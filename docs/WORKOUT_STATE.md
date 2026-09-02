@@ -716,3 +716,81 @@ linkage and durable per-set checkpoint data remain outside PR4. Roll out with th
 existing session flag OFF; enable it only after a clean non-production browser
 gate. Rollback is flag OFF for PR3 lifecycle calls plus a PR4 code revert; no
 database rollback is needed.
+
+## Mobile Training PR5 — native workout execution writes
+
+PR5 adds the first write path that lets a phone actually run a workout. It
+introduces **no new authority**: `app/services/mobile_workout_sessions/` is an
+adapter over the three that already exist (`workout_session` for identity and
+lifecycle, `workout_completion` for confirmed completion and every one of its
+side effects, `mobile_training` for canonical workout identity and content), and
+`app/blueprints/mobile_workout_sessions.py` is transport only.
+
+### What actually changed in the canonical layers
+
+The Sprint 7 PR3 `checkpoint_session` was a **heartbeat**: a coalesced touch of
+`last_activity_at`. It carried no progress, so a phone that closed mid-workout
+lost its sets. PR5 closes exactly that gap and nothing else:
+
+* `WorkoutSession` gains eight nullable/defaulted columns (migration
+  `f5a6b7c8d9e0`, purely additive, expand-only): `workout_ref`,
+  `plan_lineage_id`, `plan_mutation_version`, `checkpoint_revision` (NOT NULL
+  default 0), `checkpoint_data`, `checkpoint_at`, `checkpoint_idempotency_key`,
+  `checkpoint_fingerprint`.
+* `workout_session.queries.advance_checkpoint` is ONE conditional UPDATE gated on
+  `status='active' AND checkpoint_revision = :base`. That single statement is the
+  whole concurrency story for progress: whoever's UPDATE matches wins, everyone
+  else is told to re-read. There is no read-modify-write and no second statement.
+* `start_session` accepts an optional `NativeWorkoutIdentity`, so a native
+  session records WHICH canonical workout it belongs to. Re-resolving that stored
+  reference is what makes plan drift visible: the reference is HMAC-bound to the
+  plan lineage and mutation version, so a regenerated plan can no longer mint it
+  and the session reports stale instead of being silently rebound.
+* `CompleteWorkoutCommand` gains `expected_checkpoint_revision`. When present,
+  `complete_workout` verifies it **after** taking the session's `FOR UPDATE` lock
+  and **before** the `already_completed_today` preflight — the only race-free
+  position — and refuses with `SessionCompletionConflict(reason="revision")`,
+  rolled back, with no artifact written. `SessionOutcome.CONFLICT` now carries a
+  `conflict_reason` so the caller can tell "abandoned" from "revision" without
+  reading message text.
+
+The browser surface is byte-identical: no web route, template, payload or
+existing default changed, and `SessionView.to_dict()` was deliberately left
+alone so the web session routes and the `workout_state` snapshot assertions have
+zero blast radius. The native projection is built separately from the ORM row.
+
+### The checkpoint is a snapshot, not a patch
+
+A checkpoint is the client's whole bounded progress state plus the base revision
+it believes it is amending. That makes replay and conflict detection a pure
+function of (request, stored revision): a stream of micro-patches would need
+per-patch ordering state to be replay-safe. Exercise identities are validated
+against the canonical workout the session was STARTED for — an unknown,
+duplicated or out-of-range entry is rejected, never dropped, so a client is never
+told its progress was saved when it was not.
+
+Ordering inside `mobile_workout_sessions.checkpoint` is deliberate: resolve →
+reject terminal → re-resolve the canonical workout → parse and bound → replay
+check **before** any mutation → one conditional UPDATE → on a lost race, replay
+check again (our own duplicate) before reporting a conflict.
+
+Exercises are sorted into canonical workout order and sets by index before the
+fingerprint is taken, so two requests carrying the same progress in a different
+order replay instead of conflicting.
+
+### Completion is still the one canonical transaction
+
+Nothing in PR5 creates a `PumpCheck`, a `WorkoutLog`, XP, a quest claim or an
+activity row. The completion route does the remote work the transaction must not
+do (image validation, vision check, S3 upload) and then hands a session-scoped
+command to `complete_session` → `complete_workout` — the same transaction the
+browser route and the AI-coach tool use. Exact-once is `uq_pump_check_day`; a
+replayed completion skips the proof work entirely and reports
+`already_completed` with zero new side effects.
+
+### Rollout
+
+`FITX_WORKOUT_SESSIONS_ENABLED` (unchanged, default OFF) now gates BOTH
+surfaces. OFF ⇒ the six `/api/v1/training/workout-sessions*` routes answer 404
+and the browser contract stays `contract_version=1`. Rollback is the flag, plus a
+code revert; the migration is expand-only and is not rolled back.

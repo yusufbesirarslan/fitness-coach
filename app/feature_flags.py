@@ -323,11 +323,16 @@ ROLLOUT_FLAGS = (
     FeatureFlag(
         key="FITX_WORKOUT_SESSIONS_ENABLED",
         capability=(
-            "Enables the persisted workout-session lifecycle: the "
-            "/workout/session/* write routes stop returning 404 and the state "
-            "resolver emits the additive contract_version=2 vocabulary "
-            "(resume/in_progress from a persisted ACTIVE session). OFF "
-            "preserves the contract_version=1 contract exactly."),
+            "Enables the persisted workout-session lifecycle on BOTH surfaces: "
+            "the browser /workout/session/* write routes and the native "
+            "/api/v1/training/workout-sessions{,/current,/<ref>/resume,"
+            "/<ref>/checkpoint,/<ref>/abandon,/<ref>/complete} write contracts "
+            "stop returning 404, and the state resolver emits the additive "
+            "contract_version=2 vocabulary (resume/in_progress from a persisted "
+            "ACTIVE session). One switch, because 'are workout sessions on?' "
+            "must not be two different questions. OFF preserves the "
+            "contract_version=1 contract exactly and makes the native surface "
+            "absent."),
         owner=_OWNER,
         default=False,
         depends_on=(),
@@ -340,6 +345,9 @@ ROLLOUT_FLAGS = (
             "migration a994f9bed783 applied — the partial unique index "
             "uq_workout_session_active_owner is the at-most-one-ACTIVE-session "
             "invariant, so enabling without it is unsafe",
+            "migration f5a6b7c8d9e0 applied — the native execution columns "
+            "(checkpoint_revision/checkpoint_data/workout_ref); without them a "
+            "native checkpoint cannot be persisted at all",
             "RUNTIME_METRICS_ENABLED=1 with a training-blueprint baseline",
             "staging exercise of the full lifecycle including the "
             "abandoned/stale paths",

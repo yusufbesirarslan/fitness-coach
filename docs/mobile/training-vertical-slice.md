@@ -471,7 +471,7 @@ bytes and browser Training behavior are unchanged.
 This first slice does not expose plan replacement UI. The parameter is fixed
 false by mobile and exists to make the safety rule explicit.
 
-### Session contracts — later backend PR
+### Session contracts — SHIPPED (Mobile Training PR5)
 
 | Method/path | Request/condition | Response | Replay/concurrency |
 |---|---|---|---|
@@ -494,6 +494,62 @@ perform approved Pump Check validation inside the Training transport adapter and
 call `complete_workout`, or reference an owned, validated, single-use Pump Check
 claim that the completion service can atomically adopt. An independent “mark
 complete” write is forbidden.
+
+**Resolution (PR5): the first option.** `POST .../{session_ref}/complete` performs
+the approved Pump Check validation (`validate_uploaded_pump_check_image` →
+`validate_pump_check` → `s3_helper.upload_image`) in the transport adapter, before
+the transaction, and then calls `complete_workout` through
+`workout_session.complete_session`. The second option was rejected: adopting an
+existing mobile Pump Check row would require changing what
+`workout_completion.queries.already_completed_today` means for every caller —
+the browser route, the AI-coach gym-photo tool and `workout_state` — which is the
+cross-domain rewrite this slice is not allowed to attempt.
+
+*Known pre-existing consequence, unchanged by PR5:* `already_completed_today`
+counts ANY Pump Check created in the Istanbul day window, and the mobile
+`POST /api/v1/pump-checks` photo route writes rows with `date_key = NULL`. A user
+who takes a mobile Pump Check photo before finishing their workout therefore has
+a day that already looks completed, and a later session completion replays
+(`already_completed`) instead of creating a completion. This predates PR5 and is
+equally true of the browser route; fixing it means changing that query's meaning
+for all of its callers.
+
+#### Implemented shape
+
+* Everything is behind `FITX_WORKOUT_SESSIONS_ENABLED` (default OFF). While it is
+  off, all six routes answer `404` — the surface is absent, not forbidden.
+* One response shape for all six: `{"session": {...}}` (complete also carries
+  `{"completion": {...}}`). It has the same key set in every state.
+* `revision` is the optimistic concurrency token. `If-Match` is REQUIRED on
+  checkpoint and complete, OPTIONAL on resume and abandon (neither writes
+  progress, so demanding a precondition would only make a safe retry fail).
+* `Idempotency-Key` is REQUIRED on checkpoint and complete. On checkpoint it is
+  the replay identity, paired with a domain-separated SHA-256 fingerprint of the
+  canonicalized snapshot: same key + same snapshot replays, same key + different
+  snapshot is `TRAINING_SESSION_IDEMPOTENCY_CONFLICT`. On complete it is a client
+  discipline requirement only — exact-once there comes from `uq_pump_check_day`,
+  not from the key.
+* Every response carries `Idempotency-Replayed: true|false`. Every refusal carries
+  `Session-Resolution: retry|reread|terminal`, so a client learns what to DO
+  without parsing status codes.
+* Completion carries the client's `If-Match` revision into the completion
+  transaction, where it is checked under the session row's `FOR UPDATE` lock —
+  the only race-free place — so completing can never silently discard a
+  checkpoint that landed after the client's last read.
+* The native completion is `visibility="private"`: PR5 excludes the feed/social
+  surface, so no native completion fans a Pump Check out to friends.
+
+#### Known edge: adopting a browser-started session
+
+A session started through the browser contract has no `workout_ref` — that
+contract never had one. `POST /workout-sessions` adopts it (`200`, replayed) when
+it names the same day, slot and source, because it IS the same intended workout,
+and the projection honestly reports `workout_ref: null`. It can be read, resumed
+and abandoned, but a checkpoint against it returns
+`TRAINING_SESSION_STALE` / `Session-Resolution: reread`: the server will not
+guess which canonical workout to validate the snapshot against. The recovery is
+abandon, then start natively. This is exercised by
+`test_a_browser_started_session_is_adopted_but_cannot_be_checkpointed`.
 
 ## G. State Machine
 
