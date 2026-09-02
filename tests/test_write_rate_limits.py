@@ -40,6 +40,10 @@ def test_authenticated_write_is_rate_limited(client, auth_user, enabled_limiter,
         "nutrition.diary_update_item",
         "nutrition.diary_delete_item",
         "nutrition.diary_log_meal",
+        # Sprint 13 PR4: the ledger correction route is a destructive,
+        # token-addressed write and carries the same user-keyed limit as
+        # every other authenticated mutation.
+        "nutrition.delete_today_meal",
         "supplements.supplement_edit",
         "supplements.supplement_delete",
     ],

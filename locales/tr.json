@@ -1379,5 +1379,18 @@
   "coach.v2.title": "AI Koçun",
   "coach.v2.intro": "Antrenman, beslenme ve ilerlemen hakkında AI fitness koçuna soru sor. Sohbet bu sayfada açılır.",
   "coach.v2.open": "Koçu aç",
-  "coach.v2.hint": "Koç penceresini kapatırsan bu düğmeyle yeniden açabilirsin."
+  "coach.v2.hint": "Koç penceresini kapatırsan bu düğmeyle yeniden açabilirsin.",
+  "route.meal_delete_precondition_required": "Silme için kaydın güncel sürümü gerekiyor.",
+  "route.meal_delete_precondition_invalid": "Kayıt sürümü geçersiz.",
+  "route.meal_delete_stale": "Bu kayıt değişmiş. Listeyi yenileyip tekrar dene.",
+  "route.meal_delete_photo_unreleasable": "Bu kaydın fotoğraf referansı tanınmıyor; güvenlik gereği hiçbir şey silinmedi.",
+  "route.meal_delete_photo_not_released": "Öğün kaydı silindi. Fotoğrafının kaldırılması henüz tamamlanmadı, yeniden denenecek.",
+  "route.meal_delete_failed": "Öğün kaydı silinemedi.",
+  "nutrition.delete_meal": "Öğünü sil",
+  "nutrition.delete_meal_confirm": "Bu öğün kaydı kalıcı olarak silinecek. Yeniden kaydetmen aynı kaydı oluşturmaz.",
+  "nutrition.delete_meal_photo_note": "Kaydın öğün fotoğrafı da kalıcı olarak silinir.",
+  "nutrition.delete_meal_done": "Öğün kaydı silindi.",
+  "nutrition.delete_meal_stale": "Kayıt değişmiş; güncel liste yüklendi.",
+  "nutrition.delete_meal_failed": "Öğün kaydı silinemedi.",
+  "nutrition.delete_meal_photo_pending": "Öğün kaydı silindi. Fotoğrafının kaldırılması henüz tamamlanmadı; yeniden denenecek."
 }

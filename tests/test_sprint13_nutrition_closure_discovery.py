@@ -569,11 +569,18 @@ def test_committing_a_builder_meal_writes_the_ledger_and_keeps_the_builder(
 
 
 # ---------------------------------------------------------------------------
-# F1 / N9 - the web has no correction path for a committed entry
+# F1 / N9 - CLOSED by PR4: the web gained exactly one correction primitive
 # ---------------------------------------------------------------------------
 
-def test_the_web_nutrition_blueprint_publishes_no_ledger_mutation_route(app):
-    """F1: pinned as a URL-map fact so PR4 has to add itself here."""
+def test_the_web_nutrition_blueprint_publishes_one_ledger_mutation_route(app):
+    """F1 closed (PR4): the inventory now names the correction route.
+
+    Pre-PR4 this characterized the defect — six web writers, zero correctors.
+    PR4 added `DELETE /meal-log/entry/<entry_token>` and nothing else, so the
+    inventory is kept (it is what stops a slot move, a macro edit or a
+    historical variant from arriving unnoticed) and the assertion below is
+    inverted: the ledger has exactly ONE mutation route, and it is a delete.
+    """
     nutrition_rules = {
         (rule.rule, frozenset(rule.methods) - {"HEAD", "OPTIONS"})
         for rule in app.url_map.iter_rules()
@@ -589,6 +596,7 @@ def test_the_web_nutrition_blueprint_publishes_no_ledger_mutation_route(app):
         ("/api/diary/today", frozenset({"GET"})),
         ("/meal-log", frozenset({"POST"})),
         ("/meal-log/today", frozenset({"GET"})),
+        ("/meal-log/entry/<entry_token>", frozenset({"DELETE"})),
         ("/meal-log/history", frozenset({"GET"})),
         ("/meal-log/review", frozenset({"POST"})),
         ("/nutrition", frozenset({"GET"})),
@@ -596,18 +604,26 @@ def test_the_web_nutrition_blueprint_publishes_no_ledger_mutation_route(app):
         ("/nutrition-plan/save", frozenset({"POST"})),
         ("/nutrition-plan/active", frozenset({"GET"})),
     }
-    mutating = {
+    ledger_mutations = {
         rule for rule in nutrition_rules
-        if rule[1] & {"PATCH", "DELETE"}
+        if rule[1] & {"PATCH", "PUT", "DELETE"}
+        and not rule[0].startswith("/api/diary/item/")
     }
-    assert all(rule[0].startswith("/api/diary/item/") for rule in mutating), (
-        "The only web PATCH/DELETE routes address the builder, not the ledger. "
-        "If PR4 added a ledger route, update F1 and this inventory together.")
+    assert ledger_mutations == {
+        ("/meal-log/entry/<entry_token>", frozenset({"DELETE"}))}, (
+        "The ledger has exactly one web mutation and it is a hard delete "
+        "(C4/C5). A PATCH, a PUT or a second delete here would be web slot "
+        "move or advanced editing, which Sprint 13 placed out of scope.")
 
 
-def test_the_builder_delete_route_cannot_reach_a_committed_ledger_row(
+def test_the_builder_delete_route_still_cannot_reach_a_committed_ledger_row(
         app, client, auth_user):
-    """F1: the closest thing the web has to a delete does not touch the ledger."""
+    """The builder delete never became a ledger delete.
+
+    PR4 gave the ledger its own correction route; this one addresses
+    `CustomMealItem` and must keep refusing a `MealLog` id — the two id spaces
+    are unrelated, and conflating them would delete by raw database id.
+    """
     entry = MealLog(
         user_id=auth_user.id, ogun="Kahvaltı", yemekler="Yanlış öğün",
         kalori=900.0, protein=10.0, karb=100.0, yag=40.0,
@@ -619,8 +635,9 @@ def test_the_builder_delete_route_cannot_reach_a_committed_ledger_row(
     response = client.delete(f"/api/diary/item/{entry_id}")
     assert response.status_code == 404
     assert db.session.get(MealLog, entry_id) is not None, (
-        "A web route deleted a canonical ledger row. That is the capability F1 "
-        "says does not exist; adding it is decision C5, not a bug fix.")
+        "The builder route deleted a canonical ledger row by raw database id. "
+        "The ledger's correction path is opaque-token addressed (PR4); these "
+        "two id spaces must never be conflated.")
 
 
 # ---------------------------------------------------------------------------
@@ -747,35 +764,79 @@ def test_the_orphaned_nutrition_read_surfaces_still_exist_and_have_no_consumer(
 # F14 / C4 / N9 - the correction primitive's resource lifecycle
 # ---------------------------------------------------------------------------
 
-def test_deleting_a_ledger_row_releases_no_stored_meal_photo():
-    """F14: the primitive Sprint 13 closes on has no object lifecycle.
+def test_deleting_a_ledger_row_releases_its_stored_meal_photo():
+    """F14 closed (PR4): the deletion primitive owns a DURABLE object lifecycle.
 
-    Two halves, both load-bearing. The repository owns no S3 deletion primitive
-    at all, so there is nothing a caller could reach for; and the single code
-    path that deletes a canonical row does not reach for one. Together they are
-    why "delete + re-log is exact" (C4, as first written) is false for a
-    photo-bearing row, and why PR4 must add the lifecycle rather than assume it.
+    Pre-PR4 this characterized the defect in two halves: the repository owned
+    no S3 deletion primitive at all, and the single code path that deletes a
+    canonical row reached for none. Both halves are now inverted, and both are
+    still load-bearing — a lifecycle that exists but is not reached, or is
+    reached but does not exist, closes nothing.
+
+    Scope, deliberately narrow: `s3_helper` gained ONE deletion function and it
+    is meal-photo specific. A generic "delete any object" primitive would turn
+    every future caller into an unbounded object-store client.
+
+    The behaviour itself — ordering, partial failure, retry, concurrency,
+    malformed references, the durable cleanup intent and its operator drain —
+    is proved in `tests/test_web_meal_correction.py`.
     """
     import s3_helper
 
     deleters = sorted(
         name for name in dir(s3_helper)
-        if not name.startswith("__")
+        if not name.startswith("_")
         and ("delete" in name.lower() or "remove" in name.lower()))
-    assert deleters == [], (
-        f"s3_helper grew {deleters}. If PR4 added the deletion primitive F14 "
-        "asks for, replace this characterization with the lifecycle's own "
-        "test - including its partial-failure path - rather than deleting it.")
+    assert deleters == ["delete_meal_photo"], (
+        f"s3_helper's deletion surface is {deleters}. F14's fix authorises "
+        "exactly one bounded meal-photo primitive; a generic object deleter "
+        "is a different and much larger decision.")
 
     tree = ast.parse(
         _module_source("app/services/mobile_diary_mutation/service.py"))
-    delete_entry = next(
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "delete_entry")
-    body = ast.dump(delete_entry).lower()
-    assert "photo" not in body and "s3" not in body, (
-        "delete_entry now touches the stored object. That is F14's fix landing; "
-        "update the finding, C4 and this test together.")
+    functions = {
+        node.name: node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert "delete_meal_photo" in ast.dump(
+        functions["_release_owned_object"]), (
+        "The canonical deletion authority stopped releasing the stored object. "
+        "F14 is repository-wide: every supported deletion transport goes "
+        "through this function, so a leak here is a leak everywhere.")
+
+    # F14 has a second half, added by the PR4 remediation: the release may fail,
+    # and the key carries a random uuid4 that cannot be rebuilt from the opaque
+    # token. So the deletion must record a DURABLE cleanup intent in the SAME
+    # transaction that removes the row, before any object call. Ordering is the
+    # claim, so ordering is what is asserted.
+    delete_entry = functions["delete_entry"]
+    marks = {}
+    for node in ast.walk(delete_entry):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", None) or getattr(
+                node.func, "attr", None)
+            if name in {"MealPhotoCleanup", "commit", "_release_owned_object"}:
+                marks.setdefault(name, node.lineno)
+            if name == "delete" and getattr(
+                    getattr(node.func, "value", None), "attr", None) == "session":
+                marks.setdefault("row_delete", node.lineno)
+
+    assert set(marks) == {
+        "MealPhotoCleanup", "row_delete", "commit", "_release_owned_object"}, (
+        f"delete_entry no longer performs the durable lifecycle: {sorted(marks)}")
+    assert marks["MealPhotoCleanup"] < marks["row_delete"] < marks["commit"], (
+        "The cleanup intent and the row deletion must be one transaction. "
+        "Committing the row without recording the object key is exactly the "
+        "state that leaves an unnameable orphan behind.")
+    assert marks["commit"] < marks["_release_owned_object"], (
+        "The object must be released only AFTER the row deletion commits; "
+        "release-then-commit can leave a surviving row pointing at a deleted "
+        "object.")
+
+    # The operator half. A durable record nothing can drain closes nothing.
+    assert "drain_meal_photo_cleanups" in functions, (
+        "The pending-cleanup drain disappeared. Without it F14 depends on a "
+        "user happening to retry.")
 
 
 # ---------------------------------------------------------------------------

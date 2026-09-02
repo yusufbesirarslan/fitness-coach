@@ -649,6 +649,62 @@ class MealLog(db.Model):
         return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"
 
 
+class MealPhotoCleanup(db.Model):
+    """Bir düzeltme commit edildikten SONRA hâlâ bırakılması gereken öğün fotoğrafı.
+
+    F14'ün DAYANIKLILIK yarısı (Sprint 13 PR4 remediation). PostgreSQL ile S3
+    aynı transaction'ı paylaşamaz, bu yüzden `MealLog` ÖNCE commit edilir ve
+    nesne SONRA bırakılır. Nesne bırakma başarısız olursa satır çoktan gitmiştir
+    ve anahtar rastgele bir uuid4 taşıdığı için opak entry token'dan YENİDEN
+    TÜRETİLEMEZ — yani niyet burada kalıcılaşmasa "satır yok + nesne duruyor +
+    nesnenin kimliği UNUTULDU" durumu oluşurdu. Bu tablo tam olarak o üçüncü
+    maddeyi imkânsız kılar.
+
+    Satır, `MealLog` silinmesiyle AYNI transaction'da yazılır ve yalnızca nesne
+    gerçekten silindikten sonra kaldırılır. Ömrü bu yüzden kısadır: dolu bir
+    tablo, tamamlanmamış bırakma işi demektir (bkz. `flask cleanup-pending-meal-photos`).
+
+    KAPSAM: yalnız öğün fotoğrafı. Genel amaçlı "şu S3 anahtarını sil" kuyruğu
+    DEĞİLDİR — `photo_key` yazılmadan önce `s3_helper.meal_photo_key_is_deletable`
+    ile doğrulanır ve her tüketim yolunda YENİDEN doğrulanır, istemciye ASLA
+    yayımlanmaz.
+    """
+    __tablename__ = "meal_photo_cleanup"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    # `MealLog.id` — FK DEĞİL ve olamaz: satır bu kayıt yazılırken siliniyor.
+    # Silinen kaydın DAYANIKLI kimliği; retry, opak token'ı bu id üzerinden
+    # `matches_diary_entry_id` ile yeniden tanır (defterdeki çözümleyicinin
+    # AYNI algoritması; ikinci bir token algoritması doğmaz).
+    entry_id = db.Column(db.Integer, nullable=False)
+    # Bırakılacak TAM nesne anahtarı. Tek başına yeniden üretilemeyen bilgi budur.
+    photo_key = db.Column(db.String(300), nullable=False)
+    # Silme anında geçerli olan revizyon. Satır gittiği için retry'ın `If-Match`
+    # önkoşulu başka hiçbir yerden doğrulanamaz; saklanmasaydı yakınsama yolu
+    # HERHANGİ bir revizyonu kabul ederdi (= önkoşulun sessizce zayıflaması).
+    entry_revision = db.Column(db.String(64), nullable=False)
+    # Düzeltmenin ait olduğu kanonik gün. Web sözleşmesi BUGÜNE scope'ludur;
+    # yakınsama yolu da aynı sınırı uygulasın diye saklanır.
+    diary_date = db.Column(db.String(10), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        # Silinen KAYNAK nesnenin kendisidir; `entry_id` değil. SQLite'ta bir
+        # tablonun en büyük rowid'i silindikten sonra AYNI id yeniden
+        # kullanılabilir, dolayısıyla (user_id, entry_id) benzersizliği zamanla
+        # meşru bir ikinci niyeti reddedebilirdi. `photo_key` uuid4 taşır,
+        # global benzersizdir ve iki satır ASLA paylaşmaz.
+        db.UniqueConstraint("photo_key", name="uq_meal_photo_cleanup_key"),
+        # Yakınsama yolunun tek sorgusu: sahibin bekleyen niyetleri.
+        db.Index("ix_meal_photo_cleanup_owner_entry", "user_id", "entry_id"),
+    )
+
+    def __repr__(self):
+        return f"<MealPhotoCleanup {self.user_id} - {self.entry_id}>"
+
+
 class BarcodeFoodCache(db.Model):
     """Normalized packaged-food cache keyed by barcode.
 

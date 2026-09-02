@@ -11,9 +11,15 @@ from .preconditions import (
     parse_if_match,
 )
 from .service import (
+    DEFAULT_CLEANUP_DRAIN_LIMIT,
+    CleanupOutcome,
     EntryNotFound,
     StaleDiaryEntry,
+    StoredObjectNotReleased,
+    UnreleasableStoredObject,
     delete_entry,
+    drain_meal_photo_cleanups,
+    entry_identity,
     set_slot,
 )
 
@@ -23,10 +29,16 @@ __all__ = [
     "InvalidPrecondition",
     "EntryNotFound",
     "MissingPrecondition",
+    "DEFAULT_CLEANUP_DRAIN_LIMIT",
+    "CleanupOutcome",
     "SLOT_LABELS",
     "SetSlotCommand",
     "StaleDiaryEntry",
+    "StoredObjectNotReleased",
+    "UnreleasableStoredObject",
     "delete_entry",
+    "drain_meal_photo_cleanups",
+    "entry_identity",
     "parse_if_match",
     "parse_mutation_command",
     "set_slot",

@@ -243,6 +243,18 @@ function mealCardHTML(m) {
     ? '<img class="mc-img" src="' + esc(m.photo_url) + '" alt="">'
     : '<div class="mc-img">' + _MEAL_PLACEHOLDER_SVG + '</div>';
   var time = fmtTime(m.created_at);
+  /* F1/N9: the correction action, and only for a row the server published an
+     identity + revision for. /meal-log/today publishes those; history does not,
+     so a past-day card cannot render one. */
+  var del = (m.entry_token && m.revision)
+    ? '<button class="mc-del" data-action="deleteMeal" data-args=\'["' +
+        esc(m.entry_token) + '","' + esc(m.revision) + '",' +
+        (m.has_photo ? 'true' : 'false') + ']\' aria-label="' +
+        __t('nutrition.delete_meal') + '" title="' + __t('nutrition.delete_meal') + '">' +
+        '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/>' +
+        '<path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>' +
+      '</button>'
+    : '';
   return '<div class="meal-card">' + img +
     '<div class="mc-body"><div class="mc-title">' + esc(m.yemekler) + '</div>' +
       '<div class="mc-macros">' +
@@ -257,8 +269,59 @@ function mealCardHTML(m) {
       '<span class="badge badge-' + s.tone + '" title="' + __t('nutrition.ai_score') + ' ' + s.value + '/100">' + s.grade + '</span>' +
       '<button class="mc-edit" data-action="quickEditMeal" data-args=\'["' + esc(m.ogun) + '"]\' aria-label="' + __t('nutrition.quick_edit') + '">' +
         '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>' +
-      '</button>' +
+      '</button>' + del +
     '</div></div>';
+}
+
+/* ── MEAL CORRECTION (Sprint 13 PR4 — F1/N9) ──
+   The one correction primitive the web has: a current-day HARD DELETE, issued
+   against the opaque identity + revision the server published. Deletion is
+   LOSSY and irreversible — the confirmation says so, and names the stored photo
+   when the row owns one. There is no undo, so none is promised. */
+var _mealDeleteInFlight = false;
+
+async function deleteMeal(entryToken, revision, hasPhoto, el) {
+  if (_mealDeleteInFlight) return;
+  var message = __t('nutrition.delete_meal_confirm');
+  if (hasPhoto) message += ' ' + __t('nutrition.delete_meal_photo_note');
+  if (!window.confirm(message)) return;
+
+  _mealDeleteInFlight = true;
+  if (el) el.disabled = true;
+  try {
+    var res = await fetch('/meal-log/entry/' + encodeURIComponent(entryToken), {
+      method: 'DELETE',
+      headers: { 'If-Match': '"' + revision + '"' }
+    });
+    if (res.status === 204) {
+      showToast(__t('nutrition.delete_meal_done'), 'success');
+    } else if (res.status === 503) {
+      /* The ledger correction COMMITTED; what remains pending is only the
+         release of the stored photo, and the server holds that intent
+         durably. Reporting a failed delete here would be false: the entry is
+         gone, and the canonical re-read below proves it. The server converges
+         on the photo by itself (a retry, or the operator drain), so this is a
+         warning rather than an error the user has to act on. */
+      showToast(__t('nutrition.delete_meal_photo_pending'), 'warning');
+    } else if (res.status === 404 || res.status === 412) {
+      /* Someone or something else moved first. Say so plainly; the canonical
+         re-read below decides what is actually there now. */
+      showToast(__t('nutrition.delete_meal_stale'), 'warning');
+    } else {
+      showToast(__t('nutrition.delete_meal_failed'), 'error');
+    }
+  } catch (e) {
+    /* The request may still have been applied. Never retry a destructive call
+       with a revision we can no longer trust — re-read instead. */
+    showToast(__t('nutrition.delete_meal_failed'), 'error');
+  } finally {
+    _mealDeleteInFlight = false;
+    if (el) el.disabled = false;
+    /* Success, refusal or ambiguity: canonical server state is the only
+       authority on what is left and what the day now adds up to. The browser
+       never subtracts macros of its own. */
+    loadTodayData();
+  }
 }
 
 function renderTimeline(meals) {

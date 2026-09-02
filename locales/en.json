@@ -1379,5 +1379,18 @@
   "coach.v2.title": "Your AI Coach",
   "coach.v2.intro": "Ask your AI fitness coach about training, nutrition and progress. The chat opens on this page.",
   "coach.v2.open": "Open Coach",
-  "coach.v2.hint": "If you close the coach window, use this button to open it again."
+  "coach.v2.hint": "If you close the coach window, use this button to open it again.",
+  "route.meal_delete_precondition_required": "Deleting requires the entry's current revision.",
+  "route.meal_delete_precondition_invalid": "The entry revision is invalid.",
+  "route.meal_delete_stale": "This entry has changed. Refresh the list and try again.",
+  "route.meal_delete_photo_unreleasable": "This entry's photo reference is not recognised, so nothing was deleted.",
+  "route.meal_delete_photo_not_released": "The meal entry was deleted. Removing its photo has not finished yet and will be retried.",
+  "route.meal_delete_failed": "The meal entry could not be deleted.",
+  "nutrition.delete_meal": "Delete meal",
+  "nutrition.delete_meal_confirm": "This meal entry will be deleted permanently. Logging it again does not recreate the same entry.",
+  "nutrition.delete_meal_photo_note": "The stored meal photo is deleted permanently too.",
+  "nutrition.delete_meal_done": "Meal entry deleted.",
+  "nutrition.delete_meal_stale": "The entry had changed; the current list was loaded.",
+  "nutrition.delete_meal_failed": "The meal entry could not be deleted.",
+  "nutrition.delete_meal_photo_pending": "Meal entry deleted. Removing its photo has not finished yet; it will be retried."
 }
