@@ -34,8 +34,10 @@ from app.timeutil import day_key
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NUTRITION_JS = REPO_ROOT / "static" / "nutrition.js"
-INDEX_HTML = REPO_ROOT / "templates" / "index.html"
+# UX-2 PR4 retired templates/index.html and moved Today's hydration out of the
+# template into a real module, so the browser half of N4 now lives in today.js.
 TODAY_HTML = REPO_ROOT / "templates" / "today.html"
+TODAY_JS = REPO_ROOT / "static" / "today.js"
 TRACKING_PY = REPO_ROOT / "app" / "blueprints" / "tracking.py"
 MEALLOG_PY = REPO_ROOT / "app" / "blueprints" / "nutrition" / "meallog.py"
 
@@ -393,30 +395,29 @@ def test_browser_contains_no_competing_macro_split():
     """N4 is not closed by deleting the digits ``0.3`` somewhere.
 
     The competing authority is *deriving grams from a calorie percentage*.
-    Dashboard rings (index/today) presented the same 30/40/30 split and
-    must converge on the same payload.
+    Every browser surface that shows a macro or calorie target must converge on
+    the canonical payload instead of re-deriving one.
     """
     forbidden = ("0.30 / 4", "0.40 / 4", "0.30 / 9",
                  "0.3 / 4", "0.4 / 4", "0.3 / 9")
-    for relative in ("static/nutrition.js", "templates/index.html",
+    for relative in ("static/nutrition.js", "static/today.js",
                      "templates/today.html"):
         text = _read(relative)
         for token in forbidden:
             assert token not in text, f"{relative} still derives {token}"
 
 
-def test_dashboard_surfaces_consume_the_today_payload_targets():
-    index = INDEX_HTML.read_text(encoding="utf-8")
-    today = TODAY_HTML.read_text(encoding="utf-8")
-    assert "meals.targets" in index or "targets.protein" in index \
-        or "targets &&" in index or "targets?" in index
-    assert "meals.targets" in today or "targets.protein" in today \
-        or "targets &&" in today or "targets?" in today
-    # Neither page may fall back to a fabricated 2000 kcal configured target.
-    assert "target_calories || 2000" not in index
+def test_home_consumes_the_today_payload_targets():
+    """Home reads the canonical target from `/meal-log/today` and, when there is
+    no configured target, shows what was eaten rather than inventing a goal."""
+    today = TODAY_JS.read_text(encoding="utf-8")
+    assert "meals.targets" in today or "targets.protein" in today
+    # The page may not fall back to a fabricated 2000 kcal configured target.
     assert "target_calories || 2000" not in today
-    assert "updateCalRing(0, 2000)" not in index
-    assert "updateNutrition({}, 2000)" not in index
+    assert "2000" not in today
+    # The template itself no longer hydrates anything, so this guard cannot be
+    # satisfied by copy that merely sits in the markup.
+    assert "meal-log/today" not in TODAY_HTML.read_text(encoding="utf-8")
 
 
 def test_nutrition_js_does_not_default_target_calories_to_2000():

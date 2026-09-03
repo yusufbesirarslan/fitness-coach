@@ -29,11 +29,13 @@ from app.services.progress_physique import (InvalidProgressPhysiqueRegion,
                                             progress_physique_payload)
 from app.services.progress_summary import (UnknownProgressionSignal, build_progress_summary,
                                            progress_summary_payload)
+from app.services.today_facts import gather_today_facts
 from app.services.training_history import fetch_workout_entries
 from app.services.workout_state import resolve_workout_state
 from app.services.workout_state.serialization import workout_state_payload
 from app.services.validators import _to_int
 from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
+from app.today_presenter import build_today_view
 
 
 bp = Blueprint("tracking", __name__)
@@ -95,39 +97,25 @@ def _parse_weight(value):
 @bp.route("/")
 @require_auth
 def home():
+    """The canonical Today surface - the app's single home hierarchy.
+
+    UX-2 PR4 retired the legacy `index.html` dashboard and the flag that chose
+    between the two: Today is now the one production Home, and the canonical
+    facts it needs (active plan, today's workout state, today's action, today's
+    plan summary) are read server-side through the shared read-only helpers - the
+    SAME source `/training-plan/active`, `/workout/status` and `GET /api/v1/today`
+    use - then mapped by the pure presenter. Nothing on this page decides state.
+    """
     if not current_user.profile_complete:
         return redirect(url_for("profile.setup"))
-    # Son kilo güncellemesi zamanı (kilo butonu "hatırlatma" parıltısı için —
-    # cihazlar arası tutarlı olsun diye sunucudan, localStorage yerine).
-    last_checkin = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
-        .order_by(WeeklyCheckIn.created_at.desc()).first()
-    last_weight_update = (last_checkin.created_at.isoformat() + "Z") if last_checkin else ""
-
-    # ── AxisAI UIUX Sprint 1 PR2: Today experience v2 (flag-gated) ──
-    # OFF (default) renders the legacy dashboard unchanged. ON gathers the two
-    # canonical facts (active-plan + today-completion) through the shared
-    # read-only helpers — the SAME source /training-plan/active and
-    # /workout/status use — and maps them with the pure presenter. These are the
-    # only authoritative reads added; the primary action is server-rendered so
-    # the client no longer needs the /workout/status hydration fetch. The flag is
-    # read from config at request time so tests/rollout toggle one key.
-    if current_app.config.get("UIUX_TODAY_V2_ENABLED", False):
-        from app.services.today_facts import gather_today_facts
-        from app.today_presenter import build_today_view
-        today_view = build_today_view(gather_today_facts(current_user.id))
-        return render_template("today.html",
-            username=current_user.username,
-            profile_picture=current_user.avatar_src,
-            streak_count=current_user.streak_count or 0,
-            last_weight_update=last_weight_update,
-            today=today_view,
-        )
-
-    return render_template("index.html",
+    today_view = build_today_view(gather_today_facts(current_user.id))
+    return render_template("today.html",
         username=current_user.username,
         profile_picture=current_user.avatar_src,
-        streak_count=current_user.streak_count or 0,
-        last_weight_update=last_weight_update,
+        # The server's canonical Istanbul day. The page formats it for the
+        # locale; the browser never picks the day itself.
+        today_date=app_today().isoformat(),
+        today=today_view,
     )
 
 

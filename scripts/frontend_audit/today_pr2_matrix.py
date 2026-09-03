@@ -1,5 +1,15 @@
 """AxisAI UIUX Sprint 1 PR2 — Today experience exact browser matrix.
 
+SUPERSEDED by UX-2 PR4 — KEPT AS SHIPPED EVIDENCE, NOT AS A WORKING HARNESS.
+This driver captured the PR2 rollout evidence linked from
+``docs/frontend-readiness/sprint-1-pr2/`` and ``docs/handoff.md``, so it is left
+in place for that record. It can no longer run against the product: UX-2 PR4
+converged ``/`` on one hierarchy, deleted ``templates/index.html`` (so the
+``.dash-grid`` legacy branch this driver diffs against does not exist) and
+retired the four-state Today dialect it asserts (``plan_ready`` /
+``workout_done``) in favour of the canonical ``primary_state`` vocabulary.
+A PR4-era Today matrix would be a new driver, not an edit of this one.
+
 Reuses the Sprint-0 hermetic audit harness (``create_audit_app`` + ``AuditServer``
 + fixed browser clock + Chromium) to run the EXACT PR2 matrices with the Today
 and Navigation feature flags toggled per cell — a dimension the inventory-driven

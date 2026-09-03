@@ -35,7 +35,7 @@ WIDGET = "/static/coach_widget.js"
 CORE_ROUTES = ("/", "/training", "/nutrition", "/progress-page")
 
 # Core templates that hosted the widget only to get the launcher.
-LAUNCHER_ONLY_TEMPLATES = ("index.html", "today.html", "training.html",
+LAUNCHER_ONLY_TEMPLATES = ("today.html", "training.html",
                            "plan.html", "progress.html")
 
 # Only these still carry a floating control of their own.
@@ -341,7 +341,7 @@ def test_plan_v2_actually_renders_that_entry_with_an_active_plan(
 def test_surfaces_deliberately_left_alone_gained_no_coach_cta():
     """Coverage is not a reason to add an AI button. Today is PR4+ work, and
     Account / Community / Notifications reach Coach through the primary nav."""
-    for name in ("index.html", "today.html", "edit_profile.html",
+    for name in ("today.html", "edit_profile.html",
                  "notifications.html", "friends.html", "feed.html",
                  "leaderboard.html", "quests.html", "challenges.html",
                  "premium.html", "pump_check_gallery.html", "manage_stack.html"):

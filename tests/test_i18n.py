@@ -217,15 +217,14 @@ def test_landing_renders_localized(client):
     assert "Ücretsiz Başla" not in en_body
 
 
-def test_dashboard_renders_localized(app, client, make_user, login):
-    # Dashboard (/) login + profile_complete ister.
+def test_home_renders_localized(app, client, make_user, login):
+    # Home (/) login + profile_complete ister. UX-2 PR4'ten sonra tek üretim
+    # Home hiyerarşisi Today; eski dashboard kopyası (index.*) kaldırıldı.
     make_user("dashen", profile_complete=True, language="en")
     login("dashen")
     body = client.get("/").get_data(as_text=True)
-    assert "Quick Actions" in body and "Nutrition Summary" in body
-    assert "Hızlı İşlemler" not in body
-    # EN tip dizisi seçili olmalı (TR tip metni gövdede olmamalı)
-    assert "Sports Physiology" in body
+    assert "Today at a glance" in body and "Progress signal" in body
+    assert "Bugün özet" not in body
 
 
 def test_nutrition_renders_localized(app, client, make_user, login):
@@ -588,8 +587,8 @@ def test_login_adopts_explicit_prelogin_language(app, client, make_user, login):
     client.post("/set-language", json={"lang": "tr"})   # anonim AÇIK seçim
     login("langswitch")
     body = client.get("/").get_data(as_text=True)
-    assert "Günlük Kalori" in body
-    assert "Daily Calories" not in body
+    assert "Bugün özet" in body
+    assert "Today at a glance" not in body
     assert User.query.filter_by(username="langswitch").first().language == "tr"
 
 
@@ -603,7 +602,7 @@ def test_login_keeps_account_language_without_explicit_choice(
         s["lang"] = "tr"        # leftover; lang_explicit bayrağı YOK
     login("langkeep")
     body = client.get("/").get_data(as_text=True)
-    assert "Daily Calories" in body
+    assert "Today at a glance" in body
     assert User.query.filter_by(username="langkeep").first().language == "en"
 
 

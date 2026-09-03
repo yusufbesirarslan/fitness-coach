@@ -340,7 +340,7 @@ def _log_provider_backed_meal(data, ogun, provider_food):
 def today_meals():
     """KANONİK 'bugün yenenler' defteri ve toplamları (MealLog — tek doğru kaynak).
 
-    Ana sayfa/beslenme halkaları (templates/index.html, static/nutrition.js
+    Ana sayfa/beslenme halkaları (static/today.js, static/nutrition.js
     loadTodayData) günlük kalori/makro toplamı için YALNIZCA bunu kullanır.
     DİKKAT: /api/diary/today toplamlarıyla TOPLANMAZ — diary'de 'kaydedilmiş'
     (is_logged) öğünler zaten buraya MealLog satırı olarak yazılır; iki yüzeyi

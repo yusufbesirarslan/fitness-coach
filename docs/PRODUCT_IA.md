@@ -133,7 +133,7 @@ direct URL, or redirect. APIs are listed only when they back a visible surface.
 
 | Destination | Canonical route (today) | Entry points today | Surface | Current semantic owner | Problems / ambiguity |
 |---|---|---|---|---|---|
-| Home / Today | `GET /` (`app/blueprints/tracking.py` `home`) → `templates/index.html` (legacy) or `templates/today.html` (`UIUX_TODAY_V2_ENABLED`) | Bottom bar, header tab, brand mark | Primary | "Dashboard" / Today | Mixes daily guidance, calorie hero, quick actions, full weight entry+graph+BMR/TDEE, achievements/XP, generic tip carousel. Incomplete profile redirects to `/setup`. |
+| Home / Today | `GET /` (`app/blueprints/tracking.py` `home`) → `templates/today.html` | Bottom bar, header tab, brand mark | Primary | Today | **Converged in UX-2 PR4.** One production hierarchy: day context → daily brief → one primary action → compact status → canonical Axis insight → progress signal. The legacy dashboard (`index.html`) and the surfaces it duplicated — weight management + BMR/TDEE, the quick-action launcher, the macro donut dashboard, the level/XP hero and the generic tip carousel — were removed; their capabilities stay at their canonical owners. Incomplete profile redirects to `/setup`. |
 | Plan / Training | `GET /training` → `templates/training.html` or `templates/plan.html` (`UIUX_PLAN_V2_ENABLED`) | Bottom bar, header tab, Home "workout" quick action | Primary | Training page | Label is Training in legacy chrome, Plan in v2. Route name is still `/training`. Page owns only the workout plan, not Nutrition. |
 | Coach | `GET /coach` → `templates/coach.html` or `templates/coach_v2.html` (`UIUX_COACH_PAGE_V2_ENABLED`) | V2 primary tab; direct URL; FAB on core pages. **Legacy shell has no Coach tab and no drawer link.** | Primary (v2) / floating utility (legacy) | Floating widget (`static/coach_widget.js`) hosted by a thin page | Page auto-opens the same widget the FAB opens. FAB remains even on `/coach`. Feature flags doc already records this: Coach v2 is not observable as a destination until Nav v2 is on. |
 | Progress | `GET /progress-page` → `templates/progress.html` | Bottom bar, header tab | Primary | Progress redesign (summary, body, performance, consistency, Axis Insights, Physique, History, check-in sheet) | Physique already lives here via `GET /api/progress/physique`, but Pump Check Gallery is a separate global destination. |
@@ -160,14 +160,14 @@ In-page modules that currently behave like destinations:
 
 | Module | Where it lives today | Problem |
 |---|---|---|
-| Full weight entry + sparkline + BMR/TDEE | `templates/index.html` weight card; compact sparkline still on `templates/today.html` | Weight management belongs to Progress. Today v2 still shows a weight sparkline in the summary grid. |
-| Achievements / XP / level / streak | Home identity + achievements card; Today chips + `<details class="today-more">`; Profile hero | Dominates Home. Quests link from Home achievements. |
-| Generic tip carousel | `templates/index.html` AI tip; Today v2 `today.tip` inside "more" | Not a product destination. Future Today prefers a personalized Coach Insight. |
-| Quick Actions launcher | `templates/index.html` (log meal, barcode **Soon**, menu scan, workout) | Feature directory on Home. Barcode tile is a disabled "Soon" promotion. |
+| Full weight entry + sparkline + BMR/TDEE | ~~`templates/index.html` weight card~~ | **Resolved (UX-2 PR4).** Removed from Home with the legacy dashboard; weight entry and history are Progress-owned (check-in sheet + `GET /api/progress/history`). Today keeps only a one-line, unjudged last-check-in signal. |
+| Achievements / XP / level / streak | ~~Home identity + achievements card; Today chips~~; Profile hero | **Resolved (UX-2 PR4).** Removed from Home entirely. Level/XP and Quests are reached from Account, per the gamification boundary in §J. |
+| Generic tip carousel | ~~`templates/index.html` AI tip; `today.tip`~~ | **Resolved (UX-2 PR4).** Replaced by one canonical Axis insight re-published verbatim from `progress_insights`; absent when no canonical slot names anything. |
+| Quick Actions launcher | ~~`templates/index.html`~~ | **Resolved (UX-2 PR4).** Removed with the legacy dashboard, the disabled "Soon" barcode tile included. Meal and menu logging live on Nutrition. |
 | Nutrition in-page tabs | today / diary / plan / history / water on `/nutrition` | Correct as **domain-level** nav inside Nutrition, once Nutrition itself sits under Plan. |
-| Progress check-in sheet | `templates/progress.html` `#checkin-sheet` | Correct owner (Progress). Includes weight. Conflicts with Home weight form. |
+| Progress check-in sheet | `templates/progress.html` `#checkin-sheet` | Correct owner (Progress). Includes weight. The conflicting Home weight form is gone (UX-2 PR4). |
 | Progress "Ask Axis" | `templates/progress.html` `data-action="askAxis"` | Contextual Coach entry. Must remain contextual, not a second Coach. |
-| Weekly reward overlay | Home and Today (`/leaderboard/reward-check`) | Celebration, not a destination. Keep as a modal, not chrome. |
+| Weekly reward overlay | Today (`/leaderboard/reward-check`) | Celebration, not a destination. Keep as a modal, not chrome. |
 | Wearables | Profile integrations (WHOOP, Google Health) | Correct owner: Account. |
 
 ### C.4 Duplicated destinations (current)
@@ -195,13 +195,15 @@ These flags swap **page internals**, not the destination:
 
 | Flag | Default | Route | OFF template | ON template |
 |---|---|---|---|---|
-| `UIUX_TODAY_V2_ENABLED` | OFF | `/` | `index.html` | `today.html` |
+| `UIUX_TODAY_V2_ENABLED` | OFF | `/` | `today.html` | `today.html` |
 | `UIUX_PLAN_V2_ENABLED` | OFF | `/training` | `training.html` | `plan.html` |
 | `UIUX_COACH_PAGE_V2_ENABLED` | OFF | `/coach` | `coach.html` | `coach_v2.html` |
 | `UIUX_NAV_V2_ENABLED` | OFF | all authed HTML | legacy 5-tab shell | v2 4-tab + `nav.SECONDARY` drawer |
 
-IA ownership does not change with these flags. Future Home work (PR4+) still
-targets `/`, whether the current template is `index.html` or `today.html`.
+IA ownership does not change with these flags. `UIUX_TODAY_V2_ENABLED` no longer
+selects anything: UX-2 PR4 converged `/` on `today.html` and deleted
+`index.html`, so both columns name the same template and the key survives only so
+`/health` and the `[FLAGS]` boot line keep listing it.
 
 ---
 

@@ -1,25 +1,52 @@
-"""AxisAI UIUX Sprint 1 PR2 — Today experience v2 (flag-gated) tests.
+"""AxisAI UX-2 PR4 — Today / Home structural convergence.
 
-Covers both OFF (legacy index.html) and ON (today.html) paths, the pure
-presentation contract, the single authoritative primary action, the four
-Navigation×Today flag combinations, the canonical endpoint sources
-(/training-plan/active selector reused verbatim; /workout/status is owned by the
-Sprint 7 canonical workout-state resolver, which Today delegates its completion
-read to), the request-count dedup (V2 no longer client-fetches /workout/status),
-and template safety. The Today flag is toggled
-with app.config["UIUX_TODAY_V2_ENABLED"] (home() reads it at request time).
+PR2 shipped a *second* Today behind `UIUX_TODAY_V2_ENABLED`; PR4 converges Home
+on it, deletes the legacy dashboard and retires the selector. This module locks
+the model that convergence produces:
+
+* **One production Home.** `/` renders `today.html` at every value of the
+  retired flag. There is no second Home tree to drift.
+* **One state vocabulary.** Today re-exports the canonical `primary_state` from
+  the workout-state contract instead of maintaining a fourth Today dialect, so
+  the page, `GET /workout/status` and `GET /api/v1/today` describe one user with
+  one word.
+* **One dominant action, decided on the server.** The browser computes no next
+  action, no time-of-day rule and no completion inference.
+* **Honest absence.** A failed read is an error state, never "no plan"; a missing
+  value is "—", never 0; an insight nobody published is not rendered at all.
+* **Nothing was deleted that the user still needs.** The legacy dashboard's
+  modules were removed from Home; their capabilities stay at their canonical
+  destinations, and this module asserts each one there.
+
+The PR2 assertions for the flag-selected legacy branch, the four-state Today
+dialect and the removed dashboard modules were obsolete layout assertions and
+are gone with the layout. Every guard that carried product meaning is kept below.
 """
 import json
 import re
+from pathlib import Path
+
+import pytest
 
 from app.today_presenter import (
+    INSIGHT_WATCH,
+    INSIGHT_WORKING,
+    STATE_COMPLETED,
     STATE_ERROR,
+    STATE_IN_PROGRESS,
+    STATE_NEEDS_ATTENTION,
     STATE_NO_PLAN,
-    STATE_PLAN_READY,
-    STATE_WORKOUT_DONE,
+    STATE_REST_DAY,
+    STATE_SCHEDULED,
+    STATE_UNSCHEDULED_COMPLETED,
+    TODAY_STATES,
+    Action,
     TodayFacts,
+    TodayPlanSummary,
     build_today_view,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 # ── Helpers ──
@@ -44,223 +71,484 @@ def _seed_pumpcheck_today(user_id):
     db.session.commit()
 
 
+def _week(today_kind, today_focus="İtiş", exercises=2):
+    """A valid seven-day program whose *today* carries `today_kind`."""
+    from app.services.training_generation.response_validator import WEEKDAYS
+    from app.timeutil import app_today
+    weekday = WEEKDAYS[app_today().weekday()]
+    program = []
+    for day in WEEKDAYS:
+        if day == weekday:
+            program.append({
+                "gun": day, "tip": today_kind, "odak": today_focus,
+                "sure_dk": 45, "tahmini_kalori": 320,
+                "egzersizler": [
+                    {"isim": "Bench Press %d" % i, "set": 3, "tekrar": "8-12"}
+                    for i in range(exercises)
+                ],
+            })
+        else:
+            program.append({
+                "gun": day, "tip": "dinlenme", "odak": "", "sure_dk": 0,
+                "tahmini_kalori": 0, "egzersizler": [],
+            })
+    return json.dumps(program, ensure_ascii=False)
+
+
+def _facts(**kw):
+    base = dict(read_ok=True, has_active_plan=True, workout_completed_today=False,
+                primary_state=STATE_SCHEDULED, action="start")
+    base.update(kw)
+    return TodayFacts(**base)
+
+
+def _html(client, route="/"):
+    resp = client.get(route)
+    assert resp.status_code == 200, (route, resp.status_code)
+    return resp.get_data(as_text=True)
+
+
 # ══════════════════════════════════════════════════════════════════════════
-# A. PURE PRESENTER — contract (no app/DB context; correction #1)
+# A. ONE STATE VOCABULARY — the canonical contract, not a Today dialect
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_presenter_maps_every_state():
-    cases = {
-        STATE_NO_PLAN:      TodayFacts(read_ok=True,  has_active_plan=False, workout_completed_today=False),
-        STATE_PLAN_READY:   TodayFacts(read_ok=True,  has_active_plan=True,  workout_completed_today=False),
-        STATE_WORKOUT_DONE: TodayFacts(read_ok=True,  has_active_plan=True,  workout_completed_today=True),
-        STATE_ERROR:        TodayFacts(read_ok=False, has_active_plan=False, workout_completed_today=False),
+def test_today_states_are_the_canonical_primary_states():
+    """The point of the PR4 presenter rewrite: Today stopped inventing
+    `plan_ready` / `workout_done` and re-exports the workout-state contract, so
+    a state added upstream cannot silently become an unhandled Today state."""
+    from app.services.workout_state.models import (
+        PRIMARY_COMPLETED, PRIMARY_EXECUTION_RECORDED, PRIMARY_IN_PROGRESS,
+        PRIMARY_NEEDS_ATTENTION, PRIMARY_NO_PLAN, PRIMARY_REST_DAY,
+        PRIMARY_SCHEDULED_NOT_STARTED, PRIMARY_UNSCHEDULED_COMPLETED,
+        PRIMARY_UNSCHEDULED_EXECUTION)
+
+    canonical = {
+        PRIMARY_REST_DAY, PRIMARY_SCHEDULED_NOT_STARTED,
+        PRIMARY_EXECUTION_RECORDED, PRIMARY_COMPLETED,
+        PRIMARY_UNSCHEDULED_EXECUTION, PRIMARY_UNSCHEDULED_COMPLETED,
+        PRIMARY_NO_PLAN, PRIMARY_NEEDS_ATTENTION, PRIMARY_IN_PROGRESS,
     }
-    for expected, facts in cases.items():
-        assert build_today_view(facts).state == expected
+    # `error` is deliberately outside the canonical enum: it is not a statement
+    # about the user, it is the absence of one.
+    assert set(TODAY_STATES) == canonical | {STATE_ERROR}
+    assert STATE_ERROR not in canonical
 
 
-def test_presenter_error_is_not_no_plan():
-    # A failed canonical read must be an honest error — never "no plan", never
-    # a silent populated state.
-    v = build_today_view(TodayFacts(read_ok=False, has_active_plan=False, workout_completed_today=False))
-    assert v.state == STATE_ERROR
-    assert v.state != STATE_NO_PLAN
-    assert v.primary is None                      # no dominant CTA on error
-    assert v.secondary and v.secondary[0].href == "/training"  # neutral "Open Plan"
+def test_state_ids_are_identifiers_not_localized_copy():
+    for sid in TODAY_STATES:
+        assert re.fullmatch(r"[a-z_]+", sid), sid
 
 
-def test_presenter_error_ignores_stale_booleans():
-    # Even if booleans look "populated", read_ok=False wins → error.
-    v = build_today_view(TodayFacts(read_ok=False, has_active_plan=True, workout_completed_today=False))
-    assert v.state == STATE_ERROR
-
-
-def test_presenter_completed_has_no_stale_start():
-    v = build_today_view(TodayFacts(read_ok=True, has_active_plan=True, workout_completed_today=True))
-    assert v.state == STATE_WORKOUT_DONE
-    assert v.primary is None                      # acceptable: no dominant CTA
-    labels = [a.label_key for a in v.secondary]
-    assert "today.action.view_progress" in labels
-    # No secondary claims a "start" action.
-    assert not any("start" in lk for lk in labels)
-
-
-def test_presenter_plan_ready_label_is_neutral():
-    v = build_today_view(TodayFacts(read_ok=True, has_active_plan=True, workout_completed_today=False))
-    assert v.state == STATE_PLAN_READY
-    assert v.primary is not None
-    # Neutral canonical label — NOT "today's workout / recommended". plan_ready
-    # means only "an active plan exists and completion is false".
-    assert v.primary.label_key == "today.action.view_plan"
-    assert v.primary.href == "/training"
-    assert "today" not in v.primary.label_key.replace("today.action", "")
-
-
-def test_presenter_no_plan_points_at_canonical_plan_route():
-    v = build_today_view(TodayFacts(read_ok=True, has_active_plan=False, workout_completed_today=False))
-    assert v.state == STATE_NO_PLAN
-    assert v.primary.label_key == "today.action.create_plan"
-    assert v.primary.href == "/training"
-
-
-def test_presenter_at_most_one_primary_action():
-    # `primary` is a single Action or None — the type makes "exactly one dominant
-    # action" structural, not a count we could get wrong.
-    for facts in [
-        TodayFacts(True, False, False),
-        TodayFacts(True, True, False),
-        TodayFacts(True, True, True),
-        TodayFacts(False, False, False),
-    ]:
-        v = build_today_view(facts)
-        assert v.primary is None or v.primary.primary is True
-
-
-def test_presenter_state_ids_are_not_localized():
-    # State ids are stable ASCII identifiers, never translated copy.
-    for sid in (STATE_NO_PLAN, STATE_PLAN_READY, STATE_WORKOUT_DONE, STATE_ERROR):
-        assert re.fullmatch(r"[a-z_]+", sid)
+def test_an_unknown_canonical_state_fails_to_error_not_to_a_guess():
+    """Contract drift must surface as unavailability. Mapping an unrecognised
+    state onto the nearest familiar one would render a confident screen built on
+    a state this build does not understand."""
+    view = build_today_view(_facts(primary_state="some_future_state"))
+    assert view.state == STATE_ERROR
+    assert view.primary is None
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# B. FLAG BEHAVIOUR — OFF preserves legacy, ON renders V2
+# B. ONE DOMINANT ACTION — driven by the canonical action dimension
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_flag_default_off_renders_legacy_today(client, make_user, login):
-    _seed_login(client, make_user, login)
-    html = client.get("/").get_data(as_text=True)
-    assert "data-today-v2" not in html            # V2 mark absent
-    assert 'class="dash-grid"' in html            # legacy dashboard grid present
+def test_primary_action_follows_the_canonical_action_dimension():
+    start = build_today_view(_facts(action="start")).primary
+    assert start.label_key == "today.action.start_workout"
+    assert start.href == "/training" and start.primary is True
+
+    resume = build_today_view(
+        _facts(primary_state=STATE_IN_PROGRESS, action="resume")).primary
+    assert resume.label_key == "today.action.resume_workout"
 
 
-def test_flag_on_renders_today_v2(app, client, make_user, login):
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
-    _seed_login(client, make_user, login)
-    html = client.get("/").get_data(as_text=True)
-    assert "data-today-v2" in html
-    assert 'class="dash-grid"' not in html        # legacy tree not rendered
-    assert 'data-today-state=' in html
+def test_no_plan_offers_the_one_honest_next_step():
+    view = build_today_view(_facts(primary_state=STATE_NO_PLAN, action="none",
+                                   has_active_plan=False))
+    assert view.state == STATE_NO_PLAN
+    assert view.primary.label_key == "today.action.create_plan"
+    assert view.primary.href == "/training"
 
 
-def test_missing_flag_fails_safe_to_legacy(app, client, make_user, login):
-    app.config.pop("UIUX_TODAY_V2_ENABLED", None)
-    _seed_login(client, make_user, login)
-    html = client.get("/").get_data(as_text=True)
-    assert "data-today-v2" not in html            # safe default: legacy
+@pytest.mark.parametrize("state", [
+    STATE_REST_DAY, STATE_COMPLETED, STATE_UNSCHEDULED_COMPLETED,
+    STATE_NEEDS_ATTENTION,
+])
+def test_settled_and_blocked_states_render_no_dominant_cta(state):
+    """A completed day must never carry a "Start" and a rest day must never be
+    handed a workout — the canonical `action` says `none`/`blocked` and the
+    presenter adds nothing on top of it."""
+    view = build_today_view(_facts(primary_state=state, action="none"))
+    assert view.primary is None
+    assert not any("start" in a.label_key or "resume" in a.label_key
+                   for a in view.secondary)
 
 
-def test_exactly_one_today_tree_per_flag_state(app, client, make_user, login):
-    _seed_login(client, make_user, login)
-    off = client.get("/").get_data(as_text=True)
-    assert "data-today-v2" not in off and 'class="dash-grid"' in off
+def test_at_most_one_primary_action_is_structural():
+    """`primary` is a single Action or None, so "exactly one dominant action" is
+    a type guarantee rather than a count the template could get wrong."""
+    for state in TODAY_STATES:
+        for action in ("start", "resume", "none", "blocked"):
+            view = build_today_view(_facts(primary_state=state, action=action))
+            assert view.primary is None or isinstance(view.primary, Action)
+            assert view.primary is None or view.primary.primary is True
 
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
-    on = client.get("/").get_data(as_text=True)
-    assert "data-today-v2" in on and 'class="dash-grid"' not in on   # never both
+
+def test_no_state_is_a_dead_end_and_none_competes_with_the_primary():
+    """Two structural rules, checked over the whole matrix rather than a
+    hand-maintained per-state list: a view with a dominant CTA carries no
+    subordinate links (nothing competes with it), and a view without one always
+    offers at least the neutral fallback (no screen is a dead end). The blocked
+    scheduled/in-progress combinations only a flag-on v2 snapshot can produce are
+    included, because those are exactly the ones a per-state table forgets."""
+    for state in TODAY_STATES:
+        for action in ("start", "resume", "none", "blocked", ""):
+            view = build_today_view(_facts(primary_state=state, action=action))
+            if view.primary is not None:
+                assert view.secondary == (), (state, action)
+            else:
+                assert view.secondary, (state, action)
+
+
+def test_every_action_points_at_an_existing_canonical_route():
+    routes = {"/training", "/progress-page"}
+    for state in TODAY_STATES:
+        for action in ("start", "resume", "none"):
+            view = build_today_view(_facts(primary_state=state, action=action))
+            items = list(view.secondary) + ([view.primary] if view.primary else [])
+            for item in items:
+                assert item.href in routes, (state, item.href)
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# C. PRIMARY ACTION + STATE SEMANTICS (route level)
+# C. HONEST FAILURE — an unreadable Today is not an empty one
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_v2_no_plan_state_and_primary(app, client, make_user, login):
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
+def test_read_failure_is_an_error_state_not_no_plan():
+    view = build_today_view(TodayFacts(
+        read_ok=False, has_active_plan=False, workout_completed_today=False))
+    assert view.state == STATE_ERROR
+    assert view.state != STATE_NO_PLAN
+    assert view.primary is None
+    assert view.secondary and view.secondary[0].href == "/training"
+
+
+def test_read_failure_ignores_otherwise_populated_facts():
+    view = build_today_view(TodayFacts(
+        read_ok=False, has_active_plan=True, workout_completed_today=True,
+        primary_state=STATE_COMPLETED, action="none"))
+    assert view.state == STATE_ERROR
+
+
+def test_read_failure_publishes_no_plan_summary():
+    """A stale plan card under an error banner is exactly the "unknown rendered
+    as known" this surface must not do."""
+    view = build_today_view(TodayFacts(
+        read_ok=False, has_active_plan=True, workout_completed_today=False,
+        plan=TodayPlanSummary(focus="İtiş", duration_min=45, exercise_count=4)))
+    assert view.plan is None
+
+
+def test_today_facts_resolution_error_is_honest_error(app, make_user, monkeypatch):
+    from app.services import today_facts as tf
+    from app.services.workout_state import _safe_snapshot
+    from app.timeutil import app_today
+    make_user("erruser", profile_complete=True)
+
+    def _raise(uid, **kw):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(tf, "resolve_workout_state", _raise)
+    facts = tf.gather_today_facts(1)
+    assert facts.read_ok is False
+    assert build_today_view(facts).state == STATE_ERROR
+
+    # A fail-safe snapshot carries completed_today=False from a FAILURE; it must
+    # not read as a trustworthy "not done".
+    def _failsafe(uid, **kw):
+        return _safe_snapshot(app_today())
+    monkeypatch.setattr(tf, "resolve_workout_state", _failsafe)
+    assert tf.gather_today_facts(1).read_ok is False
+
+
+def test_domain_anomaly_is_a_product_state_not_a_failure(app, client, make_user,
+                                                         login):
+    """An unparseable plan is something true about the user's data, and the
+    canonical resolver already classifies it. Reporting "unavailable" instead of
+    "your plan needs attention" would hide an actionable condition."""
+    user = _seed_login(client, make_user, login)
+    _seed_plan(user.id, plan_data="{}")   # valid row, no seven-day program
+    from app.services.today_facts import gather_today_facts
+    facts = gather_today_facts(user.id)
+    assert facts.read_ok is True
+    assert facts.has_active_plan is True
+    assert build_today_view(facts).state == STATE_NEEDS_ATTENTION
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# D. THE CANONICAL INSIGHT — re-published, never re-decided
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_insight_label_keys_cover_the_canonical_vocabulary_exactly():
+    """Drift gate. A code added to Axis Insights without a Today mapping would
+    render nothing at all, which reads as "we found nothing" — the one wrong
+    answer. A mapping for a code the server can no longer emit is dead copy."""
+    from app.services.progress_insights import WATCH_CODES, WORKING_CODES
+    from app.today_presenter import _INSIGHT_LABEL_KEYS
+
+    assert set(_INSIGHT_LABEL_KEYS) == (
+        {(INSIGHT_WATCH, code) for code in WATCH_CODES}
+        | {(INSIGHT_WORKING, code) for code in WORKING_CODES}
+    )
+
+
+def test_insight_reuses_progress_copy_verbatim():
+    """Today and Progress must say the SAME sentence for the same canonical
+    signal. A second phrasing would be a second claim."""
+    from app.i18n import _CATALOG
+    from app.today_presenter import _INSIGHT_LABEL_KEYS
+
+    for key in _INSIGHT_LABEL_KEYS.values():
+        assert key.startswith("progress.axis_"), key
+        for loc in ("tr", "en"):
+            assert _CATALOG[loc].get(key), (loc, key)
+
+
+def test_a_watch_signal_outranks_a_working_signal():
+    view = build_today_view(_facts(insight_kind=INSIGHT_WATCH,
+                                   insight_code="deload_due"))
+    assert view.insight.kind == INSIGHT_WATCH
+    assert view.insight.label_key == "progress.axis_watch_deload_due"
+    assert view.insight.href == "/progress-page"
+
+
+def test_an_unmapped_or_absent_insight_renders_as_absence():
+    for kind, code in ((None, None), (INSIGHT_WATCH, None),
+                       (INSIGHT_WATCH, "a_code_from_the_future")):
+        view = build_today_view(_facts(insight_kind=kind, insight_code=code))
+        assert view.insight is None
+
+
+def test_a_broken_insight_read_never_takes_down_today(app, make_user, monkeypatch):
+    """The insight is a secondary observation. If it fails, Today still answers
+    the questions it exists to answer."""
+    from app.services import today_facts as tf
+    user = make_user("insightfail", profile_complete=True)
+
+    def _boom(uid, **kw):
+        raise RuntimeError("progression read failed")
+    monkeypatch.setattr(tf, "build_progress_insights", _boom)
+
+    facts = tf.gather_today_facts(user.id)
+    assert facts.read_ok is True
+    assert facts.insight_kind is None and facts.insight_code is None
+    assert build_today_view(facts).insight is None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# E. COPY COMPLETENESS — nothing renders a raw key
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_every_state_has_a_brief_and_a_training_stat_label():
+    """Both tables must be TOTAL over the state vocabulary: a state without an
+    entry renders the dotted key itself to the user."""
+    from app.i18n import _CATALOG
+    from app.today_presenter import _TRAINING_STAT_KEYS
+
+    assert set(_TRAINING_STAT_KEYS) == set(TODAY_STATES)
+    for loc in ("tr", "en"):
+        for state in TODAY_STATES:
+            assert _CATALOG[loc].get("today.brief." + state), (loc, state)
+            assert _CATALOG[loc].get(_TRAINING_STAT_KEYS[state]), (loc, state)
+
+
+def test_every_action_label_key_resolves_in_every_locale():
+    from app.i18n import _CATALOG
+    from app.today_presenter import _HREF_BY_LABEL
+
+    keys = set(_HREF_BY_LABEL) | {
+        "today.action.start_workout", "today.action.resume_workout",
+        "today.action.create_plan",
+    }
+    for loc in ("tr", "en"):
+        for key in keys:
+            assert _CATALOG[loc].get(key), (loc, key)
+
+
+def test_today_copy_is_axisai_only():
+    from app.i18n import _CATALOG
+    for loc in ("tr", "en"):
+        for key, val in _CATALOG[loc].items():
+            if key.startswith("today."):
+                assert "fitx" not in val.lower(), f"{loc}:{key}"
+
+
+def test_the_retired_legacy_home_copy_is_gone():
+    """`index.*` existed for `templates/index.html` alone. Leaving it behind
+    would make the catalog claim a surface the build no longer has."""
+    from app.i18n import _CATALOG
+    for loc in ("tr", "en"):
+        assert not [k for k in _CATALOG[loc] if k.startswith("index.")], loc
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# F. THE RENDERED PAGE — one Home, decided on the server
+# ══════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("flag", [None, False, True])
+def test_the_retired_flag_no_longer_selects_a_home(app, client, make_user, login,
+                                                   flag):
+    """Mirrors the `UIUX_NAV_V2_ENABLED` precedent: the key stays registered so
+    `/health` and the `[FLAGS]` boot line do not drift, but flipping it is not a
+    rollback path. Rolling this PR back is a git revert."""
+    if flag is None:
+        app.config.pop("UIUX_TODAY_V2_ENABLED", None)
+    else:
+        app.config["UIUX_TODAY_V2_ENABLED"] = flag
+    _seed_login(client, make_user, login)
+    html = _html(client)
+    assert "data-today" in html
+    assert 'data-today-state="' in html
+    assert 'class="dash-grid"' not in html      # the legacy tree cannot return
+
+
+def test_the_legacy_dashboard_template_is_gone():
+    assert not (ROOT / "templates" / "index.html").exists()
+    assert not (ROOT / "static" / "dashboard.css").exists()
+
+
+def test_no_plan_renders_exactly_one_dominant_cta(app, client, make_user, login):
     _seed_login(client, make_user, login)               # no plan seeded
-    html = client.get("/").get_data(as_text=True)
+    html = _html(client)
     assert 'data-today-state="no_plan"' in html
-    assert html.count("data-today-primary") == 1        # exactly one dominant CTA
+    assert html.count("data-today-primary") == 1
     assert 'href="/training"' in html
 
 
-def test_v2_plan_ready_single_primary(app, client, make_user, login):
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
+def test_a_scheduled_day_shows_the_plan_content_it_actually_has(
+        app, client, make_user, login):
     user = _seed_login(client, make_user, login)
-    _seed_plan(user.id)
-    html = client.get("/").get_data(as_text=True)
-    assert 'data-today-state="plan_ready"' in html
+    _seed_plan(user.id, plan_data=_week("antrenman", today_focus="Zirve İtiş",
+                                        exercises=3))
+    html = _html(client)
+    assert 'data-today-state="scheduled_not_started"' in html
     assert html.count("data-today-primary") == 1
+    # Plan content is the author's, projected through the canonical serializer.
+    assert "Zirve İtiş" in html
 
 
-def test_v2_workout_done_no_stale_start(app, client, make_user, login):
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
+def test_a_rest_day_is_not_a_missing_plan(app, client, make_user, login):
     user = _seed_login(client, make_user, login)
-    _seed_plan(user.id)
-    _seed_pumpcheck_today(user.id)
-    html = client.get("/").get_data(as_text=True)
-    assert 'data-today-state="workout_done"' in html
-    assert "data-today-primary" not in html             # no dominant CTA when done
-    assert 'href="/progress-page"' in html              # review kept as secondary
+    _seed_plan(user.id, plan_data=_week("dinlenme"))
+    html = _html(client)
+    assert 'data-today-state="rest_day"' in html
+    assert 'data-today-state="no_plan"' not in html
+    assert "data-today-primary" not in html     # nothing is owed today
 
 
-def test_v2_has_exactly_one_h1(app, client, make_user, login):
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
-    _seed_login(client, make_user, login)
-    html = client.get("/").get_data(as_text=True)
-    assert len(re.findall(r"<h1\b", html)) == 1
-
-
-def test_v2_no_raw_localization_keys_leak(app, client, make_user, login):
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
-    _seed_login(client, make_user, login)
-    html = client.get("/").get_data(as_text=True)
-    # Translated copy is present, raw dotted keys are not shown as text.
-    assert ">today.title<" not in html
-    assert ">today.status.no_plan<" not in html
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# D. FLAG MATRIX — 4 Navigation×Today combinations
-# ══════════════════════════════════════════════════════════════════════════
-
-def test_four_flag_combinations_render_safely(app, client, make_user, login):
-    _seed_login(client, make_user, login)
-    for nav_on in (False, True):
-        for today_on in (False, True):
-            app.config["UIUX_NAV_V2_ENABLED"] = nav_on
-            app.config["UIUX_TODAY_V2_ENABLED"] = today_on
-            html = client.get("/").get_data(as_text=True)
-            # Exactly one Today tree.
-            v2 = "data-today-v2" in html
-            legacy = 'class="dash-grid"' in html
-            assert v2 != legacy, f"nav={nav_on} today={today_on}: XOR Today tree"
-            assert v2 is today_on
-            # Production chrome is the four-destination shell regardless of
-            # UIUX_NAV_V2_ENABLED; Today remains independently flag-gated.
-            assert 'data-nav-id="today"' in html
-
-
-def test_nav_and_today_flags_are_independent(app, client, make_user, login):
-    # Today ON does not change production chrome; chrome does not force Today v2.
-    _seed_login(client, make_user, login)
-    app.config["UIUX_NAV_V2_ENABLED"] = False
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
-    html = client.get("/").get_data(as_text=True)
-    assert "data-today-v2" in html
-    assert 'data-nav-id="today"' in html
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# E. CANONICAL ENDPOINT SOURCES (correction #2) — shared, undistorted signals
-# ══════════════════════════════════════════════════════════════════════════
-
-def test_workout_status_completion_signal(app, client, make_user, login):
-    # /workout/status is owned by the Sprint 7 canonical resolver, which returns
-    # an additive `state` object alongside `completed`. Today V2 does NOT modify
-    # this route — it delegates its own completion read to the same resolver. So
-    # assert the `completed` signal Today relies on still tracks today's PumpCheck
-    # (without pinning the additive contract this endpoint is free to grow).
+def test_a_completed_day_carries_no_stale_start(app, client, make_user, login):
     user = _seed_login(client, make_user, login)
-    before = client.get("/workout/status").get_json()
-    assert before["completed"] is False
-    assert "state" in before  # Sprint 7 additive contract preserved after rebase
+    _seed_plan(user.id, plan_data=_week("antrenman"))
     _seed_pumpcheck_today(user.id)
-    after = client.get("/workout/status").get_json()
-    assert after["completed"] is True
+    html = _html(client)
+    assert 'data-today-state="completed"' in html
+    assert "data-today-primary" not in html
+    assert 'href="/progress-page"' in html      # review stays available
 
+
+def test_home_has_exactly_one_h1(app, client, make_user, login):
+    _seed_login(client, make_user, login)
+    assert len(re.findall(r"<h1\b", _html(client))) == 1
+
+
+def test_no_raw_localization_keys_leak(app, client, make_user, login):
+    _seed_login(client, make_user, login)
+    html = _html(client)
+    for key in ("today.title", "today.brief.no_plan", "today.status_label",
+                "today.stat_training.no_plan", "today.greeting_named"):
+        assert ">%s<" % key not in html
+
+
+def test_the_day_is_the_servers_and_the_browser_only_formats_it(
+        app, client, make_user, login):
+    """A browser-picked day would let a traveller's clock disagree with the
+    canonical Istanbul day the state was resolved for."""
+    from app.timeutil import app_today
+    _seed_login(client, make_user, login)
+    assert 'data-today-date="%s"' % app_today().isoformat() in _html(client)
+
+
+def test_home_does_not_re_fetch_the_server_decided_state(
+        app, client, make_user, login):
+    """Completion, the schedule and the next action are already in the HTML.
+    Re-fetching `/workout/status` would add a second authoritative read that can
+    disagree with the one that rendered the page."""
+    _seed_login(client, make_user, login)
+    assert "/workout/status" not in _html(client)
+    js = (ROOT / "static" / "today.js").read_text(encoding="utf-8")
+    assert "/workout/status" not in js
+    assert "/training-plan/active" not in js
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# G. WHAT HOME LOST — and where each capability went
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_the_removed_dashboard_modules_are_not_on_home(app, client, make_user,
+                                                       login):
+    user = _seed_login(client, make_user, login)
+    _seed_plan(user.id, plan_data=_week("antrenman"))
+    html = _html(client)
+    for gone in ('class="dash-grid"', 'id="weight-input"',
+                 'data-action="doUpdateWeight"', "wt-bmr", "wt-tdee",
+                 'class="qa-grid"', 'class="tip-card"',
+                 'data-action="nextTip"', 'class="ach-card"', "chart.js"):
+        assert gone not in html, gone
+
+
+def test_home_promotes_no_unavailable_feature(app, client, make_user, login):
+    """The legacy quick-action grid shipped a disabled "Soon" barcode tile.
+    Advertising a capability the build does not have is a trust cost with no
+    product benefit."""
+    from app.i18n import _CATALOG
+    _seed_login(client, make_user, login)
+    assert "qa-soon" not in _html(client)
+    for loc in ("tr", "en"):
+        assert "index.qa_soon" not in _CATALOG[loc]
+
+
+def test_the_capabilities_the_dashboard_hosted_are_still_reachable(
+        app, client, make_user, login):
+    """Removal is a hierarchy decision, not a feature deletion. Each module Home
+    lost is asserted here at the destination that canonically owns it."""
+    _seed_login(client, make_user, login)
+
+    # Weight entry + history → Progress (the check-in sheet).
+    assert 'id="ci-weight"' in _html(client, "/progress-page")
+
+    # Meal logging and the menu scanner → Nutrition.
+    nutrition = _html(client, "/nutrition")
+    assert 'id="log-fab"' in nutrition
+    assert 'data-action="logMenuScan"' in nutrition
+
+    # Level / XP / quests → Account.
+    assert 'href="/quests"' in _html(client, "/edit-profile")
+
+
+def test_home_renders_no_emoji_as_an_interface_icon():
+    emoji = re.compile(
+        r"[\U0001F300-\U0001F5FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF"
+        r"\U0001F900-\U0001FAFF\U00002600-\U000026FF]"
+    )
+    found = sorted(set(emoji.findall(
+        (ROOT / "templates" / "today.html").read_text(encoding="utf-8"))))
+    assert not found, found
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# H. CANONICAL SOURCES — Today cannot drift from the endpoints
+# ══════════════════════════════════════════════════════════════════════════
 
 def test_today_completion_matches_workout_status(app, client, make_user, login):
-    # The Today read layer must agree with /workout/status because both now read
-    # the one canonical owner (resolve_workout_state) — no second query to drift.
     from app.services.today_facts import workout_completed_today
     user = _seed_login(client, make_user, login)
     assert workout_completed_today(user.id) is False
@@ -268,6 +556,16 @@ def test_today_completion_matches_workout_status(app, client, make_user, login):
     _seed_pumpcheck_today(user.id)
     assert workout_completed_today(user.id) is True
     assert client.get("/workout/status").get_json()["completed"] is True
+
+
+def test_today_state_matches_the_workout_status_contract(app, client, make_user,
+                                                         login):
+    """The page's `data-today-state` is the same string `/workout/status`
+    publishes as `state.primary_state`."""
+    user = _seed_login(client, make_user, login)
+    _seed_plan(user.id, plan_data=_week("antrenman"))
+    published = client.get("/workout/status").get_json()["state"]["primary_state"]
+    assert 'data-today-state="%s"' % published in _html(client)
 
 
 def test_training_plan_active_response_unchanged(app, client, make_user, login):
@@ -278,70 +576,3 @@ def test_training_plan_active_response_unchanged(app, client, make_user, login):
     assert data["exists"] is True
     assert data["plan"] == {"days": []}
     assert "created_at" in data and "score" in data
-
-
-def test_today_facts_resolution_error_is_honest_error(app, make_user, monkeypatch):
-    # The canonical resolver owns completion; when IT hits an unexpected read
-    # failure Today must surface an honest error — never a fabricated state.
-    from app.services import today_facts as tf
-    from app.services.workout_state import _safe_snapshot
-    from app.timeutil import app_today
-    make_user("erruser", profile_complete=True)
-
-    # (a) resolver raises unexpectedly → caught by gather_today_facts → error
-    def _raise(uid, **kw):
-        raise RuntimeError("db down")
-    monkeypatch.setattr(tf, "resolve_workout_state", _raise)
-    facts = tf.gather_today_facts(1)
-    assert facts.read_ok is False
-    assert build_today_view(facts).state == STATE_ERROR
-
-    # (b) resolver fails safe with a resolution_error snapshot → still honest error
-    #     (completed_today=False from a failure must NOT read as a real "not done")
-    def _failsafe(uid, **kw):
-        return _safe_snapshot(app_today())
-    monkeypatch.setattr(tf, "resolve_workout_state", _failsafe)
-    facts = tf.gather_today_facts(1)
-    assert facts.read_ok is False
-
-
-def test_today_facts_domain_anomaly_is_not_error(app, client, make_user, login):
-    # A DOMAIN anomaly (unparseable schedule from an empty plan) is an honest
-    # classification, not a read failure: completion is still trustworthy, so
-    # Today stays plan_ready — it must NOT collapse to the error state.
-    user = _seed_login(client, make_user, login)
-    _seed_plan(user.id, plan_data="{}")  # valid row, no 7-day program → schedule_unparseable
-    from app.services.today_facts import gather_today_facts
-    facts = gather_today_facts(user.id)
-    assert facts.read_ok is True
-    assert facts.has_active_plan is True
-    assert build_today_view(facts).state == STATE_PLAN_READY
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# F. REQUEST-COUNT DEDUP (correction #6) + template safety
-# ══════════════════════════════════════════════════════════════════════════
-
-def test_v2_does_not_client_fetch_workout_status(app, client, make_user, login):
-    # Completion is read server-side for the primary action, so V2 must NOT
-    # re-fetch /workout/status on hydration (no duplicate authoritative read).
-    app.config["UIUX_TODAY_V2_ENABLED"] = True
-    _seed_login(client, make_user, login)
-    html = client.get("/").get_data(as_text=True)
-    assert "/workout/status" not in html
-
-
-def test_legacy_off_path_still_fetches_workout_status(client, make_user, login):
-    # The legacy OFF path is unchanged (still hydrates completion client-side).
-    _seed_login(client, make_user, login)
-    html = client.get("/").get_data(as_text=True)
-    assert "/workout/status" in html
-
-
-def test_new_today_copy_is_axisai_only():
-    # Correction #7: no "FitX" in the new product-facing Today copy.
-    from app.i18n import _CATALOG
-    for loc in ("tr", "en"):
-        for key, val in _CATALOG[loc].items():
-            if key.startswith("today."):
-                assert "fitx" not in val.lower(), f"{loc}:{key}"

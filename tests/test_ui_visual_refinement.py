@@ -21,9 +21,10 @@ ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "static"
 TEMPLATES = ROOT / "templates"
 
-# The four PR2 surfaces plus the shared shell they all load.
-CORE_TEMPLATES = ("index.html", "nutrition.html", "training.html", "progress.html")
-CORE_SCRIPTS = ("nutrition.js", "training.js", "coach_widget.js")
+# The four PR2 surfaces plus the shared shell they all load. UX-2 PR4 replaced
+# the legacy `index.html` dashboard with `today.html` as the one production Home.
+CORE_TEMPLATES = ("today.html", "nutrition.html", "training.html", "progress.html")
+CORE_SCRIPTS = ("nutrition.js", "training.js", "coach_widget.js", "today.js")
 
 # Pictographic ranges, minus the dingbats the app uses as typographic marks
 # (✓ ✗ ★ ➕ →) which are not emoji icons.
@@ -68,12 +69,16 @@ def test_card_component_ships_its_own_padding():
     )
 
 
-def test_home_dashboard_cards_do_not_reintroduce_inline_padding():
-    """The fix is the component default, not eight inline styles."""
-    html = _read(TEMPLATES / "index.html")
+@pytest.mark.parametrize("name", CORE_TEMPLATES)
+def test_core_cards_do_not_reintroduce_inline_padding(name):
+    """The fix is the component default, not one inline style per card. The
+    original offender was Home's eight flush `.card`s; the rule belongs to every
+    surface, so after Home was rebuilt the guard was widened rather than
+    retargeted at a single file."""
+    html = _read(TEMPLATES / name)
     for match in re.finditer(r'<section class="card[^"]*"([^>]*)>', html):
         assert "padding" not in match.group(1), (
-            "Home cards must inherit .card padding, not re-declare it inline"
+            f"{name}: cards must inherit .card padding, not re-declare it inline"
         )
 
 
@@ -93,8 +98,10 @@ def test_metric_scale_tokens_exist_and_are_fluid():
         ("components.css", ".stat-value"),
         ("progress.css", ".ps-state"),
         ("progress.css", ".wc-value"),
-        ("dashboard.css", ".hero-num"),
-        ("dashboard.css", ".wt-big"),
+        # `dashboard.css` `.hero-num` / `.wt-big` were the legacy Home's calorie
+        # hero and weight readout. UX-2 PR4 removed both modules with the page;
+        # Today's compact status strip carries labelled status values, not a
+        # dominant metric, so it has no entry to inherit here.
         ("training.css", ".wh-focus"),
     ],
 )
@@ -150,13 +157,13 @@ def test_core_scripts_hide_no_emoji_behind_unicode_escapes(name):
     assert not escaped, f"{name} still carries escaped emoji: {escaped[:5]}"
 
 
-def test_home_tips_carry_a_semantic_topic_not_a_glyph():
-    html = _read(TEMPLATES / "index.html")
-    for block in ("TIPS_TR", "TIPS_EN"):
-        body = html.split("const %s = [" % block, 1)[1].split("];", 1)[0]
-        assert "icon:'" not in body, f"{block} must not hardcode a glyph per tip"
-        assert body.count("topic:'") == 20, f"{block} must declare a topic per tip"
-    assert "const ICONS = {" in html, "topics resolve through one shared registry"
+def test_home_ships_no_generic_tip_carousel():
+    """The 20-tip carousel was generic advice dressed as coaching. UX-2 PR4
+    replaced it with one canonical Axis insight, so the icon-registry guard has
+    nothing left to protect — what matters now is that the carousel stays gone."""
+    html = _read(TEMPLATES / "today.html")
+    for gone in ("TIPS_TR", "TIPS_EN", "const ICONS", "tip-dot", "tip-card"):
+        assert gone not in html, gone
 
 
 def test_nutrition_meal_icons_come_from_the_single_slot_icon_set():
@@ -259,23 +266,14 @@ def test_progress_empty_state_action_is_a_control_not_a_bare_link():
     assert "border" in body and "background" in body
 
 
-def test_tip_dot_hit_area_meets_touch_minimum_without_growing_the_row():
-    """The visible mark is a 5px ::after; the button itself must be 44×44.
-    Negative margin keeps flex occupancy at 24px so the carousel row does
-    not spread between the prev/next controls."""
-    body = _rule(_css("dashboard.css"), ".tip-dot")
-    assert re.search(r"width:\s*44px", body), (
-        ".tip-dot hit area must meet the 44px touch minimum"
+def test_home_primary_action_meets_the_touch_minimum():
+    """The tip carousel's 44×44 dot target went with the carousel in UX-2 PR4.
+    The touch-minimum rule it encoded did not: Home's one dominant control is now
+    the primary CTA, and it is the control this page exists to have tapped."""
+    body = _rule(_css("today.css"), ".today-cta")
+    assert re.search(r"min-height:\s*3rem", body), (
+        "the primary action must meet the 48px touch minimum"
     )
-    assert re.search(r"height:\s*44px", body), (
-        ".tip-dot hit area must meet the 44px touch minimum"
-    )
-    assert re.search(r"margin:\s*-10px", body), (
-        "negative margin keeps five dots at the previous 24px occupancy"
-    )
-    after = _rule(_css("dashboard.css"), ".tip-dot::after")
-    assert re.search(r"width:\s*5px", after)
-    assert re.search(r"height:\s*5px", after)
 
 
 def test_page_shell_reserves_the_floating_fab_rail():
@@ -356,7 +354,7 @@ def test_nutrition_diary_typography_uses_design_system_roles():
 
 def test_no_core_surface_reintroduces_a_hardcoded_display_title_size():
     """PR1 made page titles fluid; PR2 must not walk that back."""
-    for name in ("dashboard.css", "nutrition.css", "training.css", "progress.css"):
+    for name in ("today.css", "nutrition.css", "training.css", "progress.css"):
         assert not re.search(r"\.page-hdr[^{]*\{[^}]*font-size:\s*\d+px", _css(name)), (
             f"{name} overrides the fluid page-title scale"
         )

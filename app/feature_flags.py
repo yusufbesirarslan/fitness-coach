@@ -171,34 +171,46 @@ ROLLOUT_FLAGS = (
     FeatureFlag(
         key="UIUX_TODAY_V2_ENABLED",
         capability=(
-            "Renders the PR2 Today hierarchy (templates/today.html: one "
-            "authoritative next action + honest missing/completed/error "
-            "semantics) instead of the legacy dashboard (templates/index.html). "
-            "Presentation only; read from current_app.config, never from a "
-            "query param, cookie, header or browser storage."),
+            "Historical presentation flag that chose between the PR2 Today "
+            "hierarchy (templates/today.html) and the legacy dashboard "
+            "(templates/index.html). UX-2 PR4 converged Home on the Today "
+            "hierarchy and DELETED the legacy dashboard, so this key remains "
+            "in the registry but no longer selects a user-reachable branch: "
+            "`/` renders Today at either value. Presentation only; the route "
+            "keeps its own @require_auth."),
         owner=_OWNER,
         default=False,
         depends_on=(),
         observability=(
-            "PARTIAL — no feature-specific log line or metric. Visible only "
-            "through the PR1 tracking-blueprint HTTP SLIs."),
+            "PARTIAL — no feature-specific log line or metric exists. Visible "
+            "only through the PR1 tracking-blueprint HttpRequests/HttpLatency/"
+            "HttpClientErrors SLIs, which cannot separate a Home regression "
+            "from any other change on the same blueprint. The env value is not "
+            "a Home selector after UX-2 PR4."),
         prerequisites=(
-            "RUNTIME_METRICS_ENABLED=1 with a tracking-blueprint baseline",
-            "UIUX_NAV_V2_ENABLED still OFF — Today is the nav shell's default "
-            "destination, so activating both in one window makes an incident "
-            "ambiguous. The dependency is one-directional: `/` is the legacy "
-            "shell's Home tab, so Today v2 is fully reachable and testable "
-            "without the new shell",
+            "none for Home selection — UX-2 PR4 made the Today hierarchy the "
+            "production Home without this flag",
+            "keep the key registered so /health and the [FLAGS] boot line do "
+            "not drift; do not treat a 0/1 flip as a Home change",
         ),
         success_signals=(
-            "tracking blueprint 5xx rate and p95 unchanged",
-            "no rise in client errors on the Today route",
+            "`/` renders the Today hierarchy regardless of this flag's 0/1 "
+            "value",
+            "the capabilities the legacy dashboard hosted stay reachable at "
+            "their canonical destinations (weight/check-in on Progress, meal "
+            "and menu logging on Nutrition, level/XP/quests on Account)",
         ),
         abort_signals=(
+            "the legacy dashboard (weight form, BMR/TDEE grid, quick-action "
+            "launcher, tip carousel) reappears in production",
             "5xx on the Today route",
-            "p95 regression on the tracking blueprint",
         ),
-        rollback=_rollback("UIUX_TODAY_V2_ENABLED"),
+        rollback=(
+            "git revert of the UX-2 PR4 Home convergence "
+            "(feat(ux): converge Today around daily guidance) and redeploy; "
+            "setting UIUX_TODAY_V2_ENABLED=0 does not restore the legacy "
+            "dashboard — templates/index.html no longer exists"
+        ),
         lifecycle=LIFECYCLE_SHIPPED_DARK,
         review_by="2026-10-01",
         decision=DECISION_ENABLE,
