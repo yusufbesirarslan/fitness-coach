@@ -225,23 +225,31 @@ def test_today_presenter_is_pure():
         "the Today presenter gained an impure dependency: %s"
         % sorted(imported & forbidden))
 
+    # UX-2 PR4 made the presenter re-export the canonical state vocabulary. The
+    # ONLY workout_state module it may reach is `models`, which is a pure data
+    # holder (no ORM, no Flask, no clock); the package root pulls in the query
+    # layer, and importing any other submodule would put I/O behind this import.
+    workout_state = {name for name in imported
+                     if name.startswith("app.services.workout_state")}
+    assert workout_state <= {"app.services.workout_state.models"}, sorted(
+        workout_state)
 
-# -- F3: three Today state vocabularies exist -------------------------------
-# The web presenter, the canonical workout-state resolver and the mobile draft
-# fixture each name "today" differently. Sprint 12 must converge on one; this
-# test records that they are, right now, not one.
 
-def test_web_today_states_and_workout_state_vocabulary_do_not_match():
-    """F3 - the web Today state ids are not the canonical workout-state ids."""
+# -- F3: the three Today state vocabularies -- RESOLVED in UX-2 PR4 ---------
+# At discovery the web presenter, the canonical workout-state resolver and the
+# mobile draft each named "today" differently: `no_plan` was the single shared
+# token, and the web presenter could not express `rest_day` at all -- which is
+# why with the flag on it rendered "View plan" as the dominant CTA on a rest day.
+#
+# UX-2 PR4 converged Home on the canonical vocabulary by RE-EXPORTING it, so the
+# finding is now inverted: this test proves the web ids ARE the canonical ids,
+# and it fails the moment a fourth dialect is reintroduced.
+
+def test_web_today_states_are_the_canonical_workout_state_vocabulary():
+    """F3 (resolved) - the web Today state ids ARE the canonical ones."""
     from app import today_presenter
     from app.services.workout_state import models as ws
 
-    web_states = {
-        today_presenter.STATE_NO_PLAN,
-        today_presenter.STATE_PLAN_READY,
-        today_presenter.STATE_WORKOUT_DONE,
-        today_presenter.STATE_ERROR,
-    }
     canonical_states = {
         ws.PRIMARY_REST_DAY,
         ws.PRIMARY_SCHEDULED_NOT_STARTED,
@@ -253,11 +261,18 @@ def test_web_today_states_and_workout_state_vocabulary_do_not_match():
         ws.PRIMARY_NEEDS_ATTENTION,
         ws.PRIMARY_IN_PROGRESS,
     }
-    # `no_plan` is the single shared token; everything else diverges. The web
-    # presenter cannot express rest_day at all, which is why with the flag on
-    # it renders "View plan" as the dominant CTA on a rest day.
-    assert web_states & canonical_states == {ws.PRIMARY_NO_PLAN}
-    assert ws.PRIMARY_REST_DAY not in web_states
+    web_states = set(today_presenter.TODAY_STATES)
+
+    # Every canonical state is renderable -- rest_day included, so a rest day can
+    # no longer be handed a workout CTA.
+    assert canonical_states <= web_states
+    assert ws.PRIMARY_REST_DAY in web_states
+    # The one extra id is `error`, which is deliberately NOT a product state: it
+    # says the read failed, not something about the user.
+    assert web_states - canonical_states == {today_presenter.STATE_ERROR}
+    # The retired PR2 dialect is gone for good.
+    for retired in ("STATE_PLAN_READY", "STATE_WORKOUT_DONE"):
+        assert not hasattr(today_presenter, retired), retired
 
 
 # -- F4: today's plan projection carries no canonical exercise identity -----
@@ -424,9 +439,9 @@ def test_today_signals_take_their_day_from_the_istanbul_authority(module):
     source = _source(module)
     assert "date.today()" not in source
     assert "datetime.now()" not in source
-    # today_facts delegates its day entirely; the others read it from timeutil.
-    if module != "app/services/today_facts.py":
-        assert "from app.timeutil import" in source
+    # Since UX-2 PR4 every module here -- today_facts included -- resolves the
+    # day from the one clock authority rather than inheriting it implicitly.
+    assert "from app.timeutil import" in source
 
 
 def test_mobile_nutrition_publishes_the_zone_that_resolved_the_day():

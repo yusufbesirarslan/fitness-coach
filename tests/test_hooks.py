@@ -203,19 +203,40 @@ def test_csp_jsdelivr_pinned_to_exact_files(client):
     # SEC1: jsdelivr artık geniş host (cdn.jsdelivr.net) DEĞİL — yalnızca SRI ile
     # sabitlenmiş tam dosyalar script-src'de listeli. Kök/keyfi-yol yükleme kapalı.
     tokens = _csp_directives(client.get("/health"))["script-src"].split()
-    assert "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" in tokens
     assert "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" in tokens
     assert "https://cdn.jsdelivr.net" not in tokens  # geniş kök host kaynağı YOK
+    # UX-2 PR4 chart.js'in son tüketicisini (legacy Home kilo sparkline'ı) kaldırdı;
+    # kullanılmayan bir CDN kaynağı allowlist'te kalmamalı.
+    assert not any("chart.js" in token for token in tokens)
 
 
-def test_chart_js_tag_carries_sri(client, make_user, login):
-    # SEC1: dashboard'daki chart.js <script> etiketi sabit sürüm + integrity +
-    # crossorigin taşımalı (tarayıcı bütünlüğü doğrulasın).
-    make_user("sriuser", profile_complete=True)
-    login("sriuser")
-    body = client.get("/").get_data(as_text=True)
-    assert 'src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"' in body
-    assert 'integrity="sha384-' in body and 'crossorigin="anonymous"' in body
+def test_every_pinned_cdn_script_is_loaded_with_integrity(client):
+    """SEC1 generalized. The concrete `<script src>` this used to assert lived on
+    the legacy Home; the rule it protected did not. Every jsdelivr URL the build
+    ships — in a template or in the script that injects it — must be pinned to an
+    exact version AND paired with an SRI hash and `crossorigin`, or the browser
+    silently trusts whatever the CDN serves.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    csp_tokens = set(
+        _csp_directives(client.get("/health"))["script-src"].split())
+    pattern = re.compile(r"https://cdn\.jsdelivr\.net/[^\s\"']+")
+
+    sources = list((root / "templates").glob("*.html"))
+    sources += list((root / "static").glob("*.js"))
+    seen = set()
+    for path in sources:
+        text = path.read_text(encoding="utf-8")
+        for url in pattern.findall(text):
+            seen.add(url)
+            assert re.search(r"@\d+\.\d+\.\d+", url), (path.name, url)
+            assert url in csp_tokens, (path.name, url)
+            assert "sha384-" in text, path.name
+            assert ("crossorigin" in text or "crossOrigin" in text), path.name
+    assert seen, "no pinned CDN script found — the guard would be vacuous"
 
 
 # ---------------------------------------------------------------------------

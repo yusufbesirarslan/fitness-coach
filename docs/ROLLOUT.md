@@ -101,7 +101,7 @@ activate first.
 | Order | Flag | Why here |
 |---|---|---|
 | 1 | `WEEKLY_PROGRAM_UI_ENABLED` | Only presentation flag with a real feature-specific signal (`[TRAINING][WEEKLY_PROGRAM]` state line). Additive, read-only, one GET. |
-| 2 | `UIUX_TODAY_V2_ENABLED` | Independently reachable through the legacy shell's Home tab (`/`). |
+| 2 | `UIUX_TODAY_V2_ENABLED` | Historical after UX-2 PR4: `/` already renders the Today hierarchy and `templates/index.html` is deleted. Flipping this env var does **not** restore the legacy dashboard. |
 | 3 | `UIUX_PLAN_V2_ENABLED` | Reachable through the legacy Training tab (`/training`). Shares a page with #1; separate windows. |
 | 4 | `UIUX_COACH_PAGE_V2_ENABLED` | Independent, but sits on the AI path. Re-check after #5 — see the note below. |
 | 5 | `UIUX_NAV_V2_ENABLED` | Historical after UX-1 PR2: production chrome is already Today/Plan/Coach/Progress. Flipping this env var does **not** restore the five-tab shell. |
@@ -109,6 +109,15 @@ activate first.
 | 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | Changes AI behaviour for every user. Staging + human answer review; no metric can judge quality. |
 | 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | **The only flag that lets the AI write user data.** After #7, which owns the system prompt it extends. Staging + journal review; needs migration `b3c4d5e6f7a8`. |
 | 9 | `MOBILE_AUTH_ENABLED` | Hardening PR4 is merged (`34f8dc79`). Treat the `blocked` lifecycle label as stale. **Runtime (2026-08-26):** already `1` on production SHA `a6d6b2e` — do **not** enable it again. Native-auth mobile remains OFF until [docs/superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md](../superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md) conditions close. |
+
+**Today v2 after UX-2 PR4.** `/` is the Today hierarchy for every user, and the
+legacy dashboard template no longer exists in the repository.
+`UIUX_TODAY_V2_ENABLED` remains registered for compatibility/history but selects
+nothing. Rolling the Home convergence back is a `git revert` of
+`feat(ux): converge Today around daily guidance` plus a redeploy — not a flag
+flip. The capabilities the legacy dashboard hosted were not removed: weight entry
+and check-in live on Progress, meal and menu logging on Nutrition, and level/XP/
+quests on Account.
 
 **Nav v2 after UX-1 PR2.** Production chrome is already Today · Plan · Coach ·
 Progress. `UIUX_NAV_V2_ENABLED` remains registered for compatibility/history but

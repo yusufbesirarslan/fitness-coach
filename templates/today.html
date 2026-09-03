@@ -3,63 +3,73 @@
 <head>
     {% include "_head.html" %}
     <title>AxisAI — {{ t('today.title') }}</title>
-    <link rel="stylesheet" href="/static/theme.css">
-    <link rel="stylesheet" href="/static/dashboard.css">
-    <link rel="stylesheet" href="/static/nav.css">
-    <link rel="stylesheet" href="/static/today.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="/static/theme.css?v={{ _v }}">
+    <link rel="stylesheet" href="/static/nav.css?v={{ _v }}">
+    <link rel="stylesheet" href="/static/today.css?v={{ _v }}">
 </head>
 <body class="page-body">
 
-{# PR1 gezinme kabuğunu TÜKET — yeniden tanımlama. Today birincil hedefi 'home'
-   nav_active işaretiyle aktif olur (çeviri/DOM'dan değil). #}
+{# Üretim gezinme kabuğunu TÜKET — yeniden tanımlama. Today birincil hedefi
+   'home' nav_active işaretiyle aktif olur (çeviri/DOM'dan değil). #}
 {% set nav_active = 'home' %}
 {% include "_nav.html" %}
 
 {# ══════════════════════════════════════════════════════════════════════════
-   TODAY V2 — Günlük yönelim → TEK birincil eylem → özet → hızlı kayıt → ikincil
-   Birincil eylem SUNUCUDA render edilir (istemci sonraki-eylemi TAHMİN ETMEZ);
-   durum kimliği `today.state` kanoniktir (çeviriden türetilmez).
+   TODAY — AxisAI'nin TEK üretim ana ekranı (UX-2 PR4).
+
+   Hiyerarşi, sayfanın üç soruyu bu sırayla yanıtlamasıdır:
+     A. Bugün hangi gün?          → gün bağlamı
+     B. Bugün ne önemli?          → Günlük Koç Özeti
+     C. Sırada ne yapmalıyım?     → TEK baskın eylem
+     D. Bugün nerede duruyorum?   → kompakt durum
+     E. AxisAI ne fark ediyor?    → kanonik Axis içgörüsü
+     F. Momentum var mı?          → kompakt ilerleme sinyali
+
+   Durum kimliği `today.state` KANONİKtir (`primary_state`); çeviriden ya da
+   DOM metninden türetilmez ve bu şablonda hiçbir durum HESAPLANMAZ. Baskın
+   eylem SUNUCUDA render edilir — istemci sonraki-eylemi TAHMİN ETMEZ.
    ══════════════════════════════════════════════════════════════════════════ #}
-<main class="main-content today-main" id="today-page" data-today-v2 data-today-state="{{ today.state }}">
+<main class="main-content today" id="today-page" data-today data-today-state="{{ today.state }}">
 
-  <!-- ── A. GÜNLÜK YÖNELİM ── -->
-  <header class="today-orient">
-    <div class="today-orient-row">
-      <div class="avatar avatar-lg today-avatar" aria-hidden="true">
-        {%- if profile_picture %}<img src="{{ profile_picture }}" alt="">{% else %}{{ username[0]|upper if username else 'U' }}{% endif -%}
-      </div>
-      <div class="today-orient-head">
-        <p class="today-eyebrow" id="today-greeting">{{ t('today.greeting') }}</p>
-        <h1 class="today-h1">{{ t('today.title') }}</h1>
-        <p class="today-date" id="today-date"></p>
-      </div>
-      <div class="today-orient-meta">
-        <span class="today-chip today-chip--streak">🔥 {{ t('index.streak_days', n=streak_count|default(0)) }}</span>
-        <span class="today-chip today-chip--xp">⚡ {{ user_xp }} XP</span>
-      </div>
+  <!-- ── A. GÜN BAĞLAMI ────────────────────────────────────────────────── -->
+  <header class="today-head">
+    <div class="avatar avatar-md today-avatar" aria-hidden="true">
+      {%- if profile_picture %}<img src="{{ profile_picture }}" alt="">{% else %}{{ username[0]|upper if username else 'U' }}{% endif -%}
     </div>
-
-    {# Durum ikon + METİN (yalnızca renkle iletilmez). Kanonik state'ten gelir;
-       error 'no plan'a çevrilmez, completed 'start' göstermez. #}
-    <p class="today-status today-status--{{ today.state }}" role="status">
-      <span class="today-status-ic" aria-hidden="true">
-        {%- if today.state == 'workout_done' %}✓{% elif today.state == 'no_plan' %}◔{% elif today.state == 'error' %}!{% else %}→{% endif -%}
-      </span>
-      <span class="today-status-txt">{{ t('today.status.' ~ today.state) }}</span>
-    </p>
+    <div class="today-head-text">
+      <p class="today-greet">{{ t('today.greeting_named', name=username) }}</p>
+      {# Gün SUNUCUNUN kanonik Istanbul günüdür; istemci yalnızca BİÇİMLENDİRİR
+         (kendi saatini okumaz, gün SEÇMEZ). Biçimlendirme başarısızsa satır boş
+         kalır — tarih dekorasyondur, iddia değil. #}
+      <p class="today-date" id="today-date" data-today-date="{{ today_date }}"></p>
+    </div>
   </header>
 
-  <!-- ── B. SONRAKİ EYLEM (tek baskın) ── -->
-  <section class="today-next" aria-labelledby="today-next-label">
-    <h2 id="today-next-label" class="today-sec-label">{{ t('today.next_action') }}</h2>
-    {% if today.primary %}
-      <a class="btn-volt today-primary" data-today-primary href="{{ today.primary.href }}">{{ t(today.primary.label_key) }}</a>
-    {% else %}
-      {# workout_done / error: baskın CTA YOK — durum yönelimde açıklanır. #}
-      <p class="today-next-none">{{ t('today.next_none.' ~ today.state) }}</p>
+  <!-- ── B. GÜNLÜK KOÇ ÖZETİ ───────────────────────────────────────────── -->
+  {# Tek cümle, kanonik durumdan. Uydurma yok: her cümle yalnızca depo'nun
+     zaten bildiği şeyi söyler. Plan detayı YALNIZCA kanonik projeksiyon bugün
+     için yayımlanabilir bir gün döndüyse eklenir. #}
+  <section class="today-brief" aria-labelledby="today-brief-line">
+    <h1 class="today-brief-line" id="today-brief-line">{{ t('today.brief.' ~ today.state) }}</h1>
+    {% if today.plan %}
+      <p class="today-brief-detail">
+        {%- if today.plan.focus %}<span class="today-brief-focus">{{ today.plan.focus }}</span>{% endif -%}
+        {%- if today.plan.duration_min or today.plan.exercise_count %}
+        <span class="today-brief-meta">
+          {%- if today.plan.duration_min %}<span>{{ t('today.plan_duration', n=today.plan.duration_min) }}</span>{% endif -%}
+          {%- if today.plan.exercise_count %}<span>{{ t('today.plan_exercises', n=today.plan.exercise_count) }}</span>{% endif -%}
+        </span>
+        {%- endif %}
+      </p>
     {% endif %}
+  </section>
 
+  <!-- ── C. TEK BASKIN EYLEM ───────────────────────────────────────────── -->
+  {% if today.primary or today.secondary %}
+  <section class="today-action">
+    {% if today.primary %}
+      <a class="btn-volt today-cta" data-today-primary href="{{ today.primary.href }}">{{ t(today.primary.label_key) }}</a>
+    {% endif %}
     {% if today.secondary %}
       <nav class="today-secondary" aria-label="{{ t('today.secondary_aria') }}">
         {% for a in today.secondary %}
@@ -68,72 +78,57 @@
       </nav>
     {% endif %}
   </section>
+  {% endif %}
 
-  <!-- ── C. GÜNÜN ÖZETİ (mevcut fetch'lerle beslenir; salt-okunur) ── -->
-  <section class="today-summary" aria-labelledby="today-summary-label">
-    <h2 id="today-summary-label" class="today-sec-label">{{ t('today.summary') }}</h2>
-    <p class="today-loading" id="today-loading" role="status" aria-live="polite">{{ t('today.loading') }}</p>
-    <p class="today-summary-error" id="today-summary-error" role="status" hidden>{{ t('today.summary_error') }}</p>
-
-    <div class="today-summary-grid" id="today-summary-grid" aria-busy="true">
-      <div class="today-cell today-cell--cal">
-        <div class="ring-wrap" style="width:96px;height:96px;">
-          <svg class="ring-svg" viewBox="0 0 96 96" width="96" height="96">
-            <circle class="ring-track" cx="48" cy="48" r="42" stroke-width="8"/>
-            <circle class="ring-fill" id="t-cal-ring" cx="48" cy="48" r="42" stroke-width="8" stroke="var(--color-primary)" stroke-dasharray="263.89" stroke-dashoffset="263.89"/>
-          </svg>
-          <div class="ring-label"><div class="hero-num" id="t-cal-num">—</div></div>
-        </div>
-        <div class="today-cell-lbl">{{ t('index.cal_remaining') }}</div>
-        <div class="today-cell-sub" id="t-cal-sub">—</div>
-      </div>
-
-      <div class="today-macros">
-        <div class="today-macro"><div class="today-macro-val" id="t-protein">—</div><div class="today-macro-lbl">{{ t('index.macro_protein') }}</div></div>
-        <div class="today-macro"><div class="today-macro-val" id="t-carb">—</div><div class="today-macro-lbl">{{ t('index.macro_carb') }}</div></div>
-        <div class="today-macro"><div class="today-macro-val" id="t-fat">—</div><div class="today-macro-lbl">{{ t('index.macro_fat') }}</div></div>
-        <div class="today-macro"><div class="today-macro-val" id="t-water">—</div><div class="today-macro-lbl">{{ t('index.macro_water') }}</div></div>
-      </div>
-
-      <div class="today-weight">
-        <div class="today-weight-top">
-          <div class="today-weight-big"><span id="t-w-kg">—</span> <span class="today-weight-unit">kg</span></div>
-          <div class="today-weight-delta" id="t-w-delta"></div>
-        </div>
-        <div class="today-spark"><canvas id="t-sparkline"></canvas><div id="t-spark-empty" class="today-spark-empty" hidden>{{ t('index.no_checkin') }}</div></div>
-      </div>
-    </div>
+  <!-- ── D. KOMPAKT BUGÜN DURUMU ───────────────────────────────────────── -->
+  {# Üç satır, üç kanonik alan. Antrenman sunucudan gelir ve HER ZAMAN doludur;
+     beslenme ve su mevcut kanonik uçlardan hidrate edilir. Bilinmeyen bir değer
+     ASLA sıfıra çevrilmez — em-dash olarak kalır ve dürüst bir hata satırı
+     görünür (bkz. static/today.js). #}
+  <section class="today-status" aria-labelledby="today-status-label">
+    <h2 class="sec-label" id="today-status-label">{{ t('today.status_label') }}</h2>
+    <ul class="today-stats">
+      <li class="today-stat">
+        <span class="today-stat-lbl">{{ t('today.stat_training') }}</span>
+        <span class="today-stat-val" data-stat="training">{{ t(today.training_stat_key) }}</span>
+      </li>
+      <li class="today-stat">
+        <span class="today-stat-lbl">{{ t('today.stat_calories') }}</span>
+        <span class="today-stat-val" data-stat="calories" id="today-stat-calories">—</span>
+      </li>
+      <li class="today-stat">
+        <span class="today-stat-lbl">{{ t('today.stat_water') }}</span>
+        <span class="today-stat-val" data-stat="water" id="today-stat-water">—</span>
+      </li>
+    </ul>
+    <p class="today-inline-error" id="today-status-error" role="status" hidden>{{ t('today.summary_error') }}</p>
   </section>
 
-  <!-- ── D. HIZLI KAYIT (mevcut kanonik kayıt akışına açık, etiketli giriş) ── -->
-  <section class="today-quicklog" aria-labelledby="today-quicklog-label">
-    <h2 id="today-quicklog-label" class="today-sec-label">{{ t('today.quick_log') }}</h2>
-    <a class="today-log-tile" href="/nutrition">
-      <span class="today-log-ic" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg>
-      </span>
-      <span class="today-log-lbl">{{ t('today.log_meal') }}</span>
-    </a>
+  <!-- ── E. AXIS İÇGÖRÜSÜ ──────────────────────────────────────────────── -->
+  {# Kanonik Axis Insights okuma modelinin TEK slotu, AYNEN yeniden yayımlanır
+     (aynı kod → aynı cümle → Progress ile ASLA farklı kelime). Üç-slotlu tam
+     yüzey Progress'e aittir; buradan oraya bir bağlantı gider.
+     BÖLÜM YOKSA HİÇ RENDER EDİLMEZ: "dikkat edilecek bir şey yok" ile "bakamadık"
+     farklı iddialardır ve ikisini tek nötr cümlede birleştirmek yanlış güven
+     verirdi (spec §27). Yokluk, yokluk olarak gösterilir. #}
+  {% if today.insight %}
+  <section class="today-insight" aria-labelledby="today-insight-label" data-insight-kind="{{ today.insight.kind }}">
+    <h2 class="sec-label" id="today-insight-label">{{ t('today.insight_label') }}</h2>
+    <p class="today-insight-line">{{ t(today.insight.label_key) }}</p>
+    <a class="today-quiet-link" href="{{ today.insight.href }}">{{ t('today.insight_more') }}</a>
   </section>
+  {% endif %}
 
-  {# ── E. "PLAN NEDEN DEĞİŞTİ" — ATLANDI ──
-     Kanonik, kullanıcıya dönük açıklama verisi yok. Uydurma yapılmaz (spec §6E);
-     bir Core/Training bağımlılığı olarak handoff'ta kayıtlı. #}
-
-  <!-- ── F. İKİNCİL / İNDİRİLMİŞ (progressive disclosure) ── -->
-  <details class="today-more">
-    <summary class="today-sec-label today-more-summary">{{ t('today.more') }}</summary>
-    <div class="today-more-body">
-      <div class="today-ach">
-        <div class="today-ach-top">
-          <span class="today-ach-title">{{ user_title }}</span>
-          <span class="today-ach-xp">{{ xp_in_level }} / {{ xp_for_next }} XP · {{ t('index.level_label') }} {{ user_level }}</span>
-        </div>
-        <div class="pbar-track"><div class="pbar-fill" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%;"></div></div>
-      </div>
-      <p class="today-tip"><span class="today-tip-ic" aria-hidden="true">💡</span> {{ t('today.tip') }}</p>
-    </div>
-  </details>
+  <!-- ── F. KOMPAKT İLERLEME SİNYALİ ───────────────────────────────────── -->
+  {# Son NİTELİKLİ check-in kilosu ve bir öncekine göre değişimi — ölçülmüş bir
+     gerçek, yargı DEĞİL. Yükselme/düşme "iyi" ya da "kötü" diye etiketlenmez:
+     depoda doğrulanmış bir kazanım/kayıp hızı otoritesi yok (docs/PROGRESS_SUMMARY.md
+     vücudu bağlam olarak tutar). Check-in yoksa dürüst boş durum gösterilir. #}
+  <section class="today-progress" aria-labelledby="today-progress-label">
+    <h2 class="sec-label" id="today-progress-label">{{ t('today.progress_label') }}</h2>
+    <p class="today-progress-line" id="today-progress-line" role="status" aria-live="polite">{{ t('today.loading') }}</p>
+    <a class="today-quiet-link" href="/progress-page">{{ t('today.action.view_progress') }}</a>
+  </section>
 
 </main>
 
@@ -145,163 +140,13 @@
 <div class="reward-overlay" id="reward-overlay" role="dialog" aria-modal="true" aria-labelledby="reward-title">
   <div class="reward-card">
     <div class="reward-trophy"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"/></svg></div>
-    <h2 class="reward-title" id="reward-title">{{ t('index.congrats') }}</h2>
+    <h2 class="reward-title" id="reward-title">{{ t('today.congrats') }}</h2>
     <p class="reward-body" id="reward-body"></p>
-    <button class="reward-btn" id="reward-btn">{{ t('index.continue') }}</button>
+    <button class="reward-btn" id="reward-btn">{{ t('today.continue') }}</button>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════════════════════════════════════
-     TODAY V2 JS — salt-okunur özet hidrasyonu. İstemci sonraki-eylemi HESAPLAMAZ
-     (birincil eylem sunucuda render edildi) ve su/kilo YAZMAZ (salt-okunur özet).
-     init idempotent: çift değerlendirme çift-fetch/çift-listener yapamaz.
-     İstek bütçesi: tamamlanma (workout-status) fetch'i DÜŞÜRÜLDÜ — bu bilgi
-     sunucuda okundu; legacy'nin altında bir istek sayısı.
-     ══════════════════════════════════════════════════════════════════════════ -->
-<script nonce="{{ csp_nonce }}">
-(function () {
-  if (window.__axTodayInit) return;      // idempotent guard
-  window.__axTodayInit = true;
-
-  var CAL_CIRC = 263.89;                  // 2π·42
-  var sparkChart = null;
-
-  function $(id) { return document.getElementById(id); }
-
-  function toast(msg, type) {
-    var wrap = $('toast-wrap'); if (!wrap) return;
-    var el = document.createElement('div');
-    el.className = 'toast toast-' + (type || 'info');
-    var ic = document.createElement('span'); ic.className = 'toast-icon'; ic.textContent = type === 'error' ? '✗' : 'ℹ';
-    var sp = document.createElement('span'); sp.textContent = msg;
-    el.appendChild(ic); el.appendChild(sp); wrap.appendChild(el);
-    setTimeout(function () { el.classList.add('hide'); setTimeout(function () { el.remove(); }, 280); }, 3200);
-  }
-
-  function setGreeting() {
-    var h = new Date().getHours(), key;
-    if (h >= 5 && h < 12) key = 'index.greet_morning';
-    else if (h >= 12 && h < 17) key = 'index.greet_noon';
-    else if (h >= 17 && h < 22) key = 'index.greet_evening';
-    else key = 'index.greet_night';
-    var g = $('today-greeting'); if (g) g.textContent = t(key);
-    var d = $('today-date');
-    if (d) {
-      try { d.textContent = new Date().toLocaleDateString(window.LOCALE === 'en' ? 'en-US' : 'tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }); }
-      catch (e) { d.textContent = ''; }
-    }
-  }
-
-  function ring(id, ratio) {
-    var el = $(id); if (!el) return;
-    var r = Math.min(Math.max(ratio, 0), 1);
-    el.style.strokeDashoffset = CAL_CIRC * (1 - r);
-  }
-
-  function renderSummary(sess, meals, water) {
-    if (sess && sess.exists && sess.weight) $('t-w-kg').textContent = sess.weight;
-    var totals = (meals && meals.totals) ? meals.totals : {};
-    var targets = (meals && meals.targets) ? meals.targets : null;
-    var remainingMacros = (meals && meals.remaining) ? meals.remaining : null;
-    var consumed = Math.round(totals.kalori || 0);
-    var target = targets ? targets.kalori : null;
-    var remaining = remainingMacros ? remainingMacros.kalori : null;
-    if (!(target > 0)) {
-      $('t-cal-num').textContent = '—';
-      $('t-cal-sub').textContent = consumed + ' kcal';
-      ring('t-cal-ring', 0);
-    } else {
-      $('t-cal-num').textContent = Math.round(remaining);
-      $('t-cal-sub').textContent = consumed + ' / ' + Math.round(target) + ' kcal';
-      var ratio = Math.min(consumed / target, 1);
-      var rEl = $('t-cal-ring');
-      rEl.style.stroke = ratio >= 1 ? 'var(--color-danger)' : (ratio >= 0.85 ? 'var(--color-warning)' : 'var(--color-primary)');
-      ring('t-cal-ring', ratio);
-    }
-
-    var p = Math.round(totals.protein || 0), c = Math.round(totals.karb || 0), f = Math.round(totals.yag || 0);
-    if (!targets) {
-      $('t-protein').textContent = p + 'g';
-      $('t-carb').textContent = c + 'g';
-      $('t-fat').textContent = f + 'g';
-    } else {
-      $('t-protein').textContent = p + '/' + Math.round(targets.protein) + 'g';
-      $('t-carb').textContent = c + '/' + Math.round(targets.karb) + 'g';
-      $('t-fat').textContent = f + '/' + Math.round(targets.yag) + 'g';
-    }
-    var wc = (water && typeof water.count === 'number') ? water.count : 0;
-    var wg = (water && water.goal) ? water.goal : 8;
-    $('t-water').textContent = wc + '/' + wg;
-  }
-
-  function renderSparkline(data) {
-    var canvas = $('t-sparkline'), empty = $('t-spark-empty');
-    if (!Array.isArray(data) || data.length === 0) { canvas.hidden = true; empty.hidden = false; return; }
-    var last7 = data.slice(-7);
-    var weights = last7.map(function (d) { return parseFloat(d.kilo); });
-    var labels = last7.map(function (d) { return d.tarih; });
-    if (last7.length >= 2) {
-      var diff = (weights[weights.length - 1] - weights[weights.length - 2]).toFixed(1);
-      var el = $('t-w-delta');
-      if (diff < 0) { el.textContent = '↓ ' + Math.abs(diff) + ' ' + t('index.kg_vs_last'); el.className = 'today-weight-delta down'; }
-      else if (diff > 0) { el.textContent = '↑ ' + diff + ' ' + t('index.kg_vs_last'); el.className = 'today-weight-delta up'; }
-      else { el.textContent = t('index.same_as_last'); el.className = 'today-weight-delta eq'; }
-    }
-    if (sparkChart) sparkChart.destroy();
-    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    sparkChart = new Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: { labels: labels, datasets: [{ data: weights, borderColor: '#3D8BFF', fill: false, tension: 0.35, borderWidth: 1.8, pointRadius: 0 }] },
-      options: { responsive: true, maintainAspectRatio: false, animation: reduce ? false : { duration: 700 }, plugins: { legend: { display: false }, tooltip: { enabled: true, callbacks: { label: function (ctx) { return ' ' + ctx.raw + ' kg'; } } } }, scales: { x: { display: false }, y: { display: false } } }
-    });
-  }
-
-  var ac = ('AbortController' in window) ? new AbortController() : null;
-  var sig = ac ? ac.signal : undefined;
-
-  function loadSummary() {
-    var loading = $('today-loading'), grid = $('today-summary-grid'), err = $('today-summary-error');
-    Promise.all([
-      fetch('/last-session', { signal: sig }).then(function (r) { return r.json(); }),
-      fetch('/meal-log/today', { signal: sig }).then(function (r) { return r.json(); }),
-      fetch('/water', { signal: sig }).then(function (r) { return r.json(); })
-    ]).then(function (res) {
-      renderSummary(res[0], res[1], res[2]);
-      loading.hidden = true; grid.setAttribute('aria-busy', 'false');
-    }).catch(function () {
-      // Kısmi/başarısız ikincil veri: sayfayı silme; dürüst hata satırı göster,
-      // birincil eylem (sunucuda render) etkilenmez. Bilinmeyen ≠ sıfır.
-      loading.hidden = true; err.hidden = false; grid.setAttribute('aria-busy', 'false');
-    });
-
-    fetch('/checkin-history', { signal: sig })
-      .then(function (r) { return r.json(); })
-      .then(renderSparkline)
-      .catch(function () { $('t-sparkline').hidden = true; $('t-spark-empty').hidden = false; });
-  }
-
-  // Haftalık ödül modalı (mevcut davranış korunur; kayıt akışı değil)
-  function rewardModal() {
-    var btn = $('reward-btn'), overlay = $('reward-overlay');
-    function dismiss() { overlay.classList.remove('open'); fetch('/leaderboard/reward-dismiss', { method: 'POST' }).catch(function () {}); }
-    fetch('/leaderboard/reward-check').then(function (r) { return r.json(); }).then(function (d) {
-      if (!d || !d.show) return;
-      var ordinals = { 1: '1st', 2: '2nd', 3: '3rd' };
-      var place = (window.LOCALE === 'en') ? (ordinals[d.rank] || (d.rank + 'th')) : (d.rank + '.');
-      var xp = Number(d.xp).toLocaleString(window.LOCALE === 'en' ? 'en-US' : 'tr-TR');
-      $('reward-body').textContent = t('index.reward_body', { place: place, xp: xp });
-      overlay.classList.add('open'); btn.focus();
-      btn.addEventListener('click', dismiss);
-      overlay.addEventListener('click', function (e) { if (e.target === overlay) dismiss(); });
-      document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { dismiss(); document.removeEventListener('keydown', esc); } });
-    }).catch(function () {});
-  }
-
-  setGreeting();
-  loadSummary();
-  rewardModal();
-})();
-</script>
+<script src="/static/today.js?v={{ _v }}"></script>
 
 </body>
 </html>

@@ -1,248 +1,276 @@
-/* AxisAI UIUX Sprint 1 PR2 — Today experience v2.
-   Yalnızca .today-* sınıfları; ortak token'lar (tokens.css/theme.css) ve
-   .btn-volt / ring / pbar bileşenleri yeniden kullanılır. Yeni token EKLENMEZ.
-   Mobil öncelik sırası: yönelim → sonraki eylem → özet → hızlı kayıt → ikincil.
-   320/390/768/1024/1366 px'te yatay taşma yok; salt-okunur, kayıt mantığı yok. */
+/* ══════════════════════════════════════════════════════════════════════════
+   today.css — AxisAI Today, the single production home surface (UX-2 PR4).
 
-.today-main {
+   Only `.today-*` classes plus the reward overlay this page owns. Shared
+   primitives come from components.css (`.btn-volt`, `.avatar`, `.sec-label`,
+   `.toast-*`) and every value is a canonical token — no new token is minted
+   here and no page-local hex/px scale is introduced.
+
+   The layout IS the hierarchy: a single column whose reading order is the
+   product's answer order (day context → brief → the one action → status →
+   insight → progress). Nothing below the brief may ever out-weigh the primary
+   CTA visually; that is why exactly one element on this page carries `.btn-volt`.
+
+   Verified 320 / 390 / 768 / 1024 / 1366: no horizontal overflow, no clipped
+   copy, and the primary action stays reachable without scrolling past a second
+   competing control.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.today {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
+  gap: var(--space-6);
 }
-.today-main * { min-width: 0; }                 /* flex/grid taşma güvenliği */
+.today * { min-width: 0; }              /* flex/grid overflow safety */
 
-/* ── A. YÖNELİM ── */
-.today-orient {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.today-orient-row {
+/* ── A. Day context ─────────────────────────────────────────────────────── */
+.today-head {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  flex-wrap: wrap;
 }
 .today-avatar { flex: 0 0 auto; }
-.today-orient-head { flex: 1 1 12rem; }
-.today-eyebrow {
+.today-head-text { flex: 1 1 auto; }
+.today-greet {
   margin: 0;
   font-size: var(--text-sm);
-  color: var(--color-text-3);
-}
-.today-h1 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  line-height: 1.1;
-  color: var(--color-text-1);
+  color: var(--color-text-2);
 }
 .today-date {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--color-text-3);
   text-transform: capitalize;
 }
-.today-orient-meta {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-.today-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.6rem;
-  border-radius: var(--radius-full);
-  background: var(--color-surface-2);
-  color: var(--color-text-2);
-  font-size: var(--text-xs);
-  white-space: nowrap;
-}
+/* The date is filled by script from a server-supplied day. Empty until then,
+   and empty forever if formatting fails — never a placeholder that reads as
+   a real date. */
+.today-date:empty { display: none; }
 
-/* Durum: ikon + METİN (renk tek başına anlam taşımaz) */
-.today-status {
+/* ── B. Daily brief ─────────────────────────────────────────────────────── */
+.today-brief {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: var(--space-2);
+}
+.today-brief-line {
   margin: 0;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  border: var(--border-w-1) solid var(--color-border-1);
-  background: var(--color-surface-1);
-  color: var(--color-text-2);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: 1.15;
+  letter-spacing: 0.5px;
+  color: var(--color-text-1);
+}
+.today-brief-detail {
+  margin: 0;
   font-size: var(--text-sm);
+  color: var(--color-text-2);
 }
-.today-status-ic {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.4rem;
-  height: 1.4rem;
-  border-radius: var(--radius-full);
-  font-weight: 700;
+/* The focus is author-written plan content and can be long, so it owns its own
+   line: inlining it with the meta made a wrapped focus push the separator to the
+   start of the next visual row, which reads as a stray leading bullet. */
+.today-brief-focus {
+  display: block;
+  font-weight: 600;
+  color: var(--color-text-1);
 }
-.today-status--workout_done { border-color: var(--color-primary); }
-.today-status--workout_done .today-status-ic { background: var(--color-primary); color: var(--color-on-primary); }
-.today-status--error { border-color: var(--color-danger); }
-.today-status--error .today-status-ic { background: var(--color-danger); color: #fff; }
-.today-status--no_plan .today-status-ic,
-.today-status--plan_ready .today-status-ic { background: var(--color-surface-3); color: var(--color-text-2); }
+.today-brief-meta { display: block; color: var(--color-text-3); }
+/* Separators are generated between items, never authored, so an absent value
+   cannot leave a dangling bullet behind. */
+.today-brief-meta > span + span::before {
+  content: "\00b7";
+  padding: 0 0.5em;
+  color: var(--color-text-4);
+}
 
-/* ── B. SONRAKİ EYLEM (tek baskın) ── */
-.today-next {
+/* An unavailable Today must LOOK unavailable — a neutral brief on a broken
+   read would be indistinguishable from a calm, healthy day. */
+[data-today-state="needs_attention"] .today-brief-line,
+[data-today-state="error"] .today-brief-line { color: var(--color-warning); }
+
+/* ── C. The one primary action ──────────────────────────────────────────── */
+.today-action {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-1);
-  border: var(--border-w-1) solid var(--color-border-1);
 }
-.today-sec-label {
-  margin: 0;
-  font-size: var(--text-xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-text-3);
-}
-.today-primary {
-  /* .btn-volt tabanını genişletir: 320px'te tek baskın CTA */
+.today-cta {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  text-align: center;
   width: 100%;
   min-height: 3rem;
   padding: var(--space-3) var(--space-4);
   font-size: var(--text-md);
-  font-weight: 600;
-  border-radius: var(--radius-md);
+  text-align: center;
   text-decoration: none;
-}
-.today-next-none {
-  margin: 0;
-  font-size: var(--text-base);
-  color: var(--color-text-2);
 }
 .today-secondary {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
 }
-.today-secondary-link {
+.today-secondary-link,
+.today-quiet-link {
   font-size: var(--text-sm);
-  color: var(--color-primary);
+  color: var(--color-text-2);
   text-decoration: none;
-}
-.today-secondary-link:hover { text-decoration: underline; }
-
-/* ── C. ÖZET ── */
-.today-summary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-.today-loading { margin: 0; font-size: var(--text-sm); color: var(--color-text-3); }
-.today-summary-error { margin: 0; font-size: var(--text-sm); color: var(--color-danger); }
-.today-summary-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-1);
-  border: var(--border-w-1) solid var(--color-border-1);
-}
-.today-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 0.25rem;
-}
-.today-cell-lbl { font-size: var(--text-xs); color: var(--color-text-3); text-transform: uppercase; letter-spacing: 0.03em; }
-.today-cell-sub { font-size: var(--text-sm); color: var(--color-text-2); }
-.today-macros {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3);
-}
-.today-macro { text-align: center; }
-.today-macro-val { font-size: var(--text-md); font-weight: 600; color: var(--color-text-1); }
-.today-macro-lbl { font-size: var(--text-xs); color: var(--color-text-3); }
-.today-weight { display: flex; flex-direction: column; gap: var(--space-2); }
-.today-weight-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
-.today-weight-big { font-family: var(--font-display); font-size: var(--text-2xl); color: var(--color-text-1); }
-.today-weight-unit { font-size: var(--text-sm); color: var(--color-text-3); }
-.today-weight-delta { font-size: var(--text-sm); }
-.today-weight-delta.up { color: var(--color-danger); }
-.today-weight-delta.down { color: var(--color-primary); }
-.today-weight-delta.eq { color: var(--color-text-3); }
-.today-spark { position: relative; height: 64px; }
-.today-spark canvas { max-width: 100%; }
-.today-spark-empty { font-size: var(--text-xs); color: var(--color-text-3); font-style: italic; }
-
-/* ── D. HIZLI KAYIT ── */
-.today-quicklog { display: flex; flex-direction: column; gap: var(--space-3); }
-.today-log-tile {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 3rem;
-  padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
-  border: var(--border-w-1) solid var(--color-border-1);
-  background: var(--color-surface-1);
-  color: var(--color-text-1);
-  text-decoration: none;
+  border-bottom: var(--border-w-1) solid var(--color-border-2);
   align-self: flex-start;
 }
-.today-log-tile:hover { border-color: var(--color-primary); }
-.today-log-ic { flex: 0 0 auto; width: 1.5rem; height: 1.5rem; color: var(--color-primary); }
-.today-log-ic svg { width: 100%; height: 100%; }
-.today-log-lbl { font-size: var(--text-base); font-weight: 500; }
+.today-secondary-link:hover,
+.today-quiet-link:hover { color: var(--color-text-1); border-bottom-color: var(--color-primary); }
 
-/* ── F. İKİNCİL / İNDİRİLMİŞ ── */
-.today-more {
+/* ── D. Compact status ──────────────────────────────────────────────────── */
+.today-status,
+.today-insight,
+.today-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.today-stats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+}
+.today-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-w-1) solid var(--color-border-1);
+}
+.today-stat:last-child { border-bottom: 0; }
+.today-stat-lbl {
+  font-size: var(--text-sm);
+  color: var(--color-text-3);
+}
+.today-stat-val {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--color-text-1);
+  text-align: right;
+}
+.today-inline-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-3);
+}
+
+/* ── E. Axis insight ────────────────────────────────────────────────────── */
+.today-insight {
+  padding: var(--space-4);
   border-radius: var(--radius-lg);
   border: var(--border-w-1) solid var(--color-border-1);
   background: var(--color-surface-1);
-  padding: var(--space-3) var(--space-4);
+  border-left: var(--border-w-2) solid var(--color-border-2);
 }
-.today-more-summary { cursor: pointer; }
-.today-more-body { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-3); }
-.today-ach-top { display: flex; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-2); }
-.today-ach-title { font-weight: 600; color: var(--color-text-1); }
-.today-ach-xp { font-size: var(--text-xs); color: var(--color-text-3); }
-.today-tip { margin: 0; font-size: var(--text-sm); color: var(--color-text-2); display: flex; gap: var(--space-2); }
-.today-tip-ic { flex: 0 0 auto; }
+.today-insight-line {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: 1.5;
+  color: var(--color-text-1);
+}
+/* The accent distinguishes a concern from a compliment, but it is never the
+   only carrier of that meaning: the section heading and the sentence itself
+   already say which one this is. */
+.today-insight[data-insight-kind="watch"] { border-left-color: var(--color-warning); }
+.today-insight[data-insight-kind="working"] { border-left-color: var(--color-success); }
 
-/* Görünür odak (klavye) — token tabanlı */
-.today-primary:focus-visible,
+/* ── F. Progress signal ─────────────────────────────────────────────────── */
+.today-progress-line {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--color-text-1);
+}
+.today-progress-line[data-empty="1"] {
+  font-size: var(--text-sm);
+  color: var(--color-text-3);
+}
+.today-progress-delta { color: var(--color-text-3); }
+
+/* ── Keyboard focus (token-based, visible on every interactive element) ── */
+.today-cta:focus-visible,
 .today-secondary-link:focus-visible,
-.today-log-tile:focus-visible,
-.today-more-summary:focus-visible {
+.today-quiet-link:focus-visible {
   outline: var(--border-w-2) solid var(--color-primary);
   outline-offset: 2px;
 }
 
-/* ── Duyarlı düzen ── */
+/* ── Responsive: the hierarchy is preserved, the density is not ─────────── */
 @media (min-width: 768px) {
-  .today-summary-grid {
-    grid-template-columns: auto 1fr;
-    align-items: center;
+  .today-cta { align-self: flex-start; width: auto; min-width: 16rem; }
+  .today-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
+  .today-stat {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    border-bottom: 0;
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-1);
+    border: var(--border-w-1) solid var(--color-border-1);
   }
-  .today-macros { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .today-weight { grid-column: 1 / -1; }
-  .today-primary { align-self: flex-start; width: auto; min-width: 16rem; }
-}
-@media (min-width: 1024px) {
-  .today-summary-grid { grid-template-columns: auto auto 1fr; }
+  .today-stat-val { text-align: left; font-size: var(--text-lg); }
 }
 
-/* Hareket azaltma tercihi */
-@media (prefers-reduced-motion: reduce) {
-  .today-main, .today-main * { animation: none !important; transition: none !important; }
+/* On a wide screen the hierarchy must stay a hierarchy: a one-sentence brief
+   stretched across 1280px stops reading as the most important thing on the page.
+   The shell's own `--content-max` is left alone (every other surface uses it);
+   Today caps its own reading column instead. */
+@media (min-width: 1024px) {
+  .today { max-width: 46rem; }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .today, .today * { animation: none !important; transition: none !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Weekly reward celebration — page-owned chrome, behaviour unchanged.
+   Moved here verbatim from the retired dashboard.css when the legacy Home was
+   removed; Today is now its only host.
+   ══════════════════════════════════════════════════════════════════════════ */
+.reward-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    display: none; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(var(--black-rgb),0.55);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.reward-overlay.open { display: flex; }
+.reward-card {
+    width: 100%; max-width: 360px; text-align: center;
+    background: var(--color-surface-2); border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-lg); padding: 32px 28px 26px;
+    box-shadow: 0 24px 60px rgba(var(--black-rgb),0.55);
+    animation: rewardIn 0.2s var(--ease-out-expo);
+}
+@keyframes rewardIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+.reward-trophy {
+    width: 56px; height: 56px; margin: 0 auto 18px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: rgba(var(--color-gold-rgb),0.10);
+    border: 1px solid rgba(var(--color-gold-rgb),0.35);
+    box-shadow: 0 0 22px rgba(var(--color-gold-rgb),0.12);
+}
+.reward-trophy svg { width: 30px; height: 30px; stroke: var(--color-rank-gold); fill: none; stroke-width: 1.8; }
+.reward-title {
+    font-family: var(--font-display); font-size: 26px; letter-spacing: 1.5px;
+    color: var(--color-text-1); margin: 0 0 10px;
+}
+.reward-body { font-size: 14px; line-height: 1.55; color: var(--color-text-2); margin: 0 0 24px; }
+.reward-body b { color: var(--color-text-1); font-weight: 700; }
+.reward-xp { color: var(--color-primary); font-weight: 700; }
+.reward-btn {
+    width: 100%; height: 48px; border: none; cursor: pointer;
+    background: var(--color-primary); color: var(--color-on-primary);
+    font-family: var(--font-body); font-size: 14px; font-weight: 700;
+    border-radius: var(--radius-md); transition: opacity 0.2s;
+}
+.reward-btn:hover { opacity: 0.88; }
+@media (prefers-reduced-motion: reduce) { .reward-card { animation: none; } }

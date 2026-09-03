@@ -164,13 +164,14 @@ def test_meal_timeline_slots_do_not_use_emoji_icons(emoji):
     assert emoji not in timeline
 
 
-def test_home_dashboard_grids_use_shrinkable_tracks():
-    css = _css("dashboard.css")
-    assert "repeat(2, minmax(0, 1fr))" in css
-    assert "repeat(4, minmax(0, 1fr))" in css
-    assert re.search(r"\.qa-lbl\s*\{[^}]*white-space:\s*nowrap", css)
-    assert re.search(r"\.ach\s*\{[^}]*height:\s*100%", css)
-    assert re.search(r"\.tip-text\s*\{[^}]*max-width:\s*65ch", css)
+def test_home_grids_use_shrinkable_tracks():
+    """The rule that mattered: a fixed `1fr` track cannot shrink below its
+    content, which is what pushed the legacy dashboard's grids past 320px. The
+    modules those selectors named are gone with UX-2 PR4; Today's own grid and
+    its blanket `min-width: 0` carry the same guarantee."""
+    css = _css("today.css")
+    assert "repeat(3, minmax(0, 1fr))" in css
+    assert re.search(r"\.today \*\s*\{[^}]*min-width:\s*0", css)
 
 
 def test_sec_label_does_not_wrap_the_caption():

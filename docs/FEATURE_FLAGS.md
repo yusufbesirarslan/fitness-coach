@@ -132,7 +132,7 @@ Rows are in the recommended staged activation order.
 | # | Flag | Default | Lifecycle | Observability | Review by | Decision |
 |---|---|---|---|---|---|---|
 | 1 | `WEEKLY_PROGRAM_UI_ENABLED` | OFF | shipped_dark | **Full** — `[TRAINING][WEEKLY_PROGRAM]` state line (2 sites) | 2026-09-01 | enable |
-| 2 | `UIUX_TODAY_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
+| 2 | `UIUX_TODAY_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only; no longer a Home selector (UX-2 PR4) | 2026-10-01 | enable |
 | 3 | `UIUX_PLAN_V2_ENABLED` | OFF | shipped_dark | **Partial** — weekly section only | 2026-10-01 | enable |
 | 4 | `UIUX_COACH_PAGE_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
 | 5 | `UIUX_NAV_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
@@ -193,11 +193,13 @@ Interacts with `UIUX_PLAN_V2_ENABLED`, which honours it for its weekly section.
 Abort on any `state=error`, a training-blueprint 5xx rise, or a `/training` p95
 regression.
 
-**2. `UIUX_TODAY_V2_ENABLED`** — PR2 Today hierarchy (`today.html`) instead of the
-legacy dashboard (`index.html`). Reachable through the legacy shell's Home tab,
-so it is testable on its own; keep Nav v2 off during its window, because Today is
-the new shell's default destination and moving both at once makes an incident
-ambiguous.
+**2. `UIUX_TODAY_V2_ENABLED`** — historical presentation flag. UX-2 PR4 made the
+Today hierarchy (`today.html`) the production Home and deleted the legacy
+dashboard (`index.html`), so the key no longer selects a user-reachable branch:
+`/` renders Today at either value. Setting it to `0` does **not** restore the
+legacy dashboard — rolling that back is a `git revert` of the UX-2 PR4 Home
+convergence plus a redeploy. Nothing here has a rollout window left; the row
+stays only so `/health?deep=1` and the `[FLAGS]` boot line keep listing it.
 
 **3. `UIUX_PLAN_V2_ENABLED`** — server-authoritative Plan v2 (`plan.html`),
 removing the legacy client's clock-based "today" selection, rest-day inference

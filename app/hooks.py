@@ -30,7 +30,7 @@ def set_csp_header(response):
     kapatıldı; asıl enjeksiyon vektörü <script> blokları zaten nonce'a tabidir.
     img-src: 'https:' (tüm hostlar) yerine yalnızca S3 (pre-signed URL'ler,
     *.amazonaws.com) + data: (base64 profil/önizleme görselleri).
-    Google Analytics (gtag.js, index.html): script/img/connect kaynakları
+    Google Analytics (gtag.js, _head.html): script/img/connect kaynakları
     Google'ın resmî CSP rehberindeki host setiyle açıldı."""
     nonce = getattr(g, "csp_nonce", "")
     # img-src: geniş `https://*.amazonaws.com` yerine yalnızca bu uygulamanın S3
@@ -40,14 +40,14 @@ def set_csp_header(response):
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         # SEC1: jsdelivr artık geniş `https://cdn.jsdelivr.net` host'u DEĞİL, yalnızca
-        # SRI ile sabitlenmiş TAM dosyalar (chart.js + html5-qrcode). Kök/keyfi-yol
+        # SRI ile sabitlenmiş TAM dosyalar (html5-qrcode + marked + dompurify;
+        # chart.js UX-2 PR4'te son tüketicisiyle birlikte kaldırıldı). Kök/keyfi-yol
         # script yükleme kapandı; yeni bir jsdelivr varlığı eklenirse buraya da onun
         # tam sürümlü URL'i eklenmeli (aksi halde tarayıcı bloklar).
         # L7 (kabul edilen tradeoff): `https://*.googletagmanager.com` joker host'u
         # Google'ın resmî GA/gtag CSP rehberi gereği geniş bırakıldı (bölge/variant
         # gtag host'ları); daraltmak GA'yı kırabilir. Düşük risk olarak kabul edildi.
         f"script-src 'self' 'nonce-{nonce}' "
-        "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js "
         "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js "
         "https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js "
         "https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js "
