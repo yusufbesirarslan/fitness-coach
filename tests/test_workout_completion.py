@@ -595,7 +595,12 @@ def test_route_rejects_previous_day_session_without_any_mutation(
     response = client.post(
         "/workout/complete",
         json={"session_id": session.public_id, "image": "x",
-              "location_type": "salon"},
+              "location_type": "salon",
+              # Sprint 14 PR2: a session-linked web completion declares the
+              # revision it is completing. Sent CORRECTLY here so the 409 below
+              # is decided by the day check under test and not by an incomplete
+              # request -- otherwise this test would pass for the wrong reason.
+              "expected_checkpoint_revision": 0},
     )
 
     db.session.expire_all()

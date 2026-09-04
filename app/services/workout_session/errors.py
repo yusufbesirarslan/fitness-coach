@@ -1,9 +1,22 @@
-"""Typed public errors for the native workout-session write contracts.
+"""The ONE typed failure vocabulary of the workout-execution domain.
 
-Every error carries the exact triple the ``/api/v1`` envelope needs — a stable
+Sprint 14 PR2 moved this module out of the ``mobile_workout_sessions`` adapter
+and into the canonical session domain, unchanged. It was never native-specific:
+"the declared revision is not current" and "the session is terminal" are facts
+about the shared ``WorkoutSession`` row, not about a transport. Both server
+transports now raise and classify these same classes, so ``isinstance`` means
+the same thing on either side and there is exactly one vocabulary to keep
+consistent.
+
+Each error carries the exact triple the ``/api/v1`` envelope needs — a stable
 public code, an HTTP status and an explicit ``retryable`` classification — so a
 native client never has to infer retry safety from the status code alone
-(PR5 section 42). Three retry classes exist and each error names exactly one:
+(PR5 section 42). Those three attributes are the NATIVE envelope's rendering of
+a domain failure and are retained verbatim here so that contract is unchanged;
+a second transport is free to render the same class differently (the browser
+transport maps them to its own lower-case session codes) but may never invent a
+second failure taxonomy. Three retry classes exist and each error names exactly
+one:
 
 ``retryable=True``
     Retry the SAME command unchanged (transient backend condition).

@@ -14,8 +14,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from .checkpoint import load_snapshot
-
 
 def _iso(value: Optional[datetime]) -> Optional[str]:
     """Server-authored timestamps only, always rendered as UTC ``Z`` instants.
@@ -33,8 +31,16 @@ def project_session(row, view) -> dict:
     """Project one owned session row plus its canonical classification.
 
     ``row`` is the persisted ``WorkoutSession``; ``view`` is the canonical
-    ``SessionView`` produced by the session authority (relationship / staleness /
-    resumability are ITS decisions, never recomputed here).
+    ``SessionView`` produced by the session authority. Every semantic execution
+    fact -- relationship, staleness, resumability and, since Sprint 14 PR2, the
+    checkpoint revision and the durable snapshot -- is ITS decision and is read
+    from it, never recomputed here. Only fields that exist solely on the row
+    (native lineage, timestamps) are read from the row.
+
+    The ENVELOPE is unchanged: this contract publishes the revision as
+    ``revision`` and the browser contract publishes it as
+    ``checkpoint_revision``. Two transports may name one canonical value
+    differently; they may not compute it differently.
     """
     return {
         "session_ref": row.public_id,
@@ -47,14 +53,14 @@ def project_session(row, view) -> dict:
         "relationship": view.relationship,
         "stale_reason": view.stale_reason,
         "resumable": view.resumable,
-        "revision": int(row.checkpoint_revision or 0),
+        "revision": view.checkpoint_revision,
         "started_at": _iso(row.started_at),
         "last_activity_at": _iso(row.last_activity_at),
         "checkpoint_at": _iso(row.checkpoint_at),
         "completed_at": _iso(row.completed_at),
         "abandoned_at": _iso(row.abandoned_at),
         "terminal_reason": row.terminal_reason,
-        "checkpoint": load_snapshot(row.checkpoint_data),
+        "checkpoint": view.checkpoint,
     }
 
 

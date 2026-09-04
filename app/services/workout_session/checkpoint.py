@@ -1,4 +1,4 @@
-"""Strict parsing, bounding and replay identity for native workout checkpoints.
+"""Strict parsing, bounding and replay identity for a workout checkpoint.
 
 A checkpoint is a **bounded full snapshot** of the client's durable execution
 progress, never a patch (PR5 section 16): the whole snapshot plus the caller's
@@ -7,10 +7,20 @@ conflict detection a pure function of the request and the stored revision. A
 sequence of micro-patches would need per-patch ordering state to be replay-safe;
 a snapshot needs none.
 
+Sprint 14 PR2 moved this module verbatim out of ``mobile_workout_sessions`` into
+the canonical session domain. Not one of these rules was ever native-specific:
+the bounds describe a workout, the fingerprint describes a snapshot, and the
+canonical ordering describes the workout's own exercise order. Cloning them into
+a second transport would have produced two validators that agree only by
+coincidence, so the browser transport calls exactly these functions and the
+native adapter re-exports them. The bounds are therefore ONE contract — a
+snapshot a native client may write is a snapshot the browser may write, for the
+same canonical workout.
+
 Nothing here touches the database, Flask or a provider. Membership is validated
-against the canonical workout projection the SESSION was started for, so Flutter
-can never checkpoint an exercise that is not part of that workout, and can never
-supply a replacement workout definition.
+against the canonical workout the SESSION was started for, so no client can
+checkpoint an exercise that is not part of that workout, and none can supply a
+replacement workout definition.
 """
 from __future__ import annotations
 
@@ -38,6 +48,11 @@ MAX_ELAPSED_SECONDS = 86_400
 # would be unpersistable and the client would get a 400 it could not act on.
 # It exists only to stop a pathological encoding, never a real workout.
 MAX_SNAPSHOT_BYTES = 65_536
+
+# The revision space both transports share. The header form and the JSON-body
+# form MUST admit exactly the same integers, otherwise a revision the checkpoint
+# endpoint issued could be unusable at the completion endpoint.
+MAX_REVISION = 999_999_999
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 _REVISION_RE = re.compile(r"^(0|[1-9][0-9]{0,8})$")
@@ -75,6 +90,24 @@ def parse_revision(raw: object) -> int:
         if _REVISION_RE.fullmatch(candidate):
             return int(candidate)
     raise InvalidRevision("a valid If-Match revision is required")
+
+
+def parse_revision_value(raw: object) -> int:
+    """Parse a declared base revision carried in a JSON **body** rather than a
+    header (Sprint 14 PR2).
+
+    The browser completion contract declares ``expected_checkpoint_revision``
+    inside the request document it already sends, so the value arrives already
+    typed and there is no reason to accept a stringly-typed one: exactly one
+    channel, exactly one type. ``True``/``False`` are rejected explicitly because
+    ``bool`` is an ``int`` subclass in Python and ``{"...": true}`` must never
+    silently mean revision 1. The admitted range is identical to
+    :func:`parse_revision`'s, so the two forms can never disagree about which
+    revisions exist.
+    """
+    if type(raw) is int and 0 <= raw <= MAX_REVISION:
+        return raw
+    raise InvalidRevision("a valid expected checkpoint revision is required")
 
 
 def parse_optional_revision(raw: object) -> Optional[int]:

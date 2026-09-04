@@ -12,50 +12,45 @@ exactly three things:
 
 It creates no completion artifact, no PumpCheck, no WorkoutLog and no XP of its
 own, and it never invokes a Training provider.
+
+Sprint 14 PR2 narrowed it further. Ownership resolution, terminal refusal, the
+optional revision guard and the whole checkpoint orchestration now live in
+``workout_session.execution``, shared with the browser transport. What is left
+here is genuinely native: resolving an opaque HMAC ``workout_ref`` to a
+canonical workout, and shaping the ``/api/v1`` envelope.
 """
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 
-from app.models import (
-    WORKOUT_SESSION_ABANDONED,
-    WORKOUT_SESSION_ACTIVE,
-    WORKOUT_SESSION_COMPLETED,
-)
+from app.models import WORKOUT_SESSION_ABANDONED, WORKOUT_SESSION_COMPLETED
 from app.services import mobile_training
 from app.services.workout_completion import CompletionResult
 from app.services.workout_session import (
+    ActiveSessionExists,
     NativeWorkoutIdentity,
+    RevisionConflict,
+    SessionNotFound,
     SessionOutcome,
+    SessionPersistenceUnavailable,
+    SessionStale,
+    SessionTerminal,
+    WorkoutNotStartable,
     abandon_session,
-    advance_checkpoint,
     build_session_view,
     complete_session,
     get_current_session,
-    get_owned_session,
+    owned_session,
+    prepare_completion,
+    record_checkpoint,
+    reject_terminal,
+    require_revision,
     resume_session,
     start_session,
 )
 from app.timeutil import app_today
 
-from .checkpoint import Checkpoint
-from .errors import (
-    ActiveSessionExists,
-    IdempotencyConflict,
-    RevisionConflict,
-    SessionNotFound,
-    SessionPersistenceUnavailable,
-    SessionStale,
-    SessionTerminal,
-    WorkoutNotStartable,
-)
 from .projection import project_completion, project_session
-
-# A public session reference is an opaque, non-enumerable, owner-scoped token
-# minted by the session authority (``secrets.token_urlsafe(32)``). Bounded here
-# so a hostile path segment can never reach a query as an oversized string.
-SESSION_REF_MAX = 64
 
 _TERMINAL_OUTCOMES = frozenset({
     SessionOutcome.ALREADY_COMPLETED, SessionOutcome.ALREADY_ABANDONED,
@@ -75,30 +70,19 @@ class SessionCommandResult:
 
 # -- Resolution helpers -------------------------------------------------------
 
-def _owned_session(user_id: int, session_ref: object):
-    """Ownership-scoped lookup by opaque reference.
-
-    A reference belonging to another owner resolves exactly like a reference
-    that never existed, so no cross-owner existence fact is revealed.
-    """
-    if not isinstance(session_ref, str) or not session_ref:
-        raise SessionNotFound("session reference is not usable")
-    if len(session_ref) > SESSION_REF_MAX:
-        raise SessionNotFound("session reference is not usable")
-    row = get_owned_session(user_id, session_ref)
-    if row is None:
-        raise SessionNotFound("session was not found")
-    return row
+# Ownership resolution, terminal refusal and the optional revision guard are the
+# canonical domain's, not this adapter's: an owned session, a terminal session
+# and a stale revision mean exactly the same thing on both transports, and a
+# second definition here is precisely how the two surfaces drifted apart before
+# Sprint 14 PR2. These aliases keep the native call sites reading naturally.
+_owned_session = owned_session
+_reject_terminal = reject_terminal
+_require_revision = require_revision
 
 
 def _project(row, today=None) -> dict:
     day = today or app_today()
     return project_session(row, build_session_view(row, day))
-
-
-def _reject_terminal(row) -> None:
-    if row.status != WORKOUT_SESSION_ACTIVE:
-        raise SessionTerminal("the workout session is already terminal")
 
 
 def resolve_startable_workout(user_id: int, secret, workout_ref: object, today) -> dict:
@@ -237,62 +221,31 @@ def checkpoint(
 ) -> SessionCommandResult:
     """Durably record one bounded full progress snapshot.
 
-    Ordering matters and is deliberate:
+    The ordering that makes this safe -- terminal refusal, membership validation
+    against the session's own canonical workout, replay decided before any
+    mutation, then one conditional UPDATE keyed on the declared base revision --
+    is :func:`workout_session.execution.record_checkpoint`, shared verbatim with
+    the browser transport since Sprint 14 PR2.
 
-    1. resolve + reject a terminal session (a terminal session accepts nothing);
-    2. re-resolve the canonical workout, so membership is validated against the
-       workout this session actually began with;
-    3. parse and bound the snapshot, producing its semantic fingerprint;
-    4. REPLAY check before any mutation -- the same key with the same snapshot
-       returns the committed state without advancing the revision;
-    5. one conditional UPDATE keyed on the declared base revision, which is the
-       only thing that decides who wins.
+    What stays native is the one genuinely native step: naming the session's
+    canonical workout by re-resolving the opaque ``workout_ref`` it stored at
+    start. Re-resolution through the same reference is what makes plan drift
+    visible -- the reference is bound to the plan lineage and mutation version,
+    so a regenerated or mutated plan can no longer produce it and the session is
+    reported stale instead of being silently rebound to a newer definition.
 
     ``parse_payload`` is a callable taking the allowed exercise identities, so
-    the caller never has to know the workout before this function resolves it.
+    the caller never has to know the workout before it is resolved.
     """
-    today = app_today()
-    row = _owned_session(user_id, session_ref)
-    _reject_terminal(row)
-    workout = _session_workout(user_id, secret, row)
-    parsed: Checkpoint = parse_payload(allowed_exercise_ids(workout))
-
-    replay = _replay_or_conflict(row, key, parsed)
-    if replay is not None:
-        return replay
-
-    if (row.checkpoint_revision or 0) != base_revision:
-        raise RevisionConflict("the declared revision is not current")
-
-    written = advance_checkpoint(
-        user_id, row.public_id, base_revision, parsed.to_json(),
-        parsed.fingerprint, key, datetime.utcnow(),
+    result = record_checkpoint(
+        user_id, session_ref, key, base_revision,
+        lambda row: allowed_exercise_ids(_session_workout(user_id, secret, row)),
+        parse_payload,
+        today=app_today(),
     )
-    row = _owned_session(user_id, row.public_id)
-    if not written:
-        # Lost a race. If the winner was OUR OWN duplicate request (same key,
-        # same snapshot) this is one logical mutation observed twice, so replay
-        # it; anything else is a genuine conflict the client must re-read.
-        replay = _replay_or_conflict(row, key, parsed)
-        if replay is not None:
-            return replay
-        _reject_terminal(row)
-        raise RevisionConflict("the declared revision is not current")
-    return SessionCommandResult({"session": _project(row, today)}, 200)
-
-
-def _replay_or_conflict(row, key: str, parsed: Checkpoint):
-    """Same key + same snapshot replays; same key + different snapshot conflicts.
-
-    Only the LAST accepted checkpoint's key is retained. An older key does not
-    replay -- but it cannot silently mutate either, because its base revision is
-    stale by construction and the revision check rejects it first.
-    """
-    if not row.checkpoint_idempotency_key or row.checkpoint_idempotency_key != key:
-        return None
-    if row.checkpoint_fingerprint != parsed.fingerprint:
-        raise IdempotencyConflict("the key belongs to a different checkpoint")
-    return SessionCommandResult({"session": _project(row)}, 200, replayed=True)
+    return SessionCommandResult(
+        {"session": project_session(result.row, result.view)}, 200,
+        replayed=result.replayed)
 
 
 def abandon(
@@ -326,26 +279,10 @@ def abandon(
         replayed=result.outcome is SessionOutcome.ALREADY_ABANDONED)
 
 
-def prepare_complete(
-    user_id: int, session_ref: object, expected_revision: int
-):
-    """Cheap fail-fast preflight run BEFORE any provider or storage work.
-
-    Completion is the only command with an expensive tail (vision validation and
-    an object-store upload), so every reason it can be refused deterministically
-    is evaluated here first: ownership, an abandoned session, and the declared
-    revision. This buys latency and cost, never correctness -- each of these is
-    re-evaluated authoritatively inside the completion transaction, the revision
-    under the session row lock.
-
-    Returns the owned row so the caller can see whether proof work is needed at
-    all (an already-COMPLETED session is a replay, not an error).
-    """
-    row = _owned_session(user_id, session_ref)
-    if row.status == WORKOUT_SESSION_ABANDONED:
-        raise SessionTerminal("the workout session was abandoned")
-    _require_revision(row, expected_revision)
-    return row
+# The completion preflight is the canonical domain's too: ownership, an
+# abandoned session and a stale declared revision are refusable identically on
+# either transport, and both must reach the same in-transaction guard afterwards.
+prepare_complete = prepare_completion
 
 
 def complete(
@@ -394,15 +331,3 @@ def complete(
     return SessionCommandResult(
         payload, 200,
         replayed=result.outcome is SessionOutcome.ALREADY_COMPLETED)
-
-
-def _require_revision(row, expected: Optional[int]) -> None:
-    """Enforce an OPTIONAL ``If-Match`` guard on a non-progress command.
-
-    Resume and abandon do not write progress, so the guard is optional: abandon
-    discards progress by definition and resume preserves it, and forcing a
-    precondition on either would make a safe retry fail for no gain. When a
-    client does send one, it is honoured exactly.
-    """
-    if expected is not None and (row.checkpoint_revision or 0) != expected:
-        raise RevisionConflict("the declared revision is not current")

@@ -794,3 +794,164 @@ replayed completion skips the proof work entirely and reports
 surfaces. OFF ⇒ the six `/api/v1/training/workout-sessions*` routes answer 404
 and the browser contract stays `contract_version=1`. Rollback is the flag, plus a
 code revert; the migration is expand-only and is not rolled back.
+
+
+---
+
+## Sprint 14 PR2 — one execution authority, two server transports
+
+Mobile Training PR5 gave the **native** surface durable, revision-gated
+execution. The **browser** half of the same flag did not move: its checkpoint
+route was still the PR3 heartbeat (`last_activity_at` only, no body, no
+revision), and its completion built a `CompleteWorkoutCommand` with no
+`expected_checkpoint_revision`. One table, one identity space, two contracts
+that disagreed. On activation that meant a browser workout still lost every set
+on reload, and a browser completion could silently discard progress a phone had
+committed — PR5's precondition existed, the browser simply never invoked it.
+
+PR2 closes that at the level it has to be closed: **the rules moved, they were
+not copied.**
+
+### What moved, and why none of it was ever native
+
+| Now canonical | Was | Reason |
+|---|---|---|
+| `workout_session/checkpoint.py` | `mobile_workout_sessions/checkpoint.py` | The bounds describe a *workout*, the fingerprint describes a *snapshot*, the canonical ordering is the *workout's* own exercise order |
+| `workout_session/errors.py` | `mobile_workout_sessions/errors.py` | "the declared revision is not current" and "the session is terminal" are facts about a row, not about a protocol |
+| `workout_session/execution.py` | `mobile_workout_sessions/service.py` | `record_checkpoint`, `owned_session`, `reject_terminal`, `require_revision` and `prepare_completion` are identical on both sides |
+
+`mobile_workout_sessions` re-exports the contract and delegates the
+orchestration. **No `/api/v1` public behaviour changed** — same routes, same
+required `If-Match` and `Idempotency-Key`, same `TRAINING_SESSION_*` codes, same
+`Session-Resolution` / `Idempotency-Replayed` headers, same private-visibility
+native completion. What remains in that package is genuinely native: resolving
+the opaque HMAC `workout_ref`, and shaping the envelope.
+
+The two transports now differ in exactly two places — how the caller is
+authenticated and how the request is parsed, and how a raised error class is
+rendered. Everything between is one implementation.
+
+### The shared projection
+
+`SessionView` gained two additive fields, and they are the ONLY new public
+surface:
+
+* `checkpoint_revision` — the optimistic revision, and the only value a caller
+  may declare back as a precondition. `0` means "started, nothing recorded yet",
+  never "unknown".
+* `checkpoint` — the last accepted bounded full snapshot, or `null`.
+
+Still private, deliberately: the raw database id, `user_id`, the owning plan id,
+`plan_fingerprint`, the checkpoint's semantic fingerprint and the replay key.
+The last two *are* the replay authority — publishing them would let a caller
+forge or probe another request's replay identity. A stored snapshot that cannot
+be decoded projects as `null` rather than raising, so a corrupt cache never
+makes an owned session unreadable.
+
+`mobile_workout_sessions.projection` keeps its own envelope (`revision`,
+`checkpoint`) but now **sources** both from that same view. Two transports may
+name one canonical value differently; they may not compute it differently.
+
+### Browser checkpoint contract
+
+```text
+POST /workout/session/<public_id>/checkpoint
+     @require_auth + the app-wide two-layer CSRF gate + WORKOUT_CHECKPOINT_RATELIMIT
+     If-Match: <revision>        REQUIRED  — progress with no declared base
+                                            revision cannot be ordered
+     Idempotency-Key: <key>      REQUIRED  — progress with no replay identity
+                                            cannot be safely retried
+     {"checkpoint": {...}}       a bounded FULL snapshot, never a patch
+```
+
+Never accepted: a `user_id`, a raw session id, a client-owned revision fallback,
+a query-parameter revision or a client date. The flag gate is applied **outside**
+the throttle (mirroring the native `_flag_gated`), so a dark surface answers 404
+and never 429 — a switched-off surface that answers 429 has told the caller it
+exists.
+
+Refusals are typed, and each maps one canonical error class to one stable
+lower-case code plus the same `Session-Resolution: retry | reread | terminal`
+classification the native surface publishes:
+
+| Canonical class | Browser code | HTTP |
+|---|---|---|
+| `SessionNotFound` | `not_found` | 404 |
+| `InvalidRevision` | `revision_required` | 428 |
+| `RevisionConflict` | `revision_conflict` | 409 |
+| `InvalidIdempotencyKey` | `idempotency_key_invalid` | 400 |
+| `IdempotencyConflict` | `idempotency_conflict` | 409 |
+| `InvalidSessionRequest` | `invalid_checkpoint` | 400 |
+| `SessionTerminal` | `session_terminal` | 409 |
+| `SessionStale` | `stale_session_requires_resolution` | 409 |
+| `SessionPersistenceUnavailable` | `session_unavailable` | 503 |
+
+No SQL text, provider detail, internal id, snapshot hash or replay key reaches a
+client through any of them: the public string is chosen by the error's *class*,
+never by its message.
+
+### Naming the session's canonical workout, without a `workout_ref`
+
+The native adapter re-resolves the HMAC-bound reference it stored at start,
+which fails closed on any plan drift because the reference is bound to the plan
+lineage and mutation version. A browser-started session has no such reference
+(`workout_ref` is NULL by design), so the equivalent question is asked of the
+plan snapshot the session already recorded:
+
+1. `source == scheduled` — an unscheduled session has no planned workout to be a
+   member of, and is refused for the same structural reason a native session
+   without a `workout_ref` is;
+2. the stored versioned `plan_fingerprint` still matches the current plan's
+   workout for that weekday slot, decided by the same `fingerprints_match` the
+   lifecycle classifier uses — **not** a second staleness rule;
+3. every exercise identity in that workout resolves in the catalog.
+
+Any of those failing is `SessionStale`, never a silent empty allow-list: "we
+cannot tell which exercises belong to this workout" must fail the checkpoint
+rather than reject each entry individually.
+
+### Browser completion contract
+
+When `FITX_WORKOUT_SESSIONS_ENABLED=1` **and** `session_id` is supplied,
+`POST /workout/complete` also requires `expected_checkpoint_revision` — an
+integer, in the JSON body the route already parses. **One channel, chosen once.**
+There is no `If-Match` fallback and no default when the field is absent, because
+a silent second channel would let a caller opt out of the precondition, which is
+the exact gap this closes. A revision declared *without* a session is refused
+rather than ignored, so the precondition can never look honoured when it was
+never evaluated.
+
+The declared value is carried into `CompleteWorkoutCommand` and verified **under
+the session row lock** inside `complete_workout`, before the already-completed
+preflight — the PR5 ordering, unchanged. The route's own check is a **cost**
+preflight: it exists so an obviously stale completion pays for no vision call
+and no S3 upload. It is not the authority, and a test exercises the canonical
+service directly to prove the guard survives without it.
+
+`expected_checkpoint_revision=None` remains a first-class contract: the legacy
+path, every completion with no session, and the AI-coach gym-photo tool all keep
+working exactly as before.
+
+### What did NOT change
+
+* **The flag.** No new flag, no default moved, no production value, no runbook
+  enablement status. `FITX_WORKOUT_SESSIONS_ENABLED` stays OFF in production and
+  PR2 is *not* activation-ready — the browser client is not converged until PR3.
+* **Persistence.** No model, column, table or migration. Alembic head remains
+  `f5a6b7c8d9e0`, single. `#276`'s schema was sufficient, as the architecture
+  said it would be.
+* **The browser client.** `static/training.js` and `templates/training.html` are
+  untouched. PR2 creates the backend contract PR3 consumes.
+* **`checkpoint_session`.** It survives as a liveness heartbeat and still writes
+  only `last_activity_at`, but no transport routes durable progress through it
+  any more. Durable progress bumps `last_activity_at` itself, inside its single
+  conditional UPDATE.
+
+### Still open after PR2
+
+Browser reload hydration (S14-5) and the browser client's half of the dark-path
+proof are PR3. The lifecycle `runtime_metrics` counter (S14-7) is PR4, as is the
+final cross-transport PostgreSQL race proof (S14-8): PR2 introduced no new
+lock-dependent semantic, so it added no PG module and made no CI
+`pg_concurrency` change — `advance_checkpoint` and the locked revision check are
+already covered by `tests/test_mobile_workout_sessions_pg.py`.
