@@ -54,6 +54,7 @@ from .schemas import (
     MOVE_DAY_TOOL,
     REMOVE_EXERCISE_TOOL,
     REPLACE_EXERCISE_TOOL,
+    SERVER_GROUNDABLE,
     UPDATE_PRESCRIPTION_TOOL,
 )
 
@@ -79,27 +80,15 @@ TOOL_ARGUMENTS = {
 }
 
 #: ``{tool name: properties the SERVER can resolve}``. Absent or blank here is
-#: "not supplied", not a refusal — see the module docstring. Kept deliberately
-#: narrow:
+#: "not supplied", not a refusal — see the module docstring.
 #:
-#: * ``day`` on add/replace/update, because ``workout_targets`` resolves a
-#:   weekday, a nickname ("my leg workout") or a unique exercise slot against
-#:   the persisted plan, and ``grounding`` asks the user when it cannot;
-#: * ``sets``/``reps`` on add, because grounding stores the half it has and
-#:   asks for the other half.
-#:
-#: ``remove`` and ``move`` are NOT groundable: neither has a continuation path
-#: (``grounding._OPERATION_TOOLS`` cannot re-issue them), so a stored
-#: clarification for one could never be completed. ``exercise``,
-#: ``replacement`` and ``target_day`` are never groundable — a target nobody
-#: named is the one thing this boundary exists to refuse.
-GROUNDABLE = {
-    REPLACE_EXERCISE_TOOL: frozenset({"day"}),
-    ADD_EXERCISE_TOOL: frozenset({"day", "sets", "reps"}),
-    UPDATE_PRESCRIPTION_TOOL: frozenset({"day"}),
-    REMOVE_EXERCISE_TOOL: frozenset(),
-    MOVE_DAY_TOOL: frozenset(),
-}
+#: Imported, not restated. ``schemas.SERVER_GROUNDABLE`` is the declaration and
+#: it also drives the ``required`` list published to the provider, so a property
+#: cannot be groundable here and mandatory there. It was, and that is the whole
+#: incident: the model read "sets and reps are required", declined to call the
+#: tool, asked the user itself, and the "4 sets" the user had already given was
+#: never stored — so the next turn started from nothing.
+GROUNDABLE = SERVER_GROUNDABLE
 
 #: Which properties are text and which are whole numbers. Used for the shape
 #: check only — ranges belong to the domain.
