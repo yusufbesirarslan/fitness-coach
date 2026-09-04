@@ -1025,3 +1025,48 @@ removes command tools, confirmation tools, and proposal writes.
 **Not in PR4:** public confirmation API, Flutter buttons, nutrition mutation,
 full-program redesign, proactive adaptation, a second feature flag, a
 wall-clock TTL (plan-state invalidation is the authority).
+
+## 32. A claimed completion needs execution evidence
+
+`grounded_provider_reply` originally enforced one output invariant: the model
+may not claim a **proposal** is pending unless a durable one is. Production
+showed the stronger falsehood was uncovered. Request `217f5ce0` produced:
+
+> Done — Dumbbell Biceps Curl has been added to your Monday workout.
+
+No `[COACH][PLAN_TOOL]` line was ever written for that request. No tool ran, no
+plan row moved, and the user was told their plan had changed. The old guard
+could not object, because the sentence asks for nothing — it announces a fact.
+
+**The invariant.** The assistant may say a plan mutation *has happened* only
+when this turn holds server-owned evidence that it did:
+`coach_plan_tools.plan_changed_this_turn()`, which is fail-safe FALSE and counts
+a replay (the plan on disk really does differ). With no evidence, the claim is
+replaced by `coach.confirm.no_plan_change` — truthful copy that still invites
+the user to continue.
+
+**What it is not.** It never infers a mutation from prose, never executes the
+tool the sentence describes, and never consults chat history. A suppressed claim
+leaves the plan byte-identical; a test asserts exactly that. Detection is
+regex over normalised text, gated on the same plan-topic vocabulary as the
+confirmation guard, so a completed meal log or a finished set is not its
+business.
+
+**Provider-independent by construction.** The sentence that caused this came
+from the OpenAI fallback, not from Bedrock. The guard sits on the single prose
+boundary every provider loop passes through (`_run_coach_conversation_openai`,
+`_run_coach_conversation_bedrock`, `_stream_bedrock`), so there is one invariant
+rather than one per provider — pinned by a test that walks all three.
+
+**Deliberately fail-closed, and deliberately narrow.** A false positive costs
+one advisory sentence; a false negative tells someone their training plan
+changed when it did not. Those are not comparable, so the listed phrasings are
+suppressed without appeal. But the bare interjection — "done", "all set",
+"tamamdır" — is *not* listed: it appears in ordinary coaching ("once you're
+done with your workout") and the topic gate would not save it. Only an explicit
+completion predicate over a mutation verb counts, which is what catches the
+production sentence by its second clause.
+
+The already-shipped guarantees are untouched: `PLAN_MUTATION_POLICY`, request
+lineage and isolation, supersession, Redis authority, consume-once semantics and
+the post-consume request-match guard all behave exactly as before.

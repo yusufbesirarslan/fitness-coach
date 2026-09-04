@@ -185,11 +185,19 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
                 user_id, question, context, history, language,
                 deadline=deadline)
             return
-        except ai_coach._BedrockFallback:
+        except ai_coach._BedrockFallback as fallback:
             # Buraya YALNIZCA hiç delta gitmemişken ve hiç araç çalışmamışken
             # gelinir (_stream_bedrock garantisi) → sağlayıcı değişimi güvenli.
-            current_app.logger.warning(
-                "[COACH][stream] Bedrock failed before work; trying OpenAI fallback")
+            #
+            # NEDENİ de kaydet. Bu satır sebebi ATIYORDU ve üretimde her koç
+            # turu buradan geçiyordu: IAM kimliğinde `bedrock:InvokeModel`
+            # olmadığı için %100 403. "Yedeğe düşülüyor" tek başına bunu tek bir
+            # geçici hatadan ayırt edilemez kılıyordu.
+            ai_coach.log_provider_fallback(
+                current_app.logger,
+                "[COACH][stream] Bedrock failed before work; "
+                "trying OpenAI fallback",
+                fallback)
 
     yield from _stream_openai_fallback(
         user_id, question, context, history, language,
@@ -267,7 +275,8 @@ def _stream_bedrock(user_id, question, context, history, language,
             # gitmiş sayılmaz — aksi halde sağlayıcı değiştirmek görülen
             # metni bozar / yan etkiyi tekrarlar.
             if not parts and tools_ran == 0:
-                raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
+                raise ai_coach._BedrockFallback(
+                    f"{type(e).__name__}: {e}", cause=e)
             current_app.logger.warning(
                 "[COACH][stream] Bedrock stream failed after work")
             yield _bedrock_work_error(parts, tools_ran)
@@ -325,7 +334,8 @@ def _stream_bedrock(user_id, question, context, history, language,
                 return
         except Exception as e:
             if not parts and tools_ran == 0:
-                raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
+                raise ai_coach._BedrockFallback(
+                    f"{type(e).__name__}: {e}", cause=e)
             current_app.logger.warning(
                 "[COACH][stream] Bedrock response processing failed after work")
             yield _bedrock_work_error(parts, tools_ran)

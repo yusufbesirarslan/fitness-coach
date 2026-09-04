@@ -280,3 +280,34 @@ separate safeguards within the locked bootstrap, not configuration management.
 CloudWatch and S3 retention are deferred operations work. SSM-agent upgrades
 are separate host hygiene work. Plan, authorize, and verify each of those
 changes outside this immutable deploy transaction.
+
+## Open follow-up: runtime AWS identity
+
+**Status: recorded, not scheduled. Do not perform it inside a Coach change.**
+
+The application runs on long-lived static credentials belonging to the IAM user
+`fitx-s3-user`, supplied through the host `.env`. That is how the Coach ended up
+served entirely by the OpenAI fallback: the user carried `AmazonS3FullAccess`
+and nothing else, so every Bedrock call returned `AccessDenied` while deep
+health reported the provider as enabled. The immediate fix was a least-privilege
+inline policy (`bedrock:InvokeModel` + `bedrock:InvokeModelWithResponseStream`,
+scoped to the configured inference profile and the foundation-model ARNs that
+profile declares). That closes the outage; it does not close the pattern.
+
+The intended end state is an EC2 instance profile / runtime role, so that
+runtime capability is granted by attachment rather than by a key that lives in a
+file and cannot be rotated without a deploy.
+
+Preconditions before static credentials are removed:
+
+1. **Inventory every capability the current key actually exercises** — S3
+   (avatars, meal photos, pump checks, presigned URLs), Bedrock, CloudWatch
+   metrics when `AI_METRICS_ENABLED`/`RUNTIME_METRICS_ENABLED` are on, and
+   anything the worker container reaches. A missed capability fails at runtime,
+   not at deploy.
+2. **Grant them on the role first and verify from inside the running
+   containers**, both `web` and `worker`, before any key is revoked.
+3. **Then remove the key**, and only then.
+
+The credential is shared by both containers; treat them as two callers of one
+identity, not one.

@@ -92,6 +92,40 @@ _INFORMATION_REQUEST_PATTERNS = (
     r"\bkac\b",
 )
 
+#: Prose reporting a plan mutation as ALREADY DONE. The confirmation guard above
+#: catches a claimed *proposal*; this catches a claimed *completion*, which is
+#: the strictly worse lie and was not covered.
+#:
+#: Production request ``217f5ce0`` is the whole reason this exists. The provider
+#: emitted "Done — Dumbbell Biceps Curl has been added to your Monday workout."
+#: and no ``[COACH][PLAN_TOOL]`` line was ever written: no tool ran, no plan row
+#: moved, and the user was told their plan had changed. Nothing in the server
+#: refused it, because the sentence asks for no confirmation — it announces a
+#: fact. A past-tense claim needs *evidence*, not a matching intent.
+#:
+#: The bare interjection ("done", "all set", "tamamdır") is deliberately NOT
+#: listed. It appears in ordinary advice — "once you're done with your workout"
+#: — and the topic gate would not save it, so listing it would suppress good
+#: coaching copy. Only an explicit completion predicate over a mutation verb
+#: counts. That leaves "Done — X has been added" caught by its second clause,
+#: which is the clause that actually makes the false claim.
+_COMPLETION_CLAIM_PATTERNS = (
+    # "has been added", "was replaced", "have been removed"
+    r"\b(?:ha[sv]e? been|was|were) (?:successfully |already |now )?"
+    r"(?:added|removed|replaced|updated|changed|swapped|moved|deleted)\b",
+    # "I added", "I've just updated", "we have replaced"
+    r"\b(?:i|we)(?:'ve| have)? (?:just |now |already |successfully )*"
+    r"(?:added|removed|replaced|updated|changed|swapped|moved|deleted)\b",
+    # "your Monday workout is updated", "the plan is now changed"
+    r"\b(?:is|are) (?:now )?"
+    r"(?:updated|added|replaced|removed|changed|swapped|moved|deleted)\b",
+    # Turkish first-person past (-dim) and passive past (-di).
+    r"\b(?:ekledim|ekledik|cikardim|kaldirdim|degistirdim|guncelledim"
+    r"|tasidim|sildim|hallettim)\b",
+    r"\b(?:eklendi|cikarildi|kaldirildi|degistirildi|guncellendi"
+    r"|tasindi|silindi)\b",
+)
+
 
 def resolve_pending_turn(user_id, language="tr"):
     """Consume a pending confirmation from this turn's intent, or ask.
@@ -156,13 +190,28 @@ def reply_after_tools(user_id, language="tr", tool_results=None):
 
 
 def grounded_provider_reply(user_id, language, text):
-    """Suppress model-authored plan confirmation with no durable proposal.
+    """Suppress model-authored plan claims the server cannot back with state.
 
-    This is a narrow output invariant, not an intent classifier: it does not
-    infer or execute a mutation. It only refuses to expose confirmation-request
-    copy when the server cannot read the state that such copy claims exists.
+    Two invariants, one boundary. Neither is an intent classifier: no mutation
+    is inferred, nothing is executed, and the completion sentence is never read
+    as an instruction to make itself true.
+
+    1. **A claimed completion needs execution evidence.** The assistant may say
+       a plan change HAS happened only when this turn actually moved persisted
+       state (``plan_changed_this_turn``, which is fail-safe FALSE and counts a
+       replay because the plan on disk really did change). No evidence → the
+       claim is replaced with truthful copy.
+    2. **A claimed proposal needs a durable pending row** — the original guard.
+
+    Order matters: an announced completion is the stronger falsehood, so it is
+    settled first. Both run on whatever prose reached this boundary, so the
+    invariant holds for Bedrock and for the OpenAI fallback alike — and it was
+    the fallback that produced the sentence this first rule exists for.
     """
     reply = text or ""
+    if (_claims_completed_plan_change(reply)
+            and not coach_plan_tools.plan_changed_this_turn()):
+        return t("coach.confirm.no_plan_change", locale=language)
     if not _asks_for_plan_confirmation(reply):
         return reply
     if _plan_pending(user_id) is not None:
@@ -288,11 +337,41 @@ def _ensure_request_id():
         pass
 
 
-def _asks_for_plan_confirmation(text):
-    normalized = unicodedata.normalize("NFKD", str(text or ""))
-    normalized = "".join(
-        char for char in normalized if not unicodedata.combining(char)
+def _normalized(text):
+    """Accent-stripped, case-folded text for pattern matching.
+
+    One helper, so the completion guard and the confirmation guard cannot come
+    to different conclusions about the same sentence.
+    """
+    stripped = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(
+        char for char in stripped if not unicodedata.combining(char)
     ).casefold().replace("ı", "i")
+
+
+def _claims_completed_plan_change(text):
+    """Whether ``text`` reports a plan mutation as already done.
+
+    Gated on the same plan-topic vocabulary as the confirmation guard, so a
+    completion sentence about something else — a logged meal, a finished set —
+    is not this boundary's business.
+
+    Deliberately fail-CLOSED on the phrasings it does list: a false positive
+    costs one advisory sentence, replaced with copy that still invites the user
+    to continue, while a false negative tells someone their training plan
+    changed when it did not. Those are not comparable costs.
+    """
+    normalized = _normalized(text)
+    return (
+        any(re.search(pattern, normalized)
+            for pattern in _PLAN_CHANGE_PATTERNS)
+        and any(re.search(pattern, normalized)
+                for pattern in _COMPLETION_CLAIM_PATTERNS)
+    )
+
+
+def _asks_for_plan_confirmation(text):
+    normalized = _normalized(text)
     if any(re.search(pattern, normalized)
            for pattern in _INFORMATION_REQUEST_PATTERNS):
         # A request for a missing discriminator claims no pending proposal, so

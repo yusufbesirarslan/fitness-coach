@@ -1,5 +1,6 @@
 {
   "coach.confirm.no_plan_proposal": "Bu plan değişikliğini hazırlayamadım; hiçbir şey değişmedi. Lütfen egzersiz, gün, set ve tekrar bilgisini yeniden yaz.",
+  "coach.confirm.no_plan_change": "Planın değişmedi — hiçbir şey kaydedilmedi. Egzersizi, günü, set ve tekrarı yaz; değişikliği yapayım.",
   "coach.plan.ask_sets_reps": "{day} günündeki {label} antrenmanını buldum. {exercise} için kaç set ve tekrar ekleyeyim? {sets} set {reps} tekrar ister misin?",
   "coach.plan.ask_reps": "{exercise} için kaç tekrar kullanayım? {sets} set istedin.",
   "coach.plan.ask_sets": "{exercise} için kaç set kullanayım? {reps} tekrar istedin.",
