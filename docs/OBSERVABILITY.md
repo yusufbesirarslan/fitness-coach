@@ -237,3 +237,61 @@ Rollback is `RUNTIME_METRICS_ENABLED=0` + restart. It is independent of
 Real provider `usage` (`prompt_tokens`/`completion_tokens`) is recorded onto each
 `CoachMessage` at `record_turn` time — a durable per-turn token ledger independent
 of CloudWatch.
+
+## Provider fallback and Bedrock reachability
+
+Two blind spots let the Coach run on the wrong provider, undetected, for weeks.
+The app's IAM identity carried no `bedrock:InvokeModel`, so every Bedrock call
+returned 403 and every turn was served by the OpenAI fallback.
+
+**The fallback line now names the reason.** `_BedrockFallback` always carried
+one; the streaming log site discarded it, so a one-off timeout and a permission
+failure on 100% of calls produced the same sentence. Both provider paths now
+emit a single bounded line via `ai_coach.log_provider_fallback`:
+
+```
+[COACH][stream] Bedrock failed before work; trying OpenAI fallback
+  provider=bedrock fallback_provider=openai
+  exception=PermissionDeniedError category=access_denied request_id=<16 hex>
+```
+
+`category` is a member of the closed `app/services/provider_failure.py`
+vocabulary and is derived from the exception's **class and HTTP status only**.
+The provider's message is never logged: a Bedrock 403 body names the caller's
+IAM ARN and the full resource ARN, and other errors can echo request content.
+Same rule as `coach_plan_tools.executor._log`.
+
+CloudWatch Logs Insights — how often, and why:
+
+```
+fields @timestamp, request_id
+| filter @message like /fallback_provider=openai/
+| parse @message "category=* " as category
+| stats count() by category, bin(1h)
+```
+
+**Deep health probes Bedrock instead of echoing config.** `/health?deep=1`
+previously reported `"bedrock": "enabled"`, which was `BEDROCK_ENABLED` read
+back — a deployment intent, not a truth. It now reports two separate facts:
+
+```json
+"bedrock": {"configured": true, "reachable": true}
+"bedrock": {"configured": true, "reachable": false, "failure": "access_denied"}
+"bedrock": {"configured": false, "reachable": false}
+```
+
+`reachable` comes from a real bounded probe (`app/services/bedrock_health.py`):
+one **streaming** message capped at a single output token, with its own short
+timeout. Streaming because `InvokeModelWithResponseStream` is a different IAM
+action from `InvokeModel` and `/ask/stream` is what production runs — a blocking
+probe would go green on a policy that still broke every conversation. Results
+are cached asymmetrically (success ~5 min, failure ~15 s) so health polling
+cannot become an inference workload while the deploy gate's own retries still
+re-probe. `BedrockUp` is published as a gauge, but only when configured.
+
+Shallow `/health` is unchanged and does not probe.
+
+**`configured=true, reachable=false` fails the deploy.** Deep health sets
+`status: error` / 503, the same mechanism `login_ok` uses, so
+`scripts/production_deploy.sh` fails and rolls back without reading a new field.
+A green deploy while the provider rejects every call is the failure this closes.

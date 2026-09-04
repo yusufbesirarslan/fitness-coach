@@ -107,7 +107,9 @@ def test_deep_health_reports_login_redis_and_bedrock(app):
     body = resp.get_json()
     assert body["login"] == "ok"
     assert body["redis"] in ("ok", "unconfigured", "error")
-    assert body["bedrock"] in ("enabled", "disabled")
+    # bedrock artık iki AYRI gerçek: yapılandırma ve gerçek erişilebilirlik.
+    assert body["bedrock"]["configured"] is False
+    assert body["bedrock"]["reachable"] is False
 
 
 def test_deep_health_reports_fatsecret_proxy(app, monkeypatch):

@@ -355,7 +355,15 @@ def test_bedrock_first_call_error_falls_back_to_openai(app, monkeypatch, caplog)
     monkeypatch.setattr(ai_coach, "_run_coach_conversation_openai", lambda *a, **k: "FALLBACK")
     with app.app_context(), caplog.at_level("WARNING"):
         assert ai_coach._run_coach_conversation(1, "x", "", client_history=[]) == "FALLBACK"
-    assert any("OpenAI'ya düşülüyor" in r.getMessage() for r in caplog.records)
+    # Yedeğe düşüldüğü DEĞİL, NEDEN düşüldüğü de kaydedilmeli: üretimde bu satır
+    # sebebi atıyordu ve %100 403 alan bir sağlayıcı tek bir zaman aşımından
+    # ayırt edilemiyordu (tests/test_coach_provider_truthfulness.py).
+    line = next(r.getMessage() for r in caplog.records
+                if "fallback_provider=openai" in r.getMessage())
+    assert "provider=bedrock" in line
+    assert "exception=RuntimeError" in line
+    assert "category=" in line
+    assert "request_id=" in line
 
 
 def test_bedrock_empty_response_falls_back_to_openai(app, monkeypatch):

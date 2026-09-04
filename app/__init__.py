@@ -120,6 +120,12 @@ def _record_dependency_gauges(body):
         runtime_metrics.set_gauge(
             "LimiterDegraded",
             1 if body.get("limiter_storage") == "degraded" else 0)
+        # Yalnızca BEKLENDİĞİNDE anlamlı: yapılandırılmamış sağlayıcı "down"
+        # değildir ve alarmı sürekli kırmızıda tutmamalıdır.
+        bedrock = body.get("bedrock")
+        if isinstance(bedrock, dict) and bedrock.get("configured"):
+            runtime_metrics.set_gauge(
+                "BedrockUp", 1 if bedrock.get("reachable") else 0)
     except Exception:
         pass
 
@@ -215,8 +221,14 @@ def create_app():
             login_ok = (not app.config.get("LOGIN_FAIL_CLOSED", True)
                         or ext.login_throttle_available())
             body["login"] = "ok" if login_ok else "offline"
-            body["bedrock"] = ("enabled" if app.config.get("BEDROCK_ENABLED")
-                               else "disabled")
+            # Bedrock: yapılandırma ve ERİŞİLEBİLİRLİK AYRI raporlanır. Eski tek
+            # "enabled" alanı config satırının kopyasıydı ve uygulamanın IAM
+            # kimliğinde `bedrock:InvokeModel` yokken haftalarca yeşil kaldı —
+            # deploy gate her seferinde geçti. Alan artık gerçek, sınırlı bir
+            # çalışma-zamanı probe'undan gelir (app/services/bedrock_health.py).
+            from app.services import bedrock_health
+            bedrock = bedrock_health.probe()
+            body["bedrock"] = bedrock
             # WS8: worker canlılığı BİLGİLENDİRİCİ (gating DEĞİL). Worker yoksa
             # arka-plan işleri satır-içine düşer; deploy'u düşürmez. None=bilinmiyor
             # (Redis yok), True/False=heartbeat penceresinde worker görüldü/görülmedi.
@@ -248,6 +260,13 @@ def create_app():
             _record_capacity_gauges(body["capacity"])
             _record_dependency_gauges(body)
             if not login_ok:
+                body["status"] = "error"
+                status = 503
+            # Bedrock BEKLENİYORSA ve erişilemiyorsa deploy KABUL EDİLMEZ.
+            # "Sağlayıcı açık" derken çağrıların %100'ü reddediliyorsa yeşil
+            # sağlık raporu, olmayan bir yeteneği onaylamaktır. login_ok ile
+            # aynı desen: gate ayrıca bir alan okumaz, status'u okur.
+            if bedrock["configured"] and not bedrock["reachable"]:
                 body["status"] = "error"
                 status = 503
         return body, status

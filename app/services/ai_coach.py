@@ -31,6 +31,8 @@ from app.prompts.system import (  # noqa: F401 (re-export)
     build_coach_system,
     coach_lang as _coach_lang,
 )
+from app.observability import current_request_id
+from app.services import provider_failure
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
 from app.services.ai_gate import model_concurrency_slot
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
@@ -1034,7 +1036,43 @@ class _BedrockFallback(Exception):
     """Bedrock döngüsü İLK çağrıda (henüz hiçbir araç çalışmadan) hata verdiğinde
     fırlatılır → OpenAI'ya güvenle düşülebilir. Bir araç YAN ETKİ ürettikten sonra
     oluşan hatalar bunu fırlatmaz (yarıda sağlayıcı değiştirip aracı tekrar
-    çalıştırmaktan kaçınmak için)."""
+    çalıştırmaktan kaçınmak için).
+
+    Sebep NESNENİN ÜSTÜNDE yaşar, mesaj string'inde değil: log yeri ``str(e)``
+    bassaydı bir 403'te çağıranın IAM ARN'si loga düşerdi, basmasaydı — ki akış
+    yolunda basmıyordu — üretimde Bedrock'un %100 reddedildiği gerçeği "yedeğe
+    düşülüyor" satırının ardında GÖRÜNMEZ kalırdı. ``category`` sağlayıcı
+    metninden DEĞİL, kapalı sunucu sözlüğünden (``provider_failure``) gelir.
+    """
+
+    def __init__(self, reason, cause=None):
+        super().__init__(reason)
+        self.reason = reason
+        self.exception_class = provider_failure.exception_class(cause)
+        self.category = (provider_failure.classify(cause) if cause is not None
+                         else provider_failure.UNKNOWN)
+
+
+def log_provider_fallback(logger, prefix, fallback):
+    """Bir sağlayıcı yedeğini TEK sınırlı satırda kaydet.
+
+    Alanların hepsi kapalı sözlüklerden ya da kod tanımlayıcılarından gelir:
+    sağlayıcı adları sunucu sabiti, ``category`` bir ``provider_failure``
+    üyesi, ``exception_class`` bir sınıf adı, ``request_id`` sunucunun kendi
+    ürettiği korelasyon kimliği. Kullanıcı metni, plan, kimlik bilgisi, token
+    ya da sağlayıcı gövdesi ASLA (``executor._log`` ile aynı kural).
+    """
+    try:
+        logger.warning(
+            "%s provider=bedrock fallback_provider=openai "
+            "exception=%s category=%s request_id=%s",
+            prefix,
+            getattr(fallback, "exception_class", "none"),
+            getattr(fallback, "category", provider_failure.UNKNOWN),
+            current_request_id(),
+        )
+    except Exception:
+        pass
 
 
 def _run_coach_conversation(user_id, question, context, client_history=None,
@@ -1085,8 +1123,10 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
                 user_id, question, context, history, language,
                 deadline=deadline)
         except _BedrockFallback as e:
-            current_app.logger.warning(
-                "[COACH] Bedrock ilk çağrı başarısız, OpenAI'ya düşülüyor: %s", e)
+            log_provider_fallback(
+                current_app.logger,
+                "[COACH] Bedrock first call failed; trying OpenAI fallback",
+                e)
             final_text = None
     if final_text is None:
         if _remaining_coach_turn_seconds(deadline) <= 0:
@@ -1323,7 +1363,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                     "[COACH][Bedrock] turn budget exhausted during provider call")
                 return _coach_tool_fallback(language)
             if tools_ran == 0:
-                raise _BedrockFallback(f"{type(e).__name__}: {e}")
+                raise _BedrockFallback(f"{type(e).__name__}: {e}", cause=e)
             current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", e)
             return _coach_tool_fallback(language)
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
