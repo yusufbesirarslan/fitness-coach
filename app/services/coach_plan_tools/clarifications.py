@@ -60,6 +60,11 @@ def remember(user_id, payload):
     record = {
         "user_id": int(user_id),
         "operation": operation,
+        # Which mutation REQUEST this record belongs to. A continuation may
+        # only ever complete the request that minted the record it reads, so
+        # the record has to name that request; without it, "Monday" executes
+        # whichever record happened to survive.
+        "request_id": str(payload.get("request_id") or ""),
         "day": str(payload.get("day") or ""),
         "exercise": str(payload.get("exercise") or ""),
         "replacement": str(payload.get("replacement") or ""),
@@ -120,6 +125,13 @@ def clear(user_id=None):
 
 
 def _write(user_id, record):
+    # A record written after a ``consume`` in the same request supersedes the
+    # one that was taken: a half-answered request ("4 sets" answered, reps
+    # still missing) consumes its own record and immediately stores the
+    # merged one, and the next turn must read the merged one. Retiring the
+    # per-request stash here is what keeps ``_request_taken`` from shadowing
+    # it — see ``_stash_taken``.
+    _clear_taken()
     redis_client = _redis()
     if redis_client is not None:
         try:
@@ -197,6 +209,15 @@ def _stash_taken(record):
     try:
         from flask import g
         setattr(g, _TAKEN_ATTR, record)
+    except RuntimeError:
+        pass
+
+
+def _clear_taken():
+    try:
+        from flask import g
+        if hasattr(g, _TAKEN_ATTR):
+            delattr(g, _TAKEN_ATTR)
     except RuntimeError:
         pass
 

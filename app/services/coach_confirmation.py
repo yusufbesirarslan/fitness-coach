@@ -22,6 +22,7 @@ from app.services.coach_plan_tools import clarifications as clar_mod
 from app.services.coach_plan_tools.grounding import (
     PROPOSED_REPS,
     PROPOSED_SETS,
+    continuation_matches_record,
     current_user_message,
     followup_add_arguments,
     followup_mutation,
@@ -435,6 +436,12 @@ def _complete_grounded_followup(user_id, language):
             tool, arguments = mutation
         taken = clar_mod.consume(user_id)
         if taken is None:
+            return None
+        if not continuation_matches_record(taken, tool, arguments):
+            # The arguments were planned from one read of a shared store and
+            # the record actually taken is a different request. Consume-once
+            # has already retired both; executing would run a mutation this
+            # continuation never established.
             return None
         result = coach_plan_tools.execute_plan_tool(user_id, tool, arguments)
     except clar_mod.ClarificationAuthorityUnavailable:

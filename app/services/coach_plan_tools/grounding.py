@@ -6,6 +6,7 @@ can persist. It never writes; it returns either a replacement command or
 a bounded non-applying result.
 """
 from dataclasses import dataclass, replace
+import hashlib
 import re
 
 from app.services.coach_plan_policy import CANCEL, CONFIRM, parse_confirmation_intent
@@ -31,6 +32,8 @@ from .prescriptions import (
 )
 from .schemas import (
     ADD_EXERCISE_TOOL,
+    MOVE_DAY_TOOL,
+    REMOVE_EXERCISE_TOOL,
     REPLACE_EXERCISE_TOOL,
     UPDATE_PRESCRIPTION_TOOL,
 )
@@ -83,6 +86,147 @@ _OPERATION_TOOLS = {
     "replace_exercise": REPLACE_EXERCISE_TOOL,
     "update_exercise_prescription": UPDATE_PRESCRIPTION_TOOL,
 }
+
+#: Every write tool's operation, including the two that have no continuation
+#: path. Supersession needs them all: a ``remove`` the user just asked for is
+#: still a new intention that a pending ``replace`` must not outlive.
+_TOOL_OPERATIONS = {
+    ADD_EXERCISE_TOOL: "add_exercise",
+    REPLACE_EXERCISE_TOOL: "replace_exercise",
+    UPDATE_PRESCRIPTION_TOOL: "update_exercise_prescription",
+    REMOVE_EXERCISE_TOOL: "remove_exercise",
+    MOVE_DAY_TOOL: "move_training_day",
+}
+
+#: Domain separation for the clarification request id. Bumping this string
+#: invalidates every stored record rather than silently redefining what an
+#: existing one meant — the same discipline ``plan_mutation.fingerprint`` uses.
+_REQUEST_DOMAIN = "axisai/coach-plan-clarification/v1"
+
+#: Field separator for the hashed payload. An exercise name cannot contain it,
+#: so ("ab", "c") and ("a", "bc") cannot collide onto one identity.
+_SEPARATOR = chr(31)
+
+
+def _fold_name(value):
+    """Case- and space-insensitive identity for one exercise name."""
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split()).casefold()
+
+
+def request_id(operation, exercise, replacement=""):
+    """Bounded identity of ONE mutation request.
+
+    A clarification record is only ever executable by the request that minted
+    it, so the record has to carry an identity strong enough to answer "is the
+    thing in front of me the same intention?" without reading chat prose and
+    without a second model call. Operation plus the two names the user actually
+    supplied is exactly that: the day, the sets and the reps are the fields a
+    continuation is *allowed* to change, so none of them participate.
+    """
+    raw = _SEPARATOR.join((
+        _REQUEST_DOMAIN, operation or "",
+        _fold_name(exercise), _fold_name(replacement)))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _record_names(stored, field):
+    """The names a stored record answers to for ``field``.
+
+    A suggestion counts as the same request: "did you mean Dumbbell Biceps
+    Curl?" → "yes" re-issues the command under the canonical name, and that
+    is the same intention, not a new one.
+    """
+    names = {_fold_name(stored.get(field)), _fold_name(stored.get("suggestion"))}
+    names.discard("")
+    return names
+
+
+def request_matches_record(stored, operation, exercise, replacement=""):
+    """Whether ``operation``/``exercise``/``replacement`` continue ``stored``.
+
+    Used in two places and deliberately the same predicate in both: deciding
+    whether an incoming request supersedes a pending clarification, and
+    deciding whether a newly minted clarification may inherit already-grounded
+    fields from the old one. Two answers that could disagree is precisely the
+    defect being closed.
+    """
+    if not stored:
+        return False
+    if stored.get("operation") != operation:
+        return False
+    target = _fold_name(exercise)
+    known = _record_names(stored, "exercise")
+    if target and known and target not in known:
+        return False
+    wanted = _fold_name(replacement)
+    stored_replacements = _record_names(stored, "replacement")
+    if wanted and stored_replacements and wanted not in stored_replacements:
+        return False
+    return True
+
+
+def supersede_stale_clarification(user_id, tool_name, arguments):
+    """A new explicit mutation request invalidates an incompatible pending one.
+
+    Runs at the REQUEST boundary rather than the turn boundary, and before the
+    parser, because both of those are where the incident came from: the model
+    raised a second, different mutation inside one turn, that second request
+    was refused for a missing day, and the *first* request's pending
+    clarification was still sitting there when the user typed "Monday" — so
+    "Monday" executed a replace nobody was still asking for.
+
+    Only the record's own identity decides. Nothing here reads assistant prose,
+    and a request that continues the pending record (including the server's own
+    re-issue after "yes"/"15") leaves it untouched.
+    """
+    operation = _TOOL_OPERATIONS.get(tool_name)
+    if operation is None:
+        return
+    try:
+        stored = (
+            clarifications.load(user_id) if user_id is not None
+            else clarifications.load_current())
+    except clarifications.ClarificationAuthorityUnavailable:
+        # Fail closed: the continuation path already refuses to execute from a
+        # store it cannot read, so a stale record cannot fire either.
+        return
+    if not stored:
+        return
+    if not isinstance(arguments, dict):
+        arguments = {}
+    exercise = arguments.get("exercise")
+    replacement = arguments.get("replacement")
+    if request_matches_record(
+            stored, operation,
+            exercise if isinstance(exercise, str) else "",
+            replacement if isinstance(replacement, str) else ""):
+        return
+    try:
+        clarifications.clear(user_id)
+    except clarifications.ClarificationAuthorityUnavailable:
+        return
+
+
+def continuation_matches_record(record, tool_name, arguments):
+    """Whether ``record`` is the record a planned continuation came from.
+
+    ``load`` then ``consume`` is two reads of a shared store; between them the
+    record can be replaced by another worker handling the same user. The
+    arguments were built from the FIRST read, so they are only allowed to
+    execute if the record actually taken is the same request.
+    """
+    if not isinstance(record, dict):
+        return False
+    operation = _TOOL_OPERATIONS.get(tool_name)
+    if operation is None or record.get("operation") != operation:
+        return False
+    if not isinstance(arguments, dict):
+        return False
+    return request_matches_record(
+        record, operation,
+        arguments.get("exercise") or "", arguments.get("replacement") or "")
 
 
 @dataclass(frozen=True)
@@ -187,6 +331,10 @@ def user_owned_intent(message=None, history=None, user_id=None):
         "message": message,
         "source": source,
         "exercise": name,
+        # The name THIS turn's text names, before any overlay. "yes" and "15"
+        # name nothing; a stored record still does, and the two must not be
+        # confused when deciding whether the user is re-targeting.
+        "typed_exercise": current_name,
         "prescription": rx,
         "accepted_proposal": accepted_proposal,
         "has_user_text": bool((message or "").strip()),
@@ -383,6 +531,14 @@ def ground_command(user_id, command):
             canonical = canonicalize_weekday(command.day)
             if canonical is not None:
                 command = replace(command, day=canonical)
+        if not (command.day or "").strip() and not isinstance(
+                command, RemoveExerciseCommand):
+            # ``day`` is groundable, so it can legitimately arrive absent — but
+            # nothing above resolved it. Asking stores what IS grounded; letting
+            # it through would reach the domain as a bare "day is required".
+            grounded = _prepare_partial(user_id, command, intent)
+            return _needs_input(
+                user_id, results.REASON_WORKOUT_NOT_FOUND, grounded)
 
     if isinstance(command, AddExerciseCommand):
         return _ground_add(user_id, command, intent)
@@ -413,7 +569,12 @@ def _resolve_command_workout(user_id, command, intent):
     slot_commands = (
         UpdateExercisePrescriptionCommand, ReplaceExerciseCommand,
         RemoveExerciseCommand)
-    if (isinstance(command, slot_commands) and intent["has_user_text"]
+    # Only when the user NAMED the exercise in this turn's own words. On a
+    # continuation ("yes", "15", "Monday") the exercise comes from the stored
+    # record, and re-deriving the day from it would throw away the day that
+    # record already settled — turning an answered question back into the
+    # question.
+    if (isinstance(command, slot_commands) and intent.get("typed_exercise")
             and not named_day and not named_region):
         search = command.exercise
         destination = resolve_destination(search)
@@ -486,6 +647,12 @@ def _ground_add(user_id, command, intent):
         return _needs_input(
             user_id, results.REASON_MISSING_REPS,
             replace(command, sets=rx.sets), user_rx=rx)
+    if rx.sets is None and rx.reps is None:
+        # No user text to ground from and the model supplied neither half.
+        return _needs_input(
+            user_id, results.REASON_MISSING_PRESCRIPTION, command,
+            label=_label_for(user_id, command.day, intent["source"]),
+            user_rx=rx)
     if rx.sets is None or rx.reps is None:
         return Grounding(command=replace(
             command, sets=rx.sets, reps=rx.reps))
@@ -524,14 +691,22 @@ def _ground_replace(user_id, command, intent):
 def _ground_update(user_id, command, intent):
     if intent["has_user_text"]:
         rx = intent["prescription"]
-        if rx.sets is None and rx.reps is None:
+        if rx.sets is None and rx.reps is None and (
+                command.sets is None and command.reps is None):
             return _needs_input(
-                user_id, results.REASON_MISSING_PRESCRIPTION, command)
+                user_id, results.REASON_MISSING_PRESCRIPTION, command,
+                user_rx=rx)
         command = replace(
             command,
             sets=rx.sets if rx.sets is not None else command.sets,
             reps=(str(rx.reps) if rx.reps is not None else command.reps),
         )
+    if command.sets is None and command.reps is None:
+        # The parser lets a groundable field arrive absent; the domain would
+        # answer this with a bare INVALID_MUTATION, which tells the user
+        # nothing and stores nothing to continue from.
+        return _needs_input(
+            user_id, results.REASON_MISSING_PRESCRIPTION, command)
     return Grounding(command=command)
 
 
@@ -553,39 +728,57 @@ def _label_for(user_id, day, message):
 
 
 def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
-    """Non-applying result, remembering accept-able clarifications."""
+    """Non-applying result, remembering accept-able clarifications.
+
+    Merging is MONOTONIC and scoped to one request lineage. Two rules, and the
+    incident came from having neither:
+
+    * a field already grounded from user intent is never replaced or dropped by
+      a later clarification — "with 4 sets" then "15" is ``4x15``, not ``3x15``;
+    * inheritance only happens WITHIN one request. A record minted for a
+      different intention contributes nothing, so a pending replace of
+      "Barbell Curl" cannot donate its exercise, its suggestion or its
+      candidate days to a brand-new add.
+    """
     if reason in (
             results.REASON_MISSING_PRESCRIPTION,
             results.REASON_MISSING_SETS,
             results.REASON_MISSING_REPS,
             results.REASON_EXERCISE_SUGGEST,
             results.REASON_AMBIGUOUS_WORKOUT):
-        rx = user_rx or Prescription()
         candidates = kwargs.get("candidates") or ()
         intent = user_owned_intent(user_id=user_id)
-        if rx.sets is None and rx.reps is None:
-            stored = intent.get("stored") or {}
-            rx = Prescription(
-                sets=stored.get("sets") if stored else None,
-                reps=stored.get("reps") if stored else None,
-            ) if stored else rx
-            if user_rx is not None:
-                rx = user_rx
+        operation = (
+            command_type(command) if command is not None else "add_exercise")
         stored = intent.get("stored") or {}
-        day = getattr(command, "day", "") or ""
+        if not request_matches_record(
+                stored, operation,
+                getattr(command, "exercise", "") or "",
+                getattr(command, "replacement", "") or ""):
+            stored = {}
+        rx = user_rx or Prescription()
+        exercise = (
+            getattr(command, "exercise", "")
+            or stored.get("exercise")
+            or "")
+        replacement = (
+            getattr(command, "replacement", "")
+            or stored.get("replacement")
+            or "")
+        suggestion = kwargs.get("suggestion") or stored.get("suggestion") or ""
+        day = getattr(command, "day", "") or stored.get("day") or ""
         if reason == results.REASON_AMBIGUOUS_WORKOUT:
+            # The day is exactly what is still unknown; keeping the model's
+            # guess would let a later "yes" execute against it.
             day = ""
         clarifications.remember(user_id, {
-            "operation": command_type(command) if command is not None else (
-                "add_exercise"),
+            "operation": operation,
+            "request_id": stored.get("request_id") or request_id(
+                operation, exercise, replacement),
             "day": day,
-            "exercise": (
-                stored.get("exercise")
-                or getattr(command, "exercise", "")
-                or ""),
-            "replacement": getattr(command, "replacement", "") or "",
-            "suggestion": kwargs.get("suggestion") or (
-                stored.get("suggestion") or ""),
+            "exercise": exercise,
+            "replacement": replacement,
+            "suggestion": suggestion,
             "sets": rx.sets if rx.sets is not None else stored.get("sets"),
             "reps": rx.reps if rx.reps is not None else stored.get("reps"),
             "proposed_sets": (
@@ -681,14 +874,18 @@ def followup_mutation(user_id=None):
             arguments["reps"] = str(rx.reps)
         return tool, arguments
     rx = intent["prescription"]
-    if rx.sets is None or rx.reps is None:
+    if rx.sets is None and rx.reps is None:
         return None
-    return tool, {
-        "day": day,
-        "exercise": exercise,
-        "sets": rx.sets,
-        "reps": str(rx.reps),
-    }
+    arguments = {"day": day, "exercise": exercise}
+    if rx.sets is not None:
+        arguments["sets"] = rx.sets
+    if rx.reps is not None:
+        arguments["reps"] = str(rx.reps)
+    # A HALF-answered add is still this request. Re-issuing it with what is
+    # known lets grounding ask for the other half and store the merge; going
+    # silent here would hand the turn back to the model, which is how the
+    # already-grounded "4 sets" was lost in the first place.
+    return tool, arguments
 
 
 def invalid_candidate_result(user_id=None):
