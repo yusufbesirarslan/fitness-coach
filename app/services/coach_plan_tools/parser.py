@@ -16,6 +16,21 @@ What it refuses, and why each one matters:
   otherwise arrive as "1 set";
 * **an empty/blank string** — a target nobody named.
 
+With one bounded exception, ``GROUNDABLE``. A few properties are not the
+model's to know: which weekday "my leg workout" is, and whether the user
+already said "4 sets". The server resolves those against the persisted plan
+and the user's own words in ``grounding.py``, which is *also* the only layer
+that can store what it already grounded and ask for the rest. Refusing the
+call here instead throws that partial state away before it can be stored,
+and the next turn then has nothing but the model's memory to run on — which
+is exactly how "add Walking Lunges with 4 sets" came back as ``3x15``.
+
+So an absent-or-blank value for a groundable property is recorded as *not
+supplied* and handed to grounding, which fills it or asks for it. This is
+not defaulting: nothing is invented here, and a value that is present but
+of the wrong type is still refused, because "sets: '3'" is a model defect
+rather than a gap the user can close.
+
 What it deliberately does NOT do is re-implement the domain's bounds. Set and
 rep *values* are range-checked by ``plan_mutation.validation`` when the command
 is applied; duplicating those numbers here would create a second authority that
@@ -63,11 +78,45 @@ TOOL_ARGUMENTS = {
     MOVE_DAY_TOOL: (("day", "target_day"), ()),
 }
 
+#: ``{tool name: properties the SERVER can resolve}``. Absent or blank here is
+#: "not supplied", not a refusal — see the module docstring. Kept deliberately
+#: narrow:
+#:
+#: * ``day`` on add/replace/update, because ``workout_targets`` resolves a
+#:   weekday, a nickname ("my leg workout") or a unique exercise slot against
+#:   the persisted plan, and ``grounding`` asks the user when it cannot;
+#: * ``sets``/``reps`` on add, because grounding stores the half it has and
+#:   asks for the other half.
+#:
+#: ``remove`` and ``move`` are NOT groundable: neither has a continuation path
+#: (``grounding._OPERATION_TOOLS`` cannot re-issue them), so a stored
+#: clarification for one could never be completed. ``exercise``,
+#: ``replacement`` and ``target_day`` are never groundable — a target nobody
+#: named is the one thing this boundary exists to refuse.
+GROUNDABLE = {
+    REPLACE_EXERCISE_TOOL: frozenset({"day"}),
+    ADD_EXERCISE_TOOL: frozenset({"day", "sets", "reps"}),
+    UPDATE_PRESCRIPTION_TOOL: frozenset({"day"}),
+    REMOVE_EXERCISE_TOOL: frozenset(),
+    MOVE_DAY_TOOL: frozenset(),
+}
+
 #: Which properties are text and which are whole numbers. Used for the shape
 #: check only — ranges belong to the domain.
 _TEXT_FIELDS = frozenset(
     {"day", "target_day", "exercise", "replacement", "reps"})
 _INT_FIELDS = frozenset({"sets"})
+
+
+def _absent(value):
+    """Whether the model supplied nothing usable for this property.
+
+    ``None`` and a blank string only. ``0`` and ``False`` are values the model
+    *chose*, and collapsing them to "not supplied" would silently execute a
+    different request than the one it expressed — ``sets: 0`` is refused by the
+    domain's range check, which is the honest answer.
+    """
+    return value is None or (isinstance(value, str) and not value.strip())
 
 
 def _text(name, value):
@@ -123,17 +172,27 @@ def parse_tool_arguments(name, arguments):
         raise ToolArgumentError(
             "beklenmeyen alan: " + ", ".join(unexpected))
 
-    missing = [field for field in required if arguments.get(field) is None]
+    groundable = GROUNDABLE.get(name, frozenset())
+    # A blank NON-groundable required field is still "a target nobody named",
+    # not "not supplied": it reaches ``_coerce`` and earns the precise
+    # "boş olamaz" the model can act on.
+    missing = [field for field in required
+               if arguments.get(field) is None and field not in groundable]
     if missing:
         raise ToolArgumentError("eksik alan: " + ", ".join(missing))
 
     parsed = {}
     for field in required:
+        if field in groundable and _absent(arguments.get(field)):
+            # The server grounds this one. Leaving it out of ``parsed`` is how
+            # "not supplied" is spelled to ``build_command``.
+            continue
         parsed[field] = _coerce(field, arguments[field])
     for field in optional:
-        # An explicit null means "not supplied", which is how the typed command
+        # An explicit null — or a blank string, which providers emit for the
+        # same thing — means "not supplied", which is how the typed command
         # already spells an absent override.
-        if arguments.get(field) is None:
+        if _absent(arguments.get(field)):
             continue
         parsed[field] = _coerce(field, arguments[field])
     return parsed
@@ -152,7 +211,7 @@ def build_command(name, arguments):
 
     if name == REPLACE_EXERCISE_TOOL:
         return ReplaceExerciseCommand(
-            day=fields["day"],
+            day=fields.get("day", ""),
             exercise=fields["exercise"],
             replacement=fields["replacement"],
             sets=fields.get("sets"),
@@ -160,10 +219,10 @@ def build_command(name, arguments):
         )
     if name == ADD_EXERCISE_TOOL:
         return AddExerciseCommand(
-            day=fields["day"],
+            day=fields.get("day", ""),
             exercise=fields["exercise"],
-            sets=fields["sets"],
-            reps=fields["reps"],
+            sets=fields.get("sets"),
+            reps=fields.get("reps"),
         )
     if name == REMOVE_EXERCISE_TOOL:
         return RemoveExerciseCommand(
@@ -175,7 +234,7 @@ def build_command(name, arguments):
             # and no operation identity is spent on an empty command.
             raise ToolArgumentError("set veya tekrar'dan en az biri gerekli")
         return UpdateExercisePrescriptionCommand(
-            day=fields["day"],
+            day=fields.get("day", ""),
             exercise=fields["exercise"],
             sets=fields.get("sets"),
             reps=fields.get("reps"),

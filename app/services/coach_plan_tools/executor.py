@@ -444,6 +444,12 @@ def _execute(user_id, name, arguments):
     try:
         if name in CONFIRMATION_TOOL_NAMES:
             return _execute_confirmation_tool(user_id, name, arguments)
+        # BEFORE the parser: a new mutation request must invalidate an
+        # incompatible pending clarification even when the new request is about
+        # to be refused for a missing field. Otherwise the failure of one
+        # request leaves the previous one armed for the next "Monday"/"yes".
+        from .grounding import supersede_stale_clarification
+        supersede_stale_clarification(user_id, name, arguments)
         pending = get_pending(user_id)
         if pending is not None:
             return _reuse_or_block_pending(pending, name, arguments)
