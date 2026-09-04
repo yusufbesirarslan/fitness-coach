@@ -162,6 +162,31 @@ def test_primary_action_follows_the_canonical_action_dimension():
     assert resume.label_key == "today.action.resume_workout"
 
 
+def test_presenter_maps_the_ranked_semantic_action_to_copy_and_route():
+    """Dropping the decision-to-presentation mapping must break visible output."""
+    from app.services.workout_state.models import ACTION_RESUME
+
+    view = build_today_view(_facts(
+        primary_state=STATE_IN_PROGRESS, action=ACTION_RESUME))
+
+    assert view.primary == Action(
+        "today.action.resume_workout", "/training", primary=True)
+    assert view.brief_key == "today.brief.in_progress"
+
+
+def test_presenter_fails_closed_on_an_incompatible_canonical_pair():
+    """A terminal state carrying Start must never leak a start CTA to Home."""
+    from app.services.workout_state.models import ACTION_START
+
+    view = build_today_view(_facts(
+        primary_state=STATE_COMPLETED, action=ACTION_START))
+
+    assert view.state == STATE_ERROR
+    assert view.primary is None
+    assert view.brief_key == "today.brief.error"
+    assert view.secondary
+
+
 def test_no_plan_offers_the_one_honest_next_step():
     view = build_today_view(_facts(primary_state=STATE_NO_PLAN, action="none",
                                    has_active_plan=False))
@@ -204,6 +229,7 @@ def test_no_state_is_a_dead_end_and_none_competes_with_the_primary():
     for state in TODAY_STATES:
         for action in ("start", "resume", "none", "blocked", ""):
             view = build_today_view(_facts(primary_state=state, action=action))
+            assert view.brief_key
             if view.primary is not None:
                 assert view.secondary == (), (state, action)
             else:
