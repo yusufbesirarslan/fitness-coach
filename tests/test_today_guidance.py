@@ -1,5 +1,9 @@
 """Pure decision-table tests for UX-2 PR5 Today guidance."""
 
+import ast
+import inspect
+from pathlib import Path
+
 import pytest
 
 from app.services.workout_state.models import (
@@ -24,11 +28,14 @@ from app.today_guidance import (
     PRIORITY_CREATE_PLAN,
     PRIORITY_RESUME_WORKOUT,
     PRIORITY_START_WORKOUT,
+    SUPPORTED_STATE_ACTIONS,
     STATE_ERROR,
     Candidate,
     decide_today_guidance,
     rank_candidates,
 )
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_resume_outranks_start_and_create_plan():
@@ -122,3 +129,76 @@ def test_unknown_canonical_state_fails_closed():
     assert decision.state == STATE_ERROR
     assert decision.primary_kind is None
     assert decision.decision_reason == "unsupported_primary_state"
+
+
+def test_supported_pairs_cover_the_canonical_primary_vocabulary_exactly():
+    """Adding a canonical state without a fail-closed compatibility row is a bug."""
+    expected = {
+        (PRIMARY_IN_PROGRESS, ACTION_RESUME),
+        (PRIMARY_SCHEDULED_NOT_STARTED, ACTION_START),
+        (PRIMARY_NO_PLAN, ACTION_NONE),
+        (PRIMARY_REST_DAY, ACTION_NONE),
+        (PRIMARY_EXECUTION_RECORDED, ACTION_NONE),
+        (PRIMARY_UNSCHEDULED_EXECUTION, ACTION_NONE),
+        (PRIMARY_COMPLETED, ACTION_NONE),
+        (PRIMARY_UNSCHEDULED_COMPLETED, ACTION_NONE),
+        (PRIMARY_NEEDS_ATTENTION, ACTION_BLOCKED),
+    }
+
+    assert set(SUPPORTED_STATE_ACTIONS) == expected
+
+
+def test_decision_api_cannot_accept_lower_authority_domain_inputs():
+    """Nutrition, check-ins, clock data, and raw rows cannot enter ranking."""
+    assert tuple(inspect.signature(decide_today_guidance).parameters) == (
+        "read_ok", "primary_state", "action")
+
+
+def test_guidance_module_has_no_io_or_secondary_domain_imports():
+    """A new ORM/domain import would turn the decision layer into an authority."""
+    source = (ROOT / "app" / "today_guidance.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+
+    assert imported <= {
+        "__future__",
+        "dataclasses",
+        "app.services.workout_state.models",
+    }
+
+
+def test_client_and_template_cannot_choose_the_guidance_action():
+    """Moving ranking into JavaScript/Jinja would create a second decision path."""
+    script = (ROOT / "static" / "today.js").read_text(encoding="utf-8")
+    template = (ROOT / "templates" / "today.html").read_text(encoding="utf-8")
+
+    for token in (
+        CANDIDATE_RESUME_WORKOUT,
+        CANDIDATE_START_WORKOUT,
+        CANDIDATE_CREATE_PLAN,
+        "data-today-state']",
+        'data-today-state"]',
+    ):
+        assert token not in script
+    assert template.count("{% if today.primary %}") == 1
+    assert "today.primary_state" not in template
+    assert "today.state ==" not in template
+    assert "today.state in" not in template
+
+
+def test_full_decision_matrix_runs_without_a_flask_application_context():
+    """The orchestration step itself must add zero reads or request dependencies."""
+    decisions = [
+        decide_today_guidance(
+            read_ok=True, primary_state=state, action=action)
+        for state, action in SUPPORTED_STATE_ACTIONS
+    ]
+
+    assert len(decisions) == 9
+    assert [item.primary_kind for item in decisions].count(
+        CANDIDATE_RESUME_WORKOUT) == 1
