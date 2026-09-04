@@ -3,6 +3,15 @@
 Each guard names one invariant from the PR5 brief's section 56 list. They are
 structural on purpose: a behaviour test proves the code does the right thing
 today, a guard proves the NEXT change cannot quietly move an authority.
+
+Sprint 14 PR2 moved several of those authorities on purpose -- the request
+contract, the typed failure vocabulary and the checkpoint orchestration are now
+``app.services.workout_session``'s, shared with the browser transport instead of
+being reimplemented for it. The guards below follow them: each asserts its
+invariant at the canonical module AND asserts that the native adapter delegates
+rather than keeping a second copy. Pointing them back at the adapter would let
+the two transports silently diverge again, which is the exact defect PR2 exists
+to close.
 """
 import ast
 import json
@@ -18,19 +27,26 @@ from app.timeutil import APP_TZ, audit_clock
 
 ROUTE_PATH = Path("app/blueprints/mobile_workout_sessions.py")
 SERVICE_PATH = Path("app/services/mobile_workout_sessions/service.py")
-CHECKPOINT_PATH = Path("app/services/mobile_workout_sessions/checkpoint.py")
 PROJECTION_PATH = Path("app/services/mobile_workout_sessions/projection.py")
-ERRORS_PATH = Path("app/services/mobile_workout_sessions/errors.py")
+# Canonical and transport-neutral since Sprint 14 PR2 -- shared with the browser.
+CHECKPOINT_PATH = Path("app/services/workout_session/checkpoint.py")
+ERRORS_PATH = Path("app/services/workout_session/errors.py")
+EXECUTION_PATH = Path("app/services/workout_session/execution.py")
 SESSION_QUERIES_PATH = Path("app/services/workout_session/queries.py")
 COMPLETION_SERVICE_PATH = Path("app/services/workout_completion/service.py")
 MODEL_PATH = Path("app/models.py")
 MIGRATION_PATH = Path(
     "migrations/versions/f5a6b7c8d9e0_add_workout_session_native_execution.py")
 CI_PATH = Path(".github/workflows/ci.yml")
+# The native adapter package: everything that is still transport-specific.
 PACKAGE_PATHS = (
-    SERVICE_PATH, CHECKPOINT_PATH, PROJECTION_PATH, ERRORS_PATH,
+    SERVICE_PATH, PROJECTION_PATH,
     Path("app/services/mobile_workout_sessions/__init__.py"),
 )
+# The canonical execution modules the adapter now delegates to. They carry the
+# same "no browser controller, no provider" obligations, because the native
+# surface reaches production through them.
+CANONICAL_PATHS = (CHECKPOINT_PATH, ERRORS_PATH, EXECUTION_PATH)
 ENDPOINTS = (
     "mobile_api.start_workout_session",
     "mobile_api.current_workout_session",
@@ -80,7 +96,7 @@ def test_no_session_route_reads_an_owner_from_the_request(app):
 
 # 2. No browser controller dependency.
 def test_the_native_surface_never_depends_on_a_browser_controller():
-    for path in (ROUTE_PATH,) + PACKAGE_PATHS:
+    for path in (ROUTE_PATH,) + PACKAGE_PATHS + CANONICAL_PATHS:
         modules = _imports(path)
         for module in modules:
             assert not module.startswith("app.blueprints.training")
@@ -91,13 +107,13 @@ def test_the_native_surface_never_depends_on_a_browser_controller():
 
 # 3. No provider calls.
 def test_the_session_service_package_can_reach_no_provider():
-    for path in PACKAGE_PATHS:
+    for path in PACKAGE_PATHS + CANONICAL_PATHS:
         for module in _imports(path):
             assert not module.startswith("app.services.ai")
             assert not module.startswith("app.prompts")
             assert not module.startswith("app.services.training_generation")
             assert module not in {"openai", "anthropic", "boto3", "groq"}
-    joined = "".join(_source(path) for path in PACKAGE_PATHS)
+    joined = "".join(_source(path) for path in PACKAGE_PATHS + CANONICAL_PATHS)
     for forbidden in (
         "invoke_model(", "openai_client", "bedrock_client", "_heavy_complete",
         "generate_training_plan_candidate",
@@ -141,14 +157,22 @@ def test_the_public_projection_carries_no_internal_identifier():
 
 
 def test_the_session_reference_is_the_opaque_public_id_and_is_length_bounded():
+    execution = _source(EXECUTION_PATH)
     service = _source(SERVICE_PATH)
 
+    # The bound and the ownership-scoped lookup are ONE definition, in the
+    # canonical domain, so both server transports resolve a reference the same
+    # way and a hostile path segment is bounded before it reaches a query.
+    assert "SESSION_REF_MAX" in execution
+    assert "get_owned_session(user_id, session_ref)" in execution
+    # The adapter delegates to it and keeps no lookup of its own.
     assert "row.public_id" in service
-    assert "SESSION_REF_MAX" in service
-    assert "get_owned_session(user_id, session_ref)" in service
-    # No lookup by primary key from a client-supplied value.
-    assert "WorkoutSession.query.get(" not in service
-    assert "filter_by(id=" not in service
+    assert "_owned_session = owned_session" in service
+    assert "def _owned_session(" not in service
+    for source in (execution, service):
+        # No lookup by primary key from a client-supplied value.
+        assert "WorkoutSession.query.get(" not in source
+        assert "filter_by(id=" not in source
 
 
 # 6. Start cannot create duplicate active sessions.
@@ -193,22 +217,52 @@ def test_the_route_refuses_a_checkpoint_without_if_match_or_a_key():
 
 # 9. Same checkpoint retry cannot double-advance the revision.
 def test_replay_is_decided_before_any_mutation_and_again_after_a_lost_race():
-    service = _source(SERVICE_PATH)
-    body = service[service.index("def checkpoint("):service.index("def _replay_or_conflict(")]
+    execution = _source(EXECUTION_PATH)
+    body = execution[execution.index("def record_checkpoint("):
+                     execution.index("def _replay_or_conflict(")]
 
     assert body.index("_replay_or_conflict(") < body.index("advance_checkpoint(")
     assert body.count("_replay_or_conflict(") == 2
-    assert "parsed.fingerprint" in service
+    assert "parsed.fingerprint" in execution
+
+
+def test_the_native_adapter_keeps_no_second_checkpoint_orchestration():
+    """The point of Sprint 14 PR2: ONE execution authority, two transports.
+
+    A transport that grows its own replay check, its own revision comparison or
+    its own call to the durable write has re-created the divergence PR2 removed
+    -- the browser and the phone would once again be able to disagree about who
+    wins. The adapter may name its session's workout; it may not decide who wins.
+    """
+    service = _source(SERVICE_PATH)
+
+    assert "record_checkpoint(" in service
+    for forbidden in (
+        # The durable write, the replay decision, and every column that decides
+        # who wins. Declaring a precondition it was handed
+        # (``expected_checkpoint_revision=``) is fine; READING the row's own
+        # progress columns to decide anything is not.
+        "advance_checkpoint(", "_replay_or_conflict(", "row.checkpoint_revision",
+        ".checkpoint_fingerprint", ".checkpoint_idempotency_key",
+        ".checkpoint_data",
+    ):
+        assert forbidden not in service, forbidden
 
 
 # 10. Terminal sessions reject later checkpoint mutation.
 def test_every_mutating_command_rejects_a_terminal_session():
+    execution = _source(EXECUTION_PATH)
     service = _source(SERVICE_PATH)
 
-    assert "def _reject_terminal(row)" in service
-    checkpoint = service[service.index("def checkpoint("):service.index(
-        "def _replay_or_conflict(")]
-    assert "_reject_terminal(row)" in checkpoint
+    assert "def reject_terminal(row)" in execution
+    checkpoint = execution[execution.index("def record_checkpoint("):
+                           execution.index("def _replay_or_conflict(")]
+    # Refused up front, and re-checked after a lost race before any conflict is
+    # reported -- a terminal session must never look merely "stale".
+    assert checkpoint.count("reject_terminal(row)") == 2
+    assert "WORKOUT_SESSION_ACTIVE" in execution
+    # The adapter's own terminal commands still branch on the canonical states.
+    assert "_reject_terminal = reject_terminal" in service
     assert "WORKOUT_SESSION_ABANDONED" in service
     assert "WORKOUT_SESSION_COMPLETED" in service
 
@@ -415,7 +469,7 @@ def test_the_byte_backstop_admits_the_largest_snapshot_the_bounds_allow():
     import importlib
 
     contract = importlib.import_module(
-        "app.services.mobile_workout_sessions.checkpoint")
+        "app.services.workout_session.checkpoint")
 
     worst_case = {
         "current_exercise_index": 0,

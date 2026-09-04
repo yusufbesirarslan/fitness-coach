@@ -616,15 +616,24 @@ def sessions_on(app):
     app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = False
 
 
-def _save_today_workout_plan(user_id):
+# Canonical exercise identities, so a browser checkpoint has a canonical workout
+# to be a member of (Sprint 14 PR2). They must resolve in the catalog: an
+# unresolvable identity collapses the whole allow-list, by design.
+_PLAN_EXERCISE_IDS = ("ex_barbell_back_squat", "ex_barbell_bench_press")
+
+
+def _save_today_workout_plan(user_id, exercise_ids=_PLAN_EXERCISE_IDS):
     """Persist a plan whose today (Istanbul) weekday is an antrenman, so a freshly
     started session's relationship classifies as matching_current_plan (resumable)."""
     today_weekday = WEEKDAYS[app_today().weekday()]
+    names = ["Squat", "Bench", "Row", "Press"]
     program = []
     for name in WEEKDAYS:
         if name == today_weekday:
-            program.append({"gun": name, "tip": "antrenman",
-                            "egzersizler": [{"isim": "Squat"}, {"isim": "Bench"}]})
+            program.append({"gun": name, "tip": "antrenman", "egzersizler": [
+                {"isim": names[index], "exercise_id": exercise_id}
+                for index, exercise_id in enumerate(exercise_ids)
+            ]})
         else:
             program.append({"gun": name, "tip": "dinlenme", "egzersizler": []})
     plan = TrainingPlan(user_id=user_id, score=5,
@@ -632,6 +641,21 @@ def _save_today_workout_plan(user_id):
     db.session.add(plan)
     db.session.commit()
     return plan
+
+
+def _checkpoint_body(exercise_id=_PLAN_EXERCISE_IDS[0], reps=8, completed=True):
+    """A minimal VALID browser checkpoint: a bounded FULL snapshot, never a patch."""
+    return {"checkpoint": {
+        "current_exercise_index": 0,
+        "elapsed_seconds": 120,
+        "exercises": [{"exercise_id": exercise_id, "sets": [
+            {"index": 0, "completed": completed, "reps": reps, "weight_kg": 60.0},
+        ]}],
+    }}
+
+
+def _checkpoint_headers(revision, key="browser-checkpoint-key-1"):
+    return {"If-Match": str(revision), "Idempotency-Key": key}
 
 
 def _foreign_active_session(user_id):
@@ -686,20 +710,36 @@ def test_complete_ignores_session_id_when_flag_off(
 # -- Flag ON: full lifecycle --------------------------------------------------
 
 def test_start_current_checkpoint_lifecycle(client, auth_user, sessions_on):
+    """Sprint 14 PR2 replaced this route's heartbeat with durable progress.
+
+    Before PR2 the assertion below was ``json={}`` → 200: the route accepted a
+    body-less POST and wrote only ``last_activity_at``. That is why a browser
+    workout lost every set on reload. The contract is now the canonical one --
+    ``If-Match`` + ``Idempotency-Key`` + a bounded full snapshot -- and the
+    projection publishes the revision it advanced to.
+    """
+    _save_today_workout_plan(auth_user.id)
     started = client.post("/workout/session/start", json={})
     assert started.status_code == 201
     body = started.get_json()
     assert body["outcome"] == "created"
     public_id = body["session"]["public_id"]
     assert public_id
+    assert body["session"]["checkpoint_revision"] == 0
+    assert body["session"]["checkpoint"] is None
 
     current = client.get("/workout/session/current")
     assert current.status_code == 200
     assert current.get_json()["session"]["public_id"] == public_id
 
-    checkpoint = client.post(f"/workout/session/{public_id}/checkpoint", json={})
+    checkpoint = client.post(
+        f"/workout/session/{public_id}/checkpoint",
+        headers=_checkpoint_headers(0), json=_checkpoint_body())
     assert checkpoint.status_code == 200
-    assert checkpoint.get_json()["outcome"] == "checkpointed"
+    projected = checkpoint.get_json()
+    assert projected["outcome"] == "checkpointed"
+    assert projected["session"]["checkpoint_revision"] == 1
+    assert projected["session"]["checkpoint"]["exercises"][0]["sets"][0]["reps"] == 8
 
 
 def test_start_twice_is_existing_active(client, auth_user, sessions_on):
@@ -740,7 +780,13 @@ def test_abandon_is_idempotent_over_the_route(client, auth_user, sessions_on):
 def test_cannot_touch_another_users_session(client, auth_user, make_user, sessions_on, verb):
     other = make_user("other_owner")
     foreign = _foreign_active_session(other.id)
-    resp = client.post(f"/workout/session/{foreign.public_id}/{verb}", json={})
+    # The checkpoint request is fully WELL-FORMED, so the 404 below is decided by
+    # ownership and not by a missing precondition -- otherwise the test would
+    # pass for the wrong reason.
+    headers = _checkpoint_headers(0) if verb == "checkpoint" else {}
+    body = _checkpoint_body() if verb == "checkpoint" else {}
+    resp = client.post(
+        f"/workout/session/{foreign.public_id}/{verb}", headers=headers, json=body)
     # Ownership is re-enforced server-side: the caller cannot even observe another
     # user's session -- it is indistinguishable from a non-existent one.
     assert resp.status_code == 404
@@ -759,7 +805,10 @@ def test_complete_with_session_terminalizes_it(client, auth_user, sessions_on, m
 
     resp = client.post("/workout/complete",
                        json={"image": "x", "location_type": "salon",
-                             "session_id": public_id})
+                             "session_id": public_id,
+                             # Sprint 14 PR2: a session-linked web completion
+                             # declares the progress revision it is completing.
+                             "expected_checkpoint_revision": 0})
     assert resp.status_code == 200
     assert resp.get_json()["session_completed"] is True
     # The linked session was terminalized COMPLETED atomically with the completion.

@@ -253,8 +253,17 @@ Three candidates. Each is supported by the evidence in §4.
 #### Objective
 
 A workout in progress survives a reload, an app switch and a device change, under
-**one** revision-gated execution authority shared by the browser and the native
-client — and the flag that governs both surfaces becomes activatable.
+**one** revision-gated execution authority shared by the **browser web transport**
+and the **native `/api/v1` server transport** — and the flag that governs both
+surfaces becomes activatable.
+
+> **Independent-review amendment (P2-A).** The original wording said "the browser
+> and the native client". The actual Flutter `WorkoutSession` client/repository is
+> **out of scope for Sprint 14** — `AppComposition.configured` wires
+> `UnavailableWorkoutSessionRepository` (§2.3), and §11 already excludes any
+> Flutter change. The two things Sprint 14 converges are two **server transports**
+> over one domain. Building the native client remains Sprint 15 / later mobile
+> work in `axisai-mobile`.
 
 #### User problem
 
@@ -320,7 +329,7 @@ Adaptive coaching. Progress. Nutrition. Any new column.
 #### Risk
 
 ```text
-product        low    -- OFF path must stay byte-identical; enforced as S14-10
+product        low    -- OFF path must stay inert (amended P2-B); enforced as S14-10
 data           low    -- no migration; expand-only columns already applied
 security       low    -- the client snapshot is the only new input surface;
                          bounded + typed + ownership re-enforced server-side
@@ -536,11 +545,20 @@ Tradeoffs, stated rather than averaged away:
 
 ```text
 RECOMMENDED SPRINT 14 OBJECTIVE:
-A workout in progress becomes durable and single-authority across the browser and the
-native client -- one revision-gated execution contract, no surface able to silently
-discard another's progress, and FITX_WORKOUT_SESSIONS_ENABLED made activatable with
-the observability its own record says it lacks.
+A workout in progress becomes durable and single-authority across the browser web
+transport and the native /api/v1 server transport -- one revision-gated execution
+contract, no surface able to silently discard another's progress, and
+FITX_WORKOUT_SESSIONS_ENABLED made activatable with the observability its own
+record says it lacks.
+
+Out of scope, explicitly: the Flutter WorkoutSession client/repository (Sprint 15
+or later, in axisai-mobile) and the staged production rollout (PR5 readiness only).
 ```
+
+> **Independent-review amendment (P2-A).** Amended from "across the browser and the
+> native client" for the reason recorded above. No candidate was re-ranked and no
+> criterion was weakened; the objective's *content* is unchanged, only its wording
+> now matches the scope §11 already declared.
 
 ### Why it wins
 
@@ -586,13 +604,13 @@ Objectively testable. Each names an observable invariant, not a feeling.
 | **S14-1** | With `FITX_WORKOUT_SESSIONS_ENABLED=1`, the browser checkpoint route persists a bounded snapshot and advances `checkpoint_revision` by exactly one, gated on the caller's declared base revision. A request declaring a stale base mutates **no** column and is refused with a typed outcome. |
 | **S14-2** | Every session projection published by **either** surface carries `checkpoint_revision` and the snapshot identity. A structural test over `SessionView.to_dict()` and `mobile_workout_sessions.projection` fails if a surface publishes a session without them. |
 | **S14-3** | `POST /workout/complete` declares `expected_checkpoint_revision` whenever a session id is supplied. A completion built on a stale revision is refused with `reason="revision"` and writes no `PumpCheck`, `WorkoutLog`, completion marker, XP, quest or activity row. |
-| **S14-4** | Cross-surface regression: a session checkpointed natively to revision *n* and then completed from the browser at revision *n-1* is refused; and the mirror case (browser checkpoint, native completion at a stale revision) is refused. Both assert zero rows written. |
+| **S14-4** | Cross-**transport** regression: a session checkpointed through the native `/api/v1` transport to revision *n* and then completed through the browser web transport at revision *n-1* is refused; and the mirror case (browser web checkpoint, native `/api/v1` completion at a stale revision) is refused. Both assert zero rows written. *(Amended P2-B: "surface" read as two shipping clients; these are two server transports over one row.)* |
 | **S14-5** | With the flag ON, a full page reload mid-workout restores every completed set from the server snapshot. The assertion is on restored set data, not on a request being made. |
 | **S14-6** | The snapshot is server-validated and bounded: over-size, over-count and schema-invalid payloads are refused with a typed error and are never truncated, coerced or partially stored. |
 | **S14-7** | A `[WORKOUT_SESSION]` lifecycle counter (`started` / `resumed` / `checkpointed` / `abandoned` / `completed` / `revision_conflict`) is emitted through `runtime_metrics` with fixed-cardinality dimensions and no user identity, closing the "No session-lifecycle metric exists" gap named in the flag's own `observability` field. |
 | **S14-8** | Proven on PostgreSQL, not SQLite: two writers on one base revision produce exactly one winner and one refusal; a completion racing a checkpoint leaves exactly one terminal outcome; the `uq_workout_session_active_owner` invariant is never violated. |
 | **S14-9** | Alembic remains at a **single head** and the sprint adds **no** migration, table or column. `f5a6b7c8d9e0` is sufficient; a PR that adds one has left scope. |
-| **S14-10** | With the flag OFF, every route in the surface answers 404, the browser issues no session request and renders no session markup, and the rendered `/training` output is byte-identical to `3a8e981`. |
+| **S14-10** | With `FITX_WORKOUT_SESSIONS_ENABLED = 0` the feature is **inert**: every session route is absent (404), no session state is fabricated (no `WorkoutSession` row is created or read into any response), the legacy `/workout/complete` path is behaviourally unchanged and requires no revision, the browser issues no session request, and no workout-session UI state or markup becomes active. Normalized legacy `/training` behaviour is unchanged. *(Amended P2-B: the original criterion demanded the rendered `/training` output be **byte-identical** to `3a8e981`. That is not testable — the page embeds process-specific `_BOOT_TS` cache-bust values, so two renders of unmodified code already differ. Cache-bust token differences are ignored; the invariant is inertness, not byte equality.)* |
 | **S14-11** | No production flag value is changed by any PR in this sprint. Activation is a separate, operator-run, documented step. |
 
 ---
@@ -743,7 +761,8 @@ a bounded deadline (`app/services/ai_gate.py:171-198`).
   the base-revision predicate, Sprint 14 would *create* the silent-overwrite path it
   exists to close. S14-1, S14-4 and S14-8 exist to make that failure loud.
 * **Scope pressure toward the workout UI.** Restoring set state invites a redesign.
-  S14-10's byte-identical OFF path and the §11 non-goals are the boundary.
+  S14-10's inert OFF path and the §11 non-goals are the boundary. *(Amended P2-B:
+  was "byte-identical OFF path".)*
 * **PostgreSQL-only proof.** SQLite cannot demonstrate `FOR UPDATE` or
   conditional-UPDATE race outcomes. S14-8 must run on the PG gate, and the new module
   must be added to CI's explicit `pg_concurrency` file list — a step that has been
@@ -771,3 +790,110 @@ workflows / deployment  unchanged
 ```
 
 The only change is this document.
+
+---
+
+## 15. PR2 implementation evidence — canonical workout execution contract
+
+Appended by PR2. The candidate history, the ranking and the reasoning above are
+preserved verbatim; sections 7, 8 and 13 carry only the two independent-review
+amendments (P2-A, P2-B), each marked inline at the sentence it corrects.
+
+### 15.1 What PR2 changed
+
+F-1's root cause was not a missing browser feature. It was that the durable
+execution rules `#276` wrote — bounds, canonical ordering, replay identity,
+revision ordering, terminality — lived inside a module named for one transport.
+The browser could not reach them without copying them, and a copy would have
+been a second authority that agreed only by coincidence.
+
+So PR2 moved the authority rather than duplicating it:
+
+| Moved into the canonical domain | From | Why it was never transport-specific |
+|---|---|---|
+| `workout_session/checkpoint.py` | `mobile_workout_sessions/checkpoint.py` | The bounds describe a *workout*; the fingerprint describes a *snapshot*; the ordering is the *workout's* own exercise order |
+| `workout_session/errors.py` | `mobile_workout_sessions/errors.py` | "the declared revision is not current" is a fact about a row, not about HTTP |
+| `workout_session/execution.py` — `record_checkpoint`, `owned_session`, `reject_terminal`, `require_revision`, `prepare_completion` | `mobile_workout_sessions/service.py` | Ownership, terminality, replay ordering and the completion preflight are identical on both sides |
+
+The native adapter re-exports the contract and delegates the orchestration. Its
+public `/api/v1` behaviour is unchanged: same routes, same required `If-Match`
+and `Idempotency-Key`, same `TRAINING_SESSION_*` codes, same `Session-Resolution`
+and `Idempotency-Replayed` headers, same private-visibility native completion.
+What is left in `mobile_workout_sessions` is what is genuinely native — resolving
+an opaque HMAC `workout_ref`, and shaping the envelope.
+
+### 15.2 The browser web transport
+
+`POST /workout/session/<public_id>/checkpoint` stopped being a heartbeat. It now
+requires `If-Match` (the declared base revision), `Idempotency-Key`, and a
+bounded FULL snapshot in `{"checkpoint": {...}}`, and reaches `advance_checkpoint`
+— the same single conditional UPDATE the native surface uses. It keeps the web's
+own auth adapter: `@require_auth`, the app-wide two-layer CSRF gate, ownership
+re-derived from `current_user`, and now `WORKOUT_CHECKPOINT_RATELIMIT`, because a
+checkpoint is a write with a payload rather than a heartbeat. The flag gate is
+applied *outside* the throttle, so a dark surface answers 404 and never 429.
+
+`POST /workout/complete` closes the S14-3 backend gap. When the flag is ON **and**
+`session_id` is supplied, the body must also declare
+`expected_checkpoint_revision` (an integer, in the request document the route
+already parses — one channel, chosen once, no `If-Match` fallback). That value is
+carried into `CompleteWorkoutCommand` and verified **under the session row lock**
+inside `complete_workout`. The route's own check is a cost preflight only; a
+dedicated test exercises the canonical service directly, so removing the
+in-transaction comparison fails even with the preflight intact.
+
+Naming the session's workout: the browser has no opaque `workout_ref`, so its
+canonical workout is resolved from the plan snapshot the session already
+recorded — `source == scheduled`, the stored versioned `plan_fingerprint` still
+matching the current plan's workout for that weekday slot, and every exercise
+identity resolvable in the catalog. Drift is therefore decided by the *same*
+`fingerprints_match` the lifecycle classifier uses, not by a second staleness
+rule. An unscheduled session is refused as stale for the same structural reason a
+native session without a `workout_ref` is: there is nothing to validate
+membership against.
+
+### 15.3 Criteria status after PR2
+
+| ID | Status | Note |
+|---|---|---|
+| S14-1 | **backend contract satisfied**, partial | Revision-gated browser checkpoint; a stale request writes nothing and is refused with a typed code. PR3 proves the client sends it. |
+| S14-2 | **satisfied (server projections)** | `SessionView` publishes `checkpoint_revision` + `checkpoint`; the native envelope now *sources* its `revision`/`checkpoint` from that same view. |
+| S14-3 | **satisfied (server contract)** | The declared revision reaches the locked completion authority; a stale refusal writes zero artifacts. |
+| S14-4 | **backend characterized**, open | Deterministic cross-transport tests both ways. The real PostgreSQL race proof stays PR4. |
+| S14-5 | **open — PR3** | The data is available; nothing hydrates it yet. |
+| S14-6 | **satisfied** | Oversized, over-count, unknown, duplicate and malformed payloads fail whole — never truncated, coerced or partially stored. |
+| S14-7 | **open — PR4** | No `runtime_metrics` counter was added. |
+| S14-8 | **open / partial — PR4** | PR2 introduced no new lock-dependent semantic, so no new PG module and no CI `pg_concurrency` change. `#276`'s PG suite still covers `advance_checkpoint` and the locked revision check. |
+| S14-9 | **satisfied** | No model, column, table or migration. Alembic head remains `f5a6b7c8d9e0`, single. |
+| S14-10 | **backend half satisfied** | Routes dark/404, no session fabricated, legacy completion unchanged and revision-free. The browser-client half is PR3. |
+| S14-11 | **satisfied** | No flag value, default, environment, runbook status or rollout record changed. |
+
+Sprint 14 is **not** complete.
+
+### 15.4 PR3 handoff
+
+PR3 should not need to invent any server semantics:
+
+```text
+GET  /workout/session/current
+     -> session.checkpoint_revision, session.checkpoint
+
+POST /workout/session/<public_id>/checkpoint
+       If-Match: <revision>          (required)
+       Idempotency-Key: <key>        (required)
+       {"checkpoint": {...}}         (bounded FULL snapshot, never a patch)
+     -> 200 {outcome, session, replayed}
+     -> 428 revision_required        | 409 revision_conflict
+        409 idempotency_conflict     | 400 invalid_checkpoint
+        400 idempotency_key_invalid  | 409 session_terminal
+        409 stale_session_requires_resolution
+        404 not_found                | 503 session_unavailable
+        (every refusal also carries Session-Resolution: retry | reread | terminal)
+
+POST /workout/complete
+       {"session_id": "<public id>", "expected_checkpoint_revision": <int>}
+     -> 409 revision_conflict when progress moved on (zero artifacts written)
+```
+
+If PR3 finds itself inventing a server rule, PR2 is incomplete — that is the
+test.

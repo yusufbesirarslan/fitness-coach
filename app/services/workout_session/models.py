@@ -171,7 +171,23 @@ def classify(inputs: RelationshipInputs) -> SessionClassification:
 
 @dataclass(frozen=True)
 class SessionView:
-    """Public, serialization-ready projection of a session (no raw DB ids)."""
+    """Public, serialization-ready projection of a session (no raw DB ids).
+
+    Sprint 14 PR2 added ``checkpoint_revision`` + ``checkpoint``: the durable
+    execution progress ``#276`` began persisting. Before that, this projection
+    could describe *which* session a client held and *whether* it was resumable,
+    but never *how far into it the user was* — which is why the browser could
+    not restore a workout and could not declare what it was completing.
+
+    Both fields are additive and every existing key keeps its meaning, so an
+    older consumer that reads only what it knows is unaffected.
+
+    Deliberately still private, because a client needs durable progress and not
+    persistence internals: the raw database id, ``user_id``, the owning plan id,
+    ``plan_fingerprint``, the checkpoint's semantic fingerprint and the replay
+    key. The last two are the replay authority itself — publishing them would
+    let a caller forge or probe another request's replay identity.
+    """
     public_id: str
     status: str
     workout_date: str
@@ -185,6 +201,14 @@ class SessionView:
     relationship: str
     stale_reason: str
     resumable: bool
+    # The optimistic revision of the durable progress below, and the ONLY value
+    # a caller may declare back as a precondition. 0 means "started, nothing
+    # checkpointed yet" — never "unknown".
+    checkpoint_revision: int = 0
+    # The last accepted bounded full snapshot, exactly as it was validated and
+    # stored, or ``None`` when no checkpoint has been accepted. Never a patch,
+    # never a partial merge — see ``checkpoint.parse_checkpoint``.
+    checkpoint: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -201,6 +225,8 @@ class SessionView:
             "relationship": self.relationship,
             "stale_reason": self.stale_reason,
             "resumable": self.resumable,
+            "checkpoint_revision": self.checkpoint_revision,
+            "checkpoint": self.checkpoint,
         }
 
 

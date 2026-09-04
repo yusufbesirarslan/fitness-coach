@@ -21,6 +21,12 @@ from app.models import (
     TrainingPlan,
     WorkoutSession,
 )
+from app.services.exercise_catalog import (
+    CatalogConfigurationError,
+    ExerciseResolutionError,
+    load_exercise_catalog,
+    resolve_exercise,
+)
 from app.services.training_generation.response_validator import VALID_TIPS, WEEKDAYS
 from app.services.workout_completion import already_completed_today
 
@@ -90,12 +96,15 @@ def _parse_program(plan: TrainingPlan) -> Optional[list]:
     return program
 
 
-def _weekday_workout(program: list, weekday_name: str) -> Tuple[bool, List[str]]:
-    """Return ``(is_workout, ordered_exercise_names)`` for ``weekday_name``.
+def _weekday_entries(program: list, weekday_name: str) -> Tuple[bool, List[dict]]:
+    """Return ``(is_workout, ordered_exercise_entries)`` for ``weekday_name``.
 
     ``is_workout`` is True only when that weekday's ``tip`` is a recognized
-    non-rest workout kind. Exercise names are the ordered ``isim`` values — the
-    canonical, order-preserving input to the versioned fingerprint.
+    non-rest workout kind. The raw ordered ``egzersizler`` dicts are returned so
+    the name projection (the fingerprint input) and the canonical identity
+    projection (the checkpoint membership input) are derived from ONE traversal
+    of one plan document — they can never disagree about which exercises, or in
+    which order, today's workout contains.
     """
     for day in program:
         if not isinstance(day, dict) or day.get("gun") != weekday_name:
@@ -105,13 +114,18 @@ def _weekday_workout(program: list, weekday_name: str) -> Tuple[bool, List[str]]
         exercises = day.get("egzersizler")
         if not isinstance(exercises, list):
             return False, []
-        names = [
-            str(ex.get("isim") or "").strip()
-            for ex in exercises
-            if isinstance(ex, dict)
-        ]
-        return True, names
+        return True, [ex for ex in exercises if isinstance(ex, dict)]
     return False, []
+
+
+def _weekday_workout(program: list, weekday_name: str) -> Tuple[bool, List[str]]:
+    """Return ``(is_workout, ordered_exercise_names)`` for ``weekday_name``.
+
+    Exercise names are the ordered ``isim`` values — the canonical,
+    order-preserving input to the versioned fingerprint.
+    """
+    is_workout, entries = _weekday_entries(program, weekday_name)
+    return is_workout, [str(ex.get("isim") or "").strip() for ex in entries]
 
 
 def compute_plan_snapshot(user_id: int, today: date) -> PlanSnapshot:
@@ -145,6 +159,59 @@ def fingerprint_for_program(program: Optional[list], weekday_name: str) -> Optio
         return None
     is_workout, names = _weekday_workout(program, weekday_name)
     return compute_fingerprint(names) if is_workout else None
+
+
+@dataclass(frozen=True)
+class PlannedWorkout:
+    """The CURRENT plan's workout for one weekday slot, read exactly once.
+
+    ``fingerprint`` is the same versioned digest the session stored at start, so
+    a caller can decide drift with :func:`models.fingerprints_match` instead of
+    inventing a second comparison. ``exercise_ids`` is that workout's ordered
+    canonical exercise identity list — the ONLY identities a checkpoint for this
+    session may name. Both are empty/``None`` when the slot is not a workout in
+    the current plan.
+    """
+    fingerprint: Optional[str]
+    exercise_ids: Tuple[str, ...]
+
+
+def planned_workout_for_slot(user_id: int, weekday_slot: Optional[str]) -> PlannedWorkout:
+    """Project the current plan's workout for ``weekday_slot`` (Sprint 14 PR2).
+
+    The browser transport has no opaque native ``workout_ref`` to re-resolve, so
+    this is how it names the canonical workout a session belongs to: the same
+    newest-plan selector, the same weekday traversal and the same fingerprint
+    algorithm the session recorded at start.
+
+    Canonical identity is verified against the exercise catalog, and any exercise
+    that is not resolvable (missing, unknown, or retired) collapses the WHOLE
+    workout to "no canonical identities" rather than yielding a partial allow-list
+    — the same fail-closed disposition the native read contract takes when a plan
+    cannot be projected. A partial list would silently narrow what a client is
+    allowed to record.
+    """
+    plan = _newest_plan(user_id)
+    if plan is None or not weekday_slot:
+        return PlannedWorkout(None, ())
+    program = _parse_program(plan)
+    if program is None:
+        return PlannedWorkout(None, ())
+    is_workout, entries = _weekday_entries(program, weekday_slot)
+    if not is_workout:
+        return PlannedWorkout(None, ())
+    fingerprint = compute_fingerprint(
+        str(ex.get("isim") or "").strip() for ex in entries)
+    try:
+        catalog = load_exercise_catalog()
+        identities = tuple(
+            resolve_exercise(
+                exercise_id=ex.get("exercise_id"), catalog=catalog).exercise_id
+            for ex in entries
+        )
+    except (ExerciseResolutionError, CatalogConfigurationError):
+        return PlannedWorkout(fingerprint, ())
+    return PlannedWorkout(fingerprint, identities)
 
 
 def current_plan_facts(user_id: int, weekday_slot: Optional[str]) -> CurrentPlanFacts:

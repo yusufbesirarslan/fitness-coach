@@ -30,6 +30,7 @@ from app.models import (
 from app.observability import current_request_id
 from app.timeutil import app_today
 
+from .checkpoint import load_snapshot
 from .models import (
     HEARTBEAT_COALESCE_SECONDS,
     STALE_NONE,
@@ -110,6 +111,13 @@ def _build_view(session, today: date) -> SessionView:
         relationship=relationship,
         stale_reason=stale_reason,
         resumable=resumable,
+        # Sprint 14 PR2: the durable execution progress #276 persists, published
+        # HERE so both server transports read it from one projection. The stored
+        # document is re-parsed rather than trusted as text, so a row that cannot
+        # be decoded projects as "no checkpoint" instead of making an owned
+        # session unreadable.
+        checkpoint_revision=int(session.checkpoint_revision or 0),
+        checkpoint=load_snapshot(session.checkpoint_data),
     )
 
 
@@ -248,8 +256,18 @@ def resume_session(user_id: int, public_id: str, *, today: Optional[date] = None
 
 
 def checkpoint_session(user_id: int, public_id: str) -> SessionResult:
-    """Replay-idempotent heartbeat. Touches ONLY ``last_activity_at``; a retry
-    inside the coalesce window is a success no-op, never a false conflict."""
+    """Replay-idempotent LIVENESS heartbeat. Touches ONLY ``last_activity_at``;
+    a retry inside the coalesce window is a success no-op, never a false
+    conflict.
+
+    NOT the durable progress authority, and since Sprint 14 PR2 no transport
+    treats it as one. Durable execution progress is
+    :func:`app.services.workout_session.execution.record_checkpoint`, which
+    carries a bounded full snapshot and a declared base revision and bumps
+    ``last_activity_at`` itself as part of its single conditional UPDATE. This
+    function records that the owner is still present; it records nothing about
+    what they did.
+    """
     now = datetime.utcnow()
     cutoff = now - timedelta(seconds=HEARTBEAT_COALESCE_SECONDS)
     if heartbeat(user_id, public_id, now, cutoff) > 0:
