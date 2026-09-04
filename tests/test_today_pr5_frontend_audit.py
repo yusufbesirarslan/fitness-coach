@@ -9,8 +9,15 @@ def _measure(**overrides):
         "today_mount_overflow": False,
         "today_state": "scheduled_not_started",
         "primary_action_count": 1,
+        "primary_action_label": "Start workout",
+        "primary_action_visible": True,
+        "primary_action_hit_testable": True,
         "primary_action_clipped": False,
         "secondary_action_count": 0,
+        "secondary_visible_count": 0,
+        "secondary_hit_testable": True,
+        "copy_overflow": [],
+        "actionbar_overlap": False,
         "raw_key_leak": [],
         "duplicate_primary_ids": False,
         "html_lang": "en",
@@ -22,7 +29,7 @@ def _measure(**overrides):
 def test_matrix_covers_every_required_viewport_locale_and_guidance_shape():
     cells = _cells()
 
-    assert len(cells) == 50
+    assert len(cells) == 60
     assert {cell["viewport"] for cell in cells} == {
         "320", "390", "768", "1024", "1366",
     }
@@ -33,6 +40,7 @@ def test_matrix_covers_every_required_viewport_locale_and_guidance_shape():
         "no_plan",
         "rest_day",
         "completed",
+        "error",
     }
     assert all(cell["partial_data"] for cell in cells if (
         cell["state"] == "scheduled_not_started"
@@ -43,21 +51,27 @@ def test_matrix_covers_every_required_viewport_locale_and_guidance_shape():
 def test_evaluator_accepts_primary_and_no_primary_states():
     primary = {
         "state": "scheduled_not_started", "locale": "en",
-        "want_primary": True,
+        "want_primary": True, "expected_primary_label": "Start workout",
     }
     no_primary = {
         "state": "rest_day", "locale": "tr", "want_primary": False,
+        "expected_primary_label": None,
     }
 
     assert _evaluate(primary, _measure()) == ("pass", [])
     assert _evaluate(no_primary, _measure(
         today_state="rest_day", primary_action_count=0,
-        secondary_action_count=1, html_lang="tr",
+        primary_action_label=None, primary_action_visible=False,
+        primary_action_hit_testable=False, secondary_action_count=1,
+        secondary_visible_count=1, html_lang="tr",
     )) == ("pass", [])
 
 
 def test_evaluator_rejects_overflow_duplicate_primary_raw_keys_and_dead_ends():
-    cell = {"state": "rest_day", "locale": "en", "want_primary": False}
+    cell = {
+        "state": "rest_day", "locale": "en", "want_primary": False,
+        "expected_primary_label": None,
+    }
 
     verdict, reasons = _evaluate(cell, _measure(
         today_state="rest_day",
@@ -68,6 +82,7 @@ def test_evaluator_rejects_overflow_duplicate_primary_raw_keys_and_dead_ends():
         today_mount_overflow=True,
         raw_key_leak=["today.brief.rest_day"],
         duplicate_primary_ids=True,
+        copy_overflow=["today-brief-line"], actionbar_overlap=True,
     ))
 
     assert verdict == "fail"
@@ -78,6 +93,26 @@ def test_evaluator_rejects_overflow_duplicate_primary_raw_keys_and_dead_ends():
     assert any("raw localization" in reason for reason in reasons)
     assert any("duplicate primary" in reason for reason in reasons)
     assert any("dead end" in reason for reason in reasons)
+    assert any("copy overflow" in reason for reason in reasons)
+    assert any("action bar" in reason for reason in reasons)
+
+
+def test_evaluator_rejects_an_invisible_or_unusable_primary_action():
+    cell = {
+        "state": "scheduled_not_started", "locale": "en",
+        "want_primary": True, "expected_primary_label": "Start workout",
+    }
+
+    verdict, reasons = _evaluate(cell, _measure(
+        primary_action_label="Wrong",
+        primary_action_visible=False,
+        primary_action_hit_testable=False,
+    ))
+
+    assert verdict == "fail"
+    assert any("primary label" in reason for reason in reasons)
+    assert any("not visible" in reason for reason in reasons)
+    assert any("not hit-testable" in reason for reason in reasons)
 
 
 def test_only_the_intentionally_injected_partial_read_console_error_is_ignored():

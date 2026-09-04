@@ -33,8 +33,35 @@ STATE_SCENARIOS = {
     "no_plan": "social-empty",
     "rest_day": "active-rest-day",
     "completed": "completed-workout",
+    "error": "wearable-disconnected",
 }
 PRIMARY_STATES = {"in_progress", "scheduled_not_started", "no_plan"}
+
+PRIMARY_LABELS = {
+    "en": {
+        "in_progress": "Resume workout",
+        "scheduled_not_started": "Start workout",
+        "no_plan": "Create your plan",
+    },
+    "tr": {
+        "in_progress": "Antrenmana devam et",
+        "scheduled_not_started": "Antrenmanı başlat",
+        "no_plan": "Planını oluştur",
+    },
+}
+
+SETTLED_JS = r"""
+() => {
+  const progress = document.getElementById('today-progress-line');
+  const calories = document.getElementById('today-stat-calories');
+  const error = document.getElementById('today-status-error');
+  const progressSettled = !!progress &&
+    !/^(Loading|Yükleniyor)/.test(progress.textContent.trim());
+  const statusSettled = !!calories &&
+    (calories.textContent.trim() !== '—' || (error && !error.hidden));
+  return document.readyState === 'complete' && progressSettled && statusSettled;
+}
+"""
 
 
 MEASURE_JS = r"""
@@ -43,16 +70,51 @@ MEASURE_JS = r"""
   const mount = document.getElementById('today-page');
   const primary = [...document.querySelectorAll('[data-today-primary]')];
   const secondary = [...document.querySelectorAll('.today-secondary-link')];
+  const actionBar = document.querySelector('.action-bar');
   const bodyText = document.body ? document.body.innerText : '';
   const ids = primary.map((el) => el.id).filter(Boolean);
+  const visible = (el) => {
+    if (!el) return false;
+    const style = getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+      el.getClientRects().length > 0;
+  };
+  const hitTestable = (el) => {
+    if (!visible(el)) return false;
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(innerWidth - 1, rect.left + rect.width / 2));
+    const y = Math.max(0, Math.min(innerHeight - 1, rect.top + rect.height / 2));
+    const hit = document.elementFromPoint(x, y);
+    return !!hit && (hit === el || el.contains(hit));
+  };
+  const copyOverflow = [...document.querySelectorAll(
+    '.today-brief-line, .today-brief-detail, .today-cta, .today-secondary-link, .today-stat-val, .today-inline-error'
+  )].filter((el) => {
+    const style = getComputedStyle(el);
+    const verticalClip = ['hidden', 'clip'].includes(style.overflowY) &&
+      el.scrollHeight > el.clientHeight + 1;
+    return el.scrollWidth > el.clientWidth + 1 || verticalClip;
+  }).map((el) => el.className || el.id || el.tagName);
+  const finalScrollY = Math.max(0, root.scrollHeight - innerHeight);
+  const lastContent = mount ? [...mount.children].filter(visible).at(-1) : null;
+  const finalContentBottom = lastContent
+    ? lastContent.getBoundingClientRect().bottom - finalScrollY : 0;
+  const actionBarTop = actionBar && visible(actionBar)
+    ? actionBar.getBoundingClientRect().top : innerHeight;
   return {
     doc_horizontal_overflow: root.scrollWidth > root.clientWidth + 1,
     today_mount_overflow: !!mount && mount.scrollWidth > mount.clientWidth + 1,
     today_state: mount ? mount.getAttribute('data-today-state') : null,
     primary_action_count: primary.length,
     primary_action_label: primary[0] ? primary[0].textContent.trim() : null,
+    primary_action_visible: primary.length === 1 && visible(primary[0]),
+    primary_action_hit_testable: primary.length === 1 && hitTestable(primary[0]),
     primary_action_clipped: primary.some((el) => el.scrollWidth > el.clientWidth + 1),
     secondary_action_count: secondary.length,
+    secondary_visible_count: secondary.filter(visible).length,
+    secondary_hit_testable: secondary.length > 0 && secondary.every(hitTestable),
+    copy_overflow: copyOverflow,
+    actionbar_overlap: finalContentBottom > actionBarTop + 1,
     raw_key_leak: [...new Set(bodyText.match(/\b(?:today|nav|progress)\.[a-z0-9_.]+/g) || [])],
     duplicate_primary_ids: ids.length !== new Set(ids).size,
     summary_error_visible: !!document.querySelector('#today-status-error:not([hidden])'),
@@ -70,6 +132,7 @@ def _cells() -> list[dict]:
             "viewport": viewport,
             "locale": locale,
             "want_primary": state in PRIMARY_STATES,
+            "expected_primary_label": PRIMARY_LABELS[locale].get(state),
             "partial_data": (
                 state == "scheduled_not_started" and viewport == "390"
             ),
@@ -93,6 +156,14 @@ def _evaluate(cell: dict, measured: dict) -> tuple[str, list[str]]:
     if measured["primary_action_count"] != wanted:
         reasons.append(
             f"primary-action count={measured['primary_action_count']} (want {wanted})")
+    if measured["primary_action_label"] != cell["expected_primary_label"]:
+        reasons.append(
+            f"primary label={measured['primary_action_label']!r} "
+            f"(want {cell['expected_primary_label']!r})")
+    if cell["want_primary"] and not measured["primary_action_visible"]:
+        reasons.append("primary action is not visible")
+    if cell["want_primary"] and not measured["primary_action_hit_testable"]:
+        reasons.append("primary action is not hit-testable")
     if measured["primary_action_clipped"]:
         reasons.append("primary action label clipped")
     if measured["raw_key_leak"]:
@@ -102,6 +173,16 @@ def _evaluate(cell: dict, measured: dict) -> tuple[str, list[str]]:
         reasons.append("duplicate primary action ids")
     if not cell["want_primary"] and measured["secondary_action_count"] < 1:
         reasons.append("no-primary state is a dead end")
+    if (not cell["want_primary"]
+            and measured["secondary_visible_count"]
+            != measured["secondary_action_count"]):
+        reasons.append("secondary continuation is not visible")
+    if not cell["want_primary"] and not measured["secondary_hit_testable"]:
+        reasons.append("secondary continuation is not hit-testable")
+    if measured["copy_overflow"]:
+        reasons.append(f"copy overflow: {measured['copy_overflow']}")
+    if measured["actionbar_overlap"]:
+        reasons.append("content overlaps the fixed action bar at final scroll")
     if measured["html_lang"] != cell["locale"]:
         reasons.append(
             f"html lang={measured['html_lang']} (want {cell['locale']})")
@@ -135,6 +216,26 @@ def _prepare_resume_state(app, clocks) -> None:
         db.session.expire_all()
 
 
+def _install_error_scenario(app) -> None:
+    """Make one synthetic user exercise Today's honest read-failure view."""
+    from app.blueprints import tracking
+    from app.models import User
+    from app.today_presenter import TodayFacts
+
+    with app.app_context():
+        error_user_id = User.query.filter_by(
+            username="audit-wearable-disconnected").one().id
+    original = tracking.gather_today_facts
+
+    def audit_gather_today_facts(user_id):
+        if user_id == error_user_id:
+            return TodayFacts(read_ok=False, has_active_plan=False,
+                              workout_completed_today=False)
+        return original(user_id)
+
+    tracking.gather_today_facts = audit_gather_today_facts
+
+
 def _set_language(app, scenario: str, locale: str) -> None:
     from app.extensions import db
     from app.models import User
@@ -163,6 +264,7 @@ def run(output_dir: Path) -> dict:
     seed_summary = seed_all(app)
     clocks = app.extensions["frontend_audit"]["scenario_clocks"]
     _prepare_resume_state(app, clocks)
+    _install_error_scenario(app)
 
     results = []
     with AuditServer(app) as server, sync_playwright() as pw:
@@ -176,6 +278,9 @@ def run(output_dir: Path) -> dict:
                     clocks[cell["scenario"]]["fixed_current_datetime"]))
                 context.route("**/*", lambda route, request: _block_external(
                     route, request, server.base_url))
+                context.route("**/leaderboard/reward-check", lambda route: route.fulfill(
+                    status=200, body='{"show":false}',
+                    content_type="application/json"))
                 if cell["partial_data"]:
                     context.route("**/meal-log/today", lambda route: route.fulfill(
                         status=503, body='{"error":"audit partial read"}',
@@ -199,7 +304,7 @@ def run(output_dir: Path) -> dict:
                     response = page.goto(
                         f"{server.base_url}/__audit__/login/{cell['scenario']}",
                         wait_until="domcontentloaded", timeout=20000)
-                    page.wait_for_timeout(700)
+                    page.wait_for_function(SETTLED_JS, timeout=10000)
                     measured = page.evaluate(MEASURE_JS)
                     verdict, reasons = _evaluate(cell, measured)
                     if response and response.status >= 500:

@@ -20,6 +20,7 @@ from app.services.workout_state.models import (
     PRIMARY_SCHEDULED_NOT_STARTED,
     PRIMARY_UNSCHEDULED_COMPLETED,
     PRIMARY_UNSCHEDULED_EXECUTION,
+    CANONICAL_PRIMARY_STATES,
 )
 from app.today_guidance import (
     CANDIDATE_CREATE_PLAN,
@@ -146,6 +147,8 @@ def test_supported_pairs_cover_the_canonical_primary_vocabulary_exactly():
     }
 
     assert set(SUPPORTED_STATE_ACTIONS) == expected
+    assert {state for state, _action in SUPPORTED_STATE_ACTIONS} == set(
+        CANONICAL_PRIMARY_STATES)
 
 
 def test_decision_api_cannot_accept_lower_authority_domain_inputs():

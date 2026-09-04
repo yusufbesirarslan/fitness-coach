@@ -102,6 +102,21 @@ PRIMARY_UNSCHEDULED_COMPLETED = "unscheduled_completed"
 PRIMARY_NO_PLAN = "no_plan"
 PRIMARY_NEEDS_ATTENTION = "needs_attention"
 
+# Additive canonical vocabulary guard for consumers that must be total over the
+# dominant state dimension.  The owner exports the set; consumers still own how
+# each state is presented or acted upon.
+CANONICAL_PRIMARY_STATES = (
+    PRIMARY_IN_PROGRESS,
+    PRIMARY_REST_DAY,
+    PRIMARY_SCHEDULED_NOT_STARTED,
+    PRIMARY_EXECUTION_RECORDED,
+    PRIMARY_COMPLETED,
+    PRIMARY_UNSCHEDULED_EXECUTION,
+    PRIMARY_UNSCHEDULED_COMPLETED,
+    PRIMARY_NO_PLAN,
+    PRIMARY_NEEDS_ATTENTION,
+)
+
 # ── Anomaly categories (safe operational labels — never PII/health data) ──────
 ANOMALY_SCHEDULE_UNPARSEABLE = "schedule_unparseable"
 ANOMALY_COMPLETION_MARKER_MISMATCH = "completion_marker_mismatch"
