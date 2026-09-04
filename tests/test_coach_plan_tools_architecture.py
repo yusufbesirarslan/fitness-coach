@@ -156,6 +156,13 @@ def test_the_published_schema_and_the_parser_agree_field_for_field():
     The schema is what the provider sees; ``TOOL_ARGUMENTS`` is what the server
     accepts. Two hand-maintained lists is how "the model keeps sending an
     argument that gets rejected" happens, and it is invisible in a diff.
+
+    ``required`` is compared against what the server ACTUALLY requires — the
+    command's requirements minus what it grounds for itself. The earlier
+    equality here missed the live defect entirely: ``sets``/``reps`` were
+    published as required for ``add`` while the parser treated them as
+    groundable, so the two lists "agreed" and the model still refused to call
+    a tool the server was ready to accept.
     """
     for definition in _ALL_PLAN_TOOL_DEFS:
         name = definition["name"]
@@ -167,8 +174,32 @@ def test_the_published_schema_and_the_parser_agree_field_for_field():
             assert name not in parser.TOOL_ARGUMENTS
             continue
         declared_required, declared_optional = parser.TOOL_ARGUMENTS[name]
-        assert set(declared_required) == required, name
+        groundable = parser.GROUNDABLE[name]
+        assert set(declared_required) - groundable == required, name
         assert set(declared_required) | set(declared_optional) == properties, name
+        assert groundable <= set(declared_required) | set(declared_optional), name
+
+
+def test_nothing_the_server_grounds_is_published_as_required():
+    """A field mandatory to the model and optional to the server is the bug.
+
+    Told "sets and reps are required", the model withholds the call and
+    interrogates the user itself — and a call the model never makes is a
+    partial request the server never gets to store. The next turn then runs on
+    the model's memory alone, which is how "add Walking Lunges with 4 sets" →
+    "15" came back asking for sets again.
+    """
+    for definition in schemas.PLAN_MUTATION_TOOL_DEFS:
+        name = definition["name"]
+        if name == schemas.UNDO_TOOL:
+            continue
+        required = set(definition["parameters"].get("required", []))
+        assert not (required & schemas.SERVER_GROUNDABLE[name]), name
+
+
+def test_the_parser_and_the_schema_share_one_groundability_declaration():
+    """Two copies would drift back apart on the next edit."""
+    assert parser.GROUNDABLE is schemas.SERVER_GROUNDABLE
 
 
 def test_every_accepted_field_has_a_declared_type_in_the_parser():

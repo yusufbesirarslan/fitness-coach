@@ -63,6 +63,35 @@ _CONFIRMATION_REQUEST_PATTERNS = (
     r"\b(?:ekle|cikar|degistir)\w* mi\b",
 )
 
+#: Interrogatives that ask the user to SUPPLY a value rather than to approve
+#: one. Their presence exempts a reply from the confirmation guard below.
+#:
+#: "Which day would you like me to add it to?" matches both pattern sets above
+#: — "add" plus "would you like ... to" — and was therefore replaced wholesale
+#: by "please repeat the exercise, day, sets, and reps". That is the opposite
+#: of what the guard is for: the model was not claiming a proposal exists, it
+#: was asking for the one discriminator the server still needs, and discarding
+#: the question made the user retype a request they had already made.
+#:
+#: Asking for a value and inviting a bare "yes" are different acts, and this is
+#: the difference: "Shall I add Dumbbell Curl to Monday?" names every value and
+#: wants approval — still suppressed; "Which day?" names none and wants an
+#: answer — allowed through. The execution boundary is unaffected either way:
+#: a bare "yes" with nothing pending is still refused by
+#: ``should_block_plan_mutation``, which is the guard that actually prevents a
+#: mutation, not this one.
+#: Narrow on purpose. A bare ``what``/``kac\w*`` would exempt "what a great
+#: week" and "kaçırdın" (you missed one), quietly retiring the guard instead of
+#: correcting it; only the forms that actually ask for one of the fields the
+#: server grounds are listed.
+_INFORMATION_REQUEST_PATTERNS = (
+    r"\bwhich\b",
+    r"\bwhat (?:day|weekday|exercise|sets?|reps?)\b",
+    r"\bhow many\b",
+    r"\bhangi\w*\b",
+    r"\bkac\b",
+)
+
 
 def resolve_pending_turn(user_id, language="tr"):
     """Consume a pending confirmation from this turn's intent, or ask.
@@ -264,6 +293,11 @@ def _asks_for_plan_confirmation(text):
     normalized = "".join(
         char for char in normalized if not unicodedata.combining(char)
     ).casefold().replace("ı", "i")
+    if any(re.search(pattern, normalized)
+           for pattern in _INFORMATION_REQUEST_PATTERNS):
+        # A request for a missing discriminator claims no pending proposal, so
+        # there is no false claim to suppress — see the pattern's own note.
+        return False
     return (
         any(re.search(pattern, normalized)
             for pattern in _PLAN_CHANGE_PATTERNS)

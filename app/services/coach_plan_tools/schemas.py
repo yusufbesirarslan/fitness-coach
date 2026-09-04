@@ -14,6 +14,16 @@ snapshots are server-owned and appear nowhere in this module (brief §12), which
 ``tests/test_coach_plan_tools_architecture.py`` enforces structurally rather
 than by reading these docstrings.
 
+**Required means required OF THE MODEL.** A property the server resolves for
+itself is never published as ``required``, however essential it is to the
+command. ``SERVER_GROUNDABLE`` below is the single declaration of which ones
+those are, and both the published ``required`` list and the parser's
+``GROUNDABLE`` table are derived from it. Two hand-written copies is how a
+tool ends up mandatory to the model and optional to the server: the model then
+obeys the schema, asks the user instead of calling, and the partial request the
+user already made is never stored — which is exactly how "add Walking Lunges
+with 4 sets" came back asking for sets again (§37).
+
 **Bounds come from the domain.** Every limit below is imported from
 ``plan_mutation.validation`` — the same constants the mutation boundary rejects
 against, which in turn reuse the generator's ``response_validator``. A second
@@ -84,6 +94,44 @@ _REPS_PROPERTY = {
 }
 
 
+#: ``{tool name: properties the SERVER resolves for itself}``.
+#:
+#: The single source of truth for groundability. ``parser.GROUNDABLE`` imports
+#: this, and the published ``required`` list below is this set subtracted from
+#: the command's real requirements — so a property cannot be mandatory to the
+#: model and optional to the server. Kept deliberately narrow:
+#:
+#: * ``day`` on add/replace/update, because ``workout_targets`` resolves a
+#:   weekday, a nickname ("my leg workout") or a unique exercise slot against
+#:   the persisted plan, and ``grounding`` asks the user when it cannot;
+#: * ``sets``/``reps`` on add, because grounding stores the half the user
+#:   already gave and asks for the other half.
+#:
+#: ``remove`` and ``move`` ground nothing: neither has a continuation path
+#: (``grounding._OPERATION_TOOLS`` cannot re-issue them), so a stored
+#: clarification for one could never be completed. ``exercise``,
+#: ``replacement`` and ``target_day`` are never groundable — a target nobody
+#: named is the one thing this boundary exists to refuse.
+SERVER_GROUNDABLE = {
+    REPLACE_EXERCISE_TOOL: frozenset({"day"}),
+    ADD_EXERCISE_TOOL: frozenset({"day", "sets", "reps"}),
+    UPDATE_PRESCRIPTION_TOOL: frozenset({"day"}),
+    REMOVE_EXERCISE_TOOL: frozenset(),
+    MOVE_DAY_TOOL: frozenset(),
+}
+
+
+def _model_required(tool_name, *fields):
+    """The subset of ``fields`` the MODEL must send.
+
+    Everything the server grounds is dropped: publishing it as required tells
+    the model to withhold the call and interrogate the user itself, and a call
+    the model never makes is a request the server never gets to store.
+    """
+    groundable = SERVER_GROUNDABLE[tool_name]
+    return [field for field in fields if field not in groundable]
+
+
 PLAN_MUTATION_TOOL_DEFS = (
     {
         "name": REPLACE_EXERCISE_TOOL,
@@ -104,7 +152,8 @@ PLAN_MUTATION_TOOL_DEFS = (
                 "sets": _SETS_PROPERTY,
                 "reps": _REPS_PROPERTY,
             },
-            "required": ["day", "exercise", "replacement"],
+            "required": _model_required(
+                REPLACE_EXERCISE_TOOL, "day", "exercise", "replacement"),
             "additionalProperties": False,
         },
     },
@@ -112,8 +161,12 @@ PLAN_MUTATION_TOOL_DEFS = (
         "name": ADD_EXERCISE_TOOL,
         "description": (
             "Kullanıcının aktif antrenman planında BİR güne BİR egzersiz "
-            "ekler. set ve tekrar ZORUNLUDUR — kullanıcı söylemediyse önce "
-            "sor, varsayılan uydurma. Dinlenme gününe egzersiz eklenemez. "
+            "ekler. Kullanıcının SÖYLEDİĞİ gün/set/tekrar neyse onu gönder; "
+            "söylemediği alanı HİÇ GÖNDERME ve aracı YİNE DE çağır — eksiği "
+            "sunucu kullanıcıya sorar, verdiğini saklar. Değer UYDURMA ve "
+            "aracı çağırmak yerine kendin sorma: sorduğun turda sunucu "
+            "kullanıcının verdiği kısmı kaydedemez. Dinlenme gününe egzersiz "
+            "eklenemez. "
             + _ONLY_ON_EXPLICIT_REQUEST),
         "parameters": {
             "type": "object",
@@ -127,7 +180,8 @@ PLAN_MUTATION_TOOL_DEFS = (
                 "sets": _SETS_PROPERTY,
                 "reps": _REPS_PROPERTY,
             },
-            "required": ["day", "exercise", "sets", "reps"],
+            "required": _model_required(
+                ADD_EXERCISE_TOOL, "day", "exercise", "sets", "reps"),
             "additionalProperties": False,
         },
     },
@@ -143,7 +197,8 @@ PLAN_MUTATION_TOOL_DEFS = (
                 "day": _DAY_PROPERTY,
                 "exercise": _TARGET_EXERCISE_PROPERTY,
             },
-            "required": ["day", "exercise"],
+            "required": _model_required(
+                REMOVE_EXERCISE_TOOL, "day", "exercise"),
             "additionalProperties": False,
         },
     },
@@ -161,7 +216,8 @@ PLAN_MUTATION_TOOL_DEFS = (
                 "sets": _SETS_PROPERTY,
                 "reps": _REPS_PROPERTY,
             },
-            "required": ["day", "exercise"],
+            "required": _model_required(
+                UPDATE_PRESCRIPTION_TOOL, "day", "exercise"),
             "additionalProperties": False,
         },
     },
@@ -179,7 +235,8 @@ PLAN_MUTATION_TOOL_DEFS = (
                 "target_day": dict(_DAY_PROPERTY,
                                    description="İçeriğin taşınacağı gün."),
             },
-            "required": ["day", "target_day"],
+            "required": _model_required(
+                MOVE_DAY_TOOL, "day", "target_day"),
             "additionalProperties": False,
         },
     },
