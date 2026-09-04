@@ -2,7 +2,7 @@
 
 Runs against the hermetic frontend-audit app and its synthetic SQLite data.
 The matrix covers every requested viewport and locale for the three primary
-guidance choices and two representative no-primary states.  The 390px
+guidance choices and three no-primary states (rest, completed, and error).  The 390px
 scheduled cells additionally fail one supporting nutrition read to prove that
 late, partial data cannot replace or duplicate the server-rendered decision.
 """
