@@ -36,10 +36,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.services.workout_state.models import (
-    ACTION_RESUME, ACTION_START, PRIMARY_COMPLETED, PRIMARY_EXECUTION_RECORDED,
+    PRIMARY_COMPLETED, PRIMARY_EXECUTION_RECORDED,
     PRIMARY_IN_PROGRESS, PRIMARY_NEEDS_ATTENTION, PRIMARY_NO_PLAN,
     PRIMARY_REST_DAY, PRIMARY_SCHEDULED_NOT_STARTED,
     PRIMARY_UNSCHEDULED_COMPLETED, PRIMARY_UNSCHEDULED_EXECUTION)
+from app.today_guidance import (
+    CANDIDATE_CREATE_PLAN,
+    CANDIDATE_RESUME_WORKOUT,
+    CANDIDATE_START_WORKOUT,
+    STATE_ERROR,
+    decide_today_guidance,
+)
 
 # ── Existing canonical routes (no route is invented here; these mirror the
 #    paths already owned by app/nav.py). ──
@@ -56,9 +63,6 @@ STATE_UNSCHEDULED_EXECUTION = PRIMARY_UNSCHEDULED_EXECUTION
 STATE_COMPLETED = PRIMARY_COMPLETED
 STATE_UNSCHEDULED_COMPLETED = PRIMARY_UNSCHEDULED_COMPLETED
 STATE_NEEDS_ATTENTION = PRIMARY_NEEDS_ATTENTION
-
-# NOT a canonical product state: the honest "canonical read failed" state.
-STATE_ERROR = "error"
 
 #: Every state Today can render. A ``primary_state`` outside this set is contract
 #: drift and is presented as ``STATE_ERROR``.
@@ -213,6 +217,7 @@ class TodayView:
     """
 
     state: str
+    brief_key: str
     primary: "Action | None"
     secondary: tuple = ()
     plan: "TodayPlanSummary | None" = None
@@ -253,25 +258,23 @@ _HREF_BY_LABEL = {
 }
 
 
-def _primary_for(state: str, action: str) -> "Action | None":
-    """The single dominant CTA for a state, or ``None``.
+_PRIMARY_PRESENTATION = {
+    CANDIDATE_RESUME_WORKOUT: (
+        "today.action.resume_workout", _ROUTE_PLAN),
+    CANDIDATE_START_WORKOUT: (
+        "today.action.start_workout", _ROUTE_PLAN),
+    CANDIDATE_CREATE_PLAN: (
+        "today.action.create_plan", _ROUTE_PLAN),
+}
 
-    The rule is the canonical contract's own ``action`` dimension — this module
-    adds no ranking heuristic and no time-of-day logic (both are PR5's, and
-    neither exists in the repository today):
 
-      * ``start``  → start today's workout
-      * ``resume`` → resume the persisted in-progress session
-      * ``none`` / ``blocked`` → no dominant CTA, EXCEPT ``no_plan``, where the
-        one honest next step is to create a plan (the repository's existing rule).
-    """
-    if action == ACTION_START:
-        return Action("today.action.start_workout", _ROUTE_PLAN, primary=True)
-    if action == ACTION_RESUME:
-        return Action("today.action.resume_workout", _ROUTE_PLAN, primary=True)
-    if state == STATE_NO_PLAN:
-        return Action("today.action.create_plan", _ROUTE_PLAN, primary=True)
-    return None
+def _primary_for_kind(kind: "str | None") -> "Action | None":
+    """Present the decision layer's winning semantic action, if any."""
+    presentation = _PRIMARY_PRESENTATION.get(kind)
+    if presentation is None:
+        return None
+    label_key, href = presentation
+    return Action(label_key, href, primary=True)
 
 
 def _secondary_for(state: str, primary: "Action | None") -> tuple:
@@ -300,27 +303,26 @@ def _insight_for(kind, code) -> "TodayInsight | None":
 
 def build_today_view(facts: TodayFacts) -> TodayView:
     """Pure mapping: canonical facts → presentation view. No I/O, no rules."""
-    # Honest failure: a canonical read failed. Do NOT present a populated state,
-    # do NOT convert to no_plan, do NOT claim the state is current. Offer only a
-    # neutral secondary "Open Plan" (safe existing route); render no dominant CTA.
-    if not facts.read_ok:
+    decision = decide_today_guidance(
+        read_ok=facts.read_ok,
+        primary_state=facts.primary_state,
+        action=facts.action,
+    )
+    state = decision.state
+    brief_key = f"today.brief.{decision.emphasis}"
+    if state == STATE_ERROR:
+        # Read failure, contract drift, and incompatible state/action dimensions
+        # all fail closed. Never publish plan or insight content beside a state
+        # that could not be validated as one coherent canonical snapshot.
         return TodayView(
-            state=STATE_ERROR, primary=None,
+            state=STATE_ERROR, brief_key=brief_key, primary=None,
             secondary=_secondary_for(STATE_ERROR, None),
         )
 
-    state = facts.primary_state
-    if state not in TODAY_STATES or state == STATE_ERROR:
-        # Contract drift: the canonical resolver emitted a state this presenter
-        # does not understand. Surface unavailability rather than guessing.
-        return TodayView(
-            state=STATE_ERROR, primary=None,
-            secondary=_secondary_for(STATE_ERROR, None),
-        )
-
-    primary = _primary_for(state, facts.action)
+    primary = _primary_for_kind(decision.primary_kind)
     return TodayView(
         state=state,
+        brief_key=brief_key,
         primary=primary,
         secondary=_secondary_for(state, primary),
         plan=facts.plan,

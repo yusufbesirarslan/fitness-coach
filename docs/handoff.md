@@ -5341,3 +5341,84 @@ or backend changes.
 
 PR2 implements the chrome in `docs/PRODUCT_IA.md` §D.3 / §K. Do not reopen the
 four primaries, the web URL lock, or the ownership matrix.
+# UX-2 PR5 — Today State-Aware Guidance Orchestration
+
+## Baseline and outcome
+
+PR5 branches from `origin/main` at `ab178830`, the UX-2 PR4 squash merge. No
+newer main commits required reconciliation. PR4's single Home (`/` →
+`today.html`), canonical workout vocabulary, four-primary navigation, deleted
+legacy dashboard, and historical/non-selecting `UIUX_TODAY_V2_ENABLED` contract
+remain unchanged.
+
+The new pure `app/today_guidance.py` layer answers one bounded question: which
+already-authoritative action deserves primary emphasis? It performs no I/O and
+accepts only `read_ok`, canonical workout `primary_state`, and canonical workout
+`action`. Facts still come from `today_facts` and `workout_state`; the presenter
+still owns localization keys and routes; Jinja renders the supplied view; JS
+only formats and hydrates secondary values.
+
+## Candidate and priority contract
+
+| Priority | Candidate | Exact eligibility | Destination |
+|---|---|---|---|
+| 10 | Resume Workout | `in_progress` + `resume` | `/training` |
+| 20 | Start Workout | `scheduled_not_started` + `start` | `/training` |
+| 30 | Create Plan | `no_plan` + `none` | `/training` |
+| fallback | no primary | every other valid canonical pair | existing subordinate Plan/Progress continuation |
+
+The precedence function is independently mutation-tested with deliberately
+competing candidates. Swapping Resume below Start makes the test fail. The
+runtime compatibility table is total across all nine canonical primary states.
+It prevents action strings from being trusted independently: Start on a
+completed/rest state, Resume on a scheduled state, an unknown state, or a read
+failure produces the honest non-canonical `error` view with no dominant CTA.
+This is fail-closed contract-drift handling, not a second workout state.
+
+State behavior remains truthful: rest is rest; recorded execution is not
+completion or a resumable session; completed states never regain Start/Resume;
+`needs_attention` remains blocked; no-primary states retain a valid secondary
+continuation. `TodayView.primary` remains one `Action | None`, so multiple
+dominant CTAs are structurally impossible.
+
+## Authority and deferred signals
+
+- Workout state/action: **USED FOR RANKING**, verbatim from
+  `resolve_workout_state`.
+- Active plan: **USED THROUGH THE CANONICAL `no_plan` STATE**; Today does not
+  independently infer plan state.
+- Plan focus/duration/exercise count: **SUPPORTING COPY ONLY**, from the bounded
+  canonical serializer.
+- Axis Insight: **SUPPORTING ONLY**, verbatim Progress code/copy and fail-soft.
+- Nutrition totals/target: **SUPPORTING ONLY**, still hydrated from the
+  canonical `/meal-log/today` endpoint; they cannot rewrite server guidance.
+- Check-in due: **DEFERRED** — only history/timestamps exist; no cadence/due
+  authority exists.
+- Recovery/readiness: **DEFERRED** — no canonical state exists.
+- Daypart ranking: **DEFERRED** — `app_now()` is an authoritative Istanbul
+  clock, but no two eligible lower-priority actions require a daypart tie-break.
+- Nutrition urgency: **DEFERRED** — targets/totals do not authorize “eat now,”
+  “behind,” meal timing, or a Log Food priority predicate.
+
+The full authority/freshness/failure matrix is in
+`docs/superpowers/specs/2026-09-04-ux2-pr5-today-guidance-orchestration-design.md`.
+
+## Failure, client boundary, and performance
+
+Workout authority failure cannot be masked by Nutrition or Progress content.
+Secondary insight failure removes only the insight. Later Nutrition/water/
+check-in hydration failures preserve unknown values and cannot alter the
+server-rendered brief or action. Missing remains distinct from zero, complete,
+and rest.
+
+`templates/today.html` now renders a complete server-supplied `brief_key`.
+`static/today.js` contains no candidate vocabulary, priority, or state-selection
+branch. The pure orchestration adds zero database queries, HTTP requests,
+provider calls, LLM calls, or history scans; first-render request behavior is
+unchanged from PR4.
+
+## Scope and rollback
+
+No Today visual redesign, Coach CTA, navigation change, Training rule/mutation,
+Nutrition target rule, Progress algorithm, schema/migration, auth behavior,
+feature flag, or mobile API expansion. Rollback is git revert and deploy.

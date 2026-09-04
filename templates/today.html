@@ -50,7 +50,7 @@
      zaten bildiği şeyi söyler. Plan detayı YALNIZCA kanonik projeksiyon bugün
      için yayımlanabilir bir gün döndüyse eklenir. #}
   <section class="today-brief" aria-labelledby="today-brief-line">
-    <h1 class="today-brief-line" id="today-brief-line">{{ t('today.brief.' ~ today.state) }}</h1>
+    <h1 class="today-brief-line" id="today-brief-line">{{ t(today.brief_key) }}</h1>
     {% if today.plan %}
       <p class="today-brief-detail">
         {%- if today.plan.focus %}<span class="today-brief-focus">{{ today.plan.focus }}</span>{% endif -%}
