@@ -1,3 +1,19 @@
+# UX-3 PR1 — Plan Domain Convergence Discovery
+
+Date: 2026-09-05
+
+Verdict: keep `/training` as the canonical primary **Plan** route and evolve it
+behind `UIUX_PLAN_V2_ENABLED` into a lightweight overview that places Training,
+Nutrition (`/nutrition`), Supplements (`/supplements`), and future Recovery.
+The existing `plan.html` is not the target unchanged: it lacks workout
+execution and remains Training-only. Plan owns placement, not business logic;
+canonical training plan/state/session/completion/Coach-mutation, MealLog/
+nutrition-target/provider, and Supplement CRUD authorities remain unchanged.
+No `/plan`, schema/API/route/flag behavior, visual redesign, mobile edit, or
+production code change belongs to PR1. Exact next change: **UX-3 PR2 — Plan
+shell and state-action parity**. Full contract:
+`docs/PLAN_DOMAIN_CONVERGENCE.md`.
+
 # Sprint 11 PR2 — Canonical Training Preference Contract
 
 Date: 2026-08-19
