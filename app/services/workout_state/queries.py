@@ -153,6 +153,7 @@ def load_session_facts(user_id: int, today: date) -> ActiveSessionFacts:
         workout_date=view.workout_date,
         relationship=view.relationship,
         stale_reason=view.stale_reason,
+        execution_view=view,
     )
 
 

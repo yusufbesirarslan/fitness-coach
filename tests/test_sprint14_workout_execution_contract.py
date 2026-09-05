@@ -290,7 +290,7 @@ def test_browser_closes_an_open_draft_when_persistence_is_blocked():
     blocked = source[source.index("function renderTrainingBlocked()"):
                      source.index("// Plan text", source.index(
                          "function renderTrainingBlocked()"))]
-    assert "if (typeof _session !== 'undefined' && _session) closeSession(true);" in blocked
+    assert "if (typeof _session !== 'undefined' && _session) discardSessionDraft();" in blocked
 
 
 def test_a_corrupt_stored_snapshot_never_makes_an_owned_session_unreadable(

@@ -12,10 +12,17 @@ class PlanSerializationError(ValueError):
 
 
 def workout_state_payload(snapshot):
-    """Return the one shared status envelope without performing any reads."""
+    """Compose decision facts with the canonical execution view, without reads.
+
+    The query layer already loaded this SessionView in the coherent snapshot.
+    Keep state classification independent of checkpoint/identity serialization.
+    """
+    state = snapshot.to_dict()
+    if state.get("session") is not None and snapshot.execution_view is not None:
+        state["session"] = {**snapshot.execution_view.to_dict(), **state["session"]}
     return {
         "completed": snapshot.completed_today,
-        "state": snapshot.to_dict(),
+        "state": state,
     }
 
 

@@ -354,12 +354,12 @@ function dayShort(v) {
                             reconciliationHandled = true;
                         }
                     } catch (error) {
-                        closeSession(true);
+                        discardSessionDraft();
                         showToast(__t('training.progress_unavailable'), 'error');
                         reconciliationHandled = true;
                     }
                 } else {
-                    closeSession(true);
+                    discardSessionDraft();
                     var pump = document.getElementById('pump-check-modal');
                     if (pump && pump.classList.contains('active')) closePumpCheck();
                     showToast(__t('training.progress_unavailable'), 'error');
@@ -376,7 +376,7 @@ function dayShort(v) {
     }
 
     function renderTrainingBlocked() {
-        if (typeof _session !== 'undefined' && _session) closeSession(true);
+        if (typeof _session !== 'undefined' && _session) discardSessionDraft();
         var pump = document.getElementById('pump-check-modal');
         if (pump && pump.classList.contains('active')) closePumpCheck();
         activePlan = null;
@@ -608,7 +608,7 @@ function dayShort(v) {
         var session = currentWorkoutState && currentWorkoutState.session;
         if (!workoutStateClient || !session || session.status !== 'active') return;
         workoutStateClient.stopCheckpointing();
-        closeSession(true);
+        discardSessionDraft();
         await workoutStateClient.mutate(
             '/workout/session/' + encodeURIComponent(session.public_id) + '/abandon',
             { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -642,14 +642,19 @@ function dayShort(v) {
         setTimeout(function () { _focusFirstIn(v); }, 50);
     }
 
-    function closeSession(discardDraft) {
+    function closeSession() {
         document.getElementById('session-view').classList.remove('open');
         document.body.style.overflow = '';
         stopRestTimer();            // Task 5 (safe no-op until defined)
-        if (discardDraft || !currentWorkoutState ||
+        if (!currentWorkoutState ||
             currentWorkoutState.contract_version !== 2) _session = null;
         _restoreFocus(_sessionTrigger);
         _sessionTrigger = null;
+    }
+
+    function discardSessionDraft() {
+        closeSession();
+        _session = null;
     }
 
     // Session with zero exercises can't happen in practice (the plan validator
@@ -1148,7 +1153,7 @@ function dayShort(v) {
                 showCelebration(mutation.ok ? data : null, _pendingStats);
             } else if (mutation && data.code === 'revision_conflict') {
                 closePumpCheck();
-                closeSession(true);
+                discardSessionDraft();
                 showToast(__t('training.progress_reloaded'), 'info');
             } else {
                 // 422 = doğrulama eşleşmedi, 400 = eksik/biçim hatası → modalda göster, yeniden dene.
@@ -1162,7 +1167,7 @@ function dayShort(v) {
         } catch (err) {
             if (err && err.code === 'session_completion_unavailable') {
                 closePumpCheck();
-                closeSession(true);
+                discardSessionDraft();
                 showToast(__t('training.progress_unavailable'), 'error');
                 return;
             }
