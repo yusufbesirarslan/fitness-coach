@@ -366,6 +366,7 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script nonce="{{ csp_nonce }}">window.__TRAINING = { injuries: {{ injuries|tojson }} };</script>
+<script src="/static/workout_draft.js?v={{ _v }}"></script>
 <script src="/static/workout_state_client.js?v={{ _v }}"></script>
 <script src="/static/training.js?v={{ _v }}"></script>
 {%- if weekly_program_ui_enabled %}

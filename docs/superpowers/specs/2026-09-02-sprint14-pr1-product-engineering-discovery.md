@@ -897,3 +897,60 @@ POST /workout/complete
 
 If PR3 finds itself inventing a server rule, PR2 is incomplete — that is the
 test.
+
+## 16. PR3 implementation evidence (2026-09-04)
+
+The browser now consumes the canonical checkpoint contract. Its checkpoint
+transport sends one bounded full snapshot with `If-Match` and
+`Idempotency-Key`, accepts revision movement only from the canonical response,
+and keeps lifecycle mutations separate from the single-flight checkpoint lane.
+
+Reload hydration reconstructs the workout draft by canonical `exercise_id` and
+set `index`, including completed flags, reps, weights, current exercise, and
+elapsed time. Fresh sessions use the ordered `checkpoint_exercise_ids` projection;
+checkpointed sessions hydrate from `session.checkpoint`. Missing, corrupt,
+duplicate, or mismatched identity/state fails closed.
+
+The revision/idempotency lifecycle is explicit: a command captures the current
+acknowledged revision and a fresh key; ambiguous network, 429, and 5xx retries
+retain that exact command; an acknowledgement retires its key and advances only
+to the server-returned revision; a newer queued draft becomes a new command with
+a different key. Deterministic reread responses discard the rejected draft,
+refresh once, and never automatically replay it.
+
+Completion flush ordering is enforced in the browser: Finish awaits a final
+checkpoint acknowledgement before opening Pump Check, and the later completion
+request supplies the client's then-current `expected_checkpoint_revision`.
+Failure leaves the workout open; completion revision conflict closes stale UI
+and renders the refreshed canonical state; the established already-completed
+handling is unchanged.
+
+With the flag OFF, contract v1 remains on the legacy in-memory execution path.
+The browser creates no workout-session request, checkpoint timer, or checkpoint
+write. No rollout/default/value changed.
+
+The only additive server projection is
+`session.checkpoint_exercise_ids: string[]`: ordered catalog IDs derived from the
+session's still-matching canonical planned workout. It is read-only execution
+input for the browser, contains no name-derived identity or private persistence
+metadata, and adds no write authority, schema, or migration.
+
+### 16.1 Criteria status after PR3
+
+| ID | Status | Note |
+|---|---|---|
+| S14-1 | **satisfied** | The browser sends the shipped revision-gated full-snapshot contract. |
+| S14-2 | **satisfied** | Canonical revision, snapshot, and minimal ordered identity projection are consumed. |
+| S14-3 | **satisfied end-to-end for browser web transport** | Final flush precedes Pump Check and completion declares the acknowledged revision. |
+| S14-4 | **client/server characterized; final PG closure remains PR4** | Conflict/reread and cross-surface stale completion behavior are deterministic. |
+| S14-5 | **satisfied** | Acknowledged progress hydrates on reload/resume without name-derived identity. |
+| S14-6 | **satisfied** | The browser emits strict full snapshots and fails closed on malformed state. |
+| S14-7 | **open - PR4** | No runtime metric was added. |
+| S14-8 | **open / partial - PR4** | PR3 adds no lock-dependent server semantic; final PostgreSQL reliability proof remains. |
+| S14-9 | **satisfied** | No model, column, table, or migration was added. |
+| S14-10 | **satisfied** | Contract v1 makes browser session persistence inert and preserves legacy execution. |
+| S14-11 | **satisfied** | The feature remains dark; rollout and runbook state are unchanged. |
+
+Sprint 14 remains open. PR4 still owns final PostgreSQL reliability proof,
+observability, runtime lifecycle metrics, and accepted contract-debt review;
+PR5 owns staged-activation readiness.

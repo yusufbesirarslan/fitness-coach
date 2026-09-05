@@ -2,6 +2,76 @@
    (OPTIONS val, sakatlık adı, gün adı, goal/level/score key) Türkçe KALIR →
    training-plan / injury_constraints eşleşmesi bozulmaz. window.t bazı yerlerdeki
    yerel `t` ile çakışmasın diye __t aliası. */
+(function (root, factory) {
+    var api = factory();
+    if (typeof module === 'object' && module.exports) module.exports = api;
+    else root.FitXTrainingFlow = api;
+}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+    'use strict';
+
+    async function runWorkoutStart(contractVersion, startCanonical, openDraft) {
+        if (contractVersion === 2) {
+            var started = await startCanonical();
+            if (!started || !started.ok) return started || { ok: false };
+        }
+        await openDraft();
+        return { ok: true, legacy: contractVersion !== 2 };
+    }
+
+    async function runWorkoutEdit(contractVersion, checkpointDraft) {
+        if (contractVersion !== 2) return { disabled: true };
+        return checkpointDraft();
+    }
+
+    async function runWorkoutFinish(contractVersion, flushDraft, openPump) {
+        var flushed = { ok: true, legacy: true };
+        if (contractVersion === 2) {
+            flushed = await flushDraft();
+            if (!flushed || !flushed.ok) return flushed || { ok: false };
+        }
+        await openPump();
+        return flushed;
+    }
+
+    function attachWorkoutCompletion(contractVersion, payload, sessionId, revision) {
+        if (contractVersion !== 2) return payload;
+        if (typeof sessionId !== 'string' || !sessionId ||
+            !Number.isInteger(revision) || revision < 0) {
+            var error = new Error('session_completion_unavailable');
+            error.code = 'session_completion_unavailable';
+            throw error;
+        }
+        payload.session_id = sessionId;
+        payload.expected_checkpoint_revision = revision;
+        return payload;
+    }
+
+    var TRAINING_ACTION_NAMES = [
+        'abandonWorkout', 'addRest', 'closeCelebration', 'closeDayPreview',
+        'closeSession', 'finishSession', 'generatePlan', 'previewDay',
+        'resetPlan', 'savePlan', 'skipRest', 'startWorkout', 'submitPumpCheck',
+    ];
+
+    function publishTrainingActions(target, actions) {
+        TRAINING_ACTION_NAMES.forEach(function (name) {
+            if (!actions || typeof actions[name] !== 'function') {
+                throw new Error('training_action_unavailable:' + name);
+            }
+            target[name] = actions[name];
+        });
+        return target;
+    }
+
+    return {
+        runWorkoutStart: runWorkoutStart,
+        runWorkoutEdit: runWorkoutEdit,
+        runWorkoutFinish: runWorkoutFinish,
+        attachWorkoutCompletion: attachWorkoutCompletion,
+        TRAINING_ACTION_NAMES: TRAINING_ACTION_NAMES,
+        publishTrainingActions: publishTrainingActions,
+    };
+}));
+
 var __t = (window.t) || function (k, v) { return k; };
 var _EN = (window.LOCALE === 'en');
 /* Sakatlık: görünen etiket EN, değer (backend'e giden) TR kalır. */
@@ -234,12 +304,18 @@ function dayShort(v) {
     let activePlan = null;
     let activeTodayPlan = null;
     let currentWorkoutState = null;
+    let currentWorkoutCompleted = false;
     let workoutStateClient = null;
 
-    function applyTrainingSnapshot(snapshot) {
+    function applyTrainingSnapshot(snapshot, reason, meta) {
             const data = snapshot.plan || { exists: false };
             currentWorkoutState = snapshot.workout && snapshot.workout.state;
+            currentWorkoutCompleted = !!(snapshot.workout && snapshot.workout.completed);
             activeTodayPlan = snapshot.today_plan || null;
+            if (meta && meta.blocked) {
+                renderTrainingBlocked();
+                return;
+            }
             if (!data.exists) {
                 activePlan = null;
                 document.getElementById('active-plan-view').style.display = 'none';
@@ -260,9 +336,39 @@ function dayShort(v) {
                 __t('training.created_on', { date: data.created_at, label: scoreLabel });
 
             // Today's Workout Hero + this-week strip + weekly stats
-            renderHero(activePlan, !!(snapshot.workout && snapshot.workout.completed));
+            renderHero(activePlan, currentWorkoutCompleted);
             renderWeekStrip(activePlan);
             renderWeekStats(activePlan);
+
+            var reconciliationHandled = false;
+            if (_session && meta && meta.replaceDraft &&
+                currentWorkoutState && currentWorkoutState.contract_version === 2) {
+                var projected = currentWorkoutState.session;
+                if (projected && projected.status === 'active' && projected.resumable) {
+                    try {
+                        _session = window.FitXWorkoutDraft.createWorkoutDraft(
+                            activeTodayPlan, projected, Date.now());
+                        renderSession();
+                        if (reason === 'checkpoint_reconcile') {
+                            showToast(__t('training.progress_reloaded'), 'info');
+                            reconciliationHandled = true;
+                        }
+                    } catch (error) {
+                        closeSession(true);
+                        showToast(__t('training.progress_unavailable'), 'error');
+                        reconciliationHandled = true;
+                    }
+                } else {
+                    closeSession(true);
+                    var pump = document.getElementById('pump-check-modal');
+                    if (pump && pump.classList.contains('active')) closePumpCheck();
+                    showToast(__t('training.progress_unavailable'), 'error');
+                    reconciliationHandled = true;
+                }
+            }
+            if (reason === 'checkpoint_reconcile' && !reconciliationHandled) {
+                showToast(__t('training.progress_reloaded'), 'info');
+            }
 
             // Switch views
             document.getElementById('active-plan-view').style.display = 'block';
@@ -270,6 +376,9 @@ function dayShort(v) {
     }
 
     function renderTrainingBlocked() {
+        if (typeof _session !== 'undefined' && _session) closeSession(true);
+        var pump = document.getElementById('pump-check-modal');
+        if (pump && pump.classList.contains('active')) closePumpCheck();
         activePlan = null;
         currentWorkoutState = null;
         activeTodayPlan = null;
@@ -295,9 +404,7 @@ function dayShort(v) {
     }
 
     // Progress ring: r=48 (matches the shared .ring-* markup in components.css /
-    // static/nutrition.js's updateRing), circumference = 2πr. The session is
-    // ephemeral (no partial state persists across reloads) so pct is only ever
-    // 0 (not done) or 100 (done) — renderHero() decides which to pass.
+    // static/nutrition.js's updateRing), circumference = 2πr.
     const WH_RING_R = 48;
     const WH_RING_C = 2 * Math.PI * WH_RING_R;
     // Rest-day glyph inside the hero ring. An SVG on currentColor, not the 😴
@@ -314,6 +421,21 @@ function dayShort(v) {
             fill.style.strokeDasharray  = WH_RING_C;
             fill.style.strokeDashoffset = WH_RING_C * (1 - (pct || 0) / 100);
         }
+    }
+
+    function checkpointProgress() {
+        var session = currentWorkoutState && currentWorkoutState.contract_version === 2 &&
+            currentWorkoutState.session;
+        var checkpoint = session && session.checkpoint;
+        if (!checkpoint || !Array.isArray(checkpoint.exercises)) return 0;
+        var done = 0, total = 0;
+        checkpoint.exercises.forEach(function (exercise) {
+            (exercise.sets || []).forEach(function (set) {
+                total++;
+                if (set.completed) done++;
+            });
+        });
+        return total ? (done / total) * 100 : 0;
     }
 
     function renderHero(program, completed) {
@@ -365,8 +487,7 @@ function dayShort(v) {
                 '<div style="font-size:9px;color:var(--color-text-3);font-weight:600;margin-top:2px;">' +
                 __t('training.exercises') + '</div>';
         }
-        // progress ring: 0% until a session runs (session is ephemeral)
-        updateHeroRing(completed ? 100 : 0);
+        updateHeroRing(completed ? 100 : checkpointProgress());
     }
 
     function renderWeekStrip(program) {
@@ -420,9 +541,8 @@ function dayShort(v) {
         openDayPreview(day, el);   // read-only sheet listing exercises (Task 4 reuses .sheet)
     }
 
-    // ── WORKOUT SESSION — set/rep interaction stays ephemeral in page memory;
-    //    lifecycle transitions are owned by the canonical server controller. ──
-    var _session = null;        // { startedAt, day, exercises:[{isim,tekrar,dinlenme,not,sets:[{weightKg,reps,done,isPR}]}] }
+    // ── WORKOUT SESSION — one local draft between durable server checkpoints. ──
+    var _session = null;
     var _pendingStats = null;   // stats snapshot handed to the celebration after Pump Check
     var _sessionTrigger = null;     // element that opened #session-view (focus returns here on close)
     var _dayPreviewTrigger = null;  // element that opened #day-preview
@@ -470,23 +590,25 @@ function dayShort(v) {
     async function startWorkout(el) {
         var day = todayDay();
         if (!day || day.tip === 'dinlenme') return;
-        if (currentWorkoutState && currentWorkoutState.contract_version === 2) {
+        var contractVersion = currentWorkoutState && currentWorkoutState.contract_version;
+        return window.FitXTrainingFlow.runWorkoutStart(contractVersion, async function () {
             var action = currentWorkoutState.action;
             var session = currentWorkoutState.session;
             var url = action === 'resume' && session
                 ? '/workout/session/' + encodeURIComponent(session.public_id) + '/resume'
                 : '/workout/session/start';
-            if (action !== 'start' && action !== 'resume') return;
-            var result = await workoutStateClient.mutate(url, { method: 'POST' });
-            if (!result || !result.ok) return;
-        }
-        openSession(day, el);
+            if (action !== 'start' && action !== 'resume') return { ok: false };
+            return workoutStateClient.mutate(url, { method: 'POST' });
+        }, function () {
+            openSession(day, el);
+        });
     }
 
     async function abandonWorkout() {
         var session = currentWorkoutState && currentWorkoutState.session;
         if (!workoutStateClient || !session || session.status !== 'active') return;
-        closeSession();
+        workoutStateClient.stopCheckpointing();
+        closeSession(true);
         await workoutStateClient.mutate(
             '/workout/session/' + encodeURIComponent(session.public_id) + '/abandon',
             { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -495,8 +617,18 @@ function dayShort(v) {
     }
 
     function openSession(day, trigger) {
-        _session = buildSession(day);
         var persistedSession = currentWorkoutState && currentWorkoutState.session;
+        if (currentWorkoutState && currentWorkoutState.contract_version === 2) {
+            try {
+                _session = window.FitXWorkoutDraft.selectWorkoutDraft(
+                    day, persistedSession, _session, Date.now());
+            } catch (error) {
+                showToast(__t('training.progress_unavailable'), 'error');
+                return;
+            }
+        } else {
+            _session = buildSession(day);
+        }
         document.getElementById('sv-abandon').hidden = !(
             currentWorkoutState && currentWorkoutState.contract_version === 2 &&
             persistedSession && persistedSession.status === 'active');
@@ -510,11 +642,12 @@ function dayShort(v) {
         setTimeout(function () { _focusFirstIn(v); }, 50);
     }
 
-    function closeSession() {
+    function closeSession(discardDraft) {
         document.getElementById('session-view').classList.remove('open');
         document.body.style.overflow = '';
         stopRestTimer();            // Task 5 (safe no-op until defined)
-        _session = null;            // discard ephemeral state
+        if (discardDraft || !currentWorkoutState ||
+            currentWorkoutState.contract_version !== 2) _session = null;
         _restoreFocus(_sessionTrigger);
         _sessionTrigger = null;
     }
@@ -569,12 +702,47 @@ function dayShort(v) {
         document.getElementById('sv-progress-bar').style.width = pct + '%';
     }
 
-    function finishSession() {
-        if (!_session) return;
+    function openPumpForFinishedSession() {
         _pendingStats = computeSessionStats(_session);
         document.getElementById('session-view').classList.remove('open');
         stopRestTimer();
-        openPumpCheck();            // existing flow; on success → showCelebration (Task 6)
+        openPumpCheck();
+    }
+
+    async function finishSession() {
+        if (!_session) return;
+        var contractVersion = currentWorkoutState && currentWorkoutState.contract_version;
+        return window.FitXTrainingFlow.runWorkoutFinish(
+            contractVersion,
+            async function () {
+            try {
+                    return await window.FitXWorkoutDraft.flushWorkoutDraft(
+                        workoutStateClient, _session, Date.now());
+            } catch (error) {
+                    showToast(__t('training.progress_save_failed'), 'error');
+                    return { ok: false };
+            }
+            },
+            openPumpForFinishedSession
+        );
+    }
+
+    function saveSessionDraft(immediate) {
+        var contractVersion = currentWorkoutState && currentWorkoutState.contract_version;
+        return window.FitXTrainingFlow.runWorkoutEdit(contractVersion, function () {
+            if (!_session) return Promise.resolve({ ok: false });
+            var snapshot;
+            try {
+                snapshot = window.FitXWorkoutDraft.buildCheckpointSnapshot(_session, Date.now());
+            } catch (error) {
+                showToast(__t('training.progress_save_failed'), 'error');
+                return Promise.resolve({ ok: false });
+            }
+            var saving = immediate
+                ? workoutStateClient.flushCheckpoint(snapshot)
+                : workoutStateClient.scheduleCheckpoint(snapshot);
+            return Promise.resolve(saving);
+        });
     }
 
     // Scoped delegated listener — binds once on #sv-body; updates `_session` in place.
@@ -586,19 +754,23 @@ function dayShort(v) {
             var ex = _session.exercises[+row.dataset.ex]; var st = ex && ex.sets[+row.dataset.set];
             if (!st) return;
             var field = e.target.dataset.field;
+            _session.currentExerciseIndex = +row.dataset.ex;
             if (field === 'weight') { st.weightKg = e.target.value === '' ? null : parseFloat(e.target.value);
                 st.isPR = evaluatePR(ex.isim, st.weightKg); refreshPRFlags(ex, +row.dataset.ex); }  // Task 5
             else if (field === 'reps') { st.reps = e.target.value === '' ? null : parseInt(e.target.value, 10); }
+            saveSessionDraft(false);
         });
         body.addEventListener('click', function (e) {
             var btn = e.target.closest('[data-field="done"]'); if (!btn || !_session) return;
             var row = btn.closest('.set-row');
             var ex = _session.exercises[+row.dataset.ex]; var st = ex.sets[+row.dataset.set];
+            _session.currentExerciseIndex = +row.dataset.ex;
             st.done = !st.done;
             row.classList.toggle('is-done', st.done);
             updateSessionProgress();
             refreshPRFlags(ex, +row.dataset.ex);   // recompute in-session top-set ★ (only done sets count)
             if (st.done) startRestTimer(parseRestSeconds(ex.dinlenme));   // Task 5
+            saveSessionDraft(true);
         });
     })();
 
@@ -952,11 +1124,12 @@ function dayShort(v) {
             visibility: pumpVisibility,
             shared_friend_ids: Array.from(pumpSelectedFriends.keys())
         };
-        if (currentWorkoutState && currentWorkoutState.contract_version === 2 &&
-            workoutStateClient.getSessionId()) {
-            payload.session_id = workoutStateClient.getSessionId();
-        }
         try {
+            window.FitXTrainingFlow.attachWorkoutCompletion(
+                currentWorkoutState && currentWorkoutState.contract_version,
+                payload,
+                workoutStateClient && workoutStateClient.getSessionId(),
+                workoutStateClient && workoutStateClient.getCheckpointRevision());
             const mutation = await workoutStateClient.mutate('/workout/complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -973,6 +1146,10 @@ function dayShort(v) {
                 if (mutation.ok) showToast(data.message, 'success');
                 closePumpCheck();
                 showCelebration(mutation.ok ? data : null, _pendingStats);
+            } else if (mutation && data.code === 'revision_conflict') {
+                closePumpCheck();
+                closeSession(true);
+                showToast(__t('training.progress_reloaded'), 'info');
             } else {
                 // 422 = doğrulama eşleşmedi, 400 = eksik/biçim hatası → modalda göster, yeniden dene.
                 showPumpError(data.error || __t('training.verify_failed'));
@@ -983,6 +1160,12 @@ function dayShort(v) {
                 submit.textContent = __t('training.complete_workout');
             }
         } catch (err) {
+            if (err && err.code === 'session_completion_unavailable') {
+                closePumpCheck();
+                closeSession(true);
+                showToast(__t('training.progress_unavailable'), 'error');
+                return;
+            }
             showPumpError(__t('training.conn_error_retry'));
             document.getElementById('pump-progress').hidden = true;
             document.getElementById('pump-progress-bar').style.width = '0%';
@@ -1260,6 +1443,22 @@ function dayShort(v) {
         });
     })();
 
+    window.FitXTrainingFlow.publishTrainingActions(window, {
+        abandonWorkout: abandonWorkout,
+        addRest: addRest,
+        closeCelebration: closeCelebration,
+        closeDayPreview: closeDayPreview,
+        closeSession: closeSession,
+        finishSession: finishSession,
+        generatePlan: generatePlan,
+        previewDay: previewDay,
+        resetPlan: resetPlan,
+        savePlan: savePlan,
+        skipRest: skipRest,
+        startWorkout: startWorkout,
+        submitPumpCheck: submitPumpCheck,
+    });
+
     populateOptions();
     setupInjuryPicker();
     loadInfo();
@@ -1270,6 +1469,19 @@ function dayShort(v) {
             fetchImpl: window.fetch.bind(window),
             onSnapshot: applyTrainingSnapshot,
             onBlocked: renderTrainingBlocked,
+            onCheckpointRetryable: function () {
+                showToast(__t('training.progress_save_failed'), 'error');
+            },
+            onCheckpointAcknowledged: function (session) {
+                if (!currentWorkoutState || currentWorkoutState.contract_version !== 2 ||
+                    !currentWorkoutState.session ||
+                    currentWorkoutState.session.public_id !== session.public_id) return;
+                currentWorkoutState.session = session;
+                if (_session && _session.sessionId === session.public_id) {
+                    _session.checkpointRevision = session.checkpoint_revision;
+                }
+                if (activePlan) renderHero(activePlan, currentWorkoutCompleted);
+            },
             documentRef: document,
             addEventListener: window.addEventListener.bind(window),
             removeEventListener: window.removeEventListener.bind(window)
