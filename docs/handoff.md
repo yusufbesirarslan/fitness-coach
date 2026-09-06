@@ -1,3 +1,34 @@
+# UX-3 PR2 — Plan Shell + State-Action Parity
+
+Date: 2026-09-06
+
+`/training` remains the only Plan route. Behind the still-default-OFF atomic
+`UIUX_PLAN_V2_ENABLED` selector, Plan now renders Training first, Nutrition
+second, and Supplements nested under Nutrition; it adds no Recovery placeholder.
+The shell extends `plan_facts` with independent child summaries and the canonical
+workout snapshot, then validates the snapshot through `decide_today_guidance`.
+No plan uses the existing in-page Create flow; scheduled uses functional Start;
+an eligible active session uses functional Resume; completed, rest, error,
+unknown, and incompatible pairs fail closed.
+
+PR #285 (main squash `6422028`) was the execution prerequisite. Its small
+presentation-independent flow boundary now lives in `static/workout_execution.js`;
+legacy `training.js` and Plan both consume it with `workout_draft.js` and
+`workout_state_client.js`. Plan hydrates its server render without a second GET,
+then retains server exercise IDs, checkpoint revisions, stable idempotency,
+acknowledged reload recovery, final flush, expected completion revision, and the
+Close-versus-explicit-Abandon distinction. Plan never loads the whole legacy
+Training client.
+
+The Plan/session flags are independent in all four combinations; neither default
+nor rollout state changed. Initial active render is bounded to five SELECTs with
+sessions OFF or six with sessions ON, zero provider/LLM calls, and no Nutrition
+history/search/scanner or Supplement CRUD boot. Child failures render
+`unavailable` without blanking Training. Dedicated Plan product telemetry is
+deferred to PR6 because no suitable product-event sink exists; request logs and
+flag health exposure remain. UX-3 PR3 still owns Training placement/regeneration
+cleanup, and PR4 still owns deeper Nutrition convergence.
+
 # UX-3 PR1 — Plan Domain Convergence Discovery
 
 Date: 2026-09-05

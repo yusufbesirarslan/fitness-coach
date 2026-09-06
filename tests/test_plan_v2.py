@@ -12,6 +12,7 @@ time); the weekly section is gated independently by WEEKLY_PROGRAM_UI_ENABLED.
 import json
 from pathlib import Path
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -282,6 +283,167 @@ def test_v2_active_plan_renders_days_no_dominant_cta(app, client, make_user, log
     assert "data-plan-create" not in html                # no generator when populated
     assert "/static/plan_create.js" not in html
     assert "/static/training.js" not in html
+
+
+def test_v2_shell_places_training_then_nutrition_then_supplements(app, client, make_user, login):
+    app.config["UIUX_PLAN_V2_ENABLED"] = True
+    user = _seed_login(client, make_user, login)
+    _seed_plan(user.id, _VALID_PLAN)
+
+    html = client.get("/training").get_data(as_text=True)
+
+    training_at = html.index('data-plan-domain="training"')
+    nutrition_at = html.index('data-plan-domain="nutrition"')
+    supplements_at = html.index('data-plan-domain="supplements"')
+    assert training_at < nutrition_at < supplements_at
+    assert 'href="/nutrition"' in html
+    assert 'href="/supplements"' in html
+    assert 'data-plan-domain="recovery"' not in html
+
+
+def test_v2_scheduled_workout_renders_one_functional_start_action(
+    app, client, make_user, login, monkeypatch,
+):
+    from app.services.workout_state.models import (
+        ACTION_START,
+        PRIMARY_SCHEDULED_NOT_STARTED,
+    )
+    from app.services import plan_facts as pf
+
+    app.config["UIUX_PLAN_V2_ENABLED"] = True
+    user = _seed_login(client, make_user, login)
+    _seed_plan(user.id, _VALID_PLAN)
+    original = pf.resolve_workout_state
+
+    def scheduled(*args, **kwargs):
+        snapshot = original(*args, **kwargs)
+        return snapshot.__class__(
+            **{
+                **snapshot.__dict__,
+                "primary_state": PRIMARY_SCHEDULED_NOT_STARTED,
+                "action": ACTION_START,
+            }
+        )
+
+    monkeypatch.setattr(pf, "resolve_workout_state", scheduled)
+    html = client.get("/training").get_data(as_text=True)
+
+    assert html.count('data-action="startWorkout"') == 1
+    assert 'data-workout-action="start"' in html
+    assert "/static/workout_execution.js" in html
+    assert "/static/workout_draft.js" in html
+    assert "/static/workout_state_client.js" in html
+    assert "/static/training.js" not in html
+
+
+def test_v2_unknown_or_incompatible_workout_state_fails_closed(
+    app, client, make_user, login, monkeypatch,
+):
+    from app.services.workout_state.models import ACTION_START, PRIMARY_COMPLETED
+    from app.services import plan_facts as pf
+
+    app.config["UIUX_PLAN_V2_ENABLED"] = True
+    user = _seed_login(client, make_user, login)
+    _seed_plan(user.id, _VALID_PLAN)
+    original = pf.resolve_workout_state
+
+    def incompatible(*args, **kwargs):
+        snapshot = original(*args, **kwargs)
+        return snapshot.__class__(
+            **{
+                **snapshot.__dict__,
+                "primary_state": PRIMARY_COMPLETED,
+                "action": ACTION_START,
+            }
+        )
+
+    monkeypatch.setattr(pf, "resolve_workout_state", incompatible)
+    html = client.get("/training").get_data(as_text=True)
+
+    assert 'data-workout-action="none"' in html
+    assert 'data-action="startWorkout"' not in html
+
+
+@pytest.mark.parametrize(("state", "action", "expected"), [
+    ("scheduled_not_started", "start", "start"),
+    ("in_progress", "resume", "resume"),
+    ("completed", "none", "none"),
+    ("rest_day", "none", "none"),
+    ("execution_recorded", "none", "none"),
+    ("unscheduled_execution", "none", "none"),
+    ("unscheduled_completed", "none", "none"),
+    ("needs_attention", "blocked", "none"),
+    ("unknown", "none", "none"),
+    ("completed", "start", "none"),
+])
+def test_plan_workout_action_matrix_follows_canonical_decision(
+    state, action, expected,
+):
+    facts = _facts()
+    facts = PlanFacts(
+        **{
+            **facts.__dict__,
+            "workout_read_ok": True,
+            "workout_snapshot": SimpleNamespace(
+                primary_state=state, action=action,
+            ),
+        }
+    )
+    view = build_plan_view(facts)
+    assert view.workout_action == expected
+    assert view.primary is None
+
+
+@pytest.mark.parametrize("plan_enabled,sessions_enabled", [
+    (False, False), (False, True), (True, False), (True, True),
+])
+def test_plan_and_session_flags_are_independent(
+    app, client, make_user, login, plan_enabled, sessions_enabled,
+):
+    app.config["UIUX_PLAN_V2_ENABLED"] = plan_enabled
+    app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = sessions_enabled
+    _seed_login(
+        client, make_user, login,
+        username=f"matrix-{int(plan_enabled)}-{int(sessions_enabled)}",
+    )
+    response = client.get("/training")
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert ("data-plan-v2" in html) is plan_enabled
+    assert ("/static/training.js" in html) is (not plan_enabled)
+
+
+def test_plan_child_failure_does_not_blank_training(
+    app, client, make_user, login, monkeypatch,
+):
+    from app.services import plan_facts as pf
+
+    app.config["UIUX_PLAN_V2_ENABLED"] = True
+    user = _seed_login(client, make_user, login, username="child-failure")
+    _seed_plan(user.id, _VALID_PLAN)
+    monkeypatch.setattr(pf, "_child_domain_facts", lambda _uid: {
+        "nutrition_state": "unavailable",
+        "nutrition_target_calories": None,
+        "supplements_state": "unavailable",
+        "supplements_count": None,
+    })
+
+    html = client.get("/training").get_data(as_text=True)
+    assert "Bench Press" in html
+    assert html.count('data-domain-state="unavailable"') == 2
+    assert 'href="/nutrition"' in html
+    assert 'href="/supplements"' in html
+
+
+def test_plan_routes_remain_stable_and_no_plan_route_exists(
+    app, client, make_user, login,
+):
+    app.config["UIUX_PLAN_V2_ENABLED"] = True
+    _seed_login(client, make_user, login, username="route-stability")
+    assert client.get("/training").status_code == 200
+    assert client.get("/nutrition").status_code == 200
+    assert client.get("/supplements").status_code == 200
+    assert client.get("/plan").status_code == 404
 
 
 def test_v2_partial_plan_keeps_plan_visible(app, client, make_user, login):

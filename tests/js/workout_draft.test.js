@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   createWorkoutDraft,
+  createLegacyWorkoutDraft,
   buildCheckpointSnapshot,
   selectWorkoutDraft,
 } = require('../../static/workout_draft.js');
@@ -13,6 +14,16 @@ const day = {
     { isim: 'Displayed row', set: 1, tekrar: '10', dinlenme: '60 sn', not: '' },
   ],
 };
+
+test('legacy fallback draft stays in the shared draft boundary without server identities', () => {
+  const draft = createLegacyWorkoutDraft(day, 5000);
+
+  assert.equal(draft.sessionId, null);
+  assert.equal(draft.startedAt, 5000);
+  assert.equal(draft.exercises[0].sets.length, 2);
+  assert.equal(draft.exercises[0].sets[0].reps, 12);
+  assert.equal(draft.exercises[0].sets[0].done, false);
+});
 
 test('fresh draft uses server identities and emits only the exact full snapshot', () => {
   const draft = createWorkoutDraft(day, {

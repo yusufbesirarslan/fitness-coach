@@ -225,3 +225,161 @@ def test_dispatcher_close_resume_delayed_ack_finish_preserves_durable_set(
         saved = json.loads(row.checkpoint_data)
         assert saved['exercises'][0]['sets'][0] == {
             'index': 0, 'completed': True, 'reps': 12, 'weight_kg': 82.5}
+
+
+def test_plan_v2_resume_uses_shared_execution_and_hydrates_acknowledged_progress(
+    app, auth_user, client, execution_session, training_page,
+):
+    checkpoint = {
+        'current_exercise_index': 1,
+        'elapsed_seconds': 321,
+        'exercises': [
+            {'exercise_id': SQUAT, 'sets': [
+                {'index': 0, 'completed': True, 'reps': 11, 'weight_kg': 82.5},
+            ]},
+            {'exercise_id': BENCH, 'sets': [
+                {'index': 0, 'completed': False, 'reps': 6, 'weight_kg': 45},
+            ]},
+        ],
+    }
+    assert checkpoint_over_http(
+        client, execution_session, 0, checkpoint,
+    ).status_code == 200
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, traffic, _, _ = training_page
+
+    page.goto('http://localhost/')
+    expect(page.locator('[data-today-primary]')).to_have_attribute('href', '/training')
+    page.locator('[data-today-primary]').click()
+    expect(page.locator('[data-workout-action="resume"]')).to_have_count(1)
+    page.locator('[data-action="startWorkout"]').click()
+
+    expect(page.locator('#session-view')).to_have_class('session-view open')
+    expect(page.locator('[data-action="closeSession"]')).to_be_focused()
+    expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
+    expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('11')
+    expect(page.locator('#sv-body .set-row[data-ex="0"][data-set="0"]')).to_have_class(
+        re.compile(r'\bis-done\b')
+    )
+    assert any(path.endswith('/resume') and status == 200
+               for path, _, status in traffic)
+
+
+def test_plan_v2_start_checkpoint_and_complete_use_durable_contract(
+    app, auth_user, client, sessions_on, proof_accepted, training_page,
+):
+    with app.app_context():
+        db.session.get(User, auth_user.id).profile_complete = True
+        plan = save_workout_plan(auth_user.id)
+        data = json.loads(plan.plan_data)
+        for day in data['program']:
+            day.update(odak='Strength', sure_dk=30, tahmini_kalori=150)
+            for exercise in day['egzersizler']:
+                exercise.update(set=1, tekrar='8', dinlenme='60 sn', not_='')
+        plan.plan_data = json.dumps(data)
+        db.session.commit()
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, traffic, _, _ = training_page
+
+    page.goto('http://localhost/')
+    expect(page.locator('[data-today-primary]')).to_have_attribute('href', '/training')
+    page.locator('[data-today-primary]').click()
+    expect(page.locator('[data-workout-action="start"]')).to_have_count(1)
+    page.locator('[data-action="startWorkout"]').click()
+    expect(page.locator('#session-view')).to_have_class('session-view open')
+    expect(page.locator('[data-action="closeSession"]')).to_be_focused()
+    assert any(path == '/workout/session/start' and status == 201
+               for path, _, status in traffic)
+
+    page.locator('#sv-body [data-field="weight"]').first.fill('82.5')
+    page.locator('#sv-body [data-field="reps"]').first.fill('11')
+    page.locator('#sv-body [data-field="done"]').first.click()
+    page.wait_for_function(
+        'document.querySelector("#sv-body .set-row").classList.contains("is-done")'
+    )
+    page.locator('[data-action="closeSession"]').click()
+    expect(page.locator('#session-view')).not_to_have_class('session-view open')
+    expect(page.locator('[data-workout-action="resume"]')).to_have_count(1)
+    page.locator('[data-action="startWorkout"]').click()
+    expect(page.locator('#session-view')).to_have_class('session-view open')
+    expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
+    expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('11')
+    assert any(path.endswith('/resume') and status == 200
+               for path, _, status in traffic)
+    page.locator('[data-action="finishSession"]').click()
+    expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
+    expect(page.locator('#plan-pump-image')).to_be_focused()
+    page.locator('#plan-pump-image').set_input_files({
+        'name': 'proof.jpg', 'mimeType': 'image/jpeg', 'buffer': b'jpeg-proof',
+    })
+    page.locator('[data-action="submitWorkoutCompletion"]').click()
+    expect(page.locator('[data-workout-action="none"]')).to_have_count(1)
+
+    completion = [json.loads(body) for path, body, status in traffic
+                  if path == '/workout/complete' and status == 200]
+    assert len(completion) == 1
+    assert isinstance(completion[0]['session_id'], str)
+    assert completion[0]['session_id']
+    assert completion[0]['expected_checkpoint_revision'] >= 1
+    with app.app_context():
+        row = row_for(auth_user.id)
+        assert row.status == 'completed'
+        saved = json.loads(row.checkpoint_data)
+        assert saved['exercises'][0]['sets'][0] == {
+            'index': 0, 'completed': True, 'reps': 11, 'weight_kg': 82.5,
+        }
+
+
+def test_plan_v2_shell_browser_qa_across_locales_and_viewports(
+    app, auth_user, training_page,
+):
+    with app.app_context():
+        user = db.session.get(User, auth_user.id)
+        user.profile_complete = True
+        plan = save_workout_plan(auth_user.id)
+        data = json.loads(plan.plan_data)
+        for day in data['program']:
+            day.update(odak='Strength', sure_dk=30, tahmini_kalori=150)
+            for exercise in day['egzersizler']:
+                exercise.update(set=1, tekrar='8', dinlenme='60 sn', not_='')
+        plan.plan_data = json.dumps(data)
+        db.session.commit()
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    app.config['FITX_WORKOUT_SESSIONS_ENABLED'] = False
+    page, _, _, _ = training_page
+    console_errors = []
+    page_errors = []
+    page.on('console', lambda message: console_errors.append(message.text))
+    page.on('pageerror', lambda error: page_errors.append(str(error)))
+
+    for locale in ('en', 'tr'):
+        with app.app_context():
+            db.session.get(User, auth_user.id).language = locale
+            db.session.commit()
+        for width in (320, 390, 768, 1024, 1366):
+            page.set_viewport_size({'width': width, 'height': 900})
+            page.goto('http://localhost/training')
+            assert page.locator('html').get_attribute('lang') == locale
+            assert page.locator('h1').count() == 1
+            active_nav = page.locator('[data-nav-id="plan"][aria-current="page"]')
+            assert active_nav.count() >= 1  # desktop and mobile chrome may coexist
+            assert page.locator('a[href="/nutrition"]').count() >= 1
+            assert page.locator('a[href="/supplements"]').count() >= 1
+            assert 'plan.' not in page.locator('body').inner_text()
+            metrics = page.evaluate('''() => ({
+              overflow: document.documentElement.scrollWidth > innerWidth,
+              hiddenSessionFocusable: Array.from(
+                document.querySelectorAll('#session-view button, #session-view input')
+              ).some(node => node.getClientRects().length > 0),
+              hiddenCompletionFocusable: Array.from(
+                document.querySelectorAll('#plan-completion button, #plan-completion input')
+              ).some(node => node.getClientRects().length > 0),
+            })''')
+            assert metrics == {
+                'overflow': False,
+                'hiddenSessionFocusable': False,
+                'hiddenCompletionFocusable': False,
+            }
+    assert not [error for error in console_errors
+                if 'Failed to load resource' not in error]
+    assert not page_errors
