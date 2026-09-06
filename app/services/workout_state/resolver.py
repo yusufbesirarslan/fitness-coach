@@ -243,5 +243,6 @@ def enrich_with_session(
         primary_state=primary_state,
         session_state=session_state,
         session=_session_dict(facts),
+        execution_view=facts.execution_view,
         anomaly=anomaly,
     )

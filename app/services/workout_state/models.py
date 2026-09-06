@@ -10,7 +10,10 @@ one overloaded boolean (see docs/WORKOUT_STATE.md).
 """
 from dataclasses import dataclass
 from datetime import date
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.services.workout_session.models import SessionView
 
 # Additive-only contract version. Consumers may branch on it; PR1 == 1.
 # When the persisted workout-session lifecycle is enabled (Sprint 7 PR3,
@@ -171,6 +174,8 @@ class ActiveSessionFacts:
     workout_date: Optional[str]
     relationship: Optional[str]
     stale_reason: Optional[str]
+    # Carried intact for read composition; classification uses only facts above.
+    execution_view: Optional["SessionView"] = None
 
 
 # The "no session at all" facts — used when the flag is on but nothing is
@@ -207,6 +212,8 @@ class WorkoutStateSnapshot:
     contract_version: int = CONTRACT_VERSION
     session_state: str = SESSION_STATE_NONE
     session: Optional[dict] = None
+    # Durable execution has its own authority and is not part of state.to_dict().
+    execution_view: Optional["SessionView"] = None
 
     def to_dict(self) -> dict:
         """Stable snake_case projection for JSON responses (additive-only).

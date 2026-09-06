@@ -297,7 +297,7 @@ let workoutStateClient = null;
 (async () => {{
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(requests, ['/training/bootstrap']);
-  assert.equal(timers.size, 1);
+  assert.equal(timers.size, 0);
   assert.equal(listenerMap('pagehide').size, 1);
   assert.equal(listenerMap('pageshow').size, 1);
 
@@ -306,7 +306,7 @@ let workoutStateClient = null;
   dispatch('pageshow', {{ persisted: true }});
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(requests, ['/training/bootstrap', '/training/bootstrap']);
-  assert.equal(timers.size, 1);
+  assert.equal(timers.size, 0);
 
   dispatch('pagehide', {{ persisted: true }});
   dispatch('pageshow', {{ persisted: true }});
@@ -314,7 +314,7 @@ let workoutStateClient = null;
   assert.deepEqual(requests, [
     '/training/bootstrap', '/training/bootstrap', '/training/bootstrap'
   ]);
-  assert.equal(timers.size, 1);
+  assert.equal(timers.size, 0);
   assert.equal(listenerMap('pagehide').size, 1);
   assert.equal(listenerMap('pageshow').size, 1);
   assert.equal(listenerMap('focus').size, 1);

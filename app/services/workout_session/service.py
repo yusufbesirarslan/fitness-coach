@@ -41,6 +41,7 @@ from .models import (
     _iso,
     classify,
     classify_relationship,
+    fingerprints_match,
 )
 from .queries import (
     NativeWorkoutIdentity,
@@ -54,6 +55,7 @@ from .queries import (
     heartbeat,
     insert_active_session,
     is_active_session_owner_violation,
+    planned_workout_for_slot,
     terminalize_abandon,
     touch_active,
 )
@@ -97,6 +99,12 @@ def _build_view(session, today: date) -> SessionView:
             current_fingerprint=facts.current_fingerprint,
         )
         stale_reason, resumable = STALE_NONE, False
+    planned = planned_workout_for_slot(session.user_id, session.weekday_slot)
+    checkpoint_exercise_ids = (
+        planned.exercise_ids
+        if fingerprints_match(session.plan_fingerprint, planned.fingerprint) is True
+        else ()
+    )
     return SessionView(
         public_id=session.public_id,
         status=session.status,
@@ -118,6 +126,7 @@ def _build_view(session, today: date) -> SessionView:
         # session unreadable.
         checkpoint_revision=int(session.checkpoint_revision or 0),
         checkpoint=load_snapshot(session.checkpoint_data),
+        checkpoint_exercise_ids=checkpoint_exercise_ids,
     )
 
 

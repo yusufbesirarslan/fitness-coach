@@ -209,6 +209,10 @@ class SessionView:
     # stored, or ``None`` when no checkpoint has been accepted. Never a patch,
     # never a partial merge — see ``checkpoint.parse_checkpoint``.
     checkpoint: Optional[dict] = None
+    # Ordered catalog identities for the canonical workout this session names.
+    # This is execution input, not persistence authority: it is derived afresh
+    # server-side and exposes none of the row/plan/replay internals.
+    checkpoint_exercise_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -227,6 +231,7 @@ class SessionView:
             "resumable": self.resumable,
             "checkpoint_revision": self.checkpoint_revision,
             "checkpoint": self.checkpoint,
+            "checkpoint_exercise_ids": list(self.checkpoint_exercise_ids),
         }
 
 
