@@ -43,7 +43,30 @@
     canonical = snapshot;
     workoutState = snapshot && snapshot.workout && snapshot.workout.state;
     todayPlan = snapshot && snapshot.today_plan;
-    if (meta && meta.replaceDraft && reason !== 'server_render') draft = null;
+    if (meta && meta.replaceDraft && reason !== 'server_render') {
+      var sessionView = document.getElementById('session-view');
+      var wasOpen = sessionView && sessionView.classList.contains('open');
+      var session = workoutState && workoutState.session;
+      if (draft && workoutState && workoutState.contract_version === 2 &&
+          session && session.status === 'active' && session.resumable !== false &&
+          todayPlan && todayPlan.tip !== 'dinlenme') {
+        try {
+          draft = window.FitXWorkoutDraft.createWorkoutDraft(
+            todayPlan, session, Date.now());
+          if (wasOpen) {
+            renderDraft();
+            document.getElementById('sv-abandon').hidden = false;
+          }
+        } catch (error) {
+          draft = null;
+          if (wasOpen) setOpen(sessionView, false);
+          showError(copy('training.progress_unavailable'));
+        }
+      } else {
+        draft = null;
+        if (wasOpen) setOpen(sessionView, false);
+      }
+    }
     if (reason !== 'server_render') syncActionFromCanonical();
   }
 
@@ -272,6 +295,46 @@
     row.classList.toggle('is-done', set.done);
     updateProgress();
     checkpoint(true);
+  });
+
+  function trapDialogFocus(container) {
+    if (!container) return;
+    container.addEventListener('keydown', function (event) {
+      if (event.key !== 'Tab' || !container.classList.contains('open')) return;
+      var focusables = Array.prototype.filter.call(
+        container.querySelectorAll(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+          'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+        function (element) { return element.getClientRects().length > 0; }
+      );
+      if (!focusables.length) return;
+      var first = focusables[0];
+      var last = focusables[focusables.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+  }
+
+  trapDialogFocus(document.getElementById('session-view'));
+  trapDialogFocus(document.getElementById('plan-completion'));
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    var completion = document.getElementById('plan-completion');
+    if (completion && completion.classList.contains('open')) {
+      event.preventDefault();
+      cancelWorkoutCompletion();
+      return;
+    }
+    var session = document.getElementById('session-view');
+    if (session && session.classList.contains('open')) {
+      event.preventDefault();
+      closeSession();
+    }
   });
 
   window.startWorkout = startWorkout;

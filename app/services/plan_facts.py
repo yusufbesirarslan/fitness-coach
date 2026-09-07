@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 
+from app.extensions import db
 from app.models import Supplement, UserSession
 from app.plan_presenter import PlanDay, PlanExercise, PlanFacts, REST_DAY_KIND
 from app.services.today_facts import get_active_plan
@@ -129,8 +130,9 @@ def _child_domain_facts(user_id):
     supplements_state = "unknown"
     supplements_count = None
     try:
-        session = (UserSession.query.filter_by(user_id=user_id)
-                   .order_by(UserSession.created_at.desc()).first())
+        with db.session.begin_nested():
+            session = (UserSession.query.filter_by(user_id=user_id)
+                       .order_by(UserSession.created_at.desc()).first())
         target = getattr(session, "target_calories", None) if session else None
         if isinstance(target, (int, float)) and target > 0:
             nutrition_state = "available"
@@ -141,7 +143,8 @@ def _child_domain_facts(user_id):
         nutrition_state = "unavailable"
 
     try:
-        supplements_count = Supplement.query.filter_by(user_id=user_id).count()
+        with db.session.begin_nested():
+            supplements_count = Supplement.query.filter_by(user_id=user_id).count()
         supplements_state = "available" if supplements_count else "empty"
     except Exception:
         supplements_state = "unavailable"

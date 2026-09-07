@@ -51,10 +51,11 @@
     return ids.slice();
   }
 
-  function freshExercises(day, ids) {
+  function freshExercises(day, ids, maxSets) {
+    var setLimit = Number.isInteger(maxSets) ? maxSets : 20;
     return day.egzersizler.map(function (exercise, exerciseIndex) {
       var count = parseInt(exercise.set, 10);
-      if (!Number.isInteger(count) || count < 1 || count > 20) {
+      if (!Number.isInteger(count) || count < 1 || count > setLimit) {
         fail('checkpoint_set_mismatch');
       }
       var sets = [];
@@ -156,7 +157,7 @@
       elapsedBaselineSeconds: 0,
       elapsedStartedAtMs: Number(nowMs) || 0,
       exercises: freshExercises(
-        { egzersizler: exercises }, exercises.map(function () { return null; })),
+        { egzersizler: exercises }, exercises.map(function () { return null; }), 100),
     };
   }
 

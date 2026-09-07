@@ -25,6 +25,20 @@ test('legacy fallback draft stays in the shared draft boundary without server id
   assert.equal(draft.exercises[0].sets[0].done, false);
 });
 
+test('legacy fallback preserves canonical plans with more than durable checkpoint set limits', () => {
+  const legacyDay = {
+    gun: 'Pazartesi', tip: 'agirlik', odak: 'Guc',
+    egzersizler: [
+      { isim: 'High-volume squat', set: 21, tekrar: '5', dinlenme: '90 sn' },
+    ],
+  };
+
+  const draft = createLegacyWorkoutDraft(legacyDay, 5000);
+
+  assert.equal(draft.exercises[0].sets.length, 21);
+  assert.equal(draft.exercises[0].sets[20].reps, 5);
+});
+
 test('fresh draft uses server identities and emits only the exact full snapshot', () => {
   const draft = createWorkoutDraft(day, {
     public_id: 'session-1', status: 'active', resumable: true,

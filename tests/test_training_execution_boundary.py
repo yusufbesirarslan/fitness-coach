@@ -263,9 +263,12 @@ def test_plan_v2_resume_uses_shared_execution_and_hydrates_acknowledged_progress
     )
     assert any(path.endswith('/resume') and status == 200
                for path, _, status in traffic)
+    page.keyboard.press('Escape')
+    expect(page.locator('#session-view')).not_to_have_class('session-view open')
+    expect(page.locator('[data-action="startWorkout"]')).to_be_focused()
 
 
-def test_plan_v2_start_checkpoint_and_complete_use_durable_contract(
+def test_plan_v2_start_refresh_checkpoint_and_complete_use_durable_contract(
     app, auth_user, client, sessions_on, proof_accepted, training_page,
 ):
     with app.app_context():
@@ -288,26 +291,48 @@ def test_plan_v2_start_checkpoint_and_complete_use_durable_contract(
     page.locator('[data-action="startWorkout"]').click()
     expect(page.locator('#session-view')).to_have_class('session-view open')
     expect(page.locator('[data-action="closeSession"]')).to_be_focused()
+    page.keyboard.press('Shift+Tab')
+    expect(page.locator('[data-action="finishSession"]')).to_be_focused()
+    page.keyboard.press('Tab')
+    expect(page.locator('[data-action="closeSession"]')).to_be_focused()
     assert any(path == '/workout/session/start' and status == 201
                for path, _, status in traffic)
 
     page.locator('#sv-body [data-field="weight"]').first.fill('82.5')
     page.locator('#sv-body [data-field="reps"]').first.fill('11')
-    page.locator('#sv-body [data-field="done"]').first.click()
-    page.wait_for_function(
-        'document.querySelector("#sv-body .set-row").classList.contains("is-done")'
-    )
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+    ):
+        page.locator('#sv-body [data-field="done"]').first.click()
+    bootstrap_reads = sum(path == '/training/bootstrap' for path, _, _ in traffic)
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path == '/training/bootstrap'
+        and response.status == 200
+    ):
+        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    assert sum(path == '/training/bootstrap' for path, _, _ in traffic) == bootstrap_reads + 1
+    expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+    ):
+        page.locator('#sv-body [data-field="reps"]').first.fill('12')
     page.locator('[data-action="closeSession"]').click()
     expect(page.locator('#session-view')).not_to_have_class('session-view open')
     expect(page.locator('[data-workout-action="resume"]')).to_have_count(1)
     page.locator('[data-action="startWorkout"]').click()
     expect(page.locator('#session-view')).to_have_class('session-view open')
     expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
-    expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('11')
+    expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('12')
     assert any(path.endswith('/resume') and status == 200
                for path, _, status in traffic)
     page.locator('[data-action="finishSession"]').click()
     expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
+    expect(page.locator('#plan-pump-image')).to_be_focused()
+    page.keyboard.press('Shift+Tab')
+    expect(page.locator('[data-action="submitWorkoutCompletion"]')).to_be_focused()
+    page.keyboard.press('Tab')
     expect(page.locator('#plan-pump-image')).to_be_focused()
     page.locator('#plan-pump-image').set_input_files({
         'name': 'proof.jpg', 'mimeType': 'image/jpeg', 'buffer': b'jpeg-proof',
@@ -326,7 +351,7 @@ def test_plan_v2_start_checkpoint_and_complete_use_durable_contract(
         assert row.status == 'completed'
         saved = json.loads(row.checkpoint_data)
         assert saved['exercises'][0]['sets'][0] == {
-            'index': 0, 'completed': True, 'reps': 11, 'weight_kg': 82.5,
+            'index': 0, 'completed': True, 'reps': 12, 'weight_kg': 82.5,
         }
 
 

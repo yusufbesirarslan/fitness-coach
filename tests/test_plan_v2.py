@@ -435,6 +435,59 @@ def test_plan_child_failure_does_not_blank_training(
     assert 'href="/supplements"' in html
 
 
+def test_transaction_aborting_child_read_is_isolated_from_other_plan_domains(
+    app, make_user, monkeypatch,
+):
+    from app.extensions import db
+    from app.services import plan_facts as pf
+
+    user = make_user("child-transaction", profile_complete=True)
+    _seed_plan(user.id, _VALID_PLAN)
+    state = {"poisoned": False, "savepoints": 0}
+
+    class Savepoint:
+        def __enter__(self):
+            state["savepoints"] += 1
+
+        def __exit__(self, exc_type, _exc, _tb):
+            if exc_type is not None:
+                state["poisoned"] = False
+            return False
+
+    class FailingNutritionQuery:
+        def filter_by(self, **_kwargs):
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def first(self):
+            state["poisoned"] = True
+            raise RuntimeError("statement aborted transaction")
+
+    class SupplementQuery:
+        def filter_by(self, **_kwargs):
+            return self
+
+        def count(self):
+            if state["poisoned"]:
+                raise RuntimeError("transaction is still aborted")
+            return 2
+
+    monkeypatch.setattr(db.session, "begin_nested", lambda: Savepoint())
+    monkeypatch.setattr(pf.UserSession, "query", FailingNutritionQuery())
+    monkeypatch.setattr(pf.Supplement, "query", SupplementQuery())
+
+    facts = pf.gather_plan_facts(user.id)
+
+    assert facts.read_ok is True
+    assert facts.has_active_plan is True
+    assert facts.nutrition_state == "unavailable"
+    assert facts.supplements_state == "available"
+    assert facts.supplements_count == 2
+    assert state["savepoints"] == 2
+
+
 def test_plan_routes_remain_stable_and_no_plan_route_exists(
     app, client, make_user, login,
 ):
