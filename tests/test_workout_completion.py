@@ -421,7 +421,9 @@ def test_fresh_completion_with_session_terminalizes_atomically(app, make_user):
     assert row.version == 2  # bumped on the terminal transition
 
 
-def test_preexisting_pumpcheck_still_terminalizes_session_no_duplicates(app, make_user):
+def test_preexisting_pumpcheck_still_terminalizes_session_no_duplicates(
+    app, make_user, monkeypatch
+):
     """ACTIVE session + a pre-existing matching PumpCheck (preflight sees it):
     the day is already completed, but the owned ACTIVE session is STILL
     terminalized — with NO duplicate PumpCheck/marker/XP."""
@@ -431,6 +433,11 @@ def test_preexisting_pumpcheck_still_terminalizes_session_no_duplicates(app, mak
     db.session.commit()
     before_xp = db.session.get(User, user.id).rank_points or 0
     session = _mk_active_session(user.id)
+    lifecycle_events = []
+    monkeypatch.setattr(
+        "app.services.workout_session.metrics.record_lifecycle_event",
+        lifecycle_events.append,
+    )
 
     result = complete_workout(_cmd(user.id, session_id=session.id))
 
@@ -444,6 +451,7 @@ def test_preexisting_pumpcheck_still_terminalizes_session_no_duplicates(app, mak
     row = db.session.get(WorkoutSession, session.id)
     assert row.status == WORKOUT_SESSION_COMPLETED
     assert row.version == 2
+    assert lifecycle_events == []
 
 
 def test_race_loser_still_terminalizes_session(app, make_user, monkeypatch):
@@ -457,6 +465,11 @@ def test_race_loser_still_terminalizes_session(app, make_user, monkeypatch):
                              date_key=app_today().isoformat()))
     db.session.commit()
     session = _mk_active_session(user.id)
+    lifecycle_events = []
+    monkeypatch.setattr(
+        "app.services.workout_session.metrics.record_lifecycle_event",
+        lifecycle_events.append,
+    )
 
     # Force the preflight to miss so the code proceeds to the INSERT, which then
     # loses the uq_pump_check_day race exactly like a real concurrent request.
@@ -472,6 +485,7 @@ def test_race_loser_still_terminalizes_session(app, make_user, monkeypatch):
     row = db.session.get(WorkoutSession, session.id)
     assert row.status == WORKOUT_SESSION_COMPLETED
     assert row.version == 2
+    assert lifecycle_events == []
 
 
 def test_duplicate_session_completion_is_a_noop(app, make_user):

@@ -101,6 +101,11 @@ def lock_session_for_completion(user_id: int, session_id: int) -> Optional[Worko
     return (
         db.session.query(WorkoutSession)
         .filter_by(id=session_id, user_id=user_id)
+        # A route-level preflight may already have loaded this identity.  The
+        # row lock must refresh it from PostgreSQL; otherwise SQLAlchemy can
+        # return the stale identity-map state and defeat the locked revision
+        # guard after a concurrent checkpoint commits.
+        .populate_existing()
         .with_for_update()
         .first()
     )

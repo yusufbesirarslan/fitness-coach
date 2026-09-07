@@ -136,7 +136,7 @@ Rows are in the recommended staged activation order.
 | 3 | `UIUX_PLAN_V2_ENABLED` | OFF | shipped_dark | **Partial** — weekly section only | 2026-10-01 | enable |
 | 4 | `UIUX_COACH_PAGE_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
 | 5 | `UIUX_NAV_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
-| 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | OFF | staging_only | **Partial** — anomaly logs, no lifecycle metric | 2026-11-01 | enable |
+| 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | OFF | staging_only | **Full** — anomaly logs + bounded `WorkoutSessionLifecycle` events | 2026-11-01 | enable |
 | 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | OFF | staging_only | **Partial** — quality is not observable | 2026-11-01 | retain experimentally |
 | 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | OFF | staging_only | **Full** — `[COACH][PLAN_TOOL]` outcome line + the durable mutation journal | 2026-11-01 | enable |
 | 9 | `MOBILE_AUTH_ENABLED` | OFF | **blocked** | **Full** — security events + client-class split | 2026-10-01 | enable (after PR4) |
@@ -225,7 +225,12 @@ not a fifth primary tab.
 index `uq_workout_session_active_owner` *is* the at-most-one-ACTIVE-session
 invariant, so enabling without it is unsafe. Turning it back off is safe with
 sessions already persisted: the read contract ignores those rows, never deletes
-them. The migration is not rolled back (expand-only, by design).
+them. The migration is not rolled back (expand-only, by design). Lifecycle
+observability is `WorkoutSessionLifecycle` in `FitX/Runtime`, with the single
+fixed `Event` dimension (`started`, `resumed`, `checkpointed`, `abandoned`,
+`completed`, `revision_conflict`). It counts committed transitions, not replays,
+and contains no user/session identity. Staging therefore also requires
+`RUNTIME_METRICS_ENABLED=1`; neither flag's repository default changes here.
 
 **7. `AI_ADAPTIVE_PLAN_CONTEXT`** — adds the versioned read-only AdaptivePlan
 block to coach context **and** switches the coach system prompt to
