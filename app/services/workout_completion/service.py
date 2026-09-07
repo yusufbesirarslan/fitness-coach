@@ -111,6 +111,8 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         ):
             db.session.rollback()
             _log(command, "session_revision_conflict")
+            from app.services.workout_session.metrics import record_lifecycle_event
+            record_lifecycle_event("revision_conflict")
             raise SessionCompletionConflict(
                 "workout session progress moved on", reason="revision"
             )
@@ -180,7 +182,7 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
 
         # Terminalize the linked session ACTIVE→COMPLETED in the SAME transaction,
         # before the single commit — one atomic unit with all completion artifacts.
-        mark_session_completed(session, now)
+        session_completed = mark_session_completed(session, now)
 
         db.session.commit()
     except IntegrityError as exc:
@@ -204,6 +206,9 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
 
     level = get_level(new_total)
     _log(command, "created")
+    if session_completed:
+        from app.services.workout_session.metrics import record_lifecycle_event
+        record_lifecycle_event("completed")
     return CompletionResult(
         outcome=CompletionOutcome.CREATED,
         pump_check_id=pump_check.id,

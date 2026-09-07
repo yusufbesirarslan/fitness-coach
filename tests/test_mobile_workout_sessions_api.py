@@ -213,6 +213,40 @@ def _session_row(user):
     return WorkoutSession.query.filter_by(user_id=user.id).one()
 
 
+@pytest.fixture
+def lifecycle_events(monkeypatch):
+    """Capture the transport-neutral lifecycle counter without a flush thread."""
+    from app.services import runtime_metrics
+
+    calls = []
+    monkeypatch.setattr(
+        runtime_metrics,
+        "increment",
+        lambda name, dimensions=None, value=1: calls.append(
+            (name, dimensions, value)
+        ),
+    )
+    return calls
+
+
+@pytest.fixture
+def browser_completion_proof(monkeypatch):
+    from app.blueprints import training as routes
+
+    calls = {"validate": 0}
+    monkeypatch.setattr(
+        routes, "validate_pump_check_image",
+        lambda *args, **kwargs: (b"jpeg", "image/jpeg", None),
+    )
+
+    def validate(*args, **kwargs):
+        calls["validate"] += 1
+        return {"valid": True, "fallback": False}
+
+    monkeypatch.setattr(routes, "validate_pump_check", validate)
+    return calls
+
+
 # -- 57. start ----------------------------------------------------------------
 
 def test_start_publishes_the_exact_native_session_contract(
@@ -372,17 +406,14 @@ def test_starting_a_different_workout_while_one_is_active_is_a_conflict(
     assert WorkoutSession.query.count() == 1
 
 
-def test_a_browser_started_session_is_adopted_but_cannot_be_checkpointed(
-    client, owner, as_mobile, workout_ref
+def test_a_browser_started_scheduled_session_can_be_checkpointed_natively(
+    client, owner, as_mobile, workout_ref, login
 ):
-    """The documented cross-surface edge, with a working way out.
+    """P2-2: server-owned plan identity bridges a browser-started row.
 
-    A session started through the BROWSER contract has no native workout
-    reference, because that contract never had one. The native client adopts it
-    (same day, slot and source — it is the same intended workout) and can read,
-    resume and abandon it, but it cannot checkpoint against a canonical workout
-    the session never recorded. Rather than guess an identity, the server says
-    so and the client recovers by abandoning and starting natively.
+    Restoring the old unconditional ``workout_ref`` requirement must make this
+    fail with ``TRAINING_SESSION_STALE``.  No reference is fabricated or
+    backfilled: both transports continue on the one browser-created row.
     """
     from app.services.workout_session import start_session
 
@@ -391,6 +422,11 @@ def test_a_browser_started_session_is_adopted_but_cannot_be_checkpointed(
         start_session(owner.id)
     assert _session_row(owner).workout_ref is None
 
+    current = client.get(CURRENT_PATH, headers=headers)
+    assert current.status_code == 200
+    assert current.json["session"]["session_ref"] == _session_row(owner).public_id
+    assert current.json["session"]["revision"] == 0
+
     adopted = _start(client, headers, workout_ref)
     assert adopted.status_code == 200
     assert adopted.headers["Idempotency-Replayed"] == "true"
@@ -398,19 +434,326 @@ def test_a_browser_started_session_is_adopted_but_cannot_be_checkpointed(
     reference = adopted.json["session"]["session_ref"]
     assert WorkoutSession.query.count() == 1
 
-    blocked = _checkpoint(client, headers, reference, 0, "adopt-key-000001")
-    assert blocked.status_code == 409
-    assert blocked.json["error"]["code"] == "TRAINING_SESSION_STALE"
-    assert blocked.headers["Session-Resolution"] == "reread"
+    saved = _checkpoint(client, headers, reference, 0, "adopt-key-000001")
+    assert saved.status_code == 200
+    assert saved.json["session"]["session_ref"] == reference
+    assert saved.json["session"]["revision"] == 1
+    assert saved.json["session"]["checkpoint"] == _snapshot()
 
-    # The documented recovery: abandon, then start natively.
-    assert _abandon(client, headers, reference).status_code == 200
-    restarted = _start(client, headers, workout_ref)
-    assert restarted.status_code == 201
-    assert restarted.json["session"]["workout_ref"] == workout_ref
+    assert login("session-owner").status_code == 200
+    browser = client.get("/workout/session/current").get_json()["session"]
+    assert browser["public_id"] == reference
+    assert browser["checkpoint_revision"] == 1
+    assert browser["checkpoint"] == _snapshot()
+
+    row = _session_row(owner)
+    assert WorkoutSession.query.count() == 1
+    assert row.public_id == reference
+    assert row.workout_ref is None
+    assert row.checkpoint_revision == 1
+    assert json.loads(row.checkpoint_data) == _snapshot()
+
+
+def test_browser_started_session_native_checkpoint_fails_closed_on_plan_drift(
+    client, owner, as_mobile, plan, workout_ref
+):
+    """The browser bridge is valid only while its scheduled slot is canonical."""
+    from app.services.workout_session import start_session
+
+    headers = as_mobile(owner)
+    with audit_clock(FIXED_NOW):
+        started = start_session(owner.id)
+    reference = started.session.public_id
+    assert _session_row(owner).workout_ref is None
+
+    changed = _plan_document()
+    changed["program"][3]["egzersizler"] = [
+        _exercise(EXERCISE_B, "Deadlift"),
+    ]
+    plan.plan_data = json.dumps(changed, ensure_ascii=False)
+    db.session.commit()
+
+    response = _checkpoint(client, headers, reference, 0, "drift-key-000001")
+
+    assert response.status_code == 409
+    assert response.json["error"]["code"] == "TRAINING_SESSION_STALE"
+    row = _session_row(owner)
+    assert row.checkpoint_revision == 0
+    assert row.checkpoint_data is None
+
+
+def test_native_started_session_can_be_checkpointed_and_completed_by_web(
+    client, owner, as_mobile, workout_ref, browser_completion_proof, login
+):
+    headers = as_mobile(owner)
+    started = _start(client, headers, workout_ref)
+    reference = started.json["session"]["session_ref"]
+    assert _session_row(owner).workout_ref == workout_ref
+
+    assert login("session-owner").status_code == 200
+    saved = client.post(
+        f"/workout/session/{reference}/checkpoint",
+        headers={"If-Match": "0", "Idempotency-Key": "web-key-0000001"},
+        json={"checkpoint": _snapshot(reps=11)},
+    )
+    assert saved.status_code == 200
+
+    native = client.get(CURRENT_PATH, headers=headers).json["session"]
+    assert native["session_ref"] == reference
+    assert native["revision"] == 1
+    assert native["checkpoint"] == _snapshot(reps=11)
+
+    with audit_clock(FIXED_NOW):
+        completed = client.post("/workout/complete", json={
+            "image": "x",
+            "location_type": "salon",
+            "session_id": reference,
+            "expected_checkpoint_revision": 1,
+        })
+    assert completed.status_code == 200
+    row = _session_row(owner)
+    assert row.public_id == reference
+    assert row.status == "completed"
+    assert WorkoutSession.query.count() == 1
+    assert PumpCheck.query.count() == 1
+    assert WorkoutLog.query.filter_by(
+        user_id=owner.id, exercise_name=WORKOUT_COMPLETION_MARKER
+    ).count() == 1
+
+
+def test_browser_started_session_can_be_completed_natively(
+    client, owner, as_mobile, plan, completion_proof
+):
+    from app.services.workout_session import start_session
+
+    with audit_clock(FIXED_NOW):
+        started = start_session(owner.id)
+    reference = started.session.public_id
+    assert _session_row(owner).workout_ref is None
+
+    response = _complete(client, as_mobile(owner), reference, 0)
+
+    assert response.status_code == 200
+    row = _session_row(owner)
+    assert row.public_id == reference
+    assert row.workout_ref is None
+    assert row.status == "completed"
+    assert WorkoutSession.query.count() == 1
+    assert PumpCheck.query.count() == 1
+    assert WorkoutLog.query.filter_by(
+        user_id=owner.id, exercise_name=WORKOUT_COMPLETION_MARKER
+    ).count() == 1
+
+
+def test_cross_transport_stale_completions_preserve_progress_and_make_no_artifacts(
+    client, owner, as_mobile, workout_ref, login
+):
+    """S14-4: either transport's checkpoint invalidates the other's old proof."""
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+    assert login("session-owner").status_code == 200
+
+    web_checkpoint = client.post(
+        f"/workout/session/{reference}/checkpoint",
+        headers={"If-Match": "0", "Idempotency-Key": "web-stale-key-01"},
+        json={"checkpoint": _snapshot(elapsed=61)},
+    )
+    assert web_checkpoint.status_code == 200
+
+    stale_native = _complete(client, headers, reference, 0)
+    assert stale_native.status_code == 409
+    assert stale_native.json["error"]["code"] == "TRAINING_SESSION_REVISION_CONFLICT"
+    assert PumpCheck.query.count() == 0
+    assert WorkoutLog.query.filter_by(
+        user_id=owner.id, exercise_name=WORKOUT_COMPLETION_MARKER
+    ).count() == 0
+
+    native_checkpoint = _checkpoint(
+        client, headers, reference, 1, "native-stale-key", _snapshot(elapsed=62)
+    )
+    assert native_checkpoint.status_code == 200
+
+    with audit_clock(FIXED_NOW):
+        stale_web = client.post("/workout/complete", json={
+            "image": "x",
+            "location_type": "salon",
+            "session_id": reference,
+            "expected_checkpoint_revision": 1,
+        })
+    assert stale_web.status_code == 409
+    assert stale_web.get_json()["error"] == "revision_conflict"
+    row = _session_row(owner)
+    assert row.public_id == reference
+    assert row.status == "active"
+    assert row.checkpoint_revision == 2
+    assert json.loads(row.checkpoint_data)["elapsed_seconds"] == 62
+    assert PumpCheck.query.count() == 0
+    assert WorkoutLog.query.filter_by(
+        user_id=owner.id, exercise_name=WORKOUT_COMPLETION_MARKER
+    ).count() == 0
+
+
+def test_lifecycle_metric_counts_transitions_and_excludes_replays(
+    client, owner, as_mobile, workout_ref, lifecycle_events
+):
+    headers = as_mobile(owner)
+    first = _start(client, headers, workout_ref)
+    reference = first.json["session"]["session_ref"]
+    assert _start(client, headers, workout_ref).status_code == 200
+
+    resumed = _post(
+        client, headers, f"{SESSIONS_PATH}/{reference}/resume", json={}
+    )
+    assert resumed.status_code == 200
+
+    saved = _checkpoint(client, headers, reference, 0, "metric-key-00001")
+    assert saved.status_code == 200
+    replay = _checkpoint(client, headers, reference, 0, "metric-key-00001")
+    assert replay.status_code == 200
+    stale = _checkpoint(client, headers, reference, 0, "metric-key-00002")
+    assert stale.status_code == 409
+
+    abandoned = _abandon(client, headers, reference, expected_revision=1)
+    assert abandoned.status_code == 200
+    replayed_abandon = _abandon(client, headers, reference, expected_revision=1)
+    assert replayed_abandon.status_code == 200
+
+    assert lifecycle_events == [
+        ("WorkoutSessionLifecycle", {"Event": "started"}, 1),
+        ("WorkoutSessionLifecycle", {"Event": "resumed"}, 1),
+        ("WorkoutSessionLifecycle", {"Event": "checkpointed"}, 1),
+        ("WorkoutSessionLifecycle", {"Event": "revision_conflict"}, 1),
+        ("WorkoutSessionLifecycle", {"Event": "abandoned"}, 1),
+    ]
+
+
+def test_completion_metric_counts_first_transition_not_replay(
+    client, owner, as_mobile, workout_ref, completion_proof, lifecycle_events
+):
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+
+    assert _complete(client, headers, reference, 0).status_code == 200
+    assert _complete(client, headers, reference, 0).status_code == 200
+
+    assert lifecycle_events == [
+        ("WorkoutSessionLifecycle", {"Event": "started"}, 1),
+        ("WorkoutSessionLifecycle", {"Event": "completed"}, 1),
+    ]
+
+
+def test_stale_completion_counts_exactly_one_revision_conflict(
+    client, owner, as_mobile, workout_ref, lifecycle_events
+):
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
     assert _checkpoint(
-        client, headers, restarted.json["session"]["session_ref"], 0,
-        "adopt-key-000002").status_code == 200
+        client, headers, reference, 0, "metric-stale-key"
+    ).status_code == 200
+
+    refused = _complete(client, headers, reference, 0)
+
+    assert refused.status_code == 409
+    assert lifecycle_events == [
+        ("WorkoutSessionLifecycle", {"Event": "started"}, 1),
+        ("WorkoutSessionLifecycle", {"Event": "checkpointed"}, 1),
+        ("WorkoutSessionLifecycle", {"Event": "revision_conflict"}, 1),
+    ]
+
+
+def test_lifecycle_metric_buffer_has_only_the_bounded_event_dimension(
+    client, owner, as_mobile, workout_ref, monkeypatch
+):
+    from app.services import runtime_metrics
+
+    runtime_metrics.reset_for_test()
+    monkeypatch.setattr(runtime_metrics, "RUNTIME_METRICS_ENABLED", True)
+    monkeypatch.setattr(runtime_metrics, "_BOTO3_AVAILABLE", True)
+    monkeypatch.setattr(runtime_metrics, "_ensure_flusher", lambda: None)
+
+    assert _start(client, as_mobile(owner), workout_ref).status_code == 201
+    counters, timings, gauges = runtime_metrics._drain()
+    data = runtime_metrics.build_metric_data(counters, timings, gauges)
+    lifecycle = [
+        datum for datum in data
+        if datum["MetricName"] == "WorkoutSessionLifecycle"
+    ]
+
+    assert lifecycle == [{
+        "MetricName": "WorkoutSessionLifecycle",
+        "Dimensions": [{"Name": "Event", "Value": "started"}],
+        "Value": 1.0,
+        "Unit": "Count",
+    }]
+
+
+def test_metric_failure_never_changes_lifecycle_command_results(
+    client, owner, as_mobile, workout_ref, monkeypatch
+):
+    from app.services import runtime_metrics
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("metrics unavailable")
+
+    monkeypatch.setattr(runtime_metrics, "increment", explode)
+    headers = as_mobile(owner)
+    started = _start(client, headers, workout_ref)
+    reference = started.json["session"]["session_ref"]
+    resumed = _post(client, headers, f"{SESSIONS_PATH}/{reference}/resume", json={})
+    saved = _checkpoint(client, headers, reference, 0, "failure-key-0001")
+    abandoned = _abandon(client, headers, reference, expected_revision=1)
+
+    assert [started.status_code, resumed.status_code, saved.status_code,
+            abandoned.status_code] == [201, 200, 200, 200]
+
+
+def test_metric_failure_never_changes_completion_result(
+    client, owner, as_mobile, workout_ref, completion_proof, monkeypatch
+):
+    from app.services import runtime_metrics
+
+    monkeypatch.setattr(
+        runtime_metrics, "increment",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("metrics unavailable")
+        ),
+    )
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+
+    completed = _complete(client, headers, reference, 0)
+
+    assert completed.status_code == 200
+    assert completed.json["session"]["status"] == "completed"
+
+
+def test_runtime_metrics_disabled_keeps_every_execution_outcome_functional(
+    client, owner, as_mobile, workout_ref, completion_proof, monkeypatch
+):
+    from app.services import runtime_metrics
+
+    monkeypatch.setattr(runtime_metrics, "RUNTIME_METRICS_ENABLED", False)
+    monkeypatch.setattr(
+        runtime_metrics, "_ensure_flusher",
+        lambda: (_ for _ in ()).throw(AssertionError("disabled metrics started I/O")),
+    )
+    headers = as_mobile(owner)
+    first = _start(client, headers, workout_ref)
+    first_ref = first.json["session"]["session_ref"]
+    resumed = _post(client, headers, f"{SESSIONS_PATH}/{first_ref}/resume", json={})
+    saved = _checkpoint(client, headers, first_ref, 0, "disabled-key-001")
+    conflict = _checkpoint(client, headers, first_ref, 0, "disabled-key-002")
+    abandoned = _abandon(client, headers, first_ref, expected_revision=1)
+
+    second = _start(client, headers, workout_ref)
+    second_ref = second.json["session"]["session_ref"]
+    completed = _complete(client, headers, second_ref, 0)
+
+    assert [
+        first.status_code, resumed.status_code, saved.status_code,
+        conflict.status_code, abandoned.status_code, second.status_code,
+        completed.status_code,
+    ] == [201, 200, 200, 409, 200, 201, 200]
 
 
 # -- 58. current / resume -----------------------------------------------------

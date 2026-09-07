@@ -106,6 +106,7 @@ approximate `p50`/`p95`/`p99`. Bucket edges are the reported values, so a p95 of
 | `HttpOverload` | Count | `Blueprint`, `Client` | 503 — deliberate load shedding |
 | `HttpThrottled` | Count | `Blueprint`, `Client` | 429 — rate limited |
 | `AuthOutcomes` | Count | `Path`, `Outcome` | `Path` ∈ web / mobile; `Outcome` ∈ ok / no_identity / session_invalid / token_rejected / provider_unavailable |
+| `WorkoutSessionLifecycle` | Count | `Event` | Committed workout-session transitions and revision refusals; `Event` ∈ started / resumed / checkpointed / abandoned / completed / revision_conflict |
 | `AiProviderCalls` | Count | `Provider`, `Outcome` | `Outcome` ∈ success / rate_limit / timeout / connection / transient / api_error / error |
 | `AiProviderLatency` | Milliseconds | `Provider` | Provider call duration |
 | `AiModelSlotWait` | Milliseconds | `Provider` | Time spent waiting for a model slot |
@@ -172,6 +173,24 @@ dimensions or values:
 server-side fact. A client-supplied header is **never** trusted for it, per
 prod-hardening §6 ("Do not trust arbitrary unvalidated client-provided labels").
 `tests/test_runtime_metrics.py` asserts both rules.
+
+#### Workout-session lifecycle
+
+`WorkoutSessionLifecycle` is recorded through the existing process-local
+`runtime_metrics` buffer; lifecycle command paths never call CloudWatch. Its only
+dimension is `Event`, from the six-value vocabulary in the table above. There is
+no user ID, session reference, workout identity, route, replay key, or plan
+identity in a datum.
+
+`started`, `resumed`, `checkpointed`, `abandoned`, and `completed` count only the
+corresponding successful canonical outcome after its durable commit. Idempotent
+start, checkpoint, abandon, and completion replays do not increment them; nor
+does session reconciliation against a completion that already existed.
+`revision_conflict` counts one refused logical command, whether refusal happens
+in checkpoint comparison, completion preflight, or the authoritative locked
+completion check; one request never counts both preflight and locked refusal.
+Instrumentation is best-effort: when runtime metrics are disabled, or even when
+`runtime_metrics.increment` raises unexpectedly, execution results are unchanged.
 
 ### Feature-flag visibility
 

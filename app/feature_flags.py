@@ -350,9 +350,11 @@ ROLLOUT_FLAGS = (
         depends_on=(),
         observability=(
             "[WORKOUT_STATE] anomaly and [WORKOUT_SESSION] log lines (PII-free) "
-            "plus the PR1 training-blueprint HTTP SLIs. No session-lifecycle "
-            "metric exists — counts of active/abandoned/stale sessions are only "
-            "obtainable by querying the database."),
+            "plus the PR1 training-blueprint HTTP SLIs and the "
+            "WorkoutSessionLifecycle metric. Its only dimension is Event, from "
+            "the fixed started/resumed/checkpointed/abandoned/completed/"
+            "revision_conflict vocabulary; it contains no user or session "
+            "identity. Requires RUNTIME_METRICS_ENABLED=1."),
         prerequisites=(
             "migration a994f9bed783 applied — the partial unique index "
             "uq_workout_session_active_owner is the at-most-one-ACTIVE-session "
@@ -367,6 +369,8 @@ ROLLOUT_FLAGS = (
         success_signals=(
             "no is_active_session_owner_violation IntegrityError in logs",
             "no [WORKOUT_STATE] completion_marker_mismatch anomalies",
+            "WorkoutSessionLifecycle transition counts remain coherent and "
+            "revision_conflict does not spike",
             "clients continue to accept contract_version=2 (additive)",
         ),
         abort_signals=(

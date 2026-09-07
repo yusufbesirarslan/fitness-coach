@@ -41,6 +41,7 @@ from app.services.workout_session import (
     complete_session,
     get_current_session,
     owned_session,
+    planned_exercise_identities,
     prepare_completion,
     record_checkpoint,
     reject_terminal,
@@ -136,6 +137,20 @@ def _session_workout(user_id: int, secret, row) -> dict:
 def allowed_exercise_ids(workout: dict) -> tuple:
     """The ordered canonical exercise identities a checkpoint may name."""
     return tuple(item["exercise_id"] for item in workout["exercises"])
+
+
+def _session_exercise_ids(user_id: int, secret, row) -> tuple:
+    """Resolve exercise membership from the strongest server-owned identity.
+
+    Native-started rows retain their opaque HMAC-bound re-resolution path.
+    Browser-started scheduled rows have no ``workout_ref`` by design, so they
+    reuse the canonical plan-fingerprint/weekday-slot authority captured by the
+    session itself.  That fallback fails closed on plan drift and remains
+    unavailable to unscheduled sessions.
+    """
+    if row.workout_ref:
+        return allowed_exercise_ids(_session_workout(user_id, secret, row))
+    return planned_exercise_identities(row)
 
 
 # -- Commands -----------------------------------------------------------------
@@ -239,7 +254,7 @@ def checkpoint(
     """
     result = record_checkpoint(
         user_id, session_ref, key, base_revision,
-        lambda row: allowed_exercise_ids(_session_workout(user_id, secret, row)),
+        lambda row: _session_exercise_ids(user_id, secret, row),
         parse_payload,
         today=app_today(),
     )

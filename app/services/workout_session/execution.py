@@ -36,6 +36,7 @@ from app.models import WORKOUT_SESSION_ABANDONED, WORKOUT_SESSION_ACTIVE
 from app.timeutil import app_today
 
 from .checkpoint import Checkpoint
+from .metrics import record_lifecycle_event
 from .errors import (
     IdempotencyConflict,
     RevisionConflict,
@@ -100,6 +101,7 @@ def require_revision(row, expected: Optional[int]) -> None:
     NOT use this — their precondition is the conditional UPDATE itself.
     """
     if expected is not None and (row.checkpoint_revision or 0) != expected:
+        record_lifecycle_event("revision_conflict")
         raise RevisionConflict("the declared revision is not current")
 
 
@@ -198,6 +200,7 @@ def record_checkpoint(
         return replay
 
     if (row.checkpoint_revision or 0) != base_revision:
+        record_lifecycle_event("revision_conflict")
         raise RevisionConflict("the declared revision is not current")
 
     written = advance_checkpoint(
@@ -213,7 +216,9 @@ def record_checkpoint(
         if replay is not None:
             return replay
         reject_terminal(row)
+        record_lifecycle_event("revision_conflict")
         raise RevisionConflict("the declared revision is not current")
+    record_lifecycle_event("checkpointed")
     return CheckpointResult(row, build_session_view(row, day), False)
 
 

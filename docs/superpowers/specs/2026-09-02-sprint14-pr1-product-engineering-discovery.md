@@ -954,3 +954,58 @@ metadata, and adds no write authority, schema, or migration.
 Sprint 14 remains open. PR4 still owns final PostgreSQL reliability proof,
 observability, runtime lifecycle metrics, and accepted contract-debt review;
 PR5 owns staged-activation readiness.
+
+## 17. PR4 implementation evidence (2026-09-06)
+
+P2-2 is closed without inventing or backfilling a native `workout_ref`. For a
+browser-started scheduled row, native checkpoint membership is derived from the
+row's server-owned weekday slot and versioned plan fingerprint, then checked
+against the current canonical planned workout. Existing native rows retain the
+HMAC `workout_ref` re-resolution path unchanged. Unscheduled identity and plan
+drift fail closed before mutation.
+
+Cross-transport request tests prove web start → native checkpoint/complete and
+native start → web checkpoint/complete use the same public ID and physical
+row. Mirrored stale-completion tests prove that either transport's newer
+checkpoint invalidates the other's old completion proof with zero PumpCheck or
+completion-marker artifacts.
+
+`tests/test_sprint14_workout_execution_reliability_pg.py` adds deterministic,
+real-PostgreSQL proofs for competing same-base checkpoints, duplicate command
+delivery, both forced completion/checkpoint orderings, concurrent starts, and
+cross-transport physical-row convergence. It uses barriers/events and is named
+explicitly in CI's `PostgreSQL concurrency` job.
+
+Lifecycle instrumentation uses the existing buffered `FitX/Runtime` path:
+`WorkoutSessionLifecycle`, with only the fixed `Event` dimension and values
+`started`, `resumed`, `checkpointed`, `abandoned`, `completed`, and
+`revision_conflict`. Successful events follow durable commit, replays are not
+transitions, a refused command counts one conflict, and metric failure cannot
+change command correctness. No identity/cardinality-sensitive dimension and no
+inline network call were added.
+
+### 17.1 Criteria and debt status after PR4
+
+| ID | Status | Note |
+|---|---|---|
+| S14-1 | **satisfied** | Revision-gated bounded browser checkpoint remains end-to-end. |
+| S14-2 | **satisfied** | Both transports project the one canonical revision and snapshot. |
+| S14-3 | **satisfied** | Completion declares and authoritatively checks the locked revision. |
+| S14-4 | **satisfied** | Mirrored transport tests plus both PostgreSQL orderings prove stale completion cannot erase progress. |
+| S14-5 | **satisfied** | Browser reload/resume hydration remains canonical. |
+| S14-6 | **satisfied** | Bounded whole-snapshot validation remains fail-closed. |
+| S14-7 | **satisfied** | Fixed-cardinality lifecycle telemetry is buffered, replay-aware, and failure-safe. |
+| S14-8 | **satisfied** | The new deterministic PostgreSQL module is explicitly CI-selected. |
+| S14-9 | **satisfied** | No schema or migration; the single head remains `f5a6b7c8d9e0`. |
+| S14-10 | **satisfied** | Flag-OFF surfaces remain inert and legacy execution remains unchanged. |
+| S14-11 | **satisfied** | Production/default flag values remain unchanged and OFF. |
+
+P2 classification: P2-2 is **CLOSED** (scheduled browser rows continue through
+native checkpoint and completion without synthetic identity). P2-1 and P2-3
+through P2-8 remain **OPEN** at their prior severity; PR4 does not opportunistically
+absorb them.
+
+All formal S14 execution criteria are now satisfied, but Sprint 14 is not closed.
+PR5 owns staging exercise, runtime-metrics baseline capture, success/abort and
+rollback evidence, the go/no-go checklist, and final closure. It should require
+no new execution-correctness implementation.

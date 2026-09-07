@@ -31,6 +31,7 @@ from app.observability import current_request_id
 from app.timeutil import app_today
 
 from .checkpoint import load_snapshot
+from .metrics import record_lifecycle_event
 from .models import (
     HEARTBEAT_COALESCE_SECONDS,
     STALE_NONE,
@@ -206,6 +207,7 @@ def start_session(
         _log("start_integrity_error", user_id)
         raise
     _log("started", user_id)
+    record_lifecycle_event("started")
     return SessionResult(SessionOutcome.CREATED, session=_build_view(session, day))
 
 
@@ -258,9 +260,23 @@ def resume_session(user_id: int, public_id: str, *, today: Optional[date] = None
 
     # Eligible: an explicit resume may bump last_activity_at (conditional on ACTIVE
     # so it can never resurrect a just-terminalized session).
-    touch_active(user_id, public_id, datetime.utcnow())
+    touched = touch_active(user_id, public_id, datetime.utcnow())
     session = get_owned_session(user_id, public_id)
+    if touched == 0:
+        if session is None:
+            return SessionResult(SessionOutcome.NOT_FOUND)
+        if session.status == WORKOUT_SESSION_COMPLETED:
+            return SessionResult(
+                SessionOutcome.ALREADY_COMPLETED,
+                session=_build_view(session, day),
+            )
+        if session.status == WORKOUT_SESSION_ABANDONED:
+            return SessionResult(
+                SessionOutcome.ALREADY_ABANDONED,
+                session=_build_view(session, day),
+            )
     _log("resumed", user_id)
+    record_lifecycle_event("resumed")
     return SessionResult(SessionOutcome.RESUMED, session=_build_view(session, day))
 
 
@@ -317,6 +333,7 @@ def abandon_session(
 
     session = get_owned_session(user_id, public_id)
     _log("abandoned", user_id)
+    record_lifecycle_event("abandoned")
     return SessionResult(SessionOutcome.ABANDONED, session=_build_view(session, day))
 
 

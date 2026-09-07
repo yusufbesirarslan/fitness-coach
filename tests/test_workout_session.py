@@ -394,6 +394,32 @@ def test_resume_abandoned_is_terminal_outcome(app, make_user):
     assert resume_session(u.id, s.public_id).outcome is SessionOutcome.ALREADY_ABANDONED
 
 
+def test_resume_losing_terminal_race_returns_terminal_without_metric(
+    app, make_user, monkeypatch
+):
+    u = make_user("r4-race")
+    public_id = start_session(u.id).session.public_id
+    lifecycle_events = []
+
+    def terminalize_before_touch(user_id, public_id, now):
+        row = WorkoutSession.query.filter_by(
+            user_id=user_id, public_id=public_id
+        ).one()
+        row.status = WORKOUT_SESSION_COMPLETED
+        row.completed_at = now
+        db.session.commit()
+        return 0
+
+    monkeypatch.setattr(wservice, "touch_active", terminalize_before_touch)
+    monkeypatch.setattr(wservice, "record_lifecycle_event", lifecycle_events.append)
+
+    result = resume_session(u.id, public_id)
+
+    assert result.outcome is SessionOutcome.ALREADY_COMPLETED
+    assert result.session.status == WORKOUT_SESSION_COMPLETED
+    assert lifecycle_events == []
+
+
 def test_resume_unknown_public_id_not_found(app, make_user):
     u = make_user("r5")
     assert resume_session(u.id, "does-not-exist").outcome is SessionOutcome.NOT_FOUND
