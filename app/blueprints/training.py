@@ -197,7 +197,12 @@ def training():
     weekly_enabled = current_app.config.get("WEEKLY_PROGRAM_UI_ENABLED", False)
     if current_app.config.get("UIUX_PLAN_V2_ENABLED", False):
         plan_view = build_plan_view(
-            gather_plan_facts(current_user.id), weekly_enabled=weekly_enabled)
+            gather_plan_facts(
+                current_user.id,
+                sessions_enabled=_workout_sessions_enabled(),
+            ),
+            weekly_enabled=weekly_enabled,
+        )
         return render_template("plan.html", plan=plan_view)
 
     # Kayıtlı sakatlık verisini forma ön-doldur (yapışkan alan). None-güvenli.

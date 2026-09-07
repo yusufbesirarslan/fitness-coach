@@ -162,6 +162,15 @@
       }
     }
 
+    function hydrate(snapshot, reason) {
+      if (destroyed) return null;
+      generation++;
+      lastRefreshAt = now();
+      var meta = acceptCanonical(snapshot, true);
+      onSnapshot(snapshot, reason || 'hydrate', meta);
+      return snapshot;
+    }
+
     function beginMutation() {
       mutationEpoch++;
       mutationGeneration++;
@@ -415,6 +424,7 @@
     addWindowListener('focus', onFocus);
 
     api = {
+      hydrate: hydrate,
       refresh: refresh,
       mutate: mutate,
       scheduleCheckpoint: scheduleCheckpoint,

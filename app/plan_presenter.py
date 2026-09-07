@@ -31,6 +31,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.today_guidance import (
+    CANDIDATE_RESUME_WORKOUT,
+    CANDIDATE_START_WORKOUT,
+    decide_today_guidance,
+)
+
 # ── Existing canonical routes (no route is invented here; these mirror paths
 #    already owned by app/nav.py). The Plan page itself is /training, so it is
 #    deliberately NOT offered as an action from within Plan (no self-link). ──
@@ -114,6 +120,13 @@ class PlanFacts:
     days: tuple = ()          # tuple[PlanDay], canonical order preserved
     score: object = None       # opaque canonical score, carried verbatim or None
     created_at: object = None  # display string or None
+    workout_read_ok: bool = False
+    workout_snapshot: object = None
+    execution_bootstrap: object = None
+    nutrition_state: str = "unknown"
+    nutrition_target_calories: object = None
+    supplements_state: str = "unknown"
+    supplements_count: object = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +158,14 @@ class PlanView:
     score: object = None
     created_at: object = None
     partial: bool = False
+    workout_state: str = "error"
+    workout_action: str = "none"
+    workout_action_label_key: str = ""
+    execution_bootstrap: object = None
+    nutrition_state: str = "unknown"
+    nutrition_target_calories: object = None
+    supplements_state: str = "unknown"
+    supplements_count: object = None
 
 
 # Secondary actions available whenever a plan surface is shown. Deliberately does
@@ -177,6 +198,33 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
     ``weekly_enabled`` is the server-owned ``WEEKLY_PROGRAM_UI_ENABLED`` value,
     passed in by the route; the presenter never reads config itself.
     """
+    decision = decide_today_guidance(
+        read_ok=facts.workout_read_ok,
+        primary_state=(facts.workout_snapshot.primary_state
+                       if facts.workout_snapshot is not None else "unknown"),
+        action=(facts.workout_snapshot.action
+                if facts.workout_snapshot is not None else "none"),
+    )
+    workout_action = "none"
+    workout_label_key = ""
+    if decision.primary_kind == CANDIDATE_START_WORKOUT:
+        workout_action = "start"
+        workout_label_key = "plan.action.start_workout"
+    elif decision.primary_kind == CANDIDATE_RESUME_WORKOUT:
+        workout_action = "resume"
+        workout_label_key = "plan.action.resume_workout"
+
+    shared = {
+        "workout_state": decision.state,
+        "workout_action": workout_action,
+        "workout_action_label_key": workout_label_key,
+        "execution_bootstrap": facts.execution_bootstrap,
+        "nutrition_state": facts.nutrition_state,
+        "nutrition_target_calories": facts.nutrition_target_calories,
+        "supplements_state": facts.supplements_state,
+        "supplements_count": facts.supplements_count,
+    }
+
     # Honest failure: a canonical read failed. Do NOT present a plan, do NOT
     # convert to no_active_plan. Offer no dominant CTA and no "Open Plan" (the user
     # is already on Plan); the template renders a safe retry (answer.txt §2).
@@ -186,6 +234,7 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
             primary=None,
             secondary=_PLAN_SECONDARY,
             weekly_section_state=_weekly_state(STATE_READ_ERROR, weekly_enabled),
+            **shared,
         )
 
     # No canonical active plan → the one honest next step is to create one via the
@@ -197,6 +246,7 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
             primary=None,
             secondary=(),
             weekly_section_state=_weekly_state(STATE_NO_ACTIVE_PLAN, weekly_enabled),
+            **shared,
         )
 
     # An active plan row exists but its data could not be parsed into a usable
@@ -215,6 +265,7 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
             score=facts.score,
             created_at=facts.created_at,
             partial=True,
+            **shared,
         )
 
     # Populated active plan: the plan content itself IS the destination → NO
@@ -227,4 +278,5 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
         days=facts.days,
         score=facts.score,
         created_at=facts.created_at,
+        **shared,
     )

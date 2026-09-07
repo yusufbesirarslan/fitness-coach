@@ -34,6 +34,16 @@
     </p>
   </header>
 
+  <section class="plan-domain plan-domain--training" data-plan-domain="training"
+           data-workout-action="{{ plan.workout_action }}" aria-labelledby="plan-training-label">
+    <div class="plan-domain-head">
+      <div>
+        <p class="plan-domain-kicker">{{ t('plan.domain.primary') }}</p>
+        <h2 id="plan-training-label" class="plan-domain-title">{{ t('plan.domain.training') }}</h2>
+      </div>
+      <span class="plan-domain-state">{{ t('plan.workout_state.' ~ plan.workout_state) }}</span>
+    </div>
+
   {% if plan.state == 'read_error' %}
     {# Dürüst hata: kanonik okuma başarısız. 'Open Plan' YOK (kullanıcı zaten
        Plan'da) — güvenli yeniden dene (sayfayı yeniden yükler). #}
@@ -152,6 +162,12 @@
       {% if plan.score is not none %}<span class="badge badge-primary" title="{{ t('plan.score_aria') }}">{{ plan.score }}</span>{% endif %}
     </div>
 
+    {% if plan.workout_action in ('start', 'resume') %}
+      <button class="btn-volt plan-workout-action" type="button"
+              data-action="startWorkout">{{ t(plan.workout_action_label_key) }}</button>
+      <p class="plan-workout-error" id="plan-workout-error" role="alert" hidden></p>
+    {% endif %}
+
 {#- ── ADAPTIVE WEEKLY PROGRAM MOUNT (reused consumer contract, answer.txt §7) ──
     Rendered ONLY when the weekly section state is 'loading' (its own flag on AND a
     plan context exists). In the 'disabled' state the whole block — markup, copy,
@@ -251,6 +267,36 @@
     </div>
   {% endif %}
 
+  </section>
+
+  <section class="plan-domain plan-domain--nutrition" data-plan-domain="nutrition"
+           data-domain-state="{{ plan.nutrition_state }}" aria-labelledby="plan-nutrition-label">
+    <div class="plan-domain-head">
+      <div>
+        <p class="plan-domain-kicker">{{ t('plan.domain.child') }}</p>
+        <h2 id="plan-nutrition-label" class="plan-domain-title">{{ t('plan.domain.nutrition') }}</h2>
+      </div>
+      <span class="plan-domain-state">{{ t('plan.domain_state.' ~ plan.nutrition_state) }}</span>
+    </div>
+    {% if plan.nutrition_target_calories is not none %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.target', calories=plan.nutrition_target_calories) }}</p>
+    {% else %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.summary') }}</p>
+    {% endif %}
+    <a class="plan-domain-link" href="/nutrition">{{ t('plan.action.open_nutrition') }}</a>
+
+    <section class="plan-domain-child" data-plan-domain="supplements"
+             data-domain-state="{{ plan.supplements_state }}" aria-labelledby="plan-supplements-label">
+      <div>
+        <h3 id="plan-supplements-label" class="plan-domain-child-title">{{ t('plan.domain.supplements') }}</h3>
+        <p class="plan-domain-summary">
+          {% if plan.supplements_count is not none %}{{ t('plan.supplements.count', count=plan.supplements_count) }}{% else %}{{ t('plan.supplements.summary') }}{% endif %}
+        </p>
+      </div>
+      <a class="plan-domain-link" href="/supplements">{{ t('plan.action.open_supplements') }}</a>
+    </section>
+  </section>
+
   {% if plan.secondary %}
     <nav class="plan-secondary" aria-label="{{ t('plan.secondary_aria') }}">
       {% for a in plan.secondary %}
@@ -260,6 +306,40 @@
   {% endif %}
 
 </main>
+
+{% if plan.workout_action in ('start', 'resume') and plan.execution_bootstrap %}
+<div class="session-view" id="session-view" role="dialog" aria-modal="true"
+     aria-labelledby="sv-title" aria-hidden="true">
+  <div class="sv-head">
+    <button class="btn-ghost" type="button" data-action="closeSession" aria-label="{{ t('training.close') }}">&times;</button>
+    <div class="sv-title" id="sv-title">{{ t('training.session') }}</div>
+    <span class="badge badge-neutral" id="sv-count">0/0</span>
+  </div>
+  <div class="sv-progress"><div id="sv-progress-bar"></div></div>
+  <div class="sv-body" id="sv-body"></div>
+  <p class="sv-error" id="sv-error" role="alert" hidden></p>
+  <div class="sv-foot">
+    <button class="btn-ghost" type="button" id="sv-abandon" data-action="abandonWorkout" hidden>{{ t('plan.action.abandon_workout') }}</button>
+    <button class="btn-volt w-full" type="button" data-action="finishSession">{{ t('training.finish_workout') }}</button>
+  </div>
+</div>
+
+<div class="plan-completion" id="plan-completion" role="dialog" aria-modal="true"
+     aria-labelledby="plan-completion-title" aria-hidden="true">
+  <div class="plan-completion-card">
+    <h2 id="plan-completion-title">{{ t('plan.completion.title') }}</h2>
+    <p>{{ t('plan.completion.body') }}</p>
+    <label for="plan-pump-image">{{ t('plan.completion.image') }}</label>
+    <input id="plan-pump-image" type="file" accept="image/*">
+    <p id="plan-completion-error" role="alert" hidden></p>
+    <div class="plan-completion-actions">
+      <button class="btn-ghost" type="button" data-action="cancelWorkoutCompletion">{{ t('training.cancel') }}</button>
+      <button class="btn-volt" type="button" data-action="submitWorkoutCompletion">{{ t('training.complete_workout') }}</button>
+    </div>
+  </div>
+</div>
+<script type="application/json" id="plan-workout-bootstrap">{{ plan.execution_bootstrap|tojson }}</script>
+{% endif %}
 
 {% include "_actionbar.html" %}
 
@@ -274,6 +354,13 @@
 {# Weekly-program consumer — loaded ONLY when the section is mounted (loading). #}
 {% if plan.weekly_section_state == 'loading' %}
 <script src="/static/weekly_program.js?v={{ _v }}"></script>
+{% endif %}
+
+{% if plan.workout_action in ('start', 'resume') and plan.execution_bootstrap %}
+<script src="/static/workout_execution.js?v={{ _v }}"></script>
+<script src="/static/workout_draft.js?v={{ _v }}"></script>
+<script src="/static/workout_state_client.js?v={{ _v }}"></script>
+<script src="/static/plan_workout.js?v={{ _v }}"></script>
 {% endif %}
 
 <script src="/static/actions.js?v={{ _v }}"></script>
