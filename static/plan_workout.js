@@ -40,6 +40,7 @@
   }
 
   function applySnapshot(snapshot, reason, meta) {
+    var previousTodayPlan = todayPlan;
     canonical = snapshot;
     workoutState = snapshot && snapshot.workout && snapshot.workout.state;
     todayPlan = snapshot && snapshot.today_plan;
@@ -47,7 +48,14 @@
       var sessionView = document.getElementById('session-view');
       var wasOpen = sessionView && sessionView.classList.contains('open');
       var session = workoutState && workoutState.session;
-      if (draft && workoutState && workoutState.contract_version === 2 &&
+      var preservesLegacyDraft = draft && workoutState &&
+        workoutState.contract_version === 1 &&
+        (workoutState.action === 'start' || workoutState.action === 'resume') &&
+        todayPlan && todayPlan.tip !== 'dinlenme' &&
+        JSON.stringify(previousTodayPlan) === JSON.stringify(todayPlan);
+      if (preservesLegacyDraft) {
+        if (wasOpen) document.getElementById('sv-abandon').hidden = true;
+      } else if (draft && workoutState && workoutState.contract_version === 2 &&
           session && session.status === 'active' && session.resumable !== false &&
           todayPlan && todayPlan.tip !== 'dinlenme') {
         try {

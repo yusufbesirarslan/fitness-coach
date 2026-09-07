@@ -408,3 +408,37 @@ def test_plan_v2_shell_browser_qa_across_locales_and_viewports(
     assert not [error for error in console_errors
                 if 'Failed to load resource' not in error]
     assert not page_errors
+
+
+def test_plan_v2_sessions_off_refresh_preserves_open_legacy_draft(
+    app, auth_user, training_page,
+):
+    with app.app_context():
+        user = db.session.get(User, auth_user.id)
+        user.profile_complete = True
+        plan = save_workout_plan(auth_user.id)
+        data = json.loads(plan.plan_data)
+        for day in data['program']:
+            day.update(odak='Strength', sure_dk=30, tahmini_kalori=150)
+            for exercise in day['egzersizler']:
+                exercise.update(set=1, tekrar='8', dinlenme='60 sn', not_='')
+        plan.plan_data = json.dumps(data)
+        db.session.commit()
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    app.config['FITX_WORKOUT_SESSIONS_ENABLED'] = False
+    page, _, _, _ = training_page
+    page.goto('http://localhost/training')
+    page.locator('[data-action="startWorkout"]').click()
+    expect(page.locator('#session-view')).to_have_class('session-view open')
+    page.locator('#sv-body [data-field="weight"]').first.fill('82.5')
+    page.locator('#sv-body [data-field="reps"]').first.fill('11')
+
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path == '/training/bootstrap'
+        and response.status == 200
+    ):
+        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+
+    expect(page.locator('#session-view')).to_have_class('session-view open')
+    expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
+    expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('11')
