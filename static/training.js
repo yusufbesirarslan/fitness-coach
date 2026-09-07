@@ -2,76 +2,6 @@
    (OPTIONS val, sakatlık adı, gün adı, goal/level/score key) Türkçe KALIR →
    training-plan / injury_constraints eşleşmesi bozulmaz. window.t bazı yerlerdeki
    yerel `t` ile çakışmasın diye __t aliası. */
-(function (root, factory) {
-    var api = factory();
-    if (typeof module === 'object' && module.exports) module.exports = api;
-    else root.FitXTrainingFlow = api;
-}(typeof globalThis !== 'undefined' ? globalThis : this, function () {
-    'use strict';
-
-    async function runWorkoutStart(contractVersion, startCanonical, openDraft) {
-        if (contractVersion === 2) {
-            var started = await startCanonical();
-            if (!started || !started.ok) return started || { ok: false };
-        }
-        await openDraft();
-        return { ok: true, legacy: contractVersion !== 2 };
-    }
-
-    async function runWorkoutEdit(contractVersion, checkpointDraft) {
-        if (contractVersion !== 2) return { disabled: true };
-        return checkpointDraft();
-    }
-
-    async function runWorkoutFinish(contractVersion, flushDraft, openPump) {
-        var flushed = { ok: true, legacy: true };
-        if (contractVersion === 2) {
-            flushed = await flushDraft();
-            if (!flushed || !flushed.ok) return flushed || { ok: false };
-        }
-        await openPump();
-        return flushed;
-    }
-
-    function attachWorkoutCompletion(contractVersion, payload, sessionId, revision) {
-        if (contractVersion !== 2) return payload;
-        if (typeof sessionId !== 'string' || !sessionId ||
-            !Number.isInteger(revision) || revision < 0) {
-            var error = new Error('session_completion_unavailable');
-            error.code = 'session_completion_unavailable';
-            throw error;
-        }
-        payload.session_id = sessionId;
-        payload.expected_checkpoint_revision = revision;
-        return payload;
-    }
-
-    var TRAINING_ACTION_NAMES = [
-        'abandonWorkout', 'addRest', 'closeCelebration', 'closeDayPreview',
-        'closeSession', 'finishSession', 'generatePlan', 'previewDay',
-        'resetPlan', 'savePlan', 'skipRest', 'startWorkout', 'submitPumpCheck',
-    ];
-
-    function publishTrainingActions(target, actions) {
-        TRAINING_ACTION_NAMES.forEach(function (name) {
-            if (!actions || typeof actions[name] !== 'function') {
-                throw new Error('training_action_unavailable:' + name);
-            }
-            target[name] = actions[name];
-        });
-        return target;
-    }
-
-    return {
-        runWorkoutStart: runWorkoutStart,
-        runWorkoutEdit: runWorkoutEdit,
-        runWorkoutFinish: runWorkoutFinish,
-        attachWorkoutCompletion: attachWorkoutCompletion,
-        TRAINING_ACTION_NAMES: TRAINING_ACTION_NAMES,
-        publishTrainingActions: publishTrainingActions,
-    };
-}));
-
 var __t = (window.t) || function (k, v) { return k; };
 var _EN = (window.LOCALE === 'en');
 /* Sakatlık: görünen etiket EN, değer (backend'e giden) TR kalır. */
@@ -547,25 +477,8 @@ function dayShort(v) {
     var _sessionTrigger = null;     // element that opened #session-view (focus returns here on close)
     var _dayPreviewTrigger = null;  // element that opened #day-preview
 
-    function defaultReps(tekrar) {
-        var m = String(tekrar || '').match(/\d+/g);
-        return m && m.length ? parseInt(m[m.length - 1], 10) : null;   // "8-12" -> 12
-    }
-
     function buildSession(day) {
-        return {
-            startedAt: Date.now(),
-            day: day,
-            exercises: (day.egzersizler || []).map(function (ex) {
-                var n = Math.max(1, parseInt(ex.set, 10) || 1);
-                var sets = [];
-                for (var i = 0; i < n; i++) {
-                    sets.push({ weightKg: null, reps: defaultReps(ex.tekrar), done: false, isPR: false });
-                }
-                return { isim: ex.isim, tekrar: ex.tekrar, dinlenme: ex.dinlenme,
-                         not: ex.not || '', sets: sets };
-            }),
-        };
+        return window.FitXWorkoutDraft.createLegacyWorkoutDraft(day, Date.now());
     }
 
     function computeSessionStats(session) {

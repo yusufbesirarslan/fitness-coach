@@ -51,10 +51,11 @@
     return ids.slice();
   }
 
-  function freshExercises(day, ids) {
+  function freshExercises(day, ids, maxSets) {
+    var setLimit = Number.isInteger(maxSets) ? maxSets : 20;
     return day.egzersizler.map(function (exercise, exerciseIndex) {
       var count = parseInt(exercise.set, 10);
-      if (!Number.isInteger(count) || count < 1 || count > 20) {
+      if (!Number.isInteger(count) || count < 1 || count > setLimit) {
         fail('checkpoint_set_mismatch');
       }
       var sets = [];
@@ -145,6 +146,21 @@
     };
   }
 
+  function createLegacyWorkoutDraft(day, nowMs) {
+    var exercises = day && Array.isArray(day.egzersizler) ? day.egzersizler : [];
+    return {
+      sessionId: null,
+      checkpointRevision: null,
+      startedAt: Number(nowMs) || 0,
+      day: day,
+      currentExerciseIndex: 0,
+      elapsedBaselineSeconds: 0,
+      elapsedStartedAtMs: Number(nowMs) || 0,
+      exercises: freshExercises(
+        { egzersizler: exercises }, exercises.map(function () { return null; }), 100),
+    };
+  }
+
   function buildCheckpointSnapshot(draft, nowMs) {
     if (!draft || !Array.isArray(draft.exercises) || !draft.exercises.length) {
       fail('checkpoint_unavailable');
@@ -208,6 +224,7 @@
 
   return {
     createWorkoutDraft: createWorkoutDraft,
+    createLegacyWorkoutDraft: createLegacyWorkoutDraft,
     buildCheckpointSnapshot: buildCheckpointSnapshot,
     flushWorkoutDraft: flushWorkoutDraft,
     selectWorkoutDraft: selectWorkoutDraft,

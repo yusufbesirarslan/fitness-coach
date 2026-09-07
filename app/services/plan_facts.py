@@ -28,9 +28,16 @@ from __future__ import annotations
 
 import json
 
+from app.extensions import db
+from app.models import Supplement, UserSession
 from app.plan_presenter import PlanDay, PlanExercise, PlanFacts, REST_DAY_KIND
 from app.services.today_facts import get_active_plan
-from app.timeutil import display_dt
+from app.services.workout_state import resolve_workout_state
+from app.services.workout_state.serialization import (
+    serialize_today_plan,
+    workout_state_payload,
+)
+from app.timeutil import app_today, display_dt
 
 
 def _text(value) -> str:
@@ -117,7 +124,40 @@ def _parse_plan_days(plan_data):
     return True, days
 
 
-def gather_plan_facts(user_id) -> PlanFacts:
+def _child_domain_facts(user_id):
+    nutrition_state = "unknown"
+    nutrition_target = None
+    supplements_state = "unknown"
+    supplements_count = None
+    try:
+        with db.session.begin_nested():
+            session = (UserSession.query.filter_by(user_id=user_id)
+                       .order_by(UserSession.created_at.desc()).first())
+        target = getattr(session, "target_calories", None) if session else None
+        if isinstance(target, (int, float)) and target > 0:
+            nutrition_state = "available"
+            nutrition_target = int(round(target))
+        else:
+            nutrition_state = "empty"
+    except Exception:
+        nutrition_state = "unavailable"
+
+    try:
+        with db.session.begin_nested():
+            supplements_count = Supplement.query.filter_by(user_id=user_id).count()
+        supplements_state = "available" if supplements_count else "empty"
+    except Exception:
+        supplements_state = "unavailable"
+        supplements_count = None
+    return {
+        "nutrition_state": nutrition_state,
+        "nutrition_target_calories": nutrition_target,
+        "supplements_state": supplements_state,
+        "supplements_count": supplements_count,
+    }
+
+
+def gather_plan_facts(user_id, *, sessions_enabled=False) -> PlanFacts:
     """Gather the canonical facts Plan V2 needs, tolerating read failure.
 
     A DB/read error yields ``read_ok=False`` so the presenter surfaces an honest
@@ -125,13 +165,40 @@ def gather_plan_facts(user_id) -> PlanFacts:
     ``plan_data`` cannot be parsed, ``parse_ok=False`` drives the honest
     ``partial_active_plan`` state — malformed data is never treated as "no plan".
     """
+    children = _child_domain_facts(user_id)
     try:
         plan = get_active_plan(user_id)
     except Exception:
-        return PlanFacts(read_ok=False, has_active_plan=False, parse_ok=False)
+        return PlanFacts(
+            read_ok=False, has_active_plan=False, parse_ok=False, **children)
+
+    today = app_today()
+    workout_snapshot = None
+    execution_bootstrap = None
+    workout_read_ok = False
+    try:
+        workout_snapshot = resolve_workout_state(
+            user_id, today=today, plan=plan,
+            sessions_enabled=sessions_enabled, strict_reads=True,
+        )
+        plan_data = json.loads(plan.plan_data) if plan is not None else None
+        execution_bootstrap = {
+            "workout": workout_state_payload(workout_snapshot),
+            "today_plan": serialize_today_plan(plan_data, today),
+        }
+        workout_read_ok = True
+    except Exception:
+        workout_snapshot = None
+        execution_bootstrap = None
 
     if plan is None:
-        return PlanFacts(read_ok=True, has_active_plan=False, parse_ok=False)
+        return PlanFacts(
+            read_ok=True, has_active_plan=False, parse_ok=False,
+            workout_read_ok=workout_read_ok,
+            workout_snapshot=workout_snapshot,
+            execution_bootstrap=execution_bootstrap,
+            **children,
+        )
 
     parse_ok, days = _parse_plan_days(plan.plan_data)
     created_at = None
@@ -146,4 +213,8 @@ def gather_plan_facts(user_id) -> PlanFacts:
         days=days,
         score=getattr(plan, "score", None),
         created_at=created_at,
+        workout_read_ok=workout_read_ok,
+        workout_snapshot=workout_snapshot,
+        execution_bootstrap=execution_bootstrap,
+        **children,
     )

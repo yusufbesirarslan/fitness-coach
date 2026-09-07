@@ -135,7 +135,7 @@ is an entry point, not ownership evidence.
 | Lineage/revision/mutation | `app/services/plan_mutation` and journal/version fields | Narrow service operations | All Coach mutations remain here |
 | Current workout selection | Active plan plus canonical day/state facts | Server selectors/fact gathering | Do not infer from browser clock |
 | Workout-state resolution | `app/services/workout_state` | `/workout/status`, `/training/bootstrap`, native reads | One resolver across entries |
-| Execution/session lifecycle | `WorkoutSession` service/routes behind `WORKOUT_SESSION_ENABLED` | start/resume/checkpoint/abandon/complete | Execution is a transient child workflow |
+| Execution/session lifecycle | `WorkoutSession` service/routes behind `FITX_WORKOUT_SESSIONS_ENABLED` | start/resume/checkpoint/abandon/complete | Execution is a transient child workflow |
 | Completion | `app/services/workout_completion` | Browser, native, AI/photo adapters converge here | No completion logic in Plan shell |
 | Weekly/adaptive planning | Weekly-program and training progression/planning services | Read projection; mutation only through authorized service paths | Overview may lazy-load a summary |
 | Coach plan mutation | `app/services/plan_mutation` invoked by six narrow tools | Gated by Coach/AI mutation flags | Refresh Plan facts after mutation |
@@ -186,7 +186,7 @@ same cabinet. A Profile preview must not grow into a second editable cabinet.
 | Lifecycle record | `shipped_dark`; decision is enable; review-by 2026-10-01 |
 | Selector | A single server-side branch in GET `/training`; no client/query override |
 | OFF | Renders `training.html`, loads `training.js`, supports generation and workout entry/execution |
-| ON | Renders `plan.html` from `plan_facts` + presenter; read/create-focused and no `training.js` |
+| ON | Renders the bounded `plan.html` shell from `plan_facts` + presenter; canonical Create/Start/Resume are functional without loading `training.js` |
 | Reachability | Exactly one branch is user-reachable per process, but both are live tested paths |
 | Staleness | Neither is dead. Both are incomplete representations of the locked Plan concept; ON is materially behind current execution access |
 | Rollback | Set `UIUX_PLAN_V2_ENABLED=0` and restart; documented in flag registry/rollout docs |
@@ -197,7 +197,7 @@ same cabinet. A Profile preview must not grow into a second editable cabinet.
 Do not retire or change the flag in PR1. PR2 should continue to use it for an
 atomic full-template rollout. After the converged shell proves stable, a later
 cleanup PR may make the converged path unconditional and classify the flag as
-historical. `UIUX_NAV_ENABLED` is already historical because hooks always emit
+historical. `UIUX_NAV_V2_ENABLED` is already historical because hooks always emit
 the converged four-destination shell. `WEEKLY_PROGRAM_UI_ENABLED` is an additive
 section gate. Workout-session and Coach mutation flags gate separate staging
 capabilities and must not be coupled to shell rollout.
@@ -206,17 +206,17 @@ capabilities and must not be coupled to shell rollout.
 
 | Dimension | `training.html` (flag OFF) | `plan.html` (flag ON) |
 |---|---|---|
-| Product concept | Training creation plus execution workspace | Read/create Training-plan summary |
-| Data | Client bootstrap, status/session, generation responses | Server `plan_facts` and presenter |
-| JavaScript | `training.js` plus execution/generation behavior | No `training.js`; `plan_create.js` only in no-plan state |
-| Active plan | Renders plan and exposes workout flow | Native `<details>` summary; no workout execution CTA |
+| Product concept | Training creation plus execution workspace | Plan shell: Training first, then Nutrition and nested Supplements |
+| Data | Client bootstrap, status/session, generation responses | Bounded `plan_facts`, canonical workout snapshot, and child summaries |
+| JavaScript | `training.js` plus shared execution/draft/state modules | No `training.js`; creation-only or actionable shared execution assets |
+| Active plan | Renders plan and exposes workout flow | Native `<details>` summary plus canonical Start/Resume workflow |
 | No plan | Full generator | Bounded creation flow |
 | Regeneration | Supported by training client | Not presented as active-plan action |
-| Workout entry | Present | Absent |
+| Workout entry | Present | Present through the PR #285 durable browser contract |
 | Weekly program | Conditional mount/API | Conditional presenter section |
 | Coach entry | Contextual entry exists | Same contextual entry exists |
 | Error/partial state | Client-specific errors/loading | Explicit `read_error`, `no_active_plan`, `active_plan`, `partial` states |
-| Responsive behavior | Existing responsive training UI | Existing responsive summary; neither is a multi-domain Plan shell |
+| Responsive behavior | Existing responsive training UI | Responsive bounded multi-domain Plan shell |
 
 They present overlapping Training authority, but they embody materially
 different workflows. Treating either template as the final Plan product would
@@ -503,6 +503,41 @@ measurement during implementation, not this repository-only discovery.
   no provider/AI boot calls; stable routes and backend authorities pass.
 - **Rollback:** flag OFF and restart.
 - **Major risk:** breaking active workout entry.
+
+#### PR2 implementation record (2026-09-06)
+
+PR #285 (`6422028` on main) supplied the prerequisite durable browser execution
+contract. PR2 extracts only its presentation-independent flow helpers into
+`workout_execution.js`; both legacy Training and Plan consume the same
+`workout_execution`, `workout_draft`, and `workout_state_client` boundaries.
+Plan does not load `training.js`, does not derive the day or workout state in the
+browser, and hydrates the server-rendered canonical bootstrap without an initial
+duplicate request.
+
+The server presenter validates the exact canonical state/action pair through
+`decide_today_guidance`: no plan keeps the canonical in-page Create flow,
+scheduled exposes Start, resumable exposes Resume, and completed/rest/evidence/
+attention/read-error/unknown/incompatible states expose no workout action. A
+successful mutation refreshes `/training/bootstrap`; Close retains the draft,
+while Abandon remains an explicit session mutation. Completion still waits for
+the final checkpoint acknowledgement and sends `expected_checkpoint_revision`.
+
+The shell adds two cheap independent child reads (latest nutrition target and
+supplement count). Together with the supplied-plan workout resolver, an active
+render uses five bounded SELECTs with sessions OFF and six with sessions ON:
+active plan, two workout evidence reads, two child reads, and the optional
+session read. It makes zero provider/LLM/food/barcode/menu/history calls. An
+actionable page loads four focused execution scripts; non-actionable pages load
+none of them. Start/Resume mutations retain the existing POST plus canonical
+bootstrap-refresh request pattern.
+
+Child reads fail independently to `unavailable`; null nutrition target is
+`empty` rather than fabricated zero, and no supplements is `empty` rather than
+error. A Training read failure removes unsafe Start/Resume while leaving the
+shell and child links reachable. Dedicated Plan telemetry is deferred because
+the repository has no suitable low-cardinality product-event facility; existing
+request logging and flag exposure remain in place. Instrumentation hardening is
+still PR6 scope. Both rollout flags remain default-OFF and independent.
 
 ### PR3 — Training placement and regeneration convergence
 

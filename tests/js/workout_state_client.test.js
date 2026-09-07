@@ -20,6 +20,34 @@ function options(fetchImpl, extra = {}) {
   }, extra);
 }
 
+test('server-rendered Plan can hydrate the canonical snapshot without a duplicate read', () => {
+  const applied = [];
+  const client = createWorkoutStateClient(options(
+    () => { throw new Error('unexpected bootstrap read'); },
+    { onSnapshot: (value, reason) => applied.push([value, reason]) },
+  ));
+  const snapshot = {
+    workout: { state: {
+      contract_version: 2,
+      session_state: 'active_resumable',
+      session: {
+        public_id: 'session-1', status: 'active', resumable: true,
+        checkpoint_revision: 3, checkpoint: {
+          current_exercise_index: 0, elapsed_seconds: 10, exercises: [],
+        },
+      },
+    } },
+  };
+
+  const result = client.hydrate(snapshot, 'server_render');
+
+  assert.equal(result, snapshot);
+  assert.equal(client.getSessionId(), 'session-1');
+  assert.equal(client.getCheckpointRevision(), 3);
+  assert.deepEqual(applied, [[snapshot, 'server_render']]);
+  client.destroy();
+});
+
 test('an older bootstrap response cannot overwrite a newer snapshot', async () => {
   const first = deferred();
   const second = deferred();

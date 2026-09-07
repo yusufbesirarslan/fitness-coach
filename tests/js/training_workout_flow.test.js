@@ -2,16 +2,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const vm = require('node:vm');
-
-const trainingSource = fs.readFileSync(
-  path.join(__dirname, '../../static/training.js'), 'utf8',
-);
-const sandbox = { module: { exports: {} } };
-vm.runInNewContext(
-  trainingSource.slice(0, trainingSource.indexOf('var __t =')),
-  sandbox,
-);
 const {
   runWorkoutStart,
   runWorkoutEdit,
@@ -19,7 +9,7 @@ const {
   attachWorkoutCompletion,
   TRAINING_ACTION_NAMES,
   publishTrainingActions,
-} = sandbox.module.exports;
+} = require('../../static/workout_execution.js');
 
 test('every Training data-action is published to the browser dispatcher', () => {
   const browserWindow = {};
@@ -35,9 +25,9 @@ test('every Training data-action is published to the browser dispatcher', () => 
     'resetPlan', 'savePlan', 'skipRest', 'startWorkout', 'submitPumpCheck',
   ];
   const sources = [
-    trainingSource,
+    path.join(__dirname, '../../static/training.js'),
     path.join(__dirname, '../../templates/training.html'),
-  ].map(value => value.endsWith('.html') ? fs.readFileSync(value, 'utf8') : value).join('\n');
+  ].map(value => fs.readFileSync(value, 'utf8')).join('\n');
   const declared = Array.from(sources.matchAll(
     /data-action(?:-self|-input|-change|-keydown)?="([^"]+)"/g,
   ), match => match[1]).sort();
