@@ -81,6 +81,9 @@ _ACCEPT_PREFIXES = frozenset({
     "confirm", "tamam",
 })
 
+_EXPLICIT_ADD_INTENT = re.compile(
+    r"(?<!\w)(?:add|ekle\w*)(?!\w)", re.IGNORECASE)
+
 _OPERATION_TOOLS = {
     "add_exercise": ADD_EXERCISE_TOOL,
     "replace_exercise": REPLACE_EXERCISE_TOOL,
@@ -494,6 +497,49 @@ def _bare_number_prescription(stored, message):
 def _normalize_bare_reps(token):
     from .prescriptions import _normalize_reps
     return _normalize_reps(token)
+
+
+def recover_no_tool_partial_add(user_id):
+    """Create clarification state for one explicit partial ADD, never a write.
+
+    This is a missing-tool recovery boundary, not a prose parser. Only the raw
+    current user turn contributes authority; provider text is not an input.
+    Existing workout/exercise/prescription grounding decides every semantic
+    field and the existing clarification writer owns persistence.
+    """
+    message = current_user_message()
+    if not isinstance(message, str) or not _EXPLICIT_ADD_INTENT.search(message):
+        return None
+    rx = parse_prescription(message)
+    if (rx.sets is None) == (rx.reps is None):
+        return None
+    exercise = _exercise_from_text(message)
+    if not exercise:
+        return None
+    destination = resolve_destination(exercise)
+    if destination.kind == EX_UNKNOWN:
+        return None
+
+    grounded = ground_command(user_id, AddExerciseCommand(
+        day="", exercise=exercise, sets=rx.sets, reps=rx.reps))
+    payload = grounded.result
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("status") != results.STATUS_NEEDS_INPUT:
+        return None
+    if payload.get("reason") not in {
+            results.REASON_MISSING_SETS,
+            results.REASON_MISSING_REPS,
+            results.REASON_AMBIGUOUS_WORKOUT,
+            results.REASON_EXERCISE_SUGGEST}:
+        return None
+
+    stored = clarifications.load(user_id)
+    if not stored or stored.get("operation") != "add_exercise":
+        return None
+    if stored.get("sets") != rx.sets or stored.get("reps") != rx.reps:
+        return None
+    return payload
 
 
 def ground_command(user_id, command):
