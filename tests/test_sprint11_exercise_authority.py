@@ -1178,11 +1178,19 @@ def test_architecture_catalog_never_persists():
 
 
 def test_architecture_save_validates_before_delete():
-    """Verify context → validate → only then destroy the stored plan.
+    """Verify context → validate → only then reach the destructive boundary.
 
     ``/training-plan/save`` is the only destructive TrainingPlan path in the
     app. Ordering is the whole guarantee: a rejected payload must leave the
     user's current plan exactly as it was.
+
+    The DELETE itself now lives in ``app/services/plan_replacement.py``, behind
+    the expected-version precondition and the lock that protects it, so the
+    ordering claim is made against the call that ENTERS that boundary. The
+    guarantee did not move with it — it got stronger, because the view can no
+    longer reach a destructive statement at all, which the second assertion
+    pins down. Without that, relocating the delete would have quietly turned
+    this guard into a claim about an ordering that no longer decides anything.
     """
     tree = _module_tree(SAVE_ROUTE_MODULE)
     save_view = _function_def(tree, "save_training_plan")
@@ -1195,9 +1203,10 @@ def test_architecture_save_validates_before_delete():
 
     resolve_line = line_of("resolve_save_exercise_context")
     validate_line = line_of("validate_plan_for_save")
-    delete_line = line_of("delete")
+    replace_line = line_of("replace_training_plan")
 
-    assert resolve_line < validate_line < delete_line
+    assert resolve_line < validate_line < replace_line
+    assert not [lineno for lineno, called in calls if called == "delete"]
 
 
 def test_architecture_provider_call_budget_is_two_with_one_repair():

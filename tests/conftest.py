@@ -231,3 +231,25 @@ def make_users_bulk(app):
         return users
 
     return _make
+
+
+@pytest.fixture
+def plan_expectation(app):
+    """The concurrency precondition a caller that has just read canonical state
+    would send to ``POST /training-plan/save``.
+
+    ``None`` when the owner has no plan ("I expect no active plan"), otherwise
+    the current lineage/version pair. Derived from ``get_active_plan`` — the
+    canonical active-plan selector — so a test never encodes a second opinion
+    about which row is active.
+    """
+    from app.services.today_facts import get_active_plan
+
+    def _expectation(user_id):
+        plan = get_active_plan(user_id)
+        if plan is None:
+            return None
+        return {"lineage_id": plan.lineage_id,
+                "mutation_version": plan.mutation_version}
+
+    return _expectation

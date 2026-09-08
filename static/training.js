@@ -236,6 +236,13 @@ function dayShort(v) {
     let currentWorkoutState = null;
     let currentWorkoutCompleted = false;
     let workoutStateClient = null;
+    // The canonical plan identity this page last READ from the server, and the
+    // precondition every destructive save must carry. Three states, all
+    // meaningful: an object = "replace exactly this plan", null = "I expect no
+    // active plan", undefined = "I have not read canonical state" — which is not
+    // an expectation and must never be sent. Only applyTrainingSnapshot may set
+    // it; a value the page computed for itself would be a second plan authority.
+    let activePlanIdentity;
 
     function applyTrainingSnapshot(snapshot, reason, meta) {
             const data = snapshot.plan || { exists: false };
@@ -248,12 +255,23 @@ function dayShort(v) {
             }
             if (!data.exists) {
                 activePlan = null;
+                activePlanIdentity = null;
                 document.getElementById('active-plan-view').style.display = 'none';
                 document.getElementById('setup-form').style.display = 'block';
                 return;
             }
 
             activePlan = Array.isArray(data.plan) ? data.plan : data.plan.program;
+            // Only a COMPLETE pair is an expectation. A payload that says a plan
+            // exists but does not name it leaves the identity UNKNOWN rather
+            // than half-built: `{lineage_id: undefined}` would serialize to `{}`
+            // and reach the server as a malformed precondition instead of an
+            // honest "this page has not read canonical state".
+            activePlanIdentity = (typeof data.lineage_id === 'string'
+                    && typeof data.mutation_version === 'number')
+                ? { lineage_id: data.lineage_id,
+                    mutation_version: data.mutation_version }
+                : undefined;
 
             // Score color & label
             const score = parseFloat(data.score) || 0;
@@ -310,6 +328,10 @@ function dayShort(v) {
         var pump = document.getElementById('pump-check-modal');
         if (pump && pump.classList.contains('active')) closePumpCheck();
         activePlan = null;
+        // Back to "unknown", NOT to null: a blocked read means the page cannot
+        // see canonical state, and null would assert the user has no plan —
+        // the one claim that turns a failed read into a destructive save.
+        activePlanIdentity = undefined;
         currentWorkoutState = null;
         activeTodayPlan = null;
         const activePlanView = document.getElementById('active-plan-view');
@@ -1247,6 +1269,14 @@ function dayShort(v) {
     async function savePlan() {
         const btn = document.getElementById("save-btn");
         if (!currentPlan) return;
+        // Saving is destructive, so it may only proceed from canonical state the
+        // page has actually read. Without it there is no expectation to send and
+        // the server would refuse anyway; refusing here keeps the failure honest
+        // ("reload") instead of surfacing it as a malformed request.
+        if (typeof activePlanIdentity === 'undefined') {
+            showToast(__t('training.save_error_prefix') + __t('training.plan_changed'), 'error');
+            return;
+        }
         try {
             const result = await workoutStateClient.mutate("/training-plan/save", {
                 method: "POST",
@@ -1254,10 +1284,23 @@ function dayShort(v) {
                 body: JSON.stringify({
                     plan: currentPlan,
                     score: currentScore,
-                    exercise_context_token: currentContextToken
+                    exercise_context_token: currentContextToken,
+                    // The precondition, exactly as last read from the server. It
+                    // narrows the window; the SERVER closes it — a 409 here means
+                    // the plan moved after this read and nothing was overwritten.
+                    expected_plan: activePlanIdentity
                 })
             });
             if (!result || !result.ok) {
+                if (result && result.status === 409) {
+                    // Not a save failure the user can retry as-is: canonical
+                    // state moved and nothing was overwritten. No refresh call
+                    // is needed here — mutate() always re-reads /training/bootstrap
+                    // before it resolves, so activePlanIdentity is already being
+                    // re-anchored and the next attempt carries a current
+                    // expectation rather than the same stale one.
+                    throw new Error(__t('training.plan_changed'));
+                }
                 const detail = result && result.body && result.body.error;
                 throw new Error(detail || "request_failed");
             }
