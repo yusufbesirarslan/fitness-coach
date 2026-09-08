@@ -21,6 +21,7 @@ from app.services.coach_plan_tools import clarifications as clar_mod
 from app.services.coach_plan_tools import results
 from app.services.plan_mutation.validation import WEEKDAYS
 from app.services.today_facts import get_active_plan
+from tests.test_ai_coach import _ScriptedLLM, _llm_msg
 from tests.test_coach_plan_mutation_grounding import (
     _ambiguous_legs_program,
     _assert_unchanged,
@@ -67,6 +68,18 @@ def _turn2(app, user_id, message, language="en"):
     with app.test_request_context("/ask", method="POST"):
         _fresh_turn(app, message, user_id=user_id)
         return coach_confirmation.resolve_pending_turn(user_id, language)
+
+
+def _no_tool_provider_turn(app, user_id, message, provider_text, monkeypatch):
+    """Drive the real provider no-tool boundary for one Coach request."""
+    provider = _ScriptedLLM([_llm_msg(provider_text)])
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
+    monkeypatch.setattr(ai_coach, "openai_client", provider)
+    with app.test_request_context("/ask", method="POST"):
+        reply = ai_coach._run_coach_conversation(
+            user_id, message, "", client_history=[], language="en")
+    assert len(provider.calls) == 1
+    return reply
 
 
 def _friday_slot(user_id):
@@ -150,6 +163,244 @@ def test_partial_sets_then_bare_reps_writes_4x15(app, split_user, tools_on):
     assert added["tekrar"] == "15"
     assert plan_version(split_user.id) == before[1] + 1
     assert len(journal(split_user.id)) == 1
+
+
+@pytest.mark.parametrize(("first_turn", "provider_text", "missing", "followup"), [
+    (
+        "Add Walking Lunges with 4 sets to my leg workout.",
+        "How many reps would you like? I could use 9 sets of 99 reps.",
+        "reps",
+        "15",
+    ),
+    (
+        "Add Walking Lunges for 15 reps to my leg workout.",
+        "How many sets would you like? I could use 9 sets of 99 reps.",
+        "sets",
+        "4",
+    ),
+])
+def test_no_tool_partial_add_continuation_persists_exact_4x15_once(
+        app, split_user, tools_on, monkeypatch,
+        first_turn, provider_text, missing, followup):
+    """A provider prose-only clarification must not drop the grounded half."""
+    before = _snapshot(split_user.id)
+    before_document = json.loads(before[0])
+
+    reply = _no_tool_provider_turn(
+        app, split_user.id, first_turn, provider_text, monkeypatch)
+
+    assert f"how many {missing}" in reply.lower()
+    assert "99" not in reply
+    _assert_unchanged(split_user.id, before)
+    stored = clar_mod.load(split_user.id)
+    assert stored["operation"] == "add_exercise"
+    assert stored["day"] == "Cuma"
+    assert stored["exercise"] == "Walking Lunge"
+    assert stored["sets"] == (4 if missing == "reps" else None)
+    assert stored["reps"] == ("15" if missing == "sets" else None)
+
+    applied = _turn2(app, split_user.id, followup)
+
+    assert applied is not None
+    after_document = json.loads(get_active_plan(split_user.id).plan_data)
+    friday = next(d for d in after_document["program"] if d["gun"] == "Cuma")
+    added = friday["egzersizler"][-1]
+    assert added["isim"] == "Walking Lunge"
+    assert added["set"] == 4
+    assert added["tekrar"] == "15"
+    assert names(split_user.id, "Cuma").count("Walking Lunge") == 1
+    assert plan_version(split_user.id) == before[1] + 1
+    assert len(journal(split_user.id)) == 1
+    assert [d for d in after_document["program"] if d["gun"] != "Cuma"] == [
+        d for d in before_document["program"] if d["gun"] != "Cuma"]
+    assert friday["egzersizler"][:-1] == next(
+        d for d in before_document["program"] if d["gun"] == "Cuma"
+    )["egzersizler"]
+
+    after = _snapshot(split_user.id)
+    replay = _turn2(app, split_user.id, followup)
+    _assert_unchanged(split_user.id, after)
+    assert len(journal(split_user.id)) == 1
+    assert names(split_user.id, "Cuma").count("Walking Lunge") == 1
+    assert replay is None or "has been added" not in replay.lower()
+
+
+@pytest.mark.parametrize(("first_turn", "first_reply", "followup"), [
+    (
+        "Add Walking Lunges with 4 sets to my leg workout.",
+        "How many reps would you like for Walking Lunges?",
+        "15",
+    ),
+    (
+        "Add Walking Lunges for 15 reps to my leg workout.",
+        "How many sets would you like for Walking Lunges?",
+        "4",
+    ),
+])
+def test_disabling_no_tool_recovery_reproduces_original_missing_both_failure(
+        app, split_user, tools_on, monkeypatch,
+        first_turn, first_reply, followup):
+    """Kill-switch proof: both acceptance paths depend on the recovery boundary."""
+    before = _snapshot(split_user.id)
+    provider = _ScriptedLLM([
+        _llm_msg(first_reply),
+        _llm_msg(
+            "I found your Friday workout on Friday. How many sets and reps "
+            "should I add for Walking Lunge?"),
+    ])
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
+    monkeypatch.setattr(ai_coach, "openai_client", provider)
+    monkeypatch.setattr(
+        coach_confirmation,
+        "recover_no_tool_partial_add",
+        lambda *_args, **_kwargs: None,
+        raising=False,
+    )
+
+    with app.test_request_context("/ask", method="POST"):
+        first = ai_coach._run_coach_conversation(
+            split_user.id, first_turn, "", client_history=[], language="en")
+    with app.test_request_context("/ask", method="POST"):
+        second = ai_coach._run_coach_conversation(
+            split_user.id, followup, "", client_history=[], language="en")
+
+    assert first == first_reply
+    assert "how many sets and reps" in second.lower()
+    assert len(provider.calls) == 2
+    _assert_unchanged(split_user.id, before)
+    assert clar_mod.load(split_user.id) is None
+
+
+def test_incompatible_clarification_cannot_donate_fields_to_no_tool_add(
+        app, split_user, tools_on, monkeypatch):
+    with app.test_request_context("/ask", method="POST"):
+        clar_mod.remember(split_user.id, {
+            "operation": "add_exercise",
+            "day": "Pazartesi",
+            "exercise": "Hammer Curl",
+            "sets": 9,
+            "reps": None,
+            "reason": results.REASON_MISSING_REPS,
+        })
+
+    _no_tool_provider_turn(
+        app,
+        split_user.id,
+        "Add Walking Lunges for 15 reps to my leg workout.",
+        "How many sets would you like? Use 9x99 if you prefer.",
+        monkeypatch,
+    )
+    stored = clar_mod.load(split_user.id)
+    assert stored["day"] == "Cuma"
+    assert stored["exercise"] == "Walking Lunge"
+    assert stored["sets"] is None
+    assert stored["reps"] == "15"
+
+    _turn2(app, split_user.id, "4")
+    added = _friday_slot(split_user.id)["egzersizler"][-1]
+    assert (added["set"], added["tekrar"]) == (4, "15")
+    assert "Hammer Curl" not in names(split_user.id, "Pazartesi")
+
+
+def test_concurrent_incompatible_clarification_supersedes_no_tool_recovery(
+        app, split_user, tools_on, monkeypatch):
+    """A later request wins without letting the earlier reply describe it."""
+    original_remember = clar_mod.remember
+    injected = False
+
+    def interleaving_remember(user_id, payload):
+        nonlocal injected
+        written = original_remember(user_id, payload)
+        if not injected and payload.get("exercise") == "Walking Lunge":
+            injected = True
+            original_remember(user_id, {
+                "operation": "add_exercise",
+                "request_id": "concurrent-hammer-curl-request",
+                "day": "Pazartesi",
+                "exercise": "Hammer Curl",
+                "sets": 4,
+                "reps": None,
+                "reason": results.REASON_MISSING_REPS,
+            })
+        return written
+
+    monkeypatch.setattr(clar_mod, "remember", interleaving_remember)
+    reply = _no_tool_provider_turn(
+        app,
+        split_user.id,
+        "Add Walking Lunges with 4 sets to my leg workout.",
+        "How many reps would you like for Walking Lunges?",
+        monkeypatch,
+    )
+
+    assert "couldn't continue that plan change" in reply.lower()
+    stored = clar_mod.load(split_user.id)
+    assert stored["request_id"] == "concurrent-hammer-curl-request"
+    assert stored["day"] == "Pazartesi"
+    assert stored["exercise"] == "Hammer Curl"
+    assert stored["sets"] == 4
+    assert stored["reps"] is None
+
+
+def test_no_tool_partial_add_with_ambiguous_workout_asks_for_day(
+        app, make_user, tools_on, monkeypatch):
+    user = make_user("notoolambiguous")
+    seed_plan(user.id, _ambiguous_legs_program())
+    before = _snapshot(user.id)
+
+    reply = _no_tool_provider_turn(
+        app,
+        user.id,
+        "Add Walking Lunges with 4 sets to my leg workout.",
+        "How many reps would you like?",
+        monkeypatch,
+    )
+
+    assert "more than one" in reply.lower()
+    _assert_unchanged(user.id, before)
+    stored = clar_mod.load(user.id)
+    assert stored["exercise"] == "Walking Lunge"
+    assert stored["sets"] == 4
+    assert stored["reps"] is None
+    assert len(stored["candidate_days"]) == 2
+    assert "Cuma" in stored["candidate_days"]
+
+
+@pytest.mark.parametrize("message", [
+    "Walking Lunges with 4 sets belong in my leg workout.",
+    "Don't add Walking Lunges with 4 sets to my leg workout.",
+    "Add Walking Lunges 4x15 to my leg workout.",
+    "Add Zzyzx Press with 4 sets to my leg workout.",
+])
+def test_no_tool_recovery_fails_closed_for_non_add_complete_or_unknown_turn(
+        app, split_user, tools_on, monkeypatch, message):
+    provider_text = "Provider response stays unchanged."
+    before = _snapshot(split_user.id)
+
+    reply = _no_tool_provider_turn(
+        app, split_user.id, message, provider_text, monkeypatch)
+
+    assert reply == provider_text
+    _assert_unchanged(split_user.id, before)
+    assert clar_mod.load(split_user.id) is None
+
+
+def test_no_tool_recovery_does_not_run_after_plan_tool_was_dispatched(
+        app, split_user, tools_on):
+    message = "Add Walking Lunges with 4 sets to my leg workout."
+    provider_text = "How many reps would you like?"
+    before = _snapshot(split_user.id)
+
+    with app.test_request_context("/ask", method="POST"):
+        _fresh_turn(app, message, user_id=split_user.id)
+        invalid = call(split_user.id, ADD, {})
+        reply = coach_confirmation.grounded_provider_reply(
+            split_user.id, "en", provider_text)
+
+    assert invalid["status"] == results.STATUS_ERROR
+    assert reply == provider_text
+    _assert_unchanged(split_user.id, before)
+    assert clar_mod.load(split_user.id) is None
 
 
 # ── 3–4. Ambiguous day preserves 3x12; invalid day refuses ───────────────────

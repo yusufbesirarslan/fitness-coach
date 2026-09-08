@@ -81,6 +81,9 @@ _ACCEPT_PREFIXES = frozenset({
     "confirm", "tamam",
 })
 
+_EXPLICIT_ADD_INTENT = re.compile(
+    r"(?<!\w)(?:add|ekle\w*)(?!\w)", re.IGNORECASE)
+
 _OPERATION_TOOLS = {
     "add_exercise": ADD_EXERCISE_TOOL,
     "replace_exercise": REPLACE_EXERCISE_TOOL,
@@ -233,6 +236,7 @@ def continuation_matches_record(record, tool_name, arguments):
 class Grounding:
     command: object = None
     result: dict = None
+    clarification: dict = None
 
     @property
     def ready(self):
@@ -496,6 +500,57 @@ def _normalize_bare_reps(token):
     return _normalize_reps(token)
 
 
+def recover_no_tool_partial_add(user_id):
+    """Create clarification state for one explicit partial ADD, never a write.
+
+    This is a missing-tool recovery boundary, not a prose parser. Only the raw
+    current user turn contributes authority; provider text is not an input.
+    Existing workout/exercise/prescription grounding decides every semantic
+    field and the existing clarification writer owns persistence.
+    """
+    message = current_user_message()
+    if not isinstance(message, str) or not _EXPLICIT_ADD_INTENT.search(message):
+        return None
+    rx = parse_prescription(message)
+    if (rx.sets is None) == (rx.reps is None):
+        return None
+    exercise = _exercise_from_text(message)
+    if not exercise:
+        return None
+    destination = resolve_destination(exercise)
+    if destination.kind == EX_UNKNOWN:
+        return None
+
+    grounded = ground_command(user_id, AddExerciseCommand(
+        day="", exercise=exercise, sets=rx.sets, reps=rx.reps))
+    payload = grounded.result
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("status") != results.STATUS_NEEDS_INPUT:
+        return None
+    if payload.get("reason") not in {
+            results.REASON_MISSING_SETS,
+            results.REASON_MISSING_REPS,
+            results.REASON_AMBIGUOUS_WORKOUT,
+            results.REASON_EXERCISE_SUGGEST}:
+        return None
+
+    expected = grounded.clarification
+    stored = clarifications.load(user_id)
+    identity_fields = (
+        "user_id", "operation", "request_id", "day", "exercise",
+        "replacement", "suggestion", "sets", "reps", "proposed_sets",
+        "proposed_reps", "candidate_days", "reason",
+    )
+    if not expected or not stored or any(
+            stored.get(field) != expected.get(field)
+            for field in identity_fields):
+        raise clarifications.ClarificationAuthorityUnavailable
+    if stored.get("sets") != rx.sets or stored.get("reps") != rx.reps:
+        raise clarifications.ClarificationAuthorityUnavailable
+    return payload
+
+
 def ground_command(user_id, command):
     """Return a ``Grounding``: ready command, or a non-applying result."""
     intent = user_owned_intent(user_id=user_id)
@@ -740,6 +795,7 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
       "Barbell Curl" cannot donate its exercise, its suggestion or its
       candidate days to a brand-new add.
     """
+    remembered = None
     if reason in (
             results.REASON_MISSING_PRESCRIPTION,
             results.REASON_MISSING_SETS,
@@ -771,7 +827,7 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
             # The day is exactly what is still unknown; keeping the model's
             # guess would let a later "yes" execute against it.
             day = ""
-        clarifications.remember(user_id, {
+        remembered = clarifications.remember(user_id, {
             "operation": operation,
             "request_id": stored.get("request_id") or request_id(
                 operation, exercise, replacement),
@@ -792,8 +848,10 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
         })
     else:
         clarifications.clear(user_id)
-    return Grounding(result=results.needs_input_result(
-        reason, command, **kwargs))
+    return Grounding(
+        result=results.needs_input_result(reason, command, **kwargs),
+        clarification=remembered,
+    )
 
 
 def followup_add_arguments(user_id=None):

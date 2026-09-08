@@ -78,6 +78,7 @@ def remember(user_id, payload):
         "created_at": time.time(),
     }
     _write(int(user_id), record)
+    return record
 
 
 def load(user_id):
