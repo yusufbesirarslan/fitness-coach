@@ -1,0 +1,74 @@
+# AxisAI staging overlay — applied ON TOP of docker-compose.yml, never alone:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.staging.yml <cmd>
+#
+# Production is UNAFFECTED by this file. The production deploy path
+# (scripts/production_deploy.sh) builds its own override with `-f
+# docker-compose.yml -f <generated override>` and never names this file, so a
+# change here can never reach the production host.
+#
+# What it adds: an isolated PostgreSQL authority that lives on the staging host
+# itself. Production reads its database from `DATABASE_URL` pointing at RDS;
+# staging points the same variable at this container. Staging therefore has a
+# separate physical database with separate credentials and no network path to
+# the production RDS security group at all.
+#
+# docs/STAGING.md is the operator contract for this file.
+
+services:
+  db:
+    # Same major as the production RDS engine (PostgreSQL 18), so schema and
+    # query semantics that Sprint 14 depends on — partial unique indexes,
+    # SELECT ... FOR UPDATE, the migration chain to f5a6b7c8d9e0 — behave as
+    # they do in production. Pinned by version AND content digest for the same
+    # reason redis is: a floating tag can silently change third-party bytes
+    # between two deploys of the same application SHA.
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+    container_name: axisai-staging-db
+    restart: unless-stopped
+    mem_limit: ${DB_MEM_LIMIT:-512m}
+    environment:
+      POSTGRES_USER: ${STAGING_DB_USER:?STAGING_DB_USER must be set}
+      POSTGRES_PASSWORD: ${STAGING_DB_PASSWORD:?STAGING_DB_PASSWORD must be set}
+      POSTGRES_DB: ${STAGING_DB_NAME:?STAGING_DB_NAME must be set}
+    # NO ports mapping. The database is reachable only over the compose network,
+    # from web and worker. It is not published to the host, and the staging
+    # security group has no ingress at all, so 5432 is unreachable from off-box
+    # by two independent controls rather than one.
+    volumes:
+      # Mounted at /var/lib/postgresql, NOT /var/lib/postgresql/data. The
+      # postgres 18+ images store data in a major-version-specific subdirectory
+      # so that `pg_upgrade --link` works without crossing a mount boundary, and
+      # they refuse to start when they find data at the old path. The pre-18
+      # convention fails closed here rather than silently.
+      - staging_db_data:/var/lib/postgresql
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      # `-U` matters: without it pg_isready probes the `root` role, which does
+      # not exist, and reports the server unhealthy while it is in fact serving.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -q"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # web and worker must not start before the staging database can accept
+  # connections. In production this dependency does not exist because RDS is an
+  # external, always-available service; here the database shares the host's
+  # lifecycle, so a cold `docker compose up` would otherwise race it.
+  web:
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  staging_db_data:

@@ -11,6 +11,10 @@ venv/
 # Bedrock / AWS uzun ömürlü anahtarlar & kimlik dosyaları — ASLA commit etme
 .env.*
 !.env.example
+# Staging template. Names only, never values — enforced by
+# tests/test_staging_separation.py, which fails if a filled-in secret,
+# a production identifier or an enabled Sprint 14 flag appears in it.
+!.env.staging.example
 *.csv
 *-api-key*.csv
 *accessKeys*.csv

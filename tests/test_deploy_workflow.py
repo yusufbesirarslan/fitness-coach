@@ -360,7 +360,30 @@ BINARY_SUFFIXES = (
 # whole class of file. `.js` and `.json` are here because they were the hole.
 REQUIRED_EXECUTABLE_KINDS = (".py", ".yml", ".sh", ".js", ".json")
 
-SSM_MENTION_ALLOWED = frozenset({
+# The isolated staging environment (docs/STAGING.md) reaches its host over SSM
+# too, so it necessarily trips both scans below. It is admitted here as its own
+# named set rather than by widening the production sets, because the difference
+# matters: these files are a SECOND lifecycle, and the guard's whole point is
+# that a second one is a deliberate act rather than an accident.
+#
+# What keeps the exemption from becoming a hole is that it runs in the opposite
+# direction from the production authority. `scripts/staging_control.py` refuses
+# to send anything unless it is given BOTH instance ids and they differ, and
+# `scripts/staging_deploy.sh` re-checks the live IMDSv2 instance id on the host
+# before it mutates anything — so this lifecycle cannot reach the production
+# instance even if someone points it there. tests/test_staging_separation.py
+# asserts those guards, and asserts in the other direction that nothing in
+# A -> B -> C names a staging artefact. Adding a path here without those
+# properties would be the drift this scan exists to catch.
+STAGING_SSM_LIFECYCLE = frozenset({
+    Path("scripts/staging_control.py"),
+    Path("scripts/staging_deploy.sh"),
+    Path("docs/STAGING.md"),
+    Path("tests/test_staging_separation.py"),
+    Path(".env.staging.example"),
+})
+
+SSM_MENTION_ALLOWED = STAGING_SSM_LIFECYCLE | frozenset({
     Path("scripts/deploy_control.py"),
     Path("tests/test_deploy_control.py"),
     Path("tests/test_deploy_workflow.py"),
@@ -390,7 +413,7 @@ SSM_LIFECYCLE_OWNERS = frozenset({
 # Historical specs/plans that name the controller's operations as documentation
 # of that one lifecycle. They are not owners: a new markdown file with a fenced
 # `aws ssm send-command` is a second lifecycle even if it lives under docs/.
-SSM_LIFECYCLE_ALLOWED = SSM_LIFECYCLE_OWNERS | frozenset({
+SSM_LIFECYCLE_ALLOWED = SSM_LIFECYCLE_OWNERS | STAGING_SSM_LIFECYCLE | frozenset({
     Path("docs/superpowers/plans/2026-08-22-production-deploy-hardening-pr1.md"),
     Path("docs/superpowers/plans/2026-08-25-production-deploy-hardening-pr1-remediation.md"),
     Path("docs/superpowers/specs/2026-08-22-production-deploy-hardening-pr1-design.md"),
