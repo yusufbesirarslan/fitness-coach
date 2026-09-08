@@ -302,6 +302,46 @@ def test_incompatible_clarification_cannot_donate_fields_to_no_tool_add(
     assert "Hammer Curl" not in names(split_user.id, "Pazartesi")
 
 
+def test_concurrent_incompatible_clarification_supersedes_no_tool_recovery(
+        app, split_user, tools_on, monkeypatch):
+    """A later request wins without letting the earlier reply describe it."""
+    original_remember = clar_mod.remember
+    injected = False
+
+    def interleaving_remember(user_id, payload):
+        nonlocal injected
+        written = original_remember(user_id, payload)
+        if not injected and payload.get("exercise") == "Walking Lunge":
+            injected = True
+            original_remember(user_id, {
+                "operation": "add_exercise",
+                "request_id": "concurrent-hammer-curl-request",
+                "day": "Pazartesi",
+                "exercise": "Hammer Curl",
+                "sets": 4,
+                "reps": None,
+                "reason": results.REASON_MISSING_REPS,
+            })
+        return written
+
+    monkeypatch.setattr(clar_mod, "remember", interleaving_remember)
+    reply = _no_tool_provider_turn(
+        app,
+        split_user.id,
+        "Add Walking Lunges with 4 sets to my leg workout.",
+        "How many reps would you like for Walking Lunges?",
+        monkeypatch,
+    )
+
+    assert "couldn't continue that plan change" in reply.lower()
+    stored = clar_mod.load(split_user.id)
+    assert stored["request_id"] == "concurrent-hammer-curl-request"
+    assert stored["day"] == "Pazartesi"
+    assert stored["exercise"] == "Hammer Curl"
+    assert stored["sets"] == 4
+    assert stored["reps"] is None
+
+
 def test_no_tool_partial_add_with_ambiguous_workout_asks_for_day(
         app, make_user, tools_on, monkeypatch):
     user = make_user("notoolambiguous")

@@ -216,7 +216,7 @@ def grounded_provider_reply(user_id, language, text):
         try:
             recovered = recover_no_tool_partial_add(user_id)
         except clar_mod.ClarificationAuthorityUnavailable:
-            recovered = None
+            return t("coach.plan.clarification_unavailable", locale=language)
         if recovered is not None:
             return _format_plan_clarification(recovered, language)
     if (_claims_completed_plan_change(reply)

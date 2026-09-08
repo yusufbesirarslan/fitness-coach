@@ -236,6 +236,7 @@ def continuation_matches_record(record, tool_name, arguments):
 class Grounding:
     command: object = None
     result: dict = None
+    clarification: dict = None
 
     @property
     def ready(self):
@@ -534,11 +535,19 @@ def recover_no_tool_partial_add(user_id):
             results.REASON_EXERCISE_SUGGEST}:
         return None
 
+    expected = grounded.clarification
     stored = clarifications.load(user_id)
-    if not stored or stored.get("operation") != "add_exercise":
-        return None
+    identity_fields = (
+        "user_id", "operation", "request_id", "day", "exercise",
+        "replacement", "suggestion", "sets", "reps", "proposed_sets",
+        "proposed_reps", "candidate_days", "reason",
+    )
+    if not expected or not stored or any(
+            stored.get(field) != expected.get(field)
+            for field in identity_fields):
+        raise clarifications.ClarificationAuthorityUnavailable
     if stored.get("sets") != rx.sets or stored.get("reps") != rx.reps:
-        return None
+        raise clarifications.ClarificationAuthorityUnavailable
     return payload
 
 
@@ -786,6 +795,7 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
       "Barbell Curl" cannot donate its exercise, its suggestion or its
       candidate days to a brand-new add.
     """
+    remembered = None
     if reason in (
             results.REASON_MISSING_PRESCRIPTION,
             results.REASON_MISSING_SETS,
@@ -817,7 +827,7 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
             # The day is exactly what is still unknown; keeping the model's
             # guess would let a later "yes" execute against it.
             day = ""
-        clarifications.remember(user_id, {
+        remembered = clarifications.remember(user_id, {
             "operation": operation,
             "request_id": stored.get("request_id") or request_id(
                 operation, exercise, replacement),
@@ -838,8 +848,10 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
         })
     else:
         clarifications.clear(user_id)
-    return Grounding(result=results.needs_input_result(
-        reason, command, **kwargs))
+    return Grounding(
+        result=results.needs_input_result(reason, command, **kwargs),
+        clarification=remembered,
+    )
 
 
 def followup_add_arguments(user_id=None):
