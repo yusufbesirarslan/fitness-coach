@@ -1009,3 +1009,52 @@ All formal S14 execution criteria are now satisfied, but Sprint 14 is not closed
 PR5 owns staging exercise, runtime-metrics baseline capture, success/abort and
 rollback evidence, the go/no-go checklist, and final closure. It should require
 no new execution-correctness implementation.
+
+## 18. PR5 readiness outcome (2026-09-07)
+
+PR5 owns staged-activation readiness and sprint closure. It produced every
+artifact it can produce and **could not execute the one thing it exists to
+execute**: the staging lifecycle exercise the flag's own prerequisites demand.
+
+**There is no staging environment.** `docs/DEPLOYMENT.md` describes exactly one
+deployment target ("the one configured EC2 instance"); the only GitHub Actions
+environment is `production`; the cloud account holds one EC2 instance and one
+RDS instance; no repository document defines a staging hostname, deployment
+mechanism, database target or flag-management procedure. `docs/ROLLOUT.md` names
+"staging first" as a precondition for this flag and never says where staging is.
+
+Production was not used and was not mutated — three read-only cloud describes,
+zero writes, no flag change, no deploy approval. Localhost was not substituted:
+no authoritative document defines it as the staging target, and evidence from it
+would be structural, which the committed suites already supply.
+
+Delivered: `docs/WORKOUT_SESSION_ACTIVATION.md` (canonical operator runbook —
+environment guard, build and migration verification, baseline capture,
+activation order, exercise matrix A–N, real response and metric vocabulary,
+success/abort signals, rollback, post-rollback inertness, go/no-go, evidence
+template), the readiness record with the P2-1…P2-8 activation-risk adjudication
+(no P2 blocks activation; none was repaired), and
+`tests/test_sprint14_activation_readiness.py`, which ties the runbook's claims
+to the shipped code.
+
+`app/feature_flags.py` was deliberately **not** changed: no registered lifecycle
+value represents "readiness complete, awaiting an operator decision"
+(`rolling_out` would falsely imply activation in progress), and there is no
+staging evidence to record. The lifecycle stays `staging_only` and the unmet
+prerequisite stays in the record.
+
+```text
+S14-1 … S14-11   SATISFIED
+                 (S14-7 = WorkoutSessionLifecycle metric,
+                  S14-8 = real PostgreSQL reliability proof)
+
+PR5              BLOCKED — STAGING EVIDENCE REQUIRED
+SPRINT 14        OPEN
+```
+
+S14-7 and S14-10 are satisfied as specified and each retains an operational half
+— a live CloudWatch datum, and live flag-OFF inertness — that only a staging
+exercise can supply. That gap is the sprint's exit blocker, and it is a single
+dependency: an authorized non-production environment at or after `b77a1dc` with
+the schema at `f5a6b7c8d9e0`. Full assessment:
+[`2026-09-07-sprint14-pr5-workout-session-activation-readiness.md`](2026-09-07-sprint14-pr5-workout-session-activation-readiness.md).

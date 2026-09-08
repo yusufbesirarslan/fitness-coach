@@ -192,6 +192,12 @@ completion check; one request never counts both preflight and locked refusal.
 Instrumentation is best-effort: when runtime metrics are disabled, or even when
 `runtime_metrics.increment` raises unexpectedly, execution results are unchanged.
 
+Because the emitting feature is dark, this metric has no production datapoints
+and will have none until `FITX_WORKOUT_SESSIONS_ENABLED` is activated. Its
+absence is therefore not a signal. How an operator establishes that the metric
+path itself is healthy — before, not after, enabling the feature — is
+[WORKOUT_SESSION_ACTIVATION.md](WORKOUT_SESSION_ACTIVATION.md) §7.2.
+
 ### Feature-flag visibility
 
 Rollout flags live in the host `.env` and the deploy pipeline does not carry them
