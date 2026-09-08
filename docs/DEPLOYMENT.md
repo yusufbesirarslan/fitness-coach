@@ -5,6 +5,12 @@ successful CI run for `main` may deploy one immutable revision to the one
 configured EC2 instance. No manual workflow dispatch, branch-tip deployment,
 or host-side feature-flag change is part of this contract.
 
+The non-production environment is documented separately in `docs/STAGING.md`
+and is deliberately outside this contract: it has its own instance, its own
+database, its own deploy script, and no job in this workflow. Nothing in this
+runbook accepts a staging target, and nothing in the staging runbook may relax
+a guarantee described here.
+
 ## Authorities and hand-off
 
 - `A` — `.github/workflows/deploy.yml`
