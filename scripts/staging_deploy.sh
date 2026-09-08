@@ -72,7 +72,7 @@ assert_staging_instance() {
 }
 
 assert_staging_database() {
-  local url count
+  local url count assignment
   # Read the SAME assignment the application will. Compose's `env_file` takes
   # the LAST assignment of a key, so inspecting the first one would let a .env
   # carrying two DATABASE_URL lines pass this guard and then boot against the
@@ -80,10 +80,19 @@ assert_staging_database() {
   # is a write, not a read. Appending a corrected line instead of editing in
   # place is the ordinary way a .env acquires a duplicate, so refuse the
   # ambiguity outright rather than picking a side and being right by luck.
-  count="$(grep -cE '^DATABASE_URL=' "$REPO_DIR/.env" || true)"
+  #
+  # `^DATABASE_URL=` is NOT the set of lines Compose treats as an
+  # assignment. Its dotenv reader also honours `export DATABASE_URL=...` and
+  # tolerates leading whitespace, so a guard anchored on the bare key would
+  # read a .env carrying `DATABASE_URL=<staging>` plus
+  # `export DATABASE_URL=<production>` as unambiguous and boot against the
+  # second one. Count and read through ONE matcher, so the line this guard
+  # inspects is always the line Compose resolves.
+  assignment='^[[:space:]]*(export[[:space:]]+)?DATABASE_URL='
+  count="$(grep -cE "$assignment" "$REPO_DIR/.env" || true)"
   [[ "$count" == "1" ]] \
     || die "expected exactly one DATABASE_URL line in staging .env, found $count"
-  url="$(grep -E '^DATABASE_URL=' "$REPO_DIR/.env" | cut -d= -f2-)"
+  url="$(grep -E "$assignment" "$REPO_DIR/.env" | sed -E "s/$assignment//")"
   [[ -n "$url" ]] || die "DATABASE_URL is empty"
   # The staging database is a container on this host, reached over the compose
   # network. An RDS endpoint here means the staging environment has been pointed

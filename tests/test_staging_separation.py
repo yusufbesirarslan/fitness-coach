@@ -226,23 +226,71 @@ def test_staging_host_script_refuses_an_ambiguous_database_url():
     than editing in place is the ordinary way a .env acquires a duplicate.
     """
     source = _read(STAGING_HOST_SCRIPT)
-    assert "grep -cE '^DATABASE_URL='" in source
+    # One matcher, agreeing with what Compose treats as an assignment.
+    assert ("assignment='^[[:space:]]*(export[[:space:]]+)?DATABASE_URL='") in source
+    assert 'count="$(grep -cE "$assignment"' in source
     assert '[[ "$count" == "1" ]]' in source
+    # And the value is read through the SAME matcher, so the line counted
+    # is the line inspected.
+    assert 'url="$(grep -E "$assignment"' in source
     # And the first-match read that made the ambiguity invisible is gone.
     assert "head -n1" not in source
+
+
+# The two endpoints the behavioural cases below distinguish: the staging
+# database container reached over the compose network, and a managed
+# database this environment must never migrate.
+STAGING_DSN = "postgresql://su:sp@db:5432/sdb"
+PRODUCTION_DSN = "postgresql://u:p@x.eu-central-1.rds.amazonaws.com:5432/f"
+
+
+def _env(*assignment_lines):
+    """A .env body. LF only — the guard reads it with grep, not Python."""
+    return chr(10).join(assignment_lines)
 
 
 @pytest.mark.skipif(not _usable_bash(),
                     reason="no bash that can read this process's files")
 @pytest.mark.parametrize("env_body,expected", [
-    ("DATABASE_URL=postgresql://su:sp@db:5432/sdb", "ACCEPTED"),
-    ("DATABASE_URL=postgresql://su:sp@db:5432/sdb\n"
-     "DATABASE_URL=postgresql://u:p@x.eu-central-1.rds.amazonaws.com:5432/f",
-     "found 2"),
-    ("DATABASE_URL=postgresql://u:p@x.eu-central-1.rds.amazonaws.com:5432/f",
-     "RDS endpoint"),
-    ("DATABASE_URL=sqlite:///chatbot.db", "does not target the staging db"),
-    ("SECRET_KEY=x", "found 0"),
+    # A. One valid staging assignment.
+    pytest.param(_env(f"DATABASE_URL={STAGING_DSN}"),
+                 "ACCEPTED", id="A-one-staging"),
+    # B-E. A SECOND assignment, in each form Compose's dotenv reader
+    # accepts. A guard anchored on `^DATABASE_URL=` counts C, D and E as one
+    # line and then boots against the endpoint it never looked at.
+    pytest.param(_env(f"DATABASE_URL={STAGING_DSN}",
+                      f"DATABASE_URL={STAGING_DSN}"),
+                 "found 2", id="B-two-plain"),
+    pytest.param(_env(f"DATABASE_URL={STAGING_DSN}",
+                      f"export DATABASE_URL={PRODUCTION_DSN}"),
+                 "found 2", id="C-plain-plus-export"),
+    pytest.param(_env(f"DATABASE_URL={STAGING_DSN}",
+                      f"  DATABASE_URL={PRODUCTION_DSN}"),
+                 "found 2", id="D-plain-plus-indented"),
+    pytest.param(_env(f"DATABASE_URL={STAGING_DSN}",
+                      f"\texport DATABASE_URL={PRODUCTION_DSN}"),
+                 "found 2", id="E-plain-plus-indented-export"),
+    # F. The production endpoint on its own.
+    pytest.param(_env(f"DATABASE_URL={PRODUCTION_DSN}"),
+                 "RDS endpoint", id="F-production-only"),
+    # G-H. A duplicate is refused for BEING a duplicate, in either order,
+    # and the refusal happens in the preflight — before compose is invoked.
+    pytest.param(_env(f"DATABASE_URL={STAGING_DSN}",
+                      f"DATABASE_URL={PRODUCTION_DSN}"),
+                 "found 2", id="G-staging-then-production"),
+    pytest.param(_env(f"DATABASE_URL={PRODUCTION_DSN}",
+                      f"DATABASE_URL={STAGING_DSN}"),
+                 "found 2", id="H-production-then-staging"),
+    # The recognised forms must also be READ, not merely counted: a guard
+    # that counts `export` but keeps the keyword in the value would judge
+    # the endpoint of a string that is not a URL.
+    pytest.param(_env(f"export DATABASE_URL={STAGING_DSN}"),
+                 "ACCEPTED", id="export-only-staging"),
+    pytest.param(_env(f"  export DATABASE_URL={PRODUCTION_DSN}"),
+                 "RDS endpoint", id="indented-export-production"),
+    pytest.param(_env("DATABASE_URL=sqlite:///chatbot.db"),
+                 "does not target the staging db", id="unsupported-scheme"),
+    pytest.param(_env("SECRET_KEY=x"), "found 0", id="absent"),
 ])
 def test_database_guard_behaviour(tmp_path, env_body, expected):
     """Runs the actual guard, so the string assertions above cannot go stale."""
@@ -253,7 +301,7 @@ def test_database_guard_behaviour(tmp_path, env_body, expected):
     (tmp_path / ".env").write_text(env_body + "\n", encoding="utf-8")
     harness = (
         "set -euo pipefail\n"
-        f'REPO_DIR="{_shell_path(tmp_path)}"\n'
+        f'REPO_DIR="{tmp_path.as_posix()}"\n'
         'die() { echo "REFUSED: $*"; exit 1; }\n'
         + body.group(0) + "\n"
         "assert_staging_database\n"
