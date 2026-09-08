@@ -207,7 +207,8 @@ def supersede_stale_clarification(user_id, tool_name, arguments):
             replacement if isinstance(replacement, str) else ""):
         return
     try:
-        clarifications.clear(user_id)
+        clarifications.clear(
+            user_id, event="superseded", reason="incompatible_request")
     except clarifications.ClarificationAuthorityUnavailable:
         return
 
@@ -359,18 +360,23 @@ def refresh_clarification_for_turn(user_message, user_id=None):
         return
     if intent == CANCEL:
         try:
-            clarifications.clear(user_id)
+            clarifications.clear(
+                user_id, event="superseded", reason="request_boundary_cancel")
         except clarifications.ClarificationAuthorityUnavailable:
             return
         return
     if stored and _is_continuation_reply(user_message, stored):
         return
     if _exercise_from_text(user_message):
-        clarifications.clear(user_id)
+        clarifications.clear(
+            user_id, event="superseded",
+            reason="request_boundary_new_exercise")
         return
     if stored and user_message and not _is_continuation_reply(
             user_message, stored):
-        clarifications.clear(user_id)
+        clarifications.clear(
+            user_id, event="superseded",
+            reason="request_boundary_noncontinuation")
 
 
 def is_continuation_attempt(message):
@@ -847,7 +853,7 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
             "reason": reason,
         })
     else:
-        clarifications.clear(user_id)
+        clarifications.clear(user_id, reason="nonrememberable_state")
     return Grounding(
         result=results.needs_input_result(reason, command, **kwargs),
         clarification=remembered,

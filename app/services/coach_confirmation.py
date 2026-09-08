@@ -565,6 +565,7 @@ def _complete_grounded_followup(user_id, language):
             # the record actually taken is a different request. Consume-once
             # has already retired both; executing would run a mutation this
             # continuation never established.
+            clar_mod.reject(taken, "authoritative_record_mismatch")
             return None
         result = coach_plan_tools.execute_plan_tool(user_id, tool, arguments)
     except clar_mod.ClarificationAuthorityUnavailable:
