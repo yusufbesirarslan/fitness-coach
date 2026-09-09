@@ -5,6 +5,7 @@ grounded fields must survive on a user-scoped server store. Persistence
 assertions are on the plan row, journal, proposals and workout logs.
 """
 import json
+import logging
 import time
 
 import pytest
@@ -18,6 +19,7 @@ from app.models import (
 from app.observability import assign_request_id
 from app.services import ai_coach, coach_confirmation, plan_confirmation
 from app.services.coach_plan_tools import clarifications as clar_mod
+from app.services.coach_plan_tools import grounding as grounding_mod
 from app.services.coach_plan_tools import results
 from app.services.plan_mutation.validation import WEEKDAYS
 from app.services.today_facts import get_active_plan
@@ -223,6 +225,176 @@ def test_no_tool_partial_add_continuation_persists_exact_4x15_once(
     assert len(journal(split_user.id)) == 1
     assert names(split_user.id, "Cuma").count("Walking Lunge") == 1
     assert replay is None or "has been added" not in replay.lower()
+
+
+def test_reverse_partial_add_numeric_continuation_precedes_exercise_heuristic(
+        app, split_user, tools_on, monkeypatch, caplog):
+    """A valid bare sets reply outranks a false new-exercise classification."""
+    plan = get_active_plan(split_user.id)
+    gym_document = json.loads(plan.plan_data)
+    gym_document["exercise_context"]["equipment_context"] = "spor_salonu"
+    plan.plan_data = json.dumps(gym_document, ensure_ascii=False)
+    db.session.commit()
+    before = _snapshot(split_user.id)
+    before_document = json.loads(before[0])
+    original_exercise_from_text = grounding_mod._exercise_from_text
+
+    def production_observed_exercise_heuristic(message):
+        if isinstance(message, str) and message.isascii() and message.isdecimal():
+            return message
+        return original_exercise_from_text(message)
+
+    monkeypatch.setattr(
+        grounding_mod, "_exercise_from_text",
+        production_observed_exercise_heuristic)
+
+    # Production's first request already established this authoritative state:
+    # Add Leg Extension for 15 reps to my leg workout -> asks only for sets.
+    # Seed that exact boundary so this regression cannot widen into prose or
+    # exercise-name parsing, which are outside the proven defect.
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        clar_mod.remember(split_user.id, {
+            "operation": "add_exercise",
+            "request_id": grounding_mod.request_id(
+                "add_exercise", "Machine Leg Extension"),
+            "day": "Cuma",
+            "exercise": "Machine Leg Extension",
+            "sets": None,
+            "reps": "15",
+            "reason": results.REASON_MISSING_SETS,
+        })
+    stored = clar_mod.load(split_user.id)
+    assert stored["exercise"] == "Machine Leg Extension"
+    assert stored["sets"] is None
+    assert stored["reps"] == "15"
+
+    caplog.clear()
+    caplog.set_level(logging.INFO, logger="app")
+    applied = _turn2(app, split_user.id, "4")
+
+    assert applied is not None
+    lifecycle = "\n".join(
+        item.getMessage() for item in caplog.records
+        if "component=coach_clarification" in item.getMessage())
+    assert "event=superseded reason=request_boundary_new_exercise" not in lifecycle
+    assert "event=consumed reason=continuation_consume" in lifecycle
+
+    after_document = json.loads(get_active_plan(split_user.id).plan_data)
+    friday = next(d for d in after_document["program"] if d["gun"] == "Cuma")
+    added = friday["egzersizler"][-1]
+    assert added["isim"] == "Machine Leg Extension"
+    assert added["exercise_id"] == "ex_leg_extension"
+    assert added["set"] == 4
+    assert added["tekrar"] == "15"
+    assert names(split_user.id, "Cuma").count("Machine Leg Extension") == 1
+    assert plan_version(split_user.id) == before[1] + 1
+    assert len(journal(split_user.id)) == 1
+    assert [d for d in after_document["program"] if d["gun"] != "Cuma"] == [
+        d for d in before_document["program"] if d["gun"] != "Cuma"]
+    assert friday["egzersizler"][:-1] == next(
+        d for d in before_document["program"] if d["gun"] == "Cuma"
+    )["egzersizler"]
+
+    after = _snapshot(split_user.id)
+    replay = _turn2(app, split_user.id, "4")
+    _assert_unchanged(split_user.id, after)
+    assert len(journal(split_user.id)) == 1
+    assert names(split_user.id, "Cuma").count("Machine Leg Extension") == 1
+    assert replay is None or "has been added" not in replay.lower()
+
+
+def test_numeric_continuation_cannot_bind_to_record_replaced_after_boundary(
+        app, split_user, tools_on):
+    """The record accepted at turn start must be the one reconstructed."""
+    before = _snapshot(split_user.id)
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        clar_mod.remember(split_user.id, {
+            "operation": "add_exercise",
+            "request_id": grounding_mod.request_id(
+                "add_exercise", "Walking Lunge"),
+            "day": "Cuma",
+            "exercise": "Walking Lunge",
+            "sets": None,
+            "reps": "15",
+            "reason": results.REASON_MISSING_SETS,
+        })
+
+    with app.test_request_context("/ask", method="POST"):
+        _fresh_turn(app, "4", user_id=split_user.id)
+        clar_mod.remember(split_user.id, {
+            "operation": "add_exercise",
+            "request_id": grounding_mod.request_id(
+                "add_exercise", "Hammer Curl"),
+            "day": "Pazartesi",
+            "exercise": "Hammer Curl",
+            "sets": None,
+            "reps": "10",
+            "reason": results.REASON_MISSING_SETS,
+        })
+        reply = coach_confirmation.resolve_pending_turn(split_user.id, "en")
+
+    _assert_unchanged(split_user.id, before)
+    assert reply is None
+    stored = clar_mod.load(split_user.id)
+    assert stored is not None
+    assert stored["exercise"] == "Hammer Curl"
+    assert stored["sets"] is None
+    assert stored["reps"] == "10"
+
+
+def test_numeric_continuation_rejects_record_replaced_during_reconstruction(
+        app, split_user, tools_on, monkeypatch, caplog):
+    """A replacement after the boundary match must never execute."""
+    before = _snapshot(split_user.id)
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        clar_mod.remember(split_user.id, {
+            "operation": "add_exercise",
+            "request_id": grounding_mod.request_id(
+                "add_exercise", "Walking Lunge"),
+            "day": "Cuma",
+            "exercise": "Walking Lunge",
+            "sets": None,
+            "reps": "15",
+            "reason": results.REASON_MISSING_SETS,
+        })
+
+    original_match = grounding_mod._matches_boundary_record
+    replaced = False
+
+    def replace_after_match(record):
+        nonlocal replaced
+        matched = original_match(record)
+        if matched and not replaced:
+            replaced = True
+            clar_mod.remember(split_user.id, {
+                "operation": "add_exercise",
+                "request_id": grounding_mod.request_id(
+                    "add_exercise", "Hammer Curl"),
+                "day": "Pazartesi",
+                "exercise": "Hammer Curl",
+                "sets": None,
+                "reps": "10",
+                "reason": results.REASON_MISSING_SETS,
+            })
+        return matched
+
+    monkeypatch.setattr(
+        grounding_mod, "_matches_boundary_record", replace_after_match)
+    caplog.set_level(logging.INFO, logger="app")
+    with app.test_request_context("/ask", method="POST"):
+        _fresh_turn(app, "4", user_id=split_user.id)
+        reply = coach_confirmation.resolve_pending_turn(split_user.id, "en")
+
+    assert replaced is True
+    assert reply is None
+    _assert_unchanged(split_user.id, before)
+    lifecycle = "\n".join(
+        item.getMessage() for item in caplog.records
+        if "component=coach_clarification" in item.getMessage())
+    assert "event=rejected reason=authoritative_record_mismatch" in lifecycle
 
 
 @pytest.mark.parametrize(("first_turn", "first_reply", "followup"), [

@@ -105,6 +105,8 @@ _TOOL_OPERATIONS = {
 #: invalidates every stored record rather than silently redefining what an
 #: existing one meant — the same discipline ``plan_mutation.fingerprint`` uses.
 _REQUEST_DOMAIN = "axisai/coach-plan-clarification/v1"
+_BOUNDARY_RECORD_ATTR = "_coach_plan_clarification_boundary_record"
+_STORED_RECORD_UNSET = object()
 
 #: Field separator for the hashed payload. An exercise name cannot contain it,
 #: so ("ab", "c") and ("a", "bc") cannot collide onto one identity.
@@ -260,6 +262,44 @@ def current_turn_history():
         return []
 
 
+def _record_generation(record):
+    """Stable identity for the exact clarification observed at turn start."""
+    if not isinstance(record, dict):
+        return None
+    request = record.get("request_id")
+    created = record.get("created_at")
+    if not isinstance(request, str) or not request:
+        return None
+    try:
+        created = float(created)
+    except (TypeError, ValueError):
+        return None
+    return request, created
+
+
+def _pin_boundary_record(record):
+    """Bind a valid continuation to one request-local record generation."""
+    try:
+        from flask import g
+        setattr(g, _BOUNDARY_RECORD_ATTR, _record_generation(record))
+    except RuntimeError:
+        pass
+
+
+def _matches_boundary_record(record):
+    try:
+        from flask import g
+        pinned = getattr(g, _BOUNDARY_RECORD_ATTR, None)
+    except RuntimeError:
+        return False
+    return pinned is not None and pinned == _record_generation(record)
+
+
+def matches_boundary_record(record):
+    """Whether ``record`` is the exact generation accepted at turn start."""
+    return _matches_boundary_record(record)
+
+
 _REGION_WORDS = frozenset(
     token for names in _REGION_TOKENS.values() for token in names)
 
@@ -305,7 +345,8 @@ def _is_clarification_acceptance(message):
     return not _exercise_from_text(remainder)
 
 
-def user_owned_intent(message=None, history=None, user_id=None):
+def user_owned_intent(message=None, history=None, user_id=None,
+                      stored_record=_STORED_RECORD_UNSET):
     """Exercise / day / prescription grounded for this turn.
 
     Current-turn user text is always authority for newly typed values.
@@ -313,17 +354,24 @@ def user_owned_intent(message=None, history=None, user_id=None):
     record, never assistant prose and never client-supplied history.
     """
     message = current_user_message() if message is None else message
-    try:
-        stored = (
-            clarifications.load(user_id) if user_id is not None
-            else clarifications.load_current())
-    except clarifications.ClarificationAuthorityUnavailable:
-        stored = None
+    if stored_record is _STORED_RECORD_UNSET:
+        try:
+            stored = (
+                clarifications.load(user_id) if user_id is not None
+                else clarifications.load_current())
+        except clarifications.ClarificationAuthorityUnavailable:
+            stored = None
+    else:
+        stored = stored_record
     accepted = _is_clarification_acceptance(message) if stored else (
         parse_confirmation_intent(message) == CONFIRM)
     current_rx = parse_prescription(message)
     current_name = _exercise_from_text(message)
     if accepted:
+        current_name = ""
+    elif stored and _bare_number_prescription(stored, message) is not None:
+        # A record-valid bare prescription value cannot also retarget the
+        # mutation, even when lexical exercise extraction returns a false hit.
         current_name = ""
     rx = current_rx
     name = current_name
@@ -349,6 +397,7 @@ def user_owned_intent(message=None, history=None, user_id=None):
 
 def refresh_clarification_for_turn(user_message, user_id=None):
     """Drop a leftover clarification when this turn is a new mutation."""
+    _pin_boundary_record(None)
     try:
         stored = (
             clarifications.load(user_id) if user_id is not None
@@ -357,6 +406,7 @@ def refresh_clarification_for_turn(user_message, user_id=None):
         return
     intent = parse_confirmation_intent(user_message)
     if intent == CONFIRM or _is_clarification_acceptance(user_message):
+        _pin_boundary_record(stored)
         return
     if intent == CANCEL:
         try:
@@ -366,6 +416,7 @@ def refresh_clarification_for_turn(user_message, user_id=None):
             return
         return
     if stored and _is_continuation_reply(user_message, stored):
+        _pin_boundary_record(stored)
         return
     if _exercise_from_text(user_message):
         clarifications.clear(
@@ -405,11 +456,14 @@ def _is_continuation_reply(message, stored):
         return True
     if _is_clarification_acceptance(message):
         return True
+    # The authoritative record decides whether a bare number can fill its one
+    # missing prescription field.  Exercise extraction is only a heuristic and
+    # must not retire that record before this semantic check gets a chance.
+    if _bare_number_prescription(stored, message) is not None:
+        return True
     leftover = _exercise_from_text(message)
     if leftover:
         return False
-    if _bare_number_prescription(stored, message) is not None:
-        return True
     rx = parse_prescription(message)
     if rx.sets is not None or rx.reps is not None:
         return True
@@ -882,6 +936,8 @@ def followup_mutation(user_id=None):
         else clarifications.load_current())
     if not stored:
         return None
+    if not _matches_boundary_record(stored):
+        return None
     message = current_user_message()
     if parse_confirmation_intent(message) == CANCEL:
         return None
@@ -891,7 +947,9 @@ def followup_mutation(user_id=None):
     candidates = tuple(stored.get("candidate_days") or ())
     if explicit and candidates and explicit not in candidates:
         return None
-    intent = user_owned_intent(user_id=user_id)
+    # Reconstruct only from the generation already matched above. Reloading
+    # here could bind this turn to a newer record written concurrently.
+    intent = user_owned_intent(user_id=user_id, stored_record=stored)
     if not intent["has_user_text"]:
         return None
     day = stored.get("day") or ""
