@@ -1069,7 +1069,7 @@ staging environment" was accurate on 2026-09-07 and is now historical.
 
 **The exercise still has not been run.** It is now blocked one step earlier than
 the matrix, on the operator workstation rather than on the environment: the AWS
-`session-manager-plugin` needed for the SSM port forward is absent, the
+`session-manager-plugin` needed for the Session Manager port-forward path is absent, the
 workstation account is not a local administrator, and staging has zero inbound
 rules by design, so there is no other browser access path. No staging mutation
 was performed; the instance was left `stopped`, and production was untouched.

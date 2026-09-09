@@ -50,13 +50,13 @@ pipeline never touches.
 > stopped-by-default EC2 instance in account `852128326881` / `eu-central-1`,
 > running the same application image as production against its own
 > container-local PostgreSQL and Redis, its own Cognito pool, its own synthetic
-> accounts, zero inbound rules, and SSM-only administration. It holds no
+> accounts, zero inbound rules, and Session Manager-only administration. It holds no
 > production data and cannot reach the production database, the production
 > metric namespaces, production storage, or a real mailbox.
 >
 > Read [STAGING.md](STAGING.md) before §2: it supplies the concrete identity,
 > deploy path (`scripts/staging_control.py`, exact 40-hex SHA only), browser
-> access path (SSM port forward to `localhost:5000`) and test-account
+> access path (Session Manager port forwarding to `localhost:5000`) and test-account
 > convention that the placeholders in §2 stand for.
 >
 > **Earlier the same day, retained as history.** Before the exercise ran,

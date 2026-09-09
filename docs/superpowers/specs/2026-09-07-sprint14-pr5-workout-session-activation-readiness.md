@@ -71,7 +71,7 @@ that no live row was ever converted to `PASS` without a live run behind it.
 exercise was resumed after #290 merged. It stopped at the runbook's own
 workstation prerequisite, before any staging mutation:
 `docs/STAGING.md` §6 requires the AWS `session-manager-plugin` on the operator
-workstation for the SSM port forward that is the *only* browser access path to
+workstation for the Session Manager port-forward path that is the *only* browser access path to
 staging (the security group has zero inbound rules, and substituting public
 ingress is forbidden). The plugin is not installed, the workstation account is
 not a local administrator, and the official AWS installer requires interactive
@@ -205,14 +205,15 @@ earlier than the matrix: at the operator workstation.
 | Does an isolated staging environment exist? | **Yes** | `docs/STAGING.md`; instance `AxisAI-staging` present in `eu-central-1`, tagged `Environment=staging`, state `stopped` (read-only `describe-instances`) |
 | Is its identity provable? | **Yes** | account `852128326881`, region `eu-central-1`, instance id and `Environment=staging` tag all match `docs/STAGING.md` §2; distinct from the production instance |
 | Does it have public ingress? | **No** | `sg-09c0d5a9e0586460d` has zero inbound rules (read-only `describe-security-groups`) |
-| How is a browser meant to reach it? | **SSM port forward only** | `docs/STAGING.md` §6: `aws ssm start-session --document-name AWS-StartPortForwardingSession` to `localhost:5000` |
+| How is a browser meant to reach it? | **Session Manager port forwarding only** | See `docs/STAGING.md` §6 for the canonical operator procedure. |
 | Is `session-manager-plugin` installed on the workstation? | **No** | absent from `PATH`, from `C:\Program Files\Amazon\SessionManagerPlugin`, and from the WSL distribution |
 | Can it be installed without owner action? | **No** | the workstation account is not a local administrator; the official AWS installer (`SessionManagerPluginSetup.exe`, a WiX Burn bundle) requires interactive administrator elevation, and the WSL package path requires an interactive `sudo` password |
 
-`start-session` is the **only** browser access path. `aws ssm send-command`
-needs no plugin and can drive the host, but it cannot carry a browser session,
-so runbook cases **A–D** and the browser halves of **H–K** are unreachable
-without it. Substituting public ingress — opening an inbound rule on
+The Session Manager port-forward procedure is the **only** browser access path.
+The separate non-tunneling host command channel does not require the browser
+port-forward plugin, but it cannot carry a browser session; therefore cases
+**A–D** and the browser halves of **H–K** are unreachable without it.
+Substituting public ingress — opening an inbound rule on
 `sg-09c0d5a9e0586460d` — is forbidden by `docs/STAGING.md` §3 and would destroy
 the isolation property that makes staging evidence meaningful in the first
 place. It was not done, and must not be.
