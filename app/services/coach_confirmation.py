@@ -28,6 +28,7 @@ from app.services.coach_plan_tools.grounding import (
     followup_mutation,
     invalid_candidate_result,
     is_continuation_attempt,
+    recover_no_tool_partial_add,
 )
 from app.services.coach_plan_tools.weekdays import (
     localize_weekday,
@@ -190,11 +191,13 @@ def reply_after_tools(user_id, language="tr", tool_results=None):
 
 
 def grounded_provider_reply(user_id, language, text):
-    """Suppress model-authored plan claims the server cannot back with state.
+    """Ground no-tool plan replies in server-owned state and evidence.
 
-    Two invariants, one boundary. Neither is an intent classifier: no mutation
-    is inferred, nothing is executed, and the completion sentence is never read
-    as an instruction to make itself true.
+    The bounded partial-ADD recovery reads only the raw user turn and creates
+    clarification state; it never reads provider prose as mutation authority and
+    never executes a plan write. The two prose guards below are not intent
+    classifiers: completion copy is never read as an instruction to make itself
+    true.
 
     1. **A claimed completion needs execution evidence.** The assistant may say
        a plan change HAS happened only when this turn actually moved persisted
@@ -209,6 +212,13 @@ def grounded_provider_reply(user_id, language, text):
     the fallback that produced the sentence this first rule exists for.
     """
     reply = text or ""
+    if not coach_plan_tools.plan_tool_attempted_this_turn():
+        try:
+            recovered = recover_no_tool_partial_add(user_id)
+        except clar_mod.ClarificationAuthorityUnavailable:
+            return t("coach.plan.clarification_unavailable", locale=language)
+        if recovered is not None:
+            return _format_plan_clarification(recovered, language)
     if (_claims_completed_plan_change(reply)
             and not coach_plan_tools.plan_changed_this_turn()):
         return t("coach.confirm.no_plan_change", locale=language)
@@ -555,6 +565,7 @@ def _complete_grounded_followup(user_id, language):
             # the record actually taken is a different request. Consume-once
             # has already retired both; executing would run a mutation this
             # continuation never established.
+            clar_mod.reject(taken, "authoritative_record_mismatch")
             return None
         result = coach_plan_tools.execute_plan_tool(user_id, tool, arguments)
     except clar_mod.ClarificationAuthorityUnavailable:

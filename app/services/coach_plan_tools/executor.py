@@ -129,6 +129,7 @@ _CHANGED_ATTR = "_coach_plan_change_applied"
 _PROPOSAL_ATTR = "_coach_plan_proposal_created"
 _NEW_PROPOSAL_ATTR = "_coach_plan_new_proposal_created"
 _INTENT_ATTR = "_coach_plan_confirmation_intent"
+_PLAN_TOOL_ATTEMPTED_ATTR = "_coach_plan_tool_attempted"
 
 
 _USER_MSG_ATTR = "_coach_plan_user_message"
@@ -156,6 +157,7 @@ def begin_turn(user_message="", history=None, user_id=None):
         setattr(g, _PROPOSAL_ATTR, False)
         setattr(g, _NEW_PROPOSAL_ATTR, False)
         setattr(g, _INTENT_ATTR, parse_confirmation_intent(user_message))
+        setattr(g, _PLAN_TOOL_ATTEMPTED_ATTR, False)
         setattr(g, _USER_MSG_ATTR, user_message or "")
         setattr(g, _HISTORY_ATTR, list(history or ()))
         setattr(g, _USER_ID_ATTR, user_id)
@@ -250,6 +252,23 @@ def plan_changed_this_turn():
         return bool(getattr(g, _CHANGED_ATTR, False))
     except RuntimeError:
         return False
+
+
+def plan_tool_attempted_this_turn():
+    """Whether any plan-write tool reached the executor in this request."""
+    try:
+        return bool(getattr(g, _PLAN_TOOL_ATTEMPTED_ATTR, False))
+    except RuntimeError:
+        return False
+
+
+def _mark_plan_tool_attempted(name):
+    if name not in PLAN_WRITE_TOOL_NAMES:
+        return
+    try:
+        setattr(g, _PLAN_TOOL_ATTEMPTED_ATTR, True)
+    except RuntimeError:
+        pass
 
 
 def _attempted_keys():
@@ -378,6 +397,7 @@ def execute_plan_tool(user_id, name, arguments):
     have been committed. Every failure becomes a code from the bounded
     vocabulary instead.
     """
+    _mark_plan_tool_attempted(name)
     payload = _execute(user_id, name, arguments)
     _settle_transaction()
     _mark_plan_changed(payload)
@@ -398,7 +418,7 @@ def _mark_plan_changed(payload):
     try:
         setattr(g, _CHANGED_ATTR, True)
         from .clarifications import clear
-        clear()
+        clear(reason="mutation_applied")
     except RuntimeError:
         pass
 
@@ -409,7 +429,7 @@ def _mark_proposal_created(payload):
     try:
         setattr(g, _PROPOSAL_ATTR, True)
         from .clarifications import clear
-        clear()
+        clear(reason="proposal_created")
     except RuntimeError:
         pass
 
