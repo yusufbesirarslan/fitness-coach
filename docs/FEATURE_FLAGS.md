@@ -231,6 +231,15 @@ fixed `Event` dimension (`started`, `resumed`, `checkpointed`, `abandoned`,
 `completed`, `revision_conflict`). It counts committed transitions, not replays,
 and contains no user/session identity. Staging therefore also requires
 `RUNTIME_METRICS_ENABLED=1`; neither flag's repository default changes here.
+The full operator procedure — prerequisites, activation order, lifecycle
+exercise matrix, success/abort signals, rollback and post-rollback inertness —
+is [WORKOUT_SESSION_ACTIVATION.md](WORKOUT_SESSION_ACTIVATION.md). Readiness
+status at 2026-09-09: **GO for technical staging-readiness, pending independent
+PR5 review.** The lifecycle exercise has been run in the isolated staging
+environment ([STAGING.md](STAGING.md), #290); see
+[WORKOUT_SESSION_ACTIVATION.md](WORKOUT_SESSION_ACTIVATION.md) §14.1. The
+repository default stays OFF. The flag stays `staging_only`. This is not
+production activation.
 
 **7. `AI_ADAPTIVE_PLAN_CONTEXT`** — adds the versioned read-only AdaptivePlan
 block to coach context **and** switches the coach system prompt to
