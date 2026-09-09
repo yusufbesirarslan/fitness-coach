@@ -20,20 +20,53 @@ PR5 BLOCKED — STAGING EVIDENCE REQUIRED
 ```
 
 **Sprint 14's execution-correctness work is complete and proven. Its
-staged-activation readiness is not, and cannot be completed from this
-repository, because no staging environment exists.**
+staged-activation readiness is not: the lifecycle exercise the flag's own record
+names as a prerequisite has still not been executed.**
 
-Every artifact PR5 owns that can be produced without a staging environment has
+Every artifact PR5 owns that can be produced without running the exercise has
 been produced: the canonical activation runbook, the exercise matrix, the
 success/abort contract, the rollback and post-rollback inertness procedure, the
 go/no-go checklist, the evidence-record template, and the P2 activation-risk
-adjudication. What is missing is not a document. It is an environment in which
-to execute the one thing the flag's own record names as a prerequisite:
+adjudication. What is missing is not a document. It is a live run of the one
+thing the flag's own record names as a prerequisite:
 
 > "staging exercise of the full lifecycle including the abandoned/stale paths"
 > — `app/feature_flags.py`, `FITX_WORKOUT_SESSIONS_ENABLED.prerequisites`
 
 That prerequisite is unmet, was never met, and is not weakened here.
+
+### 1.1 Precondition state — what changed on 2026-09-09
+
+The reason for the blocker has changed. The blocker has not.
+
+| | Previous state (2026-09-07) | Current state (2026-09-09) |
+|---|---|---|
+| Environment | **BLOCKED — no staging environment.** No second host, database, deployment path or environment name existed anywhere in the repository. | **STAGING AVAILABLE.** #290 established an isolated non-production environment; see [`docs/STAGING.md`](../../STAGING.md). |
+| Exercise | not attemptable | **LIVE EXERCISE PENDING** |
+| Verdict | NO-GO — staging evidence required | NO-GO — staging evidence required |
+
+This is a narrowing, not a resolution, and it is recorded as two distinct states
+on purpose. An environment that exists is a *precondition* for evidence; it is
+not evidence. Rows 1–14 of the runbook's §13 checklist remain `BLOCKED` because
+none of them has been observed, and the verdict is unchanged.
+
+The history above is retained deliberately. A later reader must be able to see
+that the 2026-09-07 assessment was correct when it was written, that it was
+superseded by an infrastructure slice rather than by a weakened requirement, and
+that no live row was ever converted to `PASS` without a live run behind it.
+
+**Attempted resume on 2026-09-09, and why it did not produce evidence.** The
+exercise was resumed after #290 merged. It stopped at the runbook's own
+workstation prerequisite, before any staging mutation:
+`docs/STAGING.md` §6 requires the AWS `session-manager-plugin` on the operator
+workstation for the SSM port forward that is the *only* browser access path to
+staging (the security group has zero inbound rules, and substituting public
+ingress is forbidden). The plugin is not installed, the workstation account is
+not a local administrator, and the official AWS installer requires interactive
+administrator elevation. Cases A–D and the browser halves of H–K therefore could
+not be executed at all, and a matrix missing them cannot reach GO. Nothing in
+staging was started, deployed, configured or mutated as a result; the instance
+remained `stopped` throughout, and no production resource was touched. See §9.1.
 
 **Sprint 14 is therefore NOT closed.** The formal criteria S14-1…S14-11 are
 satisfied (§6). The sprint's exit condition — evidence-based activation
@@ -75,8 +108,11 @@ classification against the `workout_session` / `runtime_metrics` /
 
 ## 3. Staging access discovery — the blocking finding
 
-The discovery was run against the repository's own configuration and against the
-live cloud account, read-only. It is the load-bearing evidence for §1.
+The discovery below was run on 2026-09-07 against the repository's own
+configuration and against the live cloud account, read-only. It was the
+load-bearing evidence for the original verdict. **It is now historical: #290
+answered it by establishing the environment (§1.1). It is retained because it
+records how the gap was found, and the current, narrower obstacle is in §3.2.**
 
 | Question | Answer | Evidence |
 |---|---|---|
@@ -108,7 +144,42 @@ where staging is. That gap is the finding.
   STATIC/STRUCTURAL TEST`, which the committed suites already provide.
 - **No staging environment was created.** Provisioning one is infrastructure
   work outside PR5's readiness-only scope, and would itself require an
-  authorization this session does not hold.
+  authorization this session does not hold. *(Superseded: #290 later did exactly
+  this, as a separate infrastructure slice with its own review — which is the
+  shape this bullet argued for.)*
+
+### 3.2 The current obstacle — workstation access tooling (2026-09-09)
+
+With the environment in place, the exercise was resumed and stopped one step
+earlier than the matrix: at the operator workstation.
+
+| Question | Answer | Evidence |
+|---|---|---|
+| Does an isolated staging environment exist? | **Yes** | `docs/STAGING.md`; instance `AxisAI-staging` present in `eu-central-1`, tagged `Environment=staging`, state `stopped` (read-only `describe-instances`) |
+| Is its identity provable? | **Yes** | account `852128326881`, region `eu-central-1`, instance id and `Environment=staging` tag all match `docs/STAGING.md` §2; distinct from the production instance |
+| Does it have public ingress? | **No** | `sg-09c0d5a9e0586460d` has zero inbound rules (read-only `describe-security-groups`) |
+| How is a browser meant to reach it? | **SSM port forward only** | `docs/STAGING.md` §6: `aws ssm start-session --document-name AWS-StartPortForwardingSession` to `localhost:5000` |
+| Is `session-manager-plugin` installed on the workstation? | **No** | absent from `PATH`, from `C:\Program Files\Amazon\SessionManagerPlugin`, and from the WSL distribution |
+| Can it be installed without owner action? | **No** | the workstation account is not a local administrator; the official AWS installer (`SessionManagerPluginSetup.exe`, a WiX Burn bundle) requires interactive administrator elevation, and the WSL package path requires an interactive `sudo` password |
+
+`start-session` is the **only** browser access path. `aws ssm send-command`
+needs no plugin and can drive the host, but it cannot carry a browser session,
+so runbook cases **A–D** and the browser halves of **H–K** are unreachable
+without it. Substituting public ingress — opening an inbound rule on
+`sg-09c0d5a9e0586460d` — is forbidden by `docs/STAGING.md` §3 and would destroy
+the isolation property that makes staging evidence meaningful in the first
+place. It was not done, and must not be.
+
+Because the matrix cannot be completed, no partial exercise was started:
+starting the instance, deploying a revision and flipping the flag would have
+mutated a real environment to collect evidence already known to be incapable of
+reaching GO. The instance was left `stopped`.
+
+**What unblocks it:** an administrator installs the plugin on the workstation
+from the official AWS distribution, exactly as `docs/STAGING.md` §6 requires.
+That is a workstation action, not a repository change, and it is the whole
+remaining prerequisite — nothing in the application, the environment or this
+branch needs to change for the exercise to run.
 
 ---
 
@@ -154,6 +225,17 @@ The runbook pointer therefore lives in the documentation layer
 Required ruling, not repair. **No P2 is fixed in PR5.** Each is re-examined
 specifically as an *activation* risk at `b77a1dc`, with the evidence that
 supports the ruling.
+
+**Reassessment attempted 2026-09-09: no ruling changes.** The rulings below were
+to be revisited against live staging evidence. None was obtained (§3.2), so
+every ruling stands exactly as adjudicated on 2026-09-07 — unchanged, not
+reconfirmed. In particular the two that were explicitly deferred to live
+observation, **P2-4** (does the checkpoint throttle actually fire with the flag
+ON) and **P2-7** (does a previous-day ACTIVE session strand a real user), remain
+**OPEN — ACCEPTABLE FOR ACTIVATION** on their original static reasoning and have
+still not been observed in a running environment. No P2 was converted into an
+activation blocker, and none was closed. Recording an unexercised debt as
+`CLOSED` would be exactly the evidence-class collapse §7 exists to prevent.
 
 | ID | Debt | Ruling | Evidence |
 |---|---|---|---|
@@ -216,10 +298,11 @@ Applied throughout, never collapsed into "verified":
 | Single Alembic head, both prerequisite migrations present | VERIFIED BY STATIC/STRUCTURAL TEST |
 | Post-PR4 main CI green on `b77a1dc` | VERIFIED BY CI (run `34143786646`) |
 | Runbook contract — real metric name, real event vocabulary, real routes, rollback documented, no production activation encoded | VERIFIED BY STATIC/STRUCTURAL TEST (`tests/test_sprint14_activation_readiness.py`) |
-| No staging environment exists | VERIFIED — repository configuration + read-only cloud inventory (§3) |
-| Live staging lifecycle exercise (cases A–N) | **BLOCKED** |
-| Live baseline capture and metric-path proof | **BLOCKED** |
-| Live rollback and post-rollback inertness | **BLOCKED** |
+| No staging environment existed at 2026-09-07 | VERIFIED — repository configuration + read-only cloud inventory (§3); **superseded on 2026-09-08 by #290** |
+| An isolated staging environment now exists, and its identity is provable | VERIFIED — read-only cloud inventory: account, region, instance id, `Environment=staging` tag, zero-inbound security group (§3.2) |
+| Live staging lifecycle exercise (cases A–N) | **BLOCKED** — workstation `session-manager-plugin` absent; no browser access path (§3.2) |
+| Live baseline capture and metric-path proof | **BLOCKED** — not attempted; the instance was left `stopped` |
+| Live rollback and post-rollback inertness | **BLOCKED** — depends on an activation that never happened |
 | Flutter / native-client acceptance of `contract_version=2` | **NOT EXERCISED** — out of scope, no Flutter build consumes these routes |
 | Released-client compatibility beyond the exercised server transports | **NOT EXERCISED** — no shipping native client is wired |
 
@@ -254,7 +337,11 @@ live ✗, rollback exercised ✗, post-rollback inertness verified ✗, go/no-go
 SPRINT 14 STATUS: OPEN — STAGING EVIDENCE REQUIRED
 ```
 
-Upon (a) provisioning of an authorized non-production environment, (b) a
+Of those, (a) is now satisfied — an authorized non-production environment exists
+(§1.1, #290). What remains is the exercise itself, currently blocked on
+workstation access tooling (§3.2).
+
+Upon (a) provisioning of an authorized non-production environment ✓, (b) a
 completed exercise recorded through the runbook's §14 template with a **GO**
 verdict, and (c) PR5 merge plus green post-merge CI, Sprint 14 may be considered
 closed as:
@@ -271,7 +358,7 @@ where *ready for activation ≠ activated*. That wording is prepared here and is
 | PR2 canonical execution contract | SHIPPED (`#280`) |
 | PR3 browser client convergence | SHIPPED (`#285`) |
 | PR4 reliability + observability | SHIPPED (`#289`), post-merge verified |
-| PR5 staged-activation readiness | **BLOCKED — STAGING EVIDENCE REQUIRED** |
+| PR5 staged-activation readiness | **BLOCKED — STAGING EVIDENCE REQUIRED** (environment available since #290; live exercise pending, blocked on workstation access tooling — §3.2) |
 
 Production flag state: `FITX_WORKOUT_SESSIONS_ENABLED` remains **OFF** unless
 separately authorized later. PR5 changes no production state.
@@ -306,18 +393,33 @@ rollout rows is harder to audit than one that reports what it saw.
 
 ### 10.1 The one thing that unblocks PR5
 
-A single dependency, stated plainly so it is not lost in the surrounding detail:
+A single dependency, stated plainly so it is not lost in the surrounding detail.
+
+**As written on 2026-09-07:**
 
 > **An authorized non-production environment running a build at or after
 > `b77a1dc`, with the schema at `f5a6b7c8d9e0`, and an operator authorized to
 > mutate its `.env`.**
 
-Nothing else in this sprint is waiting on anything. The moment such an
-environment exists, `docs/WORKOUT_SESSION_ACTIVATION.md` is executable end to
-end and PR5 completes without further engineering.
+That was provisioned as its own infrastructure slice, exactly as this section
+argued it should be (#290, `docs/STAGING.md`). It is no longer the blocker.
 
-Provisioning it is infrastructure work and should be scoped as its own slice —
-it is a second deployment target, a second database, and a second set of
-environment protections, none of which exist today. Whether that belongs to
-Sprint 15 or to an ops slice ahead of it is an owner decision, not one this
-document should make.
+**As it stands on 2026-09-09:**
+
+> **The AWS `session-manager-plugin` installed on the operator workstation from
+> the official AWS distribution, which requires a local administrator.**
+
+It is the only browser access path to an environment with zero inbound rules
+(§3.2), and without it runbook cases A–D and the browser halves of H–K cannot be
+run at all. This is a workstation prerequisite, not engineering work: no
+application code, no infrastructure and nothing on this branch has to change.
+The moment the plugin is present, `docs/WORKOUT_SESSION_ACTIVATION.md` is
+executable end to end and PR5 completes without further engineering.
+
+Two things this must not become. Opening an inbound rule on the staging security
+group would make the browser reachable and would also delete the isolation
+property that makes a staging result worth quoting — `docs/STAGING.md` §3
+forbids it. Running the matrix against a workstation `docker compose` stack
+would produce structural evidence relabelled as operational, which §7 forbids.
+The correct response to this blocker is to install the plugin, not to route
+around it.

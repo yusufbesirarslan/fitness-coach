@@ -234,9 +234,11 @@ and contains no user/session identity. Staging therefore also requires
 The full operator procedure — prerequisites, activation order, lifecycle
 exercise matrix, success/abort signals, rollback and post-rollback inertness —
 is [WORKOUT_SESSION_ACTIVATION.md](WORKOUT_SESSION_ACTIVATION.md). Readiness
-status at 2026-09-07: **NO-GO, staging evidence required.** The lifecycle
-prerequisite above is unmet because no non-production environment exists to
-exercise it in; the flag stays `staging_only` for exactly that reason.
+status at 2026-09-09: **NO-GO, staging evidence required.** An isolated
+non-production environment now exists ([STAGING.md](STAGING.md), #290), so the
+prerequisite is no longer unmeetable — but the lifecycle exercise has not yet
+been run in it, so the prerequisite is still unmet and the flag stays
+`staging_only` for exactly that reason.
 
 **7. `AI_ADAPTIVE_PLAN_CONTEXT`** — adds the versioned read-only AdaptivePlan
 block to coach context **and** switches the coach system prompt to

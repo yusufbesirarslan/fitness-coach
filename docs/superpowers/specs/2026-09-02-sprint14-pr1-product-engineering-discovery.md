@@ -1058,3 +1058,27 @@ exercise can supply. That gap is the sprint's exit blocker, and it is a single
 dependency: an authorized non-production environment at or after `b77a1dc` with
 the schema at `f5a6b7c8d9e0`. Full assessment:
 [`2026-09-07-sprint14-pr5-workout-session-activation-readiness.md`](2026-09-07-sprint14-pr5-workout-session-activation-readiness.md).
+
+### 18.1 Update (2026-09-09) — the environment gap is closed, the exercise is not
+
+The paragraphs above are retained as written. Two things have changed since.
+
+**#290 established an isolated staging environment** as its own infrastructure
+slice — see [`docs/STAGING.md`](../../STAGING.md). The finding "there is no
+staging environment" was accurate on 2026-09-07 and is now historical.
+
+**The exercise still has not been run.** It is now blocked one step earlier than
+the matrix, on the operator workstation rather than on the environment: the AWS
+`session-manager-plugin` needed for the SSM port forward is absent, the
+workstation account is not a local administrator, and staging has zero inbound
+rules by design, so there is no other browser access path. No staging mutation
+was performed; the instance was left `stopped`, and production was untouched.
+
+```text
+PR5        BLOCKED — STAGING ACCESS TOOLING REQUIRED
+SPRINT 14  OPEN
+```
+
+The verdict is unchanged and the sprint is not closed. Detail, including why
+neither opening ingress nor substituting a workstation stack is an acceptable
+route around this, is in §3.2 and §10.1 of the readiness record.

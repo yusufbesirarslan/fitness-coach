@@ -37,6 +37,31 @@ pipeline never touches.
 
 ## 1. Environment prerequisite — read this before anything else
 
+> **STATUS AT 2026-09-09: A STAGING ENVIRONMENT EXISTS. THE LIVE EXERCISE HAS
+> NOT YET BEEN RUN.**
+>
+> The environmental blocker recorded below is **closed**. An isolated
+> non-production environment was established as a standalone infrastructure
+> slice (#290) and is documented in **[STAGING.md](STAGING.md)** — a
+> stopped-by-default EC2 instance in account `852128326881` / `eu-central-1`,
+> running the same application image as production against its own
+> container-local PostgreSQL and Redis, its own Cognito pool, its own synthetic
+> accounts, zero inbound rules, and SSM-only administration. It holds no
+> production data and cannot reach the production database, the production
+> metric namespaces, production storage, or a real mailbox.
+>
+> Read [STAGING.md](STAGING.md) before §2: it supplies the concrete identity,
+> deploy path (`scripts/staging_control.py`, exact 40-hex SHA only), browser
+> access path (SSM port forward to `localhost:5000`) and test-account
+> convention that the placeholders in §2 stand for.
+>
+> **What is still outstanding is the exercise itself, not the environment.**
+> Until the matrix in §8 has actually been run against that environment, §13
+> still evaluates to **NO-GO** and its live rows stay `BLOCKED` — an
+> environment that exists is a precondition, not evidence.
+
+**Previous status, retained as history.**
+
 > **STATUS AT 2026-09-07: THERE IS NO STAGING ENVIRONMENT.**
 >
 > This procedure cannot currently be executed. The gap is environmental, not
@@ -46,18 +71,24 @@ pipeline never touches.
 > deployment path, environment name or flag-management surface is defined
 > anywhere in this repository.
 >
-> **Do not substitute production.** Do not substitute a developer workstation
-> either: a local `docker compose` stack is not the deployed artifact, does not
-> exercise the deployment or migration path, and is not defined by any
-> repository document as the staging target. Evidence gathered there is
-> *structural*, not *operational*, and §14 forbids recording it as the latter.
->
 > Provisioning a staging environment is out of scope for Sprint 14 PR5 and is
-> recorded as the sprint's exit blocker. Until one exists, §13 evaluates to
-> **NO-GO** and its live rows stay `BLOCKED`.
+> recorded as the sprint's exit blocker.
 
-Everything from §2 onwards is written to be executable the day such an
-environment exists. It is deliberately complete rather than provisional.
+That paragraph was true when it was written and is superseded by #290. The
+prohibitions it carried are **not** superseded and still bind:
+
+- **Do not substitute production.** Do not substitute a developer workstation
+  either: a local `docker compose` stack is not the deployed artifact, does not
+  exercise the deployment or migration path, and is not the staging target.
+  Evidence gathered there is *structural*, not *operational*, and §14 forbids
+  recording it as the latter.
+- The staging environment establishes nothing about activation on its own. See
+  [STAGING.md](STAGING.md) §12: establishing an environment and activating a
+  feature are separate acts with separate reviews.
+
+Everything from §2 onwards was written to be executable the day such an
+environment exists. That day has arrived; it is deliberately complete rather
+than provisional.
 
 ---
 
@@ -650,9 +681,9 @@ Record the final value of both flags.
 Deterministic. Every row must be `PASS` for **GO**. Any `FAIL` or `BLOCKED`
 makes the verdict **NO-GO** — there is no partial GO.
 
-| # | Requirement | Verification type | Status at 2026-09-07 |
+| # | Requirement | Verification type | Status at 2026-09-09 |
 |---|---|---|---|
-| 1 | correct reviewed build deployed | live | **BLOCKED** — no environment |
+| 1 | correct reviewed build deployed | live | **BLOCKED** — not exercised |
 | 2 | DB at `a994f9bed783` + `f5a6b7c8d9e0`, single head | live | **BLOCKED** |
 | 3 | `RUNTIME_METRICS` functioning (path proven, §7.2) | live | **BLOCKED** |
 | 4 | baseline captured before activation | live | **BLOCKED** |
@@ -670,7 +701,15 @@ makes the verdict **NO-GO** — there is no partial GO.
 | 16 | no unresolved P0 / P1 | review | see the readiness record |
 | 17 | no production activation included | review | **PASS** — none is encoded here |
 
-**Verdict at 2026-09-07: NO-GO — STAGING EVIDENCE REQUIRED.**
+**Why rows 1–14 still read `BLOCKED` on 2026-09-09.** The cause has changed and
+the wording of row 1 changed with it. Until 2026-09-08 they were blocked because
+no non-production environment existed at all; that cause is closed (§1, #290).
+They are now blocked only because **the exercise has not been run** — see the
+readiness record for the current, narrower obstacle. Neither cause is weaker
+than the other for the purposes of this table: an unexercised row is not a
+passing row, and the verdict is unchanged.
+
+**Verdict at 2026-09-09: NO-GO — STAGING EVIDENCE REQUIRED.**
 
 Reaching GO would mean: *all technical prerequisites for a future operator
 decision are documented and staging-proven.* It would **not** mean production
