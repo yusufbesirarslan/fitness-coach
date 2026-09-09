@@ -45,12 +45,8 @@
 .plan-ex-note { grid-column: 1 / -1; color: var(--color-text-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
 
 /* ── In-page generator (no_active_plan): native controls, no chip framework ── */
-.plan-create { margin-top: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
 .plan-create-intro { margin: 0; color: var(--color-text-2); line-height: var(--leading-relaxed); }
 .plan-create-note { margin: 0; color: var(--color-text-2); font-size: var(--text-sm); line-height: var(--leading-relaxed); }
-.plan-create-msg { margin: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-2); color: var(--color-text-2); line-height: var(--leading-relaxed); }
-.plan-create-msg--error { border-color: var(--color-danger); }
-.plan-create-msg a { color: var(--color-primary); }
 .plan-field { display: flex; flex-direction: column; gap: var(--space-2); }
 .plan-field label { color: var(--color-text-2); font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .plan-select, .plan-input { min-height: 44px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-1); color: var(--color-text-1); font: inherit; }
@@ -78,6 +74,15 @@
 .plan-domain-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .plan-domain-child { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-5); padding: var(--space-4); border-left: 3px solid var(--color-border-2); border-radius: var(--radius-md); background: var(--color-surface-1); }
 .plan-workout-action { margin-top: var(--space-5); }
+/* UX-3 PR3 defect fix. `plan_workout.js` withdraws this affordance by setting
+   `button.hidden = true` when canonical state stops offering start/resume — but
+   `.btn-volt` declares `display: inline-flex` unconditionally, and an author
+   rule of equal specificity beats the UA `[hidden]` rule, so the button stayed
+   visible and clickable. Reachable before PR3 (a Coach mutation or a
+   previous-day session blocks a session too), but PR3's regeneration is what
+   makes a user produce that state deliberately, so the correction ships here.
+   The attribute selector raises specificity; no !important needed. */
+.plan-workout-action[hidden] { display: none; }
 .plan-workout-error { margin: var(--space-3) 0 0; color: var(--color-danger); }
 
 /* Shared workout execution shell. Lifecycle, drafts and checkpoint transport are
@@ -149,4 +154,59 @@
 
 @media (prefers-reduced-motion: reduce) {
   .sv-progress > div { transition: none; }
+}
+
+/* ── UX-3 PR3: Training management (create + regenerate) ─────────────────────
+   Regeneration is a SECONDARY management affordance: it uses .btn-ghost and sits
+   below the plan and below Start/Resume, so it never competes with the dominant
+   execution action. The proposal block is visually its own object — it must not
+   be mistakable for the active plan it has not yet replaced.
+   Visibility is driven by the `hidden` attribute, so every base rule here is
+   display:none and only :not([hidden]) turns a block on; a class that set
+   `display` unconditionally would defeat the UA [hidden] rule. */
+.plan-manage { margin-top: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); }
+.plan-manage--regenerate { padding-top: var(--space-5); border-top: var(--border-w-1) solid var(--color-border-1); }
+.plan-manage-intro { margin: 0; color: var(--color-text-2); font-size: var(--text-sm); line-height: var(--leading-relaxed); }
+.plan-manage-open { align-self: flex-start; min-height: 44px; }
+.plan-manage-open:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.plan-manage-panel { display: none; flex-direction: column; gap: var(--space-4); }
+.plan-manage-panel:not([hidden]) { display: flex; }
+.plan-manage-msg { margin: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-2); color: var(--color-text-2); line-height: var(--leading-relaxed); }
+.plan-manage-msg--error { border-color: var(--color-danger); }
+.plan-manage-msg a { color: var(--color-primary); }
+
+.plan-proposal { display: none; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border: var(--border-w-1) dashed var(--color-border-1); border-radius: var(--radius-lg); background: var(--color-surface-2); }
+.plan-proposal:not([hidden]) { display: flex; }
+.plan-proposal h3:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.plan-proposal-note { margin: 0; color: var(--color-text-2); font-size: var(--text-sm); line-height: var(--leading-relaxed); }
+.plan-proposal-days { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.plan-proposal-day { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface-1); }
+.plan-proposal-day-name { color: var(--color-text-1); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+.plan-proposal-day-meta { color: var(--color-text-2); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.plan-proposal-day-ex { color: var(--color-text-3); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.plan-proposal-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.plan-proposal-actions .btn-volt, .plan-proposal-actions .btn-ghost { min-height: 44px; }
+
+.plan-session-stale { margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-warning); background: var(--color-surface-2); color: var(--color-text-2); font-size: var(--text-sm); line-height: var(--leading-relaxed); }
+
+.plan-replace-confirm { display: none; position: fixed; inset: 0; z-index: var(--z-overlay); align-items: center; justify-content: center; padding: var(--space-4); background: rgba(0, 0, 0, 0.72); }
+.plan-replace-confirm:not([hidden]) { display: flex; }
+.plan-replace-card { width: min(100%, 440px); padding: var(--space-6); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-lg); background: var(--color-surface-1); box-shadow: var(--shadow-lg); }
+.plan-replace-card h3 { margin: 0; color: var(--color-text-1); font-family: var(--font-display); }
+.plan-replace-card p { color: var(--color-text-2); line-height: var(--leading-relaxed); }
+.plan-replace-warning { color: var(--color-text-1); font-weight: var(--weight-medium); overflow-wrap: anywhere; }
+.plan-replace-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
+.plan-replace-actions .btn-volt, .plan-replace-actions .btn-ghost { min-height: 44px; }
+.plan-stale-notice { display: none; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-warning); background: var(--color-surface-2); color: var(--color-text-2); font-size: var(--text-sm); line-height: var(--leading-relaxed); }
+.plan-stale-notice:not([hidden]) { display: flex; }
+.plan-stale-notice > span { min-width: 0; flex: 1 1 12rem; overflow-wrap: anywhere; }
+.plan-stale-notice .btn-ghost { min-height: 44px; }
+
+@media (max-width: 640px) {
+  .plan-manage-open { width: 100%; justify-content: center; }
+  .plan-proposal-actions { flex-direction: column-reverse; }
+  .plan-proposal-actions .btn-volt, .plan-proposal-actions .btn-ghost { width: 100%; justify-content: center; }
+  .plan-replace-card { padding: var(--space-5); }
+  .plan-replace-actions { flex-direction: column-reverse; }
+  .plan-replace-actions .btn-volt, .plan-replace-actions .btn-ghost { width: 100%; justify-content: center; }
 }

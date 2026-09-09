@@ -124,6 +124,47 @@ def _parse_plan_days(plan_data):
     return True, days
 
 
+def _plan_revision(plan):
+    """The canonical plan-freshness identity of an already-loaded plan row.
+
+    UX-3 PR3. Both fields are read straight off the row the caller already
+    holds — no extra query, no derivation, no client-side version. The pair is
+    the SAME identity the native contract publishes as ``plan_lineage`` /
+    ``mutation_version``, named identically so the two surfaces cannot drift.
+    ``lineage_id`` changes only when the plan is REPLACED (the save path deletes
+    and re-inserts); ``mutation_version`` counts up on every targeted mutation,
+    including a Coach one. Either moving means "this is no longer the plan the
+    page was rendered against".
+    """
+    if plan is None:
+        return None
+    lineage = getattr(plan, "lineage_id", None)
+    version = getattr(plan, "mutation_version", None)
+    if not isinstance(lineage, str) or not lineage or not isinstance(version, int):
+        # An unidentifiable plan must not present a comparable revision: a
+        # freshness check against ``None`` would silently succeed forever.
+        return None
+    return {"plan_lineage": lineage, "mutation_version": version}
+
+
+def _session_facts(snapshot):
+    """Bounded truthful projection of the persisted session (contract v2 only).
+
+    Returns ``(session_state, stale_reason)``. Never the ``public_id``, never a
+    raw row: the Plan placement only needs to know that an ACTIVE session exists
+    and why the server considers it stale, so it can tell the truth before and
+    after a plan replacement. With sessions OFF the snapshot carries no session
+    at all and both values are empty.
+    """
+    if snapshot is None:
+        return "", ""
+    state = getattr(snapshot, "session_state", None)
+    session = getattr(snapshot, "session", None)
+    reason = session.get("stale_reason") if isinstance(session, dict) else None
+    return (state if isinstance(state, str) else "",
+            reason if isinstance(reason, str) else "")
+
+
 def _child_domain_facts(user_id):
     nutrition_state = "unknown"
     nutrition_target = None
@@ -191,12 +232,17 @@ def gather_plan_facts(user_id, *, sessions_enabled=False) -> PlanFacts:
         workout_snapshot = None
         execution_bootstrap = None
 
+    session_state, session_stale_reason = _session_facts(workout_snapshot)
+
     if plan is None:
         return PlanFacts(
             read_ok=True, has_active_plan=False, parse_ok=False,
             workout_read_ok=workout_read_ok,
             workout_snapshot=workout_snapshot,
             execution_bootstrap=execution_bootstrap,
+            plan_revision=None,
+            workout_session_state=session_state,
+            workout_session_stale_reason=session_stale_reason,
             **children,
         )
 
@@ -216,5 +262,8 @@ def gather_plan_facts(user_id, *, sessions_enabled=False) -> PlanFacts:
         workout_read_ok=workout_read_ok,
         workout_snapshot=workout_snapshot,
         execution_bootstrap=execution_bootstrap,
+        plan_revision=_plan_revision(plan),
+        workout_session_state=session_state,
+        workout_session_stale_reason=session_stale_reason,
         **children,
     )

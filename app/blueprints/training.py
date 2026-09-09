@@ -602,6 +602,12 @@ def _active_plan_payload(plan, plan_data=None):
         "plan": parsed,
         "score": plan.score,
         "created_at": display_dt(plan.created_at, "%d.%m.%Y"),
+        # PR #293 is the browser-projection authority: unprefixed
+        # ``lineage_id`` / ``mutation_version`` because this object is already
+        # the plan. UX-3 PR3 consumes the same pair as proposal origin /
+        # expected_plan; it does not mint a second identity or rename the
+        # payload. The browser may only COMPARE two server-owned readings of
+        # it; it never mints, edits, or increments one.
         "lineage_id": plan.lineage_id,
         "mutation_version": plan.mutation_version,
     }

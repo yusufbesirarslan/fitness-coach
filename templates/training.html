@@ -366,6 +366,10 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script nonce="{{ csp_nonce }}">window.__TRAINING = { injuries: {{ injuries|tojson }} };</script>
+{#- UX-3 PR3: the shared Training-management contract, loaded exactly the way the
+    shared execution modules are. Legacy keeps its own renderer; what it no longer
+    keeps is its own copy of the generate → proposal → replace → refresh rules. -#}
+<script src="/static/training_plan_management.js?v={{ _v }}"></script>
 <script src="/static/workout_execution.js?v={{ _v }}"></script>
 <script src="/static/workout_draft.js?v={{ _v }}"></script>
 <script src="/static/workout_state_client.js?v={{ _v }}"></script>

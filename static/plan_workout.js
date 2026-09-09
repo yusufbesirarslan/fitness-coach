@@ -40,6 +40,16 @@
   }
 
   function applySnapshot(snapshot, reason, meta) {
+    // UX-3 PR3: this client already re-reads the canonical bootstrap on
+    // focus/visibility/mutation. Hand the plan half of that SERVER reading to
+    // the Training-management renderer so it can answer "is the rendered
+    // program still current?" from the read that just happened rather than
+    // issuing a second one. Absent on the server render, whose snapshot carries
+    // no plan payload — that render IS the baseline.
+    if (typeof window.FitXPlanManageObserve === 'function' && snapshot &&
+        snapshot.plan) {
+      window.FitXPlanManageObserve(snapshot.plan);
+    }
     var previousTodayPlan = todayPlan;
     canonical = snapshot;
     workoutState = snapshot && snapshot.workout && snapshot.workout.state;

@@ -20,47 +20,46 @@
    BURADA YOK: her şey kanonik veriden sunucuda render edilir. Sayfa durum kimliği
    `plan.state` kanoniktir (çeviriden türetilmez); haftalık bölüm durumu AYRIDIR.
    ══════════════════════════════════════════════════════════════════════════ #}
-<main class="main-content plan-main" id="plan-page" data-plan-v2 data-plan-state="{{ plan.state }}">
+{#- ══════════════════════════════════════════════════════════════════════════
+    TRAINING MANAGEMENT PLACEMENT (UX-3 PR3)
 
-  <header class="plan-head">
-    <h1 class="plan-h1">{{ t('plan.title') }}</h1>
-    {# Durum ikon + METİN (yalnızca renkle iletilmez). Kanonik state'ten gelir;
-       read_error 'no plan'a çevrilmez, populated 'start' göstermez. #}
-    <p class="plan-status plan-status--{{ plan.state }}" role="status">
-      <span class="plan-status-ic" aria-hidden="true">
-        {%- if plan.state == 'active_plan' %}✓{% elif plan.state == 'partial_active_plan' %}!{% elif plan.state == 'read_error' %}!{% else %}◔{% endif -%}
-      </span>
-      <span class="plan-status-txt">{{ t('plan.status.' ~ plan.state) }}</span>
-    </p>
-  </header>
+    ONE macro, so "create a plan" and "replace the plan I follow" cannot drift
+    into two different forms with two different behaviours. What differs between
+    them is exactly what MUST differ: the create panel is open on arrival and its
+    confirm is additive, while regeneration is entered deliberately, keeps the
+    current plan visible behind it, and confirms through a destructive dialog.
 
-  <section class="plan-domain plan-domain--training" data-plan-domain="training"
-           data-workout-action="{{ plan.workout_action }}" aria-labelledby="plan-training-label">
-    <div class="plan-domain-head">
-      <div>
-        <p class="plan-domain-kicker">{{ t('plan.domain.primary') }}</p>
-        <h2 id="plan-training-label" class="plan-domain-title">{{ t('plan.domain.training') }}</h2>
-      </div>
-      <span class="plan-domain-state">{{ t('plan.workout_state.' ~ plan.workout_state) }}</span>
-    </div>
+    Nothing here renders an active plan. The proposal block is explicitly
+    labelled as not-yet-saved and is discarded by Cancel; only the server's own
+    re-render (after a successful save) ever shows an active plan.
+    ══════════════════════════════════════════════════════════════════════════ -#}
+{%- macro plan_manage(plan) -%}
+{%- set destructive = plan.management_state == 'regenerate' -%}
+    <section class="plan-manage{% if destructive %} plan-manage--regenerate{% endif %}"
+             data-plan-manage data-manage-state="{{ plan.management_state }}"
+             aria-labelledby="plan-manage-label">
+      {#- The server's statement about the plan THIS render was made against.
+          The browser hands it straight back for comparison with a fresh server
+          reading before any replacement; it is never edited or incremented. -#}
+      <script type="application/json" data-plan-manage-bootstrap>{{ plan.management_baseline|tojson }}</script>
 
-  {% if plan.state == 'read_error' %}
-    {# Dürüst hata: kanonik okuma başarısız. 'Open Plan' YOK (kullanıcı zaten
-       Plan'da) — güvenli yeniden dene (sayfayı yeniden yükler). #}
-    <section class="plan-error" aria-labelledby="plan-error-label">
-      <h2 id="plan-error-label" class="sec-label">{{ t('plan.error.title') }}</h2>
-      <p class="plan-error-body">{{ t('plan.error.body') }}</p>
-      <button class="btn-volt" type="button" data-action="fxReload">{{ t('plan.action.retry') }}</button>
-    </section>
-
-  {% elif plan.state == 'no_active_plan' %}
-    {# Aktif plan yok → tek dürüst adım: mevcut kanonik in-page üreticiyle plan
-       oluştur. /training'e SELF-LINK YOK; sunucu tek plan otoritesi kalır. #}
-    <section class="plan-create" data-plan-create aria-labelledby="plan-create-label">
-      <h2 id="plan-create-label" class="sec-label">{{ t('plan.create.title') }}</h2>
+      {% if destructive %}
+      <h2 id="plan-manage-label" class="sec-label">{{ t('plan.manage.title') }}</h2>
+      <p class="plan-manage-intro">{{ t('plan.manage.intro') }}</p>
+      <button class="btn-ghost plan-manage-open" type="button"
+              data-action="planManageOpen" data-plan-manage-open
+              aria-expanded="false" aria-controls="plan-manage-panel">
+        {{ t('plan.manage.regenerate') }}
+      </button>
+      {% else %}
+      <h2 id="plan-manage-label" class="sec-label">{{ t('plan.create.title') }}</h2>
       <p class="plan-create-intro">{{ t('plan.create.intro') }}</p>
+      {% endif %}
       <p class="plan-create-note">{{ t('plan.create.capability_note') }}</p>
-      <p class="plan-create-msg" data-plan-create-msg role="status" aria-live="polite" hidden></p>
+
+      <div class="plan-manage-panel" id="plan-manage-panel" data-plan-manage-panel
+           {% if destructive %}hidden{% endif %}>
+        <p class="plan-manage-msg" data-plan-manage-msg role="status" aria-live="polite" hidden></p>
 
       <div class="plan-field">
         <label for="pc-days">{{ t('plan.create.field.days') }}</label>
@@ -145,10 +144,87 @@
                maxlength="200" placeholder="{{ t('plan.create.injury_ph') }}">
       </div>
 
-      <button class="btn-volt w-full" type="button" data-action="createPlan" data-plan-create-submit>
-        {{ t('plan.create.submit') }}
-      </button>
+        <button class="btn-volt w-full" type="button"
+                data-action="planManageGenerate" data-plan-manage-generate>
+          {{ t('plan.manage.generate') if destructive else t('plan.create.submit') }}
+        </button>
+
+        {#- PROPOSAL — a server-generated candidate, NOT the active plan. It is
+            outside the plan-days region, carries its own not-saved notice, and
+            can only become active through the explicit confirm below. -#}
+        <section class="plan-proposal" data-plan-manage-proposal hidden
+                 aria-labelledby="plan-proposal-title">
+          <h3 class="sec-label" id="plan-proposal-title" tabindex="-1"
+              data-plan-manage-proposal-title>{{ t('plan.manage.proposal.title') }}</h3>
+          <p class="plan-proposal-note" role="status">{{ t('plan.manage.proposal.not_saved') }}</p>
+          <ul class="plan-proposal-days" data-plan-manage-days></ul>
+          <div class="plan-proposal-actions">
+            <button class="btn-volt" type="button"
+                    data-action="planManageConfirm" data-plan-manage-confirm>
+              {{ t('plan.manage.replace') if destructive else t('plan.manage.save') }}
+            </button>
+            <button class="btn-ghost" type="button" data-action="planManageClose">
+              {{ t('plan.manage.keep_current') if destructive else t('plan.manage.cancel') }}
+            </button>
+          </div>
+        </section>
+      </div>
     </section>
+{%- endmacro -%}
+
+<main class="main-content plan-main" id="plan-page" data-plan-v2 data-plan-state="{{ plan.state }}">
+
+  <header class="plan-head">
+    <h1 class="plan-h1">{{ t('plan.title') }}</h1>
+    {# Durum ikon + METİN (yalnızca renkle iletilmez). Kanonik state'ten gelir;
+       read_error 'no plan'a çevrilmez, populated 'start' göstermez. #}
+    <p class="plan-status plan-status--{{ plan.state }}" role="status">
+      <span class="plan-status-ic" aria-hidden="true">
+        {%- if plan.state == 'active_plan' %}✓{% elif plan.state == 'partial_active_plan' %}!{% elif plan.state == 'read_error' %}!{% else %}◔{% endif -%}
+      </span>
+      <span class="plan-status-txt">{{ t('plan.status.' ~ plan.state) }}</span>
+    </p>
+  </header>
+
+  <section class="plan-domain plan-domain--training" data-plan-domain="training"
+           data-workout-action="{{ plan.workout_action }}" aria-labelledby="plan-training-label">
+    <div class="plan-domain-head">
+      <div>
+        <p class="plan-domain-kicker">{{ t('plan.domain.primary') }}</p>
+        <h2 id="plan-training-label" class="plan-domain-title">{{ t('plan.domain.training') }}</h2>
+      </div>
+      <span class="plan-domain-state">{{ t('plan.workout_state.' ~ plan.workout_state) }}</span>
+    </div>
+
+  {%- if plan.management_state in ('create', 'regenerate') %}
+    {#- ── CANONICAL STALENESS NOTICE (UX-3 PR3, brief §16) ──
+        A Coach plan mutation changes the server's plan while this server-rendered
+        page keeps showing the structure it was rendered with. The management
+        client re-reads the canonical identity on return/focus and, if it moved,
+        reveals THIS notice. It deliberately says the page is out of date — it
+        never claims to know what the new plan is, and it never patches the plan
+        DOM into a fabricated "new active plan". The only offer is a reload, so
+        the SERVER re-renders the authoritative state. No cross-page signalling,
+        no polling, and nothing here trusts a word of Coach copy. -#}
+    <p class="plan-stale-notice" data-plan-stale-notice role="status" aria-live="polite" hidden>
+      <span>{{ t('plan.manage.stale_notice') }}</span>
+      <button class="btn-ghost" type="button" data-action="fxReload">{{ t('plan.manage.reload') }}</button>
+    </p>
+  {%- endif %}
+
+  {% if plan.state == 'read_error' %}
+    {# Dürüst hata: kanonik okuma başarısız. 'Open Plan' YOK (kullanıcı zaten
+       Plan'da) — güvenli yeniden dene (sayfayı yeniden yükler). #}
+    <section class="plan-error" aria-labelledby="plan-error-label">
+      <h2 id="plan-error-label" class="sec-label">{{ t('plan.error.title') }}</h2>
+      <p class="plan-error-body">{{ t('plan.error.body') }}</p>
+      <button class="btn-volt" type="button" data-action="fxReload">{{ t('plan.action.retry') }}</button>
+    </section>
+
+  {% elif plan.state == 'no_active_plan' %}
+    {# Aktif plan yok → tek dürüst adım: mevcut kanonik in-page üreticiyle plan
+       oluştur. /training'e SELF-LINK YOK; sunucu tek plan otoritesi kalır. #}
+    {{ plan_manage(plan) }}
 
   {% else %}
     {# active_plan / partial_active_plan — plan içeriği hedefin KENDİSİ: baskın CTA
@@ -166,6 +242,17 @@
       <button class="btn-volt plan-workout-action" type="button"
               data-action="startWorkout">{{ t(plan.workout_action_label_key) }}</button>
       <p class="plan-workout-error" id="plan-workout-error" role="alert" hidden></p>
+    {% endif %}
+
+    {#- ── STALE SESSION, TOLD TRUTHFULLY (UX-3 PR3, brief §38) ──
+        The resolver already refuses to call a stale session "rest", "completed"
+        or resumable — it returns needs_attention/blocked, and the placement
+        above therefore offers no workout action. What was missing was WHY. The
+        reason is the server's own ``stale_reason``; it is never re-classified,
+        softened, or converted into an action here. 'none' is not a reason. -#}
+    {% if plan.workout_session_stale_reason and plan.workout_session_stale_reason != 'none' %}
+      <p class="plan-session-stale" data-plan-session-stale="{{ plan.workout_session_stale_reason }}"
+         role="status">{{ t('plan.session_stale.' ~ plan.workout_session_stale_reason) }}</p>
     {% endif %}
 
 {#- ── ADAPTIVE WEEKLY PROGRAM MOUNT (reused consumer contract, answer.txt §7) ──
@@ -262,6 +349,13 @@
         reachable. Secondary by construction; this branch has no dominant CTA to
         compete with (the plan content is the target). Plain link to /coach — no
         context is serialized into the URL; the Coach reads the plan server-side. -#}
+    {#- ── TRAINING MANAGEMENT (UX-3 PR3) ──
+        Regeneration is plan MANAGEMENT, not daily guidance, so it lives at the
+        foot of the Training placement — after the program it would replace and
+        after Start/Resume, which stay the dominant execution action whenever
+        they are offered (brief §23). Rendered here, never in Today. -#}
+    {{ plan_manage(plan) }}
+
     <div class="coach-entry">
       <a class="btn-ghost" href="/coach">{{ t('training.ask_coach') }}</a>
     </div>
@@ -307,6 +401,37 @@
 
 </main>
 
+{%- if plan.management_state == 'regenerate' %}
+{#- Rendered OUTSIDE <main> on purpose. `.main-content` carries a filled
+    `page-enter` animation, and the transform it retains makes it a containing
+    block for `position: fixed` — a dialog nested inside it would be clipped to
+    the 720px column instead of overlaying the viewport. `#session-view` and
+    `#plan-completion` already live out here for the same reason. -#}
+    {#- DESTRUCTIVE CONFIRMATION. Producing a proposal is not confirmation and
+        navigating away is not confirmation; only this dialog is. Its dismiss
+        path (Cancel / Escape) can never reach the replace call. -#}
+    <div class="plan-replace-confirm" data-plan-replace-confirm role="dialog"
+         aria-modal="true" aria-labelledby="plan-replace-title" hidden aria-hidden="true">
+      <div class="plan-replace-card">
+        <h3 id="plan-replace-title">{{ t('plan.manage.confirm.title') }}</h3>
+        <p>{{ t('plan.manage.confirm.body') }}</p>
+        {% if plan.session_conflict %}
+        {#- Truthful, discovered behaviour: the server does not block a
+            replacement during an active session — it stops treating that
+            session as resumable, because its recorded workout no longer
+            matches the plan. Say so BEFORE the user replaces. -#}
+        <p class="plan-replace-warning">{{ t('plan.manage.confirm.session_warning') }}</p>
+        {% endif %}
+        <div class="plan-replace-actions">
+          <button class="btn-ghost" type="button" data-plan-replace-cancel
+                  data-action="planManageDismissConfirm">{{ t('plan.manage.keep_current') }}</button>
+          <button class="btn-volt" type="button"
+                  data-action="planManageReplace">{{ t('plan.manage.confirm.replace') }}</button>
+        </div>
+      </div>
+    </div>
+{%- endif %}
+
 {% if plan.workout_action in ('start', 'resume') and plan.execution_bootstrap %}
 <div class="session-view" id="session-view" role="dialog" aria-modal="true"
      aria-labelledby="sv-title" aria-hidden="true">
@@ -345,10 +470,13 @@
 
 <div class="toast-wrap" id="toast-wrap"></div>
 
-{# Creation-only submitter — loaded ONLY in the no_active_plan state so the
-   populated/partial/error trees ship none of it (one surface tree). #}
-{% if plan.state == 'no_active_plan' %}
-<script src="/static/plan_create.js?v={{ _v }}"></script>
+{# Training-management client — loaded ONLY where management is actually offered
+   (create or regenerate). The read_error tree still ships none of it, so a page
+   that cannot say what the plan is also cannot try to replace it. The shared
+   contract loads first; the Plan renderer is its only consumer here. #}
+{% if plan.management_state in ('create', 'regenerate') %}
+<script src="/static/training_plan_management.js?v={{ _v }}"></script>
+<script src="/static/plan_training_manage.js?v={{ _v }}"></script>
 {% endif %}
 
 {# Weekly-program consumer — loaded ONLY when the section is mounted (loading). #}

@@ -64,10 +64,28 @@ WEEKLY_PARTIAL = "partial"
 WEEKLY_ERROR = "error"
 WEEKLY_DISABLED = "disabled"
 
+# ── UX-3 PR3: Training-management placement state (stable, non-localized) ──
+# ONE Training-management workflow lives inside Plan, and this is the identifier
+# that says which half of it applies. "No plan" creation and "replace the plan I
+# already follow" are deliberately DIFFERENT operations (brief §10): the first is
+# additive and safe, the second is destructive and must be explicitly confirmed.
+# Collapsing them into one "save" identifier is exactly the failure this PR
+# exists to prevent, so they never share a state id.
+MANAGE_CREATE = "create"           # no active plan → safe entry into generation
+MANAGE_REGENERATE = "regenerate"   # active/partial plan → destructive replacement
+MANAGE_UNAVAILABLE = "unavailable"  # canonical read failed → offer nothing
+
 # The one canonical rest-day marker the plan data itself carries. A rest day is a
 # rest day ONLY because the plan explicitly labels it so — never because an
 # exercise list happens to be empty (answer.txt §8).
 REST_DAY_KIND = "dinlenme"
+
+# Persisted-session states (mirrored BY VALUE from
+# app.services.workout_state.models) in which an ACTIVE session exists that a
+# plan replacement would invalidate. Used ONLY to decide whether the destructive
+# confirmation must tell the truth about the running workout — never to block,
+# re-classify, or repair the session (that authority stays server-side).
+_SESSION_CONFLICT_STATES = ("active_resumable", "active_blocked")
 
 
 @dataclass(frozen=True)
@@ -127,6 +145,17 @@ class PlanFacts:
     nutrition_target_calories: object = None
     supplements_state: str = "unknown"
     supplements_count: object = None
+    # UX-3 PR3 — canonical plan-freshness identity, carried VERBATIM from the
+    # persisted row (``lineage_id`` + ``mutation_version``) or ``None`` when
+    # there is no active plan / the read failed. The presenter never derives,
+    # compares, or advances it; it only hands the server's reading to the
+    # template so a later management action can be checked against a FRESH
+    # server reading of the same fact.
+    plan_revision: object = None
+    # Bounded, truthful projection of the persisted-session facts the Training
+    # placement must not misrepresent after a plan change (contract v2 only).
+    workout_session_state: str = ""
+    workout_session_stale_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -166,13 +195,23 @@ class PlanView:
     nutrition_target_calories: object = None
     supplements_state: str = "unknown"
     supplements_count: object = None
+    # ── UX-3 PR3 Training-management placement ──
+    management_state: str = MANAGE_UNAVAILABLE
+    # The complete server statement about the plan this render was made against:
+    # whether one was present and, when it was, its canonical identity. The
+    # browser may only hand this back for comparison against a FRESH server
+    # reading; it is not a client-side version and nothing derives one from it.
+    management_baseline: object = None
+    session_conflict: bool = False
+    workout_session_stale_reason: str = ""
 
 
-# Secondary actions available whenever a plan surface is shown. Deliberately does
-# NOT include Plan itself (no self-link) and does NOT invent "edit"/"regenerate":
-# the canonical regenerate path is the in-page generator, only reachable from the
-# no_active_plan state; re-entering it from a populated plan is out of scope for
-# this PR and is documented as omitted rather than fabricated (answer.txt §2, §8).
+# Secondary NAVIGATION actions available whenever a plan surface is shown.
+# Deliberately does NOT include Plan itself (no self-link). Regeneration is NOT
+# one of these: it is not navigation, it is a Training-management operation on
+# this page, so UX-3 PR3 models it as ``management_state`` and the template
+# renders it inside the Training placement — subordinate to Start/Resume whenever
+# execution is actionable (brief §23), never as a peer link.
 _PLAN_SECONDARY = (
     Action("plan.action.open_coach", _ROUTE_COACH),
     Action("plan.action.view_progress", _ROUTE_PROGRESS),
@@ -214,6 +253,18 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
         workout_action = "resume"
         workout_label_key = "plan.action.resume_workout"
 
+    # An ACTIVE persisted session is the one fact a destructive replacement is
+    # allowed to change the meaning of, so the confirmation has to know about it.
+    # It is read from the canonical snapshot, never inferred from the plan.
+    session_conflict = facts.workout_session_state in _SESSION_CONFLICT_STATES
+
+    # ``present`` is the read layer's answer, not a guess from the revision:
+    # a plan whose identity could not be read is still a plan that exists, and
+    # collapsing that to "no plan" is what would let it be silently replaced.
+    baseline = {"present": bool(facts.read_ok and facts.has_active_plan)}
+    if isinstance(facts.plan_revision, dict):
+        baseline.update(facts.plan_revision)
+
     shared = {
         "workout_state": decision.state,
         "workout_action": workout_action,
@@ -223,17 +274,23 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
         "nutrition_target_calories": facts.nutrition_target_calories,
         "supplements_state": facts.supplements_state,
         "supplements_count": facts.supplements_count,
+        "management_baseline": baseline,
+        "session_conflict": session_conflict,
+        "workout_session_stale_reason": facts.workout_session_stale_reason,
     }
 
     # Honest failure: a canonical read failed. Do NOT present a plan, do NOT
     # convert to no_active_plan. Offer no dominant CTA and no "Open Plan" (the user
     # is already on Plan); the template renders a safe retry (answer.txt §2).
     if not facts.read_ok:
+        # No Training management is offered on top of an unknown plan: neither
+        # "create" (there may be one) nor "replace" (we cannot say what it is).
         return PlanView(
             state=STATE_READ_ERROR,
             primary=None,
             secondary=_PLAN_SECONDARY,
             weekly_section_state=_weekly_state(STATE_READ_ERROR, weekly_enabled),
+            management_state=MANAGE_UNAVAILABLE,
             **shared,
         )
 
@@ -246,6 +303,7 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
             primary=None,
             secondary=(),
             weekly_section_state=_weekly_state(STATE_NO_ACTIVE_PLAN, weekly_enabled),
+            management_state=MANAGE_CREATE,
             **shared,
         )
 
@@ -265,6 +323,11 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
             score=facts.score,
             created_at=facts.created_at,
             partial=True,
+            # A plan row that cannot be displayed is still a plan the user is
+            # following, so replacing it stays the DESTRUCTIVE operation. Offering
+            # "create" here would let an unreadable plan be silently overwritten
+            # without the confirmation an active plan is entitled to.
+            management_state=MANAGE_REGENERATE,
             **shared,
         )
 
@@ -278,5 +341,6 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
         days=facts.days,
         score=facts.score,
         created_at=facts.created_at,
+        management_state=MANAGE_REGENERATE,
         **shared,
     )

@@ -16,6 +16,7 @@ import pytest
 STATIC = Path(__file__).resolve().parents[1] / "static"
 TRAINING_SCRIPT = STATIC / "training.js"
 WORKOUT_STATE_CLIENT = STATIC / "workout_state_client.js"
+PLAN_MANAGEMENT = STATIC / "training_plan_management.js"
 NODE = shutil.which("node")
 
 
@@ -133,6 +134,7 @@ console.log(JSON.stringify({{
     save_start = source.index("    async function savePlan() {")
     save_end = source.index("\n\n    // ", save_start)
     save_source = source[save_start:save_end]
+    management_path = json.dumps(str(PLAN_MANAGEMENT))
     save_harness = f"""
 const assert = require('node:assert/strict');
 const {{ createWorkoutStateClient }} = require({json.dumps(str(WORKOUT_STATE_CLIENT))});
@@ -164,24 +166,46 @@ function makeButton() {{
   let currentContextToken = '1.PAYLOAD.SIGNATURE';
   let activePlanIdentity = {{ lineage_id: 'LIN-1', mutation_version: 3 }};
   let workoutStateClient;
-  {save_source}
+  // UX-3 PR3: savePlan routes the destructive write through the SHARED
+  // Training-management contract (the same one Plan v2 uses), which proves the
+  // plan is still the one this page was rendered against before writing, and
+  // requires a real canonical refresh afterwards. The REAL module is loaded
+  // here; a stub would make every assertion below an assertion about the stub.
+  const planManagement = require({management_path}).createPlanManagement({{
+    fetchImpl: (url, init) => global.fetch(url, init),
+    persist: (url, init) => workoutStateClient.mutate(url, init),
+    refresh: async () => planRefreshedAfterSave,
+    baseline: {{ present: true, plan_lineage: 'lineage-1', mutation_version: 3 }},
+  }});
+  let planRefreshedAfterSave = false;
+{save_source}
 
   const write = deferred();
   const calls = [];
+  const canonicalPlan = {{
+    exists: true, plan_lineage: 'lineage-1', mutation_version: 3,
+  }};
+  const generated = {{
+    program: [{{ gun: 'Pazartesi', egzersizler: [] }}], overall_score: 8,
+    exercise_context_token: '1.PAYLOAD.SIGNATURE',
+  }};
   const successFetch = (url, init = {{}}) => {{
     calls.push({{ url, init }});
+    if (url === '/training-plan') return Promise.resolve(response(generated));
     if (url === '/training-plan/save') return write.promise;
     if (url === '/training/bootstrap') return Promise.resolve(response({{
-      plan: {{ exists: true }},
+      plan: canonicalPlan,
       workout: {{ state: {{ contract_version: 2, session_state: 'none', session: null }} }},
       today_plan: null,
     }}));
     throw new Error('unexpected URL: ' + url);
   }};
   global.fetch = successFetch;
+  assert.equal((await planManagement.generate({{}})).ok, true);
+  calls.length = 0;
   workoutStateClient = createWorkoutStateClient({{
     fetchImpl: successFetch,
-    onSnapshot: () => {{}},
+    onSnapshot: () => {{ planRefreshedAfterSave = true; }},
     addEventListener: () => {{}}, removeEventListener: () => {{}},
     documentRef: {{ hidden: false, addEventListener() {{}}, removeEventListener() {{}} }},
   }});
@@ -191,15 +215,18 @@ function makeButton() {{
   write.resolve(response({{ saved: true }}, true, 200));
   await Promise.all([first, repeated]);
 
+  // Freshness is proven BEFORE the one destructive write and the canonical
+  // refresh follows it; a second concurrent click adds no second write.
   assert.deepEqual(calls.map(call => call.url), [
-    '/training-plan/save', '/training/bootstrap'
+    '/training/bootstrap', '/training-plan/save', '/training/bootstrap'
   ]);
-  assert.equal(calls[0].init.method, 'POST');
-  assert.deepEqual(calls[0].init.headers, {{ 'Content-Type': 'application/json' }});
-  assert.deepEqual(JSON.parse(calls[0].init.body), {{
+  const saved = calls.find(call => call.url === '/training-plan/save');
+  assert.equal(saved.init.method, 'POST');
+  assert.deepEqual(saved.init.headers, {{ 'Content-Type': 'application/json' }});
+  assert.deepEqual(JSON.parse(saved.init.body), {{
     plan: [{{ gun: 'Pazartesi', egzersizler: [] }}], score: 8,
     exercise_context_token: '1.PAYLOAD.SIGNATURE',
-    expected_plan: {{ lineage_id: 'LIN-1', mutation_version: 3 }}
+    expected_plan: {{ lineage_id: 'lineage-1', mutation_version: 3 }}
   }});
   assert.equal(button.textContent, 'training.saved');
   assert.equal(button.hasClass('saved'), true);
@@ -208,19 +235,23 @@ function makeButton() {{
 
   button = makeButton();
   toasts.length = 0;
+  currentPlan = [{{ gun: 'Pazartesi', egzersizler: [] }}];
   const failedCalls = [];
   const failedFetch = url => {{
     failedCalls.push(url);
+    if (url === '/training-plan') return Promise.resolve(response(generated));
     if (url === '/training-plan/save') {{
       return Promise.resolve(response({{ error: 'conflict' }}, false, 409));
     }}
     return Promise.resolve(response({{
-      plan: {{ exists: true }},
+      plan: canonicalPlan,
       workout: {{ state: {{ contract_version: 2, session_state: 'none', session: null }} }},
       today_plan: null,
     }}));
   }};
   global.fetch = failedFetch;
+  assert.equal((await planManagement.generate({{}})).ok, true);
+  failedCalls.length = 0;
   workoutStateClient = createWorkoutStateClient({{
     fetchImpl: failedFetch,
     onSnapshot: () => {{}},
@@ -228,43 +259,60 @@ function makeButton() {{
     documentRef: {{ hidden: false, addEventListener() {{}}, removeEventListener() {{}} }},
   }});
   await savePlan();
-  assert.deepEqual(failedCalls, ['/training-plan/save', '/training/bootstrap']);
+  assert.deepEqual(failedCalls, [
+    '/training/bootstrap', '/training-plan/save', '/training/bootstrap'
+  ]);
   assert.equal(button.textContent, 'Save');
   assert.equal(button.hasClass('saved'), false);
   assert.equal(toasts.some(toast => toast.type === 'success'), false);
   assert.equal(toasts.some(toast => toast.type === 'error'), true);
   workoutStateClient.destroy();
 
-  // A stale precondition: the server refused and destroyed nothing, so the
-  // page must say so and must NOT show the saved state.
+  // A stale 409: the server refused and destroyed nothing. The page must say
+  // so, must NOT show saved, and must NOT auto-retry the same proposal.
   button = makeButton();
   toasts.length = 0;
-  workoutStateClient = {{
-    mutate: async () => ({{ ok: false, status: 409,
-                           body: {{ code: 'TRAINING_PLAN_SAVE_PLAN_CHANGED' }} }}),
+  currentPlan = [{{ gun: 'Pazartesi', egzersizler: [] }}];
+  const staleCalls = [];
+  const staleFetch = (url, init = {{}}) => {{
+    staleCalls.push({{ url, init }});
+    if (url === '/training-plan') return Promise.resolve(response(generated));
+    if (url === '/training-plan/save') {{
+      return Promise.resolve(response(
+        {{ code: 'TRAINING_PLAN_SAVE_PLAN_CHANGED', error: 'changed' }},
+        false, 409));
+    }}
+    return Promise.resolve(response({{
+      plan: canonicalPlan,
+      workout: {{ state: {{ contract_version: 2, session_state: 'none', session: null }} }},
+      today_plan: null,
+    }}));
   }};
+  global.fetch = staleFetch;
+  assert.equal((await planManagement.generate({{}})).ok, true);
+  staleCalls.length = 0;
+  workoutStateClient = createWorkoutStateClient({{
+    fetchImpl: staleFetch,
+    onSnapshot: () => {{}},
+    addEventListener: () => {{}}, removeEventListener: () => {{}},
+    documentRef: {{ hidden: false, addEventListener() {{}}, removeEventListener() {{}} }},
+  }});
   await savePlan();
+  assert.equal(staleCalls.filter(c => c.url === '/training-plan/save').length, 1);
+  const staleSaved = JSON.parse(staleCalls.find(c => c.url === '/training-plan/save').init.body);
+  assert.deepEqual(staleSaved.expected_plan, {{ lineage_id: 'lineage-1', mutation_version: 3 }});
+  await savePlan();
+  assert.equal(staleCalls.filter(c => c.url === '/training-plan/save').length, 1);
   assert.equal(button.textContent, 'Save');
   assert.equal(button.hasClass('saved'), false);
   assert.equal(toasts.some(toast => toast.type === 'success'), false);
   assert.equal(toasts.some(toast => toast.type === 'error'), true);
-  assert.ok(toasts.some(toast => toast.message.indexOf('training.plan_changed') >= 0));
-
-  // Canonical state was never read (a blocked bootstrap). There is no honest
-  // precondition to send, so no destructive request may leave the page.
-  button = makeButton();
-  toasts.length = 0;
-  const unreadCalls = [];
-  activePlanIdentity = undefined;
-  workoutStateClient = {{ mutate: async url => {{ unreadCalls.push(url); return null; }} }};
-  await savePlan();
-  assert.deepEqual(unreadCalls, []);
-  assert.equal(button.textContent, 'Save');
-  assert.equal(toasts.some(toast => toast.type === 'error'), true);
-  activePlanIdentity = {{ lineage_id: 'LIN-1', mutation_version: 3 }};
+  workoutStateClient.destroy();
 
   button = makeButton();
   toasts.length = 0;
+  currentPlan = [{{ gun: 'Pazartesi', egzersizler: [] }}];
+  assert.equal((await planManagement.generate({{}})).ok, true);
   workoutStateClient = {{ mutate: async () => null }};
   await savePlan();
   assert.equal(button.textContent, 'Save');
@@ -378,13 +426,20 @@ def test_legacy_client_carries_the_context_token_from_generate_into_save():
     itself does not live.
     """
     source = TRAINING_SCRIPT.read_text(encoding="utf-8")
+    shared = PLAN_MANAGEMENT.read_text(encoding="utf-8")
 
-    assert "currentContextToken = data.exercise_context_token" in source
-    assert "exercise_context_token: currentContextToken" in source
+    # UX-3 PR3: legacy still holds the token beside its in-memory candidate, but
+    # the generate→save carry itself moved into the shared Training-management
+    # contract, so the guard now covers both halves of the same journey.
+    assert "currentContextToken = result.proposal.exercise_context_token" in source
+    assert "exercise_context_token: body.exercise_context_token" in shared
+    assert "exercise_context_token: proposal.exercise_context_token" in shared
     # Declared beside the rest of the in-memory candidate, so it dies with it.
     assert re.search(
         r"let currentPlan = null, currentScore = null, currentContextToken = null;",
         source)
+    # ...and it is actually released when the candidate is.
+    assert source.count("currentContextToken = null;") >= 3
     for forbidden in (
         "currentContextToken.split", "currentContextToken.slice",
         "atob(", "JSON.parse(currentContextToken)",
