@@ -226,7 +226,7 @@ function makeButton() {{
   assert.deepEqual(JSON.parse(saved.init.body), {{
     plan: [{{ gun: 'Pazartesi', egzersizler: [] }}], score: 8,
     exercise_context_token: '1.PAYLOAD.SIGNATURE',
-    expected_plan: {{ lineage_id: 'LIN-1', mutation_version: 3 }}
+    expected_plan: {{ lineage_id: 'lineage-1', mutation_version: 3 }}
   }});
   assert.equal(button.textContent, 'training.saved');
   assert.equal(button.hasClass('saved'), true);
@@ -268,33 +268,46 @@ function makeButton() {{
   assert.equal(toasts.some(toast => toast.type === 'error'), true);
   workoutStateClient.destroy();
 
-  // A stale precondition: the server refused and destroyed nothing, so the
-  // page must say so and must NOT show the saved state.
+  // A stale 409: the server refused and destroyed nothing. The page must say
+  // so, must NOT show saved, and must NOT auto-retry the same proposal.
   button = makeButton();
   toasts.length = 0;
-  workoutStateClient = {{
-    mutate: async () => ({{ ok: false, status: 409,
-                           body: {{ code: 'TRAINING_PLAN_SAVE_PLAN_CHANGED' }} }}),
+  currentPlan = [{{ gun: 'Pazartesi', egzersizler: [] }}];
+  const staleCalls = [];
+  const staleFetch = (url, init = {{}}) => {{
+    staleCalls.push({{ url, init }});
+    if (url === '/training-plan') return Promise.resolve(response(generated));
+    if (url === '/training-plan/save') {{
+      return Promise.resolve(response(
+        {{ code: 'TRAINING_PLAN_SAVE_PLAN_CHANGED', error: 'changed' }},
+        false, 409));
+    }}
+    return Promise.resolve(response({{
+      plan: canonicalPlan,
+      workout: {{ state: {{ contract_version: 2, session_state: 'none', session: null }} }},
+      today_plan: null,
+    }}));
   }};
+  global.fetch = staleFetch;
+  assert.equal((await planManagement.generate({{}})).ok, true);
+  staleCalls.length = 0;
+  workoutStateClient = createWorkoutStateClient({{
+    fetchImpl: staleFetch,
+    onSnapshot: () => {{}},
+    addEventListener: () => {{}}, removeEventListener: () => {{}},
+    documentRef: {{ hidden: false, addEventListener() {{}}, removeEventListener() {{}} }},
+  }});
   await savePlan();
+  assert.equal(staleCalls.filter(c => c.url === '/training-plan/save').length, 1);
+  const staleSaved = JSON.parse(staleCalls.find(c => c.url === '/training-plan/save').init.body);
+  assert.deepEqual(staleSaved.expected_plan, {{ lineage_id: 'lineage-1', mutation_version: 3 }});
+  await savePlan();
+  assert.equal(staleCalls.filter(c => c.url === '/training-plan/save').length, 1);
   assert.equal(button.textContent, 'Save');
   assert.equal(button.hasClass('saved'), false);
   assert.equal(toasts.some(toast => toast.type === 'success'), false);
   assert.equal(toasts.some(toast => toast.type === 'error'), true);
-  assert.ok(toasts.some(toast => toast.message.indexOf('training.plan_changed') >= 0));
-
-  // Canonical state was never read (a blocked bootstrap). There is no honest
-  // precondition to send, so no destructive request may leave the page.
-  button = makeButton();
-  toasts.length = 0;
-  const unreadCalls = [];
-  activePlanIdentity = undefined;
-  workoutStateClient = {{ mutate: async url => {{ unreadCalls.push(url); return null; }} }};
-  await savePlan();
-  assert.deepEqual(unreadCalls, []);
-  assert.equal(button.textContent, 'Save');
-  assert.equal(toasts.some(toast => toast.type === 'error'), true);
-  activePlanIdentity = {{ lineage_id: 'LIN-1', mutation_version: 3 }};
+  workoutStateClient.destroy();
 
   button = makeButton();
   toasts.length = 0;

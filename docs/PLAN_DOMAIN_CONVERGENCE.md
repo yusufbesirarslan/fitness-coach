@@ -604,33 +604,39 @@ proposal is not confirmation; navigating away is not confirmation.
 **Mutation/version boundary.** The canonical plan-freshness identity is
 `TrainingPlan.lineage_id` + `mutation_version` — `lineage_id` changes on
 replacement (the save path deletes and re-inserts), `mutation_version` counts up
-on every targeted mutation including a Coach one. PR3 publishes that pair
-additively from `_active_plan_payload`, so `GET /training/bootstrap` and
-`GET /training-plan/active` both carry `plan_lineage` / `mutation_version`. This
-introduces no new disclosure decision: the native contract
-(`GET /api/v1/training/plans/current`) already publishes the same pair under the
-same names to an authenticated client. No new query is added — both fields are
-read off the row the shell already loaded.
+on every targeted mutation including a Coach one. PR #293 is the
+browser-projection authority: `_active_plan_payload` publishes the pair as
+`lineage_id` / `mutation_version` on `GET /training/bootstrap` and
+`GET /training-plan/active`. PR3 consumes that pair; it does not mint a second
+identity. The Plan presenter still hands the same server reading to the
+management bootstrap as `plan_lineage` / `mutation_version` (a different
+envelope). No new query is added — both fields are read off the row the shell
+already loaded.
 
-**Stale-plan protection, stated honestly.** `POST /training-plan/save` accepts
-NO precondition: no expected version, no `If-Match`, no lineage guard. Neither
-does the native generation command (it has an `Idempotency-Key`, which is replay
-protection, not concurrency control). PR3 does not invent one — no schema, no
-new endpoint, no new persistence authority. What it adds is a canonical
-FRESHNESS PRECHECK: immediately before a destructive write the client re-reads
-`/training/bootstrap` and compares the server's current identity with the
-server's identity at render time, refusing (`plan_changed`) without issuing any
-write when they differ, and refusing (`freshness_unavailable`) when the re-read
-fails or either identity is unreadable. Both readings are the server's; the
-browser only compares them and fails closed.
+**Stale-plan protection (PR #293 is the replacement-concurrency authority).**
+`POST /training-plan/save` requires `expected_plan`. `null` asserts "I expect no
+active plan". `{lineage_id, mutation_version}` names the exact active plan the
+caller intends to replace. Comparison happens under the same lock that protects
+replacement. Mismatch is typed 409 `TRAINING_PLAN_SAVE_PLAN_CHANGED`; a
+malformed/missing expectation is 400. Both perform no delete and no insert.
 
-This closes the window that exists in practice — the seconds-to-minutes between
-deciding to regenerate and confirming, during which a Coach mutation or another
-tab can move the plan. It does **not** close the sub-request window between the
-re-read and the write. That residual race is recorded as an open P1 backend
-prerequisite below; it is pre-existing (both the legacy and Plan save paths had
-it with no protection at all before PR3) and PR3 narrows it rather than claiming
-it closed.
+PR3 does not own that server contract. It consumes it:
+
+- CREATE sends `expected_plan: null` only from a known no-plan origin.
+- REGENERATE captures `proposal_origin` from the canonical identity at generate
+  time and sends that frozen pair as `expected_plan`. A later fresh read may
+  detect staleness early; it must never upgrade the proposal's replacement
+  authority.
+- UNKNOWN (missing/partial/invalid origin) does not POST. UNKNOWN is never
+  coerced to `null`.
+- A 409 refreshes canonical state, leaves the proposal non-active, does not
+  auto-retry, and does not rewrite `expected_plan`. The user must regenerate
+  intentionally against current state.
+
+The optional client precheck remains: immediately before POST the client
+re-reads `/training/bootstrap` and compares it to `proposal_origin`, refusing
+(`plan_changed`) without a write when they differ. The server comparison is
+authority for the window between that re-read and the write.
 
 **Coach mutation coherence.** After a Coach mutation the Plan page would
 otherwise keep showing the program it was server-rendered with: PR2's refresh
@@ -683,15 +689,12 @@ scripts where management is offered and none on `read_error`. The only added
 requests are user-initiated: one canonical `/training/bootstrap` read before each
 destructive write, plus one throttled read per return-to-page.
 
-**Open item (P1, backend prerequisite, NOT implemented here).** A server-side
-concurrency precondition on plan replacement does not exist. The smallest
-prerequisite PR would accept an optional expected `(plan_lineage,
-mutation_version)` on `POST /training-plan/save` (and its native equivalent),
-compare it under the same row lock the mutation service already takes, and
-return a typed 409 on mismatch. That is a persistence-contract change with its
-own tests and native-parity work, deliberately out of PR3's scope. Until it
-lands, the sub-request race remains: two actors replacing a plan within the same
-few hundred milliseconds can still have the later write win silently.
+**Prerequisite landed.** PR #293 (`fix(training): guard plan replacement by
+expected version`) is the replacement-concurrency authority. PR3 binds each
+regeneration proposal to the canonical origin identity from which that proposal
+was created and sends that origin as `expected_plan`. Remaining PR4/PR5/PR6
+work is Nutrition convergence, remaining Plan-domain cleanup, and hardening —
+not a second TrainingPlan writer and not a second version authority.
 
 **Two defects fixed here.** The destructive confirmation must live outside
 `<main>`: `.main-content` carries a filled `page-enter` animation whose retained

@@ -1,10 +1,11 @@
 # UX-3 PR3 — Training Placement + Regeneration Convergence
 
-Date: 2026-09-07
+Date: 2026-09-09
 
-Baseline `origin/main` `b77a1dc` (PR #289), one commit past the PR2 merge
-`720d590` (PR #288). No route, schema, migration, algorithm, prompt, flag
-default, or Coach mutation authority changed.
+Rebased onto `origin/main` `0e2f604` (PR #293, plan-replacement precondition).
+Original parked implementation was `8fae669` on `b77a1dc` (PR #289). No route,
+schema, migration, algorithm, prompt, flag default, or Coach mutation authority
+changed. PR3 does not add a TrainingPlan writer.
 
 Plan now owns ONE Training-management workflow with two operations that are
 deliberately not the same thing. `management_state` names them: `create` when
@@ -27,25 +28,27 @@ injects `workoutStateClient.mutate` as the persist transport, so PR2/#285
 save-ordering and the post-mutation bootstrap refresh are unchanged.
 
 The canonical plan-freshness identity is `TrainingPlan.lineage_id` +
-`mutation_version`, published additively by `_active_plan_payload` and therefore
-by both `GET /training/bootstrap` and `GET /training-plan/active`. This is not a
-new disclosure: `GET /api/v1/training/plans/current` already publishes the same
-pair under the same names, and both fields come off the row the shell had
-already loaded, so the landing gains no query.
+`mutation_version`. PR #293 is the browser-projection and replacement-concurrency
+authority: `_active_plan_payload` publishes `lineage_id` / `mutation_version` on
+`GET /training/bootstrap` and `GET /training-plan/active`, and
+`POST /training-plan/save` requires `expected_plan` (`null` = no active plan;
+`{lineage_id, mutation_version}` = replace exactly that plan). Comparison is
+under the same lock that protects replacement. Mismatch is typed 409
+`TRAINING_PLAN_SAVE_PLAN_CHANGED`.
 
-Stale-plan protection is stated honestly. `POST /training-plan/save` accepts no
-precondition — no expected version, no `If-Match`, no lineage guard — and PR3
-invents none. It adds a canonical precheck: immediately before a destructive
-write the client re-reads `/training/bootstrap` and compares the server's current
-identity against the server's identity at render time, refusing without issuing
-any write when they differ (`plan_changed`) or when either identity cannot be
-read (`freshness_unavailable`). Both readings are the server's. This closes the
-decision window that exists in practice; it does NOT close the sub-request race
-between the re-read and the write. That residual race is pre-existing — before
-PR3 both save paths had no protection whatever — and is recorded as an open P1
-backend prerequisite in `docs/PLAN_DOMAIN_CONVERGENCE.md`: an optional expected
-`(plan_lineage, mutation_version)` on the save routes, compared under the row
-lock the mutation service already takes, returning a typed 409.
+PR3 consumes that contract. A regeneration proposal captures `proposal_origin`
+from the canonical identity at generate time and sends that frozen pair as
+`expected_plan`. Create sends `expected_plan: null` only from a known no-plan
+origin. UNKNOWN never becomes null and never POSTs. A later fresh read may
+detect staleness early; it must never upgrade the proposal's replacement
+authority. A 409 refreshes canonical state, leaves the proposal non-active, and
+does not auto-retry — the user must regenerate against current state.
+
+The client still re-reads `/training/bootstrap` immediately before a destructive
+write and refuses (`plan_changed`) without posting when that reading differs
+from `proposal_origin`. The server comparison is authority for the remaining
+window. Remaining work is PR4 Nutrition / PR5 / PR6, not a second TrainingPlan
+writer.
 
 Coach mutation coherence is handled by canonical refresh on return, not by
 reading Coach copy. The management renderer re-reads the canonical identity on

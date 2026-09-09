@@ -1322,6 +1322,7 @@ function dayShort(v) {
         const SAVE_ERROR_COPY = {
             plan_changed: 'plan.manage.error.plan_changed',
             freshness_unavailable: 'plan.manage.error.freshness_unavailable',
+            unknown_origin: 'plan.manage.error.freshness_unavailable',
             refresh_failed: 'plan.manage.error.refresh_failed',
         };
         const btn = document.getElementById("save-btn");

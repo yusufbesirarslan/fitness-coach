@@ -1,5 +1,5 @@
 /* UX-3 PR3 — the shared Training-management contract.
- *
+
  * These are behaviour tests, not string checks: each one would pass on a
  * version of the module that had lost the invariant only if the module actually
  * stopped issuing (or started issuing) a real request.
@@ -30,7 +30,8 @@ function recorder(routes) {
 }
 
 function bootstrapPlan(lineage, version) {
-  return { body: { plan: { exists: true, plan_lineage: lineage, mutation_version: version } } };
+  // PR #293 browser projection: unprefixed lineage_id on the plan object.
+  return { body: { plan: { exists: true, lineage_id: lineage, mutation_version: version } } };
 }
 
 function make(routes, baseline, extra) {
@@ -85,12 +86,12 @@ test('the no-session 400 is classified, and a typed 400 is not', async () => {
   assert.equal(result.message, 'nope');
 });
 
-test('replacement forwards the signed context verbatim and then refreshes', async () => {
+test('replacement forwards the signed context and frozen expected_plan, then refreshes', async () => {
   let refreshed = 0;
   const { manager, calls } = make({
     '/training-plan': GENERATED,
     '/training/bootstrap': bootstrapPlan('lineage-a', 4),
-    '/training-plan/save': { body: { message: 'saved' } },
+    '/training-plan/save': { body: { message: 'saved', plan: { lineage_id: 'lineage-b', mutation_version: 0 } } },
   }, { present: true, plan_lineage: 'lineage-a', mutation_version: 4 },
   { refresh: async () => { refreshed += 1; return true; } });
 
@@ -107,6 +108,22 @@ test('replacement forwards the signed context verbatim and then refreshes', asyn
   assert.equal(saved.exercise_context_token, 'signed.token');
   assert.equal(saved.score, 8.2);
   assert.deepEqual(saved.plan, PROGRAM);
+  // Server contract: expected_plan uses lineage_id, captured at generate.
+  assert.deepEqual(saved.expected_plan, { lineage_id: 'lineage-a', mutation_version: 4 });
+});
+
+test('creation sends expected_plan null from a known no-plan origin', async () => {
+  const { manager, calls } = make({
+    '/training-plan': GENERATED,
+    '/training/bootstrap': { body: { plan: { exists: false } } },
+    '/training-plan/save': { body: { message: 'saved' } },
+  }, { present: false });
+
+  await manager.generate({});
+  assert.equal((await manager.replace()).ok, true);
+  const saved = JSON.parse(calls.find(c => c.url === management.SAVE_URL).body);
+  assert.equal(Object.prototype.hasOwnProperty.call(saved, 'expected_plan'), true);
+  assert.equal(saved.expected_plan, null);
 });
 
 test('a plan that moved under the page is REFUSED without any write', async () => {
@@ -165,6 +182,73 @@ test('an unreadable canonical state blocks the write instead of guessing', async
   assert.equal(calls.some(c => c.url === management.SAVE_URL), false);
 });
 
+test('UNKNOWN origin never becomes null and never POSTs', async () => {
+  const { manager, calls } = make({
+    '/training-plan': GENERATED,
+    '/training-plan/save': () => { throw new Error('save must not be reached'); },
+  }, { present: true });  // a plan exists, but no readable identity
+
+  await manager.generate({});
+  const result = await manager.replace();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'unknown_origin');
+  assert.equal(calls.some(c => c.url === management.SAVE_URL), false);
+  assert.notEqual(management.expectedPlanFromOrigin(manager.getProposalOrigin()).kind, 'create');
+});
+
+test('a later canonical read must not upgrade the proposal origin', async () => {
+  const { manager, calls } = make({
+    '/training-plan': GENERATED,
+    '/training/bootstrap': bootstrapPlan('lineage-a', 5),
+    '/training-plan/save': () => { throw new Error('save must not be reached'); },
+  }, { present: true, lineage_id: 'lineage-a', mutation_version: 4 });
+
+  await manager.generate({});
+  // Coach mutation (or mutate() bootstrap refresh) restates PAGE identity.
+  manager.adoptBaseline({ exists: true, lineage_id: 'lineage-a', mutation_version: 5 });
+  assert.deepEqual(manager.getBaseline(), { present: true, lineage: 'lineage-a', version: 5 });
+  assert.deepEqual(manager.getProposalOrigin(), { present: true, lineage: 'lineage-a', version: 4 });
+
+  const result = await manager.replace();
+  assert.equal(result.code, 'plan_changed');
+  assert.equal(calls.some(c => c.url === management.SAVE_URL), false);
+  // Origin is still the generate-time pair, not the later read.
+  assert.deepEqual(manager.getProposalOrigin(), { present: true, lineage: 'lineage-a', version: 4 });
+});
+
+test('a 409 does not rewrite expected_plan or auto-retry', async () => {
+  let saveCount = 0;
+  const { manager, calls } = make({
+    '/training-plan': GENERATED,
+    '/training/bootstrap': bootstrapPlan('lineage-a', 4),
+    '/training-plan/save': () => {
+      saveCount += 1;
+      return {
+        ok: false, status: 409,
+        body: { code: management.CODE_PLAN_CHANGED, error: 'changed' },
+      };
+    },
+  }, { present: true, lineage_id: 'lineage-a', mutation_version: 4 });
+
+  await manager.generate({});
+  const first = await manager.replace();
+
+  assert.equal(first.ok, false);
+  assert.equal(first.code, 'plan_changed');
+  assert.equal(manager.getState(), management.STATES.STALE_PLAN);
+  assert.equal(saveCount, 1);
+  const saved = JSON.parse(calls.find(c => c.url === management.SAVE_URL).body);
+  assert.deepEqual(saved.expected_plan, { lineage_id: 'lineage-a', mutation_version: 4 });
+
+  // A later snapshot must not let a second click send the newer identity.
+  manager.adoptBaseline({ exists: true, lineage_id: 'lineage-a', mutation_version: 5 });
+  const second = await manager.replace();
+  assert.equal(second.code, 'no_proposal');  // stale proposal is retired from Replace
+  assert.equal(saveCount, 1);
+  assert.deepEqual(manager.getProposalOrigin(), { present: true, lineage: 'lineage-a', version: 4 });
+});
+
 test('a failed save leaves the proposal a proposal and claims nothing', async () => {
   const { manager } = make({
     '/training-plan': GENERATED,
@@ -203,6 +287,7 @@ test('cancelling discards the proposal and touches nothing', async () => {
   manager.discardProposal();
 
   assert.equal(manager.getProposal(), null);
+  assert.equal(manager.getProposalOrigin(), null);
   assert.equal(manager.getState(), management.STATES.IDLE);
   assert.equal((await manager.replace()).code, 'no_proposal');
   assert.deepEqual(calls.map(c => c.url), ['/training-plan']);
@@ -223,4 +308,7 @@ test('an unreadable identity on either side is undecidable, never a match', () =
   assert.equal(management.compareBaselines({ present: false }, { present: false }), 'match');
   assert.equal(management.compareBaselines({ present: false }, known), 'changed');
   assert.equal(management.compareBaselines(known, { present: false }), 'changed');
+  assert.equal(management.compareBaselines(
+    { exists: true, lineage_id: 'l', mutation_version: 1 },
+    { exists: true, plan_lineage: 'l', mutation_version: 1 }), 'match');
 });

@@ -137,6 +137,8 @@ def test_creation_flow_ends_in_a_server_rendered_active_plan(
     save_at = paths.index("/training-plan/save")
     assert "/training/bootstrap" in paths[:save_at]
     assert "/training/bootstrap" in paths[save_at + 1:]
+    save_body = json.loads(traffic[save_at][1])
+    assert save_body["expected_plan"] is None
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -173,6 +175,12 @@ def test_replacement_requires_the_confirmation_and_then_shows_canonical_state(
     before_lineage, _ = _stored(app, profile_ready.id)
 
     page.goto(PLAN_URL)
+    with app.app_context():
+        origin = TrainingPlan.query.filter_by(user_id=profile_ready.id).one()
+        origin_pair = {
+            "lineage_id": origin.lineage_id,
+            "mutation_version": origin.mutation_version,
+        }
     page.locator("[data-plan-manage-open]").click()
     _generate(page)
     generator["focus"] = "Full Body"
@@ -195,6 +203,10 @@ def test_replacement_requires_the_confirmation_and_then_shows_canonical_state(
     assert document["program"][0]["odak"] == "Full Body"
     with app.app_context():
         assert TrainingPlan.query.filter_by(user_id=profile_ready.id).count() == 1
+    saves = [(path, json.loads(body)) for path, body, status in traffic
+             if path == "/training-plan/save"]
+    assert len(saves) == 1
+    assert saves[0][1]["expected_plan"] == origin_pair
 
 
 def test_dismissing_the_confirmation_writes_nothing(

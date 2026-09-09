@@ -125,6 +125,7 @@
   var ERROR_COPY = {
     plan_changed: "plan.manage.error.plan_changed",
     freshness_unavailable: "plan.manage.error.freshness_unavailable",
+    unknown_origin: "plan.manage.error.freshness_unavailable",
     refresh_failed: "plan.manage.error.refresh_failed",
     save_failed: "plan.manage.error.save_failed",
     save_unavailable: "plan.manage.error.save_failed",
