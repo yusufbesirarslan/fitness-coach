@@ -37,8 +37,12 @@ pipeline never touches.
 
 ## 1. Environment prerequisite — read this before anything else
 
-> **STATUS AT 2026-09-09: A STAGING ENVIRONMENT EXISTS. THE LIVE EXERCISE HAS
-> NOT YET BEEN RUN.**
+> **STATUS AT 2026-09-09 (later the same day): THE LIVE STAGING EXERCISE HAS
+> BEEN RUN.** Cases A–N, observability, rollback and post-rollback inertness
+> were observed against the isolated staging environment in
+> **[STAGING.md](STAGING.md)** on tested SHA
+> `c3f579a259d13bace018f0296de030aedeb191d7`. §13 now evaluates to **GO**.
+> That is technical staging-readiness, not production activation — see §0.
 >
 > The environmental blocker recorded below is **closed**. An isolated
 > non-production environment was established as a standalone infrastructure
@@ -55,10 +59,11 @@ pipeline never touches.
 > access path (SSM port forward to `localhost:5000`) and test-account
 > convention that the placeholders in §2 stand for.
 >
-> **What is still outstanding is the exercise itself, not the environment.**
-> Until the matrix in §8 has actually been run against that environment, §13
-> still evaluates to **NO-GO** and its live rows stay `BLOCKED` — an
-> environment that exists is a precondition, not evidence.
+> **Earlier the same day, retained as history.** Before the exercise ran,
+> this banner said the environment existed and the matrix had not yet been
+> run, so §13 still evaluated to **NO-GO** with live rows `BLOCKED`. That
+> was correct at the time. An environment that exists is a precondition, not
+> evidence; the evidence is the filled record in §14.1.
 
 **Previous status, retained as history.**
 
@@ -683,33 +688,33 @@ makes the verdict **NO-GO** — there is no partial GO.
 
 | # | Requirement | Verification type | Status at 2026-09-09 |
 |---|---|---|---|
-| 1 | correct reviewed build deployed | live | **BLOCKED** — not exercised |
-| 2 | DB at `a994f9bed783` + `f5a6b7c8d9e0`, single head | live | **BLOCKED** |
-| 3 | `RUNTIME_METRICS` functioning (path proven, §7.2) | live | **BLOCKED** |
-| 4 | baseline captured before activation | live | **BLOCKED** |
-| 5 | browser lifecycle A–D passed | live | **BLOCKED** |
-| 6 | native `/api/v1` lifecycle E–G passed | live | **BLOCKED** |
-| 7 | cross-transport H–K passed, both directions | live | **BLOCKED** |
-| 8 | abandon (L) passed | live | **BLOCKED** |
-| 9 | revision conflict (M) behaved correctly | live | **BLOCKED** |
-| 10 | stale path (N) passed or limitation adjudicated | live | **BLOCKED** |
-| 11 | lifecycle metric coherent + cardinality clean | live | **BLOCKED** |
-| 12 | no abort signal observed | live | **BLOCKED** |
-| 13 | rollback demonstrated | live | **BLOCKED** |
-| 14 | flag-OFF inertness reverified after rollback | live | **BLOCKED** |
+| 1 | correct reviewed build deployed | live | **PASS** — `c3f579a259d13bace018f0296de030aedeb191d7` |
+| 2 | DB at `a994f9bed783` + `f5a6b7c8d9e0`, single head | live | **PASS** — current `f5a6b7c8d9e0`, one head |
+| 3 | `RUNTIME_METRICS` functioning (path proven, §7.2) | live | **PASS** — process `RUNTIME_METRICS_ENABLED=1`, `ThreadReserve` flushing into `AxisAI/Staging/Runtime` |
+| 4 | baseline captured before activation | live | **PASS** — §14.1 |
+| 5 | browser lifecycle A–D passed | live | **PASS** |
+| 6 | native `/api/v1` lifecycle E–G passed | live | **PASS** |
+| 7 | cross-transport H–K passed, both directions | live | **PASS** |
+| 8 | abandon (L) passed | live | **PASS** |
+| 9 | revision conflict (M) behaved correctly | live | **PASS** |
+| 10 | stale path (N) passed or limitation adjudicated | live | **PASS** — plan-drift 409 `stale_session_requires_resolution` |
+| 11 | lifecycle metric coherent + cardinality clean | live | **PASS** — `Event` only |
+| 12 | no abort signal observed | live | **PASS** |
+| 13 | rollback demonstrated | live | **PASS** — flag OFF, restart, health green |
+| 14 | flag-OFF inertness reverified after rollback | live | **PASS** |
 | 15 | all CI green on the exercised SHA | CI | see the readiness record |
 | 16 | no unresolved P0 / P1 | review | see the readiness record |
 | 17 | no production activation included | review | **PASS** — none is encoded here |
 
-**Why rows 1–14 still read `BLOCKED` on 2026-09-09.** The cause has changed and
-the wording of row 1 changed with it. Until 2026-09-08 they were blocked because
-no non-production environment existed at all; that cause is closed (§1, #290).
-They are now blocked only because **the exercise has not been run** — see the
-readiness record for the current, narrower obstacle. Neither cause is weaker
-than the other for the purposes of this table: an unexercised row is not a
-passing row, and the verdict is unchanged.
+**Why rows 1–14 read `PASS` on 2026-09-09.** They were `BLOCKED` earlier the
+same day because the exercise had not been run (and, before #290, because no
+staging environment existed). Those earlier states are retained in §1. They
+are `PASS` now because the matrix, metric path, rollback and inertness were
+observed live against staging — see §14.1. An unexercised row is still not a
+passing row; these rows are no longer unexercised.
 
-**Verdict at 2026-09-09: NO-GO — STAGING EVIDENCE REQUIRED.**
+**Verdict at 2026-09-09: GO.** Technical staging-readiness for a future
+operator decision. This is **not** production activation.
 
 Reaching GO would mean: *all technical prerequisites for a future operator
 decision are documented and staging-proven.* It would **not** mean production
@@ -771,6 +776,87 @@ final RUNTIME_METRICS_ENABLED       :
 limitations                :
 operator                   :
 overall verdict            : GO | NO-GO
+```
+
+### 14.1 Exercise of 2026-09-09 (UTC)
+
+Filled from observation. No cookies, JWTs, passwords, session public ids or
+user ids.
+
+```text
+date / time (UTC)          : 2026-09-09T09:04:20Z baseline;
+                             activation ~09:09Z; rollback 09:45:03Z–09:45:13Z
+environment                : AxisAI-staging (account 852128326881,
+                             eu-central-1, instance i-086fdd5d201cbf1a5)
+non-production proof       : ENVIRONMENT=staging; host INSTANCE_ID == IMDS id;
+                             DATABASE_URL @db:5432/axisai_staging (not RDS);
+                             SG axisai-staging-sg zero inbound; production
+                             instance i-0c6f5352fc214e68d remained distinct
+                             and was not mutated
+tested build SHA           : c3f579a259d13bace018f0296de030aedeb191d7
+BUILD_REVISION observed    : c3f579a259d13bace018f0296de030aedeb191d7
+migration head             : f5a6b7c8d9e0 (single head; unique active-owner
+                             index present)
+test account classification: dedicated staging synthetic Cognito accounts
+                             in pool eu-central-1_KH1YUFTCK (.invalid emails)
+initial FITX_WORKOUT_SESSIONS_ENABLED : 0 / process false
+initial RUNTIME_METRICS_ENABLED       : 1 / process 1
+initial MOBILE_AUTH_ENABLED           : 1 / process true
+baseline summary           : WorkoutSession rows=0; WorkoutSessionLifecycle
+                             datapoints empty; HttpServerErrors/Overload/
+                             Throttled empty; ThreadReserve Average=8.0
+                             flushing; WORKOUT_STATE anomalies=0;
+                             WorkoutSession IntegrityError=0
+
+case A  browser start                   : 201 created, ACTIVE, revision 0 / VERIFIED LIVE IN STAGING / Event=started
+case B  browser checkpoint              : 200 checkpointed, revision 0→1 / VERIFIED LIVE IN STAGING / Event=checkpointed
+case C  browser reload-resume           : 200 existing_active, revision 1, elapsed 120 restored, same session / VERIFIED LIVE IN STAGING
+case D  browser completion              : 200 session_completed=true, XP awarded / VERIFIED LIVE IN STAGING / Event=completed
+case E  native start                    : 201 ACTIVE revision 0 / VERIFIED LIVE IN STAGING / Event=started
+case F  native checkpoint               : 200 revision 0→1 / VERIFIED LIVE IN STAGING / Event=checkpointed
+case G  native completion               : 200 completion+session / VERIFIED LIVE IN STAGING / Event=completed
+case H  browser start -> native ckpt    : 201 then 200, same session_ref, revision 1 / VERIFIED LIVE IN STAGING
+case I  native start -> browser ckpt    : 201 then 200 checkpointed revision 1 / VERIFIED LIVE IN STAGING
+case J  browser start -> native complete: 200 after H / VERIFIED LIVE IN STAGING / Event=completed
+case K  native start -> browser complete: 200 session_completed=true / VERIFIED LIVE IN STAGING / Event=completed
+case L  abandon                         : 200 abandoned / VERIFIED LIVE IN STAGING / Event=abandoned
+case M  revision conflict               : valid ckpt R0→R1; stale If-Match R0 → 409 revision_conflict, Session-Resolution=reread, state stayed R1 / VERIFIED LIVE IN STAGING / Event=revision_conflict (1)
+case N  stale / plan drift              : after canonical plan replacement, checkpoint → 409 stale_session_requires_resolution, revision unchanged 0 / VERIFIED LIVE IN STAGING
+
+lifecycle metric summary   : AxisAI/Staging/Runtime WorkoutSessionLifecycle
+                             Event only (started, checkpointed, completed,
+                             abandoned, revision_conflict). Counts: started 6,
+                             checkpointed 5, completed 4, abandoned 1,
+                             revision_conflict 1, resumed 0. Cardinality
+                             confirmed: no other dimension.
+anomaly / log summary      : IntegrityError on WorkoutSession = 0;
+                             [WORKOUT_STATE] anomaly = 0;
+                             completion_marker_mismatch = 0;
+                             HttpServerErrors / HttpOverload / HttpThrottled
+                             empty in the exercise window
+abort signals observed     : none
+rollback result            : FITX_WORKOUT_SESSIONS_ENABLED=0, process false,
+                             FLAGS line MOBILE_AUTH_ENABLED only, health ok,
+                             revision unchanged, ~10 s restart
+post-rollback inertness    : browser start/current 404 {"code":"not_found"};
+                             native start/current 404 TRAINING_SESSION_NOT_FOUND;
+                             8× dark start still 404 never 429;
+                             /training/bootstrap contract_version=1 and no
+                             session in public state;
+                             WorkoutSession rows still stored (6: 4 completed,
+                             1 abandoned, 1 active leftover from the N
+                             fail-closed session)
+final FITX_WORKOUT_SESSIONS_ENABLED : 0
+final RUNTIME_METRICS_ENABLED       : 1 (retained; staging observability baseline)
+limitations                : evidence is for SHA c3f579a, not later main
+                             0e2f604 (#293 plan-replacement, classified as
+                             non-WorkoutSession and not mixed into this GO);
+                             previous-day ACTIVE (P2-7) NOT EXERCISED;
+                             flag-ON 429 throttle (P2-4) not forced — no
+                             spurious HttpThrottled on the single-user matrix;
+                             Flutter NOT EXERCISED
+operator                   : continuation after session-manager-plugin recovery
+overall verdict            : GO
 ```
 
 ---

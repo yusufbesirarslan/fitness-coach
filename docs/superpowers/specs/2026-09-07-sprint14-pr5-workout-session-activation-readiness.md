@@ -16,12 +16,23 @@ Sprint objective, criteria and PR sequence:
 ## 1. Verdict
 
 ```text
+READY FOR INDEPENDENT SPRINT 14 PR5 REVIEW
+```
+
+**Sprint 14's execution-correctness work is complete and proven. The staged
+activation lifecycle exercise the flag's own record names as a prerequisite
+has now been executed in the isolated staging environment.** Production is
+not activated. Sprint 14 is not closed.
+
+The historical verdict below is retained so a later reader can see what was
+true before the exercise:
+
+```text
 PR5 BLOCKED — STAGING EVIDENCE REQUIRED
 ```
 
-**Sprint 14's execution-correctness work is complete and proven. Its
-staged-activation readiness is not: the lifecycle exercise the flag's own record
-names as a prerequisite has still not been executed.**
+That line described the 2026-09-07 assessment and the morning-of-2026-09-09
+pre-exercise state. It is no longer the current status line.
 
 Every artifact PR5 owns that can be produced without running the exercise has
 been produced: the canonical activation runbook, the exercise matrix, the
@@ -42,13 +53,14 @@ The reason for the blocker has changed. The blocker has not.
 | | Previous state (2026-09-07) | Current state (2026-09-09) |
 |---|---|---|
 | Environment | **BLOCKED — no staging environment.** No second host, database, deployment path or environment name existed anywhere in the repository. | **STAGING AVAILABLE.** #290 established an isolated non-production environment; see [`docs/STAGING.md`](../../STAGING.md). |
-| Exercise | not attemptable | **LIVE EXERCISE PENDING** |
-| Verdict | NO-GO — staging evidence required | NO-GO — staging evidence required |
+| Exercise | not attemptable | **LIVE EXERCISE PENDING** at the morning handoff; **RUN** later the same day (see §1.2) |
+| Verdict | NO-GO — staging evidence required | morning: still NO-GO; later: **GO** for technical staging-readiness, pending independent review |
 
-This is a narrowing, not a resolution, and it is recorded as two distinct states
-on purpose. An environment that exists is a *precondition* for evidence; it is
-not evidence. Rows 1–14 of the runbook's §13 checklist remain `BLOCKED` because
-none of them has been observed, and the verdict is unchanged.
+This was a narrowing, not a resolution, *until the exercise actually ran*. An
+environment that exists is a *precondition* for evidence; it is not evidence.
+Rows 1–14 of the runbook's §13 checklist stayed `BLOCKED` until they were
+observed. They are `PASS` now because they were observed — see §1.2 and the
+runbook §14.1 record.
 
 The history above is retained deliberately. A later reader must be able to see
 that the 2026-09-07 assessment was correct when it was written, that it was
@@ -69,8 +81,43 @@ staging was started, deployed, configured or mutated as a result; the instance
 remained `stopped` throughout, and no production resource was touched. See §9.1.
 
 **Sprint 14 is therefore NOT closed.** The formal criteria S14-1…S14-11 are
-satisfied (§6). The sprint's exit condition — evidence-based activation
-readiness — is not.
+satisfied (§6). The live operational halves of S14-7 and S14-10 were supplied
+by the 2026-09-09 exercise (§1.2). Independent review of this PR5 branch, CI
+on the completion commit, and merge are still outstanding.
+
+### 1.2 Live staging exercise — 2026-09-09
+
+The session-manager-plugin blocker in §3.2 / §9.1 was subsequently closed
+(plugin 1.2.835.0 on the operator workstation). The exercise then ran against
+staging on tested SHA `c3f579a259d13bace018f0296de030aedeb191d7`.
+
+Filled evidence: [`docs/WORKOUT_SESSION_ACTIVATION.md`](../../WORKOUT_SESSION_ACTIVATION.md) §14.1.
+
+| Item | Result | Class |
+|---|---|---|
+| Staging identity (env, instance, `@db:5432/axisai_staging`, zero inbound, production instance distinct) | matched | VERIFIED LIVE IN STAGING |
+| Deployed revision | `c3f579a…` process + `/app/BUILD_REVISION` + deep health | VERIFIED LIVE IN STAGING |
+| Alembic | single head `f5a6b7c8d9e0`; unique active-owner index present | VERIFIED LIVE IN STAGING |
+| Metric path | `RUNTIME_METRICS_ENABLED=1`, namespace `AxisAI/Staging/Runtime`, `ThreadReserve` flushing | VERIFIED LIVE IN STAGING |
+| Pre-flag baseline | zero WorkoutSession rows; lifecycle metric absent; no 5xx/throttle/overload | VERIFIED LIVE IN STAGING |
+| Cases A–D browser | start 201 r0; checkpoint 200 r1; reload restored; complete 200 | VERIFIED LIVE IN STAGING |
+| Cases E–G native `/api/v1` | start 201; checkpoint 200 r1; complete 200 | VERIFIED LIVE IN STAGING |
+| Cases H–K cross-transport | both directions, same `session_ref`, revision continuity | VERIFIED LIVE IN STAGING |
+| Case L abandon | 200 `abandoned` | VERIFIED LIVE IN STAGING |
+| Case M revision conflict | 409 `revision_conflict`, state stayed at R1, one metric event | VERIFIED LIVE IN STAGING |
+| Case N plan-drift | 409 `stale_session_requires_resolution`, revision unchanged | VERIFIED LIVE IN STAGING |
+| Lifecycle cardinality | `Event` only; vocabulary started/checkpointed/completed/abandoned/revision_conflict | VERIFIED LIVE IN STAGING |
+| Abort signals | none (0 IntegrityError, 0 WORKOUT_STATE anomaly, 0 completion mismatch) | VERIFIED LIVE IN STAGING |
+| Rollback | flag 1→0, process false, health ok, SHA unchanged | VERIFIED LIVE IN STAGING |
+| OFF inertness | 404 not 429; `contract_version=1`; no session in public state; 6 rows retained | VERIFIED LIVE IN STAGING |
+| Production mutations | 0 | VERIFIED LIVE IN STAGING |
+| Flutter / native client | not in scope | NOT EXERCISED |
+| Previous-day ACTIVE (P2-7) | not constructed | NOT EXERCISED |
+| Flag-ON 429 (P2-4) | not forced; no spurious `HttpThrottled` on the single-user matrix | NOT EXERCISED (throttle fire); observed non-firing is informational |
+
+`origin/main` advanced to `0e2f604` (`fix(training): guard plan replacement by expected version`, #293) during the exercise. Classified as TrainingPlan save/replacement, not WorkoutSession / runtime metrics / staging deploy. The running staging revision was **not** redeployed. This GO is for `c3f579a` only; the two SHAs are not mixed.
+
+Final staging flags: `FITX_WORKOUT_SESSIONS_ENABLED=0`, `RUNTIME_METRICS_ENABLED=1` retained. Instance stopped after the exercise. Nightly safety-stop remains enabled. Production instance was not started, stopped, deployed or flag-edited.
 
 ---
 
@@ -226,16 +273,16 @@ Required ruling, not repair. **No P2 is fixed in PR5.** Each is re-examined
 specifically as an *activation* risk at `b77a1dc`, with the evidence that
 supports the ruling.
 
-**Reassessment attempted 2026-09-09: no ruling changes.** The rulings below were
-to be revisited against live staging evidence. None was obtained (§3.2), so
-every ruling stands exactly as adjudicated on 2026-09-07 — unchanged, not
-reconfirmed. In particular the two that were explicitly deferred to live
-observation, **P2-4** (does the checkpoint throttle actually fire with the flag
-ON) and **P2-7** (does a previous-day ACTIVE session strand a real user), remain
-**OPEN — ACCEPTABLE FOR ACTIVATION** on their original static reasoning and have
-still not been observed in a running environment. No P2 was converted into an
-activation blocker, and none was closed. Recording an unexercised debt as
-`CLOSED` would be exactly the evidence-class collapse §7 exists to prevent.
+**Reassessment 2026-09-09 after live evidence.** No P2 was fixed in PR5. Live
+staging did not convert any P2 into an activation blocker, and did not close
+any that the original static ruling left open. In particular:
+
+- **P2-4** — the single-user matrix produced **no** `HttpThrottled` datapoints
+  (a throttle on a normal lifecycle would have been a must-pass failure). The
+  flag-ON 429 fire was **NOT EXERCISED** (not forced). Dark-route hammer after
+  rollback remained 404, never 429. Ruling unchanged.
+- **P2-7** — previous-day ACTIVE was **NOT EXERCISED**. No stranding was
+  observed on same-day sessions. Ruling unchanged.
 
 | ID | Debt | Ruling | Evidence |
 |---|---|---|---|
@@ -272,15 +319,15 @@ The mapping below is authoritative and must not be swapped:
 | S14-4 | **SATISFIED** | VERIFIED BY CI |
 | S14-5 | **SATISFIED** | VERIFIED BY CI |
 | S14-6 | **SATISFIED** | VERIFIED BY CI |
-| S14-7 — lifecycle observability | **SATISFIED** | VERIFIED BY CI (emission, cardinality and replay-awareness). **NOT EXERCISED** as a live CloudWatch datum — that needs §7.2 of the runbook. |
+| S14-7 — lifecycle observability | **SATISFIED** | VERIFIED BY CI (emission, cardinality and replay-awareness). **VERIFIED LIVE IN STAGING** as CloudWatch datapoints in `AxisAI/Staging/Runtime` with dimension `Event` only (§1.2). |
 | S14-8 — PostgreSQL reliability proof | **SATISFIED** | VERIFIED BY CI on real PostgreSQL |
 | S14-9 | **SATISFIED** | single Alembic head `f5a6b7c8d9e0`; PR5 adds **zero** migrations |
-| S14-10 | **SATISFIED** | VERIFIED BY STATIC/STRUCTURAL TEST. **NOT EXERCISED** operationally — that is runbook §12. |
+| S14-10 | **SATISFIED** | VERIFIED BY STATIC/STRUCTURAL TEST. **VERIFIED LIVE IN STAGING** operationally after rollback (runbook §12): session routes 404, `contract_version=1`, rows retained. |
 | S14-11 | **SATISFIED** | no production flag value changed by any PR in this sprint, PR5 included |
 
-The distinction in S14-7 and S14-10 is the point of this document: both criteria
-are met *as specified*, and both have an operational half that only a staging
-exercise can supply.
+The distinction in S14-7 and S14-10 is the point of this document: both
+criteria were already met *as specified* by CI / structural tests, and both
+now also have their operational half from the 2026-09-09 staging exercise.
 
 ---
 
@@ -293,16 +340,16 @@ Applied throughout, never collapsed into "verified":
 | Revision-gated checkpoint, bounded snapshot, typed refusals | VERIFIED BY CI |
 | Cross-transport stale-completion refusal, both directions | VERIFIED BY CI |
 | PostgreSQL race correctness (competing checkpoints, forced orderings, concurrent starts) | VERIFIED BY CI |
-| `WorkoutSessionLifecycle` emission, vocabulary and cardinality | VERIFIED BY CI |
-| Flag-OFF inertness (404 not 429, `contract_version=1`, no session state published) | VERIFIED BY STATIC/STRUCTURAL TEST |
+| `WorkoutSessionLifecycle` emission, vocabulary and cardinality | VERIFIED BY CI **and** VERIFIED LIVE IN STAGING (CloudWatch, `Event` only) |
+| Flag-OFF inertness (404 not 429, `contract_version=1`, no session state published) | VERIFIED BY STATIC/STRUCTURAL TEST **and** VERIFIED LIVE IN STAGING after rollback |
 | Single Alembic head, both prerequisite migrations present | VERIFIED BY STATIC/STRUCTURAL TEST |
 | Post-PR4 main CI green on `b77a1dc` | VERIFIED BY CI (run `34143786646`) |
 | Runbook contract — real metric name, real event vocabulary, real routes, rollback documented, no production activation encoded | VERIFIED BY STATIC/STRUCTURAL TEST (`tests/test_sprint14_activation_readiness.py`) |
 | No staging environment existed at 2026-09-07 | VERIFIED — repository configuration + read-only cloud inventory (§3); **superseded on 2026-09-08 by #290** |
 | An isolated staging environment now exists, and its identity is provable | VERIFIED — read-only cloud inventory: account, region, instance id, `Environment=staging` tag, zero-inbound security group (§3.2) |
-| Live staging lifecycle exercise (cases A–N) | **BLOCKED** — workstation `session-manager-plugin` absent; no browser access path (§3.2) |
-| Live baseline capture and metric-path proof | **BLOCKED** — not attempted; the instance was left `stopped` |
-| Live rollback and post-rollback inertness | **BLOCKED** — depends on an activation that never happened |
+| Live staging lifecycle exercise (cases A–N) | **VERIFIED LIVE IN STAGING** — §1.2 / runbook §14.1. Earlier the same day this row was **BLOCKED** on workstation `session-manager-plugin` (§3.2); that blocker closed before the exercise. |
+| Live baseline capture and metric-path proof | **VERIFIED LIVE IN STAGING** |
+| Live rollback and post-rollback inertness | **VERIFIED LIVE IN STAGING** |
 | Flutter / native-client acceptance of `contract_version=2` | **NOT EXERCISED** — out of scope, no Flutter build consumes these routes |
 | Released-client compatibility beyond the exercised server transports | **NOT EXERCISED** — no shipping native client is wired |
 
@@ -314,14 +361,14 @@ Bounded to operational readiness; this is not a general security audit.
 
 | Concern | Finding |
 |---|---|
-| Test accounts | The runbook mandates dedicated staging test accounts and forbids real user accounts. No exercise was run, so no account of any kind was used. |
+| Test accounts | Dedicated staging synthetic Cognito accounts in the staging pool (`.invalid` emails). No production identity was used. |
 | Owner-scoped behaviour | Unchanged. Every session query is `user_id`-scoped and re-derived from the authenticated principal; `advance_checkpoint`'s UPDATE predicate includes `user_id`, so a cross-user checkpoint matches zero rows by construction. |
 | Cross-user existence leak | None observed; none possible to observe without an exercise. Listed as an abort signal. |
 | Metric identity | `WorkoutSessionLifecycle` carries the single `Event` dimension from a six-value closed vocabulary. No identity. |
 | Log identity | **Both** `[WORKOUT_SESSION]` and `[WORKOUT_STATE] anomaly` lines carry `user_id`. The runbook (§9.5) requires it redacted from any committed evidence. This is an evidence-handling rule, not a defect claim. |
 | Secrets in committed material | None. The runbook uses `<STAGING_HOST>` / `<PRODUCTION_HOST>` placeholders, commits no hostname, credential, token, key or cookie, and no command defaults to production. |
 | Rollback and user data | Rollback deletes nothing: no migration downgrade, no row deletion, no checkpoint cleanup, no manual completion repair. |
-| Production | Untouched. Three read-only cloud describes; zero mutations. |
+| Production | Untouched. Production instance `i-0c6f5352fc214e68d` was not started, stopped, deployed or flag-edited. Staging stop after the exercise targeted only `i-086fdd5d201cbf1a5`. |
 
 ---
 
@@ -329,17 +376,18 @@ Bounded to operational readiness; this is not a general security audit.
 
 Closure requires **all** of: PR1–PR4 shipped ✓, PR4 post-merge CI green ✓, PR4
 integration provenance closed ✓, S14-1…S14-11 satisfied ✓, PR5 staging
-prerequisites validated ✗, staging lifecycle exercised ✗, observability verified
-live ✗, rollback exercised ✗, post-rollback inertness verified ✗, go/no-go = GO
-✗, PR5 reviewed / CI-green / merged / post-merge-verified ✗.
+prerequisites validated ✓, staging lifecycle exercised ✓, observability verified
+live ✓, rollback exercised ✓, post-rollback inertness verified ✓, go/no-go = GO
+✓, PR5 reviewed / CI-green / merged / post-merge-verified ✗.
 
 ```text
-SPRINT 14 STATUS: OPEN — STAGING EVIDENCE REQUIRED
+SPRINT 14 STATUS: OPEN — READY FOR INDEPENDENT PR5 REVIEW
 ```
 
-Of those, (a) is now satisfied — an authorized non-production environment exists
-(§1.1, #290). What remains is the exercise itself, currently blocked on
-workstation access tooling (§3.2).
+Of those, (a) the environment and (b) the live exercise are now satisfied.
+What remains is independent review of this branch, CI on the completion
+commit, and merge. The earlier same-day status `OPEN — STAGING EVIDENCE
+REQUIRED` is retained in the history above and in §1.
 
 Upon (a) provisioning of an authorized non-production environment ✓, (b) a
 completed exercise recorded through the runbook's §14 template with a **GO**
@@ -358,7 +406,7 @@ where *ready for activation ≠ activated*. That wording is prepared here and is
 | PR2 canonical execution contract | SHIPPED (`#280`) |
 | PR3 browser client convergence | SHIPPED (`#285`) |
 | PR4 reliability + observability | SHIPPED (`#289`), post-merge verified |
-| PR5 staged-activation readiness | **BLOCKED — STAGING EVIDENCE REQUIRED** (environment available since #290; live exercise pending, blocked on workstation access tooling — §3.2) |
+| PR5 staged-activation readiness | **READY FOR INDEPENDENT REVIEW** (live exercise recorded 2026-09-09; not merged; not production-activated). Historical: **BLOCKED — STAGING EVIDENCE REQUIRED** until the exercise ran. |
 
 Production flag state: `FITX_WORKOUT_SESSIONS_ENABLED` remains **OFF** unless
 separately authorized later. PR5 changes no production state.
