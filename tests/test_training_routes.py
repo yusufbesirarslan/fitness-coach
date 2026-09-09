@@ -113,11 +113,27 @@ def plan_save_token(app):
     return _make
 
 
-def _save_program(client, token, program=None, score=7.0):
+def _save_program(client, token, program=None, score=7.0, user_id=None,
+                  expected="auto"):
+    """Save as an up-to-date client would: with the current plan's identity.
+
+    ``expected="auto"`` reads the canonical pair straight from the database, so
+    these tests keep asserting what they always asserted (the save itself)
+    rather than freezing a lineage literal. Pass ``expected=`` explicitly to
+    make a save deliberately stale.
+    """
+    if expected == "auto":
+        from app.services.today_facts import get_active_plan
+        plan = get_active_plan(user_id)
+        expected = None if plan is None else {
+            "lineage_id": plan.lineage_id,
+            "mutation_version": plan.mutation_version,
+        }
     return client.post("/training-plan/save", json={
         "plan": _seven_day_program() if program is None else program,
         "score": score,
         "exercise_context_token": token,
+        "expected_plan": expected,
     })
 
 
@@ -319,8 +335,10 @@ def test_save_plan_replaces_previous(client, auth_user, plan_save_token):
     token = plan_save_token(auth_user.id)
     first = _seven_day_program("Squat")
     second = _seven_day_program("Deadlift")
-    assert _save_program(client, token, first, 7.0).status_code == 200
-    assert _save_program(client, token, second, 8.0).status_code == 200
+    assert _save_program(client, token, first, 7.0,
+                     user_id=auth_user.id).status_code == 200
+    assert _save_program(client, token, second, 8.0,
+                     user_id=auth_user.id).status_code == 200
     plans = TrainingPlan.query.filter_by(user_id=auth_user.id).all()
     assert len(plans) == 1
     # Sprint 11 PR4 Task 4: the row is the canonical document now, and the
@@ -332,7 +350,8 @@ def test_active_plan_roundtrip(client, auth_user, plan_save_token):
     assert client.get("/training-plan/active").get_json() == {"exists": False}
     program = _seven_day_program()
     assert _save_program(
-        client, plan_save_token(auth_user.id), program, 7.5).status_code == 200
+        client, plan_save_token(auth_user.id), program, 7.5,
+        user_id=auth_user.id).status_code == 200
     body = client.get("/training-plan/active").get_json()
     assert body["exists"] is True
     assert body["plan"] == _expect_saved_document(program)
@@ -345,7 +364,8 @@ def test_active_plan_roundtrip(client, auth_user, plan_save_token):
 
 @pytest.fixture
 def workout_ready(client, auth_user, plan_save_token):
-    _save_program(client, plan_save_token(auth_user.id))
+    _save_program(client, plan_save_token(auth_user.id),
+                  user_id=auth_user.id)
     db.session.add(DailyQuest(title="Log a Workout", points_reward=50,
                               quest_type="workout_logged"))
     db.session.commit()
@@ -692,7 +712,8 @@ def test_session_routes_are_404_when_flag_off(client, auth_user, method, path):
 
 def test_complete_ignores_session_id_when_flag_off(
         client, with_session, monkeypatch, plan_save_token):
-    _save_program(client, plan_save_token(with_session.id))
+    _save_program(client, plan_save_token(with_session.id),
+                  user_id=with_session.id)
     monkeypatch.setattr(training_bp, "validate_pump_check_image",
                         lambda *a, **k: (b"jpeg", "image/jpeg", None))
     monkeypatch.setattr(training_bp, "validate_pump_check",

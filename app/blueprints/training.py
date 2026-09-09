@@ -25,6 +25,12 @@ from app.services.pump_checks import get_friend_ids, normalize_workout_score
 from app.services.premium import premium_ai_plan_gate
 from app.plan_presenter import build_plan_view
 from app.services.plan_facts import gather_plan_facts
+from app.services.plan_replacement import (
+    PlanReplacementConflict,
+    PlanReplacementError,
+    parse_expectation,
+    replace_training_plan,
+)
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.exercise_context_token import (
     sign_exercise_context,
@@ -291,11 +297,28 @@ def save_training_plan():
     if not plan:
         return jsonify({"error": t("route.plan_data_missing")}), 400
 
+    # The concurrency precondition is read FIRST and costs nothing: a request
+    # that cannot say which plan it intends to replace is refused before any
+    # signature is verified, any catalog is consulted, and — decisively — before
+    # anything is deleted. The field is REQUIRED. An omission is exactly the
+    # unconditional destructive save this prerequisite exists to remove, so it
+    # must not be reachable by forgetting a key.
+    try:
+        expectation = parse_expectation(data)
+    except PlanReplacementError as exc:
+        current_app.logger.info(
+            "[TRAINING] save_precondition_rejected reason=%s request_id=%s",
+            exc.reason, current_request_id(),
+        )
+        return jsonify(exc.to_body(t)), exc.http_status
+
     # Sprint 11 PR4 Task 4. This is the only destructive TrainingPlan path in
     # the app, so the order below is the guarantee: verify the signed context
     # → structure → semantics → catalog exercise resolution → equipment
     # compatibility, and only then delete. Anything that fails leaves the
-    # user's current plan exactly as it was.
+    # user's current plan exactly as it was. These checks stay OUTSIDE the
+    # replacement critical section: they are expensive and owner-scoped, and
+    # holding a row lock across them would add contention without adding safety.
     try:
         exercise_context = resolve_save_exercise_context(
             data.get("exercise_context_token"),
@@ -311,17 +334,34 @@ def save_training_plan():
         )
         return jsonify(exc.to_body(t)), exc.http_status
 
-    TrainingPlan.query.filter_by(user_id=current_user.id).delete()
+    # Compare-and-replace under one lock, in one transaction. The route never
+    # deletes or inserts a plan itself any more: a destructive write that is not
+    # guarded by the precondition is now unreachable from HTTP.
+    try:
+        replaced = replace_training_plan(
+            current_user.id,
+            expectation,
+            plan_data=json.dumps(validated_document, ensure_ascii=False),
+            score=score,
+        )
+    except PlanReplacementConflict as exc:
+        # Bounded reason, no lineage value, no user id, no payload.
+        current_app.logger.info(
+            "[TRAINING] training_plan_replacement_conflict reason=%s request_id=%s",
+            exc.reason, current_request_id(),
+        )
+        return jsonify(exc.to_body(t)), exc.http_status
 
-    new_plan = TrainingPlan(
-        user_id   = current_user.id,
-        plan_data = json.dumps(validated_document, ensure_ascii=False),
-        score     = score
-    )
-    db.session.add(new_plan)
-    db.session.commit()
-
-    return jsonify({"message": t("route.training_plan_saved")})
+    return jsonify({
+        "message": t("route.training_plan_saved"),
+        # The identity of the plan that now exists, so a client can re-anchor
+        # its next save without a follow-up read (and without the window a
+        # follow-up read would reopen).
+        "plan": {
+            "lineage_id": replaced.lineage_id,
+            "mutation_version": replaced.mutation_version,
+        },
+    })
 
 
 @bp.route("/workout/complete", methods=["POST"])
@@ -537,6 +577,23 @@ def workout_status():
 
 
 def _active_plan_payload(plan, plan_data=None):
+    """The canonical browser projection of the active plan.
+
+    ``lineage_id``/``mutation_version`` are the plan's freshness identity, not a
+    new internal identifier: they are the same server-owned pair the native
+    canonical training read already publishes (``plan_lineage`` +
+    ``mutation_version`` in ``app/services/mobile_training.py``), read straight
+    off the owner's own row. The browser needs them because a destructive save
+    must now declare which plan it intends to replace, and a client cannot
+    declare an identity it was never given. Unprefixed here because the object
+    they sit in is already the plan — the native surface prefixes only to
+    disambiguate a flattened workout payload.
+
+    The no-plan shape stays exactly ``{"exists": False}``. ``exists`` is already
+    the whole answer a caller needs to send the "I expect no active plan"
+    precondition, and inventing null identity fields would let a client believe
+    it holds an identity it does not.
+    """
     if plan is None:
         return {"exists": False}
     parsed = json.loads(plan.plan_data) if plan_data is None else plan_data
@@ -545,6 +602,8 @@ def _active_plan_payload(plan, plan_data=None):
         "plan": parsed,
         "score": plan.score,
         "created_at": display_dt(plan.created_at, "%d.%m.%Y"),
+        "lineage_id": plan.lineage_id,
+        "mutation_version": plan.mutation_version,
     }
 
 

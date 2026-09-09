@@ -824,7 +824,8 @@ class TestUndo:
         apply_plan_mutation(user.id, _swap_bench(), _ctx("u-lineage-0001"))
         old_lineage = _plan(user.id).lineage_id
 
-        # Exactly what POST /training-plan/save does.
+        # Exactly what POST /training-plan/save does once its
+        # expected-plan precondition has been satisfied.
         TrainingPlan.query.filter_by(user_id=user.id).delete()
         regenerated = json.dumps(_program(), ensure_ascii=False)
         db.session.add(TrainingPlan(user_id=user.id, plan_data=regenerated, score=9))

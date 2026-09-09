@@ -100,13 +100,22 @@
     }).then(function (data) {
       // The server-signed equipment context is forwarded straight through from
       // generate to save: never parsed, displayed, edited, or persisted here.
+      //
+      // expected_plan: null is this control's whole concurrency contract, and it
+      // is a constant on purpose. This submitter only ever mounts on the
+      // no_active_plan state, so the only honest thing it can assert is "I
+      // expect the server to still have no active plan". If one appeared while
+      // the user was filling the form (a second tab, the Coach), the server
+      // answers 409 and nothing is overwritten — which is why this file must
+      // never learn to send an identity it did not read.
       return fetch("/training-plan/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           plan: data.program,
           score: data.overall_score,
-          exercise_context_token: data.exercise_context_token
+          exercise_context_token: data.exercise_context_token,
+          expected_plan: null
         })
       }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (saved) {

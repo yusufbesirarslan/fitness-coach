@@ -816,6 +816,8 @@ def test_save_replaces_plan_without_journal_or_typed_generation_command(
         "plan": _seven_day_plan(3, "Squat", canonical=True)["program"],
         "score": 7.0,
         "exercise_context_token": token,
+        # First save: the caller asserts the server holds no plan yet.
+        "expected_plan": None,
     })
     assert first.status_code == 200, first.get_json()
     first_row = TrainingPlan.query.filter_by(user_id=auth_user.id).one()
@@ -826,6 +828,8 @@ def test_save_replaces_plan_without_journal_or_typed_generation_command(
         "plan": _seven_day_plan(3, "Deadlift", canonical=True)["program"],
         "score": 8.0,
         "exercise_context_token": token,
+        # Replacement: the caller names the plan it intends to replace.
+        "expected_plan": {"lineage_id": first_lineage, "mutation_version": 0},
     })
     assert second.status_code == 200, second.get_json()
     rows = TrainingPlan.query.filter_by(user_id=auth_user.id).all()

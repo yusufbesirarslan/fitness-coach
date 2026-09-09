@@ -238,6 +238,7 @@ def test_freshly_saved_canonical_plan_stays_reader_compatible(
     saved = client.post("/training-plan/save", json={
         "plan": _seven_day_program(), "score": 7.0,
         "exercise_context_token": token,
+        "expected_plan": None,
     })
     assert saved.status_code == 200
 
@@ -433,6 +434,8 @@ def test_failed_save_validation_keeps_the_existing_plan(
 
     response = client.post("/training-plan/save", json={
         "plan": invalid, "score": 7.0, "exercise_context_token": token,
+        "expected_plan": {"lineage_id": plan.lineage_id,
+                          "mutation_version": plan.mutation_version},
     })
 
     assert response.status_code == 422
@@ -451,6 +454,8 @@ def test_failed_save_context_check_keeps_the_existing_plan(client, auth_user):
     response = client.post("/training-plan/save", json={
         "plan": _seven_day_program(), "score": 7.0,
         "exercise_context_token": "forged.token.value",
+        "expected_plan": {"lineage_id": plan.lineage_id,
+                          "mutation_version": plan.mutation_version},
     })
 
     assert response.status_code == 422

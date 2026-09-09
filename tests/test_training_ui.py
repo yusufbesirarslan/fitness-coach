@@ -96,12 +96,15 @@ const _EN = true;
 let activePlan = [{{ day: 'Monday' }}];
 let activeTodayPlan = {{ day: 'Monday' }};
 let currentWorkoutState = {{ status: 'active' }};
+let activePlanIdentity = {{ lineage_id: 'LIN-1', mutation_version: 3 }};
 {function_source}
 renderTrainingBlocked();
 console.log(JSON.stringify({{
   activePlan,
   activeTodayPlan,
   currentWorkoutState,
+  identityIsUnknown: activePlanIdentity === undefined,
+  identityIsNull: activePlanIdentity === null,
   activePlanDisplay: elements['active-plan-view'].style.display,
   setupFormDisplay: elements['setup-form'].style.display,
   warning: elements['wh-cta'].innerHTML,
@@ -116,6 +119,11 @@ console.log(JSON.stringify({{
     assert result["activePlan"] is None
     assert result["activeTodayPlan"] is None
     assert result["currentWorkoutState"] is None
+    # A blocked read leaves the save precondition UNKNOWN, never "no plan":
+    # null would be a positive claim that the user has nothing to overwrite,
+    # which is exactly how a failed read becomes a destructive save.
+    assert result["identityIsUnknown"] is True
+    assert result["identityIsNull"] is False
     assert result["activePlanDisplay"] == "block"
     assert result["setupFormDisplay"] == "none"
     assert result["warning"] == (
@@ -154,6 +162,7 @@ function makeButton() {{
   let currentPlan = [{{ gun: 'Pazartesi', egzersizler: [] }}];
   let currentScore = 8;
   let currentContextToken = '1.PAYLOAD.SIGNATURE';
+  let activePlanIdentity = {{ lineage_id: 'LIN-1', mutation_version: 3 }};
   let workoutStateClient;
   {save_source}
 
@@ -189,7 +198,8 @@ function makeButton() {{
   assert.deepEqual(calls[0].init.headers, {{ 'Content-Type': 'application/json' }});
   assert.deepEqual(JSON.parse(calls[0].init.body), {{
     plan: [{{ gun: 'Pazartesi', egzersizler: [] }}], score: 8,
-    exercise_context_token: '1.PAYLOAD.SIGNATURE'
+    exercise_context_token: '1.PAYLOAD.SIGNATURE',
+    expected_plan: {{ lineage_id: 'LIN-1', mutation_version: 3 }}
   }});
   assert.equal(button.textContent, 'training.saved');
   assert.equal(button.hasClass('saved'), true);
@@ -224,6 +234,34 @@ function makeButton() {{
   assert.equal(toasts.some(toast => toast.type === 'success'), false);
   assert.equal(toasts.some(toast => toast.type === 'error'), true);
   workoutStateClient.destroy();
+
+  // A stale precondition: the server refused and destroyed nothing, so the
+  // page must say so and must NOT show the saved state.
+  button = makeButton();
+  toasts.length = 0;
+  workoutStateClient = {{
+    mutate: async () => ({{ ok: false, status: 409,
+                           body: {{ code: 'TRAINING_PLAN_SAVE_PLAN_CHANGED' }} }}),
+  }};
+  await savePlan();
+  assert.equal(button.textContent, 'Save');
+  assert.equal(button.hasClass('saved'), false);
+  assert.equal(toasts.some(toast => toast.type === 'success'), false);
+  assert.equal(toasts.some(toast => toast.type === 'error'), true);
+  assert.ok(toasts.some(toast => toast.message.indexOf('training.plan_changed') >= 0));
+
+  // Canonical state was never read (a blocked bootstrap). There is no honest
+  // precondition to send, so no destructive request may leave the page.
+  button = makeButton();
+  toasts.length = 0;
+  const unreadCalls = [];
+  activePlanIdentity = undefined;
+  workoutStateClient = {{ mutate: async url => {{ unreadCalls.push(url); return null; }} }};
+  await savePlan();
+  assert.deepEqual(unreadCalls, []);
+  assert.equal(button.textContent, 'Save');
+  assert.equal(toasts.some(toast => toast.type === 'error'), true);
+  activePlanIdentity = {{ lineage_id: 'LIN-1', mutation_version: 3 }};
 
   button = makeButton();
   toasts.length = 0;

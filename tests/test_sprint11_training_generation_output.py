@@ -2,6 +2,7 @@
 
 Hermetic: no live Bedrock/OpenAI. Provider invocation is always a spy.
 """
+import re
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -145,9 +146,32 @@ def save_token(app, auth_user):
     return _make
 
 
-def _post_save(client, plan, token, score=7.0):
+def _expectation(user_id=None):
+    """The precondition a client that has just read canonical state would send.
+
+    Read from the database rather than frozen as a literal, so these tests keep
+    asserting the behaviour they were written for (validation, catalog
+    authority, ordering) instead of turning into tests of a lineage value.
+
+    With no ``user_id`` it resolves the single plan row these single-user tests
+    ever hold — ``one_or_none`` rather than ``first`` on purpose, so the save
+    endpoint's own "at most one plan per user" invariant stays asserted here
+    too. Pass ``user_id`` to go through the canonical active-plan selector.
+    """
+    from app.services.today_facts import get_active_plan
+
+    plan = (TrainingPlan.query.one_or_none() if user_id is None
+            else get_active_plan(user_id))
+    if plan is None:
+        return None
+    return {"lineage_id": plan.lineage_id,
+            "mutation_version": plan.mutation_version}
+
+
+def _post_save(client, plan, token, score=7.0, user_id=None):
     return client.post("/training-plan/save", json={
         "plan": plan, "score": score, "exercise_context_token": token,
+        "expected_plan": _expectation(user_id),
     })
 
 
@@ -800,6 +824,7 @@ def test_generated_exercise_id_is_accepted_by_save(client, auth_user, monkeypatc
     saved = client.post("/training-plan/save", json={
         "plan": body["program"], "score": body["overall_score"],
         "exercise_context_token": body["exercise_context_token"],
+        "expected_plan": _expectation(auth_user.id),
     })
     assert saved.status_code == 200
     stored = _stored_document(auth_user.id)
@@ -963,6 +988,7 @@ def test_generate_then_save_mocked_path(client, auth_user, monkeypatch):
         saved = client.post("/training-plan/save", json={
             "plan": program, "score": body["overall_score"],
             "exercise_context_token": body["exercise_context_token"],
+            "expected_plan": _expectation(auth_user.id),
         })
         assert saved.status_code == 200
         stored = _stored_document(auth_user.id)
@@ -975,10 +1001,20 @@ def test_generate_then_save_mocked_path(client, auth_user, monkeypatch):
 
 
 def test_all_save_paths_invoke_canonical_validation():
+    """Validation still gates the destructive path, wherever the DELETE lives.
+
+    The statement moved into the replacement authority, so this can no longer
+    anchor on a literal delete in the route. The claim it exists to make is
+    unchanged: nothing reaches the boundary that owns the DELETE without having
+    been through canonical validation first. The second assertion is what keeps
+    that honest — a route that grew a destructive statement of its own could
+    satisfy the ordering above and still bypass validation entirely.
+    """
     source = Path(training_bp.__file__).read_text(encoding="utf-8")
     assert "validate_plan_for_save" in source
-    assert source.index("validate_plan_for_save") < source.index(
-        "TrainingPlan.query.filter_by(user_id=current_user.id).delete()")
+    assert source.index("validate_plan_for_save(") < source.index(
+        "replace_training_plan(")
+    assert not re.search(r"TrainingPlan.*\.delete\(", source)
 
 
 def test_repair_suffix_is_not_write_less():
@@ -1079,7 +1115,7 @@ def test_invalid_exercise_save_does_not_delete_existing_plan(
 ])
 def test_save_without_a_verifiable_context_token_is_refused(
         client, auth_user, token):
-    body = {"plan": _week()["program"], "score": 7.0}
+    body = {"plan": _week()["program"], "score": 7.0, "expected_plan": None}
     if token is not None:
         body["exercise_context_token"] = token
 
@@ -1430,6 +1466,7 @@ def test_a_client_declared_context_cannot_widen_the_signed_one(
         "exercise_context_token": save_token(equipment="ev"),
         "exercise_context": {"equipment_context": "spor_salonu"},
         "ekipman": "spor_salonu",
+        "expected_plan": None,
     })
 
     assert response.status_code == 422
@@ -1482,18 +1519,24 @@ def test_every_check_runs_before_the_destructive_delete(
     assert _post_save(client, _week()["program"], save_token()).status_code == 200
     seeded = _stored_document(auth_user.id)
 
+    current = _expectation(auth_user.id)
     rejections = {
-        "token": {"plan": _week()["program"], "score": 1},
+        "token": {"plan": _week()["program"], "score": 1,
+                  "expected_plan": current},
         "structure": {"plan": {"v": 9}, "score": 1,
-                      "exercise_context_token": save_token()},
+                      "exercise_context_token": save_token(),
+                      "expected_plan": current},
         "semantics": {"plan": _week(training_days=1)["program"], "score": 1,
-                      "exercise_context_token": save_token()},
+                      "exercise_context_token": save_token(),
+                      "expected_plan": current},
         "resolution": {
             "plan": _week(exercises=[_exercise("Invented Laser Row")])["program"],
-            "score": 1, "exercise_context_token": save_token()},
+            "score": 1, "exercise_context_token": save_token(),
+            "expected_plan": current},
         "equipment": {
             "plan": _week(exercises=[_exercise("Barbell Back Squat")])["program"],
-            "score": 1, "exercise_context_token": save_token(equipment="ev")},
+            "score": 1, "exercise_context_token": save_token(equipment="ev"),
+            "expected_plan": current},
     }
 
     with delete_spy() as deletes:
@@ -1501,20 +1544,43 @@ def test_every_check_runs_before_the_destructive_delete(
             response = client.post("/training-plan/save", json=body)
             assert response.status_code == 422, label
             assert deletes == [], label
-        assert _post_save(
-            client, _week()["program"], save_token(), score=9).status_code == 200
+        # A stale precondition must reach the same conclusion by a different
+        # route: refused, and still not one DELETE.
+        stale = client.post("/training-plan/save", json={
+            "plan": _week()["program"], "score": 1,
+            "exercise_context_token": save_token(),
+            "expected_plan": {"lineage_id": current["lineage_id"],
+                              "mutation_version": current["mutation_version"] + 1},
+        })
+        assert stale.status_code == 409
+        assert deletes == []
+        assert _post_save(client, _week()["program"], save_token(), score=9,
+                          user_id=auth_user.id).status_code == 200
         assert len(deletes) == 1
 
     assert _stored_document(auth_user.id)["program"] == seeded["program"]
 
 
-def test_save_route_verifies_context_before_it_validates_or_deletes():
+def test_save_route_verifies_context_before_it_validates_or_replaces():
+    """The route's order, now that the DELETE lives behind the precondition.
+
+    The concurrency precondition is parsed first (a request that cannot name the
+    plan it replaces must not consume signature or catalog work), then the
+    signed context, then the proposal, and only then the replacement authority
+    — which owns the lock, the comparison and the destructive statement.
+    """
     source = Path(training_bp.__file__).read_text(encoding="utf-8")
+    expectation = source.index("parse_expectation(data)")
     verify = source.index("resolve_save_exercise_context(")
     validate = source.index("validate_plan_for_save(")
-    delete = source.index("TrainingPlan.query.filter_by(user_id=current_user.id).delete()")
+    replace = source.index("replace_training_plan(")
 
-    assert verify < validate < delete
+    assert expectation < verify < validate < replace
+    # The route must not keep a destructive path of its own: the only DELETE
+    # against training_plan is the guarded one inside the authority. Scoped to
+    # TrainingPlan on purpose — this is a claim about the plan, not a ban on
+    # every future delete in an unrelated route of the same blueprint.
+    assert not re.search(r"TrainingPlan.*\.delete\(", source)
 
 
 # ── Generation emits the token; unit callers may opt out ────────────────────

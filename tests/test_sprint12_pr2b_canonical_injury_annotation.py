@@ -30,6 +30,7 @@ from app.services.training_generation.service import (
     validate_plan_for_save,
 )
 from app.services.training_generation import exercise_resolution
+from app.services.today_facts import get_active_plan
 from app.services.training_generation import service as training_service
 from tests.test_sprint11_training_generation_output import (
     _exercise,
@@ -187,10 +188,17 @@ def test_alias_equivalent_warnings_persist_into_stored_plan_data(
         })
         assert generated.status_code == 200
         body = generated.get_json()
+        current = get_active_plan(auth_user.id)
         saved = client.post("/training-plan/save", json={
             "plan": body["program"],
             "score": body["overall_score"],
             "exercise_context_token": body["exercise_context_token"],
+            # Loop pass 1 creates, pass 2 replaces — read the precondition
+            # each time rather than assuming which one this is.
+            "expected_plan": None if current is None else {
+                "lineage_id": current.lineage_id,
+                "mutation_version": current.mutation_version,
+            },
         })
         assert saved.status_code == 200
         stored = _stored_document(auth_user.id)
