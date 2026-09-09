@@ -28,6 +28,7 @@ from app.services.coach_plan_tools.grounding import (
     followup_mutation,
     invalid_candidate_result,
     is_continuation_attempt,
+    matches_boundary_record,
     recover_no_tool_partial_add,
 )
 from app.services.coach_plan_tools.weekdays import (
@@ -560,7 +561,8 @@ def _complete_grounded_followup(user_id, language):
         taken = clar_mod.consume(user_id)
         if taken is None:
             return None
-        if not continuation_matches_record(taken, tool, arguments):
+        if (not matches_boundary_record(taken)
+                or not continuation_matches_record(taken, tool, arguments)):
             # The arguments were planned from one read of a shared store and
             # the record actually taken is a different request. Consume-once
             # has already retired both; executing would run a mutation this

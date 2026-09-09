@@ -112,6 +112,68 @@ def test_request_start_retirement_names_the_exact_refresh_branch(
     assert f"event=superseded reason={reason}" in _events(caplog)[-1]
 
 
+def test_missing_day_weekday_survives_request_boundary(
+        app, monkeypatch, caplog):
+    monkeypatch.setattr(clarifications, "_redis", lambda: None)
+    monkeypatch.setattr(clarifications, "_MEMORY", {})
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        caplog.set_level(logging.INFO, logger="app")
+        clarifications.remember(41, _record(
+            day="", sets=4, reps="15", reason="ambiguous_workout",
+            candidate_days=("Pazartesi", "Cuma")))
+        grounding.refresh_clarification_for_turn("Monday", user_id=41)
+        stored = clarifications.load(41)
+
+    assert stored is not None
+    assert stored["day"] == ""
+    assert "event=superseded" not in "\n".join(_events(caplog))
+
+
+@pytest.mark.parametrize("message", ("4", "6"))
+def test_record_valid_bare_set_value_precedes_numeric_exercise_false_positive(
+        app, monkeypatch, caplog, message):
+    original_exercise_from_text = grounding._exercise_from_text
+
+    def numeric_false_positive(text):
+        if isinstance(text, str) and text.isascii() and text.isdecimal():
+            return text
+        return original_exercise_from_text(text)
+
+    monkeypatch.setattr(grounding, "_exercise_from_text", numeric_false_positive)
+    monkeypatch.setattr(clarifications, "_redis", lambda: None)
+    monkeypatch.setattr(clarifications, "_MEMORY", {})
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        caplog.set_level(logging.INFO, logger="app")
+        clarifications.remember(41, _record())
+        grounding.refresh_clarification_for_turn(message, user_id=41)
+        stored = clarifications.load(41)
+
+    assert stored is not None
+    assert stored["reps"] == "15"
+    assert "event=superseded" not in "\n".join(_events(caplog))
+
+
+def test_real_new_exercise_request_still_supersedes_active_clarification(
+        app, monkeypatch, caplog):
+    """Disabling request-boundary supersession must make this test fail."""
+    monkeypatch.setattr(clarifications, "_redis", lambda: None)
+    monkeypatch.setattr(clarifications, "_MEMORY", {})
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        caplog.set_level(logging.INFO, logger="app")
+        clarifications.remember(41, _record())
+        grounding.refresh_clarification_for_turn(
+            "Add Hammer Curl 3x10 to my chest workout", user_id=41)
+        stored = clarifications.load(41)
+
+    assert stored is None
+    assert (
+        "event=superseded reason=request_boundary_new_exercise"
+        in "\n".join(_events(caplog)))
+
+
 def test_consume_once_emits_consumed_event(app, monkeypatch, caplog):
     """Removing consume-once emission must make this test fail."""
     monkeypatch.setattr(clarifications, "_redis", lambda: None)

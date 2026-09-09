@@ -70,9 +70,10 @@ def split_user(app, make_user):
     return user
 
 
-def _fresh_turn(app, message, history=None):
+def _fresh_turn(app, message, history=None, user_id=None):
     assign_request_id()
-    ai_coach._begin_coach_turn(message, history=history or [])
+    ai_coach._begin_coach_turn(
+        message, history=history or [], user_id=user_id)
 
 
 def _snapshot(user_id):
@@ -330,7 +331,8 @@ def test_accepting_proposed_prescription_applies_only_those_numbers(
             "sets": 3, "reps": "10",
         })
         assert result["status"] == results.STATUS_NEEDS_INPUT
-        _fresh_turn(app, "yes", history=poison)
+        _fresh_turn(
+            app, "yes", history=poison, user_id=split_user.id)
         reply = coach_confirmation.resolve_pending_turn(split_user.id, "en")
 
     assert reply is not None
@@ -374,7 +376,7 @@ def test_followup_prescription_uses_stored_day_and_exercise(
             "sets": 3, "reps": "10",
         })
         assert result["status"] == results.STATUS_NEEDS_INPUT
-        _fresh_turn(app, "3x12")
+        _fresh_turn(app, "3x12", user_id=split_user.id)
         reply = coach_confirmation.resolve_pending_turn(split_user.id, "en")
 
     assert reply is not None
@@ -402,7 +404,7 @@ def test_confirming_exercise_suggestion_writes_canonical_identity(
         assert result["reason"] == results.REASON_EXERCISE_SUGGEST
         suggestion = result["detail"]
         assert suggestion == "Walking Lunge"
-        _fresh_turn(app, "yes")
+        _fresh_turn(app, "yes", user_id=split_user.id)
         reply = coach_confirmation.resolve_pending_turn(split_user.id, "en")
 
     assert reply is not None
