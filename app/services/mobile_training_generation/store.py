@@ -18,6 +18,7 @@ from app.models import (
     User,
 )
 from app.services import premium
+from app.services.plan_owner_lock import lock_plan_owner
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.preference_contract import (
     CODE_GENERATION_EXERCISE_AMBIGUOUS,
@@ -217,12 +218,35 @@ def _insert_plan(**kwargs):
 
 
 def commit_plan(operation_id, user_id):
+    """Turn this owner's staged candidate into their plan, or refuse.
+
+    TWO locks, in this order, and the order is the repository-wide one
+    (``app/services/plan_owner_lock``): the idempotency-operation row first, so
+    this command's own replay/attempt semantics are decided exactly as they
+    always were, then the OWNER row.
+
+    The owner lock is not redundant with the operation lock. The operation row
+    serializes this command against another native attempt; it says nothing
+    about the browser's ``POST /training-plan/save``, which creates a plan
+    through ``plan_replacement`` and locks the owner row. Without this line the
+    two writers lock different objects, so a browser create and a native create
+    could both observe an absent plan and both insert, and the owner would hold
+    two plans.
+
+    It must be taken BEFORE the ``get_active_plan`` check below, not merely
+    before the insert: PostgreSQL already blocks the insert on its own (the
+    ``training_plan.user_id`` foreign key takes a ``FOR KEY SHARE`` lock on the
+    owner row, which conflicts with the browser's ``FOR UPDATE``), but blocking
+    the insert after the decision has been made only delays a write already
+    committed to. The check has to be the thing that waits.
+    """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
                      .filter_by(id=operation_id, user_id=user_id)
                      .with_for_update().one_or_none())
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_GENERATED:
             raise GenerationPersistenceUnavailable()
+        lock_plan_owner(user_id)
         if get_active_plan(user_id) is not None:
             raise ExistingPlanRefused()
         plan = _insert_plan(

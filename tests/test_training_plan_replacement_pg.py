@@ -100,6 +100,11 @@ def pg_app():
         SECRET_KEY="disposable-pg-plan-replacement-test",
         SQLALCHEMY_DATABASE_URI=url,
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        # The native generation store is one of the CREATE writers exercised
+        # below. Its claim path reserves an AI allowance, which is a second,
+        # unrelated owner-row write; switching it off keeps these tests
+        # measuring the serialization boundary and not the quota ledger.
+        AI_PLAN_QUOTA_ENABLED=False,
     )
     db.init_app(app)
     with app.app_context():
@@ -177,6 +182,7 @@ def _state(app, user_id):
 def _run(app, calls):
     """Release ``len(calls)`` threads at one barrier and collect their outcomes."""
     from app.extensions import db
+    from app.services.mobile_training_generation import ExistingPlanRefused
     from app.services.plan_mutation import PlanNotFound, PlanStateConflict
     from app.services.plan_replacement import PlanReplacementConflict
 
@@ -190,6 +196,12 @@ def _run(app, calls):
                 outcomes[index] = ("ok", calls[index]())
             except PlanReplacementConflict as error:
                 outcomes[index] = ("conflict", error.reason)
+            except ExistingPlanRefused:
+                # The native command's OWN canonical refusal, caught as a
+                # distinct kind: collapsing it into "conflict" would let a
+                # native caller that started refusing for some other reason
+                # keep these assertions green.
+                outcomes[index] = ("existing_plan_refused", None)
             except PlanNotFound:
                 outcomes[index] = ("plan_not_found", None)
             except PlanStateConflict:
@@ -616,3 +628,351 @@ def test_a_failure_after_the_delete_leaves_the_plan_intact(seeded):
 
 def _explode():
     raise RuntimeError("database went away mid-replacement")
+
+
+# ── CASE F — CROSS-TRANSPORT: a browser create versus a native create ────────
+#
+# The two CREATE writers in this repository reach ``TrainingPlan`` through
+# different front doors. The browser's ``POST /training-plan/save`` enters
+# ``plan_replacement``, which serializes creation on the owner row. The native
+# ``POST /api/v1/training/plans`` enters ``mobile_training_generation``, whose
+# ``store.commit_plan`` locks its idempotency-operation row, asks
+# ``get_active_plan`` whether the owner already has a plan, and inserts.
+#
+# An operation-row lock says nothing about a browser tab: the two callers lock
+# different objects, so both could observe "no plan" and both insert, and the
+# owner would end up holding two plans — a state every reader in the app treats
+# as impossible, because ``get_active_plan`` silently picks the newer row and
+# the older one becomes unreachable data the user still owns.
+#
+# CASE C already proves browser-versus-browser. These cases prove the invariant
+# holds ACROSS transports, which is the only thing a single per-owner
+# serialization contract actually buys.
+
+
+def _staged_native_operation(app, user_id, key, marker="native"):
+    """A native generation operation parked in GENERATED, ready to commit.
+
+    Built through the real store transitions rather than by inserting a row, so
+    the operation these races commit is what a live native request would have
+    produced — including the JSON envelope ``commit_plan`` copies into the plan
+    row.
+    """
+    from app.extensions import db
+    from app.services.mobile_training_generation import store
+
+    with app.app_context():
+        operation = store.claim(user_id, key, "fingerprint-" + key)
+        store.stage_candidate(operation.id, _proposal(marker), 8.5)
+        operation_id = operation.id
+        db.session.remove()
+    return operation_id
+
+
+def _native_create(user_id, operation_id):
+    from app.services.mobile_training_generation import store
+
+    return lambda: store.commit_plan(operation_id, user_id)
+
+
+def _clear_owner(app, user_id):
+    """Return the owner to the no-plan state a CREATE race starts from."""
+    from app.extensions import db
+    from app.models import TrainingPlan, TrainingPlanGenerationOperation
+
+    with app.app_context():
+        TrainingPlan.query.filter_by(user_id=user_id).delete(
+            synchronize_session=False)
+        TrainingPlanGenerationOperation.query.filter_by(user_id=user_id).delete(
+            synchronize_session=False)
+        db.session.commit()
+        db.session.remove()
+
+
+def test_a_browser_create_and_a_native_create_produce_exactly_one_plan(pg_app):
+    """The headline cross-transport race.
+
+    Both callers start from an empty owner and both intend to create. Exactly
+    one may persist a plan; the loser must be refused through its own existing
+    canonical vocabulary, never through a database error.
+    """
+    app, user_id = pg_app
+    operation_id = _staged_native_operation(app, user_id, "pg-cross-key-1")
+
+    outcomes = _run(app, [_replace(user_id, None, "browser"),
+                          _native_create(user_id, operation_id)])
+
+    kinds = sorted(outcome[0] for outcome in outcomes.values())
+    assert kinds in (["existing_plan_refused", "ok"],
+                     ["conflict", "ok"]), outcomes
+    if outcomes[0][0] == "conflict":
+        # The browser lost: its refusal is the create-specific one, never a
+        # mismatch reason, which would mean it had compared against some plan
+        # it believed it was replacing.
+        assert outcomes[0][1] == "expected_absent_but_plan_exists", outcomes
+
+    state = _state(app, user_id)
+    # THE assertion: one plan, not two. Before a shared owner-scoped boundary
+    # both writers observed absence and both inserted.
+    assert state["count"] == 1, {"outcomes": outcomes, "state": state}
+    _lineage, version, plan_data = state["active"]
+    assert version == 0
+    assert len([m for m in ("browser", "native") if m in plan_data]) == 1
+
+
+def test_the_native_create_cannot_cross_the_browser_owner_lock(
+        pg_app, monkeypatch):
+    """The browser holds the boundary; the native create must wait.
+
+    A barrier only starts two threads together — with a GIL one of them usually
+    runs away with the whole operation, which is why the free-running case above
+    stays green even with the native writer outside the boundary entirely. So
+    the window is forced open: the browser create is paused between its locked
+    absence check and its insert, and the native create is released into that
+    exact window. If both writers share one owner-scoped boundary, the native
+    caller cannot return until the browser commits and then finds a plan and
+    refuses. If they do not, it inserts a second plan and reports success.
+    """
+    from app.extensions import db
+    from app.services import plan_replacement
+    from app.services.mobile_training_generation import (
+        ExistingPlanRefused, GenerationPersistenceUnavailable,
+    )
+
+    app, user_id = pg_app
+    operation_id = _staged_native_operation(app, user_id, "pg-cross-key-2")
+    browser_paused = threading.Event()
+    native_returned = threading.Event()
+    observed = {}
+
+    real_get_active_plan = plan_replacement.get_active_plan
+
+    def paused_selector(uid):
+        # Reached with every lock this transaction takes already held.
+        plan = real_get_active_plan(uid)
+        browser_paused.set()
+        observed["native_escaped"] = native_returned.wait(LOCK_PROBE_SECONDS)
+        return plan
+
+    monkeypatch.setattr(plan_replacement, "get_active_plan", paused_selector)
+
+    def browser():
+        with app.app_context():
+            try:
+                observed["browser"] = ("ok", _replace(
+                    user_id, None, "browser")())
+            except plan_replacement.PlanReplacementConflict as error:
+                observed["browser"] = ("conflict", error.reason)
+            except Exception as error:  # pragma: no cover - surfaced by asserts
+                observed["browser"] = ("unexpected", type(error).__name__,
+                                       str(error))
+            finally:
+                browser_paused.set()  # never strand the other thread
+                db.session.remove()
+
+    def native():
+        with app.app_context():
+            browser_paused.wait(timeout=10)
+            try:
+                observed["native"] = ("ok", _native_create(
+                    user_id, operation_id)().id)
+            except ExistingPlanRefused:
+                observed["native"] = ("existing_plan_refused", None)
+            except GenerationPersistenceUnavailable:
+                observed["native"] = ("persistence_unavailable", None)
+            except Exception as error:  # pragma: no cover - surfaced by asserts
+                observed["native"] = ("unexpected", type(error).__name__,
+                                      str(error))
+            finally:
+                native_returned.set()
+                db.session.remove()
+
+    threads = [threading.Thread(target=browser, daemon=True),
+               threading.Thread(target=native, daemon=True)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert not any(thread.is_alive() for thread in threads), observed
+
+    # THE assertion: the native create could not commit while the browser held
+    # its critical section open.
+    assert observed["native_escaped"] is False, observed
+    assert observed["browser"][0] == "ok", observed
+    assert observed["native"] == ("existing_plan_refused", None), observed
+
+    state = _state(app, user_id)
+    assert state["count"] == 1, observed
+    _lineage, version, plan_data = state["active"]
+    assert version == 0
+    assert "browser" in plan_data and "native" not in plan_data
+
+
+def test_the_browser_create_cannot_cross_the_native_owner_lock(
+        pg_app, monkeypatch):
+    """The mirror, and the interleaving the finding was actually about.
+
+    Here the NATIVE create holds the boundary. Its operation-row lock is a lock
+    on the wrong object as far as a browser tab is concerned: nothing about
+    ``TrainingPlanGenerationOperation`` stops ``plan_replacement`` from
+    observing an empty owner and inserting. Pausing the native writer between
+    its absence check and its insert, then releasing a browser create into that
+    window, is the only way to observe that directly — and it is exactly the
+    interleaving that produced two plans.
+    """
+    from app.extensions import db
+    from app.services import plan_replacement
+    from app.services.mobile_training_generation import (
+        ExistingPlanRefused, GenerationPersistenceUnavailable, store,
+    )
+
+    app, user_id = pg_app
+    operation_id = _staged_native_operation(app, user_id, "pg-cross-key-3")
+    native_paused = threading.Event()
+    browser_returned = threading.Event()
+    observed = {}
+
+    real_get_active_plan = store.get_active_plan
+
+    def paused_selector(uid):
+        plan = real_get_active_plan(uid)
+        native_paused.set()
+        observed["browser_escaped"] = browser_returned.wait(LOCK_PROBE_SECONDS)
+        return plan
+
+    monkeypatch.setattr(store, "get_active_plan", paused_selector)
+
+    def native():
+        with app.app_context():
+            try:
+                observed["native"] = ("ok", _native_create(
+                    user_id, operation_id)().id)
+            except ExistingPlanRefused:
+                observed["native"] = ("existing_plan_refused", None)
+            except GenerationPersistenceUnavailable:
+                observed["native"] = ("persistence_unavailable", None)
+            except Exception as error:  # pragma: no cover - surfaced by asserts
+                observed["native"] = ("unexpected", type(error).__name__,
+                                      str(error))
+            finally:
+                native_paused.set()
+                db.session.remove()
+
+    def browser():
+        with app.app_context():
+            native_paused.wait(timeout=10)
+            try:
+                observed["browser"] = ("ok", _replace(
+                    user_id, None, "browser")())
+            except plan_replacement.PlanReplacementConflict as error:
+                observed["browser"] = ("conflict", error.reason)
+            except Exception as error:  # pragma: no cover - surfaced by asserts
+                observed["browser"] = ("unexpected", type(error).__name__,
+                                       str(error))
+            finally:
+                browser_returned.set()
+                db.session.remove()
+
+    threads = [threading.Thread(target=native, daemon=True),
+               threading.Thread(target=browser, daemon=True)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert not any(thread.is_alive() for thread in threads), observed
+
+    # THE assertion: the browser create could not commit while the native
+    # command held its critical section open.
+    assert observed["browser_escaped"] is False, observed
+    assert observed["native"][0] == "ok", observed
+    assert observed["browser"] == ("conflict",
+                                   "expected_absent_but_plan_exists"), observed
+
+    state = _state(app, user_id)
+    assert state["count"] == 1, observed
+    _lineage, version, plan_data = state["active"]
+    assert version == 0
+    assert "native" in plan_data and "browser" not in plan_data
+
+
+def test_repeated_cross_transport_creates_never_deadlock(pg_app):
+    """Lock ORDER, asserted by running the race until a cycle would show.
+
+    A cross-transport boundary is only safe if every writer takes the shared
+    locks in one order. The native command locks its operation row and then the
+    owner; the browser locks the owner and then the plan rows. A writer that
+    took them the other way round would not fail the outcome tests above — it
+    would deadlock intermittently, and PostgreSQL would break the tie by
+    aborting one side with a ``deadlock detected`` error that an outcome
+    assertion phrased as "one of them was refused" would happily accept.
+
+    Both release orders are exercised, because a cycle needs the two callers to
+    arrive from opposite directions.
+    """
+    app, user_id = pg_app
+
+    for round_index in range(6):
+        _clear_owner(app, user_id)
+        operation_id = _staged_native_operation(
+            app, user_id, "pg-cross-loop-%d" % round_index)
+        calls = [_replace(user_id, None, "browser"),
+                 _native_create(user_id, operation_id)]
+        if round_index % 2:
+            calls.reverse()
+
+        outcomes = _run(app, calls)
+
+        kinds = sorted(outcome[0] for outcome in outcomes.values())
+        # An aborted deadlock victim arrives here as ("unexpected", ...), so a
+        # cycle cannot hide behind "one of them was refused".
+        assert kinds in (["existing_plan_refused", "ok"],
+                         ["conflict", "ok"]), (round_index, outcomes)
+        state = _state(app, user_id)
+        assert state["count"] == 1, (round_index, outcomes, state)
+
+
+def test_the_owner_lock_leaves_native_operation_replay_unchanged(pg_app):
+    """The idempotency ledger still decides native replays, exactly as before.
+
+    Serializing creation must not be paid for by weakening what the operation
+    row governs: a committed operation stays terminal, a second commit of it is
+    refused by the SAME ``GenerationPersistenceUnavailable`` its status check
+    has always raised, and the durable replay still returns the identical plan
+    row rather than minting a second one.
+    """
+    from app.extensions import db
+    from app.models import TrainingPlanGenerationOperation
+    from app.services.mobile_training_generation import (
+        GenerationPersistenceUnavailable, store,
+    )
+
+    app, user_id = pg_app
+    operation_id = _staged_native_operation(app, user_id, "pg-cross-key-4")
+
+    with app.app_context():
+        plan = store.commit_plan(operation_id, user_id)
+        plan_id, lineage_id = plan.id, plan.lineage_id
+        operation = db.session.get(TrainingPlanGenerationOperation, operation_id)
+        assert operation.status == "SUCCEEDED"
+        assert operation.training_plan_id == plan_id
+        assert operation.plan_lineage_id == lineage_id
+        assert operation.candidate_plan_data is None
+        db.session.remove()
+
+    with app.app_context():
+        # Terminal means terminal: committing the same operation again is
+        # refused on its status, under the operation row's own lock.
+        with pytest.raises(GenerationPersistenceUnavailable):
+            store.commit_plan(operation_id, user_id)
+        db.session.remove()
+
+    with app.app_context():
+        operation = db.session.get(TrainingPlanGenerationOperation, operation_id)
+        replayed = store.replay_plan(operation, user_id)
+        assert replayed.id == plan_id
+        assert replayed.lineage_id == lineage_id
+        db.session.remove()
+
+    state = _state(app, user_id)
+    assert state["count"] == 1, state
+    assert state["active"][:2] == (lineage_id, 0), state

@@ -384,7 +384,13 @@ def test_success_has_bounded_constant_sql_cost_without_exercise_n_plus_one(
         event.remove(db.engine, "before_cursor_execute", record)
 
     assert response.status_code == 201
-    assert len(statements) <= 20, statements
+    # 21, not 20: the shared per-owner serialization lock that
+    # ``store.commit_plan`` now takes (``plan_owner_lock.lock_plan_owner``)
+    # adds exactly one ``SELECT user.id ... FOR UPDATE``. That is a constant
+    # cost, not a per-exercise one -- both parametrisations below measure 21 --
+    # so this bound still fails on a genuine N+1, which would make the
+    # 20-exercise case cost far more than the 1-exercise case.
+    assert len(statements) <= 21, statements
     operation_lookups = [
         sql for sql in statements
         if "FROM training_plan_generation_operation" in sql

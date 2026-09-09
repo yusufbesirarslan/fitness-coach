@@ -37,20 +37,21 @@ the *same* object rather than through two unrelated schemes.
 The owner-row lock exists for the one case the plan-row lock physically cannot
 cover: creation. When the user has no plan there is no row to lock, so two
 concurrent "there is no plan, create one" requests would both pass their check
-and the second would delete the first's brand-new plan. Locking the owner row is
-the repository's established idiom for serializing a per-user singleton decision
-(``memory_manager.get_or_create_active_conversation``, ``supplements``,
-``premium.reserve_ai_quota_in_transaction``).
+and the second would delete the first's brand-new plan.
 
-No other writer takes a ``TrainingPlan`` lock and then a ``User`` lock, so this
-order introduces no cycle: ``plan_mutation`` and the Coach executor lock the plan
-row only, workout completion locks a session row before awarding XP, and native
-generation locks its own operation row.
+That lock is NOT taken here. It lives in ``app/services/plan_owner_lock.py``,
+because this is not the only writer that creates a ``TrainingPlan``: the native
+generate-and-persist command (``mobile_training_generation.store.commit_plan``)
+creates one too, and a per-owner boundary only serializes anything if every
+create writer stands behind the SAME object. That module also carries the
+repository-wide lock order this one takes a prefix of, and the argument that it
+contains no cycle.
 """
 from dataclasses import dataclass
 
 from app.extensions import db
-from app.models import TrainingPlan, User
+from app.models import TrainingPlan
+from app.services.plan_owner_lock import lock_plan_owner
 from app.services.today_facts import get_active_plan
 
 
@@ -170,21 +171,6 @@ def parse_expectation(payload) -> PlanExpectation:
         absent=False, lineage_id=lineage_id, mutation_version=mutation_version)
 
 
-def _lock_owner(user_id):
-    """Serialize this owner's whole-plan writes, including creation.
-
-    A COLUMN query, not an entity query: an entity query returns the
-    already-identity-mapped ``current_user`` without refreshing it, so the lock
-    would be real while the data read under it was stale — the repository's known
-    footgun (``app/hooks.py``, ``app/services/gamification.py``). Nothing is read
-    off the result; the row is locked for its serializing effect alone.
-
-    On SQLite this is a no-op, as everywhere else in the repository: that backend
-    admits one writer at a time, so the critical section is already exclusive.
-    """
-    db.session.query(User.id).filter_by(id=user_id).with_for_update().first()
-
-
 def replace_training_plan(user_id, expectation, *, plan_data,
                           score) -> ReplacementResult:
     """Install ``plan_data`` as the owner's plan iff ``expectation`` still holds.
@@ -201,7 +187,7 @@ def replace_training_plan(user_id, expectation, *, plan_data,
     rather than contend.
     """
     try:
-        _lock_owner(user_id)
+        lock_plan_owner(user_id)
 
         # Lock the owner's plan rows themselves. ``populate_existing`` is
         # load-bearing: without it SQLAlchemy hands back identity-mapped
