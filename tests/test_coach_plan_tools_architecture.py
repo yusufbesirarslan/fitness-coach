@@ -394,12 +394,14 @@ def test_the_error_vocabulary_is_closed_and_fully_documented():
 def test_no_module_in_the_package_can_log_audit_material():
     """Arguments, plan text, summaries, keys and fingerprints must never reach
     a log line (§60). The executor's single call site logs the tool name and a
-    bounded outcome; nothing else in the package logs at all.
+    bounded outcome; the clarification store logs only bounded lifecycle
+    transitions, and nothing else in the package logs at all.
     """
     # AST, not a substring scan: "print(" also matches "fingerprint(", which is
     # a real identifier in this package.
     emitters = {"print", "logger", "current_app", "capture_message"}
-    allowed = {PACKAGE_ROOT / "executor.py"}
+    clarification_path = PACKAGE_ROOT / "clarifications.py"
+    allowed = {PACKAGE_ROOT / "executor.py", clarification_path}
     for path in _package_modules():
         if path in allowed:
             continue
@@ -445,6 +447,17 @@ def test_no_module_in_the_package_can_log_audit_material():
             else:
                 raise AssertionError(
                     f"executor.py:{call.lineno} logs an unvetted expression")
+
+    lifecycle_emitters = []
+    for function in (
+            node for node in ast.walk(_tree(clarification_path))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))):
+        if any(
+                isinstance(node, ast.Attribute)
+                and node.attr in emitters
+                for node in ast.walk(function)):
+            lifecycle_emitters.append(function.name)
+    assert lifecycle_emitters == ["_emit_lifecycle"]
 
 
 def test_the_result_shape_is_a_closed_set_of_keys():

@@ -251,6 +251,40 @@ exceeding its abort threshold (`docs/ROLLOUT.md`).
 Rollback is `RUNTIME_METRICS_ENABLED=0` + restart. It is independent of
 `AI_METRICS_ENABLED`; neither flag affects request handling either way.
 
+## Coach clarification lifecycle
+
+The shared Coach clarification authority emits one bounded logfmt event for
+every write, overwrite, consume, retirement, missing/expired lookup, and
+fail-closed Redis operation:
+
+```
+component=coach_clarification event=created reason=initial_write
+operation=add request_id=<clarification lineage> backend=redis
+missing_fields=sets record_present_before=false record_present_after=true
+ttl_before=null ttl_after=1800 correlation_id=<Coach request id>
+```
+
+`event`, `reason`, `operation`, `backend`, and `missing_fields` come from closed
+server vocabularies. The event never includes user IDs, Redis keys, user or
+provider text, exercise/day names, or prescription values. When authoritative
+state is already missing, the signed session mirror may supply only the bounded
+lineage metadata used by this log; it remains non-executable.
+
+Correlate a reported two-turn clarification by its request IDs, then follow the
+clarification lineage:
+
+```
+fields @timestamp, @message
+| filter @message like /component=coach_clarification/
+| filter correlation_id in ["<request A>", "<request B>"]
+| sort @timestamp asc
+```
+
+An `expired_or_missing/record_missing` event proves the authority was absent at
+that lookup. It does not guess whether Redis TTL or an earlier deletion caused
+the absence; a preceding `superseded`, `consumed`, or `deleted` event provides
+that proof when the application performed the destructive transition.
+
 ## Token usage on `CoachMessage`
 
 Real provider `usage` (`prompt_tokens`/`completion_tokens`) is recorded onto each

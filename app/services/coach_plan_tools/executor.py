@@ -418,7 +418,7 @@ def _mark_plan_changed(payload):
     try:
         setattr(g, _CHANGED_ATTR, True)
         from .clarifications import clear
-        clear()
+        clear(reason="mutation_applied")
     except RuntimeError:
         pass
 
@@ -429,7 +429,7 @@ def _mark_proposal_created(payload):
     try:
         setattr(g, _PROPOSAL_ATTR, True)
         from .clarifications import clear
-        clear()
+        clear(reason="proposal_created")
     except RuntimeError:
         pass
 
