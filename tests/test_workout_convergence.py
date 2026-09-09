@@ -199,13 +199,14 @@ def test_training_bootstrap_projects_full_week_onto_closed_public_schema(
 
     assert response.status_code == 200
     body = response.get_json()
-    # The bounded key set now also carries the plan's freshness identity
-    # (Sprint 1 PR2 columns, already public on the native training read):
-    # a destructive save must declare which plan it replaces, and a client
-    # cannot declare an identity the server never gave it.
+    # PR #293 is the browser-projection authority: unprefixed lineage_id.
+    # The closed-schema guarantee is unchanged and still exact: the set is
+    # enumerated, not relaxed. UX-3 PR3 consumes this pair; it does not rename it.
     assert set(body["plan"]) == {
         "exists", "plan", "score", "created_at",
         "lineage_id", "mutation_version"}
+    assert isinstance(body["plan"]["lineage_id"], str)
+    assert isinstance(body["plan"]["mutation_version"], int)
     assert set(body["plan"]["plan"]) == {"program"}
     public_program = body["plan"]["plan"]["program"]
     assert len(public_program) == 7

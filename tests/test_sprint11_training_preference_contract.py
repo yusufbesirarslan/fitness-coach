@@ -906,8 +906,12 @@ def test_canonical_style_source_has_no_general_default():
 
 
 def test_plan_v2_does_not_zero_cardio_days_when_type_is_yok():
+    # UX-3 PR3 retired the creation-only `plan_create.js`; the surface that now
+    # collects Plan preferences is `plan_training_manage.js`, and the guard
+    # follows it unchanged. The client must not silently rewrite a preference
+    # the server owns.
     source = (
-        Path(__file__).resolve().parents[1] / "static" / "plan_create.js"
+        Path(__file__).resolve().parents[1] / "static" / "plan_training_manage.js"
     ).read_text(encoding="utf-8")
     assert "selections.kardiyo_gun = 0" not in source
 
@@ -933,20 +937,37 @@ def test_service_evaluates_capability_before_provider(monkeypatch):
 
 
 def test_plan_v2_client_does_not_map_typed_400_to_setup():
+    # PR3 moved response CLASSIFICATION into the shared management contract, so
+    # both renderers classify a typed 400 identically, while WHERE the user is
+    # sent to recover stays a presentation decision. The invariant is unchanged:
+    # only the untyped / no-session 400 may be shown as "complete your profile".
     source = (
-        Path(__file__).resolve().parents[1] / "static" / "plan_create.js"
+        Path(__file__).resolve().parents[1]
+        / "static" / "training_plan_management.js"
     ).read_text(encoding="utf-8")
-    assert "TRAINING_PLAN_NO_SESSION" in source
-    assert "data.code === \"TRAINING_PLAN_NO_SESSION\"" in source or \
-        "data.code === 'TRAINING_PLAN_NO_SESSION'" in source
+    assert "CODE_NO_SESSION = 'TRAINING_PLAN_NO_SESSION'" in source
+    assert "body.code === CODE_NO_SESSION" in source
+    renderer = (
+        Path(__file__).resolve().parents[1] / "static" / "plan_training_manage.js"
+    ).read_text(encoding="utf-8")
+    assert "management.CODE_NO_SESSION" in renderer
 
 
 def test_legacy_client_surfaces_backend_error_text():
+    # PR3: the generate request moved into the shared contract, which carries the
+    # backend's own `error` text out as `message`. Legacy still SHOWS that text
+    # rather than a generic string, and still runs its pre-flight preference
+    # check before spending a provider call.
     source = (
         Path(__file__).resolve().parents[1] / "static" / "training.js"
     ).read_text(encoding="utf-8")
-    assert "if (data.error)" in source
+    assert "showToast(result.message ||" in source
     assert "plan.contract.conflicting_preferences" in source
+    shared = (
+        Path(__file__).resolve().parents[1]
+        / "static" / "training_plan_management.js"
+    ).read_text(encoding="utf-8")
+    assert "body.error || null" in shared
 
 
 def test_contract_failure_never_enters_compact_retry(monkeypatch):

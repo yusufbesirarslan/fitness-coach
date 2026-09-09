@@ -264,13 +264,21 @@ def test_exactly_one_plan_tree_per_flag_state(app, client, make_user, login):
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_v2_no_active_plan_shows_inline_generator(app, client, make_user, login):
+    # UX-3 PR3 contract update: the creation surface is now the `create` half of
+    # ONE Training-management placement (`data-plan-manage`), served by the
+    # shared management contract plus the Plan renderer that replaced the
+    # creation-only `plan_create.js`. The behaviour being guarded is unchanged —
+    # an in-page canonical generator, and never the legacy client.
     app.config["UIUX_PLAN_V2_ENABLED"] = True
     _seed_login(client, make_user, login)               # no plan seeded
     html = client.get("/training").get_data(as_text=True)
     assert 'data-plan-state="no_active_plan"' in html
-    assert "data-plan-create" in html                    # in-page generator present
-    assert "/static/plan_create.js" in html              # creation-only script loaded
+    assert 'data-manage-state="create"' in html          # in-page generator present
+    assert "/static/training_plan_management.js" in html  # shared contract
+    assert "/static/plan_training_manage.js" in html      # Plan renderer
     assert "/static/training.js" not in html             # NOT the legacy generator
+    # Creation is NOT the destructive operation: no replacement confirmation ships.
+    assert "data-plan-replace-confirm" not in html
 
 
 def test_v2_active_plan_renders_days_no_dominant_cta(app, client, make_user, login):
@@ -280,8 +288,10 @@ def test_v2_active_plan_renders_days_no_dominant_cta(app, client, make_user, log
     html = client.get("/training").get_data(as_text=True)
     assert 'data-plan-state="active_plan"' in html
     assert "Bench Press" in html                          # exercise rendered server-side
-    assert "data-plan-create" not in html                # no generator when populated
-    assert "/static/plan_create.js" not in html
+    # PR3: an active plan gets the REGENERATE half of the same placement — never
+    # the create half, and the plan content still carries no dominant CTA.
+    assert 'data-manage-state="regenerate"' in html
+    assert 'data-manage-state="create"' not in html
     assert "/static/training.js" not in html
 
 
@@ -603,22 +613,31 @@ def test_new_plan_copy_is_axisai_only():
 # G. SIGNED EXERCISE-CONTEXT TOKEN FORWARDING (Sprint 11 PR4 Task 4)
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_plan_create_forwards_the_context_token_from_generate_into_save():
-    """plan_create.js is a submitter, not a second authority — and that holds
-    for the signed equipment context too: it forwards the token from the
-    generate response straight into the save body without parsing it,
-    rendering it, editing it, or persisting it anywhere."""
-    source = (Path(__file__).resolve().parents[1]
-              / "static" / "plan_create.js").read_text(encoding="utf-8")
+def test_plan_management_forwards_the_context_token_from_generate_into_save():
+    """The Training-management client is a submitter, not a second authority —
+    and that holds for the signed equipment context too: it forwards the token
+    from the generate response straight into the save body without parsing it,
+    rendering it, editing it, or persisting it anywhere.
 
-    assert "exercise_context_token: data.exercise_context_token" in source
+    UX-3 PR3 moved this responsibility out of the retired creation-only
+    `plan_create.js` and into the shared `training_plan_management.js` that BOTH
+    renderers call, so the guard now covers legacy Training as well."""
+    source = (Path(__file__).resolve().parents[1]
+              / "static" / "training_plan_management.js").read_text(encoding="utf-8")
+
+    assert "exercise_context_token: body.exercise_context_token" in source
     token_lines = [
-        line for line in source.splitlines() if "exercise_context_token" in line
+        line for line in source.splitlines()
+        if "exercise_context_token" in line and not line.strip().startswith("*")
     ]
-    assert len(token_lines) == 1
-    for forbidden in ("localStorage", "sessionStorage", "textContent",
-                      "innerHTML", "location", "atob", "JSON.parse",
-                      "searchParams", "split"):
-        assert forbidden not in token_lines[0], forbidden
+    # Read from the generate response once, handed to save once. Nothing else.
+    assert len(token_lines) == 2, token_lines
+    for line in token_lines:
+        for forbidden in ("localStorage", "sessionStorage", "textContent",
+                          "innerHTML", "location", "atob", "JSON.parse",
+                          "searchParams", "split"):
+            assert forbidden not in line, (forbidden, line)
     # The client never invents an equipment context of its own.
-    assert "exercise_context" not in source.replace("exercise_context_token", "")
+    body = "\n".join(line for line in source.splitlines()
+                     if not line.strip().startswith("*"))
+    assert "exercise_context" not in body.replace("exercise_context_token", "")

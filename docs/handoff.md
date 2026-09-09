@@ -1,3 +1,150 @@
+# UX-3 PR3 — Training Placement + Regeneration Convergence
+
+Date: 2026-09-07
+
+Baseline `origin/main` `b77a1dc` (PR #289), one commit past the PR2 merge
+`720d590` (PR #288). No route, schema, migration, algorithm, prompt, flag
+default, or Coach mutation authority changed.
+
+Plan now owns ONE Training-management workflow with two operations that are
+deliberately not the same thing. `management_state` names them: `create` when
+there is no active plan (additive, panel open on arrival, no confirmation
+dialog), `regenerate` when there is one (destructive, entered deliberately,
+confirmed through a modal), and `unavailable` on a read error, where no
+management client ships at all. A `partial_active_plan` is `regenerate`, never
+`create` — a plan that cannot be displayed is still a plan the user follows.
+
+`static/training_plan_management.js` is the single browser Training-management
+contract, extracted the way `workout_execution.js` was extracted for execution in
+PR2. It owns the request sequence (`POST /training-plan` → `POST
+/training-plan/save`, with the signed exercise context forwarded verbatim), the
+bounded state machine that keeps a PROPOSAL distinguishable from a PERSISTED
+plan at every instant, the freshness precheck, and the rule that a write is not
+reported as done until a canonical refresh has run. It renders nothing.
+`static/plan_training_manage.js` (which replaces the creation-only
+`plan_create.js`) and legacy `static/training.js` are its two renderers; legacy
+injects `workoutStateClient.mutate` as the persist transport, so PR2/#285
+save-ordering and the post-mutation bootstrap refresh are unchanged.
+
+The canonical plan-freshness identity is `TrainingPlan.lineage_id` +
+`mutation_version`, published additively by `_active_plan_payload` and therefore
+by both `GET /training/bootstrap` and `GET /training-plan/active`. This is not a
+new disclosure: `GET /api/v1/training/plans/current` already publishes the same
+pair under the same names, and both fields come off the row the shell had
+already loaded, so the landing gains no query.
+
+Stale-plan protection is stated honestly. `POST /training-plan/save` accepts no
+precondition — no expected version, no `If-Match`, no lineage guard — and PR3
+invents none. It adds a canonical precheck: immediately before a destructive
+write the client re-reads `/training/bootstrap` and compares the server's current
+identity against the server's identity at render time, refusing without issuing
+any write when they differ (`plan_changed`) or when either identity cannot be
+read (`freshness_unavailable`). Both readings are the server's. This closes the
+decision window that exists in practice; it does NOT close the sub-request race
+between the re-read and the write. That residual race is pre-existing — before
+PR3 both save paths had no protection whatever — and is recorded as an open P1
+backend prerequisite in `docs/PLAN_DOMAIN_CONVERGENCE.md`: an optional expected
+`(plan_lineage, mutation_version)` on the save routes, compared under the row
+lock the mutation service already takes, returning a typed 409.
+
+Coach mutation coherence is handled by canonical refresh on return, not by
+reading Coach copy. The management renderer re-reads the canonical identity on
+`focus`/`visibilitychange`, throttled to the same 5 s interval
+`workout_state_client` uses, and when the identity has moved it reveals a bounded
+notice that the page is out of date plus a reload. The page never renders or
+guesses the new plan; the server re-renders it. No polling, no cross-page
+storage signalling, and a failed re-read claims nothing.
+
+Active session plus plan replacement follows the contract that already exists:
+the server does not block the replacement, the session's `plan_fingerprint` stops
+matching, and it becomes `plan_regenerated_or_replaced` / `resumable=False` →
+`active_blocked` / `blocked` / `needs_attention`, with checkpoint and completion
+refusing as `SessionStale`. PR3 warns truthfully in the confirmation BEFORE the
+replacement when an active session exists, and renders the server's own
+`stale_reason` afterwards. Stale is never converted into rest, completed, or
+Resume. The #285/#288 draft invariants are unchanged: after the canonical refresh
+the session is no longer `active_resumable`, so the client clears checkpoint
+state and `plan_workout.js` discards the draft.
+
+Both rollout flags keep their defaults and rollback. Regeneration requires
+neither `FITX_WORKOUT_SESSIONS_ENABLED` nor `WEEKLY_PROGRAM_UI_ENABLED`. The
+flag-OFF legacy path keeps every capability it had and now shares the contract
+instead of duplicating it.
+
+**Two defects were found and fixed while proving this.** (1) The destructive
+confirmation was first nested inside `<main>`; `.main-content` carries a filled
+`page-enter` animation whose retained transform makes it a containing block for
+`position: fixed`, so the dialog rendered as a block clipped to the 720 px column
+instead of a viewport overlay. It now lives beside `#session-view` and
+`#plan-completion` outside `</main>`, which is why those already do. Its absence
+also fails CLOSED now: a missing confirmation refuses the replacement instead of
+falling through to the write. (2) `plan_workout.js` withdraws Start/Resume by
+setting `button.hidden = true`, but `.btn-volt` declares `display: inline-flex`
+unconditionally and an author rule of equal specificity beats the UA `[hidden]`
+rule — so a workout action the canonical state had withdrawn stayed visible and
+clickable. Reachable before PR3 (a Coach mutation or a previous-day session
+blocks a session too), but PR3's regeneration is what makes a user produce that
+state deliberately, so `.plan-workout-action[hidden] { display: none; }` ships
+here. The same class of bug on `#sv-abandon` is reported below, not fixed: it is
+PR2 execution-dialog debt that regeneration does not reach.
+
+**Verification.** `tests/test_ux3_pr3_training_management.py` (27) covers the
+identity publication and how it moves under a Coach mutation and a replacement,
+the presenter's create/regenerate separation, rendering, the active-session
+matrix with sessions ON and OFF, flag boundaries, and a provider/query budget.
+`tests/test_ux3_pr3_training_management_browser.py` (18) drives the real page:
+creation end to end, proposal-then-cancel, confirmed replacement, dialog
+dismissal, a plan changed elsewhere, generation failure, save failure, the
+Coach-mutation staleness notice, the shared canonical read on an actionable page,
+superseded-draft invalidation, 320/390/768/1024/1366 overflow and overlay
+geometry, keyboard completion with focus restoration, and EN copy.
+`tests/js/training_plan_management.test.js` (13) exercises the module against
+recorded HTTP traffic and is executed from pytest so CI, which runs pytest only,
+enforces it.
+
+Broad regression on Windows, 8 batches with isolated `--basetemp`, all green:
+731 / 865+1s / 593 / 572+4s / 717+10s / 866+1s / 1061+7s / 963+4s =
+**6368 passed, 27 skipped, 0 failed**. `pytest.ini` deselects `-m "not load"`.
+EXCLUDED: `tests/test_production_deploy_script.py` — the Linux-only deploy
+harness, which does not complete on Windows (22 of its 67 collected tests in
+300 s, no completion). CI runs it in its own `linux-production-locks` job under
+`sudo` with `--run-authoritative-linux-lock-tests`; PR3 changes no deploy file.
+Exact-head GitHub CI remains the merge authority.
+
+**Guards updated with justification.** Four pre-existing guards followed the code
+rather than being relaxed: the retired `plan_create.js` assertions now cover its
+successor and the shared contract (`test_plan_v2.py`,
+`test_sprint11_training_preference_contract.py`); the legacy `savePlan` node
+harness now loads the REAL shared module and asserts the precheck / write /
+refresh ordering, and the token-carrier guard follows the carry into that module
+(`test_training_ui.py`); and the bootstrap closed-schema guard enumerates the two
+additive identity keys exactly, keeping every private-field leak assertion
+(`test_workout_convergence.py`).
+
+**Non-vacuity.** Six sabotages were run and each broke tests that would otherwise
+have passed: ignoring the freshness verdict (7 JS failures), saving on generate
+(15), reporting success without a canonical refresh (5), downgrading a partial
+plan to `create` (1), never reporting a session conflict (1), and publishing a
+constant plan lineage (3). All were reverted and the suites re-run green. Both
+defects above were caught by a failing test before their fix.
+
+**Known open items.** P1 backend prerequisite: no server-side concurrency
+precondition on plan replacement (above). P2: an `active_blocked` session has no
+recovery affordance on the Plan surface; this predates PR3, is dark while the
+session flag is OFF, and belongs with PR6 hardening. P2: `#sv-abandon` in the
+shared session dialog carries the same `hidden`-versus-`.btn-ghost` defect fixed
+for `.plan-workout-action`; it is PR2 execution-dialog debt that regeneration
+does not reach, so it is reported rather than absorbed here.
+
+**PR4 overlap.** PR3 touched `templates/plan.html` (a new macro plus a new block
+after `</main>`; the Nutrition and Supplements sections are untouched),
+`app/plan_presenter.py` and `app/services/plan_facts.py` (additive fields on the
+same dataclasses and the same `shared` dict PR4 will extend), `static/plan.css`
+and both locale files (appended at the end, so PR4 appending there conflicts on
+the tail), and the three narrative docs, which always conflict across sprint PRs.
+Rebase risk is mechanical rather than semantic: no Nutrition presentation,
+route, or authority changed.
+
 # UX-3 PR2 — Plan Shell + State-Action Parity
 
 Date: 2026-09-06

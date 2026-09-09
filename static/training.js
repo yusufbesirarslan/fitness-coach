@@ -104,6 +104,29 @@ function dayShort(v) {
     // parsed, displayed, edited, stored, or put in a URL — it is opaque here.
     let currentPlan = null, currentScore = null, currentContextToken = null;
 
+    // UX-3 PR3 — the SHARED Training-management contract (static/training_plan_
+    // management.js), the same one Plan v2 uses. Legacy keeps its own renderer
+    // (#results, the score banner, the weekly grid) and hands the rules over:
+    // the request sequence, proposal-vs-persisted separation, the canonical
+    // freshness precheck before a destructive replacement, and the requirement
+    // that a successful write be followed by a real canonical refresh.
+    //
+    // The destructive write keeps going through workoutStateClient.mutate, so
+    // save-ordering and the post-mutation bootstrap refresh are byte-for-byte
+    // the behaviour PR2/#285 established — the transport is injected, not
+    // replaced.
+    // Set by applyTrainingSnapshot; the only thing that can turn it true is a
+    // canonical snapshot arriving from the server after the save was issued.
+    let planRefreshedAfterSave = false;
+    const planManagement = window.FitXPlanManagement.createPlanManagement({
+        fetchImpl: window.fetch.bind(window),
+        persist: (url, init) => workoutStateClient.mutate(url, init),
+        // mutate() already performs the canonical /training/bootstrap refresh
+        // and feeds applyTrainingSnapshot, which re-renders the active plan from
+        // the SERVER. Confirm it actually ran rather than assuming it did.
+        refresh: () => Promise.resolve(planRefreshedAfterSave),
+    });
+
     // ── TOAST ──
     function showToast(msg, type = 'info') {
         const icons = { success: '✓', error: '✗', info: 'ℹ' };
@@ -246,6 +269,14 @@ function dayShort(v) {
 
     function applyTrainingSnapshot(snapshot, reason, meta) {
             const data = snapshot.plan || { exists: false };
+            // UX-3 PR3: every canonical snapshot re-states the plan identity the
+            // page is now looking at, and that identity — never a browser-side
+            // one — is what a later replacement is checked against. A Coach
+            // mutation therefore becomes visible to the management workflow
+            // through the SAME focus/visibility/mutation refresh PR2 already
+            // runs, with no cross-page signalling and no trust in Coach prose.
+            planManagement.adoptBaseline(data);
+            planRefreshedAfterSave = true;
             currentWorkoutState = snapshot.workout && snapshot.workout.state;
             currentWorkoutCompleted = !!(snapshot.workout && snapshot.workout.completed);
             activeTodayPlan = snapshot.today_plan || null;
@@ -1158,6 +1189,16 @@ function dayShort(v) {
     }
 
     function resetPlan() {
+        // Entering regeneration must start from a clean proposal: an older
+        // candidate left over from a previous attempt can never be the thing
+        // that replaces the plan. Nothing is written and nothing is discarded
+        // server-side — the active plan stays exactly as it is until an explicit
+        // save succeeds.
+        planManagement.discardProposal();
+        currentPlan = null;
+        currentScore = null;
+        currentContextToken = null;
+        document.getElementById('results').style.display = 'none';
         document.getElementById('active-plan-view').style.display = 'none';
         document.getElementById('setup-form').style.display        = 'block';
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1177,16 +1218,18 @@ function dayShort(v) {
                 showToast(__t('plan.contract.conflicting_preferences'), 'error');
                 return;
             }
-            const res  = await fetch("/training-plan", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(selections)
-            });
-            const data = await res.json();
-            if (data.error) { showToast(data.error, 'error'); return; }
-            currentPlan  = data.program;
-            currentScore = data.overall_score;
-            currentContextToken = data.exercise_context_token;
+            // The shared contract owns the request and the proposal state; this
+            // function still owns how a proposal is presented. A failure leaves
+            // the current plan exactly as it was — nothing is written here.
+            const result = await planManagement.generate(selections);
+            if (!result.ok) {
+                showToast(result.message || __t('plan.manage.error.generation'), 'error');
+                return;
+            }
+            const data = result.proposal.payload;
+            currentPlan  = result.proposal.program;
+            currentScore = result.proposal.score;
+            currentContextToken = result.proposal.exercise_context_token;
             renderResults(data);
         } catch (err) {
             showToast(__t('training.error_prefix') + err.message, 'error');
@@ -1266,50 +1309,44 @@ function dayShort(v) {
         setTimeout(() => document.getElementById("results").scrollIntoView({ behavior:"smooth", block:"start" }), 200);
     }
 
+    // Legacy "Save program" persists the held proposal. On this page it is
+    // reached both with no plan (creation) and after `resetPlan()` from an
+    // active plan (replacement) — the second is destructive, so it goes through
+    // exactly the same canonical freshness precheck Plan v2 uses. A refusal is
+    // reported honestly and writes nothing.
     async function savePlan() {
+        // Declared INSIDE so this function stays self-contained: the legacy
+        // client-behaviour guard in tests/test_training_ui.py extracts exactly
+        // this function's source and runs it, and a free-floating constant would
+        // silently fall outside that extraction.
+        const SAVE_ERROR_COPY = {
+            plan_changed: 'plan.manage.error.plan_changed',
+            freshness_unavailable: 'plan.manage.error.freshness_unavailable',
+            refresh_failed: 'plan.manage.error.refresh_failed',
+        };
         const btn = document.getElementById("save-btn");
         if (!currentPlan) return;
-        // Saving is destructive, so it may only proceed from canonical state the
-        // page has actually read. Without it there is no expectation to send and
-        // the server would refuse anyway; refusing here keeps the failure honest
-        // ("reload") instead of surfacing it as a malformed request.
-        if (typeof activePlanIdentity === 'undefined') {
-            showToast(__t('training.save_error_prefix') + __t('training.plan_changed'), 'error');
+        // Destructive save is owned by the shared Training-management contract
+        // (UX-3 PR3). expected_plan / 409 handling live there so this page
+        // cannot send a later re-read as the replacement authority.
+        planRefreshedAfterSave = false;
+        const result = await planManagement.replace();
+        if (!result.ok) {
+            const key = SAVE_ERROR_COPY[result.code];
+            showToast(key ? __t(key)
+                          : __t('training.save_error_prefix') +
+                            (result.message || result.code || 'request_failed'),
+                      'error');
             return;
         }
-        try {
-            const result = await workoutStateClient.mutate("/training-plan/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    plan: currentPlan,
-                    score: currentScore,
-                    exercise_context_token: currentContextToken,
-                    // The precondition, exactly as last read from the server. It
-                    // narrows the window; the SERVER closes it — a 409 here means
-                    // the plan moved after this read and nothing was overwritten.
-                    expected_plan: activePlanIdentity
-                })
-            });
-            if (!result || !result.ok) {
-                if (result && result.status === 409) {
-                    // Not a save failure the user can retry as-is: canonical
-                    // state moved and nothing was overwritten. No refresh call
-                    // is needed here — mutate() always re-reads /training/bootstrap
-                    // before it resolves, so activePlanIdentity is already being
-                    // re-anchored and the next attempt carries a current
-                    // expectation rather than the same stale one.
-                    throw new Error(__t('training.plan_changed'));
-                }
-                const detail = result && result.body && result.body.error;
-                throw new Error(detail || "request_failed");
-            }
-            btn.textContent = __t('training.saved');
-            btn.classList.add("saved");
-            showToast(__t('training.program_saved'), 'success');
-        } catch (err) {
-            showToast(__t('training.save_error_prefix') + err.message, 'error');
-        }
+        // The proposal has been consumed: it is now the server's active plan and
+        // must not be replayable as a second destructive write.
+        currentPlan = null;
+        currentScore = null;
+        currentContextToken = null;
+        btn.textContent = __t('training.saved');
+        btn.classList.add("saved");
+        showToast(__t('training.program_saved'), 'success');
     }
 
     // ── Pump Check modal olay bağlantıları ──
