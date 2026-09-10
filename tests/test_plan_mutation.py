@@ -22,6 +22,7 @@ from app.services.plan_mutation import (
     AddExerciseCommand,
     AmbiguousExerciseTarget,
     DayNotFound,
+    ExerciseAlreadyPresent,
     ExerciseNotFound,
     InvalidMutation,
     InvalidPrescription,
@@ -1327,3 +1328,368 @@ class TestLegacyDocumentsAreUnchanged:
 
         assert changed is True
         assert _names(mutated, "Çarşamba") == ["Barbell Row", "Lat Pulldown"]
+
+
+# ── Duplicate-add guard ──────────────────────────────────────────────────────
+#
+# One exercise identity, at most one slot, per workout day. Production carries
+# a Friday holding "Walking Lunge 4x15" AND "Walking Lunge 4x12" — two slots a
+# later ``add`` appended — so the matrix below is written against a defect that
+# actually shipped, not a hypothetical one.
+#
+# The three outcomes are deliberately different facts and are asserted as
+# different facts: already true (a no-op), already there but not like that (a
+# typed conflict), and a day whose history already holds it twice (fail
+# closed). Nothing here repairs data.
+
+
+def _version(user_id):
+    from app.extensions import db
+    from app.services.today_facts import get_active_plan
+
+    db.session.expire_all()
+    return get_active_plan(user_id).mutation_version
+
+
+class TestDuplicateAddGuardOnCanonicalPlans:
+    """Identity is the catalog's ``exercise_id``, so wording cannot evade it."""
+
+    def test_adding_an_exercise_the_day_does_not_have_still_appends(self):
+        """Case A. The guard refuses duplicates, not additions."""
+        document = canonical_document(equipment_context="minimal")
+
+        mutated, changed = apply_command(document, AddExerciseCommand(
+            day="Çarşamba", exercise="Goblet Squat", sets=4, reps="12"))
+
+        assert changed is True
+        assert _names(mutated, "Çarşamba") == ["Bodyweight Squat",
+                                               "Goblet Squat"]
+
+    def test_an_exact_duplicate_is_a_deterministic_no_op(self):
+        """Case B. Already true is an accepted request and not a change — and
+        the ORIGINAL document comes back, which is what lets the service skip
+        the write entirely instead of rewriting identical bytes."""
+        document = canonical_document(equipment_context="minimal")
+        before = json.dumps(document, ensure_ascii=False)
+
+        mutated, changed = apply_command(document, AddExerciseCommand(
+            day="Çarşamba", exercise="Bodyweight Squat", sets=4,
+            reps="12-15"))
+
+        assert changed is False
+        assert mutated is document
+        assert json.dumps(mutated, ensure_ascii=False) == before
+
+    def test_an_alias_cannot_add_a_second_slot_for_the_same_exercise(self):
+        """Case C. "Band Row" and "Resistance Band Row" are ONE exercise. A
+        name-only guard would have seen two unrelated strings and appended."""
+        document = canonical_document(equipment_context="minimal")
+        seeded, _changed = apply_command(document, AddExerciseCommand(
+            day="Çarşamba", exercise="Resistance Band Row", sets=3,
+            reps="10-12"))
+
+        mutated, changed = apply_command(seeded, AddExerciseCommand(
+            day="Çarşamba", exercise="Band Row", sets=3, reps="10-12"))
+
+        assert changed is False
+        assert [entry["exercise_id"]
+                for entry in _day(mutated, "Çarşamba")["egzersizler"]] == [
+            "ex_bodyweight_squat", "ex_band_row"]
+
+    def test_an_alias_with_a_different_prescription_is_refused_too(self):
+        """The alias path reaches the SAME conflict, not a second append."""
+        document = canonical_document(equipment_context="minimal")
+        seeded, _changed = apply_command(document, AddExerciseCommand(
+            day="Çarşamba", exercise="Resistance Band Row", sets=3,
+            reps="10-12"))
+
+        with pytest.raises(ExerciseAlreadyPresent):
+            apply_command(seeded, AddExerciseCommand(
+                day="Çarşamba", exercise="Band Row", sets=4, reps="8"))
+
+    def test_a_different_prescription_is_refused_and_never_rewrites(self):
+        """Case D. The user issued ADD. Turning that into an UPDATE would
+        apply a change they did not ask for, so the plan is left alone and the
+        refusal is typed."""
+        document = canonical_document(equipment_context="minimal")
+        before = json.dumps(document, ensure_ascii=False)
+
+        with pytest.raises(ExerciseAlreadyPresent):
+            apply_command(document, AddExerciseCommand(
+                day="Çarşamba", exercise="Bodyweight Squat", sets=3,
+                reps="10"))
+
+        assert json.dumps(document, ensure_ascii=False) == before
+        entry = _entry(document, "Çarşamba")
+        assert (entry["set"], entry["tekrar"]) == (4, "12-15")
+
+    def test_the_same_exercise_on_a_different_day_is_allowed(self):
+        """Case E. The invariant is identity + DAY, never identity anywhere in
+        the week: a squat on leg day and on a full-body day is an ordinary
+        plan, and a weekly-global rule would refuse plans the generator writes
+        itself."""
+        document = canonical_document(equipment_context="minimal")
+
+        mutated, changed = apply_command(document, AddExerciseCommand(
+            day="Cuma", exercise="Bodyweight Squat", sets=4, reps="12-15"))
+
+        assert changed is True
+        assert _names(mutated, "Cuma") == ["Plank", "Bodyweight Squat"]
+        assert _names(mutated, "Çarşamba") == ["Bodyweight Squat"]
+
+    def test_a_day_that_already_holds_two_copies_fails_closed(self):
+        """Case F. Historical dirty state. A third copy is the one outcome
+        that is certainly wrong; choosing, merging or deleting one of the two
+        would each be a repair nobody requested."""
+        document = canonical_document(equipment_context="minimal")
+        _day(document, "Çarşamba")["egzersizler"].append(
+            {"isim": "Bodyweight Squat", "set": 3, "tekrar": "10",
+             "exercise_id": "ex_bodyweight_squat"})
+        before = json.dumps(document, ensure_ascii=False)
+
+        with pytest.raises(AmbiguousExerciseTarget):
+            apply_command(document, AddExerciseCommand(
+                day="Çarşamba", exercise="Bodyweight Squat", sets=5,
+                reps="8"))
+
+        assert json.dumps(document, ensure_ascii=False) == before
+
+    def test_two_historical_copies_are_refused_even_at_a_matching_rx(self):
+        """Ambiguity is decided BEFORE the prescription comparison: with two
+        candidates there is no single "the existing one" to compare against."""
+        document = canonical_document(equipment_context="minimal")
+        _day(document, "Çarşamba")["egzersizler"].append(
+            {"isim": "Bodyweight Squat", "set": 4, "tekrar": "12-15",
+             "exercise_id": "ex_bodyweight_squat"})
+
+        with pytest.raises(AmbiguousExerciseTarget):
+            apply_command(document, AddExerciseCommand(
+                day="Çarşamba", exercise="Bodyweight Squat", sets=4,
+                reps="12-15"))
+
+    def test_an_unknown_exercise_is_still_refused_before_the_guard(self):
+        """Case H. The duplicate rule is additional, never a bypass — a name
+        the catalog does not declare is still not an exercise."""
+        document = canonical_document(equipment_context="minimal")
+
+        with pytest.raises(InvalidMutation):
+            apply_command(document, AddExerciseCommand(
+                day="Çarşamba", exercise="Machine Chest Press", sets=3,
+                reps="10"))
+
+    def test_placement_and_equipment_gates_still_run_first(self):
+        """Case I. Both gates come BEFORE the duplicate check, so an exercise
+        the context forbids is refused as incompatible rather than quietly
+        answered "already there" — and cardio placement is unchanged."""
+        home = canonical_document(equipment_context="ev")
+
+        with pytest.raises(InvalidMutation):
+            apply_command(home, AddExerciseCommand(
+                day="Çarşamba", exercise="Goblet Squat", sets=3, reps="10"))
+
+        gym = canonical_document(equipment_context="minimal")
+        with pytest.raises(InvalidMutation):
+            apply_command(gym, AddExerciseCommand(
+                day="Çarşamba", exercise="Brisk Walk", sets=1, reps="20 dk"))
+
+    def test_a_rest_day_is_still_refused(self):
+        document = canonical_document(equipment_context="minimal")
+
+        with pytest.raises(InvalidMutation):
+            apply_command(document, AddExerciseCommand(
+                day="Salı", exercise="Goblet Squat", sets=3, reps="10"))
+
+
+class TestDuplicateAddGuardOnLegacyPlans:
+    """Case G. A legacy plan keeps its own identity rule and its own shape."""
+
+    def test_the_existing_casefold_name_rule_decides_sameness(self):
+        document = _legacy_document()
+
+        mutated, changed = apply_command(document, AddExerciseCommand(
+            day="Çarşamba", exercise="  barbell row  ", sets=4,
+            reps="6-10"))
+
+        assert changed is False
+        assert mutated is document
+
+    def test_a_legacy_duplicate_at_another_prescription_is_refused(self):
+        document = _legacy_document()
+        before = json.dumps(document, ensure_ascii=False)
+
+        with pytest.raises(ExerciseAlreadyPresent):
+            apply_command(document, AddExerciseCommand(
+                day="Çarşamba", exercise="Barbell Row", sets=3, reps="12"))
+
+        assert json.dumps(document, ensure_ascii=False) == before
+
+    def test_the_guard_never_upgrades_a_legacy_document_to_catalog_identity(
+            self, monkeypatch):
+        """The dangerous direction. If the guard reached for the catalog to
+        decide sameness on a legacy plan, that plan would silently gain
+        ``exercise_id`` values nothing authorized — and the catalog would not
+        even have to be reachable for this path to work."""
+        from app.services.plan_mutation import document as document_module
+
+        def _forbidden():
+            raise AssertionError("legacy add loaded the exercise catalog")
+
+        monkeypatch.setattr(
+            document_module, "load_exercise_catalog", _forbidden)
+        document = _legacy_document()
+
+        mutated, changed = apply_command(document, AddExerciseCommand(
+            day="Çarşamba", exercise="Lat Pulldown", sets=3, reps="10-12"))
+
+        assert changed is True
+        entries = _day(mutated, "Çarşamba")["egzersizler"]
+        assert all("exercise_id" not in entry for entry in entries)
+        assert entries[-1] == {"isim": "Lat Pulldown", "set": 3,
+                               "tekrar": "10-12"}
+
+    def test_superficially_similar_legacy_names_stay_distinct(self):
+        """"Squat" and "Front Squat" are two exercises, and the guard must not
+        collapse them — no prefix, substring or fuzzy matching anywhere."""
+        document = _legacy_document()
+
+        mutated, changed = apply_command(document, AddExerciseCommand(
+            day="Cuma", exercise="Front Squat", sets=3, reps="8"))
+
+        assert changed is True
+        assert _names(mutated, "Cuma") == ["Squat", "Front Squat"]
+
+    def test_a_legacy_bare_list_document_is_guarded_too(self):
+        document = _legacy_document()["program"]
+
+        mutated, changed = apply_command(document, AddExerciseCommand(
+            day="Cuma", exercise="Squat", sets=5, reps="5"))
+
+        assert changed is False
+        assert mutated is document
+
+
+class TestDuplicateAddGuardThroughTheService:
+    """The same outcomes as PERSISTED state: bytes, version, journal."""
+
+    def test_an_exact_duplicate_persists_nothing_and_moves_no_version(
+            self, app, make_user, seed_plan):
+        """Case B, end to end. A no-op must not rewrite the plan text and must
+        not consume a version — a version that moves for a change that did not
+        happen makes every later precondition lie."""
+        from app.models import PlanMutationRecord
+        from app.services.plan_mutation.journal import OUTCOME_NO_OP
+
+        user = make_user("dupnoop")
+        text = seed_plan(user.id)
+
+        result = _mutate(user.id, AddExerciseCommand(
+            day="Çarşamba", exercise="Barbell Row", sets=4, reps="6-10"))
+
+        assert result.outcome == OUTCOME_NO_OP
+        assert result.changed is False
+        assert _stored_text(user.id) == text
+        assert _version(user.id) == 0
+        assert _names(_stored(user.id), "Çarşamba") == ["Barbell Row"]
+        records = PlanMutationRecord.query.filter_by(user_id=user.id).all()
+        assert [record.outcome for record in records] == [OUTCOME_NO_OP]
+
+    def test_a_different_prescription_persists_nothing_at_all(
+            self, app, make_user, seed_plan):
+        """Case D, end to end. No append, no hidden update, no version, and no
+        journal row — a refused command consumes no operation identity."""
+        from app.models import PlanMutationRecord
+
+        user = make_user("dupconflict")
+        text = seed_plan(user.id)
+
+        with pytest.raises(ExerciseAlreadyPresent):
+            _mutate(user.id, AddExerciseCommand(
+                day="Çarşamba", exercise="Barbell Row", sets=3, reps="12"))
+
+        assert _stored_text(user.id) == text
+        assert _version(user.id) == 0
+        entry = _day(_stored(user.id), "Çarşamba")["egzersizler"][0]
+        assert (entry["set"], entry["tekrar"]) == (4, "6-10")
+        assert PlanMutationRecord.query.filter_by(user_id=user.id).count() == 0
+
+    def test_two_sequential_adds_of_one_exercise_leave_one_slot(
+            self, app, make_user, seed_plan):
+        """The production defect, as a persisted sequence. Two independent
+        requests — different operation keys, so idempotency is NOT what is
+        being tested here — and the day still holds one slot."""
+        user = make_user("dupsequence")
+        seed_plan(user.id)
+
+        first = _mutate(user.id, AddExerciseCommand(
+            day="Çarşamba", exercise="Walking Lunge", sets=4, reps="15"))
+        second = _mutate(user.id, AddExerciseCommand(
+            day="Çarşamba", exercise="Walking Lunge", sets=4, reps="15"))
+
+        assert (first.changed, second.changed) == (True, False)
+        assert _names(_stored(user.id), "Çarşamba") == [
+            "Barbell Row", "Walking Lunge"]
+        assert _version(user.id) == 1
+
+    def test_a_replay_is_not_the_duplicate_guard(self, app, make_user,
+                                                 seed_plan):
+        """Idempotency replay and duplicate identity are different mechanisms
+        and must stay separable: the SAME key replays the durable result and
+        still reports ``applied``, where a fresh key would newly observe the
+        exercise and report a no-op."""
+        user = make_user("dupreplay")
+        seed_plan(user.id)
+        command = AddExerciseCommand(
+            day="Çarşamba", exercise="Walking Lunge", sets=4, reps="15")
+        context = MutationContext(idempotency_key="dup-replay-0001")
+
+        first = apply_plan_mutation(user.id, command, context)
+        replayed = apply_plan_mutation(user.id, command, context)
+
+        assert first.replayed is False and first.changed is True
+        assert replayed.replayed is True and replayed.changed is True
+        assert _version(user.id) == 1
+        assert _names(_stored(user.id), "Çarşamba") == [
+            "Barbell Row", "Walking Lunge"]
+
+    def test_the_guard_does_not_change_replace_update_or_remove(
+            self, app, make_user, seed_plan):
+        """Cases J/K/L. Only ``add`` gained a rule: ``replace`` can still
+        produce a day holding one name twice, and ``update``/``remove`` still
+        answer that state with the existing ambiguity refusal."""
+        user = make_user("dupothers")
+        seed_plan(user.id)
+
+        _mutate(user.id, ReplaceExerciseCommand(
+            day="Pazartesi", exercise="Bench Press",
+            replacement="Shoulder Press"))
+        assert _names(_stored(user.id), "Pazartesi") == [
+            "Shoulder Press", "Shoulder Press"]
+
+        with pytest.raises(AmbiguousExerciseTarget):
+            _mutate(user.id, UpdateExercisePrescriptionCommand(
+                day="Pazartesi", exercise="Shoulder Press", sets=5))
+        with pytest.raises(AmbiguousExerciseTarget):
+            _mutate(user.id, RemoveExerciseCommand(
+                day="Pazartesi", exercise="Shoulder Press"))
+
+    def test_a_duplicate_no_op_is_not_an_undoable_state_transition(
+            self, app, make_user, seed_plan):
+        """Case M. A no-op creates no state to reverse, so the undo that
+        follows it steps back over the last REAL change — it neither reverses
+        the no-op nor fails because one sits on top of history."""
+        from app.services.plan_mutation import undo_last_change
+
+        user = make_user("dupundo")
+        text = seed_plan(user.id)
+
+        _mutate(user.id, AddExerciseCommand(
+            day="Çarşamba", exercise="Walking Lunge", sets=4, reps="15"))
+        _mutate(user.id, AddExerciseCommand(
+            day="Çarşamba", exercise="Walking Lunge", sets=4, reps="15"))
+
+        undone = undo_last_change(
+            user.id, MutationContext(idempotency_key="dup-undo-0001"))
+
+        assert undone.changed is True
+        assert _stored_text(user.id) == text
+        assert _version(user.id) == 2

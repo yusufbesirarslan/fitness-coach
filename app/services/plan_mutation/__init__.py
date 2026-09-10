@@ -46,6 +46,7 @@ from .context import (
 from .errors import (
     AmbiguousExerciseTarget,
     DayNotFound,
+    ExerciseAlreadyPresent,
     ExerciseNotFound,
     IdempotencyConflict,
     InvalidMutation,
@@ -72,6 +73,7 @@ __all__ = [
     "AddExerciseCommand",
     "AmbiguousExerciseTarget",
     "DayNotFound",
+    "ExerciseAlreadyPresent",
     "ExerciseNotFound",
     "IdempotencyConflict",
     "InvalidMutation",

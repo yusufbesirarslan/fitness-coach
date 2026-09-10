@@ -21,6 +21,7 @@ from app.services.plan_mutation import (
     AddExerciseCommand,
     AmbiguousExerciseTarget,
     DayNotFound,
+    ExerciseAlreadyPresent,
     ExerciseNotFound,
     IdempotencyConflict,
     InvalidMutation,
@@ -60,6 +61,7 @@ ERROR_PLAN_NOT_MUTABLE = "PLAN_NOT_MUTABLE"
 ERROR_DAY_NOT_FOUND = "DAY_NOT_FOUND"
 ERROR_TARGET_NOT_FOUND = "TARGET_NOT_FOUND"
 ERROR_AMBIGUOUS_TARGET = "AMBIGUOUS_TARGET"
+ERROR_EXERCISE_ALREADY_PRESENT = "EXERCISE_ALREADY_PRESENT"
 ERROR_INVALID_MUTATION = "INVALID_MUTATION"
 ERROR_INVALID_PRESCRIPTION = "INVALID_PRESCRIPTION"
 ERROR_INVALID_ARGUMENTS = "INVALID_ARGUMENTS"
@@ -82,6 +84,7 @@ ERROR_UNSUPPORTED_IMPACT = "UNSUPPORTED_IMPACT"
 #: what keeps a domain wording change from becoming a contract change.
 _ERROR_BY_EXCEPTION = (
     (AmbiguousExerciseTarget, ERROR_AMBIGUOUS_TARGET),
+    (ExerciseAlreadyPresent, ERROR_EXERCISE_ALREADY_PRESENT),
     (ExerciseNotFound, ERROR_TARGET_NOT_FOUND),
     (DayNotFound, ERROR_DAY_NOT_FOUND),
     (InvalidPrescription, ERROR_INVALID_PRESCRIPTION),
@@ -113,6 +116,13 @@ _ERROR_MESSAGES = {
         "Bu ad o gün içinde birden fazla egzersizle eşleşiyor. Hangisini "
         "kastettiğini kullanıcıya SOR. Sıradaki ilkini seçme, konuma göre "
         "tahmin etme, aracı tekrar çağırma."),
+    ERROR_EXERCISE_ALREADY_PRESENT: (
+        "Bu egzersiz o antrenmanda ZATEN var. Plan DEĞİŞMEDİ ve ikinci bir "
+        "kopya eklenmedi; eklendiğini SÖYLEME. İstenen set/tekrar mevcut "
+        "olandan farklı olsa bile mevcut egzersizi kendiliğinden güncelleme "
+        "ve başka bir plan aracını çağırma. Kullanıcıya egzersizin planda "
+        "zaten olduğunu söyle; farklı set/tekrar istiyorsa mevcut egzersizi "
+        "değiştirmek istediğini AÇIKÇA söylemesini iste."),
     ERROR_INVALID_MUTATION: (
         "Bu değişiklik uygulanamaz. Değerleri kendiliğinden kırpma veya "
         "yeniden yorumlama; kullanıcıya neyin mümkün olmadığını açıkla."),
@@ -270,6 +280,13 @@ def _summary_of(command, applied):
         return (f"{command.day} gününde {command.exercise} yerine "
                 f"{command.replacement} kondu.")
     if isinstance(command, AddExerciseCommand):
+        if not applied:
+            # An ``add`` CAN now come back as a no-op: the exercise was
+            # already in that day at exactly this prescription. Saying
+            # "eklendi" here would narrate a change that did not happen.
+            return (f"{command.day} gününde {command.exercise} zaten "
+                    f"{command.sets}x{command.reps} olarak vardı; plan "
+                    f"değişmedi.")
         return (f"{command.day} gününe {command.exercise} eklendi "
                 f"({command.sets}x{command.reps}).")
     if isinstance(command, RemoveExerciseCommand):

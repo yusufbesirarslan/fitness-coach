@@ -53,6 +53,36 @@ class AmbiguousExerciseTarget(PlanMutationError):
     The behaviour itself is unchanged either way: rather than silently picking
     an occurrence the caller did not identify, an ambiguous target is refused
     and the plan is left exactly as it was.
+
+    ``add`` reaches this too, for the one state that predates the duplicate
+    guard: a day that ALREADY holds the incoming exercise more than once. It
+    is the same fact — several candidates, no way to tell which one the caller
+    meant — so it gets the same refusal, and nothing is appended, merged,
+    chosen or deleted.
+    """
+
+
+class ExerciseAlreadyPresent(PlanMutationError):
+    """An ``add`` names an exercise the target day ALREADY holds, differently.
+
+    The product invariant is one exercise identity, at most one slot, per
+    workout day — so an ``add`` may never append a second occurrence. When the
+    existing slot already carries the requested prescription the request is
+    simply already true and comes back as a deterministic no-op; this class is
+    the OTHER case, where the day holds that exercise at a *different*
+    prescription.
+
+    It is refused rather than silently converted into an update: the caller
+    asked to ADD an exercise, and quietly rewriting the sets/reps of the one
+    already there is a change nobody requested. That decision is the user's and
+    takes an explicit update.
+
+    "Same exercise" is the plan's own identity rule, never a second one — the
+    catalog's ``exercise_id`` on a canonical plan, so an alias cannot slip a
+    duplicate past this, and the existing casefold ``isim`` comparison on a
+    legacy name-only plan. A day that ALREADY holds more than one matching slot
+    is historical state this boundary does not repair: it raises
+    ``AmbiguousExerciseTarget`` and appends nothing.
     """
 
 
