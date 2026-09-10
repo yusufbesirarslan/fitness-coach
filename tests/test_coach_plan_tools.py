@@ -307,24 +307,36 @@ def test_a_new_turn_gets_a_new_budget_and_a_new_identity(
     """Two user messages asking for the same thing are two intents (§19).
 
     The user who says "add cable flies" twice, in two messages, has asked
-    twice. Convergence is a within-turn guarantee, and this test states that
-    boundary rather than letting it be assumed either way.
+    twice: two turns, two turn identities, two distinct operation keys, two
+    journal rows — NOT one replayed operation. That is what this test pins,
+    and none of it changed.
+
+    What the second request now DOES is settled one layer down. It is a
+    genuinely new operation, it reaches the plan, and it observes that the
+    exercise is already there — so it converges on a no-op instead of
+    appending a second identical slot. Before the duplicate-add guard this
+    test asserted two slots, which is precisely the production defect (a
+    Friday holding "Walking Lunge 4x15" and "Walking Lunge 4x12") the guard
+    exists to prevent. Distinct intent and duplicate state were never the same
+    claim; only the second one was wrong.
     """
     from app.observability import assign_request_id
 
     arguments = {"day": "Pazartesi", "exercise": "Push-Up",
                  "sets": 3, "reps": "12"}
     turn_ids = []
+    statuses = []
     for _ in range(2):
         with app.test_request_context("/ask", method="POST"):
             assign_request_id()
             ai_coach._begin_coach_turn()
             turn_ids.append(identity.current_turn_id())
-            assert call(planned_user.id, ADD, dict(arguments))["status"] == \
-                results.STATUS_APPLIED
+            statuses.append(call(planned_user.id, ADD,
+                                 dict(arguments))["status"])
 
     assert turn_ids[0] != turn_ids[1]
-    assert names(planned_user.id).count("Push-Up") == 2
+    assert statuses == [results.STATUS_APPLIED, results.STATUS_NO_OP]
+    assert names(planned_user.id).count("Push-Up") == 1
     assert len({e.idempotency_key for e in journal(planned_user.id)}) == 2
 
 
@@ -1314,3 +1326,219 @@ def test_no_canonical_tool_result_leaks_catalog_identity_to_the_model(
         assert "ex_" not in blob
         assert "catalog" not in blob.lower()
         assert "equipment_context" not in blob
+
+
+# ── The duplicate-add guard, as the model and the user experience it ─────────
+#
+# ``add`` could not no-op before this guard existed, so "X eklendi" was the
+# only sentence the formatter had for it. Now the same tool has three honest
+# answers and the model must be handed the right one — a plan that did not
+# change, narrated as a change, is the failure mode the whole boundary exists
+# to prevent.
+
+
+def test_adding_an_exercise_that_is_already_there_at_the_same_rx_is_a_no_op(
+        app, planned_user, tools_on, turn):
+    """Case N. Barbell Row is already Çarşamba 4x6-10."""
+    before = day_exercises(planned_user.id, "Çarşamba")
+
+    result = call(planned_user.id, ADD,
+                  {"day": "Çarşamba", "exercise": "Barbell Row",
+                   "sets": 4, "reps": "6-10"})
+
+    assert result["status"] == results.STATUS_NO_OP
+    assert day_exercises(planned_user.id, "Çarşamba") == before
+    assert plan_version(planned_user.id) == 0
+    assert coach_plan_tools.plan_changed_this_turn() is False
+
+
+def test_a_no_op_add_is_never_narrated_as_an_addition(
+        app, planned_user, tools_on, turn):
+    """The sentence itself, because the sentence is what the user hears.
+
+    ``summary`` is the model's grounded description of what the plan now says;
+    if it reads "eklendi" the model has been handed a change that did not
+    happen, and the ``note`` telling it not to claim one is competing with the
+    text right above it instead of reinforcing it."""
+    result = call(planned_user.id, ADD,
+                  {"day": "Çarşamba", "exercise": "Barbell Row",
+                   "sets": 4, "reps": "6-10"})
+
+    assert "eklendi" not in result["summary"]
+    assert "zaten" in result["summary"]
+    assert "değişmedi" in result["summary"]
+    assert "SÖYLEME" in result["note"]
+
+
+def test_an_applied_add_still_says_it_was_added(
+        app, planned_user, tools_on, turn):
+    """The other half of the same claim: the truthful no-op wording must not
+    have been bought by making a real addition sound tentative."""
+    result = call(planned_user.id, ADD,
+                  {"day": "Pazartesi", "exercise": "Lat Pulldown",
+                   "sets": 3, "reps": "10-12"})
+
+    assert result["status"] == results.STATUS_APPLIED
+    assert "eklendi" in result["summary"]
+    assert names(planned_user.id) == [
+        "Bench Press", "Shoulder Press", "Lat Pulldown"]
+
+
+def test_adding_an_existing_exercise_at_another_rx_is_a_bounded_conflict(
+        app, planned_user, tools_on, turn):
+    """Case O. No second slot, no silent update, no journal row."""
+    before = day_exercises(planned_user.id, "Çarşamba")
+
+    result = call(planned_user.id, ADD,
+                  {"day": "Çarşamba", "exercise": "Barbell Row",
+                   "sets": 3, "reps": "12"})
+
+    assert result["status"] == results.STATUS_ERROR
+    assert result["error"] == results.ERROR_EXERCISE_ALREADY_PRESENT
+    assert day_exercises(planned_user.id, "Çarşamba") == before
+    assert plan_version(planned_user.id) == 0
+    assert journal(planned_user.id) == []
+    assert coach_plan_tools.plan_changed_this_turn() is False
+
+
+def test_the_already_present_message_forbids_a_silent_update(
+        app, planned_user, tools_on, turn):
+    """The recovery text travels with the failure it describes (§29). It has to
+    say all four things, because a model told only "that failed" will helpfully
+    reach for the update tool and apply the change nobody confirmed."""
+    message = results._ERROR_MESSAGES[results.ERROR_EXERCISE_ALREADY_PRESENT]
+
+    assert "ZATEN" in message                      # it is already there
+    assert "DEĞİŞMEDİ" in message                  # nothing was persisted
+    assert "SÖYLEME" in message                    # do not claim success
+    assert "çağırma" in message                    # do not call another tool
+
+
+def test_asking_twice_in_two_turns_adds_one_slot_through_the_provider_loop(
+        app, planned_user, tools_on, monkeypatch):
+    """Case P, blocking ``/ask``: two whole turns through the real provider loop.
+
+    Two turns rather than two calls inside one, because that is the shape the
+    production defect actually had — a user who asks again in a later message.
+    Within one turn the operation key already converges a repeat into a replay
+    (§35, tested separately); across turns it is a genuinely new operation with
+    a new key, and only the domain guard can stop the second append.
+
+    Both turns are asserted end to end, so the tool result the model was handed
+    is the one the real loop produced and the persisted plan is the one it left
+    behind."""
+    from app.observability import assign_request_id
+
+    _openai_only(monkeypatch)
+    arguments = {"day": "Pazartesi", "exercise": "Lat Pulldown",
+                 "sets": 3, "reps": "10-12"}
+    for _ in range(2):
+        monkeypatch.setattr(ai_coach, "openai_client", _ScriptedOpenAI([
+            (ADD, dict(arguments)),
+        ]))
+        with app.test_request_context("/ask", method="POST"):
+            assign_request_id()
+            ai_coach._run_coach_conversation(
+                planned_user.id, "pazartesiye lat pulldown 3x10-12 ekle", "",
+                client_history=[])
+
+    assert day_exercises(planned_user.id) == [
+        ("Bench Press", 3, "8-12"),
+        ("Shoulder Press", 4, "10-12"),
+        ("Lat Pulldown", 3, "10-12"),
+    ]
+    outcomes = [record.outcome for record in journal(planned_user.id)]
+    assert outcomes == ["applied", "no_op"]
+    assert plan_version(planned_user.id) == 1
+
+
+def test_the_streaming_path_refuses_the_duplicate_the_same_way(
+        app, planned_user, tools_on, monkeypatch):
+    """Case P, ``/ask/stream``. Same domain, same refusal, same state — the
+    transport must not be able to produce a different plan."""
+    from types import SimpleNamespace
+
+    from app.observability import assign_request_id
+    from app.services import ai_stream
+
+    block = SimpleNamespace(
+        type="tool_use", name=ADD, id="t1",
+        input={"day": "Çarşamba", "exercise": "Barbell Row", "sets": 3,
+               "reps": "12"})
+    first = SimpleNamespace(stop_reason="tool_use", content=[block],
+                            usage=None)
+    closing = SimpleNamespace(stop_reason="end_turn", content=[], usage=None)
+    state = {"n": 0}
+
+    class _Stream:
+        def __init__(self, message):
+            self._message = message
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        text_stream = ()
+
+        def get_final_message(self):
+            return self._message
+
+    class _Messages:
+        def stream(self, **_kwargs):
+            state["n"] += 1
+            return _Stream(first if state["n"] == 1 else closing)
+
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai_coach, "_anthropic", object())
+    monkeypatch.setattr(ai_coach, "bedrock_client",
+                        SimpleNamespace(messages=_Messages()))
+    before = day_exercises(planned_user.id, "Çarşamba")
+
+    with app.test_request_context("/ask/stream", method="POST"):
+        assign_request_id()
+        events = list(ai_stream.stream_coach_answer(
+            planned_user.id, "çarşambaya barbell row 3x12 ekle", "", [],
+            "tr"))
+
+    assert [e for e in events if e["type"] == "error"] == []
+    assert day_exercises(planned_user.id, "Çarşamba") == before
+    assert plan_version(planned_user.id) == 0
+    assert journal(planned_user.id) == []
+
+
+def test_a_canonicalised_destination_name_is_what_a_legacy_plan_is_matched_on(
+        app, planned_user, tools_on):
+    """The documented edge, pinned rather than left to be discovered.
+
+    Coach ADD destinations are canonicalised by ``exercise_grounding`` BEFORE
+    the domain sees them — "Bench Press" is written as "Barbell Bench Press".
+    That predates this guard and is not changed by it. On a LEGACY name-only
+    plan whose slot the GENERATOR wrote under a non-canonical name, the two
+    strings genuinely are not the same exercise under the only identity model
+    a legacy document has, so the add appends.
+
+    Closing this would mean resolving legacy names through the catalog, i.e.
+    giving legacy documents catalog identity — the one thing this task is
+    explicitly not allowed to do. It is also self-correcting in practice:
+    every name the Coach writes is already canonical, so a second Coach add
+    of the same exercise DOES converge, which the assertion below also shows.
+    A canonical plan (one carrying a verified ``exercise_context``) is
+    unaffected — there identity is the ``exercise_id`` and the alias matches.
+    """
+    from app.observability import assign_request_id
+
+    arguments = {"day": "Pazartesi", "exercise": "Bench Press",
+                 "sets": 3, "reps": "8-12"}
+    statuses = []
+    for _ in range(2):
+        with app.test_request_context("/ask", method="POST"):
+            assign_request_id()
+            ai_coach._begin_coach_turn()
+            statuses.append(call(planned_user.id, ADD,
+                                 dict(arguments))["status"])
+
+    assert statuses == [results.STATUS_APPLIED, results.STATUS_NO_OP]
+    assert names(planned_user.id) == [
+        "Bench Press", "Shoulder Press", "Barbell Bench Press"]

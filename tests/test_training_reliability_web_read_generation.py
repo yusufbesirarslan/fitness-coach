@@ -51,14 +51,22 @@ def _mutated_program():
     Built by running the real canonical mutation writer, not by hand-writing
     what we think it emits — if that writer ever starts emitting the full
     exercise shape, this regression must follow it rather than pin a fiction.
+
+    The exercise must be one Pazartesi does NOT already hold: an ``add`` that
+    names an exercise already in the target day is a duplicate, and the writer
+    refuses it (§33) instead of appending. What this fixture needs is a real
+    APPLIED append, so it asks for one — the name itself is incidental and no
+    assertion here reads it.
     """
     from app.services.plan_mutation.commands import AddExerciseCommand
     from app.services.plan_mutation.document import apply_command
 
     document = {"program": _seven_day_program()}
+    monday = document["program"][0]["egzersizler"]
+    assert not any(entry["isim"] == "Face Pull" for entry in monday)
     mutated, changed = apply_command(
         document, AddExerciseCommand(
-            day="Pazartesi", exercise="Push-up", sets=3, reps="12"))
+            day="Pazartesi", exercise="Face Pull", sets=3, reps="12"))
     assert changed, "the fixture must exercise a real applied mutation"
     return mutated
 

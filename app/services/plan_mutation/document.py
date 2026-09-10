@@ -37,6 +37,15 @@ names written through, no ``exercise_id`` ever introduced. A legacy plan is
 never silently upgraded, and — the other direction, which is the dangerous one
 — a canonical plan whose context block is unreadable is never silently
 downgraded: it is refused.
+
+One identity, one slot, one day
+-------------------------------
+``add`` may not append an exercise the target day already holds. Whichever of
+the two identity models is in force decides "already holds", which is why
+there is exactly one predicate (``_identity_matches``) and both the target
+lookup and the duplicate guard ask it — an alias must not be able to add what
+a rename could not. The rule is DAY-local: the same exercise on two different
+training days is an ordinary plan.
 """
 import copy
 from dataclasses import dataclass
@@ -68,6 +77,7 @@ from .commands import (
 from .errors import (
     AmbiguousExerciseTarget,
     DayNotFound,
+    ExerciseAlreadyPresent,
     ExerciseNotFound,
     InvalidMutation,
     PlanNotMutable,
@@ -299,48 +309,65 @@ def _resolve_placeable_exercise(authority, name, day) -> ExerciseDefinition:
     return exercise
 
 
-def _find_exercise_index(exercises, exercise_name, authority):
-    """The single index matching ``exercise_name``.
+def _identity_matches(exercises, wanted, authority, resolved=None):
+    """Every index in ``exercises`` holding the SAME exercise as ``wanted``.
+
+    THE identity rule for this document, defined once. Both questions the
+    engine asks — "which slot does this command target?" and "does this day
+    already hold this exercise?" — are the same question about sameness, and a
+    second implementation of it is how a guard and a lookup drift until an
+    alias can add what a rename could not.
 
     On a LEGACY document, matching is case-insensitive and
     whitespace-insensitive because names are free text typed by humans and
     models, and the name is all the identity there is.
 
     On a CANONICAL document the name is resolved to a catalog entry first and
-    the slot is found by that entry's stable ``exercise_id``. Two entries
-    worded differently that resolve to the same catalog entry are therefore
-    the same exercise twice, and are refused as ambiguous — casefold matching
-    would have seen two unrelated names and edited one of them. There is no
-    fall back to name matching when the ID does not appear: on a plan the
-    catalog owns, an entry it does not own is not a target.
+    slots are found by that entry's stable ``exercise_id``. Two entries worded
+    differently that resolve to the same catalog entry are therefore the same
+    exercise twice — casefold matching would have seen two unrelated names.
+    There is no fall back to name matching when the ID does not appear: on a
+    plan the catalog owns, an entry it does not own is not a match.
 
-    Two matches is refused either way, never resolved by position (see
-    ``AmbiguousExerciseTarget``).
+    ``resolved`` lets a caller that has ALREADY resolved this name pass the
+    catalog entry in rather than resolve it a second time. It is only ever the
+    resolution of ``wanted``; passing anything else would make the two
+    arguments disagree about which exercise is meant.
 
     ``authority`` has no default here or on any ``_apply_*`` helper: a
     forgotten argument would silently pick LEGACY name matching on a
     canonical plan, which is the same downgrade ``_exercise_authority``
     refuses to perform on a broken context block.
     """
-    wanted = normalize_exercise_name(exercise_name)
-    if wanted is None:
-        raise InvalidMutation("exercise name is required")
     if authority is None:
         folded = wanted.casefold()
-        hits = [
+        return [
             index
             for index, entry in enumerate(exercises)
             if isinstance(entry, dict)
             and str(entry.get(FIELD_NAME) or "").strip().casefold() == folded
         ]
-    else:
-        target = _resolve_exercise_name(authority, wanted)
-        hits = [
-            index
-            for index, entry in enumerate(exercises)
-            if isinstance(entry, dict)
-            and entry.get(FIELD_EXERCISE_ID) == target.exercise_id
-        ]
+    target = resolved if resolved is not None else _resolve_exercise_name(
+        authority, wanted)
+    return [
+        index
+        for index, entry in enumerate(exercises)
+        if isinstance(entry, dict)
+        and entry.get(FIELD_EXERCISE_ID) == target.exercise_id
+    ]
+
+
+def _find_exercise_index(exercises, exercise_name, authority):
+    """The single index matching ``exercise_name``.
+
+    Two matches is refused, never resolved by position (see
+    ``AmbiguousExerciseTarget``); zero is ``ExerciseNotFound``. What counts as
+    a match is ``_identity_matches``.
+    """
+    wanted = normalize_exercise_name(exercise_name)
+    if wanted is None:
+        raise InvalidMutation("exercise name is required")
+    hits = _identity_matches(exercises, wanted, authority)
     if not hits:
         raise ExerciseNotFound("target exercise is not in the day")
     if len(hits) > 1:
@@ -442,6 +469,7 @@ def _apply_add(program, command, authority):
     day = _find_day(program, command.day)
     _require_workout_day(day)
     entry = {FIELD_NAME: name, FIELD_SETS: sets, FIELD_REPS: reps}
+    resolved = None
     if authority is not None:
         resolved = _resolve_placeable_exercise(authority, name, day)
         entry[FIELD_NAME] = resolved.canonical_name
@@ -450,6 +478,43 @@ def _apply_add(program, command, authority):
         # saved one serialize the same way.
         entry[FIELD_EXERCISE_ID] = resolved.exercise_id
     exercises = _exercises_of(day)
+
+    # One exercise identity, at most one slot, per day. Checked here — after
+    # the catalog/compatibility/placement gates above, which therefore still
+    # decide an ADD exactly as they did, and before the append, which is the
+    # only statement that could create the second occurrence.
+    #
+    # Deliberately DAY-local. The same exercise on two different training days
+    # is an ordinary plan (a squat on leg day and on a full-body day), so a
+    # weekly-global rule would refuse plans the generator itself writes.
+    existing = _identity_matches(exercises, name, authority, resolved)
+    if len(existing) > 1:
+        # Historical state this boundary does not repair: some day already
+        # holds this exercise twice. Picking one, merging them or deleting one
+        # would all be a write nobody asked for, so it refuses and appends
+        # nothing — a third copy is the one outcome that is certainly wrong.
+        raise AmbiguousExerciseTarget("target exercise matches more than once")
+    if existing:
+        current = exercises[existing[0]]
+        if (current.get(FIELD_SETS) == sets
+                and current.get(FIELD_REPS) == reps):
+            # Already exactly what was asked for. A deterministic no-op on the
+            # engine's existing terms: the ORIGINAL document goes back to the
+            # caller, so no version moves and no bytes are rewritten.
+            #
+            # Equality is the canonical validated values compared as they are
+            # stored — the same ``==`` every other operation here uses. No
+            # equivalence is invented for this guard: if the repository does
+            # not already consider "8-12" and "8 to 12" the same prescription,
+            # they are two different prescriptions, and the branch below is
+            # the honest answer rather than a rep parser this task has no
+            # mandate to write.
+            return False
+        # Present, but not as requested. NOT converted into an update: the
+        # caller asked to add an exercise, and rewriting the prescription of
+        # the one already there is a different change than the one requested.
+        raise ExerciseAlreadyPresent("exercise is already in the target day")
+
     exercises.append(entry)
     return True
 

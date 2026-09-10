@@ -108,7 +108,8 @@ def _run(app, calls):
     """Release ``len(calls)`` threads at one barrier and collect their outcomes."""
     from app.extensions import db
     from app.services.plan_mutation import (
-        IdempotencyConflict, UndoConflict, UndoUnavailable,
+        ExerciseAlreadyPresent, IdempotencyConflict, UndoConflict,
+        UndoUnavailable,
     )
 
     barrier = threading.Barrier(len(calls))
@@ -121,6 +122,8 @@ def _run(app, calls):
                 result = calls[index]()
                 outcomes[index] = ("ok", result.outcome, result.plan_version,
                                    result.mutation_id, result.replayed)
+            except ExerciseAlreadyPresent:
+                outcomes[index] = ("already_present",)
             except IdempotencyConflict:
                 outcomes[index] = ("idempotency_conflict",)
             except UndoConflict:
@@ -286,3 +289,92 @@ def test_concurrent_distinct_key_undos_reverse_only_one_change(pg_plan_app):
     assert plan_data == PROGRAM
     assert version == 2
     assert [r[0] for r in records] == ["mutation", "undo"]
+
+
+# ── Race F/G: two keys, one exercise identity ────────────────────────────────
+#
+# The duplicate-add guard is a read-then-append inside the mutation engine, so
+# it is only correct if it reads AUTHORITATIVE state. On SQLite the file lock
+# hides that entirely. Here two real transactions contend for one plan row with
+# DIFFERENT operation keys — so idempotency cannot settle it and the guard has
+# to, against the plan as the row lock serialized it.
+
+
+def _add_to(day, exercise, sets, reps):
+    from app.services.plan_mutation import AddExerciseCommand
+    return AddExerciseCommand(day=day, exercise=exercise, sets=sets,
+                              reps=reps)
+
+
+def test_concurrent_duplicate_adds_leave_exactly_one_slot(pg_plan_app):
+    """Same exercise, same prescription, two keys, at once.
+
+    One request applies and the other must observe the exercise that now
+    exists — not the plan as it looked before the winner committed. The wrong
+    implementation passes on SQLite and fails here: compute the guard from a
+    document parsed before the lock, and both contenders see an empty day and
+    both append.
+    """
+    app, user_id = pg_plan_app
+    outcomes = _run(app, [
+        _mutation(user_id, _add_to("Carsamba", "Bulgarian Split Squat", 4,
+                                   "12"), "pg-race-f-0001"),
+        _mutation(user_id, _add_to("Carsamba", "Bulgarian Split Squat", 4,
+                                   "12"), "pg-race-f-0002"),
+    ])
+
+    assert [outcomes[i][0] for i in range(2)] == ["ok", "ok"], outcomes
+    assert sorted(outcomes[i][1] for i in range(2)) == ["applied", "no_op"]
+    assert all(outcomes[i][4] is False for i in range(2)), outcomes
+
+    plan_data, version, records = _state(app, user_id)
+    assert plan_data.count('"Bulgarian Split Squat"') == 1
+    assert version == 1
+    assert sorted(r[2] for r in records) == ["pg-race-f-0001",
+                                             "pg-race-f-0002"]
+    assert sorted(r[1] for r in records) == ["applied", "no_op"]
+
+
+def test_concurrent_adds_at_different_prescriptions_leave_exactly_one_slot(
+        pg_plan_app):
+    """Same exercise, DIFFERENT prescriptions, two keys, at once.
+
+    Which one wins depends on lock acquisition order and is not asserted —
+    that is a genuine race and either winner is correct. What must hold either
+    way: one slot, one version step, and a loser that refuses instead of
+    appending a second occurrence or quietly rewriting the winner's sets.
+    """
+    app, user_id = pg_plan_app
+    outcomes = _run(app, [
+        _mutation(user_id, _add_to("Carsamba", "Bulgarian Split Squat", 4,
+                                   "12"), "pg-race-g-0001"),
+        _mutation(user_id, _add_to("Carsamba", "Bulgarian Split Squat", 3,
+                                   "10"), "pg-race-g-0002"),
+    ])
+
+    kinds = sorted(outcome[0] for outcome in outcomes.values())
+    assert kinds == ["already_present", "ok"], outcomes
+
+    plan_data, version, records = _state(app, user_id)
+    assert plan_data.count('"Bulgarian Split Squat"') == 1
+    assert version == 1
+    # The refusal consumed no operation identity: one journal row, the winner's.
+    assert [(r[0], r[1]) for r in records] == [("mutation", "applied")]
+
+
+def test_a_concurrent_duplicate_never_reaches_a_third_slot(pg_plan_app):
+    """Three contenders, three keys, one identity. Two of them must lose."""
+    app, user_id = pg_plan_app
+    outcomes = _run(app, [
+        _mutation(user_id, _add_to("Carsamba", "Bulgarian Split Squat", 4,
+                                   "12"), "pg-race-h-%04d" % index)
+        for index in range(1, 4)
+    ])
+
+    assert [outcomes[i][0] for i in range(3)] == ["ok"] * 3, outcomes
+    assert sorted(outcomes[i][1] for i in range(3)) == [
+        "applied", "no_op", "no_op"]
+
+    plan_data, version, _records = _state(app, user_id)
+    assert plan_data.count('"Bulgarian Split Squat"') == 1
+    assert version == 1

@@ -1070,3 +1070,109 @@ production sentence by its second clause.
 The already-shipped guarantees are untouched: `PLAN_MUTATION_POLICY`, request
 lineage and isolation, supersession, Redis authority, consume-once semantics and
 the post-consume request-match guard all behave exactly as before.
+
+
+## 33. One exercise identity, at most one slot, per day
+
+Production evidence: a Friday workout holding
+
+    Walking Lunge — 4x15
+    Walking Lunge — 4x12
+
+Both are real persisted slots and the second was appended by a later `add`.
+`_apply_add` resolved the day and the exercise and then appended
+unconditionally — it never asked whether the day already held that exercise —
+so nothing between the model and the JSON column stopped a duplicate.
+
+**The invariant.** Within ONE workout day, one exercise identity may occupy at
+most one slot. It is day-local, not weekly-global: the same exercise on two
+different training days is an ordinary plan, and a weekly rule would refuse
+plans the generator writes itself.
+
+**Where it is enforced.** In `plan_mutation/document.py::_apply_add`, the pure
+engine — after the existing catalog / equipment-compatibility / cardio-placement
+gates, which therefore still decide an `add` exactly as they did, and before the
+`append`, which is the only statement that can create the second occurrence.
+Not in the prompt, the tool schema, the grounding layer or the client: those are
+callers, they drift, and a caller that skipped the check would still reach a
+mutation authority that let the duplicate through. `tests/test_plan_mutation_architecture.py`
+pins that nothing else in `app/` raises the refusal.
+
+**What counts as the same exercise** is the plan's existing identity model, not
+a second one. Both questions the engine asks — "which slot does this command
+target?" and "does this day already hold this exercise?" — are the same
+question about sameness, so there is one predicate (`_identity_matches`) and
+`_find_exercise_index` and the guard both call it:
+
+| plan | identity |
+|---|---|
+| canonical (carries a verified `exercise_context`) | the catalog's stable `exercise_id`, so a declared alias resolves to the slot that is already there and cannot add a second one |
+| legacy (name-only) | the existing casefold/whitespace-insensitive `isim` comparison — never silently upgraded to catalog identity |
+
+**Three outcomes, three different facts.**
+
+| target day state | outcome |
+|---|---|
+| exercise absent | append, `applied`, version +1 (unchanged behaviour) |
+| present exactly once, at the requested prescription | deterministic `no_op` — original document returned, plan bytes untouched, `mutation_version` unchanged, journal row written exactly as any other accepted no-op |
+| present exactly once, at a DIFFERENT prescription | `ExerciseAlreadyPresent` → no write, no version, no journal row |
+| present more than once (historical) | `AmbiguousExerciseTarget` → fail closed, nothing appended |
+
+The different-prescription case is deliberately a refusal and not a silent
+`update`. The caller asked to ADD; rewriting the sets/reps of the exercise that
+is already there is a change nobody requested. There is no "yes, update it"
+continuation and no auto-called second tool — if the user wants different
+sets/reps they say so, explicitly, and the update tool applies it.
+
+**Prescription equality** is the canonical validated values compared as stored
+(`==`), the same comparison every other operation in the engine uses. No
+equivalence is invented here: `"8-12"`, `"8–12"` and `"8 to 12"` are the same
+prescription only if the repository already canonicalises them as the same, and
+this task does not add a rep parser to make them so.
+
+**Historical duplicates are preserved.** This is forward prevention, not data
+repair. Nothing deletes, merges, chooses between or normalises the two Walking
+Lunge slots that already exist, and no migration touches `plan_data`. Remediating
+them, if it is ever wanted, is a separate and explicit task.
+
+**Concurrency.** The guard is a read-then-append, so it is only correct against
+authoritative state — and it is: `service._locked_active_plan` takes the plan
+row's `SELECT … FOR UPDATE` with `populate_existing()` BEFORE `apply_command`
+runs, so the document the guard inspects is the plan as the lock serialized it.
+No second lock and no advisory lock was added. Two concurrent adds of one
+identity under DIFFERENT operation keys (so idempotency cannot settle it) leave
+exactly one slot and one version step, with the loser reporting `no_op` at a
+matching prescription or `ExerciseAlreadyPresent` at a different one:
+`tests/test_plan_mutation_history_pg.py`, CI's PostgreSQL concurrency job.
+
+**Idempotency is untouched and stays separable.** Same key + same command still
+replays the durable result (and still reports `applied`); same key + different
+command is still `IdempotencyConflict`; DIFFERENT keys + the same exercise is
+what the new guard decides, from current plan state.
+
+**Coach truthfulness.** `add` could not no-op before, so the result formatter
+had one sentence for it and always said "eklendi". It now distinguishes
+`applied` from `no_op`, and the new bounded code `EXERCISE_ALREADY_PRESENT`
+carries server-authored recovery text stating that the exercise is already in
+that workout, that the plan did NOT change, that success must not be claimed,
+that no other mutation tool may be called, and that a different prescription
+needs an explicit user request. `applied` / `no_op` / `replayed` /
+`EXERCISE_ALREADY_PRESENT` remain four distinguishable states.
+
+**One documented edge, on legacy plans only.** Coach ADD destinations are
+canonicalised by `coach_plan_tools/exercise_grounding.py` BEFORE the domain sees
+them — "Bench Press" arrives as "Barbell Bench Press". That predates this guard.
+On a LEGACY name-only plan whose slot the *generator* wrote under a
+non-canonical name, the two strings are not the same exercise under the only
+identity model such a document has, and the add appends. Closing it would mean
+resolving legacy names through the catalog, i.e. giving legacy documents catalog
+identity — the one thing this change is explicitly not allowed to do. It is also
+self-limiting: every name the Coach writes is already canonical, so a second
+Coach add of the same exercise does converge, and a canonical plan is unaffected
+because there identity is the `exercise_id`. Pinned by
+`test_a_canonicalised_destination_name_is_what_a_legacy_plan_is_matched_on`.
+
+**Not changed by this:** `replace`, `update`, `remove`, `move` and `undo`
+semantics; unknown-exercise fail-closed behaviour; equipment and placement
+gates; the journal, the confirmation flow, the rollout flags, the schema
+(Alembic head unchanged) and every existing tool schema.

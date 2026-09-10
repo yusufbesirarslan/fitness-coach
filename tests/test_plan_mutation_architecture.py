@@ -486,3 +486,68 @@ def test_the_cardio_placement_rule_has_a_single_definition():
     assert "CARDIO_MOVEMENT" not in source
     assert "CARDIO_TIP" not in source
     assert callable(exercise_resolution.check_placement)
+
+
+def _raises_named(path, name):
+    """Lines in ``path`` that ``raise <name>(...)``.
+
+    Anchored on the raise, not on the identifier: importing the class to
+    CATCH it, re-export it or map it to a transport code is exactly what the
+    layers above are supposed to do. Only deciding that the condition holds is
+    the authority being pinned here.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    lines = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+        exc = node.exc
+        func = exc.func if isinstance(exc, ast.Call) else exc
+        called = func.id if isinstance(func, ast.Name) else getattr(
+            func, "attr", None)
+        if called == name:
+            lines.append(node.lineno)
+    return lines
+
+
+def test_duplicate_exercise_identity_is_decided_only_by_the_pure_engine():
+    """The duplicate-add invariant has ONE enforcement point.
+
+    A Coach caller, a route or a client could all re-implement "is this
+    exercise already in that day?" and all of them would drift — and a caller
+    that skipped the check would still reach a mutation authority that let the
+    duplicate through. So the refusal is raised where the plan is actually
+    mutated, and nowhere else in the application may raise it.
+
+    Catching it, re-exporting it and mapping it to a bounded tool code stay
+    legal, and the Coach bridge does all three.
+    """
+    approved = {MUTATION_ROOT / "document.py"}
+    deciders = []
+    for path in APP_ROOT.rglob("*.py"):
+        if path in approved:
+            continue
+        for lineno in _raises_named(path, "ExerciseAlreadyPresent"):
+            deciders.append(f"{path}:{lineno}")
+
+    assert not deciders, (
+        f"a second duplicate-exercise authority: {deciders}")
+
+
+def test_the_duplicate_authority_guard_detects_a_second_decider(tmp_path):
+    """The guard above only means something if it can actually fail — and only
+    if it does not fire on the layers that legitimately handle the class."""
+    competitor = tmp_path / "competitor.py"
+    competitor.write_text(
+        "def guard(day, exercise):\n"
+        "    if exercise in day:\n"
+        "        raise ExerciseAlreadyPresent('already there')\n"
+        "\n"
+        "def translate(error):\n"
+        "    try:\n"
+        "        return handle()\n"
+        "    except ExerciseAlreadyPresent:\n"
+        "        return ERROR_EXERCISE_ALREADY_PRESENT\n",
+        encoding="utf-8")
+
+    assert _raises_named(competitor, "ExerciseAlreadyPresent") == [3]
