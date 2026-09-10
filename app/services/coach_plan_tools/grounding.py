@@ -304,8 +304,34 @@ _REGION_WORDS = frozenset(
     token for names in _REGION_TOKENS.values() for token in names)
 
 
+_DROP_TOKEN, _REGION_TOKEN, _NAME_TOKEN = 0, 1, 2
+
+
+def _token_kind(token):
+    folded = token.casefold()
+    if folded in _CUE_WORDS:
+        return _DROP_TOKEN
+    if canonicalize_weekday(token) is not None:
+        return _DROP_TOKEN
+    if folded in _REGION_WORDS:
+        return _REGION_TOKEN
+    return _NAME_TOKEN
+
+
 def _exercise_from_text(message):
-    """Leftover tokens after stripping cues, weekdays, rx and nicknames."""
+    """Leftover tokens after stripping cues, weekdays, rx and nicknames.
+
+    A body-region word is dropped where it stands alone ("to my LEG workout")
+    but KEPT where it sits directly beside a surviving name token ("LEG
+    Extension"). Nearly half the catalog names a region INSIDE the exercise's
+    own name, and deleting it silently renames the movement: "Leg Curl" became
+    "Curl", which grounds to a biceps exercise, and "Leg Extension" became
+    "Extension", which grounds to nothing at all — so a partial ADD lost its
+    exercise, and with it the prescription half the user had typed.
+
+    Adjacency is the whole rule. It needs no catalog lookup, so this stays the
+    lexical heuristic every caller already treats it as.
+    """
     if not isinstance(message, str) or not message.strip():
         return ""
     text = message
@@ -316,14 +342,15 @@ def _exercise_from_text(message):
     text = re.sub(r"\b\d+(?:\s*[-–—]\s*\d+)?\b", " ", text)
     text = re.sub(r"\bwith\b", " ", text, flags=re.I)
     tokens = re.findall(r"[A-Za-z0-9çÇğĞıİöÖşŞüÜ+-]+", text)
+    kinds = [_token_kind(token) for token in tokens]
     kept = []
-    for token in tokens:
-        folded = token.casefold()
-        if folded in _CUE_WORDS:
+    for index, token in enumerate(tokens):
+        kind = kinds[index]
+        if kind == _DROP_TOKEN:
             continue
-        if canonicalize_weekday(token) is not None:
-            continue
-        if folded in _REGION_WORDS:
+        if kind == _REGION_TOKEN and _NAME_TOKEN not in (
+                kinds[index - 1] if index else _DROP_TOKEN,
+                kinds[index + 1] if index + 1 < len(kinds) else _DROP_TOKEN):
             continue
         kept.append(token)
     return " ".join(kept).strip()
