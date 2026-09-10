@@ -70,6 +70,8 @@
 .plan-domain-child-title { font-size: var(--text-lg); }
 .plan-domain-state { flex: 0 0 auto; padding: var(--space-1) var(--space-3); border-radius: var(--radius-full); background: var(--overlay-6); color: var(--color-text-2); font-size: var(--text-xs); }
 .plan-domain-summary { margin: var(--space-3) 0; color: var(--color-text-2); line-height: var(--leading-relaxed); }
+.plan-domain-summary--muted { margin-top: calc(var(--space-2) * -1); color: var(--color-text-3); font-size: var(--text-sm); }
+.plan-nutrition-progress { display: block; width: min(100%, 360px); height: 6px; margin: calc(var(--space-2) * -1) 0 var(--space-4); accent-color: var(--color-primary); }
 .plan-domain-link { display: inline-flex; min-height: 44px; align-items: center; color: var(--color-primary); font-weight: var(--weight-semibold); text-decoration: none; }
 .plan-domain-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .plan-domain-child { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-5); padding: var(--space-4); border-left: 3px solid var(--color-border-2); border-radius: var(--radius-md); background: var(--color-surface-1); }

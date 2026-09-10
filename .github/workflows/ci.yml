@@ -259,3 +259,4 @@ jobs:
           tests/test_diary_provider_truth_pg.py
           tests/test_mobile_workout_sessions_pg.py
           tests/test_sprint14_workout_execution_reliability_pg.py
+          tests/test_ux3_pr4_nutrition_placement_pg.py

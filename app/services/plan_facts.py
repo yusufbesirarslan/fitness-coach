@@ -27,9 +27,12 @@ clock-based "today" selection, no rest-day inference, no completion-from-storage
 from __future__ import annotations
 
 import json
+import math
+
+from sqlalchemy import func
 
 from app.extensions import db
-from app.models import Supplement, UserSession
+from app.models import MealLog, NutritionPlan, Supplement, UserSession
 from app.plan_presenter import PlanDay, PlanExercise, PlanFacts, REST_DAY_KIND
 from app.services.today_facts import get_active_plan
 from app.services.workout_state import resolve_workout_state
@@ -165,23 +168,112 @@ def _session_facts(snapshot):
             reason if isinstance(reason, str) else "")
 
 
+def _display_kcal(value):
+    """Project a canonical kcal value onto the integer the Nutrition UI shows.
+
+    ``static/nutrition.js`` renders every Today/Diary/History calorie through
+    ``Math.round()`` (``ring-eaten``, ``ring-target``, per-meal totals). Python's
+    built-in ``round()`` is half-to-even, so ``round(2200.5) == 2200`` while
+    ``Math.round(2200.5) === 2201`` — Plan's bounded summary would print a
+    different integer than Nutrition for the *same* stored value. JS defines
+    ``Math.round(x)`` as ``floor(x + 0.5)``, which this reproduces exactly:
+
+      * ``.5`` boundaries round away from zero for positives (2200.5 → 2201);
+      * non-boundary values round normally (2200.4 → 2200, 2200.6 → 2201);
+      * ``None`` stays ``None`` — a missing value is never coerced to 0;
+      * a non-numeric, bool, NaN or infinite value yields ``None`` rather than a
+        fabricated integer.
+
+    Display projection only: stored ``MealLog``/``UserSession`` values are never
+    rewritten, and nothing here rounds at persistence time.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, int):
+        return value
+    if not math.isfinite(value):
+        return None
+    return math.floor(value + 0.5)
+
+
+def _read_nutrition_target(user_id):
+    """Latest canonical daily target; absence is unknown, never numeric zero."""
+    with db.session.begin_nested():
+        session = (UserSession.query.filter_by(user_id=user_id)
+                   .order_by(UserSession.created_at.desc()).first())
+    target = getattr(session, "target_calories", None) if session else None
+    if isinstance(target, (int, float)) and not isinstance(target, bool) and target > 0:
+        displayed = _display_kcal(target)
+        if displayed is not None:
+            return "available", displayed
+    return "empty", None
+
+
+def _read_today_nutrition(user_id):
+    """Bounded aggregate of the canonical current-day MealLog ledger."""
+    today = app_today().isoformat()
+    with db.session.begin_nested():
+        count, calories = db.session.query(
+            func.count(MealLog.id),
+            func.coalesce(func.sum(MealLog.kalori), 0),
+        ).filter(MealLog.user_id == user_id, MealLog.tarih == today).one()
+    consumed = _display_kcal(float(calories or 0))
+    if consumed is None:
+        # A non-finite aggregate is corrupt, not a known intake; never print 0.
+        return "unavailable", None, None
+    return "available", consumed, int(count or 0)
+
+
+def _read_nutrition_plan_presence(user_id):
+    """Presence only, matching the canonical latest-plan selector."""
+    with db.session.begin_nested():
+        plan_id = (NutritionPlan.query.filter_by(user_id=user_id)
+                   .with_entities(NutritionPlan.id)
+                   .order_by(NutritionPlan.created_at.desc()).first())
+    return ("available", True) if plan_id is not None else ("empty", False)
+
+
+def _nutrition_placement_state(target_state, intake_state, plan_state, *,
+                               meal_count, has_plan):
+    """Summarize health without hiding any independently degraded dimension."""
+    states = (target_state, intake_state, plan_state)
+    if all(state == "unavailable" for state in states):
+        return "unavailable"
+    if any(state == "unavailable" for state in states):
+        return "partial"
+    if target_state == "available" or has_plan or (meal_count or 0) > 0:
+        return "available"
+    return "empty"
+
+
 def _child_domain_facts(user_id):
-    nutrition_state = "unknown"
+    nutrition_target_state = "unavailable"
     nutrition_target = None
+    nutrition_intake_state = "unavailable"
+    nutrition_consumed = None
+    nutrition_meal_count = None
+    nutrition_plan_state = "unavailable"
+    has_nutrition_plan = None
     supplements_state = "unknown"
     supplements_count = None
     try:
-        with db.session.begin_nested():
-            session = (UserSession.query.filter_by(user_id=user_id)
-                       .order_by(UserSession.created_at.desc()).first())
-        target = getattr(session, "target_calories", None) if session else None
-        if isinstance(target, (int, float)) and target > 0:
-            nutrition_state = "available"
-            nutrition_target = int(round(target))
-        else:
-            nutrition_state = "empty"
+        nutrition_target_state, nutrition_target = _read_nutrition_target(user_id)
     except Exception:
-        nutrition_state = "unavailable"
+        pass
+
+    try:
+        (nutrition_intake_state, nutrition_consumed,
+         nutrition_meal_count) = _read_today_nutrition(user_id)
+    except Exception:
+        pass
+
+    try:
+        nutrition_plan_state, has_nutrition_plan = (
+            _read_nutrition_plan_presence(user_id))
+    except Exception:
+        pass
 
     try:
         with db.session.begin_nested():
@@ -190,9 +282,24 @@ def _child_domain_facts(user_id):
     except Exception:
         supplements_state = "unavailable"
         supplements_count = None
+    nutrition_state = _nutrition_placement_state(
+        nutrition_target_state,
+        nutrition_intake_state,
+        nutrition_plan_state,
+        meal_count=nutrition_meal_count,
+        has_plan=has_nutrition_plan,
+    )
     return {
+        # Compatibility state retained for the placement badge; the detailed
+        # dimensions below remain independent and drive the factual summary.
         "nutrition_state": nutrition_state,
+        "nutrition_target_state": nutrition_target_state,
         "nutrition_target_calories": nutrition_target,
+        "nutrition_intake_state": nutrition_intake_state,
+        "nutrition_consumed_calories": nutrition_consumed,
+        "nutrition_meal_count": nutrition_meal_count,
+        "nutrition_plan_state": nutrition_plan_state,
+        "has_nutrition_plan": has_nutrition_plan,
         "supplements_state": supplements_state,
         "supplements_count": supplements_count,
     }

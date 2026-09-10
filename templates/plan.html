@@ -372,11 +372,23 @@
       </div>
       <span class="plan-domain-state">{{ t('plan.domain_state.' ~ plan.nutrition_state) }}</span>
     </div>
-    {% if plan.nutrition_target_calories is not none %}
-      <p class="plan-domain-summary">{{ t('plan.nutrition.target', calories=plan.nutrition_target_calories) }}</p>
+    {% if plan.nutrition_intake_state == 'available' and plan.nutrition_target_state == 'available' %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_target', consumed=plan.nutrition_consumed_calories, target=plan.nutrition_target_calories) }}</p>
+      <progress class="plan-nutrition-progress" value="{{ plan.nutrition_consumed_calories }}"
+                max="{{ plan.nutrition_target_calories }}"
+                aria-label="{{ t('plan.nutrition.progress_aria') }}"></progress>
+    {% elif plan.nutrition_intake_state == 'available' %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_only', consumed=plan.nutrition_consumed_calories) }}</p>
+    {% elif plan.nutrition_target_state == 'available' %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.target', calories=plan.nutrition_target_calories) }} {{ t('plan.nutrition.intake_unavailable') }}</p>
     {% else %}
-      <p class="plan-domain-summary">{{ t('plan.nutrition.summary') }}</p>
+      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_unavailable') }}</p>
     {% endif %}
+    <p class="plan-domain-summary plan-domain-summary--muted">
+      {% if plan.nutrition_plan_state == 'available' %}{{ t('plan.nutrition.plan_available') }}
+      {% elif plan.nutrition_plan_state == 'empty' %}{{ t('plan.nutrition.plan_empty') }}
+      {% else %}{{ t('plan.nutrition.plan_unavailable') }}{% endif %}
+    </p>
     <a class="plan-domain-link" href="/nutrition">{{ t('plan.action.open_nutrition') }}</a>
 
     <section class="plan-domain-child" data-plan-domain="supplements"

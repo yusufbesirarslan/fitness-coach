@@ -1,3 +1,68 @@
+# UX-3 PR4 — Nutrition Placement Convergence
+
+Date: 2026-09-10
+
+`/training` Plan V2 now renders a bounded, server-owned Nutrition snapshot from
+three canonical facts: latest positive `UserSession.target_calories`, the current
+Istanbul day's `MealLog` calorie/count aggregate, and newest `NutritionPlan`
+presence. Separate nested transactions isolate each read from the other
+Nutrition dimensions, Supplements, and Training. No target is unknown rather
+than zero; no current-day ledger rows is the known value zero.
+
+The pure presenter copies those facts and Plan renders target/intake, a native
+progress element only when both are known, plan-presence copy, and one `Open
+Nutrition` entry. It adds no Nutrition browser fetch, provider/serving/barcode/
+menu/history/water read, prompt, LLM call, or write. Facts cost 7 SELECTs with
+workout sessions OFF and 9 with them ON, exactly two more than pre-PR4.
+
+`/nutrition` remains canonical with all mutations and routes unchanged. Compact
+linked `Plan / Nutrition` orientation was added; the global Plan destination
+remains active; local areas remain Today, Diary, Nutrition Plan, History, Water.
+Tabs/panels now have explicit ARIA relationships, and the quick-add empty-state
+shortcut selects the actual Nutrition Plan tab rather than Diary.
+
+Plan's kcal projection is presentation-only and follows the browser, not
+Python. `static/nutrition.js` renders every Today/Diary/History calorie through
+`Math.round()`, which is `floor(x + 0.5)`, while Python's `round()` is
+half-to-even — so `round(2200.5)` is 2200 where `Math.round(2200.5)` is 2201 and
+Plan would print a different integer than Nutrition for the SAME stored value.
+`_display_kcal` in `app/services/plan_facts.py` reproduces the JS contract at
+display time only: stored `MealLog` calories/macros and `UserSession`
+`target_calories` are never rewritten, nothing rounds at persistence time, and
+Python's global rounding behaviour is untouched. Absent, non-numeric, NaN and
+infinite inputs stay `None` rather than becoming a fabricated integer.
+
+The nested transactions are proved against real PostgreSQL, not a Python mock.
+SQLite does not abort a transaction when a statement fails, so only PostgreSQL
+can show that a poisoned subread leaves the remaining Nutrition reads usable.
+`tests/test_ux3_pr4_nutrition_placement_pg.py` injects a real failing statement
+(`SELECT 1 / 0`) inside the target subread, asserts the placement degrades to
+`partial` while intake, plan presence and Supplements stay `available`, and
+refuses to run on any dialect but `postgresql`. It is opt-in through
+`pg_concurrency` + `FITX_PG_CONCURRENCY_TEST=1`, and because the CI
+`mobile-pg-concurrency` job selects PostgreSQL modules by an explicit file list,
+the module was added to that list — otherwise the proof would never execute in
+CI. Removing the savepoint from the failing subread collapses `partial` to
+`unavailable`, so the guard is load-bearing rather than decorative.
+
+Verification (2026-09-10, PR4 tree integrated onto `origin/main` a962599):
+focused PR4 module 23 passed; PR4 + Plan V2 + Plan-convergence + PR3 Training
+contracts 107 passed; real-Chromium PR4 suite 2 passed; PostgreSQL isolation
+proof 1 passed on PostgreSQL 16.15; canonical Nutrition/provider/write
+regression 582 passed; Plan/Training/PR3 regression 323 passed. Broad gate: the
+whole suite in 8 batches, 6610 passed and 29 skipped, every skip an opt-in
+PostgreSQL-concurrency test or the `test_staging_separation` bash-unavailable
+guard. `tests/test_production_deploy_script.py` (67 tests) is excluded as a
+Windows-host environment limitation, not a PR4 result: the whole module hangs
+identically on unmodified `origin/main`, while the test it stalls on passes in
+isolation on both trees. The real-browser EN/TR journey covers 320/390/768/1024/
+1366 without horizontal overflow, including a no-`NutritionPlan` 320px journey
+that logs a meal through the canonical `POST /meal-log` web write (only the
+external LLM macro estimator stubbed), sees it in Today and History, keeps the
+Diary builder's four slots operable, creates a plan, and writes water. No
+schema, migration, migration head, route, flag default, rollout state, or PR5
+work changed. Rollback is a code revert; Plan V2 stays OFF.
+
 # UX-3 PR3 — Training Placement + Regeneration Convergence
 
 Date: 2026-09-09
