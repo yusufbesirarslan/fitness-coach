@@ -444,6 +444,25 @@ destinations; same Plan-owned domains; same null/error/session meanings; same
 server mutation authorities. Native may ship domain placements incrementally.
 The sibling repository is read-only and is not changed by this PR.
 
+Re-inspected at UX-3 PR5 (`origin/main` `7f354e3`), the top-level agreement
+holds and the gap is now stated precisely. `AppDestinationId` declares exactly
+`today`, `plan`, `coach`, `progress`, matched by four `StatefulShellBranch`es,
+with no profile or settings destination. Below that: there is no Supplements
+route, screen, repository, model or API client anywhere in `lib/`; there is no
+native Supplements backend contract for one to call; and Nutrition is not a Plan
+child at all — its four logging sub-routes (`/today/nutrition/add*`) carry
+`RouteOwner.nutrition` but hang off `AppDestinationId.today`, with no Nutrition
+domain root and a still Training-only `PlanScreen`. Production composition is
+fixture-free (`AppComposition.configured` wires live or explicit `Unavailable*`
+repositories; fixtures live only in `AppComposition.development`).
+
+Native `Plan → Nutrition → Supplements` therefore requires two decisions PR5
+does not own: re-homing Nutrition from Today to Plan, and adding a Supplements
+capability (backend contract plus client). Until both exist, mobile alignment is
+**BLOCKED — MISSING CAPABILITY**; a placement shipped before then would be a dead
+destination or a fixture presented as product truth. This document does not claim
+mobile Plan-domain parity.
+
 ## S. Performance and load analysis
 
 Current legacy Training commonly loads `/training/bootstrap` plus current/last
@@ -811,6 +830,159 @@ deeper Supplements placement without reopening Nutrition authority.
   contextual; mobile hierarchy matches.
 - **Rollback:** retain stable cabinet and restore prior contextual link layout.
 - **Major risk:** cross-repository sequencing.
+
+#### PR5 implementation record (2026-09-10)
+
+PR5 changes where Supplements *belongs*, and nothing about what the cabinet
+*is*. The whole change is placement, orientation, and copy: no route, model,
+schema, migration, mutation, rating, visibility, or flag semantics moved.
+
+**One editable cabinet.** `/supplements` (`templates/manage_stack.html`) remains
+the only surface in the product that can add, edit, change status, rate, price,
+review, publish, or delete a `Supplement`. `POST /supplement/add`,
+`POST /supplement/edit/<sid>` and `POST /supplement/delete/<sid>` remain the only
+mutation authority, still `@require_auth` + `@auth_write_limit`, still scoped by
+`filter_by(user_id=current_user.id)`, and still serializing the first-supplement
+bonus on the owner row lock taken *before* the count. Plan, Nutrition and Profile
+navigate to that cabinet and can do nothing else to it. This is enforced, not
+asserted: `tests/test_ux3_pr5_supplements_placement.py` scans every shipped
+template and browser script for the three mutation paths and fails unless
+`templates/manage_stack.html` is the single file that names them — so a future
+developer who adds a supplement form to Plan, Nutrition or Profile breaks the
+build rather than the architecture.
+
+**Plan → Nutrition → Supplements.** PR4's nesting is preserved exactly:
+Supplements renders as `.plan-domain-child` *inside* the open Nutrition section,
+never as a third peer beside Training and Nutrition. Plan still publishes only a
+bounded count taken in its own savepoint, and PR5 adds zero queries anywhere —
+Plan fact gathering is still exactly 7 SELECTs with workout sessions OFF and 9
+with them ON, `/nutrition` still issues no Supplement statement at all, and
+`/edit-profile` keeps the single projection read it already had.
+
+**Three states stay three statements.** Plan previously printed a neutral
+tagline whenever the count was absent, which read the same whether the cabinet
+was unreadable or simply not yet used. `available`, `empty` and `unavailable` now
+each have their own sentence, and `plan.supplements.summary` is retired. A failed
+cabinet read says the count is temporarily unavailable; it can never render as
+"no supplements yet", because those two facts lead a user to opposite actions.
+Training, the Nutrition summary, Start/Resume and the Plan shell are unaffected
+by that failure, and the canonical `/supplements` link stays truthful through it.
+
+**Nutrition exposes a child domain, not a sixth tab.** `/nutrition` keeps exactly
+five local workflow tabs — Today, Diary, Nutrition Plan, History, Water — and
+gains one compact `nutrition-child-domain` landmark rendered *below* and
+*outside* the `role="tablist"`, with its own kicker and no `.tab-btn` styling. It
+belongs to the domain rather than to any one workflow, so it stays visible as the
+user moves between tabs, and it costs one anchor and no data.
+
+**The cabinet states its parents.** `/supplements` gains a single
+`stack-parent-context` line — `Plan / Nutrition / Supplements`, the first two
+linked — deliberately the same restrained pattern PR4 gave `/nutrition`, so the
+two child pages read as one hierarchy rather than two inventions. There is no new
+navbar, no nested sidebar, no duplicated Plan shell, no Nutrition tabs and no
+breadcrumb hero; the page still has one `<h1>` and the cabinet is still the first
+substantial thing on it. Global ownership is unchanged: `nav_active` stays
+`supplements`, `app/nav.py` keeps
+`active_when = ("plan", "training", "nutrition", "supplements")`, and Plan is the
+active primary destination on `/supplements` in both the header and the mobile
+bar. Supplements is not a fifth global destination and Nutrition is not one
+either.
+
+**Profile is a projection, and now says so.** Account never owned Supplements,
+but its copy implied it: "Edit Your Stack →" and "+ Add Your First Supplement"
+made `/edit-profile` read like the cabinet's home. Both keys are retired in
+favour of one contextual entry — "Open supplement cabinet →" in both the
+populated and empty states — under a line that states plainly that management
+lives in Plan → Nutrition → Supplements. Everything that made the section useful
+survives: the read-only stack preview, its ratings and reviews, and the empty
+message. Nothing about `is_public` changed — not its column, not its default, not
+its persistence, not the owner's own view of their stack; the flag is still
+written only by the canonical cabinet, in both directions, and an edit that does
+not mention visibility still leaves it alone.
+
+**One pre-existing defect fixed, deliberately.** `.supp-actions` was a
+non-wrapping flex row of four buttons, so at 320px the cabinet's cards pushed the
+page into horizontal scroll on `origin/main` as well. PR5 makes `/supplements`
+the surface every other page points at, and 320px is supported, so the row now
+wraps. One declaration; no visual redesign.
+
+**Classified, not fixed.** The star rating controls are `<span>`s with click
+listeners and are therefore not keyboard operable. PR5 does not touch them, so
+per scope they are recorded here rather than repaired: this is the one bounded
+accessibility item `/supplements` still owes, and it belongs to PR6's hardening.
+
+**Verification.** Focused module 38 passed; browser journeys 8 passed twice on
+real Chromium at 320/390/768/1024/1366 in EN and TR with no horizontal overflow
+on Plan, Nutrition, Supplements or Profile. Every browser mutation in those
+journeys — add, status change, delete — was observed leaving the canonical
+cabinet and no other surface. Twelve adversarial mutations were applied one at a
+time to prove the guards are not vacuous: a second editor in Plan, Nutrition or
+Profile; a changed `/supplements` route; Supplements promoted to a fifth global
+destination; Supplements demoted to a sixth Nutrition tab; Plan losing its active
+state; an extra Plan Supplement SELECT; an eager cabinet load on `/nutrition`;
+`is_public` ignored on add and on edit; a weakened owner filter; and a read
+failure rendered as an empty cabinet. Each one failed the test that claims to
+catch it.
+
+That last point required correcting an assertion style this repository is prone
+to: `templates/_head.html` injects the entire locale catalog into `window.I18N`,
+so `"some translated sentence" in html` is true on **every** page whether or not
+the page renders it. Copy assertions here run against the response with its
+`<script>` blocks stripped.
+
+**Mobile: BLOCKED — MISSING CAPABILITY.** The sibling Flutter repository
+(`yusufbesirarslan/axisai-mobile`, `origin/main` `7f354e3`) was inspected
+read-only and not modified. It already agrees with the web at the top level:
+exactly four primary destinations — `today`, `plan`, `coach`, `progress` — in
+that order, declared once in `AppDestinationId` and matched by four
+`StatefulShellBranch`es; no profile or settings destination exists. Below that it
+diverges in a way PR5 cannot honestly close:
+
+- There is no Supplements route, screen, repository, domain model or API client
+  anywhere in `lib/`. The word does not appear outside an unrelated comment.
+- There is no native Supplements backend contract either. `/api/v1` carries no
+  supplement endpoint; `app/blueprints/supplements.py` serves HTML only.
+- Nutrition is not a Plan child on mobile at all. It exists only as four logging
+  sub-routes — `/today/nutrition/add`, `.../serving`, `.../manual`,
+  `.../barcode` — which carry `RouteOwner.nutrition` but hang off
+  `AppDestinationId.today`. There is no Nutrition domain root under Plan, and
+  `PlanScreen` remains Training-only.
+
+Expressing `Plan → Nutrition → Supplements` natively therefore needs two things
+PR5 is not allowed to invent: a Nutrition domain root re-homed from Today to
+Plan, and a Supplements destination backed by an API that does not exist. A
+button added today would be dead, and a fixture behind it would be a lie. The
+production composition is clean on this point and must stay so — fixtures appear
+only in `AppComposition.development`; `AppComposition.configured` wires live
+repositories or explicit `Unavailable*` ones.
+
+Sequencing risk is real but secondary: Sprint 15 launch hardening owns the same
+shell and navigation files, and the native workout-session client is still
+`UnavailableWorkoutSessionRepository`. Even with that work finished, the
+capability gap above would remain.
+
+The cross-platform contract is therefore recorded as semantics, not as shipped
+parity. Shared: four primary destinations, Today · Plan · Coach · Progress; Plan
+owns Training, Nutrition and Supplements; Nutrition conceptually contains
+Supplements; Profile/Account is a contextual projection and never a management
+home; server services are the only mutation authorities; and `unknown` is never
+`empty`, `read failure` never `absence`. Web satisfies all of it today. Mobile
+satisfies the destination contract and the null/error contract; it does not yet
+satisfy Plan-domain placement, and this document does not claim it does.
+
+**Future ship order.** The web change here is independently reviewable and has no
+mobile dependency. Mobile alignment is a later, separately reviewable change in
+its own repository, and it is gated on a product decision this PR does not own:
+whether a native Supplements capability (backend contract plus client) is in
+scope at all, and whether Nutrition is re-homed from Today to Plan natively.
+Neither repository needs the other's code, and no atomic cross-repo deployment is
+required.
+
+Rollback is a code revert. `UIUX_PLAN_V2_ENABLED` remains default OFF and is not
+a rollback selector for this change; `/supplements` and its parent context render
+identically with the flag off. No schema, migration, route, flag default or
+rollout value changed. PR6 owns flag retirement, the star-control accessibility
+item, and the remaining responsive/loading/observability hardening.
 
 ### PR6 — Flag retirement and hardening
 

@@ -1,6 +1,22 @@
 /* manage_stack page — extracted from inline <style> (Phase 5 Final QA), canonical tokens. */
     .stack-wrap { max-width: 700px; margin: 0 auto; }
 
+    /* UX-3 PR5 — Plan / Nutrition / Supplements orientation. Deliberately the
+       same restrained one-line pattern PR4 gave `/nutrition`, so the two child
+       pages read as one hierarchy instead of two inventions. It must consume
+       almost no vertical space: the cabinet, not the breadcrumb, is the page. */
+    .stack-parent-context {
+        display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+        margin-bottom: var(--space-2); color: var(--color-text-3);
+        font-size: var(--text-sm); line-height: var(--leading-normal);
+    }
+    .stack-parent-context a {
+        color: var(--color-text-2); text-decoration: none;
+        min-height: 44px; display: inline-flex; align-items: center;
+    }
+    .stack-parent-context a:hover { color: var(--color-primary); }
+    .stack-parent-context a:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
     /* ── add form ── */
     .add-card { background: var(--surface); border-radius: var(--r-lg); padding: 24px; margin-bottom: 32px; }
     .add-card-title { font-family: var(--font-display); font-size: 20px; letter-spacing: 2px; color: var(--color-primary); margin-bottom: 16px; }
@@ -80,7 +96,12 @@
     .status-low      { background: rgba(var(--color-warning-rgb),0.15); color: var(--orange); }
     .status-finished { background: rgba(var(--gray-500-rgb),0.2); color: var(--color-text-4); }
 
-    .supp-actions { display: flex; gap: 6px; margin-top: 8px; }
+    /* UX-3 PR5 — the four status/delete buttons are a non-wrapping flex row, so
+       at 320px their combined intrinsic width pushed `.supp-body` (min-width:0)
+       wider than the card and the PAGE scrolled sideways. Pre-existing, but this
+       is the canonical cabinet PR5 points every other surface at, and 320px is a
+       supported viewport. One declaration; no layout redesign. */
+    .supp-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
     .supp-act-btn {
         font-size: 11px; padding: 4px 12px; border-radius: var(--r-sm); border: 1px solid var(--border);
         background: transparent; color: var(--text-2); cursor: pointer; transition: all 0.15s;

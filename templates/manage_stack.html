@@ -18,6 +18,20 @@
 <main class="main-content">
     <div class="stack-wrap">
 
+        {#- UX-3 PR5 — local orientation only. Global chrome already expresses
+            primary ownership (nav_active='supplements' resolves to Plan through
+            app/nav.py); this line states WHERE inside Plan the cabinet lives so
+            the page is not read as a free-floating Account feature. It is a
+            single text row on purpose: no second navbar, no Plan shell, no
+            Nutrition tabs, no hero. -#}
+        <nav class="stack-parent-context" aria-label="{{ t('supplements.parent.aria') }}">
+            <a href="/training">{{ t('supplements.parent.plan') }}</a>
+            <span aria-hidden="true">/</span>
+            <a href="/nutrition">{{ t('supplements.parent.nutrition') }}</a>
+            <span aria-hidden="true">/</span>
+            <span aria-current="page">{{ t('supplements.parent.current') }}</span>
+        </nav>
+
         <div class="page-hdr">
             <h1>{{ t('manage_stack.h1_a') }}<br><span>{{ t('manage_stack.h1_b') }}</span></h1>
             <p>{{ t('manage_stack.page_sub') }}</p>
@@ -231,7 +245,7 @@ async function quickStatus(id, status) {
 }
 
 async function deleteSupplement(id) {
-    if (!confirm('Bu supplement silinsin mi?')) return;
+    if (!confirm(__t('manage_stack.delete_confirm'))) return;
     try {
         const res = await fetch('/supplement/delete/' + id, { method: 'POST' });
         const data = await res.json();

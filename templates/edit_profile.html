@@ -112,9 +112,17 @@
       </div>
     </div>
 
-    <!-- ── MY STACK (supplements, read-only) ── -->
+    {#- ── MY STACK — a PROJECTION of identity, never the cabinet ──
+        UX-3 PR5. Account does not own Supplements: Plan → Nutrition →
+        Supplements does. This block stays a read-only preview of what the user
+        shows about themselves and carries exactly one contextual link OUT to the
+        canonical cabinet. It must never grow an add form, a status control, a
+        delete control, or any POST to /supplement/* — the one-cabinet guard in
+        `test_ux3_pr5_supplements_placement.py` fails if it does. The copy states
+        where management lives so the section cannot be mistaken for it. -#}
     <div>
       <div class="pf-section-title">{{ t('editprofile.stack_title') }}</div>
+      <p class="pf-stack-context">{{ t('editprofile.stack_context') }}</p>
       {% if supplements %}
       <div class="pf-stack">
         {% for s in supplements %}
@@ -137,9 +145,9 @@
         </div>
         {% endfor %}
       </div>
-      <a href="/supplements" class="pf-link">{{ t('editprofile.edit_stack') }}</a>
+      <a href="/supplements" class="pf-link">{{ t('editprofile.stack_manage') }}</a>
       {% else %}
-      <div class="pf-stack-empty">{{ t('editprofile.no_supps') }}<br><a href="/supplements" class="pf-link">{{ t('editprofile.add_first_supp') }}</a></div>
+      <div class="pf-stack-empty">{{ t('editprofile.no_supps') }}<br><a href="/supplements" class="pf-link">{{ t('editprofile.stack_manage') }}</a></div>
       {% endif %}
     </div>
 

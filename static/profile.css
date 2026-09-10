@@ -75,6 +75,10 @@
 
 /* ── section titles (nav rows / integrations / stack) ── */
 .pf-section-title { font-family: var(--font-display); font-size: var(--text-lg); letter-spacing: .04em; color: var(--color-text-1); margin: var(--space-2) 0 var(--space-3); }
+/* UX-3 PR5 — one muted line under the stack heading naming Plan → Nutrition →
+   Supplements as the place management lives. It sits above the preview so the
+   reader learns "this is a projection" before reading the cards. */
+.pf-stack-context { color: var(--color-text-3); font-size: var(--text-sm); line-height: var(--leading-normal); margin: calc(var(--space-2) * -1) 0 var(--space-3); }
 
 /* ── integrations (wearables) ── */
 .pf-integrations { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }

@@ -16,6 +16,32 @@
 .nutrition-parent-context a:hover { color: var(--color-primary); }
 .nutrition-parent-context a:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
+/* UX-3 PR5 — the Nutrition → Supplements child-domain entry. Styled as a quiet
+   inset row, NOT as a `.tab-btn`: no pill, no icon, no active state, and it sits
+   outside the `role="tablist"` element. That separation is the point — the five
+   local tabs are daily Nutrition workflows, while Supplements is a child domain
+   with its own canonical page. */
+.nutrition-child-domain {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: calc(var(--space-2) * -1) 0 var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+}
+.nutrition-child-kicker {
+  color: var(--color-text-3); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.08em;
+}
+.nutrition-child-link {
+  display: inline-flex; align-items: center; min-height: 44px;
+  color: var(--color-primary); font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+.nutrition-child-link:hover { text-decoration: underline; }
+.nutrition-child-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
 .nut-hero {
   display: grid; grid-template-columns: auto 1fr;
   gap: var(--space-5); align-items: center;
