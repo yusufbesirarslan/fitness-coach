@@ -1110,3 +1110,157 @@ def test_expired_clarification_is_not_executable(
     reply = _turn2(app, split_user.id, "yes it would be good")
     _assert_no_mutation(split_user.id, before)
     assert reply is None or "has been added" not in (reply or "").lower()
+
+
+# ── 12. Region-named exercises keep their own name ──────────────────────────
+#
+# "Leg Extension" carries a body-region token INSIDE the exercise name. The
+# turn's own words are the only authority for a first-turn partial ADD, so
+# losing that token loses the exercise — and with it the user-owned half of
+# the prescription, because no clarification record is ever constructed.
+
+
+def _gym_context(user_id):
+    """The machine catalog entries this section names need a gym context."""
+    plan = get_active_plan(user_id)
+    document = json.loads(plan.plan_data)
+    document["exercise_context"]["equipment_context"] = "spor_salonu"
+    plan.plan_data = json.dumps(document, ensure_ascii=False)
+    db.session.commit()
+
+
+def _lifecycle(caplog):
+    return "\n".join(
+        item.getMessage() for item in caplog.records
+        if "component=coach_clarification" in item.getMessage())
+
+
+@pytest.mark.parametrize(
+    ("first_turn", "missing", "stored_sets", "stored_reps", "reason"), [
+        (
+            "Add Leg Extension for 15 reps to my leg workout.",
+            "sets", None, "15", results.REASON_MISSING_SETS,
+        ),
+        (
+            "Add Leg Extension with 4 sets to my leg workout.",
+            "reps", 4, None, results.REASON_MISSING_REPS,
+        ),
+    ])
+def test_region_named_partial_add_persists_the_user_owned_half(
+        app, split_user, tools_on, monkeypatch, caplog,
+        first_turn, missing, stored_sets, stored_reps, reason):
+    """The authoritative record, not the reply, must carry the typed half."""
+    _gym_context(split_user.id)
+    before = _snapshot(split_user.id)
+    caplog.set_level(logging.INFO, logger="app")
+
+    reply = _no_tool_provider_turn(
+        app, split_user.id, first_turn,
+        "How many would you like? I could use 9 sets of 99 reps.", monkeypatch)
+
+    assert f"how many {missing}" in reply.lower()
+    assert "99" not in reply
+    _assert_unchanged(split_user.id, before)
+
+    stored = clar_mod.load(split_user.id)
+    assert stored is not None
+    assert stored["operation"] == "add_exercise"
+    assert stored["exercise"] == "Machine Leg Extension"
+    assert stored["day"] == "Cuma"
+    assert stored["sets"] == stored_sets
+    assert stored["reps"] == stored_reps
+    assert stored["reason"] == reason
+
+    lifecycle = _lifecycle(caplog)
+    assert "event=created reason=initial_write" in lifecycle
+    assert f"missing_fields={missing}" in lifecycle
+
+
+def test_region_named_exercise_is_not_retargeted_to_another_muscle_group(
+        app, split_user, tools_on, monkeypatch):
+    """Dropping "Leg" from "Leg Curl" must not ground a biceps exercise."""
+    _gym_context(split_user.id)
+
+    _no_tool_provider_turn(
+        app, split_user.id,
+        "Add Leg Curl for 15 reps to my leg workout.",
+        "How many sets would you like?", monkeypatch)
+
+    stored = clar_mod.load(split_user.id)
+    assert stored is not None
+    assert stored["exercise"] == "Lying Leg Curl"
+
+
+def test_region_named_reps_first_continuation_persists_exact_4x15_once(
+        app, split_user, tools_on, monkeypatch, caplog):
+    """The production sequence: 15 reps first, then a bare "4"."""
+    _gym_context(split_user.id)
+    before = _snapshot(split_user.id)
+    before_document = json.loads(before[0])
+
+    _no_tool_provider_turn(
+        app, split_user.id,
+        "Add Leg Extension for 15 reps to my leg workout.",
+        "How many sets would you like?", monkeypatch)
+    _assert_unchanged(split_user.id, before)
+
+    caplog.clear()
+    caplog.set_level(logging.INFO, logger="app")
+    applied = _turn2(app, split_user.id, "4")
+
+    assert applied is not None
+    lifecycle = _lifecycle(caplog)
+    assert "reason=request_boundary_new_exercise" not in lifecycle
+    assert "event=consumed reason=continuation_consume" in lifecycle
+
+    friday = _friday_slot(split_user.id)
+    added = friday["egzersizler"][-1]
+    assert added["isim"] == "Machine Leg Extension"
+    assert added["exercise_id"] == "ex_leg_extension"
+    assert added["set"] == 4
+    assert added["tekrar"] == "15"
+    assert names(split_user.id, "Cuma").count("Machine Leg Extension") == 1
+    assert plan_version(split_user.id) == before[1] + 1
+    assert len(journal(split_user.id)) == 1
+    assert friday["egzersizler"][:-1] == next(
+        d for d in before_document["program"] if d["gun"] == "Cuma"
+    )["egzersizler"]
+
+
+def test_a_genuinely_new_region_named_request_still_supersedes(
+        app, split_user, tools_on, monkeypatch, caplog):
+    """Keeping the name must not turn a new mutation into a continuation."""
+    _gym_context(split_user.id)
+    _no_tool_provider_turn(
+        app, split_user.id,
+        "Add Leg Extension for 15 reps to my leg workout.",
+        "How many sets would you like?", monkeypatch)
+    assert clar_mod.load(split_user.id) is not None
+
+    caplog.clear()
+    caplog.set_level(logging.INFO, logger="app")
+    _turn2(app, split_user.id, "Add Hammer Curl 3x10 to my chest workout")
+
+    assert "reason=request_boundary_new_exercise" in _lifecycle(caplog)
+
+
+# ── 13. The reply may reflect authority; it may not create it ───────────────
+
+
+def test_clarification_copy_cannot_claim_a_half_authority_does_not_hold(
+        app, split_user, tools_on):
+    """ask_sets copy without a matching authoritative record fails closed."""
+    payload = {
+        "status": results.STATUS_NEEDS_INPUT,
+        "reason": results.REASON_MISSING_SETS,
+        "change": {"day": "Cuma", "exercise": "Walking Lunge", "reps": "15"},
+    }
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        clar_mod.clear(split_user.id)
+        reply = coach_confirmation._format_plan_clarification(
+            payload, "en", user_id=split_user.id)
+
+    assert "15 reps" not in reply
+    assert reply == coach_confirmation.t(
+        "coach.plan.clarification_unavailable", locale="en")

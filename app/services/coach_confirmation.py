@@ -187,7 +187,8 @@ def reply_after_tools(user_id, language="tr", tool_results=None):
     if applied:
         return _format_plan_applied(applied[-1], language)
     if clarifications:
-        return _format_plan_clarification(clarifications[-1], language)
+        return _format_plan_clarification(
+            clarifications[-1], language, user_id)
     return None
 
 
@@ -219,7 +220,7 @@ def grounded_provider_reply(user_id, language, text):
         except clar_mod.ClarificationAuthorityUnavailable:
             return t("coach.plan.clarification_unavailable", locale=language)
         if recovered is not None:
-            return _format_plan_clarification(recovered, language)
+            return _format_plan_clarification(recovered, language, user_id)
     if (_claims_completed_plan_change(reply)
             and not coach_plan_tools.plan_changed_this_turn()):
         return t("coach.confirm.no_plan_change", locale=language)
@@ -549,7 +550,7 @@ def _complete_grounded_followup(user_id, language):
     try:
         invalid = invalid_candidate_result(user_id)
         if invalid:
-            return _format_plan_clarification(invalid, language)
+            return _format_plan_clarification(invalid, language, user_id)
         mutation = followup_mutation(user_id)
         if not mutation:
             arguments = followup_add_arguments(user_id)
@@ -577,11 +578,32 @@ def _complete_grounded_followup(user_id, language):
     if result.get("status") in (results.STATUS_APPLIED, results.STATUS_REPLAYED):
         return _format_plan_applied(result, language)
     if result.get("status") == results.STATUS_NEEDS_INPUT:
-        return _format_plan_clarification(result, language)
+        return _format_plan_clarification(result, language, user_id)
     return None
 
 
-def _format_plan_clarification(payload, language):
+def _authority_holds(user_id, field, claimed):
+    """Whether the executable clarification really carries ``claimed``.
+
+    The reply may REFLECT authoritative state; it may not CREATE it. Copy that
+    says "You asked for 15 reps" is a claim about the record a later
+    continuation will execute, so it may only be emitted when that exact field
+    reads back from the record itself — never from the payload that is about
+    to become the sentence. Anything else (no record, a superseded one, a
+    shared store that cannot be read) fails closed.
+    """
+    if claimed in (None, ""):
+        return False
+    try:
+        stored = clar_mod.load(user_id)
+    except clar_mod.ClarificationAuthorityUnavailable:
+        return False
+    if not stored:
+        return False
+    return str(stored.get(field) or "") == str(claimed)
+
+
+def _format_plan_clarification(payload, language, user_id):
     reason = payload.get("reason") or ""
     change = payload.get("change") or {}
     day = _day_for_copy(change.get("day") or "", language)
@@ -600,18 +622,24 @@ def _format_plan_clarification(payload, language):
             reps=PROPOSED_REPS,
         )
     if reason == "missing_reps":
+        sets = change.get("sets") or ""
+        if not _authority_holds(user_id, "sets", sets):
+            return t("coach.plan.clarification_unavailable", locale=language)
         return t(
             "coach.plan.ask_reps",
             locale=language,
             exercise=exercise,
-            sets=change.get("sets") or "",
+            sets=sets,
         )
     if reason == "missing_sets":
+        reps = change.get("reps") or ""
+        if not _authority_holds(user_id, "reps", reps):
+            return t("coach.plan.clarification_unavailable", locale=language)
         return t(
             "coach.plan.ask_sets",
             locale=language,
             exercise=exercise,
-            reps=change.get("reps") or "",
+            reps=reps,
         )
     if reason == "exercise_unknown":
         return t(
