@@ -81,6 +81,11 @@
 <main class="main-content">
 
   <!-- Page Header -->
+  <nav class="nutrition-parent-context" aria-label="{{ t('nutrition.parent.aria') }}">
+    <a href="/training">{{ t('nutrition.parent.plan') }}</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">{{ t('nutrition.parent.current') }}</span>
+  </nav>
   <div class="page-hdr">
     <h1>{{ t('nutrition.h1_a') }} <span>{{ t('nutrition.h1_b') }}</span></h1>
     <p>{{ t('nutrition.page_sub') }}</p>
@@ -88,23 +93,23 @@
 
   <!-- Tab Bar -->
   <div class="tab-bar" role="tablist">
-    <button class="tab-btn active" data-action="switchTab" data-args='["today"]' role="tab" aria-selected="true">
+    <button id="nutrition-tab-today" class="tab-btn active" data-tab-name="today" data-action="switchTab" data-args='["today"]' role="tab" aria-selected="true" aria-controls="panel-today">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       {{ t('nutrition.tab_today') }}
     </button>
-    <button class="tab-btn" data-action="switchTab" data-args='["diary"]' role="tab" aria-selected="false">
+    <button id="nutrition-tab-diary" class="tab-btn" data-tab-name="diary" data-action="switchTab" data-args='["diary"]' role="tab" aria-selected="false" aria-controls="panel-diary">
       <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       {{ t('nutrition.tab_diary') }}
     </button>
-    <button class="tab-btn" data-action="switchTab" data-args='["plan"]' role="tab" aria-selected="false">
+    <button id="nutrition-tab-plan" class="tab-btn" data-tab-name="plan" data-action="switchTab" data-args='["plan"]' role="tab" aria-selected="false" aria-controls="panel-plan">
       <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       {{ t('nutrition.tab_plan') }}
     </button>
-    <button class="tab-btn" data-action="switchTab" data-args='["history"]' role="tab" aria-selected="false">
+    <button id="nutrition-tab-history" class="tab-btn" data-tab-name="history" data-action="switchTab" data-args='["history"]' role="tab" aria-selected="false" aria-controls="panel-history">
       <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       {{ t('nutrition.tab_history') }}
     </button>
-    <button class="tab-btn" data-action="switchTab" data-args='["water"]' role="tab" aria-selected="false">
+    <button id="nutrition-tab-water" class="tab-btn" data-tab-name="water" data-action="switchTab" data-args='["water"]' role="tab" aria-selected="false" aria-controls="panel-water">
       <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
       {{ t('nutrition.tab_water') }}
     </button>
@@ -113,7 +118,7 @@
   <!-- ════════════════════════════════
        TAB 1 — BUGÜN
   ════════════════════════════════ -->
-  <div class="tab-panel active" id="panel-today">
+  <div class="tab-panel active" id="panel-today" role="tabpanel" aria-labelledby="nutrition-tab-today">
 
     <!-- Macro Ring + Macro Bars -->
     <div class="card" style="padding:24px;margin-bottom:20px;">
@@ -227,7 +232,7 @@
   <!-- ════════════════════════════════
        TAB 2 — GÜNLÜK OLUŞTURUCU
   ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-diary">
+  <div class="tab-panel" id="panel-diary" role="tabpanel" aria-labelledby="nutrition-tab-diary">
 
     <div style="font-size:11px;color:var(--color-text-3);font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:16px;">
       {{ t('nutrition.diary_builder') }}
@@ -251,7 +256,7 @@
   <!-- ════════════════════════════════
        TAB 3 — AI PLAN
   ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-plan">
+  <div class="tab-panel" id="panel-plan" role="tabpanel" aria-labelledby="nutrition-tab-plan">
 
     <div id="active-plan-detail" style="display:none;"></div>
 
@@ -290,7 +295,7 @@
   <!-- ════════════════════════════════
        TAB 4 — GEÇMİŞ
   ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-history">
+  <div class="tab-panel" id="panel-history" role="tabpanel" aria-labelledby="nutrition-tab-history">
 
     <div class="card" style="padding:24px;margin-bottom:20px;">
       <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-text-3);margin-bottom:16px;">{{ t('nutrition.weekly_cal') }}</div>
@@ -314,7 +319,7 @@
   <!-- ════════════════════════════════
        TAB 5 — SU TAKİBİ
   ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-water">
+  <div class="tab-panel" id="panel-water" role="tabpanel" aria-labelledby="nutrition-tab-water">
 
     <div class="card water-card" style="padding:28px 24px;">
       <div class="water-hdr">

@@ -142,7 +142,13 @@ class PlanFacts:
     workout_snapshot: object = None
     execution_bootstrap: object = None
     nutrition_state: str = "unknown"
+    nutrition_target_state: str = "unknown"
     nutrition_target_calories: object = None
+    nutrition_intake_state: str = "unknown"
+    nutrition_consumed_calories: object = None
+    nutrition_meal_count: object = None
+    nutrition_plan_state: str = "unknown"
+    has_nutrition_plan: object = None
     supplements_state: str = "unknown"
     supplements_count: object = None
     # UX-3 PR3 — canonical plan-freshness identity, carried VERBATIM from the
@@ -192,7 +198,13 @@ class PlanView:
     workout_action_label_key: str = ""
     execution_bootstrap: object = None
     nutrition_state: str = "unknown"
+    nutrition_target_state: str = "unknown"
     nutrition_target_calories: object = None
+    nutrition_intake_state: str = "unknown"
+    nutrition_consumed_calories: object = None
+    nutrition_meal_count: object = None
+    nutrition_plan_state: str = "unknown"
+    has_nutrition_plan: object = None
     supplements_state: str = "unknown"
     supplements_count: object = None
     # ── UX-3 PR3 Training-management placement ──
@@ -271,7 +283,13 @@ def build_plan_view(facts: PlanFacts, weekly_enabled: bool = False) -> PlanView:
         "workout_action_label_key": workout_label_key,
         "execution_bootstrap": facts.execution_bootstrap,
         "nutrition_state": facts.nutrition_state,
+        "nutrition_target_state": facts.nutrition_target_state,
         "nutrition_target_calories": facts.nutrition_target_calories,
+        "nutrition_intake_state": facts.nutrition_intake_state,
+        "nutrition_consumed_calories": facts.nutrition_consumed_calories,
+        "nutrition_meal_count": facts.nutrition_meal_count,
+        "nutrition_plan_state": facts.nutrition_plan_state,
+        "has_nutrition_plan": facts.has_nutrition_plan,
         "supplements_state": facts.supplements_state,
         "supplements_count": facts.supplements_count,
         "management_baseline": baseline,

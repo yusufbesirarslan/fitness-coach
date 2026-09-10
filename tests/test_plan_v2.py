@@ -492,10 +492,12 @@ def test_transaction_aborting_child_read_is_isolated_from_other_plan_domains(
 
     assert facts.read_ok is True
     assert facts.has_active_plan is True
-    assert facts.nutrition_state == "unavailable"
+    assert facts.nutrition_state == "partial"
     assert facts.supplements_state == "available"
     assert facts.supplements_count == 2
-    assert state["savepoints"] == 2
+    # Target, current-day ledger, plan presence, and Supplements each own a
+    # rollback boundary, so one failed read cannot poison any sibling.
+    assert state["savepoints"] == 4
 
 
 def test_plan_routes_remain_stable_and_no_plan_route_exists(

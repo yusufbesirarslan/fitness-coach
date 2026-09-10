@@ -735,6 +735,70 @@ workflow does not reach, so it is reported rather than absorbed here.
 - **Rollback:** remove summary/placement links; `/nutrition` remains canonical.
 - **Major risk:** eager loading or ledger-semantic regression.
 
+#### PR4 implementation record (2026-09-10)
+
+PR4 keeps `/nutrition` as the only Nutrition workspace and makes its ownership
+visible in both directions. Plan's existing Nutrition placement now presents a
+bounded read-only snapshot: the latest positive `UserSession.target_calories`,
+the current Istanbul day's canonical `MealLog` count/calorie aggregate, and
+whether the canonical newest `NutritionPlan` exists. Zero MealLog rows is the
+known value zero; a missing target remains unknown and is never rendered as
+zero. Plan adds no Nutrition write, provider/serving/barcode/menu/history/water
+read, browser fetch, prompt, or model call.
+
+The three facts use separate nested transactions, as does Supplements. A failed
+target, ledger, or plan-presence statement therefore degrades only that
+dimension; the placement reports `partial` when a subset is unavailable and
+never blanks Training. The presenter only copies frozen facts. The resulting
+facts read costs exactly seven SELECTs with workout sessions OFF and nine with
+sessions ON: the pre-PR4 five/seven plus one bounded MealLog aggregate and one
+NutritionPlan presence read. It is independent of MealLog history length.
+
+`/nutrition` adds compact linked `Plan / Nutrition` context, while its global
+active destination remains Plan through the existing `app/nav.py` ownership
+map. Its five local areas remain Today, Diary, Nutrition Plan, History, and
+Water; only the ambiguous local “AI Plan” label changed. Tab/panel relationships
+are explicit, the quick-add empty state targets the actual Nutrition Plan tab,
+and existing write routes and clients are unchanged.
+
+Plan projects kcal for display with the browser's rule, not Python's.
+`static/nutrition.js` renders every Today/Diary/History calorie through
+`Math.round()` (`floor(x + 0.5)`), while Python's `round()` is half-to-even, so
+the same stored 2200.5 would print 2201 in Nutrition and 2200 in Plan.
+`_display_kcal` in `app/services/plan_facts.py` reproduces the JS contract at
+display time only; stored `MealLog` and `UserSession` values are never
+rewritten, nothing rounds at persistence time, and Python's global rounding is
+untouched. Absent, non-numeric, NaN and infinite inputs stay unknown.
+
+The read isolation is proved on real PostgreSQL, because SQLite does not abort a
+transaction on a failed statement and so cannot prove anything here.
+`tests/test_ux3_pr4_nutrition_placement_pg.py` injects a genuine failing
+statement inside the target subread and asserts the placement degrades to
+`partial` while intake, plan presence and Supplements stay `available`; it
+refuses any dialect but `postgresql`. Because the CI `mobile-pg-concurrency` job
+selects PostgreSQL modules by an explicit file list, the module is registered in
+that list. Removing the savepoint collapses `partial` to `unavailable`, so the
+isolation boundary is load-bearing.
+
+Focused verification covers the state/failure matrix, query budget, EN/TR
+catalogs, stable hierarchy, the rounding contract, and real Chromium journeys at
+320/390/768/1024/1366 with no horizontal overflow — including a
+no-`NutritionPlan` 320px journey that logs a meal through the canonical
+`POST /meal-log` web write, finds it in Today and History, keeps the Diary
+builder operable, creates a plan, and writes water. Results (2026-09-10, on
+`origin/main` a962599): focused PR4 module 23 passed; PR4 + Plan V2 +
+Plan-convergence + PR3 contracts 107 passed; browser suite 2 passed; PostgreSQL
+proof 1 passed on PostgreSQL 16.15; canonical Nutrition/provider/write
+regression 582 passed; Plan/Training/PR3 regression 323 passed; whole suite in 8
+batches 6610 passed / 29 skipped (every skip an opt-in PostgreSQL test or the
+`test_staging_separation` bash guard), with
+`tests/test_production_deploy_script.py` excluded as a Windows-host limitation
+that reproduces identically on unmodified `origin/main`.
+
+Rollback is a code revert; `UIUX_PLAN_V2_ENABLED` remains default OFF and no
+schema, migration, route, or rollout value changed. PR5 can now converge the
+deeper Supplements placement without reopening Nutrition authority.
+
 ### PR5 — Supplements placement and cross-platform contract
 
 - **Goal:** establish Plan → Nutrition → Supplements placement, reduce Profile

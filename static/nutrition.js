@@ -107,7 +107,7 @@ document.addEventListener('keydown', function (e) {
    Tıklanan öğe (eski `this`) bazı eski çağrılarda ortada/başta argümandı ya da
    this.value iletiliyordu; delegasyon öğeyi sona koyduğu için bu ince
    sarmalayıcılar argüman sırasını ve değer okumayı korur. */
-function fxGoToPlanTab() { switchTab('plan', document.querySelectorAll('.tab-btn')[1]); }
+function fxGoToPlanTab() { switchTab('plan', document.querySelector('[data-tab-name="plan"]')); }
 function fxSelectFood(el) { selectFood(JSON.parse(el.dataset.f)); }
 function fxAddDiaryFood(el) { addDiaryFood(el.dataset.meal, JSON.parse(el.dataset.f)); }
 function fxDiaryFoodSearch(el) { diaryFoodSearch(el, el.dataset.meal); }
