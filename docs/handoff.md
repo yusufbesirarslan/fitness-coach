@@ -55,6 +55,19 @@ canonical cabinet only; focused + PR3/PR4/nav/profile/i18n/Today regression 278
 passed. Twelve adversarial mutations were applied one at a time and each was
 caught by the guard that claims it.
 
+**Ship-time correction (browser suite determinism).** The cabinet reloads
+ITSELF a few hundred ms after a successful add/status write
+(`setTimeout(() => location.reload(), ...)` in `manage_stack.html`), i.e. after
+the response the suite waits on has already arrived. `page.wait_for_url(
+"**/supplements")` cannot fence that: a reload does not change the URL, so it
+matches the current document and returns immediately. The scheduled reload then
+landed mid-`goto` and aborted it — `net::ERR_ABORTED` on a request the server
+answered `200`, reproducing on roughly 2 of 5 module runs. The three write sites
+now stamp the document before the click and wait for the stamp to disappear
+(`_arm_reload_probe` / `_await_cabinet_reload`), which waits for the NEW document
+instead of guessing at a delay; instrumented, that barrier blocks ~1s, so it is
+not vacuous. No assertion was removed or relaxed.
+
 **Assertion hazard worth remembering.** `templates/_head.html` injects the WHOLE
 locale catalog into `window.I18N`, so `"translated sentence" in html` is TRUE on
 every page whether or not the page renders it. That made one guard vacuous during

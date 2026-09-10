@@ -41,6 +41,29 @@ def _no_horizontal_overflow(page):
     )
 
 
+def _arm_reload_probe(page):
+    """Stamp the current document so a self-reload can be detected.
+
+    `manage_stack.html` reloads ITSELF a few hundred ms after a successful
+    add/status write (`setTimeout(() => location.reload(), ...)`), i.e. AFTER
+    the response this suite waits on has already arrived.
+    """
+    page.evaluate("window.__pr5_document = true")
+
+
+def _await_cabinet_reload(page):
+    """Block until the cabinet's own delayed reload has landed.
+
+    `page.wait_for_url("**/supplements")` CANNOT serve as this barrier: a reload
+    does not change the URL, so it matches the current document and returns
+    immediately. The scheduled reload then fires while the test is navigating
+    somewhere else and aborts that navigation -- `net::ERR_ABORTED`, on a
+    request the server answered 200. Waiting for the stamp to disappear waits
+    for the new document instead of guessing at a delay.
+    """
+    page.wait_for_function("() => window.__pr5_document === undefined")
+
+
 def test_plan_to_nutrition_to_supplements_journey_keeps_plan_active(
     app, auth_user, training_page,
 ):
@@ -194,13 +217,14 @@ def test_zero_then_add_then_status_then_delete_all_run_through_the_cabinet(
 
     page.locator("#f-name").fill("Creatine Monohydrate")
     page.locator("#f-brand").fill("Bulk")
+    _arm_reload_probe(page)
     with page.expect_response(
         lambda r: r.url.endswith("/supplement/add") and r.request.method == "POST"
     ) as added:
         page.locator("#add-btn").click()
     assert added.value.ok
 
-    page.wait_for_url("**/supplements")
+    _await_cabinet_reload(page)
     expect(page.locator(".supp-card")).to_have_count(1)
     expect(page.locator(".supp-card")).to_contain_text("Creatine Monohydrate")
 
@@ -210,6 +234,7 @@ def test_zero_then_add_then_status_then_delete_all_run_through_the_cabinet(
         supplement_id = row.id
 
     # E. Status change — through /supplement/edit, from the cabinet only.
+    _arm_reload_probe(page)
     with page.expect_response(
         lambda r: r.url.endswith(f"/supplement/edit/{supplement_id}")
         and r.request.method == "POST"
@@ -218,7 +243,7 @@ def test_zero_then_add_then_status_then_delete_all_run_through_the_cabinet(
             f'[data-action="quickStatus"][data-args=\'[{supplement_id},"Low Stock"]\']'
         ).click()
     assert edited.value.ok
-    page.wait_for_url("**/supplements")
+    _await_cabinet_reload(page)
     with app.app_context():
         assert db.session.get(Supplement, supplement_id).status == "Low Stock"
 
@@ -272,11 +297,13 @@ def test_visibility_toggle_is_owned_by_the_cabinet_and_persists(
 
     page.locator("#f-name").fill("Private ZMA")
     page.locator("#f-brand").fill("House")
+    _arm_reload_probe(page)
     with page.expect_response(
         lambda r: r.url.endswith("/supplement/add") and r.request.method == "POST"
     ) as added:
         page.locator("#add-btn").click()
     assert added.value.ok
+    _await_cabinet_reload(page)
 
     with app.app_context():
         row = Supplement.query.filter_by(user_id=auth_user.id).one()
