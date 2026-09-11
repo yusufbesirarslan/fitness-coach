@@ -395,8 +395,16 @@
              data-domain-state="{{ plan.supplements_state }}" aria-labelledby="plan-supplements-label">
       <div>
         <h3 id="plan-supplements-label" class="plan-domain-child-title">{{ t('plan.domain.supplements') }}</h3>
+        {#- UX-3 PR5 — three states stay three statements. A failed cabinet read
+            is `unavailable` and says so; it must NEVER render as the empty
+            cabinet, because "we could not read it" and "you own nothing" lead a
+            user to opposite actions. `supplements_count` is a bounded COUNT
+            taken in its own savepoint by `plan_facts`; no list, rating, price,
+            review, visibility flag or DB id reaches this page. -#}
         <p class="plan-domain-summary">
-          {% if plan.supplements_count is not none %}{{ t('plan.supplements.count', count=plan.supplements_count) }}{% else %}{{ t('plan.supplements.summary') }}{% endif %}
+          {% if plan.supplements_state == 'unavailable' %}{{ t('plan.supplements.unavailable') }}
+          {% elif plan.supplements_count %}{{ t('plan.supplements.count', count=plan.supplements_count) }}
+          {% else %}{{ t('plan.supplements.empty') }}{% endif %}
         </p>
       </div>
       <a class="plan-domain-link" href="/supplements">{{ t('plan.action.open_supplements') }}</a>

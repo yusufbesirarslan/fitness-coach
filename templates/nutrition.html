@@ -115,6 +115,17 @@
     </button>
   </div>
 
+  {#- UX-3 PR5 — Supplements is a CHILD DOMAIN of Nutrition, not a sixth daily
+      workflow tab. It is rendered BELOW the local tablist, outside it, with its
+      own kicker and its own `nav` landmark, so nothing about it reads as a peer
+      of Today/Diary/Nutrition Plan/History/Water. It is one link: the cabinet at
+      `/supplements` stays the only place supplements are edited, and this page
+      issues no Supplement query to draw it. -#}
+  <nav class="nutrition-child-domain" aria-label="{{ t('nutrition.child.aria') }}">
+    <span class="nutrition-child-kicker">{{ t('nutrition.child.kicker') }}</span>
+    <a class="nutrition-child-link" href="/supplements">{{ t('nutrition.child.supplements') }}</a>
+  </nav>
+
   <!-- ════════════════════════════════
        TAB 1 — BUGÜN
   ════════════════════════════════ -->

@@ -292,7 +292,7 @@ No feature has two canonical homes. "Reachable from" is not "home".
 | Nutrition plan | `/nutrition` in-page "plan" tab | Plan → Nutrition | Domain | Stay an in-page tab | — | Not a primary destination. |
 | Water logging | `/nutrition` water tab + `/water` API + Today summary | Plan → Nutrition | Domain / Today summary | Keep API. Compact Today signal allowed | `/water` is API, not a page | |
 | Menu scan / barcode | Home quick action; Coach widget QR; Nutrition log sheet | Plan → Nutrition (logging) | Contextual + domain | Remove Home "Soon" barcode tile. Coach may offer scan in-conversation | — | Nutrition `#log-fab` stays as in-domain logging, not global chrome. |
-| Supplement Cabinet | `/supplements` + Profile hub + drawer | Plan → Nutrition | Domain | Remove from drawer and Profile sitemap. Profile may keep a *read-only* stack summary that links in | Keep `/supplements` | |
+| Supplement Cabinet | `/supplements` + Profile stack projection | Plan → Nutrition | Domain | **DONE (UX-3 PR5).** Drawer and Profile sitemap rows removed; Plan nests it under Nutrition, `/nutrition` carries one child-domain entry, `/supplements` states its parent chain, and Profile keeps a *read-only* stack summary with one contextual link out | Keep `/supplements` | `/supplements` is the ONE editable cabinet; Plan/Nutrition/Profile may only navigate to it |
 | AI Coach | FAB + `/coach` + Progress Ask Axis | Coach `/coach` | Primary | Promote in production chrome (PR2). Remove FAB (PR3). Keep Ask Axis as contextual | Keep `/coach` | Same widget (`coach_widget.js`). No second Coach app. |
 | Coach conversation APIs | `/ask`, `/ask/stream`, `/coach/history`, `/coach/conversation/reset` | Coach | — | None | — | Not destinations. |
 | Notifications | Bell + drawer | Notifications `/notifications` | Global utility | Bell only. Remove drawer item. Fix `nav_active` (today `'profile'`) | Keep `/notifications` | |
@@ -349,7 +349,7 @@ Nothing in this table is removed in this PR.
 | Friends, Feed, Club, Quests | Collapse under a single Community entry |
 | Challenges (missing today) | Join that Community entry; do not leave it drawer-only |
 | Pump Check Gallery | Remove from Account sitemap; Progress → Physique is home |
-| Supplements | Remove from Account sitemap; optional read-only stack summary may remain |
+| Supplements | Done (UX-3 PR5): removed from the Account sitemap; the read-only stack summary remains as a projection with one contextual link to the canonical cabinet |
 | Premium | Keep as Account → Subscription (membership card already does this) |
 | Language | Keep (Account) |
 | Logout | Keep (Account) |
@@ -420,7 +420,7 @@ If a later PR truly must change a path:
 | `/coach` | `coach` → Coach | Keep |
 | `/progress-page` | `progress` → Progress | Keep |
 | `/nutrition` | v2: **none**; legacy: Nutrition tab | **Must become Plan** |
-| `/supplements` | none / profile | **Must become Plan** |
+| `/supplements` | **Plan** (`active_when` in `app/nav.py`) | Done — UX-3 PR5 |
 | `/pump-check-gallery` | `profile` | **Must become Progress** |
 | `/notifications` | `profile` | **None** (utility; bell is the chrome) |
 | `/edit-profile` | `profile` | **None** (utility; avatar is the chrome) |
