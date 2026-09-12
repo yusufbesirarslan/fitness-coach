@@ -15,7 +15,7 @@ from app.services.validators import _decode_data_url_image
 _MAX_AVATAR_LEN = 500_000
 
 _ERRORS = {
-    "too_big": "Profil fotoğrafı çok büyük (maks 2MB).",
+    "too_big": "Profil fotoğrafı çok büyük (maks ~375KB).",
     "bad_format": "Geçersiz profil fotoğrafı formatı.",
     "decode_failed": "Profil fotoğrafı çözümlenemedi.",
     "bad_image": "Geçerli bir görsel dosyası değil.",

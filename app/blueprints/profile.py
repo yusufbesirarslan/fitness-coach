@@ -18,6 +18,13 @@ from app.services.validators import validate_full_name, validate_username
 bp = Blueprint("profile", __name__)
 
 
+@bp.after_request
+def prevent_profile_cache(response):
+    if request.endpoint == "profile.edit_profile":
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @bp.route("/setup", methods=["GET", "POST"])
 @require_auth
 def setup():
@@ -108,6 +115,13 @@ def edit_profile():
         )
 
     data = request.get_json(silent=True) or {}
+
+    if set(data) == {"profile_picture"}:
+        pic_error = set_user_avatar(current_user, data["profile_picture"])
+        if pic_error:
+            return jsonify({"error": pic_error}), 400
+        db.session.commit()
+        return jsonify({"message": t("editprofile.avatar_updated")})
 
     new_username = (data.get("username") or "").strip()
     new_full_name = (data.get("full_name") or "").strip()

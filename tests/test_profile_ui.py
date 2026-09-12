@@ -28,6 +28,11 @@ def test_profile_structural_anchors(client, auth_user):
     assert "--volt" not in html
 
 
+def test_profile_script_url_is_versioned_so_avatar_fixes_reach_existing_clients(client, auth_user):
+    html = _html(client)
+    assert '/static/profile.js?v=' in html
+
+
 def test_profile_hub_destinations_preserved(client, auth_user):
     html = _html(client)
     for href in ("/friends", "/feed", "/leaderboard", "/quests",

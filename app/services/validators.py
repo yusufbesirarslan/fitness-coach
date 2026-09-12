@@ -81,7 +81,7 @@ def validate_profile_picture(value):
     if not value:
         return None, None  # boş = fotoğrafı kaldır
     if len(value) > 500_000:
-        return None, "Profil fotoğrafı çok büyük (maks 2MB)."
+        return None, "Profil fotoğrafı çok büyük (maks ~375KB)."
     m = _PROFILE_PIC_RE.match(value)
     if not m:
         return None, "Geçersiz profil fotoğrafı formatı."

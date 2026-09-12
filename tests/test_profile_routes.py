@@ -78,6 +78,26 @@ def test_edit_profile_page_renders(client, auth_user):
     assert client.get("/edit-profile").status_code == 200
 
 
+def test_edit_profile_page_is_not_cached_after_update(client, auth_user):
+    first = client.get("/edit-profile")
+    assert first.status_code == 200
+    assert "no-store" in first.headers.get("Cache-Control", "")
+
+    saved = client.post("/edit-profile", json={
+        "username": "newprofile", "full_name": "Updated Name", "goal": "kas kazanma",
+        "target_weight": "85",
+    })
+    assert saved.status_code == 200
+    assert "no-store" in saved.headers.get("Cache-Control", "")
+
+    db.session.remove()
+    refreshed = client.get("/edit-profile")
+    assert refreshed.status_code == 200
+    assert 'value="Updated Name"' in refreshed.get_data(as_text=True)
+    assert 'value="newprofile"' in refreshed.get_data(as_text=True)
+    assert 'value="85.0"' in refreshed.get_data(as_text=True)
+
+
 def test_edit_profile_updates_fields(client, auth_user):
     response = client.post("/edit-profile", json={
         "username": "yeniad", "full_name": "Yusuf B", "goal": "kas kazanma",
@@ -147,6 +167,21 @@ def test_edit_profile_bad_picture_rejected_good_one_stored(client, auth_user):
     good = client.post("/edit-profile", json={"username": "testuser", "profile_picture": pic})
     assert good.status_code == 200
     assert _fresh_user(auth_user.id).profile_picture == pic
+
+
+def test_avatar_only_update_preserves_unsaved_profile_fields(client, auth_user):
+    from tests.test_validators import _image_data_url
+
+    pic = _image_data_url("PNG")
+    response = client.post("/edit-profile", json={"profile_picture": pic})
+
+    assert response.status_code == 200
+    assert response.json["message"]
+    user = _fresh_user(auth_user.id)
+    assert user.profile_picture == pic
+    assert user.username == "testuser"
+    db.session.remove()
+    assert pic in client.get("/edit-profile").get_data(as_text=True)
 
 
 def test_edit_profile_empty_target_weight_clears(client, auth_user):
