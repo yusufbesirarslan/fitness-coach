@@ -62,6 +62,7 @@ from .service import (
     complete,
     current,
     prepare_complete,
+    read,
     resume,
     start,
 )
@@ -70,6 +71,7 @@ __all__ = [
     # commands
     "start",
     "current",
+    "read",
     "resume",
     "checkpoint",
     "abandon",

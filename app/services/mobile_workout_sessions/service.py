@@ -1,4 +1,4 @@
-"""Native workout-session write commands.
+"""Native workout-session read and write contracts.
 
 This module is an ADAPTER, not an authority. Session identity, the
 one-active-session invariant, lifecycle classification and terminal transitions
@@ -200,6 +200,17 @@ def current(user_id: int) -> SessionCommandResult:
         return SessionCommandResult({"session": None}, 200)
     row = _owned_session(user_id, result.session.public_id)
     return SessionCommandResult({"session": _project(row, today)}, 200)
+
+
+def read(user_id: int, session_ref: object) -> SessionCommandResult:
+    """Read one owned session by public reference, including terminal states.
+
+    This does not change /current's active-only recovery meaning. The shared
+    owner-scoped lookup and canonical view provide the same projection as the
+    command responses, without touching the session or its completion effects.
+    """
+    row = _owned_session(user_id, session_ref)
+    return SessionCommandResult({"session": _project(row)}, 200)
 
 
 def resume(
