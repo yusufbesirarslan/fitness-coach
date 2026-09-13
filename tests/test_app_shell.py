@@ -1,5 +1,6 @@
 """Phase 2 app shell guards: tüm uygulama sayfaları ortak kabuk parçalarını kullanır."""
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -79,6 +80,25 @@ def test_all_app_pages_render_shared_shell(client, make_user, login):
         assert 'class="global-header"' in html, route
         assert 'class="action-bar"' in html, route
         assert "fx-drawer" not in html, route
+
+
+def test_plan_and_coach_header_avatar_matches_working_page(app, client, make_user, login):
+    photo = "data:image/png;base64,cHJvZmlsZQ=="
+    make_user("avataruser", profile_complete=True, profile_picture=photo)
+    login("avataruser")
+    avatar = re.compile(r'<a href="/edit-profile" class="header-avatar"[^>]*>\s*<img src="([^"]+)" alt="">\s*</a>')
+
+    working = avatar.search(client.get("/progress-page").get_data(as_text=True))
+    assert working is not None and working.group(1) == photo
+
+    app.config["UIUX_PLAN_V2_ENABLED"] = True
+    plan = avatar.search(client.get("/training").get_data(as_text=True))
+    assert plan is not None and plan.group(1) == photo
+
+    for coach_v2 in (False, True):
+        app.config["UIUX_COACH_PAGE_V2_ENABLED"] = coach_v2
+        coach = avatar.search(client.get("/coach").get_data(as_text=True))
+        assert coach is not None and coach.group(1) == photo
 
 
 def test_profile_hub_lists_community_and_account_destinations(client, auth_user):

@@ -43,9 +43,9 @@ def coach_page():
     (İKİNCİ koç uygulaması YOK), tek etkileşimli örnek garanti edilir. Bayrak
     request-zamanında okunur; geçersiz/eksik → KAPALI → eski coach.html (fail-safe).
     Veri çekme/iş mantığı yine YOK; her iki yolda da @require_auth korunur."""
-    if current_app.config.get("UIUX_COACH_PAGE_V2_ENABLED", False):
-        return render_template("coach_v2.html")
-    return render_template("coach.html")
+    template = "coach_v2.html" if current_app.config.get("UIUX_COACH_PAGE_V2_ENABLED", False) else "coach.html"
+    return render_template(template, username=current_user.username,
+                           profile_picture=current_user.avatar_src)
 
 
 def _ai_cooldown_response():
