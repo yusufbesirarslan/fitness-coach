@@ -209,7 +209,9 @@ def training():
             ),
             weekly_enabled=weekly_enabled,
         )
-        return render_template("plan.html", plan=plan_view)
+        return render_template("plan.html", plan=plan_view,
+                               username=current_user.username,
+                               profile_picture=current_user.avatar_src)
 
     # Kayıtlı sakatlık verisini forma ön-doldur (yapışkan alan). None-güvenli.
     _meta = getattr(current_user, "user_metadata", None) or {}
