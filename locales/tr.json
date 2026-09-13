@@ -979,7 +979,7 @@
   "editprofile.target_weight_hint": "Ulaşmak istediğiniz kilo (opsiyonel).",
   "editprofile.stack_title": "GÜNCEL SUPPLEMENT STACK",
   "editprofile.no_supps": "Henüz supplement eklemedin.",
-  "editprofile.avatar_max": "Maksimum dosya boyutu 2MB.",
+  "editprofile.avatar_max": "Maksimum dosya boyutu yaklaşık 375KB.",
   "editprofile.avatar_updated": "Profil fotoğrafı güncellendi.",
   "route.supp.updated": "Supplement güncellendi!",
   "route.supp_added": "Supplement eklendi!",

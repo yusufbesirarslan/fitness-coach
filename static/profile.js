@@ -1,7 +1,8 @@
 /* Profile page (Phase 5 · Surface 3). Top-level globals for data-action + listeners. */
 var __t = (window.t) || function (k) { return k; };
 var selectedGoal = (document.body.getAttribute('data-goal') || '');
-var pendingAvatar = null;
+var avatarSaving = false;
+var profileSaving = false;
 var _editOpener = null;
 
 function toast(msg, type) {
@@ -47,8 +48,12 @@ function closeEditSheet() {
 }
 
 async function saveProfile() {
+  if (profileSaving || avatarSaving) return;
+  profileSaving = true;
   var btn = document.getElementById('save-btn');
+  var fileInput = document.getElementById('avatar-file-input');
   btn.disabled = true;
+  if (fileInput) fileInput.disabled = true;
   btn.textContent = __t('common.saving');
   var tw = document.getElementById('target_weight');
   var payload = {
@@ -57,7 +62,7 @@ async function saveProfile() {
     goal: selectedGoal,
     target_weight: tw ? tw.value.trim() : ''
   };
-  if (pendingAvatar !== null) { payload.profile_picture = pendingAvatar; }
+  var willReload = false;
   try {
     var res = await fetch('/edit-profile', {
       method: 'POST',
@@ -66,12 +71,44 @@ async function saveProfile() {
     });
     var data = await res.json();
     if (!res.ok) { toast(data.error || __t('common.error'), 'error'); }
-    else { toast(data.message, 'success'); setTimeout(function () { location.reload(); }, 800); }
+    else { willReload = true; toast(data.message, 'success'); setTimeout(function () { location.reload(); }, 800); }
   } catch (e) {
     toast(__t('common.conn_error'), 'error');
   } finally {
-    btn.disabled = false;
+    profileSaving = false;
     btn.textContent = __t('common.save');
+    if (!willReload) {
+      btn.disabled = false;
+      if (fileInput) fileInput.disabled = false;
+    }
+  }
+}
+
+async function saveAvatar(dataUrl) {
+  var fileInput = document.getElementById('avatar-file-input');
+  var btn = document.getElementById('save-btn');
+  try {
+    var res = await fetch('/edit-profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile_picture: dataUrl })
+    });
+    var data = await res.json();
+    if (!res.ok) { toast(data.error || __t('common.error'), 'error'); return; }
+    var display = document.getElementById('avatar-display');
+    var img = display.querySelector('img') || document.createElement('img');
+    img.src = dataUrl;
+    img.alt = 'Profil';
+    var letter = display.querySelector('span');
+    if (letter) letter.remove();
+    if (!display.querySelector('img')) display.insertBefore(img, display.querySelector('.pf-avatar-overlay'));
+    toast(data.message, 'success');
+  } catch (e) {
+    toast(__t('common.conn_error'), 'error');
+  } finally {
+    avatarSaving = false;
+    if (fileInput) { fileInput.disabled = false; fileInput.value = ''; }
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -87,20 +124,29 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var fileInput = document.getElementById('avatar-file-input');
   if (fileInput) fileInput.addEventListener('change', function (e) {
+    if (avatarSaving || profileSaving) return;
     var file = e.target.files[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast(__t('editprofile.avatar_max'), 'error'); return; }
+    if (file.size > 374000) { toast(__t('editprofile.avatar_max'), 'error'); return; }
+    avatarSaving = true;
+    fileInput.disabled = true;
+    document.getElementById('save-btn').disabled = true;
     var reader = new FileReader();
     reader.onload = function (ev) {
-      pendingAvatar = ev.target.result;
-      var display = document.getElementById('avatar-display');
-      var overlay = display.querySelector('.pf-avatar-overlay');
-      var img = display.querySelector('img') || document.createElement('img');
-      img.src = pendingAvatar; img.alt = 'Profil';
-      var letter = display.querySelector('span');
-      if (letter) letter.remove();
-      if (!display.querySelector('img')) display.insertBefore(img, overlay);
-      toast(__t('editprofile.avatar_updated'), 'success');
+      if (ev.target.result.length > 500000) {
+        avatarSaving = false;
+        fileInput.disabled = false;
+        document.getElementById('save-btn').disabled = false;
+        toast(__t('editprofile.avatar_max'), 'error');
+        return;
+      }
+      saveAvatar(ev.target.result);
+    };
+    reader.onerror = function () {
+      avatarSaving = false;
+      fileInput.disabled = false;
+      document.getElementById('save-btn').disabled = false;
+      toast(__t('common.error'), 'error');
     };
     reader.readAsDataURL(file);
   });

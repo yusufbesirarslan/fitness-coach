@@ -979,7 +979,7 @@
   "editprofile.target_weight_hint": "The weight you want to reach (optional).",
   "editprofile.stack_title": "CURRENT SUPPLEMENT STACK",
   "editprofile.no_supps": "You haven't added any supplements yet.",
-  "editprofile.avatar_max": "Maximum file size is 2MB.",
+  "editprofile.avatar_max": "Maximum file size is about 375KB.",
   "editprofile.avatar_updated": "Profile photo updated.",
   "route.supp.updated": "Supplement updated!",
   "route.supp_added": "Supplement added!",
