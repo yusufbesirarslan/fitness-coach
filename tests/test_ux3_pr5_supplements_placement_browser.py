@@ -250,7 +250,7 @@ def test_zero_then_add_then_status_then_delete_all_run_through_the_cabinet(
     # Plan reflects the same cabinet without gaining a control of its own.
     page.goto("http://localhost/training")
     expect(page.locator('[data-plan-domain="supplements"]')).to_contain_text(
-        "1 supplements saved.")
+        "1 supplement saved.")
 
     # F. Delete — through /supplement/delete, from the cabinet only.
     page.goto("http://localhost/supplements")
@@ -407,3 +407,23 @@ def test_cabinet_controls_are_keyboard_reachable_and_show_focus(
             " return Boolean(l && l.textContent.trim()); }",
             field,
         ), field
+
+
+def test_rating_stars_are_named_keyboard_buttons(app, auth_user, training_page):
+    with app.app_context():
+        _ready(auth_user.id)
+    page, _, _, _ = training_page
+    page.goto("http://localhost/supplements")
+    effect = page.locator('[data-field="rating_effect"]')
+    buttons = effect.get_by_role("button")
+    expect(buttons).to_have_count(5)
+    third = buttons.nth(2)
+    expect(third).to_have_text("\u2605")
+    expect(third).to_have_accessible_name("Effect: 3 of 5")
+    third.focus()
+    assert page.evaluate("document.activeElement === document.querySelector('[data-field=\"rating_effect\"] [data-val=\"3\"]')")
+    page.keyboard.press("Enter")
+    expect(third).to_have_attribute("aria-pressed", "true")
+    page.keyboard.press("Space")
+    expect(third).to_have_attribute("aria-pressed", "false")
+    assert third.evaluate("el => getComputedStyle(el, ':focus-visible').outlineStyle !== 'none'")

@@ -152,6 +152,13 @@
   /* Render the proposal as a PROPOSAL: a bounded, clearly-labelled preview of
    * what would replace the plan, built with textContent only. It is never
    * rendered into the active-plan region and never inherits its styling. */
+  function localizedWeekday(day) {
+    if (!day) return tr("plan.day.untitled");
+    var key = "plan.weekday." + String(day);
+    var localized = tr(key);
+    return localized === key ? String(day) : localized;
+  }
+
   function renderProposal(program) {
     if (!proposalDays) return;
     proposalDays.replaceChildren();
@@ -161,7 +168,7 @@
 
       var label = document.createElement("span");
       label.className = "plan-proposal-day-name";
-      label.textContent = day && day.gun ? String(day.gun) : tr("plan.day.untitled");
+      label.textContent = localizedWeekday(day && day.gun);
       item.appendChild(label);
 
       var meta = document.createElement("span");

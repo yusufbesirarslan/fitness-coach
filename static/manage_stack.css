@@ -46,11 +46,12 @@
     .star-row-label { font-size: 12px; color: var(--text-2); min-width: 90px; }
     .stars { display: flex; gap: 4px; }
     .stars .star {
-        width: 28px; height: 28px; cursor: pointer; font-size: 20px; line-height: 28px; text-align: center;
+        width: 28px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; font-size: 20px; line-height: 28px; text-align: center;
         color: var(--border); transition: color 0.12s;
     }
     .stars .star.filled { color: var(--color-primary); }
     .stars .star:hover { color: var(--color-accent-lime); }
+    .stars .star:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 3px; }
 
     /* ── submit ── */
     .add-btn {

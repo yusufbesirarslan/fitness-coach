@@ -85,18 +85,25 @@
         if (wasOpen) setOpen(sessionView, false);
       }
     }
-    if (reason !== 'server_render') syncActionFromCanonical();
+    syncActionFromCanonical();
   }
 
   function syncActionFromCanonical() {
     var domain = document.querySelector('[data-plan-domain="training"]');
     var button = document.querySelector('[data-action="startWorkout"]');
-    if (!domain || !button) return;
+    var recovery = document.querySelector('[data-action="recoverBlockedWorkout"]');
+    if (!domain) return;
     var action = workoutState && workoutState.action;
     var actionable = action === 'start' || action === 'resume';
     domain.dataset.workoutAction = actionable ? action : 'none';
-    button.hidden = !actionable;
-    if (actionable) button.textContent = copy('plan.action.' + action + '_workout');
+    if (button) {
+      button.hidden = !actionable;
+      if (actionable) button.textContent = copy('plan.action.' + action + '_workout');
+    }
+    if (recovery) recovery.hidden = !(workoutState &&
+      workoutState.contract_version === 2 &&
+      workoutState.session_state === 'active_blocked' &&
+      workoutState.session && workoutState.session.status === 'active');
   }
 
   var client = window.FitXWorkoutStateClient.createWorkoutStateClient({
@@ -219,11 +226,27 @@
     client.stopCheckpointing();
     closeSession();
     draft = null;
-    await client.mutate(
+    return await client.mutate(
       '/workout/session/' + encodeURIComponent(session.public_id) + '/abandon',
       { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'user_abandoned' }) },
     );
+  }
+
+  async function recoverBlockedWorkout() {
+    if (!workoutState || workoutState.session_state !== 'active_blocked' ||
+        !workoutState.session || workoutState.session.status !== 'active') return;
+    if (!window.confirm(copy('plan.abandon.confirm'))) return;
+    try {
+      var result = await abandonWorkout();
+      if (result && result.ok) {
+        window.location.reload();
+      } else {
+        showError(copy('training.progress_unavailable'));
+      }
+    } catch (error) {
+      showError(copy('training.progress_unavailable'));
+    }
   }
 
   function openCompletion() {
@@ -358,6 +381,7 @@
   window.startWorkout = startWorkout;
   window.closeSession = closeSession;
   window.abandonWorkout = abandonWorkout;
+  window.recoverBlockedWorkout = recoverBlockedWorkout;
   window.finishSession = finishSession;
   window.cancelWorkoutCompletion = cancelWorkoutCompletion;
   window.submitWorkoutCompletion = submitWorkoutCompletion;

@@ -1,5 +1,11 @@
 # Product Information Architecture Contract
 
+**Current shipped web hierarchy (UX-3 PR5):** Today, Plan, Coach, Progress.
+Plan owns Training at `/training` and Nutrition at `/nutrition`; Supplements
+is a child of Nutrition at `/supplements`. Nutrition and Supplements resolve
+to Plan in the converged navigation. The migration inventory below records
+pre-convergence observations and the steps that led to this state.
+
 Durable product-level Information Architecture (IA) for AxisAI. Subsequent UX
 convergence PRs implement **this** document. They do not reopen the destination
 model, ownership matrix, or navigation-level assignments recorded here.
@@ -419,7 +425,7 @@ If a later PR truly must change a path:
 | `/training` | `training` or `plan` → Plan | Keep |
 | `/coach` | `coach` → Coach | Keep |
 | `/progress-page` | `progress` → Progress | Keep |
-| `/nutrition` | v2: **none**; legacy: Nutrition tab | **Must become Plan** |
+| `/nutrition` | v2: Plan; legacy: Nutrition tab | Keep Plan active in v2 |
 | `/supplements` | **Plan** (`active_when` in `app/nav.py`) | Done — UX-3 PR5 |
 | `/pump-check-gallery` | `profile` | **Must become Progress** |
 | `/notifications` | `profile` | **None** (utility; bell is the chrome) |
@@ -427,9 +433,8 @@ If a later PR truly must change a path:
 | Community pages | `profile` | **None** (secondary domain) |
 | `/premium` | `profile` | **None** (Account internal) |
 
-`app/nav.py` `resolve_active` and `tests/test_nav_contract.py` currently encode
-the opposite for Nutrition (`None`) and treat Gallery as a Community secondary.
-PR2 updates those tests. That is expected, not a regression.
+`app/nav.py` `resolve_active` maps Nutrition to Plan in the converged shell.
+The legacy Nutrition tab remains available while the rollback flags are active.
 
 ### G.4 Route ownership (code)
 
