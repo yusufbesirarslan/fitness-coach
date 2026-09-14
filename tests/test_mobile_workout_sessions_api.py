@@ -1,4 +1,4 @@
-"""Native workout-session write contracts (Mobile Training PR5).
+"""Native workout-session contracts.
 
 These tests exercise the real HTTP surface against real persistence. They
 assert literal contracts (status codes, payload keys, header values, canonical
@@ -805,6 +805,115 @@ def test_current_is_scoped_to_its_owner(
         response = client.get(CURRENT_PATH, headers=as_mobile(stranger))
 
     assert response.json == {"session": None}
+
+
+# A terminal response may be lost after the transaction commits. The client
+# needs the referenced row, since /current deliberately returns only ACTIVE.
+def test_referenced_read_returns_the_same_active_projection_without_mutation(
+    client, owner, as_mobile, workout_ref
+):
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+    saved = _checkpoint(client, headers, reference, 0, "reread-key-000001")
+    row = _session_row(owner)
+    before = (row.version, row.updated_at, row.last_activity_at,
+              row.checkpoint_revision)
+
+    with audit_clock(FIXED_NOW):
+        reread = client.get(f"{SESSIONS_PATH}/{reference}", headers=headers)
+
+    assert reread.status_code == 200
+    assert reread.json == {"session": saved.json["session"]}
+    row = _session_row(owner)
+    assert (row.version, row.updated_at, row.last_activity_at,
+            row.checkpoint_revision) == before
+
+
+def test_lost_completion_response_is_resolved_by_referenced_terminal_read(
+    client, owner, as_mobile, workout_ref, completion_proof
+):
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+    saved = _checkpoint(client, headers, reference, 0, "reread-key-000002")
+    completed = _complete(client, headers, reference, saved.json["session"]["revision"])
+    assert completed.status_code == 200, completed.json
+    assert completed.json["session"]["status"] == "completed"
+    row = _session_row(owner)
+    before = (row.version, row.updated_at, row.last_activity_at,
+              row.checkpoint_revision, row.completed_at)
+    side_effects_before = (PumpCheck.query.count(), WorkoutLog.query.count())
+
+    with audit_clock(FIXED_NOW):
+        current = client.get(CURRENT_PATH, headers=headers)
+        reread = client.get(f"{SESSIONS_PATH}/{reference}", headers=headers)
+
+    assert current.json == {"session": None}
+    assert reread.status_code == 200
+    assert reread.json == {"session": completed.json["session"]}
+    assert reread.json["session"]["session_ref"] == reference
+    assert reread.json["session"]["completed_at"] is not None
+    assert reread.json["session"]["abandoned_at"] is None
+    assert "completion" not in reread.json
+    assert (PumpCheck.query.count(), WorkoutLog.query.count()) == side_effects_before
+    row = _session_row(owner)
+    assert (row.version, row.updated_at, row.last_activity_at,
+            row.checkpoint_revision, row.completed_at) == before
+    assert not {"id", "session_id", "user_id", "plan_id", "pump_check_id",
+                "checkpoint_fingerprint", "checkpoint_idempotency_key"} & set(reread.json["session"])
+
+
+def test_referenced_read_never_fabricates_completion_and_distinguishes_abandon(
+    client, owner, as_mobile, workout_ref
+):
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+    with audit_clock(FIXED_NOW):
+        active = client.get(f"{SESSIONS_PATH}/{reference}", headers=headers)
+    assert active.json["session"]["status"] == "active"
+    assert active.json["session"]["completed_at"] is None
+
+    abandoned = _abandon(client, headers, reference)
+    with audit_clock(FIXED_NOW):
+        reread = client.get(f"{SESSIONS_PATH}/{reference}", headers=headers)
+    assert reread.status_code == 200
+    assert reread.json == {"session": abandoned.json["session"]}
+    assert reread.json["session"]["status"] == "abandoned"
+    assert reread.json["session"]["completed_at"] is None
+    assert reread.json["session"]["abandoned_at"] is not None
+
+
+def test_referenced_read_hides_foreign_and_unknown_sessions(
+    client, owner, stranger, as_mobile, workout_ref
+):
+    reference = _start(client, as_mobile(owner), workout_ref).json["session"]["session_ref"]
+    foreign_headers = as_mobile(stranger)
+    foreign = client.get(f"{SESSIONS_PATH}/{reference}", headers=foreign_headers)
+    unknown = client.get(f"{SESSIONS_PATH}/not-a-real-reference", headers=foreign_headers)
+    malformed = client.get(f"{SESSIONS_PATH}/{'x' * 65}", headers=foreign_headers)
+
+    for response in (foreign, unknown, malformed):
+        assert response.status_code == 404
+        assert response.json["error"]["code"] == "TRAINING_SESSION_NOT_FOUND"
+        assert response.headers["Session-Resolution"] == "terminal"
+    public_errors = [
+        {key: value for key, value in response.json["error"].items()
+         if key != "request_id"}
+        for response in (foreign, unknown, malformed)
+    ]
+    assert public_errors[0] == public_errors[1] == public_errors[2]
+
+
+def test_referenced_read_requires_bearer_and_respects_session_flag(
+    app, client, raw_client, owner, as_mobile, workout_ref
+):
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+    anonymous = raw_client.get(f"{SESSIONS_PATH}/{reference}")
+    assert anonymous.status_code == 401
+    app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = False
+    disabled = client.get(f"{SESSIONS_PATH}/{reference}", headers=headers)
+    assert disabled.status_code == 404
+    assert disabled.json["error"]["code"] == "TRAINING_SESSION_NOT_FOUND"
 
 
 def test_resume_reattaches_to_the_same_session_without_creating_another(

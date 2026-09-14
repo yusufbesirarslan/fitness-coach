@@ -1,4 +1,4 @@
-"""Architecture guards for the native workout-session write contracts (PR5).
+"""Architecture guards for the native workout-session contracts.
 
 Each guard names one invariant from the PR5 brief's section 56 list. They are
 structural on purpose: a behaviour test proves the code does the right thing
@@ -50,6 +50,7 @@ CANONICAL_PATHS = (CHECKPOINT_PATH, ERRORS_PATH, EXECUTION_PATH)
 ENDPOINTS = (
     "mobile_api.start_workout_session",
     "mobile_api.current_workout_session",
+    "mobile_api.read_workout_session",
     "mobile_api.resume_workout_session",
     "mobile_api.checkpoint_workout_session",
     "mobile_api.abandon_workout_session",

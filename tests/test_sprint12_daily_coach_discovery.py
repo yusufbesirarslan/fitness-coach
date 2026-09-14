@@ -89,7 +89,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
 
     `/api/v1/today` joined the set in Sprint 12 PR3. Mobile Training PR2 adds
     exactly three canonical read projections, PR4A one native plan write, and
-    PR5 the six native workout-session write contracts. Any further path means
+    PR5 the six native workout-session contracts. The referenced-session read
+    adds one owner-scoped canonical projection. Any further path means
     a domain arrived on mobile and its architecture has to be reviewed, which
     is what this exact-set assertion is for.
 
@@ -119,6 +120,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/workouts/<workout_reference>",
         "/api/v1/training/workout-sessions",
         "/api/v1/training/workout-sessions/current",
+        "/api/v1/training/workout-sessions/<session_reference>",
         "/api/v1/training/workout-sessions/<session_reference>/resume",
         "/api/v1/training/workout-sessions/<session_reference>/checkpoint",
         "/api/v1/training/workout-sessions/<session_reference>/abandon",
@@ -150,9 +152,12 @@ _APPROVED_TRAINING_PATHS = {
     # abandon/complete -- and none of them composes a Daily-Coach aggregate,
     # mints a workout, or computes a Today of its own. Completion delegates to
     # the one canonical completion transaction the browser route also uses.
-    # Admitted here by review, not by widening the guard.
+    # The referenced-session GET adds only owner-scoped canonical state, with
+    # no Daily-Coach aggregate or new completion authority. Admitted here by
+    # review, not by widening the guard.
     "/api/v1/training/workout-sessions",
     "/api/v1/training/workout-sessions/current",
+    "/api/v1/training/workout-sessions/<session_reference>",
     "/api/v1/training/workout-sessions/<session_reference>/resume",
     "/api/v1/training/workout-sessions/<session_reference>/checkpoint",
     "/api/v1/training/workout-sessions/<session_reference>/abandon",

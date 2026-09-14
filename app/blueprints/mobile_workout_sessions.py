@@ -1,4 +1,4 @@
-"""Bearer-authenticated native workout-session write contracts (PR5).
+"""Bearer-authenticated native workout-session contracts.
 
 Transport only. Every route here does the same four things and nothing more:
 
@@ -144,6 +144,19 @@ def current_workout_session():
         return _failure(error)
     except Exception as error:  # noqa: BLE001
         return _unavailable(error, "current_failed")
+    return _ok(result)
+
+
+@bp.get("/training/workout-sessions/<session_reference>")
+@require_mobile_auth
+@_flag_gated
+def read_workout_session(session_reference):
+    try:
+        result = sessions.read(g.mobile_user.id, session_reference)
+    except sessions.SessionCommandError as error:
+        return _failure(error)
+    except Exception as error:  # noqa: BLE001
+        return _unavailable(error, "read_failed")
     return _ok(result)
 
 
