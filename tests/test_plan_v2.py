@@ -643,3 +643,23 @@ def test_plan_management_forwards_the_context_token_from_generate_into_save():
     body = "\n".join(line for line in source.splitlines()
                      if not line.strip().startswith("*"))
     assert "exercise_context" not in body.replace("exercise_context_token", "")
+
+
+@pytest.mark.parametrize("language,expected", [("en", "Monday"), ("tr", "Pazartesi")])
+def test_plan_weekday_display_uses_locale_without_changing_stored_day(
+    app, client, make_user, login, language, expected,
+):
+    from app.extensions import db
+    from app.models import User, TrainingPlan
+    app.config["UIUX_PLAN_V2_ENABLED"] = True
+    user = _seed_login(client, make_user, login, "weekday-" + language)
+    with app.app_context():
+        db.session.get(User, user.id).language = language
+        _seed_plan(user.id, _VALID_PLAN)
+    html = client.get("/training").get_data(as_text=True)
+    assert f'<span class="plan-day-name">{expected}</span>' in html
+    other_days = ("Tuesday", "Wednesday") if language == "en" else ("Sal\u0131", "\u00c7ar\u015famba")
+    for day in other_days:
+        assert f'<span class="plan-day-name">{day}</span>' in html
+    with app.app_context():
+        assert "Pazartesi" in TrainingPlan.query.filter_by(user_id=user.id).first().plan_data

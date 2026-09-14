@@ -212,3 +212,5 @@
   .plan-replace-actions { flex-direction: column-reverse; }
   .plan-replace-actions .btn-volt, .plan-replace-actions .btn-ghost { width: 100%; justify-content: center; }
 }
+
+.plan-workout-action[hidden], .plan-recovery-action[hidden], #sv-abandon[hidden] { display: none; }

@@ -65,25 +65,41 @@
                 <div class="star-row">
                     <span class="star-row-label">{{ t('manage_stack.effect') }}</span>
                     <div class="stars" data-field="rating_effect">
-                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
                     </div>
                 </div>
                 <div class="star-row">
                     <span class="star-row-label">{{ t('manage_stack.taste') }}</span>
                     <div class="stars" data-field="rating_taste">
-                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
                     </div>
                 </div>
                 <div class="star-row">
                     <span class="star-row-label">{{ t('manage_stack.digestion') }}</span>
                     <div class="stars" data-field="rating_digestion">
-                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
                     </div>
                 </div>
                 <div class="star-row">
                     <span class="star-row-label">{{ t('manage_stack.price_perf') }}</span>
                     <div class="stars" data-field="rating_price">
-                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
+                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
                     </div>
                 </div>
             </div>
@@ -188,6 +204,7 @@ document.querySelectorAll('.stars').forEach(group => {
             if (ratings[field] === val) { ratings[field] = 0; } else { ratings[field] = val; }
             group.querySelectorAll('.star').forEach(s => {
                 s.classList.toggle('filled', parseInt(s.dataset.val) <= ratings[field]);
+                s.setAttribute('aria-pressed', String(parseInt(s.dataset.val) === ratings[field]));
             });
         });
     });

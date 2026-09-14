@@ -195,6 +195,9 @@
       </div>
       <span class="plan-domain-state">{{ t('plan.workout_state.' ~ plan.workout_state) }}</span>
     </div>
+    <button class="btn-ghost plan-recovery-action" type="button"
+            data-action="recoverBlockedWorkout" hidden>{{ t('plan.action.abandon_workout') }}</button>
+    <p class="plan-workout-error" id="plan-workout-error" role="alert" hidden></p>
 
   {%- if plan.management_state in ('create', 'regenerate') %}
     {#- ── CANONICAL STALENESS NOTICE (UX-3 PR3, brief §16) ──
@@ -241,7 +244,6 @@
     {% if plan.workout_action in ('start', 'resume') %}
       <button class="btn-volt plan-workout-action" type="button"
               data-action="startWorkout">{{ t(plan.workout_action_label_key) }}</button>
-      <p class="plan-workout-error" id="plan-workout-error" role="alert" hidden></p>
     {% endif %}
 
     {#- ── STALE SESSION, TOLD TRUTHFULLY (UX-3 PR3, brief §38) ──
@@ -311,7 +313,7 @@
       {% for day in plan.days %}
       <details class="plan-day{% if day.is_rest %} plan-day--rest{% endif %}">
         <summary class="plan-day-summary">
-          <span class="plan-day-name">{{ day.label if day.label else t('plan.day.untitled') }}</span>
+          <span class="plan-day-name">{% if day.label %}{% set weekday_key = 'plan.weekday.' ~ day.label %}{{ day.label if t(weekday_key) == weekday_key else t(weekday_key) }}{% else %}{{ t('plan.day.untitled') }}{% endif %}</span>
           <span class="plan-day-meta">
             {%- if not day.is_rest %}{{ day.exercises|length }} · {{ day.duration_min }} {{ t('plan.min') }} · ~{{ day.est_calories }} kcal{%- endif -%}
           </span>
@@ -403,6 +405,7 @@
             review, visibility flag or DB id reaches this page. -#}
         <p class="plan-domain-summary">
           {% if plan.supplements_state == 'unavailable' %}{{ t('plan.supplements.unavailable') }}
+          {% elif plan.supplements_count == 1 %}{{ t('plan.supplements.count_one') }}
           {% elif plan.supplements_count %}{{ t('plan.supplements.count', count=plan.supplements_count) }}
           {% else %}{{ t('plan.supplements.empty') }}{% endif %}
         </p>
@@ -452,7 +455,7 @@
     </div>
 {%- endif %}
 
-{% if plan.workout_action in ('start', 'resume') and plan.execution_bootstrap %}
+{% if plan.execution_bootstrap and (plan.workout_action in ('start', 'resume') or plan.session_conflict) %}
 <div class="session-view" id="session-view" role="dialog" aria-modal="true"
      aria-labelledby="sv-title" aria-hidden="true">
   <div class="sv-head">
@@ -504,7 +507,7 @@
 <script src="/static/weekly_program.js?v={{ _v }}"></script>
 {% endif %}
 
-{% if plan.workout_action in ('start', 'resume') and plan.execution_bootstrap %}
+{% if plan.execution_bootstrap and (plan.workout_action in ('start', 'resume') or plan.session_conflict) %}
 <script src="/static/workout_execution.js?v={{ _v }}"></script>
 <script src="/static/workout_draft.js?v={{ _v }}"></script>
 <script src="/static/workout_state_client.js?v={{ _v }}"></script>

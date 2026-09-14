@@ -449,6 +449,7 @@ def test_english_locale_renders_the_management_workflow(
     open_button.click()
     page.locator("[data-plan-manage-generate]").click()
     expect(page.locator("[data-plan-manage-proposal]")).to_be_visible()
+    expect(page.locator(".plan-proposal-day-name").first).to_have_text("Monday")
     expect(page.locator("[data-plan-manage-confirm]")).to_have_text(
         copy["plan.manage.replace"])
     page.locator("[data-plan-manage-confirm]").click()
@@ -558,6 +559,28 @@ def test_a_replaced_plan_does_not_let_an_old_browser_draft_resurrect(
         if path.endswith("/checkpoint")
     ]
     assert checkpoints_after == [], checkpoints_after
+    page.reload()  # A direct Plan visit must also boot the recovery client.
+    # A blocked session needs one reachable recovery path, but never auto-abandons.
+    recovery = page.locator('[data-action="recoverBlockedWorkout"]')
+    expect(recovery).to_be_visible()
+    assert recovery.evaluate("el => getComputedStyle(el).display !== 'none'")
+    recovery.click()  # Playwright dismisses the native confirmation by default.
+    assert not any(path.endswith('/abandon') for path, _, _ in traffic)
+    page.on("dialog", lambda dialog: dialog.accept())
+    page.route("**/workout/session/*/abandon", lambda route: route.fulfill(
+        status=503, content_type="application/json", body="{}"))
+    recovery.click()
+    expect(recovery).to_be_visible()
+    expect(page.locator("#plan-workout-error")).to_be_visible()
+    assert not any(path.endswith('/abandon') for path, _, _ in traffic)
+    page.unroute("**/workout/session/*/abandon")
+    with page.expect_response(lambda r: r.url.endswith('/abandon') and r.request.method == 'POST') as abandoned:
+        recovery.click()
+    assert abandoned.value.ok
+    assert sum(1 for path, _, _ in traffic if path.endswith('/abandon')) == 1
+    expect(recovery).to_be_hidden()
+    assert recovery.evaluate("el => getComputedStyle(el).display === 'none'")
+    assert page.evaluate("fetch('/training/bootstrap').then(r => r.json()).then(d => d.workout.state.session_state)") != 'active_blocked'
 
 
 @pytest.fixture

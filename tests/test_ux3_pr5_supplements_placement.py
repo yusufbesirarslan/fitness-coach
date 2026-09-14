@@ -357,7 +357,7 @@ def test_profile_without_supplements_links_out_instead_of_offering_a_form(
 
 @pytest.mark.parametrize("count,expected", [
     (0, "No supplements saved yet."),
-    (1, "1 supplements saved."),
+    (1, "1 supplement saved."),
     (4, "4 supplements saved."),
 ])
 def test_plan_summary_counts_are_bounded_and_truthful(
