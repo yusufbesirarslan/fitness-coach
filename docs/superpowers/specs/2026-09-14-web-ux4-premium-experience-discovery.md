@@ -2325,7 +2325,7 @@ surfaces · the light theme.
 | Feature flags changed | **0** |
 | Deploys | **0** |
 | AWS actions | **0** |
-| Candidate SHA | recorded in §AD below after commit |
+| Candidate SHA | `1ff35af72fe42304a5ee9ad6713d2bc366729b48` (discovery commit, on base `6cace40e6dc7bb3908f2931e1f6bd07e7d1bfe76`) |
 | Worktree | clean apart from the single added document |
 
 **AA · Independent review** — P0: **0** · P1: **1** (false contrast findings from the
@@ -2334,7 +2334,7 @@ P2: **3** (design-system rewrite scope cut; F-06 demoted P1→P2; rollback story
 and converted into a scope constraint) · P3: **0**. **All resolved before publication.**
 Detail in §AB.
 
-**AB · PR** — recorded in §AD below after push.
+**AB · PR** — [#309](https://github.com/yusufbesirarslan/fitness-coach/pull/309) `docs(ux): define premium web experience roadmap`, head `1ff35af`, base `main`. CI: **all 5 required checks green** (run 34928173010). Open, unmerged. Detail in §AD.
 
 **AC · Merge** — **NOT PERFORMED — explicit authorization required.**
 
@@ -2346,7 +2346,23 @@ Detail in §AB.
 |---|---|
 | Branch | `web-ux4-pr1-premium-experience-discovery` |
 | Base | `main` @ `6cace40e6dc7bb3908f2931e1f6bd07e7d1bfe76` |
-| PR | *(filled in on publication)* |
-| Head SHA | *(filled in on publication)* |
-| CI | *(filled in on publication)* |
+| PR | [#309](https://github.com/yusufbesirarslan/fitness-coach/pull/309) |
+| Head SHA (discovery commit) | `1ff35af72fe42304a5ee9ad6713d2bc366729b48` |
+| CI | **all 5 required checks green** on `1ff35af` — run [34928173010](https://github.com/yusufbesirarslan/fitness-coach/actions/runs/34928173010): pytest 12m33s · PostgreSQL concurrency 1m58s · schema-drift guard 54s · authoritative image revision immutability 38s · authoritative Linux production locks 32s |
 | Merge | **not performed — awaiting explicit authorization** |
+
+This publication record was written after PR #309 was opened and CI reported, so it
+lands as a follow-up commit on the same branch; the discovery content itself is the
+tree at `1ff35af`, which is the commit CI verified.
+
+Repository proof at publication:
+
+| | |
+|---|---|
+| Files changed | 1 (`docs/superpowers/specs/2026-09-14-web-ux4-premium-experience-discovery.md`) |
+| Runtime files changed | **0** — no CSS, templates, JS, tokens, fonts, routes, schemas, migrations |
+| Feature flags changed | **0** — `UIUX_PLAN_V2_ENABLED` not retired, legacy Training renderer not deleted, WEB-UX3-PR6B not started |
+| Production mutations | **0** |
+| Mobile / `/api/v1` WorkoutSession / Flutter / MOB-S15-PR7 | untouched |
+| `git diff --check` | clean |
+| Worktree | clean |
