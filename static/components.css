@@ -39,26 +39,64 @@ img, video { max-width: 100%; }
   100% { background-position:  600px 0; }
 }
 
+/* ── CONTROL TYPEFACE RESET ───────────────────────── */
+/* WEB-UX4-PR2 / F-10. A <button>/<input>/<select>/<textarea> does NOT inherit
+   the page font: Chromium's UA sheet sets `font: 400 13.333px Arial` on form
+   controls. That single omission is why 41 elements across four surfaces
+   measured Arial, and why `.btn-ghost` rendered in Arial as a <button> but
+   Inter as an <a> — the ELEMENT was choosing the typeface, not the component.
+   Normalising the family here repairs every bare control in the product
+   (.cat-chip, .star, .supp-act-btn, .add-btn, .auth-btn, .setup-btn,
+   .log-fab, #cw-close …) without touching a single page stylesheet.
+   Only the FAMILY is normalised: size/weight stay with each component, so
+   this changes no geometry. */
+button, input, select, textarea, optgroup {
+  font-family: inherit;
+}
+
 /* ── BUTTON ───────────────────────────────────────── */
+/* The canonical action family. Three ranks, ONE geometry:
+     .btn-volt   PRIMARY      solid primary fill, display voice
+     .btn-ghost  SECONDARY    hairline outline, body voice
+     .btn-danger DESTRUCTIVE  danger outline + danger label, body voice
+   Shared by contract (F-10 · F-21 · F-36): 44px minimum control height (the
+   repo's existing touch standard, used at 26 sites), --radius-md, spacing-scale
+   padding, an explicit font-family, and complete
+   hover · pressed · focus-visible · disabled · loading coverage.
+   Baseline measured ghost at 32–35px against volt at 45px, radius 8 vs 12,
+   Arial vs Bebas, and NO :focus-visible or :disabled rule on any of them. */
 .btn-volt {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  padding: 13px 28px;
+  min-height: 44px; padding: var(--space-3) var(--space-6);
   background: var(--color-primary); color: var(--color-on-primary);
   font-family: var(--font-display); font-size: 16px; letter-spacing: 2.5px;
-  border: none; border-radius: var(--radius-md); cursor: pointer;
-  transition: all var(--duration-base) var(--ease-standard);
+  /* Bebas'in satir kutusu Inter'den uzundur; leading-none olmadan birincil
+     buton 47px, digerleri 44px olur ve uc rutbe "tek aile" gibi okunmaz. */
+  line-height: var(--leading-none);
+  border: var(--border-w-1) solid transparent; border-radius: var(--radius-md);
+  cursor: pointer; text-decoration: none;
+  transition: background var(--duration-base) var(--ease-standard),
+              box-shadow var(--duration-base) var(--ease-standard),
+              transform var(--duration-base) var(--ease-standard),
+              opacity var(--duration-base) var(--ease-standard);
 }
 .btn-volt:hover   { background: var(--color-primary-strong); box-shadow: var(--shadow-primary); transform: translateY(-1px); }
 .btn-volt:active  { transform: scale(0.97); box-shadow: none; }
-.btn-volt.loading { opacity: var(--opacity-disabled); cursor: not-allowed; pointer-events: none; }
 .btn-volt.w-full  { width: 100%; }
 
 .btn-ghost {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  padding: 9px 18px; background: transparent; color: var(--color-text-2);
+  min-height: 44px; padding: var(--space-3) var(--space-6);
+  background: transparent; color: var(--color-text-2);
+  font-family: var(--font-body);
   font-size: var(--text-md); font-weight: var(--weight-medium);
-  border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-sm);
-  cursor: pointer; transition: all var(--duration-fast) var(--ease-standard);
+  border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard),
+              background var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard),
+              transform var(--duration-fast) var(--ease-standard),
+              opacity var(--duration-fast) var(--ease-standard);
   /* The component is also rendered as an <a> (empty-state CTAs); without this it
      arrives underlined. No-op for the <button> consumers. */
   text-decoration: none;
@@ -66,7 +104,8 @@ img, video { max-width: 100%; }
 .btn-ghost:hover  { color: var(--color-text-1); border-color: var(--color-border-2); background: var(--overlay-4); }
 .btn-ghost:active { transform: scale(0.97); }
 @media (max-width: 640px) {
-  .btn-ghost { padding: var(--space-2) 14px; font-size: var(--text-sm); }
+  /* Tighter horizontal inset below 640px; the 44px floor is unchanged. */
+  .btn-ghost { padding: var(--space-2) var(--space-4); font-size: var(--text-sm); }
 }
 
 /* ── CONTEXTUAL COACH ENTRY (UX-1 PR3) ──────────────────── */
@@ -76,17 +115,58 @@ img, video { max-width: 100%; }
    never be mistaken for the screen's dominant CTA. */
 .coach-entry { margin-top: var(--space-4); }
 
+/* DESTRUCTIVE rank (F-36). Baseline was `.btn-volt` with the hue swapped:
+   same geometry, same display voice, same solid fill — so "delete" read as a
+   primary call to action sitting one Tab away from a toggle.
+   An outlined treatment ranks it apart from the CTA without a new token, and
+   it is also the higher-contrast choice: the solid fill put --white on
+   --color-danger at 3.27 : 1, while the label on the page surface measures
+   4.69–5.73 : 1. The hover affordance is an INSET ring rather than a fill, so
+   hover cannot tint the label's own backdrop (a --color-danger-soft fill
+   would drop it to 4.07 : 1 on --color-surface-3) and cannot shift layout. */
 .btn-danger {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  padding: 13px 28px;
-  background: var(--color-danger); color: var(--white);
-  font-family: var(--font-display); font-size: 16px; letter-spacing: 2.5px;
-  border: none; border-radius: var(--radius-md); cursor: pointer;
-  transition: all var(--duration-base) var(--ease-standard);
+  min-height: 44px; padding: var(--space-3) var(--space-6);
+  background: transparent; color: var(--color-danger);
+  font-family: var(--font-body);
+  font-size: var(--text-md); font-weight: var(--weight-bold);
+  border: var(--border-w-2) solid var(--color-danger); border-radius: var(--radius-md);
+  cursor: pointer; text-decoration: none;
+  transition: box-shadow var(--duration-base) var(--ease-standard),
+              transform var(--duration-base) var(--ease-standard),
+              opacity var(--duration-base) var(--ease-standard);
 }
-.btn-danger:hover   { filter: brightness(0.92); }
+.btn-danger:hover   { box-shadow: inset 0 0 0 var(--border-w-1) var(--color-danger); }
 .btn-danger:active  { transform: scale(0.97); }
-.btn-danger.loading { opacity: var(--opacity-disabled); cursor: not-allowed; pointer-events: none; }
+
+/* ── SHARED BUTTON STATES ─────────────────────────── */
+/* One focus language for the whole family. The global `button:focus-visible`
+   rule below already covers <button>, but these classes also ship as <a>, and
+   page stylesheets load AFTER this file — an explicit rule keeps the canonical
+   ring deterministic rather than element- and cascade-dependent. */
+.btn-volt:focus-visible,
+.btn-ghost:focus-visible,
+.btn-danger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+/* Unavailable and in-flight were undesigned on all three (F-21). `.loading`
+   is the in-flight flag the existing consumers already use. */
+.btn-volt:disabled,   .btn-volt[disabled],   .btn-volt.loading,
+.btn-ghost:disabled,  .btn-ghost[disabled],  .btn-ghost.loading,
+.btn-danger:disabled, .btn-danger[disabled], .btn-danger.loading {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+/* Only the in-flight flag swallows clicks; a genuinely disabled control is
+   already inert, and `pointer-events: none` on it would also suppress the
+   cursor feedback above. */
+.btn-volt.loading, .btn-ghost.loading, .btn-danger.loading { pointer-events: none; }
+.btn-volt:disabled:hover,   .btn-volt[disabled]:hover   { background: var(--color-primary); box-shadow: none; transform: none; }
+.btn-ghost:disabled:hover,  .btn-ghost[disabled]:hover  { background: transparent; color: var(--color-text-2); border-color: var(--color-border-1); }
+.btn-danger:disabled:hover, .btn-danger[disabled]:hover { box-shadow: none; }
 
 /* ── INPUT ────────────────────────────────────────── */
 .fc-input {
@@ -163,7 +243,8 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: var(--leadi
   background: none; border: none; color: var(--color-text-3);
   font-size: var(--text-2xl); line-height: var(--leading-none);
   cursor: pointer; border-radius: var(--radius-sm);
-  transition: all var(--duration-fast) var(--ease-standard);
+  transition: color var(--duration-fast) var(--ease-standard),
+              background var(--duration-fast) var(--ease-standard);
 }
 .modal-close:hover { color: var(--color-text-1); background: var(--overlay-6); }
 .modal-body { padding: var(--space-4) var(--space-5); overflow-y: auto; }
@@ -221,18 +302,24 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: var(--leadi
 
 /* ── CHIP ─────────────────────────────────────────── */
 .chip {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: var(--space-2) 14px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-4); border-radius: var(--radius-sm);
   font-size: var(--text-md); font-weight: var(--weight-medium);
   border: var(--border-w-2) solid var(--color-border-1);
   background: var(--overlay-3);
   color: var(--color-text-2); cursor: pointer;
-  transition: all var(--duration-fast) var(--ease-standard); user-select: none;
+  transition: color var(--duration-fast) var(--ease-standard),
+              background var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard),
+              transform var(--duration-fast) var(--ease-standard);
+  user-select: none;
 }
 .chip:hover    { border-color: rgba(var(--color-primary-rgb),0.35); color: var(--color-text-1); }
 .chip:active   { transform: scale(0.96); }
 .chip.selected { background: var(--color-primary-soft); border-color: rgba(var(--color-primary-rgb),0.55); color: var(--color-primary); }
-.chip-dot { width: 6px; height: 6px; border-radius: var(--radius-full); border: var(--border-w-2) solid var(--color-text-3); transition: all var(--duration-fast) var(--ease-standard); flex-shrink: 0; }
+.chip-dot { width: 6px; height: 6px; border-radius: var(--radius-full); border: var(--border-w-2) solid var(--color-text-3);
+  transition: background var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard); flex-shrink: 0; }
 .chip.selected .chip-dot { background: var(--color-primary); border-color: var(--color-primary); }
 
 /* ── AVATAR ───────────────────────────────────────── */
@@ -278,11 +365,15 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: var(--leadi
 
 .tab-btn {
   flex: 1; min-width: max-content;
-  padding: 10px var(--space-5); border-radius: 9px; border: none;
+  padding: 10px var(--space-5); border-radius: var(--radius-sm); border: none;
   background: transparent; color: var(--color-text-3);
   font-family: var(--font-body); font-size: var(--text-md); font-weight: var(--weight-semibold);
-  cursor: pointer; transition: all var(--duration-base) var(--ease-standard);
-  display: flex; align-items: center; justify-content: center; gap: 7px;
+  cursor: pointer;
+  transition: color var(--duration-base) var(--ease-standard),
+              background var(--duration-base) var(--ease-standard),
+              border-color var(--duration-base) var(--ease-standard),
+              transform var(--duration-base) var(--ease-standard);
+  display: flex; align-items: center; justify-content: center; gap: var(--space-2);
 }
 .tab-btn:hover:not(.active) { color: var(--color-text-2); background: var(--overlay-4); }
 .tab-btn:active { transform: scale(0.96); }
@@ -339,7 +430,9 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: var(--leadi
   background: var(--color-menu-scrim); border: var(--border-w-1) solid var(--overlay-6);
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  cursor: pointer; transition: all 0.2s; backdrop-filter: blur(10px);
+  cursor: pointer; backdrop-filter: blur(10px);
+  transition: background var(--duration-base) var(--ease-standard),
+              border-color var(--duration-base) var(--ease-standard);
 }
 .fab-sub svg { stroke: var(--color-text-3); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: stroke 0.2s; }
 .fab-sub:hover { border-color: rgba(var(--color-primary-rgb),0.25); background: rgba(var(--color-primary-rgb),0.06); }
@@ -448,8 +541,12 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: var(--leadi
   height: 1px; background: var(--color-border-1);
 }
 
+/* F-12 / F-29: `.sec-label` is the canonical micro-label; `.cat-label` is its
+   smaller sibling, not a sixth variant. The raw 0.14em tracking was the reason
+   pages that correctly adopted the library still inherited an off-scale value.
+   Page-level heading migration belongs to the journey PRs. */
 .cat-label {
-  font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: 0.14em;
+  font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label);
   text-transform: uppercase; color: var(--color-text-3);
   display: flex; align-items: center; gap: var(--space-2); margin: var(--space-6) 0 var(--space-3);
 }
@@ -527,6 +624,23 @@ button:focus-visible,
   .w-btn.pulse, .gr-badge-dot,
   .skeleton, [class*="shimmer"] {
     animation: none !important;
+  }
+  /* WEB-UX4-PR2 / F-33: the SHARED primitives entered with movement
+     (slide-up / sheet-up / toast-in / fade-in) and were not covered here.
+     Movement is removed; the elements still appear and disappear, and the
+     colour/opacity transitions that tell a user their control responded are
+     deliberately left alone — `reduce` is not "disable all feedback".
+     Page-specific animation belongs to the journey PRs; the Coach widget's
+     own motion is UX4-PR3. */
+  .modal-backdrop, .modal,
+  .sheet-backdrop, .sheet,
+  .toast, .tab-panel.active {
+    animation: none !important;
+  }
+  .btn-volt:hover, .btn-volt:active,
+  .btn-ghost:active, .btn-danger:active,
+  .chip:active, .tab-btn:active {
+    transform: none !important;
   }
   .ins-slide.ins-out-left, .ins-slide.ins-out-right,
   .ins-slide.ins-in-left,  .ins-slide.ins-in-right {

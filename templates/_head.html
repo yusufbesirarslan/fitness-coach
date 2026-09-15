@@ -14,12 +14,21 @@
    yüklenir ki setLang'in fetch'i X-CSRFToken ile sarmalanmış olsun. #}
 <script nonce="{{ csp_nonce }}">window.I18N = {{ i18n_catalog|tojson }}; window.LOCALE = "{{ locale }}";</script>
 <script src="/static/i18n.js?v={{ _v }}"></script>
+{# Kanonik Modal/Sheet davranışı (WEB-UX4-PR2 · F-11/F-38): components.css'teki
+   primitive'in odak tuzağı, inert arka plan ve odak iadesi. Bağımsız, açık
+   yaşam döngüsü (open/close) — otomatik bağlama veya observer YOK. Mevcut
+   ürün diyalogları bu PR'da taşınmaz; her yolculuk PR'ı kendi diyaloglarını
+   taşır. #}
+<script src="/static/modal.js?v={{ _v }}"></script>
 <link rel="icon" href="/static/icon-holo.png?v={{ _v }}" type="image/png">
 <link rel="apple-touch-icon" href="/static/icon-holo.png?v={{ _v }}">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+{# AxisAI tip sistemi Inter + Bebas Neue'dur. DM Sans (5 ağırlık + italik)
+   indiriliyordu ama yalnızca 4 öğe render ediyordu — WEB-UX4-PR2 / F-32 ile
+   istekten çıkarıldı. Inter ağırlıkları tip merdiveninin kullandığı settir. #}
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 
 {# Tasarım sistemi: token'lar + bileşen kütüphanesi. Sayfa CSS'lerinden ÖNCE
    yüklenmeli ki sayfa kuralları eşit özgüllükte kazanmaya devam etsin.

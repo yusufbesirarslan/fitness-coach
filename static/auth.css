@@ -78,7 +78,9 @@ body.auth-body {
 .lang-opt {
     min-width: 40px;
     min-height: 30px;
-    border: 0;
+    /* Seffaf kenarlik: secim kenarlik KAZANDIGINDA (asagida, F-37) geometri
+       kaymasin. */
+    border: var(--border-w-1) solid transparent;
     border-radius: 6px;
     background: transparent;
     color: var(--text2);
@@ -86,9 +88,13 @@ body.auth-body {
     cursor: pointer;
 }
 
+/* F-37: SECIM, EYLEM DEGILDIR. Dolu primary zemin ekranin birincil CTA'sinin
+   dilidir; giris ekraninda secili dil, "GIRIS YAP" ile ayni rutbede
+   okunuyordu. `.chip.selected` ile ayni soft-primary dili kullanilir. */
 .lang-opt.on {
-    background: var(--accent);
-    color: var(--gray-950);
+    background: var(--color-primary-soft);
+    border-color: rgba(var(--color-primary-rgb), 0.55);
+    color: var(--color-primary);
 }
 
 .theme-toggle {
@@ -129,7 +135,7 @@ body.auth-body {
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--card);
-    padding: var(--space-7);
+    padding: var(--space-6);
     box-shadow: var(--elevation-2);
 }
 
@@ -475,7 +481,7 @@ body.auth-body {
 }
 
 .landing-footer {
-    padding: var(--space-7) 0 var(--space-4);
+    padding: var(--space-6) 0 var(--space-4);
     color: var(--text3);
     font-size: var(--text-sm);
 }

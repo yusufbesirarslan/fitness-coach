@@ -131,7 +131,7 @@
 .mc-macros strong { color: var(--color-text-1); font-weight: var(--weight-semibold); }
 /* The calorie figure is what the row is scanned for. */
 .mc-macros > span:first-child { color: var(--color-text-1); font-weight: var(--weight-semibold); }
-.mc-time { font-size: var(--text-xs); color: var(--color-text-4); margin-top: 3px; }
+.mc-time { font-size: var(--text-xs); color: var(--color-text-3); margin-top: 3px; }
 .mc-side {
   display: flex; flex-direction: column; align-items: flex-end;
   justify-content: space-between; gap: var(--space-2);
@@ -544,7 +544,7 @@
 .slot-empty:focus-visible,
 .scan-close:focus-visible,
 .qab:focus-visible {
-  outline: var(--focus-ring, 2px solid var(--color-primary));
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 

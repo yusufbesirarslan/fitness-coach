@@ -137,7 +137,11 @@
   /* ── 3. TYPOGRAPHY ───────────────────────────────────────────
      UI yazı yüzü: Inter (Phase 1'de DM Sans'ın yerini aldı).
      Display: Bebas Neue — sayfa yeniden tasarımları sonraki fazlarda. */
-  --font-sans: 'Inter', 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* DM Sans yalnızca 4 öğe render ediyordu ve _head.html'de tam bir aile
+     (5 ağırlık + italik) olarak indiriliyordu; WEB-UX4-PR2 / F-32 ile
+     kaldırıldı. Yedek yığında bırakılsaydı, artık indirmediğimiz bir aileyi
+     yerel olarak kurulu olduğu makinelerde system-ui'ye tercih ederdi. */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Bebas Neue', var(--font-sans);
   --font-body: var(--font-sans);
 
@@ -223,7 +227,17 @@
   --elevation-2: 0 4px 16px rgba(0, 0, 0, 0.45);
   --elevation-3: 0 12px 32px rgba(0, 0, 0, 0.55);
   --shadow-primary: 0 2px 10px rgba(var(--color-primary-rgb), 0.14);
-  --focus-ring: 0 0 0 3px rgba(var(--color-primary-rgb), 0.07);
+  /* Klavye odak halkası — ÜRÜNÜN TEK odak dili (WEB-UX4-PR2 / F-02).
+     Eski değer rgba(primary, 0.07) idi ve uygulama yüzeylerine karşı
+     1.07–1.09 : 1 ölçüyordu: halka vardı, görünmüyordu. Tam opak primary
+     4.62–5.65 : 1 (dark) / 4.28–5.45 : 1 (light) verir; WCAG 2.2 SC 1.4.11
+     metin-dışı eşiği 3 : 1'dir. --color-primary tema-farkındalıklı olduğu
+     için light temada otomatik döner.
+     SÖZDİZİMSEL ROL: bu bir box-shadow DEĞERİDİR. `outline: var(--focus-ring)`
+     computed-value anında geçersizdir ve outline'ı `none`'a düşürür — F-03'ün
+     beş kontrolü böyle kaybetti. outline gereken yerde
+     `2px solid var(--color-primary)` yazılır. */
+  --focus-ring: 0 0 0 2px var(--color-primary);
   /* Serbest siyah gölge tonları — --elevation-* tam box-shadow (offset+blur
      dahil) değerleridir; coach widget'ın kendi offset/blur'lu bileşik
      gölgelerine yalnızca RENK bileşeni olarak eklenir. */

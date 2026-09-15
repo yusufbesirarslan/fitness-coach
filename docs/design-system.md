@@ -7,7 +7,7 @@ yeni UI kodu yazan herkes (insan veya ajan) önce burayı okumalı.
 
 ```
 templates/_head.html          ← her sayfada, sayfa CSS'lerinden ÖNCE:
- ├─ Google Fonts (Inter + Bebas Neue + DM Sans)
+ ├─ Google Fonts (Inter + Bebas Neue)
  ├─ static/tokens.css         ← 1) TÜM design token'ları (tek kaynak)
  └─ static/components.css     ← 2) yeniden kullanılabilir bileşenler
 sayfa CSS'i                   ← 3) theme.css | style.css (+ nav/dashboard/coach_widget)
@@ -72,7 +72,7 @@ renkli dolgu üstünde tema'dan bağımsız koyu metin → `var(--gray-950)`).
 
 ### Tipografi
 
-- Aileler: `--font-sans` = **Inter** (DM Sans fallback) · `--font-display` =
+- Aileler: `--font-sans` = **Inter** (sistem yedekleri) · `--font-display` =
   **Bebas Neue** · `--font-body` = `var(--font-sans)`.
   Inter ağırlıkları 300–800 yüklü (_head.html Google Fonts).
 - Boyutlar: `--text-2xs..--text-3xl` → 10 / 11 / 12 / 13 / 14 / 15 / 17 / 20 / 24 px;
@@ -107,9 +107,30 @@ grid'e çekilecek.
   (badge · chip · buton-input · kart · sheet · pill-avatar).
 - Kenarlık kalınlığı: `--border-w-1/2/3` → 1 / 1.5 / 2 px.
 - Elevation: `--elevation-1/2/3` (yumuşak siyah gölgeler; light'ta hafifler),
-  `--shadow-primary` (mavi vurgu), `--focus-ring` (3 px yumuşak odak halkası).
+  `--shadow-primary` (mavi vurgu).
 - Opaklık: `--opacity-disabled` .65 · `--opacity-muted` .7 · `--opacity-faint` .85.
 - İkon: `--icon-xs/sm/md/lg/xl` → 14 / 16 / 18 / 22 / 26 px (stroke ~1.8).
+
+### Odak (tek dil — WEB-UX4-PR2)
+
+Ürünün **TEK** odak dili 2 px solid primary halkadır. İki sözdizimsel rolü var
+ve ikisi de aynı görünür:
+
+- `--focus-ring` → **box-shadow DEĞERİ** (`0 0 0 2px var(--color-primary)`).
+  `box-shadow: var(--focus-ring);` biçiminde tüketilir.
+- `outline` gereken yerde (overflow kırpması riski olan kaplar) doğrudan
+  `outline: 2px solid var(--color-primary); outline-offset: 2px;` yazılır.
+
+**`outline: var(--focus-ring)` YASAKTIR.** `--focus-ring` bir box-shadow
+değeridir; `outline` içinde kullanıldığında computed-value anında geçersiz olur,
+`var()` parse-time denetimini atlattığı için kural sessizce `outline: none`'a
+düşer ve kaskadın bir önceki kazananına da DÖNMEZ. Bu, beş kontrolün (meal
+edit/delete, quick-add, log FAB, slot-empty) odağını tamamen silmişti.
+Bir regresyon testi bu kullanımı repo genelinde yasaklar.
+
+Kontrast: halka `--color-bg` / `--color-surface-1/2/3` karşısında dark temada
+4.62–5.65 : 1, light temada 4.28–5.45 : 1 ölçer (WCAG 2.2 SC 1.4.11 eşiği 3 : 1).
+Yeni bir odak token'ı EKLEME — tek token, tek dil.
 
 ### Hareket
 
@@ -155,10 +176,10 @@ Mevcut sınıf adları kamu API'sidir — yeniden adlandırma yok. Kullanım ör
 
 | Bileşen | Sınıflar | Örnek |
 |---|---|---|
-| Button | `.btn-volt` (primary), `.btn-ghost`, `.btn-danger`, mod: `.w-full`, `.loading` | `<button class="btn-volt">KAYDET</button>` |
+| Button | `.btn-volt` (primary), `.btn-ghost` (ikincil), `.btn-danger` (yıkıcı), mod: `.w-full`, `.loading` | `<button class="btn-volt">KAYDET</button>` |
 | Input | `.fc-input` (+ `.field` > `.field-label`) | `<div class="field"><label class="field-label">AD</label><input class="fc-input"></div>` |
 | Card | `.card` (kendi `--space-5` padding'ini TAŞIR), hover için ek `.card-hover`, padding'i kendi yöneten kartlar için `.card-flush` | `<div class="card card-hover">…</div>` |
-| Modal | `.modal-backdrop.open` > `.modal` > `.modal-header/-title/-close/-body/-footer` | JS: backdrop'a `.open` ekle/çıkar |
+| Modal | `.modal-backdrop` > `.modal` > `.modal-header/-title/-close/-body/-footer` | `AxisModal.open(backdrop)` / `AxisModal.close(backdrop)` — aşağıya bak |
 | Bottom Sheet | `.sheet-backdrop.open` > `.sheet` > `.sheet-handle` + `.sheet-title` | mobilde alttan, ≥768px ortalanır |
 | Badge | `.badge` + `.badge-primary/-success/-warning/-danger/-neutral` | `<span class="badge badge-success">AKTİF</span>` |
 | Chip | `.chip(.selected)` > `.chip-dot` | seçilebilir filtre/besin etiketi |
@@ -178,6 +199,55 @@ Mevcut sınıf adları kamu API'sidir — yeniden adlandırma yok. Kullanım ör
 
 Yenileri (Modal, Sheet, Badge, Avatar) Phase 1'de tanımlandı; sayfalar henüz
 ad-hoc kopyalarını kullanıyor — sayfa fazlarında bunlara geçirilecek.
+
+### Kanonik buton ailesi (WEB-UX4-PR2)
+
+Üç rütbe, **TEK** geometri. Ortak sözleşme: `min-height: 44px` (deponun mevcut
+dokunma hedefi standardı), `--radius-md`, `--space-3`/`--space-6` iç boşluk,
+AÇIK `font-family` ve tam `hover · pressed · focus-visible · disabled ·
+loading` kapsaması.
+
+| Sınıf | Rütbe | Dolgu | Yazı yüzü |
+|---|---|---|---|
+| `.btn-volt` | BİRİNCİL | dolu `--color-primary` | `--font-display` (Bebas) |
+| `.btn-ghost` | İKİNCİL | şeffaf + hairline kenarlık | `--font-body` (Inter) |
+| `.btn-danger` | YIKICI | şeffaf + `--color-danger` kenarlık ve metin | `--font-body` (Inter) |
+
+- **`font-family` zorunludur.** `<button>` sayfa yazı tipini MİRAS ALMAZ —
+  Chromium UA sayfası form kontrollerine `font: 400 13.333px Arial` basar.
+  `.btn-ghost` bu yüzden `<button>` iken Arial, `<a>` iken Inter render
+  ediyordu. `components.css` artık `button, input, select, textarea, optgroup`
+  için `font-family: inherit` normalizasyonu yapar; yalnızca AİLE normalize
+  edilir, boyut/ağırlık bileşende kalır.
+- **`.btn-danger` "renk değişmiş primary" DEĞİLDİR.** Dolu kırmızı zemin
+  `--white` metni 3.27 : 1'e düşürüyordu; anahatlı muamele hem rütbeyi ayırır
+  hem 4.69–5.73 : 1 ölçer. Hover bir FILL değil `inset` halkadır — dolgu,
+  metnin kendi zeminini boyayıp kontrastı 4.07 : 1'e düşürürdü.
+
+### Modal/Sheet davranışı (`static/modal.js` — WEB-UX4-PR2)
+
+CSS primitive'i Phase 1'den beri vardı ama DAVRANIŞI yoktu; ürün bu yüzden 21
+ayrı `role="dialog"` yüzeyi üretti (1 odak tuzağı, 3 odak iadesi, 2 `inert`).
+`modal.js` YALNIZCA mevcut primitive'i tamamlar — bileşen çerçevesi değildir:
+kayıt defteri, otomatik bağlama, MutationObserver veya polling YOKTUR.
+
+```js
+AxisModal.open(backdropEl, {
+  dismissible: true,      // false → Escape kapatmaz (yıkıcı onaylar)
+  initialFocus: '#name',  // Element | seçici | yoksa ilk odaklanabilir
+  onClose: fn
+});
+AxisModal.close(backdropEl);
+AxisModal.isOpen(backdropEl);
+```
+
+Garantiler: açılışta odak içeri · `Tab`/`Shift+Tab` sarmalama · politikaya
+saygılı `Escape` · `inert` ile arka plan yalıtımı · açan öğeye odak iadesi
+(öğe hâlâ kullanılabilirse; değilse `main`'e) · iç içe diyaloglarda LIFO
+temizlik · kapanıştan sonra bağlı handler BIRAKMAZ.
+
+PR2 hiçbir ürün diyaloğunu taşımaz; her yolculuk PR'ı kendi diyaloglarını
+taşır. Sözleşme `tests/test_ux4_pr2_foundations_browser.py` ile korunur.
 
 ## Uygulama Kabuğu (static/nav.css — Phase 2)
 

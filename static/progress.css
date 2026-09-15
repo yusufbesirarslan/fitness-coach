@@ -393,7 +393,7 @@ input[type="range"]::-moz-range-thumb {
 }
 input[type="range"]::-moz-range-thumb:active { cursor: grabbing; transform: scale(1.1); }
 input[type="range"]:focus-visible {
-  outline: var(--focus-ring, 2px solid var(--color-primary));
+  outline: 2px solid var(--color-primary);
   outline-offset: 4px;
 }
 
@@ -410,7 +410,7 @@ input[type="range"]:focus-visible {
 .overload-chip:hover { border-color: var(--color-primary-glow); }
 .overload-chip.selected { background: var(--color-primary-soft); border-color: var(--color-primary); color: var(--color-primary); }
 .overload-chip:focus-visible {
-  outline: var(--focus-ring, 2px solid var(--color-primary));
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
 }
 
