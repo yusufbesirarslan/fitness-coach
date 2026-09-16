@@ -281,6 +281,44 @@ markup'ı YASAK (regresyon: `tests/test_app_shell.py`):
 - **Çekmece (drawer) kaldırıldı** (v3 → v4): `static/nav.js` silindi, kabuk
   JS'siz çalışır. Aktif sekme `aria-current="page"` taşır.
 
+### Koç hedefi (WEB-UX4-PR3)
+
+Coach dört birincil hedeften biridir, bu yüzden kanonik `/coach` sayfasında
+sohbet **sayfa içeriğidir** — üstüne yüzen bir destek penceresi değil. Aynı
+widget, aynı `#cw-root`, aynı composer/stream/`/coach/history` hidrasyonu:
+`static/coach_widget.js` TEK Coach uygulaması olmayı sürdürür. Değişen tek şey
+sunumdur ve host'un iki bildirimsel kancasıyla açılır (launcher'ın `data-coach-
+launcher` deseninin aynısı; kancasız her host eskisi gibi yüzer):
+
+| Kanca | Kim koyar | Ne yapar |
+| --- | --- | --- |
+| `data-coach-mount` | `coach_v2.html` (`<main>` içindeki sütun) | Tek ağacın NEREYE eklendiği — `<body>`nin dibi yerine içerik sütunu. |
+| `data-coach-destination` | `coach_v2.html` `<body>` | NASIL sunulduğu: pencere hep açık, `inert` değil, `toggle()` no-op, `#cw-header` gizli. |
+
+- **Sayfa akışı:** `body.page-body[data-coach-destination]` viewport'un TAM
+  kendisidir (`height: 100vh; height: 100dvh; overflow: hidden`) ve dikey flex
+  kolondur; taşma `#cw-msgs`'e aittir. Sayfanın kendisi kaydırılsaydı composer
+  telefonda katlamanın altına inerdi. dvh'siz tarayıcı ikinci bildirimi düşürür
+  ve 100vh'de kalır — kap yine vardır.
+- **Katman:** `#cw-root` → `--z-fab`, `#cw-notify` → `--z-toast`. Ham 9998/9999
+  gitti; Coach artık toast'ın ÜSTÜNE çıkamaz. Hedef modunda `#cw-root`
+  `position: static` olur, yani katmana hiç girmez.
+- **`#cw-notify` DAİMA `<body>`ye eklenir**, mount'a asla: `position: fixed` bir
+  düğüm, dönüştürülmüş bir atanın (`.main-content` `page-enter`) içindeyken o
+  ataya göre konumlanır ve animasyon boyunca rayından kayardı.
+- **Klavye:** DOM sırası = sekme sırası. Composer artık satırın BAŞINDA
+  (`#cw-input` → `#cw-qr` → `#cw-send`); hedefte launcher/kapat yok, yani
+  görünmez odak durağı da yok. Pozitif `tabindex` hiçbir yerde yok.
+- **Tipografi/renk:** gövde `--text-base`/`--weight-regular`, composer
+  `--text-xl` (17 px — iOS'un 16 px odak-zoom eşiğinin üstündeki EN KÜÇÜK
+  mevcut token; yeni token EKLENMEDİ). Ham hex kalmadı.
+- **Geri alma:** `UIUX_COACH_PAGE_V2_ENABLED=0` → `templates/coach.html` +
+  `.coach-page*` (nav.css) birebir eskisi gibi render eder. Bayrak adı,
+  varsayılanı ve okuma yolu DEĞİŞMEDİ.
+- **Regresyon:** `tests/test_ux4_pr3_coach_contract.py` (kaynak sözleşmesi) +
+  `tests/test_ux4_pr3_coach_destination_browser.py` (ölçülmüş geometri, gerçek
+  Tab yürüyüşü, 320–1366 × TR/EN taşma matrisi) + `tests/test_coach_page_v2.py`.
+
 ## Genişletme Rehberi
 
 1. **Yeni token:** tokens.css'te doğru bölüme kanonik adla ekle; light değeri
@@ -301,11 +339,15 @@ markup'ı YASAK (regresyon: `tests/test_app_shell.py`):
   (blur zemini için token yok) — bilinçli istisna, nav.css'te not düşüldü.
 - ✅ `dashboard.css` Phase 3'te tamamen kanonik token'lara taşındı (ara-gri
   palet kaldırıldı); ana sayfa kabuğu artık `.card`/`.ring-*`/`.pbar-*`/
-  `.avatar`/`.badge`/`.sec-label` bileşenlerini yeniden kullanır. `coach_widget.css`
-  hâlâ kendi ara-gri paletini taşır (`#808088`, `#505058`, `#2A2A2A`…) —
-  `--color-text-*`/`--color-surface-*`'e normalize edilecek.
-- `coach_widget.css`'te eski lime kalıntıları (`#99cc00`, `#d6ff1a` hover) —
-  mavi temayla uyumsuz, widget elden geçirilirken düzeltilecek.
+  `.avatar`/`.badge`/`.sec-label` bileşenlerini yeniden kullanır.
+- ✅ `coach_widget.css`'in kendi ara-gri paleti (`#808088`, `#505058`, `#2A2A2A`…)
+  WEB-UX4-PR3'te kaldırıldı: stylesheet'te ham hex KALMADI, her değer
+  `--color-text-*`/`--surface-*`/`--color-border-*`'ten gelir.
+- ✅ Eski lime kalıntıları (avatar gradyanı ve `#cw-send:hover`) WEB-UX4-PR3'te
+  kanonik `--color-primary` / `--color-primary-strong` çiftine taşındı;
+  `--color-chat-avatar-accent` ve `--color-chat-send-hover` token'ları
+  `tokens.css`'ten SİLİNDİ (referanssız bırakılmadı). Bir regresyon testi
+  `static/**/*.css` içinde iki hex'i de ve iki token adını da reddeder.
 - Auth sayfaları katı `--color-border-solid` kenarlık kullanır; hairline'a
   birleştirme Phase 3+.
 - Chart.js konfiglerindeki renk/font literalleri (progress/index) JS içinde —

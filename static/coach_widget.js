@@ -32,6 +32,29 @@
   var CW_LAUNCHER = !!(document.body &&
                        document.body.hasAttribute('data-coach-launcher'));
 
+  /* ── 0c. Destination mode (AxisAI WEB-UX4-PR3) ──
+     Coach is one of four primary destinations, so on its canonical page the
+     conversation IS the page content — not a support window floated over it.
+     This is the SAME widget: one #cw-root, one composer, one stream, one
+     /coach/history hydration. Only two things change, and only where the host
+     opts in exactly as it already does for the launcher:
+
+       data-coach-mount        WHERE the one tree is appended (the page's
+                               content column instead of the foot of <body>).
+       data-coach-destination  HOW it is presented — always-present rather than
+                               opened from a launcher, so the window is never
+                               inert and toggle() is a no-op (there is no
+                               launcher to reopen it with).
+
+     Every other host is untouched: without these attributes the widget floats
+     exactly as before, which is what Nutrition's menu scanner and the legacy
+     Coach rollback page both depend on. Presentation lives in
+     coach_widget.css under the same attribute; nothing here changes what the
+     AI does, what is sent, or what is persisted. */
+  var CW_DESTINATION = !!(document.body &&
+                          document.body.hasAttribute('data-coach-destination'));
+  var CW_MOUNT = document.querySelector('[data-coach-mount]');
+
   function mealWriteHeaders() {
     var key = (window.crypto && window.crypto.randomUUID)
       ? window.crypto.randomUUID()
@@ -76,21 +99,21 @@
   /* ── 2. Inject HTML ── */
   var html = '<div id="cw-root">' +
 
-    '<div id="cw-window" role="dialog" aria-label="AI Fitness Coach">' +
+    '<div id="cw-window" role="dialog" aria-label="' + t('coach.widget_title') + '">' +
       '<div id="cw-header">' +
         '<div id="cw-hleft">' +
           '<div id="cw-avatar" aria-hidden="true">' + '<svg viewBox="0 0 24 24"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg>' + '</div>' +
           '<div>' +
-            '<div id="cw-htitle">AI Fitness Coach</div>' +
+            '<div id="cw-htitle">' + t('coach.widget_title') + '</div>' +
           '</div>' +
         '</div>' +
-        '<button id="cw-close" aria-label="Kapat">' +
+        '<button id="cw-close" aria-label="' + t('coach.close') + '">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">' +
             '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>' +
           '</svg>' +
         '</button>' +
       '</div>' +
-      '<div id="cw-msgs" role="log" aria-live="polite"></div>' +
+      '<div id="cw-msgs" role="log" aria-live="polite" aria-label="' + t('coach.log_label') + '"></div>' +
 
       '<div id="cw-qr-menu" role="menu">' +
         '<button class="cw-qr-opt" id="cw-qr-scan" role="menuitem">' +
@@ -104,18 +127,24 @@
       '</div>' +
 
       '<div id="cw-urlbox">' +
-        '<div id="cw-urlbox-label">Menü URL\'si</div>' +
+        '<div id="cw-urlbox-label">' + t('coach.url_label') + '</div>' +
         '<div id="cw-urlbox-row">' +
           '<input type="url" id="cw-url-input" placeholder="https://menu.example.com" autocomplete="off">' +
-          '<button id="cw-url-go">ANALİZ ET</button>' +
+          '<button id="cw-url-go">' + t('coach.url_submit') + '</button>' +
         '</div>' +
       '</div>' +
 
+      /* DOM order IS tab order (no positive tabindex anywhere in this widget).
+         Discovery measured Send first and the composer at stop 12, so a
+         keyboard user met "send" before the field they had to type in. The
+         composer now comes first, its adjacent utility second, and the submit
+         last — and the row paints in that same order, so nothing here relies on
+         a visual/DOM mismatch. */
       '<div id="cw-irow">' +
-        '<button id="cw-qr" aria-label="Menü tara">' +
+        '<input type="text" id="cw-input" aria-label="' + t('coach.composer_label') + '" placeholder="' + t('coach.placeholder') + '" autocomplete="off">' +
+        '<button id="cw-qr" aria-label="' + t('coach.scan_menu') + '">' +
           '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/></svg>' +
         '</button>' +
-        '<input type="text" id="cw-input" placeholder="' + t('coach.placeholder') + '" autocomplete="off">' +
         '<button id="cw-send" aria-label="' + t('coach.send') + '">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
             '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' +
@@ -128,15 +157,15 @@
 
       '<div id="cw-scan">' +
         '<div id="cw-scan-head">' +
-          '<div id="cw-scan-title">MENÜ TARA</div>' +
-          '<button id="cw-scan-close" aria-label="Kapat">' +
+          '<div id="cw-scan-title">' + t('coach.scan_title') + '</div>' +
+          '<button id="cw-scan-close" aria-label="' + t('coach.close') + '">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">' +
               '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>' +
             '</svg>' +
           '</button>' +
         '</div>' +
         '<div id="cw-scan-reader"></div>' +
-        '<div id="cw-scan-hint">QR kodu kameraya gösterin</div>' +
+        '<div id="cw-scan-hint">' + t('coach.scan_hint') + '</div>' +
         '<div id="cw-scan-status"></div>' +
       '</div>' +
 
@@ -162,6 +191,16 @@
   if (!document.getElementById('cw-root')) {
     var wrap = document.createElement('div');
     wrap.innerHTML = html;
+    /* #cw-root is the conversation: on a destination host it belongs IN the
+       page's content column, everywhere else at the foot of <body> as before.
+       #cw-notify is a viewport-anchored toast and always belongs on <body> —
+       a position:fixed element nested inside a transformed ancestor (the page
+       -enter animation on .main-content) re-anchors to that ancestor for the
+       length of the animation, which would move the toast off its rail. */
+    var cwRootEl   = wrap.querySelector('#cw-root');
+    var cwNotifyEl = wrap.querySelector('#cw-notify');
+    if (cwRootEl)   (CW_MOUNT || document.body).appendChild(cwRootEl);
+    if (cwNotifyEl) document.body.appendChild(cwNotifyEl);
     while (wrap.firstChild) document.body.appendChild(wrap.firstChild);
   }
 
@@ -170,7 +209,21 @@
      it; on a launcher-less host it is focusable UI the user cannot see and could
      not have opened. Cleared on every open (CW.toggle). */
   var cwWinEl = document.getElementById('cw-window');
-  if (cwWinEl) cwWinEl.inert = true;
+  if (cwWinEl && !CW_DESTINATION) cwWinEl.inert = true;
+
+  /* A floating Coach really is a dialog: it opens over the page, it has a
+     close control, and it is what the launcher launches. A destination is
+     not — it is the page's own content, always present, with nothing to
+     close it to. Announcing it as a dialog tells a screen-reader user they
+     are inside something they can leave, and some readers switch navigation
+     mode on the strength of that. The role is removed for the destination
+     ONLY; every floating host keeps it verbatim. The conversation keeps its
+     own semantics either way (#cw-msgs is role="log" with a name), and the
+     page supplies the heading the widget header used to. */
+  if (cwWinEl && CW_DESTINATION) {
+    cwWinEl.removeAttribute('role');
+    cwWinEl.removeAttribute('aria-label');
+  }
 
   /* ── 3. Wire events ── */
   document.getElementById('cw-close').addEventListener('click', function () { CW.toggle(); });
@@ -227,7 +280,9 @@
   }
 
   var CW = window.CW = {
-    open:     false,
+    /* On a destination host the conversation is page content that is already
+       there — there is no launcher, so it starts open and stays open. */
+    open:     CW_DESTINATION,
     busy:     false,
     messages: [],
     _scanner: null,
@@ -287,6 +342,11 @@
     },
 
     toggle: function () {
+      /* A destination host has no launcher and no close control, so closing
+         the conversation would strand the user on a page whose only content
+         is gone. startScan()/processMenuUrl() already guard on `open`, which
+         is true here, so neither reaches this. */
+      if (CW_DESTINATION) return;
       this.open = !this.open;
       var win = document.getElementById('cw-window');
       var fab = document.getElementById('cw-fab');   // null on a launcher-less host
@@ -539,7 +599,7 @@
     submitUrl: function () {
       var inp = document.getElementById('cw-url-input');
       var url = this._normUrl(inp ? inp.value : '');
-      if (!url) { this._toast('Geçerli bir URL girin.', 'error'); return; }
+      if (!url) { this._toast(t('coach.url_invalid'), 'error'); return; }
       this.hideUrlBox();
       this.processMenuUrl(url);
     },
@@ -557,9 +617,9 @@
       this._scanStatus('');
 
       var begin = function () {
-        if (typeof Html5Qrcode === 'undefined') { self._scanStatus('Tarayıcı yüklenemedi.'); return; }
+        if (typeof Html5Qrcode === 'undefined') { self._scanStatus(t('coach.scan_lib_failed')); return; }
         if (!window.isSecureContext) {
-          self._scanStatus('Kamera yalnızca güvenli (HTTPS) bağlantıda açılır. "URL Gir" seçeneğini kullanın.');
+          self._scanStatus(t('coach.scan_insecure'));
           return;
         }
         var reader = document.getElementById('cw-scan-reader');
@@ -568,19 +628,19 @@
         var onDecode = function (decoded) {
           var url = self._normUrl(decoded);
           self.stopScan();
-          if (!url) { self._toast('QR kod geçerli bir URL içermiyor.', 'error'); return; }
+          if (!url) { self._toast(t('coach.qr_invalid'), 'error'); return; }
           self.processMenuUrl(url);
         };
         var fail = function (err) {
           var info = ((err && (err.name || err.type)) || '') + ' ' + ((err && err.message) || err || '');
           if (/NotAllowed|Permission|denied/i.test(info)) {
-            self._scanStatus('Kamera izni reddedildi. Tarayıcı ayarlarından kamera iznini açıp tekrar deneyin.');
+            self._scanStatus(t('coach.scan_denied'));
           } else if (/NotReadable|TrackStart|in use/i.test(info)) {
-            self._scanStatus('Kamera başka bir uygulama tarafından kullanılıyor.');
+            self._scanStatus(t('coach.scan_busy'));
           } else if (/NotFound|Overconstrained|no camera|devices/i.test(info)) {
-            self._scanStatus('Uygun kamera bulunamadı. "URL Gir" seçeneğini kullanabilirsiniz.');
+            self._scanStatus(t('coach.scan_no_camera'));
           } else {
-            self._scanStatus('Kamera açılamadı. "URL Gir" seçeneğini kullanabilirsiniz.');
+            self._scanStatus(t('coach.scan_failed'));
           }
         };
         // Arka kamerayı dene; başarısız olursa (örn. masaüstü) mevcut kameraya düş.
@@ -596,7 +656,7 @@
         };
         try {
           self._scanner = new Html5Qrcode('cw-scan-reader');
-          self._scanStatus('Kamera başlatılıyor...');
+          self._scanStatus(t('coach.scan_starting'));
           self._scanner.start({ facingMode: 'environment' }, qrCfg, onDecode, function () {})
             .then(function () { self._scanStatus(''); })
             .catch(fallbackToAnyCamera);
@@ -606,13 +666,13 @@
       if (typeof Html5Qrcode !== 'undefined') {
         begin();
       } else {
-        self._scanStatus('Tarayıcı yükleniyor...');
+        self._scanStatus(t('coach.scan_lib_loading'));
         var s = document.createElement('script');
         s.src = QR_LIB_SRC;
         s.integrity = QR_LIB_SRI;       // SEC1: tedarik-zinciri bütünlük doğrulaması
         s.crossOrigin = 'anonymous';    // SRI'nin cross-origin script'te çalışması için şart
         s.onload = function () { self._scanStatus(''); begin(); };
-        s.onerror = function () { self._scanStatus('Tarayıcı yüklenemedi.'); };
+        s.onerror = function () { self._scanStatus(t('coach.scan_lib_failed')); };
         document.head.appendChild(s);
       }
     },
@@ -634,7 +694,7 @@
     processMenuUrl: function (url) {
       var self = this;
       if (!this.open) this.toggle();
-      this._push('user', '🔗 Menü: ' + url);
+      this._push('user', t('coach.menu_link', { url: url }));
       this._setLoading(true);
 
       fetch('/api/proxy/scan-menu', {
@@ -645,12 +705,12 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         if (!res.ok) {
-          throw { msg: (res.d && res.d.error) || 'Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyin.' };
+          throw { msg: (res.d && res.d.error) || t('coach.menu_protected') };
         }
         var pd = res.d;
         var menuText = [pd.title || ''].concat(pd.headings || [], [pd.body_text || '']).join('\n');
         if (!menuText || menuText.trim().length < 20) {
-          throw { msg: 'Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyin.' };
+          throw { msg: t('coach.menu_protected') };
         }
         var body = { menu_text: menuText };
         if (pd.menu_source) body.menu_source = pd.menu_source;
@@ -666,7 +726,7 @@
         self._setLoading(false);
         var result = res.d;
         if (!res.ok || result.success === false) {
-          self._push('bot', result.message || result.error || 'Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.');
+          self._push('bot', result.message || result.error || t('coach.menu_process_error'));
           return;
         }
         var cats = result.categories || {};
@@ -676,14 +736,14 @@
           return;
         }
         if (!totalItems && !(result.coach_picks || []).length) {
-          self._push('bot', 'Menüde analiz edilebilir yemek bulunamadı. Lütfen başka bir menü deneyin.');
+          self._push('bot', t('coach.menu_no_dishes'));
           return;
         }
         self._pushMenu(result);
       })
       .catch(function (err) {
         self._setLoading(false);
-        self._push('bot', (err && err.msg) || 'Bağlantı hatası. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.');
+        self._push('bot', (err && err.msg) || t('coach.menu_conn_error'));
       });
     },
 
@@ -718,16 +778,18 @@
       })
       .then(function (r) {
         if (!r.ok) throw new Error('fail');
-        btn.textContent = 'Eklendi ✓';
-        btn.style.color = '#00C48C';
-        btn.style.borderColor = 'rgba(0,196,140,0.3)';
-        self._toast(d.name + ' günlük kayda eklendi', 'success');
+        btn.textContent = t('coach.dish_added');
+        /* The success state was two hardcoded hexes set as inline styles, which
+           no stylesheet or theme could override. It is a class now, painted
+           from the semantic palette. */
+        btn.classList.add('cw-added');
+        self._toast(t('coach.dish_added_toast', { dish: d.name }), 'success');
       })
       .catch(function () {
-        btn.textContent = 'Hata';
+        btn.textContent = t('coach.dish_error');
         btn.disabled = false;
-        setTimeout(function () { btn.textContent = orig || 'Günlük Kayda Ekle'; }, 2000);
-        self._toast('Kayıt başarısız.', 'error');
+        setTimeout(function () { btn.textContent = orig || t('coach.dish_add'); }, 2000);
+        self._toast(t('coach.dish_add_failed'), 'error');
       });
     },
 
@@ -770,7 +832,7 @@
     _pushMenu: function (result) {
       var picks = (result.coach_picks || []).length;
       this.messages.push({ role: 'bot', type: 'menu', data: result,
-                           text: 'Menü analizi (' + picks + ' öneri)', time: this._time() });
+                           text: t('coach.menu_analysis', { count: picks }), time: this._time() });
       this._save();
       this._render();
       this._scrollBottom();
@@ -796,13 +858,13 @@
           '</div>' +
           '<div class="cw-dish-reason">' + this._esc(dd.reason) + '</div>' +
           '<div class="cw-dish-macros">' +
-            '<div class="cw-dish-macro"><span>' + m.calories + '</span> kcal</div>' +
-            '<div class="cw-dish-macro"><span>' + m.protein + 'g</span> protein</div>' +
-            '<div class="cw-dish-macro"><span>' + m.carbs + 'g</span> karb</div>' +
-            '<div class="cw-dish-macro"><span>' + m.fat + 'g</span> yağ</div>' +
+            '<div class="cw-dish-macro"><span>' + m.calories + '</span> ' + this._esc(t('coach.macro_kcal')) + '</div>' +
+            '<div class="cw-dish-macro"><span>' + m.protein + 'g</span> ' + this._esc(t('coach.macro_protein')) + '</div>' +
+            '<div class="cw-dish-macro"><span>' + m.carbs + 'g</span> ' + this._esc(t('coach.macro_carbs')) + '</div>' +
+            '<div class="cw-dish-macro"><span>' + m.fat + 'g</span> ' + this._esc(t('coach.macro_fat')) + '</div>' +
           '</div>' +
           (warns ? '<div class="cw-dish-warns">' + warns + '</div>' : '') +
-          '<button class="cw-dish-add" data-action="CW.addDishFromEl" data-dd="' + ddJson + '">Günlük Kayda Ekle</button>' +
+          '<button class="cw-dish-add" data-action="CW.addDishFromEl" data-dd="' + ddJson + '">' + this._esc(t('coach.dish_add')) + '</button>' +
         '</div>';
     },
 
@@ -810,16 +872,16 @@
       var self = this;
       var out = '<div class="cw-menu">';
       if (d.remaining) {
-        out += '<div class="cw-menu-rem">Kalan: ' +
-          '<b>' + Math.round(d.remaining.calories) + '</b> kcal · ' +
-          '<b>' + Math.round(d.remaining.protein) + 'g</b> protein · ' +
-          '<b>' + Math.round(d.remaining.carbs) + 'g</b> karb · ' +
-          '<b>' + Math.round(d.remaining.fat) + 'g</b> yağ</div>';
+        out += '<div class="cw-menu-rem">' + self._esc(t('coach.menu_remaining')) + ' ' +
+          '<b>' + Math.round(d.remaining.calories) + '</b> ' + self._esc(t('coach.macro_kcal')) + ' · ' +
+          '<b>' + Math.round(d.remaining.protein) + 'g</b> ' + self._esc(t('coach.macro_protein')) + ' · ' +
+          '<b>' + Math.round(d.remaining.carbs) + 'g</b> ' + self._esc(t('coach.macro_carbs')) + ' · ' +
+          '<b>' + Math.round(d.remaining.fat) + 'g</b> ' + self._esc(t('coach.macro_fat')) + '</div>';
       }
       var picks = d.coach_picks || [];
       if (picks.length) {
         out += '<div class="cw-menu-coach">' +
-          '<div class="cw-menu-coach-title">KOÇUN SEÇİMİ <span class="cw-menu-badge">Top 3</span></div>' +
+          '<div class="cw-menu-coach-title">' + self._esc(t('coach.menu_picks')) + ' <span class="cw-menu-badge">' + self._esc(t('coach.menu_picks_badge')) + '</span></div>' +
           picks.map(function (x) { return self._dishCard(x, true); }).join('') +
           '</div>';
       }

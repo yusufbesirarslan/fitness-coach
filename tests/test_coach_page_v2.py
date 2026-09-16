@@ -3,6 +3,12 @@
 Covers the route swap (OFF → legacy coach.html thin host, ON → hardened
 coach_v2.html), @require_auth on both paths, and the guarantee that V2 REUSES the
 exact existing floating widget (no second Coach implementation). The Coach flag is
+
+WEB-UX4-PR3 turned the V2 page into a DESTINATION: the widget no longer floats
+over an empty hero, it mounts into the page's content column. The invariant this
+file guards is unchanged and now matters more — still ONE Coach implementation,
+one composer, one stream, one history hydration. The launcher, its inline opener
+and its two copy keys are gone; the assertions below track that.
 toggled with app.config["UIUX_COACH_PAGE_V2_ENABLED"] (coach_page() reads it at
 request time).
 
@@ -46,9 +52,9 @@ def _seed_login(client, make_user, login, username="coachuser"):
 def test_flag_default_off_renders_legacy_coach(client, make_user, login):
     _seed_login(client, make_user, login)
     html = client.get("/coach").get_data(as_text=True)
-    assert "data-coach-v2" not in html          # V2 marker absent
-    assert "window.axCoachOpen" not in html     # V2 route opener absent
-    assert 'class="coach-page-title"' in html    # legacy thin host still rendered
+    assert "data-coach-v2" not in html            # V2 marker absent
+    assert "data-coach-destination" not in html   # destination mode absent
+    assert 'class="coach-page-title"' in html      # legacy thin host still rendered
 
 
 def test_flag_on_renders_coach_v2(app, client, make_user, login):
@@ -56,7 +62,9 @@ def test_flag_on_renders_coach_v2(app, client, make_user, login):
     _seed_login(client, make_user, login)
     html = client.get("/coach").get_data(as_text=True)
     assert "data-coach-v2" in html
-    assert "window.axCoachOpen" in html         # route-mode opener present
+    # PR3: the page no longer opens a floating widget — it IS the Coach.
+    assert "data-coach-destination" in html     # destination presentation mode
+    assert "data-coach-mount" in html           # and it declares where Coach lives
 
 
 def test_missing_flag_fails_safe_to_legacy(app, client, make_user, login):
@@ -160,20 +168,41 @@ def test_widget_bootstraps_exactly_once():
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_shared_widget_has_no_route_mode_behaviour():
-    # Auto-open / page-shell / route opener must NOT be in the shared widget, or
-    # they would fire on the legacy floating widget on every page.
+    # Page-shell knowledge must NOT be in the shared widget, or it would fire on
+    # the floating widget on every other page. PR3 kept this: the widget reads
+    # two neutral presentation hooks the HOST page sets, and knows no route.
     src = _read("static", "coach_widget.js")
     assert "axCoachOpen" not in src
     assert "data-coach-v2" not in src
+    # The widget knows two Coach ENDPOINTS and no Coach ROUTE: it never reads
+    # the URL, so it can never decide for itself that a page is the destination.
+    assert "window.location" not in src
+    assert "location.pathname" not in src
 
 
-def test_route_opener_is_idempotent_open_only():
-    # The route script opens the ONE widget only when CLOSED (toggle() flips
-    # state), so re-clicks / poll re-fires never close it and never make a second.
+def test_destination_mode_is_declared_by_the_page_not_the_widget():
+    # PR3 replaced the inline "open the widget" script with two declarative
+    # hooks. The page says WHERE Coach mounts and THAT it is the destination;
+    # the widget decides what that means. No inline script is needed at all,
+    # which is why the CSP-nonced <script> block is gone rather than unnonced.
     tpl = _read("templates", "coach_v2.html")
-    assert "window.axCoachOpen" in tpl
-    assert "!CW.open" in tpl                     # guarded open, not blind toggle
-    assert 'nonce="{{ csp_nonce }}"' in tpl      # inline script is CSP-nonced
+    assert "data-coach-destination" in tpl
+    assert "data-coach-mount" in tpl
+    assert "window.axCoachOpen" not in tpl
+    assert "<script>" not in tpl                 # no inline script survives
+
+    src = _read("static", "coach_widget.js")
+    assert "data-coach-destination" in src
+    assert "data-coach-mount" in src
+
+
+def test_destination_mode_does_not_poll_for_the_widget():
+    # The old opener polled until CW existed. The widget tag now sits after the
+    # mount point, so the mount is in the DOM before the widget initialises.
+    tpl = _read("templates", "coach_v2.html")
+    assert "setInterval" not in tpl
+    assert "setTimeout" not in tpl
+    assert tpl.index("data-coach-mount") < tpl.index("/static/coach_widget.js")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -197,13 +226,16 @@ def test_v2_no_raw_localization_keys_leak(app, client, make_user, login):
     _seed_login(client, make_user, login)
     html = client.get("/coach").get_data(as_text=True)
     assert ">coach.v2.title<" not in html
-    assert ">coach.v2.intro<" not in html
+    assert ">coach.v2.context<" not in html
+    assert ">coach.v2.view_plan<" not in html
 
 
-def test_v2_uses_data_action_delegation_not_onclick():
+def test_v2_uses_no_inline_event_handlers():
+    # PR3 removed the only data-action on this page (the launcher). The rule it
+    # existed to satisfy — delegation, never inline handlers — still holds.
     tpl = _read("templates", "coach_v2.html")
-    assert 'data-action="axCoachOpen"' in tpl
     assert "onclick=" not in tpl
+    assert "onload=" not in tpl
 
 
 def test_coach_v2_copy_is_axisai_only():
@@ -232,9 +264,20 @@ def test_coach_v2_copy_makes_no_plan_authority_claim():
 # ══════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.parametrize("key", [
-    "coach.v2.title", "coach.v2.intro", "coach.v2.open", "coach.v2.hint",
+    "coach.v2.title", "coach.v2.context", "coach.v2.view_plan",
 ])
 def test_coach_v2_keys_exist_in_both_locales(key):
     from app.i18n import _CATALOG
     assert key in _CATALOG["tr"]
     assert key in _CATALOG["en"]
+
+
+@pytest.mark.parametrize("retired",
+                         ["coach.v2.open", "coach.v2.hint", "coach.v2.intro"])
+def test_retired_launcher_copy_is_gone_from_both_locales(retired):
+    # These strings only ever labelled the "Open Coach" button, its hint, and
+    # the hero paragraph that explained "the chat opens on this page".
+    # The button is gone; leaving the copy behind invites the button back.
+    from app.i18n import _CATALOG
+    assert retired not in _CATALOG["tr"]
+    assert retired not in _CATALOG["en"]
