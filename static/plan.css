@@ -323,7 +323,7 @@
 .plan-days .plan-day-body { padding: 0 0 var(--space-4); }
 
 /* Rest: weekday and "Rest" on one quiet line, guidance as secondary text. */
-.plan-days .plan-day--rest { padding: var(--space-3) 0; }
+.plan-days .plan-day--rest { padding: var(--space-2) 0; }
 .plan-days .plan-day--rest > .plan-day-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); min-height: 0; margin: 0; padding: 0; cursor: default; }
 .plan-days .plan-day--rest .plan-day-name { color: var(--color-text-2); }
 .plan-days .plan-day--rest .plan-day-focus { color: var(--color-text-3); }
@@ -359,6 +359,14 @@
   .plan-domain--training .weekly-program-actions,
   .plan-domain--training .weekly-program-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* One section rhythm inside the active Plan: every divided section inside
+   Training (weekly guidance, the week, management) and the secondary links
+   open with the same divider + spacing pair. */
+.plan-domain--training .weekly-program-card,
+.plan-domain--training .plan-days,
+.plan-domain--training .plan-manage--regenerate { margin-top: var(--space-5); padding-top: var(--space-4); }
+.plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-secondary { margin-top: var(--space-5); padding-top: var(--space-4); }
 
 /* F-30: on desktop the active Plan is composed, not a phone column. Training
    keeps the wide reading column; Nutrition (with Supplements) and the

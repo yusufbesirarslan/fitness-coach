@@ -142,7 +142,6 @@
               aria-expanded="false" aria-controls="plan-manage-panel">
         {{ t('plan.manage.regenerate') }}
       </button>
-      <p class="plan-create-note">{{ t('plan.create.capability_note') }}</p>
       {% else %}
       {#- ── FIRST RUN (UX4-PR4, F-07) ──
           Coached, not configured: say what AxisAI will build and that the
@@ -160,6 +159,9 @@
         {#- Regeneration is not PR4's to redesign: the flat form, its order and
             its status placement are exactly what UX-3 PR3 shipped. -#}
         <p class="plan-manage-msg" data-plan-manage-msg role="status" aria-live="polite" hidden></p>
+        {#- UX4-PR5: the combination caveat qualifies the form, so it is shown
+            with the form — the same placement PR4 gave the create branch. -#}
+        <p class="plan-create-note">{{ t('plan.create.capability_note') }}</p>
         {% for name in ('gun_sayisi', 'antrenman_tarzi', 'odak_hedef', 'ekipman', 'odak', 'sure', 'kardiyo_tipi', 'injuries') %}{{ plan_pref(name) }}{% endfor %}
 
         <button class="btn-volt w-full" type="button"
