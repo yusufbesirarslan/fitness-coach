@@ -36,9 +36,9 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # Mobile Training PR5 adds the native workout-session execution columns as
-    # the sole new head, chained off Sprint 13 PR4's e4f5a6b7c8d9. One head only.
-    assert heads == ["f5a6b7c8d9e0"]
+    # The F1 credential-epoch column is the sole new head, chained off Mobile
+    # Training PR5's f5a6b7c8d9e0. One head only.
+    assert heads == ["a6b7c8d9e0f1"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -59,9 +59,10 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # The literal is the tripwire that makes "we added one small table" fail
     # here first. 39 = the integrated origin/main baseline; 40 = plus Mobile
     # Training PR5's f5a6b7c8d9e0, which adds COLUMNS to the existing
-    # workout_session table and no new table. Sprint 11 PR4 still contributes
+    # workout_session table and no new table; 41 = plus the F1 credential epoch,
+    # one COLUMN on the existing user table. Sprint 11 PR4 still contributes
     # none of them, which is the claim this test guards.
-    assert len(revision_files) == 40
+    assert len(revision_files) == 41
     assert not any("exercise" in name for name in revision_files)
 
     catalog_path = (
@@ -456,3 +457,72 @@ def test_meal_idempotency_migration_upgrades_deployed_pre_column_schema(tmp_path
             constraint["name"] == "uq_meal_log_user_idempotency"
             for constraint in inspector.get_unique_constraints("meal_log")
         )
+
+
+def _credential_epoch_migration():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations"
+        / "versions"
+        / "a6b7c8d9e0f1_add_user_credential_epoch.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "user_credential_epoch_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
+def test_credential_epoch_migration_backfills_existing_rows_without_a_default_pass(
+        tmp_path):
+    """F1: the login fence needs a value on every row that already exists.
+
+    A NULL epoch would make the comparison in
+    ``mobile_auth._assert_credential_unchanged`` meaningless for every account
+    created before this revision, so the column is NOT NULL with a server
+    default and the existing row must come back as 0 with no backfill step.
+    """
+    migration = _credential_epoch_migration()
+    assert migration.revision == "a6b7c8d9e0f1"
+    assert migration.down_revision == "f5a6b7c8d9e0"
+
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'credential-epoch.db'}")
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            'CREATE TABLE "user" (id INTEGER PRIMARY KEY, username VARCHAR(80))'))
+        connection.execute(sa.text(
+            'INSERT INTO "user" (id, username) VALUES (1, \'before\')'))
+        context = MigrationContext.configure(connection)
+
+        with Operations.context(context):
+            migration.upgrade()
+
+        columns = {
+            c["name"]: c for c in sa.inspect(connection).get_columns("user")}
+        assert columns["credential_epoch"]["nullable"] is False
+        assert connection.execute(sa.text(
+            'SELECT credential_epoch FROM "user" WHERE id = 1')).scalar() == 0
+
+        # Re-running is a no-op: the boot path may have built the column with
+        # db.create_all() before Alembic ever ran.
+        with Operations.context(context):
+            migration.upgrade()
+
+        with Operations.context(context):
+            migration.downgrade()
+        assert "credential_epoch" not in {
+            c["name"] for c in sa.inspect(connection).get_columns("user")}
+
+        with Operations.context(context):
+            migration.upgrade()
+        assert connection.execute(sa.text(
+            'SELECT credential_epoch FROM "user" WHERE id = 1')).scalar() == 0
+
+
+def test_credential_epoch_model_and_migration_agree():
+    from app.models import User
+
+    column = User.__table__.c.credential_epoch
+    assert column.nullable is False
+    assert column.server_default.arg == "0"
+    assert isinstance(column.type, sa.Integer)

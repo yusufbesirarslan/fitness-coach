@@ -7,6 +7,7 @@ only one phase-two transaction may persist its provider material and child.
 import calendar
 import os
 import threading
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -267,3 +268,172 @@ def test_credential_change_during_provider_renewal_cannot_be_outlived(pg_app):
         assert MobileRefreshCredential.query.filter(
             MobileRefreshCredential.revoked_at.is_(None)).count() == 0
     assert counter["calls"] == 1
+
+
+def _wait_for_a_backend_blocked_on_a_row_lock(timeout=15.0):
+    """Block until PostgreSQL itself reports a session waiting on a lock.
+
+    The alternative would be sleeping and hoping, which proves nothing: a fix
+    that takes no lock at all would sail past a sleep and the test would still
+    be green. Waiting on an observable server state instead means the mutant
+    that drops ``with_for_update`` never reaches this state and fails here.
+    """
+    deadline = time.monotonic() + timeout
+    probe = db.engine.connect()
+    try:
+        while time.monotonic() < deadline:
+            waiting = probe.execute(sa.text(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datname = current_database() "
+                "AND wait_event_type = 'Lock' AND state = 'active'")).scalar()
+            if waiting:
+                return True
+            probe.rollback()
+            time.sleep(0.05)
+        return False
+    finally:
+        probe.close()
+
+
+def test_login_authenticated_before_a_credential_change_cannot_land_after_it(
+        pg_app, monkeypatch):
+    """The in-flight login race, with real connections and real row locks.
+
+    The login is parked inside the provider call - authenticated with the OLD
+    password, no local row written yet - while the whole credential change
+    commits on another connection. The family it is about to insert would be
+    born after the sweep already looked, so nothing but the epoch fence can
+    refuse it.
+    """
+    app, _counter = pg_app
+    at_provider = threading.Event()
+    release = threading.Event()
+    outcome = {}
+
+    def authenticate(username, password):
+        at_provider.set()
+        assert release.wait(timeout=15)
+        return {
+            "tokens": {
+                "access_token": "pg-provider-old", "id_token": "pg-provider-id",
+                "refresh_token": "pg-provider-refresh", "expires_in": 901,
+            },
+            "claims": {"sub": "pg-mobile-race-sub"},
+        }
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+
+    def sign_in():
+        with app.app_context():
+            try:
+                outcome["login"] = ("issued", mobile_auth.login(
+                    "pg-mobile-race", "old-password", now=NOW))
+            except mobile_auth.MobileAuthFailure as exc:
+                outcome["login"] = (
+                    "failed", exc.code, exc.reason, exc.retryable, exc.status)
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcome["login"] = (
+                    "unexpected", type(exc).__name__, str(exc))
+            finally:
+                db.session.remove()
+
+    thread = threading.Thread(target=sign_in, daemon=True)
+    thread.start()
+    assert at_provider.wait(timeout=15), outcome
+    with app.app_context():
+        user_id = User.query.one().id
+        assert mobile_auth.revoke_all_for_user(
+            user_id, now=NOW + timedelta(seconds=10)) == []
+        db.session.remove()
+    release.set()
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), outcome
+    assert outcome["login"] == (
+        "failed", "AUTH_INVALID_CREDENTIALS", "credential_changed_during_login",
+        False, 401), outcome
+    with app.app_context():
+        assert MobileAuthSession.query.count() == 0
+        assert MobileAccessCredential.query.count() == 0
+        assert MobileRefreshCredential.query.count() == 0
+        assert db.session.query(User.credential_epoch).scalar() == 1
+
+
+def test_a_credential_change_waits_for_a_committing_login_and_then_revokes_it(
+        pg_app, monkeypatch):
+    """The other interleaving, which only a row lock can decide.
+
+    Here the login already passed the fence and is inside the transaction that
+    writes its family. The credential change must not slip past it: without the
+    lock its sweep would run while the family is still invisible and leave a
+    session alive that was minted with the old password. With it, the change
+    blocks - PostgreSQL is asked to confirm that, not a sleep - and the family
+    it then finds is revoked like any other.
+    """
+    app, _counter = pg_app
+    at_insert = threading.Event()
+    release = threading.Event()
+    outcome = {}
+    real_encrypt = session_store.encrypt_token
+    parked = {"done": False}
+
+    def encrypt_token(value):
+        if not parked["done"]:
+            parked["done"] = True
+            at_insert.set()
+            assert release.wait(timeout=15)
+        return real_encrypt(value)
+
+    monkeypatch.setattr(session_store, "encrypt_token", encrypt_token)
+
+    def sign_in():
+        with app.app_context():
+            try:
+                outcome["login"] = ("issued", mobile_auth.login(
+                    "pg-mobile-race", "old-password", now=NOW))
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcome["login"] = ("failed", type(exc).__name__, str(exc))
+            finally:
+                db.session.remove()
+
+    def change_credential():
+        with app.app_context():
+            try:
+                outcome["revoked"] = mobile_auth.revoke_all_for_user(
+                    User.query.one().id, now=NOW + timedelta(seconds=10))
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcome["revoked"] = ("failed", type(exc).__name__, str(exc))
+            finally:
+                db.session.remove()
+
+    login_thread = threading.Thread(target=sign_in, daemon=True)
+    login_thread.start()
+    assert at_insert.wait(timeout=15), outcome
+    change_thread = threading.Thread(target=change_credential, daemon=True)
+    change_thread.start()
+    with app.app_context():
+        assert _wait_for_a_backend_blocked_on_a_row_lock(), outcome
+        db.session.remove()
+    release.set()
+    for thread in (login_thread, change_thread):
+        thread.join(timeout=30)
+
+    assert not any(
+        thread.is_alive() for thread in (login_thread, change_thread)), outcome
+    assert outcome["login"][0] == "issued", outcome
+    issued = outcome["login"][1]
+    assert len(outcome["revoked"]) == 1, outcome
+    with app.app_context():
+        family = MobileAuthSession.query.one()
+        assert family.revoked_at == NOW + timedelta(seconds=10)
+        assert family.revoked_reason == "credential_change"
+        assert family.cognito_access_token is None
+        assert family.cognito_refresh_token is None
+        assert MobileAccessCredential.query.filter(
+            MobileAccessCredential.revoked_at.is_(None)).count() == 0
+        # The credential it was handed is dead on its very first use.
+        with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+            mobile_auth.authenticate_access(
+                issued.access_credential, now=NOW + timedelta(seconds=20))
+        assert exc.value.code == "AUTH_SESSION_EXPIRED"
+        db.session.remove()

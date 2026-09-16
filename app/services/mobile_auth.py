@@ -195,8 +195,75 @@ def _validate_refreshed_provider(token, expected_sub):
     return claims, provider_exp
 
 
+def _credential_fence(username):
+    """Read the account's credential epoch BEFORE authenticating at the provider.
+
+    `login` reaches Cognito over the network and only then writes its family
+    row, so seconds can pass between "this password is correct" and "this
+    session exists". A password reset committed inside that window changed the
+    password AFTER this login authenticated, and collected the families to
+    revoke BEFORE this one existed — the family would be born already stale,
+    with nothing left to revoke it. That is the whole race, and it is not a
+    narrow one: it is as wide as one Cognito round-trip.
+
+    The epoch answers it without a clock and without a timeout. It is read here,
+    then re-read under a row lock next to the INSERT (see
+    `_assert_credential_unchanged`). The key is `username`, the SAME key
+    `auth.reset_password` resolves the account by, so the fence is exactly as
+    reachable as the revocation it protects.
+
+    Returns (user_id, epoch) or None for an account with no local row yet, and
+    leaves no transaction open: the provider call is next and a pooled
+    connection must not sit idle inside one for the length of it.
+    """
+    try:
+        fence = db.session.query(User.id, User.credential_epoch).filter(
+            User.username == username).first()
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
+    db.session.rollback()
+    return fence
+
+
+def _assert_credential_unchanged(user, fence):
+    """Refuse a session whose credential changed while we were authenticating.
+
+    Runs inside the transaction that inserts the family and takes a row lock on
+    the account, so neither this check nor that INSERT can interleave with the
+    bump in `_fence_credential_change`. Only two orderings remain: the bump
+    commits first and the epochs differ here, or this family commits first and
+    the family sweep — which runs strictly after the bump commits — sees it.
+    There is no third one, which is why no timestamp and no timeout appears
+    anywhere in the fence.
+
+    A row this login created or reconciled during the provider call has no
+    fenced epoch of its own. Requiring 0 from it is not a guess: the only writer
+    of the epoch resolves the account by `username`, so a row carrying a
+    non-zero epoch was reset under the same username this login just presented
+    to the provider, and the fence would have covered it.
+    """
+    expected = fence[1] if fence is not None and fence[0] == user.id else 0
+    try:
+        current = db.session.query(User.credential_epoch).filter(
+            User.id == user.id).with_for_update().scalar()
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
+    if current is None or current != expected:
+        _security_event("credential_changed_during_login", category="credential")
+        raise _failure(
+            "AUTH_INVALID_CREDENTIALS", 401, False,
+            "credential_changed_during_login")
+
+
 def login(username, password, now=None):
     now = now or datetime.utcnow()
+    fence = _credential_fence(username)
     try:
         with blocking_concurrency_slot():
             try:
@@ -275,6 +342,7 @@ def login(username, password, now=None):
             raise _failure(
                 "AUTH_INVALID_CREDENTIALS", 401, False,
                 "local_identity_unavailable")
+        _assert_credential_unchanged(user, fence)
         access_raw = mobile_credentials.generate_credential()
         refresh_raw = mobile_credentials.generate_credential()
         family = MobileAuthSession(
@@ -826,6 +894,36 @@ def best_effort_provider_revoke(result):
             "provider_revoke_failed", result.family_id or "-", "provider")
 
 
+def _fence_credential_change(user_id):
+    """Publish the credential change to logins still inside the provider call.
+
+    One statement, so the increment happens in the database and no stale
+    in-memory value can be written back: the caller already holds a `User`
+    instance and a read-modify-write here would race with itself. The UPDATE
+    takes the account's row lock, and the commit publishes the new epoch BEFORE
+    `revoke_all_for_user` looks for families — which is what makes the two
+    orderings in `_assert_credential_unchanged` exhaustive.
+
+    It runs even when the account has no live family at all. That is precisely
+    the case the family sweep cannot cover, because the family the racing login
+    is about to create does not exist yet.
+
+    Returns the number of rows fenced: 0 means the local account is gone, which
+    leaves nothing to revoke and nothing to protect.
+    """
+    try:
+        fenced = db.session.query(User).filter(User.id == user_id).update(
+            {User.credential_epoch: User.credential_epoch + 1},
+            synchronize_session=False)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
+    return fenced
+
+
 def revoke_all_for_user(user_id, reason=CREDENTIAL_CHANGE_REASON, now=None):
     """Revoke every live mobile family for one local user.
 
@@ -842,9 +940,11 @@ def revoke_all_for_user(user_id, reason=CREDENTIAL_CHANGE_REASON, now=None):
 
     Each family is locked and committed on its own, the same shape as
     `purge_expired`, so a row a racing writer already revoked cannot stall the
-    rest. The candidate list is read once on purpose: a family created after
-    that read was minted by `login`, which authenticates against the provider,
-    so it belongs to whoever holds the NEW credential and must survive.
+    rest. The candidate list is read once, and on its own it would not be
+    enough: a login that authenticated with the OLD password seconds ago may
+    still be inside its Cognito round-trip and insert its family after this
+    read. `_fence_credential_change` closes that by raising the account's
+    credential epoch first, which is why it commits BEFORE the list is read.
 
     Returns one LogoutResult per family revoked here, each carrying the provider
     refresh token decrypted BEFORE `_revoke_family` clears the ciphertext, so
@@ -853,6 +953,7 @@ def revoke_all_for_user(user_id, reason=CREDENTIAL_CHANGE_REASON, now=None):
     able to tell "nothing is live" from "I could not check".
     """
     now = now or datetime.utcnow()
+    _fence_credential_change(user_id)
     try:
         candidate_ids = [row[0] for row in db.session.query(
             MobileAuthSession.id).filter(

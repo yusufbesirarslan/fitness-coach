@@ -49,9 +49,23 @@ kopya landing sprint'inin (Resend 2) görünümüyle birebirdir.
   Rate limit: 10 / 15 dk. Başarıda bilgilendirme e-postası best-effort gider.
 - Başarılı sıfırlama **TÜM oturumları KAPATIR** — web VE mobil.
   `_revoke_all_sessions_after_credential_change(user.id)` tek giriş noktasıdır:
-  1. `mobile_auth.revoke_all_for_user(user.id)` kullanıcının HER canlı mobil
-     ailesini (`MobileAuthSession`) `revoked_reason="credential_change"` ile
-     iptal eder ve saklı sağlayıcı şifre metnini temizler. Bu adım ZORUNLUDUR
+  1. `mobile_auth.revoke_all_for_user(user.id)` ÖNCE hesabın
+     `User.credential_epoch` sayacını tek bir UPDATE ile artırıp COMMIT eder
+     (`_fence_credential_change`). Bunun sebebi bir yarış: mobil `login`
+     Cognito'ya ağ üzerinden gider ve `MobileAuthSession` satırını ancak
+     dönüşte yazar, yani ESKİ şifreyle doğrulanmış bir giriş, iptal edilecek
+     aileler toplandıktan SONRA kendi ailesini yaratabilir. `login` bu sayacı
+     sağlayıcı çağrısından ÖNCE okur ve INSERT'ten hemen önce satır kilidi
+     altında (`SELECT ... FOR UPDATE`) tekrar okur; değerler ayrılıyorsa oturum
+     hiç doğmaz (401 `AUTH_INVALID_CREDENTIALS`,
+     reason `credential_changed_during_login`). Kilit yüzünden yalnızca iki
+     sıralama mümkündür: ya sayacın COMMIT'i önce olur ve giriş reddedilir, ya
+     da aile önce COMMIT olur ve arkadan gelen tarama onu GÖRÜR. Saat, timeout
+     veya zaman karşılaştırması yoktur. Sayacın artırılması, kullanıcının hiç
+     canlı mobil oturumu olmasa BİLE çalışır — taramanın kapatamayacağı tek
+     durum budur, çünkü o aile henüz yoktur. Ardından aynı fonksiyon HER canlı
+     mobil ailesini (`MobileAuthSession`) `revoked_reason="credential_change"`
+     ile iptal eder ve saklı sağlayıcı şifre metnini temizler. Bu adım ZORUNLUDUR
      çünkü `mobile_auth.authenticate_access` saklı access token'ı ÇEVRİMDIŞI
      doğrular — sağlayıcı tarafındaki hiçbir değişikliği GÖRMEZ; opak kimlik
      bilgisi yalnızca aile satırı iptal edilince ölür. Kalıcılaştırılamazsa

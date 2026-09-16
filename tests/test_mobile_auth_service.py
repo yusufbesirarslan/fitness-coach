@@ -5,7 +5,9 @@ import threading
 import pytest
 
 from app.extensions import db
-from app.models import MobileAccessCredential, MobileAuthSession, MobileRefreshCredential
+from app.models import (
+    MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
+)
 from app.services import ai_gate, cognito_jwt, cognito_service, mobile_credentials
 
 
@@ -988,6 +990,27 @@ def _fail_revocation_commit(monkeypatch):
         lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")))
 
 
+def _fail_commit_from_call(monkeypatch, first_failing_call):
+    """Break commit only from the Nth call on.
+
+    `revoke_all_for_user` commits the credential fence before it touches a
+    single family, so a globally broken commit never reaches the family sweep
+    at all. Counting keeps "the sweep could not be persisted" tests about the
+    sweep.
+    """
+    real_commit = db.session.commit
+    calls = {"n": 0}
+
+    def commit():
+        calls["n"] += 1
+        if calls["n"] >= first_failing_call:
+            raise RuntimeError("database unavailable")
+        return real_commit()
+
+    monkeypatch.setattr(db.session, "commit", commit)
+    return calls
+
+
 def _assert_retryable_storage_failure(exc):
     assert exc.value.code == "AUTH_TEMPORARILY_UNAVAILABLE"
     assert exc.value.status == 503
@@ -1261,7 +1284,7 @@ def test_credential_change_revoke_commit_failure_is_typed_retryable(
     from app.services import mobile_auth
 
     mobile_auth.login("mobile-service", "correct", now=NOW)
-    _fail_revocation_commit(monkeypatch)
+    _fail_commit_from_call(monkeypatch, 2)
 
     with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
         mobile_auth.revoke_all_for_user(
@@ -1272,12 +1295,20 @@ def test_credential_change_revoke_commit_failure_is_typed_retryable(
 
 def test_credential_change_lookup_failure_is_typed_retryable(
         app, mobile_user, provider, monkeypatch):
+    """The FAMILY lookup, specifically: the epoch fence queries before it."""
     from app.services import mobile_auth
 
     mobile_auth.login("mobile-service", "correct", now=NOW)
-    monkeypatch.setattr(
-        db.session, "query",
-        lambda *args: (_ for _ in ()).throw(RuntimeError("database unavailable")))
+    real_query = db.session.query
+    calls = {"n": 0}
+
+    def query(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("database unavailable")
+        return real_query(*args, **kwargs)
+
+    monkeypatch.setattr(db.session, "query", query)
 
     with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
         mobile_auth.revoke_all_for_user(
@@ -1291,3 +1322,200 @@ def test_credential_change_reason_fits_the_persisted_column(app):
 
     column = MobileAuthSession.__table__.c.revoked_reason
     assert len(mobile_auth.CREDENTIAL_CHANGE_REASON) <= column.type.length
+
+
+def _credential_change_lands_during_provider_call(monkeypatch, user_id, now):
+    """Make the password change commit while `login` is inside Cognito.
+
+    The window is real and it is wide: `cognito_service.authenticate` is a
+    network round-trip (5s connect, 10s read, two attempts) and the family row
+    is written only after it returns. Driving the whole credential change from
+    inside the stub reproduces the interleaving exactly, in one thread, with no
+    sleep and no barrier - the reset commits strictly between this login's fence
+    read and its INSERT, which is the only ordering that ever mattered.
+    """
+    from app.services import mobile_auth
+
+    authenticated = {"with_old_password": False}
+    real_authenticate = cognito_service.authenticate
+
+    def authenticate(username, password):
+        result = real_authenticate(username, password)
+        authenticated["with_old_password"] = True
+        mobile_auth.revoke_all_for_user(user_id, now=now)
+        return result
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+    return authenticated
+
+
+def _assert_refused_as_stale_credential(exc):
+    assert exc.value.code == "AUTH_INVALID_CREDENTIALS"
+    assert exc.value.status == 401
+    assert exc.value.retryable is False
+    assert exc.value.reason == "credential_changed_during_login"
+
+
+def test_login_authenticated_before_a_reset_cannot_create_a_session_after_it(
+        app, mobile_user, provider, monkeypatch):
+    """The in-flight login race, with nothing for the family sweep to find.
+
+    This is the case a candidate snapshot can never cover: at the moment the
+    credential change collects the families to revoke, this login's family does
+    not exist yet. Only the epoch fence can refuse it.
+    """
+    from app.services import mobile_auth
+
+    user_id = mobile_user.id
+    authenticated = _credential_change_lands_during_provider_call(
+        monkeypatch, user_id, NOW + timedelta(minutes=1))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.login("mobile-service", "correct", now=NOW)
+
+    assert authenticated["with_old_password"] is True
+    _assert_refused_as_stale_credential(exc)
+    # Refused means never born: no family, no credential, nothing to expire.
+    assert MobileAuthSession.query.filter_by(user_id=user_id).count() == 0
+    assert MobileAccessCredential.query.count() == 0
+    assert MobileRefreshCredential.query.count() == 0
+
+
+def test_in_flight_login_is_refused_while_the_existing_family_is_revoked(
+        app, mobile_user, provider, monkeypatch):
+    """Both halves of the invariant at once: the old session dies and the new
+    one is never issued."""
+    from app.services import mobile_auth
+
+    user_id = mobile_user.id
+    established = mobile_auth.login("mobile-service", "correct", now=NOW)
+    _credential_change_lands_during_provider_call(
+        monkeypatch, user_id, NOW + timedelta(minutes=1))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.login(
+            "mobile-service", "correct", now=NOW + timedelta(seconds=1))
+
+    _assert_refused_as_stale_credential(exc)
+    family = MobileAuthSession.query.filter_by(user_id=user_id).one()
+    assert family.revoked_reason == mobile_auth.CREDENTIAL_CHANGE_REASON
+    with pytest.raises(mobile_auth.MobileAuthFailure) as reused:
+        mobile_auth.authenticate_access(
+            established.access_credential, now=NOW + timedelta(minutes=2))
+    assert reused.value.code == "AUTH_SESSION_EXPIRED"
+
+
+def test_login_authenticated_after_the_reset_is_still_issued_a_session(
+        app, mobile_user, provider):
+    """The fence must not cost the user the login they are about to make.
+
+    A legitimate login reads the already-bumped epoch as its own fence, so the
+    two reads agree and the session is issued exactly as before.
+    """
+    from app.services import mobile_auth
+
+    mobile_auth.revoke_all_for_user(mobile_user.id, now=NOW)
+    issued = mobile_auth.login(
+        "mobile-service", "new-password", now=NOW + timedelta(minutes=1))
+
+    principal = mobile_auth.authenticate_access(
+        issued.access_credential, now=NOW + timedelta(minutes=2))
+    assert principal.user.id == mobile_user.id
+    assert principal.family.revoked_at is None
+    assert MobileAuthSession.query.filter(
+        MobileAuthSession.revoked_at.is_(None)).count() == 1
+
+
+def test_repeated_logins_are_unaffected_while_the_credential_stands(
+        app, mobile_user, provider):
+    """The fence is not a one-shot token: it moves only when the password does."""
+    from app.services import mobile_auth
+
+    first = mobile_auth.login("mobile-service", "correct", now=NOW)
+    second = mobile_auth.login(
+        "mobile-service", "correct", now=NOW + timedelta(minutes=1))
+
+    assert first.access_credential != second.access_credential
+    assert MobileAuthSession.query.filter(
+        MobileAuthSession.revoked_at.is_(None)).count() == 2
+    assert mobile_user.credential_epoch == 0
+
+
+def test_credential_fence_is_scoped_to_the_account_that_changed(
+        app, mobile_user, make_user, provider, monkeypatch):
+    """A reset for somebody else must not refuse this user's login."""
+    from app.services import mobile_auth
+
+    bystander = make_user("mobile-bystander", cognito_sub="sub-bystander")
+    bystander_id = bystander.id
+    _credential_change_lands_during_provider_call(
+        monkeypatch, bystander_id, NOW + timedelta(minutes=1))
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+
+    assert mobile_auth.authenticate_access(
+        issued.access_credential,
+        now=NOW + timedelta(minutes=2)).user.id == mobile_user.id
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=bystander_id).scalar() == 1
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=mobile_user.id).scalar() == 0
+
+
+def test_every_credential_change_moves_the_fence_and_never_resets_it(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    for expected in (1, 2, 3):
+        mobile_auth.revoke_all_for_user(mobile_user.id, now=NOW)
+        assert db.session.query(User.credential_epoch).filter_by(
+            id=mobile_user.id).scalar() == expected
+
+
+def test_the_fence_survives_a_family_sweep_that_cannot_be_persisted(
+        app, mobile_user, provider, monkeypatch):
+    """A 503 must not leave the account unfenced.
+
+    The route answers "I could not close your sessions" and the user resets
+    again; in between, a login that authenticated with the old password must
+    still be refused. That only holds because the epoch is committed before the
+    sweep can fail.
+    """
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    _fail_commit_from_call(monkeypatch, 2)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.revoke_all_for_user(
+            mobile_user.id, now=NOW + timedelta(minutes=2))
+
+    _assert_retryable_storage_failure(exc)
+    monkeypatch.undo()
+    assert MobileAuthSession.query.one().revoked_at is None
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=mobile_user.id).scalar() == 1
+
+
+def test_fence_storage_failure_is_typed_retryable_and_revokes_nothing(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    monkeypatch.setattr(
+        db.session, "query",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("database unavailable")))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.revoke_all_for_user(
+            mobile_user.id, now=NOW + timedelta(minutes=2))
+
+    _assert_retryable_storage_failure(exc)
+    monkeypatch.undo()
+    assert MobileAuthSession.query.one().revoked_at is None
+
+
+def test_fencing_an_absent_account_is_a_no_op_rather_than_a_failure(app):
+    from app.services import mobile_auth
+
+    assert mobile_auth.revoke_all_for_user(999_999, now=NOW) == []

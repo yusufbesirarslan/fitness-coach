@@ -423,3 +423,81 @@ def test_provider_revocation_is_bounded_so_a_thread_cannot_park_for_minutes(
     # Local revocation is NOT capped — it is the authoritative step.
     assert MobileAuthSession.query.one().revoked_at is not None
     assert CognitoSession.query.filter_by(user_id=user.id).count() == 0
+
+
+def test_reset_route_publishes_the_credential_fence(client, mobile_provider):
+    """The live route, not just the primitive, moves the fence.
+
+    Without this the epoch could be bumped only by a test calling
+    `revoke_all_for_user` directly, and the production credential-change path
+    would leave every in-flight login unfenced.
+    """
+    user = User(username="alice", email="alice@example.com", cognito_sub="sub-alice")
+    db.session.add(user)
+    db.session.commit()
+    assert user.credential_epoch == 0
+
+    _reset_context(client)
+    assert client.post("/reset-password", json=_reset_payload()).status_code == 200
+
+    db.session.refresh(user)
+    assert user.credential_epoch == 1
+
+
+def test_reset_route_refuses_a_mobile_login_that_authenticated_before_it(
+        client, mobile_provider, monkeypatch):
+    """End to end: authenticate with the old password, reset, then try to land.
+
+    The mobile login reaches Cognito over the network and writes its family row
+    only after that call returns, so the whole reset request is driven from
+    inside the provider stub - the exact interleaving the fence exists for, with
+    no sleep and no thread. Nothing may survive it: not a family, not a
+    credential, not a 200.
+    """
+    from app.models import MobileAuthSession, MobileAccessCredential
+    from app.services import mobile_auth
+
+    user = User(username="alice", email="alice@example.com", cognito_sub="sub-alice")
+    db.session.add(user)
+    db.session.commit()
+
+    real_authenticate = cognito_service.authenticate
+    landed = {}
+
+    def authenticate(username, password):
+        tokens = real_authenticate(username, password)
+        if "reset" not in landed:
+            _reset_context(client)
+            landed["reset"] = client.post("/reset-password", json=_reset_payload())
+        return tokens
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        _mobile_login()
+
+    assert landed["reset"].status_code == 200
+    assert exc.value.status == 401
+    assert exc.value.retryable is False
+    assert exc.value.reason == "credential_changed_during_login"
+    assert MobileAuthSession.query.count() == 0
+    assert MobileAccessCredential.query.count() == 0
+
+
+def test_reset_route_leaves_a_later_mobile_login_working(client, mobile_provider):
+    """The fence closes the race, not the product."""
+    from app.services import mobile_auth
+
+    user = User(username="alice", email="alice@example.com", cognito_sub="sub-alice")
+    db.session.add(user)
+    db.session.commit()
+
+    _reset_context(client)
+    assert client.post("/reset-password", json=_reset_payload()).status_code == 200
+
+    issued = mobile_auth.login(
+        "alice", "Newpass123", now=MOBILE_NOW + timedelta(minutes=1))
+    accepted = client.get(
+        "/api/v1/account/me",
+        headers={"Authorization": f"Bearer {issued.access_credential}"})
+    assert accepted.status_code == 200
