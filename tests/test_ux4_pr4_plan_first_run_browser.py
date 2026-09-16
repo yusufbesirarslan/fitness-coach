@@ -113,12 +113,19 @@ def _usable_bottom(page):
 
 
 def _topmost_is(page, selector):
-    """True when the element's own centre is not painted over by anything else."""
+    """True when no part of the element is painted over by anything else.
+
+    Probed per line box (`getClientRects`), not at the bounding-box centre: an
+    inline element that wraps (the setup link does at 320px, and on CI's wider
+    Linux fonts at 390px) has a bounding box whose centre lies BETWEEN its line
+    fragments, on the surrounding paragraph — a false "covered" reading."""
     return page.evaluate("""(sel) => {
         const el = document.querySelector(sel);
-        const r = el.getBoundingClientRect();
-        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        return !!hit && (hit === el || el.contains(hit));
+        const rects = [...el.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+        return rects.length > 0 && rects.every(r => {
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !!hit && (hit === el || el.contains(hit));
+        });
     }""", selector)
 
 
@@ -332,20 +339,23 @@ def test_the_action_cannot_be_pressed_twice_while_generating(first_run):
     assert not any(path == "/training-plan/save" for path, _ in _api(traffic))
 
 
+@pytest.mark.parametrize("width", MOBILE)
 def test_profile_setup_required_is_shown_with_its_link_beside_the_action(
-        app, plan_v2, auth_user, generator, training_page):
+        app, plan_v2, auth_user, generator, training_page, width):
     page, traffic, _, _ = training_page
     page.emulate_media(reduced_motion="reduce")
     with app.app_context():
         db.session.get(User, auth_user.id).profile_complete = True
         db.session.commit()
-    _open(page, 390)
+    _open(page, width)
     page.locator("[data-plan-manage-generate]").click()
     link = page.locator('[data-plan-manage-msg] a[href="/setup"]')
     expect(link).to_be_visible()
     with app.test_request_context():
         expect(link).to_have_text(t("plan.create.go_setup", locale="tr"))
     assert _topmost_is(page, '[data-plan-manage-msg] a[href="/setup"]')
+    for fragment in link.evaluate("a => [...a.getClientRects()].map(r => r.bottom)"):
+        assert fragment <= _usable_bottom(page) + OVERFLOW_TOLERANCE, (width, fragment)
     assert generator["calls"] == 0
     assert [p for p, _ in _api(traffic) if p.startswith("/training-plan")] == ["/training-plan"]
 
