@@ -243,8 +243,66 @@
 }
 .hub-lang-opt:not(.on):hover { color: var(--color-text-1); }
 
-/* Coach hedefi ince sayfası — yüzen widget açılışta açılır, ana içerik minimal
-   kalır (Coach yeniden tasarımı YOK). Paylaşılan token'lar + basit hero. */
+/* WEB-UX4-PR3 (F-04, F-30) — Coach as a destination.
+
+   Coach is a primary destination, so the conversation is the page: the column
+   claims the viewport's height and the widget's own workspace fills whatever
+   the header leaves. The widget is NOT resized here — coach_widget.css owns
+   the conversation; this file only owns the page that holds it.
+
+   The destination is the ONE page that must not scroll: the conversation
+   scrolls inside #cw-msgs, so a page that also scrolls would push the
+   composer below the fold on a phone — the field the user types in has to
+   stay where the thumb is. So the body is EXACTLY the viewport, not at least
+   it, and the overflow it would have had belongs to the message list.
+
+   Each height is declared twice on purpose. A browser without dvh drops the
+   second declaration and keeps 100vh — the page still cannot scroll, it only
+   loses dvh's correction for retracting mobile browser chrome. Dropping the
+   cap entirely is what produced a 2218px document inside an 844px viewport. */
+body.page-body[data-coach-destination] {
+  min-height: 100vh; min-height: 100dvh;
+  height: 100vh; height: 100dvh;
+  overflow: hidden;
+  display: flex; flex-direction: column; }
+[data-coach-destination] .main-content { flex: 1; width: 100%; min-height: 0;
+  display: flex; flex-direction: column; }
+.coach-dest { flex: 1; min-height: 0; width: 100%; max-width: 52rem;
+  margin: 0 auto; display: flex; flex-direction: column; gap: var(--space-4); }
+.coach-dest-head { display: flex; flex-wrap: wrap; align-items: baseline;
+  justify-content: space-between; gap: var(--space-2) var(--space-4); }
+.coach-dest-title { font-family: var(--font-display); font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-wide); color: var(--color-text-1); margin: 0; }
+.coach-dest-link { color: var(--color-primary); font-family: var(--font-body);
+  font-size: var(--text-sm); font-weight: var(--weight-semibold);
+  text-decoration: none; white-space: nowrap; }
+.coach-dest-link:hover { text-decoration: underline; }
+.coach-dest-link:focus-visible { outline: 2px solid var(--color-primary);
+  outline-offset: 2px; border-radius: var(--radius-xs); }
+.coach-dest-context { flex: 1 0 100%; margin: 0; color: var(--color-text-3);
+  font-size: var(--text-base); line-height: var(--leading-relaxed); }
+.coach-dest-workspace { flex: 1; min-height: 0; display: flex; }
+
+/* Short-viewport escape hatch. Locking the page to the viewport is right
+   while the viewport can hold the destination. It stops being right on a
+   landscape phone or at heavy zoom: the fixed cost (header + heading +
+   context + composer + bottom bar) is ~260 px, so at 320 px of height the
+   measured result was a 32 px message list with #cw-irow painting 44 px
+   BELOW the panel that is supposed to contain it. Nothing was stranded —
+   the page simply stopped being a conversation.
+
+   Below that height the page returns to ordinary flow and scrolls, and the
+   conversation keeps a floor worth reading. min-height:100dvh survives from
+   the rule above, so a tall viewport is still filled edge to edge. */
+@media (max-height: 560px) {
+  body.page-body[data-coach-destination] { height: auto; overflow: visible; }
+  .coach-dest-workspace { min-height: 20rem; }
+}
+
+/* LEGACY ROLLBACK BRANCH ONLY (templates/coach.html) — the pre-destination
+   Coach page: a thin hero whose job was to open the floating widget. It is
+   reachable only with UIUX_COACH_PAGE_V2_ENABLED off, and is kept verbatim
+   so the rollback path renders exactly as it did before PR3. */
 .coach-page { max-width: 720px; margin: 0 auto; padding: var(--space-8) var(--space-4); }
 .coach-page-title { font-family: var(--font-display); font-size: var(--text-3xl);
   letter-spacing: var(--tracking-wide); color: var(--color-text-1); margin-bottom: var(--space-3); }

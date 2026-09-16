@@ -126,9 +126,13 @@
 
   /* Coach widget (AI chat) — bileşene özgü, tek-tüketicili paletler.
      Genel semantik/overlay/primary-a* token'ları karşılamıyorsa buraya
-     eklenir; yalnızca coach_widget.css tüketir, başka sayfa KULLANMAZ. */
-  --color-chat-avatar-accent: #99CC00;
-  --color-chat-send-hover:    #D6FF1A;
+     eklenir; yalnızca coach_widget.css tüketir, başka sayfa KULLANMAZ.
+
+     WEB-UX4-PR3 / F-28: the two retired brand-palette entries that used to
+     sit at the top of this block are deleted, not just unreferenced. They
+     were the last place the old accent survived, and both consumers now use
+     the canonical primary pair (--color-primary / --color-primary-strong).
+     Nothing outside coach_widget.css ever read them. */
   --color-chat-badge:         #FF3B30;
   --color-chat-badge-glow:    rgba(255, 59, 48, 0.6);
   --color-chat-card-grad-1:   rgba(18, 18, 22, 0.95);

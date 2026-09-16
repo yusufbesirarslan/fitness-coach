@@ -7,59 +7,44 @@
     <link rel="stylesheet" href="/static/nav.css">
 </head>
 {% set nav_active = 'coach' %}
-{#- data-coach-launcher / has-fab-rail: see templates/coach.html — the floating
-    launcher is page-owned chrome on the Coach destination only (UX-1 PR3). -#}
-<body class="page-body has-fab-rail" data-coach-launcher>
+{#- WEB-UX4-PR3 — Coach as a destination (UIUX_COACH_PAGE_V2_ENABLED).
+
+    Coach is one of four primary destinations, so the conversation is the page's
+    primary content — not a support widget floated over an empty canvas. The page
+    declares WHERE the one existing widget mounts (data-coach-mount, inside the
+    content column) and HOW it is presented (data-coach-destination on <body>);
+    static/coach_widget.js still owns the conversation itself. There is exactly
+    ONE Coach implementation, one composer, one stream, one /coach/history
+    hydration — see the module-level __cwWidgetInit guard.
+
+    No data-coach-launcher and no has-fab-rail: a floating button that opens
+    something already on the page is duplicate navigation, and an invisible
+    launcher is a keyboard stop that does nothing. templates/coach.html keeps
+    both and remains the rollback target.
+
+    No inline script: the widget tag sits after the mount, so the mount exists
+    when the widget initialises. Nothing polls for anything. -#}
+<body class="page-body" data-coach-destination>
 
 {% include "_nav.html" %}
 
 <main class="main-content" id="main-content" data-coach-v2>
-    <div class="coach-page">
-        <h1 class="coach-page-title">{{ t('coach.v2.title') }}</h1>
-        <p class="coach-page-intro">{{ t('coach.v2.intro') }}</p>
-        <div class="coach-page-cta">
-            <button type="button" class="btn-volt" data-action="axCoachOpen">{{ t('coach.v2.open') }}</button>
-        </div>
-        <p class="coach-page-hint">{{ t('coach.v2.hint') }}</p>
+    <div class="coach-dest">
+        <header class="coach-dest-head">
+            <h1 class="coach-dest-title">{{ t('coach.v2.title') }}</h1>
+            <a class="coach-dest-link" href="/training">{{ t('coach.v2.view_plan') }}</a>
+            <p class="coach-dest-context">{{ t('coach.v2.context') }}</p>
+        </header>
+
+        {#- The one Coach tree is appended here by coach_widget.js. Nothing is
+            hand-rendered: a second composer here would be a second Coach. -#}
+        <div class="coach-dest-workspace" data-coach-mount></div>
     </div>
 </main>
 
 {% include "_actionbar.html" %}
 
-{# AxisAI UIUX Sprint 1 PR3 — Coach Page V2 (UIUX_COACH_PAGE_V2_ENABLED).
-   Reuses the EXACT existing floating widget — NO second Coach implementation.
-   coach_widget.js self-injects its host + CSS, defines window.CW and boots ONCE
-   (module-level guard), so there is exactly one interactive instance / composer /
-   submit / stream. AI behaviour, prompt, streaming, persistence UNCHANGED. #}
 <script src="/static/coach_widget.js"></script>
 <script src="/static/actions.js"></script>
-<script nonce="{{ csp_nonce }}">
-(function(){
-    // Route-mode ONLY behavior (answer.txt §5): auto-opening the ONE widget on
-    // arrival and the "Open Coach" fallback live HERE, never in the shared widget,
-    // so the floating widget on every other page is untouched.
-    //
-    // Idempotent open: CW.toggle() FLIPS state, so we toggle only when CLOSED.
-    // Calling this repeatedly (fallback re-clicks, poll re-fires) never closes an
-    // open widget and never creates a second instance.
-    function openCoach(){
-        var CW = window.CW;
-        if (!CW || typeof CW.toggle !== 'function') return false;  // widget not ready yet
-        if (!CW.open) CW.toggle();                                  // open only when closed
-        return true;                                               // ready (opened or already open)
-    }
-    // "Open Coach" fallback button (data-action delegation via actions.js).
-    window.axCoachOpen = function(){ openCoach(); };
-
-    // Auto-open the single widget once it has self-injected. It injects
-    // synchronously above, so the first call usually succeeds; poll briefly as a
-    // defensive fallback. No dialog/alert is triggered.
-    if (openCoach()) return;
-    var tries = 0;
-    var iv = setInterval(function(){
-        if (openCoach() || ++tries > 40) clearInterval(iv);
-    }, 50);
-})();
-</script>
 </body>
 </html>
