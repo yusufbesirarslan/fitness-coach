@@ -178,7 +178,15 @@ def test_delete_for_user_removes_only_target_sessions(app):
 # token OFFLINE — a reset that only touched web rows left a native session
 # usable for the rest of its family's absolute lifetime.
 
-MOBILE_NOW = datetime(2026, 9, 16, 10, 0, 0)
+def _mobile_now():
+    """Anchor mobile-login clocks to the real wall clock.
+
+    The opaque access credential is minted from this value but validated
+    against datetime.utcnow() by the request path, so a hard-coded instant
+    here would only hold for one MOBILE_AUTH_ACCESS_TTL_SECONDS window on
+    one calendar day and red every other run.
+    """
+    return datetime.utcnow().replace(microsecond=0)
 
 
 @pytest.fixture
@@ -201,7 +209,8 @@ def mobile_provider(monkeypatch):
             return {"sub": "sub-alice", "email": "alice@example.com",
                     "email_verified": True}
         return {"sub": "sub-alice",
-                "exp": calendar.timegm((MOBILE_NOW + timedelta(hours=1)).timetuple())}
+                "exp": calendar.timegm(
+                    (_mobile_now() + timedelta(hours=1)).timetuple())}
 
     monkeypatch.setattr(cognito_jwt, "validate_token", validate)
     monkeypatch.setattr(cognito_service, "revoke_token", revoked.append)
@@ -213,7 +222,7 @@ def mobile_provider(monkeypatch):
 def _mobile_login(username="alice"):
     from app.services import mobile_auth
 
-    return mobile_auth.login(username, "Oldpass123", now=MOBILE_NOW)
+    return mobile_auth.login(username, "Oldpass123", now=_mobile_now())
 
 
 def test_reset_revokes_mobile_sessions_and_401s_the_live_credential(
@@ -496,7 +505,7 @@ def test_reset_route_leaves_a_later_mobile_login_working(client, mobile_provider
     assert client.post("/reset-password", json=_reset_payload()).status_code == 200
 
     issued = mobile_auth.login(
-        "alice", "Newpass123", now=MOBILE_NOW + timedelta(minutes=1))
+        "alice", "Newpass123", now=_mobile_now() + timedelta(minutes=1))
     accepted = client.get(
         "/api/v1/account/me",
         headers={"Authorization": f"Bearer {issued.access_credential}"})
