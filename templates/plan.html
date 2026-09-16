@@ -2,7 +2,7 @@
 <html lang="{{ locale }}">
 <head>
     {% include "_head.html" %}
-    <title>AxisAI — {{ t('plan.title') }}</title>
+    <title>AxisAI — {{ t('nav.plan') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <link rel="stylesheet" href="/static/plan.css">
@@ -33,6 +33,97 @@
     labelled as not-yet-saved and is discarded by Cancel; only the server's own
     re-render (after a successful save) ever shows an active plan.
     ══════════════════════════════════════════════════════════════════════════ -#}
+{#- One control per canonical preference, rendered from ONE definition so the
+    create and regenerate compositions below can never drift into two forms
+    with different names, options or types. -#}
+{%- macro plan_pref(name, wide=False) -%}
+  {%- set field_class = 'plan-field plan-field--wide' if wide else 'plan-field' -%}
+  {%- if name == 'gun_sayisi' %}
+      <div class="{{ field_class }}">
+        <label for="pc-days">{{ t('plan.create.field.days') }}</label>
+        <select id="pc-days" class="plan-select" data-plan-field="gun_sayisi" data-plan-type="int">
+          <option value="3">{{ t('plan.create.days.3') }}</option>
+          <option value="4">{{ t('plan.create.days.4') }}</option>
+          <option value="5">{{ t('plan.create.days.5') }}</option>
+          <option value="6">{{ t('plan.create.days.6') }}</option>
+        </select>
+      </div>
+  {%- elif name == 'antrenman_tarzi' %}
+      <div class="{{ field_class }}">
+        <label for="pc-style">{{ t('plan.create.field.style') }}</label>
+        <select id="pc-style" class="plan-select" data-plan-field="antrenman_tarzi">
+          <option value="genel">{{ t('plan.create.style.genel') }}</option>
+          <option value="crossfit">{{ t('plan.create.style.crossfit') }}</option>
+          <option value="calisthenics">{{ t('plan.create.style.calisthenics') }}</option>
+          <option value="powerlifting">{{ t('plan.create.style.powerlifting') }}</option>
+          <option value="bodybuilding">{{ t('plan.create.style.bodybuilding') }}</option>
+          <option value="fonksiyonel">{{ t('plan.create.style.fonksiyonel') }}</option>
+        </select>
+      </div>
+  {%- elif name == 'odak_hedef' %}
+      <div class="{{ field_class }}">
+        <label for="pc-goal">{{ t('plan.create.field.goal') }}</label>
+        <select id="pc-goal" class="plan-select" data-plan-field="odak_hedef">
+          <option value="genel">{{ t('plan.create.goal.genel') }}</option>
+          <option value="guc">{{ t('plan.create.goal.guc') }}</option>
+          <option value="kondisyon">{{ t('plan.create.goal.kondisyon') }}</option>
+          <option value="kas_kutlesi">{{ t('plan.create.goal.kas_kutlesi') }}</option>
+          <option value="yag_yakimi">{{ t('plan.create.goal.yag_yakimi') }}</option>
+          <option value="esneklik">{{ t('plan.create.goal.esneklik') }}</option>
+        </select>
+      </div>
+  {%- elif name == 'ekipman' %}
+      <div class="{{ field_class }}">
+        <label for="pc-equip">{{ t('plan.create.field.equip') }}</label>
+        <select id="pc-equip" class="plan-select" data-plan-field="ekipman">
+          <option value="spor_salonu">{{ t('plan.create.equip.spor_salonu') }}</option>
+          <option value="ev">{{ t('plan.create.equip.ev') }}</option>
+          <option value="minimal">{{ t('plan.create.equip.minimal') }}</option>
+        </select>
+      </div>
+  {%- elif name == 'odak' %}
+      <div class="{{ field_class }}">
+        <label for="pc-focus">{{ t('plan.create.field.focus') }}</label>
+        <select id="pc-focus" class="plan-select" data-plan-field="odak">
+          <option value="tum_vucut">{{ t('plan.create.focus.tum_vucut') }}</option>
+          <option value="ust_vucut">{{ t('plan.create.focus.ust_vucut') }}</option>
+          <option value="sirt">{{ t('plan.create.focus.sirt') }}</option>
+          <option value="alt_vucut">{{ t('plan.create.focus.alt_vucut') }}</option>
+          <option value="core">{{ t('plan.create.focus.core') }}</option>
+        </select>
+      </div>
+  {%- elif name == 'sure' %}
+      <div class="{{ field_class }}">
+        <label for="pc-dur">{{ t('plan.create.field.dur') }}</label>
+        <select id="pc-dur" class="plan-select" data-plan-field="sure" data-plan-type="int">
+          <option value="30">{{ t('plan.create.dur.30') }}</option>
+          <option value="45">{{ t('plan.create.dur.45') }}</option>
+          <option value="60">{{ t('plan.create.dur.60') }}</option>
+          <option value="90">{{ t('plan.create.dur.90') }}</option>
+        </select>
+      </div>
+  {%- elif name == 'kardiyo_tipi' %}
+      <div class="{{ field_class }}">
+        <label for="pc-cardio">{{ t('plan.create.field.cardio') }}</label>
+        <select id="pc-cardio" class="plan-select" data-plan-field="kardiyo_tipi">
+          <option value="yok">{{ t('plan.create.cardio.yok') }}</option>
+          <option value="kosu">{{ t('plan.create.cardio.kosu') }}</option>
+          <option value="bisiklet">{{ t('plan.create.cardio.bisiklet') }}</option>
+          <option value="yuzme">{{ t('plan.create.cardio.yuzme') }}</option>
+          <option value="ip_atlama">{{ t('plan.create.cardio.ip_atlama') }}</option>
+          <option value="yuruyus">{{ t('plan.create.cardio.yuruyus') }}</option>
+          <option value="karisik">{{ t('plan.create.cardio.karisik') }}</option>
+        </select>
+      </div>
+  {%- elif name == 'injuries' %}
+      <div class="{{ field_class }}">
+        <label for="pc-injuries">{{ t('plan.create.field.injury') }}</label>
+        <input type="text" id="pc-injuries" class="plan-input" data-plan-field="injuries"
+               maxlength="200" placeholder="{{ t('plan.create.injury_ph') }}">
+      </div>
+  {%- endif %}
+{%- endmacro -%}
+
 {%- macro plan_manage(plan) -%}
 {%- set destructive = plan.management_state == 'regenerate' -%}
     <section class="plan-manage{% if destructive %} plan-manage--regenerate{% endif %}"
@@ -51,103 +142,66 @@
               aria-expanded="false" aria-controls="plan-manage-panel">
         {{ t('plan.manage.regenerate') }}
       </button>
-      {% else %}
-      <h2 id="plan-manage-label" class="sec-label">{{ t('plan.create.title') }}</h2>
-      <p class="plan-create-intro">{{ t('plan.create.intro') }}</p>
-      {% endif %}
       <p class="plan-create-note">{{ t('plan.create.capability_note') }}</p>
+      {% else %}
+      {#- ── FIRST RUN (UX4-PR4, F-07) ──
+          Coached, not configured: say what AxisAI will build and that the
+          defaults are enough BEFORE asking for anything. Presentation only —
+          the same eleven-key preference payload, the same defaults and the same
+          proposal → review → explicit save chain as before. -#}
+      <h2 id="plan-manage-label" class="sec-label">{{ t('plan.create.title') }}</h2>
+      <p class="plan-create-outcome">{{ t('plan.create.outcome') }}</p>
+      <p class="plan-create-note">{{ t('plan.create.defaults_hint') }}</p>
+      {% endif %}
 
       <div class="plan-manage-panel" id="plan-manage-panel" data-plan-manage-panel
            {% if destructive %}hidden{% endif %}>
+      {% if destructive %}
+        {#- Regeneration is not PR4's to redesign: the flat form, its order and
+            its status placement are exactly what UX-3 PR3 shipped. -#}
         <p class="plan-manage-msg" data-plan-manage-msg role="status" aria-live="polite" hidden></p>
-
-      <div class="plan-field">
-        <label for="pc-days">{{ t('plan.create.field.days') }}</label>
-        <select id="pc-days" class="plan-select" data-plan-field="gun_sayisi" data-plan-type="int">
-          <option value="3">{{ t('plan.create.days.3') }}</option>
-          <option value="4">{{ t('plan.create.days.4') }}</option>
-          <option value="5">{{ t('plan.create.days.5') }}</option>
-          <option value="6">{{ t('plan.create.days.6') }}</option>
-        </select>
-      </div>
-
-      <div class="plan-field">
-        <label for="pc-style">{{ t('plan.create.field.style') }}</label>
-        <select id="pc-style" class="plan-select" data-plan-field="antrenman_tarzi">
-          <option value="genel">{{ t('plan.create.style.genel') }}</option>
-          <option value="crossfit">{{ t('plan.create.style.crossfit') }}</option>
-          <option value="calisthenics">{{ t('plan.create.style.calisthenics') }}</option>
-          <option value="powerlifting">{{ t('plan.create.style.powerlifting') }}</option>
-          <option value="bodybuilding">{{ t('plan.create.style.bodybuilding') }}</option>
-          <option value="fonksiyonel">{{ t('plan.create.style.fonksiyonel') }}</option>
-        </select>
-      </div>
-
-      <div class="plan-field">
-        <label for="pc-goal">{{ t('plan.create.field.goal') }}</label>
-        <select id="pc-goal" class="plan-select" data-plan-field="odak_hedef">
-          <option value="genel">{{ t('plan.create.goal.genel') }}</option>
-          <option value="guc">{{ t('plan.create.goal.guc') }}</option>
-          <option value="kondisyon">{{ t('plan.create.goal.kondisyon') }}</option>
-          <option value="kas_kutlesi">{{ t('plan.create.goal.kas_kutlesi') }}</option>
-          <option value="yag_yakimi">{{ t('plan.create.goal.yag_yakimi') }}</option>
-          <option value="esneklik">{{ t('plan.create.goal.esneklik') }}</option>
-        </select>
-      </div>
-
-      <div class="plan-field">
-        <label for="pc-equip">{{ t('plan.create.field.equip') }}</label>
-        <select id="pc-equip" class="plan-select" data-plan-field="ekipman">
-          <option value="spor_salonu">{{ t('plan.create.equip.spor_salonu') }}</option>
-          <option value="ev">{{ t('plan.create.equip.ev') }}</option>
-          <option value="minimal">{{ t('plan.create.equip.minimal') }}</option>
-        </select>
-      </div>
-
-      <div class="plan-field">
-        <label for="pc-focus">{{ t('plan.create.field.focus') }}</label>
-        <select id="pc-focus" class="plan-select" data-plan-field="odak">
-          <option value="tum_vucut">{{ t('plan.create.focus.tum_vucut') }}</option>
-          <option value="ust_vucut">{{ t('plan.create.focus.ust_vucut') }}</option>
-          <option value="sirt">{{ t('plan.create.focus.sirt') }}</option>
-          <option value="alt_vucut">{{ t('plan.create.focus.alt_vucut') }}</option>
-          <option value="core">{{ t('plan.create.focus.core') }}</option>
-        </select>
-      </div>
-
-      <div class="plan-field">
-        <label for="pc-dur">{{ t('plan.create.field.dur') }}</label>
-        <select id="pc-dur" class="plan-select" data-plan-field="sure" data-plan-type="int">
-          <option value="30">{{ t('plan.create.dur.30') }}</option>
-          <option value="45">{{ t('plan.create.dur.45') }}</option>
-          <option value="60">{{ t('plan.create.dur.60') }}</option>
-          <option value="90">{{ t('plan.create.dur.90') }}</option>
-        </select>
-      </div>
-
-      <div class="plan-field">
-        <label for="pc-cardio">{{ t('plan.create.field.cardio') }}</label>
-        <select id="pc-cardio" class="plan-select" data-plan-field="kardiyo_tipi">
-          <option value="yok">{{ t('plan.create.cardio.yok') }}</option>
-          <option value="kosu">{{ t('plan.create.cardio.kosu') }}</option>
-          <option value="bisiklet">{{ t('plan.create.cardio.bisiklet') }}</option>
-          <option value="yuzme">{{ t('plan.create.cardio.yuzme') }}</option>
-          <option value="ip_atlama">{{ t('plan.create.cardio.ip_atlama') }}</option>
-          <option value="yuruyus">{{ t('plan.create.cardio.yuruyus') }}</option>
-          <option value="karisik">{{ t('plan.create.cardio.karisik') }}</option>
-        </select>
-      </div>
-
-      <div class="plan-field">
-        <label for="pc-injuries">{{ t('plan.create.field.injury') }}</label>
-        <input type="text" id="pc-injuries" class="plan-input" data-plan-field="injuries"
-               maxlength="200" placeholder="{{ t('plan.create.injury_ph') }}">
-      </div>
+        {% for name in ('gun_sayisi', 'antrenman_tarzi', 'odak_hedef', 'ekipman', 'odak', 'sure', 'kardiyo_tipi', 'injuries') %}{{ plan_pref(name) }}{% endfor %}
 
         <button class="btn-volt w-full" type="button"
                 data-action="planManageGenerate" data-plan-manage-generate>
-          {{ t('plan.manage.generate') if destructive else t('plan.create.submit') }}
+          {{ t('plan.manage.generate') }}
         </button>
+      {% else %}
+        {#- Essentials: the four answers that shape a week. Goal and equipment
+            carry the longest option labels and keep a full row on phones; the
+            short "how often / how long" pair shares one. -#}
+        <div class="plan-create-grid">
+          {{ plan_pref('odak_hedef', wide=True) }}{{ plan_pref('ekipman', wide=True) }}{{ plan_pref('gun_sayisi') }}{{ plan_pref('sure') }}
+        </div>
+
+        {#- Optional refinement: a NATIVE disclosure. Collapsed controls keep
+            their values and are still read on submit; opening or closing it is
+            presentation state only — no draft, no storage, no step machine. -#}
+        <details class="plan-refine">
+          <summary>{{ t('plan.create.refine') }}</summary>
+          <div class="plan-refine-body">
+            {#- The combination caveat belongs to the style choice it qualifies. -#}
+            <p class="plan-create-note">{{ t('plan.create.capability_note') }}</p>
+            <div class="plan-create-grid">
+              {% for name in ('antrenman_tarzi', 'odak', 'kardiyo_tipi') %}{{ plan_pref(name, wide=True) }}{% endfor %}
+            </div>
+          </div>
+        </details>
+
+        {#- Safety context stays in plain view — never behind the disclosure. -#}
+        {{ plan_pref('injuries') }}
+
+        {#- The ONE generate control and its status, kept together so the answer
+            to a click is always painted beside it. On narrow screens this block
+            stays reachable above the bottom navigation while the form scrolls. -#}
+        <div class="plan-manage-action">
+          <p class="plan-manage-msg" data-plan-manage-msg role="status" aria-live="polite" hidden></p>
+          <button class="btn-volt w-full" type="button"
+                  data-action="planManageGenerate" data-plan-manage-generate>
+            {{ t('plan.create.submit') }}
+          </button>
+        </div>
+      {% endif %}
 
         {#- PROPOSAL — a server-generated candidate, NOT the active plan. It is
             outside the plan-days region, carries its own not-saved notice, and
@@ -175,7 +229,9 @@
 <main class="main-content plan-main" id="plan-page" data-plan-v2 data-plan-state="{{ plan.state }}">
 
   <header class="plan-head">
-    <h1 class="plan-h1">{{ t('plan.title') }}</h1>
+    {#- F-14: the destination names itself with the label the user clicked.
+        Training, Nutrition and Supplements stay child-domain headings below. -#}
+    <h1 class="plan-h1">{{ t('nav.plan') }}</h1>
     {# Durum ikon + METİN (yalnızca renkle iletilmez). Kanonik state'ten gelir;
        read_error 'no plan'a çevrilmez, populated 'start' göstermez. #}
     <p class="plan-status plan-status--{{ plan.state }}" role="status">
@@ -193,7 +249,11 @@
         <p class="plan-domain-kicker">{{ t('plan.domain.primary') }}</p>
         <h2 id="plan-training-label" class="plan-domain-title">{{ t('plan.domain.training') }}</h2>
       </div>
+      {#- With no plan the header status already says so and the create
+          heading says it again; a third chip would only repeat it. -#}
+      {% if plan.state != 'no_active_plan' %}
       <span class="plan-domain-state">{{ t('plan.workout_state.' ~ plan.workout_state) }}</span>
+      {% endif %}
     </div>
     <button class="btn-ghost plan-recovery-action" type="button"
             data-action="recoverBlockedWorkout" hidden>{{ t('plan.action.abandon_workout') }}</button>
