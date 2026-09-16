@@ -381,9 +381,15 @@ yeniden oluşturma iş akışı, JS, locale ve Python birebir aynıdır.
 | Masaüstü kompozisyonu | ≥1024 px ve YALNIZCA `[data-plan-state="active_plan"]` / `partial_active_plan`: `max-width: 1120px` ızgara, Antrenman `minmax(0,1fr)` (1366'da 736 px) + 320 px destek sütunu (Beslenme → Takviyeler, ikincil bağlantılar). | F-30: 1366'da ortalanmış 688 px telefon sütunuydu. Antrenman baskın kalır; en uzun satır 622 px. |
 | 320 px bağlantılar | `.plan-domain-link` tam genişlik ve 44 px hedef, metin okuma ekseninde (`justify-content: flex-start`). | Sola hizalı bölümde ortalanmış bağlantı tutarsızlığı. |
 
-- **Ölçüm (390×844, TR, kanonik aktif plan):** 2 718 → 2 164 px (−20,4 %,
-  3,22 → 2,56 ekran); haftalık rehberlik + hafta 1,56 → 1,00 ekran. 1366:
-  2 192 → 1 479 px. Tipografi, dokunma hedefleri ve içerik küçültülmedi.
+- **Ölçüm (390×844, TR, kanonik aktif plan, aynı düzenek iki commit'te):**
+  Windows Chromium 2 718 → 2 021 px (−25,6 %, 3,22 → 2,39 ekran); Linux
+  Chromium (CI fontları) 2 685 → 2 118 px (−21,1 %). Haftalık rehberlik +
+  hafta 1,56 → 0,95 ekran. 1366: 2 192 → 1 386 px. Tipografi, dokunma
+  hedefleri ve içerik küçültülmedi.
+- **Yeniden oluşturma:** `plan.create.capability_note` artık kapalı panelin
+  dışında değil, açılan formun içinde (durum satırından hemen sonra) — PR4'ün
+  create dalına verdiği yerleşimin aynısı. Form alanları, sırası ve iş akışı
+  değişmedi.
 - **Kapsam:** no_active_plan (PR4 ilk kurulum) ve read_error ızgara/genişlik
   almaz; oluşturma eylemi geometrisi değişmedi. Takviyeler alt bölümünün
   düzleşmesi Beslenme sunumudur ve her Plan durumunda aynıdır (bu durumlarda

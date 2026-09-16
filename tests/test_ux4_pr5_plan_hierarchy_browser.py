@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -331,7 +332,11 @@ def test_expanded_census_is_recorded(surface, scenario, language):
 # derive from it and are not tuned to the implementation: F-06 asks for
 # roughly a fifth less height at 390 and nesting <= 2.
 # ══════════════════════════════════════════════════════════════════════════
-BASELINE_390_HEIGHT = 2718
+# Document height depends on the platform's fallback fonts (CI's Linux fonts
+# wrap more lines), so the 1110ecb baseline is recorded per platform with this
+# same harness: Windows Chromium 2718 px, Linux Chromium (WSL Ubuntu 24.04,
+# which reproduces CI's candidate height exactly) 2685 px.
+BASELINE_390_HEIGHT = {"win32": 2718, "linux": 2685}
 BASELINE_SURFACES = 15
 BASELINE_CONTENT_WIDTH_1366 = 688
 ACTIVE = ("scheduled_start", "active_resume", "stale_session", "active_rest_day",
@@ -447,7 +452,8 @@ def test_390_document_height_falls_by_a_fifth(surface):
     arrange("scheduled_start")
     open_plan(page, 390)
     data = probe(page)
-    assert data["doc_height"] <= BASELINE_390_HEIGHT * 0.80, data["doc_height"]
+    baseline = BASELINE_390_HEIGHT["win32" if sys.platform == "win32" else "linux"]
+    assert data["doc_height"] <= baseline * 0.80, (data["doc_height"], baseline)
     assert data["overflow"] is False
 
 
