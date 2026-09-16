@@ -56,20 +56,40 @@ def diary_provider(monkeypatch):
 # Plan kaydet / aktif plan / hızlı ekleme
 # ---------------------------------------------------------------------------
 
+def _seed_legacy_plan(user_id, document):
+    """Persist a plan document WITHOUT going through the save route.
+
+    F2 gave /nutrition-plan/save a closed schema, so a malformed document can
+    no longer be written over HTTP. Rows written before that boundary existed
+    are still in the database, so the read paths must stay exactly as tolerant
+    as they were — which is what these tests cover. Seeding directly is the
+    only honest way to keep covering it; routing through the save route would
+    leave the test passing because nothing was stored at all.
+    """
+    db.session.add(NutritionPlan(
+        user_id=user_id, plan_data=json.dumps(document), score=8.0))
+    db.session.commit()
+
 def test_save_plan_replaces_previous(client, auth_user):
+    first = {"ogle": {"yemekler": ["Tavuk - 150g"], "kalori": 380}}
+    second = {"ogle": {"yemekler": ["Somon - 150g"], "kalori": 420}}
     assert client.post("/nutrition-plan/save", json={}).status_code == 400
-    client.post("/nutrition-plan/save", json={"plan": {"v": 1}, "score": 6.0})
-    client.post("/nutrition-plan/save", json={"plan": {"v": 2}, "score": 7.0})
+    # F2: an unrecognised document is refused rather than stored.
+    assert client.post("/nutrition-plan/save",
+                       json={"plan": {"v": 1}, "score": 6.0}).status_code == 400
+    client.post("/nutrition-plan/save", json={"plan": first, "score": 6.0})
+    client.post("/nutrition-plan/save", json={"plan": second, "score": 7.0})
     plans = NutritionPlan.query.filter_by(user_id=auth_user.id).all()
     assert len(plans) == 1
-    assert json.loads(plans[0].plan_data) == {"v": 2}
+    assert json.loads(plans[0].plan_data) == second
 
 
 def test_active_plan_roundtrip(client, auth_user):
+    plan = {"isim": "Plan A", "ogle": {"yemekler": ["Tavuk - 150g"], "kalori": 380}}
     assert client.get("/nutrition-plan/active").get_json() == {"exists": False}
-    client.post("/nutrition-plan/save", json={"plan": {"v": 1}, "score": 8.0})
+    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
     body = client.get("/nutrition-plan/active").get_json()
-    assert body["exists"] is True and body["plan"] == {"v": 1}
+    assert body["exists"] is True and body["plan"] == plan
 
 
 def test_quick_add_meal(client, auth_user):
@@ -94,10 +114,13 @@ def test_quick_add_meal(client, auth_user):
 
 def test_quick_add_meal_handles_malformed_plan(client, auth_user):
     # A4: LLM planı sayısal-olmayan makro / liste-olmayan yemekler içerebilir →
-    # 500 yerine güvenli değerlerle eklenmeli.
+    # 500 yerine güvenli değerlerle eklenmeli. F2'den beri bu belge save
+    # rotasından GEÇEMEZ; premise legacy satırdır, o yüzden doğrudan yazılır.
     plan = {"ogle": {"yemekler": "Tek string yemek", "kalori": "400 kcal",
                      "protein": None, "karb": 30, "yag": 5}}
-    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+    assert client.post("/nutrition-plan/save",
+                       json={"plan": plan, "score": 8.0}).status_code == 400
+    _seed_legacy_plan(auth_user.id, plan)
     resp = client.post("/api/quick-add-meal", json={"meal_key": "ogle"})
     assert resp.status_code == 200
     body = resp.get_json()
@@ -109,7 +132,11 @@ def test_quick_add_meal_handles_malformed_plan(client, auth_user):
 
 def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
     # A4: boş öğün ({}) 0-makro satır yazmamalı — eski `if not meal` davranışı korunur.
-    client.post("/nutrition-plan/save", json={"plan": {"ogle": {}}, "score": 8.0})
+    # Legacy satır olarak yazılır: aksi halde plan HİÇ kaydedilmediği için 404
+    # "plan yok"tan gelir ve test boş öğün kuralını sınamamış olur.
+    assert client.post("/nutrition-plan/save",
+                       json={"plan": {"ogle": {}}, "score": 8.0}).status_code == 400
+    _seed_legacy_plan(auth_user.id, {"ogle": {}})
     assert client.post("/api/quick-add-meal", json={"meal_key": "ogle"}).status_code == 404
     assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
 
@@ -117,7 +144,11 @@ def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
 def test_quick_add_meal_floors_negative_macros(client, auth_user):
     plan = {"ogle": {"yemekler": ["Hatalı plan"], "kalori": -50,
                      "protein": -5, "karb": -2, "yag": -1}}
-    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+    # F2 negatif makroyu artık save'de reddeder; taban alma kuralı legacy
+    # satırlar için hâlâ geçerli olmalı.
+    assert client.post("/nutrition-plan/save",
+                       json={"plan": plan, "score": 8.0}).status_code == 400
+    _seed_legacy_plan(auth_user.id, plan)
     response = client.post("/api/quick-add-meal", json={"meal_key": "ogle"})
     assert response.status_code == 200
     assert response.get_json()["nutrients"] == {

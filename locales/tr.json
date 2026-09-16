@@ -1036,6 +1036,8 @@
   "route.name_too_long": "Ad soyad en fazla 150 karakter olabilir.",
   "route.name_invalid": "Ad soyad desteklenmeyen kontrol karakterleri içeriyor.",
   "route.request_pending": "Zaten bekleyen bir istek var.",
+  "route.plan_score_invalid": "Plan puanı geçersiz.",
+  "route.nutrition_plan_invalid": "Beslenme planı verisi geçersiz.",
   "route.plan_data_missing": "Plan verisi eksik",
   "route.weight_required": "Kilo zorunludur",
   "route.plan_saved": "Plan kaydedildi.",
