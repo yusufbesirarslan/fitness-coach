@@ -319,6 +319,50 @@ launcher` deseninin aynısı; kancasız her host eskisi gibi yüzer):
   `tests/test_ux4_pr3_coach_destination_browser.py` (ölçülmüş geometri, gerçek
   Tab yürüyüşü, 320–1366 × TR/EN taşma matrisi) + `tests/test_coach_page_v2.py`.
 
+### Plan ilk kurulum (WEB-UX4-PR4)
+
+Aktif planı olmayan kullanıcı Plan'a geldiğinde ilk gördüğü şey artık sekiz
+soruluk bir form değil, **koçluk yapılan bir ilk adımdır**: sonuç → temel
+tercihler → isteğe bağlı ayar → güvenlik notu → TEK eylem. Yalnızca sunum
+değişti; `plan_manage` iş akışı, 11 anahtarlı tercih yükü, varsayılanlar,
+`POST /training-plan` → öneri → `GET /training/bootstrap` tazelik okuması →
+`POST /training-plan/save` → kanonik yenileme zinciri ve `management_baseline`
+birebir aynıdır (`static/training_plan_management.js` DEĞİŞMEDİ).
+
+| Katman | Ne | Neden |
+| --- | --- | --- |
+| Sonuç | `plan.create.outcome` + `plan.create.defaults_hint`, ilk alandan ÖNCE | Kullanıcı neyin kurulacağını, kaydetmeden önce inceleyeceğini ve varsayılanların yeterli olduğunu parametreye dokunmadan öğrenir. |
+| Temel | Hedef, ekipman, haftalık gün, süre | Bir haftayı şekillendiren dört cevap. ≥360 px'te kısa etiketli gün/süre çifti yan yana; uzun etiketli hedef/ekipman telefonda tam satır (kapalı `<select>` metni kırpılmaz). ≥641 px'te hepsi ikişerli. |
+| İsteğe bağlı | Yerel `<details class="plan-refine">`: tarz, odak bölge, kardiyo + kombinasyon uyarısı | Kapalıyken alanlar sekme sırasında YOK ama değerlerini korur ve gönderimde okunur; açıp kapamak yükü değiştirmez. Sihirbaz/adım makinesi/taslak depolama YOK. |
+| Güvenlik | `data-plan-field="injuries"` (maxlength 200, boş) | Açıklamanın DIŞINDA, her zaman görünür. |
+| Eylem | `.plan-manage-action` içinde TEK `[data-plan-manage-generate]` + `[data-plan-manage-msg]` | `position: sticky`; alt gezinmenin (`--action-bar-h`) ve safe-area'nın üstünde kalır, form kaydıkça erişilebilir, sonra yerine oturur — takip eden öneri panelinin üstünde ASLA asılı kalmaz. Durum/hata satırı eylemle aynı blokta olduğundan tıklamanın cevabı hiçbir zaman eylemin altında kalmaz. |
+
+- **Kapsam:** her kural `[data-manage-state="create"]` ya da yalnızca create
+  dalının render ettiği sınıflara bağlıdır. Yeniden oluşturma (regenerate)
+  formu, sırası ve durum satırı UX-3 PR3'teki gibi düz kalır; aktif plan,
+  read_error, Beslenme ve Takviyeler piksel olarak değişmedi (390/1366 belge
+  yükseklikleri birebir aynı).
+- **Odak:** odağı alan alan `scroll-margin-bottom` ile yapışkan eylemin ve alt
+  gezinmenin üstüne kaydırılır. Pozitif `tabindex` yok; özet (`summary`)
+  `outline: 2px solid var(--color-primary)` taşır.
+- **F-14:** Plan hedefinin `<h1>`'i ve `<title>`'ı gezinmenin kendi etiketini
+  (`nav.plan`) kullanır. Antrenman/Beslenme/Takviyeler alt-alan başlıkları
+  olarak kalır. `plan.title` ve `plan.create.intro` tek tüketicileri gittiği
+  için katalogdan çıkarıldı (TR/EN eşliği korunur).
+- **Bilinen, BİLEREK çözülmeyen tutarsızlık:** dokunulmamış Plan V2 formu
+  `sure=30` gönderir (süre `<select>`'inde seçili seçenek yok → ilk seçenek),
+  oysa `plan_training_manage.js` `DEFAULTS`, legacy Training, sunucu
+  `TrainingPreferences` ve tercih sözleşmesi yedeği 45 der. 30 → 45 üretici
+  girdisini değiştirir; bu yüzden PR4 davranışı KORUR ve testle karakterize
+  eder. Ayrı, dar bir takip işi olarak kayıtlıdır.
+- **Geri alma:** `git revert`. `UIUX_PLAN_V2_ENABLED` daha geniş Plan geri alma
+  seçicisi olarak kalır; bu PR hiçbir bayrağa dokunmaz.
+- **Regresyon:** `tests/test_ux4_pr4_plan_first_run_contract.py` (render
+  sözleşmesi, yük/otorite/depolama/CSS kapıları) +
+  `tests/test_ux4_pr4_plan_first_run_browser.py` (gerçek yük, ağ sırası, ilk
+  ekran geometrisi, gerçek Tab yürüyüşü, yapışkan eylem, 320–1366 × TR/EN
+  taşma matrisi, yeniden oluşturma regresyonu).
+
 ## Genişletme Rehberi
 
 1. **Yeni token:** tokens.css'te doğru bölüme kanonik adla ekle; light değeri
