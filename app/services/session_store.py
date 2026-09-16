@@ -187,6 +187,37 @@ def delete_for_user(user_id):
     return removed
 
 
+def provider_refresh_tokens_for_user(user_id):
+    """Return the decryptable provider refresh tokens of one user's web sessions.
+
+    Read BEFORE `delete_for_user` so a credential change can revoke the provider
+    material it is about to drop: deleting the row ends the session for THIS app
+    (require_auth needs the row) but leaves the refresh token itself usable at
+    Cognito, which `ConfirmForgotPassword` does not revoke.
+
+    Rows whose ciphertext no longer decrypts (rotated COGNITO_TOKEN_ENC_KEY,
+    corrupted value) are skipped rather than raised on: there is nothing
+    revocable in them, and a credential change must not fail over one.
+    """
+    tokens = []
+    rows = (db.session.query(CognitoSession.refresh_token)
+            .filter_by(user_id=user_id)
+            .all())
+    for (ciphertext,) in rows:
+        if not ciphertext:
+            continue
+        try:
+            token = _dec(ciphertext)
+        except Exception:
+            _logger.warning(
+                "[SESSION] refresh token ciphertext unreadable — atlandı (user=%s)",
+                user_id)
+            continue
+        if token:
+            tokens.append(token)
+    return tokens
+
+
 # Cognito refresh token'ının varsayılan geçerliliği 30 gündür; bu kadar süre
 # dokunulmamış bir oturum zaten yenilenemez — satırı tutmanın tek etkisi
 # tablonun sınırsız büyümesi ve süresi geçmiş şifreli token saklamaktır (I5).

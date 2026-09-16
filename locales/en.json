@@ -34,6 +34,7 @@
   "auth.reset_throttled": "Too many attempts. Please try again shortly.",
   "auth.reset_password_rejected": "The new password does not meet the security policy.",
   "auth.reset_success": "Your password was changed. Sign in with your new password.",
+  "auth.reset_sessions_not_cleared": "Your password was changed, but open sessions could not be closed. Please request a new code and try again.",
   "validate.username_min": "Username must be at least 3 characters.",
   "validate.username_max": "Username can be at most 80 characters.",
   "validate.username_charset": "Username may only contain letters, numbers, dots, underscores and hyphens.",

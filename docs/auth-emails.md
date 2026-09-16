@@ -47,11 +47,43 @@ kopya landing sprint'inin (Resend 2) görünümüyle birebirdir.
 - `GET/POST /reset-password` — kullanıcı adı + kod + yeni şifre;
   `cognito_service.confirm_forgot_password`. Kod/şifre kuralları Cognito'nundur.
   Rate limit: 10 / 15 dk. Başarıda bilgilendirme e-postası best-effort gider.
-- Başarılı sıfırlama **TÜM oturumları KAPATIR**: `reset_password`,
-  `session_store.delete_for_user(user.id)` ile kullanıcının sunucu tarafındaki
-  bütün Cognito oturum satırlarını siler ve Flask-Login durumunu temizler. (Bu,
-  Sprint 3'te eklendi; `ConfirmForgotPassword`'ün kendisi Cognito refresh
-  token'larını revoke etmez, revoke'u uygulama yapar.)
+- Başarılı sıfırlama **TÜM oturumları KAPATIR** — web VE mobil.
+  `_revoke_all_sessions_after_credential_change(user.id)` tek giriş noktasıdır:
+  1. `mobile_auth.revoke_all_for_user(user.id)` ÖNCE hesabın
+     `User.credential_epoch` sayacını tek bir UPDATE ile artırıp COMMIT eder
+     (`_fence_credential_change`). Bunun sebebi bir yarış: mobil `login`
+     Cognito'ya ağ üzerinden gider ve `MobileAuthSession` satırını ancak
+     dönüşte yazar, yani ESKİ şifreyle doğrulanmış bir giriş, iptal edilecek
+     aileler toplandıktan SONRA kendi ailesini yaratabilir. `login` bu sayacı
+     sağlayıcı çağrısından ÖNCE okur ve INSERT'ten hemen önce satır kilidi
+     altında (`SELECT ... FOR UPDATE`) tekrar okur; değerler ayrılıyorsa oturum
+     hiç doğmaz (401 `AUTH_INVALID_CREDENTIALS`,
+     reason `credential_changed_during_login`). Kilit yüzünden yalnızca iki
+     sıralama mümkündür: ya sayacın COMMIT'i önce olur ve giriş reddedilir, ya
+     da aile önce COMMIT olur ve arkadan gelen tarama onu GÖRÜR. Saat, timeout
+     veya zaman karşılaştırması yoktur. Sayacın artırılması, kullanıcının hiç
+     canlı mobil oturumu olmasa BİLE çalışır — taramanın kapatamayacağı tek
+     durum budur, çünkü o aile henüz yoktur. Ardından aynı fonksiyon HER canlı
+     mobil ailesini (`MobileAuthSession`) `revoked_reason="credential_change"`
+     ile iptal eder ve saklı sağlayıcı şifre metnini temizler. Bu adım ZORUNLUDUR
+     çünkü `mobile_auth.authenticate_access` saklı access token'ı ÇEVRİMDIŞI
+     doğrular — sağlayıcı tarafındaki hiçbir değişikliği GÖRMEZ; opak kimlik
+     bilgisi yalnızca aile satırı iptal edilince ölür. Kalıcılaştırılamazsa
+     route 200 DEĞİL 503 döner (`auth.reset_sessions_not_cleared`): "hiçbir
+     oturum canlı değil" ile "kontrol edemedim" aynı görünmemelidir.
+  2. `session_store.delete_for_user(user.id)` sunucu tarafındaki bütün Cognito
+     oturum satırlarını siler ve Flask-Login durumu temizlenir (web oturumu
+     satırıyla birlikte ölür — `require_auth` her istekte satırı çözer).
+  3. En son, **best-effort** olarak her saklı refresh token'ı Cognito'da
+     `revoke_token` ile iptal eder. `ConfirmForgotPassword` refresh token'ları
+     revoke ETMEZ; bu route kimlik doğrulanmamış çalıştığı için `GlobalSignOut`
+     (kullanıcının access token'ını ister) ve `AdminUserGlobalSignOut` (bu
+     UNSIGNED public client'ta olmayan AWS kimliğini ister) KULLANILAMAZ —
+     token-başına revoke aynı kümeye (uygulamanın kendi verdiği her oturum)
+     ulaşır. Bloklayıcı sağlayıcı turları olduğu için PAYLAŞILAN
+     `blocking_concurrency_slot` altında ve `_PROVIDER_REVOKE_LIMIT` ile
+     sınırlıdır; kapasite reddi veya sağlayıcı hatası sıfırlamayı DÜŞÜRMEZ
+     (oturumları bitiren adım yereldir).
 
 ## Hata sözleşmesi — auth ASLA e-posta yüzünden düşmez
 

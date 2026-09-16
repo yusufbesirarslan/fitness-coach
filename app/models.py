@@ -64,6 +64,15 @@ class User(UserMixin, db.Model):
     # kapanır (I-M1: index-vs-constraint uyuşmazlığı).
     cognito_sub      = db.Column(db.String(64), nullable=True)
 
+    # Kimlik bilgisi (şifre) her değiştiğinde 1 artan sayaç. Sağlayıcıya yapılan
+    # kimlik doğrulaması ile yerel oturumun YARATILMASI arasında saniyeler
+    # geçebilir (Cognito çağrısı ağ üzerinden); bu sayaç, o aralıkta şifre
+    # değişmişse oturumun hiç doğmamasını sağlayan tek otoriter işarettir.
+    # Yalnızca app/services/mobile_auth.py okur/yazar (login fence'i ve
+    # revoke_all_for_user); asla sıfırlanmaz, yalnızca artar.
+    credential_epoch = db.Column(
+        db.Integer, nullable=False, default=0, server_default='0')
+
     # Davet/referral döngüsü: her kullanıcının paylaşılabilir tek davet kodu olur;
     # referred_by_id, bu kullanıcıyı getiren davetçiyi işaret eder (çift taraflı ödül).
     referral_code    = db.Column(db.String(16), nullable=True)

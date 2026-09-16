@@ -14,7 +14,9 @@ from app.config import COGNITO_ENABLED
 from app.extensions import db, limiter, login_throttle_available
 from app.models import User
 from app.services import (cognito_jwt, cognito_service, email_service,
-                          email_templates, session_store)
+                          email_templates, mobile_auth, session_store)
+from app.services.ai_gate import (BlockingConcurrencyLimit,
+                                  blocking_concurrency_slot)
 from app.services.cognito_service import CognitoServiceError
 from app.services.cognito_jwt import TokenValidationError
 from app.services.cognito_identity import reconcilable_local_user
@@ -38,6 +40,9 @@ _RESET_USERNAME_KEY = "password_reset_username"
 _RESET_STARTED_KEY = "password_reset_started_at"
 _RESET_CONTEXT_MINUTES = 15
 _FORGOT_GENERIC_KEY = "auth.forgot_generic"
+# Most provider refresh tokens one credential change will try to revoke. Local
+# revocation is unbounded and authoritative; this only bounds the network work.
+_PROVIDER_REVOKE_LIMIT = 20
 
 
 def _consume_pending_referral(user):
@@ -204,7 +209,16 @@ def reset_password():
         return _reset_error_response(exc)
     user = User.query.filter_by(username=username).first()
     if user:
-        session_store.delete_for_user(user.id)
+        try:
+            _revoke_all_sessions_after_credential_change(user.id)
+        except mobile_auth.MobileAuthFailure:
+            # Şifre Cognito'da ÇOKTAN değişti ama açık oturumları kapatamadık.
+            # 200 dönmek "her yerde çıkış yapıldı" yalanı olur; depolama geçici
+            # olarak ulaşılamıyor demektir, bunu olduğu gibi söyle.
+            current_app.logger.error(
+                "[AUTH] şifre değişti ama oturumlar kapatılamadı (user=%s)",
+                user.id)
+            return jsonify({"error": t("auth.reset_sessions_not_cleared")}), 503
     logout_user()
     session.clear()
     # Şifre değişti bildirimi — best-effort; sıfırlama yanıtını ASLA etkilemez.
@@ -541,6 +555,82 @@ def _send_welcome_email(user):
     except Exception:
         current_app.logger.warning("[AUTH-EMAIL] welcome gönderilemedi (user=%s)",
                                    getattr(user, "username", "?"), exc_info=True)
+
+
+def _revoke_all_sessions_after_credential_change(user_id):
+    """End every session issued under the OLD credential, then tell the provider.
+
+    Web and mobile fail differently, so both are handled here explicitly:
+
+    * Web sessions die with their server-side row — `require_auth` resolves
+      `cognito_sid` against CognitoSession on every request — so deleting the
+      rows is sufficient locally, and that is the pre-existing behaviour kept
+      byte-for-byte below.
+    * Mobile sessions do NOT. `mobile_auth.authenticate_access` validates the
+      STORED provider access token offline, so an opaque credential stays
+      accepted for its whole TTL — and its family keeps minting new ones until
+      the absolute expiry — unless the family row itself is revoked. That is the
+      revocation added here.
+
+    Local revocation is what actually ends the sessions, so it runs first and is
+    allowed to fail the request: "nothing is live" and "I could not check" must
+    not look the same to the caller.
+
+    The provider calls come last and are best-effort. `ConfirmForgotPassword`
+    changes the password but does not revoke refresh tokens, and this route runs
+    unauthenticated: `GlobalSignOut` needs the user's own access token and
+    `AdminUserGlobalSignOut` needs AWS credentials this UNSIGNED public client
+    does not have. Revoking each stored refresh token reaches the same set —
+    every session this app issued — and a provider outage must never make an
+    already-changed password look unchanged.
+    """
+    mobile_results = mobile_auth.revoke_all_for_user(user_id)
+    web_provider_refresh = session_store.provider_refresh_tokens_for_user(user_id)
+    session_store.delete_for_user(user_id)
+    _best_effort_provider_revoke_all(user_id, mobile_results, web_provider_refresh)
+
+
+def _best_effort_provider_revoke_all(user_id, mobile_results, web_refresh_tokens):
+    """Tell Cognito about revocations already committed locally. Never raises.
+
+    Every call here is a blocking provider round-trip, so it takes the shared
+    `blocking_concurrency_slot` the same way every other Cognito/FatSecret/model
+    caller does: one gunicorn worker with 8 threads cannot afford an ungated
+    sequence of network calls (each up to the client's 5s connect + 10s read) or
+    /health queues behind it and the deploy gate rolls a healthy build back. One
+    slot covers the whole sequence because the sequence is nothing BUT network —
+    no cache read, DB write or lock happens while it is held.
+
+    Bounded on purpose: sessions accumulate for the family's whole absolute
+    lifetime, so a busy account can hold dozens, and "revoke them all" must not
+    become "park a thread for minutes". Anything past the cap stays locally
+    revoked — which is what actually ends the session — and is logged.
+
+    Capacity rejection is not an error either: local revocation already ran, so
+    skipping the advisory provider call is strictly better than failing a
+    password reset that has already changed the password.
+    """
+    tokens = [result.provider_refresh_token for result in mobile_results
+              if result.provider_refresh_token]
+    tokens.extend(web_refresh_tokens)
+    if not tokens:
+        return
+    skipped = max(0, len(tokens) - _PROVIDER_REVOKE_LIMIT)
+    if skipped:
+        current_app.logger.warning(
+            "[AUTH] sağlayıcı iptali üst sınırda kesildi (user=%s skipped=%d)",
+            user_id, skipped)
+    try:
+        with blocking_concurrency_slot():
+            for refresh_token in tokens[:_PROVIDER_REVOKE_LIMIT]:
+                try:
+                    cognito_service.revoke_token(refresh_token)
+                except Exception:
+                    current_app.logger.warning(
+                        "[AUTH] refresh token iptal edilemedi (user=%s)", user_id)
+    except BlockingConcurrencyLimit:
+        current_app.logger.warning(
+            "[AUTH] sağlayıcı iptali kapasite nedeniyle atlandı (user=%s)", user_id)
 
 
 def _send_password_changed_email(username):

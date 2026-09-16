@@ -233,7 +233,11 @@ Both migrations must be applied, and the schema must be at the repository head:
 | `a994f9bed783` | creates the partial unique index `uq_workout_session_active_owner`, which **is** the at-most-one-ACTIVE-session invariant. Enabling without it is unsafe. |
 | `f5a6b7c8d9e0` | adds the execution columns (`checkpoint_revision`, `checkpoint_data`, `checkpoint_at`, `checkpoint_idempotency_key`, `checkpoint_fingerprint`, `workout_ref`, `plan_lineage_id`, `plan_mutation_version`). Without them a checkpoint cannot be persisted at all. |
 
-Repository head at the time of writing: **`f5a6b7c8d9e0`**, single head.
+Repository head: **`a6b7c8d9e0f1`**, single head. The two revisions above
+remain the prerequisites; the head has since advanced past them
+(`a6b7c8d9e0f1` adds `users.credential_epoch`, which is unrelated to
+workout sessions). Being at head implies both are applied, since they are
+its ancestors.
 
 ```bash
 fitx_assert_staging || return 1
@@ -242,7 +246,7 @@ docker compose exec -T web alembic current
 docker compose exec -T web alembic heads
 ```
 
-Expect `f5a6b7c8d9e0` from both, and exactly one head.
+Expect `a6b7c8d9e0f1` from both, and exactly one head.
 
 If the schema is behind, bring it forward **only** through that environment's
 established deployment/migration procedure. **Never run an Alembic downgrade**

@@ -422,7 +422,10 @@ def test_the_migration_only_adds_columns_and_keeps_one_alembic_head():
             if "revision" in names:
                 revisions.add(value.value)
     assert "f5a6b7c8d9e0" in revisions
-    assert revisions - parents == {"f5a6b7c8d9e0"}, sorted(revisions - parents)
+    # The head moves with every added revision; f5a6b7c8d9e0 must still
+    # exist (asserted above) but is no longer the tip. F1 chained
+    # a6b7c8d9e0f1 (users.credential_epoch) onto it.
+    assert revisions - parents == {"a6b7c8d9e0f1"}, sorted(revisions - parents)
 
 
 # 13/14. Untouched neighbours.
