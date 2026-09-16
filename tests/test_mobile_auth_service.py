@@ -1140,3 +1140,154 @@ def test_expiry_cleanup_is_idempotent_and_clears_ciphertext(
     assert family.revoked_at is not None
     assert family.cognito_access_token is None
     assert family.cognito_refresh_token is None
+
+
+def _other_user_family(user, *, family_id="other-family", revoked=False):
+    """A bare family row for a DIFFERENT user — enough to prove isolation."""
+    from app.services import session_store
+
+    family = MobileAuthSession(
+        family_id=family_id,
+        user_id=user.id,
+        cognito_username=user.username,
+        cognito_sub=user.cognito_sub,
+        cognito_access_token=session_store.encrypt_token("other-access"),
+        cognito_refresh_token=session_store.encrypt_token("other-refresh"),
+        cognito_access_expires_at=NOW + timedelta(hours=1),
+        absolute_expires_at=NOW + timedelta(days=7),
+        revoked_at=NOW if revoked else None,
+        revoked_reason="logout" if revoked else None,
+        version=1, created_at=NOW, last_used_at=NOW, updated_at=NOW,
+    )
+    db.session.add(family)
+    db.session.commit()
+    return family
+
+
+def test_credential_change_revokes_every_family_of_only_that_user(
+        app, mobile_user, provider, make_user):
+    from app.services import mobile_auth
+
+    first = mobile_auth.login("mobile-service", "correct", now=NOW)
+    second = mobile_auth.login(
+        "mobile-service", "correct", now=NOW + timedelta(minutes=1))
+    bystander = make_user("bystander", cognito_sub="sub-bystander")
+    untouched = _other_user_family(bystander)
+
+    results = mobile_auth.revoke_all_for_user(
+        mobile_user.id, now=NOW + timedelta(minutes=2))
+
+    assert len(results) == 2
+    assert {r.provider_refresh_token for r in results} == {"provider-refresh"}
+    mine = MobileAuthSession.query.filter_by(user_id=mobile_user.id).all()
+    assert len(mine) == 2
+    for family in mine:
+        assert family.revoked_at == NOW + timedelta(minutes=2)
+        assert family.revoked_reason == "credential_change"
+        assert family.cognito_access_token is None
+        assert family.cognito_refresh_token is None
+    assert {r.family_id for r in results} == {f.family_id for f in mine}
+    # Every credential row of both families is revoked, not just the family.
+    assert MobileAccessCredential.query.filter(
+        MobileAccessCredential.revoked_at.is_(None)).count() == 0
+    assert MobileRefreshCredential.query.filter(
+        MobileRefreshCredential.revoked_at.is_(None)).count() == 0
+    db.session.refresh(untouched)
+    assert untouched.revoked_at is None
+    assert untouched.cognito_refresh_token is not None
+    assert first.access_credential != second.access_credential
+
+
+def test_credential_change_makes_existing_mobile_credentials_unusable(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+    later = NOW + timedelta(minutes=2)
+    # Precondition: both credentials work before the credential change.
+    assert mobile_auth.authenticate_access(
+        issued.access_credential, now=later).user.id == mobile_user.id
+
+    mobile_auth.revoke_all_for_user(mobile_user.id, now=later)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as access_exc:
+        mobile_auth.authenticate_access(issued.access_credential, now=later)
+    assert access_exc.value.code == "AUTH_SESSION_EXPIRED"
+    assert access_exc.value.status == 401
+    assert access_exc.value.retryable is False
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as refresh_exc:
+        mobile_auth.refresh(issued.refresh_credential, now=later)
+    assert refresh_exc.value.code == "AUTH_REFRESH_FAILED"
+    assert refresh_exc.value.reason == "refresh_revoked"
+
+
+def test_credential_change_revocation_is_idempotent_and_keeps_first_reason(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    first = mobile_auth.revoke_all_for_user(
+        mobile_user.id, now=NOW + timedelta(minutes=2))
+    second = mobile_auth.revoke_all_for_user(
+        mobile_user.id, now=NOW + timedelta(minutes=3))
+
+    assert len(first) == 1
+    assert second == []
+    family = MobileAuthSession.query.one()
+    assert family.revoked_at == NOW + timedelta(minutes=2)
+    assert family.revoked_reason == "credential_change"
+
+
+def test_credential_change_skips_unreadable_provider_ciphertext(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    family = MobileAuthSession.query.one()
+    family.cognito_refresh_token = "not-a-fernet-token"
+    db.session.commit()
+
+    results = mobile_auth.revoke_all_for_user(
+        mobile_user.id, now=NOW + timedelta(minutes=2))
+
+    assert len(results) == 1
+    assert results[0].provider_refresh_token is None
+    assert MobileAuthSession.query.one().revoked_at is not None
+
+
+def test_credential_change_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.revoke_all_for_user(
+            mobile_user.id, now=NOW + timedelta(minutes=2))
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_credential_change_lookup_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    monkeypatch.setattr(
+        db.session, "query",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("database unavailable")))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.revoke_all_for_user(
+            mobile_user.id, now=NOW + timedelta(minutes=2))
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_credential_change_reason_fits_the_persisted_column(app):
+    from app.services import mobile_auth
+
+    column = MobileAuthSession.__table__.c.revoked_reason
+    assert len(mobile_auth.CREDENTIAL_CHANGE_REASON) <= column.type.length

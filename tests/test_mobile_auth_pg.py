@@ -197,3 +197,73 @@ def test_same_parent_race_commits_one_child_and_keeps_winner_provider_tokens(
         assert session_store.decrypt_token(
             family.cognito_refresh_token) == "pg-provider-refresh-winner"
     assert counter["calls"] == 2
+
+
+def test_credential_change_during_provider_renewal_cannot_be_outlived(pg_app):
+    """A refresh parked at the provider must not resurrect a revoked family.
+
+    The rotation is deliberately two transactions with a provider round-trip in
+    between, so a password reset can land in that gap holding no lock the
+    refresh is waiting on. Only real row locks decide this, so it is proved
+    here: SQLite neither takes them nor aborts on conflict.
+    """
+    app, counter = pg_app
+    with app.app_context():
+        original = mobile_auth.login("pg-mobile-race", "correct", now=NOW)
+
+    counter["provider_barrier"] = threading.Barrier(2)
+    counter["winner_at_provider"] = threading.Event()
+    counter["winner_finished"] = threading.Event()
+    outcomes = {}
+
+    def rotate():
+        with app.app_context():
+            counter["thread_state"].contender = "winner"
+            try:
+                outcomes["refresh"] = (
+                    "issued",
+                    mobile_auth.refresh(
+                        original.refresh_credential,
+                        now=NOW + timedelta(seconds=850),
+                    ),
+                )
+            except mobile_auth.MobileAuthFailure as exc:
+                outcomes["refresh"] = (
+                    "failed", exc.code, exc.reason, exc.retryable)
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcomes["refresh"] = (
+                    "unexpected", type(exc).__name__, str(exc))
+            finally:
+                counter["winner_finished"].set()
+                db.session.remove()
+
+    thread = threading.Thread(target=rotate, daemon=True)
+    thread.start()
+    # The rotation is now inside the provider call: phase one already rolled
+    # back, so no row lock is held and the credential change is free to commit.
+    assert counter["winner_at_provider"].wait(timeout=10), outcomes
+    with app.app_context():
+        revoked = mobile_auth.revoke_all_for_user(
+            User.query.one().id, now=NOW + timedelta(seconds=860))
+        assert len(revoked) == 1
+        db.session.remove()
+    counter["provider_barrier"].wait(timeout=10)
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), outcomes
+    assert outcomes["refresh"] == (
+        "failed", "AUTH_REFRESH_FAILED", "refresh_revoked", False), outcomes
+    with app.app_context():
+        family = MobileAuthSession.query.one()
+        assert family.revoked_at == NOW + timedelta(seconds=860)
+        assert family.revoked_reason == "credential_change"
+        assert family.cognito_access_token is None
+        assert family.cognito_refresh_token is None
+        # No child generation was committed, so no usable credential survives.
+        assert MobileAccessCredential.query.filter_by(generation=1).count() == 0
+        assert MobileRefreshCredential.query.filter_by(generation=1).count() == 0
+        assert MobileAccessCredential.query.filter(
+            MobileAccessCredential.revoked_at.is_(None)).count() == 0
+        assert MobileRefreshCredential.query.filter(
+            MobileRefreshCredential.revoked_at.is_(None)).count() == 0
+    assert counter["calls"] == 1

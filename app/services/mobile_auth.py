@@ -317,6 +317,13 @@ def login(username, password, now=None):
             "session_commit_failed") from exc
 
 
+# Revocation reason recorded when the account's credentials changed rather than
+# when this session's own lifecycle ended. Kept as a constant because the web
+# password-reset route is the only caller and it must not spell it by hand;
+# MobileAuthSession.revoked_reason is String(40).
+CREDENTIAL_CHANGE_REASON = "credential_change"
+
+
 def _revoke_family(family, reason, now):
     family.revoked_at = family.revoked_at or now
     family.revoked_reason = family.revoked_reason or reason
@@ -817,6 +824,70 @@ def best_effort_provider_revoke(result):
     except Exception:
         _security_event(
             "provider_revoke_failed", result.family_id or "-", "provider")
+
+
+def revoke_all_for_user(user_id, reason=CREDENTIAL_CHANGE_REASON, now=None):
+    """Revoke every live mobile family for one local user.
+
+    The account-recovery counterpart to `prepare_logout`, which can only reach
+    the one family holding the presented credential. A credential change has no
+    credential to present and must reach all of them.
+
+    Local revocation is the authoritative step, not a convenience: a mobile
+    request is authorized by `authenticate_access`, which validates the STORED
+    provider access token OFFLINE. Nothing it does consults Cognito, so no
+    provider-side change is observable on that path — only `revoked_at` on the
+    family (and on its credential rows) ends the session, and it ends it on the
+    very next request.
+
+    Each family is locked and committed on its own, the same shape as
+    `purge_expired`, so a row a racing writer already revoked cannot stall the
+    rest. The candidate list is read once on purpose: a family created after
+    that read was minted by `login`, which authenticates against the provider,
+    so it belongs to whoever holds the NEW credential and must survive.
+
+    Returns one LogoutResult per family revoked here, each carrying the provider
+    refresh token decrypted BEFORE `_revoke_family` clears the ciphertext, so
+    the caller can follow with `best_effort_provider_revoke`. Storage failures
+    surface as the normalized retryable MobileAuthFailure — a caller must be
+    able to tell "nothing is live" from "I could not check".
+    """
+    now = now or datetime.utcnow()
+    try:
+        candidate_ids = [row[0] for row in db.session.query(
+            MobileAuthSession.id).filter(
+                MobileAuthSession.user_id == user_id,
+                MobileAuthSession.revoked_at.is_(None)).all()]
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
+    revoked = []
+    for family_id in candidate_ids:
+        try:
+            family = (MobileAuthSession.query.filter_by(id=family_id)
+                      .with_for_update().one_or_none())
+        except Exception as exc:
+            db.session.rollback()
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "storage_unavailable") from exc
+        if family is None or family.revoked_at is not None:
+            db.session.rollback()
+            continue
+        provider_refresh = None
+        if family.cognito_refresh_token:
+            try:
+                provider_refresh = session_store.decrypt_token(
+                    family.cognito_refresh_token)
+            except Exception:
+                provider_refresh = None
+        public_family_id = family.family_id
+        _revoke_family_and_commit(family, reason, now)
+        _security_event(reason, public_family_id, "credential")
+        revoked.append(LogoutResult(public_family_id, provider_refresh))
+    return revoked
 
 
 def validate_derivation_key_readiness(now=None):

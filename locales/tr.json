@@ -44,6 +44,7 @@
   "auth.reset_throttled": "Çok fazla deneme. Lütfen biraz sonra tekrar dene.",
   "auth.reset_password_rejected": "Yeni şifre güvenlik politikasını karşılamıyor.",
   "auth.reset_success": "Şifren değiştirildi. Yeni şifrenle giriş yapabilirsin.",
+  "auth.reset_sessions_not_cleared": "Şifren değiştirildi ancak açık oturumlar kapatılamadı. Lütfen yeni bir kod isteyip tekrar dene.",
   "validate.username_min": "Kullanıcı adı en az 3 karakter olmalıdır.",
   "validate.username_max": "Kullanıcı adı en fazla 80 karakter olabilir.",
   "validate.username_charset": "Kullanıcı adı yalnızca harf, rakam, nokta, alt çizgi ve tire içerebilir.",
