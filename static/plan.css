@@ -273,8 +273,10 @@
    tiles, and a third box for Supplements inside Nutrition. Ownership stays
    exactly as rendered; only the boxes go. Inside a domain, structure is carried
    by rhythm, dividers and type. Everything here is scoped to the active/partial
-   Plan branch or to classes only that branch renders, so the PR4 first run and
-   read_error keep their composition. No new token, font or component. */
+   Plan branch or to classes only that branch renders — except the Supplements
+   child treatment, which is Nutrition presentation and deliberately identical
+   in every Plan state. The PR4 first run and read_error keep their width, order
+   and action geometry. No new token, font or component. */
 
 /* Attention reads as a marked sentence, not another box. */
 .plan-partial-note,
@@ -322,7 +324,7 @@
 
 /* Rest: weekday and "Rest" on one quiet line, guidance as secondary text. */
 .plan-days .plan-day--rest { padding: var(--space-3) 0; }
-.plan-days .plan-day--rest > .plan-day-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); min-height: 0; margin: 0; padding: 0; }
+.plan-days .plan-day--rest > .plan-day-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); min-height: 0; margin: 0; padding: 0; cursor: default; }
 .plan-days .plan-day--rest .plan-day-name { color: var(--color-text-2); }
 .plan-days .plan-day--rest .plan-day-focus { color: var(--color-text-3); }
 .plan-days .plan-day--rest > .plan-day-note { margin-top: var(--space-1); color: var(--color-text-3); font-size: var(--text-sm); }
