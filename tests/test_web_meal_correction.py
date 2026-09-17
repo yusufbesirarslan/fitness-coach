@@ -17,7 +17,7 @@ the claim being proved is that the correction domain asks for one exact
 bucket/key, and a mock of the helper itself could not prove that.
 """
 import re
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -27,14 +27,18 @@ from app.extensions import db
 from app.models import MealLog, MealPhotoCleanup
 from app.services import mobile_diary_mutation
 from app.services.mobile_diary_mutation import service as mutation_service
+from app.timeutil import app_today
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NUTRITION_JS = (REPO_ROOT / "static" / "nutrition.js").read_text(encoding="utf-8")
 
 BUCKET = "axisai-test-bucket"
-TODAY = date.today().isoformat()
-YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
+# The day boundary under test is the application's (Europe/Istanbul), never the
+# process-local one: on a UTC CI runner between 21:00 and 24:00 UTC the two dates
+# differ, and a process-local seed would land on the app's yesterday.
+TODAY = app_today().isoformat()
+YESTERDAY = (app_today() - timedelta(days=1)).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +182,35 @@ def test_the_history_surface_publishes_no_correction_identity(
         "The history surface published a correction identity. N9 is scoped to "
         "current-day entries; publishing tokens there invites a historical "
         "ledger-management API this sprint did not authorise.")
+
+
+def test_the_current_day_read_uses_the_application_day_at_the_utc_boundary(
+        app, client, auth_user):
+    """§6: "today" is the application's Istanbul day, never the UTC/process day.
+
+    Between 21:00 and 24:00 UTC the UTC date is still D while the application
+    day is already D+1. Two rows are seeded — one on each of those dates — so a
+    read that resolved the day from the process-local clock would publish the
+    wrong one and miss the right one. Frozen dates, so this holds on every
+    runner in every timezone at every hour.
+    """
+    from datetime import timezone
+    from app.timeutil import APP_TZ, audit_clock
+
+    frozen = datetime(2026, 3, 11, 0, 30, tzinfo=APP_TZ)
+    assert frozen.astimezone(timezone.utc).date().isoformat() == "2026-03-10", (
+        "the fixture must sit inside the window where the UTC and Istanbul "
+        "dates differ, or this test proves nothing")
+
+    with audit_clock(frozen):
+        make_entry(auth_user.id, yemekler="Istanbul günü", tarih="2026-03-11")
+        make_entry(auth_user.id, yemekler="UTC günü", tarih="2026-03-10")
+
+        rows = today_payload(client)["meals"]
+
+    assert [row["yemekler"] for row in rows] == ["Istanbul günü"], (
+        "The current-day read did not use the application day: it must publish "
+        "the Istanbul-day row and exclude the row on the still-current UTC day.")
 
 
 # ===========================================================================
