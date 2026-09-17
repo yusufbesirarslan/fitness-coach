@@ -16,6 +16,11 @@ from app.i18n import current_locale, t
 from app.models import NutritionPlan, UserSession
 from app.services.ai import _heavy_chat
 from app.services.ai_gate import ai_concurrency_gate
+from app.services.nutrition_plan_schema import (
+    NutritionPlanInvalid,
+    validate_nutrition_plan_for_save,
+)
+from app.services.plan_score import PlanScoreInvalid, parse_plan_score
 from app.services.premium import premium_ai_plan_gate
 from app.timeutil import display_dt
 
@@ -29,6 +34,27 @@ def save_nutrition_plan():
 
     if not plan:
         return jsonify({"error": t("route.plan_data_missing")}), 400
+
+    # SIRA GARANTİDİR: her iki doğrulama da TEK BİR satır silinmeden ÖNCE
+    # çalışır, yani geçersiz bir istek kullanıcının mevcut planını yok edemez.
+    # F3 — `score` bir db.Float kolonuna gider; "abc" eskiden route'tan geçip
+    # flush'ta patlıyor ve yalnızca JSON okuyan çağırana HTML 500 döndürüyordu.
+    try:
+        score = parse_plan_score(score)
+    except PlanScoreInvalid as exc:
+        current_app.logger.info(
+            "[NUTRITION] save_score_rejected reason=%s", exc.reason)
+        return jsonify(exc.to_body(t)), exc.http_status
+
+    # F2: persist the CANONICAL document, never the client's. Anything the
+    # schema does not name is refused rather than dropped, so what /active
+    # hands back to innerHTML is a closed, bounded field set.
+    try:
+        plan = validate_nutrition_plan_for_save(plan)
+    except NutritionPlanInvalid as exc:
+        current_app.logger.info(
+            "[NUTRITION] save_schema_rejected reason=%s", exc.reason)
+        return jsonify(exc.to_body(t)), exc.http_status
 
     # Eski planı sil, yenisini kaydet
     NutritionPlan.query.filter_by(user_id=current_user.id).delete()

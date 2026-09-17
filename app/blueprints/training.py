@@ -25,6 +25,7 @@ from app.services.pump_checks import get_friend_ids, normalize_workout_score
 from app.services.premium import premium_ai_plan_gate
 from app.plan_presenter import build_plan_view
 from app.services.plan_facts import gather_plan_facts
+from app.services.plan_score import PlanScoreInvalid, parse_plan_score
 from app.services.plan_replacement import (
     PlanReplacementConflict,
     PlanReplacementError,
@@ -299,7 +300,22 @@ def save_training_plan():
     if not plan:
         return jsonify({"error": t("route.plan_data_missing")}), 400
 
-    # The concurrency precondition is read FIRST and costs nothing: a request
+    # F3: `score` lands in a db.Float column. Validated here — before the
+    # precondition, before any signature check, and decisively before anything
+    # is deleted — so a value the column cannot hold can never reach the flush
+    # and turn a JSON save into an HTML 500. Same contract, same body, same
+    # status as /nutrition-plan/save: one score rule for both plan kinds.
+    try:
+        score = parse_plan_score(score)
+    except PlanScoreInvalid as exc:
+        current_app.logger.info(
+            "[TRAINING] save_score_rejected reason=%s request_id=%s",
+            exc.reason, current_request_id(),
+        )
+        return jsonify(exc.to_body(t)), exc.http_status
+
+    # The concurrency precondition is read before any work and costs nothing
+    # (only the score rule, which touches nothing, runs ahead of it): a request
     # that cannot say which plan it intends to replace is refused before any
     # signature is verified, any catalog is consulted, and — decisively — before
     # anything is deleted. The field is REQUIRED. An omission is exactly the

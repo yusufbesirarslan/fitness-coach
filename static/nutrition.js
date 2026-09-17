@@ -46,6 +46,19 @@ function esc(s) {
   ));
 }
 
+/* ── SAFE NUMERIC SLOT (F2) ──
+   Plan macros (kalori/protein/karb/yag, toplam_*) and the plan score are
+   interpolated into innerHTML WITHOUT esc(). The server schema
+   (app/services/nutrition_plan_schema.py) now guarantees they are numbers on
+   the way in; this guarantees the page renders nothing but digits on the way
+   out — including for rows persisted before that schema existed, which the
+   read path still has to tolerate. Anything else becomes the placeholder. */
+function fmtNum(v, fallback = '—') {
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : fallback;
+  if (typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v)) return v;
+  return fallback;
+}
+
 /* ── SERVING LABEL HELPER ── */
 function formatServingLabel(desc, metricAmt, calories, isBulk) {
   let label = desc;
@@ -805,9 +818,9 @@ function renderPlans(data) {
   const color = scoreColors[data.score_label] || '#9A9A9A';
   document.getElementById('score-banner-wrap').innerHTML = `
     <div class="score-banner" style="margin-bottom:24px;">
-      <div class="score-big" style="color:${color};">${data.overall_score}</div>
+      <div class="score-big" style="color:${color};">${fmtNum(data.overall_score)}</div>
       <div>
-        <div class="score-label" style="color:${color};">${scoreLabel(data.score_label)} ${__t('nutrition.plan_word')}</div>
+        <div class="score-label" style="color:${color};">${esc(scoreLabel(data.score_label))} ${__t('nutrition.plan_word')}</div>
         <div class="score-desc">${__t('nutrition.score_desc')}</div>
       </div>
     </div>`;
@@ -827,7 +840,7 @@ function renderPlans(data) {
       if (!ml) return '';
       return `
         <div class="plan-meal-sec">
-          <div class="plan-meal-title">${m.label} · ${ml.kalori ?? '—'} kcal</div>
+          <div class="plan-meal-title">${m.label} · ${fmtNum(ml.kalori)} kcal</div>
           <ul class="plan-meal-items">${(ml.yemekler || []).map(y => `<li>${esc(y)}</li>`).join('')}</ul>
         </div>`;
     }).join('');
@@ -838,17 +851,17 @@ function renderPlans(data) {
     card.innerHTML = `
       <div class="plan-card-hdr">
         <div class="plan-card-name">${esc(plan.isim ?? 'Plan ' + (i+1))}</div>
-        <div class="plan-card-kcal">${plan.toplam_kalori ?? '—'} kcal</div>
+        <div class="plan-card-kcal">${fmtNum(plan.toplam_kalori)} kcal</div>
       </div>
       <div class="plan-card-body">
         ${mealsHtml}
         <div class="plan-macro-grid">
-          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_protein ?? '—'}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_protein')}</div></div>
-          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_karb ?? '—'}g</div><div class="plan-macro-lbl">${__t('nutrition.carb_short')}</div></div>
-          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_yag ?? '—'}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_fat')}</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_protein)}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_protein')}</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_karb)}g</div><div class="plan-macro-lbl">${__t('nutrition.carb_short')}</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_yag)}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_fat')}</div></div>
         </div>
         <button class="btn-select-plan" id="sel-btn-${i}"
-          data-action="selectPlan" data-args="${JSON.stringify([i, plan, data.overall_score]).replace(/"/g,'&quot;')}">
+          data-action="selectPlan" data-args="${esc(JSON.stringify([i, plan, data.overall_score]))}">
           ${__t('nutrition.select_plan')}
         </button>
       </div>`;
@@ -860,11 +873,19 @@ function renderPlans(data) {
 
 async function selectPlan(i, plan, score) {
   try {
-    await fetch('/nutrition-plan/save', {
+    const res = await fetch('/nutrition-plan/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan, score })
     });
+    /* The save route can now refuse (F2 schema / F3 score). Claiming success
+       on a refusal would show the card as the active plan while the server
+       holds the OLD one — the user's next reload would silently disagree. */
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      showToast(d.error || __t('nutrition.save_error_prefix'), 'error');
+      return;
+    }
     invalidateActivePlan();
     document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('chosen'));
     document.querySelectorAll('.btn-select-plan').forEach(b => { b.textContent = __t('nutrition.select_plan'); b.classList.remove('chosen'); });
@@ -920,7 +941,7 @@ function renderActivePlanDetail(plan, score, createdAt) {
         <div class="apd-meal-hdr">
           <span class="apd-meal-icon" aria-hidden="true">${m.icon}</span>
           <span class="apd-meal-name">${m.label}</span>
-          <span class="apd-meal-kcal">${ml.kalori ?? '—'} kcal</span>
+          <span class="apd-meal-kcal">${fmtNum(ml.kalori)} kcal</span>
         </div>
         <ul class="apd-meal-list">${items}</ul>
       </div>`;
@@ -930,26 +951,26 @@ function renderActivePlanDetail(plan, score, createdAt) {
     <div class="apd-header">
       <div>
         <div class="apd-title">${esc(plan.isim || __t('nutrition.active_plan_name'))}</div>
-        <div class="apd-sub">${createdAt} · ${__t('nutrition.score_text')} ${score}/10</div>
+        <div class="apd-sub">${esc(createdAt)} · ${__t('nutrition.score_text')} ${fmtNum(score)}/10</div>
       </div>
       <button class="btn-ghost" data-action="resetPlan">${__t('nutrition.new_plan')}</button>
     </div>
 
     <div class="apd-macro-grid">
       <div class="apd-macro-item">
-        <div class="apd-macro-val">${plan.toplam_kalori ?? '—'}</div>
+        <div class="apd-macro-val">${fmtNum(plan.toplam_kalori)}</div>
         <div class="apd-macro-lbl">kcal</div>
       </div>
       <div class="apd-macro-item">
-        <div class="apd-macro-val">${plan.toplam_protein ?? '—'}g</div>
+        <div class="apd-macro-val">${fmtNum(plan.toplam_protein)}g</div>
         <div class="apd-macro-lbl">${__t('nutrition.macro_protein')}</div>
       </div>
       <div class="apd-macro-item">
-        <div class="apd-macro-val">${plan.toplam_karb ?? '—'}g</div>
+        <div class="apd-macro-val">${fmtNum(plan.toplam_karb)}g</div>
         <div class="apd-macro-lbl">${__t('nutrition.carb_short')}</div>
       </div>
       <div class="apd-macro-item">
-        <div class="apd-macro-val">${plan.toplam_yag ?? '—'}g</div>
+        <div class="apd-macro-val">${fmtNum(plan.toplam_yag)}g</div>
         <div class="apd-macro-lbl">${__t('nutrition.macro_fat')}</div>
       </div>
     </div>
@@ -986,7 +1007,7 @@ async function loadQuickAddSection() {
     container.innerHTML = MEALS.map(m => {
       const ml  = d.plan[m.key];
       if (!ml) return '';
-      const sub = `${ml.kalori ?? '—'} kcal · ${ml.protein ?? '—'}g ${__t('nutrition.unit_protein')} · ${ml.karb ?? '—'}g ${__t('nutrition.unit_carb')}`;
+      const sub = `${fmtNum(ml.kalori)} kcal · ${fmtNum(ml.protein)}g ${__t('nutrition.unit_protein')} · ${fmtNum(ml.karb)}g ${__t('nutrition.unit_carb')}`;
       return `
         <button class="qab" id="qab-${m.key}"
           data-action="quickAddMeal" data-args='["${m.key}","${m.label}"]' type="button">
