@@ -137,9 +137,14 @@ def key_belongs_to_user(key, user_id):
 # `_EXT_BY_MIME` değerleri + bilinmeyen MIME'ın düştüğü "bin". Bu desen bilerek
 # dar: defterdeki serbest metin (bozuk URL, yabancı kova, yol geçişi) hiçbir
 # zaman bir nesneyi silme yetkisine dönüşmemeli (bkz. UnsafeObjectKey).
-_MEAL_PHOTO_KEY = re.compile(
-    r"meals/(?P<user_id>[1-9][0-9]{0,17})/[0-9]{4}/[0-9]{2}/"
+_KEY_BODY = (
+    r"(?P<user_id>[1-9][0-9]{0,17})/[0-9]{4}/[0-9]{2}/"
     r"[0-9a-f]{32}\.(?:jpg|png|webp|gif|bin)")
+_MEAL_PHOTO_KEY = re.compile(r"meals/" + _KEY_BODY)
+# F4. Prefixes actually minted by upload_image callers for Pump Check photos
+# (`prefix="pump-checks"`) and avatars (`prefix="avatars"`). `meals/` stays on
+# the F14 primitive; default `uploads/` is not a live call-site prefix.
+_MANAGED_OBJECT_KEY = re.compile(r"(?P<prefix>pump-checks|avatars)/" + _KEY_BODY)
 
 
 def meal_photo_key_is_deletable(key, owner_user_id):
@@ -178,6 +183,66 @@ def delete_meal_photo(key, expected_user_id):
             "[S3] event=meal_photo_delete_failed error_type=%s", type(e).__name__)
         raise S3Error(str(e)) from e
     logger.info("[S3] event=meal_photo_deleted")
+
+
+def managed_object_key_is_deletable(key, owner_user_id):
+    """Bu anahtar, `owner_user_id`'ye ait ve BİZİM ürettiğimiz bir F4 nesnesi mi?
+
+    Saf yüklem (ağ yok): boş/None, harici URL, statik varlık, öğün fotoğrafı
+    veya yabancı sahip → False. Veritabanındaki serbest metin silme yetkisine
+    dönüşmez.
+    """
+    if not isinstance(key, str) or not key:
+        return False
+    match = _MANAGED_OBJECT_KEY.fullmatch(key)
+    return bool(match) and match.group("user_id") == str(owner_user_id)
+
+
+def _is_missing_object(error):
+    response = getattr(error, "response", None)
+    if not isinstance(response, dict):
+        return False
+    code = str((response.get("Error") or {}).get("Code") or "")
+    return code in {"404", "NoSuchKey", "NotFound"}
+
+
+def delete_managed_object(key, expected_user_id):
+    """Uygulamanın ürettiği tek bir Pump Check / avatar nesnesini sil (F4).
+
+    Kova SUNUCU tarafından seçilir (parametre değildir). Anahtar
+    `managed_object_key_is_deletable` ile sınırlanır: boş referans, varsayılan
+    varlık, harici URL veya yabancı sahip → S3 çağrısı YOK, False.
+
+    Olmayan nesne (NoSuchKey/404) idempotent başarıdır. Taşıma hatasında
+    `S3Error` yükselir — sessiz başarısızlık yoktur.
+    """
+    if not managed_object_key_is_deletable(key, expected_user_id):
+        if isinstance(key, str) and key:
+            logger.warning(
+                "[S3] event=managed_object_delete_skipped reason=unmanaged_or_unowned")
+        return False
+    if not is_enabled():
+        logger.warning(
+            "[S3] event=managed_object_delete_skipped reason=s3_disabled")
+        return False
+    try:
+        client = _get_client()
+        client.delete_object(Bucket=S3_BUCKET_NAME, Key=key)
+    except ClientError as e:
+        if _is_missing_object(e):
+            logger.info("[S3] event=managed_object_already_absent")
+            return True
+        logger.warning(
+            "[S3] event=managed_object_delete_failed error_type=%s",
+            type(e).__name__)
+        raise S3Error(str(e)) from e
+    except BotoCoreError as e:
+        logger.warning(
+            "[S3] event=managed_object_delete_failed error_type=%s",
+            type(e).__name__)
+        raise S3Error(str(e)) from e
+    logger.info("[S3] event=managed_object_deleted")
+    return True
 
 
 def _build_key(prefix, content_type, user_id):

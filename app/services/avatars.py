@@ -8,8 +8,12 @@ geliştirme, test) eski base64 davranışına zarifçe düşülür — temel ak�
 Gösterim tarafı: User.avatar_src (modelde) anahtardan pre-signed URL üretir ya da
 eski base64'ü döndürür.
 """
+import logging
+
 import s3_helper
 from app.services.validators import _decode_data_url_image
+
+logger = logging.getLogger(__name__)
 
 # 500 KB üst sınır (base64 dize uzunluğu) — yükleme guard'ı olarak korunur.
 _MAX_AVATAR_LEN = 500_000
@@ -55,3 +59,22 @@ def set_user_avatar(user, data_url):
     user.profile_picture = data_url
     user.profile_picture_key = None
     return None
+
+
+def release_unreferenced_avatar(user, candidate_key):
+    """Aday anahtarı, kullanıcının GÜNCEL avatarı değilse sil (F4).
+
+    Commit/rollback'ten SONRA çağrılır. Aynı anahtar (A→A) ve boş/harici
+    referans no-op'tur. Taşıma hatası yükseltmez; canlı avatarı geçersiz kılmaz.
+    """
+    if not candidate_key:
+        return
+    live_key = user.profile_picture_key
+    if candidate_key == live_key:
+        return
+    try:
+        s3_helper.delete_managed_object(candidate_key, user.id)
+    except s3_helper.S3Error as error:
+        logger.error(
+            "[AVATAR] event=object_release_pending user_id=%s key=%s error_type=%s",
+            user.id, candidate_key, type(error).__name__)

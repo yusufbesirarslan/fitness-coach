@@ -9,9 +9,9 @@ from app.blueprints.supplements import CATEGORY_ICONS
 from app.extensions import db
 from app.i18n import t
 from app.models import PumpCheck, Supplement, User, UserSession, UserWearableConnection
-from app.services.avatars import set_user_avatar
+from app.services.avatars import release_unreferenced_avatar, set_user_avatar
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
-from app.services.pump_checks import serialize_pump_check_card
+from app.services.pump_checks import release_pump_check_image, serialize_pump_check_card
 from app.services.validators import validate_full_name, validate_username
 
 
@@ -117,10 +117,18 @@ def edit_profile():
     data = request.get_json(silent=True) or {}
 
     if set(data) == {"profile_picture"}:
+        old_key = current_user.profile_picture_key
         pic_error = set_user_avatar(current_user, data["profile_picture"])
         if pic_error:
             return jsonify({"error": pic_error}), 400
-        db.session.commit()
+        uploaded_key = current_user.profile_picture_key
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            release_unreferenced_avatar(current_user, uploaded_key)
+            raise
+        release_unreferenced_avatar(current_user, old_key)
         return jsonify({"message": t("editprofile.avatar_updated")})
 
     new_username = (data.get("username") or "").strip()
@@ -139,12 +147,15 @@ def edit_profile():
     if full_name_error:
         return jsonify({"error": full_name_error}), 400
 
+    old_avatar_key = current_user.profile_picture_key
+    uploaded_avatar_key = old_avatar_key
     if "profile_picture" in data:
         # S3 açıksa avatarı S3'e koyar (key saklar, base64'ü temizler); kapalıysa
         # eski base64 davranışına düşer. Validasyon (≤500KB + gerçek görsel) içeride.
         pic_error = set_user_avatar(current_user, data.get("profile_picture"))
         if pic_error:
             return jsonify({"error": pic_error}), 400
+        uploaded_avatar_key = current_user.profile_picture_key
 
     valid_goals = ["kilo verme", "kas kazanma", ""]
     if new_goal not in valid_goals:
@@ -170,7 +181,16 @@ def edit_profile():
         # eşzamanlı istek aynı adı alabilir. DB unique kısıtı (models.py) gerçek
         # guard; çakışmada 500 yerine dostça "kullanımda" mesajı dön (2.4).
         db.session.rollback()
+        if "profile_picture" in data:
+            release_unreferenced_avatar(current_user, uploaded_avatar_key)
         return jsonify({"error": t("route.username_taken")}), 400
+    except Exception:
+        db.session.rollback()
+        if "profile_picture" in data:
+            release_unreferenced_avatar(current_user, uploaded_avatar_key)
+        raise
+    if "profile_picture" in data:
+        release_unreferenced_avatar(current_user, old_avatar_key)
     return jsonify({"message": t("route.profile_updated")})
 
 
@@ -224,6 +244,8 @@ def pump_check_gallery_data():
 @require_auth
 def pump_check_gallery_delete(check_id):
     check = PumpCheck.query.filter_by(id=check_id, user_id=current_user.id).first_or_404()
+    image_key = check.image_key
+    owner_id = check.user_id
     # Feed V2 (Sprint 5 PR2): bu pump check'e ATIFTA BULUNAN repost/quote'lar
     # (ref_id FK'siz) askıda kalmasın diye önce çocuklarıyla birlikte silinir.
     from app.models import FeedItem, FeedItemComment, FeedItemLike
@@ -240,4 +262,5 @@ def pump_check_gallery_delete(check_id):
     purge_content_notifications(pump_check_ids=[check.id], feed_item_ids=ref_items)
     db.session.delete(check)
     db.session.commit()
+    release_pump_check_image(owner_id, image_key)
     return jsonify({"ok": True})

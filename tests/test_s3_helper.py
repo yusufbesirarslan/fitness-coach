@@ -15,14 +15,24 @@ from s3_helper import S3Error, _build_key, generate_presigned_url, is_enabled, u
 
 
 class _FakeS3:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, missing=False):
         self.put_calls = []
+        self.delete_calls = []
         self.fail = fail
+        self.missing = missing
 
     def put_object(self, **kwargs):
         if self.fail:
             raise ClientError({"Error": {"Code": "AccessDenied"}}, "PutObject")
         self.put_calls.append(kwargs)
+
+    def delete_object(self, **kwargs):
+        self.delete_calls.append(kwargs)
+        if self.fail:
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject")
+        if self.missing:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "DeleteObject")
+        return {"ResponseMetadata": {"HTTPStatusCode": 204}}
 
     def generate_presigned_url(self, op, Params=None, ExpiresIn=None):
         if self.fail:
@@ -107,3 +117,78 @@ def test_s3_logs_never_contain_private_key_bucket_or_owner(caplog, s3_on, monkey
     assert private_key not in rendered
     assert "test-bucket" not in rendered
     assert "424242" not in rendered
+
+
+def _minted(prefix, user_id, stem="a1"):
+    return f"{prefix}/{user_id}/2026/09/{stem * 16}.jpg"
+
+
+def test_delete_managed_object_is_bounded_to_the_server_bucket(s3_on):
+    import inspect
+
+    signature = inspect.signature(s3_helper.delete_managed_object)
+    assert "bucket" not in signature.parameters
+    key = _minted("pump-checks", 7)
+    assert s3_helper.delete_managed_object(key, 7) is True
+    assert s3_on.delete_calls == [{"Bucket": "test-bucket", "Key": key}]
+
+
+def test_delete_managed_object_only_accepts_minted_pump_check_and_avatar_keys(s3_on):
+    pump = _minted("pump-checks", 7)
+    avatar = _minted("avatars", 7, "b2")
+    assert s3_helper.managed_object_key_is_deletable(pump, 7)
+    assert s3_helper.managed_object_key_is_deletable(avatar, 7)
+    s3_helper.delete_managed_object(pump, 7)
+    s3_helper.delete_managed_object(avatar, 7)
+    assert [call["Key"] for call in s3_on.delete_calls] == [pump, avatar]
+
+
+@pytest.mark.parametrize("key, owner", [
+    (None, 7),
+    ("", 7),
+    ("https://cdn.example/avatars/7.png", 7),
+    ("/static/img/default-avatar.png", 7),
+    ("avatars/7/2026/09/not-a-uuid.jpg", 7),
+    ("meals/7/2026/09/" + "a1" * 16 + ".jpg", 7),
+    ("uploads/7/2026/09/" + "a1" * 16 + ".jpg", 7),
+    (_minted("pump-checks", 8), 7),
+    ("pump-checks/7/2026/09/" + "a1" * 16 + ".jpg?X-Amz-Signature=secret", 7),
+    ("../pump-checks/7/2026/09/" + "a1" * 16 + ".jpg", 7),
+])
+def test_delete_managed_object_is_a_safe_noop_for_unmanaged_references(
+        s3_on, key, owner):
+    assert s3_helper.managed_object_key_is_deletable(key, owner) is False
+    assert s3_helper.delete_managed_object(key, owner) is False
+    assert s3_on.delete_calls == []
+
+
+def test_delete_managed_object_is_idempotent_when_the_object_is_already_gone(
+        s3_on, monkeypatch):
+    key = _minted("avatars", 7)
+    s3_helper.delete_managed_object(key, 7)
+    monkeypatch.setattr(s3_helper, "_client", _FakeS3(missing=True))
+    assert s3_helper.delete_managed_object(key, 7) is True
+
+
+def test_delete_managed_object_raises_on_transport_failure(s3_on, monkeypatch):
+    monkeypatch.setattr(s3_helper, "_client", _FakeS3(fail=True))
+    with pytest.raises(S3Error):
+        s3_helper.delete_managed_object(_minted("pump-checks", 7), 7)
+
+
+def test_delete_managed_object_logs_never_contain_key_bucket_or_owner(
+        caplog, s3_on, monkeypatch):
+    private_key = _minted("pump-checks", 424242, "ab")
+    s3_helper.delete_managed_object(private_key, 424242)
+    s3_helper.delete_managed_object("https://evil.example/secret.jpg", 424242)
+    monkeypatch.setattr(s3_helper, "_client", _FakeS3(fail=True))
+    with pytest.raises(S3Error):
+        s3_helper.delete_managed_object(private_key, 424242)
+
+    rendered = caplog.text
+    assert private_key not in rendered
+    assert "test-bucket" not in rendered
+    assert "424242" not in rendered
+    assert "evil.example" not in rendered
+    assert "secret.jpg" not in rendered
+    assert "X-Amz" not in rendered
