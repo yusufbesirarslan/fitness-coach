@@ -1,4 +1,8 @@
-/* manage_stack page — extracted from inline <style> (Phase 5 Final QA), canonical tokens. */
+/* manage_stack page — the ONE editable Supplement cabinet.
+   WEB-UX4-PR6 rebuilt the page on the shared system: .sec-label headings,
+   .fc-input fields, .icon-tile / .icon-inline SVG iconography, the canonical
+   button ranks, and native radio groups for every choice. Every class below
+   is page-scoped; no token, generic component, font or icon system is added. */
     .stack-wrap { max-width: 700px; margin: 0 auto; }
 
     /* UX-3 PR5 — Plan / Nutrition / Supplements orientation. Deliberately the
@@ -10,111 +14,188 @@
         margin-bottom: var(--space-2); color: var(--color-text-3);
         font-size: var(--text-sm); line-height: var(--leading-normal);
     }
+    /* PR6: a one-word crumb ("Plan") measured 23px wide; the 44px floor applies
+       to both axes. The hit area grows by inline padding that an equal negative
+       margin cancels, so the crumb text does not move. */
     .stack-parent-context a {
         color: var(--color-text-2); text-decoration: none;
         min-height: 44px; display: inline-flex; align-items: center;
+        padding: 0 var(--space-3); margin: 0 calc(var(--space-3) * -1);
     }
     .stack-parent-context a:hover { color: var(--color-primary); }
     .stack-parent-context a:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
-    /* ── add form ── */
-    .add-card { background: var(--surface); border-radius: var(--r-lg); padding: 24px; margin-bottom: 32px; }
-    .add-card-title { font-family: var(--font-display); font-size: 20px; letter-spacing: 2px; color: var(--color-primary); margin-bottom: 16px; }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
-    .form-row.full { grid-template-columns: 1fr; }
-    @media(max-width:500px) { .form-row { grid-template-columns: 1fr; } }
-    .form-row label { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; display: block; }
-    .form-row input, .form-row select, .form-row textarea {
-        width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
-        padding: 10px 14px; color: var(--text); font-size: 14px; font-family: var(--font-body);
-    }
-    /* WEB-UX4-PR2 / F-02: outline'i bastirip yerine yalnizca border rengi
-       birakmak kanonik odak halkasini siliyordu; .fc-input:focus ile ayni
-       dil kullanilir. */
-    .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--color-primary); outline: none; box-shadow: var(--focus-ring); }
-    .form-row textarea { resize: vertical; min-height: 60px; }
-
-    /* ── chips ── */
-    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .chip-row label { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; display: block; width: 100%; }
-    .cat-chip {
-        padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: transparent;
-        color: var(--text-2); font-size: 13px; cursor: pointer;
-        /* WEB-UX4-PR2 / F-33: `transition: all` odak halkasinin RENGINI de
-           animasyonluyordu, bu yuzden kanonik halka 150 ms boyunca ara
-           renklerden geciyor ve o sure boyunca algilanamiyordu. */
-        transition: background 0.15s, border-color 0.15s, color 0.15s;
-    }
-    .cat-chip.active { background: var(--color-primary); color: rgb(var(--black-rgb)); border-color: var(--color-primary); font-weight: 600; }
-
-    /* ── star rating ── */
-    .star-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-    .star-row { display: flex; align-items: center; gap: 10px; }
-    .star-row-label { font-size: 12px; color: var(--text-2); min-width: 90px; }
-    .stars { display: flex; gap: 4px; }
-    .stars .star {
-        width: 28px; height: 28px; padding: 0; border: 0; background: transparent; cursor: pointer; font-size: 20px; line-height: 28px; text-align: center;
-        color: var(--border); transition: color 0.12s;
-    }
-    .stars .star.filled { color: var(--color-primary); }
-    .stars .star:hover { color: var(--color-accent-lime); }
-    .stars .star:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 3px; }
-
-    /* ── submit ── */
-    .add-btn {
-        background: var(--color-primary); color: rgb(var(--black-rgb)); font-family: var(--font-display); font-size: 16px;
-        letter-spacing: 2px; padding: 12px 32px; border: none; border-radius: var(--r-sm);
-        cursor: pointer; width: 100%; margin-top: 8px; transition: opacity 0.2s;
-    }
-    .add-btn:hover { opacity: 0.85; }
-    .add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-    /* ── toggle row ── */
-    .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .toggle-row label { font-size: 13px; color: var(--text-2); }
-    .toggle { width: 40px; height: 22px; border-radius: 11px; background: var(--border); position: relative; cursor: pointer; transition: background 0.2s; }
-    .toggle.on { background: var(--color-primary); }
-    .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--white); transition: transform 0.2s; }
-    .toggle.on::after { transform: translateX(18px); }
-
-    /* ── supplement list ── */
-    .list-title { font-family: var(--font-display); font-size: 18px; letter-spacing: 2px; color: var(--text); margin-bottom: 16px; }
-    .supp-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 48px; }
+    /* ── cabinet ── */
+    .stack-cabinet { margin-bottom: var(--space-8); }
+    .supp-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
 
     .supp-card {
-        background: var(--surface); border-radius: var(--r-md); padding: 16px 20px;
-        display: flex; align-items: flex-start; gap: 14px; position: relative;
-        border: 1px solid var(--border); transition: border-color 0.2s;
+        background: var(--color-surface-2); border-radius: var(--radius-lg);
+        padding: var(--space-4) var(--space-5);
+        display: flex; align-items: flex-start; gap: var(--space-4);
+        border: var(--border-w-1) solid var(--color-border-1);
+        min-width: 0;
     }
-    .supp-card:hover { border-color: var(--border-2); }
-    .supp-icon { font-size: 28px; flex-shrink: 0; margin-top: 2px; }
-    .supp-body { flex: 1; min-width: 0; }
-    .supp-name { font-weight: 600; color: var(--text); font-size: 15px; }
-    .supp-brand { font-size: 12px; color: var(--text-3); }
-    .supp-ratings { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
-    .supp-rating-item { font-size: 11px; color: var(--text-2); }
-    .supp-rating-item .mini-stars { color: var(--color-primary); letter-spacing: 1px; }
-    .supp-review { font-size: 12px; color: var(--text-3); font-style: italic; margin-top: 6px; border-left: 2px solid var(--color-primary); padding-left: 10px; }
+    .supp-icon { margin-top: 2px; }
+    .supp-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+    .supp-top-row { display: flex; align-items: flex-start; gap: var(--space-3); justify-content: space-between; }
+    .supp-ident { min-width: 0; }
+    .supp-name {
+        font-size: var(--text-base); font-weight: var(--weight-semibold);
+        color: var(--color-text-1); line-height: var(--leading-tight);
+        overflow-wrap: anywhere;
+    }
+    .supp-brand { font-size: var(--text-sm); color: var(--color-text-3); margin-top: 2px; overflow-wrap: anywhere; }
 
     .status-badge {
-        font-size: 10px; padding: 3px 10px; border-radius: 10px; font-weight: 600;
-        text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+        flex-shrink: 0;
+        font-size: var(--text-xs); padding: 3px 10px; border-radius: var(--radius-full); font-weight: var(--weight-semibold);
+        text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
     }
-    .status-active   { background: rgba(var(--color-success-rgb),0.15); color: var(--green); }
-    .status-low      { background: rgba(var(--color-warning-rgb),0.15); color: var(--orange); }
-    .status-finished { background: rgba(var(--gray-500-rgb),0.2); color: var(--color-text-4); }
+    .status-active   { background: rgba(var(--color-success-rgb),0.15); color: var(--color-success); }
+    .status-low      { background: rgba(var(--color-warning-rgb),0.15); color: var(--color-warning); }
+    .status-finished { background: var(--overlay-4); color: var(--color-text-3); }
 
-    /* UX-3 PR5 — the four status/delete buttons are a non-wrapping flex row, so
-       at 320px their combined intrinsic width pushed `.supp-body` (min-width:0)
-       wider than the card and the PAGE scrolled sideways. Pre-existing, but this
-       is the canonical cabinet PR5 points every other surface at, and 320px is a
-       supported viewport. One declaration; no layout redesign. */
-    .supp-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .supp-act-btn {
-        font-size: 11px; padding: 4px 12px; border-radius: var(--r-sm); border: 1px solid var(--border);
-        background: transparent; color: var(--text-2); cursor: pointer; transition: all 0.15s;
+    /* Saved ratings: the value is TEXT ("4/5") so it is never colour- or
+       glyph-only; the five-segment meter beside it is decorative. */
+    .supp-ratings { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-4); }
+    .supp-rating-item { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--color-text-2); }
+    .supp-rating-label { color: var(--color-text-3); }
+    .supp-rating-meter { display: inline-flex; gap: 2px; }
+    .supp-rating-seg { width: 8px; height: 4px; border-radius: var(--radius-full); background: var(--overlay-6); }
+    .supp-rating-seg.is-on { background: var(--color-primary); }
+    .supp-rating-value { font-variant-numeric: tabular-nums; color: var(--color-text-1); font-weight: var(--weight-medium); }
+    .supp-review {
+        font-size: var(--text-sm); color: var(--color-text-2); line-height: var(--leading-normal);
+        border-left: var(--border-w-2) solid var(--color-border-2); padding-left: var(--space-3);
+        overflow-wrap: anywhere;
     }
-    .supp-act-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
-    .supp-act-btn.del:hover { border-color: var(--red); color: var(--red); }
-    .supp-top-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
-    .empty-state { text-align: center; color: var(--text-3); padding: 40px 20px; font-size: 14px; }
+
+    /* F-36 — state management and destruction are two ranks, not four equal
+       ghosts: status is one quiet segmented group, Delete is the canonical
+       .btn-danger set apart from it. UX-3 PR5's wrap is kept so 320px never
+       scrolls sideways. */
+    .supp-actions {
+        display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+        gap: var(--space-2) var(--space-3); margin-top: var(--space-1);
+    }
+    .supp-status-set {
+        display: inline-flex; flex: 1 1 auto; min-width: 0;
+        border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-md);
+        padding: 2px; gap: 2px;
+    }
+    .supp-status-btn {
+        flex: 1 0 auto; min-width: 44px; min-height: 44px; padding: 0 var(--space-2);
+        border: 0; border-radius: var(--radius-sm); background: transparent;
+        color: var(--color-text-3); font-size: var(--text-sm); font-weight: var(--weight-medium);
+        cursor: pointer; white-space: nowrap;
+        transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+    }
+    .supp-status-btn:hover { color: var(--color-text-1); background: var(--overlay-4); }
+    /* Current state: raised surface + stronger label + weight — never the
+       primary fill, which belongs to the page's call to action. */
+    .supp-status-btn[aria-pressed="true"] {
+        background: var(--overlay-6); color: var(--color-text-1); font-weight: var(--weight-semibold);
+        box-shadow: inset 0 0 0 var(--border-w-1) var(--color-border-2);
+    }
+    .supp-status-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+    .supp-delete { flex: 0 0 auto; padding-left: var(--space-5); padding-right: var(--space-5); }
+
+    .stack-empty { padding: var(--space-8) var(--space-4); gap: var(--space-3); }
+
+    /* ── add disclosure ── */
+    .stack-add { margin-bottom: var(--space-8); }
+    .stack-add-disclosure { border-radius: var(--radius-lg); }
+    .stack-add-summary { width: 100%; list-style: none; }
+    .stack-add-summary::-webkit-details-marker { display: none; }
+    .stack-add-summary::marker { content: ''; }
+    .stack-add-disclosure[open] { background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1); padding: var(--space-4); }
+    .stack-add-form { display: flex; flex-direction: column; gap: var(--space-5); margin-top: var(--space-5); }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+    .form-row.full { grid-template-columns: 1fr; }
+    @media (max-width: 500px) { .form-row { grid-template-columns: 1fr; } }
+    .form-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+    .form-field > label,
+    .stack-choices > legend,
+    .stack-ratings > legend {
+        font-size: var(--text-xs); color: var(--color-text-3); font-weight: var(--weight-semibold);
+        text-transform: uppercase; letter-spacing: var(--tracking-label);
+    }
+    .form-field-switch { justify-content: flex-end; }
+
+    fieldset.stack-choices, fieldset.stack-ratings, fieldset.stack-rating { border: 0; min-width: 0; }
+    .stack-choices > legend, .stack-ratings > legend { margin-bottom: var(--space-2); }
+
+    /* Native radio, custom face: the input stays in the accessibility tree and
+       the Tab order (one stop per group, arrow keys move within it); the label
+       is the ≥44px hit area. */
+    .stack-choice, .stack-rating-opt { position: relative; display: inline-flex; cursor: pointer; }
+    .stack-choice input, .stack-rating-opt input {
+        position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer;
+    }
+    .stack-choice-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .stack-choice-face, .stack-rating-face {
+        display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+        min-height: 44px; min-width: 44px; padding: 0 var(--space-4);
+        border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-md);
+        color: var(--color-text-2); font-size: var(--text-md); font-weight: var(--weight-medium);
+        background: transparent;
+        transition: background var(--duration-fast) var(--ease-standard),
+                    border-color var(--duration-fast) var(--ease-standard),
+                    color var(--duration-fast) var(--ease-standard);
+    }
+    .stack-choice:hover .stack-choice-face, .stack-rating-opt:hover .stack-rating-face { border-color: var(--color-border-2); color: var(--color-text-1); }
+    /* Selected ≠ primary CTA: soft tint, a 2px border (a shape change, so the
+       state is not carried by colour alone) and a heavier label. */
+    .stack-choice input:checked + .stack-choice-face,
+    .stack-rating-opt input:checked + .stack-rating-face {
+        background: var(--color-primary-soft); color: var(--color-text-1);
+        border-color: var(--color-primary);
+        /* A second ring drawn inside the box: the state reads as a shape change,
+           not only a colour, and the chip does not grow or re-wrap. */
+        box-shadow: inset 0 0 0 var(--border-w-1) var(--color-primary);
+    }
+    .stack-choice input:focus-visible + .stack-choice-face,
+    .stack-rating-opt input:focus-visible + .stack-rating-face {
+        outline: 2px solid var(--color-primary); outline-offset: 2px;
+    }
+
+    .stack-ratings { display: flex; flex-direction: column; gap: var(--space-3); }
+    .stack-rating { display: grid; grid-template-columns: minmax(96px, auto) 1fr; align-items: center; gap: var(--space-3); }
+    .stack-rating > legend { float: left; font-size: var(--text-md); color: var(--color-text-2); padding: 0; }
+    .stack-rating-scale { display: grid; grid-template-columns: auto repeat(5, minmax(44px, 1fr)); gap: var(--space-1); }
+    .stack-rating-opt .stack-rating-face { width: 100%; padding: 0 var(--space-2); font-variant-numeric: tabular-nums; }
+    .stack-rating-unset .stack-rating-face { color: var(--color-text-3); }
+    /* Phones: "Not rated" plus five 44px values does not fit one row with
+       margin to spare at every width (and "Puan yok"/"Not rated" differ), so
+       the unset choice takes its own full row above a five-column scale. */
+    @media (max-width: 500px) {
+        .stack-rating { grid-template-columns: 1fr; gap: var(--space-2); }
+        .stack-rating > legend { float: none; }
+        .stack-rating-scale { grid-template-columns: repeat(5, minmax(44px, 1fr)); }
+        .stack-rating-unset { grid-column: 1 / -1; }
+    }
+
+    /* Visibility switch: a native checkbox with role="switch"; the whole label
+       row is the hit area. */
+    .stack-switch { position: relative; display: inline-flex; align-items: center; gap: var(--space-3); min-height: 44px; cursor: pointer; color: var(--color-text-2); font-size: var(--text-md); }
+    .stack-switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+    .stack-switch-track {
+        position: relative; flex-shrink: 0; width: 40px; height: 22px; border-radius: var(--radius-full);
+        background: var(--overlay-6); border: var(--border-w-1) solid var(--color-border-2);
+        transition: background var(--duration-fast) var(--ease-standard);
+    }
+    .stack-switch-track::after {
+        content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+        border-radius: 50%; background: var(--color-text-2);
+        transition: transform var(--duration-fast) var(--ease-standard);
+    }
+    .stack-switch input:checked + .stack-switch-track { background: var(--color-primary); border-color: var(--color-primary); }
+    .stack-switch input:checked + .stack-switch-track::after { transform: translateX(18px); background: var(--color-on-primary); }
+    .stack-switch input:focus-visible + .stack-switch-track { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+    @media (prefers-reduced-motion: reduce) {
+        .supp-status-btn, .stack-choice-face, .stack-rating-face,
+        .stack-switch-track, .stack-switch-track::after { transition: none; }
+    }

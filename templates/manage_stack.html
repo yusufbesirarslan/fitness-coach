@@ -9,6 +9,50 @@
 </head>
 <body class="page-body">
 
+{#- WEB-UX4-PR6 / F-20 — category iconography. The stored category VALUES are
+    the canonical backend enum and never change; only their presentation is
+    mapped here, from a known value to a template-owned 1.8-stroke SVG. Nothing
+    is injected from Python (no `|safe`), and an unknown value falls back to the
+    same system icon as "Other". `CATEGORY_ICONS` is deliberately NOT edited:
+    Account still renders it and Account's iconography belongs to UX4-PR7. -#}
+{%- macro category_icon(category, cls='') -%}
+<svg class="{{ cls }}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+{%- if category == 'Protein' -%}
+<path d="M8 3h8l-1 4H9z"/><path d="M9 7h6l1.4 12.6A1.5 1.5 0 0 1 14.9 21H9.1a1.5 1.5 0 0 1-1.5-1.4z"/><path d="M8.6 12h6.8"/>
+{%- elif category == 'Amino Acid' -%}
+<path d="M12 2.7l5.7 5.6a8 8 0 1 1-11.4 0z"/>
+{%- elif category == 'Pre-Workout' -%}
+<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>
+{%- elif category == 'Vitamin/Health' -%}
+<path d="M10.5 20.5a4.95 4.95 0 0 1-7-7l10-10a4.95 4.95 0 0 1 7 7z"/><path d="M8.5 8.5l7 7"/>
+{%- elif category == 'Creatine' -%}
+<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>
+{%- else -%}
+<path d="M21 8l-9-5-9 5 9 5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>
+{%- endif -%}
+</svg>
+{%- endmacro -%}
+
+{%- set category_labels = {
+    'Protein': t('manage_stack.cat_protein'),
+    'Amino Acid': t('manage_stack.cat_amino'),
+    'Pre-Workout': t('manage_stack.cat_preworkout'),
+    'Vitamin/Health': t('manage_stack.cat_vitamin'),
+    'Creatine': t('manage_stack.cat_creatine'),
+    'Other': t('manage_stack.cat_other'),
+} -%}
+{%- set status_labels = {
+    'Active': t('manage_stack.status_active'),
+    'Low Stock': t('manage_stack.status_low'),
+    'Finished': t('manage_stack.status_finished'),
+} -%}
+{%- set rating_fields = [
+    ('rating_effect', t('manage_stack.effect')),
+    ('rating_taste', t('manage_stack.taste')),
+    ('rating_digestion', t('manage_stack.digestion')),
+    ('rating_price', t('manage_stack.price_perf')),
+] -%}
+
 <div class="toast-wrap" id="toast-wrap"></div>
 
 {% set nav_active = 'supplements' %}
@@ -32,139 +76,166 @@
             <span aria-current="page">{{ t('supplements.parent.current') }}</span>
         </nav>
 
+        {#- WEB-UX4-PR6 / F-15-style naming: the destination has ONE name, the
+            same one the breadcrumb and the document title use. "Cabinet" is
+            supporting copy, never a second identity. -#}
         <div class="page-hdr">
-            <h1>{{ t('manage_stack.h1_a') }}<br><span>{{ t('manage_stack.h1_b') }}</span></h1>
+            <h1>{{ t('supplements.parent.current') }}</h1>
             <p>{{ t('manage_stack.page_sub') }}</p>
         </div>
 
-        <!-- ══ ADD FORM ══ -->
-        <div class="add-card" id="add-card">
-            <div class="add-card-title">{{ t('manage_stack.add_title') }}</div>
-
-            <div class="form-row">
-                <div><label>{{ t('manage_stack.name_label') }}</label><input type="text" id="f-name" placeholder="Gold Standard Whey"></div>
-                <div><label>{{ t('manage_stack.brand_label') }}</label><input type="text" id="f-brand" placeholder="Optimum Nutrition"></div>
-            </div>
-
-            <div class="chip-row">
-                <label>{{ t('manage_stack.category') }}</label>
-                {% for cat in categories %}
-                <button class="cat-chip{% if cat == 'Protein' %} active{% endif %}" data-action="fxPickCat" data-cat="{{ cat }}">{{ icons[cat] }} {{ cat }}</button>
-                {% endfor %}
-            </div>
-
-            <div class="chip-row">
-                <label>{{ t('manage_stack.status') }}</label>
-                <button class="cat-chip active" data-action="fxPickStatus" data-status="Active">{{ t('manage_stack.status_active') }}</button>
-                <button class="cat-chip" data-action="fxPickStatus" data-status="Low Stock">{{ t('manage_stack.status_low') }}</button>
-                <button class="cat-chip" data-action="fxPickStatus" data-status="Finished">{{ t('manage_stack.status_finished') }}</button>
-            </div>
-
-            <div class="star-group">
-                <label style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;">{{ t('manage_stack.rating_opt') }}</label>
-                <div class="star-row">
-                    <span class="star-row-label">{{ t('manage_stack.effect') }}</span>
-                    <div class="stars" data-field="rating_effect">
-                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.effect') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
-                    </div>
-                </div>
-                <div class="star-row">
-                    <span class="star-row-label">{{ t('manage_stack.taste') }}</span>
-                    <div class="stars" data-field="rating_taste">
-                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.taste') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
-                    </div>
-                </div>
-                <div class="star-row">
-                    <span class="star-row-label">{{ t('manage_stack.digestion') }}</span>
-                    <div class="stars" data-field="rating_digestion">
-                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.digestion') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
-                    </div>
-                </div>
-                <div class="star-row">
-                    <span class="star-row-label">{{ t('manage_stack.price_perf') }}</span>
-                    <div class="stars" data-field="rating_price">
-                        <button class="star" type="button" data-val="1" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 1 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="2" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 2 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="3" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 3 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="4" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 4 {{ t('manage_stack.rating_of_five') }}">★</button>
-                        <button class="star" type="button" data-val="5" aria-pressed="false" aria-label="{{ t('manage_stack.price_perf') }}: 5 {{ t('manage_stack.rating_of_five') }}">★</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div><label>{{ t('manage_stack.price_paid') }}</label><input type="number" id="f-price" placeholder="750" step="0.01"></div>
-                <div style="display:flex;align-items:end;padding-bottom:2px;">
-                    <div class="toggle-row">
-                        <div class="toggle on" id="f-public" data-action="fxToggleClass" data-class="on"></div>
-                        <label>{{ t('manage_stack.show_profile') }}</label>
-                    </div>
-                </div>
-            </div>
-            <div class="form-row full">
-                <div><label>{{ t('manage_stack.review_opt') }}</label><textarea id="f-review" placeholder="{{ t('manage_stack.review_ph') }}"></textarea></div>
-            </div>
-
-            <button class="add-btn" id="add-btn" data-action="addSupplement">{{ t('manage_stack.add') }}</button>
-        </div>
-
-        <!-- ══ EXISTING LIST ══ -->
-        <div class="list-title">{{ t('manage_stack.current') }}</div>
-        <div class="supp-grid" id="supp-list">
-            {% if supplements %}
-                {% for s in supplements %}
-                <div class="supp-card" id="supp-{{ s.id }}">
-                    <div class="supp-icon">{{ icons.get(s.category, '📦') }}</div>
-                    <div class="supp-body">
-                        <div class="supp-top-row">
-                            <div>
-                                <div class="supp-name">{{ s.product_name }}</div>
-                                <div class="supp-brand">{{ s.brand }} · {{ s.category }}</div>
+        {#- WEB-UX4-PR6 / F-08 — the user's own cabinet comes FIRST, in the DOM
+            and therefore in reading and keyboard order, not by CSS `order`. -#}
+        <section class="stack-cabinet" aria-labelledby="stack-cabinet-title">
+            <h2 class="sec-label" id="stack-cabinet-title">{{ t('manage_stack.current') }}</h2>
+            <div class="supp-grid" id="supp-list">
+                {% if supplements %}
+                    {% for s in supplements %}
+                    <article class="supp-card" id="supp-{{ s.id }}">
+                        <span class="icon-tile icon-tile-sm icon-tile-soft supp-icon">{{ category_icon(s.category) }}</span>
+                        <div class="supp-body">
+                            <div class="supp-top-row">
+                                <div class="supp-ident">
+                                    <h3 class="supp-name">{{ s.product_name }}</h3>
+                                    <p class="supp-brand">{{ s.brand }} · {{ category_labels.get(s.category, s.category) }}</p>
+                                </div>
+                                <span class="status-badge {% if s.status == 'Active' %}status-active{% elif s.status == 'Low Stock' %}status-low{% else %}status-finished{% endif %}">{{ status_labels.get(s.status, s.status) }}</span>
                             </div>
-                            <span class="status-badge {% if s.status == 'Active' %}status-active{% elif s.status == 'Low Stock' %}status-low{% else %}status-finished{% endif %}">{{ {'Active':t('manage_stack.status_active'),'Low Stock':t('manage_stack.status_low'),'Finished':t('manage_stack.status_finished')}.get(s.status, s.status) }}</span>
+                            {%- set rated = [] %}
+                            {%- for field, label in rating_fields %}{% if s[field] %}{% set _ = rated.append((label, s[field])) %}{% endif %}{% endfor %}
+                            {% if rated %}
+                            <ul class="supp-ratings">
+                                {% for label, value in rated %}
+                                <li class="supp-rating-item">
+                                    <span class="supp-rating-label">{{ label }}</span>
+                                    <span class="supp-rating-meter" aria-hidden="true">{% for i in range(1, 6) %}<span class="supp-rating-seg{% if i <= value %} is-on{% endif %}"></span>{% endfor %}</span>
+                                    <span class="supp-rating-value">{{ t('manage_stack.rating_value', n=value) }}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            {% endif %}
+                            {% if s.review_text %}
+                            <p class="supp-review">{{ s.review_text }}</p>
+                            {% endif %}
+                            <div class="supp-actions">
+                                <span class="supp-status-set" role="group" aria-label="{{ t('manage_stack.status_change') }}">
+                                    <button type="button" class="supp-status-btn" aria-pressed="{{ 'true' if s.status == 'Active' else 'false' }}" data-action="quickStatus" data-args='[{{ s.id }},"Active"]'>{{ t('manage_stack.status_active') }}</button>
+                                    <button type="button" class="supp-status-btn" aria-pressed="{{ 'true' if s.status == 'Low Stock' else 'false' }}" data-action="quickStatus" data-args='[{{ s.id }},"Low Stock"]'>{{ t('manage_stack.status_low') }}</button>
+                                    <button type="button" class="supp-status-btn" aria-pressed="{{ 'true' if s.status == 'Finished' else 'false' }}" data-action="quickStatus" data-args='[{{ s.id }},"Finished"]'>{{ t('manage_stack.status_finished') }}</button>
+                                </span>
+                                <button type="button" class="btn-danger supp-delete" aria-label="{{ t('manage_stack.delete_aria', name=s.product_name) }}" data-action="deleteSupplement" data-args='[{{ s.id }}]'>{{ t('manage_stack.delete') }}</button>
+                            </div>
                         </div>
-                        <div class="supp-ratings">
-                            {% if s.rating_effect %}
-                            <span class="supp-rating-item">{{ t('manage_stack.effect') }}: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>
-                            {% endif %}
-                            {% if s.rating_taste %}
-                            <span class="supp-rating-item">{{ t('manage_stack.taste') }}: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
-                            {% endif %}
-                            {% if s.rating_digestion %}
-                            <span class="supp-rating-item">{{ t('manage_stack.digestion') }}: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>
-                            {% endif %}
-                            {% if s.rating_price %}
-                            <span class="supp-rating-item">{{ t('manage_stack.price') }}: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
-                            {% endif %}
+                    </article>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state stack-empty">
+                        <span class="icon-tile icon-tile-soft" aria-hidden="true">{{ category_icon('Other') }}</span>
+                        <p class="empty-title">{{ t('manage_stack.empty') }}</p>
+                        <p class="empty-desc">{{ t('manage_stack.empty_sub') }}</p>
+                    </div>
+                {% endif %}
+            </div>
+        </section>
+
+        {#- WEB-UX4-PR6 / F-08 — creation is a deliberate act behind native
+            <details>: closed on arrival (even when the cabinet is empty), so the
+            page answers "what do I have" before it asks for a form, and the
+            closed fields take no Tab stops. Opening or closing it sends nothing;
+            the ONE write is the explicit #add-btn below. -#}
+        <section class="stack-add" aria-labelledby="stack-add-title">
+            <h2 class="sec-label" id="stack-add-title">{{ t('manage_stack.add_heading') }}</h2>
+            <details class="stack-add-disclosure" id="add-card">
+                <summary class="btn-volt stack-add-summary" id="add-toggle">
+                    <svg class="icon-inline" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>
+                    <span>{{ t('manage_stack.add_title') }}</span>
+                </summary>
+
+                <div class="stack-add-form">
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label for="f-name">{{ t('manage_stack.name_label') }}</label>
+                            <input class="fc-input" type="text" id="f-name" autocomplete="off" placeholder="Gold Standard Whey">
                         </div>
-                        {% if s.review_text %}
-                        <div class="supp-review">"{{ s.review_text }}"</div>
-                        {% endif %}
-                        <div class="supp-actions">
-                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Active"]'>{{ t('manage_stack.status_active') }}</button>
-                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Low Stock"]'>{{ t('manage_stack.status_low') }}</button>
-                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Finished"]'>{{ t('manage_stack.status_finished') }}</button>
-                            <button class="supp-act-btn del" data-action="deleteSupplement" data-args='[{{ s.id }}]'>{{ t('manage_stack.delete') }}</button>
+                        <div class="form-field">
+                            <label for="f-brand">{{ t('manage_stack.brand_label') }}</label>
+                            <input class="fc-input" type="text" id="f-brand" autocomplete="off" placeholder="Optimum Nutrition">
                         </div>
                     </div>
+
+                    <fieldset class="stack-choices">
+                        <legend>{{ t('manage_stack.category') }}</legend>
+                        <div class="stack-choice-row">
+                            {% for cat in categories %}
+                            <label class="stack-choice">
+                                <input type="radio" name="category" value="{{ cat }}"{% if cat == 'Protein' %} checked{% endif %}>
+                                <span class="stack-choice-face">{{ category_icon(cat, 'icon-inline') }}{{ category_labels.get(cat, cat) }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="stack-choices">
+                        <legend>{{ t('manage_stack.status') }}</legend>
+                        <div class="stack-choice-row">
+                            {% for st in statuses %}
+                            <label class="stack-choice">
+                                <input type="radio" name="status" value="{{ st }}"{% if st == 'Active' %} checked{% endif %}>
+                                <span class="stack-choice-face">{{ status_labels.get(st, st) }}</span>
+                            </label>
+                            {% endfor %}
+                        </div>
+                    </fieldset>
+
+                    {#- WEB-UX4-PR6 / F-20 + keyboard debt from UX-3 PR5: each rating
+                        dimension is ONE native radio group — one Tab stop, arrow
+                        keys move the value, the checked state is exposed to AT,
+                        and "not rated" is a real choice that submits null. -#}
+                    <fieldset class="stack-ratings">
+                        <legend>{{ t('manage_stack.rating_opt') }}</legend>
+                        {% for field, label in rating_fields %}
+                        <fieldset class="stack-rating" data-rating-field="{{ field }}">
+                            <legend>{{ label }}</legend>
+                            <div class="stack-rating-scale">
+                                <label class="stack-rating-opt stack-rating-unset">
+                                    <input type="radio" name="{{ field }}" value="" checked>
+                                    <span class="stack-rating-face">{{ t('manage_stack.rating_unset') }}</span>
+                                </label>
+                                {% for n in range(1, 6) %}
+                                <label class="stack-rating-opt">
+                                    <input type="radio" name="{{ field }}" value="{{ n }}">
+                                    <span class="stack-rating-face">{{ n }}</span>
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </fieldset>
+                        {% endfor %}
+                    </fieldset>
+
+                    <div class="form-row">
+                        <div class="form-field">
+                            <label for="f-price">{{ t('manage_stack.price_paid') }}</label>
+                            <input class="fc-input" type="number" id="f-price" placeholder="750" step="0.01" inputmode="decimal">
+                        </div>
+                        <div class="form-field form-field-switch">
+                            <label class="stack-switch" for="f-public">
+                                <input type="checkbox" role="switch" id="f-public" checked>
+                                <span class="stack-switch-track" aria-hidden="true"></span>
+                                <span class="stack-switch-label">{{ t('manage_stack.show_profile') }}</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-row full">
+                        <div class="form-field">
+                            <label for="f-review">{{ t('manage_stack.review_opt') }}</label>
+                            <textarea class="fc-input" id="f-review" placeholder="{{ t('manage_stack.review_ph') }}"></textarea>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn-volt w-full stack-add-submit" id="add-btn" data-action="addSupplement">{{ t('manage_stack.add') }}</button>
                 </div>
-                {% endfor %}
-            {% else %}
-                <div class="empty-state">{{ t('manage_stack.empty') }}</div>
-            {% endif %}
-        </div>
+            </details>
+        </section>
 
     </div>
 </main>
@@ -173,42 +244,32 @@
 
 <script nonce="{{ csp_nonce }}">
 var __t = (window.t) || function (k, v) { return k; };
-let selectedCat = 'Protein';
-let selectedStatus = 'Active';
-const ratings = { rating_effect: 0, rating_taste: 0, rating_digestion: 0, rating_price: 0 };
 
-function pickCat(el, cat) {
-    document.querySelectorAll('.chip-row .cat-chip').forEach(c => {
-        if (c.parentElement === el.parentElement) c.classList.remove('active');
-    });
-    el.classList.add('active');
-    selectedCat = cat;
+// WEB-UX4-PR6: the form's choices are native radio groups, so the selected
+// category/status/rating is READ at submit rather than mirrored into
+// page-level variables. The values sent are the canonical ones the markup
+// carries; an unrated dimension ("" value) is sent as null, never 0.
+function checkedValue(name, fallback) {
+    const el = document.querySelector('input[name="' + name + '"]:checked');
+    return el ? el.value : fallback;
+}
+function ratingValue(name) {
+    const raw = checkedValue(name, '');
+    return raw ? parseInt(raw, 10) : null;
 }
 
-function pickStatus(el, st) {
-    el.parentElement.querySelectorAll('.cat-chip').forEach(c => c.classList.remove('active'));
-    el.classList.add('active');
-    selectedStatus = st;
-}
-
-// data-action sarmalayıcıları: tıklanan öğe (this) ilk argümandı; delegasyonda
-// öğe son argümana düştüğü için sıralamayı koruyacak ince köprüler.
-function fxPickCat(el) { pickCat(el, el.dataset.cat); }
-function fxPickStatus(el) { pickStatus(el, el.dataset.status); }
-
-document.querySelectorAll('.stars').forEach(group => {
-    const field = group.dataset.field;
-    group.querySelectorAll('.star').forEach(star => {
-        star.addEventListener('click', () => {
-            const val = parseInt(star.dataset.val);
-            if (ratings[field] === val) { ratings[field] = 0; } else { ratings[field] = val; }
-            group.querySelectorAll('.star').forEach(s => {
-                s.classList.toggle('filled', parseInt(s.dataset.val) <= ratings[field]);
-                s.setAttribute('aria-pressed', String(parseInt(s.dataset.val) === ratings[field]));
-            });
-        });
+// One dominant action per state: the closed disclosure is the page's primary
+// action; once open, the submit button is, and the summary steps down to the
+// secondary rank. Presentation only — toggling sends no request.
+(function () {
+    const disclosure = document.getElementById('add-card');
+    const summary = document.getElementById('add-toggle');
+    if (!disclosure || !summary) return;
+    disclosure.addEventListener('toggle', function () {
+        summary.classList.toggle('btn-volt', !disclosure.open);
+        summary.classList.toggle('btn-ghost', disclosure.open);
     });
-});
+})();
 
 function toast(msg, type) {
     type = type || 'info';
@@ -232,14 +293,15 @@ async function addSupplement() {
             method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({
                 product_name: name, brand: brand,
-                category: selectedCat, status: selectedStatus,
-                rating_effect: ratings.rating_effect || null,
-                rating_taste: ratings.rating_taste || null,
-                rating_digestion: ratings.rating_digestion || null,
-                rating_price: ratings.rating_price || null,
+                category: checkedValue('category', 'Protein'),
+                status: checkedValue('status', 'Active'),
+                rating_effect: ratingValue('rating_effect'),
+                rating_taste: ratingValue('rating_taste'),
+                rating_digestion: ratingValue('rating_digestion'),
+                rating_price: ratingValue('rating_price'),
                 review_text: document.getElementById('f-review').value.trim(),
                 price_paid: document.getElementById('f-price').value || null,
-                is_public: document.getElementById('f-public').classList.contains('on'),
+                is_public: document.getElementById('f-public').checked,
             })
         });
         const data = await res.json();

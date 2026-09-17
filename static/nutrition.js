@@ -132,14 +132,21 @@ function fxUpdateDiaryGrams(el) { updateDiaryGrams(el.dataset.itemId, el.value);
 /* ── CALORIE RING ── */
 function updateRing(eaten, target) {
   const ring = document.getElementById('calorie-ring');
+  // WEB-UX4-PR6 / F-16 — presentation state only. The template cannot tell
+  // "the canonical read published no target" from "not read yet" (both show
+  // the same dash), so the hero is marked here, next to the one branch that
+  // already decides it. No value, arithmetic or request below changes.
+  const hero = ring.closest('.nut-hero');
   document.getElementById('ring-eaten').textContent = Math.round(eaten);
   if (!(target > 0)) {
+    if (hero) hero.dataset.targetState = 'absent';
     ring.style.strokeDashoffset = RING_CIRC;
     ring.style.stroke = '#3D8BFF';
     document.getElementById('ring-pct').textContent = '—';
     document.getElementById('ring-target').textContent = '—';
     return;
   }
+  if (hero) hero.dataset.targetState = 'known';
   const pct = Math.min(eaten / target, 1);
   ring.style.strokeDashoffset = RING_CIRC * (1 - pct);
   ring.style.stroke = eaten > target * 1.05 ? '#FF4D4D' : '#3D8BFF';

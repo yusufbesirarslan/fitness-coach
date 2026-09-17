@@ -68,7 +68,6 @@ def test_display_title_parts_are_complete_words():
         for key in en
         if key.endswith(".h1_a") and key.replace(".h1_a", ".h1_b") in en
     )
-    assert "nutrition" in pairs
     for prefix in pairs:
         a_en, b_en = en[f"{prefix}.h1_a"], en[f"{prefix}.h1_b"]
         a_tr, b_tr = tr[f"{prefix}.h1_a"], tr[f"{prefix}.h1_b"]
@@ -78,13 +77,16 @@ def test_display_title_parts_are_complete_words():
             assert part.strip(), prefix
 
 
-def test_nutrition_title_is_complete_words_not_mid_word_split():
+def test_nutrition_title_is_the_destination_name_not_mid_word_split():
+    """WEB-UX4-PR6 / F-15 retired the two-part "NUTRITION PLAN" title: the page
+    is the Nutrition destination and "Nutrition Plan" names only its third tab.
+    The title now renders the single destination key, so it cannot be split."""
     en = _locale("en")
     tr = _locale("tr")
-    assert en["nutrition.h1_a"] == "NUTRITION"
-    assert en["nutrition.h1_b"] == "PLAN"
-    assert tr["nutrition.h1_a"] == "BESLENME"
-    assert tr["nutrition.h1_b"] == "PLANI"
+    assert "nutrition.h1_a" not in en and "nutrition.h1_b" not in en
+    assert "nutrition.h1_a" not in tr and "nutrition.h1_b" not in tr
+    assert en["nutrition.parent.current"] == "Nutrition"
+    assert tr["nutrition.parent.current"] == "Beslenme"
 
 
 def test_nutrition_heading_does_not_glue_or_split_the_word(
@@ -98,9 +100,8 @@ def test_nutrition_heading_does_not_glue_or_split_the_word(
     assert hdr, "nutrition page-hdr h1 is missing"
     heading = hdr.group(1)
     assert "<br" not in heading
-    assert "NUTRITION" in heading
-    assert "PLAN" in heading
-    assert re.search(r"NUTRITION\s*<span>\s*PLAN\s*</span>", heading)
+    # WEB-UX4-PR6 / F-15: one whole destination word, never "NUTRITION PLAN".
+    assert heading.strip() == "Nutrition"
 
 
 def test_progress_heading_does_not_force_a_mid_word_break(

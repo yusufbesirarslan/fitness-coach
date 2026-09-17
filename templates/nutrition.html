@@ -22,7 +22,7 @@
 <div class="modal-overlay" id="water-modal" data-action-self="closeWater">
   <div class="modal-box">
     <div class="modal-title">{{ t('nutrition.water_title') }}</div>
-    <p style="font-size:14px;color:var(--color-text-2);margin-bottom:20px;">{{ t('nutrition.water_q') }}</p>
+    <p class="nut-modal-lead">{{ t('nutrition.water_q') }}</p>
     <select class="fc-input" id="water-amount" style="margin-bottom:16px;">
       <option value="250">{{ t('nutrition.water_1cup') }}</option>
       <option value="500">{{ t('nutrition.water_2cup') }}</option>
@@ -40,23 +40,23 @@
 <div class="modal-overlay" id="serving-modal" data-action-self="closeServingModal">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="sm-title">
     <div class="modal-title" id="sm-title">{{ t('nutrition.add_food_title') }}</div>
-    <div id="sm-food-name" style="font-size:15px;color:var(--color-text-1);font-weight:600;margin-bottom:4px;"></div>
-    <div id="sm-brand" style="font-size:12px;color:var(--color-text-3);margin-bottom:16px;"></div>
+    <div id="sm-food-name" class="sm-food-name"></div>
+    <div id="sm-brand" class="sm-brand"></div>
     <div id="sm-body">
       <div id="sm-loading" style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
         <div class="diary-serving-loading"></div>
-        <span style="font-size:13px;color:var(--color-text-3);">{{ t('nutrition.serving_loading') }}</span>
+        <span class="sm-loading-text">{{ t('nutrition.serving_loading') }}</span>
       </div>
       <div id="sm-serving-row" style="display:none;margin-bottom:12px;">
-        <label style="font-size:11px;color:var(--color-text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">{{ t('nutrition.serving_label') }}</label>
+        <label class="sm-field-label">{{ t('nutrition.serving_label') }}</label>
         <select class="fc-input" id="sm-serving-select" data-action-change="updateSmPreview" style="width:100%;"></select>
       </div>
       <div id="sm-gram-row" style="display:none;margin-bottom:12px;">
-        <label style="font-size:11px;color:var(--color-text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">{{ t('nutrition.gram_label') }}</label>
+        <label class="sm-field-label">{{ t('nutrition.gram_label') }}</label>
         <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" data-action-input="updateSmPreview" style="width:100%;">
       </div>
       <div id="sm-qty-row" style="display:none;margin-bottom:16px;">
-        <label style="font-size:11px;color:var(--color-text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">{{ t('nutrition.qty_label') }}</label>
+        <label class="sm-field-label">{{ t('nutrition.qty_label') }}</label>
         <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" data-action-input="updateSmPreview" style="width:100%;">
       </div>
     </div>
@@ -87,7 +87,7 @@
     <span aria-current="page">{{ t('nutrition.parent.current') }}</span>
   </nav>
   <div class="page-hdr">
-    <h1>{{ t('nutrition.h1_a') }} <span>{{ t('nutrition.h1_b') }}</span></h1>
+    <h1>{{ t('nutrition.parent.current') }}</h1>
     <p>{{ t('nutrition.page_sub') }}</p>
   </div>
 
@@ -133,7 +133,7 @@
 
     <!-- Macro Ring + Macro Bars -->
     <div class="card" style="padding:24px;margin-bottom:20px;">
-      <div class="nut-hero">
+      <div class="nut-hero" data-target-state="pending">
         <!-- Ring -->
         <div class="ring-wrap">
           <svg class="ring-svg" width="150" height="150" viewBox="0 0 120 120">
@@ -143,16 +143,21 @@
               stroke="#3D8BFF" stroke-dasharray="301.6" stroke-dashoffset="301.6"/>
           </svg>
           <div class="ring-label">
-            <div style="font-family:var(--font-display);font-size:30px;color:var(--color-primary);letter-spacing:1px;line-height:1;" id="ring-eaten">0</div>
-            <div style="font-size:11px;color:var(--color-text-3);font-weight:600;margin-top:2px;">kcal</div>
-            <div style="font-size:10px;color:var(--color-text-3);font-weight:500;" id="ring-pct">0%</div>
+            <div class="ring-eaten" id="ring-eaten">0</div>
+            <div class="ring-unit">kcal</div>
+            <div class="ring-pct" id="ring-pct">0%</div>
           </div>
         </div>
 
         <!-- Macro bars -->
         <div style="min-width:0;width:100%;">
+          {#- WEB-UX4-PR6 / F-16 — `nutrition_targets` is the only authority.
+              When it publishes no target, nutrition.js marks the hero
+              `data-target-state="absent"` and the sentence below replaces the
+              stacked "TARGET: — KCAL" + "—"; no number is ever shown for it. -#}
           <div class="nut-hero-target">
-            {{ t('nutrition.target_label') }} <span id="ring-target">—</span> kcal
+            <span class="nut-target-known">{{ t('nutrition.target_label') }} <span id="ring-target">—</span> kcal</span>
+            <span class="nut-target-absent">{{ t('nutrition.target_absent') }}</span>
           </div>
           <div class="nut-macros nut-macros-hero">
             <!-- Protein -->
@@ -195,7 +200,7 @@
     </div>
 
     <!-- Meal Timeline -->
-    <div class="sec-label">{{ t('nutrition.todays_meals') }}</div>
+    <h2 class="sec-label">{{ t('nutrition.todays_meals') }}</h2>
     <div class="meal-timeline" id="meal-timeline">
       <!-- Skeleton -->
       <div class="timeline-skeleton" id="today-skeleton">
@@ -234,7 +239,7 @@
     </div>
     <button class="btn-ghost w-full" id="review-btn" data-action="getReview" style="width:100%;">{{ t('nutrition.eod_review') }}</button>
     <div class="card" id="review-card" style="padding:20px;margin-top:12px;display:none;">
-      <div id="review-text" style="font-size:14px;color:var(--color-text-2);line-height:1.7;"></div>
+      <div id="review-text" class="review-text"></div>
     </div>
 
   </div><!-- /panel-today -->
@@ -245,14 +250,12 @@
   ════════════════════════════════ -->
   <div class="tab-panel" id="panel-diary" role="tabpanel" aria-labelledby="nutrition-tab-diary">
 
-    <div style="font-size:11px;color:var(--color-text-3);font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:16px;">
-      {{ t('nutrition.diary_builder') }}
-    </div>
+    <h2 class="sec-label">{{ t('nutrition.diary_builder') }}</h2>
 
     <div id="diary-meals"><!-- Rendered by loadDiary() --></div>
 
     <div class="card" id="diary-grand-total" style="padding:16px;margin-top:16px;display:none;">
-      <div style="font-size:11px;color:var(--color-text-3);font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px;">{{ t('nutrition.daily_total') }}</div>
+      <h3 class="sec-label">{{ t('nutrition.daily_total') }}</h3>
       <div class="apd-macro-grid">
         <div class="apd-macro-item"><div class="apd-macro-val" id="diary-total-cal">0</div><div class="apd-macro-lbl">kcal</div></div>
         <div class="apd-macro-item"><div class="apd-macro-val" id="diary-total-pro">0g</div><div class="apd-macro-lbl">{{ t('nutrition.macro_protein') }}</div></div>
@@ -309,13 +312,13 @@
   <div class="tab-panel" id="panel-history" role="tabpanel" aria-labelledby="nutrition-tab-history">
 
     <div class="card" style="padding:24px;margin-bottom:20px;">
-      <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--color-text-3);margin-bottom:16px;">{{ t('nutrition.weekly_cal') }}</div>
+      <h2 class="sec-label">{{ t('nutrition.weekly_cal') }}</h2>
       <div class="bar-chart-wrap" id="weekly-chart">
-        <div style="flex:1;text-align:center;color:var(--color-text-3);font-size:13px;align-self:center;">{{ t('nutrition.loading_data') }}</div>
+        <div class="chart-loading">{{ t('nutrition.loading_data') }}</div>
       </div>
     </div>
 
-    <div class="sec-label">{{ t('nutrition.meal_history') }}</div>
+    <h2 class="sec-label">{{ t('nutrition.meal_history') }}</h2>
     <div id="history-list">
       <div class="skel-card" style="margin-bottom:12px;">
         <div class="skeleton" style="height:14px;width:30%;"></div>
@@ -333,9 +336,9 @@
   <div class="tab-panel" id="panel-water" role="tabpanel" aria-labelledby="nutrition-tab-water">
 
     <div class="card water-card" style="padding:28px 24px;">
-      <div class="water-hdr">
-        <span class="water-dot"></span>{{ t('nutrition.water_tracking') }}
-      </div>
+      <h2 class="water-hdr">
+        <span class="water-dot" aria-hidden="true"></span>{{ t('nutrition.water_tracking') }}
+      </h2>
       <div class="water-num" id="water-num">0</div>
       <div class="water-denom">{{ t('nutrition.water_denom') }}</div>
       <div class="water-glasses" id="water-glasses"></div>
@@ -412,9 +415,9 @@
     </div>
 
     <div id="selected-foods-list" style="margin-bottom:12px;display:none;">
-      <div style="font-size:11px;color:var(--color-text-3);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">{{ t('nutrition.selected_foods') }}</div>
+      <div class="sec-label selected-foods-label">{{ t('nutrition.selected_foods') }}</div>
       <div id="selected-foods-items"></div>
-      <div id="selected-foods-totals" style="margin-top:8px;padding:10px;background:var(--color-primary-soft);border:1px solid var(--color-primary-soft);border-radius:8px;font-size:12px;color:var(--color-text-2);"></div>
+      <div id="selected-foods-totals" class="selected-foods-totals"></div>
     </div>
 
     <textarea class="fc-input" id="meal-input" placeholder="{{ t('nutrition.meal_input_ph') }}"></textarea>
