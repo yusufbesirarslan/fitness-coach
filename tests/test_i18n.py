@@ -296,7 +296,7 @@ def test_final_pages_render_en(app, client, make_user, login):
     login("finen")
     for path, en_str, tr_str in [
         ("/progress-page", "Weekly Check-In", "Haftalık Check-In"),
-        ("/supplements", "ADD NEW SUPPLEMENT", "YENİ SUPPLEMENT EKLE"),
+        ("/supplements", "Your supplements", "Takviyelerin"),
     ]:
         r = client.get(path)
         assert r.status_code == 200, (path, r.status_code)

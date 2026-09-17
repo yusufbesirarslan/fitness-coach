@@ -406,6 +406,36 @@ yeniden oluşturma iş akışı, JS, locale ve Python birebir aynıdır.
   genişlik × TR/EN, hesaplanmış yüzey sayımı, ölçülmüş eylem geometrisi, gerçek
   Tab yürüyüşü, ağ değişmezleri, PR4/read_error/regenerate kayıtları).
 
+### Beslenme + Takviyeler yakınsaması (WEB-UX4-PR6)
+
+`Plan → Beslenme → Takviyeler` tek yolculuk olarak mevcut ilkelleri TÜKETİR;
+yeni token, jenerik bileşen, font veya ikon sistemi YOKTUR (tüm yeni sınıflar
+sayfa kapsamlı). Yetki değişmedi: `MealLog`, `mobile_diary_mutation`,
+`nutrition_targets`, `POST /supplement/{add,edit,delete}`, kategori/durum
+değerleri, sorgu sayıları ve istek bütçeleri birebir aynı.
+
+| Kural | Ne | Neden |
+| --- | --- | --- |
+| Tek hedef adı | `/nutrition` h1 = `nutrition.parent.current` (Beslenme), üçüncü sekme `Beslenme Planı` kalır; `/supplements` h1 = kırıntı = başlık = `supplements.parent.current` (Takviyeler). "Dolap" yalnızca açıklayıcı metin. | F-15: sayfa ve kendi sekmesi aynı adı taşıyordu; Takviyeler dört adla anılıyordu. |
+| `.sec-label` = başlık | Bölüm etiketleri `<h2 class="sec-label">` (alt bölüm `<h3>`); satır içi kopyalar silindi. | F-17: `<div>` kopyaları görünüşü alıp yapıyı kaybetmişti. |
+| Satır içi tipografi yok | `nutrition.html` içinde `font-size` bildirimi 17 → 0; sayfa kapsamlı adlandırılmış sınıflar + tip token'ları (halka rakamı `--text-metric-md`). JS'in açıp kapattığı `display` kancaları yerinde kaldı. | F-34 |
+| Hedef yoksa cümle | `nutrition.js` yalnızca `.nut-hero[data-target-state]` (`pending`/`known`/`absent`) işaretler; `absent` → `nutrition.target_absent`, yüzde gizli. Sayı, BMR/TDEE/profil/sabit yedeği ÜRETİLMEZ. | F-16: yığılmış iki "—" kırık gibi okunuyordu; şablon "okunmadı" ile "yok"u ayıramaz. |
+| Beş iş akışı görünür | ≤640 px sekmeler simge-üstte, sözcük arası sarabilen etiket, ≥44 px; 320/390'da beşi de ekranda. Paylaşılan kaydırıcı yedek olarak kalır; taşma olursa kaydırma-zamanlı kenar solması (yalnızca kaydırılacak içerik varken). | F-35: 390'da 3,57/5 sekme görünüyordu. |
+| Önce dolap | `#supp-list` DOM'da `#add-card`'dan önce; ekleme yerel `<details>` arkasında, boş dolapta bile kapalı; açma/kapama 0 istek. Kapalıyken birincil rütbe özet, açıkken gönder düğmesi. | F-08 |
+| Yerel radyo grupları | Kategori, durum ve dört puan boyutu `<fieldset><legend>` + yerel radyo; puan başına 1 Tab durağı, ok tuşları değeri değiştirir, "Puan yok" `null` gönderir. Seçili = yumuşak dolgu + 2 px kenarlık, birincil dolgu DEĞİL. Görünürlük `role="switch"` onay kutusu. | 4×5 = 20 `★` durağı; seçili filtre CTA gibi boyanıyordu. |
+| Sistem ikonları | Kategori → şablonun bildiği 1.8 çizgi SVG (`.icon-tile` / `.icon-inline`), bilinmeyen değer "Diğer" ikonuna düşer; `|safe` yok. `CATEGORY_ICONS` BİLEREK değişmedi (Hesap onu hâlâ render eder — UX4-PR7). Kayıtlı puan "4/5" metni + dekoratif çubuk. | F-20 |
+| Yıkıcı rütbe | Durum = tek sessiz bölümlü grup (`aria-pressed`), Sil = kanonik `.btn-danger`, gruptan ayrı; aynı onay ve uç nokta. | F-36 |
+
+- **Ölçüm (Windows Chromium, 390, EN, aynı düzenek iki commit'te):** Takviyeler
+  (6 kayıt) 44 px altı kontrol 57 → 0, emoji 12 → 0, `★/☆` 45 → 0, sayfa Tab
+  durağı 60 → 27 (form açıkken 39; puan 20 → 4), dolap Y 1233 → 270, belge
+  2 227 → 1 529 px. Beslenme: 44 px altı 6 → 0, görünür sekme 3,57 → 5 (320:
+  2,89 → 5), başlık `h1` → `h1 h2`.
+- **Geri alma:** `git revert` — PR6'nın bayrağı yoktur; `UIUX_PLAN_V2_ENABLED`
+  bu iki sayfayı seçmez.
+- **Regresyon:** `tests/test_ux4_pr6_nutrition_supplements_contract.py` +
+  `tests/test_ux4_pr6_nutrition_supplements_browser.py`.
+
 ## Genişletme Rehberi
 
 1. **Yeni token:** tokens.css'te doğru bölüme kanonik adla ekle; light değeri

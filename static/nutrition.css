@@ -12,7 +12,10 @@
   margin-bottom: var(--space-2); color: var(--color-text-3);
   font-size: var(--text-sm); line-height: var(--leading-normal);
 }
-.nutrition-parent-context a { color: var(--color-text-2); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; }
+/* WEB-UX4-PR6: the one-word "Plan" crumb measured 23px wide — the 44px floor
+   applies on both axes. Inline padding widens the hit area and an equal
+   negative margin cancels it, so the crumb text does not move. */
+.nutrition-parent-context a { color: var(--color-text-2); text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 var(--space-3); margin: 0 calc(var(--space-3) * -1); }
 .nutrition-parent-context a:hover { color: var(--color-primary); }
 .nutrition-parent-context a:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
@@ -55,6 +58,19 @@
   text-transform: uppercase; margin-bottom: var(--space-4);
 }
 .nut-hero-target span { color: var(--color-text-2); }
+/* WEB-UX4-PR6 / F-16 — target presentation state, set by nutrition.js from
+   the canonical `/meal-log/today` read. `pending` = not read yet (or the read
+   failed): the neutral "Target: — kcal" line, but no bare "—" percentage under
+   the ring. `absent` = the authority published NO target: one intentional
+   sentence replaces both dashes. No state ever renders an invented number. */
+.nut-target-absent { display: none; }
+.nut-hero[data-target-state="absent"] .nut-target-known { display: none; }
+.nut-hero[data-target-state="absent"] .nut-target-absent {
+  display: inline; color: var(--color-text-2);
+  text-transform: none; letter-spacing: normal; font-weight: var(--weight-medium);
+  font-size: var(--text-sm);
+}
+.nut-hero:not([data-target-state="known"]) .ring-pct { visibility: hidden; }
 .nut-macros {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2);
   width: 100%;
@@ -552,4 +568,62 @@
 @media (prefers-reduced-motion: reduce) {
   .meal-card, .wg.just-filled, .qab-done .qab-check, .water-num { animation: none !important; transition: none !important; }
   .log-fab, .log-sheet-opt, .mc-edit, .mc-del, .slot-empty { transition: none !important; }
+}
+
+/* ── WEB-UX4-PR6 · F-34 — typography that used to be inline `style` ─────────
+   Named, page-scoped classes on the canonical type tokens. Only typography
+   moved here; layout/visibility hooks nutrition.js toggles stay where they are. */
+.nut-modal-lead { font-size: var(--text-base); color: var(--color-text-2); margin-bottom: var(--space-5); }
+.sm-food-name { font-size: var(--text-lg); color: var(--color-text-1); font-weight: var(--weight-semibold); margin-bottom: var(--space-1); }
+.sm-brand { font-size: var(--text-sm); color: var(--color-text-3); margin-bottom: var(--space-4); }
+.sm-loading-text { font-size: var(--text-md); color: var(--color-text-3); }
+.sm-field-label {
+  display: block; margin-bottom: 6px;
+  font-size: var(--text-xs); color: var(--color-text-3);
+  font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase;
+}
+.ring-eaten {
+  font-family: var(--font-display); font-size: var(--text-metric-md);
+  color: var(--color-primary); letter-spacing: 1px; line-height: var(--leading-none);
+}
+.ring-unit { font-size: var(--text-xs); color: var(--color-text-3); font-weight: var(--weight-semibold); margin-top: 2px; }
+.ring-pct { font-size: var(--text-2xs); color: var(--color-text-3); font-weight: var(--weight-medium); }
+.review-text { font-size: var(--text-base); color: var(--color-text-2); line-height: var(--leading-relaxed); }
+.chart-loading { flex: 1; align-self: center; text-align: center; font-size: var(--text-md); color: var(--color-text-3); }
+.selected-foods-label { margin-bottom: var(--space-2); }
+.selected-foods-totals {
+  margin-top: var(--space-2); padding: 10px;
+  background: var(--color-primary-soft); border: var(--border-w-1) solid var(--color-primary-soft);
+  border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-text-2);
+}
+/* `.sec-label` now ships as real <h2>/<h3> elements on this page (F-17). */
+.card > .sec-label:first-child { margin-bottom: var(--space-4); }
+
+/* ── WEB-UX4-PR6 · F-35 — five workflows, all discoverable ──────────────────
+   Every tab meets the 44px floor. Below 640px each tab stacks its icon over a
+   label that may wrap between words, so all five fit a 320px column in both
+   locales instead of hiding History and Water off-screen. The shared scroller
+   is kept as the fallback (large text / zoom): if the row still overflows, a
+   scroll-driven edge fade shows there is more — and only while there is. */
+.tab-bar .tab-btn { min-height: 44px; }
+@media (max-width: 640px) {
+  .tab-bar { gap: 2px; margin-bottom: var(--space-6); }
+  .tab-bar .tab-btn {
+    flex: 1 1 0; min-width: min-content;
+    flex-direction: column; gap: 3px;
+    padding: var(--space-1) 6px;
+    font-size: var(--text-xs); line-height: var(--leading-tight);
+    white-space: normal; text-align: center; overflow-wrap: normal; hyphens: none;
+  }
+}
+@supports (animation-timeline: scroll()) {
+  .tab-bar {
+    animation: nut-tab-more linear both;
+    animation-timeline: scroll(self inline);
+  }
+  @keyframes nut-tab-more {
+    from { -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); }
+    96%  { -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); }
+    to   { -webkit-mask-image: none; mask-image: none; }
+  }
 }

@@ -215,6 +215,8 @@ def test_zero_then_add_then_status_then_delete_all_run_through_the_cabinet(
     page.goto("http://localhost/supplements")
     expect(page.locator(".empty-state")).to_be_visible()
 
+    # WEB-UX4-PR6: creation sits behind a deliberate disclosure.
+    page.locator("#add-toggle").click()
     page.locator("#f-name").fill("Creatine Monohydrate")
     page.locator("#f-brand").fill("Bulk")
     _arm_reload_probe(page)
@@ -290,10 +292,13 @@ def test_visibility_toggle_is_owned_by_the_cabinet_and_persists(
     page, _, _, _ = training_page
     page.goto("http://localhost/supplements")
 
+    page.locator("#add-toggle").click()
+    # WEB-UX4-PR6: a native checkbox with role="switch" (it was a non-focusable
+    # <div>); default stays public and the payload field is unchanged.
     toggle = page.locator("#f-public")
-    expect(toggle).to_have_class("toggle on")
-    toggle.click()
-    expect(toggle).to_have_class("toggle")
+    expect(toggle).to_be_checked()
+    page.locator("label.stack-switch").click()
+    expect(toggle).not_to_be_checked()
 
     page.locator("#f-name").fill("Private ZMA")
     page.locator("#f-brand").fill("House")
@@ -348,7 +353,7 @@ def test_hierarchy_is_readable_at_every_viewport_in_both_languages(
         expect(context).to_be_visible()
         # The orientation line must stay a line, not a hero block.
         assert context.bounding_box()["height"] <= 120, (language, width)
-        expect(page.locator("#add-btn")).to_be_visible()
+        expect(page.locator("#add-toggle")).to_be_visible()
         assert _no_horizontal_overflow(page), ("supplements", language, width)
 
         page.goto("http://localhost/edit-profile")
@@ -384,16 +389,18 @@ def test_cabinet_controls_are_keyboard_reachable_and_show_focus(
             f'.stack-parent-context a[href="{href}"]',
         )
 
-    # Category and status chips are <button>s, so Enter operates them.
-    creatine = page.locator('[data-action="fxPickCat"][data-cat="Creatine"]')
+    # WEB-UX4-PR6: category and status are native radio groups, so Space
+    # selects and the checked state is exposed rather than a class name.
+    page.locator("#add-toggle").click()
+    creatine = page.locator('input[name="category"][value="Creatine"]')
     creatine.focus()
-    page.keyboard.press("Enter")
-    expect(creatine).to_have_class("cat-chip active")
+    page.keyboard.press("Space")
+    expect(creatine).to_be_checked()
 
-    low = page.locator('[data-action="fxPickStatus"][data-status="Low Stock"]')
+    low = page.locator('input[name="status"][value="Low Stock"]')
     low.focus()
-    page.keyboard.press("Enter")
-    expect(low).to_have_class("cat-chip active")
+    page.keyboard.press("Space")
+    expect(low).to_be_checked()
 
     # Status badges are not colour-only — each carries its own label text.
     badge = page.locator(f"#supp-{supplement_id} .status-badge")
@@ -409,21 +416,23 @@ def test_cabinet_controls_are_keyboard_reachable_and_show_focus(
         ), field
 
 
-def test_rating_stars_are_named_keyboard_buttons(app, auth_user, training_page):
+def test_rating_groups_are_named_keyboard_radios(app, auth_user, training_page):
+    """UX-3 PR5 classified the star <span>/<button> rating as keyboard debt that
+    WEB-UX4-PR6 owns. Each dimension is now one named native radio group."""
     with app.app_context():
         _ready(auth_user.id)
     page, _, _, _ = training_page
     page.goto("http://localhost/supplements")
-    effect = page.locator('[data-field="rating_effect"]')
-    buttons = effect.get_by_role("button")
-    expect(buttons).to_have_count(5)
-    third = buttons.nth(2)
-    expect(third).to_have_text("\u2605")
-    expect(third).to_have_accessible_name("Effect: 3 of 5")
-    third.focus()
-    assert page.evaluate("document.activeElement === document.querySelector('[data-field=\"rating_effect\"] [data-val=\"3\"]')")
-    page.keyboard.press("Enter")
-    expect(third).to_have_attribute("aria-pressed", "true")
-    page.keyboard.press("Space")
-    expect(third).to_have_attribute("aria-pressed", "false")
-    assert third.evaluate("el => getComputedStyle(el, ':focus-visible').outlineStyle !== 'none'")
+    page.locator("#add-toggle").click()
+    effect = page.get_by_role("group", name="Effect")
+    radios = effect.get_by_role("radio")
+    expect(radios).to_have_count(6)
+    expect(effect.get_by_role("radio", name="Not rated")).to_be_checked()
+    effect.get_by_role("radio", name="Not rated").focus()
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("ArrowRight")
+    expect(effect.get_by_role("radio", name="3")).to_be_checked()
+    assert page.evaluate(
+        "getComputedStyle(document.activeElement.nextElementSibling).outlineStyle") == "solid"
+    assert "★" not in page.locator("main").inner_text()
