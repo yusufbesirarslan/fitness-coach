@@ -146,7 +146,9 @@
   .plan-domain { padding: var(--space-4); }
   .plan-domain-head, .plan-domain-child { align-items: flex-start; flex-direction: column; }
   .plan-domain-state { white-space: normal; }
-  .plan-domain-link, .plan-workout-action { width: 100%; justify-content: center; }
+  .plan-workout-action { width: 100%; justify-content: center; }
+  /* A full-width link keeps its 44px target but reads on the section's axis. */
+  .plan-domain-link { width: 100%; justify-content: flex-start; }
   .sv-foot { flex-direction: column-reverse; }
   .plan-completion-card { padding: var(--space-5); }
   .plan-completion-actions { flex-direction: column-reverse; }
@@ -263,4 +265,121 @@
    bottom navigation instead of landing underneath them. */
 .plan-manage[data-manage-state="create"] :is(.plan-select, .plan-input, .plan-refine > summary) {
   scroll-margin-bottom: calc(var(--action-bar-h) * 2 + var(--space-8));
+}
+
+/* ── UX4-PR5: active Plan surface hierarchy ──────────────────────────────────
+   F-06: two ownership boundaries (Training, Nutrition) were drawn with three
+   levels of rounded box — weekly program card → seven day cards → exercise
+   tiles, and a third box for Supplements inside Nutrition. Ownership stays
+   exactly as rendered; only the boxes go. Inside a domain, structure is carried
+   by rhythm, dividers and type. Everything here is scoped to the active/partial
+   Plan branch or to classes only that branch renders — except the Supplements
+   child treatment, which is Nutrition presentation and deliberately identical
+   in every Plan state. The PR4 first run and read_error keep their width, order
+   and action geometry. No new token, font or component. */
+
+/* Attention reads as a marked sentence, not another box. */
+.plan-partial-note,
+.plan-session-stale {
+  margin: var(--space-4) 0 0; padding: var(--space-1) 0 var(--space-1) var(--space-3);
+  border: 0; border-left: 3px solid var(--color-warning); border-radius: 0;
+  background: none; color: var(--color-text-2); font-size: var(--text-base); line-height: var(--leading-relaxed);
+}
+.plan-session-stale { color: var(--color-text-1); }
+.plan-recovery-action { margin-top: var(--space-3); min-height: 44px; }
+.plan-meta { margin-top: var(--space-4); }
+
+/* Weekly guidance: a section inside Training, not a second card. The mount's
+   classes are applied by weekly_program.js and are left untouched; only how
+   they look inside Plan changes. */
+.plan-domain--training .weekly-program-card {
+  margin-top: var(--space-6); padding: var(--space-5) 0 0;
+  border: 0; border-top: var(--border-w-1) solid var(--color-border-1); border-radius: 0;
+  background: none; overflow: visible;
+}
+.plan-domain--training .weekly-program-action,
+.plan-domain--training .weekly-program-metric {
+  padding: 0 0 0 var(--space-3); border: 0; border-left: 2px solid var(--color-border-2);
+  border-radius: 0; background: none;
+}
+.plan-domain--training .weekly-program-action { color: var(--color-text-1); }
+
+/* Week schedule: one structured list. Training days stay native disclosures;
+   rest days are quiet text rows; dividers separate days. */
+.plan-days { margin-top: var(--space-6); padding-top: var(--space-5); border-top: var(--border-w-1) solid var(--color-border-1); }
+.plan-days > .sec-label { margin-bottom: var(--space-2); }
+.plan-days .plan-day { margin: 0; border: 0; border-top: var(--border-w-1) solid var(--color-border-1); border-radius: 0; background: none; overflow: visible; opacity: 1; }
+.plan-days > .sec-label + .plan-day { border-top: 0; }
+.plan-days .plan-day-summary { min-height: 44px; padding: var(--space-3) var(--space-6) var(--space-3) 0; position: relative; gap: var(--space-1) var(--space-3); }
+.plan-days .plan-day-name { font-size: var(--text-lg); }
+.plan-days .plan-day-focus { font-size: var(--text-sm); }
+.plan-days details.plan-day > .plan-day-summary::after {
+  content: ""; position: absolute; right: var(--space-2); top: calc(var(--space-3) + 6px);
+  width: 8px; height: 8px; border-right: 2px solid var(--color-text-3); border-bottom: 2px solid var(--color-text-3);
+  transform: rotate(45deg);
+}
+.plan-days details.plan-day[open] > .plan-day-summary::after { transform: rotate(-135deg); top: calc(var(--space-3) + 10px); }
+.plan-days .plan-day-summary:focus-visible { outline-offset: 2px; border-radius: var(--radius-sm); }
+.plan-days .plan-day-body { padding: 0 0 var(--space-4); }
+
+/* Rest: weekday and "Rest" on one quiet line, guidance as secondary text. */
+.plan-days .plan-day--rest { padding: var(--space-2) 0; }
+.plan-days .plan-day--rest > .plan-day-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-3); min-height: 0; margin: 0; padding: 0; cursor: default; }
+.plan-days .plan-day--rest .plan-day-name { color: var(--color-text-2); }
+.plan-days .plan-day--rest .plan-day-focus { color: var(--color-text-3); }
+.plan-days .plan-day--rest > .plan-day-note { margin-top: var(--space-1); color: var(--color-text-3); font-size: var(--text-sm); }
+
+/* Exercises are content of a day: rows on a divider rhythm, no tiles. */
+.plan-days .plan-ex-list { gap: 0; }
+.plan-days .plan-ex { padding: var(--space-2) 0; border-radius: 0; background: none; border-top: var(--border-w-1) solid var(--color-border-1); }
+.plan-days .plan-ex:first-child { border-top: 0; }
+
+/* Supplements stays a child section of Nutrition; a divider marks it. */
+.plan-domain--nutrition .plan-domain-child {
+  margin-top: var(--space-4); padding: var(--space-4) 0 0;
+  border: 0; border-top: var(--border-w-1) solid var(--color-border-1); border-radius: 0; background: none;
+}
+
+/* A regeneration proposal keeps its own dashed boundary (it must never be
+   mistaken for the active plan), but its days are rows inside it, not tiles. */
+.plan-manage--regenerate .plan-proposal-days { gap: 0; }
+.plan-manage--regenerate .plan-proposal-day { padding: var(--space-2) 0; border-radius: 0; background: none; border-top: var(--border-w-1) solid var(--color-border-1); }
+.plan-manage--regenerate .plan-proposal-day:first-child { border-top: 0; }
+
+/* `.page-body` already reserves the bottom navigation; the active Plan does
+   not hold a second, empty 64px band under its last section. */
+.plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) { padding-bottom: var(--space-8); }
+
+/* Phones from 360px: a day's name and its meta share the first line, and the
+   weekly guidance pairs its two actions and two metrics — the same content in
+   fewer lines, at unchanged type sizes and target sizes. */
+@media (min-width: 360px) {
+  .plan-days details.plan-day > .plan-day-summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .plan-days .plan-day-meta { white-space: normal; text-align: right; }
+  .plan-domain--training .weekly-program-actions,
+  .plan-domain--training .weekly-program-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* One section rhythm inside the active Plan: every divided section inside
+   Training (weekly guidance, the week, management) and the secondary links
+   open with the same divider + spacing pair. */
+.plan-domain--training .weekly-program-card,
+.plan-domain--training .plan-days,
+.plan-domain--training .plan-manage--regenerate { margin-top: var(--space-5); padding-top: var(--space-4); }
+.plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-secondary { margin-top: var(--space-5); padding-top: var(--space-4); }
+
+/* F-30: on desktop the active Plan is composed, not a phone column. Training
+   keeps the wide reading column; Nutrition (with Supplements) and the
+   secondary links sit in a narrower supporting rail beside it. */
+@media (min-width: 1024px) {
+  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) {
+    max-width: 1120px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto auto 1fr;
+    column-gap: var(--space-8); align-items: start;
+  }
+  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-head { grid-column: 1 / -1; }
+  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-domain--training { grid-column: 1; grid-row: 2 / span 2; }
+  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-domain--nutrition { grid-column: 2; grid-row: 2; margin-top: var(--space-5); }
+  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-secondary { grid-column: 2; grid-row: 3; margin-top: var(--space-5); }
+  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) .plan-domain--nutrition .plan-domain-child { flex-direction: column; align-items: flex-start; gap: 0; }
 }

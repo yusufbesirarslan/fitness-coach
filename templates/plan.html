@@ -142,7 +142,6 @@
               aria-expanded="false" aria-controls="plan-manage-panel">
         {{ t('plan.manage.regenerate') }}
       </button>
-      <p class="plan-create-note">{{ t('plan.create.capability_note') }}</p>
       {% else %}
       {#- ── FIRST RUN (UX4-PR4, F-07) ──
           Coached, not configured: say what AxisAI will build and that the
@@ -160,6 +159,9 @@
         {#- Regeneration is not PR4's to redesign: the flat form, its order and
             its status placement are exactly what UX-3 PR3 shipped. -#}
         <p class="plan-manage-msg" data-plan-manage-msg role="status" aria-live="polite" hidden></p>
+        {#- UX4-PR5: the combination caveat qualifies the form, so it is shown
+            with the form — the same placement PR4 gave the create branch. -#}
+        <p class="plan-create-note">{{ t('plan.create.capability_note') }}</p>
         {% for name in ('gun_sayisi', 'antrenman_tarzi', 'odak_hedef', 'ekipman', 'odak', 'sure', 'kardiyo_tipi', 'injuries') %}{{ plan_pref(name) }}{% endfor %}
 
         <button class="btn-volt w-full" type="button"
@@ -255,6 +257,27 @@
       <span class="plan-domain-state">{{ t('plan.workout_state.' ~ plan.workout_state) }}</span>
       {% endif %}
     </div>
+    {#- ── ATTENTION FIRST (UX4-PR5) ──
+        What needs attention is said before anything can be done about it, so
+        a stale session reads "needs attention → why → recovery" instead of
+        showing an unexplained recovery button above its own reason. Both
+        sentences are the server's own facts rendered exactly as before; only
+        their position moved. -#}
+    {% if plan.state in ('active_plan', 'partial_active_plan') %}
+      {% if plan.partial %}
+      <p class="plan-partial-note" role="status">{{ t('plan.partial.note') }}</p>
+      {% endif %}
+      {#- ── STALE SESSION, TOLD TRUTHFULLY (UX-3 PR3, brief §38) ──
+          The resolver already refuses to call a stale session "rest", "completed"
+          or resumable — it returns needs_attention/blocked, and the placement
+          below therefore offers no workout action. What was missing was WHY. The
+          reason is the server's own ``stale_reason``; it is never re-classified,
+          softened, or converted into an action here. 'none' is not a reason. -#}
+      {% if plan.workout_session_stale_reason and plan.workout_session_stale_reason != 'none' %}
+      <p class="plan-session-stale" data-plan-session-stale="{{ plan.workout_session_stale_reason }}"
+         role="status">{{ t('plan.session_stale.' ~ plan.workout_session_stale_reason) }}</p>
+      {% endif %}
+    {% endif %}
     <button class="btn-ghost plan-recovery-action" type="button"
             data-action="recoverBlockedWorkout" hidden>{{ t('plan.action.abandon_workout') }}</button>
     <p class="plan-workout-error" id="plan-workout-error" role="alert" hidden></p>
@@ -292,30 +315,15 @@
   {% else %}
     {# active_plan / partial_active_plan — plan içeriği hedefin KENDİSİ: baskın CTA
        YOK. partial'da dürüst not gösterilir; plan yine görünür kalır. #}
-    {% if plan.partial %}
-      <p class="plan-partial-note" role="status">{{ t('plan.partial.note') }}</p>
+    {% if plan.workout_action in ('start', 'resume') %}
+      <button class="btn-volt plan-workout-action" type="button"
+              data-action="startWorkout">{{ t(plan.workout_action_label_key) }}</button>
     {% endif %}
 
     <div class="plan-meta">
       {% if plan.created_at %}<span class="plan-meta-created">{{ t('plan.created_on', date=plan.created_at) }}</span>{% endif %}
       {% if plan.score is not none %}<span class="badge badge-primary" title="{{ t('plan.score_aria') }}">{{ plan.score }}</span>{% endif %}
     </div>
-
-    {% if plan.workout_action in ('start', 'resume') %}
-      <button class="btn-volt plan-workout-action" type="button"
-              data-action="startWorkout">{{ t(plan.workout_action_label_key) }}</button>
-    {% endif %}
-
-    {#- ── STALE SESSION, TOLD TRUTHFULLY (UX-3 PR3, brief §38) ──
-        The resolver already refuses to call a stale session "rest", "completed"
-        or resumable — it returns needs_attention/blocked, and the placement
-        above therefore offers no workout action. What was missing was WHY. The
-        reason is the server's own ``stale_reason``; it is never re-classified,
-        softened, or converted into an action here. 'none' is not a reason. -#}
-    {% if plan.workout_session_stale_reason and plan.workout_session_stale_reason != 'none' %}
-      <p class="plan-session-stale" data-plan-session-stale="{{ plan.workout_session_stale_reason }}"
-         role="status">{{ t('plan.session_stale.' ~ plan.workout_session_stale_reason) }}</p>
-    {% endif %}
 
 {#- ── ADAPTIVE WEEKLY PROGRAM MOUNT (reused consumer contract, answer.txt §7) ──
     Rendered ONLY when the weekly section state is 'loading' (its own flag on AND a
@@ -369,22 +377,40 @@
 {%- endif %}
 
     <section class="plan-days" aria-labelledby="plan-days-label">
-      <h2 id="plan-days-label" class="sec-label">{{ t('plan.days_label') }}</h2>
+      {#- With the adaptive weekly program mounted above, "Weekly program" would
+          head two neighbouring sections; the schedule is then named for what it
+          is — this week's days — with an existing label. -#}
+      <h2 id="plan-days-label" class="sec-label">{{ t('training.this_week') if plan.weekly_section_state == 'loading' else t('plan.days_label') }}</h2>
       {% for day in plan.days %}
-      <details class="plan-day{% if day.is_rest %} plan-day--rest{% endif %}">
+      {%- set day_name -%}
+        {% if day.label %}{% set weekday_key = 'plan.weekday.' ~ day.label %}{{ day.label if t(weekday_key) == weekday_key else t(weekday_key) }}{% else %}{{ t('plan.day.untitled') }}{% endif %}
+      {%- endset %}
+      {% if day.is_rest %}
+      {#- ── REST DAY: A QUIET ROW (UX4-PR5, F-06) ──
+          The server's explicit rest marker (``day.is_rest``) is the only input;
+          nothing is inferred from an empty exercise list. A rest day has nothing
+          to disclose, so it is plain text — weekday, "Rest", its guidance — with
+          no disclosure, no card and no tab stop. -#}
+      <div class="plan-day plan-day--rest">
+        <p class="plan-day-summary">
+          <span class="plan-day-name">{{ day_name }}</span>
+          <span class="plan-day-focus">{{ t('plan.day.rest') }}</span>
+        </p>
+        <p class="plan-day-note">{{ t('plan.day.rest_note') }}</p>
+      </div>
+      {% else %}
+      <details class="plan-day">
         <summary class="plan-day-summary">
-          <span class="plan-day-name">{% if day.label %}{% set weekday_key = 'plan.weekday.' ~ day.label %}{{ day.label if t(weekday_key) == weekday_key else t(weekday_key) }}{% else %}{{ t('plan.day.untitled') }}{% endif %}</span>
+          <span class="plan-day-name">{{ day_name }}</span>
           <span class="plan-day-meta">
-            {%- if not day.is_rest %}{{ day.exercises|length }} · {{ day.duration_min }} {{ t('plan.min') }} · ~{{ day.est_calories }} kcal{%- endif -%}
+            {{- day.exercises|length }} · {{ day.duration_min }} {{ t('plan.min') }} · ~{{ day.est_calories }} kcal
           </span>
           <span class="plan-day-focus">
-            {%- if day.is_rest %}{{ t('plan.day.rest') }}{% elif day.focus %}{{ day.focus }}{% else %}{{ t('plan.day.workout') }}{% endif -%}
+            {%- if day.focus %}{{ day.focus }}{% else %}{{ t('plan.day.workout') }}{% endif -%}
           </span>
         </summary>
         <div class="plan-day-body">
-          {% if day.is_rest %}
-            <p class="plan-day-note">{{ t('plan.day.rest_note') }}</p>
-          {% elif day.exercises %}
+          {% if day.exercises %}
             <ul class="plan-ex-list">
               {% for ex in day.exercises %}
               <li class="plan-ex">
@@ -402,6 +428,7 @@
           {% endif %}
         </div>
       </details>
+      {% endif %}
       {% endfor %}
     </section>
 

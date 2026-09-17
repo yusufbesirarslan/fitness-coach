@@ -305,7 +305,16 @@ def test_plan_css_weekly_rules_match_training_css():
     training = _weekly_rules((static / "training.css").read_text(encoding="utf-8"))
     plan = _weekly_rules((static / "plan.css").read_text(encoding="utf-8"))
     assert training, "no .weekly-program-* rules found in training.css"
-    assert plan == training, "plan.css .weekly-program-* rules drifted from training.css"
+    # WEB-UX4-PR5 (F-06): inside Plan the mount reads as a section of Training
+    # rather than a second card, so plan.css may ADD presentation rules scoped to
+    # the Training domain. The copied canonical set itself must stay identical,
+    # and a Plan-context rule may restyle the mount but never hide any of it.
+    context = {rule for rule in plan
+               if all(part.strip().startswith(".plan-domain--training ")
+                      for part in rule[0].split(","))}
+    assert plan - context == training, "plan.css .weekly-program-* rules drifted from training.css"
+    for selector, declarations in context:
+        assert not re.search(r"display:\s*none|visibility:\s*hidden|opacity:\s*0\b|clip", declarations), selector
 
 
 def test_asset_stays_small():

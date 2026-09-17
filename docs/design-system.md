@@ -363,6 +363,49 @@ birebir aynıdır (`static/training_plan_management.js` DEĞİŞMEDİ).
   ekran geometrisi, gerçek Tab yürüyüşü, yapışkan eylem, 320–1366 × TR/EN
   taşma matrisi, yeniden oluşturma regresyonu).
 
+### Aktif Plan hiyerarşisi (WEB-UX4-PR5)
+
+Aktif (ve kısmi) Plan artık iç içe koyu kutular yığını değil, bir performans
+yüzeyidir: **durum/eylem → haftalık rehberlik → hafta programı → plan yönetimi
+→ destekleyici alanlar**. Yalnızca sunum değişti; `PlanView`, `workout_state`,
+`WorkoutSession`, `/training/bootstrap`, haftalık program tüketici sözleşmesi,
+yeniden oluşturma iş akışı, JS, locale ve Python birebir aynıdır.
+
+| Kural | Ne | Neden |
+| --- | --- | --- |
+| Sahiplik sınırı başına bir kart | Yalnızca `plan-domain--training` ve `plan-domain--nutrition` yüzeydir. Haftalık program (`.weekly-program-card`, JS'in eklediği sınıflar DEĞİŞMEDİ), gün satırları, egzersizler, öneri günleri ve Takviyeler kutu değil; ayırıcı, ritim ve tipografi taşır. | F-06: iki sahiplik düzeyi üç kutu düzeyiyle çiziliyordu. Hesaplanmış stil sayımı (arka plan ayrışması / tam kenarlık / gölge — sınıf adı DEĞİL): 390 px'te 15 yüzey, derinlik 3 → 2 yüzey, derinlik 1 (günler açıkken 24/3 → 2/1). |
+| Dikkat önce | Kısmi not ve `workout_session_stale_reason` cümlesi Antrenman başlığının hemen altında, kurtarma düğmesinden ÖNCE; sol şeritli cümle, kutu değil. | "Dikkat → neden → kurtarma". Metin sunucunun kendi alanından birebir; yalnızca konumu değişti. |
+| Tek kanonik eylem | Başlat/Devam et haftalık programdan, haftadan, yönetimden ve Beslenme'den önce. | 320×640 ve 390×844'te ölçülmüş geometriyle ilk ekranda; sabit konum/çift eylem YOK. |
+| Dinlenme = sessiz satır | `day.is_rest` (sunucunun kanonik işareti) → `<div class="plan-day plan-day--rest">`: gün adı, "Dinlenme", rehber cümlesi. `<details>`, kart ve sekme durağı YOK. Antrenman günleri yerel `<details>` olarak kalır; tüm içerik (süre, kcal, odak, egzersiz, set/tekrar/dinlenme, not) korunur. | 4 dinlenme günü 4 gereksiz sekme durağı ve tam kart ağırlığı taşıyordu. |
+| Hafta başlığı | Haftalık program bağlandığında program listesi `training.this_week` ile başlar (mevcut anahtar). | İki komşu bölüm aynı "Haftalık program" başlığını taşıyordu. |
+| Masaüstü kompozisyonu | ≥1024 px ve YALNIZCA `[data-plan-state="active_plan"]` / `partial_active_plan`: `max-width: 1120px` ızgara, Antrenman `minmax(0,1fr)` (1366'da 736 px) + 320 px destek sütunu (Beslenme → Takviyeler, ikincil bağlantılar). | F-30: 1366'da ortalanmış 688 px telefon sütunuydu. Antrenman baskın kalır; en uzun satır 622 px. |
+| 320 px bağlantılar | `.plan-domain-link` tam genişlik ve 44 px hedef, metin okuma ekseninde (`justify-content: flex-start`). | Sola hizalı bölümde ortalanmış bağlantı tutarsızlığı. |
+
+- **Ölçüm (390×844, TR, kanonik aktif plan, aynı düzenek iki commit'te):**
+  Windows Chromium 2 718 → 2 021 px (−25,6 %, 3,22 → 2,39 ekran); Linux
+  Chromium (CI fontları) 2 685 → 2 118 px (−21,1 %). Haftalık rehberlik +
+  hafta 1,56 → 0,95 ekran. 1366: 2 192 → 1 386 px. Tipografi, dokunma
+  hedefleri ve içerik küçültülmedi.
+- **Yeniden oluşturma:** `plan.create.capability_note` artık kapalı panelin
+  dışında değil, açılan formun içinde (durum satırından hemen sonra) — PR4'ün
+  create dalına verdiği yerleşimin aynısı. Form alanları, sırası ve iş akışı
+  değişmedi.
+- **Kapsam:** no_active_plan (PR4 ilk kurulum) ve read_error ızgara/genişlik
+  almaz; oluşturma eylemi geometrisi değişmedi. Takviyeler alt bölümünün
+  düzleşmesi Beslenme sunumudur ve her Plan durumunda aynıdır (bu durumlarda
+  −19 px).
+- **Bilinen, BİLEREK değiştirilmeyen:** `plan.day.rest_note` "Bugün dinlenme
+  günü…" der ama her dinlenme satırında gösterilir; metin değişikliği locale
+  işidir, ayrı takip.
+- **Geri alma:** `git revert`. `UIUX_PLAN_V2_ENABLED` daha geniş Plan geri alma
+  seçicisi olarak kalır; bu PR hiçbir bayrağa dokunmaz.
+- **Regresyon:** `tests/test_ux4_pr5_plan_hierarchy_contract.py` (sahiplik,
+  `day.is_rest` yetkisi, içerik korunumu, haftalık program sözleşmesi, CSS
+  kapıları) + `tests/test_ux4_pr5_plan_hierarchy_browser.py` (gerçek
+  `WorkoutSession` ile Devam et / çakışma / önceki-gün bayat durumları × 5
+  genişlik × TR/EN, hesaplanmış yüzey sayımı, ölçülmüş eylem geometrisi, gerçek
+  Tab yürüyüşü, ağ değişmezleri, PR4/read_error/regenerate kayıtları).
+
 ## Genişletme Rehberi
 
 1. **Yeni token:** tokens.css'te doğru bölüme kanonik adla ekle; light değeri
