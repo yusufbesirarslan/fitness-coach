@@ -176,7 +176,9 @@ def test_all_main_pages_render(client, make_user, login):
         r = client.get(path)
         assert r.status_code in (200, 302), f"{path} -> {r.status_code}"
         if r.status_code == 200:
-            assert "_head" not in r.get_data(as_text=True)  # include çözüldü
+            # Unresolved `{% include "_head.html" %}`. The locale catalog is
+            # injected on every page, so a key containing `_head` is not a leak.
+            assert "_head.html" not in r.get_data(as_text=True)
 
 
 # ---------------------------------------------------------------------------
