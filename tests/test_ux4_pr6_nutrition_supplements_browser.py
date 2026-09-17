@@ -376,7 +376,9 @@ def test_nutrition_tabs_are_all_discoverable_touchable_and_keyboard_reachable(
                   mask: cs.maskImage !== 'none' || (cs.webkitMaskImage || 'none') !== 'none'};
         }""")
         assert len(bar["tabs"]) == 5
-        assert all(t["h"] >= 44 for t in bar["tabs"]), (language, width, bar)
+        # 43.5 matches `_small_controls` / the measure harness. Linux Chromium
+        # reports CSS min-height: 44px as 43.99998 via getBoundingClientRect.
+        assert all(t["h"] >= 43.5 for t in bar["tabs"]), (language, width, bar)
         assert not any(t["clipped"] for t in bar["tabs"]), (language, width, bar)
         if bar["scrollable"]:
             # Off-screen workflows must announce themselves on arrival.
