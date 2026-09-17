@@ -7,13 +7,14 @@
 
     python -m pytest tests/test_hooks.py -v
 """
-from datetime import date, timedelta
+from datetime import timedelta
 
 from app.extensions import db
 from app.models import Activity, User
 from app.blueprints import auth as auth_bp
 from app.services import cognito_service
 from app.services.cognito_service import CognitoServiceError
+from app.timeutil import app_today
 
 
 def _csp_directives(response):
@@ -249,16 +250,16 @@ def _fresh(user_id):
 
 
 def test_streak_increments_on_consecutive_day(client, make_user, login):
-    user = make_user("alice", last_login=date.today() - timedelta(days=1), streak_count=3)
+    user = make_user("alice", last_login=app_today() - timedelta(days=1), streak_count=3)
     login("alice")
     client.get("/health")
     user = _fresh(user.id)
     assert user.streak_count == 4
-    assert user.last_login == date.today()
+    assert user.last_login == app_today()
 
 
 def test_streak_resets_after_gap(client, make_user, login):
-    user = make_user("bob", last_login=date.today() - timedelta(days=3), streak_count=10)
+    user = make_user("bob", last_login=app_today() - timedelta(days=3), streak_count=10)
     login("bob")
     client.get("/health")
     assert _fresh(user.id).streak_count == 1
@@ -272,7 +273,7 @@ def test_streak_first_login_starts_at_one(client, make_user, login):
 
 
 def test_streak_same_day_counts_once(client, make_user, login):
-    user = make_user("dave", last_login=date.today() - timedelta(days=1), streak_count=1)
+    user = make_user("dave", last_login=app_today() - timedelta(days=1), streak_count=1)
     login("dave")
     client.get("/health")
     client.get("/health")
@@ -280,7 +281,7 @@ def test_streak_same_day_counts_once(client, make_user, login):
 
 
 def test_streak_milestone_awards_xp_and_activity(client, make_user, login):
-    user = make_user("eve", last_login=date.today() - timedelta(days=1),
+    user = make_user("eve", last_login=app_today() - timedelta(days=1),
                      streak_count=6, rank_points=0, weekly_xp=0)
     login("eve")
     client.get("/health")
@@ -293,11 +294,42 @@ def test_streak_milestone_awards_xp_and_activity(client, make_user, login):
 
 
 def test_streak_non_milestone_awards_nothing(client, make_user, login):
-    user = make_user("frank", last_login=date.today() - timedelta(days=1),
+    user = make_user("frank", last_login=app_today() - timedelta(days=1),
                      streak_count=3, rank_points=0)
     login("frank")
     client.get("/health")
     assert _fresh(user.id).rank_points == 0
+
+
+def test_streak_increments_inside_the_utc_istanbul_midnight_window(
+        client, make_user, login):
+    """The streak day boundary is Istanbul's, not UTC's or the server's.
+
+    Between 21:00 and 24:00 UTC the UTC date is still D while the application
+    day is already D+1. A user whose ``last_login`` is the application's
+    yesterday must increment in that window. An implementation that resolved
+    "today" from ``date.today()`` (UTC on a CI runner) would read the seeded day
+    as *today* and take the already-updated early return instead, leaving the
+    streak untouched — which is precisely the drift that made the fixtures in
+    this module clock-dependent. Frozen dates, so this holds on every runner in
+    every timezone at every hour.
+    """
+    from datetime import date, datetime, timezone
+    from app.timeutil import APP_TZ, audit_clock
+
+    frozen = datetime(2026, 3, 11, 0, 30, tzinfo=APP_TZ)
+    assert frozen.astimezone(timezone.utc).date() == date(2026, 3, 10), (
+        "the fixture must sit inside the window where the UTC and Istanbul "
+        "dates differ, or this test proves nothing")
+
+    user = make_user("boundary", last_login=date(2026, 3, 10), streak_count=5)
+    login("boundary")
+    with audit_clock(frozen):
+        client.get("/health")
+
+    user = _fresh(user.id)
+    assert user.streak_count == 6
+    assert user.last_login == date(2026, 3, 11)
 
 
 # ---------------------------------------------------------------------------
