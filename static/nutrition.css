@@ -57,7 +57,7 @@
   font-weight: var(--weight-bold); letter-spacing: 0.1em;
   text-transform: uppercase; margin-bottom: var(--space-4);
 }
-.nut-hero-target span { color: var(--color-text-2); }
+.nut-hero-target #ring-target { color: var(--color-text-2); }
 /* WEB-UX4-PR6 / F-16 — target presentation state, set by nutrition.js from
    the canonical `/meal-log/today` read. `pending` = not read yet (or the read
    failed): the neutral "Target: — kcal" line, but no bare "—" percentage under

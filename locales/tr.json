@@ -1387,7 +1387,7 @@
   "plan.supplements.unavailable": "Takviye sayısı geçici olarak görüntülenemiyor.",
   "editprofile.stack_context": "Stack'in profilinde böyle görünür. Yönetimi Plan → Beslenme → Takviyeler altındadır.",
   "editprofile.stack_manage": "Takviye dolabını aç →",
-  "manage_stack.delete_confirm": "Bu takviye silinsin mi?",
+  "manage_stack.delete_confirm": "Bu supplement silinsin mi?",
   "coach.widget_title": "AxisAI Koç",
   "coach.close": "Kapat",
   "coach.composer_label": "Koça mesajın",

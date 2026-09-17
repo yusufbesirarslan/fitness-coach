@@ -19,6 +19,8 @@ from app.timeutil import app_today
 from test_training_execution_boundary import training_page  # noqa: F401
 
 WIDTHS = (320, 390, 768, 1024, 1366)
+# Review P2-1: the in-between phone widths where a row can run out of room.
+PHONE_EDGES = (360, 375, 384, 414)
 RATING_FIELDS = ("rating_effect", "rating_taste", "rating_digestion", "rating_price")
 
 # Global chrome (header/action bar/Coach widget root) is owned by the shell, not
@@ -207,10 +209,10 @@ def test_rating_groups_use_native_arrow_keys_and_expose_the_value(
       const a = document.activeElement;
       const face = getComputedStyle(a.nextElementSibling);
       return {name: a.name, value: a.value, checked: a.checked,
-              outline: face.outlineStyle, borderWidth: face.borderTopWidth};
+              outline: face.outlineStyle, inset: face.boxShadow.includes('inset')};
     }""")
     assert focused == {"name": "rating_effect", "value": "2", "checked": True,
-                       "outline": "solid", "borderWidth": "2px"}, focused
+                       "outline": "solid", "inset": True}, focused
     # The group has an accessible name and each option a spoken value.
     group = page.locator('[data-rating-field="rating_effect"]')
     expect(group.get_by_role("radio", name="2")).to_be_checked()
@@ -327,6 +329,18 @@ def test_supplements_geometry_emoji_and_overflow_across_the_matrix(
         assert EMOJI.findall(text) == [], (language, width)
         assert not re.search("[★☆]", text), (language, width)
         assert _no_overflow(page), (language, width)
+        clipped = page.evaluate("""() => [...document.querySelectorAll(
+            '.supp-status-btn, .btn-danger, .stack-choice-face, .stack-rating-face, .stack-add-summary')]
+            .filter(el => el.checkVisibility() && el.scrollWidth > el.clientWidth + 1)
+            .map(el => el.textContent.trim())""")
+        assert clipped == [], (language, width, clipped)
+    for width in PHONE_EDGES:
+        page.set_viewport_size({"width": width, "height": 900})
+        page.goto("http://localhost/supplements")
+        page.locator("#add-toggle").click()
+        page.locator('[data-rating-field="rating_effect"] label:has(input[value=""])').click()
+        assert _no_overflow(page), (language, width)
+        assert _small_controls(page) == [], (language, width)
     assert errors == []
 
 

@@ -245,8 +245,6 @@ def test_measure_nutrition(app, auth_user, training_page, language, target):
             cell["resizeScrollRequests"] = len(traffic)
             cell["tabWalk"] = _walk(page)
         cells[width] = cell
-    with app.app_context():
-        pass
     _write(f"nutrition-{language}-{'target' if target else 'notarget'}", {"cells": cells, "errors": errors})
 
 
