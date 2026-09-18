@@ -778,9 +778,10 @@ def test_deleting_a_ledger_row_releases_its_stored_meal_photo():
     still load-bearing — a lifecycle that exists but is not reached, or is
     reached but does not exist, closes nothing.
 
-    Scope, deliberately narrow: `s3_helper` gained ONE deletion function and it
-    is meal-photo specific. A generic "delete any object" primitive would turn
-    every future caller into an unbounded object-store client.
+    Scope, deliberately narrow: F14 owns `delete_meal_photo`. F4 later added
+    `delete_managed_object` for pump-check/avatar keys only — still not a
+    generic "delete any object" primitive. Meal-photo callers must keep using
+    the F14 function.
 
     The behaviour itself — ordering, partial failure, retry, concurrency,
     malformed references, the durable cleanup intent and its operator drain —
@@ -792,10 +793,10 @@ def test_deleting_a_ledger_row_releases_its_stored_meal_photo():
         name for name in dir(s3_helper)
         if not name.startswith("_")
         and ("delete" in name.lower() or "remove" in name.lower()))
-    assert deleters == ["delete_meal_photo"], (
-        f"s3_helper's deletion surface is {deleters}. F14's fix authorises "
-        "exactly one bounded meal-photo primitive; a generic object deleter "
-        "is a different and much larger decision.")
+    assert deleters == ["delete_managed_object", "delete_meal_photo"], (
+        f"s3_helper's deletion surface is {deleters}. F14 owns "
+        "delete_meal_photo; F4 owns delete_managed_object for pump-checks/"
+        "avatars. A bucket-or-prefix-parameter deleter is still forbidden.")
 
     tree = ast.parse(
         _module_source("app/services/mobile_diary_mutation/service.py"))

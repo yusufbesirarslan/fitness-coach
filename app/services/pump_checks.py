@@ -1,10 +1,14 @@
+import logging
+
 import s3_helper
 
-from app.models import PumpCheckLike, TrainingPlan
+from app.models import PumpCheck, PumpCheckLike, TrainingPlan
 # Geriye uyumluluk: get_friend_ids artık friends servisinde yaşıyor; buradan
 # import eden mevcut modüller (social, training, ...) kırılmasın diye re-export.
 from app.services.friends import get_friend_ids  # noqa: F401
 from app.timeutil import display_dt
+
+logger = logging.getLogger(__name__)
 
 _SHARING_STATUS_KEYS = {
     "feed": "pump_check.sharing.feed",
@@ -26,6 +30,25 @@ def can_view_pump_check(user_id, check):
         return (user_id in set(check.shared_friend_ids or [])
                 and user_id in get_friend_ids(check.user_id))
     return False
+
+
+def release_pump_check_image(owner_user_id, image_key):
+    """Commit'ten SONRA bir Pump Check görselini serbest bırak (F4).
+
+    Hâlâ başka bir satırın işaret ettiği anahtar silinmez. Taşıma hatası
+    kullanıcı yanıtını bozmaz; olay loglanır (kurtarılabilir yetim).
+    """
+    if not image_key:
+        return
+    if PumpCheck.query.filter_by(image_key=image_key).first() is not None:
+        logger.warning("[PUMP] event=image_release_skipped reason=still_referenced")
+        return
+    try:
+        s3_helper.delete_managed_object(image_key, owner_user_id)
+    except s3_helper.S3Error as error:
+        logger.error(
+            "[PUMP] event=image_release_pending user_id=%s key=%s error_type=%s",
+            owner_user_id, image_key, type(error).__name__)
 
 
 def pump_check_image_url(check, viewer_id, expires_in=3600, visibility_preauthorized=False):
