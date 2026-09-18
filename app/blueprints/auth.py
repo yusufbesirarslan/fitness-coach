@@ -590,6 +590,31 @@ def _revoke_all_sessions_after_credential_change(user_id):
     _best_effort_provider_revoke_all(user_id, mobile_results, web_provider_refresh)
 
 
+def _revoke_local_sessions_for_global_logout(user_id):
+    """End every locally-authoritative session this user already holds.
+
+    Web logout calls Cognito GlobalSignOut, which invalidates every provider
+    refresh token across devices. `authenticate_access` never consults Cognito
+    — it validates the STORED provider access token offline — so a live
+    `MobileAuthSession` family would keep authenticating after that global
+    intent unless it is revoked here. Other browser `CognitoSession` rows are
+    the same class of leftover: `require_auth` accepts the stored access token
+    until refresh.
+
+    Local revocation is the security-authoritative step and runs first. The
+    credential-epoch fence is NOT used: logout is not a password change, and
+    a later login with the still-valid password must succeed. The family sweep
+    is the same primitive credential change uses.
+
+    Returns (mobile_results, web_rows_deleted). Storage failure raises
+    MobileAuthFailure for mobile, or a database exception for web rows; the
+    caller must not claim logout completed.
+    """
+    mobile_results = mobile_auth.revoke_all_for_global_logout(user_id)
+    web_deleted = session_store.delete_for_user(user_id)
+    return mobile_results, web_deleted
+
+
 def _best_effort_provider_revoke_all(user_id, mobile_results, web_refresh_tokens):
     """Tell Cognito about revocations already committed locally. Never raises.
 
@@ -686,18 +711,49 @@ def logout():
         from urllib.parse import urlparse
         if urlparse(referer).hostname != request.host.split(":")[0]:
             abort(403, description=t("route.csrf_failed"))
-    # Cognito oturumu: GlobalSignOut (best-effort — süresi dolmuş token hata
-    # verebilir, yut) + sunucu tarafı token satırını sil.
+    # Ordering (F5):
+    #   1. Identity from Flask-Login only — never a client-supplied user_id.
+    #   2. Capture the current access token for the later provider call.
+    #   3. Revoke every local mobile family + delete every CognitoSession row.
+    #      This is the security-authoritative step and must not depend on
+    #      Cognito being reachable. Failure here aborts; the browser cookie
+    #      stays so the user can retry. A 302 would claim global logout
+    #      completed while locally-authoritative sessions might still live.
+    #   4. Clear the Flask-Login cookie / session keys.
+    #   5. Best-effort Cognito GlobalSignOut. A provider outage must not
+    #      resurrect local sessions; it is logged, not rolled back.
+    user_id = current_user.id
     sid = session.get("cognito_sid")
+    access = None
     if sid:
-        access = session_store.current_access_token(sid)
-        if access:
-            try:
-                cognito_service.global_sign_out(access)
-            except CognitoServiceError:
-                pass
-        session_store.delete(sid)
+        try:
+            access = session_store.current_access_token(sid)
+        except Exception:
+            access = None
+    try:
+        mobile_results, web_deleted = _revoke_local_sessions_for_global_logout(
+            user_id)
+    except mobile_auth.MobileAuthFailure:
+        current_app.logger.error(
+            "[AUTH] global logout local sessions could not be revoked (user=%s)",
+            user_id)
+        abort(503)
+    except Exception:
+        current_app.logger.error(
+            "[AUTH] global logout local sessions could not be revoked (user=%s)",
+            user_id, exc_info=True)
+        abort(503)
     session.pop("cognito_sid", None)
     session.pop("via_cognito", None)
     logout_user()
+    if access:
+        try:
+            cognito_service.global_sign_out(access)
+        except CognitoServiceError:
+            current_app.logger.warning(
+                "[AUTH] GlobalSignOut failed after local revoke (user=%s)",
+                user_id)
+    current_app.logger.info(
+        "[AUTH] global logout completed (user=%s families=%d web_rows=%d)",
+        user_id, len(mobile_results), web_deleted)
     return redirect(url_for("auth.login"))

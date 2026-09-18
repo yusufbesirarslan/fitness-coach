@@ -1519,3 +1519,191 @@ def test_fencing_an_absent_account_is_a_no_op_rather_than_a_failure(app):
     from app.services import mobile_auth
 
     assert mobile_auth.revoke_all_for_user(999_999, now=NOW) == []
+
+
+def test_global_logout_reason_fits_the_persisted_column(app):
+    from app.services import mobile_auth
+
+    column = MobileAuthSession.__table__.c.revoked_reason
+    assert len(mobile_auth.GLOBAL_LOGOUT_REASON) <= column.type.length
+
+
+def test_global_logout_revokes_every_family_without_moving_the_epoch(
+        app, mobile_user, provider, make_user):
+    from app.services import mobile_auth
+
+    first = mobile_auth.login("mobile-service", "correct", now=NOW)
+    second = mobile_auth.login(
+        "mobile-service", "correct", now=NOW + timedelta(minutes=1))
+    bystander = make_user("bystander", cognito_sub="sub-bystander")
+    untouched = _other_user_family(bystander)
+    later = NOW + timedelta(minutes=2)
+
+    results = mobile_auth.revoke_all_for_global_logout(
+        mobile_user.id, now=later)
+
+    assert len(results) == 2
+    mine = MobileAuthSession.query.filter_by(user_id=mobile_user.id).all()
+    assert len(mine) == 2
+    for family in mine:
+        assert family.revoked_at == later
+        assert family.revoked_reason == mobile_auth.GLOBAL_LOGOUT_REASON
+        assert family.cognito_access_token is None
+        assert family.cognito_refresh_token is None
+    assert MobileAccessCredential.query.filter(
+        MobileAccessCredential.revoked_at.is_(None)).count() == 0
+    assert MobileRefreshCredential.query.filter(
+        MobileRefreshCredential.revoked_at.is_(None)).count() == 0
+    db.session.refresh(untouched)
+    assert untouched.revoked_at is None
+    assert untouched.cognito_refresh_token is not None
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=mobile_user.id).scalar() == 0
+    assert first.access_credential != second.access_credential
+
+
+def test_global_logout_makes_existing_credentials_unusable_and_blocks_refresh(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+    later = NOW + timedelta(minutes=2)
+    assert mobile_auth.authenticate_access(
+        issued.access_credential, now=later).user.id == mobile_user.id
+
+    mobile_auth.revoke_all_for_global_logout(mobile_user.id, now=later)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as access_exc:
+        mobile_auth.authenticate_access(issued.access_credential, now=later)
+    assert access_exc.value.code == "AUTH_SESSION_EXPIRED"
+    assert access_exc.value.status == 401
+    assert access_exc.value.retryable is False
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as refresh_exc:
+        mobile_auth.refresh(issued.refresh_credential, now=later)
+    assert refresh_exc.value.code == "AUTH_REFRESH_FAILED"
+    assert refresh_exc.value.reason == "refresh_revoked"
+
+
+def test_global_logout_revocation_is_idempotent_and_keeps_first_reason(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    first = mobile_auth.revoke_all_for_global_logout(
+        mobile_user.id, now=NOW + timedelta(minutes=2))
+    second = mobile_auth.revoke_all_for_global_logout(
+        mobile_user.id, now=NOW + timedelta(minutes=3))
+
+    assert len(first) == 1
+    assert second == []
+    family = MobileAuthSession.query.one()
+    assert family.revoked_at == NOW + timedelta(minutes=2)
+    assert family.revoked_reason == mobile_auth.GLOBAL_LOGOUT_REASON
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=mobile_user.id).scalar() == 0
+
+
+def test_a_new_login_after_global_logout_is_still_issued_a_session(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    mobile_auth.revoke_all_for_global_logout(mobile_user.id, now=NOW)
+    issued = mobile_auth.login(
+        "mobile-service", "correct", now=NOW + timedelta(minutes=1))
+
+    principal = mobile_auth.authenticate_access(
+        issued.access_credential, now=NOW + timedelta(minutes=2))
+    assert principal.user.id == mobile_user.id
+    assert principal.family.revoked_at is None
+    assert MobileAuthSession.query.filter(
+        MobileAuthSession.revoked_at.is_(None)).count() == 1
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=mobile_user.id).scalar() == 0
+
+
+def test_refresh_parked_at_the_provider_cannot_outlive_global_logout(
+        app, mobile_user, provider, monkeypatch):
+    """A refresh that began before global logout must not mint a child after it.
+
+    The rotation drops its row lock for the Cognito round-trip. Driving the
+    family sweep from inside that stub is the same interleaving as a concurrent
+    web logout, in one thread, with no sleep.
+    """
+    from app.services import mobile_auth
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+    real_refresh = cognito_service.refresh_tokens
+    later = NOW + timedelta(minutes=50)
+
+    def refresh_tokens(refresh_token, username):
+        mobile_auth.revoke_all_for_global_logout(mobile_user.id, now=later)
+        return real_refresh(refresh_token, username)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", refresh_tokens)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(issued.refresh_credential, now=later)
+    assert exc.value.code == "AUTH_REFRESH_FAILED"
+    assert exc.value.reason == "refresh_revoked"
+    family = MobileAuthSession.query.one()
+    assert family.revoked_reason == mobile_auth.GLOBAL_LOGOUT_REASON
+    assert MobileAccessCredential.query.filter_by(generation=1).count() == 0
+    assert MobileRefreshCredential.query.filter_by(generation=1).count() == 0
+    with pytest.raises(mobile_auth.MobileAuthFailure) as reused:
+        mobile_auth.authenticate_access(issued.access_credential, now=later)
+    assert reused.value.code == "AUTH_SESSION_EXPIRED"
+
+
+def test_in_flight_login_during_global_logout_is_still_issued(
+        app, mobile_user, provider, monkeypatch):
+    """Logout is not a credential change: the password still works.
+
+    An authenticate that started before the sweep and inserts after it is a
+    new login at the boundary, not a pre-existing family surviving. The epoch
+    stays put so that login is issued.
+    """
+    from app.services import mobile_auth
+
+    established = mobile_auth.login("mobile-service", "correct", now=NOW)
+    real_authenticate = cognito_service.authenticate
+
+    def authenticate(username, password):
+        result = real_authenticate(username, password)
+        mobile_auth.revoke_all_for_global_logout(
+            mobile_user.id, now=NOW + timedelta(minutes=1))
+        return result
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+    issued = mobile_auth.login(
+        "mobile-service", "correct", now=NOW + timedelta(seconds=1))
+
+    assert mobile_auth.authenticate_access(
+        issued.access_credential,
+        now=NOW + timedelta(minutes=2)).user.id == mobile_user.id
+    with pytest.raises(mobile_auth.MobileAuthFailure) as reused:
+        mobile_auth.authenticate_access(
+            established.access_credential, now=NOW + timedelta(minutes=2))
+    assert reused.value.code == "AUTH_SESSION_EXPIRED"
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=mobile_user.id).scalar() == 0
+
+
+def test_global_logout_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    # No epoch fence commit precedes the sweep, so the first commit is the
+    # family revoke itself.
+    _fail_commit_from_call(monkeypatch, 1)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.revoke_all_for_global_logout(
+            mobile_user.id, now=NOW + timedelta(minutes=2))
+
+    _assert_retryable_storage_failure(exc)
+    monkeypatch.undo()
+    assert MobileAuthSession.query.one().revoked_at is None
+    assert db.session.query(User.credential_epoch).filter_by(
+        id=mobile_user.id).scalar() == 0

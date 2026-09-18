@@ -385,11 +385,10 @@ def login(username, password, now=None):
             "session_commit_failed") from exc
 
 
-# Revocation reason recorded when the account's credentials changed rather than
-# when this session's own lifecycle ended. Kept as a constant because the web
-# password-reset route is the only caller and it must not spell it by hand;
+# Revocation reasons recorded on the family rather than spelled by callers.
 # MobileAuthSession.revoked_reason is String(40).
 CREDENTIAL_CHANGE_REASON = "credential_change"
+GLOBAL_LOGOUT_REASON = "global_logout"
 
 
 def _revoke_family(family, reason, now):
@@ -924,36 +923,27 @@ def _fence_credential_change(user_id):
     return fenced
 
 
-def revoke_all_for_user(user_id, reason=CREDENTIAL_CHANGE_REASON, now=None):
-    """Revoke every live mobile family for one local user.
+def _revoke_live_families_for_user(user_id, reason, now):
+    """Lock and revoke every currently live mobile family for one local user.
 
-    The account-recovery counterpart to `prepare_logout`, which can only reach
-    the one family holding the presented credential. A credential change has no
-    credential to present and must reach all of them.
-
-    Local revocation is the authoritative step, not a convenience: a mobile
-    request is authorized by `authenticate_access`, which validates the STORED
-    provider access token OFFLINE. Nothing it does consults Cognito, so no
-    provider-side change is observable on that path — only `revoked_at` on the
-    family (and on its credential rows) ends the session, and it ends it on the
-    very next request.
+    Shared by credential-change and global web logout so those paths cannot
+    drift on which rows die, how they die, or how a racing writer is handled.
+    Does not move `credential_epoch`: that fence is a password-change concern
+    and would refuse a later login that still presents a valid password.
 
     Each family is locked and committed on its own, the same shape as
     `purge_expired`, so a row a racing writer already revoked cannot stall the
-    rest. The candidate list is read once, and on its own it would not be
-    enough: a login that authenticated with the OLD password seconds ago may
-    still be inside its Cognito round-trip and insert its family after this
-    read. `_fence_credential_change` closes that by raising the account's
-    credential epoch first, which is why it commits BEFORE the list is read.
+    rest. The candidate list is read once. A refresh that snapshotted a family
+    before this sweep cannot commit a child after it: `_lock_and_revalidate_refresh`
+    refuses a non-null `revoked_at`, and the versioned family UPDATE is
+    predicated on `revoked_at IS NULL`.
 
     Returns one LogoutResult per family revoked here, each carrying the provider
     refresh token decrypted BEFORE `_revoke_family` clears the ciphertext, so
-    the caller can follow with `best_effort_provider_revoke`. Storage failures
+    the caller can follow with a best-effort provider call. Storage failures
     surface as the normalized retryable MobileAuthFailure — a caller must be
     able to tell "nothing is live" from "I could not check".
     """
-    now = now or datetime.utcnow()
-    _fence_credential_change(user_id)
     try:
         candidate_ids = [row[0] for row in db.session.query(
             MobileAuthSession.id).filter(
@@ -989,6 +979,45 @@ def revoke_all_for_user(user_id, reason=CREDENTIAL_CHANGE_REASON, now=None):
         _security_event(reason, public_family_id, "credential")
         revoked.append(LogoutResult(public_family_id, provider_refresh))
     return revoked
+
+
+def revoke_all_for_user(user_id, reason=CREDENTIAL_CHANGE_REASON, now=None):
+    """Revoke every live mobile family after a credential change.
+
+    The account-recovery counterpart to `prepare_logout`, which can only reach
+    the one family holding the presented credential. A credential change has no
+    credential to present and must reach all of them.
+
+    Local revocation is the authoritative step, not a convenience: a mobile
+    request is authorized by `authenticate_access`, which validates the STORED
+    provider access token OFFLINE. Nothing it does consults Cognito, so no
+    provider-side change is observable on that path — only `revoked_at` on the
+    family (and on its credential rows) ends the session, and it ends it on the
+    very next request.
+
+    The candidate list is read once, and on its own it would not be enough: a
+    login that authenticated with the OLD password seconds ago may still be
+    inside its Cognito round-trip and insert its family after this read.
+    `_fence_credential_change` closes that by raising the account's credential
+    epoch first, which is why it commits BEFORE the list is read.
+    """
+    now = now or datetime.utcnow()
+    _fence_credential_change(user_id)
+    return _revoke_live_families_for_user(user_id, reason, now)
+
+
+def revoke_all_for_global_logout(user_id, now=None):
+    """Revoke every live mobile family for a provider-global web logout.
+
+    Same family sweep as `revoke_all_for_user`, without the credential-epoch
+    fence. Web logout already calls Cognito GlobalSignOut (every provider
+    refresh token, every device). Local families must not outlive that intent.
+    The password itself has not changed, so a genuinely new login after this
+    boundary must still be issued: bumping the epoch would refuse it as a
+    stale credential.
+    """
+    now = now or datetime.utcnow()
+    return _revoke_live_families_for_user(user_id, GLOBAL_LOGOUT_REASON, now)
 
 
 def validate_derivation_key_readiness(now=None):

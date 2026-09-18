@@ -73,9 +73,12 @@ def test_concurrent_sessions_are_independent(app, cognito_env, cog_account):
     assert c1.post("/login", json={"username": "e2e", "password": "x"}).status_code == 200
     assert c2.post("/login", json={"username": "e2e", "password": "x"}).status_code == 200
     assert CognitoSession.query.count() == 2       # iki bağımsız satır
-    # c1 çıkış yapınca kendi satırı silinir; c2 satırı kalır (yerel kayıt bağımsız).
+    # Login still creates independent rows. Web logout is GlobalSignOut, so
+    # every local CognitoSession for that user must die with it — leaving
+    # c2's row valid would be the same leftover-authority bug as a live
+    # mobile family (F5).
     c1.get("/logout", headers={"Referer": "http://localhost/"})
-    assert CognitoSession.query.count() == 1
+    assert CognitoSession.query.count() == 0
 
 
 def test_session_expiration_forces_relogin(client, cognito_env, cog_account, monkeypatch):
