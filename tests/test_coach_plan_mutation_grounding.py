@@ -96,15 +96,12 @@ def _assert_unchanged(user_id, before):
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
-def test_english_weekdays_match_training_js_presentation():
-    from pathlib import Path
-    js = Path("static/training.js").read_text(encoding="utf-8")
+def test_english_weekdays_match_canonical_presentation():
     for turkish, english in zip(
             __import__(
                 "app.services.plan_mutation.validation",
                 fromlist=["WEEKDAYS"]).WEEKDAYS,
             ENGLISH_WEEKDAYS):
-        assert f"'{turkish}':'{english}'" in js
         assert localize_weekday(turkish, "en") == english
         assert localize_weekday(turkish, "tr") == turkish
         assert canonicalize_weekday(english) == turkish

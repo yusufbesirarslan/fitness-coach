@@ -59,65 +59,28 @@ def test_training_renders_the_training_template(app, client, make_user, login):
         make_user("chartpl", profile_complete=True)
         login("chartpl")
         client.get("/training")
-    assert "training.html" in rendered
+    assert "plan.html" in rendered
 
 
 # ── major DOM regions ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("marker", [
-    'id="active-plan-view"',   # plan varsa gösterilen görünüm (training.js açar)
-    'id="setup-form"',         # plan yoksa gösterilen kurulum akışı
-    'id="workout-hero"',
-    'id="week-strip"',
-    'id="wstats"',
-    'class="apv-meta-row"',
-    'id="info-banner"',
-    'id="results"',
-    'id="weekly-grid"',
-    'id="session-view"',
-    'id="celebration"',
-    'id="rest-timer"',
-    'id="pump-check-modal"',
-    'id="pump-crop"',
-    'id="day-preview"',
+    'id="plan-page"',
+    "data-plan-v2",
+    'data-plan-state="no_active_plan"',
+    "data-plan-manage",
+    'data-manage-state="create"',
     'id="toast-wrap"',
-    'id="loading"',
 ])
 def test_existing_dom_regions_are_present(training_html, marker):
     assert marker in training_html
 
 
-@pytest.mark.parametrize("grid_id", [
-    "gun-grid", "tarzi-grid", "hedef-grid", "ekipman-grid",
-    "odak-grid", "sure-grid", "kardiyo-tip-grid", "injury-grid",
-])
-def test_setup_form_option_grids_are_present(training_html, grid_id):
-    assert 'id="%s"' % grid_id in training_html
-
-
-# ── controls ────────────────────────────────────────────────────────────────────
-
 @pytest.mark.parametrize("action", [
-    "startWorkout", "generatePlan", "savePlan", "resetPlan",
-    "submitPumpCheck", "finishSession", "closeSession",
-    "closeCelebration", "addRest", "skipRest",
+    "planManageGenerate",
 ])
 def test_existing_declarative_controls_are_present(training_html, action):
     assert 'data-action="%s"' % action in training_html
-
-
-@pytest.mark.parametrize("control_id", [
-    "submit-btn", "save-btn", "pump-submit", "pump-cancel", "pump-close",
-    "pump-file-input", "pump-location", "pump-desc", "injury-other",
-])
-def test_existing_form_controls_are_present(training_html, control_id):
-    assert 'id="%s"' % control_id in training_html
-
-
-def test_pump_share_selector_is_present(training_html):
-    assert 'data-share="feed"' in training_html
-    assert 'data-share="friends"' in training_html
-    assert 'id="pump-friend-picker"' in training_html
 
 
 # ── navigation ──────────────────────────────────────────────────────────────────
@@ -131,7 +94,6 @@ def test_existing_navigation_entries_are_present(training_html, href):
 
 
 def test_nutrition_is_not_a_primary_navigation_entry(training_html):
-    assert 'href="/nutrition"' not in training_html
     assert 'data-nav-id="nutrition"' not in training_html
 
 
@@ -144,11 +106,14 @@ def test_training_is_the_active_navigation_entry(training_html):
 # ── assets / scripts ────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("asset", [
-    "/static/training.css", "/static/theme.css", "/static/nav.css",
-    "/static/training.js", "/static/actions.js",
+    "/static/plan.css", "/static/theme.css", "/static/nav.css",
+    "/static/training_plan_management.js", "/static/plan_training_manage.js",
+    "/static/actions.js",
 ])
 def test_existing_assets_are_wired(training_html, asset):
     assert asset in training_html
+    assert "/static/training.js" not in training_html
+    assert "/static/training.css" not in training_html
 
 
 def test_the_global_coach_widget_is_no_longer_loaded(training_html):
@@ -157,10 +122,8 @@ def test_the_global_coach_widget_is_no_longer_loaded(training_html):
     assert "/static/coach_widget.js" not in training_html
 
 
-def test_inline_training_bootstrap_carries_a_csp_nonce(training_html):
-    assert "window.__TRAINING" in training_html
-    marker = training_html.index("window.__TRAINING")
-    assert "nonce=" in training_html[marker - 120:marker]
+def test_plan_page_does_not_ship_the_legacy_training_bootstrap(training_html):
+    assert "window.__TRAINING" not in training_html
 
 
 def test_csrf_meta_tag_is_present(training_html):

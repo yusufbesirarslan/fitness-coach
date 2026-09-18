@@ -133,13 +133,14 @@ ROLLOUT_FLAGS = (
     FeatureFlag(
         key="WEEKLY_PROGRAM_UI_ENABLED",
         capability=(
-            "Renders the read-only weekly-program card on /training (mount shell "
-            "+ static/weekly_program.js + one GET /api/training/weekly-program). "
-            "Presentation only — the endpoint stays @require_auth in every flag "
-            "state, and OFF emits no markup, script, request or whitespace."),
+            "Renders the read-only weekly-program card on the canonical Plan "
+            "page at /training (mount shell + static/weekly_program.js + one "
+            "GET /api/training/weekly-program). Presentation only — the "
+            "endpoint stays @require_auth in every flag state, and OFF emits "
+            "no markup, script, request or whitespace."),
         owner=_OWNER,
         default=False,
-        depends_on=("UIUX_PLAN_V2_ENABLED",),
+        depends_on=(),
         observability=(
             "[TRAINING][WEEKLY_PROGRAM] request_id=... state={neutral|"
             "missing_baseline|populated|error} (2 sites, PII-free) plus the PR1 "
@@ -218,32 +219,47 @@ ROLLOUT_FLAGS = (
     FeatureFlag(
         key="UIUX_PLAN_V2_ENABLED",
         capability=(
-            "Renders the server-authoritative Plan v2 surface "
-            "(templates/plan.html) instead of the legacy /training page, "
-            "removing the legacy client's clock-based 'today' selection, "
-            "rest-day inference and localStorage completion. Presentation only."),
+            "Historical presentation flag that chose between the server-"
+            "authoritative Plan surface (templates/plan.html) and the legacy "
+            "/training renderer (templates/training.html). WEB-UX3-PR6B made "
+            "GET /training always render Plan and DELETED the legacy "
+            "training.html/css/js tree, so this key remains in the registry "
+            "but no longer selects a user-reachable branch: /training "
+            "renders Plan at either value. Presentation only; the route "
+            "keeps its own @require_auth."
+        ),
         owner=_OWNER,
         default=False,
-        depends_on=("WEEKLY_PROGRAM_UI_ENABLED",),
+        depends_on=(),
         observability=(
-            "PARTIAL — no feature-specific log line or metric of its own. The "
-            "weekly section it hosts is covered by [TRAINING][WEEKLY_PROGRAM]; "
-            "the page itself is visible only through the PR1 training-blueprint "
-            "HTTP SLIs."),
+            "PARTIAL — no feature-specific log line or metric exists. Visible "
+            "only through the PR1 training-blueprint HttpRequests/HttpLatency/"
+            "HttpClientErrors SLIs, which cannot separate a Plan regression "
+            "from any other change on the same blueprint. The env value is not "
+            "a /training selector after WEB-UX3-PR6B."),
         prerequisites=(
-            "RUNTIME_METRICS_ENABLED=1 with a training-blueprint baseline",
-            "WEEKLY_PROGRAM_UI_ENABLED decided first — Plan v2 honours it for "
-            "its weekly section, so the two interact on one page",
+            "none for Plan selection — WEB-UX3-PR6B made plan.html the "
+            "production /training renderer without this flag",
+            "keep the key registered so /health and the [FLAGS] boot line do "
+            "not drift; do not treat a 0/1 flip as a Plan change",
         ),
         success_signals=(
-            "training blueprint 5xx rate and p95 unchanged",
-            "weekly section reaches populated/insufficient_data, not error",
+            "GET /training renders templates/plan.html regardless of this "
+            "flag's 0/1 value",
+            "the legacy training.html/training.js renderer is not reachable",
         ),
         abort_signals=(
-            "read_error page state observed in production",
-            "training blueprint 5xx or p95 regression",
+            "the legacy /training renderer (training.html, training.js, "
+            "clock-based today, localStorage completion) reappears in "
+            "production",
+            "5xx on GET /training",
         ),
-        rollback=_rollback("UIUX_PLAN_V2_ENABLED"),
+        rollback=(
+            "git revert of WEB-UX3-PR6B (retire Plan V2 rollout flag + "
+            "legacy /training renderer) and redeploy; setting "
+            "UIUX_PLAN_V2_ENABLED=0 does not restore the legacy renderer — "
+            "templates/training.html no longer exists"
+        ),
         lifecycle=LIFECYCLE_SHIPPED_DARK,
         review_by="2026-10-01",
         decision=DECISION_ENABLE,

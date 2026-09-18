@@ -223,32 +223,13 @@ def test_script_is_syntactically_valid():
 
 # ── template wiring ─────────────────────────────────────────────────────────────
 
-def test_script_is_only_referenced_behind_the_flag():
-    """The asset must never be loaded unconditionally: OFF ships zero bytes of it."""
-    template = (Path(__file__).resolve().parents[1] / "templates" / "training.html"
-                ).read_text(encoding="utf-8")
-    assert template.count("/static/weekly_program.js") == 1
-    lines = template.splitlines()
-    at = next(i for i, line in enumerate(lines) if "/static/weekly_program.js" in line)
-    assert lines[at - 1].strip() == "{%- if weekly_program_ui_enabled %}"
-    assert lines[at + 1].strip() == "{%- endif %}"
-
-
 def test_script_is_not_referenced_from_any_other_template_or_asset():
     root = Path(__file__).resolve().parents[1]
     referrers = [path for path in list((root / "templates").rglob("*.html"))
                  + list((root / "static").glob("*.js"))
                  if path.name != "weekly_program.js"
                  and "weekly_program.js" in path.read_text(encoding="utf-8")]
-    # training.html owns the canonical mount; plan.html (UIUX Sprint 1 PR3) REUSES
-    # the same standalone consumer to render the weekly section on /training's V2
-    # tree — a deliberate, flag-gated reference (answer.txt §7 "reuse the consumer
-    # contract"), not accidental coupling, and NEVER a training.js dependency. Both
-    # load it only behind their respective conditions (see the two guards below).
-    assert sorted(referrers) == sorted([
-        root / "templates" / "training.html",
-        root / "templates" / "plan.html",
-    ])
+    assert referrers == [root / "templates" / "plan.html"]
 
 
 def test_plan_v2_references_the_script_only_when_the_section_mounts():
@@ -279,7 +260,7 @@ def test_css_is_owned_by_training_stylesheet_and_uses_scoped_classes():
         # loading training.css (answer.txt §7 — reuse the mount, never train­ing.js).
         # Drift is impossible: test_plan_css_weekly_rules_match_training_css pins the
         # two rule-sets byte-equal.
-        if sheet.name in ("training.css", "plan.css"):
+        if sheet.name == "plan.css":
             assert ".weekly-program-" in body
         else:
             assert "weekly-program" not in body, sheet.name
@@ -296,23 +277,17 @@ def _weekly_rules(css_text):
     return {(" ".join(sel.split()), " ".join(decl.split())) for sel, decl in rules}
 
 
-def test_plan_css_weekly_rules_match_training_css():
-    """Plan V2 copies the scoped `.weekly-program-*` rules into plan.css so it can
-    style the reused mount without loading training.css. Pin them equal to
-    training.css's set so the copy can never silently drift — the single-owner
-    intent the guard above protects, preserved across the deliberate reuse."""
+def test_plan_css_owns_weekly_program_rules():
+    """WEB-UX3-PR6B deleted training.css. plan.css is the single owner of
+    `.weekly-program-*` presentation, including Plan-context restyles that
+    must never hide the mount."""
     static = Path(__file__).resolve().parents[1] / "static"
-    training = _weekly_rules((static / "training.css").read_text(encoding="utf-8"))
+    assert not (static / "training.css").exists()
     plan = _weekly_rules((static / "plan.css").read_text(encoding="utf-8"))
-    assert training, "no .weekly-program-* rules found in training.css"
-    # WEB-UX4-PR5 (F-06): inside Plan the mount reads as a section of Training
-    # rather than a second card, so plan.css may ADD presentation rules scoped to
-    # the Training domain. The copied canonical set itself must stay identical,
-    # and a Plan-context rule may restyle the mount but never hide any of it.
+    assert plan, "no .weekly-program-* rules found in plan.css"
     context = {rule for rule in plan
                if all(part.strip().startswith(".plan-domain--training ")
                       for part in rule[0].split(","))}
-    assert plan - context == training, "plan.css .weekly-program-* rules drifted from training.css"
     for selector, declarations in context:
         assert not re.search(r"display:\s*none|visibility:\s*hidden|opacity:\s*0\b|clip", declarations), selector
 
@@ -765,31 +740,31 @@ def test_successful_retry_focuses_the_rendered_section_heading():
     assert result["retry"]["focusTabindex"] == "-1"
 
 
-TRAINING_CSS = (
-    Path(__file__).resolve().parents[1] / "static" / "training.css"
+PLAN_CSS = (
+    Path(__file__).resolve().parents[1] / "static" / "plan.css"
 ).read_text(encoding="utf-8")
 
 
 def test_weekly_program_styles_are_scoped_and_responsive():
-    assert ".weekly-program-card" in TRAINING_CSS
-    assert ".weekly-program-metrics" in TRAINING_CSS
-    assert ".weekly-program-retry" in TRAINING_CSS
-    assert "@media (max-width: 640px)" in TRAINING_CSS
+    assert ".weekly-program-card" in PLAN_CSS
+    assert ".weekly-program-metrics" in PLAN_CSS
+    assert ".weekly-program-retry" in PLAN_CSS
+    assert "@media (max-width: 640px)" in PLAN_CSS
     assert re.search(
         r"\.weekly-program-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(2,",
-        TRAINING_CSS, re.DOTALL)
+        PLAN_CSS, re.DOTALL)
     assert re.search(
         r"@media \(max-width: 640px\).*?\.weekly-program-metrics[^}]*"
         r"grid-template-columns:\s*1fr",
-        TRAINING_CSS, re.DOTALL)
+        PLAN_CSS, re.DOTALL)
 
 
 def test_weekly_program_styles_pin_overflow_tap_and_shared_skeleton():
     assert re.search(r"\.weekly-program-card\s*\{[^}]*min-width:\s*0",
-                     TRAINING_CSS, re.DOTALL)
-    assert "overflow-wrap: anywhere" in TRAINING_CSS
+                     PLAN_CSS, re.DOTALL)
+    assert "overflow-wrap: anywhere" in PLAN_CSS
     assert re.search(r"\.weekly-program-retry\s*\{[^}]*min-height:\s*44px",
-                     TRAINING_CSS, re.DOTALL)
+                     PLAN_CSS, re.DOTALL)
     assert "skeleton skeleton-text weekly-program-skeleton" in CODE
 
 
@@ -797,7 +772,7 @@ def test_weekly_program_heading_uses_contrast_safe_text_token():
     """Chrome PR6.3 audit measured the inherited accent at 4.22:1 on the card."""
     assert re.search(
         r"\.weekly-program-heading\s*\{[^}]*color:\s*var\(--color-text-2\)",
-        TRAINING_CSS, re.DOTALL)
+        PLAN_CSS, re.DOTALL)
 
 
 

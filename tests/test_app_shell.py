@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 APP_TEMPLATES = [
     # UX-2 PR4 replaced the legacy `index.html` dashboard with `today.html` as
     # the one production Home; the shell contract itself is unchanged.
-    "today.html", "nutrition.html", "training.html", "progress.html",
+    "today.html", "nutrition.html", "plan.html", "progress.html",
     "quests.html", "friends.html", "leaderboard.html", "manage_stack.html",
     "chat.html", "edit_profile.html", "feed.html", "premium.html",
     "pump_check_gallery.html", "coach.html",

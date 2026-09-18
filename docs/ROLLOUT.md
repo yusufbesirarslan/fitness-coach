@@ -102,7 +102,7 @@ activate first.
 |---|---|---|
 | 1 | `WEEKLY_PROGRAM_UI_ENABLED` | Only presentation flag with a real feature-specific signal (`[TRAINING][WEEKLY_PROGRAM]` state line). Additive, read-only, one GET. |
 | 2 | `UIUX_TODAY_V2_ENABLED` | Historical after UX-2 PR4: `/` already renders the Today hierarchy and `templates/index.html` is deleted. Flipping this env var does **not** restore the legacy dashboard. |
-| 3 | `UIUX_PLAN_V2_ENABLED` | Reachable through the legacy Training tab (`/training`). Shares a page with #1; separate windows. |
+| 3 | `UIUX_PLAN_V2_ENABLED` | Historical after WEB-UX3-PR6B: `/training` already renders Plan and `templates/training.html` is deleted. Flipping this env var does **not** restore the legacy renderer. |
 | 4 | `UIUX_COACH_PAGE_V2_ENABLED` | Independent, but sits on the AI path. Re-check after #5 — see the note below. |
 | 5 | `UIUX_NAV_V2_ENABLED` | Historical after UX-1 PR2: production chrome is already Today/Plan/Coach/Progress. Flipping this env var does **not** restore the five-tab shell. |
 | 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | Mutating and schema-backed, and since Mobile Training PR5 it opens TWO transports at once: the browser `/workout/session/*` routes and the native `/api/v1/training/workout-sessions*` write contracts. Since Sprint 14 PR2 those two share one execution authority (one revision, one durable snapshot, one completion precondition), so activating them together no longer ships two different contracts on one table, and PR3 converged the browser client onto that contract. Activation readiness is owned by **[WORKOUT_SESSION_ACTIVATION.md](WORKOUT_SESSION_ACTIVATION.md)**, whose verdict at 2026-09-09 is **GO** for technical staging-readiness (live exercise recorded; independent PR5 review still required): an isolated non-production environment exists ([STAGING.md](STAGING.md), #290) and the lifecycle exercise this flag's own prerequisites demand has been run in it. This is not production activation. Staging first; needs migrations `a994f9bed783` **and** `f5a6b7c8d9e0` (the native execution columns — without them a native checkpoint cannot be persisted at all). The native half also requires `MOBILE_AUTH_ENABLED=1`, so on a host where that is OFF this flag still only opens the browser half. |
@@ -118,6 +118,14 @@ nothing. Rolling the Home convergence back is a `git revert` of
 flip. The capabilities the legacy dashboard hosted were not removed: weight entry
 and check-in live on Progress, meal and menu logging on Nutrition, and level/XP/
 quests on Account.
+
+**Plan v2 after WEB-UX3-PR6B.** `/training` is the Plan hierarchy for every
+user, and the legacy `training.html` / `training.css` / `training.js` renderer
+no longer exists in the repository. `UIUX_PLAN_V2_ENABLED` remains registered
+for compatibility/history but selects nothing. Rolling the Plan convergence
+back is a `git revert` of WEB-UX3-PR6B plus a redeploy — not a flag flip.
+Production hosts may leave `UIUX_PLAN_V2_ENABLED=1` in `.env`; it is inert.
+`WEEKLY_PROGRAM_UI_ENABLED` still gates the weekly-program card on that page.
 
 **Nav v2 after UX-1 PR2.** Production chrome is already Today · Plan · Coach ·
 Progress. `UIUX_NAV_V2_ENABLED` remains registered for compatibility/history but

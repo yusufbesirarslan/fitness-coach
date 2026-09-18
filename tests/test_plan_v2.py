@@ -1,13 +1,13 @@
-"""AxisAI UIUX Sprint 1 PR3 — Plan experience v2 (flag-gated) tests.
+"""AxisAI Plan experience tests.
 
 Covers the pure presentation contract (page state vs. weekly-section state kept
 INDEPENDENT), the strict fallback semantics (parse failure → partial, never
 no-plan; empty exercise list is NOT a rest day; malformed ≠ no plan; canonical
-order preserved), both flag paths (OFF = legacy training.html + training.js; ON =
-plan.html), the weekly-program-disabled combination, and the guarantee that the V2
-surface carries NONE of legacy training.js's client-side authority. The Plan flag
-is toggled with app.config["UIUX_PLAN_V2_ENABLED"] (training() reads it at request
-time); the weekly section is gated independently by WEEKLY_PROGRAM_UI_ENABLED.
+order preserved), the unconditional Plan renderer at GET /training after
+WEB-UX3-PR6B, the weekly-program-disabled combination, and the guarantee that
+the Plan surface carries NONE of the deleted training.js client-side authority.
+UIUX_PLAN_V2_ENABLED is historical and is not a template selector; the weekly
+section is gated independently by WEEKLY_PROGRAM_UI_ENABLED.
 """
 import json
 from pathlib import Path
@@ -223,40 +223,32 @@ def test_facts_read_failure_is_read_error(app, make_user, monkeypatch):
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# C. FLAG BEHAVIOUR — OFF preserves legacy, ON renders Plan v2
+# C. FLAG BEHAVIOUR — historical; /training always renders Plan
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_flag_default_off_renders_legacy_training(client, make_user, login):
-    _seed_login(client, make_user, login)
-    html = client.get("/training").get_data(as_text=True)
-    assert "data-plan-v2" not in html                    # V2 mark absent
-    assert "/static/training.js" in html                 # legacy renderer present
-    assert 'id="setup-form"' in html
-
-
-def test_flag_on_renders_plan_v2(app, client, make_user, login):
-    app.config["UIUX_PLAN_V2_ENABLED"] = True
-    _seed_login(client, make_user, login)
+@pytest.mark.parametrize("flag", [None, False, True])
+def test_the_retired_flag_no_longer_selects_training(app, client, make_user, login,
+                                                     flag):
+    """Mirrors the Today/Nav precedent: the key stays registered so /health
+    and the [FLAGS] boot line do not drift, but flipping it is not a
+    rollback path. Rolling this PR back is a git revert."""
+    if flag is None:
+        app.config.pop("UIUX_PLAN_V2_ENABLED", None)
+    else:
+        app.config["UIUX_PLAN_V2_ENABLED"] = flag
+    _seed_login(client, make_user, login, username=f"planflag-{flag}")
     html = client.get("/training").get_data(as_text=True)
     assert "data-plan-v2" in html
     assert 'data-plan-state=' in html
-    assert "/static/training.js" not in html             # legacy JS never loaded on V2
+    assert "/static/training.js" not in html
+    assert 'id="setup-form"' not in html
 
 
-def test_missing_flag_fails_safe_to_legacy(app, client, make_user, login):
-    app.config.pop("UIUX_PLAN_V2_ENABLED", None)
-    _seed_login(client, make_user, login)
-    html = client.get("/training").get_data(as_text=True)
-    assert "data-plan-v2" not in html                    # safe default: legacy
-
-
-def test_exactly_one_plan_tree_per_flag_state(app, client, make_user, login):
-    _seed_login(client, make_user, login)
-    off = client.get("/training").get_data(as_text=True)
-    assert "data-plan-v2" not in off and "/static/training.js" in off
-    app.config["UIUX_PLAN_V2_ENABLED"] = True
-    on = client.get("/training").get_data(as_text=True)
-    assert "data-plan-v2" in on and "/static/training.js" not in on   # never both
+def test_the_legacy_training_renderer_is_gone():
+    root = Path(__file__).resolve().parents[1]
+    assert not (root / "templates" / "training.html").exists()
+    assert not (root / "static" / "training.css").exists()
+    assert not (root / "static" / "training.js").exists()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -419,8 +411,8 @@ def test_plan_and_session_flags_are_independent(
     response = client.get("/training")
     assert response.status_code == 200
     html = response.get_data(as_text=True)
-    assert ("data-plan-v2" in html) is plan_enabled
-    assert ("/static/training.js" in html) is (not plan_enabled)
+    assert "data-plan-v2" in html
+    assert "/static/training.js" not in html
 
 
 def test_plan_child_failure_does_not_blank_training(

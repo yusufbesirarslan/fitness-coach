@@ -133,7 +133,7 @@ Rows are in the recommended staged activation order.
 |---|---|---|---|---|---|---|
 | 1 | `WEEKLY_PROGRAM_UI_ENABLED` | OFF | shipped_dark | **Full** — `[TRAINING][WEEKLY_PROGRAM]` state line (2 sites) | 2026-09-01 | enable |
 | 2 | `UIUX_TODAY_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only; no longer a Home selector (UX-2 PR4) | 2026-10-01 | enable |
-| 3 | `UIUX_PLAN_V2_ENABLED` | OFF | shipped_dark | **Partial** — weekly section only | 2026-10-01 | enable |
+| 3 | `UIUX_PLAN_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only; no longer a /training selector (WEB-UX3-PR6B) | 2026-10-01 | enable |
 | 4 | `UIUX_COACH_PAGE_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
 | 5 | `UIUX_NAV_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
 | 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | OFF | staging_only | **Full** — anomaly logs + bounded `WorkoutSessionLifecycle` events | 2026-11-01 | enable |
@@ -189,7 +189,7 @@ runbook's activation procedures. The summary that matters here:
 **1. `WEEKLY_PROGRAM_UI_ENABLED`** — read-only weekly-program card on `/training`
 (mount shell + `weekly_program.js` + one `GET /api/training/weekly-program`).
 Presentation only; the endpoint stays `@require_auth` in every flag state.
-Interacts with `UIUX_PLAN_V2_ENABLED`, which honours it for its weekly section.
+Mounts on the canonical Plan page at `/training`. `UIUX_PLAN_V2_ENABLED` is historical after WEB-UX3-PR6B and no longer selects that page.
 Abort on any `state=error`, a training-blueprint 5xx rise, or a `/training` p95
 regression.
 
@@ -201,9 +201,13 @@ legacy dashboard — rolling that back is a `git revert` of the UX-2 PR4 Home
 convergence plus a redeploy. Nothing here has a rollout window left; the row
 stays only so `/health?deep=1` and the `[FLAGS]` boot line keep listing it.
 
-**3. `UIUX_PLAN_V2_ENABLED`** — server-authoritative Plan v2 (`plan.html`),
-removing the legacy client's clock-based "today" selection, rest-day inference
-and localStorage completion. Decide flag 1 first — they share a page.
+**3. `UIUX_PLAN_V2_ENABLED`** — historical presentation flag. WEB-UX3-PR6B made
+GET `/training` always render `plan.html` and deleted the legacy
+`training.html`/`training.css`/`training.js` tree, so the key no longer selects
+a user-reachable branch: `/training` renders Plan at either value. Setting it
+to `0` does **not** restore the legacy renderer — rolling that back is a
+`git revert` of WEB-UX3-PR6B plus a redeploy. Production hosts may leave the
+env var set; it is inert. The weekly-program card is still gated by flag 1.
 
 **4. `UIUX_COACH_PAGE_V2_ENABLED`** — hardened Coach destination reusing the
 existing widget, guaranteeing exactly one interactive instance. Changes no AI

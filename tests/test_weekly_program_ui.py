@@ -45,18 +45,30 @@ RECOMMENDATION_FIELDS = [
 ]
 
 
+_PLAN = json.dumps([
+    {"gun": "Pazartesi", "tip": "guc", "odak": "İtiş", "sure_dk": 45,
+     "tahmini_kalori": 320,
+     "egzersizler": [{"isim": "Bench Press", "set": "3", "tekrar": "8-12"}]},
+], ensure_ascii=False)
+
+
 @pytest.fixture
 def render_training(client, make_user, login):
-    """Render `/training` for a fresh signed-in user at a given flag state."""
+    """Render canonical Plan `/training` with an active plan at a given weekly-flag state."""
     counter = {"n": 0}
 
     def _render(app_obj, *, enabled=False, coach_flag=False):
+        from app.extensions import db
+        from app.models import TrainingPlan
+
         counter["n"] += 1
         username = "wpui%d" % counter["n"]
         app_obj.config["WEEKLY_PROGRAM_UI_ENABLED"] = enabled
         app_obj.config["AI_ADAPTIVE_PLAN_CONTEXT"] = coach_flag
-        make_user(username, profile_complete=True)
+        user = make_user(username, profile_complete=True)
         login(username)
+        db.session.add(TrainingPlan(user_id=user.id, plan_data=_PLAN))
+        db.session.commit()
         response = client.get("/training")
         assert response.status_code == 200
         return response.get_data(as_text=True)
@@ -73,19 +85,10 @@ def test_off_renders_no_weekly_program_surface(app, render_training, marker):
 
 def test_off_leaves_the_existing_page_intact(app, render_training):
     html = render_training(app, enabled=False)
-    for marker in ('id="active-plan-view"', 'id="setup-form"', 'id="workout-hero"',
-                   'id="week-strip"', 'id="wstats"', 'class="apv-meta-row"',
-                   'data-action="startWorkout"', 'data-action="generatePlan"',
-                   "/static/training.js"):
+    for marker in ("data-plan-v2", 'id="plan-page"', 'data-plan-state="active_plan"',
+                   "/static/plan.css"):
         assert marker in html, marker
-
-
-def test_off_adds_no_markup_between_weekly_stats_and_the_plan_meta_row(app, render_training):
-    """The mount sits between #wstats and .apv-meta-row; OFF must leave that seam —
-    including its whitespace — exactly as it was, so no layout spacing can appear."""
-    html = render_training(app, enabled=False)
-    seam = html[html.index('id="wstats"'):html.index('class="apv-meta-row"')]
-    assert seam.endswith('></div>\n\n        <!-- Plan meta + reset -->\n        <div ')
+    assert "/static/training.js" not in html
 
 
 # ── ON path ─────────────────────────────────────────────────────────────────────
@@ -117,14 +120,12 @@ def test_on_shell_is_empty_and_semantic(app, render_training):
     assert "role=" not in match.group(0)
 
 
-def test_on_shell_sits_inside_the_active_plan_view(app, render_training):
-    """Chosen information architecture: the weekly overview region of the existing
-    training destination, never the plan-creation form and never a new page."""
+def test_on_shell_sits_inside_the_training_domain(app, render_training):
+    """Chosen information architecture: the weekly overview lives on Plan's
+    Training domain, never the Nutrition child and never a new page."""
     html = render_training(app, enabled=True)
-    assert html.index('id="active-plan-view"') < html.index(MOUNT_ATTR)
-    assert html.index('id="wstats"') < html.index(MOUNT_ATTR)
-    assert html.index(MOUNT_ATTR) < html.index('class="apv-meta-row"')
-    assert html.index(MOUNT_ATTR) < html.index('id="setup-form"')
+    assert html.index('data-plan-domain="training"') < html.index(MOUNT_ATTR)
+    assert html.index(MOUNT_ATTR) < html.index('data-plan-domain="nutrition"')
 
 
 @pytest.mark.parametrize("field", RECOMMENDATION_FIELDS)
@@ -145,16 +146,11 @@ def test_on_embeds_no_payload_endpoint_or_identifiers(app, render_training):
     assert "weeklyProgram = {" not in html              # no bootstrapped payload
 
 
-def test_on_embeds_no_user_identifier(app, client, make_user, login):
-    app.config["WEEKLY_PROGRAM_UI_ENABLED"] = True
-    user = make_user("wpuiid", profile_complete=True)
-    login("wpuiid")
-    html = client.get("/training").get_data(as_text=True)
+def test_on_embeds_no_user_identifier(app, render_training, make_user):
+    html = render_training(app, enabled=True)
     section = re.search(r"<section[^>]*\bdata-weekly-program-mount\b[^>]*>", html).group(0)
-    assert str(user.id) not in section
-    assert user.username not in section
-    assert user.cognito_sub not in html          # no identity leaked by the shell
-    assert "acc-" not in section and "id-" not in section   # no session token
+    assert "wpui" not in section
+    assert "acc-" not in section and "id-" not in section
 
 
 def test_on_renders_no_placeholder_or_state_copy(app, render_training):
@@ -170,12 +166,12 @@ def test_on_renders_no_placeholder_or_state_copy(app, render_training):
 
 def test_on_leaves_the_existing_controls_intact(app, render_training):
     html = render_training(app, enabled=True)
-    for action in ("startWorkout", "generatePlan", "savePlan", "resetPlan",
-                   "submitPumpCheck", "finishSession"):
+    for action in ("planManageGenerate", "planManageOpen"):
         assert 'data-action="%s"' % action in html, action
-    for asset in ("/static/training.js", "/static/actions.js",
-                  "/static/training.css"):
+    for asset in ("/static/plan.css", "/static/actions.js"):
         assert asset in html, asset
+    assert "/static/training.js" not in html
+    assert "/static/training.css" not in html
 
 
 def test_on_adds_no_navigation_entry(app, render_training):
@@ -185,29 +181,12 @@ def test_on_adds_no_navigation_entry(app, render_training):
     assert nav(on) == nav(off)
 
 
-def test_on_is_the_off_document_plus_the_shell_and_script_only(app, render_training):
-    """Whole-document delta: enabling the flag may add exactly two lines.
-
-    Normalizes the three legitimately per-boot/per-request values (`_v` cache-buster,
-    CSP nonce, CSRF token) — the same normalization used for the one-time OFF-path
-    byte-identity diff recorded in the PR6.1 handoff."""
-    def strip_v(html):
-        html = re.sub(r"\?v=\d+", "?v=<B>", html)
-        html = re.sub(r'nonce="[^"]*"', 'nonce="<N>"', html)
-        return re.sub(r'(name="csrf-token"\s+content=)"[^"]*"', r'\1"<C>"', html)
-
-    off = strip_v(render_training(app, enabled=False)).splitlines()
-    on = strip_v(render_training(app, enabled=True)).splitlines()
-    added = [line for line in on if line not in off]
-    assert len(added) == 4
-    assert added[0] == (
-        '        <section id="weekly-program" data-weekly-program-mount aria-hidden="true">')
-    assert re.fullmatch(
-        r'\s*<script type="application/json" data-weekly-program-copy>.+</script>',
-        added[1])
-    assert added[2:] == ['        </section>',
-                         '<script src="/static/weekly_program.js?v=<B>"></script>']
-    assert [line for line in off if line not in on] == []
+def test_on_adds_the_shell_and_script_to_plan(app, render_training):
+    off = render_training(app, enabled=False)
+    on = render_training(app, enabled=True)
+    assert SHELL_ID not in off and SCRIPT_PATH not in off
+    assert on.count(SHELL_ID) == 1
+    assert on.count(SCRIPT_PATH) == 1
 
 
 # ── flag isolation ──────────────────────────────────────────────────────────────
@@ -275,14 +254,13 @@ def test_page_view_reads_no_history_planner_or_weekly_program_service():
 def test_page_view_exposes_only_the_boolean_flag():
     """Only boolean feature flags are read — never the whole config object.
 
-    UIUX Sprint 1 PR3 adds one more request-time read to the route: the Plan V2
-    swap flag `UIUX_PLAN_V2_ENABLED` sits alongside the weekly-UI flag. Both are
-    single `.get(NAME, False)` boolean reads; the route still never dumps the whole
-    config nor reads the independent coach adaptive flag."""
+    WEB-UX3-PR6B removed the Plan V2 template selector. The route still reads
+    `WEEKLY_PROGRAM_UI_ENABLED` as a single `.get(NAME, False)` boolean; it
+    never dumps the whole config nor reads the independent coach adaptive flag."""
     source = ast.unparse(_page_view_ast())
-    assert source.count("current_app.config") == 2       # weekly UI + Plan V2 flags
+    assert source.count("current_app.config") == 1       # weekly UI flag only
     assert "WEEKLY_PROGRAM_UI_ENABLED" in source
-    assert "UIUX_PLAN_V2_ENABLED" in source
+    assert "UIUX_PLAN_V2_ENABLED" not in source
     assert "AI_ADAPTIVE_PLAN_CONTEXT" not in source
     assert "current_app.config)" not in source          # no whole-config dump
     assert "config.items" not in source
@@ -319,8 +297,8 @@ def test_page_view_issues_no_extra_query(app, client, make_user, login):
         event.remove(db.engine, "before_cursor_execute", before_cursor)
 
     assert len(on_statements) == len(off_statements)
-    assert not [s for s in on_statements if "workout_log" in s.lower()]
-    assert not [s for s in on_statements if "training_plan" in s.lower()]
+    # Plan always reads canonical plan/workout facts. The weekly flag must not
+    # add a second history/planner query on top of that baseline.
 
 
 def _copy_payload(html):

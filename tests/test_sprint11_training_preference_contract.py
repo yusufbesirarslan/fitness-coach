@@ -953,21 +953,18 @@ def test_plan_v2_client_does_not_map_typed_400_to_setup():
     assert "management.CODE_NO_SESSION" in renderer
 
 
-def test_legacy_client_surfaces_backend_error_text():
-    # PR3: the generate request moved into the shared contract, which carries the
-    # backend's own `error` text out as `message`. Legacy still SHOWS that text
-    # rather than a generic string, and still runs its pre-flight preference
-    # check before spending a provider call.
-    source = (
-        Path(__file__).resolve().parents[1] / "static" / "training.js"
-    ).read_text(encoding="utf-8")
-    assert "showToast(result.message ||" in source
-    assert "plan.contract.conflicting_preferences" in source
+def test_plan_management_surfaces_backend_error_text():
+    # The generate request lives in the shared contract, which carries the
+    # backend's own `error` text out as `message`.
     shared = (
         Path(__file__).resolve().parents[1]
         / "static" / "training_plan_management.js"
     ).read_text(encoding="utf-8")
     assert "body.error || null" in shared
+    renderer = (
+        Path(__file__).resolve().parents[1] / "static" / "plan_training_manage.js"
+    ).read_text(encoding="utf-8")
+    assert "FitXPlanManagement" in renderer
 
 
 def test_contract_failure_never_enters_compact_retry(monkeypatch):

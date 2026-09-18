@@ -252,18 +252,13 @@ def test_training_renders_localized(app, client, make_user, login):
     r = client.get("/training")
     assert r.status_code == 200, r.status_code
     body = r.get_data(as_text=True)
-    # UI chrome İngilizce
-    assert "Training Style" in body and "Equipment" in body and "CREATE MY PROGRAM" in body
+    # UI chrome İngilizce (canonical Plan first-run)
+    assert "Training style" in body and "Equipment" in body and "Create plan" in body
     assert "Antrenman Tarzı" not in body
-    # Kuplaj koruması: pump-location HTML değeri şablonda TR kalır
-    assert '<option value="Spor Salonu"' in body                   # pump-location değeri
-    # OPTIONS val kodları ve kanonik gün adları static/training.js'te korunur;
-    # tarih ve tamamlanma otoritesi sunucunun bootstrap snapshot'ındadır.
     import os
-    js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training.js")
+    js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "plan_training_manage.js")
     js = open(js_path, encoding="utf-8").read()
     assert '"spor_salonu"' in js and '"tum_vucut"' in js           # OPTIONS val
-    assert "'Pazartesi'" in js                                      # backend gün eşleşmesi
     assert "getTodayTurkish" not in js
     assert "fitx_workout_completed_" not in js
     state_js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "workout_state_client.js")
@@ -516,16 +511,11 @@ def test_plan_no_session_error_localized(app, client, make_user, login):
     assert r.get_json()["error"] == "First create your plan from the home page."
 
 
-def test_training_js_day_label_coupling():
-    """static/training.js: gün adı GÖRÜNEN map'i var; eşleşme hâlâ kanonik TR güne
-    dayanır. (Phase 5: satır-içi script static/training.js'e taşındı.)"""
+def test_training_js_day_label_coupling_is_gone_with_the_legacy_client():
+    """WEB-UX3-PR6B deleted training.js. Plan days are server-rendered."""
     import os
     p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training.js")
-    js = open(p, encoding="utf-8").read()
-    assert "DAY_LABELS_EN" in js and "function dayLabel" in js
-    assert "esc(dayLabel(gun.gun))" in js                 # görünen ad çevrilir
-    assert "gun.gun === todayName" in js                  # eşleşme kanonik TR kalır
-    assert "'Pazartesi':'Monday'" in js
+    assert not os.path.exists(p)
 
 
 # ── Route mesajları (jsonify error/message) dile göre ──
@@ -695,8 +685,7 @@ def test_workout_already_done_uses_structured_code(app, client, make_user, login
     body = r.get_json()
     assert body["code"] == "already_completed"
     assert body["error"] == "You've already completed today's workout!"  # EN
-    # Frontend artık ham TR substring'ine ('zaten') değil code'a bakar
-    # (Phase 5: satır-içi script static/training.js'e taşındı).
+    # Frontend artık ham TR substring'ine ('zaten') değil code'a bakar.
     import os
-    tj = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training.js")
-    assert "data.code === 'already_completed'" in open(tj, encoding="utf-8").read()
+    tj = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "plan_workout.js")
+    assert "already_completed" in open(tj, encoding="utf-8").read()

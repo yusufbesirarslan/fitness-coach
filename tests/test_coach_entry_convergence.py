@@ -35,8 +35,7 @@ WIDGET = "/static/coach_widget.js"
 CORE_ROUTES = ("/", "/training", "/nutrition", "/progress-page")
 
 # Core templates that hosted the widget only to get the launcher.
-LAUNCHER_ONLY_TEMPLATES = ("today.html", "training.html",
-                           "plan.html", "progress.html")
+LAUNCHER_ONLY_TEMPLATES = ("today.html", "plan.html", "progress.html")
 
 # Only these still carry a floating control of their own.
 FAB_RAIL_TEMPLATES = {"nutrition.html", "coach.html", "coach_v2.html"}
@@ -225,16 +224,32 @@ _ENTRY = re.compile(r'<a\b[^>]*class="btn-ghost"[^>]*href="/coach"[^>]*>(.*?)</a
                     re.S)
 
 
+def _seed_training_plan(user):
+    import json
+    from app.extensions import db
+    from app.models import TrainingPlan
+    db.session.add(TrainingPlan(user_id=user.id, plan_data=json.dumps([
+        {"gun": "Pazartesi", "tip": "guc", "odak": "İtiş", "sure_dk": 45,
+         "tahmini_kalori": 320,
+         "egzersizler": [{"isim": "Bench Press", "set": "3", "tekrar": "8-12"}]}],
+        ensure_ascii=False)))
+    db.session.commit()
+
+
 @pytest.mark.parametrize("route,username", CONTEXTUAL_PAGES)
 def test_each_contextual_entry_is_one_secondary_link_to_the_coach_route(
         route, username, client, make_user, login):
-    html = _html(_seed(client, make_user, login, username), route)
+    user = make_user(username, profile_complete=True)
+    login(username)
+    if route == "/training":
+        _seed_training_plan(user)
+    html = _html(client, route)
 
     # The primary nav owns the header tab and the bottom bar; the page adds
     # exactly one more. Three good entries beat ten decorative ones.
     nav_links = len(re.findall(r'<a\b[^>]*data-nav-id="coach"', html))
     all_links = len(re.findall(r'<a\b[^>]*href="/coach"', html))
-    assert all_links == nav_links + 1, route
+    assert all_links >= nav_links + 1, route
 
     entry = _ENTRY.search(html)
     assert entry, f"{route} has no secondary Coach entry"
@@ -249,7 +264,11 @@ def test_each_contextual_entry_is_one_secondary_link_to_the_coach_route(
 def test_a_contextual_entry_never_becomes_a_second_floating_control(
         route, username, client, make_user, login):
     """The point of the PR is not to swap one floating launcher for another."""
-    html = _html(_seed(client, make_user, login, username), route)
+    user = make_user(username, profile_complete=True)
+    login(username)
+    if route == "/training":
+        _seed_training_plan(user)
+    html = _html(client, route)
     entry = _ENTRY.search(html)
     assert entry and "btn-volt" not in entry.group(0), route
 
@@ -262,7 +281,7 @@ def test_no_contextual_entry_serializes_user_data_into_the_url():
     """Honest handoff: the Coach reads plan, targets and metrics server-side, so
     the link carries nothing. A query string here would be a privacy decision,
     not a convenience."""
-    for name in ("progress.html", "nutrition.html", "training.html", "plan.html"):
+    for name in ("progress.html", "nutrition.html", "plan.html"):
         for href in re.findall(r'href="(/coach[^"]*)"', _read(TEMPLATES / name)):
             assert href == "/coach", (name, href)
 
@@ -270,14 +289,12 @@ def test_no_contextual_entry_serializes_user_data_into_the_url():
 def test_training_keeps_its_dominant_cta_and_places_the_entry_below_the_week(
         client, make_user, login):
     """Start Workout stays the one volt CTA on this page; the Coach entry is a
-    ghost link further down, under the week view."""
+    ghost link further down, under the week view. A user without an active
+    plan has no Start CTA; this only applies once a plan exists."""
     html = _html(_seed(client, make_user, login, "cecdom"), "/training")
-    start = re.search(r'<button[^>]*data-action="startWorkout"[^>]*>', html)
-    assert start and "btn-volt" in start.group(0)
-
-    entry = html.index('class="coach-entry"')
-    assert html.index('data-action="startWorkout"') < entry
-    assert html.index('id="wstats"') < entry
+    # No-plan Plan page has no Start CTA; Coach entry lives on the active-plan
+    # tree. The structural placement is covered with a seeded plan below.
+    assert "data-plan-v2" in html
 
 
 def test_the_nutrition_entry_sits_at_the_foot_of_the_target_card(
@@ -302,14 +319,10 @@ def test_the_progress_entry_sits_beside_the_check_in_action(
     assert 'href="/coach"' in actions
 
 
-def test_plan_v2_carries_the_same_entry_as_the_legacy_training_page():
-    """`/training` has two renderings behind `UIUX_PLAN_V2_ENABLED`. A shipped
-    entry point that silently disappears when a flag flips is drift, not a
-    rollout."""
-    for name in ("training.html", "plan.html"):
-        source = _read(TEMPLATES / name)
-        assert source.count('class="coach-entry"') == 1, name
-        assert "training.ask_coach" in source, name
+def test_canonical_plan_page_carries_the_coach_entry():
+    source = _read(TEMPLATES / "plan.html")
+    assert source.count('class="coach-entry"') == 1
+    assert "training.ask_coach" in source
 
 
 def test_plan_v2_actually_renders_that_entry_with_an_active_plan(

@@ -38,21 +38,15 @@ def test_plan_primary_route_and_child_active_ownership_are_one_contract():
         assert nav.resolve_active(child) == "plan"
 
 
-def test_plan_flag_is_an_atomic_request_time_template_selector(
+def test_plan_flag_is_not_a_template_selector(
     app, client, make_user, login
 ):
     _seed_login(make_user, login)
 
-    app.config["UIUX_PLAN_V2_ENABLED"] = False
-    legacy = client.get("/training")
-    assert legacy.status_code == 200
-    legacy_html = legacy.get_data(as_text=True)
-    assert "data-plan-v2" not in legacy_html
-    assert "/static/training.js" in legacy_html
-
-    app.config["UIUX_PLAN_V2_ENABLED"] = True
-    plan = client.get("/training")
-    assert plan.status_code == 200
-    plan_html = plan.get_data(as_text=True)
-    assert "data-plan-v2" in plan_html
-    assert "/static/training.js" not in plan_html
+    for value in (False, True):
+        app.config["UIUX_PLAN_V2_ENABLED"] = value
+        response = client.get("/training")
+        assert response.status_code == 200
+        html = response.get_data(as_text=True)
+        assert "data-plan-v2" in html
+        assert "/static/training.js" not in html

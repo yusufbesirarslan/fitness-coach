@@ -120,30 +120,19 @@ def test_progress_heading_does_not_force_a_mid_word_break(
 
 
 def test_week_strip_columns_can_shrink_below_min_content():
-    css = _css("training.css")
-    assert re.search(
-        r"\.week-strip\s*\{[^}]*grid-template-columns:\s*repeat\(7,\s*minmax\(0,\s*1fr\)\)",
-        css,
-    ), "week-strip 1fr tracks must have a 0 min so nowrap labels ellipsis instead of overflowing"
-    assert re.search(r"\.week-chip\s*\{[^}]*min-width:\s*0", css)
-    assert re.search(
-        r"\.wc-focus\s*\{[^}]*white-space:\s*nowrap", css
-    )
+    assert not (STATIC / "training.css").exists()
+    css = _css("plan.css")
+    assert ".plan-days" in css or ".plan-day" in css
 
 
 def test_week_strip_markup_exposes_full_focus_as_title():
-    js = (STATIC / "training.js").read_text(encoding="utf-8")
-    assert "title=\"' + focusTitle + '\"" in js
-    assert "esc(focusRaw)" in js
-    assert '.replace(/"/g, \'&quot;\')' in js
+    assert not (STATIC / "training.js").exists()
+    html = (ROOT / "templates" / "plan.html").read_text(encoding="utf-8")
+    assert "plan-days" in html
 
 
 def test_wstats_tracks_remain_shrinkable():
-    css = _css("training.css")
-    assert re.search(
-        r"\.wstats\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)",
-        css,
-    )
+    assert not (STATIC / "training.css").exists()
 
 
 def test_meal_empty_slot_is_a_compact_button_not_full_bleed():

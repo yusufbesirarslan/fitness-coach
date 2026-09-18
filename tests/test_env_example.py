@@ -111,8 +111,8 @@ def test_weekly_program_ui_flag_is_documented_default_off():
 
 
 def test_plan_v2_flag_is_documented_default_off():
-    """UIUX Sprint 1 PR3 rollout gate. Commented-out `=0` so copying `.env.example`
-    can never enable Plan V2 by accident; never documented as `=1`."""
+    """Historical after WEB-UX3-PR6B. Commented-out `=0` remains so copying
+    `.env.example` cannot document an activation; never documented as `=1`."""
     assert _has_exact_commented_setting(
         ENV_EXAMPLE_SOURCE, "UIUX_PLAN_V2_ENABLED=0"
     )
