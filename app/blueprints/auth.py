@@ -156,7 +156,7 @@ def _reset_error_response(exc):
 
 
 @bp.route("/forgot-password", methods=["GET", "POST"])
-@limiter.limit("5 per 15 minutes", methods=["POST"])
+@limiter.limit("5 per 15 minutes", key_func=get_remote_address, methods=["POST"])
 def forgot_password():
     if request.method == "GET":
         return render_template("forgot_password.html")
@@ -182,7 +182,7 @@ def forgot_password():
 
 
 @bp.route("/reset-password", methods=["GET", "POST"])
-@limiter.limit("10 per 15 minutes", methods=["POST"])
+@limiter.limit("10 per 15 minutes", key_func=get_remote_address, methods=["POST"])
 def reset_password():
     username = _valid_reset_username()
     if not username:
@@ -231,7 +231,7 @@ def reset_password():
 
 
 @bp.route("/register", methods=["GET","POST"])
-@limiter.limit("5 per hour", methods=["POST"])
+@limiter.limit("5 per hour", key_func=get_remote_address, methods=["POST"])
 def register():
     if request.method == "GET":
         return render_template("register.html", cognito_enabled=_cognito_available())
@@ -394,7 +394,7 @@ def _reconcile_local_user(verified_claims, cognito_username):
 
 
 @bp.route("/login", methods=["GET","POST"])
-@limiter.limit("10 per minute; 50 per hour", methods=["POST"])
+@limiter.limit("10 per minute; 50 per hour", key_func=get_remote_address, methods=["POST"])
 @limiter.limit("15 per 15 minutes", key_func=_login_username_key, methods=["POST"],
                deduct_when=lambda response: response.status_code == 401)
 def login():
@@ -500,7 +500,7 @@ def verify_page():
 
 
 @bp.route("/verify", methods=["POST"])
-@limiter.limit("10 per 15 minutes", methods=["POST"])
+@limiter.limit("10 per 15 minutes", key_func=get_remote_address, methods=["POST"])
 def verify_confirm():
     """Kullanıcının girdiği doğrulama kodunu Cognito'da onayla."""
     if not COGNITO_ENABLED:
@@ -523,7 +523,7 @@ def verify_confirm():
 
 
 @bp.route("/verify/resend", methods=["POST"])
-@limiter.limit("3 per 15 minutes", methods=["POST"])
+@limiter.limit("3 per 15 minutes", key_func=get_remote_address, methods=["POST"])
 def verify_resend():
     """Doğrulama kodunu yeniden gönder."""
     if not COGNITO_ENABLED:

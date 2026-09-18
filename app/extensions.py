@@ -5,6 +5,7 @@ import redis
 from flask_limiter import Limiter
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
+from flask import g, has_request_context, request
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
 from openai import OpenAI
@@ -53,13 +54,55 @@ except Exception:  # pragma: no cover - authlib opsiyonel bağımlılık
     oauth = None
 redis_client = redis.from_url(_REDIS_URL, decode_responses=True) if _REDIS_URL else None
 _LIMITER_STORAGE = _REDIS_URL or "memory://"
+
+
+def _ip_limiter_key():
+    """Canonical anonymous limiter identity: the same client IP Flask-Limiter
+    already used (ProxyFix → request.remote_addr → get_remote_address)."""
+    try:
+        addr = get_remote_address()
+    except Exception:
+        addr = "127.0.0.1"
+    return f"ip:{addr or '127.0.0.1'}"
+
+
+def default_limiter_key():
+    """Default limiter identity: verified app principal, else client IP.
+
+    Browser requests use Flask-Login ``current_user`` (signed session, already
+    available when Flask-Limiter evaluates default limits in before_request).
+    Mobile API requests use ``g.mobile_user`` only after the existing Bearer
+    pipeline has bound it; cookie identity is ignored on that surface.
+    Unverified tokens, missing auth, and resolution errors fall back to IP.
+    """
+    try:
+        if has_request_context() and request.blueprint == "mobile_api":
+            mobile_id = getattr(getattr(g, "mobile_user", None), "id", None)
+            if mobile_id is not None:
+                return f"user:{mobile_id}"
+            return _ip_limiter_key()
+        if has_request_context() and hasattr(g, "_login_user"):
+            # flask.g is app-context scoped; drop a leftover principal so this
+            # request reloads Flask-Login identity from its own session.
+            delattr(g, "_login_user")
+        if current_user.is_authenticated:
+            user_id = getattr(current_user, "id", None)
+            if user_id is not None:
+                return f"user:{user_id}"
+    except Exception:
+        pass
+    return _ip_limiter_key()
+
+
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=default_limiter_key,
     default_limits=[DEFAULT_RATELIMIT],
     storage_uri=_LIMITER_STORAGE,
     storage_options={"socket_connect_timeout": 2} if _REDIS_URL else {},
     in_memory_fallback_enabled=True,
 )
+
+
 class _LazyOpenAI:
     """OpenAI istemcisini ilk kullanımda kurar. İstemci import sırasında
     kurulursa OPENAI_API_KEY olmayan her ortam (test, migration, CLI) daha
