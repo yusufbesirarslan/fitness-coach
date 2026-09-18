@@ -110,13 +110,16 @@ def test_weekly_program_ui_flag_is_documented_default_off():
     assert "WEEKLY_PROGRAM_UI_ENABLED=1" not in ENV_EXAMPLE_SOURCE
 
 
-def test_plan_v2_flag_is_documented_default_off():
-    """Historical after WEB-UX3-PR6B. Commented-out `=0` remains so copying
-    `.env.example` cannot document an activation; never documented as `=1`."""
-    assert _has_exact_commented_setting(
-        ENV_EXAMPLE_SOURCE, "UIUX_PLAN_V2_ENABLED=0"
+def test_plan_v2_flag_is_absent_from_env_example():
+    """WEB-UX3-PR6B retired the Plan flag. `.env.example` must not document
+    an active `UIUX_PLAN_V2_ENABLED` settings line, commented or not."""
+    pattern = re.compile(r"^\s*#?\s*(?:export\s+)?UIUX_PLAN_V2_ENABLED=")
+    offending = [line for line in ENV_EXAMPLE_SOURCE.splitlines()
+                 if pattern.match(line)]
+    assert offending == [], (
+        "copying .env.example must not document UIUX_PLAN_V2_ENABLED; "
+        f"found {offending}"
     )
-    assert "UIUX_PLAN_V2_ENABLED=1" not in ENV_EXAMPLE_SOURCE
 
 
 @pytest.mark.parametrize('setting', [

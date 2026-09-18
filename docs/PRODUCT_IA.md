@@ -18,7 +18,7 @@ not a feature flag rollout.
 | `app/nav.py` | Presentational shell metadata (UIUX Sprint 1 PR1). Reads as Today · Plan · Coach · Progress. Default **OFF** via `UIUX_NAV_V2_ENABLED`. |
 | `templates/_nav.html`, `templates/_actionbar.html` | Header, drawer, and mobile bottom bar. Flag-branched: legacy 5-tab vs v2 4-tab. |
 | `app/hooks.py` `inject_nav` | Injects `nav_v2`, `nav_primary`, `nav_secondary`, `nav_resolve_active` into every template. |
-| `docs/FEATURE_FLAGS.md` | Rollout order for `UIUX_NAV_V2_ENABLED`, `UIUX_TODAY_V2_ENABLED`, `UIUX_PLAN_V2_ENABLED`, `UIUX_COACH_PAGE_V2_ENABLED`. |
+| `docs/FEATURE_FLAGS.md` | Rollout order for `UIUX_NAV_V2_ENABLED`, `UIUX_TODAY_V2_ENABLED`, `UIUX_COACH_PAGE_V2_ENABLED`. Plan has no rollout selector after WEB-UX3-PR6B. |
 | `docs/MOBILE_TODAY.md` | Native Today **read** contract (`GET /api/v1/today`). Not a navigation contract. |
 | Native app `lib/app/shell/app_shell.dart` | Already ships Today · Plan · Coach · Progress as the only bottom destinations. |
 
@@ -140,7 +140,7 @@ direct URL, or redirect. APIs are listed only when they back a visible surface.
 | Destination | Canonical route (today) | Entry points today | Surface | Current semantic owner | Problems / ambiguity |
 |---|---|---|---|---|---|
 | Home / Today | `GET /` (`app/blueprints/tracking.py` `home`) → `templates/today.html` | Bottom bar, header tab, brand mark | Primary | Today | **Converged in UX-2 PR4.** One production hierarchy: day context → daily brief → one primary action → compact status → canonical Axis insight → progress signal. The legacy dashboard (`index.html`) and the surfaces it duplicated — weight management + BMR/TDEE, the quick-action launcher, the macro donut dashboard, the level/XP hero and the generic tip carousel — were removed; their capabilities stay at their canonical owners. Incomplete profile redirects to `/setup`. |
-| Plan / Training | `GET /training` → `templates/plan.html` | Bottom bar, header tab, Home "workout" quick action | Primary | Plan page | **Converged in WEB-UX3-PR6B.** `/training` remains the stable URL. The legacy `training.html` renderer is deleted. `UIUX_PLAN_V2_ENABLED` is historical and does not select a branch. Page owns the workout plan plus child-domain summaries; Nutrition and Supplements keep their own URLs. |
+| Plan / Training | `GET /training` → `templates/plan.html` | Bottom bar, header tab, Home "workout" quick action | Primary | Plan page | **Converged in WEB-UX3-PR6B.** `/training` remains the stable URL. The legacy `training.html` renderer is deleted. There is no Plan rollout selector. Page owns the workout plan plus child-domain summaries; Nutrition and Supplements keep their own URLs. |
 | Coach | `GET /coach` → `templates/coach.html` or `templates/coach_v2.html` (`UIUX_COACH_PAGE_V2_ENABLED`) | V2 primary tab; direct URL; FAB on core pages. **Legacy shell has no Coach tab and no drawer link.** | Primary (v2) / floating utility (legacy) | Floating widget (`static/coach_widget.js`) hosted by a thin page | Page auto-opens the same widget the FAB opens. FAB remains even on `/coach`. Feature flags doc already records this: Coach v2 is not observable as a destination until Nav v2 is on. |
 | Progress | `GET /progress-page` → `templates/progress.html` | Bottom bar, header tab | Primary | Progress redesign (summary, body, performance, consistency, Axis Insights, Physique, History, check-in sheet) | Physique already lives here via `GET /api/progress/physique`, but Pump Check Gallery is a separate global destination. |
 | Progress alias | `GET /progress` | Bookmarks / guessed URL | Redirect | Compatibility | Redirects to `/progress-page`. Keep. |
@@ -202,17 +202,17 @@ These flags swap **page internals**, not the destination:
 | Flag | Default | Route | OFF template | ON template |
 |---|---|---|---|---|
 | `UIUX_TODAY_V2_ENABLED` | OFF | `/` | `today.html` | `today.html` |
-| `UIUX_PLAN_V2_ENABLED` | OFF | `/training` | `plan.html` | `plan.html` |
 | `UIUX_COACH_PAGE_V2_ENABLED` | OFF | `/coach` | `coach.html` | `coach_v2.html` |
 | `UIUX_NAV_V2_ENABLED` | OFF | all authed HTML | legacy 5-tab shell | v2 4-tab + `nav.SECONDARY` drawer |
 
 IA ownership does not change with these flags. `UIUX_TODAY_V2_ENABLED` no longer
 selects anything: UX-2 PR4 converged `/` on `today.html` and deleted
 `index.html`, so both columns name the same template and the key survives only so
-`/health` and the `[FLAGS]` boot line keep listing it. `UIUX_PLAN_V2_ENABLED` is
-the same shape after WEB-UX3-PR6B: `/training` always renders `plan.html`, the
-legacy `training.html` tree is deleted, and flipping the env var does not restore
-it.
+`/health` and the `[FLAGS]` boot line keep listing it. Plan is unconditional:
+WEB-UX3-PR6B retired `UIUX_PLAN_V2_ENABLED` from the rollout registry, so
+`/training` always renders `plan.html` with no selector. Rollback of that
+convergence is a `git revert` plus redeploy. `UIUX_TODAY_V2_ENABLED` and
+`UIUX_NAV_V2_ENABLED` remaining as historical no-ops is separate cleanup debt.
 
 ---
 

@@ -195,9 +195,9 @@ def _parse_pump_visibility(data):
 @require_auth
 def training():
     # WEB-UX3-PR6B: /training is the canonical Plan URL and always renders
-    # templates/plan.html. UIUX_PLAN_V2_ENABLED is historical and is not read
-    # here; flipping it does not restore templates/training.html. The weekly
-    # section is still gated independently by WEEKLY_PROGRAM_UI_ENABLED.
+    # templates/plan.html. There is no Plan rollout selector. A leftover
+    # UIUX_PLAN_V2_ENABLED host env key is ignored. The weekly section is
+    # still gated independently by WEEKLY_PROGRAM_UI_ENABLED.
     weekly_enabled = current_app.config.get("WEEKLY_PROGRAM_UI_ENABLED", False)
     plan_view = build_plan_view(
         gather_plan_facts(

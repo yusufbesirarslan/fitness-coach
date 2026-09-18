@@ -4,6 +4,8 @@ Every assertion here is about the CURRENT production contract. PR2 activates
 nothing: the default of all eight flags is OFF and these tests fail loudly if a
 future change flips one by accident.
 """
+import os
+
 import pytest
 
 from app import feature_flags
@@ -124,12 +126,12 @@ def test_every_malformed_key_is_reported_in_one_error():
     with pytest.raises(FeatureFlagConfigurationError) as excinfo:
         resolve_rollout_flags({
             "UIUX_NAV_V2_ENABLED": "true",
-            "UIUX_PLAN_V2_ENABLED": "1 ",
+            "UIUX_TODAY_V2_ENABLED": "1 ",
             "WEEKLY_PROGRAM_UI_ENABLED": "1",
         })
     message = str(excinfo.value)
     assert "UIUX_NAV_V2_ENABLED" in message
-    assert "UIUX_PLAN_V2_ENABLED" in message
+    assert "UIUX_TODAY_V2_ENABLED" in message
     assert "WEEKLY_PROGRAM_UI_ENABLED" not in message, \
         "a valid key must not be named in the error"
 
@@ -166,7 +168,26 @@ def test_boot_applies_an_explicitly_enabled_flag(monkeypatch):
     monkeypatch.setenv("WEEKLY_PROGRAM_UI_ENABLED", "1")
     flask_app = _create_app()
     assert flask_app.config["WEEKLY_PROGRAM_UI_ENABLED"] is True
-    assert flask_app.config["UIUX_PLAN_V2_ENABLED"] is False
+    assert "UIUX_PLAN_V2_ENABLED" not in feature_flags.FEATURE_FLAG_KEYS
+    from app.config import feature_flag_state
+    assert "UIUX_PLAN_V2_ENABLED" not in feature_flag_state(flask_app)
+
+
+def test_boot_succeeds_with_retired_plan_flag_env_residue(monkeypatch):
+    """Production may keep UIUX_PLAN_V2_ENABLED=1 during the observation window.
+
+    WEB-UX3-PR6B must ignore that unknown key rather than fail boot or treat
+    it as a rollout flag.
+    """
+    from app.config import feature_flag_state
+
+    _clear_flag_env(monkeypatch)
+    monkeypatch.setenv("UIUX_PLAN_V2_ENABLED", "1")
+    flask_app = _create_app()
+    state = feature_flag_state(flask_app)
+    assert "UIUX_PLAN_V2_ENABLED" not in feature_flags.FEATURE_FLAG_KEYS
+    assert "UIUX_PLAN_V2_ENABLED" not in state
+    assert "UIUX_PLAN_V2_ENABLED" not in resolve_rollout_flags(os.environ)
 
 
 def test_boot_rollback_to_off_matches_a_never_enabled_boot(monkeypatch):

@@ -6,8 +6,9 @@ no-plan; empty exercise list is NOT a rest day; malformed ≠ no plan; canonical
 order preserved), the unconditional Plan renderer at GET /training after
 WEB-UX3-PR6B, the weekly-program-disabled combination, and the guarantee that
 the Plan surface carries NONE of the deleted training.js client-side authority.
-UIUX_PLAN_V2_ENABLED is historical and is not a template selector; the weekly
-section is gated independently by WEEKLY_PROGRAM_UI_ENABLED.
+UIUX_PLAN_V2_ENABLED is retired from the rollout registry and is not a
+template selector; leftover config/env values do not change rendering. The
+weekly section is gated independently by WEEKLY_PROGRAM_UI_ENABLED.
 """
 import json
 from pathlib import Path
@@ -229,9 +230,10 @@ def test_facts_read_failure_is_read_error(app, make_user, monkeypatch):
 @pytest.mark.parametrize("flag", [None, False, True])
 def test_the_retired_flag_no_longer_selects_training(app, client, make_user, login,
                                                      flag):
-    """Mirrors the Today/Nav precedent: the key stays registered so /health
-    and the [FLAGS] boot line do not drift, but flipping it is not a
-    rollback path. Rolling this PR back is a git revert."""
+    """Leftover config named UIUX_PLAN_V2_ENABLED must not select a renderer.
+
+    WEB-UX3-PR6B retired the flag from the registry; a stray config value is
+    not a rollback path. Rolling this PR back is a git revert."""
     if flag is None:
         app.config.pop("UIUX_PLAN_V2_ENABLED", None)
     else:

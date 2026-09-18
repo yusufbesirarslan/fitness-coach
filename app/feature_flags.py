@@ -126,9 +126,13 @@ def _rollback(key):
     return _ENV_ROLLBACK.format(key=key)
 
 
-# ── The nine backend rollout flags ─────────────────────────────────────────
+# ── The eight backend rollout flags ────────────────────────────────────────
 # Order is the recommended staged activation order (see docs/ROLLOUT.md); it is
 # documentation, not an enforcement mechanism.
+# WEB-UX3-PR6B retired UIUX_PLAN_V2_ENABLED from this inventory. Do not re-add
+# it as a historical no-op, operational boolean, kill switch, or alias.
+# UIUX_TODAY_V2_ENABLED and UIUX_NAV_V2_ENABLED remain registered historical
+# no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
         key="WEEKLY_PROGRAM_UI_ENABLED",
@@ -211,54 +215,6 @@ ROLLOUT_FLAGS = (
             "(feat(ux): converge Today around daily guidance) and redeploy; "
             "setting UIUX_TODAY_V2_ENABLED=0 does not restore the legacy "
             "dashboard — templates/index.html no longer exists"
-        ),
-        lifecycle=LIFECYCLE_SHIPPED_DARK,
-        review_by="2026-10-01",
-        decision=DECISION_ENABLE,
-    ),
-    FeatureFlag(
-        key="UIUX_PLAN_V2_ENABLED",
-        capability=(
-            "Historical presentation flag that chose between the server-"
-            "authoritative Plan surface (templates/plan.html) and the legacy "
-            "/training renderer (templates/training.html). WEB-UX3-PR6B made "
-            "GET /training always render Plan and DELETED the legacy "
-            "training.html/css/js tree, so this key remains in the registry "
-            "but no longer selects a user-reachable branch: /training "
-            "renders Plan at either value. Presentation only; the route "
-            "keeps its own @require_auth."
-        ),
-        owner=_OWNER,
-        default=False,
-        depends_on=(),
-        observability=(
-            "PARTIAL — no feature-specific log line or metric exists. Visible "
-            "only through the PR1 training-blueprint HttpRequests/HttpLatency/"
-            "HttpClientErrors SLIs, which cannot separate a Plan regression "
-            "from any other change on the same blueprint. The env value is not "
-            "a /training selector after WEB-UX3-PR6B."),
-        prerequisites=(
-            "none for Plan selection — WEB-UX3-PR6B made plan.html the "
-            "production /training renderer without this flag",
-            "keep the key registered so /health and the [FLAGS] boot line do "
-            "not drift; do not treat a 0/1 flip as a Plan change",
-        ),
-        success_signals=(
-            "GET /training renders templates/plan.html regardless of this "
-            "flag's 0/1 value",
-            "the legacy training.html/training.js renderer is not reachable",
-        ),
-        abort_signals=(
-            "the legacy /training renderer (training.html, training.js, "
-            "clock-based today, localStorage completion) reappears in "
-            "production",
-            "5xx on GET /training",
-        ),
-        rollback=(
-            "git revert of WEB-UX3-PR6B (retire Plan V2 rollout flag + "
-            "legacy /training renderer) and redeploy; setting "
-            "UIUX_PLAN_V2_ENABLED=0 does not restore the legacy renderer — "
-            "templates/training.html no longer exists"
         ),
         lifecycle=LIFECYCLE_SHIPPED_DARK,
         review_by="2026-10-01",

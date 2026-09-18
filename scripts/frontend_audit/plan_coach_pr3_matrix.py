@@ -1,26 +1,26 @@
 """AxisAI UIUX Sprint 1 PR3 — Plan V2 + Coach Page V2 exact browser matrix.
 
 Reuses the Sprint-0 hermetic audit harness (``create_audit_app`` + ``AuditServer``
-+ fixed browser clock + Chromium) to run the EXACT PR3 matrices with the Plan and
-Coach Page feature flags toggled per cell — a dimension the inventory-driven
-capture tiers do not model. Hermetic: ``create_audit_app`` calls
++ fixed browser clock + Chromium) to run the PR3 matrices. The retired Plan
+config key is exercised at both stale values to prove it is inert, while the
+Coach Page flag remains an active per-cell dimension. Hermetic:
+``create_audit_app`` calls
 ``configure_audit_environment`` before any ``app.*`` import, so no production or
 external dependency is contacted (FatSecret/Bedrock/Resend/S3/Redis pinned to
 inert values; SQLite audit DB on loopback only).
 
-Both flags are read from ``current_app.config`` at request time, so the driver
-toggles ``UIUX_PLAN_V2_ENABLED`` / ``UIUX_COACH_PAGE_V2_ENABLED`` (and, for the
-weekly-section combinations, ``WEEKLY_PROGRAM_UI_ENABLED``) on the shared app
-between sequential captures. Locale is forced through the signed-in user's
-``language`` column (the canonical first-priority locale source).
+The driver supplies both stale values for ``UIUX_PLAN_V2_ENABLED`` and requires
+the same Plan renderer in every cell. It toggles the active Coach and weekly
+flags on the shared app between sequential captures. Locale is forced through
+the signed-in user's ``language`` column (the canonical locale source).
 
 Matrices (Chromium; the repository's minimum required engine):
-  A. Plan — 20 cells:  5 vp x 2 loc x Plan{off,on}; Nav ON, Today ON, Coach OFF
-  B. Coach — 20 cells: 5 vp x 2 loc x Coach{off,on}; Nav ON, Today ON, Plan ON
-  C. Plan x Coach — 16 cells: {390,1366} x {en,tr} x 4 flag combos (Plan surface)
-  D. Upstream — 8 cells: {390,1366} x 4 Nav/Today combos; Plan ON + Coach ON (Coach)
-  E. Plan states — 16 cells: 4 canonical page states x {390,1366} x {en,tr}, Plan ON
-  W. Weekly section — 6 cells: {disabled, enabled, enabled-error} x {390,1366}, Plan ON
+  A. Plan — 20 cells: 5 vp x 2 loc x stale Plan config{0,1}; always Plan
+  B. Coach — 20 cells: 5 vp x 2 loc x Coach{off,on}; unconditional Plan
+  C. Stale Plan config x Coach — 16 cells: both stale values x Coach{off,on}
+  D. Upstream — 8 cells: {390,1366} x 4 Nav/Today combos; Coach ON
+  E. Plan states — 16 cells: 4 canonical page states x {390,1366} x {en,tr}
+  W. Weekly section — 6 cells: {disabled, enabled, enabled-error} x {390,1366}
 
 Plus ``run_interactions`` (200% zoom / reduced-motion / increased-text) and
 ``run_behavior`` (the answer.txt §9 Coach lifecycle idempotency combinations,
@@ -205,7 +205,7 @@ def _cells():
                     "flags": {"plan": plan, "coach": False, "weekly": False},
                     "expect_state": "active_plan", "shot": shot,
                 })
-    # B. Coach — 20 (Plan ON)
+    # B. Coach — 20 (unconditional Plan)
     for vp in ("320", "390", "768", "1024", "1366"):
         for loc in ("en", "tr"):
             for coach in (False, True):
@@ -216,7 +216,7 @@ def _cells():
                     "flags": {"plan": True, "coach": coach, "weekly": False},
                     "shot": shot,
                 })
-    # C. Plan x Coach — 16 (Plan surface, all 4 flag combos)
+    # C. Stale Plan config x Coach — 16 (Plan must ignore both stale values)
     for vp in ("390", "1366"):
         for loc in ("en", "tr"):
             for plan in (False, True):
@@ -228,7 +228,7 @@ def _cells():
                         "expect_state": "active_plan",
                         "shot": vp == "390" and loc == "en" and plan,
                     })
-    # D. Upstream compatibility — 8 (Plan ON + Coach ON, vary Nav/Today; Coach surface)
+    # D. Upstream compatibility — 8 (Coach ON, vary Nav/Today; Coach surface)
     for vp in ("390", "1366"):
         for nav in (False, True):
             for today in (False, True):
@@ -239,7 +239,7 @@ def _cells():
                               "nav": nav, "today": today},
                     "shot": False,
                 })
-    # E. Plan states — 16 (Plan ON)
+    # E. Plan states — 16 (unconditional Plan)
     for state in ("no_active_plan", "active_plan", "partial_active_plan", "read_error"):
         for vp in ("390", "1366"):
             for loc in ("en", "tr"):
@@ -249,7 +249,7 @@ def _cells():
                     "flags": {"plan": True, "coach": False, "weekly": False},
                     "expect_state": state, "shot": vp == "390" and loc == "en",
                 })
-    # W. Weekly section — 6 (Plan ON + active plan)
+    # W. Weekly section — 6 (unconditional Plan + active plan)
     for weekly_mode in ("disabled", "enabled", "enabled-error"):
         for vp in ("390", "1366"):
             cells.append({
@@ -285,45 +285,41 @@ def _evaluate_plan(cell, m, weekly_reqs):
         reasons.append(f"coach instances={m['coach_root_count']} (want exactly 1)")
     if m["raw_key_leak"]:
         reasons.append(f"raw localization keys leaked: {m['raw_key_leak']}")
-    if f["plan"]:
-        if not m["plan_present"]:
-            reasons.append("Plan v2 flag ON but plan tree absent")
-        if m["legacy_training_js"]:
-            reasons.append("legacy training.js loaded under Plan ON")
-        if m["plan_mount_overflow"]:
-            reasons.append("plan-shell horizontal overflow")
-        if not m["status_text_present"]:
-            reasons.append("status not conveyed as text")
-        if m["self_link_to_training"]:
-            reasons.append("plan self-links to /training")
-        if cell.get("expect_state") and m["plan_state"] != cell["expect_state"]:
-            reasons.append(f"state={m['plan_state']} (want {cell['expect_state']})")
-        # No dominant/self CTA in any state; create form only in no_active_plan;
-        # retry only in read_error.
-        want_create = 1 if m["plan_state"] == "no_active_plan" else 0
-        if m["create_form_present"] != want_create:
-            reasons.append(f"create form={m['create_form_present']} (want {want_create})")
-        want_retry = 1 if m["plan_state"] == "read_error" else 0
-        if m["retry_present"] != want_retry:
-            reasons.append(f"retry={m['retry_present']} (want {want_retry})")
-        # Weekly section: disabled → no mount/js/request, plan still visible;
-        # enabled → exactly one mount + at most one weekly request; a weekly
-        # failure must NOT collapse the page (plan_state stays active_plan).
-        if f["weekly"] and m["plan_state"] in ("active_plan", "partial_active_plan"):
-            if m["weekly_mount_count"] != 1:
-                reasons.append(f"weekly mount={m['weekly_mount_count']} (want 1 when enabled)")
-            if weekly_reqs > 1:
-                reasons.append(f"weekly requests={weekly_reqs} (want <=1)")
-        else:
-            if m["weekly_mount_count"]:
-                reasons.append("weekly mount present while disabled")
-            if m["weekly_js_count"]:
-                reasons.append("weekly_program.js loaded while disabled")
-            if weekly_reqs:
-                reasons.append(f"weekly request fired while disabled ({weekly_reqs})")
+    if not m["plan_present"]:
+        reasons.append("unconditional Plan tree absent")
+    if m["legacy_training_js"]:
+        reasons.append("legacy training.js loaded")
+    if m["plan_mount_overflow"]:
+        reasons.append("plan-shell horizontal overflow")
+    if not m["status_text_present"]:
+        reasons.append("status not conveyed as text")
+    if m["self_link_to_training"]:
+        reasons.append("plan self-links to /training")
+    if cell.get("expect_state") and m["plan_state"] != cell["expect_state"]:
+        reasons.append(f"state={m['plan_state']} (want {cell['expect_state']})")
+    # No dominant/self CTA in any state; create form only in no_active_plan;
+    # retry only in read_error.
+    want_create = 1 if m["plan_state"] == "no_active_plan" else 0
+    if m["create_form_present"] != want_create:
+        reasons.append(f"create form={m['create_form_present']} (want {want_create})")
+    want_retry = 1 if m["plan_state"] == "read_error" else 0
+    if m["retry_present"] != want_retry:
+        reasons.append(f"retry={m['retry_present']} (want {want_retry})")
+    # Weekly section: disabled → no mount/js/request, plan still visible;
+    # enabled → exactly one mount + at most one weekly request; a weekly
+    # failure must NOT collapse the page (plan_state stays active_plan).
+    if f["weekly"] and m["plan_state"] in ("active_plan", "partial_active_plan"):
+        if m["weekly_mount_count"] != 1:
+            reasons.append(f"weekly mount={m['weekly_mount_count']} (want 1 when enabled)")
+        if weekly_reqs > 1:
+            reasons.append(f"weekly requests={weekly_reqs} (want <=1)")
     else:
-        if m["plan_present"]:
-            reasons.append("Plan v2 tree present under Plan OFF")
+        if m["weekly_mount_count"]:
+            reasons.append("weekly mount present while disabled")
+        if m["weekly_js_count"]:
+            reasons.append("weekly_program.js loaded while disabled")
+        if weekly_reqs:
+            reasons.append(f"weekly request fired while disabled ({weekly_reqs})")
     return ("pass" if not reasons else "fail"), reasons
 
 

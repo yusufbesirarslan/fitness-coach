@@ -85,18 +85,17 @@ def test_nav_v2_flag_rollback_is_not_an_env_flip():
     assert "set UIUX_NAV_V2_ENABLED=0" not in flag.rollback
 
 
-def test_plan_v2_flag_rollback_is_not_an_env_flip():
-    """WEB-UX3-PR6B made GET /training always render Plan.
+def test_plan_v2_flag_is_absent_from_the_rollout_registry():
+    """WEB-UX3-PR6B retires the Plan flag itself, not merely its selector.
 
-    Operators must not be told that `UIUX_PLAN_V2_ENABLED=0` restores
-    templates/training.html — that env flip is a no-op after this PR.
+    Re-adding a FeatureFlag record (including a historical no-op) must fail
+    this test. Today/Nav remaining as registered no-ops is separate debt.
     """
-    flag = next(f for f in feature_flags.ROLLOUT_FLAGS
-                if f.key == "UIUX_PLAN_V2_ENABLED")
-    assert "revert" in flag.rollback.lower()
-    assert "does not restore" in flag.rollback
-    assert "set UIUX_PLAN_V2_ENABLED=0" not in flag.rollback
-    assert "templates/training.html no longer exists" in flag.rollback
+    assert "UIUX_PLAN_V2_ENABLED" not in feature_flags.FEATURE_FLAG_KEYS
+    assert "UIUX_PLAN_V2_ENABLED" not in feature_flags.FLAGS_BY_KEY
+    assert all(flag.key != "UIUX_PLAN_V2_ENABLED" for flag in ROLLOUT_FLAGS)
+    assert "UIUX_TODAY_V2_ENABLED" in feature_flags.FEATURE_FLAG_KEYS
+    assert "UIUX_NAV_V2_ENABLED" in feature_flags.FEATURE_FLAG_KEYS
 
 
 def test_no_flag_is_registered_with_a_default_of_on():
