@@ -136,11 +136,30 @@ deletes the row and raises `SessionInvalid` → the user is forced to re-login.
 
 ### Logout Flow
 
-`GET /logout` (CSRF-guarded via Sec-Fetch-Site / Referer) calls
-`cognito_service.global_sign_out(access_token)` best-effort (errors swallowed —
-an expired token can fail), deletes the `CognitoSession` row, pops
-`cognito_sid`, and clears the Flask-Login session. GlobalSignOut revokes every
-refresh token for the user across devices.
+`GET /logout` (CSRF-guarded via Sec-Fetch-Site / Referer) is a **global**
+logout: it already calls Cognito `GlobalSignOut`, which revokes every provider
+refresh token for the user across devices. Local AxisAI sessions must not
+outlive that intent.
+
+Ordering:
+
+1. Identity comes from the authenticated Flask-Login user, never from a
+   client-supplied id.
+2. The current access token is captured for the later provider call.
+3. Every live mobile family for that user is revoked
+   (`mobile_auth.revoke_all_for_global_logout`, same family sweep as a
+   credential change, **without** bumping `credential_epoch`) and every
+   `CognitoSession` row for that user is deleted. Failure here is 503; the
+   browser session is left intact so the user can retry. A 302 would claim
+   logout completed while locally-authoritative sessions might still live.
+4. `cognito_sid` is popped and the Flask-Login session is cleared.
+5. `cognito_service.global_sign_out(access_token)` is best-effort. A provider
+   outage is logged and does **not** roll local revocation back — an expired
+   token can fail, and local `authenticate_access` never consults Cognito.
+
+Mobile `POST /api/v1/auth/logout` stays device-scoped (one family +
+`revoke_token`). A genuinely new login after this boundary still succeeds:
+the password has not changed.
 
 ### Protected Route Strategy
 

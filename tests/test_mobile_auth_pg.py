@@ -270,6 +270,74 @@ def test_credential_change_during_provider_renewal_cannot_be_outlived(pg_app):
     assert counter["calls"] == 1
 
 
+def test_global_logout_during_provider_renewal_cannot_be_outlived(pg_app):
+    """Same refresh race as credential change, without moving the epoch.
+
+    Web logout reuses the family sweep, not the password-change fence. The
+    refresh still must lose: `revoked_at` plus the versioned family UPDATE
+    are what stop a child from landing after the boundary.
+    """
+    app, counter = pg_app
+    with app.app_context():
+        original = mobile_auth.login("pg-mobile-race", "correct", now=NOW)
+        assert db.session.query(User.credential_epoch).scalar() == 0
+
+    counter["provider_barrier"] = threading.Barrier(2)
+    counter["winner_at_provider"] = threading.Event()
+    counter["winner_finished"] = threading.Event()
+    outcomes = {}
+
+    def rotate():
+        with app.app_context():
+            counter["thread_state"].contender = "winner"
+            try:
+                outcomes["refresh"] = (
+                    "issued",
+                    mobile_auth.refresh(
+                        original.refresh_credential,
+                        now=NOW + timedelta(seconds=850),
+                    ),
+                )
+            except mobile_auth.MobileAuthFailure as exc:
+                outcomes["refresh"] = (
+                    "failed", exc.code, exc.reason, exc.retryable)
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcomes["refresh"] = (
+                    "unexpected", type(exc).__name__, str(exc))
+            finally:
+                counter["winner_finished"].set()
+                db.session.remove()
+
+    thread = threading.Thread(target=rotate, daemon=True)
+    thread.start()
+    assert counter["winner_at_provider"].wait(timeout=10), outcomes
+    with app.app_context():
+        revoked = mobile_auth.revoke_all_for_global_logout(
+            User.query.one().id, now=NOW + timedelta(seconds=860))
+        assert len(revoked) == 1
+        db.session.remove()
+    counter["provider_barrier"].wait(timeout=10)
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), outcomes
+    assert outcomes["refresh"] == (
+        "failed", "AUTH_REFRESH_FAILED", "refresh_revoked", False), outcomes
+    with app.app_context():
+        family = MobileAuthSession.query.one()
+        assert family.revoked_at == NOW + timedelta(seconds=860)
+        assert family.revoked_reason == mobile_auth.GLOBAL_LOGOUT_REASON
+        assert family.cognito_access_token is None
+        assert family.cognito_refresh_token is None
+        assert MobileAccessCredential.query.filter_by(generation=1).count() == 0
+        assert MobileRefreshCredential.query.filter_by(generation=1).count() == 0
+        assert MobileAccessCredential.query.filter(
+            MobileAccessCredential.revoked_at.is_(None)).count() == 0
+        assert MobileRefreshCredential.query.filter(
+            MobileRefreshCredential.revoked_at.is_(None)).count() == 0
+        assert db.session.query(User.credential_epoch).scalar() == 0
+    assert counter["calls"] == 1
+
+
 def _wait_for_a_backend_blocked_on_a_row_lock(timeout=15.0):
     """Block until PostgreSQL itself reports a session waiting on a lock.
 
