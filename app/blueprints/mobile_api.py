@@ -93,7 +93,7 @@ def _run_issuance(operation, *args, refresh_context=False):
 
 
 @bp.post("/auth/login")
-@limiter.limit("10 per minute; 50 per hour")
+@limiter.limit("10 per minute; 50 per hour", key_func=get_remote_address)
 @limiter.limit(
     "15 per 15 minutes", key_func=_login_username_key,
     deduct_when=lambda response: response.status_code in (401, 403))

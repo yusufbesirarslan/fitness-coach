@@ -78,12 +78,13 @@ def test_limiter_storage_status_degraded_when_ping_fails(monkeypatch):
 
 def test_limiter_registers_default_hourly_limit():
     from app.config import DEFAULT_RATELIMIT
-    from app.extensions import limiter
+    from app.extensions import default_limiter_key, limiter
 
     registered = [str(limit.limit) for limit in limiter.limit_manager.default_limits]
 
     assert DEFAULT_RATELIMIT == "600 per hour"
     assert registered == ["600 per 1 hour"]
+    assert limiter._key_func is default_limiter_key
 
 
 def test_health_reports_limiter_storage(app):

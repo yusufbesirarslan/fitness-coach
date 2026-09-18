@@ -272,18 +272,23 @@ def create_app():
         return body, status
 
     # before_request order must match the original monolith:
-    #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak
+    #   _csrf_protect -> bind_mobile_request_principal -> (limiter)
+    #   _check_request_limit -> maybe_weekly_rollover -> update_streak
+    # Mobile Bearer identity is bound before the default limiter key runs;
+    # Flask-Login current_user is already lazy-available from the session.
     from app.hooks import _csrf_protect, generate_csp_nonce, inject_csp_nonce, \
         inject_csrf_token, inject_i18n, inject_nav, maybe_weekly_rollover, \
         set_csp_header, update_streak, inject_rank, ratelimit_exceeded, \
         not_found, payload_too_large, server_error
     from app.i18n import resolve_locale
+    from app.mobile_auth_middleware import bind_mobile_request_principal
     from app.observability import assign_request_id, log_request, start_request_timer
     # İstek süresini en baştan ölç + izleme kimliği ata (diğer before_request'lerden önce).
     app.before_request(start_request_timer)
     app.before_request(assign_request_id)
     app.before_request(generate_csp_nonce)
     app.before_request(_csrf_protect)
+    app.before_request(bind_mobile_request_principal)
     limiter.init_app(app)
     warn_if_limiter_degraded(app)
     from app.services.ai_gate import enforce_gate_invariants
