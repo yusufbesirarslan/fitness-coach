@@ -126,20 +126,25 @@ def _rollback(key):
     return _ENV_ROLLBACK.format(key=key)
 
 
-# ── The nine backend rollout flags ─────────────────────────────────────────
+# ── The eight backend rollout flags ────────────────────────────────────────
 # Order is the recommended staged activation order (see docs/ROLLOUT.md); it is
 # documentation, not an enforcement mechanism.
+# WEB-UX3-PR6B retired UIUX_PLAN_V2_ENABLED from this inventory. Do not re-add
+# it as a historical no-op, operational boolean, kill switch, or alias.
+# UIUX_TODAY_V2_ENABLED and UIUX_NAV_V2_ENABLED remain registered historical
+# no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
         key="WEEKLY_PROGRAM_UI_ENABLED",
         capability=(
-            "Renders the read-only weekly-program card on /training (mount shell "
-            "+ static/weekly_program.js + one GET /api/training/weekly-program). "
-            "Presentation only — the endpoint stays @require_auth in every flag "
-            "state, and OFF emits no markup, script, request or whitespace."),
+            "Renders the read-only weekly-program card on the canonical Plan "
+            "page at /training (mount shell + static/weekly_program.js + one "
+            "GET /api/training/weekly-program). Presentation only — the "
+            "endpoint stays @require_auth in every flag state, and OFF emits "
+            "no markup, script, request or whitespace."),
         owner=_OWNER,
         default=False,
-        depends_on=("UIUX_PLAN_V2_ENABLED",),
+        depends_on=(),
         observability=(
             "[TRAINING][WEEKLY_PROGRAM] request_id=... state={neutral|"
             "missing_baseline|populated|error} (2 sites, PII-free) plus the PR1 "
@@ -211,39 +216,6 @@ ROLLOUT_FLAGS = (
             "setting UIUX_TODAY_V2_ENABLED=0 does not restore the legacy "
             "dashboard — templates/index.html no longer exists"
         ),
-        lifecycle=LIFECYCLE_SHIPPED_DARK,
-        review_by="2026-10-01",
-        decision=DECISION_ENABLE,
-    ),
-    FeatureFlag(
-        key="UIUX_PLAN_V2_ENABLED",
-        capability=(
-            "Renders the server-authoritative Plan v2 surface "
-            "(templates/plan.html) instead of the legacy /training page, "
-            "removing the legacy client's clock-based 'today' selection, "
-            "rest-day inference and localStorage completion. Presentation only."),
-        owner=_OWNER,
-        default=False,
-        depends_on=("WEEKLY_PROGRAM_UI_ENABLED",),
-        observability=(
-            "PARTIAL — no feature-specific log line or metric of its own. The "
-            "weekly section it hosts is covered by [TRAINING][WEEKLY_PROGRAM]; "
-            "the page itself is visible only through the PR1 training-blueprint "
-            "HTTP SLIs."),
-        prerequisites=(
-            "RUNTIME_METRICS_ENABLED=1 with a training-blueprint baseline",
-            "WEEKLY_PROGRAM_UI_ENABLED decided first — Plan v2 honours it for "
-            "its weekly section, so the two interact on one page",
-        ),
-        success_signals=(
-            "training blueprint 5xx rate and p95 unchanged",
-            "weekly section reaches populated/insufficient_data, not error",
-        ),
-        abort_signals=(
-            "read_error page state observed in production",
-            "training blueprint 5xx or p95 regression",
-        ),
-        rollback=_rollback("UIUX_PLAN_V2_ENABLED"),
         lifecycle=LIFECYCLE_SHIPPED_DARK,
         review_by="2026-10-01",
         decision=DECISION_ENABLE,

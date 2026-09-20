@@ -73,7 +73,7 @@ primary destinations. This discovery does not reopen those decisions.
 | Route | Surface | Current behavior | Target classification |
 |---|---|---|---|
 | `/` | Today | Ranks Resume, Start, or Create from canonical state | Stable canonical home |
-| `/training` | `training.html` or `plan.html` | Full-template swap controlled by `UIUX_PLAN_V2_ENABLED` | Stable canonical Plan home |
+| `/training` | `plan.html` | Unconditional Plan renderer after WEB-UX3-PR6B; no Plan rollout selector | Stable canonical Plan home |
 | `/nutrition` | `nutrition.html` | Nutrition Today, Diary, Plan, History, Water | Stable Plan child home |
 | `/supplements` | `manage_stack.html` | Supplement cabinet CRUD | Stable Plan → Nutrition child home |
 | `/coach` | Coach | Conversation and contextual plan tools | Stable contextual home |
@@ -178,51 +178,48 @@ same cabinet. A Profile preview must not grow into a second editable cabinet.
 
 ## H. Plan flag analysis
 
-`UIUX_PLAN_V2_ENABLED` is still a meaningful behavioral flag, not historical.
+`UIUX_PLAN_V2_ENABLED` is **retired** after WEB-UX3-PR6B. GET `/training`
+unconditionally renders `templates/plan.html`. The legacy `training.html` /
+`training.css` / `training.js` tree is deleted. The key is absent from
+`ROLLOUT_FLAGS`, `FEATURE_FLAG_KEYS`, `/health?deep=1`, and the `[FLAGS]` boot
+line. It is not a historical no-op record, operational boolean, kill switch,
+or compatibility alias. Rollback is a git revert plus redeploy. A leftover
+host `.env` value is ignored and does not fail boot.
+`WEEKLY_PROGRAM_UI_ENABLED` remains an additive section gate on the Plan page
+and no longer depends on the retired Plan flag. Workout-session and Coach
+mutation flags gate separate staging capabilities and must not be coupled to
+this retirement. `UIUX_TODAY_V2_ENABLED` and `UIUX_NAV_V2_ENABLED` remaining
+as historical no-ops is separate cleanup debt.
 
 | Question | Finding |
 |---|---|
-| Default | `False` in application configuration and `.env.example` |
-| Lifecycle record | `shipped_dark`; decision is enable; review-by 2026-10-01 |
-| Selector | A single server-side branch in GET `/training`; no client/query override |
-| OFF | Renders `training.html`, loads `training.js`, supports generation and workout entry/execution |
-| ON | Renders the bounded `plan.html` shell from `plan_facts` + presenter; canonical Create/Start/Resume are functional without loading `training.js` |
-| Reachability | Exactly one branch is user-reachable per process, but both are live tested paths |
-| Staleness | Neither is dead. Both are incomplete representations of the locked Plan concept; ON is materially behind current execution access |
-| Rollback | Set `UIUX_PLAN_V2_ENABLED=0` and restart; documented in flag registry/rollout docs |
-| Observability | Boot/health flag exposure and weekly telemetry are partial; no repository evidence of a dedicated Plan-render metric |
-| Tests | `tests/test_plan_v2.py`, feature-flag/env tests, and Coach-entry convergence tests cover selection and key states |
-| Production value | **UNKNOWN** in source; host environment is authoritative |
+| Registry | Absent from `ROLLOUT_FLAGS` and `FEATURE_FLAG_KEYS` |
+| Selector | None. GET `/training` always renders `plan.html` |
+| `.env.example` | No active Plan flag entry |
+| Rollback | git revert of WEB-UX3-PR6B and redeploy |
+| Leftover host env | `UIUX_PLAN_V2_ENABLED=1` may remain during the observation window; ignored |
+| Weekly program | Still a rollout flag; no dependency on the retired Plan flag |
+| Tests | `tests/test_plan_flag_retirement.py` and `tests/test_plan_v2.py` |
 
-Do not retire or change the flag in PR1. PR2 should continue to use it for an
-atomic full-template rollout. After the converged shell proves stable, a later
-cleanup PR may make the converged path unconditional and classify the flag as
-historical. `UIUX_NAV_V2_ENABLED` is already historical because hooks always emit
-the converged four-destination shell. `WEEKLY_PROGRAM_UI_ENABLED` is an additive
-section gate. Workout-session and Coach mutation flags gate separate staging
-capabilities and must not be coupled to shell rollout.
+## I. Canonical Plan renderer
 
-## I. `training.html` versus `plan.html`
+WEB-UX3-PR6B deleted `templates/training.html`, `static/training.css`, and
+`static/training.js`. GET `/training` always renders `templates/plan.html`.
+Shared execution assets (`workout_execution.js`, `workout_draft.js`,
+`workout_state_client.js`, `training_plan_management.js`) remain.
 
-| Dimension | `training.html` (flag OFF) | `plan.html` (flag ON) |
-|---|---|---|
-| Product concept | Training creation plus execution workspace | Plan shell: Training first, then Nutrition and nested Supplements |
-| Data | Client bootstrap, status/session, generation responses | Bounded `plan_facts`, canonical workout snapshot, and child summaries |
-| JavaScript | `training.js` plus shared execution/draft/state modules | No `training.js`; creation-only or actionable shared execution assets |
-| Active plan | Renders plan and exposes workout flow | Native `<details>` summary plus canonical Start/Resume workflow |
-| No plan | Full generator | Bounded creation flow |
-| Regeneration | Supported by training client | Not presented as active-plan action |
-| Workout entry | Present | Present through the PR #285 durable browser contract |
-| Weekly program | Conditional mount/API | Conditional presenter section |
-| Coach entry | Contextual entry exists | Same contextual entry exists |
-| Error/partial state | Client-specific errors/loading | Explicit `read_error`, `no_active_plan`, `active_plan`, `partial` states |
-| Responsive behavior | Existing responsive training UI | Responsive bounded multi-domain Plan shell |
-
-They present overlapping Training authority, but they embody materially
-different workflows. Treating either template as the final Plan product would
-lock in a missing half: server-state clarity without execution, or execution
-without Plan-domain hierarchy. The target is one presentation contract over
-the same authorities, not two permanent concepts.
+| Dimension | `plan.html` (canonical) |
+|---|---|
+| Product concept | Plan shell: Training first, then Nutrition and nested Supplements |
+| Data | Bounded `plan_facts`, canonical workout snapshot, and child summaries |
+| JavaScript | No `training.js`; creation-only or actionable shared execution assets |
+| Active plan | Native `<details>` summary plus canonical Start/Resume workflow |
+| No plan | Bounded creation flow |
+| Regeneration | Explicit destructive management placement |
+| Workout entry | Present through the PR #285 durable browser contract |
+| Weekly program | Conditional presenter section (`WEEKLY_PROGRAM_UI_ENABLED`) |
+| Coach entry | Contextual entry exists |
+| Error/partial state | Explicit `read_error`, `no_active_plan`, `active_plan`, `partial` states |
 
 ## J. User workflow map
 
@@ -402,9 +399,9 @@ M. **Stable routes:** `/`, `/training`, `/nutrition`, `/supplements`, `/coach`,
 `/progress-page`, `/edit-profile`, existing mutation APIs, and native `/api/v1`
 contracts remain unchanged.
 
-N. **Flag convergence:** use `UIUX_PLAN_V2_ENABLED` for atomic full-template
-rollout through parity; retire only in a later cleanup after evidence. Do not
-couple it to weekly, session, or Coach mutation flags.
+N. **Flag convergence:** WEB-UX3-PR6B retired `UIUX_PLAN_V2_ENABLED`. GET
+`/training` always renders Plan. Do not couple weekly, session, or Coach
+mutation flags to that retirement. Rollback is git revert plus redeploy.
 
 O. **Mobile parity:** mobile keeps Today/Plan/Coach/Progress and a Plan concept
 that places Training, Nutrition, and Supplements. Platform UI may differ, but
@@ -985,6 +982,11 @@ rollout value changed. PR6 owns flag retirement, the star-control accessibility
 item, and the remaining responsive/loading/observability hardening.
 
 ### PR6 — Flag retirement and hardening
+
+**Current (WEB-UX3-PR6B):** GET `/training` is unconditional Plan; the legacy
+renderer is deleted; `UIUX_PLAN_V2_ENABLED` is removed from the active flag
+inventory. Remaining PR6 hardening (responsive/loading/error/a11y/performance)
+is out of this PR.
 
 - **Goal:** after rollout evidence, remove dual template architecture and harden
   responsive, loading, error, accessibility, and performance behavior.

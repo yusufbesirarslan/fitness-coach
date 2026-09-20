@@ -177,6 +177,7 @@ def test_ui_flag_is_not_derived_from_the_coach_flag():
 
     assert COACH_FLAG not in feature_flags.FLAGS_BY_KEY[FLAG].depends_on
     assert FLAG not in feature_flags.FLAGS_BY_KEY[COACH_FLAG].depends_on
+    assert "UIUX_PLAN_V2_ENABLED" not in feature_flags.FLAGS_BY_KEY[FLAG].depends_on
     assert resolve_rollout_flags({FLAG: "1"})[FLAG] is True
     assert resolve_rollout_flags({COACH_FLAG: "1"})[FLAG] is False
 

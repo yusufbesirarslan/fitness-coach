@@ -491,32 +491,29 @@ def _pr3_facts_for(user_id, sessions_enabled=True):
 # F. Flag boundaries and legacy rollback
 # ══════════════════════════════════════════════════════════════════════════
 
-def test_flag_off_legacy_keeps_generation_regeneration_and_the_shared_contract(
+def test_flag_off_still_keeps_generation_regeneration_and_the_shared_contract(
         client, make_user, login):
     user = _login(client, make_user, login)
     _seed_plan(user.id)
 
     html = client.get("/training").get_data(as_text=True)
 
-    assert "data-plan-v2" not in html
-    assert "/static/training.js" in html
+    assert "data-plan-v2" in html
+    assert "/static/training.js" not in html
     assert "/static/training_plan_management.js" in html   # shared, not copied
-    for capability in ('data-action="generatePlan"', 'data-action="savePlan"',
-                       'data-action="resetPlan"', 'data-action="startWorkout"'):
+    assert "/static/plan_training_manage.js" in html
+    for capability in ('data-action="planManageGenerate"',
+                       'data-manage-state="regenerate"'):
         assert capability in html, capability
-    # PR3 does not smuggle the Plan renderer into the rollback path.
-    assert "/static/plan_training_manage.js" not in html
 
 
 def test_pr3_changes_no_rollout_flag_default():
-    """PR3 neither enables nor retires a rollout flag. The registry is the
-    authority on both defaults, so the guard reads it rather than a config
-    attribute that could be absent for an unrelated reason."""
+    """PR3 neither enabled nor retired a rollout flag. WEB-UX3-PR6B later
+    retired the Plan flag from the registry; sessions stay default OFF."""
     from app.feature_flags import FLAGS_BY_KEY
 
-    defaults = {key: flag.default for key, flag in FLAGS_BY_KEY.items()}
-    assert defaults["UIUX_PLAN_V2_ENABLED"] is False
-    assert defaults["FITX_WORKOUT_SESSIONS_ENABLED"] is False
+    assert "UIUX_PLAN_V2_ENABLED" not in FLAGS_BY_KEY
+    assert FLAGS_BY_KEY["FITX_WORKOUT_SESSIONS_ENABLED"].default is False
 
 
 def test_the_management_placement_never_requires_the_weekly_flag(

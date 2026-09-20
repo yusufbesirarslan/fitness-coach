@@ -355,8 +355,9 @@ birebir aynıdır (`static/training_plan_management.js` DEĞİŞMEDİ).
   `TrainingPreferences` ve tercih sözleşmesi yedeği 45 der. 30 → 45 üretici
   girdisini değiştirir; bu yüzden PR4 davranışı KORUR ve testle karakterize
   eder. Ayrı, dar bir takip işi olarak kayıtlıdır.
-- **Geri alma:** `git revert`. `UIUX_PLAN_V2_ENABLED` daha geniş Plan geri alma
-  seçicisi olarak kalır; bu PR hiçbir bayrağa dokunmaz.
+- **Geri alma:** `git revert`. WEB-UX3-PR6B `UIUX_PLAN_V2_ENABLED` kaydını
+  emekliye ayırdı; Plan geri alma bir env çevirmesi değil, o PR'ın revert'i
+  ve yeniden deploy'dur. Bu PR hiçbir bayrağa dokunmaz.
 - **Regresyon:** `tests/test_ux4_pr4_plan_first_run_contract.py` (render
   sözleşmesi, yük/otorite/depolama/CSS kapıları) +
   `tests/test_ux4_pr4_plan_first_run_browser.py` (gerçek yük, ağ sırası, ilk
@@ -397,8 +398,9 @@ yeniden oluşturma iş akışı, JS, locale ve Python birebir aynıdır.
 - **Bilinen, BİLEREK değiştirilmeyen:** `plan.day.rest_note` "Bugün dinlenme
   günü…" der ama her dinlenme satırında gösterilir; metin değişikliği locale
   işidir, ayrı takip.
-- **Geri alma:** `git revert`. `UIUX_PLAN_V2_ENABLED` daha geniş Plan geri alma
-  seçicisi olarak kalır; bu PR hiçbir bayrağa dokunmaz.
+- **Geri alma:** `git revert`. WEB-UX3-PR6B `UIUX_PLAN_V2_ENABLED` kaydını
+  emekliye ayırdı; Plan geri alma bir env çevirmesi değil, o PR'ın revert'i
+  ve yeniden deploy'dur. Bu PR hiçbir bayrağa dokunmaz.
 - **Regresyon:** `tests/test_ux4_pr5_plan_hierarchy_contract.py` (sahiplik,
   `day.is_rest` yetkisi, içerik korunumu, haftalık program sözleşmesi, CSS
   kapıları) + `tests/test_ux4_pr5_plan_hierarchy_browser.py` (gerçek
@@ -431,8 +433,9 @@ değerleri, sorgu sayıları ve istek bütçeleri birebir aynı.
   durağı 60 → 27 (form açıkken 39; puan 20 → 4), dolap Y 1233 → 270, belge
   2 227 → 1 529 px. Beslenme: 44 px altı 6 → 0, görünür sekme 3,57 → 5 (320:
   2,89 → 5), başlık `h1` → `h1 h2`.
-- **Geri alma:** `git revert` — PR6'nın bayrağı yoktur; `UIUX_PLAN_V2_ENABLED`
-  bu iki sayfayı seçmez.
+- **Geri alma:** `git revert` — PR6'nın bayrağı yoktur. WEB-UX3-PR6B
+  `UIUX_PLAN_V2_ENABLED` kaydını emekliye ayırdı; bu iki sayfayı seçen bir
+  Plan rollout seçicisi yoktur.
 - **Regresyon:** `tests/test_ux4_pr6_nutrition_supplements_contract.py` +
   `tests/test_ux4_pr6_nutrition_supplements_browser.py`.
 

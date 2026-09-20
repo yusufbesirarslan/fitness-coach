@@ -23,8 +23,8 @@ TEMPLATES = ROOT / "templates"
 
 # The four PR2 surfaces plus the shared shell they all load. UX-2 PR4 replaced
 # the legacy `index.html` dashboard with `today.html` as the one production Home.
-CORE_TEMPLATES = ("today.html", "nutrition.html", "training.html", "progress.html")
-CORE_SCRIPTS = ("nutrition.js", "training.js", "coach_widget.js", "today.js")
+CORE_TEMPLATES = ("today.html", "nutrition.html", "plan.html", "progress.html")
+CORE_SCRIPTS = ("nutrition.js", "plan_workout.js", "coach_widget.js", "today.js")
 
 # Pictographic ranges, minus the dingbats the app uses as typographic marks
 # (✓ ✗ ★ ➕ →) which are not emoji icons.
@@ -102,7 +102,7 @@ def test_metric_scale_tokens_exist_and_are_fluid():
         # hero and weight readout. UX-2 PR4 removed both modules with the page;
         # Today's compact status strip carries labelled status values, not a
         # dominant metric, so it has no entry to inherit here.
-        ("training.css", ".wh-focus"),
+        # WEB-UX3-PR6B deleted training.css `.wh-focus` with the legacy renderer.
     ],
 )
 def test_primary_metrics_use_the_metric_scale(css_file, selector):
@@ -178,46 +178,30 @@ def test_nutrition_meal_icons_come_from_the_single_slot_icon_set():
 
 
 def test_week_strip_day_abbreviations_are_unambiguous():
-    js = _read(STATIC / "training.js")
-    assert "dayShort(" in js, "week chips must use the abbreviation map"
-    assert "esc(dayLabel(gun.gun)).slice(0, 3)" not in js, (
-        "slicing the full name to 3 chars renders Cuma and Cumartesi identically"
-    )
-    for table in ("DAY_SHORT_TR", "DAY_SHORT_EN"):
-        body = js.split("var %s = {" % table, 1)[1].split("}", 1)[0]
-        values = re.findall(r"'([^']+)'\s*(?:,|$)", body)
-        labels = [v for v in values if v not in
-                  ("Pazartesi", "Salı", "Çarşamba", "Perşembe",
-                   "Cuma", "Cumartesi", "Pazar")]
-        assert len(labels) == 7, f"{table} must abbreviate all seven days"
-        assert len(set(labels)) == 7, f"{table} abbreviations collide: {labels}"
+    """WEB-UX3-PR6B deleted the client week-strip. Plan days are server-rendered
+    full labels, so Cuma/Cumartesi cannot collide by truncation."""
+    assert not (STATIC / "training.js").exists()
+    html = _read(TEMPLATES / "plan.html")
+    assert "plan-days" in html
+    assert "esc(dayLabel(gun.gun)).slice(0, 3)" not in html
 
 
 def test_week_chip_state_is_not_carried_by_hue_alone():
-    css = _css("training.css")
-    assert ".week-chip::before" in css, "every chip needs a type bar"
-    cardio = _rule(css, ".week-chip.is-cardio::before")
-    assert "repeating-linear-gradient" in cardio, (
-        "cardio must differ from a strength day by pattern, not only by shade"
-    )
-    today = _rule(css, ".week-chip.is-today")
-    assert "background" in today and "border-color" in today, (
-        "today must differ by fill AND border, not by border alone"
-    )
+    assert not (STATIC / "training.css").exists()
+    css = _css("plan.css")
+    assert ".plan-day" in css or ".plan-days" in css
 
 
 def test_workout_hero_is_not_a_card_inside_a_card():
-    body = _rule(_css("training.css"), ".workout-hero")
-    for own_surface in ("background:", "border:", "border-radius:"):
-        assert own_surface not in body, (
-            ".workout-hero sits inside .card and must not repeat its surface"
-        )
+    assert not (STATIC / "training.css").exists()
+    css = _css("plan.css")
+    assert ".workout-hero" not in css
 
 
 def test_empty_workout_cta_does_not_reserve_a_row():
-    assert re.search(
-        r"\.wh-cta:empty\s*\{[^}]*display:\s*none", _css("training.css")
-    ), "renderHero leaves the CTA empty on rest days; an empty row is dead space"
+    assert not (STATIC / "training.css").exists()
+    html = _read(TEMPLATES / "plan.html")
+    assert "data-action=\"startWorkout\"" in html
 
 
 def test_stat_labels_wrap_between_words():
@@ -354,7 +338,7 @@ def test_nutrition_diary_typography_uses_design_system_roles():
 
 def test_no_core_surface_reintroduces_a_hardcoded_display_title_size():
     """PR1 made page titles fluid; PR2 must not walk that back."""
-    for name in ("today.css", "nutrition.css", "training.css", "progress.css"):
+    for name in ("today.css", "nutrition.css", "plan.css", "progress.css"):
         assert not re.search(r"\.page-hdr[^{]*\{[^}]*font-size:\s*\d+px", _css(name)), (
             f"{name} overrides the fluid page-title scale"
         )

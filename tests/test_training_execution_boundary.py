@@ -88,6 +88,7 @@ def test_real_bootstrap_fresh_first_checkpoint(app, auth_user, client, execution
         assert row_for(auth_user.id).checkpoint_revision == 1
 
 
+@pytest.mark.skip(reason="WEB-UX3-PR6B deleted training.js globals; Plan coverage is test_plan_v2_resume_uses_shared_execution_and_hydrates_acknowledged_progress")
 def test_real_bootstrap_reload_hydrates_acknowledged_progress(app, auth_user, client, execution_session, training_page):
     page, _, _, _ = training_page
     page.goto("http://localhost/training")
@@ -172,6 +173,7 @@ def training_page(client):
         browser.close()
 
 
+@pytest.mark.skip(reason="WEB-UX3-PR6B deleted training.js globals; Plan coverage is test_plan_v2_start_refresh_checkpoint_and_complete_use_durable_contract")
 def test_dispatcher_close_resume_delayed_ack_finish_preserves_durable_set(
     app, auth_user, client, execution_session, proof_accepted, training_page,
 ):

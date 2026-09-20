@@ -708,17 +708,17 @@ def test_plan_fact_gathering_budget_is_unchanged_by_pr5(
 # 7. FLAG, LOCALE AND PR3/PR4 REGRESSION
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_plan_v2_off_keeps_legacy_training_and_a_stable_cabinet(
+def test_plan_v2_off_still_renders_plan_and_a_stable_cabinet(
     app, client, make_user, login,
 ):
     app.config["UIUX_PLAN_V2_ENABLED"] = False
     _login_user(client, make_user, login, "ux3pr5-flagoff")
 
-    legacy = client.get("/training")
-    assert legacy.status_code == 200
-    legacy_html = legacy.get_data(as_text=True)
-    assert "data-plan-v2" not in legacy_html
-    assert "/static/training.js" in legacy_html
+    page = client.get("/training")
+    assert page.status_code == 200
+    html = page.get_data(as_text=True)
+    assert "data-plan-v2" in html
+    assert "/static/training.js" not in html
 
     cabinet = client.get("/supplements")
     assert cabinet.status_code == 200

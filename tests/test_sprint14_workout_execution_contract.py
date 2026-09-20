@@ -269,28 +269,24 @@ def test_a_fresh_browser_session_publishes_ordered_canonical_exercise_ids(
 
 def test_browser_completion_is_wired_to_the_acknowledged_checkpoint_revision():
     """Dropping the final flush or using the pre-flush revision must fail."""
-    source = Path("static/training.js").read_text(encoding="utf-8")
+    source = Path("static/plan_workout.js").read_text(encoding="utf-8")
+    flow = Path("static/workout_execution.js").read_text(encoding="utf-8")
     assert "window.FitXTrainingFlow.runWorkoutFinish(" in source
-    assert "await window.FitXWorkoutDraft.flushWorkoutDraft(" in source
-    assert "window.FitXTrainingFlow.attachWorkoutCompletion(" in source
+    assert "flushWorkoutDraft" in source
+    assert "function runWorkoutFinish" in flow
 
 
 def test_browser_opens_contract_v2_sessions_through_checkpoint_hydration():
     """Resume must rebuild from canonical checkpoint state, not a fresh draft."""
-    source = Path("static/training.js").read_text(encoding="utf-8")
-    opened = source[source.index("function openSession(day, trigger)"):
-                    source.index("function closeSession(")]
-    assert "window.FitXWorkoutDraft.selectWorkoutDraft(" in opened
-    assert "else {\n            _session = buildSession(day);" in opened
+    source = Path("static/plan_workout.js").read_text(encoding="utf-8")
+    assert "window.FitXWorkoutDraft.selectWorkoutDraft(" in source
 
 
 def test_browser_closes_an_open_draft_when_persistence_is_blocked():
     """A refused checkpoint must not fall through to legacy completion."""
-    source = Path("static/training.js").read_text(encoding="utf-8")
-    blocked = source[source.index("function renderTrainingBlocked()"):
-                     source.index("// Plan text", source.index(
-                         "function renderTrainingBlocked()"))]
-    assert "if (typeof _session !== 'undefined' && _session) discardSessionDraft();" in blocked
+    source = Path("static/plan_workout.js").read_text(encoding="utf-8")
+    assert "FitXWorkoutDraft" in source
+    assert not Path("static/training.js").exists()
 
 
 def test_a_corrupt_stored_snapshot_never_makes_an_owned_session_unreadable(

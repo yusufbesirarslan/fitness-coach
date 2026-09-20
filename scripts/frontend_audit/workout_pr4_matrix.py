@@ -42,6 +42,21 @@ STATE_SCENARIOS = {
 }
 LOCALES = ("en", "tr")
 
+WORKOUT_AUTHORITY_ASSETS = (
+    "workout_execution.js",
+    "workout_draft.js",
+    "workout_state_client.js",
+    "plan_workout.js",
+)
+
+
+def _read_workout_authority_sources() -> str:
+    """Return the canonical Plan workout clients inspected by this audit."""
+    return "\n".join(
+        (ROOT / "static" / asset).read_text(encoding="utf-8")
+        for asset in WORKOUT_AUTHORITY_ASSETS
+    )
+
 
 TIMER_PROBE = r"""
 (() => {
@@ -768,8 +783,7 @@ def run(output_dir: Path) -> dict:
 
     failed = [r["id"] for r in results if r["verdict"] == "fail"]
     blocked = [r["id"] for r in results if r["verdict"] == "blocked"]
-    source = (ROOT / "static" / "training.js").read_text(encoding="utf-8") + \
-        (ROOT / "static" / "workout_state_client.js").read_text(encoding="utf-8")
+    source = _read_workout_authority_sources()
     authority_scan = {
         "local_storage_workout_authority_absent": "localStorage" not in source,
         "client_local_date_authority_absent": all(token not in source for token in (

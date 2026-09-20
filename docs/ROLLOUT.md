@@ -22,7 +22,7 @@ touches (`git reset --hard origin/main` does not modify it). Consequences:
 ```bash
 # On the host, as the deploy user:
 cd <app-dir>
-grep -E '^(WEEKLY_PROGRAM_UI_ENABLED|UIUX_TODAY_V2_ENABLED|UIUX_PLAN_V2_ENABLED|UIUX_COACH_PAGE_V2_ENABLED|UIUX_NAV_V2_ENABLED|FITX_WORKOUT_SESSIONS_ENABLED|AI_ADAPTIVE_PLAN_CONTEXT|AI_COACH_PLAN_MUTATION_TOOLS_ENABLED|MOBILE_AUTH_ENABLED)=' .env
+grep -E '^(WEEKLY_PROGRAM_UI_ENABLED|UIUX_TODAY_V2_ENABLED|UIUX_COACH_PAGE_V2_ENABLED|UIUX_NAV_V2_ENABLED|FITX_WORKOUT_SESSIONS_ENABLED|AI_ADAPTIVE_PLAN_CONTEXT|AI_COACH_PLAN_MUTATION_TOOLS_ENABLED|MOBILE_AUTH_ENABLED)=' .env
 ```
 
 ---
@@ -37,7 +37,7 @@ first is cheaper than a rolled-back deploy.
 ```bash
 # On the host. Prints a line for every rollout flag whose value is not exactly
 # 0, 1, or empty. Expected output: nothing.
-for k in WEEKLY_PROGRAM_UI_ENABLED UIUX_TODAY_V2_ENABLED UIUX_PLAN_V2_ENABLED \
+for k in WEEKLY_PROGRAM_UI_ENABLED UIUX_TODAY_V2_ENABLED \
          UIUX_COACH_PAGE_V2_ENABLED UIUX_NAV_V2_ENABLED \
          FITX_WORKOUT_SESSIONS_ENABLED AI_ADAPTIVE_PLAN_CONTEXT \
          AI_COACH_PLAN_MUTATION_TOOLS_ENABLED MOBILE_AUTH_ENABLED; do
@@ -102,13 +102,12 @@ activate first.
 |---|---|---|
 | 1 | `WEEKLY_PROGRAM_UI_ENABLED` | Only presentation flag with a real feature-specific signal (`[TRAINING][WEEKLY_PROGRAM]` state line). Additive, read-only, one GET. |
 | 2 | `UIUX_TODAY_V2_ENABLED` | Historical after UX-2 PR4: `/` already renders the Today hierarchy and `templates/index.html` is deleted. Flipping this env var does **not** restore the legacy dashboard. |
-| 3 | `UIUX_PLAN_V2_ENABLED` | Reachable through the legacy Training tab (`/training`). Shares a page with #1; separate windows. |
-| 4 | `UIUX_COACH_PAGE_V2_ENABLED` | Independent, but sits on the AI path. Re-check after #5 — see the note below. |
-| 5 | `UIUX_NAV_V2_ENABLED` | Historical after UX-1 PR2: production chrome is already Today/Plan/Coach/Progress. Flipping this env var does **not** restore the five-tab shell. |
-| 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | Mutating and schema-backed, and since Mobile Training PR5 it opens TWO transports at once: the browser `/workout/session/*` routes and the native `/api/v1/training/workout-sessions*` write contracts. Since Sprint 14 PR2 those two share one execution authority (one revision, one durable snapshot, one completion precondition), so activating them together no longer ships two different contracts on one table, and PR3 converged the browser client onto that contract. Activation readiness is owned by **[WORKOUT_SESSION_ACTIVATION.md](WORKOUT_SESSION_ACTIVATION.md)**, whose verdict at 2026-09-09 is **GO** for technical staging-readiness (live exercise recorded; independent PR5 review still required): an isolated non-production environment exists ([STAGING.md](STAGING.md), #290) and the lifecycle exercise this flag's own prerequisites demand has been run in it. This is not production activation. Staging first; needs migrations `a994f9bed783` **and** `f5a6b7c8d9e0` (the native execution columns — without them a native checkpoint cannot be persisted at all). The native half also requires `MOBILE_AUTH_ENABLED=1`, so on a host where that is OFF this flag still only opens the browser half. |
-| 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | Changes AI behaviour for every user. Staging + human answer review; no metric can judge quality. |
-| 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | **The only flag that lets the AI write user data.** After #7, which owns the system prompt it extends. Staging + journal review; needs migration `b3c4d5e6f7a8`. |
-| 9 | `MOBILE_AUTH_ENABLED` | Hardening PR4 is merged (`34f8dc79`). Treat the `blocked` lifecycle label as stale. **Runtime (2026-08-26):** already `1` on production SHA `a6d6b2e` — do **not** enable it again. Native-auth mobile remains OFF until [docs/superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md](../superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md) conditions close. |
+| 3 | `UIUX_COACH_PAGE_V2_ENABLED` | Independent, but sits on the AI path. Re-check after #4 — see the note below. |
+| 4 | `UIUX_NAV_V2_ENABLED` | Historical after UX-1 PR2: production chrome is already Today/Plan/Coach/Progress. Flipping this env var does **not** restore the five-tab shell. |
+| 5 | `FITX_WORKOUT_SESSIONS_ENABLED` | Mutating and schema-backed, and since Mobile Training PR5 it opens TWO transports at once: the browser `/workout/session/*` routes and the native `/api/v1/training/workout-sessions*` write contracts. Since Sprint 14 PR2 those two share one execution authority (one revision, one durable snapshot, one completion precondition), so activating them together no longer ships two different contracts on one table, and PR3 converged the browser client onto that contract. Activation readiness is owned by **[WORKOUT_SESSION_ACTIVATION.md](WORKOUT_SESSION_ACTIVATION.md)**, whose verdict at 2026-09-09 is **GO** for technical staging-readiness (live exercise recorded; independent PR5 review still required): an isolated non-production environment exists ([STAGING.md](STAGING.md), #290) and the lifecycle exercise this flag's own prerequisites demand has been run in it. This is not production activation. Staging first; needs migrations `a994f9bed783` **and** `f5a6b7c8d9e0` (the native execution columns — without them a native checkpoint cannot be persisted at all). The native half also requires `MOBILE_AUTH_ENABLED=1`, so on a host where that is OFF this flag still only opens the browser half. |
+| 6 | `AI_ADAPTIVE_PLAN_CONTEXT` | Changes AI behaviour for every user. Staging + human answer review; no metric can judge quality. |
+| 7 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | **The only flag that lets the AI write user data.** After #6, which owns the system prompt it extends. Staging + journal review; needs migration `b3c4d5e6f7a8`. |
+| 8 | `MOBILE_AUTH_ENABLED` | Hardening PR4 is merged (`34f8dc79`). Treat the `blocked` lifecycle label as stale. **Runtime (2026-08-26):** already `1` on production SHA `a6d6b2e` — do **not** enable it again. Native-auth mobile remains OFF until [docs/superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md](../superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md) conditions close. |
 
 **Today v2 after UX-2 PR4.** `/` is the Today hierarchy for every user, and the
 legacy dashboard template no longer exists in the repository.
@@ -119,18 +118,29 @@ flip. The capabilities the legacy dashboard hosted were not removed: weight entr
 and check-in live on Progress, meal and menu logging on Nutrition, and level/XP/
 quests on Account.
 
+**Plan after WEB-UX3-PR6B.** `/training` always renders Plan for every user,
+and the legacy `training.html` / `training.css` / `training.js` renderer no
+longer exists in the repository. `UIUX_PLAN_V2_ENABLED` is retired from the
+rollout registry: it is not in `ROLLOUT_FLAGS`, `FEATURE_FLAG_KEYS`,
+`/health?deep=1`, or the `[FLAGS]` boot line. There is no Plan rollout
+selector. Rolling the Plan convergence back is a `git revert` of WEB-UX3-PR6B
+plus a redeploy — not a flag flip. Production hosts may leave
+`UIUX_PLAN_V2_ENABLED=1` in `.env` during the rollback observation window; the
+process ignores that unknown key and still boots. `WEEKLY_PROGRAM_UI_ENABLED`
+still gates the weekly-program card on that page.
+
 **Nav v2 after UX-1 PR2.** Production chrome is already Today · Plan · Coach ·
 Progress. `UIUX_NAV_V2_ENABLED` remains registered for compatibility/history but
 flipping it does **not** restore the five-tab shell or hamburger. Coach is a
 primary destination. Rollback is a git revert of the UX-1 PR2 chrome change,
 not `UIUX_NAV_V2_ENABLED=0`.
 
-**One caveat on #4.** Coach is a production primary tab after UX-1 PR2, so
+**One caveat on #3.** Coach is a production primary tab after UX-1 PR2, so
 `UIUX_COACH_PAGE_V2_ENABLED` is now reachable from chrome as well as by direct
 URL. The floating widget remains until UX-1 PR3. Abort signal is still
 duplicated `/coach/history` fetches.
 
-**#8 is observed differently from the other eight.** Its abort signals are not
+**#7 is observed differently from the other seven.** Its abort signals are not
 rates, they are individual events: one plan change the user did not ask for is a
 rollback, even if every metric is flat. The instrument is the durable mutation
 journal, not an alarm:
@@ -165,8 +175,8 @@ Recommended on this evidence:
   attributable to this flag rather than to "something on the training blueprint".
 - **Not an authorization boundary.** The endpoint is `@require_auth` in every
   flag state, so activation cannot widen access.
-- **Already exercised.** The four-way flag matrix (this flag × Plan v2) is
-  covered by the existing suite.
+- **Already exercised.** The weekly-program × coach-flag matrix is covered by
+  the existing suite. Plan is unconditional at `/training`.
 - **Instant rollback.** One `.env` edit and a restart; no merge, no deploy, no
   data to unwind.
 

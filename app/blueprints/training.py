@@ -194,39 +194,21 @@ def _parse_pump_visibility(data):
 @bp.route("/training")
 @require_auth
 def training():
-    # UIUX Sprint 1 PR3: full-template swap IN the route (never a mixed tree),
-    # mirroring the PR2 Today swap. Flag OFF → the legacy /training page renders
-    # byte-identically; ON → the server-authoritative Plan v2 surface, which reads
-    # only canonical data (no clock-based "today", no rest-day inference, no
-    # completion-from-storage). The flag is read only here, only from server config
-    # (never a query param/cookie/header/browser storage). Independent of
-    # WEEKLY_PROGRAM_UI_ENABLED, which Plan v2 also honors for its weekly section.
+    # WEB-UX3-PR6B: /training is the canonical Plan URL and always renders
+    # templates/plan.html. There is no Plan rollout selector. A leftover
+    # UIUX_PLAN_V2_ENABLED host env key is ignored. The weekly section is
+    # still gated independently by WEEKLY_PROGRAM_UI_ENABLED.
     weekly_enabled = current_app.config.get("WEEKLY_PROGRAM_UI_ENABLED", False)
-    if current_app.config.get("UIUX_PLAN_V2_ENABLED", False):
-        plan_view = build_plan_view(
-            gather_plan_facts(
-                current_user.id,
-                sessions_enabled=_workout_sessions_enabled(),
-            ),
-            weekly_enabled=weekly_enabled,
-        )
-        return render_template("plan.html", plan=plan_view,
-                               username=current_user.username,
-                               profile_picture=current_user.avatar_src)
-
-    # Kayıtlı sakatlık verisini forma ön-doldur (yapışkan alan). None-güvenli.
-    _meta = getattr(current_user, "user_metadata", None) or {}
-    injuries = _meta.get("injuries") or ""
-    # Sprint 6 PR6.1: the ONLY thing this route knows about the weekly program is
-    # whether its UI mount point should exist. Deliberately the narrowest possible
-    # boundary — a single server-owned boolean, not a context processor and not a
-    # client-side flag framework, so no other config can leak into the page. The
-    # route stays free of build_weekly_program / WorkoutLog / the planner: PR6.1
-    # renders a shell, it does not consume data (docs/WEEKLY_PROGRAM.md).
-    return render_template("training.html", username=current_user.username,
-                           profile_picture=current_user.avatar_src,
-                           injuries=injuries,
-                           weekly_program_ui_enabled=weekly_enabled)
+    plan_view = build_plan_view(
+        gather_plan_facts(
+            current_user.id,
+            sessions_enabled=_workout_sessions_enabled(),
+        ),
+        weekly_enabled=weekly_enabled,
+    )
+    return render_template("plan.html", plan=plan_view,
+                           username=current_user.username,
+                           profile_picture=current_user.avatar_src)
 
 
 @bp.route("/training-plan", methods=["POST"])

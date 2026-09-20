@@ -58,11 +58,11 @@ out, or "enabled to see what happens".
 Rollout flags are resolved in `configure_app` through
 `feature_flags.resolve_rollout_flags(os.environ)`.
 
-**The nine flags do not all treat an empty value the same way.** Eight share one
+**The eight flags do not all treat an empty value the same way.** Seven share one
 behaviour; `MOBILE_AUTH_ENABLED` is deliberately stricter, and the difference is
 tested:
 
-| Value | Eight registry-parsed flags | `MOBILE_AUTH_ENABLED` |
+| Value | Seven registry-parsed flags | `MOBILE_AUTH_ENABLED` |
 |---|---|---|
 | unset | default (OFF) | OFF |
 | `` (empty / whitespace) | default (OFF) — `KEY=` is a normal "not set" in a `.env` | **rejected** — `CredentialConfigurationError: invalid MOBILE_AUTH_ENABLED` |
@@ -75,7 +75,7 @@ PR2: `MOBILE_AUTH_ENABLED` refuses an empty value (`allow_empty=False`), and it
 raises `CredentialConfigurationError` instead of `FeatureFlagConfigurationError`.
 It opens a **pre-auth attack surface**, so "the operator left it blank" is not a
 safe thing to interpret as OFF — an ambiguous value must be corrected, not
-guessed. Anything relying on a uniform empty-value rule across all nine flags is
+guessed. Anything relying on a uniform empty-value rule across all eight flags is
 relying on something that is not true.
 
 **Why raise instead of defaulting.** The historical idiom
@@ -121,9 +121,9 @@ rollout flag or one of the four non-rollout categories.
 
 ---
 
-## The nine backend rollout flags
+## The eight backend rollout flags
 
-Owner for all nine: **@yusufbesirarslan** (single-maintainer repository; the
+Owner for all eight: **@yusufbesirarslan** (single-maintainer repository; the
 field exists so a second owner has somewhere to be recorded rather than being
 folklore).
 
@@ -133,49 +133,54 @@ Rows are in the recommended staged activation order.
 |---|---|---|---|---|---|---|
 | 1 | `WEEKLY_PROGRAM_UI_ENABLED` | OFF | shipped_dark | **Full** — `[TRAINING][WEEKLY_PROGRAM]` state line (2 sites) | 2026-09-01 | enable |
 | 2 | `UIUX_TODAY_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only; no longer a Home selector (UX-2 PR4) | 2026-10-01 | enable |
-| 3 | `UIUX_PLAN_V2_ENABLED` | OFF | shipped_dark | **Partial** — weekly section only | 2026-10-01 | enable |
-| 4 | `UIUX_COACH_PAGE_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
-| 5 | `UIUX_NAV_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
-| 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | OFF | staging_only | **Full** — anomaly logs + bounded `WorkoutSessionLifecycle` events | 2026-11-01 | enable |
-| 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | OFF | staging_only | **Partial** — quality is not observable | 2026-11-01 | retain experimentally |
-| 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | OFF | staging_only | **Full** — `[COACH][PLAN_TOOL]` outcome line + the durable mutation journal | 2026-11-01 | enable |
-| 9 | `MOBILE_AUTH_ENABLED` | OFF | **blocked** | **Full** — security events + client-class split | 2026-10-01 | enable (after PR4) |
+| 3 | `UIUX_COACH_PAGE_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
+| 4 | `UIUX_NAV_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
+| 5 | `FITX_WORKOUT_SESSIONS_ENABLED` | OFF | staging_only | **Full** — anomaly logs + bounded `WorkoutSessionLifecycle` events | 2026-11-01 | enable |
+| 6 | `AI_ADAPTIVE_PLAN_CONTEXT` | OFF | staging_only | **Partial** — quality is not observable | 2026-11-01 | retain experimentally |
+| 7 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | OFF | staging_only | **Full** — `[COACH][PLAN_TOOL]` outcome line + the durable mutation journal | 2026-11-01 | enable |
+| 8 | `MOBILE_AUTH_ENABLED` | OFF | **blocked** | **Full** — security events + client-class split | 2026-10-01 | enable (after PR4) |
 
 ### Observability is the constraint on the order
 
-This is the finding that shaped the recommendation. Four of the nine —
-`UIUX_NAV_V2_ENABLED`, `UIUX_TODAY_V2_ENABLED`, `UIUX_PLAN_V2_ENABLED`,
-`UIUX_COACH_PAGE_V2_ENABLED` — emit **no feature-specific log line or metric at
-all**. After PR1 they are visible only through per-blueprint HTTP SLIs, which
-cannot separate a navigation regression from any other change on the same
-blueprint. Enabling two of them in the same window makes an incident ambiguous:
-you would know something regressed, not which flag did it. Hence: one flag per
-window, and the best-instrumented flag first.
+This is the finding that shaped the recommendation. Three of the eight —
+`UIUX_NAV_V2_ENABLED`, `UIUX_TODAY_V2_ENABLED`, `UIUX_COACH_PAGE_V2_ENABLED` —
+emit **no feature-specific log line or metric at all**. After PR1 they are
+visible only through per-blueprint HTTP SLIs, which cannot separate a navigation
+regression from any other change on the same blueprint. Enabling two of them in
+the same window makes an incident ambiguous: you would know something
+regressed, not which flag did it. Hence: one flag per window, and the
+best-instrumented flag first.
+
+`UIUX_PLAN_V2_ENABLED` was retired in WEB-UX3-PR6B and is no longer in this
+inventory. See **Retired flags** below. `UIUX_TODAY_V2_ENABLED` and
+`UIUX_NAV_V2_ENABLED` remain registered historical no-ops; retiring them is
+separate cleanup debt.
 
 ### Why Nav v2 goes last among the presentation flags
 
 `UIUX_NAV_V2_ENABLED` pairs the **widest** blast radius with the **weakest**
 observability, so it is the one flag whose failure would be hardest to attribute
 — and, activated early, every subsequent rollout would sit behind a shell change
-no metric can absolve. It therefore goes after the three destinations it hosts.
+no metric can absolve. It therefore goes after the active destination rollout it
+still hosts: Coach.
 
 **There is no technical dependency requiring it first.** Verified in the source:
 
 - `app/nav.py` points the v2 primary tier at four **pre-existing canonical
   routes** — `/`, `/training`, `/coach`, `/progress-page`. All four respond
-  regardless of the Today/Plan/Coach v2 flags, so Nav v2 renders correctly with
-  all three still OFF.
+  regardless of the remaining Today/Coach v2 flags, and `/training` now always
+  renders Plan, so Nav v2 renders correctly before those flags activate.
 - The dependency runs the *other* way, and only as a scheduling constraint:
   `/` is the legacy shell's **Home** tab and `/training` is its **Training** tab,
-  so Today v2 and Plan v2 are fully reachable and independently testable while
-  Nav v2 is off.
+  so Today and the unconditional Plan surface remain fully reachable while Nav
+  v2 is off.
 
 One asymmetry is worth stating rather than hiding: **the legacy shell has no
 `/coach` entry point at all** — not a tab, not a drawer link (`templates/_nav.html`).
 Until Nav v2 promotes Coach to the primary tier, `/coach` is reached only by
 direct URL, while the everyday coach entry point remains the floating widget,
 which this flag does not change. So a clean observation window for
-`UIUX_COACH_PAGE_V2_ENABLED` at position 4 proves less than it appears, and its
+`UIUX_COACH_PAGE_V2_ENABLED` at position 3 proves less than it appears, and its
 signals must be **re-checked after Nav v2 activates**. That is recorded in the
 flag's own prerequisites. It is an argument for watching Coach twice, not for
 moving Nav earlier.
@@ -189,9 +194,9 @@ runbook's activation procedures. The summary that matters here:
 **1. `WEEKLY_PROGRAM_UI_ENABLED`** — read-only weekly-program card on `/training`
 (mount shell + `weekly_program.js` + one `GET /api/training/weekly-program`).
 Presentation only; the endpoint stays `@require_auth` in every flag state.
-Interacts with `UIUX_PLAN_V2_ENABLED`, which honours it for its weekly section.
-Abort on any `state=error`, a training-blueprint 5xx rise, or a `/training` p95
-regression.
+Mounts on the canonical Plan page at `/training`. It does not depend on the
+retired Plan rollout flag. Abort on any `state=error`, a training-blueprint
+5xx rise, or a `/training` p95 regression.
 
 **2. `UIUX_TODAY_V2_ENABLED`** — historical presentation flag. UX-2 PR4 made the
 Today hierarchy (`today.html`) the production Home and deleted the legacy
@@ -200,26 +205,24 @@ dashboard (`index.html`), so the key no longer selects a user-reachable branch:
 legacy dashboard — rolling that back is a `git revert` of the UX-2 PR4 Home
 convergence plus a redeploy. Nothing here has a rollout window left; the row
 stays only so `/health?deep=1` and the `[FLAGS]` boot line keep listing it.
+Retiring this no-op is separate cleanup debt, not WEB-UX3-PR6B.
 
-**3. `UIUX_PLAN_V2_ENABLED`** — server-authoritative Plan v2 (`plan.html`),
-removing the legacy client's clock-based "today" selection, rest-day inference
-and localStorage completion. Decide flag 1 first — they share a page.
-
-**4. `UIUX_COACH_PAGE_V2_ENABLED`** — hardened Coach destination reusing the
+**3. `UIUX_COACH_PAGE_V2_ENABLED`** — hardened Coach destination reusing the
 existing widget, guaranteeing exactly one interactive instance. Changes no AI
 prompt, model, streaming protocol, persistence, rate limit or moderation policy.
 Abort signal: duplicated `/coach/history` fetches (a double mount). Re-check its
-signals after flag 5 — see the ordering note above.
+signals after flag 4 — see the ordering note above.
 
-**5. `UIUX_NAV_V2_ENABLED`** — historical presentation flag. UX-1 PR2 made
+**4. `UIUX_NAV_V2_ENABLED`** — historical presentation flag. UX-1 PR2 made
 Today/Plan/Coach/Progress production chrome. The key remains in the registry
 but no longer selects a user-reachable legacy five-tab branch or drawer.
 Setting it to `0` does **not** restore Home/Nutrition/Training/Progress/Profile
 or the hamburger. Rollback is a git revert of that chrome change, not an env
 flip. Nutrition and Community stay reachable by their locked URLs; they are
-not a fifth primary tab.
+not a fifth primary tab. Retiring this no-op is separate cleanup debt, not
+WEB-UX3-PR6B.
 
-**6. `FITX_WORKOUT_SESSIONS_ENABLED`** — persisted workout-session lifecycle;
+**5. `FITX_WORKOUT_SESSIONS_ENABLED`** — persisted workout-session lifecycle;
 `/workout/session/*` stops 404-ing and the resolver emits the additive
 `contract_version=2`. **Requires migration `a994f9bed783`** — the partial unique
 index `uq_workout_session_active_owner` *is* the at-most-one-ACTIVE-session
@@ -241,21 +244,21 @@ environment ([STAGING.md](STAGING.md), #290); see
 repository default stays OFF. The flag stays `staging_only`. This is not
 production activation.
 
-**7. `AI_ADAPTIVE_PLAN_CONTEXT`** — adds the versioned read-only AdaptivePlan
+**6. `AI_ADAPTIVE_PLAN_CONTEXT`** — adds the versioned read-only AdaptivePlan
 block to coach context **and** switches the coach system prompt to
-`ADAPTIVE_COACH_SYSTEM_PROMPT`. Broadest behavioural change of the nine: it
+`ADAPTIVE_COACH_SYSTEM_PROMPT`. Broadest behavioural change of the eight: it
 alters what the AI says, on every turn, for every user. **Answer quality is not
 observable by any metric** — only human review of staging answers can judge it,
 which is why the decision is *retain experimentally* rather than *enable*.
 
-**8. `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`** — publishes six narrow plan-editing
+**7. `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`** — publishes six narrow plan-editing
 tools (replace / add / remove an exercise, update a prescription, move a day,
 undo the last change) to both coach providers and lets the Coach execute them
 through `app/services/coach_plan_tools` → `app/services/plan_mutation`. **This is
-the only flag of the nine that lets the AI cause a durable write to user data**;
+the only flag of the eight that lets the AI cause a durable write to user data**;
 every other one changes presentation, context or attack surface. **Requires
 migration `b3c4d5e6f7a8`** — undo, replay and the audit trail are all built on
-the mutation journal. Decide flag 7 first: it owns which system prompt is
+the mutation journal. Decide flag 6 first: it owns which system prompt is
 active, and the plan-mutation policy block is appended to whichever one is, so
 activating both in one window makes a bad answer impossible to attribute.
 
@@ -268,7 +271,7 @@ is a 5xx, so the journal — not an alarm — is the instrument. Rollback stops 
 AI writes; it does **not** revert mutations already applied, which remain
 ordinary versioned plan history the user can undo.
 
-**9. `MOBILE_AUTH_ENABLED`** — registers the `/api/v1` mobile blueprint and the
+**8. `MOBILE_AUTH_ENABLED`** — registers the `/api/v1` mobile blueprint and the
 opaque credential flow. Unlike the presentation flags this is an
 **attack-surface** change. **Blocked until PR4 merges**:
 `NEEDED_FIXES_2026-08-02.md` finding 2 records that `/api/v1/auth/login` and
@@ -277,6 +280,21 @@ no concurrency gate and no thread-reserve accounting, and are reachable
 pre-auth. Enabling it before that fix hands an unauthenticated caller a way to
 exhaust all 8 web threads. Rollback also invalidates issued mobile credentials —
 clients must re-authenticate.
+
+---
+
+## Retired flags
+
+**`UIUX_PLAN_V2_ENABLED`** — retired in WEB-UX3-PR6B. GET `/training` always
+renders `templates/plan.html`. The key is absent from `ROLLOUT_FLAGS`,
+`FEATURE_FLAG_KEYS`, `/health?deep=1`, and the `[FLAGS]` boot line. A leftover
+host `.env` value is ignored and does not fail boot. Rollback is `git revert`
+of WEB-UX3-PR6B plus a redeploy, not an env flip. Do not re-add this key as a
+historical no-op, operational boolean, kill switch, or compatibility alias.
+
+`UIUX_TODAY_V2_ENABLED` and `UIUX_NAV_V2_ENABLED` remain registered historical
+no-ops. They are **separate cleanup debt** and are not a reason to keep the
+Plan flag.
 
 ---
 
@@ -293,7 +311,7 @@ clients must re-authenticate.
 | Review by | 2026-10-01 |
 | Decision | enable |
 
-**This is not a ninth backend flag and no backend runtime control will be built
+**This is not a backend rollout flag and no backend runtime control will be built
 for it.** It is baked into a shipped binary: the backend cannot read it, flip it
 or roll it back, and a released build keeps whatever value it was compiled with.
 A backend switch would be a promise this process cannot honour. Rollback is
