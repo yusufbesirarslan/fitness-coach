@@ -14,6 +14,7 @@ import uuid
 
 from flask import current_app, g, request
 from flask_login import current_user
+from sqlalchemy import inspect as sa_inspect
 
 
 def init_sentry(app):
@@ -124,6 +125,23 @@ def current_request_id():
     return getattr(g, "request_id", "-")
 
 
+def _logged_user_id(response):
+    """Log satırı için kullanıcı kimliği.
+
+    5xx yanıtlarında kimlik anahtarından, SQL'siz okunur: `current_user.id` süresi
+    dolmuş (expired) bir örnekte yenileme SELECT'i atar ve 500 kurtarma yolu oturumu
+    geri aldıktan (rollback her örneği expire eder) sonra bu, kopuk DB'ye yeni bir
+    sorgu demekti (F11). Birincil anahtar identity key'de durur; aynı değeri
+    sorgusuz verir. Diğer yanıtlarda davranış değişmez."""
+    if not current_user.is_authenticated:
+        return "-"
+    if response.status_code >= 500:
+        state = sa_inspect(current_user._get_current_object(), raiseerr=False)
+        if state is not None and state.identity:
+            return state.identity[0]
+    return current_user.id
+
+
 def log_request(response):
     """Her isteği logfmt satırı olarak logla. /health (sağlık probe'u) atlanır."""
     if request.path == "/health":
@@ -137,7 +155,7 @@ def log_request(response):
         uid = "-"
     else:
         try:
-            uid = current_user.id if current_user.is_authenticated else "-"
+            uid = _logged_user_id(response)
         except Exception:
             uid = "-"
     # L6: ham X-Forwarded-For istemci-kontrollü (birden çok IP, sahte değer, hatta
