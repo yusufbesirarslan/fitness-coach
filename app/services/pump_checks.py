@@ -111,7 +111,7 @@ def serialize_pump_check_card(
                 pump_check_id=check.id,
                 user_id=viewer_id,
             ).first() is not None
-    return {
+    card = {
         "id": check.id,
         "userId": check.user_id,
         "username": user.username if user else "",
@@ -128,10 +128,12 @@ def serialize_pump_check_card(
         "description": check.description or "",
         "visibility": check.visibility or "private",
         "sharingStatus": sharing_status(check),
-        "sharedFriendIds": check.shared_friend_ids or [],
         "likesCount": check.likes_count or 0,
         "commentsCount": check.comments_count or 0,
         "repostsCount": getattr(check, "reposts_count", 0) or 0,
         "likedByMe": liked,
         "repostedByMe": (reposted_ref_ids is not None and check.id in reposted_ref_ids),
     }
+    if viewer_id == check.user_id:
+        card["sharedFriendIds"] = check.shared_friend_ids or []
+    return card
