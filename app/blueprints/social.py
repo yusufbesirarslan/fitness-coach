@@ -374,11 +374,18 @@ def _serialize_comment_page(model, scope_filter, post_owner_id):
 
 
 # ── Feed V2: feed-item (quote) beğeni / yorum ─────────────────────────────────
+def _can_view_feed_item(viewer_id, item):
+    """FeedItem (repost/quote sarmalayıcı) okuma kuralı: sahibi veya arkadaşı.
+    get_feed_page'in fi_q kapsamıyla aynı; orijinalin görünürlüğü AYRI sorulur
+    (görünmeyen orijinal → "unavailable" kart, sarmalayıcı yine görünür)."""
+    return item.user_id == viewer_id or item.user_id in get_friend_ids(viewer_id)
+
+
 def _visible_feed_item_or_403(item_id):
     item = db.session.get(FeedItem, item_id)
     if not item:
         return None, (jsonify({"error": t("feed.not_found")}), 404)
-    if item.user_id != current_user.id and item.user_id not in get_friend_ids(current_user.id):
+    if not _can_view_feed_item(current_user.id, item):
         return None, (jsonify({"error": t("route.not_friends")}), 403)
     return item, None
 
@@ -477,40 +484,68 @@ def feed_item_comment_delete(item_id, comment_id):
 # ── Feed V2: moderasyon (görüntüleyen-başı gizle / şikayet) ───────────────────
 _MOD_TARGET_TYPES = {"pump_check", "feed_item", "activity"}
 _REPORT_REASONS = {"spam", "inappropriate", "other"}
+# target_id bir Integer kolonu: aralık dışı değer PG'de DataError (500) olurdu.
+_MOD_TARGET_ID_MAX = 2 ** 31 - 1
 
 
-def _target_owner_id(target_type, target_id):
+def _resolve_mod_target(viewer_id, target_type, target_id):
+    """Görüntüleyenin ŞU AN görebildiği hedef satırı; yoksa/göremiyorsa None.
+
+    Her tür kendi kanonik okuma kuralından geçer (pump check paylaşım/arkadaşlık,
+    feed-item sarmalayıcı sahibi/arkadaşı, activity milestone+arkadaş). Var-olmayan
+    ve görünmeyen BİLEREK tek sonuca (None) çöker: çağıran ikisini ayıramaz,
+    moderasyon yazısı varlık kahini (existence oracle) olmaz.
+    """
     if target_type == "pump_check":
         row = db.session.get(PumpCheck, target_id)
+        visible = row is not None and can_view_pump_check(viewer_id, row)
     elif target_type == "feed_item":
         row = db.session.get(FeedItem, target_id)
+        visible = row is not None and _can_view_feed_item(viewer_id, row)
     elif target_type == "activity":
+        from app.services.feed import can_view_feed_activity
         row = db.session.get(Activity, target_id)
+        visible = row is not None and can_view_feed_activity(viewer_id, row)
     else:
-        row = None
-    return row.user_id if row is not None else None
+        return None
+    return row if visible else None
+
+
+def _mod_target_unavailable():
+    return jsonify({"error": t("feed.not_found")}), 404
 
 
 def _parse_mod_target():
     """(target_type, target_id, data) döndürür; geçersizse (None, None, data)."""
-    data = request.get_json(silent=True) or {}
-    ttype = (data.get("target_type") or "").strip()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
+    ttype = data.get("target_type")
+    raw_id = data.get("target_id")
+    if not isinstance(ttype, str) or ttype.strip() not in _MOD_TARGET_TYPES:
+        return None, None, data
+    if isinstance(raw_id, bool):
+        return None, None, data
     try:
-        tid = int(data.get("target_id"))
-    except (TypeError, ValueError):
+        tid = int(raw_id)
+    except (TypeError, ValueError, OverflowError):
         return None, None, data
-    if ttype not in _MOD_TARGET_TYPES:
+    if not 1 <= tid <= _MOD_TARGET_ID_MAX:
         return None, None, data
-    return ttype, tid, data
+    return ttype.strip(), tid, data
 
 
 @bp.route("/feed/hide", methods=["POST"])
 @require_auth
+@limiter.limit(FEED_WRITE_RATELIMIT, key_func=_user_or_ip_key)
 def feed_hide():
     ttype, tid, _ = _parse_mod_target()
     if ttype is None:
         return jsonify({"error": t("feed.invalid_request")}), 400
-    if _target_owner_id(ttype, tid) == current_user.id:
+    target = _resolve_mod_target(current_user.id, ttype, tid)
+    if target is None:
+        return _mod_target_unavailable()
+    if target.user_id == current_user.id:
         return jsonify({"error": t("feed.cannot_hide_own")}), 400
     if not FeedHide.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
         db.session.add(FeedHide(user_id=current_user.id, target_type=ttype, target_id=tid))
@@ -523,7 +558,10 @@ def feed_hide():
 
 @bp.route("/feed/unhide", methods=["POST"])
 @require_auth
+@limiter.limit(FEED_WRITE_RATELIMIT, key_func=_user_or_ip_key)
 def feed_unhide():
+    # Görünürlük BİLEREK sorulmaz: yalnızca kendi satırını siler, yeni durum
+    # yaratmaz; hedef sonradan görünmez olsa da kullanıcı gizlemesini kaldırabilmeli.
     ttype, tid, _ = _parse_mod_target()
     if ttype is None:
         return jsonify({"error": t("feed.invalid_request")}), 400
@@ -543,6 +581,9 @@ def feed_report():
     if reason not in _REPORT_REASONS:
         return jsonify({"error": t("feed.invalid_request")}), 400
     note = (data.get("note") or "").strip()[:300] or None
+    # Kendi içeriğini şikayet API'de hâlâ serbest (F9 öncesi sözleşme; UI sunmaz).
+    if _resolve_mod_target(current_user.id, ttype, tid) is None:
+        return _mod_target_unavailable()
     if FeedReport.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
         return jsonify({"error": t("feed.already_reported")}), 400
     db.session.add(FeedReport(user_id=current_user.id, target_type=ttype, target_id=tid, reason=reason, note=note))

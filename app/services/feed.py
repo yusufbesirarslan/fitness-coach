@@ -71,6 +71,15 @@ def _sort_key(candidate):
     return (ca, SOURCE_RANK.get(source, 0), cid)
 
 
+def can_view_feed_activity(viewer_id, activity):
+    """Activity okuma kurali — satir-basi hali. Activity'yi gosteren TEK yuzey
+    get_feed_page'in act_q sorgusudur (sahibi goruntuleyen/arkadas VE tur
+    milestone allowlist'inde); bu predicate onunla birebir ayni kalmalidir."""
+    if activity.activity_type not in MILESTONE_ACTIVITY_TYPES:
+        return False
+    return activity.user_id == viewer_id or activity.user_id in get_friend_ids(viewer_id)
+
+
 def get_feed_page(viewer_id, cursor=None, limit=10):
     limit = max(1, min(int(limit or 10), 30))
     decoded = decode_cursor(cursor)
