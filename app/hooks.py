@@ -375,5 +375,55 @@ def not_found(e):
     return render_template("404.html"), 404
 
 
+# F11: son savunma hattı. 500.html bile render edilemezse dönen, DB'siz, şablonsuz,
+# stilsiz sabit gövde. Yalnızca sözleşmesi: HTTP 500 + genel mesaj + özyineleme yok.
+_STATIC_500_BODY = (
+    '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>500</title></head>'
+    '<body><h1>500</h1><p>Internal Server Error</p><a href="/">/</a></body></html>'
+)
+
+
+def _reset_failed_db_session():
+    """F11: başarısız (rollback-bekleyen) SQLAlchemy oturumunu en-iyi-çaba sıfırla.
+
+    Commit YOK, iş transaction'ı yeniden DENENMEZ. Oturum kaldırma (remove) teardown'ın
+    işidir; burada yalnızca rollback. Rollback'in kendisi patlarsa (DB kesintisi) hata
+    sayfası yine üretilir — yalnızca sınıf adı loglanır (SQL/parametre değil) ve
+    WARNING seviyesindedir ki asıl istisnanın yanında ikinci bir Sentry olayı açılmasın.
+    """
+    try:
+        db.session.rollback()
+    except Exception as exc:
+        current_app.logger.warning(
+            "[F11] 500 recovery: session rollback failed (%s)", type(exc).__name__)
+
+
+def _render_emergency_500():
+    """500.html'i global context processor'ları ATLAYARAK render et.
+
+    render_template() tüm context processor'ları çalıştırır; inject_rank
+    current_user'ın ORM niteliklerini okur ve zehirli/kopuk bir oturumda yeni SQL
+    (ya da PendingRollbackError) üretir. Şablon yalnızca DB'siz üç değere ihtiyaç
+    duyar: before_request'in zaten çözdüğü g.locale (yoksa varsayılan — locale
+    YENİDEN çözülmez, current_user'a dokunulmaz), bellek-içi katalogdan `t` ve bu
+    isteğin CSP nonce'u. Aynı jinja_env kullanıldığı için autoescape korunur;
+    inject_csrf_token çağrılmadığından hata sayfası yeni CSRF oturum token'ı yazmaz.
+    """
+    from app.i18n import current_locale, t
+    template = current_app.jinja_env.get_template("500.html")
+    return template.render(
+        t=t, locale=current_locale(), csp_nonce=getattr(g, "csp_nonce", ""))
+
+
 def server_error(e):
-    return render_template("500.html"), 500
+    # Flask asıl istisnayı bu işleyiciden ÖNCE loglar ve got_request_exception
+    # sinyalini (Sentry) yayar; burası yalnızca kullanıcıya dönen yanıtı üretir.
+    _reset_failed_db_session()
+    try:
+        body = _render_emergency_500()
+    except Exception as exc:
+        current_app.logger.warning(
+            "[F11] 500 recovery: 500.html render failed (%s); static fallback served",
+            type(exc).__name__)
+        body = _STATIC_500_BODY
+    return body, 500, {"Content-Type": "text/html; charset=utf-8"}
