@@ -75,7 +75,15 @@ function showToast(msg, type = 'info', duration = 3500) {
   const icons = { success: '✓', error: '✕', info: 'ℹ' };
   const t = document.createElement('div');
   t.className = `toast toast-${type}`;
-  t.innerHTML = `<span class="toast-icon">${icons[type] || '•'}</span><span>${msg}</span>`;
+  // F8: msg is text, never markup — it can carry server `error` strings and
+  // browser exception text, so it must not cross an HTML parser boundary.
+  const icon = document.createElement('span');
+  icon.className = 'toast-icon';
+  icon.textContent = icons[type] || '•';
+  const text = document.createElement('span');
+  text.textContent = msg == null ? '' : String(msg);
+  t.appendChild(icon);
+  t.appendChild(text);
   wrap.appendChild(t);
   setTimeout(() => {
     t.classList.add('hide');

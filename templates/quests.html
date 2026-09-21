@@ -67,7 +67,13 @@ function showToast(msg, type) {
   const wrap = document.getElementById('toast-wrap');
   const t = document.createElement('div');
   t.className = 'toast toast-' + type;
-  t.innerHTML = '<span>' + (type === 'success' ? '&#10003;' : '&#10007;') + '</span><span>' + msg + '</span>';
+  // F8: msg is text, never markup.
+  const icon = document.createElement('span');
+  icon.textContent = type === 'success' ? '✓' : '✗';
+  const text = document.createElement('span');
+  text.textContent = msg == null ? '' : String(msg);
+  t.appendChild(icon);
+  t.appendChild(text);
   wrap.appendChild(t);
   setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3200);
 }
