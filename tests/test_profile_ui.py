@@ -2,7 +2,10 @@
 redesigned shell, the Membership card in both is_premium states, the edit sheet,
 the test-pinned hub destinations, and the canonical-tokens-only guard."""
 
+import re
+
 from app.extensions import db
+from app.models import Supplement
 
 
 def _html(client):
@@ -20,12 +23,49 @@ def test_profile_structural_anchors(client, auth_user):
     assert 'id="edit-sheet"' in html
     assert 'role="dialog"' in html
     assert 'data-action="openEditSheet"' in html
+    assert '<button type="button" class="pf-avatar"' in html
+    assert html.count('<button type="button" class="pf-choice') == 4
+    assert not re.search(r'<div class="pf-choice(?:\s|\")', html)
     # sheet form still carries the i18n-test-pinned pieces
     assert '["kilo verme"]' in html
     # static assets + no legacy token leak
     assert "/static/profile.js" in html
     assert "/static/profile.css" in html
     assert "--volt" not in html
+
+
+def test_account_prioritizes_identity_and_has_one_page_primary(client, auth_user):
+    html = _html(client)
+    page = html.split('<!-- ── EDIT PROFILE SHEET', 1)[0]
+
+    edit = re.search(r'<button[^>]*data-action="openEditSheet"[^>]*>', page)
+    assert edit, "identity edit action is missing"
+    assert "btn-volt" in edit.group(0)
+    assert page.count("btn-volt") == 1
+    for section in ("identity", "preferences", "subscription", "security"):
+        assert f'data-account-section="{section}"' in page
+    assert page.count("<h1") == 1
+    assert page.count("<h2") >= 4
+
+
+def test_account_presentation_uses_system_icons_and_localized_status(client, auth_user):
+    db.session.add(Supplement(
+        user_id=auth_user.id,
+        product_name="Whey",
+        brand="AxisAI",
+        category="Protein",
+        status="Active",
+        rating_effect=4,
+    ))
+    db.session.commit()
+    client.post("/set-language", json={"lang": "tr"})
+
+    html = _html(client)
+    visible = html.split("</head>", 1)[1]
+    assert not re.search(r"[🔥🏃💪🇹🇷🇬🇧★☆📦]", visible)
+    assert ">Aktif<" in visible
+    assert ">Active<" not in visible
+    assert 'aria-label="4 / 5"' in visible
 
 
 def test_profile_script_url_is_versioned_so_avatar_fixes_reach_existing_clients(client, auth_user):
@@ -52,7 +92,7 @@ def test_membership_free_shows_upgrade(client, auth_user):
     # not on resolved copy — _head.html dumps the whole i18n catalog into
     # window.I18N on every page, so every key *name* is present regardless.
     html = _html(client)
-    assert 'class="btn-volt pf-upgrade"' in html     # free-plan upgrade CTA present
+    assert 'class="btn-ghost pf-upgrade"' in html    # contextual commercial CTA
     assert 'href="/premium"' in html
     assert 'data-ga-event="premium_nav_click"' in html
 
@@ -62,5 +102,4 @@ def test_membership_premium_shows_badge_no_cta(client, auth_user):
     db.session.commit()
     html = _html(client)
     assert 'class="badge badge-success' in html      # premium badge present
-    # the upgrade CTA button (btn-volt in the membership card) is gone
-    assert 'class="btn-volt pf-upgrade"' not in html
+    assert 'class="btn-ghost pf-upgrade"' not in html

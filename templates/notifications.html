@@ -9,7 +9,7 @@
 </head>
 <body class="page-body">
 
-<div class="toast-wrap" id="toast-wrap"></div>
+<div class="toast-wrap" id="toast-wrap" role="status" aria-live="assertive" aria-atomic="true"></div>
 
 {% set nav_active = 'notifications' %}
 {% include "_nav.html" %}
@@ -24,8 +24,8 @@
         <div class="notif-toolbar">
             <button type="button" class="notif-markall" id="notif-markall">{{ t('notif.mark_all') }}</button>
         </div>
-        <div class="notif-list" id="notif-list">
-            <div class="loading-text">{{ t('friends.loading') }}</div>
+        <div class="notif-list" id="notif-list" data-notif-state="loading" aria-live="polite">
+            <div class="loading-text" role="status">{{ t('friends.loading') }}</div>
         </div>
     </div>
 
@@ -55,19 +55,23 @@ var hasMore = true;
 var loading = false;
 var firstLoad = true;
 
-// Kanonik ntype → görsel ikon (görünen metin i18n'den; ikon sabit).
+// Kanonik ntype → sistem ikonu (görünen metin i18n'den; SVG sabit).
 var ICONS = {
-    pump_check_like: '❤️',
-    pump_check_comment: '💬',
-    friend_request: '👋',
-    friend_accept: '🤝',
-    repost: '🔁',
-    quote_repost: '🔁',
-    feed_like: '❤️',
-    feed_comment: '💬',
-    challenge_complete: '🏆'
+    like: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8z"/>',
+    comment: '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>',
+    friend: '<path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
+    repost: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+    challenge: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3"/>',
+    bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/>'
 };
-function iconFor(type) { return ICONS[type] || '🔔'; }
+function iconFor(type) {
+    var kind = type.indexOf('comment') !== -1 ? 'comment' :
+        (type.indexOf('like') !== -1 ? 'like' :
+        (type.indexOf('friend') !== -1 ? 'friend' :
+        (type.indexOf('repost') !== -1 ? 'repost' :
+        (type === 'challenge_complete' ? 'challenge' : 'bell'))));
+    return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICONS[kind] + '</svg>';
+}
 
 // Hedef yüzey: pump check / feed-item etkileşimleri → feed, arkadaşlık → arkadaşlar.
 function targetUrl(n) {
@@ -101,6 +105,21 @@ function rowHTML(n) {
         '</a>';
 }
 
+function renderEmpty() {
+    listEl.dataset.notifState = 'empty';
+    listEl.innerHTML = '<div class="empty-state notif-empty"><div class="empty-icon">' + iconFor('system') + '</div><div class="empty-desc">' + esc(__t('notif.empty')) + '</div></div>';
+    markAllBtn.hidden = true;
+}
+
+function renderLoadError() {
+    listEl.dataset.notifState = 'error';
+    listEl.innerHTML = '<div class="notif-error" role="alert">' +
+        '<div class="empty-icon">' + iconFor('system') + '</div>' +
+        '<p>' + esc(__t('notif.load_failed')) + '</p>' +
+        '<button type="button" class="btn-ghost" id="notif-retry">' + esc(__t('notif.retry')) + '</button></div>';
+    markAllBtn.hidden = true;
+}
+
 function updateBadge(count) {
     var badge = document.getElementById('notif-badge');
     if (!badge) return;
@@ -111,22 +130,26 @@ function updateBadge(count) {
 async function loadNotifications() {
     if (loading || !hasMore) return;
     loading = true;
+    listEl.dataset.notifState = 'loading';
     try {
         var res = await fetch('/notifications/data?before_id=' + beforeId + '&limit=20');
+        if (!res.ok) throw new Error('notification load failed: ' + res.status);
         var data = await res.json();
+        if (!data || !Array.isArray(data.notifications)) throw new Error('invalid notification payload');
         if (firstLoad) { listEl.innerHTML = ''; firstLoad = false; }
         if (!data.notifications.length && beforeId === 0) {
-            listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">🔔</div><div class="empty-desc">' + __t('notif.empty') + '</div></div>';
-            markAllBtn.style.display = 'none';
+            renderEmpty();
             hasMore = false;
             return;
         }
+        listEl.dataset.notifState = 'ready';
+        markAllBtn.hidden = false;
         listEl.insertAdjacentHTML('beforeend', data.notifications.map(rowHTML).join(''));
         hasMore = !!data.hasMore;
         if (data.nextBeforeId) beforeId = data.nextBeforeId;
         updateBadge(data.unreadCount);
     } catch (err) {
-        firstLoad = false;
+        renderLoadError();
     } finally {
         loading = false;
     }
@@ -140,10 +163,14 @@ async function markRead(ids, all) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
+        if (!res.ok) throw new Error('notification read failed: ' + res.status);
         var data = await res.json();
-        if (res.ok) updateBadge(data.unreadCount);
-        return res.ok;
-    } catch (err) { return false; }
+        updateBadge(data.unreadCount);
+        return true;
+    } catch (err) {
+        toast(__t('notif.read_failed'), 'error');
+        return false;
+    }
 }
 
 // Satıra tıkla: okundu işaretle (bekle → kayıt garantili), sonra hedefe git.
@@ -156,10 +183,24 @@ listEl.addEventListener('click', async function (e) {
         row.classList.remove('unread');
         var dot = row.querySelector('.notif-dot');
         if (dot) dot.remove();
-        await markRead([id], false);
+        var saved = await markRead([id], false);
+        if (!saved) {
+            row.classList.add('unread');
+            if (!row.querySelector('.notif-dot')) row.insertAdjacentHTML('beforeend', '<span class="notif-dot" aria-hidden="true"></span>');
+            return;
+        }
     }
     var url = row.getAttribute('href');
     if (url && url !== '#') window.location.href = url;
+});
+
+listEl.addEventListener('click', function (e) {
+    if (!e.target.closest('#notif-retry')) return;
+    firstLoad = true;
+    hasMore = true;
+    beforeId = 0;
+    listEl.innerHTML = '<div class="loading-text" role="status">' + esc(__t('friends.loading')) + '</div>';
+    loadNotifications();
 });
 
 markAllBtn.addEventListener('click', async function () {

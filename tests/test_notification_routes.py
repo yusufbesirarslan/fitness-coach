@@ -5,6 +5,8 @@ user_id scope'u + mark-all, geçersiz gövde 400 ve CSRF 403.
 
     python -m pytest tests/test_notification_routes.py -v
 """
+import re
+
 from app.extensions import db
 from app.models import Notification
 from app.services.notifications import notify
@@ -97,4 +99,14 @@ def test_read_requires_csrf(raw_client):
 
 
 def test_page_renders(client, auth_user):
-    assert client.get("/notifications").status_code == 200
+    resp = client.get("/notifications")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    visible = html.split("</head>", 1)[1]
+    assert 'data-notif-state="loading"' in visible
+    assert 'id="toast-wrap" role="status" aria-live="assertive"' in visible
+    assert 'id="notif-retry"' in visible
+    assert "renderLoadError" in visible
+    assert "notif.load_failed" in visible
+    assert "notif.read_failed" in visible
+    assert not re.search(r"[❤💬👋🤝🔁🏆🔔]", visible)

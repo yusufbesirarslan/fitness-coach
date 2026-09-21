@@ -10,9 +10,12 @@ static/progress.js structurally, because the rule they enforce ("no threshold
 lives here") is about what the file may contain, not about one rendered string.
 """
 
+import json
 import re
+from pathlib import Path
 
 SECTION_IDS = ("ps-h", "wc-h", "ai-h", "pp-h", "ph-h")
+ROOT = Path(__file__).resolve().parents[1]
 
 # Every state the server may publish, and the i18n key the client maps it to.
 TRAJECTORY_KEYS = {
@@ -116,7 +119,7 @@ def test_progress_page_drops_legacy_dashboard_surfaces(app, client, make_user, l
         assert f'id="tab-{name}"' not in html
 
 
-def test_weekly_checkin_remains_reachable_and_secondary(app, client, make_user, login):
+def test_weekly_checkin_is_the_one_primary_progress_action(app, client, make_user, login):
     html = _get_progress_html(client, make_user, login, "proguicheckin")
 
     # The sheet and every field id the POST flow depends on are intact.
@@ -125,11 +128,28 @@ def test_weekly_checkin_remains_reachable_and_secondary(app, client, make_user, 
         assert f'id="{field}"' in html
     assert 'data-action="submitCheckin"' in html
 
-    # The opener still exists, but is no longer a full-width volt CTA.
+    # Progress owns check-ins, so this existing action closes the page's
+    # interpretation -> action loop.  It is the only primary-ranked control;
+    # contextual Coach remains secondary.
     opener = re.search(r'<button[^>]*data-action="openCheckin"[^>]*>', html)
     assert opener, "weekly check-in opener is missing"
-    assert "btn-volt" not in opener.group(0)
+    assert "btn-volt" in opener.group(0)
     assert "w-full" not in opener.group(0)
+
+    body = html.split('<main', 1)[1].split('</main>', 1)[0]
+    assert body.count('btn-volt') == 1
+
+
+def test_insufficient_insight_slots_explain_their_distinct_roles():
+    keys = (
+        "progress.axis_working_insufficient",
+        "progress.axis_watch_insufficient",
+        "progress.axis_next_insufficient",
+    )
+    for locale in ("en", "tr"):
+        catalog = json.loads((ROOT / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+        copy = [catalog[key] for key in keys]
+        assert len(set(copy)) == len(copy), (locale, copy)
 
 
 def test_ask_axis_action_is_a_server_rendered_link_to_the_coach_destination(
@@ -193,7 +213,9 @@ def test_progress_page_hardcodes_no_progress_values(app, client, make_user, logi
     """
     html = _get_progress_html(client, make_user, login, "proguiempty")
 
-    body = html.split('<main class="main-content">')[1].split("</main>")[0]
+    main = re.search(r"<main\b[^>]*>(.*?)</main>", html, re.DOTALL)
+    assert main, "Progress main landmark is missing"
+    body = main.group(1)
     # Comments explain what is deliberately NOT implemented (e.g. the deferred
     # PR3 interpretation) — only rendered copy is under test here.
     body = re.sub(r"<!--.*?-->", "", body, flags=re.S)
