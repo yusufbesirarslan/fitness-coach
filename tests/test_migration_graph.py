@@ -36,9 +36,9 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # The F1 credential-epoch column is the sole new head, chained off Mobile
-    # Training PR5's f5a6b7c8d9e0. One head only.
-    assert heads == ["a6b7c8d9e0f1"]
+    # F7's Coach-message history index is chained from the credential-epoch
+    # revision. One head only.
+    assert heads == ["b7c8d9e0f1a2"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -60,9 +60,10 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # here first. 39 = the integrated origin/main baseline; 40 = plus Mobile
     # Training PR5's f5a6b7c8d9e0, which adds COLUMNS to the existing
     # workout_session table and no new table; 41 = plus the F1 credential epoch,
-    # one COLUMN on the existing user table. Sprint 11 PR4 still contributes
-    # none of them, which is the claim this test guards.
-    assert len(revision_files) == 41
+    # one COLUMN on the existing user table; 42 = plus F7's Coach-message
+    # composite index. Sprint 11 PR4 still contributes none of them, which is
+    # the claim this test guards.
+    assert len(revision_files) == 42
     assert not any("exercise" in name for name in revision_files)
 
     catalog_path = (
