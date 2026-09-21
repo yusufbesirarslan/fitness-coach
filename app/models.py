@@ -801,6 +801,11 @@ class CoachMessage(db.Model):
     interrupted     = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
     created_at      = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
 
+    __table_args__ = (
+        db.Index(
+            "ix_coach_message_conversation_id_id", "conversation_id", "id"),
+    )
+
     def __repr__(self):
         return f"<CoachMessage {self.id} conv={self.conversation_id} {self.role}>"
 
