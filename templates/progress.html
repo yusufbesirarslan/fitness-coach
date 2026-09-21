@@ -18,7 +18,7 @@
      "What matters next?" (AXIS INSIGHTS). Physique + History follow as
      supporting detail. Every section renders from data that ALREADY exists;
      none of them fabricate a trajectory, score or assessment. -->
-<main class="main-content">
+<main class="main-content progress-main">
 
     <div class="page-hdr">
         <h1>{{ t('progress.h1_a') }} <span>{{ t('progress.h1_b') }}</span></h1>
@@ -46,15 +46,15 @@
             </div>
 
             <div class="ps-actions">
-                <button type="button" class="btn-ghost" data-action="openCheckin">
+                <button type="button" class="btn-volt" data-action="openCheckin">
                     {{ t('progress.checkin_action') }}
                 </button>
                 {#- Contextual Coach entry (UX-1 PR3). It used to be a button that
                     toggled the floating widget and was revealed by JS only if that
                     widget had loaded; it is now a server-rendered link to the
                     canonical Coach destination, so it cannot silently disappear.
-                    Sits beside the check-in action, both secondary — the interpreted
-                    insight above is what the user came here to read. -#}
+                    It stays subordinate to the check-in action, while the interpreted
+                    insight above remains what the user came here to read. -#}
                 <a class="btn-ghost" href="/coach" id="ps-ask">
                     {{ t('progress.ask_axis') }}
                 </a>

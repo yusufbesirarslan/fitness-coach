@@ -73,7 +73,7 @@
     {% if today.secondary %}
       <nav class="today-secondary" aria-label="{{ t('today.secondary_aria') }}">
         {% for a in today.secondary %}
-          <a class="today-secondary-link" href="{{ a.href }}">{{ t(a.label_key) }}</a>
+          <a class="today-secondary-link{% if loop.first %} btn-ghost today-next-action{% endif %}"{% if loop.first %} data-today-next{% endif %} href="{{ a.href }}">{{ t(a.label_key) }}</a>
         {% endfor %}
       </nav>
     {% endif %}

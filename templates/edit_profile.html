@@ -8,6 +8,26 @@
     <link rel="stylesheet" href="/static/profile.css">
 </head>
 {% set nav_active = 'profile' %}
+{%- macro category_icon(category) -%}
+<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+{%- if category == 'Protein' -%}<path d="M8 3h8l-1 4H9z"/><path d="M9 7h6l1.4 12.6A1.5 1.5 0 0 1 14.9 21H9.1a1.5 1.5 0 0 1-1.5-1.4z"/><path d="M8.6 12h6.8"/>
+{%- elif category == 'Amino Acid' -%}<path d="M12 2.7l5.7 5.6a8 8 0 1 1-11.4 0z"/>
+{%- elif category == 'Pre-Workout' -%}<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>
+{%- elif category == 'Vitamin/Health' -%}<path d="M10.5 20.5a4.95 4.95 0 0 1-7-7l10-10a4.95 4.95 0 0 1 7 7z"/><path d="M8.5 8.5l7 7"/>
+{%- elif category == 'Creatine' -%}<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9.5v5M20.5 9.5v5M6.5 12h11"/>
+{%- else -%}<path d="M21 8l-9-5-9 5 9 5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>
+{%- endif -%}
+</svg>
+{%- endmacro -%}
+{%- set category_labels = {
+  'Protein': t('manage_stack.cat_protein'), 'Amino Acid': t('manage_stack.cat_amino'),
+  'Pre-Workout': t('manage_stack.cat_preworkout'), 'Vitamin/Health': t('manage_stack.cat_vitamin'),
+  'Creatine': t('manage_stack.cat_creatine'), 'Other': t('manage_stack.cat_other')
+} -%}
+{%- set status_labels = {
+  'Active': t('manage_stack.status_active'), 'Low Stock': t('manage_stack.status_low'),
+  'Finished': t('manage_stack.status_finished')
+} -%}
 <body class="page-body" data-goal="{{ goal }}">
 
 <div class="toast-wrap" id="toast-wrap"></div>
@@ -23,17 +43,19 @@
   <div class="pf-wrap">
 
     <!-- ── IDENTITY / XP HERO ── -->
+    <section class="pf-section" data-account-section="identity" aria-labelledby="account-identity-title">
+    <h2 class="pf-section-title" id="account-identity-title">{{ t('profile.sec_identity') }}</h2>
     <div class="pf-card">
      <div class="pf-hero">
-      <div class="pf-avatar" id="avatar-display" tabindex="0" role="button"
-           aria-label="{{ t('profile.change_photo') }}"
-           data-action="fxClickTarget" data-target="avatar-file-input">
+      <button type="button" class="pf-avatar" id="avatar-display"
+              aria-label="{{ t('profile.change_photo') }}"
+              data-action="fxClickTarget" data-target="avatar-file-input">
         {% if profile_picture %}<img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
         {% else %}<span id="avatar-letter">{{ username[0]|upper if username else 'U' }}</span>{% endif %}
         <div class="pf-avatar-overlay">
           <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
         </div>
-      </div>
+      </button>
       <input type="file" id="avatar-file-input" accept="image/*" hidden>
       <div class="pf-name">{{ full_name if full_name else username }}</div>
       <div class="pf-handle">@{{ username }}</div>
@@ -42,11 +64,15 @@
         <div class="pbar-track"><div class="pbar-fill" style="width: {{ ((xp_in_level / xp_for_next) * 100)|round(0, 'floor')|int if xp_for_next else 0 }}%"></div></div>
         <div class="pf-xp-label">{{ xp_in_level }} / {{ xp_for_next }} XP · {{ t('profile.xp_to_next') }}</div>
       </div>
-      <div class="pf-streak">🔥 {{ streak_count }} · {{ t('profile.streak') }}</div>
+      <div class="pf-streak"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2s1 4-2 7c-2.5 2.5-3 5.5-.5 8 0-2 1-3 2.5-4 0 2 1 3 2.5 4 2.5-2.5 2-6-.5-8 0 2-1 3-2 4 1-4-3-6-3-9 2 1 3 3 3 5z"/></svg>{{ streak_count }} · {{ t('profile.streak') }}</div>
      </div>
     </div>
+    <button class="btn-volt pf-edit-btn" data-action="openEditSheet">{{ t('profile.edit_profile') }}</button>
+    </section>
 
     <!-- ── MEMBERSHIP CARD ── -->
+    <section class="pf-section" data-account-section="subscription" aria-labelledby="account-subscription-title">
+    <h2 class="pf-section-title" id="account-subscription-title">{{ t('profile.sec_subscription') }}</h2>
     <div class="pf-membership pf-card">
       <div class="pf-plan-head">
         <div class="pf-plan-name">{{ t('profile.plan_premium') if is_premium else t('profile.plan_free') }}</div>
@@ -56,14 +82,14 @@
         <p class="pf-plan-desc">{{ t('profile.plan_premium_thanks') }}</p>
       {% else %}
         <p class="pf-plan-desc">{{ t('profile.plan_free_desc') }}</p>
-        <a href="/premium" class="btn-volt pf-upgrade" data-ga-event="premium_nav_click">{{ t('profile.upgrade_cta') }}</a>
+        <a href="/premium" class="btn-ghost pf-upgrade" data-ga-event="premium_nav_click">{{ t('profile.upgrade_cta') }}</a>
       {% endif %}
     </div>
-
-    <!-- ── EDIT PROFILE TRIGGER ── -->
-    <button class="btn-ghost pf-edit-btn" data-action="openEditSheet">{{ t('profile.edit_profile') }}</button>
+    </section>
 
     <!-- ── NAV ROWS — Account internals + one Community grouping ── -->
+    <section class="pf-section" data-account-section="preferences" aria-labelledby="account-preferences-title">
+    <h2 class="pf-section-title" id="account-preferences-title">{{ t('profile.sec_preferences') }}</h2>
     <nav class="hub" aria-label="{{ t('nav.menu_nav') }}">
       <div class="hub-section-label">{{ t('profile.sec_community') }}</div>
       <div class="hub-card">
@@ -79,17 +105,17 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           {{ t('settings.language') }}
           <div class="hub-lang" role="group" aria-label="{{ t('lang.aria') }}">
-            <button type="button" class="hub-lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
-            <button type="button" class="hub-lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+            <button type="button" class="hub-lang-opt{% if locale == 'tr' %} on{% endif %}" aria-pressed="{{ 'true' if locale == 'tr' else 'false' }}" data-action="setLang" data-args='["tr"]'>TR</button>
+            <button type="button" class="hub-lang-opt{% if locale == 'en' %} on{% endif %}" aria-pressed="{{ 'true' if locale == 'en' else 'false' }}" data-action="setLang" data-args='["en"]'>EN</button>
           </div>
         </div>
-        <a href="/logout" class="hub-link hub-link-danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a>
       </div>
     </nav>
+    </section>
 
     <!-- ── INTEGRATIONS (wearables) ── -->
-    <div>
-      <div class="pf-section-title">{{ t('profile.integrations') }}</div>
+    <section class="pf-section" aria-labelledby="account-connections-title">
+      <h2 class="pf-section-title" id="account-connections-title">{{ t('profile.sec_connections') }}</h2>
       <div class="pf-integrations">
         {% for provider, label in [('whoop', 'WHOOP'), ('google_health', 'Google Health')] %}
         {% set conn = wearable_connections.get(provider) if wearable_connections else None %}
@@ -104,13 +130,13 @@
             {% else %}{{ t('wearables.connect_hint') }}{% endif %}
           </div>
           <div class="pf-wear-actions">
-            <button type="button" class="btn-volt wearable-connect" data-provider="{{ provider }}">{{ t('wearables.connect') }}</button>
+            <button type="button" class="btn-ghost wearable-connect" data-provider="{{ provider }}">{{ t('wearables.connect') }}</button>
             <button type="button" class="btn-ghost wearable-sync" data-provider="{{ provider }}"{% if not conn %} disabled{% endif %}>{{ t('wearables.sync_today') }}</button>
           </div>
         </div>
         {% endfor %}
       </div>
-    </div>
+    </section>
 
     {#- ── MY STACK — a PROJECTION of identity, never the cabinet ──
         UX-3 PR5. Account does not own Supplements: Plan → Nutrition →
@@ -120,25 +146,24 @@
         delete control, or any POST to /supplement/* — the one-cabinet guard in
         `test_ux3_pr5_supplements_placement.py` fails if it does. The copy states
         where management lives so the section cannot be mistaken for it. -#}
-    <div>
-      <div class="pf-section-title">{{ t('editprofile.stack_title') }}</div>
+    <section class="pf-section" aria-labelledby="account-stack-title">
+      <h2 class="pf-section-title" id="account-stack-title">{{ t('editprofile.stack_title') }}</h2>
       <p class="pf-stack-context">{{ t('editprofile.stack_context') }}</p>
       {% if supplements %}
       <div class="pf-stack">
         {% for s in supplements %}
         <div class="pf-stack-card">
-          <div class="pf-stack-icon">{{ icons.get(s.category, '📦') }}</div>
+          <span class="icon-tile icon-tile-sm icon-tile-soft pf-stack-icon">{{ category_icon(s.category) }}</span>
           <div class="pf-stack-body">
             <div class="pf-stack-top">
               <div class="pf-stack-name">{{ s.product_name }}</div>
-              <span class="badge {% if s.status == 'Active' %}badge-success{% else %}badge-warning{% endif %}">{{ s.status }}</span>
+              <span class="badge {% if s.status == 'Active' %}badge-success{% else %}badge-warning{% endif %}">{{ status_labels.get(s.status, s.status) }}</span>
             </div>
-            <div class="pf-stack-brand">{{ s.brand }} · {{ s.category }}</div>
+            <div class="pf-stack-brand">{{ s.brand }} · {{ category_labels.get(s.category, t('manage_stack.cat_other')) }}</div>
             <div class="pf-stack-ratings">
-              {% if s.rating_effect %}<span class="pf-stack-rating">{{ t('manage_stack.effect') }}: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>{% endif %}
-              {% if s.rating_taste %}<span class="pf-stack-rating">{{ t('manage_stack.taste') }}: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>{% endif %}
-              {% if s.rating_digestion %}<span class="pf-stack-rating">{{ t('manage_stack.digestion') }}: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>{% endif %}
-              {% if s.rating_price %}<span class="pf-stack-rating">{{ t('manage_stack.price') }}: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>{% endif %}
+              {% for value, label in [(s.rating_effect, t('manage_stack.effect')), (s.rating_taste, t('manage_stack.taste')), (s.rating_digestion, t('manage_stack.digestion')), (s.rating_price, t('manage_stack.price'))] %}
+              {% if value %}<span class="pf-stack-rating">{{ label }} <span class="pf-rating-meter" role="img" aria-label="{{ value }} / 5"><span style="width: {{ value * 20 }}%"></span></span></span>{% endif %}
+              {% endfor %}
             </div>
             {% if s.review_text %}<div class="pf-stack-review">"{{ s.review_text }}"</div>{% endif %}
           </div>
@@ -149,7 +174,14 @@
       {% else %}
       <div class="pf-stack-empty">{{ t('editprofile.no_supps') }}<br><a href="/supplements" class="pf-link">{{ t('editprofile.stack_manage') }}</a></div>
       {% endif %}
-    </div>
+    </section>
+
+    <section class="pf-section" data-account-section="security" aria-labelledby="account-security-title">
+      <h2 class="pf-section-title" id="account-security-title">{{ t('profile.sec_security') }}</h2>
+      <div class="hub-card">
+        <a href="/logout" class="hub-link hub-link-danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a>
+      </div>
+    </section>
 
   </div>
 </main>
@@ -170,14 +202,14 @@
         <div class="pf-hint">{{ t('editprofile.username_hint') }}</div>
       </div>
       <div class="pf-field pf-goal">
-        <label>{{ t('editprofile.fitness_goal') }}</label>
-        <div class="pf-cards">
-          <div class="pf-choice{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-args='["kilo verme"]'>
-            <div class="pf-choice-icon">🏃</div><div class="pf-choice-label">{{ t('editprofile.goal_loss') }}</div>
-          </div>
-          <div class="pf-choice{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-args='["kas kazanma"]'>
-            <div class="pf-choice-icon">💪</div><div class="pf-choice-label">{{ t('editprofile.goal_gain') }}</div>
-          </div>
+        <label id="pf-goal-label">{{ t('editprofile.fitness_goal') }}</label>
+        <div class="pf-cards" role="group" aria-labelledby="pf-goal-label">
+          <button type="button" class="pf-choice{% if goal == 'kilo verme' %} selected{% endif %}" aria-pressed="{{ 'true' if goal == 'kilo verme' else 'false' }}" data-action="selectGoal" data-args='["kilo verme"]'>
+            <span class="pf-choice-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="M10 22l1-6-3-3 2-5 4 3 3 1"/><path d="M6 22l2-5M14 22l-1-5 4-3 2 3"/></svg></span><span class="pf-choice-label">{{ t('editprofile.goal_loss') }}</span>
+          </button>
+          <button type="button" class="pf-choice{% if goal == 'kas kazanma' %} selected{% endif %}" aria-pressed="{{ 'true' if goal == 'kas kazanma' else 'false' }}" data-action="selectGoal" data-args='["kas kazanma"]'>
+            <span class="pf-choice-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 12V8M17 12V8M4 10v4M20 10v4M7 10h10M7 14h10"/><path d="M9 7v10M15 7v10"/></svg></span><span class="pf-choice-label">{{ t('editprofile.goal_gain') }}</span>
+          </button>
         </div>
       </div>
       <div class="pf-field">
@@ -186,14 +218,14 @@
         <div class="pf-hint">{{ t('editprofile.target_weight_hint') }}</div>
       </div>
       <div class="pf-field">
-        <label>{{ t('settings.language') }}</label>
-        <div class="pf-cards">
-          <div class="pf-choice{% if locale == 'tr' %} selected{% endif %}" data-action="setLang" data-args='["tr"]'>
-            <div class="pf-choice-icon">🇹🇷</div><div class="pf-choice-label">Türkçe</div>
-          </div>
-          <div class="pf-choice{% if locale == 'en' %} selected{% endif %}" data-action="setLang" data-args='["en"]'>
-            <div class="pf-choice-icon">🇬🇧</div><div class="pf-choice-label">English</div>
-          </div>
+        <label id="pf-lang-label">{{ t('settings.language') }}</label>
+        <div class="pf-cards" role="group" aria-labelledby="pf-lang-label">
+          <button type="button" class="pf-choice{% if locale == 'tr' %} selected{% endif %}" aria-pressed="{{ 'true' if locale == 'tr' else 'false' }}" data-action="setLang" data-args='["tr"]'>
+            <span class="pf-choice-icon pf-language-code" aria-hidden="true">TR</span><span class="pf-choice-label">Türkçe</span>
+          </button>
+          <button type="button" class="pf-choice{% if locale == 'en' %} selected{% endif %}" aria-pressed="{{ 'true' if locale == 'en' else 'false' }}" data-action="setLang" data-args='["en"]'>
+            <span class="pf-choice-icon pf-language-code" aria-hidden="true">EN</span><span class="pf-choice-label">English</span>
+          </button>
         </div>
         <div class="pf-hint">{{ t('settings.language_hint') }}</div>
       </div>

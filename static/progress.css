@@ -12,6 +12,7 @@
    ══════════════════════════════════════════════════════════════════════ */
 
 /* ── 1 · SECTION RHYTHM ─────────────────────────────────────────────── */
+.progress-main { max-width: 1040px; margin-inline: auto; }
 /* One consistent vertical beat between the five sections; the breathing
    room IS the hierarchy here, so it is deliberately generous. */
 .prog-section { margin-bottom: var(--space-8); }

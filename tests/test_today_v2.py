@@ -469,6 +469,8 @@ def test_a_rest_day_is_not_a_missing_plan(app, client, make_user, login):
     assert 'data-today-state="rest_day"' in html
     assert 'data-today-state="no_plan"' not in html
     assert "data-today-primary" not in html     # nothing is owed today
+    next_action = re.search(r'<a[^>]*data-today-next[^>]*>', html)
+    assert next_action and "btn-ghost" in next_action.group(0)
 
 
 def test_a_completed_day_carries_no_stale_start(app, client, make_user, login):
@@ -479,6 +481,8 @@ def test_a_completed_day_carries_no_stale_start(app, client, make_user, login):
     assert 'data-today-state="completed"' in html
     assert "data-today-primary" not in html
     assert 'href="/progress-page"' in html      # review stays available
+    next_action = re.search(r'<a[^>]*data-today-next[^>]*href="/progress-page"[^>]*>', html)
+    assert next_action and "btn-ghost" in next_action.group(0)
 
 
 def test_home_has_exactly_one_h1(app, client, make_user, login):
