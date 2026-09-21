@@ -161,6 +161,32 @@ def test_feed_hides_restricted_and_repost_stub(app, auth_user, make_user, client
     assert stub["engagement"] is None
 
 
+def test_repost_and_quote_do_not_disclose_original_owner_recipient_ids(
+        app, auth_user, make_user, client):
+    owner = make_user("indirection-owner")
+    another_recipient = make_user("indirection-recipient")
+    _befriend(auth_user.id, owner.id)
+    original = _feed_check(
+        owner.id,
+        created_at=_dt(1),
+        shared_friend_ids=[auth_user.id, another_recipient.id],
+    )
+    repost = _repost(auth_user.id, original.id, _dt(2))
+    quote = _repost(
+        auth_user.id, original.id, _dt(3), item_type="quote", body="Mine")
+
+    items = client.get("/feed/data").get_json()["items"]
+    repost_card = next(
+        item for item in items
+        if item["kind"] == "repost" and item["id"] == repost.id)
+    quote_card = next(
+        item for item in items
+        if item["kind"] == "quote" and item["id"] == quote.id)
+
+    assert "sharedFriendIds" not in repost_card["original"]
+    assert "sharedFriendIds" not in quote_card["original"]
+
+
 def test_feed_and_gallery_pages_render(app, auth_user, client):
     # Jinja/tojson (ME, ME_NAME) ve şablon bütünlüğü CI'da tarayıcısız doğrulanır.
     r = client.get("/feed")

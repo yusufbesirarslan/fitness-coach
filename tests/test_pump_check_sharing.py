@@ -143,6 +143,60 @@ def test_serialize_pump_check_card_includes_workout_score_when_available(client,
     assert data["workoutScore"] == 8.0
 
 
+def test_serialize_pump_check_card_discloses_recipient_ids_only_to_owner(make_user):
+    owner = make_user("recipient-owner")
+    first_recipient = make_user("recipient-first")
+    second_recipient = make_user("recipient-second")
+    check = PumpCheck(
+        user_id=owner.id,
+        visibility="friends",
+        shared_friend_ids=[first_recipient.id, second_recipient.id],
+        valid=True,
+    )
+    db.session.add(check)
+    db.session.commit()
+
+    owner_card = serialize_pump_check_card(
+        check, owner.id, include_viewer_state=False)
+    first_recipient_card = serialize_pump_check_card(
+        check, first_recipient.id, include_viewer_state=False)
+    second_recipient_card = serialize_pump_check_card(
+        check, second_recipient.id, include_viewer_state=False)
+
+    assert owner_card["sharedFriendIds"] == [
+        first_recipient.id, second_recipient.id]
+    assert "sharedFriendIds" not in first_recipient_card
+    assert "sharedFriendIds" not in second_recipient_card
+
+
+def test_serialize_pump_check_card_handles_empty_and_null_recipient_ids(make_user):
+    owner = make_user("empty-recipient-owner")
+    viewer = make_user("empty-recipient-viewer")
+    empty_check = PumpCheck(
+        user_id=owner.id,
+        visibility="private",
+        shared_friend_ids=[],
+        valid=True,
+    )
+    db.session.add(empty_check)
+    db.session.commit()
+    null_check = PumpCheck(
+        user_id=owner.id,
+        visibility="private",
+        shared_friend_ids=None,
+        valid=True,
+    )
+
+    assert serialize_pump_check_card(
+        empty_check, owner.id, include_viewer_state=False,
+    )["sharedFriendIds"] == []
+    assert serialize_pump_check_card(
+        null_check, owner.id, include_viewer_state=False,
+    )["sharedFriendIds"] == []
+    assert "sharedFriendIds" not in serialize_pump_check_card(
+        null_check, viewer.id, include_viewer_state=False)
+
+
 def _seed_plan(user, payload, score):
     TrainingPlan.query.filter_by(user_id=user.id).delete()
     db.session.add(TrainingPlan(
@@ -370,11 +424,17 @@ def test_workout_complete_friends_upload_persists_image_key_and_dm_renders(clien
 
 def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, make_user):
     friend = make_user("friend")
+    second_recipient = make_user("second-recipient")
     db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.add(Friendship(
+        sender_id=auth_user.id,
+        receiver_id=second_recipient.id,
+        status="accepted",
+    ))
     check = PumpCheck(
         user_id=auth_user.id,
         visibility="friends",
-        shared_friend_ids=[friend.id],
+        shared_friend_ids=[friend.id, second_recipient.id],
         location_type="Gym",
         description="Shared only",
         image_key="pump-checks/1/2026/07/shared.jpg",
@@ -414,6 +474,7 @@ def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, 
     assert msg["pump_check"]["imageUrl"] is not None
     assert msg["pump_check"]["timePosted"] == "02.07.2026 17:05"
     assert msg["pump_check"]["createdAt"] == "2026-07-02T14:05:00"
+    assert "sharedFriendIds" not in msg["pump_check"]
 
 
 def test_chat_messages_redact_unavailable_pump_check_payload(client, auth_user, make_user):
@@ -504,8 +565,22 @@ def test_feed_data_shows_current_user_and_friend_feed_posts(client, auth_user, m
     friend = make_user("friend")
     stranger = make_user("stranger")
     db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
-    db.session.add(PumpCheck(user_id=auth_user.id, visibility="feed", location_type="Gym", description="Mine", valid=True))
-    db.session.add(PumpCheck(user_id=friend.id, visibility="feed", location_type="Home", description="Friend", valid=True))
+    db.session.add(PumpCheck(
+        user_id=auth_user.id,
+        visibility="feed",
+        shared_friend_ids=[friend.id],
+        location_type="Gym",
+        description="Mine",
+        valid=True,
+    ))
+    db.session.add(PumpCheck(
+        user_id=friend.id,
+        visibility="feed",
+        shared_friend_ids=[auth_user.id, stranger.id],
+        location_type="Home",
+        description="Friend",
+        valid=True,
+    ))
     db.session.add(PumpCheck(user_id=stranger.id, visibility="feed", location_type="Gym", description="Nope", valid=True))
     db.session.commit()
 
@@ -514,6 +589,9 @@ def test_feed_data_shows_current_user_and_friend_feed_posts(client, auth_user, m
     descriptions = [post["description"] for post in body["items"]]
     assert descriptions == ["Friend", "Mine"]
     assert "Nope" not in descriptions
+    friend_card, owner_card = body["items"]
+    assert "sharedFriendIds" not in friend_card
+    assert owner_card["sharedFriendIds"] == [friend.id]
 
 
 def test_feed_data_excludes_friends_and_private_visibility_posts(client, auth_user, make_user):
@@ -545,7 +623,13 @@ def test_feed_page_renders(client, auth_user):
 
 def test_gallery_lists_only_current_user_pump_checks(client, auth_user, make_user):
     other = make_user("other")
-    mine_feed = PumpCheck(user_id=auth_user.id, visibility="feed", description="Feed", valid=True)
+    mine_feed = PumpCheck(
+        user_id=auth_user.id,
+        visibility="feed",
+        shared_friend_ids=[other.id],
+        description="Feed",
+        valid=True,
+    )
     mine_private = PumpCheck(user_id=auth_user.id, visibility="private", description="Private", valid=True)
     not_mine = PumpCheck(user_id=other.id, visibility="feed", description="Other", valid=True)
     db.session.add_all([mine_feed, mine_private, not_mine])
@@ -554,6 +638,8 @@ def test_gallery_lists_only_current_user_pump_checks(client, auth_user, make_use
     body = client.get("/pump-check-gallery/data").get_json()
 
     assert [item["description"] for item in body["items"]] == ["Private", "Feed"]
+    assert body["items"][0]["sharedFriendIds"] == []
+    assert body["items"][1]["sharedFriendIds"] == [other.id]
 
 
 def test_gallery_page_renders(client, auth_user):
