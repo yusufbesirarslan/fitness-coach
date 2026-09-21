@@ -459,6 +459,8 @@
   "notif.mark_all": "Mark all read",
   "notif.load_failed": "Notifications could not be loaded.",
   "notif.retry": "Try again",
+  "notif.load_more_failed": "More notifications could not be loaded.",
+  "notif.more_loaded": "{count} more notifications loaded.",
   "notif.read_failed": "That notification could not be marked as read. Try again.",
   "notif.pump_check_like": "{username} liked your pump check",
   "notif.pump_check_comment": "{username} commented on your pump check",

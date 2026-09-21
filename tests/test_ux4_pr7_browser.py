@@ -111,6 +111,13 @@ def test_pr7_surface_matrix_has_no_overflow_or_hierarchy_regression(
                 assert facts["shortPriority"] == [], (name, width, facts)
                 if name in {"today", "progress", "account"}:
                     assert facts["primary"] == 1, (name, width, facts)
+                if name == "account":
+                    pressed = page.eval_on_selector_all(
+                        '.hub-lang-opt, .pf-choice[data-action="setLang"]',
+                        "els => els.map(e => [JSON.parse(e.dataset.args)[0], e.getAttribute('aria-pressed')])")
+                    assert sorted(pressed) == sorted([[language, "true"], [language, "true"],
+                                                      ["tr" if language == "en" else "en", "false"],
+                                                      ["tr" if language == "en" else "en", "false"]]), (width, pressed)
 
                 if CAPTURE_DIR and language == "en" and width in (390, 1366):
                     capture = Path(CAPTURE_DIR)
@@ -307,3 +314,357 @@ def test_notifications_browser_covers_empty_and_mixed_read_state(
     expect(page.locator(".notif-row")).to_have_count(2)
     expect(page.locator(".notif-row.unread")).to_have_count(1)
     expect(page.locator(".notif-row:not(.unread)")).to_have_count(1)
+
+
+# ── Review-fix regressions: notification failure, pending and a11y states ──
+
+NOTIF_HOOKS = r"""
+(() => {
+  window.__readCalls = 0;
+  window.__dataCalls = [];
+  window.__navs = [];
+  const orig = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    const url = String(input && input.url ? input.url : input);
+    if (url.indexOf('/notifications/read') !== -1) window.__readCalls += 1;
+    const m = url.match(/\/notifications\/data\?before_id=(\d+)/);
+    if (m) window.__dataCalls.push(Number(m[1]));
+    return orig(input, init);
+  };
+  if (window.navigation) {
+    window.navigation.addEventListener('navigate', e => window.__navs.push(new URL(e.destination.url).pathname));
+  }
+})();
+"""
+
+NOT_LIVE = r"""
+() => {
+  const rows = [...document.querySelectorAll('.notif-row')];
+  const live = el => el.hasAttribute('aria-live') ||
+      ['status', 'log', 'alert', 'marquee', 'timer'].includes(el.getAttribute('role'));
+  return rows.length > 0 && rows.every(row => {
+    for (let el = row; el; el = el.parentElement) if (live(el)) return false;
+    return true;
+  });
+}
+"""
+
+SCROLL_END = "() => { window.scrollTo(0, document.body.scrollHeight); window.dispatchEvent(new Event('scroll')); }"
+EMPTY_PAGE = '{"notifications":[],"hasMore":false,"nextBeforeId":null,"unreadCount":0}'
+
+
+def _seed_notifications(app, user_id, actor_id, count, read_every=0):
+    """Distinct targets -> notify() never dedupes. Returns ids newest first."""
+    from app.models import Notification
+
+    with app.app_context():
+        for i in range(count):
+            n = notify(user_id, "friend_request", actor_id=actor_id,
+                       target_type="friendship", target_id=10_000 + i)
+            assert n is not None
+            if read_every and i % read_every == 0:
+                n.is_read = True
+        db.session.commit()
+        return sorted((n.id for n in Notification.query.filter_by(user_id=user_id)),
+                      reverse=True)
+
+
+def _notif_harness(page):
+    """Deterministic controls for /notifications/data and /notifications/read.
+
+    Modes: 'pass' (real Flask client), 'fail' (503), 'empty' (data only),
+    'hold' (the request stays pending until the test releases it).
+    """
+    ctl = {"data": "pass", "data_first_page": "pass", "read": "pass",
+           "held_data": [], "held_read": []}
+
+    def data_route(route):
+        first = "before_id=0&" in route.request.url
+        mode = ctl["data_first_page"] if first else ctl["data"]
+        if mode == "fail":
+            route.fulfill(status=503, content_type="application/json", body='{"error":"unavailable"}')
+        elif mode == "empty":
+            route.fulfill(status=200, content_type="application/json", body=EMPTY_PAGE)
+        elif mode == "hold":
+            ctl["held_data"].append(route)
+        else:
+            route.fallback()
+
+    def read_route(route):
+        if ctl["read"] == "fail":
+            route.fulfill(status=503, content_type="application/json", body='{"error":"unavailable"}')
+        elif ctl["read"] == "hold":
+            ctl["held_read"].append(route)
+        else:
+            route.fallback()
+
+    page.add_init_script(NOTIF_HOOKS)
+    page.route("**/notifications/data*", data_route)
+    page.route("**/notifications/read", read_route)
+    return ctl
+
+
+def _wait_held(page, held, count):
+    """Bounded poll until a routed request is parked (a condition, not a timed assertion)."""
+    for _ in range(250):
+        if len(held) >= count:
+            return
+        page.wait_for_timeout(20)
+    raise AssertionError(f"expected {count} held request(s), saw {len(held)}")
+
+
+def _row_ids(page):
+    return [int(x) for x in page.eval_on_selector_all(".notif-row", "els => els.map(e => e.dataset.id)")]
+
+
+def test_notification_page_n_failure_keeps_rows_and_retries_the_same_boundary(
+        app, auth_user, make_user, training_page):
+    actor = make_user("paginationactor")
+    ids = _seed_notifications(app, auth_user.id, actor.id, 45)
+    with app.app_context():
+        _ready(auth_user.id, "en")
+    page, _, _, _ = training_page
+    ctl = _notif_harness(page)
+    page.set_viewport_size({"width": 390, "height": 844})
+
+    page.goto("http://localhost/notifications")
+    expect(page.locator(".notif-row")).to_have_count(20)
+    assert page.evaluate(NOT_LIVE) is True
+    assert page.locator("#notif-list").get_attribute("aria-live") is None
+
+    # CASE B: page 2 fails -> page 1 stays, one inline error, no full-page error.
+    ctl["data"] = "fail"
+    page.evaluate(SCROLL_END)
+    more = page.locator('#notif-more[data-notif-more="error"]')
+    expect(more).to_be_visible()
+    expect(more.locator('[role="alert"]')).to_have_count(1)
+    assert _row_ids(page) == ids[:20]
+    expect(page.locator('[data-notif-state="error"]')).to_have_count(0)
+    expect(page.locator("#notif-retry")).to_have_count(0)
+    expect(page.locator("#notif-list")).to_have_attribute("data-notif-state", "ready")
+
+    # CASE D: repeated scroll triggers while failed -> no later page, no second affordance.
+    for _ in range(3):
+        page.evaluate(SCROLL_END)
+    expect(page.locator("#notif-page-retry")).to_have_count(1)
+    boundary = ids[19]
+    assert page.evaluate("window.__dataCalls") == [0, boundary]
+
+    # CASE C: retry the exact failed boundary; rows append once and the error clears.
+    ctl["data"] = "pass"
+    page.locator("#notif-page-retry").click()
+    expect(page.locator(".notif-row")).to_have_count(40)
+    expect(page.locator("#notif-more")).to_be_hidden()
+    expect(page.locator("#notif-page-retry")).to_have_count(0)
+    assert _row_ids(page) == ids[:40]
+    assert page.evaluate("window.__dataCalls") == [0, boundary, boundary]
+    assert page.evaluate("document.activeElement.dataset.id") == str(ids[20])
+    expect(page.locator("#notif-status")).to_have_text("20 more notifications loaded.")
+    assert page.evaluate(NOT_LIVE) is True
+
+    page.evaluate(SCROLL_END)
+    expect(page.locator(".notif-row")).to_have_count(45)
+    assert _row_ids(page) == ids
+    assert page.evaluate("window.__dataCalls") == [0, boundary, boundary, ids[39]]
+    expect(page.locator("#notif-status")).to_have_text("5 more notifications loaded.")
+
+
+def test_notification_first_load_failure_keeps_full_error_and_retries_page_one(
+        app, auth_user, make_user, training_page):
+    actor = make_user("firstloadactor")
+    ids = _seed_notifications(app, auth_user.id, actor.id, 3)
+    page, _, _, _ = training_page
+    ctl = _notif_harness(page)
+    ctl["data_first_page"] = "fail"
+
+    # CASE A
+    page.goto("http://localhost/notifications")
+    expect(page.locator('[data-notif-state="error"] [role="alert"]')).to_be_visible()
+    expect(page.locator("#notif-more")).to_be_hidden()
+    page.evaluate(SCROLL_END)
+    assert page.evaluate("window.__dataCalls") == [0]
+    ctl["data_first_page"] = "pass"
+    page.locator("#notif-retry").click()
+    expect(page.locator(".notif-row")).to_have_count(3)
+    assert _row_ids(page) == ids
+    assert page.evaluate("window.__dataCalls") == [0, 0]
+
+
+def test_notification_pending_mark_read_blocks_repeat_activation_and_false_navigation(
+        app, auth_user, make_user, training_page):
+    actor = make_user("pendingreadactor")
+    _seed_notifications(app, auth_user.id, actor.id, 2)
+    page, _, _, _ = training_page
+    ctl = _notif_harness(page)
+    page.goto("http://localhost/notifications")
+    expect(page.locator(".notif-row.unread")).to_have_count(2)
+    row = page.locator(".notif-row").first
+    other = page.locator(".notif-row").nth(1)
+
+    # CASE E: first activation -> one request, pending state exposed.
+    ctl["read"] = "hold"
+    row.click()
+    expect(row).to_have_attribute("aria-busy", "true")
+    assert page.evaluate("window.__readCalls") == 1
+    _wait_held(page, ctl["held_read"], 1)
+
+    # CASE F: pointer + keyboard repeat on the SAME row -> no navigation, no duplicate.
+    row.click()
+    row.focus()
+    row.press("Enter")
+    assert page.evaluate("window.__readCalls") == 1
+    assert page.evaluate("window.__navs") == []
+    # the guard is scoped to that notification only
+    expect(other).not_to_have_attribute("aria-busy", "true")
+    expect(other).to_have_class(re.compile(r"\bunread\b"))
+
+    # CASE H: failure restores unread, stays put, is announced, and allows retry.
+    ctl["held_read"].pop().fulfill(status=503, content_type="application/json",
+                                   body='{"error":"unavailable"}')
+    expect(page.locator("#toast-wrap[aria-live] .toast-error")).to_be_visible()
+    expect(row).to_have_class(re.compile(r"\bunread\b"))
+    expect(row.locator(".notif-dot")).to_have_count(1)
+    expect(row).not_to_have_attribute("aria-busy", "true")
+    assert page.evaluate("window.__navs") == []
+    assert page.url.endswith("/notifications")
+
+    # CASE G: retry -> navigation only after the original request succeeds.
+    row.click()
+    assert page.evaluate("window.__readCalls") == 2
+    _wait_held(page, ctl["held_read"], 1)
+    row.click()
+    assert page.evaluate("window.__readCalls") == 2
+    assert page.evaluate("window.__navs") == []
+    ctl["held_read"].pop().fallback()
+    page.wait_for_url("**/friends")
+
+
+def test_account_goal_and_language_choices_expose_selected_state(
+        app, auth_user, training_page):
+    for language in ("en", "tr"):
+        with app.app_context():
+            _ready(auth_user.id, language)
+            user = db.session.get(User, auth_user.id)
+            user.goal = "kilo verme"
+            db.session.commit()
+        page, _, _, _ = training_page
+        page.goto("http://localhost/edit-profile")
+        other = "tr" if language == "en" else "en"
+        for sel in (".hub-lang-opt", ".pf-choice"):
+            expect(page.locator(f'{sel}[data-args=\'["{language}"]\']')).to_have_attribute("aria-pressed", "true")
+            expect(page.locator(f'{sel}[data-args=\'["{other}"]\']')).to_have_attribute("aria-pressed", "false")
+
+        page.locator('[data-action="openEditSheet"]').click()
+        loss, gain = page.locator(".pf-goal .pf-choice").nth(0), page.locator(".pf-goal .pf-choice").nth(1)
+        expect(loss).to_have_attribute("aria-pressed", "true")
+        expect(gain).to_have_attribute("aria-pressed", "false")
+        expect(page.locator('.pf-goal [role="group"]')).to_have_attribute("aria-labelledby", "pf-goal-label")
+        gain.focus()
+        gain.press("Enter")
+        expect(gain).to_have_attribute("aria-pressed", "true")
+        expect(loss).to_have_attribute("aria-pressed", "false")
+        assert page.evaluate("document.activeElement === document.querySelectorAll('.pf-goal .pf-choice')[1]")
+
+
+NOTIF_MATRIX_PROBE = r"""
+() => {
+  const shown = el => el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true});
+  const small = [...document.querySelectorAll('#notif-retry, #notif-page-retry, .notif-markall')]
+    .filter(shown).map(el => el.getBoundingClientRect()).filter(r => r.width < 43.5 || r.height < 43.5).length;
+  return {
+    overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+    small,
+    liveList: document.getElementById('notif-list').hasAttribute('aria-live'),
+  };
+}
+"""
+
+
+def test_notification_state_matrix_across_widths_and_languages(
+        app, auth_user, make_user, training_page):
+    actor = make_user("matrixnotificationactorwithalongname")
+    ids = _seed_notifications(app, auth_user.id, actor.id, 25, read_every=3)
+    page, _, _, _ = training_page
+    ctl = _notif_harness(page)
+    errors = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+
+    def check(state, lang, width):
+        facts = page.evaluate(NOTIF_MATRIX_PROBE)
+        assert facts == {"overflow": False, "small": 0, "liveList": False}, (state, lang, width, facts)
+
+    for language in ("en", "tr"):
+        with app.app_context():
+            _ready(auth_user.id, language)
+            from app.models import Notification
+            for n in Notification.query.filter_by(user_id=auth_user.id):
+                n.is_read = (ids.index(n.id) % 3 == 0)
+            db.session.commit()
+        for width in WIDTHS:
+            page.set_viewport_size({"width": width, "height": 700})
+            for key in ("data", "data_first_page", "read"):
+                ctl[key] = "pass"
+
+            # initial loading (page 1 held) -> released populated + mixed read/unread
+            ctl["data_first_page"] = "hold"
+            page.goto("http://localhost/notifications")
+            _wait_held(page, ctl["held_data"], 1)
+            expect(page.locator('#notif-list[data-notif-state="loading"] .loading-text')).to_be_visible()
+            check("loading", language, width)
+            ctl["data_first_page"] = "pass"
+            ctl["held_data"].pop().fallback()
+            expect(page.locator(".notif-row")).to_have_count(20)
+            expect(page.locator(".notif-row.unread")).not_to_have_count(0)
+            expect(page.locator(".notif-row:not(.unread)")).not_to_have_count(0)
+            check("populated", language, width)
+
+            # pagination failure -> retry -> success
+            ctl["data"] = "fail"
+            page.evaluate(SCROLL_END)
+            expect(page.locator("#notif-page-retry")).to_be_visible()
+            assert page.locator(".notif-row").count() == 20
+            check("page-failure", language, width)
+            ctl["data"] = "pass"
+            page.locator("#notif-page-retry").click()
+            expect(page.locator(".notif-row")).to_have_count(25)
+            expect(page.locator("#notif-more")).to_be_hidden()
+            assert _row_ids(page) == ids
+            check("page-retry", language, width)
+
+            # mark-read pending/repeat -> failure -> success navigation
+            row_id = page.locator(".notif-row.unread").first.get_attribute("data-id")
+            row = page.locator(f'.notif-row[data-id="{row_id}"]')
+            row.scroll_into_view_if_needed()
+            ctl["read"] = "hold"
+            row.click()
+            expect(row).to_have_attribute("aria-busy", "true")
+            _wait_held(page, ctl["held_read"], 1)
+            row.click()
+            check("read-pending", language, width)
+            assert page.evaluate("window.__navs") == []
+            ctl["held_read"].pop().fulfill(status=503, content_type="application/json", body="{}")
+            expect(page.locator(".toast-error").last).to_be_visible()
+            expect(row).to_have_class(re.compile(r"\bunread\b"))
+            check("read-failure", language, width)
+            ctl["read"] = "pass"
+            row.click()
+            page.wait_for_url(re.compile(r"/friends$"))
+            # restore the read row for the next cell
+            with app.app_context():
+                from app.models import Notification
+                for n in Notification.query.filter_by(user_id=auth_user.id):
+                    n.is_read = (ids.index(n.id) % 3 == 0)
+                db.session.commit()
+
+            # initial failure, then empty
+            ctl["data_first_page"] = "fail"
+            page.goto("http://localhost/notifications")
+            expect(page.locator('[data-notif-state="error"] #notif-retry')).to_be_visible()
+            check("initial-failure", language, width)
+            ctl["data_first_page"] = "empty"
+            page.locator("#notif-retry").click()
+            expect(page.locator('[data-notif-state="empty"]')).to_be_visible()
+            expect(page.locator("#notif-status")).not_to_be_empty()
+            check("empty", language, width)
+
+    assert errors == []

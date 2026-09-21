@@ -469,6 +469,8 @@
   "notif.mark_all": "Tümünü okundu işaretle",
   "notif.load_failed": "Bildirimler yüklenemedi.",
   "notif.retry": "Tekrar dene",
+  "notif.load_more_failed": "Daha fazla bildirim yüklenemedi.",
+  "notif.more_loaded": "{count} bildirim daha yüklendi.",
   "notif.read_failed": "Bildirim okundu olarak işaretlenemedi. Tekrar dene.",
   "notif.pump_check_like": "{username} pump check'ini beğendi",
   "notif.pump_check_comment": "{username} pump check'ine yorum yaptı",

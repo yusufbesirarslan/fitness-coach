@@ -24,9 +24,13 @@
         <div class="notif-toolbar">
             <button type="button" class="notif-markall" id="notif-markall">{{ t('notif.mark_all') }}</button>
         </div>
-        <div class="notif-list" id="notif-list" data-notif-state="loading" aria-live="polite">
+        <div class="notif-list" id="notif-list" data-notif-state="loading">
             <div class="loading-text" role="status">{{ t('friends.loading') }}</div>
         </div>
+        {#- Sayfa-N hatası listeyi ASLA değiştirmez; satır içi tek tekrar bloğu burada.
+            Liste canlı bölge değildir: eklenen sayfalar yalnızca #notif-status'ta özetlenir. #}
+        <div class="notif-more" id="notif-more" hidden></div>
+        <div class="notif-status" id="notif-status" role="status" aria-live="polite" aria-atomic="true"></div>
     </div>
 
 </main>
@@ -49,11 +53,15 @@ function toast(msg, type) {
 function esc(v) { var d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML; }
 
 var listEl = document.getElementById('notif-list');
+var moreEl = document.getElementById('notif-more');
+var statusEl = document.getElementById('notif-status');
 var markAllBtn = document.getElementById('notif-markall');
-var beforeId = 0;
+var beforeId = 0;          // yalnızca BAŞARILI sayfada ilerler
 var hasMore = true;
 var loading = false;
 var firstLoad = true;
+var pageFailed = false;    // başarısız sayfa, kendi Retry'ı çözene kadar sonraki yüklemeleri durdurur
+var pendingReads = {};     // id → okundu isteği uçuşta (aynı bildirimde çift tık / erken gezinme yok)
 
 // Kanonik ntype → sistem ikonu (görünen metin i18n'den; SVG sabit).
 var ICONS = {
@@ -120,6 +128,23 @@ function renderLoadError() {
     markAllBtn.hidden = true;
 }
 
+// Sayfa-N hatası: yüklenmiş satırlar yerinde kalır; tek bir satır içi blok (innerHTML → asla çoğalmaz).
+function renderPageError() {
+    moreEl.dataset.notifMore = 'error';
+    moreEl.innerHTML = '<div class="notif-page-error" role="alert">' +
+        '<p>' + esc(__t('notif.load_more_failed')) + '</p>' +
+        '<button type="button" class="btn-ghost" id="notif-page-retry">' + esc(__t('notif.retry')) + '</button></div>';
+    moreEl.hidden = false;
+}
+
+function clearPageError() {
+    moreEl.hidden = true;
+    moreEl.innerHTML = '';
+    delete moreEl.dataset.notifMore;
+}
+
+function announce(msg) { statusEl.textContent = msg; }
+
 function updateBadge(count) {
     var badge = document.getElementById('notif-badge');
     if (!badge) return;
@@ -128,28 +153,34 @@ function updateBadge(count) {
 }
 
 async function loadNotifications() {
-    if (loading || !hasMore) return;
+    if (loading || !hasMore || pageFailed) return;
     loading = true;
-    listEl.dataset.notifState = 'loading';
+    var initial = beforeId === 0;
+    if (initial) listEl.dataset.notifState = 'loading';
     try {
         var res = await fetch('/notifications/data?before_id=' + beforeId + '&limit=20');
         if (!res.ok) throw new Error('notification load failed: ' + res.status);
         var data = await res.json();
         if (!data || !Array.isArray(data.notifications)) throw new Error('invalid notification payload');
         if (firstLoad) { listEl.innerHTML = ''; firstLoad = false; }
-        if (!data.notifications.length && beforeId === 0) {
+        if (!data.notifications.length && initial) {
             renderEmpty();
+            announce(__t('notif.empty'));
             hasMore = false;
             return;
         }
         listEl.dataset.notifState = 'ready';
         markAllBtn.hidden = false;
         listEl.insertAdjacentHTML('beforeend', data.notifications.map(rowHTML).join(''));
-        hasMore = !!data.hasMore;
-        if (data.nextBeforeId) beforeId = data.nextBeforeId;
+        // İmleç yalnızca burada ilerler; imleçsiz "hasMore" aynı sayfayı yeniden çekip çoğaltırdı.
+        hasMore = !!data.hasMore && !!data.nextBeforeId;
+        if (hasMore) beforeId = data.nextBeforeId;
         updateBadge(data.unreadCount);
+        if (!initial && data.notifications.length) announce(__t('notif.more_loaded', { count: data.notifications.length }));
     } catch (err) {
-        renderLoadError();
+        // beforeId ilerlemez: Retry tam olarak başarısız sınırı yeniden ister.
+        pageFailed = true;
+        if (initial) renderLoadError(); else renderPageError();
     } finally {
         loading = false;
     }
@@ -174,16 +205,27 @@ async function markRead(ids, all) {
 }
 
 // Satıra tıkla: okundu işaretle (bekle → kayıt garantili), sonra hedefe git.
+// Aynı bildirimin isteği uçuştayken tekrar etkinleştirme yok sayılır: ikinci tık
+// "zaten okundu" yoluyla sonuç bilinmeden gezinemez, yinelenen istek de gitmez.
 listEl.addEventListener('click', async function (e) {
     var row = e.target.closest('.notif-row');
     if (!row) return;
     e.preventDefault();
     var id = parseInt(row.dataset.id, 10);
+    if (pendingReads[id]) return;
     if (row.classList.contains('unread')) {
+        pendingReads[id] = true;
+        row.setAttribute('aria-busy', 'true');
         row.classList.remove('unread');
         var dot = row.querySelector('.notif-dot');
         if (dot) dot.remove();
-        var saved = await markRead([id], false);
+        var saved = false;
+        try {
+            saved = await markRead([id], false);
+        } finally {
+            delete pendingReads[id];
+            row.removeAttribute('aria-busy');
+        }
         if (!saved) {
             row.classList.add('unread');
             if (!row.querySelector('.notif-dot')) row.insertAdjacentHTML('beforeend', '<span class="notif-dot" aria-hidden="true"></span>');
@@ -199,8 +241,22 @@ listEl.addEventListener('click', function (e) {
     firstLoad = true;
     hasMore = true;
     beforeId = 0;
+    pageFailed = false;
     listEl.innerHTML = '<div class="loading-text" role="status">' + esc(__t('friends.loading')) + '</div>';
     loadNotifications();
+});
+
+// Satır içi Retry: aynı beforeId sınırını yeniden ister; odak yeni ilk satıra
+// (başarı) ya da yeniden çizilen Retry'a (hata) taşınır, gövdeye düşmez.
+moreEl.addEventListener('click', async function (e) {
+    if (!e.target.closest('#notif-page-retry')) return;
+    var before = listEl.querySelectorAll('.notif-row').length;
+    pageFailed = false;
+    clearPageError();
+    await loadNotifications();
+    var target = pageFailed ? document.getElementById('notif-page-retry')
+        : listEl.querySelectorAll('.notif-row')[before];
+    if (target) target.focus();
 });
 
 markAllBtn.addEventListener('click', async function () {

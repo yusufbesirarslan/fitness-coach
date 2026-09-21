@@ -17,8 +17,11 @@ function toast(msg, type) {
 }
 
 function selectGoal(goal, el) {
-  document.querySelectorAll('.pf-goal .pf-choice').forEach(function (c) { c.classList.remove('selected'); });
-  if (el) el.classList.add('selected');
+  document.querySelectorAll('.pf-goal .pf-choice').forEach(function (c) {
+    c.classList.remove('selected');
+    c.setAttribute('aria-pressed', 'false');
+  });
+  if (el) { el.classList.add('selected'); el.setAttribute('aria-pressed', 'true'); }
   selectedGoal = goal;
 }
 

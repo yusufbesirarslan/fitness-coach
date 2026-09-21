@@ -26,6 +26,12 @@ def test_profile_structural_anchors(client, auth_user):
     assert '<button type="button" class="pf-avatar"' in html
     assert html.count('<button type="button" class="pf-choice') == 4
     assert not re.search(r'<div class="pf-choice(?:\s|\")', html)
+    # seçili durum yardımcı teknolojiye açık: her seçim düğmesi aria-pressed taşır
+    choices = re.findall(r'<button type="button" class="(?:pf-choice|hub-lang-opt)[^>]*>', html)
+    assert len(choices) == 6
+    assert all(re.search(r'aria-pressed="(?:true|false)"', c) for c in choices)
+    assert sum('aria-pressed="true"' in c for c in choices if 'setLang' in c) == 2
+    assert not re.search(r'<button type="button" class="pf-choice[^>]*>\s*<div', html)
     # sheet form still carries the i18n-test-pinned pieces
     assert '["kilo verme"]' in html
     # static assets + no legacy token leak

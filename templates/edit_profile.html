@@ -105,8 +105,8 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           {{ t('settings.language') }}
           <div class="hub-lang" role="group" aria-label="{{ t('lang.aria') }}">
-            <button type="button" class="hub-lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
-            <button type="button" class="hub-lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+            <button type="button" class="hub-lang-opt{% if locale == 'tr' %} on{% endif %}" aria-pressed="{{ 'true' if locale == 'tr' else 'false' }}" data-action="setLang" data-args='["tr"]'>TR</button>
+            <button type="button" class="hub-lang-opt{% if locale == 'en' %} on{% endif %}" aria-pressed="{{ 'true' if locale == 'en' else 'false' }}" data-action="setLang" data-args='["en"]'>EN</button>
           </div>
         </div>
       </div>
@@ -202,13 +202,13 @@
         <div class="pf-hint">{{ t('editprofile.username_hint') }}</div>
       </div>
       <div class="pf-field pf-goal">
-        <label>{{ t('editprofile.fitness_goal') }}</label>
-        <div class="pf-cards">
-          <button type="button" class="pf-choice{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-args='["kilo verme"]'>
-            <div class="pf-choice-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="M10 22l1-6-3-3 2-5 4 3 3 1"/><path d="M6 22l2-5M14 22l-1-5 4-3 2 3"/></svg></div><div class="pf-choice-label">{{ t('editprofile.goal_loss') }}</div>
+        <label id="pf-goal-label">{{ t('editprofile.fitness_goal') }}</label>
+        <div class="pf-cards" role="group" aria-labelledby="pf-goal-label">
+          <button type="button" class="pf-choice{% if goal == 'kilo verme' %} selected{% endif %}" aria-pressed="{{ 'true' if goal == 'kilo verme' else 'false' }}" data-action="selectGoal" data-args='["kilo verme"]'>
+            <span class="pf-choice-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="2"/><path d="M10 22l1-6-3-3 2-5 4 3 3 1"/><path d="M6 22l2-5M14 22l-1-5 4-3 2 3"/></svg></span><span class="pf-choice-label">{{ t('editprofile.goal_loss') }}</span>
           </button>
-          <button type="button" class="pf-choice{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-args='["kas kazanma"]'>
-            <div class="pf-choice-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 12V8M17 12V8M4 10v4M20 10v4M7 10h10M7 14h10"/><path d="M9 7v10M15 7v10"/></svg></div><div class="pf-choice-label">{{ t('editprofile.goal_gain') }}</div>
+          <button type="button" class="pf-choice{% if goal == 'kas kazanma' %} selected{% endif %}" aria-pressed="{{ 'true' if goal == 'kas kazanma' else 'false' }}" data-action="selectGoal" data-args='["kas kazanma"]'>
+            <span class="pf-choice-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 12V8M17 12V8M4 10v4M20 10v4M7 10h10M7 14h10"/><path d="M9 7v10M15 7v10"/></svg></span><span class="pf-choice-label">{{ t('editprofile.goal_gain') }}</span>
           </button>
         </div>
       </div>
@@ -218,13 +218,13 @@
         <div class="pf-hint">{{ t('editprofile.target_weight_hint') }}</div>
       </div>
       <div class="pf-field">
-        <label>{{ t('settings.language') }}</label>
-        <div class="pf-cards">
-          <button type="button" class="pf-choice{% if locale == 'tr' %} selected{% endif %}" data-action="setLang" data-args='["tr"]'>
-            <div class="pf-choice-icon pf-language-code" aria-hidden="true">TR</div><div class="pf-choice-label">Türkçe</div>
+        <label id="pf-lang-label">{{ t('settings.language') }}</label>
+        <div class="pf-cards" role="group" aria-labelledby="pf-lang-label">
+          <button type="button" class="pf-choice{% if locale == 'tr' %} selected{% endif %}" aria-pressed="{{ 'true' if locale == 'tr' else 'false' }}" data-action="setLang" data-args='["tr"]'>
+            <span class="pf-choice-icon pf-language-code" aria-hidden="true">TR</span><span class="pf-choice-label">Türkçe</span>
           </button>
-          <button type="button" class="pf-choice{% if locale == 'en' %} selected{% endif %}" data-action="setLang" data-args='["en"]'>
-            <div class="pf-choice-icon pf-language-code" aria-hidden="true">EN</div><div class="pf-choice-label">English</div>
+          <button type="button" class="pf-choice{% if locale == 'en' %} selected{% endif %}" aria-pressed="{{ 'true' if locale == 'en' else 'false' }}" data-action="setLang" data-args='["en"]'>
+            <span class="pf-choice-icon pf-language-code" aria-hidden="true">EN</span><span class="pf-choice-label">English</span>
           </button>
         </div>
         <div class="pf-hint">{{ t('settings.language_hint') }}</div>

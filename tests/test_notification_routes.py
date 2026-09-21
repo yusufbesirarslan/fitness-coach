@@ -107,6 +107,12 @@ def test_page_renders(client, auth_user):
     assert 'id="toast-wrap" role="status" aria-live="assertive"' in visible
     assert 'id="notif-retry"' in visible
     assert "renderLoadError" in visible
+    # Sayfa-N hatası listeyi değiştirmez; liste canlı bölge değildir (yalnızca #notif-status).
+    assert "renderPageError" in visible and 'id="notif-more"' in visible
+    list_tag = re.search(r'<div[^>]*id="notif-list"[^>]*>', visible).group(0)
+    assert "aria-live" not in list_tag and "role=" not in list_tag
+    assert 'id="notif-status" role="status" aria-live="polite"' in visible
+    assert "notif.load_more_failed" in visible and "notif.more_loaded" in visible
     assert "notif.load_failed" in visible
     assert "notif.read_failed" in visible
     assert not re.search(r"[❤💬👋🤝🔁🏆🔔]", visible)

@@ -71,10 +71,10 @@
 }
 .pf-choice:hover { border-color: var(--color-border-2); }
 .pf-choice.selected { border-color: var(--color-primary); background: var(--color-primary-soft); }
-.pf-choice-icon { font-size: var(--text-2xl); margin-bottom: var(--space-1); }
+.pf-choice-icon { display: block; font-size: var(--text-2xl); margin-bottom: var(--space-1); }
 .pf-choice-icon svg { width: var(--icon-lg); height: var(--icon-lg); fill: none; stroke: currentColor; stroke-width: 1.8; }
 .pf-language-code { font-family: var(--font-display); font-size: var(--text-lg); letter-spacing: .08em; }
-.pf-choice-label { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-text-1); }
+.pf-choice-label { display: block; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-text-1); }
 .pf-choice.selected .pf-choice-label { color: var(--color-primary); }
 
 /* ── section titles (nav rows / integrations / stack) ── */
