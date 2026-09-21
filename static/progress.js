@@ -25,7 +25,14 @@ function showToast(msg, type = 'info') {
     const wrap = document.getElementById('toast-wrap');
     const t = document.createElement('div');
     t.className = `toast toast-${type}`;
-    t.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ'}</span><span>${msg}</span>`;
+    // F8: msg is text, never markup (server `error` / exception text reaches it).
+    const icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    icon.textContent = icons[type] || 'ℹ';
+    const text = document.createElement('span');
+    text.textContent = msg == null ? '' : String(msg);
+    t.appendChild(icon);
+    t.appendChild(text);
     wrap.appendChild(t);
     setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 280); }, 3200);
 }
