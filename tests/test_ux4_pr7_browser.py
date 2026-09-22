@@ -180,6 +180,10 @@ def test_today_settled_states_keep_a_reachable_next_step(
         _seed_plan(auth_user.id, _week("dinlenme"))
 
     page, _, _, _ = training_page
+    # The 44px invariant is about settled layout: opt into the product's
+    # reduced-motion path so nav.css's page-enter translateY cannot be mid-flight
+    # when bounding_box() samples the target.
+    page.emulate_media(reduced_motion="reduce")
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto("http://localhost/")
     rest = page.locator('[data-today-state="rest_day"] [data-today-next]')
