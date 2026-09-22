@@ -195,3 +195,190 @@ def test_expected_user_mismatch_deletes_session(app, cog_user):
         session_store.get_valid_access_token(sid, cog_user.id + 1)
     assert exc.value.args[0] == "user_mismatch"
     assert session_store.get(sid) is None
+
+
+# --- F12: refresh runs snapshot -> provider (no transaction) -> re-lock -------
+# The provider stubs below act as "another request" by committing through the
+# same store API while the refresh is between phase 1 and phase 3.
+
+def _expired(cog_user):
+    sid = session_store.create(cog_user, _tokens(3600), "cg")
+    row = session_store.get(sid)
+    row.access_token_exp = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+    return sid
+
+
+def _material(sid):
+    row = session_store.get(sid)
+    return (row.access_token, row.refresh_token, row.access_token_exp)
+
+
+def _renewed(access, refresh=None):
+    tokens = {"access_token": access, "id_token": "", "expires_in": 3600}
+    if refresh is not None:
+        tokens["refresh_token"] = refresh
+    return tokens
+
+
+def _commit_winner(sid, access, expires_at):
+    (CognitoSession.query.filter_by(session_id=sid).update({
+        CognitoSession.access_token: session_store.encrypt_token(access),
+        CognitoSession.access_token_exp: expires_at,
+    }, synchronize_session=False))
+    db.session.commit()
+
+
+def test_fresh_token_makes_no_provider_call_and_no_write(app, cog_user, monkeypatch):
+    sid = session_store.create(cog_user, _tokens(3600), "cg")
+    before = _material(sid)
+    monkeypatch.setattr(cognito_service, "refresh_tokens",
+                        lambda *a: pytest.fail("fresh token must not refresh"))
+    assert session_store.get_valid_access_token(sid, cog_user.id) == "acc-1"
+    assert _material(sid) == before
+
+
+def test_refresh_calls_provider_once_outside_any_transaction(app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+    refresh_ciphertext = session_store.get(sid).refresh_token
+    calls = []
+
+    def renew(refresh, username):
+        calls.append((refresh, username, db.session().in_transaction()))
+        return _renewed("acc-2", refresh)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", renew)
+    assert session_store.get_valid_access_token(sid, cog_user.id) == "acc-2"
+    assert calls == [("ref-1", "cg", False)]
+    row = session_store.get(sid)
+    assert session_store.decrypt_token(row.access_token) == "acc-2"
+    assert row.access_token_exp > datetime.utcnow() + timedelta(minutes=55)
+    # An unrotated refresh token keeps its ciphertext byte-for-byte.
+    assert row.refresh_token == refresh_ciphertext
+
+
+def test_rotated_refresh_token_is_persisted_with_its_access_token(app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+    monkeypatch.setattr(cognito_service, "refresh_tokens",
+                        lambda refresh, username: _renewed("acc-2", "ref-2"))
+    assert session_store.get_valid_access_token(sid, cog_user.id) == "acc-2"
+    row = session_store.get(sid)
+    assert session_store.decrypt_token(row.access_token) == "acc-2"
+    assert session_store.decrypt_token(row.refresh_token) == "ref-2"
+
+
+def test_corrupted_refresh_ciphertext_fails_before_the_provider(app, cog_user, monkeypatch):
+    from cryptography.fernet import InvalidToken
+    sid = _expired(cog_user)
+    row = session_store.get(sid)
+    row.refresh_token = "not-a-fernet-token"
+    db.session.commit()
+    before = _material(sid)
+    monkeypatch.setattr(cognito_service, "refresh_tokens",
+                        lambda *a: pytest.fail("undecryptable token reached Cognito"))
+    with pytest.raises(InvalidToken):
+        session_store.get_valid_access_token(sid, cog_user.id)
+    assert _material(sid) == before
+
+
+def test_row_deleted_during_provider_call_is_never_recreated(app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+
+    def renew(refresh, username):
+        assert session_store.delete_for_user(cog_user.id) == 1
+        return _renewed("acc-2", refresh)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", renew)
+    with pytest.raises(SessionInvalid) as exc:
+        session_store.get_valid_access_token(sid, cog_user.id)
+    assert exc.value.args[0] == "no_session"
+    assert CognitoSession.query.filter_by(user_id=cog_user.id).count() == 0
+
+
+def test_winner_committed_during_provider_call_is_returned_not_overwritten(
+        app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+
+    def renew(refresh, username):
+        _commit_winner(sid, "acc-winner", datetime.utcnow() + timedelta(hours=1))
+        return _renewed("acc-loser", refresh)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", renew)
+    assert session_store.get_valid_access_token(sid, cog_user.id) == "acc-winner"
+    assert session_store.current_access_token(sid) == "acc-winner"
+
+
+def test_definitive_rejection_after_a_winner_keeps_the_winner(app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+
+    def rejected(refresh, username):
+        _commit_winner(sid, "acc-winner", datetime.utcnow() + timedelta(hours=1))
+        raise cognito_service.CognitoServiceError("x", "NotAuthorizedException")
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", rejected)
+    assert session_store.get_valid_access_token(sid, cog_user.id) == "acc-winner"
+    assert session_store.current_access_token(sid) == "acc-winner"
+
+
+def test_changed_but_unusable_winner_state_is_a_transient_conflict(
+        app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+
+    def rejected(refresh, username):
+        _commit_winner(sid, "acc-short", datetime.utcnow())
+        raise cognito_service.CognitoServiceError("x", "NotAuthorizedException")
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", rejected)
+    with pytest.raises(session_store.SessionTransient) as exc:
+        session_store.get_valid_access_token(sid, cog_user.id)
+    assert exc.value.args[0] == "refresh_conflict"
+    assert session_store.current_access_token(sid) == "acc-short"
+
+
+def test_touch_during_provider_call_is_not_a_refresh_conflict(app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+
+    def renew(refresh, username):
+        session_store.touch(sid)
+        return _renewed("acc-2", refresh)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", renew)
+    assert session_store.get_valid_access_token(sid, cog_user.id) == "acc-2"
+    assert session_store.current_access_token(sid) == "acc-2"
+
+
+def test_idle_deadline_is_rechecked_after_the_provider_answers(app, cog_user, monkeypatch):
+    sid = _expired(cog_user)
+
+    def renew(refresh, username):
+        # Stands in for the clock crossing the idle deadline mid-call.
+        (CognitoSession.query.filter_by(session_id=sid).update({
+            CognitoSession.last_used_at: datetime.utcnow() - timedelta(hours=25),
+        }, synchronize_session=False))
+        db.session.commit()
+        return _renewed("acc-2", refresh)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", renew)
+    with pytest.raises(SessionInvalid) as exc:
+        session_store.get_valid_access_token(sid, cog_user.id)
+    assert exc.value.args[0] == "idle_timeout"
+    assert session_store.get(sid) is None
+
+
+def test_touch_after_delete_neither_raises_nor_resurrects(app, cog_user):
+    sid = session_store.create(cog_user, _tokens(), "cg")
+    session_store.get(sid)  # the request already holds the row
+    session_store.delete_for_user(cog_user.id)
+    session_store.touch(sid)
+    assert session_store.get(sid) is None
+
+
+def test_touch_updates_activity_only(app, cog_user):
+    sid = session_store.create(cog_user, _tokens(), "cg")
+    row = session_store.get(sid)
+    row.last_used_at = datetime.utcnow() - timedelta(hours=1)
+    db.session.commit()
+    before = _material(sid)
+    session_store.touch(sid)
+    assert _material(sid) == before
+    assert session_store.get(sid).last_used_at > datetime.utcnow() - timedelta(minutes=1)

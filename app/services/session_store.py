@@ -12,6 +12,7 @@ import hashlib
 import logging
 import os
 import secrets
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from cryptography.fernet import Fernet
@@ -126,7 +127,65 @@ def current_access_token(session_id):
     return _dec(row.access_token) if row else None
 
 
+@dataclass(frozen=True)
+class _RefreshSnapshot:
+    """Detached scalars of the row a refresh decision was made from (F12).
+
+    Only authentication material identifies "the same state": the ciphertexts
+    and the access expiry. Fernet ciphertext is randomized, so any rewrite of a
+    token column changes it even when the plaintext is identical — which is
+    what makes this comparison sufficient without a version column.
+    `last_used_at` is deliberately absent: `touch()` bumps it on every request,
+    and activity telemetry must not turn into refresh conflicts.
+    """
+    row_id: int
+    session_id: str
+    user_id: int
+    cognito_username: str
+    encrypted_access_token: str
+    encrypted_refresh_token: str
+    access_token_exp: datetime
+
+
+def _check_timeouts(row, now):
+    """Delete the row and raise if it outlived its absolute or idle deadline."""
+    absolute_deadline = timedelta(days=COGNITO_SESSION_ABSOLUTE_DAYS)
+    if row.created_at and now - row.created_at > absolute_deadline:
+        _delete_row_and_commit(row)
+        raise SessionInvalid("absolute_timeout")
+    idle_deadline = timedelta(hours=COGNITO_SESSION_IDLE_HOURS)
+    if row.last_used_at and now - row.last_used_at > idle_deadline:
+        _delete_row_and_commit(row)
+        raise SessionInvalid("idle_timeout")
+
+
+def _delete_row_and_commit(row):
+    db.session.delete(row)
+    db.session.commit()
+
+
+def _is_fresh(access_token_exp, now):
+    skew = timedelta(seconds=COGNITO_REFRESH_SKEW_SECONDS)
+    return bool(access_token_exp) and (access_token_exp - now) > skew
+
+
 def get_valid_access_token(session_id, expected_user_id=None):
+    """Return a currently valid provider access token for one web session.
+
+    Fresh token: one read, no lock, no write (the hot path).
+
+    Refresh (F12) runs in three phases so Cognito latency never pins a
+    transaction, a pooled connection or a row lock:
+      1. a plain read → detached `_RefreshSnapshot` → transaction ended;
+      2. `cognito_service.refresh_tokens` with NO database transaction open;
+      3. a short `SELECT ... FOR UPDATE` that re-validates the row against the
+         snapshot before anything is written or deleted.
+    A missing row in phase 3 is a committed logout/credential revocation and
+    always wins: nothing is re-inserted. A row whose auth material changed was
+    advanced by a concurrent winner: its token is returned and the winner is
+    never overwritten or deleted. Duplicate provider calls stay possible (two
+    requests can snapshot the same expired row); only one result survives.
+    """
     row = get(session_id)
     if not row:
         raise SessionInvalid("no_session")
@@ -134,41 +193,112 @@ def get_valid_access_token(session_id, expected_user_id=None):
         delete(session_id)
         raise SessionInvalid("user_mismatch")
     now = datetime.utcnow()
-    absolute_deadline = timedelta(days=COGNITO_SESSION_ABSOLUTE_DAYS)
-    if row.created_at and now - row.created_at > absolute_deadline:
-        delete(session_id)
-        raise SessionInvalid("absolute_timeout")
-    idle_deadline = timedelta(hours=COGNITO_SESSION_IDLE_HOURS)
-    if row.last_used_at and now - row.last_used_at > idle_deadline:
-        delete(session_id)
-        raise SessionInvalid("idle_timeout")
-    skew = timedelta(seconds=COGNITO_REFRESH_SKEW_SECONDS)
-    if row.access_token_exp and (row.access_token_exp - now) > skew:
+    _check_timeouts(row, now)
+    if _is_fresh(row.access_token_exp, now):
         return _dec(row.access_token)
     # süresi dolmuş / dolmak üzere → yenile
+    snapshot = _RefreshSnapshot(
+        row_id=row.id,
+        session_id=row.session_id,
+        user_id=row.user_id,
+        cognito_username=row.cognito_username,
+        encrypted_access_token=row.access_token,
+        encrypted_refresh_token=row.refresh_token,
+        access_token_exp=row.access_token_exp,
+    )
+    # Phase 1 ends here: the read transaction is released before any network
+    # I/O, and the ORM row is no longer an authority for anything below.
+    db.session.rollback()
+    refresh_token = _dec(snapshot.encrypted_refresh_token)
+    if db.session().in_transaction():
+        raise RuntimeError(
+            "web session refresh attempted during database transaction")
     try:
-        refreshed = cognito_service.refresh_tokens(_dec(row.refresh_token), row.cognito_username)
+        refreshed = cognito_service.refresh_tokens(
+            refresh_token, snapshot.cognito_username)
     except cognito_service.CognitoServiceError as e:
         # H1: geçici Cognito kesintisi oturumu ÖLDÜRMEZ. Yalnızca KESİN ret
-        # (NotAuthorized = refresh token iptal/süresi dolmuş) satırı siler.
+        # (NotAuthorized = refresh token iptal/süresi dolmuş) satırı siler —
+        # ve yalnız ret hâlâ GÜNCEL satırı tarif ediyorsa (F12).
         if _is_transient(e):
             _logger.warning(
                 "[SESSION] Cognito geçici olarak ulaşılamadı (%s) — oturum korunuyor",
                 e.code or type(e).__name__)
             raise SessionTransient("cognito_unavailable")
-        delete(session_id)
-        raise SessionInvalid("refresh_failed")
-    row.access_token = _enc(refreshed["access_token"])
-    row.access_token_exp = datetime.utcnow() + timedelta(seconds=int(refreshed.get("expires_in", 3600)))
-    db.session.commit()
-    return refreshed["access_token"]
+        return _reconcile(snapshot, expected_user_id, refresh_token, None)
+    return _reconcile(snapshot, expected_user_id, refresh_token, refreshed)
+
+
+def _reconcile(snapshot, expected_user_id, refresh_token, refreshed):
+    """Phase 3: re-lock the row and apply `refreshed` (None = definitive reject).
+
+    One short transaction; every exit commits or rolls back, so the row lock
+    never outlives this call.
+    """
+    try:
+        now = datetime.utcnow()
+        row = (CognitoSession.query
+               .filter_by(id=snapshot.row_id)
+               .populate_existing()
+               .with_for_update()
+               .one_or_none())
+        if (row is None or row.session_id != snapshot.session_id
+                or row.user_id != snapshot.user_id
+                or (expected_user_id is not None
+                    and row.user_id != expected_user_id)):
+            # Deleted by logout / credential revocation while the provider
+            # call was in flight: revocation wins, nothing is recreated.
+            db.session.rollback()
+            _logger.info("[SESSION] refresh reconciled against a revoked session")
+            raise SessionInvalid("no_session")
+        # A fresh clock: a session must not outlive its deadlines just because
+        # the provider answered late.
+        _check_timeouts(row, now)
+        if (row.access_token != snapshot.encrypted_access_token
+                or row.refresh_token != snapshot.encrypted_refresh_token
+                or row.access_token_exp != snapshot.access_token_exp):
+            # A concurrent request already advanced this session. Its state is
+            # authoritative: never overwrite it with ours, and never delete it
+            # on a rejection that described the older state.
+            if _is_fresh(row.access_token_exp, now):
+                winner_access = _dec(row.access_token)
+                db.session.rollback()
+                return winner_access
+            db.session.rollback()
+            _logger.warning("[SESSION] refresh conflict — oturum korunuyor")
+            raise SessionTransient("refresh_conflict")
+        if refreshed is None:
+            _delete_row_and_commit(row)
+            raise SessionInvalid("refresh_failed")
+        row.access_token = _enc(refreshed["access_token"])
+        rotated = refreshed.get("refresh_token")
+        if rotated and rotated != refresh_token:
+            # The provider rotated the refresh token: it lands in the same
+            # commit as the access token it belongs to, never one without the
+            # other. An unrotated token keeps its ciphertext byte-for-byte.
+            row.refresh_token = _enc(rotated)
+        row.access_token_exp = now + timedelta(
+            seconds=int(refreshed.get("expires_in", 3600)))
+        db.session.commit()
+        return refreshed["access_token"]
+    except (SessionInvalid, SessionTransient):
+        raise
+    except Exception:
+        db.session.rollback()
+        raise
 
 
 def touch(session_id):
-    row = get(session_id)
-    if row:
-        row.last_used_at = datetime.utcnow()
-        db.session.commit()
+    """Best-effort activity stamp (F12): one UPDATE, so it never resurrects a
+    deleted row, never rewrites auth material and never fails when the row is
+    already gone."""
+    if not session_id:
+        return
+    (CognitoSession.query
+     .filter_by(session_id=session_id)
+     .update({CognitoSession.last_used_at: datetime.utcnow()},
+             synchronize_session=False))
+    db.session.commit()
 
 
 def delete(session_id):

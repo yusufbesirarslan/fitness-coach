@@ -359,10 +359,12 @@ def _selects(client, path):
     return statements
 
 
-# Measured on the authorized baseline 8ab9cda with this exact fixture.
+# Measured on the authorized baseline 8ab9cda with this exact fixture (8 / 9),
+# minus exactly one SELECT: F12 made session touch() a single atomic UPDATE of
+# CognitoSession.last_used_at instead of SELECT-then-ORM-flush.
 @pytest.mark.parametrize("path,total,supplement", [
-    ("/nutrition", 8, 0),
-    ("/supplements", 9, 1),
+    ("/nutrition", 7, 0),
+    ("/supplements", 8, 1),
 ])
 def test_page_query_budget_is_unchanged(app, client, make_user, login, path, total, supplement):
     user = _login(client, make_user, login, f"pr6-q-{path.strip('/')}")
