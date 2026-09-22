@@ -867,6 +867,7 @@
   "coach.plan.workout_ambiguous": "I found more than one matching workout ({candidates}). Which one should I use? Nothing was changed.",
   "coach.plan.workout_unknown": "I couldn't match that workout to your current plan, so nothing was changed. Which day did you mean?",
   "coach.plan.clarification_unavailable": "I couldn't continue that plan change just now, so nothing was changed. Please try again.",
+  "coach.plan.remove_ambiguous": "{day} has more than one {exercise}: {candidates}. Which one should I remove? Nothing was changed.",
   "quest.login.title": "Daily Login",
   "quest.login.desc": "Log in to the app today",
   "quest.workout_logged.title": "Log a Workout",

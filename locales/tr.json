@@ -9,6 +9,7 @@
   "coach.plan.workout_ambiguous": "Birden fazla uyan antrenman buldum ({candidates}). Hangisini kullanayım? Hiçbir şey değişmedi.",
   "coach.plan.workout_unknown": "Bu antrenmanı aktif planınla eşleştiremedim; hiçbir şey değişmedi. Hangi günü kastediyorsun?",
   "coach.plan.clarification_unavailable": "Bu plan değişikliğine şu an devam edemedim; hiçbir şey değişmedi. Lütfen tekrar dene.",
+  "coach.plan.remove_ambiguous": "{day} gününde birden fazla {exercise} var: {candidates}. Hangisini çıkarayım? Hiçbir şey değişmedi.",
   "lang.aria": "Dil",
   "lang.switch_failed": "Dil değiştirilemedi. Lütfen tekrar deneyin.",
   "theme.aria": "Tema değiştir",

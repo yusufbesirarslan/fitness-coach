@@ -357,22 +357,71 @@ def _identity_matches(exercises, wanted, authority, resolved=None):
     ]
 
 
-def _find_exercise_index(exercises, exercise_name, authority):
+def _find_exercise_index(exercises, exercise_name, authority,
+                         match_sets=None, match_reps=None):
     """The single index matching ``exercise_name``.
 
     Two matches is refused, never resolved by position (see
     ``AmbiguousExerciseTarget``); zero is ``ExerciseNotFound``. What counts as
-    a match is ``_identity_matches``.
+    a match is ``_identity_matches``; the optional selectors only narrow those
+    identity matches (``_select_by_prescription``) and never widen them.
     """
     wanted = normalize_exercise_name(exercise_name)
     if wanted is None:
         raise InvalidMutation("exercise name is required")
     hits = _identity_matches(exercises, wanted, authority)
+    hits = _select_by_prescription(exercises, hits, match_sets, match_reps)
     if not hits:
         raise ExerciseNotFound("target exercise is not in the day")
     if len(hits) > 1:
         raise AmbiguousExerciseTarget("target exercise matches more than once")
     return hits[0]
+
+
+def _select_by_prescription(exercises, hits, match_sets, match_reps):
+    """The identity matches whose stored prescription equals the selectors.
+
+    Selectors are validated with the same bounds a written prescription gets,
+    so a malformed one is refused rather than silently matching nothing — or,
+    worse, being ignored and leaving the bare ambiguous target in force as if
+    it had been honoured. Equality is the stored values compared as stored,
+    the same ``==`` the duplicate-ADD guard uses: no rep parser, no "8-12"
+    ≈ "8 to 12" equivalence. With no selector at all this is the identity.
+    """
+    if match_sets is None and match_reps is None:
+        return hits
+    sets = None if match_sets is None else validate_sets(match_sets)
+    reps = None if match_reps is None else validate_reps(match_reps)
+    return [
+        index for index in hits
+        if (sets is None or exercises[index].get(FIELD_SETS) == sets)
+        and (reps is None or exercises[index].get(FIELD_REPS) == reps)
+    ]
+
+
+def remove_target_slots(document, day_name, exercise_name):
+    """``(sets, reps)`` of every slot a remove of ``exercise_name`` could hit.
+
+    Read-only, and answered by THE identity rule (``_identity_matches``) on
+    the document's own authority, so the Coach can show the user the real
+    candidates of an ambiguous remove without a second matcher that could
+    disagree with the one the mutation will use. Returned in plan order,
+    which is presentation only: a choice is always sent back as an exact
+    selector, never as a position. Domain errors propagate unchanged.
+    """
+    program = _program_of(document)
+    authority = _exercise_authority(document)
+    day = _find_day(program, day_name)
+    exercises = day.get(FIELD_EXERCISES)
+    if not isinstance(exercises, list):
+        return []
+    wanted = normalize_exercise_name(exercise_name)
+    if wanted is None:
+        raise InvalidMutation("exercise name is required")
+    return [
+        (exercises[index].get(FIELD_SETS), exercises[index].get(FIELD_REPS))
+        for index in _identity_matches(exercises, wanted, authority)
+    ]
 
 
 def _require_workout_day(day):
@@ -522,7 +571,9 @@ def _apply_add(program, command, authority):
 def _apply_remove(program, command, authority):
     day = _find_day(program, command.day)
     exercises = _exercises_of(day)
-    index = _find_exercise_index(exercises, command.exercise, authority)
+    index = _find_exercise_index(
+        exercises, command.exercise, authority,
+        match_sets=command.match_sets, match_reps=command.match_reps)
     exercises.pop(index)
     _require_day_stays_valid(day)
     return True

@@ -47,9 +47,21 @@ class AddExerciseCommand:
 
 @dataclass(frozen=True)
 class RemoveExerciseCommand:
-    """Remove exactly one identified exercise from exactly one named day."""
+    """Remove exactly one identified exercise from exactly one named day.
+
+    ``match_sets``/``match_reps`` are optional TARGET SELECTORS, not a
+    prescription: nothing is ever written from them. They narrow the slots the
+    exercise identity already matched to the one whose stored ``set``/``tekrar``
+    equal them exactly, which is what makes one of two historical duplicates
+    ("Walking Lunge 4x15" next to "Walking Lunge 4x12") addressable at all.
+    Without them a name matching twice stays ``AmbiguousExerciseTarget``; with
+    them the result must still be exactly one slot. List position is never an
+    input.
+    """
     day: str
     exercise: str
+    match_sets: Optional[int] = None
+    match_reps: Optional[str] = None
 
 
 @dataclass(frozen=True)

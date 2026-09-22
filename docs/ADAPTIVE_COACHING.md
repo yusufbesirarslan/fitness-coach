@@ -110,7 +110,7 @@ This mirrors the pure/impure split already used by `workout_state`,
 | --- | --- |
 | `ReplaceExerciseCommand` | Replace one named exercise in one named day. Position, rest, notes and unmodelled fields are **inherited** unless `sets`/`reps` are explicitly overridden. |
 | `AddExerciseCommand` | Append one exercise to one named day. `sets` **and** `reps` are required — no invented prescription. Rejected on a rest day. |
-| `RemoveExerciseCommand` | Remove exactly one identified exercise. Rejected if it would empty a training day. |
+| `RemoveExerciseCommand` | Remove exactly one identified exercise. Rejected if it would empty a training day. Optional `match_sets`/`match_reps` are exact **target selectors** (never written): they narrow the identity matches to one of several same-name slots. A bare name matching twice stays `AmbiguousExerciseTarget`; the Coach then stores the candidates' exact prescriptions server-side, asks once ("4x15 or 4x12?"), and completes the stored remove into one normal confirmation. Selector-less removes keep their v1 fingerprint; selector removes hash under `remove-selector/v1`. |
 | `UpdateExercisePrescriptionCommand` | Change `sets` and/or `reps` only. |
 | `MoveTrainingDayCommand` | Exchange two weekday slots' *content*; each entry keeps its own `gun`, so the calendar is never renamed or reordered. |
 

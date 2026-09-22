@@ -22,7 +22,12 @@ import json
 import pytest
 
 from app.extensions import db
-from app.models import PlanMutationRecord, TrainingPlan, WorkoutLog
+from app.models import (
+    PlanMutationRecord,
+    TrainingPlan,
+    TrainingPlanConfirmationProposal,
+    WorkoutLog,
+)
 from app.services import ai_coach, coach_plan_tools
 from app.services.coach_plan_tools import identity, results
 from app.services.plan_mutation import PlanStateConflict
@@ -780,9 +785,18 @@ def test_an_ambiguous_target_is_refused_never_guessed(
     result = call(user.id, REMOVE,
                   {"day": "Pazartesi", "exercise": "Bench Press"})
 
-    assert result["error"] == results.ERROR_AMBIGUOUS_TARGET
+    # Still refused and never guessed. Since the duplicate-remove fix the
+    # refusal is a server-owned question offering the two exact candidates
+    # (answered by selector, never by position) instead of a dead-end error;
+    # the bare target itself is still ``AmbiguousExerciseTarget`` in the
+    # domain (tests/test_coach_duplicate_remove_selector.py).
+    assert result["status"] == results.STATUS_NEEDS_INPUT
+    assert result["reason"] == results.REASON_AMBIGUOUS_EXERCISE
+    assert result["detail"] == "3x8-12, 4x5"
     assert len(day_exercises(user.id)) == 2
     assert journal(user.id) == []
+    assert TrainingPlanConfirmationProposal.query.filter_by(
+        user_id=user.id).count() == 0
 
 
 def test_adding_to_a_rest_day_is_refused(app, planned_user, tools_on, turn):

@@ -88,9 +88,12 @@ _OPERATION_TOOLS = {
     "add_exercise": ADD_EXERCISE_TOOL,
     "replace_exercise": REPLACE_EXERCISE_TOOL,
     "update_exercise_prescription": UPDATE_PRESCRIPTION_TOOL,
+    # Only ever re-issued to finish an AMBIGUOUS_EXERCISE record: the stored
+    # candidate the user picked becomes an exact target selector.
+    "remove_exercise": REMOVE_EXERCISE_TOOL,
 }
 
-#: Every write tool's operation, including the two that have no continuation
+#: Every write tool's operation, including ``move``, which has no continuation
 #: path. Supersession needs them all: a ``remove`` the user just asked for is
 #: still a new intention that a pending ``replace`` must not outlive.
 _TOOL_OPERATIONS = {
@@ -372,6 +375,106 @@ def _is_clarification_acceptance(message):
     return not _exercise_from_text(remainder)
 
 
+#: Ordinal words accepted ONLY as shorthand for "candidate N of the list the
+#: server stored and showed". Never forwarded as a position: the chosen
+#: candidate's exact prescription is what reaches the domain.
+_ORDINALS = {
+    "first": 1, "1st": 1, "birinci": 1, "birincisi": 1, "birinciyi": 1,
+    "ilk": 1, "ilki": 1, "ilkini": 1,
+    "second": 2, "2nd": 2, "ikinci": 2, "ikincisi": 2, "ikinciyi": 2,
+    "ikincisini": 2,
+    "third": 3, "3rd": 3, "üçüncü": 3, "ucuncu": 3, "üçüncüsü": 3,
+    "üçüncüyü": 3,
+}
+
+#: Words that may surround a choice without meaning anything else.
+_CHOICE_FILLER = frozenset({
+    "one", "ones", "remove", "delete", "drop", "take", "out", "from", "i",
+    "mean", "meant", "the", "entry", "slot", "copy", "duplicate",
+    "kaldir", "kaldır", "cikar", "çıkar", "sil", "olan", "olanı", "olani",
+    "tane", "tanesi", "tanesini",
+})
+
+_CHOICE_COMPACT_RX = re.compile(
+    r"\d+\s*[x×]\s*\d+(?:\s*[-–—]\s*\d+)?", re.IGNORECASE)
+_CHOICE_WORD_RX = re.compile(
+    r"\d+(?:\s*[-–—]\s*\d+)?\s*(?:sets?|reps?|tekrar(?:lar)?)\b",
+    re.IGNORECASE)
+
+
+def _is_remove_choice_record(stored):
+    return bool(
+        isinstance(stored, dict)
+        and stored.get("operation") == "remove_exercise"
+        and stored.get("reason") == results.REASON_AMBIGUOUS_EXERCISE
+        and stored.get("candidate_slots"))
+
+
+def _slot_choice(stored, message):
+    """The stored remove candidate this turn picks, or ``None``.
+
+    Resolved ONLY against the candidate list the server stored — never
+    against the plan, never against assistant prose. Two ways to pick, and
+    both must agree when both are present:
+
+    * an exact prescription ("4x15", "the 15 rep one"), which must match
+      exactly one candidate;
+    * an ordinal ("first", "the second one"), UI shorthand for "candidate N
+      of the list you showed me".
+
+    Anything else in the message — a different exercise, a different day —
+    means this is not an answer to the stored question, so the caller treats
+    it as a new request instead of letting it complete this one.
+    """
+    if not _is_remove_choice_record(stored):
+        return None
+    if not isinstance(message, str) or not message.strip():
+        return None
+    candidates = stored.get("candidate_slots") or []
+    explicit = find_explicit_weekday(message)
+    if explicit is not None and explicit != stored.get("day"):
+        return None
+    rx = parse_prescription(message)
+    text = _CHOICE_WORD_RX.sub(" ", _CHOICE_COMPACT_RX.sub(" ", message))
+    name_tokens = {
+        token.casefold()
+        for token in re.findall(
+            r"[A-Za-z0-9çÇğĞıİöÖşŞüÜ+-]+", stored.get("exercise") or "")}
+    ordinals = set()
+    for token in re.findall(r"[A-Za-z0-9çÇğĞıİöÖşŞüÜ+-]+", text):
+        folded = token.casefold()
+        if folded in _ORDINALS:
+            ordinals.add(_ORDINALS[folded])
+        elif (folded in _CHOICE_FILLER or folded in _CUE_WORDS
+              or folded in name_tokens
+              or folded.rstrip("s") in name_tokens
+              or canonicalize_weekday(token) is not None):
+            continue
+        else:
+            return None
+    if len(ordinals) > 1:
+        return None
+    by_ordinal = None
+    if ordinals:
+        position = next(iter(ordinals))
+        if not 1 <= position <= len(candidates):
+            return None
+        by_ordinal = candidates[position - 1]
+    if rx.sets is None and rx.reps is None:
+        return by_ordinal
+    matches = [
+        slot for slot in candidates
+        if (rx.sets is None or slot.get("sets") == rx.sets)
+        and (rx.reps is None
+             or _normalize_bare_reps(slot.get("reps") or "") == rx.reps)
+    ]
+    if len(matches) != 1:
+        return None
+    if by_ordinal is not None and by_ordinal != matches[0]:
+        return None
+    return matches[0]
+
+
 def user_owned_intent(message=None, history=None, user_id=None,
                       stored_record=_STORED_RECORD_UNSET):
     """Exercise / day / prescription grounded for this turn.
@@ -399,6 +502,10 @@ def user_owned_intent(message=None, history=None, user_id=None,
     elif stored and _bare_number_prescription(stored, message) is not None:
         # A record-valid bare prescription value cannot also retarget the
         # mutation, even when lexical exercise extraction returns a false hit.
+        current_name = ""
+    elif stored and _slot_choice(stored, message) is not None:
+        # "the first one" / "the 4x15 one" answers the stored remove question;
+        # its leftover words ("first one") are not an exercise.
         current_name = ""
     rx = current_rx
     name = current_name
@@ -487,6 +594,8 @@ def _is_continuation_reply(message, stored):
     # missing prescription field.  Exercise extraction is only a heuristic and
     # must not retire that record before this semantic check gets a chance.
     if _bare_number_prescription(stored, message) is not None:
+        return True
+    if _slot_choice(stored, message) is not None:
         return True
     leftover = _exercise_from_text(message)
     if leftover:
@@ -698,7 +807,7 @@ def ground_command(user_id, command):
             command, day=day, target_day=target))
 
     if isinstance(command, RemoveExerciseCommand):
-        return Grounding(command=command)
+        return _ground_remove(user_id, command, intent)
 
     return Grounding(command=command)
 
@@ -852,6 +961,104 @@ def _ground_update(user_id, command, intent):
     return Grounding(command=command)
 
 
+#: Detail for duplicates no supported selector can separate. Short: it is
+#: clipped to ``results.MAX_ECHO_CHARS``.
+_INDISTINGUISHABLE_DETAIL = (
+    "Kopyalar set/tekrar olarak da aynı; ayırt edilemez. Tekrar sorma, aracı "
+    "çağırma; planı elle düzenlemesini öner.")
+
+
+def _selectable(slot):
+    sets, reps = slot
+    return (not isinstance(sets, bool) and isinstance(sets, int) and sets > 0
+            and isinstance(reps, str) and bool(reps.strip()))
+
+
+def _ground_remove(user_id, command, intent):
+    """Pick ONE slot for a remove, or ask which — never by position.
+
+    Selector authority, in order:
+
+    1. this turn's answer to the server's own stored remove question — an
+       exact prescription or an ordinal resolved against the stored
+       candidates (``_slot_choice``);
+    2. a prescription in this turn's raw user text ("the 4x15 one");
+    3. the tool's own selectors ONLY when there is no user text at all.
+       With user text, the model's ``sets``/``reps`` are dropped, exactly as
+       ``merge_prescription`` drops a model's add prescription: a model
+       mapping "the first lunge" onto 4x15 from plan context is the
+       positional guess this boundary refuses to accept.
+
+    Candidates come from the domain's own identity rule. With at most one
+    identity match the selectors are dropped and the domain answers exactly
+    as it did before selectors existed; a remove only needs a selector when
+    the name alone is ambiguous.
+    """
+    record = intent.get("stored")
+    if not (_is_remove_choice_record(record) and request_matches_record(
+            record, "remove_exercise", command.exercise)):
+        record = None
+    sets = reps = None
+    if intent["has_user_text"]:
+        choice = _slot_choice(record, intent["message"]) if record else None
+        if choice is not None:
+            sets, reps = choice["sets"], choice["reps"]
+        else:
+            rx = parse_prescription(intent["message"])
+            sets = rx.sets
+            reps = str(rx.reps) if rx.reps is not None else None
+    else:
+        sets, reps = command.match_sets, command.match_reps
+    bare = replace(command, match_sets=None, match_reps=None)
+
+    from .proposals import remove_candidates
+    slots = remove_candidates(user_id, command)
+    if not slots or len(slots) == 1:
+        return Grounding(command=bare)
+    if (not all(_selectable(slot) for slot in slots)
+            or len(set(slots)) != len(slots)):
+        # Same identity AND same prescription: nothing this contract can
+        # express tells them apart. One clear refusal, nothing stored — a
+        # stored question here could only loop.
+        clarifications.clear(user_id, reason="nonrememberable_state")
+        return Grounding(result=results.error_result(
+            results.ERROR_AMBIGUOUS_TARGET, _INDISTINGUISHABLE_DETAIL))
+    if sets is not None or reps is not None:
+        matches = [
+            slot for slot in slots
+            if (sets is None or slot[0] == sets)
+            and (reps is None or _normalize_bare_reps(slot[1]) == reps)
+        ]
+        if len(matches) == 1:
+            # The full stored prescription of the one matching slot: "4x15"
+            # and "the 15 rep one" are the same target and must be the same
+            # command (and fingerprint).
+            match_sets, match_reps = matches[0]
+            return Grounding(command=replace(
+                bare, match_sets=match_sets, match_reps=match_reps))
+    return _needs_remove_choice(user_id, bare, slots)
+
+
+def _needs_remove_choice(user_id, command, slots):
+    """Store the candidates of an ambiguous remove and ask which one."""
+    operation = command_type(command)
+    remembered = clarifications.remember(user_id, {
+        "operation": operation,
+        "request_id": request_id(operation, command.exercise),
+        "day": command.day,
+        "exercise": command.exercise,
+        "candidate_slots": [
+            {"sets": sets, "reps": reps} for sets, reps in slots],
+        "reason": results.REASON_AMBIGUOUS_EXERCISE,
+    })
+    return Grounding(
+        result=results.needs_input_result(
+            results.REASON_AMBIGUOUS_EXERCISE, command,
+            candidates=[f"{sets}x{reps}" for sets, reps in slots]),
+        clarification=remembered,
+    )
+
+
 def _canonicalize_command_days(command):
     if hasattr(command, "day"):
         canonical = canonicalize_weekday(command.day)
@@ -984,6 +1191,8 @@ def followup_mutation(user_id=None):
         day = explicit
     if not day:
         return None
+    if stored.get("operation") == "remove_exercise":
+        return _followup_remove(stored, message, day)
     exercise = intent["exercise"] or stored.get("exercise") or ""
     if stored.get("suggestion") and _is_clarification_acceptance(message):
         exercise = stored.get("suggestion") or exercise
@@ -1035,6 +1244,35 @@ def followup_mutation(user_id=None):
     # silent here would hand the turn back to the model, which is how the
     # already-grounded "4 sets" was lost in the first place.
     return tool, arguments
+
+
+def _followup_remove(stored, message, day):
+    """Re-issue the stored remove with the user's choice as a selector.
+
+    The exercise is the STORED one — the reply "the first one" names no
+    exercise. A prescription that matches no candidate is still re-issued:
+    grounding then re-asks with the same stored candidates instead of the
+    turn silently falling back to the model.
+    """
+    if not _is_remove_choice_record(stored):
+        return None
+    exercise = stored.get("exercise") or ""
+    if not exercise:
+        return None
+    arguments = {"day": day, "exercise": exercise}
+    choice = _slot_choice(stored, message)
+    if choice is not None:
+        arguments["sets"] = choice["sets"]
+        arguments["reps"] = choice["reps"]
+        return REMOVE_EXERCISE_TOOL, arguments
+    rx = parse_prescription(message)
+    if rx.sets is None and rx.reps is None:
+        return None
+    if rx.sets is not None:
+        arguments["sets"] = rx.sets
+    if rx.reps is not None:
+        arguments["reps"] = str(rx.reps)
+    return REMOVE_EXERCISE_TOOL, arguments
 
 
 def invalid_candidate_result(user_id=None):

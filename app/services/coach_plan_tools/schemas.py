@@ -107,9 +107,12 @@ _REPS_PROPERTY = {
 #: * ``sets``/``reps`` on add, because grounding stores the half the user
 #:   already gave and asks for the other half.
 #:
-#: ``remove`` and ``move`` ground nothing: neither has a continuation path
-#: (``grounding._OPERATION_TOOLS`` cannot re-issue them), so a stored
-#: clarification for one could never be completed. ``exercise``,
+#: ``remove`` and ``move`` ground no REQUIRED property. ``remove`` does have a
+#: continuation, but only for its optional target selectors (``sets``/``reps``
+#: on remove pick one of several identical-name slots; grounding asks with the
+#: stored candidates), which the model is never required to send, so nothing
+#: here changes what the model must supply. ``move`` has no continuation path
+#: at all. ``exercise``,
 #: ``replacement`` and ``target_day`` are never groundable — a target nobody
 #: named is the one thing this boundary exists to refuse.
 SERVER_GROUNDABLE = {
@@ -195,7 +198,25 @@ PLAN_MUTATION_TOOL_DEFS = (
             "type": "object",
             "properties": {
                 "day": _DAY_PROPERTY,
-                "exercise": _TARGET_EXERCISE_PROPERTY,
+                "exercise": dict(
+                    _TARGET_EXERCISE_PROPERTY,
+                    description=(
+                        "O gündeki hedef egzersizin adı. Aynı gün içinde "
+                        "birden çok kez geçiyorsa aracı YİNE DE çağır; "
+                        "hangisinin kastedildiğini sunucu kullanıcıya "
+                        "sorar. Sıra/konum ile seçme.")),
+                "sets": dict(
+                    _SETS_PROPERTY,
+                    description=(
+                        "YALNIZCA hedefi seçmek için: kaldırılacak girdinin "
+                        "plandaki mevcut set sayısı, kullanıcı bunu söylediyse. "
+                        "Yeni bir değer yazmaz.")),
+                "reps": dict(
+                    _REPS_PROPERTY,
+                    description=(
+                        "YALNIZCA hedefi seçmek için: kaldırılacak girdinin "
+                        "plandaki mevcut tekrar reçetesi, kullanıcı bunu "
+                        "söylediyse. Yeni bir değer yazmaz.")),
             },
             "required": _model_required(
                 REMOVE_EXERCISE_TOOL, "day", "exercise"),

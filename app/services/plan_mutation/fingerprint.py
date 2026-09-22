@@ -44,6 +44,16 @@ from .commands import (
 #: than silently redefining what an existing stored digest meant.
 FINGERPRINT_DOMAIN = "axisai/training-plan-mutation/v1"
 
+#: The representation of a ``remove_exercise`` that carries target selectors.
+#: Selectors are new participating fields, so by the rule above they get their
+#: own version rather than a v1 payload that quietly means more than it did.
+#: A remove WITHOUT selectors still hashes the exact v1 payload, so every
+#: digest already stored in the journal or on a pending proposal keeps its
+#: replay/conflict meaning; a selector remove can never collide with one,
+#: because the domain string differs.
+REMOVE_SELECTOR_FINGERPRINT_DOMAIN = (
+    "axisai/training-plan-mutation/remove-selector/v1")
+
 #: Stable command identities. Persisted, so they are part of the audit contract
 #: and never derived from a class name that a refactor could rename.
 COMMAND_TYPES = {
@@ -113,6 +123,13 @@ def _semantic_payload(command):
             "day": _label(command.day),
             "exercise": _target(command.exercise),
         }
+        if command.match_sets is not None or command.match_reps is not None:
+            return {
+                "domain": REMOVE_SELECTOR_FINGERPRINT_DOMAIN, "kind": kind,
+                **body,
+                "match_sets": _sets(command.match_sets),
+                "match_reps": _label(command.match_reps),
+            }
     elif isinstance(command, UpdateExercisePrescriptionCommand):
         body = {
             "day": _label(command.day),

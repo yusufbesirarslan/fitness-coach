@@ -14,7 +14,11 @@ from app.services.plan_mutation import (
     ReplaceExerciseCommand,
     UpdateExercisePrescriptionCommand,
 )
-from app.services.plan_mutation.document import apply_command, parse_plan_document
+from app.services.plan_mutation.document import (
+    apply_command,
+    parse_plan_document,
+    remove_target_slots,
+)
 from app.services.plan_mutation.fingerprint import (
     UNDO_COMMAND_TYPE,
     command_type,
@@ -49,9 +53,14 @@ def encode_command(command):
             "reps": command.reps,
         }, semantic_fingerprint(command)
     if isinstance(command, RemoveExerciseCommand):
-        return kind, {
-            "day": command.day, "exercise": command.exercise,
-        }, semantic_fingerprint(command)
+        # Selectors only when present, so a selector-less remove stores the
+        # exact payload it always did.
+        payload = {"day": command.day, "exercise": command.exercise}
+        if command.match_sets is not None:
+            payload["match_sets"] = command.match_sets
+        if command.match_reps is not None:
+            payload["match_reps"] = command.match_reps
+        return kind, payload, semantic_fingerprint(command)
     if isinstance(command, UpdateExercisePrescriptionCommand):
         payload = {"day": command.day, "exercise": command.exercise}
         if command.sets is not None:
@@ -88,7 +97,11 @@ def decode_command(command_type_name, payload):
         )
     if command_type_name == "remove_exercise":
         return RemoveExerciseCommand(
-            day=payload["day"], exercise=payload["exercise"])
+            day=payload["day"],
+            exercise=payload["exercise"],
+            match_sets=payload.get("match_sets"),
+            match_reps=payload.get("match_reps"),
+        )
     if command_type_name == "update_exercise_prescription":
         return UpdateExercisePrescriptionCommand(
             day=payload["day"],
@@ -117,6 +130,27 @@ def preview_command(user_id, command):
     document, _program = parse_plan_document(plan.plan_data)
     _new_document, changed = apply_command(document, command)
     return plan, document, changed
+
+
+def remove_candidates(user_id, command):
+    """``(sets, reps)`` of every slot ``command``'s remove target matches.
+
+    Read-only, answered by the domain's own identity rule on the active plan,
+    so the candidates a clarification offers are exactly the slots the
+    mutation would consider. ``None`` when there is no plan or the domain
+    refuses the target outright (unknown day, unusable document) — the caller
+    then lets the ordinary domain call produce its ordinary error.
+    """
+    from app.services.plan_mutation import PlanMutationError
+
+    plan = get_active_plan(user_id)
+    if plan is None:
+        return None
+    try:
+        document, _program = parse_plan_document(plan.plan_data)
+        return remove_target_slots(document, command.day, command.exercise)
+    except PlanMutationError:
+        return None
 
 
 @dataclass(frozen=True)
