@@ -31,6 +31,7 @@ from app.services.coach_plan_tools.grounding import (
     matches_boundary_record,
     recover_no_tool_partial_add,
 )
+from app.services.coach_plan_tools.schemas import REMOVE_EXERCISE_TOOL
 from app.services.coach_plan_tools.weekdays import (
     localize_weekday,
     localize_weekday_text,
@@ -496,7 +497,9 @@ def _format_plan_proposal(pending, language):
         return t(
             "coach.confirm.propose_plan_remove",
             locale=language,
-            exercise=payload.get("exercise") or "",
+            exercise=results.remove_target_label(
+                payload.get("exercise") or "",
+                payload.get("match_sets"), payload.get("match_reps")),
             day=day,
         )
     if kind == "replace_exercise":
@@ -525,7 +528,9 @@ def _format_plan_applied(result, language):
         return t(
             "coach.confirm.plan_remove",
             locale=language,
-            exercise=change.get("exercise") or "",
+            exercise=results.remove_target_label(
+                change.get("exercise") or "",
+                change.get("match_sets"), change.get("match_reps")),
             day=day,
         )
     if operation == "replace_exercise":
@@ -579,7 +584,33 @@ def _complete_grounded_followup(user_id, language):
         return _format_plan_applied(result, language)
     if result.get("status") == results.STATUS_NEEDS_INPUT:
         return _format_plan_clarification(result, language, user_id)
+    if (tool == REMOVE_EXERCISE_TOOL
+            and result.get("status") == results.STATUS_CONFIRMATION_REQUIRED):
+        # A completed remove choice always stages a proposal. Its copy is
+        # the durable row's, not the model's: handing this turn back to the
+        # provider is how a finished clarification turned into another
+        # question. Remove only: other operations' continuations that stage
+        # a proposal still hand the turn back exactly as before.
+        return canonical_pending_prompt(user_id, language)
     return None
+
+
+def _remove_candidates_hold(user_id, payload):
+    """Whether the candidates about to be shown are the STORED ones.
+
+    Same rule as ``_authority_holds``: the question may only offer the
+    choices a later answer will actually be resolved against.
+    """
+    try:
+        stored = clar_mod.load(user_id)
+    except clar_mod.ClarificationAuthorityUnavailable:
+        return False
+    if not stored or stored.get("operation") != "remove_exercise":
+        return False
+    shown = ", ".join(
+        f"{slot.get('sets')}x{slot.get('reps')}"
+        for slot in stored.get("candidate_slots") or ())
+    return bool(shown) and shown == (payload.get("detail") or "")
 
 
 def _authority_holds(user_id, field, claimed):
@@ -663,6 +694,16 @@ def _format_plan_clarification(payload, language, user_id):
             "coach.plan.workout_ambiguous",
             locale=language,
             candidates=", ".join(candidates),
+        )
+    if reason == results.REASON_AMBIGUOUS_EXERCISE:
+        if not _remove_candidates_hold(user_id, payload):
+            return t("coach.plan.clarification_unavailable", locale=language)
+        return t(
+            "coach.plan.remove_ambiguous",
+            locale=language,
+            exercise=exercise,
+            day=day,
+            candidates=payload.get("detail") or "",
         )
     if reason == "workout_not_found":
         return t("coach.plan.workout_unknown", locale=language)

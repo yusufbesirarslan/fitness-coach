@@ -7,7 +7,7 @@ is written on the assumption that the provider will not honour the JSON schema
 What it refuses, and why each one matters:
 
 * **an unknown property** — silently dropping ``{"day": "Cuma", "sets": 4}`` on
-  a remove call would execute a *different* request than the model expressed,
+  a move call would execute a *different* request than the model expressed,
   and neither the user nor the model would learn that (brief §38);
 * **a missing required property** — no defaulting. The generator fills gaps in
   LLM output because a slightly-wrong plan beats no plan; a mutation that
@@ -74,7 +74,9 @@ TOOL_ARGUMENTS = {
     REPLACE_EXERCISE_TOOL: (("day", "exercise", "replacement"),
                             ("sets", "reps")),
     ADD_EXERCISE_TOOL: (("day", "exercise", "sets", "reps"), ()),
-    REMOVE_EXERCISE_TOOL: (("day", "exercise"), ()),
+    # ``sets``/``reps`` on remove are target selectors: mapped onto
+    # ``match_sets``/``match_reps`` below, never onto a prescription.
+    REMOVE_EXERCISE_TOOL: (("day", "exercise"), ("sets", "reps")),
     UPDATE_PRESCRIPTION_TOOL: (("day", "exercise"), ("sets", "reps")),
     MOVE_DAY_TOOL: (("day", "target_day"), ()),
 }
@@ -215,7 +217,11 @@ def build_command(name, arguments):
         )
     if name == REMOVE_EXERCISE_TOOL:
         return RemoveExerciseCommand(
-            day=fields["day"], exercise=fields["exercise"])
+            day=fields["day"],
+            exercise=fields["exercise"],
+            match_sets=fields.get("sets"),
+            match_reps=fields.get("reps"),
+        )
     if name == UPDATE_PRESCRIPTION_TOOL:
         if "sets" not in fields and "reps" not in fields:
             # The domain refuses this too. Refusing here as well means the

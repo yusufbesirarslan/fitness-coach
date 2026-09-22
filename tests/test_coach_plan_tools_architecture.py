@@ -480,7 +480,9 @@ def test_the_result_shape_is_a_closed_set_of_keys():
 
     # Dict literals in these modules are results and the change projection; the
     # change projection's own keys are command fields, which are user intent.
+    # ``match_sets``/``match_reps`` are RemoveExerciseCommand's target
+    # selectors — which of two same-name slots the user chose.
     command_fields = {"day", "target_day", "exercise", "replacement",
-                      "sets", "reps"}
+                      "sets", "reps", "match_sets", "match_reps"}
     assert literal_keys <= allowed | command_fields, sorted(
         literal_keys - allowed - command_fields)

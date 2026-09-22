@@ -251,7 +251,15 @@ def _change_of(command):
         return {"day": _clip(command.day), "exercise": _clip(command.exercise),
                 "sets": command.sets, "reps": _clip(command.reps)}
     if isinstance(command, RemoveExerciseCommand):
-        return {"day": _clip(command.day), "exercise": _clip(command.exercise)}
+        change = {"day": _clip(command.day),
+                  "exercise": _clip(command.exercise)}
+        # The selectors say WHICH slot, so a user confirming a removal can see
+        # they are confirming the right one. Only when supplied.
+        if command.match_sets is not None:
+            change["match_sets"] = command.match_sets
+        if command.match_reps is not None:
+            change["match_reps"] = _clip(command.match_reps)
+        return change
     if isinstance(command, UpdateExercisePrescriptionCommand):
         change = {"day": _clip(command.day),
                   "exercise": _clip(command.exercise)}
@@ -264,6 +272,26 @@ def _change_of(command):
         return {"day": _clip(command.day),
                 "target_day": _clip(command.target_day)}
     return {}
+
+
+def remove_target_label(exercise, match_sets=None, match_reps=None):
+    """"Walking Lunge (4x15)" — the removed slot as the user knows it.
+
+    Built from the command's own selectors, never read back from the plan.
+    A bare remove is just the name, exactly as before.
+    """
+    if match_sets is not None and match_reps is not None:
+        return f"{exercise} ({match_sets}x{match_reps})"
+    if match_sets is not None:
+        return f"{exercise} ({match_sets} set)"
+    if match_reps is not None:
+        return f"{exercise} ({match_reps})"
+    return exercise
+
+
+def _remove_label(command):
+    return remove_target_label(
+        command.exercise, command.match_sets, command.match_reps)
 
 
 def _summary_of(command, applied):
@@ -290,7 +318,7 @@ def _summary_of(command, applied):
         return (f"{command.day} gününe {command.exercise} eklendi "
                 f"({command.sets}x{command.reps}).")
     if isinstance(command, RemoveExerciseCommand):
-        return f"{command.day} gününden {command.exercise} çıkarıldı."
+        return f"{command.day} gününden {_remove_label(command)} çıkarıldı."
     if isinstance(command, UpdateExercisePrescriptionCommand):
         parts = []
         if command.sets is not None:
@@ -367,6 +395,10 @@ REASON_EXERCISE_UNKNOWN = "exercise_unknown"
 REASON_EXERCISE_SUGGEST = "exercise_suggest"
 REASON_AMBIGUOUS_WORKOUT = "ambiguous_workout"
 REASON_WORKOUT_NOT_FOUND = "workout_not_found"
+#: A remove whose exercise name matches several slots of one day. The server
+#: stores the candidates' exact prescriptions and asks which one; the answer
+#: comes back as an exact selector, never as a position.
+REASON_AMBIGUOUS_EXERCISE = "ambiguous_exercise"
 
 #: Model-facing recovery for a grounded clarification. Plan is unchanged.
 _INPUT_SUMMARIES = {
@@ -391,6 +423,11 @@ _INPUT_SUMMARIES = {
     REASON_WORKOUT_NOT_FOUND: (
         "İstenen antrenman aktif planda yok. Kullanıcıya hangi günü "
         "kastettiğini sor. Bir gün uydurma."),
+    REASON_AMBIGUOUS_EXERCISE: (
+        "Bu egzersiz o günde birden fazla kez var; seçenekler detail'de "
+        "(set x tekrar). Hangisinin kaldırılacağını kullanıcıya SOR. Sıradaki "
+        "ilkini seçme, tahmin etme, aracı tekrar çağırma — kullanıcının "
+        "cevabını sunucu tamamlar."),
 }
 
 _INPUT_NOTE = (
@@ -439,7 +476,8 @@ def _pending_summary_of(command):
         return (f"{command.day} gününe {command.exercise} eklenecek "
                 f"({command.sets}x{command.reps}).")
     if isinstance(command, RemoveExerciseCommand):
-        return f"{command.day} gününden {command.exercise} çıkarılacak."
+        return (f"{command.day} gününden {_remove_label(command)} "
+                f"çıkarılacak.")
     if isinstance(command, UpdateExercisePrescriptionCommand):
         parts = []
         if command.sets is not None:

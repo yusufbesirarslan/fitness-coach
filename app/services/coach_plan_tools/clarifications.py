@@ -44,6 +44,7 @@ _MISSING_FIELDS = {
     "missing_reps": "reps",
     "exercise_suggest": "exercise",
     "ambiguous_workout": "day",
+    "ambiguous_exercise": "target",
 }
 
 _SAFE_ID = re.compile(r"\A[A-Za-z0-9_-]{1,64}\Z")
@@ -84,7 +85,12 @@ _REMEMBERABLE = frozenset({
     "missing_reps",
     "exercise_suggest",
     "ambiguous_workout",
+    "ambiguous_exercise",
 })
+
+#: Upper bound on stored remove candidates. A day holding more copies of one
+#: exercise than this is not a disambiguation the Coach should be offering.
+_MAX_CANDIDATE_SLOTS = 6
 
 _OPERATIONS = frozenset({
     "add_exercise",
@@ -122,6 +128,10 @@ def remember(user_id, payload):
         "proposed_sets": _as_int(payload.get("proposed_sets")),
         "proposed_reps": _as_text(payload.get("proposed_reps")),
         "candidate_days": _as_days(payload.get("candidate_days")),
+        # The exact prescriptions of the slots an ambiguous REMOVE matched, in
+        # plan order. Server-derived from the plan, never from the model; the
+        # user's answer is resolved against THIS list into an exact selector.
+        "candidate_slots": _as_slots(payload.get("candidate_slots")),
         "reason": reason,
         "created_at": time.time(),
     }
@@ -654,6 +664,30 @@ def _as_text(value):
         return None
     text = str(value).strip()
     return text or None
+
+
+def _as_slots(value):
+    """Closed ``[{"sets": int, "reps": str}, ...]`` or ``[]``.
+
+    Any malformed element voids the whole list rather than being dropped: a
+    partially kept list would silently renumber the candidates a stored
+    "first"/"second" answer is resolved against.
+    """
+    if not isinstance(value, (list, tuple)) or not value:
+        return []
+    if len(value) > _MAX_CANDIDATE_SLOTS:
+        return []
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            return []
+        sets = item.get("sets")
+        reps = item.get("reps")
+        if (isinstance(sets, bool) or not isinstance(sets, int) or sets <= 0
+                or not isinstance(reps, str) or not reps.strip()):
+            return []
+        out.append({"sets": sets, "reps": reps.strip()})
+    return out
 
 
 def _as_days(value):
