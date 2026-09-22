@@ -2,20 +2,27 @@
 <html lang="{{ locale }}">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ t('error.404_title') }}</title>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400&display=swap" rel="stylesheet">
+    {#- F-40: the numeral sits on the product's display scale (--text-display-lg,
+        clamp(38px, 6vw, 52px)) instead of a 120px poster. This standalone
+        document does not load tokens.css, so the scale values are restated. #}
     <style nonce="{{ csp_nonce }}">
-        body { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; background: #0a0a0a; color: #f0f0f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; }
-        h1 { font-family: 'Bebas Neue'; font-size: 120px; color: #3D8BFF; letter-spacing: 8px; line-height: 1; }
-        p { color: #888; font-size: 16px; margin: 12px 0 24px; font-weight: 300; }
-        a { color: #3D8BFF; text-decoration: none; font-size: 14px; border-bottom: 1px solid #3D8BFF; padding-bottom: 2px; }
+        *, *::before, *::after { box-sizing: border-box; }
+        body { margin: 0; padding: 24px 16px; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; background: #0a0a0a; color: #f0f0f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; text-align: center; }
+        main { max-width: 440px; }
+        h1 { margin: 0; font-family: 'Bebas Neue', system-ui, sans-serif; font-weight: 400; font-size: clamp(38px, 6vw, 52px); color: #3D8BFF; letter-spacing: 2px; line-height: 1; }
+        p { color: #888; font-size: 16px; line-height: 1.5; margin: 12px 0 20px; font-weight: 300; overflow-wrap: anywhere; }
+        a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; color: #3D8BFF; text-decoration: underline; text-underline-offset: 4px; font-size: 14px; border-radius: 8px; }
+        a:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
     </style>
 </head>
 <body>
-    <div>
+    <main>
         <h1>404</h1>
         <p>{{ t('error.404_body') }}</p>
         <a href="/">{{ t('error.back_home') }}</a>
-    </div>
+    </main>
 </body>
 </html>
