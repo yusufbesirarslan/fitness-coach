@@ -13,10 +13,12 @@ from urllib.parse import urlsplit
 import pytest
 from playwright.sync_api import sync_playwright, expect
 
+from datetime import datetime, timedelta
+
 from app.extensions import db
-from app.models import User
+from app.models import User, WorkoutSession
 from test_sprint14_workout_execution_contract import (
-    SQUAT, BENCH, checkpoint_over_http, proof_accepted, row_for,
+    SQUAT, BENCH, ROW, checkpoint_over_http, proof_accepted, row_for,
     save_workout_plan, sessions_on, start_session_over_http,
 )
 
@@ -532,6 +534,11 @@ def _complete_current(page, body):
     return json.loads(completed.value.request.post_data)['checkpoint']
 
 
+def _clock_seconds(text):
+    minutes, seconds = text.split(':')
+    return int(minutes) * 60 + int(seconds)
+
+
 def _surface_metrics(page):
     return page.evaluate('''() => {
       const heading = document.getElementById('aw-active-set');
@@ -647,6 +654,159 @@ def test_one_tap_set_progression_prefills_advances_and_survives_refresh(
     finish.click()
     expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
     assert not any(path == '/workout/complete' for path, _, _ in traffic)
+
+
+def _seed_prior_session(user_id, public_id, exercise_id, sets, completed_at):
+    db.session.add(WorkoutSession(
+        public_id=public_id,
+        user_id=user_id,
+        status="completed",
+        workout_date="2020-01-02",
+        weekday_slot="Pazartesi",
+        source="scheduled",
+        completed_at=completed_at,
+        checkpoint_revision=1,
+        checkpoint_data=json.dumps({
+            "current_exercise_index": 0,
+            "elapsed_seconds": 40,
+            "exercises": [{"exercise_id": exercise_id, "sets": sets}],
+        }),
+    ))
+
+
+def test_smart_defaults_and_rest_flow_mobile(
+    app, auth_user, client, sessions_on, training_page,
+):
+    _seed_progression_plan(app, auth_user.id)
+    now = datetime.utcnow()
+    with app.app_context():
+        _seed_prior_session(auth_user.id, "prior-squat", SQUAT, [
+            {"index": 0, "completed": True, "reps": 8, "weight_kg": 60},
+            {"index": 1, "completed": True, "reps": 5, "weight_kg": 80},
+        ], now)
+        _seed_prior_session(auth_user.id, "prior-bench", BENCH, [
+            {"index": 0, "completed": True, "reps": 12, "weight_kg": None},
+        ], now - timedelta(days=1))
+        _seed_prior_session(auth_user.id, "prior-row", ROW, [
+            {"index": 0, "completed": True, "reps": 3, "weight_kg": 100},
+        ], now)
+        db.session.commit()
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, traffic, _, _ = training_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    body = _open_session(page)
+
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    page.reload()
+    body = _open_session(page, navigate=False)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+
+    body.locator('.aw-current [data-field="weight"]').fill('62.5')
+    body.locator('.aw-current [data-field="reps"]').fill('7')
+    sent = _complete_current(page, body)
+    assert sent['exercises'][0]['sets'][0] == {
+        'index': 0, 'completed': True, 'reps': 7, 'weight_kg': 62.5}
+    assert sent['exercises'][0]['sets'][1] == {
+        'index': 1, 'completed': False, 'reps': 7, 'weight_kg': 62.5}
+    assert sent['exercises'][0]['sets'][2]['reps'] is None
+    assert sent['exercises'][0]['sets'][2]['weight_kg'] is None
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('62.5')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('7')
+    expect(page.locator('#aw-rest')).to_be_visible()
+    expect(page.locator('#aw-rest-clock')).to_have_text(re.compile(r'^01:(?:30|29)$'))
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'62\.5 kg × 7'))
+    page.locator('[data-rest-action="add"]').click()
+    extended = page.locator('#aw-rest-clock').inner_text()
+    assert _clock_seconds(extended) >= 110
+    body.locator('.aw-current [data-field="weight"]').fill('65')
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'65 kg × 7'))
+    assert _clock_seconds(page.locator('#aw-rest-clock').inner_text()) >= 100
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    page.locator('[data-rest-action="skip"]').click()
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('.set-row[data-ex="0"][data-set="1"]')).to_have_attribute(
+        'data-set-state', 'active')
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+    ):
+        body.locator('.set-row[data-ex="0"][data-set="0"] [data-set-action="edit"]').click()
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '0')
+    body.locator('.aw-current [data-field="weight"]').fill('55')
+    _complete_current(page, body)
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('65')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('7')
+
+    _complete_current(page, body)
+    expect(page.locator('#aw-rest')).to_be_visible()
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    page.evaluate('''() => {
+      const now = Date.now;
+      const ahead = now() + 120000;
+      Date.now = () => ahead;
+      document.dispatchEvent(new Event('visibilitychange'));
+      Date.now = now;
+    }''')
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    expect(body.locator('.set-row[data-ex="0"][data-set="2"]')).to_have_attribute(
+        'data-set-state', 'active')
+
+    _complete_current(page, body)
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '1')
+    expect(body.locator('.aw-active-name')).to_have_text('Bench')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('12')
+    metrics = _surface_metrics(page)
+    assert metrics['overflow'] is False
+    assert metrics['inView'] is True
+
+    body.locator('.aw-current [data-field="weight"]').fill('40')
+    _complete_current(page, body)
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-all-done')).to_be_visible()
+    finish = page.locator('[data-action="finishSession"]')
+    expect(finish).to_have_class(re.compile(r'\bbtn-volt\b'))
+    expect(page.locator('#plan-completion')).not_to_have_class(re.compile(r'\bopen\b'))
+    finish.click()
+    expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
+    assert not any(path == '/workout/complete' for path, _, _ in traffic)
+
+
+def test_smart_defaults_and_rest_flow_desktop(
+    app, auth_user, client, sessions_on, training_page,
+):
+    _seed_progression_plan(app, auth_user.id)
+    with app.app_context():
+        _seed_prior_session(auth_user.id, "prior-squat-desktop", SQUAT, [
+            {"index": 0, "completed": True, "reps": 8, "weight_kg": 60},
+        ], datetime.utcnow())
+        db.session.commit()
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, _, _, _ = training_page
+    page.set_viewport_size({'width': 1366, 'height': 900})
+    body = _open_session(page)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    _complete_current(page, body)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    expect(page.locator('#aw-rest-clock')).to_have_text(re.compile(r'^01:(?:30|29)$'))
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'60 kg × 8'))
+    page.locator('[data-rest-action="skip"]').click()
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    metrics = _surface_metrics(page)
+    assert metrics['overflow'] is False
+    assert metrics['inView'] is True
+    assert metrics['inputFocused'] is False
 
 
 def test_one_tap_set_progression_desktop_smoke(

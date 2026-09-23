@@ -7,6 +7,14 @@ const {
   selectWorkoutDraft,
   deriveActiveWorkout,
   prepareNextSet,
+  historicalEntry,
+  presentFirstSet,
+  adoptHistoricalDefault,
+  deriveRestDurationMs,
+  shouldStartRest,
+  remainingRestMs,
+  extendRestDeadline,
+  formatRestClock,
 } = require('../../static/workout_draft.js');
 
 const day = {
@@ -430,4 +438,93 @@ test('confirmed prescription reps survive checkpoint refresh; untouched fallback
   resumedSets[1].repsExplicit = true;
   assert.equal(prepareNextSet(resumed.exercises[0], 1), true);
   assert.deepEqual([resumedSets[2].weightKg, resumedSets[2].reps], [60, 8]);
+});
+
+const history = {
+  pulldown: { weight_kg: 60, reps: 8 },
+  pullup: { weight_kg: null, reps: 12 },
+};
+
+test('historical first-set default is presented and stays out of the checkpoint', () => {
+  const draft = progressionDraft();
+  const entry = historicalEntry(history, 'pulldown');
+  const set = draft.exercises[0].sets[0];
+  assert.deepEqual(presentFirstSet(set, entry), { weightKg: 60, reps: 8 });
+  assert.notEqual(set.repsExplicit, true);
+  assert.equal(set.weightKg, null);
+  const snapshot = buildCheckpointSnapshot(draft, 0);
+  assert.equal(snapshot.exercises[0].sets[0].reps, null);
+  assert.equal(snapshot.exercises[0].sets[0].weight_kg, null);
+  assert.equal(historicalEntry(history, 'row'), null);
+  assert.deepEqual(presentFirstSet(draft.exercises[1].sets[0], null), {
+    weightKg: null, reps: 10,
+  });
+  assert.deepEqual(presentFirstSet(draft.exercises[0].sets[1], entry), {
+    weightKg: null, reps: 12,
+  });
+});
+
+test('current first-set values beat history, then the live set feeds the next set', () => {
+  const draft = progressionDraft();
+  const entry = historicalEntry(history, 'pulldown');
+  const sets = draft.exercises[0].sets;
+  sets[0].weightKg = 62.5;
+  sets[0].reps = 7;
+  sets[0].repsExplicit = true;
+  assert.deepEqual(presentFirstSet(sets[0], entry), { weightKg: 62.5, reps: 7 });
+  assert.equal(adoptHistoricalDefault(sets[0], entry), false);
+
+  const seeded = progressionDraft();
+  const first = seeded.exercises[0].sets[0];
+  assert.equal(adoptHistoricalDefault(first, entry), true);
+  first.weightKg = 62.5;
+  first.reps = 7;
+  first.repsExplicit = true;
+  first.done = true;
+  assert.equal(prepareNextSet(seeded.exercises[0], 0), true);
+  assert.deepEqual(
+    [seeded.exercises[0].sets[1].weightKg, seeded.exercises[0].sets[1].reps],
+    [62.5, 7],
+  );
+  assert.equal(seeded.exercises[1].sets[0].weightKg, null);
+  assert.equal(seeded.exercises[1].sets[0].reps, 10);
+});
+
+test('null historical weight is not turned into 0 kg', () => {
+  const entry = historicalEntry(history, 'pullup');
+  assert.deepEqual(entry, { reps: 12, weightKg: null });
+  const draft = progressionDraft();
+  const set = draft.exercises[0].sets[0];
+  assert.equal(presentFirstSet(set, entry).weightKg, null);
+  assert.equal(presentFirstSet(set, entry).reps, 12);
+  adoptHistoricalDefault(set, entry);
+  set.done = true;
+  const snapshot = buildCheckpointSnapshot(draft, 0);
+  assert.equal(snapshot.exercises[0].sets[0].weight_kg, null);
+  assert.equal(snapshot.exercises[0].sets[0].reps, 12);
+});
+
+test('rest starts only for forward same-exercise completion and uses the deadline', () => {
+  const draft = progressionDraft();
+  const exercise = draft.exercises[0];
+  assert.equal(deriveRestDurationMs('90 sn'), 90000);
+  assert.equal(deriveRestDurationMs('2 dk'), 120000);
+  assert.equal(deriveRestDurationMs('0'), 0);
+  assert.equal(deriveRestDurationMs('90s'), null);
+  assert.equal(shouldStartRest(exercise, 0), true);
+  assert.equal(shouldStartRest(exercise, 2), false);
+  exercise.sets[2].done = true;
+  assert.equal(shouldStartRest(exercise, 0), false);
+  exercise.sets[2].done = false;
+  exercise.sets[0].reopened = true;
+  assert.equal(shouldStartRest(exercise, 0), false);
+  assert.equal(shouldStartRest(draft.exercises[1], 0), false);
+
+  const endsAt = 1_000_000;
+  assert.equal(remainingRestMs(endsAt, endsAt - 5000), 5000);
+  assert.equal(remainingRestMs(endsAt, endsAt + 20000), 0);
+  assert.equal(extendRestDeadline(endsAt, endsAt - 5000, 30000), endsAt + 30000);
+  assert.equal(extendRestDeadline(endsAt, endsAt + 1, 30000), null);
+  assert.equal(formatRestClock(90000), '01:30');
+  assert.equal(exercise.dinlenme, '90 sn');
 });

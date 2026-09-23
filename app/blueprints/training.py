@@ -82,6 +82,7 @@ from app.services.workout_session import (
     resume_session,
     start_session,
 )
+from app.services.workout_session.prior_performance import load_prior_performance
 from app.services.workout_state import resolve_workout_state
 from app.services.workout_state.snapshot import coherent_read_snapshot
 from app.services.workout_state.serialization import (
@@ -635,6 +636,7 @@ def training_bootstrap():
                 "workout": workout_state_payload(snapshot),
                 "plan": _active_plan_payload(plan, serialize_plan(plan_data)),
                 "today_plan": serialize_today_plan(plan_data, today),
+                "prior_performance": load_prior_performance(user_id),
             })
     except Exception as exc:  # noqa: BLE001 - coherent response must fail closed
         current_app.logger.warning(
