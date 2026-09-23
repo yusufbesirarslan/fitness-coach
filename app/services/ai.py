@@ -12,8 +12,7 @@ except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalı
 
 from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
 from app.extensions import bedrock_client, openai_client
-from app.services import ai_recovery
-from app.services.ai_gate import model_concurrency_slot
+from app.services import ai_provider_call, ai_recovery
 from app.services.ai_recovery import TransientAIError
 from app.services.ai_spend_guard import AISpendLimitExceeded
 
@@ -42,7 +41,8 @@ def _remember_completion(result: "ChatCompletion") -> "ChatCompletion":
 from app.prompts.nutrition import PORTION_SANITY_RULE  # noqa: E402,F401 (re-export)
 
 
-def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
+                 feature="other"):
     """Merkezi LLM sohbet çağrısı (OpenAI Chat Completions).
 
     `messages` Anthropic ile uyumlu [{"role","content"}] listesidir; system_prompt
@@ -56,13 +56,11 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
     try:
         # Slot yalnızca gerçek ağ çağrısını sarar — retry/backoff uykular ve
         # sağlayıcı geçişi slotsuz kalır (triage 2026-07-19 #3, ai_coach deseni).
-        with model_concurrency_slot("openai"):
-            resp = openai_client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=full_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+        payload = dict(model=OPENAI_MODEL, messages=full_messages,
+                       max_tokens=max_tokens, temperature=temperature)
+        with ai_provider_call.admit(feature=feature, provider="openai",
+                                    payload=payload) as call:
+            resp = call.create(openai_client.chat.completions.create)
         # `choices` içerik filtresinde boş, `message.content` ise refuse/length
         # durumlarında None olabilir. Çağıranların çoğu dönüşe doğrudan .strip()
         # uyguluyor; ham IndexError/None'ı buraya hapsedip her zaman str döndür.
@@ -84,6 +82,8 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
             text=text, truncated=truncated, finish_reason=finish_reason,
             provider="openai"))
         return text
+    except AISpendLimitExceeded:
+        raise
     except RateLimitError:
         # Geçici: kurtarma katmanı (call_with_recovery) yeniden dener. Metin
         # dostça ve RuntimeError alt sınıfı → mevcut çağıran fallback'leri korunur.
@@ -97,7 +97,8 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
         raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
 
 
-def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
+                 feature="other"):
     """Ağır görev LLM çağrısı (Claude Sonnet 4.5 — Amazon Bedrock, Messages API).
 
     `_openai_chat` ile AYNI imzayı taşır; OpenAI-stili argümanları Anthropic'e çevirir:
@@ -122,8 +123,9 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
                       messages=convo, temperature=temperature)
         if system:
             kwargs["system"] = system
-        with model_concurrency_slot("bedrock"):
-            resp = bedrock_client.messages.create(**kwargs)
+        with ai_provider_call.admit(feature=feature, provider="bedrock",
+                                    payload=kwargs) as call:
+            resp = call.create(bedrock_client.messages.create)
         finish_reason = getattr(resp, "stop_reason", None)
         truncated = finish_reason == "max_tokens"
         if truncated:
@@ -137,6 +139,8 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
             text=text, truncated=truncated, finish_reason=finish_reason,
             provider="bedrock"))
         return text
+    except AISpendLimitExceeded:
+        raise
     except anthropic.RateLimitError:
         # Geçici: kurtarma katmanı yeniden dener (TransientAIError, RuntimeError alt sınıfı).
         raise TransientAIError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
@@ -161,19 +165,21 @@ def _image_block(image_bytes, media_type):
     }
 
 
-def _bedrock_image_message(content, max_tokens, temperature):
+def _bedrock_image_message(content, max_tokens, temperature, feature="vision"):
     try:
-        with model_concurrency_slot("bedrock"):
-            resp = bedrock_client.messages.create(
-                model=BEDROCK_MODEL,
-                max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
-                messages=[{"role": "user", "content": content}],
-                temperature=temperature,
-            )
+        payload = dict(model=BEDROCK_MODEL,
+                       max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
+                       messages=[{"role": "user", "content": content}],
+                       temperature=temperature)
+        with ai_provider_call.admit(feature=feature, provider="bedrock",
+                                    payload=payload) as call:
+            resp = call.create(bedrock_client.messages.create)
         for block in resp.content:
             if getattr(block, "type", None) == "text":
                 return block.text
         return ""
+    except AISpendLimitExceeded:
+        raise
     except anthropic.RateLimitError:
         raise RuntimeError("AI servisi \u015fu an yo\u011fun (rate limit). L\u00fctfen biraz sonra tekrar deneyin.")
     except (anthropic.APITimeoutError, anthropic.APIConnectionError):
@@ -186,7 +192,7 @@ def _bedrock_image_message(content, max_tokens, temperature):
 def _bedrock_compare_images(
         baseline_bytes, baseline_media_type,
         current_bytes, current_media_type, prompt,
-        max_tokens=1200, temperature=0.0):
+        max_tokens=1200, temperature=0.0, feature="vision"):
     content = [
         {"type": "text", "text": prompt},
         {"type": "text", "text": "Image A \u2014 baseline"},
@@ -194,10 +200,11 @@ def _bedrock_compare_images(
         {"type": "text", "text": "Image B \u2014 current"},
         _image_block(current_bytes, current_media_type),
     ]
-    return _bedrock_image_message(content, max_tokens, temperature)
+    return _bedrock_image_message(content, max_tokens, temperature, feature=feature)
 
 
-def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, temperature=0.0):
+def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, temperature=0.0,
+                            feature="vision"):
     """Bedrock (Claude Sonnet) çok-kipli doğrulama: bir görsel + metin promptu gönderir,
     modelin ham metin yanıtını (genelde katı JSON) string olarak döndürür.
 
@@ -215,17 +222,19 @@ def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, tem
         {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
     ]
     try:
-        with model_concurrency_slot("bedrock"):
-            resp = bedrock_client.messages.create(
-                model=BEDROCK_MODEL,
-                max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
-                messages=[{"role": "user", "content": content}],
-                temperature=temperature,
-            )
+        payload = dict(model=BEDROCK_MODEL,
+                       max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
+                       messages=[{"role": "user", "content": content}],
+                       temperature=temperature)
+        with ai_provider_call.admit(feature=feature, provider="bedrock",
+                                    payload=payload) as call:
+            resp = call.create(bedrock_client.messages.create)
         for block in resp.content:
             if getattr(block, "type", None) == "text":
                 return block.text
         return ""
+    except AISpendLimitExceeded:
+        raise
     except anthropic.RateLimitError:
         raise RuntimeError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
     except (anthropic.APITimeoutError, anthropic.APIConnectionError):
@@ -248,7 +257,8 @@ def _completion_from_text(text, *, fallback_used=False):
     return ChatCompletion(text=text or "", fallback_used=fallback_used)
 
 
-def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
+                    feature="other"):
     """Like `_heavy_chat` but keeps finish/truncation metadata for generation."""
     _completion_tls.last = None
     lg_key = ai_recovery.lastgood_key(
@@ -258,7 +268,8 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
         try:
             reply = ai_recovery.call_with_recovery(
                 lambda: _claude_chat(messages, system_prompt=system_prompt,
-                                     max_tokens=max_tokens, temperature=temperature),
+                                     max_tokens=max_tokens, temperature=temperature,
+                                     feature=feature),
                 feature="heavy_chat.bedrock")
             logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
             ai_recovery.remember_last_good(lg_key, reply)
@@ -275,7 +286,8 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
         logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
         reply = ai_recovery.call_with_recovery(
             lambda: _openai_chat(messages, system_prompt=system_prompt,
-                                 max_tokens=max_tokens, temperature=temperature),
+                                 max_tokens=max_tokens, temperature=temperature,
+                                 feature=feature),
             feature="heavy_chat.openai")
         ai_recovery.remember_last_good(lg_key, reply)
         return _completion_from_text(reply, fallback_used=fallback_used)
@@ -291,7 +303,8 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
         raise
 
 
-def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
+                feature="other"):
     """Ağır görev yönlendiricisi: Bedrock açıksa Claude Sonnet'e gider, aksi halde veya
     herhangi bir hatada OpenAI'ya şeffafça düşer. İmza `_openai_chat` ile aynıdır, böylece
     çağrı noktaları yalnızca `_openai_chat(` → `_heavy_chat(` rename'iyle taşınır.
@@ -303,4 +316,4 @@ def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
     yoksa dostça RuntimeError yükselir (çağıranın mevcut fallback'i)."""
     return _heavy_complete(
         messages, system_prompt=system_prompt,
-        max_tokens=max_tokens, temperature=temperature).text
+        max_tokens=max_tokens, temperature=temperature, feature=feature).text

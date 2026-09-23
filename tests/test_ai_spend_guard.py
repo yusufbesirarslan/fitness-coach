@@ -427,22 +427,30 @@ def test_charge_is_placed_before_the_yield_in_the_gate():
 
 
 def test_every_provider_sdk_call_site_is_guarded():
-    """A provider call is only bounded if it passes model_concurrency_slot or
-    charges directly. The deep-health Bedrock probe is the one deliberate
-    exception (1 output token, cached, and gating it could fail a deploy)."""
+    """A provider call is only bounded if it goes through the provider door,
+    ai_provider_call.admit(), which takes the permit and charges the guard
+    (menu OCR: gate=False, still charged). The deep-health Bedrock probe is
+    the one deliberate charge exception (charge=False: 1 output token, cached,
+    and a refusal could fail a deploy) — it still passes the door."""
     root = Path(ai_spend_guard.__file__).resolve().parents[1]
     offenders = []
     for path in root.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        if not any(sdk in text for sdk in (".messages.create(", ".messages.stream(",
-                                            ".chat.completions.create(")):
+        if not any(sdk in text for sdk in (".messages.create", ".messages.stream",
+                                            ".chat.completions.create")):
             continue
         rel = path.relative_to(root.parent).as_posix()
-        if rel == "app/services/bedrock_health.py":
+        if rel == "app/services/ai_provider_call.py":
             continue
-        if "model_concurrency_slot(" not in text and "ai_spend_guard.charge(" not in text:
+        if "ai_provider_call.admit(" not in text:
             offenders.append(rel)
     assert offenders == []
+    health = (root / "services" / "bedrock_health.py").read_text(encoding="utf-8")
+    assert "charge=False" in health
+    uncharged = [p.relative_to(root.parent).as_posix() for p in root.rglob("*.py")
+                 if "charge=False" in p.read_text(encoding="utf-8")
+                 and p.name != "ai_provider_call.py"]
+    assert uncharged == ["app/services/bedrock_health.py"]
 
 
 # ── No provider call after refusal: chat helpers ────────────────────────────

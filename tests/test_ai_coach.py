@@ -417,7 +417,9 @@ def _install_advancing_model_slot(monkeypatch, clock, advance_seconds):
         clock.now += advance_seconds
         yield
 
-    monkeypatch.setattr(ai_coach, "model_concurrency_slot", advancing_slot)
+    # The permit is taken inside the provider door (ai_provider_call.admit).
+    from app.services import ai_provider_call
+    monkeypatch.setattr(ai_provider_call, "model_concurrency_slot", advancing_slot)
     return deadlines
 
 

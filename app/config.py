@@ -182,9 +182,12 @@ AI_RETRY_MAX_DELAY = float(os.getenv("AI_RETRY_MAX_DELAY", "4.0"))     # saniye 
 # Son-iyi yanıt TTL: her başarılı ağır çağrı bu süreyle saklanır, her iki
 # sağlayıcı da düşerse bayat-ama-gerçek yanıt döner.
 AI_LASTGOOD_TTL_SECONDS = int(os.getenv("AI_LASTGOOD_TTL_SECONDS", str(24 * 3600)))
-# AnthropicBedrock SDK'nın kendi yeniden-deneme sayısı. Kurtarma katmanı kendi
-# retry'ını yaptığından 1'e düşürülür (çarpımı önle). OpenAI istemcisi ayrı.
+# Transient-failure retries per provider call, performed by the provider
+# boundary (app/services/ai_provider_call.py), NOT by the SDK: both SDK clients
+# are built with max_retries=0 so that every physical HTTP attempt passes the
+# spend guard itself. Same counts the SDKs used before (Bedrock 1, OpenAI 2).
 BEDROCK_MAX_RETRIES = int(os.getenv("BEDROCK_MAX_RETRIES", "1"))
+OPENAI_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "2"))
 
 # ── Sprint 4 WS7: AI kötüye-kullanım kısıtları ──
 # AI_RATELIMIT (30/saat) üstüne binen kısa-pencere burst tavanı: /ask* uçlarında

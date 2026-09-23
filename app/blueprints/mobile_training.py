@@ -1,5 +1,6 @@
 """Bearer-authenticated native Training routes."""
 from contextlib import contextmanager
+from functools import partial
 
 from flask import current_app, g, jsonify, request
 from flask_limiter.errors import RateLimitExceeded
@@ -54,7 +55,7 @@ def create_training_plan():
             g.mobile_user,
             native_request,
             key,
-            chat_fn=_heavy_chat,
+            chat_fn=partial(_heavy_chat, feature="training_plan"),
             provider_guard=_native_generation_provider_guard,
             logger=current_app.logger,
         )

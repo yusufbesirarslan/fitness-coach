@@ -218,6 +218,7 @@ def log_meal():
             system_prompt=nutrition_prompts.MEAL_TOTALS_SYSTEM,
             max_tokens=150,
             temperature=0.0,
+            feature="nutrition",
         ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
 
@@ -601,6 +602,7 @@ def review_meals():
             system_prompt=system_prompt,
             max_tokens=400,
             temperature=0.7,
+            feature="nutrition",
         )
     except Exception:
         current_app.logger.exception("Öğün değerlendirmesi üretilemedi")

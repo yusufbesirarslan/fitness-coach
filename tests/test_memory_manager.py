@@ -245,7 +245,10 @@ def fake_summarizer(monkeypatch):
 
     calls = []
 
-    def _chat(messages, system_prompt=None, max_tokens=None, temperature=None):
+    def _chat(messages, system_prompt=None, max_tokens=None, temperature=None,
+              feature=None):
+        # The summary is attributed (and budgeted) as its own AI feature.
+        assert feature == "summary"
         calls.append({"messages": messages, "system_prompt": system_prompt})
         return "  ÖZET: kullanıcı bulk dönemde.  "
 

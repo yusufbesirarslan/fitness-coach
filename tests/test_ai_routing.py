@@ -82,16 +82,20 @@ def test_heavy_chat_passes_kwargs_through(monkeypatch):
     monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
     monkeypatch.setattr(ai, "anthropic", object())
 
-    def fake_claude(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+    def fake_claude(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
+                    feature="other"):
         captured.update(messages=messages, system_prompt=system_prompt,
-                        max_tokens=max_tokens, temperature=temperature)
+                        max_tokens=max_tokens, temperature=temperature,
+                        feature=feature)
         return "ok"
     monkeypatch.setattr(ai, "_claude_chat", fake_claude)
 
     ai._heavy_chat([{"role": "user", "content": "x"}],
-                   system_prompt="S", max_tokens=4000, temperature=0.4)
+                   system_prompt="S", max_tokens=4000, temperature=0.4,
+                   feature="training_plan")
     assert captured == {"messages": [{"role": "user", "content": "x"}],
-                        "system_prompt": "S", "max_tokens": 4000, "temperature": 0.4}
+                        "system_prompt": "S", "max_tokens": 4000, "temperature": 0.4,
+                        "feature": "training_plan"}
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +269,10 @@ def test_claude_chat_hoists_system_and_clamps_tokens(monkeypatch):
     _fake_bedrock(monkeypatch, reply=resp, capture=cap)
     monkeypatch.setattr(ai, "BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
     monkeypatch.setattr(ai, "BEDROCK_MAX_TOKENS", 8000)
+    # This test is about the 8000 clamp, not the per-feature output budget
+    # (which refuses, rather than clamps, anything above it).
+    from app.services import ai_input_budget
+    monkeypatch.setitem(ai_input_budget.OUTPUT_BUDGETS, "other", 8000)
 
     out = ai._claude_chat(
         messages=[{"role": "system", "content": "EK SİSTEM"},

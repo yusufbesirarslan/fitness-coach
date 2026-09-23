@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine
 
 from app.config import (
     _REDIS_URL, AUTH_WRITE_RATELIMIT, BEDROCK_CALL_TIMEOUT_SECONDS,
-    BEDROCK_MAX_RETRIES, BEDROCK_REGION, DEFAULT_RATELIMIT,
+    BEDROCK_REGION, DEFAULT_RATELIMIT,
 )
 
 
@@ -114,8 +114,10 @@ class _LazyOpenAI:
 
     def __getattr__(self, name):
         if self._client is None:
+            # max_retries=0: retries happen in ai_provider_call, where each
+            # physical attempt is charged to the spend guard (P2 closeout).
             self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
-                                  timeout=30.0, max_retries=2)
+                                  timeout=30.0, max_retries=0)
         return getattr(self._client, name)
 
 
@@ -135,13 +137,13 @@ class _LazyAnthropicBedrock:
     def __getattr__(self, name):
         if self._client is None:
             from anthropic import AnthropicBedrock
-            # max_retries=1 (WS9): kurtarma katmanı (ai_recovery) kendi jitter'lı
-            # retry'ını yapar; SDK retry'ı da 2 kalırsa iki katman çarpılır ve tek
-            # ağır istek onlarca Bedrock çağrısı doğurabilir (1 worker × 8 thread).
+            # max_retries=0: an SDK-internal retry is a paid attempt the spend
+            # guard never sees. ai_provider_call performs the BEDROCK_MAX_RETRIES
+            # transient retries itself and charges each one (P2 closeout).
             self._client = AnthropicBedrock(
                 aws_region=BEDROCK_REGION,
                 timeout=BEDROCK_CALL_TIMEOUT_SECONDS,
-                max_retries=BEDROCK_MAX_RETRIES,
+                max_retries=0,
             )
         return getattr(self._client, name)
 
