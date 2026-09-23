@@ -15,6 +15,7 @@ from app.extensions import _user_or_ip_key, limiter, redis_client
 from app.i18n import t
 from app.models import MealLog, UserSession
 from app.services.ai_nutrition import MAX_MENU_ITEMS, _cap_items_round_robin, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
+from app.services import ai_spend_guard
 from app.services.ai_gate import ai_concurrency_gate, scrape_concurrency_gate
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.timeutil import day_key
@@ -452,12 +453,15 @@ def analyze_menu():
     if per_100g_items and missing:
         app = current_app._get_current_object()
 
+        # Executor threads: bind the requesting account (spend guard).
+        @ai_spend_guard.bind_subject
         def _weights_job():
             with app.app_context():
                 return _estimate_serving_weights_llm(list(per_100g_items.keys()),
                                                      fallback_weights=fallback_g,
                                                      return_fallbacks=True)
 
+        @ai_spend_guard.bind_subject
         def _macros_job():
             # Kategori bağlamı LLM'e de geçer: 'Margarita'@Pizzalar kokteyl değil
             # tek kişilik pizza olarak tahmin edilsin (tür referanslı prompt).

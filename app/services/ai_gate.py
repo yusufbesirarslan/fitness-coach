@@ -198,6 +198,16 @@ def model_concurrency_slot(
     if not acquired:
         raise BlockingConcurrencyLimit("model blocking capacity exhausted")
 
+    # Spend ceiling (P2-C): decided after a permit is held, so a capacity
+    # refusal never consumes budget, and before the body runs, so a refused
+    # call never reaches the provider. Refusal returns the permit.
+    try:
+        from app.services import ai_spend_guard
+        ai_spend_guard.charge(provider)
+    except BaseException:
+        _model_slots.release()
+        raise
+
     _enter("model")
     call_start = time.monotonic() if metrics_enabled else None
     outcome = "success"

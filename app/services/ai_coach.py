@@ -35,6 +35,7 @@ from app.observability import current_request_id
 from app.services import provider_failure
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
 from app.services.ai_gate import model_concurrency_slot
+from app.services.ai_spend_guard import AISpendLimitExceeded
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 # The ONLY route from the Coach to the training-plan mutation boundary. This
 # module deliberately does not import app.services.plan_mutation itself —
@@ -1357,6 +1358,11 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                 return owned
         except _BedrockFallback:
             raise
+        except AISpendLimitExceeded:
+            # Spend ceiling: no OpenAI fallback (that would keep spending) and no
+            # further round. The soft-error text keeps quota refund/B16 intact.
+            current_app.logger.warning("[COACH][Bedrock] spend guard refused provider call")
+            return _coach_tool_fallback(language, "error")
         except Exception as e:
             if _remaining_coach_turn_seconds(deadline) <= 0:
                 current_app.logger.warning(

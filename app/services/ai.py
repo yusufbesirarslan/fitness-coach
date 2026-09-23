@@ -15,6 +15,7 @@ from app.extensions import bedrock_client, openai_client
 from app.services import ai_recovery
 from app.services.ai_gate import model_concurrency_slot
 from app.services.ai_recovery import TransientAIError
+from app.services.ai_spend_guard import AISpendLimitExceeded
 
 logger = logging.getLogger(__name__)
 _completion_tls = threading.local()
@@ -262,6 +263,10 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
             logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
             ai_recovery.remember_last_good(lg_key, reply)
             return _completion_from_text(reply, fallback_used=False)
+        except AISpendLimitExceeded:
+            # A spend ceiling is not a provider failure: falling back to OpenAI
+            # would keep spending after the boundary said stop.
+            raise
         except Exception as e:
             fallback_used = True
             logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
@@ -274,6 +279,8 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
             feature="heavy_chat.openai")
         ai_recovery.remember_last_good(lg_key, reply)
         return _completion_from_text(reply, fallback_used=fallback_used)
+    except AISpendLimitExceeded:
+        raise
     except Exception:
         cached = ai_recovery.recall_last_good(lg_key)
         if cached is not None:

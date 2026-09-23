@@ -150,6 +150,11 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         "Her yemeği ayrı satırda yaz. Türkçe karakterleri doğru kullan (ı, ş, ğ, ç, ö, ü)."
     )
     try:
+        # The one provider call outside ai_gate.model_concurrency_slot, so it
+        # charges the spend guard itself; a refusal lands in the except below
+        # ("menu unreadable") without reaching the provider. PDFs pay per page.
+        from app.services import ai_spend_guard
+        ai_spend_guard.charge("openai")
         resp = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
             # L5: çıktı 4000 token ile sınırlı (uzun menülerin tam OCR'ı için
