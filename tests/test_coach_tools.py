@@ -265,7 +265,9 @@ def _install_model_slot_probe(monkeypatch):
         finally:
             state["active"] = False
 
-    monkeypatch.setattr(ai_coach, "model_concurrency_slot", slot)
+    # The permit is taken inside the provider door (ai_provider_call.admit).
+    from app.services import ai_provider_call
+    monkeypatch.setattr(ai_provider_call, "model_concurrency_slot", slot)
     return state
 
 
