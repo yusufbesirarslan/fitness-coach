@@ -324,6 +324,30 @@ def test_redis_outage_degrades_to_a_local_bound_not_fail_open(monkeypatch, caplo
     assert "Redis unavailable" in caplog.text
 
 
+def test_concurrent_callers_never_exceed_the_local_ceiling_without_redis(monkeypatch):
+    _limits(monkeypatch, user_heavy=0, global_heavy_hour=10, global_heavy_day=1000)
+    admitted, refused = _race(64, lambda i: ai_spend_guard.charge("bedrock"))
+    assert len(admitted) == 10
+    assert len(refused) == 54
+
+
+def test_redis_outage_mid_window_admits_at_most_one_extra_local_allowance(monkeypatch):
+    # The local counters cannot see what Redis already admitted, so an outage
+    # that starts mid-window allows up to one more full limit in this process.
+    # That is the documented (1 + processes) bound, and it stays finite.
+    fake = _use_redis(monkeypatch)
+    _limits(monkeypatch, user_heavy=0, global_heavy_hour=5, global_heavy_day=1000)
+    for _ in range(5):
+        ai_spend_guard.charge("bedrock")
+    with pytest.raises(AISpendLimitExceeded):
+        ai_spend_guard.charge("bedrock")
+    fake.fail = True
+    for _ in range(5):
+        ai_spend_guard.charge("bedrock")
+    with pytest.raises(AISpendLimitExceeded):
+        ai_spend_guard.charge("bedrock")
+
+
 # ── Subject attribution across threads ──────────────────────────────────────
 
 def test_bind_subject_carries_the_caller_into_an_executor_thread():

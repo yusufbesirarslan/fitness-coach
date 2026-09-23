@@ -74,9 +74,42 @@ total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
 - Redis MULTI/EXEC INCR (+EXPIRE NX), admit only if every post-increment
   count is within its limit, compensate on refusal → concurrent callers can
   never over-admit. Redis down → same limits process-locally (bounded, not
-  fail-open).
+  fail-open). The local counters do not see what Redis already admitted, so
+  an outage that starts mid-window allows up to (1 + processes) × limit. Prod
+  runs 1 gunicorn process (enforced at boot) + 1 RQ worker, and only the web
+  process makes heavy calls: ≤2× heavy, ≤3× light, plus one more allowance per
+  process restart during the outage.
 - Not a billing kill switch for calls already made, and not a product quota:
   defaults sit far above observed use and do not change entitlement.
+- **A call ceiling is not a dollar ceiling.** `max_tokens` caps output only.
+  Input has no app-enforced token cap (the context budgets are character
+  heuristics that undercount Turkish), so the hard per-call input bound is the
+  provider context window. SDK retries (Bedrock 1, OpenAI 2) are extra HTTP
+  attempts inside one counted call.
+
+### Worst-case exposure at the default ceilings
+
+List prices verified 2026-09-23: Bedrock Price List API, eu-central-1, Sonnet
+4.5 **global** profile (what prod uses), $3.00 input / $15.00 output per 1M
+tokens (regional profiles +10%); OpenAI gpt-4o-mini $0.15 / $0.60 per 1M.
+AWS-enforced quota: 10 requests/min on the global Sonnet 4.5 profile (600/h).
+
+| Case | Per call | Global hour | Global day | 3 days |
+|---|---|---|---|---|
+| Heavy, absolute (200K in + 8K out) | $0.72 | 300 → $216 | 1,500 → $1,080 | $3,240 |
+| Heavy, p99 observed (19.3K in + 2.3K out) | $0.093 | $28 | $139 | $417 |
+| Light, absolute (128K in + 16,384 out) | $0.029 | no hourly cap | 5,000 → $145 | $435 |
+
+One account: heavy 200/day → $144 absolute, $18.5 at p99; light 400/day → $11.6
+absolute. Observed peak (30 days to 2026-09-23): 40 Bedrock calls in a day,
+all in one hour, $1.27 at list price. Bedrock spend draws on AWS credits;
+OpenAI spend does not.
+
+The absolute day at 1,500 heavy calls exceeds the ~$950 AWS credit balance.
+That case needs every call to fill the 200K context, which no app path is
+known to reach, but no app code prevents it either. Tighter ceilings are an
+env change (`AI_SPEND_GLOBAL_HEAVY_PER_DAY`, `..._PER_HOUR`). Making the
+ceiling a real dollar bound needs a pre-provider input-token cap.
 
 ## Env vars
 

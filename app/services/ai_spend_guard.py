@@ -10,8 +10,13 @@ This module is the emergency boundary, not a product quota:
 
 - The unit is ONE PROVIDER CALL. It is known before the call is made; cost in
   tokens is only known afterwards and the app's own per-turn token telemetry is
-  partial. Every call's worst-case cost is bounded (max_tokens caps output,
-  context budgets cap input), so a call ceiling is a spend ceiling.
+  partial. max_tokens caps each call's OUTPUT; nothing in the app caps its
+  INPUT in tokens (the context budgets are character heuristics), so the hard
+  per-call input bound is the model's context window (200K for Sonnet 4.5,
+  128K for gpt-4o-mini). A call ceiling therefore bounds spend only as
+  calls x that per-call worst case, and the SDKs' own retries
+  (BEDROCK_MAX_RETRIES=1, OpenAI max_retries=2) are further HTTP attempts
+  inside one counted call. docs/RATE_LIMITING.md has the dollar figures.
 - `charge()` runs BEFORE the provider is invoked. Every provider call enters
   `ai_gate.model_concurrency_slot()` (menu OCR calls `charge()` itself), so a
   rejected call never reaches the provider — including tool-loop rounds,
@@ -27,7 +32,9 @@ This module is the emergency boundary, not a product quota:
   an over-admission.
 - Redis unavailable -> process-local counters with the same limits. That is
   neither fail-open (unbounded spend) nor fail-closed (AI outage on a Redis
-  blip): the bound degrades to at most one limit per process (web + worker).
+  blip). Local counters cannot see what Redis already admitted, so an outage
+  that starts mid-window allows up to one more limit per process: at most
+  (1 + processes) x limit per window, and a process restart resets its share.
 
 A rejection raises `AISpendLimitExceeded`, a `BlockingConcurrencyLimit`, so
 every existing capacity handler already turns it into a deterministic
