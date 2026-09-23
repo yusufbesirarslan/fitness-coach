@@ -221,26 +221,41 @@ credentials. `usage_source=estimated` (timeouts, errors, abandoned streams)
 carries the input UPPER bound and no output figure — never a claimed zero.
 `estimated_cost_usd` is list-price arithmetic, not a bill.
 
-Logs Insights over `/axisai/app` (examples):
+Logs Insights over `/axisai/app`. Events arrive as docker json-file lines, so
+the event is the `log` field; the key order is fixed, so one regex `parse`
+extracts it. Every query starts with this prefix (PAID = attempts that reached
+a provider):
 
 ```
-# 1-2. usage today by provider
-filter @message like /\[AI-USAGE\]/ | parse @message '[AI-USAGE] *' as j
-| fields jsonParse(j) as e
-| filter e.outcome in ["success","provider_error","timeout","client_disconnect"]
-| stats sum(e.input_tokens) as input, sum(e.output_tokens) as output,
-        sum(e.estimated_cost_usd) as usd, count(*) as attempts by e.provider
-# 3/5/10. by feature (tokens, distribution, cost)
-... | stats sum(e.input_tokens), pct(e.input_tokens, 95), max(e.input_tokens),
-        sum(e.estimated_cost_usd) by e.feature
-# 4. top accounts by paid attempts
-... | filter ispresent(e.subject_id) | stats count(*) as attempts by e.subject_id
-| sort attempts desc | limit 10
-# 6-7. timeouts and pre-provider refusals
-... | stats count(*) by e.outcome
-# 8-9. COGS per active / paying user: sum(usd) above ÷ active or premium
-#      account count from the database for the same window.
+filter log like /^\[AI-USAGE\]/
+| parse log /"request_id":(?<rid>"[^"]*"|null),"provider":"(?<provider>[a-z]+)","model":"(?<model>[a-z0-9-]+)","feature":"(?<feature>[a-z_]+)","subject_id":(?<subject>[0-9]+|null),"outcome":"(?<outcome>[a-z_]+)","attempt":(?<attempt>[0-9]+|null),"tool_round":(?<round>[0-9]+|null),"usage_source":(?<src>"[a-z]+"|null),"input_tokens":(?<inp>[0-9]+|null),"output_tokens":(?<outp>[0-9]+|null),"cache_write_tokens":(?<cw>[0-9]+|null),"cache_read_tokens":(?<cr>[0-9]+|null)/
+| parse log /"estimated_cost_usd":(?<usd>[0-9.e-]+)/
 ```
+
+```
+# 1-2 usage by provider (set the time range to "today")
+<prefix> | filter outcome in ["success","provider_error","timeout","client_disconnect"]
+| stats sum(inp) as input_tokens_total, sum(outp) as output_tokens_total,
+        sum(usd) as cost_usd, count(*) as attempts by provider
+# 3, 5, 10 tokens / distribution / estimated COGS per feature
+<prefix> | filter outcome in [...PAID...]
+| stats sum(inp) as input_tokens_total, sum(outp) as output_tokens_total,
+        pct(inp, 50) as in_p50, pct(inp, 95) as in_p95, pct(inp, 99) as in_p99,
+        max(inp) as in_max, sum(usd) as cost_usd by feature | sort input_tokens_total desc
+# 4 accounts by paid attempts
+<prefix> | filter outcome in [...PAID...] | filter subject != "null"
+| stats count(*) as attempts, sum(usd) as cost_usd by subject | sort attempts desc | limit 10
+# 6-7 timeouts and refusals before the provider
+<prefix> | stats count(*) as n by outcome, provider
+# 8-9 COGS per active / paying user: cost_usd ÷ the account count for the
+#     window (accounts_with_ai here; premium count from the database)
+<prefix> | filter outcome in [...PAID...]
+| stats sum(usd) as cost_usd, count_distinct(subject) as accounts_with_ai
+```
+
+Distribution percentiles use provider-reported tokens where present; filter
+`src = '"provider"'` to exclude estimated upper bounds.
+
 ## Env vars
 
 ```
