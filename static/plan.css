@@ -97,18 +97,51 @@
 .sv-body { flex: 1; display: flex; flex-direction: column; gap: var(--space-3); overflow-y: auto; padding: var(--space-4); }
 .sv-error { margin: 0; padding: 0 var(--space-4) var(--space-3); color: var(--color-danger); }
 .sv-foot { display: flex; gap: var(--space-3); padding: var(--space-4); border-top: var(--border-w-1) solid var(--color-border-1); }
-.exercise-card { padding: var(--space-4); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-lg); background: var(--color-surface-2); }
-.ec-head { display: flex; align-items: baseline; gap: var(--space-2); }
-.ec-name { color: var(--color-text-1); font-size: var(--text-lg); font-weight: var(--weight-semibold); }
-.ec-prescribed { margin-left: auto; color: var(--color-text-3); font-size: var(--text-sm); }
-.ec-note { margin-top: var(--space-1); color: var(--color-text-3); font-size: var(--text-sm); }
-.set-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) minmax(0, 1fr) 44px; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: var(--border-w-1) solid var(--color-border-1); }
-.set-row.is-done { opacity: var(--opacity-faint); }
-.set-idx { color: var(--color-text-3); font-size: var(--text-sm); text-align: center; }
-.set-input { width: 100%; min-height: 44px; border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-sm); background: var(--color-surface-1); color: var(--color-text-1); font: inherit; text-align: center; }
-.set-input:focus-visible, .set-check:focus-visible { outline: none; border-color: var(--color-primary); box-shadow: var(--focus-ring); }
-.set-check { display: grid; width: 44px; height: 44px; place-items: center; border: var(--border-w-2) solid var(--color-border-2); border-radius: var(--radius-sm); background: none; color: transparent; cursor: pointer; }
-.set-row.is-done .set-check { border-color: var(--color-success); background: var(--color-success); color: var(--color-on-primary); }
+/* Active workout surface: one active exercise and set lead; finished and
+   upcoming work is summarised compactly underneath. */
+.sv-body { gap: var(--space-4); }
+.sv-body > * { width: 100%; max-width: 640px; margin-inline: auto; }
+.sv-foot { justify-content: flex-end; }
+.sv-finish { margin-left: auto; }
+.aw-label { color: var(--color-text-3); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-wider); text-transform: uppercase; }
+.aw-active { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-5); border: var(--border-w-1) solid var(--color-primary-a38); border-radius: var(--radius-lg); background: var(--color-surface-2); }
+.aw-active-name { margin: 0; color: var(--color-text-1); font-family: var(--font-display); font-size: var(--text-3xl); letter-spacing: 1px; line-height: var(--leading-tight); overflow-wrap: anywhere; }
+.aw-active-set { margin: calc(var(--space-2) * -1) 0 0; color: var(--color-primary); font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.aw-active-set:focus { outline: none; }
+.aw-active-set:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.aw-target { margin: 0; color: var(--color-text-2); font-size: var(--text-base); }
+.aw-current { display: flex; flex-direction: column; gap: var(--space-3); }
+.aw-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.aw-field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.set-input { width: 100%; min-height: 56px; border: var(--border-w-1) solid var(--color-border-2); border-radius: var(--radius-md); background: var(--color-surface-1); color: var(--color-text-1); font: inherit; font-size: var(--text-2xl); font-weight: var(--weight-semibold); text-align: center; }
+.set-input:focus-visible { outline: none; border-color: var(--color-primary); box-shadow: var(--focus-ring); }
+.aw-complete { min-height: 52px; }
+.aw-exercise-done, .aw-all-done { margin-block: 0; color: var(--color-success); font-weight: var(--weight-semibold); }
+.aw-set-list, .aw-exercise-list { margin-block: 0; padding: 0; list-style: none; }
+.aw-set { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); min-height: 44px; padding: var(--space-1) 0; border-top: var(--border-w-1) solid var(--color-border-1); color: var(--color-text-3); font-size: var(--text-md); }
+.aw-set-icon { display: inline-grid; width: 20px; place-items: center; }
+.aw-set-name { color: var(--color-text-2); font-weight: var(--weight-medium); }
+.aw-set-state::before { content: "\00b7"; margin-right: var(--space-2); }
+.aw-set-value { margin-left: auto; color: var(--color-text-2); }
+.aw-set-edit { min-height: 36px; padding: var(--space-1) var(--space-3); }
+.aw-set.is-completed .aw-set-icon { color: var(--color-success); }
+.aw-set.is-active { color: var(--color-primary); }
+.aw-set.is-active .aw-set-name { color: var(--color-text-1); font-weight: var(--weight-semibold); }
+.aw-note summary { min-height: 44px; display: flex; align-items: center; color: var(--color-text-3); font-size: var(--text-sm); cursor: pointer; }
+.aw-note p { margin: 0; color: var(--color-text-2); font-size: var(--text-md); }
+.aw-next { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin-block: 0; padding: 0 var(--space-1); }
+.aw-next-name { color: var(--color-text-1); font-weight: var(--weight-semibold); }
+.aw-next-meta { color: var(--color-text-3); font-size: var(--text-sm); }
+.aw-exercise-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.aw-exercise-row { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 48px; padding: var(--space-2) var(--space-3); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-md); background: none; color: var(--color-text-2); font: inherit; text-align: left; cursor: pointer; }
+.aw-exercise-row:focus-visible { outline: none; border-color: var(--color-primary); box-shadow: var(--focus-ring); }
+div.aw-exercise-row { border-color: var(--color-primary-a38); background: var(--color-primary-a06); cursor: default; }
+.aw-exercise-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.aw-exercise-meta { color: var(--color-text-3); font-size: var(--text-sm); white-space: nowrap; }
+.aw-exercise-meta .aw-set-state::before { content: none; }
+.aw-exercise.is-completed .aw-set-icon { color: var(--color-success); }
+.aw-exercise.is-completed .aw-exercise-name { color: var(--color-text-3); }
+.aw-exercise.is-active .aw-set-icon { color: var(--color-primary); }
 .plan-completion { position: fixed; inset: 0; z-index: var(--z-overlay); display: none; align-items: center; justify-content: center; padding: var(--space-4); background: rgba(0, 0, 0, 0.72); }
 .plan-completion.open { display: flex; }
 .plan-completion-card { width: min(100%, 440px); padding: var(--space-6); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-lg); background: var(--color-surface-1); box-shadow: var(--shadow-lg); }
@@ -149,7 +182,9 @@
   .plan-workout-action { width: 100%; justify-content: center; }
   /* A full-width link keeps its 44px target but reads on the section's axis. */
   .plan-domain-link { width: 100%; justify-content: flex-start; }
-  .sv-foot { flex-direction: column-reverse; }
+  .sv-foot > button { flex: 1; padding-inline: var(--space-3); }
+  .sv-finish { margin-left: 0; }
+  .aw-active { padding: var(--space-4); }
   .plan-completion-card { padding: var(--space-5); }
   .plan-completion-actions { flex-direction: column-reverse; }
   .plan-completion-actions .btn-ghost, .plan-completion-actions .btn-volt { width: 100%; }

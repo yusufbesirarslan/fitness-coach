@@ -5,6 +5,7 @@ const {
   createLegacyWorkoutDraft,
   buildCheckpointSnapshot,
   selectWorkoutDraft,
+  deriveActiveWorkout,
 } = require('../../static/workout_draft.js');
 
 const day = {
@@ -168,4 +169,50 @@ test('ordinary close and reopen retains the pending draft for the same session',
 
   assert.equal(reopened, dirty);
   assert.equal(reopened.exercises[0].sets[0].done, true);
+});
+
+test('active surface derives completed, active and upcoming state from done flags only', () => {
+  const projection = {
+    public_id: 'session-1', status: 'active', resumable: true,
+    checkpoint_revision: 1,
+    checkpoint: {
+      current_exercise_index: 0, elapsed_seconds: 30,
+      exercises: [
+        { exercise_id: 'squat-v1', sets: [
+          { index: 0, completed: true, reps: 8, weight_kg: 60 },
+          { index: 1, completed: false, reps: 8, weight_kg: null },
+        ] },
+        { exercise_id: 'row-v1', sets: [
+          { index: 0, completed: false, reps: 10, weight_kg: null },
+        ] },
+      ],
+    },
+    checkpoint_exercise_ids: ['squat-v1', 'row-v1'],
+  };
+  const draft = createWorkoutDraft(day, projection, 0);
+  const before = JSON.stringify(draft);
+
+  const view = deriveActiveWorkout(draft, null);
+  assert.equal(JSON.stringify(draft), before, 'derivation must not mutate the draft');
+  assert.deepEqual(
+    [view.exerciseIndex, view.setIndex, view.nextExerciseIndex], [0, 1, 1]);
+  assert.deepEqual([view.completedSets, view.totalSets, view.complete], [1, 3, false]);
+  assert.deepEqual(view.exerciseStates, ['active', 'upcoming']);
+
+  // Finishing the exercise moves the lead to the next open exercise, even
+  // though the persisted cursor still points at the finished one.
+  draft.exercises[0].sets[1].done = true;
+  const advanced = deriveActiveWorkout(draft, null);
+  assert.deepEqual(
+    [advanced.exerciseIndex, advanced.setIndex, advanced.nextExerciseIndex], [1, 0, -1]);
+  assert.deepEqual(advanced.exerciseStates, ['completed', 'active']);
+
+  // An explicitly opened finished exercise leads for review with no open set.
+  const review = deriveActiveWorkout(draft, 0);
+  assert.deepEqual([review.exerciseIndex, review.setIndex], [0, -1]);
+
+  draft.exercises[1].sets[0].done = true;
+  const done = deriveActiveWorkout(draft, null);
+  assert.deepEqual([done.exerciseIndex, done.complete], [-1, true]);
+  assert.deepEqual(done.exerciseStates, ['completed', 'completed']);
 });
