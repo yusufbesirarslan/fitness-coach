@@ -442,6 +442,106 @@
       (remain < 10 ? '0' : '') + remain;
   }
 
+  // Product targets are a fixed count ("10") or a hyphen/dash range ("8-12",
+  // "8–10"). Anything else — words, extra clauses, inverted ranges — is not
+  // a cue. No guess.
+  function parseRepTarget(value) {
+    if (typeof value !== 'string') return null;
+    var text = value.trim();
+    var fixed = /^(0|[1-9]\d*)$/.exec(text);
+    if (fixed) {
+      var only = parseInt(fixed[1], 10);
+      if (only > MAX_REPS) return null;
+      return { min: only, max: only };
+    }
+    var range = /^(0|[1-9]\d*)\s*[-–—]\s*(0|[1-9]\d*)$/.exec(text);
+    if (!range) return null;
+    var min = parseInt(range[1], 10);
+    var max = parseInt(range[2], 10);
+    if (min > max || max > MAX_REPS) return null;
+    return { min: min, max: max };
+  }
+
+  function classifySetAgainstTarget(actualReps, targetText) {
+    var target = parseRepTarget(targetText);
+    if (!target || !Number.isInteger(actualReps) || actualReps < 0 ||
+        actualReps > MAX_REPS) return null;
+    if (actualReps < target.min) return 'below_target';
+    if (actualReps > target.max) return 'above_target';
+    return 'on_target';
+  }
+
+  // Cue only for a forward completion that is about to show between-set rest.
+  // Re-completing an earlier set, a failed parse, and the last set of an
+  // exercise all stay silent.
+  function coachCueForCompletion(options) {
+    if (!options || options.reopened === true || options.forwardRest !== true) {
+      return null;
+    }
+    return classifySetAgainstTarget(options.actualReps, options.targetText);
+  }
+
+  // Where the values on screen came from, stamped before the user edits them.
+  // Current workout data beats history. History is only the untouched first set.
+  function loggingSeedSource(set, entry) {
+    if (!set) return 'blank';
+    var historyEligible = set.index === 0 && set.reopened !== true && !!entry &&
+      set.weightExplicit !== true && set.repsExplicit !== true &&
+      set.repsTouched !== true && set.weightKg == null;
+    if (historyEligible) return 'history';
+    if (set.repsExplicit === true || set.weightExplicit === true || set.weightKg != null) {
+      return 'current';
+    }
+    if (set.reps != null) return 'prescription';
+    return 'blank';
+  }
+
+  function deriveSetLogging(seedSource, weightEdited, repsEdited) {
+    var source = seedSource === 'current' || seedSource === 'history' ||
+      seedSource === 'prescription' || seedSource === 'blank' ? seedSource : 'blank';
+    var weight = weightEdited === true;
+    var reps = repsEdited === true;
+    return {
+      default_source: source,
+      weight_edited: weight,
+      reps_edited: reps,
+      fields_edited: (weight ? 1 : 0) + (reps ? 1 : 0),
+    };
+  }
+
+  var CUE_TYPES = { below_target: true, on_target: true, above_target: true };
+
+  function buildSetCompletedParams(exercisePosition, setPosition, logging, hadRest, cueType) {
+    return {
+      exercise_position: exercisePosition,
+      set_position: setPosition,
+      default_source: logging.default_source,
+      weight_edited: logging.weight_edited === true,
+      reps_edited: logging.reps_edited === true,
+      fields_edited: logging.fields_edited,
+      had_rest: hadRest === true,
+      cue_type: CUE_TYPES[cueType] ? cueType : 'none',
+    };
+  }
+
+  function restDurationBucket(durationMs) {
+    var ms = Number(durationMs);
+    if (!Number.isFinite(ms) || ms < 0) return 'lt_60';
+    var seconds = Math.floor(ms / 1000);
+    if (seconds < 60) return 'lt_60';
+    if (seconds < 90) return '60_89';
+    if (seconds < 120) return '90_119';
+    return '120_plus';
+  }
+
+  // One terminal outcome per rest. Skip and natural expiry cannot both win.
+  function claimRestTerminal(timer, outcome) {
+    if (!timer || timer.outcome) return null;
+    if (outcome !== 'skipped' && outcome !== 'expired') return null;
+    timer.outcome = outcome;
+    return outcome === 'skipped' ? 'training_rest_skipped' : 'training_rest_expired';
+  }
+
   function selectWorkoutDraft(day, session, existingDraft, nowMs) {
     if (existingDraft && session && existingDraft.sessionId === session.public_id) {
       return existingDraft;
@@ -465,5 +565,13 @@
     remainingRestMs: remainingRestMs,
     extendRestDeadline: extendRestDeadline,
     formatRestClock: formatRestClock,
+    parseRepTarget: parseRepTarget,
+    classifySetAgainstTarget: classifySetAgainstTarget,
+    coachCueForCompletion: coachCueForCompletion,
+    loggingSeedSource: loggingSeedSource,
+    deriveSetLogging: deriveSetLogging,
+    buildSetCompletedParams: buildSetCompletedParams,
+    restDurationBucket: restDurationBucket,
+    claimRestTerminal: claimRestTerminal,
   };
 }));

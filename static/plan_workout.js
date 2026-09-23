@@ -79,19 +79,20 @@
           focusIndex = null;
           draft = window.FitXWorkoutDraft.createWorkoutDraft(
             todayPlan, session, Date.now());
+          if (restTimer && restTimer.sessionId !== draft.sessionId) invalidateTransient();
           if (wasOpen) {
             renderDraft();
             document.getElementById('sv-abandon').hidden = false;
           }
         } catch (error) {
           draft = null;
-          clearRest();
+          invalidateTransient();
           if (wasOpen) setOpen(sessionView, false);
           showError(copy('training.progress_unavailable'));
         }
       } else {
         draft = null;
-        clearRest();
+        invalidateTransient();
         if (wasOpen) setOpen(sessionView, false);
       }
     }
@@ -145,6 +146,10 @@
   // the checkpoint. A hard refresh drops it; background time does not.
   var restTimer = null;
   var restTick = null;
+  // One Complete Set checkpoint at a time. A second tap while that save is
+  // in flight is ignored so it cannot complete the next set as well.
+  var completionInFlight = false;
+  var completionFlight = null;
 
   var SET_ICONS = { completed: '&#10003;', active: '&#9679;', upcoming: '&#9675;' };
 
@@ -190,12 +195,155 @@
     return { weightKg: set.weightKg, reps: set.reps };
   }
 
+  function trackTraining(name, params) {
+    try {
+      if (typeof window.fxTrack !== 'function') return;
+      window.fxTrack(name, params || {});
+    } catch (error) { /* analytics must not affect the workout */ }
+  }
+
   function clearRest() {
     restTimer = null;
     if (restTick != null) {
       clearInterval(restTick);
       restTick = null;
     }
+  }
+
+  function removeRestBanner() {
+    var node = document.getElementById('aw-rest');
+    if (node) node.remove();
+  }
+
+  // Rest and the cue live only on restTimer. Drop both, and drop any
+  // telemetry still waiting on a completion that no longer belongs to this
+  // session.
+  function invalidateTransient() {
+    if (restTimer) restTimer.suppressTelemetry = true;
+    if (completionFlight) completionFlight.cancelled = true;
+    completionFlight = null;
+    completionInFlight = false;
+    clearRest();
+    removeRestBanner();
+  }
+
+  function captureMutable(set) {
+    return {
+      done: set.done === true,
+      reopened: set.reopened === true,
+      weightKg: set.weightKg,
+      reps: set.reps,
+      repsExplicit: set.repsExplicit === true,
+      weightExplicit: set.weightExplicit === true,
+      repsTouched: set.repsTouched === true,
+    };
+  }
+
+  function restoreMutable(set, snap) {
+    if (!set || !snap) return;
+    set.done = snap.done;
+    set.reopened = snap.reopened;
+    set.weightKg = snap.weightKg;
+    set.reps = snap.reps;
+    set.repsExplicit = snap.repsExplicit;
+    set.weightExplicit = snap.weightExplicit;
+    set.repsTouched = snap.repsTouched;
+  }
+
+  function ensureLoggingSeed(set, exercise) {
+    if (!set || set.loggingSeed) return;
+    set.loggingSeed = window.FitXWorkoutDraft.loggingSeedSource(
+      set, historyFor(exercise));
+  }
+
+  function releaseRestTelemetry(timer) {
+    if (!timer || timer.suppressTelemetry || timer.telemetryReady) return;
+    timer.telemetryReady = true;
+    trackTraining('training_rest_started', {
+      duration_bucket: window.FitXWorkoutDraft.restDurationBucket(timer.durationMs),
+    });
+    if (timer.cueType && !timer.cueEmitted) {
+      timer.cueEmitted = true;
+      trackTraining('training_coach_cue_shown', { cue_type: timer.cueType });
+    }
+    var pending = timer.pendingExtensions || 0;
+    timer.pendingExtensions = 0;
+    for (var i = 0; i < pending; i++) {
+      trackTraining('training_rest_extended', { extension: 'plus_30' });
+    }
+    if (timer.outcome === 'skipped') trackTraining('training_rest_skipped', {});
+    else if (timer.outcome === 'expired') trackTraining('training_rest_expired', {});
+  }
+
+  function noteRestExtended(timer) {
+    if (!timer || timer.suppressTelemetry || timer.outcome) return;
+    if (timer.telemetryReady) {
+      trackTraining('training_rest_extended', { extension: 'plus_30' });
+      return;
+    }
+    timer.pendingExtensions = (timer.pendingExtensions || 0) + 1;
+  }
+
+  function emitRestTerminal(timer, eventName) {
+    if (!eventName || !timer || !timer.telemetryReady || timer.suppressTelemetry) return;
+    trackTraining(eventName, {});
+  }
+
+  function expireRest() {
+    var timer = restTimer;
+    if (!timer) return;
+    var eventName = window.FitXWorkoutDraft.claimRestTerminal(timer, 'expired');
+    clearRest();
+    removeRestBanner();
+    emitRestTerminal(timer, eventName);
+  }
+
+  function skipRest() {
+    var timer = restTimer;
+    if (!timer) return;
+    var eventName = window.FitXWorkoutDraft.claimRestTerminal(timer, 'skipped');
+    clearRest();
+    removeRestBanner();
+    emitRestTerminal(timer, eventName);
+  }
+
+  function settleCompletion(flight, result) {
+    if (completionFlight !== flight) return;
+    completionFlight = null;
+    completionInFlight = false;
+    if (flight.cancelled) return;
+    var ok = !!(result && result.ok === true);
+    var persisted = ok || !!(result && (result.disabled === true || result.unchanged === true));
+    if (!persisted) {
+      if (flight.rest) flight.rest.suppressTelemetry = true;
+      if (restTimer === flight.rest) {
+        clearRest();
+        removeRestBanner();
+      }
+      if (draft === flight.draft) {
+        restoreMutable(flight.set, flight.setSnap);
+        restoreMutable(flight.nextSet, flight.nextSnap);
+        focusIndex = flight.focusIndex;
+        draft.currentExerciseIndex = flight.exerciseCursor;
+        renderDraft();
+        focusActiveSurface();
+      } else if (draft) {
+        var sessionView = document.getElementById('session-view');
+        if (sessionView && sessionView.classList.contains('open')) renderDraft();
+      }
+      return;
+    }
+    var button = document.querySelector('#sv-body [data-set-action="complete"]');
+    if (button) button.disabled = false;
+    if (!ok || result.unchanged === true || flight.reopened) return;
+    trackTraining('training_set_completed', window.FitXWorkoutDraft.buildSetCompletedParams(
+      flight.exercisePosition,
+      flight.setPosition,
+      flight.logging,
+      flight.rest != null,
+      flight.rest && flight.rest.cueType,
+    ));
+    if (flight.rest) releaseRestTelemetry(flight.rest);
   }
 
   function activeRest() {
@@ -215,15 +363,18 @@
   }
 
   function paintRestClock() {
-    var clock = document.getElementById('aw-rest-clock');
     if (!restTimer) return;
     var remaining = window.FitXWorkoutDraft.remainingRestMs(restTimer.endsAt, Date.now());
-    if (remaining <= 0 || !activeRest()) {
-      clearRest();
-      var node = document.getElementById('aw-rest');
-      if (node) node.remove();
+    if (remaining <= 0) {
+      expireRest();
       return;
     }
+    if (!activeRest()) {
+      clearRest();
+      removeRestBanner();
+      return;
+    }
+    var clock = document.getElementById('aw-rest-clock');
     if (clock) clock.textContent = window.FitXWorkoutDraft.formatRestClock(remaining);
   }
 
@@ -231,11 +382,17 @@
     var rest = activeRest();
     if (!rest) return '';
     var remaining = window.FitXWorkoutDraft.remainingRestMs(restTimer.endsAt, Date.now());
+    var cueType = restTimer.cueType;
+    var cue = cueType === 'below_target' || cueType === 'on_target' || cueType === 'above_target'
+      ? '<p class="aw-rest-cue" data-coach-cue="' + cueType + '">' +
+        escapeHTML(copy('training.cue_' + cueType)) + '</p>'
+      : '';
     return '<div class="aw-rest" id="aw-rest" role="timer">' +
       '<p class="aw-rest-kicker"><span class="aw-label">' + escapeHTML(copy('training.rest')) +
       '</span></p>' +
       '<p class="aw-rest-clock" id="aw-rest-clock">' +
       escapeHTML(window.FitXWorkoutDraft.formatRestClock(remaining)) + '</p>' +
+      cue +
       '<p class="aw-rest-next"><span class="aw-label">' + escapeHTML(copy('training.next_up')) +
       '</span> <span id="aw-rest-next-value">' + escapeHTML(setSummary(rest.set)) +
       '</span></p>' +
@@ -252,25 +409,21 @@
       var extended = window.FitXWorkoutDraft.extendRestDeadline(
         restTimer.endsAt, Date.now(), 30000);
       if (extended == null) {
-        clearRest();
-        var expired = document.getElementById('aw-rest');
-        if (expired) expired.remove();
+        expireRest();
         return;
       }
       restTimer.endsAt = extended;
+      noteRestExtended(restTimer);
       paintRestClock();
       return;
     }
-    if (action === 'skip') {
-      clearRest();
-      var banner = document.getElementById('aw-rest');
-      if (banner) banner.remove();
-    }
+    if (action === 'skip') skipRest();
   }
 
   function renderActiveExercise(exercise, exerciseIndex, setIndex) {
     var total = exercise.sets.length;
     var current = setIndex === -1 ? null : exercise.sets[setIndex];
+    if (current) ensureLoggingSeed(current, exercise);
     var shown = current ? shownSet(exercise, current, setIndex) : null;
     var target = prescription(exercise) +
       (exercise.dinlenme ? ' &middot; ' + escapeHTML(copy('training.rest')) + ' ' +
@@ -284,7 +437,8 @@
         '<label class="aw-field"><span class="aw-label">' + escapeHTML(copy('training.reps')) +
         '</span><input class="set-input" type="number" inputmode="numeric" min="0" step="1"' +
         ' data-field="reps" value="' + (shown.reps == null ? '' : shown.reps) + '"></label>' +
-        '</div><button class="btn-volt w-full aw-complete" type="button" data-set-action="complete">' +
+        '</div><button class="btn-volt w-full aw-complete" type="button" data-set-action="complete"' +
+        (completionInFlight ? ' disabled' : '') + '>' +
         escapeHTML(copy('training.set_done')) + '</button></div>'
       : '<p class="aw-exercise-done">' + escapeHTML(copy('training.exercise_complete')) + '</p>';
     return '<section class="aw-active" data-ex="' + exerciseIndex +
@@ -439,7 +593,10 @@
 
   function closeSession() {
     setOpen(document.getElementById('session-view'), false);
-    if (workoutState.contract_version !== 2) draft = null;
+    if (workoutState.contract_version !== 2) {
+      draft = null;
+      invalidateTransient();
+    }
     if (trigger && trigger.focus) trigger.focus();
   }
 
@@ -447,14 +604,16 @@
     var session = workoutState && workoutState.session;
     if (!session || session.status !== 'active') return;
     client.stopCheckpointing();
-    clearRest();
+    invalidateTransient();
     closeSession();
     draft = null;
-    return await client.mutate(
+    var result = await client.mutate(
       '/workout/session/' + encodeURIComponent(session.public_id) + '/abandon',
       { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'user_abandoned' }) },
     );
+    if (result && result.ok) trackTraining('training_workout_abandoned', {});
+    return result;
   }
 
   async function recoverBlockedWorkout() {
@@ -530,6 +689,8 @@
           copy('training.verify_failed'));
         return;
       }
+      trackTraining('training_workout_finished', {});
+      invalidateTransient();
       setOpen(document.getElementById('plan-completion'), false);
       draft = null;
       window.location.reload();
@@ -579,7 +740,7 @@
       return;
     }
     var button = event.target.closest('[data-set-action]');
-    if (!button) return;
+    if (!button || completionInFlight) return;
     var row = button.closest('[data-set]');
     var exerciseIndex = Number(row.dataset.ex);
     var setIndex = Number(row.dataset.set);
@@ -598,9 +759,18 @@
       checkpoint(true);
       return;
     }
+    if (button.disabled) return;
     var reopened = set.reopened === true;
     var forwardRest = !reopened &&
       window.FitXWorkoutDraft.shouldStartRest(exercise, setIndex);
+    var setSnap = captureMutable(set);
+    var nextSet = exercise.sets[setIndex + 1] || null;
+    var nextSnap = nextSet ? captureMutable(nextSet) : null;
+    var savedFocus = focusIndex;
+    var savedCursor = draft.currentExerciseIndex;
+    ensureLoggingSeed(set, exercise);
+    var logging = window.FitXWorkoutDraft.deriveSetLogging(
+      set.loggingSeed, set.weightExplicit === true, set.repsTouched === true);
     if (setIndex === 0) {
       window.FitXWorkoutDraft.adoptHistoricalDefault(set, historyFor(exercise));
     }
@@ -612,16 +782,30 @@
     // this exercise when that set is still missing them. The copy is part of
     // the same checkpoint as completion, so a refresh keeps it.
     window.FitXWorkoutDraft.prepareNextSet(exercise, setIndex);
+    var cueType = window.FitXWorkoutDraft.coachCueForCompletion({
+      reopened: reopened,
+      forwardRest: forwardRest,
+      actualReps: set.reps,
+      targetText: exercise.tekrar,
+    });
     // A reopened set is not a new rest. Forward completion either starts the
     // next between-set rest or ends the one that just finished.
     var startedRest = null;
     if (!reopened) {
       if (forwardRest) {
+        var durationMs = window.FitXWorkoutDraft.deriveRestDurationMs(exercise.dinlenme);
         restTimer = {
           sessionId: draft.sessionId,
           exerciseIndex: exerciseIndex,
           setIndex: setIndex + 1,
-          endsAt: Date.now() + window.FitXWorkoutDraft.deriveRestDurationMs(exercise.dinlenme),
+          endsAt: Date.now() + durationMs,
+          durationMs: durationMs,
+          cueType: cueType,
+          outcome: null,
+          telemetryReady: false,
+          suppressTelemetry: false,
+          pendingExtensions: 0,
+          cueEmitted: false,
         };
         startedRest = restTimer;
         ensureRestTick();
@@ -638,22 +822,41 @@
       draft.currentExerciseIndex = exerciseIndex;
     }
     if (window.FitXWorkoutDraft.deriveActiveWorkout(draft, null).complete) clearRest();
+    if (startedRest && restTimer !== startedRest) {
+      startedRest.suppressTelemetry = true;
+      startedRest = null;
+    }
+    var flight = {
+      draft: draft,
+      set: set,
+      setSnap: setSnap,
+      nextSet: nextSet,
+      nextSnap: nextSnap,
+      focusIndex: savedFocus,
+      exerciseCursor: savedCursor,
+      reopened: reopened,
+      rest: startedRest,
+      logging: logging,
+      exercisePosition: exerciseIndex + 1,
+      setPosition: setIndex + 1,
+      cancelled: false,
+    };
+    completionFlight = flight;
+    completionInFlight = true;
     renderDraft();
     focusActiveSurface();
-    var saved = checkpoint(true);
-    if (startedRest) {
-      Promise.resolve(saved).then(function (result) {
-        if (restTimer !== startedRest || (result && result.ok === true)) return;
-        clearRest();
-        var node = document.getElementById('aw-rest');
-        if (node) node.remove();
-      }).catch(function () {
-        if (restTimer !== startedRest) return;
-        clearRest();
-        var node = document.getElementById('aw-rest');
-        if (node) node.remove();
-      });
+    var saved;
+    try {
+      saved = checkpoint(true);
+    } catch (error) {
+      settleCompletion(flight, { ok: false });
+      return;
     }
+    Promise.resolve(saved).then(function (result) {
+      settleCompletion(flight, result);
+    }).catch(function () {
+      settleCompletion(flight, { ok: false });
+    });
   });
 
   function trapDialogFocus(container) {
@@ -706,7 +909,7 @@
   document.addEventListener('visibilitychange', paintRestClock);
   window.addEventListener('focus', paintRestClock);
   window.addEventListener('pagehide', function () {
-    clearRest();
+    invalidateTransient();
     client.destroy();
   });
 }());
