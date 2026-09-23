@@ -177,6 +177,7 @@ def host_fixture(tmp_path: Path):
         fail_candidate_docker_command: str = "",
         fail_rollback_docker_command: str = "",
         fail_prune: bool = False,
+        fail_build_cache_prune: bool = False,
         timeout_hang_phase: str = "",
         timeout_hang_command: str = "",
         clock_readings: tuple[int, ...] = (),
@@ -373,7 +374,9 @@ if [[ " $* " == *' build '* ]]; then operation=build; fi
 if [[ " $* " == *' up -d '* ]]; then operation=up; fi
 if [[ " $* " == *' ps '* ]]; then operation=ps; fi
 if [[ " $* " == *' image prune '* ]]; then operation=prune; fi
+if [[ " $* " == *' builder prune '* ]]; then operation=build_cache_prune; fi
 if [[ "$operation" == prune && "$FAKE_FAIL_PRUNE" == 1 ]]; then exit 41; fi
+if [[ "$operation" == build_cache_prune && "$FAKE_FAIL_BUILD_CACHE_PRUNE" == 1 ]]; then exit 44; fi
 if [[ -n "$FAKE_FAIL_CANDIDATE_DOCKER_COMMAND" && "$revision" == "$FAKE_CANDIDATE_SHA" && "$operation" == "$FAKE_FAIL_CANDIDATE_DOCKER_COMMAND" ]]; then
   exit 42
 fi
@@ -689,6 +692,7 @@ esac
                 "FAKE_FAIL_CANDIDATE_DOCKER_COMMAND": fail_candidate_docker_command,
                 "FAKE_FAIL_ROLLBACK_DOCKER_COMMAND": fail_rollback_docker_command,
                 "FAKE_FAIL_PRUNE": "1" if fail_prune else "0",
+                "FAKE_FAIL_BUILD_CACHE_PRUNE": "1" if fail_build_cache_prune else "0",
                 "FAKE_CLOCK_FILE": _bash_path(fake_clock),
                 "FAKE_CLOCK_COUNT_FILE": _bash_path(fake_clock_count),
                 "FAKE_CLOCK_READINGS_FILE": _bash_path(fake_clock_readings),
@@ -1770,6 +1774,88 @@ def test_prune_failure_rolls_back_exactly_once(bash_executable, host_fixture):
     assert _trace_command_count(trace, "docker image prune -f") == 1
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
+
+
+def _build_cache_keep_bytes() -> int:
+    # The budget is read back out of the host script rather than repeated here,
+    # so a change to the cap cannot leave this suite asserting a stale bound.
+    match = re.search(
+        r"(?m)^\s*readonly BUILD_CACHE_KEEP_BYTES=([0-9]+)\s*$",
+        HOST_SCRIPT.read_text(encoding="utf-8"),
+    )
+    assert match is not None
+    return int(match.group(1))
+
+
+def test_verified_deploy_bounds_build_cache_after_image_prune(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture()
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    expected = f"docker builder prune --force --keep-storage {_build_cache_keep_bytes()}"
+    assert _trace_command_count(trace, expected) == 1
+    # Bounding the cache is housekeeping for a release that already shipped, so
+    # it has to follow the candidate it just built -- pruning first would throw
+    # away the layers that build was about to reuse.
+    trace_lines = trace.splitlines()
+    assert trace_lines.index(expected) > trace_lines.index("docker image prune -f")
+    # The cache is capped, never emptied: a deploy that discarded every layer
+    # would make the next rollback build cold exactly when speed matters most.
+    assert "docker builder prune --force --all" not in trace
+    assert _trace_command_count(trace, "docker system prune -f") == 0
+    assert _trace_command_count(trace, "docker volume prune -f") == 0
+
+
+def test_build_cache_prune_failure_leaves_verified_deploy_intact(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(fail_build_cache_prune=True)
+    result = fixture.run(bash_executable)
+
+    # A release whose health checks passed is deployed. Housekeeping that could
+    # not finish is a disk problem, not a bad release, so it must not fail the
+    # run and must not reach the rollback the ERR trap has already released.
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    expected = f"docker builder prune --force --keep-storage {_build_cache_keep_bytes()}"
+    assert _trace_command_count(trace, expected) == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 0
+    assert "rollback verified" not in result.stderr
+    assert "build cache prune did not complete" in result.stderr
+    assert f"deployment verified at {fixture.candidate_commit}" in result.stderr
+    assert (
+        _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"])
+        == fixture.candidate_commit
+    )
+
+
+def test_build_cache_prune_carries_its_own_bound_not_the_phase_budget(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture()
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    script = HOST_SCRIPT.read_text(encoding="utf-8")
+    grace_match = re.search(
+        r"(?m)^\s*readonly COMMAND_KILL_GRACE_SECONDS=([0-9]+)\s*$", script
+    )
+    timeout_match = re.search(
+        r"(?m)^\s*readonly BUILD_CACHE_PRUNE_TIMEOUT_SECONDS=([0-9]+)\s*$", script
+    )
+    assert grace_match is not None
+    assert timeout_match is not None
+    trace = fixture.trace.read_text(encoding="utf-8")
+    # The deploy phase clock bounds work the release depends on. Housekeeping
+    # must not inherit whatever a slow build left of it, so it is bounded by its
+    # own constant instead of by run_external's remaining budget.
+    assert (
+        f"--signal=TERM --kill-after={grace_match.group(1)}s "
+        f"{timeout_match.group(1)}s docker builder prune" in trace
+    )
 
 
 def test_failed_rollback_revision_is_reported_without_second_attempt(

@@ -60,6 +60,14 @@ readonly PUBLIC_HEALTH_ATTEMPTS=12
 readonly HEALTH_CONNECT_TIMEOUT_SECONDS=2
 readonly HEALTH_MAX_TIME_SECONDS=5
 readonly HEALTH_RETRY_DELAY_SECONDS=5
+# BuildKit cache accelerates builds and is never read at runtime, so it is the
+# one Docker store a verified deployment may bound. Left unbounded it grew to
+# ~13.8 GB and carried the 24 GB root volume to ~80% used, within 5 points of
+# AxisAI-EC2-Disk-High. The budget keeps the most recently used layers so the
+# candidate and its rollback still build warm, while capping the store: live
+# images (~1.6 GB) plus volumes plus this budget stay far below the alarm.
+readonly BUILD_CACHE_KEEP_BYTES=4294967296
+readonly BUILD_CACHE_PRUNE_TIMEOUT_SECONDS=120
 readonly ABSENT_BUILD_REVISION_MARKER='__axisai_build_revision_absent__'
 # The baked-revision probe reports an absent /app/BUILD_REVISION *in band* and
 # still exits 0, so an unreachable container, a transport error, or an exhausted
@@ -117,6 +125,22 @@ run_external() {
     status="$?"
     return "$status"
   fi
+}
+
+# Caps the BuildKit cache once a release is already verified. This deliberately
+# does not go through run_external: the deploy phase clock exists to bound work
+# the release depends on, and a disk-hygiene step must never inherit a budget
+# that a slow build has already spent. It carries its own bound instead, and it
+# always reports success -- a verified release is not failed, and never rolled
+# back, because housekeeping could not finish.
+prune_build_cache() {
+  if timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
+    "${BUILD_CACHE_PRUNE_TIMEOUT_SECONDS}s" \
+    docker builder prune --force --keep-storage "$BUILD_CACHE_KEEP_BYTES" >&2; then
+    return 0
+  fi
+  echo "build cache prune did not complete; deployment remains verified" >&2
+  return 0
 }
 
 # The root wrapper passes descriptor 7 for the exact locked open-file
@@ -561,4 +585,5 @@ fi
 start_and_verify_release "$DEPLOY_SHA" 0 1
 run_external docker image prune -f
 trap - ERR
+prune_build_cache
 echo "deployment verified at $DEPLOY_SHA" >&2
