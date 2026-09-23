@@ -261,9 +261,15 @@
 
   function focusActiveSurface() {
     var heading = document.getElementById('aw-active-set');
+    var anchor = heading || document.querySelector('#sv-body .aw-all-done');
+    // Keep the new active set on screen without opening the keyboard.
+    // `nearest` does not move the page when the target is already visible.
+    if (anchor && anchor.scrollIntoView) {
+      anchor.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
     var target = heading ||
       document.querySelector('#session-view [data-action="finishSession"]');
-    if (target) target.focus();
+    if (target && target.focus) target.focus({ preventScroll: true });
   }
 
   function openDraft() {
@@ -428,6 +434,8 @@
       set.weightKg = event.target.value === '' ? null : Number(event.target.value);
     } else if (event.target.dataset.field === 'reps') {
       set.reps = event.target.value === '' ? null : Number(event.target.value);
+      // Blank stays eligible for a later copy. A typed number does not.
+      set.repsExplicit = set.reps != null;
     }
     checkpoint(false);
   });
@@ -451,6 +459,12 @@
     // Same persisted field the old checkbox toggled; the next active set is
     // derived from it on render, never stored separately.
     set.done = button.dataset.setAction === 'complete';
+    // One-tap: lend this set's weight and reps to the immediate next set in
+    // this exercise when that set is still missing them. The copy is part of
+    // the same checkpoint as completion, so a refresh keeps it.
+    if (set.done) {
+      window.FitXWorkoutDraft.prepareNextSet(exercise, Number(row.dataset.set));
+    }
     if (set.done && exercise.sets.every(function (item) { return item.done; })) {
       focusIndex = null;
       var view = window.FitXWorkoutDraft.deriveActiveWorkout(draft, null);

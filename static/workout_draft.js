@@ -110,6 +110,11 @@
         set.done = saved.completed;
         set.reps = optionalInteger(saved.reps, MAX_REPS, 'checkpoint_reps_invalid');
         set.weightKg = weight(saved.weight_kg);
+        // A stored number is the user's when it has a load or it is not the
+        // prescription fallback. Future sets are snapshotted with that
+        // fallback and stay eligible for a same-exercise copy.
+        set.repsExplicit = set.reps != null &&
+          (set.weightKg != null || set.reps !== defaultReps(exercise.tekrar));
       });
     });
   }
@@ -273,6 +278,38 @@
     };
   }
 
+  // Copy missing weight/reps from the set just completed onto the immediate
+  // next set in the same exercise. Precedence is: a value already on that
+  // set, then the previous set, then the prescription fallback. Weight is
+  // kept whenever it is non-null. Reps are kept when `repsExplicit` is set
+  // (typed, copied earlier, or hydrated as real data). Completed sets are
+  // never written. Returns whether the next set changed.
+  function prepareNextSet(exercise, completedIndex) {
+    var sets = exercise && Array.isArray(exercise.sets) ? exercise.sets : null;
+    if (!sets || !Number.isInteger(completedIndex) || completedIndex < 0) return false;
+    var source = sets[completedIndex];
+    var next = sets[completedIndex + 1];
+    if (!source || !next || source.done !== true || next.done === true) return false;
+    var changed = false;
+    if (next.weightKg == null && typeof source.weightKg === 'number' &&
+        Number.isFinite(source.weightKg)) {
+      next.weightKg = source.weightKg;
+      changed = true;
+    }
+    if (Number.isInteger(source.reps) &&
+        (next.reps == null || next.repsExplicit !== true)) {
+      if (next.reps !== source.reps) {
+        next.reps = source.reps;
+        changed = true;
+      }
+      if (next.repsExplicit !== true) {
+        next.repsExplicit = true;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function selectWorkoutDraft(day, session, existingDraft, nowMs) {
     if (existingDraft && session && existingDraft.sessionId === session.public_id) {
       return existingDraft;
@@ -287,5 +324,6 @@
     flushWorkoutDraft: flushWorkoutDraft,
     selectWorkoutDraft: selectWorkoutDraft,
     deriveActiveWorkout: deriveActiveWorkout,
+    prepareNextSet: prepareNextSet,
   };
 }));
