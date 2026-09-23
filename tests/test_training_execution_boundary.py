@@ -568,11 +568,12 @@ def test_one_tap_set_progression_prefills_advances_and_survives_refresh(
         'index': 0, 'completed': True, 'reps': 8, 'weight_kg': 60}
     assert sent['exercises'][0]['sets'][1] == {
         'index': 1, 'completed': False, 'reps': 8, 'weight_kg': 60}
-    # The set after next, and the other exercise, are not pre-filled.
+    # Untouched sets stay on the prescription: null in the snapshot, so a
+    # refresh can still copy onto them. A confirmed 12 would be stored as 12.
     assert sent['exercises'][0]['sets'][2]['weight_kg'] is None
-    assert sent['exercises'][0]['sets'][2]['reps'] == 12
+    assert sent['exercises'][0]['sets'][2]['reps'] is None
     assert sent['exercises'][1]['sets'][0] == {
-        'index': 0, 'completed': False, 'reps': 10, 'weight_kg': None}
+        'index': 0, 'completed': False, 'reps': None, 'weight_kg': None}
 
     expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
     expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 2 of 3$'))
