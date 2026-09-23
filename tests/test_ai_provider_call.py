@@ -707,7 +707,22 @@ def test_retry_count_is_bounded(providers, provider, expected):
                             else ai_provider_call.OPENAI_MAX_RETRIES)
 
 
-@pytest.mark.parametrize("exc", [APITimeoutError("read"), StatusError(400), StatusError(403)])
+def _sdk_timeouts():
+    import anthropic
+    import httpx
+    import openai
+    request = httpx.Request("POST", "https://example.invalid")
+    return [anthropic.APITimeoutError(request=request), openai.APITimeoutError(request=request)]
+
+
+def test_real_sdk_timeouts_are_connection_errors_but_never_retried():
+    for exc in _sdk_timeouts():
+        assert any(c.__name__ == "APIConnectionError" for c in type(exc).__mro__)
+        assert ai_provider_call._is_retryable(exc) is False
+
+
+@pytest.mark.parametrize("exc", [APITimeoutError("read"), StatusError(400), StatusError(403)]
+                         + _sdk_timeouts())
 def test_timeouts_and_permanent_errors_are_not_retried(providers, exc, usage_events):
     providers.bedrock.script = [exc, _bedrock_resp()]
     with pytest.raises(type(exc)):
@@ -717,7 +732,8 @@ def test_timeouts_and_permanent_errors_are_not_retried(providers, exc, usage_eve
     assert len(providers.bedrock.calls) == 1
     (event,) = _parsed(usage_events)
     assert event["usage_source"] == "estimated" and event["input_tokens"] > 0
-    assert event["outcome"] == ("timeout" if isinstance(exc, APITimeoutError) else "provider_error")
+    assert event["outcome"] == ("timeout" if "Timeout" in type(exc).__name__
+                                else "provider_error")
 
 
 def test_a_spend_refusal_on_retry_ends_the_call(providers, monkeypatch, usage_events):

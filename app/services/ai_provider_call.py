@@ -80,7 +80,9 @@ def _is_retryable(exc):
     status = getattr(exc, "status_code", None)
     if isinstance(status, int):
         return status in _RETRYABLE_STATUS or status >= 500
-    return type(exc).__name__ == "APIConnectionError"
+    # Connection refused/reset. Both SDKs derive their timeout class from
+    # APIConnectionError, which is why the timeout test above must come first.
+    return any(cls.__name__ == "APIConnectionError" for cls in type(exc).__mro__)
 
 
 def _outcome_of(exc):
