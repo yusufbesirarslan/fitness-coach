@@ -26,11 +26,20 @@ services:
     # yazar, yani log dosyası sınırsız büyür. Tek EC2 host'unda sabit bir EBS
     # diskiyle bu, eninde sonunda diski doldurur ve web + redis + deploy'u BİRLİKTE
     # düşürür. mem_limit diskin dolmasına karşı hiçbir şey yapmaz.
+    #
+    # labels: her JSON log satırına attrs."com.docker.compose.service"="web"
+    # yazar. Host CloudWatch Agent'ı /var/lib/docker/containers/*/*-json.log
+    # glob'unu YALNIZCA bu etiketle filtreleyerek /axisai/app'e taşır
+    # (deploy/cloudwatch-agent/). Kimlik konteyner ID'sinden DEĞİL servis
+    # adından gelir → her deploy'un yeni konteyner ID'si ek iş istemeden
+    # sevk edilir. Eskiden agent tek bir sabit konteyner yolunu izliyordu ve
+    # ilk redeploy'da sessizce boşa düştü. redis bu etiketi BİLEREK taşımaz.
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+        labels: "com.docker.compose.service"
     # Veritabanı: AWS RDS PostgreSQL. Bağlantı .env'deki DATABASE_URL'den gelir;
     # compose ARTIK override ETMEZ (önceden bundled "db" servisine yönlendiriyordu).
     # .env'de DATABASE_URL=postgresql://...rds.amazonaws.com:5432/... ZORUNLU;
@@ -53,11 +62,13 @@ services:
     env_file:
       - .env
     # web/redis ile aynı gerekçe: sınırsız log = dolu disk = tüm servisler düşer.
+    # labels: web ile aynı — worker satırları da /axisai/app'e servis adıyla gider.
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+        labels: "com.docker.compose.service"
     # Worker'a KENDİ sağlık sözleşmesini ver. Aksi halde imaj düzeyindeki
     # HEALTHCHECK'i (web'e ait `http://127.0.0.1:5000/health`) miras alır — ama
     # worker `python worker.py` koşar ve 5000'de dinleyen HİÇBİR ŞEY yoktur, yani

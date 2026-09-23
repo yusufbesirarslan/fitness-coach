@@ -342,6 +342,12 @@ def configure_app(app):
     app.config.update(_feature_flags.resolve_rollout_flags(os.environ))
     if _gunicorn_logger.handlers:
         app.logger.handlers = _gunicorn_logger.handlers
+        # app.logger now writes through gunicorn's own handler. Propagating as
+        # well hands every record to the root handler that Alembic's
+        # fileConfig installs at boot, so production printed each request line
+        # twice ("[INFO] request id=..." and "INFO  [app] request id=...") and
+        # shipped both.
+        app.logger.propagate = False
         app.logger.setLevel(_gunicorn_logger.level or getattr(logging, _LOG_LEVEL, logging.INFO))
     else:
         logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO))
