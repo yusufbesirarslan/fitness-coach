@@ -15,6 +15,14 @@ const {
   remainingRestMs,
   extendRestDeadline,
   formatRestClock,
+  parseRepTarget,
+  classifySetAgainstTarget,
+  coachCueForCompletion,
+  loggingSeedSource,
+  deriveSetLogging,
+  buildSetCompletedParams,
+  restDurationBucket,
+  claimRestTerminal,
 } = require('../../static/workout_draft.js');
 
 const day = {
@@ -527,4 +535,91 @@ test('rest starts only for forward same-exercise completion and uses the deadlin
   assert.equal(extendRestDeadline(endsAt, endsAt + 1, 30000), null);
   assert.equal(formatRestClock(90000), '01:30');
   assert.equal(exercise.dinlenme, '90 sn');
+});
+
+test('rep target classification is only the product range or a fixed count', () => {
+  assert.deepEqual(parseRepTarget('8-10'), { min: 8, max: 10 });
+  assert.deepEqual(parseRepTarget('8–10'), { min: 8, max: 10 });
+  assert.deepEqual(parseRepTarget('8 — 10'), { min: 8, max: 10 });
+  assert.deepEqual(parseRepTarget('10'), { min: 10, max: 10 });
+  for (const actual of [8, 9, 10]) {
+    assert.equal(classifySetAgainstTarget(actual, '8–10'), 'on_target');
+  }
+  assert.equal(classifySetAgainstTarget(7, '8-10'), 'below_target');
+  assert.equal(classifySetAgainstTarget(11, '8-10'), 'above_target');
+  assert.equal(classifySetAgainstTarget(10, '10'), 'on_target');
+  assert.equal(classifySetAgainstTarget(9, '10'), 'below_target');
+  for (const target of ['8 to 10', '30 dk', '8-10-12', '08-10', '10-8', '', 'AMRAP', null]) {
+    assert.equal(parseRepTarget(target), null);
+    assert.equal(classifySetAgainstTarget(8, target), null);
+  }
+  assert.equal(classifySetAgainstTarget(null, '8-10'), null);
+  assert.equal(coachCueForCompletion({
+    reopened: true, forwardRest: true, actualReps: 6, targetText: '8-10',
+  }), null);
+  assert.equal(coachCueForCompletion({
+    reopened: false, forwardRest: false, actualReps: 6, targetText: '8-10',
+  }), null);
+  assert.equal(coachCueForCompletion({
+    reopened: false, forwardRest: true, actualReps: 9, targetText: '8-10',
+  }), 'on_target');
+  assert.equal(coachCueForCompletion({
+    reopened: false, forwardRest: true, actualReps: 9, targetText: 'around 8-10',
+  }), null);
+});
+
+test('set logging source and edit counts stay bounded', () => {
+  const history = { reps: 8, weightKg: 60 };
+  const fresh = { index: 0, weightKg: null, reps: 12, repsExplicit: false };
+  assert.equal(loggingSeedSource(fresh, history), 'history');
+  assert.equal(loggingSeedSource(fresh, null), 'prescription');
+  assert.equal(loggingSeedSource({
+    index: 0, weightKg: null, reps: null,
+  }, null), 'blank');
+  assert.equal(loggingSeedSource({
+    index: 0, weightKg: null, reps: 8, repsExplicit: true,
+  }, history), 'current');
+  assert.equal(loggingSeedSource({
+    index: 1, weightKg: 60, reps: 8, repsExplicit: true,
+  }, history), 'current');
+  assert.equal(loggingSeedSource({
+    index: 1, weightKg: null, reps: 12, repsExplicit: false,
+  }, history), 'prescription');
+
+  const accepted = deriveSetLogging('history', false, false);
+  assert.deepEqual(accepted, {
+    default_source: 'history', weight_edited: false, reps_edited: false, fields_edited: 0,
+  });
+  const both = deriveSetLogging('history', true, true);
+  assert.equal(both.fields_edited, 2);
+  assert.equal(both.weight_edited, true);
+  assert.equal(both.reps_edited, true);
+  const params = buildSetCompletedParams(1, 1, accepted, true, 'on_target');
+  assert.deepEqual(params, {
+    exercise_position: 1,
+    set_position: 1,
+    default_source: 'history',
+    weight_edited: false,
+    reps_edited: false,
+    fields_edited: 0,
+    had_rest: true,
+    cue_type: 'on_target',
+  });
+  assert.equal(JSON.stringify(params).includes('60'), false);
+  assert.equal(buildSetCompletedParams(2, 3, both, false, null).cue_type, 'none');
+});
+
+test('rest buckets and skip versus expiry are mutually exclusive', () => {
+  assert.equal(restDurationBucket(59000), 'lt_60');
+  assert.equal(restDurationBucket(60000), '60_89');
+  assert.equal(restDurationBucket(89000), '60_89');
+  assert.equal(restDurationBucket(90000), '90_119');
+  assert.equal(restDurationBucket(119000), '90_119');
+  assert.equal(restDurationBucket(120000), '120_plus');
+  const skipped = {};
+  assert.equal(claimRestTerminal(skipped, 'skipped'), 'training_rest_skipped');
+  assert.equal(claimRestTerminal(skipped, 'expired'), null);
+  const expired = {};
+  assert.equal(claimRestTerminal(expired, 'expired'), 'training_rest_expired');
+  assert.equal(claimRestTerminal(expired, 'skipped'), null);
 });

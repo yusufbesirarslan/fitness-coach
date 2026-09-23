@@ -833,6 +833,366 @@ def test_one_tap_set_progression_desktop_smoke(
     }
 
 
+def _arm_analytics(page):
+    page.evaluate('''() => {
+      sessionStorage.removeItem('fx-events');
+      window.__fxEvents = [];
+      window.fxTrack = (name, params) => {
+        let copy = {};
+        try { copy = params ? JSON.parse(JSON.stringify(params)) : {}; }
+        catch (error) { copy = { __uncloneable: true }; }
+        window.__fxEvents.push({ name: name, params: copy });
+        sessionStorage.setItem('fx-events', JSON.stringify(window.__fxEvents));
+      };
+    }''')
+
+
+def _fx_events(page):
+    return page.evaluate('''() => {
+      if (Array.isArray(window.__fxEvents)) return window.__fxEvents;
+      try { return JSON.parse(sessionStorage.getItem('fx-events') || '[]'); }
+      catch (error) { return []; }
+    }''')
+
+
+def _named(events, name):
+    return [event for event in events if event['name'] == name]
+
+
+_EVENT_PARAMS = {
+    'training_set_completed': {
+        'exercise_position', 'set_position', 'default_source', 'weight_edited',
+        'reps_edited', 'fields_edited', 'had_rest', 'cue_type',
+    },
+    'training_rest_started': {'duration_bucket'},
+    'training_rest_extended': {'extension'},
+    'training_rest_skipped': set(),
+    'training_rest_expired': set(),
+    'training_workout_finished': set(),
+    'training_workout_abandoned': set(),
+    'training_coach_cue_shown': {'cue_type'},
+}
+
+
+def _assert_bounded_events(events):
+    raw = ('60', '62.5', '40', 'Squat', 'Bench', 'On target', 'kg')
+    for event in events:
+        assert event['name'] in _EVENT_PARAMS, event
+        params = event['params']
+        assert set(params) == _EVENT_PARAMS[event['name']], event
+        blob = json.dumps(params)
+        for token in raw:
+            assert token not in blob, event
+        if 'cue_type' in params:
+            assert params['cue_type'] in {'below_target', 'on_target', 'above_target', 'none'}
+        if 'default_source' in params:
+            assert params['default_source'] in {'current', 'history', 'prescription', 'blank'}
+        if 'duration_bucket' in params:
+            assert params['duration_bucket'] in {'lt_60', '60_89', '90_119', '120_plus'}
+        if 'extension' in params:
+            assert params['extension'] == 'plus_30'
+        if 'fields_edited' in params:
+            assert params['fields_edited'] in {0, 1, 2}
+
+
+def _expire_rest(page):
+    page.evaluate('''() => {
+      const now = Date.now;
+      const ahead = now() + 180000;
+      Date.now = () => ahead;
+      document.dispatchEvent(new Event('visibilitychange'));
+      Date.now = now;
+    }''')
+
+
+def test_execution_v1_closure_mobile(
+    app, auth_user, client, sessions_on, proof_accepted, training_page,
+):
+    """One phone pass: accept history, coach once, rest, edit, finish."""
+    _seed_progression_plan(app, auth_user.id)
+    now = datetime.utcnow()
+    with app.app_context():
+        _seed_prior_session(auth_user.id, 'prior-squat-pr4', SQUAT, [
+            {'index': 0, 'completed': True, 'reps': 8, 'weight_kg': 60},
+        ], now)
+        _seed_prior_session(auth_user.id, 'prior-bench-pr4', BENCH, [
+            {'index': 0, 'completed': True, 'reps': 12, 'weight_kg': None},
+        ], now - timedelta(days=1))
+        db.session.commit()
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, traffic, _, _ = training_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    body = _open_session(page)
+    _arm_analytics(page)
+
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    _complete_current(page, body)
+    expect(page.locator('[data-coach-cue="on_target"]')).to_have_text(
+        'On target — keep the next set controlled.')
+    expect(page.locator('#aw-rest')).to_be_visible()
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'60 kg × 8'))
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    page.wait_for_function(
+        '() => window.__fxEvents.filter(event => event.name === "training_coach_cue_shown").length === 1'
+    )
+    page.wait_for_timeout(400)
+    assert len(_named(_fx_events(page), 'training_coach_cue_shown')) == 1
+    page.locator('[data-rest-action="add"]').click()
+    page.locator('[data-rest-action="skip"]').click()
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(page.locator('[data-coach-cue]')).to_have_count(0)
+
+    _complete_current(page, body)
+    expect(page.locator('[data-coach-cue="on_target"]')).to_have_count(1)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    _expire_rest(page)
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(page.locator('[data-coach-cue]')).to_have_count(0)
+    before_edit = _fx_events(page)
+    assert len(_named(before_edit, 'training_set_completed')) == 2
+    assert len(_named(before_edit, 'training_rest_skipped')) == 1
+    assert len(_named(before_edit, 'training_rest_expired')) == 1
+
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+    ):
+        body.locator('.set-row[data-ex="0"][data-set="0"] [data-set-action="edit"]').click()
+    body.locator('.aw-current [data-field="reps"]').fill('5')
+    _complete_current(page, body)
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(page.locator('[data-coach-cue]')).to_have_count(0)
+    assert len(_named(_fx_events(page), 'training_set_completed')) == 2
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+
+    _complete_current(page, body)
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '1')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('12')
+    body.locator('.aw-current [data-field="weight"]').fill('40')
+    _complete_current(page, body)
+    expect(page.locator('.aw-all-done')).to_be_visible()
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    metrics = _surface_metrics(page)
+    assert metrics['overflow'] is False
+
+    page.locator('[data-action="finishSession"]').click()
+    expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
+    page.locator('#plan-pump-image').set_input_files({
+        'name': 'proof.jpg', 'mimeType': 'image/jpeg', 'buffer': b'jpeg-proof',
+    })
+    page.locator('[data-action="submitWorkoutCompletion"]').click()
+    expect(page.locator('[data-workout-action="none"]')).to_have_count(1)
+    events = _fx_events(page)
+    _assert_bounded_events(events)
+    completed = _named(events, 'training_set_completed')
+    assert len(completed) == 4
+    assert completed[0]['params'] == {
+        'exercise_position': 1, 'set_position': 1, 'default_source': 'history',
+        'weight_edited': False, 'reps_edited': False, 'fields_edited': 0,
+        'had_rest': True, 'cue_type': 'on_target',
+    }
+    assert completed[1]['params'] == {
+        'exercise_position': 1, 'set_position': 2, 'default_source': 'current',
+        'weight_edited': False, 'reps_edited': False, 'fields_edited': 0,
+        'had_rest': True, 'cue_type': 'on_target',
+    }
+    assert completed[2]['params']['had_rest'] is False
+    assert completed[2]['params']['cue_type'] == 'none'
+    assert completed[2]['params']['set_position'] == 3
+    assert completed[3]['params'] == {
+        'exercise_position': 2, 'set_position': 1, 'default_source': 'history',
+        'weight_edited': True, 'reps_edited': False, 'fields_edited': 1,
+        'had_rest': False, 'cue_type': 'none',
+    }
+    assert len(_named(events, 'training_rest_started')) == 2
+    assert len(_named(events, 'training_rest_extended')) == 1
+    assert len(_named(events, 'training_rest_skipped')) == 1
+    assert len(_named(events, 'training_rest_expired')) == 1
+    assert len(_named(events, 'training_coach_cue_shown')) == 2
+    assert {event['params']['cue_type'] for event in _named(events, 'training_coach_cue_shown')} == {'on_target'}
+    assert len(_named(events, 'training_workout_finished')) == 1
+    assert _named(events, 'training_workout_abandoned') == []
+    assert not any('google-analytics' in path or 'googletagmanager' in path for path, _, _ in traffic)
+
+
+def test_execution_v1_closure_desktop(
+    app, auth_user, client, sessions_on, training_page,
+):
+    _seed_progression_plan(app, auth_user.id)
+    with app.app_context():
+        _seed_prior_session(auth_user.id, 'prior-squat-desktop-pr4', SQUAT, [
+            {'index': 0, 'completed': True, 'reps': 8, 'weight_kg': 60},
+        ], datetime.utcnow())
+        db.session.commit()
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, _, _, _ = training_page
+    page.set_viewport_size({'width': 1366, 'height': 900})
+    body = _open_session(page)
+    _arm_analytics(page)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    _complete_current(page, body)
+    expect(page.locator('[data-coach-cue="on_target"]')).to_be_visible()
+    expect(page.locator('#aw-rest-clock')).to_be_visible()
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'60 kg × 8'))
+    box = page.evaluate('''() => {
+      const cue = document.querySelector('.aw-rest-cue').getBoundingClientRect();
+      const clock = document.querySelector('.aw-rest-clock').getBoundingClientRect();
+      const next = document.querySelector('.aw-rest-next').getBoundingClientRect();
+      return {
+        ordered: clock.bottom <= cue.top + 1 && cue.bottom <= next.top + 1,
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+      };
+    }''')
+    assert box == {'ordered': True, 'overflow': False}
+    page.locator('[data-rest-action="skip"]').click()
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    events = _fx_events(page)
+    _assert_bounded_events(events)
+    assert len(_named(events, 'training_set_completed')) == 1
+    assert len(_named(events, 'training_coach_cue_shown')) == 1
+    assert len(_named(events, 'training_rest_skipped')) == 1
+    assert _named(events, 'training_rest_expired') == []
+
+
+def test_duplicate_complete_set_is_single_flight(
+    app, auth_user, client, sessions_on, training_page,
+):
+    _seed_progression_plan(app, auth_user.id)
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, traffic, held, control = training_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    body = _open_session(page)
+    _arm_analytics(page)
+    control['hold'] = True
+    page.evaluate('''() => {
+      document.querySelector('[data-set-action="complete"]').click();
+      const second = document.querySelector('[data-set-action="complete"]');
+      second.disabled = false;
+      second.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }''')
+    expect(page.locator('#aw-rest')).to_be_visible()
+    assert len(held) == 1
+    control['hold'] = False
+    assert held[0]() == 200
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
+        'data-set-state', 'completed')
+    expect(body.locator('.set-row[data-ex="0"][data-set="1"]')).to_have_attribute(
+        'data-set-state', 'active')
+    expect(page.locator('#aw-rest')).to_have_count(1)
+    page.wait_for_function(
+        '() => window.__fxEvents.filter(event => event.name === "training_set_completed").length === 1'
+    )
+    checkpoints = [
+        json.loads(payload)['checkpoint'] for path, payload, status in traffic
+        if path.endswith('/checkpoint') and status == 200 and payload
+    ]
+    assert len(checkpoints) == 1
+    assert [item['completed'] for item in checkpoints[0]['exercises'][0]['sets']] == [
+        True, False, False]
+
+
+def test_failed_set_completion_keeps_the_set_open(
+    app, auth_user, client, sessions_on, training_page, monkeypatch,
+):
+    import app.blueprints.training as training_bp
+
+    _seed_progression_plan(app, auth_user.id)
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, _, _, _ = training_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    body = _open_session(page)
+    _arm_analytics(page)
+    original = training_bp.record_checkpoint
+
+    def fail_checkpoint(*args, **kwargs):
+        raise RuntimeError('checkpoint down')
+
+    monkeypatch.setattr(training_bp, 'record_checkpoint', fail_checkpoint)
+    body.locator('[data-set-action="complete"]').click()
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '0')
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
+        'data-set-state', 'active')
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(page.locator('[data-coach-cue]')).to_have_count(0)
+    expect(body.locator('[data-set-action="complete"]')).to_be_enabled()
+    assert _named(_fx_events(page), 'training_set_completed') == []
+    assert _named(_fx_events(page), 'training_rest_started') == []
+    assert _named(_fx_events(page), 'training_coach_cue_shown') == []
+
+    monkeypatch.setattr(training_bp, 'record_checkpoint', original)
+    _complete_current(page, body)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(page.locator('#aw-rest')).to_be_visible()
+    page.wait_for_function(
+        '() => window.__fxEvents.filter(event => event.name === "training_set_completed").length === 1'
+    )
+
+
+def test_analytics_failure_does_not_block_set_completion(
+    app, auth_user, client, sessions_on, training_page,
+):
+    _seed_progression_plan(app, auth_user.id)
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, _, _, _ = training_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    body = _open_session(page)
+    page.evaluate('''() => { window.fxTrack = () => { throw new Error('analytics down'); }; }''')
+    body.locator('.aw-current [data-field="weight"]').fill('50')
+    _complete_current(page, body)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(page.locator('#aw-rest')).to_be_visible()
+    page.locator('[data-rest-action="skip"]').click()
+    page.evaluate('() => { delete window.fxTrack; }')
+    _complete_current(page, body)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+
+
+def test_workout_abandon_analytics_follow_canonical_success(
+    app, auth_user, client, sessions_on, training_page, monkeypatch,
+):
+    from app.services.workout_session import SessionOutcome
+    from app.services.workout_session.models import SessionResult
+    import app.blueprints.training as training_bp
+
+    _seed_progression_plan(app, auth_user.id)
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, _, _, _ = training_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    body = _open_session(page)
+    _arm_analytics(page)
+    _complete_current(page, body)
+    expect(page.locator('#aw-rest')).to_be_visible()
+    original = training_bp.abandon_session
+    monkeypatch.setattr(
+        training_bp, 'abandon_session',
+        lambda *args, **kwargs: SessionResult(SessionOutcome.NOT_FOUND, None),
+    )
+    page.locator('#sv-abandon').click()
+    expect(page.locator('#session-view')).not_to_have_class(re.compile(r'\bopen\b'))
+    expect(page.locator('#aw-rest')).to_have_count(0)
+    assert _named(_fx_events(page), 'training_workout_abandoned') == []
+    monkeypatch.setattr(training_bp, 'abandon_session', original)
+    page.locator('[data-action="startWorkout"]').click()
+    expect(page.locator('#session-view')).to_have_class(re.compile(r'\bopen\b'))
+    page.locator('#sv-abandon').click()
+    expect(page.locator('#session-view')).not_to_have_class(re.compile(r'\bopen\b'))
+    page.wait_for_function(
+        '() => window.__fxEvents.filter(event => event.name === "training_workout_abandoned").length === 1'
+    )
+    events = _fx_events(page)
+    assert len(_named(events, 'training_workout_abandoned')) == 1
+    assert _named(events, 'training_workout_finished') == []
+    assert _named(events, 'training_rest_expired') == []
+
+
 def test_active_workout_derivation_contract_passes_in_node():
     """CI runs pytest only; execute the shared draft module's node suite here so
     the active-surface state derivation (completed/active/upcoming) gates it."""
