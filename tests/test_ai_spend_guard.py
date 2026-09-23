@@ -649,6 +649,10 @@ def test_ask_stream_at_ceiling_returns_localized_error_frame_and_refunds_quota(
         _charge_as(auth_user.id)
     resp = client.post("/ask/stream", json={"question": "merhaba"})
     body = resp.get_data(as_text=True)
+    # The stream gate returns its permit on close, as every WSGI server does
+    # after the last frame; an unclosed response leaks it into later tests.
+    resp.close()
+    assert ai_gate.capacity_snapshot()["ai_active"] == 0
     assert resp.status_code == 200
     assert "event: error" in body
     with app.test_request_context():
