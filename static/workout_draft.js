@@ -325,6 +325,123 @@
     return changed;
   }
 
+  // Canonical prior performance is already selected server-side. This only
+  // accepts one entry: integer reps, and weight that is null or a real kg
+  // value. Null weight stays null — 0 kg is not invented.
+  function historicalEntry(prior, exerciseId) {
+    if (!prior || typeof exerciseId !== 'string' || !exerciseId) return null;
+    var entry = prior[exerciseId];
+    if (!entry || typeof entry !== 'object') return null;
+    var reps = entry.reps;
+    var weightKg = entry.weight_kg;
+    if (!Number.isInteger(reps) || reps < 0 || reps > MAX_REPS) return null;
+    if (weightKg == null) return { reps: reps, weightKg: null };
+    if (typeof weightKg !== 'number' || !Number.isFinite(weightKg) ||
+        weightKg < 0 || weightKg > MAX_WEIGHT_KG) return null;
+    return {
+      reps: reps,
+      weightKg: Math.round((weightKg + Number.EPSILON) * 10) / 10,
+    };
+  }
+
+  // Display-only fallback for the first set. User-owned draft fields win.
+  // Nothing here is written onto the set, so an untouched open set still
+  // checkpoints as reps null.
+  function presentFirstSet(set, entry) {
+    var weightKg = set ? set.weightKg : null;
+    var reps = set ? set.reps : null;
+    if (!set || set.index !== 0 || set.done === true || !entry) {
+      return { weightKg: weightKg, reps: reps };
+    }
+    if (set.weightExplicit !== true && weightKg == null && entry.weightKg != null) {
+      weightKg = entry.weightKg;
+    }
+    if (set.repsExplicit !== true && set.repsTouched !== true &&
+        Number.isInteger(entry.reps)) {
+      reps = entry.reps;
+    }
+    return { weightKg: weightKg, reps: reps };
+  }
+
+  // Call when the user completes the first set, before it is marked done, so
+  // the accepted historical numbers become this workout's actual values and
+  // the same-exercise copy reads them. A field the user already owns is kept.
+  function adoptHistoricalDefault(set, entry) {
+    if (!set || set.index !== 0 || set.done === true || set.reopened === true || !entry) {
+      return false;
+    }
+    var changed = false;
+    if (set.weightExplicit !== true && set.weightKg == null && entry.weightKg != null) {
+      set.weightKg = entry.weightKg;
+      changed = true;
+    }
+    if (set.repsExplicit !== true && set.repsTouched !== true &&
+        Number.isInteger(entry.reps)) {
+      if (set.reps !== entry.reps) {
+        set.reps = entry.reps;
+        changed = true;
+      }
+      if (set.repsExplicit !== true) {
+        set.repsExplicit = true;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  // Same display contract the native plan projection already parses:
+  // "90 sn", "2 dk", or "0". Anything else has no duration.
+  function deriveRestDurationMs(value) {
+    var text = typeof value === 'string' ? value.trim() : '';
+    if (text === '0') return 0;
+    var match = /^(0|[1-9][0-9]*) (sn|dk)$/.exec(text);
+    if (!match) return null;
+    var amount = parseInt(match[1], 10);
+    var seconds = match[2] === 'sn' ? amount : amount * 60;
+    if (seconds > MAX_ELAPSED_SECONDS) return null;
+    return seconds * 1000;
+  }
+
+  // Forward completion of a set that still has an open later set in THIS
+  // exercise. Call before marking the set done. A reopened earlier set, a
+  // later set that is already done, the last set of the exercise, and a
+  // missing/zero prescribed rest all decline.
+  function shouldStartRest(exercise, completedIndex) {
+    var sets = exercise && Array.isArray(exercise.sets) ? exercise.sets : null;
+    if (!sets || !Number.isInteger(completedIndex) || completedIndex < 0 ||
+        completedIndex >= sets.length) return false;
+    var current = sets[completedIndex];
+    if (!current || current.reopened === true) return false;
+    if (completedIndex + 1 >= sets.length) return false;
+    for (var i = completedIndex + 1; i < sets.length; i++) {
+      if (sets[i].done === true) return false;
+    }
+    var duration = deriveRestDurationMs(exercise.dinlenme);
+    return typeof duration === 'number' && duration > 0;
+  }
+
+  function remainingRestMs(endsAt, nowMs) {
+    var ends = Number(endsAt);
+    var now = Number(nowMs);
+    if (!Number.isFinite(ends) || !Number.isFinite(now)) return 0;
+    return Math.max(0, ends - now);
+  }
+
+  // One rest session only. Null means the deadline has already passed.
+  function extendRestDeadline(endsAt, nowMs, extraMs) {
+    if (remainingRestMs(endsAt, nowMs) <= 0) return null;
+    if (!Number.isFinite(extraMs)) return null;
+    return endsAt + extraMs;
+  }
+
+  function formatRestClock(ms) {
+    var seconds = Math.ceil(Math.max(0, Number(ms) || 0) / 1000);
+    var minutes = Math.floor(seconds / 60);
+    var remain = seconds % 60;
+    return (minutes < 10 ? '0' : '') + minutes + ':' +
+      (remain < 10 ? '0' : '') + remain;
+  }
+
   function selectWorkoutDraft(day, session, existingDraft, nowMs) {
     if (existingDraft && session && existingDraft.sessionId === session.public_id) {
       return existingDraft;
@@ -340,5 +457,13 @@
     selectWorkoutDraft: selectWorkoutDraft,
     deriveActiveWorkout: deriveActiveWorkout,
     prepareNextSet: prepareNextSet,
+    historicalEntry: historicalEntry,
+    presentFirstSet: presentFirstSet,
+    adoptHistoricalDefault: adoptHistoricalDefault,
+    deriveRestDurationMs: deriveRestDurationMs,
+    shouldStartRest: shouldStartRest,
+    remainingRestMs: remainingRestMs,
+    extendRestDeadline: extendRestDeadline,
+    formatRestClock: formatRestClock,
   };
 }));

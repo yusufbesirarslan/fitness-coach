@@ -153,7 +153,8 @@ def test_training_bootstrap_uses_one_plan_instance_and_shared_payload(
 
     assert response.status_code == 200
     body = response.get_json()
-    assert set(body) == {"workout", "plan", "today_plan"}
+    assert set(body) == {"workout", "plan", "today_plan", "prior_performance"}
+    assert body["prior_performance"] == {}
     assert body["workout"]["completed"] is False
     assert body["plan"]["exists"] is True
     assert body["today_plan"]["gun"] == "Pazartesi"

@@ -9,6 +9,9 @@
   var todayPlan = canonical.today_plan;
   var draft = null;
   var trigger = null;
+  // Server-selected prior actuals, keyed by canonical exercise id. Display
+  // only until the user edits or completes the first set.
+  var priorPerformance = {};
 
   function copy(key, vars) {
     return window.t ? window.t(key, vars) : key;
@@ -52,6 +55,10 @@
     }
     var previousTodayPlan = todayPlan;
     canonical = snapshot;
+    if (snapshot && snapshot.prior_performance &&
+        typeof snapshot.prior_performance === 'object') {
+      priorPerformance = snapshot.prior_performance;
+    }
     workoutState = snapshot && snapshot.workout && snapshot.workout.state;
     todayPlan = snapshot && snapshot.today_plan;
     if (meta && meta.replaceDraft && reason !== 'server_render') {
@@ -78,11 +85,13 @@
           }
         } catch (error) {
           draft = null;
+          clearRest();
           if (wasOpen) setOpen(sessionView, false);
           showError(copy('training.progress_unavailable'));
         }
       } else {
         draft = null;
+        clearRest();
         if (wasOpen) setOpen(sessionView, false);
       }
     }
@@ -132,6 +141,10 @@
   // Exercise the user explicitly opened on the active surface (presentation
   // only). The persisted cursor stays draft.currentExerciseIndex.
   var focusIndex = null;
+  // In-memory absolute deadline for the current between-set rest. Not part of
+  // the checkpoint. A hard refresh drops it; background time does not.
+  var restTimer = null;
+  var restTick = null;
 
   var SET_ICONS = { completed: '&#10003;', active: '&#9679;', upcoming: '&#9675;' };
 
@@ -165,9 +178,100 @@
       '</li>';
   }
 
+  function historyFor(exercise) {
+    return window.FitXWorkoutDraft.historicalEntry(
+      priorPerformance, exercise && exercise.exerciseId);
+  }
+
+  function shownSet(exercise, set, setIndex) {
+    if (setIndex === 0) {
+      return window.FitXWorkoutDraft.presentFirstSet(set, historyFor(exercise));
+    }
+    return { weightKg: set.weightKg, reps: set.reps };
+  }
+
+  function clearRest() {
+    restTimer = null;
+    if (restTick != null) {
+      clearInterval(restTick);
+      restTick = null;
+    }
+  }
+
+  function activeRest() {
+    if (!restTimer || !draft || draft.sessionId !== restTimer.sessionId) return null;
+    var exercise = draft.exercises[restTimer.exerciseIndex];
+    var set = exercise && exercise.sets[restTimer.setIndex];
+    if (!exercise || !set || set.done === true) return null;
+    if (window.FitXWorkoutDraft.remainingRestMs(restTimer.endsAt, Date.now()) <= 0) {
+      return null;
+    }
+    return { exercise: exercise, set: set };
+  }
+
+  function ensureRestTick() {
+    if (restTick !== null) return;
+    restTick = setInterval(paintRestClock, 250);
+  }
+
+  function paintRestClock() {
+    var clock = document.getElementById('aw-rest-clock');
+    if (!restTimer) return;
+    var remaining = window.FitXWorkoutDraft.remainingRestMs(restTimer.endsAt, Date.now());
+    if (remaining <= 0 || !activeRest()) {
+      clearRest();
+      var node = document.getElementById('aw-rest');
+      if (node) node.remove();
+      return;
+    }
+    if (clock) clock.textContent = window.FitXWorkoutDraft.formatRestClock(remaining);
+  }
+
+  function renderRestBanner() {
+    var rest = activeRest();
+    if (!rest) return '';
+    var remaining = window.FitXWorkoutDraft.remainingRestMs(restTimer.endsAt, Date.now());
+    return '<div class="aw-rest" id="aw-rest" role="timer">' +
+      '<p class="aw-rest-kicker"><span class="aw-label">' + escapeHTML(copy('training.rest')) +
+      '</span></p>' +
+      '<p class="aw-rest-clock" id="aw-rest-clock">' +
+      escapeHTML(window.FitXWorkoutDraft.formatRestClock(remaining)) + '</p>' +
+      '<p class="aw-rest-next"><span class="aw-label">' + escapeHTML(copy('training.next_up')) +
+      '</span> <span id="aw-rest-next-value">' + escapeHTML(setSummary(rest.set)) +
+      '</span></p>' +
+      '<div class="aw-rest-actions">' +
+      '<button class="btn-ghost" type="button" data-rest-action="add">' +
+      escapeHTML(copy('training.rest_add_30')) + '</button>' +
+      '<button class="btn-ghost" type="button" data-rest-action="skip">' +
+      escapeHTML(copy('training.skip')) + '</button></div></div>';
+  }
+
+  function onRestAction(action) {
+    if (!restTimer) return;
+    if (action === 'add') {
+      var extended = window.FitXWorkoutDraft.extendRestDeadline(
+        restTimer.endsAt, Date.now(), 30000);
+      if (extended == null) {
+        clearRest();
+        var expired = document.getElementById('aw-rest');
+        if (expired) expired.remove();
+        return;
+      }
+      restTimer.endsAt = extended;
+      paintRestClock();
+      return;
+    }
+    if (action === 'skip') {
+      clearRest();
+      var banner = document.getElementById('aw-rest');
+      if (banner) banner.remove();
+    }
+  }
+
   function renderActiveExercise(exercise, exerciseIndex, setIndex) {
     var total = exercise.sets.length;
     var current = setIndex === -1 ? null : exercise.sets[setIndex];
+    var shown = current ? shownSet(exercise, current, setIndex) : null;
     var target = prescription(exercise) +
       (exercise.dinlenme ? ' &middot; ' + escapeHTML(copy('training.rest')) + ' ' +
         escapeHTML(exercise.dinlenme) : '');
@@ -176,10 +280,10 @@
         '<div class="aw-fields">' +
         '<label class="aw-field"><span class="aw-label">' + escapeHTML(copy('training.weight_kg')) +
         '</span><input class="set-input" type="number" inputmode="decimal" min="0" step="0.5"' +
-        ' data-field="weight" value="' + (current.weightKg == null ? '' : current.weightKg) + '"></label>' +
+        ' data-field="weight" value="' + (shown.weightKg == null ? '' : shown.weightKg) + '"></label>' +
         '<label class="aw-field"><span class="aw-label">' + escapeHTML(copy('training.reps')) +
         '</span><input class="set-input" type="number" inputmode="numeric" min="0" step="1"' +
-        ' data-field="reps" value="' + (current.reps == null ? '' : current.reps) + '"></label>' +
+        ' data-field="reps" value="' + (shown.reps == null ? '' : shown.reps) + '"></label>' +
         '</div><button class="btn-volt w-full aw-complete" type="button" data-set-action="complete">' +
         escapeHTML(copy('training.set_done')) + '</button></div>'
       : '<p class="aw-exercise-done">' + escapeHTML(copy('training.exercise_complete')) + '</p>';
@@ -191,7 +295,9 @@
         ? copy('training.set_of', { n: setIndex + 1, total: total })
         : copy('training.sets_progress', { done: total, total: total })) + '</p>' +
       '<p class="aw-target"><span class="aw-label">' + escapeHTML(copy('training.target')) +
-      '</span> ' + target + '</p>' + entry +
+      '</span> ' + target + '</p>' +
+      (activeRest() && restTimer.exerciseIndex === exerciseIndex ? renderRestBanner() : '') +
+      entry +
       '<ol class="aw-set-list" aria-label="' + escapeHTML(copy('training.sets')) + '">' +
       exercise.sets.map(function (set, index) {
         var state = set.done ? 'completed' : index === setIndex ? 'active' : 'upcoming';
@@ -212,6 +318,12 @@
       parts.push('<p class="aw-all-done" role="status">' +
         escapeHTML(copy('training.all_sets_complete')) + '</p>');
     }
+    if (restTimer && !activeRest()) clearRest();
+    var rest = activeRest();
+    if (rest && view.exerciseIndex !== restTimer.exerciseIndex) {
+      parts.push(renderRestBanner());
+    }
+    if (rest) ensureRestTick();
     if (view.exerciseIndex !== -1) {
       parts.push(renderActiveExercise(
         draft.exercises[view.exerciseIndex], view.exerciseIndex, view.setIndex));
@@ -335,6 +447,7 @@
     var session = workoutState && workoutState.session;
     if (!session || session.status !== 'active') return;
     client.stopCheckpointing();
+    clearRest();
     closeSession();
     draft = null;
     return await client.mutate(
@@ -432,15 +545,30 @@
     draft.currentExerciseIndex = Number(row.dataset.ex);
     if (event.target.dataset.field === 'weight') {
       set.weightKg = event.target.value === '' ? null : Number(event.target.value);
+      // A cleared weight stays cleared for this session. History must not
+      // refill it on the next render.
+      set.weightExplicit = true;
     } else if (event.target.dataset.field === 'reps') {
       set.reps = event.target.value === '' ? null : Number(event.target.value);
       // Blank stays eligible for a later copy. A typed number does not.
+      // Touched blanks are still the user's, so history does not refill them.
       set.repsExplicit = set.reps != null;
+      set.repsTouched = true;
+    }
+    var preview = document.getElementById('aw-rest-next-value');
+    if (preview && restTimer && Number(row.dataset.ex) === restTimer.exerciseIndex &&
+        Number(row.dataset.set) === restTimer.setIndex) {
+      preview.textContent = setSummary(set);
     }
     checkpoint(false);
   });
   document.getElementById('sv-body').addEventListener('click', function (event) {
     if (!draft) return;
+    var restButton = event.target.closest('[data-rest-action]');
+    if (restButton) {
+      onRestAction(restButton.dataset.restAction);
+      return;
+    }
     var open = event.target.closest('[data-open-exercise]');
     if (open) {
       focusIndex = Number(open.dataset.openExercise);
@@ -454,18 +582,54 @@
     if (!button) return;
     var row = button.closest('[data-set]');
     var exerciseIndex = Number(row.dataset.ex);
+    var setIndex = Number(row.dataset.set);
     var exercise = draft.exercises[exerciseIndex];
-    var set = exercise.sets[Number(row.dataset.set)];
+    var set = exercise.sets[setIndex];
+    if (button.dataset.setAction === 'edit') {
+      // Reopening an earlier set is not forward execution. Leave the rest
+      // deadline where it is, and remember the reopen so saving it does not
+      // start another one.
+      set.reopened = true;
+      set.done = false;
+      focusIndex = exerciseIndex;
+      draft.currentExerciseIndex = exerciseIndex;
+      renderDraft();
+      focusActiveSurface();
+      checkpoint(true);
+      return;
+    }
+    var reopened = set.reopened === true;
+    var forwardRest = !reopened &&
+      window.FitXWorkoutDraft.shouldStartRest(exercise, setIndex);
+    if (setIndex === 0) {
+      window.FitXWorkoutDraft.adoptHistoricalDefault(set, historyFor(exercise));
+    }
     // Same persisted field the old checkbox toggled; the next active set is
     // derived from it on render, never stored separately.
-    set.done = button.dataset.setAction === 'complete';
+    set.done = true;
+    set.reopened = false;
     // One-tap: lend this set's weight and reps to the immediate next set in
     // this exercise when that set is still missing them. The copy is part of
     // the same checkpoint as completion, so a refresh keeps it.
-    if (set.done) {
-      window.FitXWorkoutDraft.prepareNextSet(exercise, Number(row.dataset.set));
+    window.FitXWorkoutDraft.prepareNextSet(exercise, setIndex);
+    // A reopened set is not a new rest. Forward completion either starts the
+    // next between-set rest or ends the one that just finished.
+    var startedRest = null;
+    if (!reopened) {
+      if (forwardRest) {
+        restTimer = {
+          sessionId: draft.sessionId,
+          exerciseIndex: exerciseIndex,
+          setIndex: setIndex + 1,
+          endsAt: Date.now() + window.FitXWorkoutDraft.deriveRestDurationMs(exercise.dinlenme),
+        };
+        startedRest = restTimer;
+        ensureRestTick();
+      } else {
+        clearRest();
+      }
     }
-    if (set.done && exercise.sets.every(function (item) { return item.done; })) {
+    if (exercise.sets.every(function (item) { return item.done; })) {
       focusIndex = null;
       var view = window.FitXWorkoutDraft.deriveActiveWorkout(draft, null);
       draft.currentExerciseIndex = view.exerciseIndex === -1 ? exerciseIndex : view.exerciseIndex;
@@ -473,9 +637,23 @@
       focusIndex = exerciseIndex;
       draft.currentExerciseIndex = exerciseIndex;
     }
+    if (window.FitXWorkoutDraft.deriveActiveWorkout(draft, null).complete) clearRest();
     renderDraft();
     focusActiveSurface();
-    checkpoint(true);
+    var saved = checkpoint(true);
+    if (startedRest) {
+      Promise.resolve(saved).then(function (result) {
+        if (restTimer !== startedRest || (result && result.ok === true)) return;
+        clearRest();
+        var node = document.getElementById('aw-rest');
+        if (node) node.remove();
+      }).catch(function () {
+        if (restTimer !== startedRest) return;
+        clearRest();
+        var node = document.getElementById('aw-rest');
+        if (node) node.remove();
+      });
+    }
   });
 
   function trapDialogFocus(container) {
@@ -525,5 +703,10 @@
   window.finishSession = finishSession;
   window.cancelWorkoutCompletion = cancelWorkoutCompletion;
   window.submitWorkoutCompletion = submitWorkoutCompletion;
-  window.addEventListener('pagehide', function () { client.destroy(); });
+  document.addEventListener('visibilitychange', paintRestClock);
+  window.addEventListener('focus', paintRestClock);
+  window.addEventListener('pagehide', function () {
+    clearRest();
+    client.destroy();
+  });
 }());
