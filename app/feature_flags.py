@@ -553,6 +553,7 @@ OPERATIONAL_BOOLEAN_KEYS = {
     "AI_MEMORY_ENABLED": CATEGORY_KILL_SWITCH,
     "AI_CACHE_ENABLED": CATEGORY_KILL_SWITCH,
     "AI_RECOVERY_ENABLED": CATEGORY_KILL_SWITCH,
+    "AI_SPEND_GUARD_ENABLED": CATEGORY_KILL_SWITCH,
     # Environment identity and boot mode. Not tuning knobs and not rollout
     # candidates: they answer "which environment is this?", not "is this feature
     # on?". Flipping one in production changes the security posture of the whole

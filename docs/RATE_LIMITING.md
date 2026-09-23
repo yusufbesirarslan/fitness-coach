@@ -53,9 +53,40 @@ timeout / connection) with bounded jittered backoff (`AI_RETRY_ATTEMPTS`, defaul
 then to a **last-good** cached response, then to the friendly error. See
 [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md).
 
+## Spend guard (Phase 2 P2-C)
+
+Rate limits count per route and per hour, and premium has no weekly quota, so
+they do not bound spend. `app/services/ai_spend_guard.py` is the emergency
+boundary: a finite number of **provider calls** per account per day and in
+total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
+
+- Enforced inside `ai_gate.model_concurrency_slot` after the capacity permit
+  and **before** the provider call (menu OCR, the one ungated call site,
+  charges itself). Tool-loop rounds, recovery retries and fan-out batches are
+  each a real paid call and each count. The deep-health Bedrock probe is the
+  only exclusion (1 output token, cached; refusing it could fail a deploy).
+- Refusal raises `AISpendLimitExceeded` (a `BlockingConcurrencyLimit`): every
+  existing capacity handler answers with its localized busy/soft-error state.
+  No OpenAI fallback, no recovery retry, no provider call to explain it; the
+  message names no threshold. Log line `[AI-SPEND] provider call refused
+  scope=... class=... user=...` + metric `FitX/Runtime AiSpendGuardRejections`
+  (Scope × Class, 4 series max).
+- Redis MULTI/EXEC INCR (+EXPIRE NX), admit only if every post-increment
+  count is within its limit, compensate on refusal → concurrent callers can
+  never over-admit. Redis down → same limits process-locally (bounded, not
+  fail-open).
+- Not a billing kill switch for calls already made, and not a product quota:
+  defaults sit far above observed use and do not change entitlement.
+
 ## Env vars
 
 ```
+AI_SPEND_GUARD_ENABLED=1
+AI_SPEND_USER_HEAVY_PER_DAY=200
+AI_SPEND_USER_LIGHT_PER_DAY=400
+AI_SPEND_GLOBAL_HEAVY_PER_HOUR=300
+AI_SPEND_GLOBAL_HEAVY_PER_DAY=1500
+AI_SPEND_GLOBAL_LIGHT_PER_DAY=5000   # 0 disables that one ceiling
 AI_RATELIMIT=30 per hour          # (config constant)
 AI_BURST_RATELIMIT=5 per minute
 AI_FAILURE_THRESHOLD=3

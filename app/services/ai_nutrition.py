@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import current_app
 
 from app.prompts import nutrition as nutrition_prompts
-from app.services import ai_cache
+from app.services import ai_cache, ai_spend_guard
 from app.services.ai import _heavy_chat, _openai_chat
 from app.services.foodcache import _cache_macros
 
@@ -768,6 +768,9 @@ def _estimate_macros_llm(items, category_map=None, grams_hint=None):
     # app_context'inde calistir.
     app = current_app._get_current_object()
 
+    # Executor threads have no request context: bind the requesting account so
+    # every batch (each one a paid provider call) spends that account's budget.
+    @ai_spend_guard.bind_subject
     def _run_batch(batch):
         with app.app_context():
             # grams_hint yoksa eski 2-argümanlı imza korunur (mevcut çağrı/mock'lar bozulmaz).

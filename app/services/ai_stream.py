@@ -28,6 +28,7 @@ from flask import current_app
 
 from app.config import BEDROCK_MAX_TOKENS, BEDROCK_MODEL
 from app.services import prompt_builder
+from app.services import ai_spend_guard
 from app.services.ai_gate import model_concurrency_slot
 
 # Akış yokken metni sahte-akıtırken kullanılan parça boyutu (karakter).
@@ -120,7 +121,7 @@ def _bedrock_work_error(parts, tools_ran):
 
 
 
-def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline):
+def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline, subject=None):
     messages = queue.SimpleQueue()
     # Triage 2026-07-19 #6: tüketici (istemci) kopunca üretici thread Bedrock
     # akışını doğal bitimine dek sürüyordu — giden kullanıcı için faturalanan
@@ -132,7 +133,10 @@ def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline):
         from app.services import ai_coach
 
         try:
-            with model_concurrency_slot("bedrock-stream", deadline=deadline):
+            # The producer thread has no request context: attribute the call to
+            # the turn's owner explicitly so the per-account ceiling applies.
+            with ai_spend_guard.subject_scope(subject), \
+                    model_concurrency_slot("bedrock-stream", deadline=deadline):
                 remaining = ai_coach._remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     messages.put({"kind": "deadline_exhausted"})
@@ -246,7 +250,7 @@ def _stream_bedrock(user_id, question, context, history, language,
         try:
             for message in _stream_bedrock_turn(
                     ai_coach.bedrock_client.messages, call_kwargs,
-                    deadline=deadline):
+                    deadline=deadline, subject=user_id):
                 if message["kind"] == "delta":
                     text = message["text"]
                     if text:
@@ -263,6 +267,13 @@ def _stream_bedrock(user_id, question, context, history, language,
                 else:
                     raise message["exception"]
         except Exception as e:
+            if isinstance(e, ai_spend_guard.AISpendLimitExceeded):
+                # Spend ceiling: never fall back to OpenAI and never start
+                # another round; the existing localized error frame applies.
+                current_app.logger.warning(
+                    "[COACH][stream] spend guard refused provider call")
+                yield _bedrock_work_error(parts, tools_ran)
+                return
             if ai_coach._remaining_coach_turn_seconds(deadline) <= 0:
                 current_app.logger.warning(
                     "[COACH][stream] Bedrock turn budget exhausted during provider call")
