@@ -28,8 +28,7 @@ from flask import current_app
 
 from app.config import BEDROCK_MAX_TOKENS, BEDROCK_MODEL
 from app.services import prompt_builder
-from app.services import ai_spend_guard
-from app.services.ai_gate import model_concurrency_slot
+from app.services import ai_input_budget, ai_provider_call, ai_spend_guard, ai_usage
 
 # Akış yokken metni sahte-akıtırken kullanılan parça boyutu (karakter).
 CHUNK_CHARS = 48
@@ -121,7 +120,8 @@ def _bedrock_work_error(parts, tools_ran):
 
 
 
-def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline, subject=None):
+def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline, subject=None,
+                         tool_round=None, reduce=None, request_id=None):
     messages = queue.SimpleQueue()
     # Triage 2026-07-19 #6: tüketici (istemci) kopunca üretici thread Bedrock
     # akışını doğal bitimine dek sürüyordu — giden kullanıcı için faturalanan
@@ -135,16 +135,22 @@ def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline, subject=None
         try:
             # The producer thread has no request context: attribute the call to
             # the turn's owner explicitly so the per-account ceiling applies.
+            # The final payload is checked and admitted HERE, on the thread
+            # that sends it: same budget, same spend charge as the blocking path.
             with ai_spend_guard.subject_scope(subject), \
-                    model_concurrency_slot("bedrock-stream", deadline=deadline):
+                    ai_usage.request_scope(request_id), \
+                    ai_provider_call.admit(
+                        feature="coach", provider="bedrock-stream",
+                        payload=call_kwargs, deadline=deadline,
+                        tool_round=tool_round, reduce=reduce) as call:
                 remaining = ai_coach._remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     messages.put({"kind": "deadline_exhausted"})
                     return
-                provider_kwargs = dict(call_kwargs)
-                provider_kwargs["timeout"] = min(
-                    ai_coach.BEDROCK_CALL_TIMEOUT_SECONDS, remaining)
-                with messages_client.stream(**provider_kwargs) as stream:
+                with call.stream(
+                        messages_client.stream,
+                        timeout=min(ai_coach.BEDROCK_CALL_TIMEOUT_SECONDS,
+                                    remaining)) as stream:
                     for text in stream.text_stream:
                         if cancelled.is_set():
                             return
@@ -225,12 +231,14 @@ def _stream_bedrock(user_id, question, context, history, language,
     tools = ai_coach._anthropic_tools_for_call(user_id)
     convo = prompt_builder.build_anthropic_messages(history, question)
     max_tokens = min(_COACH_MAX_TOKENS, BEDROCK_MAX_TOKENS)
+    history_len = max(0, len(convo) - 1)
+    request_id = ai_usage.current_request_id()
 
     parts = []
     tools_ran = 0
     usage = None
 
-    for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
+    for tool_round in range(1, ai_coach._COACH_TOOL_LOOP_CAP + 1):
         remaining = ai_coach._remaining_coach_turn_seconds(deadline)
         if remaining <= 0:
             current_app.logger.warning(
@@ -250,7 +258,9 @@ def _stream_bedrock(user_id, question, context, history, language,
         try:
             for message in _stream_bedrock_turn(
                     ai_coach.bedrock_client.messages, call_kwargs,
-                    deadline=deadline, subject=user_id):
+                    deadline=deadline, subject=user_id, tool_round=tool_round,
+                    reduce=ai_input_budget.history_reducer(0, history_len),
+                    request_id=request_id):
                 if message["kind"] == "delta":
                     text = message["text"]
                     if text:

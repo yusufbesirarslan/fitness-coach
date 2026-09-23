@@ -221,6 +221,7 @@ def _normalize_food_query_en(q):
             system_prompt=nutrition_prompts.NORMALIZE_EN_SYSTEM,
             temperature=0.0,
             max_tokens=24,
+            feature="nutrition",
         ).strip().strip('"').strip(".").strip()
         # Model bir cümle döndürürse (çeviri yerine açıklama) güvenli reddet.
         if not out or len(out) > 80 or "\n" in out:
@@ -272,6 +273,7 @@ def _normalize_food_queries_en(names, category_map=None):
             system_prompt=nutrition_prompts.NORMALIZE_EN_BATCH_SYSTEM,
             temperature=0.0,
             max_tokens=min(200 + len(names) * 20, 2000),
+            feature="nutrition",
         ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
@@ -316,6 +318,7 @@ def _food_search_llm(q):
             system_prompt=nutrition_prompts.FOOD_SEARCH_SYSTEM,
             temperature=0.3,
             max_tokens=600,
+            feature="nutrition",
         ).strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
@@ -481,6 +484,7 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
             system_prompt=nutrition_prompts.MENU_EXTRACT_SYSTEM,
             temperature=0.0,
             max_tokens=_MENU_EXTRACT_MAX_TOKENS,
+            feature="menu_extract",
         ).strip()
         current_app.logger.info(f"[EXTRACT] LLM raw response length: {len(raw)} chars")
         raw = raw.replace("```json", "").replace("```", "").strip()
@@ -548,6 +552,7 @@ def _parse_suggestion_items(body_text):
             system_prompt=nutrition_prompts.SUGGESTION_ITEMS_SYSTEM,
             temperature=0.0,
             max_tokens=500,
+            feature="nutrition",
         ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("[")
@@ -581,6 +586,7 @@ def _estimate_serving_weights_llm(items, fallback_weights=None, return_fallbacks
             system_prompt=nutrition_prompts.SERVING_WEIGHTS_SYSTEM,
             temperature=0.0,
             max_tokens=1000,
+            feature="nutrition",
         ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
@@ -688,6 +694,7 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
             system_prompt=nutrition_prompts.MACRO_BATCH_SYSTEM,
             temperature=0.0,
             max_tokens=max_tok,
+            feature="nutrition",
         ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")

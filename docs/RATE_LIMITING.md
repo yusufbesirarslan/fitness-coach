@@ -1,5 +1,19 @@
 # Rate Limiting & Abuse Control (Sprint 4 WS7)
 
+Six different things bound AI use, and none of them is the bill:
+
+| Control | Unit | Where |
+|---|---|---|
+| Rate limit | requests per route per window | Flask-Limiter |
+| Concurrency limit | simultaneous provider calls | `ai_gate` permits |
+| Provider-call ceiling | admitted physical provider attempts per account/global window | `ai_spend_guard` |
+| Input-token ceiling | upper-bound input tokens per attempt, per feature | `ai_input_budget` |
+| Estimated cost | list price × provider-reported tokens, per attempt | `[AI-USAGE]` log events |
+| Actual billed cost | what AWS / OpenAI invoice | Cost Explorer / OpenAI billing |
+
+The ceilings bound the maximum; the usage events measure what happened; only
+the invoices are the bill.
+
 Four layers protect the AI paths, from cheapest to most specific. All are
 per-user (keyed by user id when authenticated, else client IP).
 
@@ -44,14 +58,28 @@ auth → rate limit (sustained) → burst limit → cooldown check (429 before q
      → on error-fallback / exception: record failure + refund quota
 ```
 
-## Recovery retry vs. SDK retry
+## Recovery retry vs. provider-attempt retry
 
-`ai_recovery.call_with_recovery` retries only `TransientAIError` (rate-limit /
-timeout / connection) with bounded jittered backoff (`AI_RETRY_ATTEMPTS`, default
-2). To avoid multiplying attempts, the Bedrock SDK `max_retries` is dropped to 1
-(`BEDROCK_MAX_RETRIES`). On exhaustion, `_heavy_chat` falls to the other provider,
-then to a **last-good** cached response, then to the friendly error. See
-[AI_ARCHITECTURE.md](AI_ARCHITECTURE.md).
+Two retry layers, and every physical provider attempt in either is charged:
+
+- **Provider attempt** (`app/services/ai_provider_call.py`). Both SDK clients
+  are built with `max_retries=0`, so one SDK call is one HTTP attempt. The
+  provider door retries connection errors and 408/409/429/5xx itself, up to
+  `BEDROCK_MAX_RETRIES` (1) / `OPENAI_MAX_RETRIES` (2) extra attempts, and
+  charges the spend guard before EACH retry. **One spend-guard unit = one
+  physical provider attempt.** Timeouts are not retried at this layer (a
+  timed-out request may already be generating billed output); a streaming
+  call is one attempt (a stream is not replayable).
+- **Recovery ladder** (`ai_recovery.call_with_recovery`, heavy chat only)
+  retries `TransientAIError` (rate-limit / timeout / connection) with bounded
+  jittered backoff (`AI_RETRY_ATTEMPTS`, default 2). Each of its attempts is a
+  fresh admission (input check + charge). On exhaustion, `_heavy_chat` falls
+  to the other provider, then to a **last-good** cached response, then to the
+  friendly error. See [AI_ARCHITECTURE.md](AI_ARCHITECTURE.md).
+
+Maximum physical attempts for one `_heavy_chat` call: 2 × (1+1) Bedrock + 2 ×
+(1+2) OpenAI = 10, all counted. A spend or input-budget refusal is never
+retried and never falls back.
 
 ## Spend guard (Phase 2 P2-C)
 
@@ -61,10 +89,13 @@ boundary: a finite number of **provider calls** per account per day and in
 total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
 
 - Enforced inside `ai_gate.model_concurrency_slot` after the capacity permit
-  and **before** the provider call (menu OCR, the one ungated call site,
-  charges itself). Tool-loop rounds, recovery retries and fan-out batches are
-  each a real paid call and each count. The deep-health Bedrock probe is the
-  only exclusion (1 output token, cached; refusing it could fail a deploy).
+  and **before** the provider call; every provider call reaches the slot
+  through `ai_provider_call.admit()` (menu OCR: `gate=False`, still charged).
+  Tool-loop rounds, recovery retries, provider-attempt retries and fan-out
+  batches are each a real paid attempt and each count. The deep-health
+  Bedrock probe is the only uncharged call (1 output token, fixed prompt,
+  cached; refusing it could fail a deploy) — it still passes the input check
+  and emits a usage event.
 - Refusal raises `AISpendLimitExceeded` (a `BlockingConcurrencyLimit`): every
   existing capacity handler answers with its localized busy/soft-error state.
   No OpenAI fallback, no recovery retry, no provider call to explain it; the
@@ -81,45 +112,150 @@ total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
   process restart during the outage.
 - Not a billing kill switch for calls already made, and not a product quota:
   defaults sit far above observed use and do not change entitlement.
-- **A call ceiling is not a dollar ceiling.** `max_tokens` caps output only.
-  Input has no app-enforced token cap (the context budgets are character
-  heuristics that undercount Turkish), so the hard per-call input bound is the
-  provider context window. SDK retries (Bedrock 1, OpenAI 2) are extra HTTP
-  attempts inside one counted call.
+- A call ceiling alone is not a dollar ceiling. It becomes one together with
+  the hard input budget below: every counted attempt has a bounded maximum
+  input and output, so calls × per-attempt maximum is a real bound.
 
-### Worst-case exposure at the default ceilings
+## Hard input budget (Phase 2 closeout)
 
-List prices verified 2026-09-23: Bedrock Price List API, eu-central-1, Sonnet
-4.5 **global** profile (what prod uses), $3.00 input / $15.00 output per 1M
-tokens (regional profiles +10%); OpenAI gpt-4o-mini $0.15 / $0.60 per 1M.
-AWS-enforced quota: 10 requests/min on the global Sonnet 4.5 profile (600/h).
+`app/services/ai_input_budget.py` (policy) + `app/services/ai_provider_call.py`
+(enforcement). Every paid call goes through one door:
 
-| Case | Per call | Global hour | Global day | 3 days |
+```
+final request kwargs → deep copy → hard input/output/image check (+ reduction,
+re-count) → capacity permit → spend-guard charge → provider attempt
+```
+
+- **What is counted.** A deterministic UPPER bound, not an estimate:
+  UTF-8 bytes of the JSON-serialized payload (system, messages, tools, tool
+  results; image data excluded) + 1,024 fixed overhead + a per-image ceiling
+  (Sonnet 4.5: 1,600; gpt-4o-mini high/auto detail: 48,169, low: 2,833).
+  Byte-level BPE never yields more tokens than bytes of text; the fixed
+  overhead covers role markers and the hidden tool-use prompt. Calibrated
+  against Bedrock CountTokens on the production model (2026-09-23): worst
+  text ratio 1.00 token/byte (spaced digits), a tool_result call ~300 tokens
+  above its byte count, a 5000×5000 image 1,568 tokens. Ordinary Turkish text
+  is over-counted ~2× — the price of never undercounting. Every usage event
+  logs the bound next to the provider-reported count; `bound_violation:true`
+  would mark an undercount.
+- **Where.** At the last trustworthy point: `admit()` receives the final
+  kwargs, deep-copies them, checks the copy, and the SDK is called with that
+  copy. The only argument a caller can add afterwards is the transport
+  `timeout` (anything else is a `TypeError`). The streaming producer thread
+  and every tool-loop round are admitted separately, so a large tool result
+  is re-checked before the next round.
+- **Reduction.** Only the coach has droppable content: the oldest history,
+  two messages at a time (`history_reducer`). System/security instructions,
+  tool schemas, the current request and this turn's tool calls/results are
+  never dropped. After reduction the payload is re-counted; if it still does
+  not fit, it is refused. No model is called to summarize.
+- **Refusal.** `AIInputBudgetExceeded`, a subclass of `AISpendLimitExceeded`:
+  the existing localized busy/soft-error handling applies, the provider is
+  never called, there is no fallback and no retry, no spend budget or permit
+  is consumed, and the free quota is refunded exactly as for a spend refusal.
+  The message names no threshold. Log line `[AI-BUDGET]
+  input_budget_exceeded provider=... model=... feature=...`, a usage event with
+  `outcome=input_budget_rejected`, and `FitX/Runtime AiInputBudgetRejections`
+  (dimension `Class` only: 2 series max).
+- **Output** is capped per feature too: a call asking for more than the
+  feature's `max_tokens` ceiling is refused (a code defect), never clamped.
+
+| Feature | Provider | Input budget | Output cap | Images |
 |---|---|---|---|---|
-| Heavy, absolute (200K in + 8K out) | $0.72 | 300 → $216 | 1,500 → $1,080 | $3,240 |
-| Heavy, p99 observed (19.3K in + 2.3K out) | $0.093 | $28 | $139 | $417 |
-| Light, absolute (128K in + 16,384 out) | $0.029 | no hourly cap | 5,000 → $145 | $435 |
+| coach (tool loop, stream, feedback) | Bedrock → OpenAI | 64,000 | 700 | 0 |
+| training_plan (generate + repair) | Bedrock → OpenAI | 32,000 | 7,000 | 0 |
+| nutrition_plan | Bedrock → OpenAI | 32,000 | 2,000 | 0 |
+| nutrition (estimates, macro batches, meal review) | both | 16,000 | 4,000 | 0 |
+| menu_extract | Bedrock → OpenAI | 64,000 | 5,000 | 0 |
+| menu_ocr (per image / scanned-PDF page) | OpenAI | 56,000 | 4,000 | 1 |
+| vision (validation, pump-check analysis/compare) | Bedrock | 12,000 | 1,200 | 2 |
+| summary | OpenAI | 16,000 | 500 | 0 |
+| health_probe (uncharged) | Bedrock | 2,048 | 1 | 0 |
+| other | both | 16,000 | 2,000 | 0 |
 
-One account: heavy 200/day → $144 absolute, $18.5 at p99; light 400/day → $11.6
-absolute. Observed peak (30 days to 2026-09-23): 40 Bedrock calls in a day,
-all in one hour, $1.27 at list price. Bedrock spend draws on AWS credits;
-OpenAI spend does not.
+Scanned-PDF OCR is capped at `AI_MENU_OCR_MAX_PAGES` (5) pages per upload.
+Budgets are env-overridable (`AI_INPUT_BUDGET_<FEATURE>`,
+`AI_OUTPUT_BUDGET_<FEATURE>`); a non-positive or non-integer value fails boot.
+There is no "0 = unlimited".
 
-The absolute day at 1,500 heavy calls exceeds the ~$950 AWS credit balance.
-That case needs every call to fill the 200K context, which no app path is
-known to reach, but no app code prevents it either. Tighter ceilings are an
-env change (`AI_SPEND_GLOBAL_HEAVY_PER_DAY`, `..._PER_HOUR`). Making the
-ceiling a real dollar bound needs a pre-provider input-token cap.
+Evidence for the budgets: AWS/Bedrock `InputTokenCount`, 2026-07-25..09-23,
+~150 non-probe calls (small sample): max 19,795 tokens (a coach turn), p95
+over the last 15 days ~15.8K–18.5K, non-coach calls ~1.7–2K. The coach
+budget (64K bound units) is ~1.5× the largest observed coach call converted
+to bound units (19,795 × 2.09 measured coach ratio ≈ 41K).
 
+### Worst-case exposure (per attempt × production ceilings)
+
+List prices verified 2026-09-23: Sonnet 4.5 **global** profile $3.00 input /
+$15.00 output per 1M tokens (cache write $3.75, read $0.30); gpt-4o-mini $0.15
+/ $0.60. Max $ per attempt = input budget × input price + output cap × output
+price (cache writes, coach only, stay below the menu_extract figure).
+
+| | Max $ / attempt | Hour | Day | 3 days | Redis-degraded day |
+|---|---|---|---|---|---|
+| Heavy (menu_extract worst: 64K in + 5K out) | $0.267 | 100 → $26.70 | 300 → $80.10 | $240.30 | ≤2× → $160.20 |
+| Light (menu_extract fallback: 64K in + 5K out) | $0.0126 | no hourly cap | 5,000 → $63.00 | $189.00 | ≤3× → $189.00 |
+
+(Production env: heavy 100/hour, 300/day; light code default 5,000/day.)
+Before the input budget the heavy absolute was $0.72/call and $1,080/day at
+the 1,500/day default. Per-attempt maxima for the other features: coach
+$0.2025, training_plan $0.201, nutrition_plan $0.126, nutrition $0.108,
+vision $0.054. Bedrock spend draws on AWS credits; OpenAI spend does not.
+
+## Usage telemetry
+
+One `[AI-USAGE] {json}` line per physical provider attempt and per local
+refusal, written to stdout by the dedicated `fitx.ai_usage` logger, so it
+lands in `/axisai/app` (30-day retention) with the web/worker service label.
+No CloudWatch custom metric per user or feature.
+
+Fields: `event, ts, request_id, provider (bedrock|openai), model (normalized:
+claude-sonnet-4-5|gpt-4o-mini|other), feature (fixed taxonomy), subject_id
+(internal account id or null), outcome (success|provider_error|timeout|
+client_disconnect|guard_rejected|input_budget_rejected), attempt, tool_round,
+usage_source (provider|estimated), input_tokens, output_tokens,
+cache_write_tokens, cache_read_tokens, image_units, input_bound, output_cap`,
+and for attempted calls with known pricing `estimated_cost_usd,
+pricing_version, pricing_model`. Never prompt or response text, email, IP or
+credentials. `usage_source=estimated` (timeouts, errors, abandoned streams)
+carries the input UPPER bound and no output figure — never a claimed zero.
+`estimated_cost_usd` is list-price arithmetic, not a bill.
+
+Logs Insights over `/axisai/app` (examples):
+
+```
+# 1-2. usage today by provider
+filter @message like /\[AI-USAGE\]/ | parse @message '[AI-USAGE] *' as j
+| fields jsonParse(j) as e
+| filter e.outcome in ["success","provider_error","timeout","client_disconnect"]
+| stats sum(e.input_tokens) as input, sum(e.output_tokens) as output,
+        sum(e.estimated_cost_usd) as usd, count(*) as attempts by e.provider
+# 3/5/10. by feature (tokens, distribution, cost)
+... | stats sum(e.input_tokens), pct(e.input_tokens, 95), max(e.input_tokens),
+        sum(e.estimated_cost_usd) by e.feature
+# 4. top accounts by paid attempts
+... | filter ispresent(e.subject_id) | stats count(*) as attempts by e.subject_id
+| sort attempts desc | limit 10
+# 6-7. timeouts and pre-provider refusals
+... | stats count(*) by e.outcome
+# 8-9. COGS per active / paying user: sum(usd) above ÷ active or premium
+#      account count from the database for the same window.
+```
 ## Env vars
 
 ```
 AI_SPEND_GUARD_ENABLED=1
+# production (2026-09-23): AI_SPEND_GLOBAL_HEAVY_PER_HOUR=100, ..._PER_DAY=300
 AI_SPEND_USER_HEAVY_PER_DAY=200
 AI_SPEND_USER_LIGHT_PER_DAY=400
 AI_SPEND_GLOBAL_HEAVY_PER_HOUR=300
 AI_SPEND_GLOBAL_HEAVY_PER_DAY=1500
 AI_SPEND_GLOBAL_LIGHT_PER_DAY=5000   # 0 disables that one ceiling
+AI_INPUT_BUDGET_<FEATURE>=<int>     # see the input budget table; must be > 0
+AI_OUTPUT_BUDGET_<FEATURE>=<int>
+AI_MENU_OCR_MAX_PAGES=5
+BEDROCK_MAX_RETRIES=1                # provider-door retries (SDK retries are 0)
+OPENAI_MAX_RETRIES=2
 AI_RATELIMIT=30 per hour          # (config constant)
 AI_BURST_RATELIMIT=5 per minute
 AI_FAILURE_THRESHOLD=3

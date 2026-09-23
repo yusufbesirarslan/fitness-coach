@@ -292,6 +292,7 @@ def maybe_summarize(conversation):
             system_prompt=SUMMARIZE_SYSTEM,
             max_tokens=500,
             temperature=0.2,
+            feature="summary",
         ).strip()
     except Exception:
         current_app.logger.warning("[MEMORY] konuşma özetleme başarısız", exc_info=True)

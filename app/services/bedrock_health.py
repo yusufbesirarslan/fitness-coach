@@ -60,14 +60,18 @@ _cached = None
 def _probe_once():
     """Return ``(reachable, failure_category)``. Never raises."""
     from app.extensions import bedrock_client
+    from app.services import ai_provider_call
 
     try:
-        with bedrock_client.messages.stream(
-            model=BEDROCK_MODEL,
-            max_tokens=PROBE_MAX_TOKENS,
-            messages=[{"role": "user", "content": "ping"}],
-            timeout=PROBE_TIMEOUT_SECONDS,
-        ) as stream:
+        # Through the provider door for the input/output check and the usage
+        # event, but without a permit or a spend charge (see module docstring:
+        # a refusal here would fail /health and roll back a healthy deploy).
+        payload = dict(model=BEDROCK_MODEL, max_tokens=PROBE_MAX_TOKENS,
+                       messages=[{"role": "user", "content": "ping"}])
+        with ai_provider_call.admit(feature="health_probe", provider="bedrock-stream",
+                                    payload=payload, gate=False, charge=False) as call, \
+                call.stream(bedrock_client.messages.stream,
+                            timeout=PROBE_TIMEOUT_SECONDS) as stream:
             # Read to the end: opening the context manager is not proof the
             # provider accepted the call. The 403 arrives on the wire.
             stream.get_final_message()

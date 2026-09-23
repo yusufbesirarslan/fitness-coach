@@ -131,7 +131,10 @@ def _install_advancing_model_slot(
         clock.now += advance_seconds
         yield
 
-    monkeypatch.setattr(module, "model_concurrency_slot", advancing_slot)
+    # The permit is taken inside the provider door (ai_provider_call.admit),
+    # whichever module starts the call.
+    from app.services import ai_provider_call
+    monkeypatch.setattr(ai_provider_call, "model_concurrency_slot", advancing_slot)
     return deadlines
 
 
@@ -1009,8 +1012,11 @@ def test_stream_bedrock_turn_cancels_producer_on_consumer_close():
 
     client = SimpleNamespace(stream=lambda **kw: _EndlessStream())
 
+    # A real (minimal) payload: an empty one is refused by the input budget.
     gen = ai_stream._stream_bedrock_turn(
-        client, {}, deadline=float("inf"))
+        client, {"model": "m", "max_tokens": 10,
+                 "messages": [{"role": "user", "content": "x"}]},
+        deadline=float("inf"))
     assert next(gen) == {"kind": "delta", "text": "ilk"}
     gen.close()                # istemci koptu (GeneratorExit)
     consumer_closed.set()      # üretici devam etmeyi DENER — iptali görmeli

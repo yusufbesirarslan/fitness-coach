@@ -8,19 +8,18 @@ of paid provider calls, and nothing bounded the aggregate across accounts.
 
 This module is the emergency boundary, not a product quota:
 
-- The unit is ONE PROVIDER CALL. It is known before the call is made; cost in
-  tokens is only known afterwards and the app's own per-turn token telemetry is
-  partial. max_tokens caps each call's OUTPUT; nothing in the app caps its
-  INPUT in tokens (the context budgets are character heuristics), so the hard
-  per-call input bound is the model's context window (200K for Sonnet 4.5,
-  128K for gpt-4o-mini). A call ceiling therefore bounds spend only as
-  calls x that per-call worst case, and the SDKs' own retries
-  (BEDROCK_MAX_RETRIES=1, OpenAI max_retries=2) are further HTTP attempts
-  inside one counted call. docs/RATE_LIMITING.md has the dollar figures.
-- `charge()` runs BEFORE the provider is invoked. Every provider call enters
-  `ai_gate.model_concurrency_slot()` (menu OCR calls `charge()` itself), so a
-  rejected call never reaches the provider — including tool-loop rounds,
-  recovery retries and fan-out batches, each of which is a real paid call.
+- The unit is ONE PHYSICAL PROVIDER ATTEMPT. It is known before the attempt
+  is made; cost in tokens is only known afterwards. The SDK clients do not
+  retry (max_retries=0): the provider door (`ai_provider_call`) retries
+  transient failures itself and charges each retry here first. Each attempt's
+  input and output are capped per feature by `ai_input_budget`, so calls x
+  the per-attempt maximum is a real dollar bound; docs/RATE_LIMITING.md has
+  the figures.
+- `charge()` runs BEFORE the provider is invoked. Every provider call goes
+  through `ai_provider_call.admit()` and so enters
+  `ai_gate.model_concurrency_slot()` (menu OCR: charged without the permit),
+  so a rejected call never reaches the provider — including tool-loop rounds,
+  recovery retries, provider-attempt retries and fan-out batches.
 - Two classes: `heavy` (Bedrock/Sonnet) and `light` (OpenAI gpt-4o-mini).
   Per-account daily ceilings bound one account; global hourly/daily ceilings
   bound the sum over all accounts (multi-account abuse, runaway loops, bugs).

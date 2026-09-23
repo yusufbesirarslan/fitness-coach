@@ -292,6 +292,7 @@ def nutrition_plan_generate():
             system_prompt=system_prompt,
             max_tokens=2000,
             temperature=0.3,
+            feature="nutrition_plan",
         ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")

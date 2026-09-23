@@ -34,7 +34,7 @@ from app.prompts.system import (  # noqa: F401 (re-export)
 from app.observability import current_request_id
 from app.services import provider_failure
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
-from app.services.ai_gate import model_concurrency_slot
+from app.services import ai_input_budget, ai_provider_call
 from app.services.ai_spend_guard import AISpendLimitExceeded
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 # The ONLY route from the Coach to the training-plan mutation boundary. This
@@ -1167,28 +1167,38 @@ def _run_coach_conversation_openai(user_id, question, context, history,
         adaptive_plan_context=_adaptive_plan_context_enabled(),
         plan_mutation_tools=coach_plan_tools.plan_mutation_tools_enabled())
 
+    # History sits between the leading system message(s) and the question; it
+    # is the only part the input budget may drop (oldest first).
+    history_start = sum(1 for m in messages if m.get("role") == "system")
+    history_len = max(0, len(messages) - history_start - 1)
+
     final_text = ""
-    for _ in range(_COACH_TOOL_LOOP_CAP):
+    for tool_round in range(1, _COACH_TOOL_LOOP_CAP + 1):
         remaining = _remaining_coach_turn_seconds(deadline)
         if remaining <= 0:
             current_app.logger.warning("[COACH] OpenAI turn budget exhausted")
             return _coach_tool_fallback(language)
         try:
-            with model_concurrency_slot("openai", deadline=deadline):
+            payload = dict(
+                model=OPENAI_MODEL,
+                messages=messages,
+                tools=_openai_tools_for_call(user_id),
+                tool_choice="auto",
+                max_tokens=700,
+                temperature=0.6,
+            )
+            with ai_provider_call.admit(
+                    feature="coach", provider="openai", payload=payload,
+                    deadline=deadline, tool_round=tool_round,
+                    reduce=ai_input_budget.history_reducer(
+                        history_start, history_len)) as call:
                 remaining = _remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     current_app.logger.warning(
                         "[COACH] OpenAI turn budget exhausted after model gate")
                     return _coach_tool_fallback(language)
-                resp = openai_client.chat.completions.create(
-                    model=OPENAI_MODEL,
-                    messages=messages,
-                    tools=_openai_tools_for_call(user_id),
-                    tool_choice="auto",
-                    max_tokens=700,
-                    temperature=0.6,
-                    timeout=min(30.0, remaining),
-                )
+                resp = call.create(openai_client.chat.completions.create,
+                                   timeout=min(30.0, remaining))
         except Exception as e:
             if _remaining_coach_turn_seconds(deadline) <= 0:
                 current_app.logger.warning(
@@ -1299,9 +1309,11 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
     tools = _anthropic_tools_for_call(user_id)
     convo = prompt_builder.build_anthropic_messages(history, question)
     max_tokens = min(700, BEDROCK_MAX_TOKENS)
+    # Everything before the current question is droppable history.
+    history_len = max(0, len(convo) - 1)
 
     tools_ran = 0
-    for _ in range(_COACH_TOOL_LOOP_CAP):
+    for tool_round in range(1, _COACH_TOOL_LOOP_CAP + 1):
         remaining = _remaining_coach_turn_seconds(deadline)
         if remaining <= 0:
             current_app.logger.warning("[COACH][Bedrock] turn budget exhausted")
@@ -1312,20 +1324,20 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            with model_concurrency_slot("bedrock", deadline=deadline):
+            payload = dict(model=BEDROCK_MODEL, max_tokens=max_tokens,
+                           system=system, messages=convo, tools=tools)
+            with ai_provider_call.admit(
+                    feature="coach", provider="bedrock", payload=payload,
+                    deadline=deadline, tool_round=tool_round,
+                    reduce=ai_input_budget.history_reducer(0, history_len)) as call:
                 remaining = _remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     current_app.logger.warning(
                         "[COACH][Bedrock] turn budget exhausted after model gate")
                     return _coach_tool_fallback(language)
-                resp = bedrock_client.messages.create(
-                    model=BEDROCK_MODEL,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=convo,
-                    tools=tools,
-                    timeout=min(BEDROCK_CALL_TIMEOUT_SECONDS, remaining),
-                )
+                resp = call.create(
+                    bedrock_client.messages.create,
+                    timeout=min(BEDROCK_CALL_TIMEOUT_SECONDS, remaining))
 
             if getattr(resp, "stop_reason", None) != "tool_use":
                 text = _first_text_block(resp)
@@ -1397,6 +1409,7 @@ def generate_coach_reply(name, age, gender, weight, height,
             system_prompt=system_prompt,
             max_tokens=700,
             temperature=0.7,
+            feature="coach",
         )
     except Exception:
         current_app.logger.exception("Koç yorumu üretilemedi")
@@ -1419,6 +1432,7 @@ def generate_checkin_feedback(name, weight, prev_weight, days_passed,
             system_prompt=system_prompt,
             max_tokens=400,
             temperature=0.7,
+            feature="coach",
         )
     except Exception:
         current_app.logger.exception("Check-in geri bildirimi üretilemedi")

@@ -80,7 +80,9 @@ def _extract_text_from_pdf(pdf_bytes):
 
     if scanned_pages and len(text_result.strip()) < 50:
         current_app.logger.info(f"[PDF] Scanned PDF detected: {len(scanned_pages)} pages with no text, forwarding to Vision OCR")
-        ocr_text = _extract_pdf_pages_via_vision(pdf_bytes, scanned_pages[:5])
+        from app.services.ai_input_budget import MENU_OCR_MAX_PAGES
+        ocr_text = _extract_pdf_pages_via_vision(
+            pdf_bytes, scanned_pages[:MENU_OCR_MAX_PAGES])
         if ocr_text:
             text_result = (text_result + "\n\n" + ocr_text).strip() if text_result.strip() else ocr_text
     elif scanned_pages:
@@ -150,17 +152,17 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         "Her yemeği ayrı satırda yaz. Türkçe karakterleri doğru kullan (ı, ş, ğ, ç, ö, ü)."
     )
     try:
-        # The one provider call outside ai_gate.model_concurrency_slot, so it
-        # charges the spend guard itself; a refusal lands in the except below
-        # ("menu unreadable") without reaching the provider. PDFs pay per page.
-        from app.services import ai_spend_guard
-        ai_spend_guard.charge("openai")
-        resp = openai_client.chat.completions.create(
+        # Outside ai_gate.model_concurrency_slot (gate=False) as before, but
+        # still through the provider door: the one image and the output cap
+        # are checked against the menu_ocr budget, the spend guard is charged,
+        # and a refusal lands in the except below ("menu unreadable") without
+        # reaching the provider. A scanned PDF pays per page, up to
+        # MENU_OCR_MAX_PAGES pages.
+        from app.services import ai_provider_call
+        payload = dict(
             model=OPENAI_MODEL,
             # L5: çıktı 4000 token ile sınırlı (uzun menülerin tam OCR'ı için
-            # gerekli) ve girdi görseli >1.5MB ise üstte sıkıştırılıyor. Asıl
-            # maliyet guard'ı çağıran rotalardaki rate-limit (SCRAPE_RATELIMIT) +
-            # genel AI maliyet kontrolleridir (H2 girdi-cap, M4 sohbet kotası).
+            # gerekli) ve girdi görseli >1.5MB ise üstte sıkıştırılıyor.
             max_tokens=4000,
             temperature=0.0,
             messages=[
@@ -175,6 +177,9 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
                 ]},
             ],
         )
+        with ai_provider_call.admit(feature="menu_ocr", provider="openai",
+                                    payload=payload, gate=False) as call:
+            resp = call.create(openai_client.chat.completions.create)
         # İçerik filtresi/boş yanıtta choices boş gelebilir — _openai_chat'teki
         # aynı korumayı buraya da koy ki resp.choices[0] IndexError fırlatmasın (A2).
         if not resp.choices:
