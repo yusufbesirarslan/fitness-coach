@@ -215,6 +215,64 @@
     };
   }
 
+  // Presentation only: which exercise/set the active workout surface leads with.
+  // Everything is derived from the draft's `done` flags and its persisted
+  // `currentExerciseIndex`; nothing here is written back or stored separately.
+  // `focusIndex` is the exercise the user explicitly opened (it may be finished,
+  // so it can be reviewed); otherwise the persisted current exercise leads while
+  // it still has an open set, then the first exercise with an open set.
+  function deriveActiveWorkout(draft, focusIndex) {
+    var exercises = draft && Array.isArray(draft.exercises) ? draft.exercises : [];
+    var totalSets = 0;
+    var completedSets = 0;
+    exercises.forEach(function (exercise) {
+      exercise.sets.forEach(function (set) {
+        totalSets += 1;
+        if (set.done) completedSets += 1;
+      });
+    });
+    function inRange(index) {
+      return Number.isInteger(index) && index >= 0 && index < exercises.length;
+    }
+    function firstOpenSet(index) {
+      var sets = exercises[index].sets;
+      for (var i = 0; i < sets.length; i++) if (!sets[i].done) return i;
+      return -1;
+    }
+    var exerciseIndex = -1;
+    if (inRange(focusIndex)) {
+      exerciseIndex = focusIndex;
+    } else if (draft && inRange(draft.currentExerciseIndex) &&
+        firstOpenSet(draft.currentExerciseIndex) !== -1) {
+      exerciseIndex = draft.currentExerciseIndex;
+    } else {
+      for (var e = 0; e < exercises.length; e++) {
+        if (firstOpenSet(e) !== -1) { exerciseIndex = e; break; }
+      }
+    }
+    var nextExerciseIndex = -1;
+    for (var step = 1; step <= exercises.length; step++) {
+      var candidate = ((exerciseIndex < 0 ? -1 : exerciseIndex) + step) % exercises.length;
+      if (candidate !== exerciseIndex && firstOpenSet(candidate) !== -1) {
+        nextExerciseIndex = candidate;
+        break;
+      }
+    }
+    return {
+      exerciseIndex: exerciseIndex,
+      setIndex: exerciseIndex === -1 ? -1 : firstOpenSet(exerciseIndex),
+      nextExerciseIndex: nextExerciseIndex,
+      completedSets: completedSets,
+      totalSets: totalSets,
+      complete: totalSets > 0 && completedSets === totalSets,
+      exerciseStates: exercises.map(function (exercise, index) {
+        if (index === exerciseIndex) return 'active';
+        return exercise.sets.every(function (set) { return set.done; })
+          ? 'completed' : 'upcoming';
+      }),
+    };
+  }
+
   function selectWorkoutDraft(day, session, existingDraft, nowMs) {
     if (existingDraft && session && existingDraft.sessionId === session.public_id) {
       return existingDraft;
@@ -228,5 +286,6 @@
     buildCheckpointSnapshot: buildCheckpointSnapshot,
     flushWorkoutDraft: flushWorkoutDraft,
     selectWorkoutDraft: selectWorkoutDraft,
+    deriveActiveWorkout: deriveActiveWorkout,
   };
 }));

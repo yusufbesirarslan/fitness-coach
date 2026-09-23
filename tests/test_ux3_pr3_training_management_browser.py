@@ -528,10 +528,10 @@ def test_a_replaced_plan_does_not_let_an_old_browser_draft_resurrect(
     page.goto(PLAN_URL)
     page.locator('[data-action="startWorkout"]').click()
     expect(page.locator("#session-view")).to_have_class("session-view open")
-    page.locator('#sv-body [data-field="weight"]').first.fill("82.5")
-    page.locator('#sv-body [data-field="done"]').first.click()
-    expect(page.locator('#sv-body .set-row[data-ex="0"][data-set="0"]')).to_have_class(
-        __import__("re").compile(r"\bis-done\b"))
+    page.locator('#sv-body .aw-current [data-field="weight"]').fill("82.5")
+    page.locator('#sv-body [data-set-action="complete"]').click()
+    expect(page.locator('#sv-body .aw-exercise[data-ex="0"]')).to_have_attribute(
+        "data-exercise-state", "completed")
 
     # The plan is replaced underneath the running workout.
     replacement_marker = len(traffic)

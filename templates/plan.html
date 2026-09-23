@@ -555,7 +555,9 @@
   <p class="sv-error" id="sv-error" role="alert" hidden></p>
   <div class="sv-foot">
     <button class="btn-ghost" type="button" id="sv-abandon" data-action="abandonWorkout" hidden>{{ t('plan.action.abandon_workout') }}</button>
-    <button class="btn-volt w-full" type="button" data-action="finishSession">{{ t('training.finish_workout') }}</button>
+    {#- Secondary while sets remain: Complete Set is the primary action. The
+        renderer promotes it to btn-volt once every set is done. -#}
+    <button class="btn-ghost sv-finish" type="button" data-action="finishSession">{{ t('training.finish_workout') }}</button>
   </div>
 </div>
 

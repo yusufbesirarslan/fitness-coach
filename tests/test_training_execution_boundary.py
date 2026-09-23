@@ -258,11 +258,29 @@ def test_plan_v2_resume_uses_shared_execution_and_hydrates_acknowledged_progress
 
     expect(page.locator('#session-view')).to_have_class('session-view open')
     expect(page.locator('[data-action="closeSession"]')).to_be_focused()
-    expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
-    expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('11')
-    expect(page.locator('#sv-body .set-row[data-ex="0"][data-set="0"]')).to_have_class(
-        re.compile(r'\bis-done\b')
-    )
+    # Active workout surface: the hydrated checkpoint alone decides the states.
+    # Squat's only set is done, so Bench (the persisted cursor) leads with its
+    # first open set as the single editable entry.
+    body = page.locator('#sv-body')
+    expect(body.locator('.aw-active')).to_have_count(1)
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '1')
+    expect(body.locator('.aw-current')).to_have_count(1)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('45')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('6')
+    expect(body.locator('.set-row[data-ex="1"][data-set="0"]')).to_have_attribute(
+        'data-set-state', 'active')
+    expect(body.locator('.aw-exercise[data-ex="0"]')).to_have_attribute(
+        'data-exercise-state', 'completed')
+    expect(body.locator('[data-field="done"], input[type="checkbox"]')).to_have_count(0)
+    expect(page.locator('#sv-count')).to_have_text(re.compile(r'^1 / 2 '))
+    # The finished exercise stays reviewable, compactly, with its saved values.
+    body.locator('[data-open-exercise="0"]').click()
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '0')
+    completed = body.locator('.set-row[data-ex="0"][data-set="0"]')
+    expect(completed).to_have_attribute('data-set-state', 'completed')
+    expect(completed).to_have_class(re.compile(r'\bis-done\b'))
+    expect(completed.locator('.aw-set-value')).to_have_text('82.5 kg × 11')
+    expect(body.locator('.aw-current')).to_have_count(0)
     assert any(path.endswith('/resume') and status == 200
                for path, _, status in traffic)
     page.keyboard.press('Escape')
@@ -300,13 +318,29 @@ def test_plan_v2_start_refresh_checkpoint_and_complete_use_durable_contract(
     assert any(path == '/workout/session/start' and status == 201
                for path, _, status in traffic)
 
-    page.locator('#sv-body [data-field="weight"]').first.fill('82.5')
-    page.locator('#sv-body [data-field="reps"]').first.fill('11')
+    body = page.locator('#sv-body')
+    finish = page.locator('[data-action="finishSession"]')
+    # Complete Set is the primary action; Finish stays available but secondary.
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '0')
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 1 '))
+    expect(finish).to_have_class(re.compile(r'\bbtn-ghost\b'))
+    expect(page.locator('#sv-count')).to_have_text(re.compile(r'^0 / 2 '))
+    body.locator('.aw-current [data-field="weight"]').fill('82.5')
+    body.locator('.aw-current [data-field="reps"]').fill('11')
     with page.expect_response(
         lambda response: urlsplit(response.url).path.endswith('/checkpoint')
         and response.status == 200
-    ):
-        page.locator('#sv-body [data-field="done"]').first.click()
+        and '"completed": true' in (response.request.post_data or '').replace('":true', '": true')
+    ) as completed_set:
+        body.locator('[data-set-action="complete"]').click()
+    sent = json.loads(completed_set.value.request.post_data)
+    assert sent['checkpoint']['exercises'][0]['sets'][0] == {
+        'index': 0, 'completed': True, 'reps': 11, 'weight_kg': 82.5}
+    expect(body.locator('.aw-exercise[data-ex="0"]')).to_have_attribute(
+        'data-exercise-state', 'completed')
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '1')
+    expect(page.locator('#aw-active-set')).to_be_focused()
+    expect(page.locator('#sv-count')).to_have_text(re.compile(r'^1 / 2 '))
     bootstrap_reads = sum(path == '/training/bootstrap' for path, _, _ in traffic)
     with page.expect_response(
         lambda response: urlsplit(response.url).path == '/training/bootstrap'
@@ -314,22 +348,36 @@ def test_plan_v2_start_refresh_checkpoint_and_complete_use_durable_contract(
     ):
         page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     assert sum(path == '/training/bootstrap' for path, _, _ in traffic) == bootstrap_reads + 1
-    expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
+    # Rebuilt from the server's checkpoint: the completed set did not vanish.
+    expect(body.locator('.aw-exercise[data-ex="0"]')).to_have_attribute(
+        'data-exercise-state', 'completed')
+    # Correct the completed set: Edit reopens it, Complete Set saves it again.
+    body.locator('[data-open-exercise="0"]').click()
     with page.expect_response(
         lambda response: urlsplit(response.url).path.endswith('/checkpoint')
         and response.status == 200
     ):
-        page.locator('#sv-body [data-field="reps"]').first.fill('12')
+        body.locator('.set-row[data-ex="0"][data-set="0"] [data-set-action="edit"]').click()
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('82.5')
+    body.locator('.aw-current [data-field="reps"]').fill('12')
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+        and '"reps": 12' in (response.request.post_data or '').replace('":12', '": 12')
+        and '"completed": true' in (response.request.post_data or '').replace('":true', '": true')
+    ):
+        body.locator('[data-set-action="complete"]').click()
     page.locator('[data-action="closeSession"]').click()
     expect(page.locator('#session-view')).not_to_have_class('session-view open')
     expect(page.locator('[data-workout-action="resume"]')).to_have_count(1)
     page.locator('[data-action="startWorkout"]').click()
     expect(page.locator('#session-view')).to_have_class('session-view open')
-    expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
-    expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('12')
+    body.locator('[data-open-exercise="0"]').click()
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"] .aw-set-value')).to_have_text(
+        '82.5 kg × 12')
     assert any(path.endswith('/resume') and status == 200
                for path, _, status in traffic)
-    page.locator('[data-action="finishSession"]').click()
+    finish.click()
     expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
     expect(page.locator('#plan-pump-image')).to_be_focused()
     page.keyboard.press('Shift+Tab')
@@ -444,3 +492,12 @@ def test_plan_v2_sessions_off_refresh_preserves_open_legacy_draft(
     expect(page.locator('#session-view')).to_have_class('session-view open')
     expect(page.locator('#sv-body [data-field="weight"]').first).to_have_value('82.5')
     expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('11')
+
+
+def test_active_workout_derivation_contract_passes_in_node():
+    """CI runs pytest only; execute the shared draft module's node suite here so
+    the active-surface state derivation (completed/active/upcoming) gates it."""
+    result = subprocess.run(['node', '--test', 'tests/js/workout_draft.test.js'],
+                            cwd=ROOT, capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'fail 0' in result.stdout, result.stdout
