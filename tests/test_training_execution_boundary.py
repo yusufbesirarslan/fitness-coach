@@ -494,6 +494,185 @@ def test_plan_v2_sessions_off_refresh_preserves_open_legacy_draft(
     expect(page.locator('#sv-body [data-field="reps"]').first).to_have_value('11')
 
 
+def _seed_progression_plan(app, user_id):
+    """Two exercises: three sets whose prescription reps differ from a typed 8,
+    then one set that must not inherit the previous exercise."""
+    with app.app_context():
+        user = db.session.get(User, user_id)
+        user.profile_complete = True
+        user.language = 'en'
+        plan = save_workout_plan(user_id)
+        data = json.loads(plan.plan_data)
+        for day in data['program']:
+            day.update(odak='Strength', sure_dk=30, tahmini_kalori=150)
+            exercises = day['egzersizler']
+            if len(exercises) < 2:
+                continue
+            exercises[0].update(set=3, tekrar='8-12', dinlenme='90 sn')
+            exercises[1].update(set=1, tekrar='10', dinlenme='60 sn')
+        plan.plan_data = json.dumps(data)
+        db.session.commit()
+
+
+def _open_session(page, navigate=True):
+    if navigate:
+        page.goto('http://localhost/training')
+    page.locator('[data-action="startWorkout"]').click()
+    expect(page.locator('#session-view')).to_have_class('session-view open')
+    return page.locator('#sv-body')
+
+
+def _complete_current(page, body):
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+        and '"completed": true' in (response.request.post_data or '').replace('":true', '": true')
+    ) as completed:
+        body.locator('[data-set-action="complete"]').click()
+    return json.loads(completed.value.request.post_data)['checkpoint']
+
+
+def _surface_metrics(page):
+    return page.evaluate('''() => {
+      const heading = document.getElementById('aw-active-set');
+      const rect = heading ? heading.getBoundingClientRect() : null;
+      return {
+        focusedId: document.activeElement && document.activeElement.id,
+        inputFocused: !!(document.activeElement && document.activeElement.matches('input, textarea')),
+        inView: !!(rect && rect.height > 0 && rect.top >= 0 && rect.bottom <= window.innerHeight),
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+      };
+    }''')
+
+
+def test_one_tap_set_progression_prefills_advances_and_survives_refresh(
+    app, auth_user, client, sessions_on, training_page,
+):
+    _seed_progression_plan(app, auth_user.id)
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, traffic, _, _ = training_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    body = _open_session(page)
+    finish = page.locator('[data-action="finishSession"]')
+
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 1 of 3$'))
+    expect(page.locator('#sv-count')).to_have_text(re.compile(r'^0 / 4 sets$'))
+    expect(finish).to_have_class(re.compile(r'\bbtn-ghost\b'))
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('12')
+
+    body.locator('.aw-current [data-field="weight"]').fill('60')
+    body.locator('.aw-current [data-field="reps"]').fill('8')
+    sent = _complete_current(page, body)
+    assert sent['current_exercise_index'] == 0
+    assert sent['exercises'][0]['sets'][0] == {
+        'index': 0, 'completed': True, 'reps': 8, 'weight_kg': 60}
+    assert sent['exercises'][0]['sets'][1] == {
+        'index': 1, 'completed': False, 'reps': 8, 'weight_kg': 60}
+    # Untouched sets stay on the prescription: null in the snapshot, so a
+    # refresh can still copy onto them. A confirmed 12 would be stored as 12.
+    assert sent['exercises'][0]['sets'][2]['weight_kg'] is None
+    assert sent['exercises'][0]['sets'][2]['reps'] is None
+    assert sent['exercises'][1]['sets'][0] == {
+        'index': 0, 'completed': False, 'reps': None, 'weight_kg': None}
+
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 2 of 3$'))
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
+        'data-set-state', 'completed')
+    metrics = _surface_metrics(page)
+    assert metrics['focusedId'] == 'aw-active-set'
+    assert metrics['inputFocused'] is False
+    assert metrics['inView'] is True
+    assert metrics['overflow'] is False
+
+    page.reload()
+    expect(page.locator('[data-workout-action="resume"]')).to_have_count(1)
+    body = _open_session(page, navigate=False)
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '0')
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
+        'data-set-state', 'completed')
+
+    body.locator('.aw-current [data-field="weight"]').fill('62.5')
+    sent = _complete_current(page, body)
+    assert sent['exercises'][0]['sets'][2] == {
+        'index': 2, 'completed': False, 'reps': 8, 'weight_kg': 62.5}
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 3 of 3$'))
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('62.5')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+
+    # Correcting set 1 must not rewind the workout onto set 2 or replace set 3.
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+    ):
+        body.locator('.set-row[data-ex="0"][data-set="0"] [data-set-action="edit"]').click()
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '0')
+    body.locator('.aw-current [data-field="weight"]').fill('55')
+    body.locator('.aw-current [data-field="reps"]').fill('5')
+    _complete_current(page, body)
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '0')
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('62.5')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    expect(body.locator('.set-row[data-ex="0"][data-set="1"]')).to_have_attribute(
+        'data-set-state', 'completed')
+
+    _complete_current(page, body)
+    expect(body.locator('.aw-exercise[data-ex="0"]')).to_have_attribute(
+        'data-exercise-state', 'completed')
+    expect(body.locator('.aw-active')).to_have_attribute('data-ex', '1')
+    expect(body.locator('.aw-active-name')).to_have_text('Bench')
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 1 of 1$'))
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('10')
+    metrics = _surface_metrics(page)
+    assert metrics['inView'] is True
+    assert metrics['inputFocused'] is False
+
+    body.locator('.aw-current [data-field="weight"]').fill('40')
+    _complete_current(page, body)
+    expect(body.locator('.aw-current')).to_have_count(0)
+    expect(body.locator('[data-set-state="active"]')).to_have_count(0)
+    expect(body.locator('.aw-all-done')).to_be_visible()
+    expect(finish).to_have_class(re.compile(r'\bbtn-volt\b'))
+    expect(finish).not_to_have_class(re.compile(r'\bbtn-ghost\b'))
+    expect(page.locator('#plan-completion')).not_to_have_class(re.compile(r'\bopen\b'))
+    assert not any(path == '/workout/complete' for path, _, _ in traffic)
+
+    finish.click()
+    expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
+    assert not any(path == '/workout/complete' for path, _, _ in traffic)
+
+
+def test_one_tap_set_progression_desktop_smoke(
+    app, auth_user, client, sessions_on, training_page,
+):
+    _seed_progression_plan(app, auth_user.id)
+    app.config['UIUX_PLAN_V2_ENABLED'] = True
+    page, _, _, _ = training_page
+    page.set_viewport_size({'width': 1366, 'height': 900})
+    body = _open_session(page)
+    body.locator('.aw-current [data-field="weight"]').fill('60')
+    body.locator('.aw-current [data-field="reps"]').fill('8')
+    _complete_current(page, body)
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 2 of 3$'))
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    expect(page.locator('[data-action="finishSession"]')).to_have_class(re.compile(r'\bbtn-ghost\b'))
+    metrics = _surface_metrics(page)
+    assert metrics == {
+        'focusedId': 'aw-active-set',
+        'inputFocused': False,
+        'inView': True,
+        'overflow': False,
+    }
+
+
 def test_active_workout_derivation_contract_passes_in_node():
     """CI runs pytest only; execute the shared draft module's node suite here so
     the active-surface state derivation (completed/active/upcoming) gates it."""

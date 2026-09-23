@@ -6,6 +6,7 @@ const {
   buildCheckpointSnapshot,
   selectWorkoutDraft,
   deriveActiveWorkout,
+  prepareNextSet,
 } = require('../../static/workout_draft.js');
 
 const day = {
@@ -60,10 +61,10 @@ test('fresh draft uses server identities and emits only the exact full snapshot'
     exercises: [
       { exercise_id: 'squat-v1', sets: [
         { index: 0, completed: true, reps: 9, weight_kg: 82.3 },
-        { index: 1, completed: false, reps: 12, weight_kg: null },
+        { index: 1, completed: false, reps: null, weight_kg: null },
       ] },
       { exercise_id: 'row-v1', sets: [
-        { index: 0, completed: false, reps: 10, weight_kg: null },
+        { index: 0, completed: false, reps: null, weight_kg: null },
       ] },
     ],
   });
@@ -215,4 +216,218 @@ test('active surface derives completed, active and upcoming state from done flag
   const done = deriveActiveWorkout(draft, null);
   assert.deepEqual([done.exerciseIndex, done.complete], [-1, true]);
   assert.deepEqual(done.exerciseStates, ['completed', 'completed']);
+});
+
+const progressionDay = {
+  gun: 'Pazartesi', tip: 'agirlik', odak: 'Guc',
+  egzersizler: [
+    { isim: 'Lat Pulldown', set: 3, tekrar: '8-12', dinlenme: '90 sn', not: '' },
+    { isim: 'Barbell Row', set: 1, tekrar: '10', dinlenme: '60 sn', not: '' },
+  ],
+};
+
+function progressionDraft(checkpoint) {
+  return createWorkoutDraft(progressionDay, {
+    public_id: 'session-1', status: 'active', resumable: true,
+    checkpoint_revision: checkpoint ? 1 : 0,
+    checkpoint: checkpoint || null,
+    checkpoint_exercise_ids: ['pulldown', 'row'],
+  }, 0);
+}
+
+function fieldSnapshot(exercise) {
+  return exercise.sets.map(set => [set.index, set.done, set.reps, set.weightKg]);
+}
+
+test('prepareNextSet copies missing weight and reps onto the immediate next set only', () => {
+  const draft = progressionDraft();
+  const pulldown = draft.exercises[0];
+  const row = draft.exercises[1];
+  const rowBefore = fieldSnapshot(row);
+  pulldown.sets[0].weightKg = 60;
+  pulldown.sets[0].reps = 8;
+  pulldown.sets[0].done = true;
+  pulldown.sets[1].weightKg = null;
+  pulldown.sets[1].reps = null;
+
+  assert.equal(prepareNextSet(pulldown, 0), true);
+
+  assert.deepEqual(fieldSnapshot(pulldown), [
+    [0, true, 8, 60],
+    [1, false, 8, 60],
+    [2, false, 12, null],
+  ]);
+  assert.equal(pulldown.sets[1].repsExplicit, true);
+  assert.notEqual(pulldown.sets[2].repsExplicit, true);
+  assert.deepEqual(fieldSnapshot(row), rowBefore);
+  // 60 stays 60. Nothing here invents the next load.
+  assert.equal(pulldown.sets[1].weightKg, 60);
+});
+
+test('prepareNextSet keeps existing values and fills only the blank field', () => {
+  const draft = progressionDraft();
+  const sets = draft.exercises[0].sets;
+  sets[0].weightKg = 60;
+  sets[0].reps = 8;
+  sets[0].done = true;
+
+  sets[1].weightKg = 62.5;
+  sets[1].reps = 6;
+  sets[1].repsExplicit = true;
+  assert.equal(prepareNextSet(draft.exercises[0], 0), false);
+  assert.deepEqual([sets[1].weightKg, sets[1].reps, sets[1].done], [62.5, 6, false]);
+
+  sets[1].weightKg = 62.5;
+  sets[1].reps = null;
+  sets[1].repsExplicit = false;
+  assert.equal(prepareNextSet(draft.exercises[0], 0), true);
+  assert.deepEqual([sets[1].weightKg, sets[1].reps], [62.5, 8]);
+
+  sets[1].weightKg = null;
+  sets[1].reps = 6;
+  sets[1].repsExplicit = true;
+  assert.equal(prepareNextSet(draft.exercises[0], 0), true);
+  assert.deepEqual([sets[1].weightKg, sets[1].reps], [60, 6]);
+});
+
+test('untouched prescription reps yield to the previous set; a completed set does not', () => {
+  const draft = progressionDraft();
+  const sets = draft.exercises[0].sets;
+  sets[0].weightKg = 60;
+  sets[0].reps = 8;
+  sets[0].done = true;
+  // Fresh set 2 still carries the 8-12 fallback (12) and no explicit flag.
+  assert.equal(sets[1].reps, 12);
+  assert.notEqual(sets[1].repsExplicit, true);
+
+  prepareNextSet(draft.exercises[0], 0);
+  assert.deepEqual([sets[1].weightKg, sets[1].reps], [60, 8]);
+
+  sets[1].done = true;
+  sets[2].done = true;
+  sets[2].weightKg = 70;
+  sets[2].reps = 5;
+  const before = fieldSnapshot(draft.exercises[0]);
+  assert.equal(prepareNextSet(draft.exercises[0], 1), false);
+  assert.deepEqual(fieldSnapshot(draft.exercises[0]), before);
+});
+
+test('re-completing an earlier set does not rewrite later sets or rewind the active set', () => {
+  const draft = progressionDraft();
+  const sets = draft.exercises[0].sets;
+  sets[0].done = true;
+  sets[0].weightKg = 60;
+  sets[0].reps = 8;
+  sets[1].done = true;
+  sets[1].weightKg = 70;
+  sets[1].reps = 6;
+  sets[1].repsExplicit = true;
+  sets[2].weightKg = null;
+  sets[2].reps = 12;
+
+  // Edit set 1, then save it again.
+  sets[0].done = false;
+  sets[0].weightKg = 55;
+  sets[0].reps = 5;
+  let view = deriveActiveWorkout(draft, 0);
+  assert.deepEqual([view.exerciseIndex, view.setIndex], [0, 0]);
+
+  sets[0].done = true;
+  assert.equal(prepareNextSet(draft.exercises[0], 0), false);
+  view = deriveActiveWorkout(draft, 0);
+  assert.deepEqual([view.exerciseIndex, view.setIndex], [0, 2]);
+  assert.equal(sets[1].done, true);
+  assert.deepEqual([sets[1].weightKg, sets[1].reps], [70, 6]);
+  assert.deepEqual([sets[2].weightKg, sets[2].reps], [null, 12]);
+});
+
+test('hydrated checkpoint values win and untouched fallback reps stay copyable', () => {
+  const draft = progressionDraft({
+    current_exercise_index: 0, elapsed_seconds: 40,
+    exercises: [
+      { exercise_id: 'pulldown', sets: [
+        { index: 0, completed: true, reps: 8, weight_kg: 60 },
+        { index: 1, completed: false, reps: 8, weight_kg: 60 },
+        { index: 2, completed: false, reps: null, weight_kg: null },
+      ] },
+      { exercise_id: 'row', sets: [
+        { index: 0, completed: false, reps: 10, weight_kg: null },
+      ] },
+    ],
+  });
+  const pulldown = draft.exercises[0];
+  assert.equal(pulldown.sets[1].repsExplicit, true);
+  assert.equal(pulldown.sets[2].reps, 12);
+  assert.notEqual(pulldown.sets[2].repsExplicit, true);
+  const rowBefore = fieldSnapshot(draft.exercises[1]);
+
+  pulldown.sets[1].done = true;
+  pulldown.sets[1].reps = 8;
+  pulldown.sets[1].weightKg = 62.5;
+  assert.equal(prepareNextSet(pulldown, 1), true);
+  assert.deepEqual([pulldown.sets[2].weightKg, pulldown.sets[2].reps], [62.5, 8]);
+  assert.deepEqual(fieldSnapshot(draft.exercises[1]), rowBefore);
+
+  const preserved = progressionDraft({
+    current_exercise_index: 0, elapsed_seconds: 10,
+    exercises: [
+      { exercise_id: 'pulldown', sets: [
+        { index: 0, completed: false, reps: 8, weight_kg: 60 },
+        { index: 1, completed: false, reps: 6, weight_kg: 62.5 },
+        { index: 2, completed: false, reps: null, weight_kg: 62.5 },
+      ] },
+      { exercise_id: 'row', sets: [
+        { index: 0, completed: false, reps: 10, weight_kg: null },
+      ] },
+    ],
+  });
+  const open = preserved.exercises[0];
+  open.sets[0].done = true;
+  assert.equal(prepareNextSet(open, 0), false);
+  assert.deepEqual([open.sets[1].weightKg, open.sets[1].reps], [62.5, 6]);
+
+  open.sets[1].done = true;
+  assert.equal(prepareNextSet(open, 1), true);
+  assert.deepEqual([open.sets[2].weightKg, open.sets[2].reps], [62.5, 6]);
+});
+
+test('confirmed prescription reps survive checkpoint refresh; untouched fallback stays copyable', () => {
+  const draft = progressionDraft();
+  const sets = draft.exercises[0].sets;
+  sets[1].reps = 12;
+  sets[1].repsExplicit = true;
+  sets[1].weightKg = null;
+  assert.equal(sets[2].reps, 12);
+  assert.notEqual(sets[2].repsExplicit, true);
+
+  const snapshot = buildCheckpointSnapshot(draft, 5000);
+  assert.equal(snapshot.exercises[0].sets[1].reps, 12);
+  assert.equal(snapshot.exercises[0].sets[1].weight_kg, null);
+  assert.equal(snapshot.exercises[0].sets[2].reps, null);
+  assert.equal(snapshot.exercises[0].sets[2].weight_kg, null);
+
+  const resumed = progressionDraft(snapshot);
+  const resumedSets = resumed.exercises[0].sets;
+  assert.equal(resumedSets[1].reps, 12);
+  assert.equal(resumedSets[1].repsExplicit, true);
+  assert.equal(resumedSets[1].weightKg, null);
+  assert.equal(resumedSets[2].reps, 12);
+  assert.notEqual(resumedSets[2].repsExplicit, true);
+
+  resumedSets[0].done = true;
+  resumedSets[0].reps = 8;
+  resumedSets[0].weightKg = 60;
+  assert.equal(prepareNextSet(resumed.exercises[0], 0), true);
+  assert.equal(resumedSets[1].reps, 12);
+  assert.equal(resumedSets[1].weightKg, 60);
+
+  const protectedSnapshot = buildCheckpointSnapshot(resumed, 8000);
+  assert.equal(protectedSnapshot.exercises[0].sets[1].reps, 12);
+  assert.equal(protectedSnapshot.exercises[0].sets[1].weight_kg, 60);
+
+  resumedSets[1].done = true;
+  resumedSets[1].reps = 8;
+  resumedSets[1].repsExplicit = true;
+  assert.equal(prepareNextSet(resumed.exercises[0], 1), true);
+  assert.deepEqual([resumedSets[2].weightKg, resumedSets[2].reps], [60, 8]);
 });

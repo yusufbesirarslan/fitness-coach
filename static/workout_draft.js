@@ -110,6 +110,16 @@
         set.done = saved.completed;
         set.reps = optionalInteger(saved.reps, MAX_REPS, 'checkpoint_reps_invalid');
         set.weightKg = weight(saved.weight_kg);
+        if (set.reps == null && set.done !== true) {
+          // Null on an open set means the prescription, not a confirmed
+          // number. Show that fallback locally; it stays eligible for copy.
+          set.reps = defaultReps(exercise.tekrar);
+          set.repsExplicit = false;
+        } else {
+          // A stored integer is the user's, including when it equals the
+          // prescription and weight is still blank.
+          set.repsExplicit = set.reps != null;
+        }
       });
     });
   }
@@ -161,6 +171,16 @@
     };
   }
 
+  // Open sets still showing only the prescription are stored as null so
+  // refresh can tell them from a confirmed number. Completed sets and any
+  // set the user (or an earlier copy) has marked explicit keep the integer.
+  function persistedReps(set) {
+    var reps = optionalInteger(set.reps, MAX_REPS, 'checkpoint_reps_invalid');
+    if (reps == null) return null;
+    if (set.done === true || set.repsExplicit === true) return reps;
+    return null;
+  }
+
   function buildCheckpointSnapshot(draft, nowMs) {
     if (!draft || !Array.isArray(draft.exercises) || !draft.exercises.length) {
       fail('checkpoint_unavailable');
@@ -191,7 +211,7 @@
           return {
             index: assertInteger(set.index, 0, 19, 'checkpoint_set_mismatch'),
             completed: set.done,
-            reps: optionalInteger(set.reps, MAX_REPS, 'checkpoint_reps_invalid'),
+            reps: persistedReps(set),
             weight_kg: weight(set.weightKg),
           };
         }),
@@ -273,6 +293,38 @@
     };
   }
 
+  // Copy missing weight/reps from the set just completed onto the immediate
+  // next set in the same exercise. Precedence is: a value already on that
+  // set, then the previous set, then the prescription fallback. Weight is
+  // kept whenever it is non-null. Reps are kept when `repsExplicit` is set
+  // (typed, copied earlier, or hydrated as real data). Completed sets are
+  // never written. Returns whether the next set changed.
+  function prepareNextSet(exercise, completedIndex) {
+    var sets = exercise && Array.isArray(exercise.sets) ? exercise.sets : null;
+    if (!sets || !Number.isInteger(completedIndex) || completedIndex < 0) return false;
+    var source = sets[completedIndex];
+    var next = sets[completedIndex + 1];
+    if (!source || !next || source.done !== true || next.done === true) return false;
+    var changed = false;
+    if (next.weightKg == null && typeof source.weightKg === 'number' &&
+        Number.isFinite(source.weightKg)) {
+      next.weightKg = source.weightKg;
+      changed = true;
+    }
+    if (Number.isInteger(source.reps) &&
+        (next.reps == null || next.repsExplicit !== true)) {
+      if (next.reps !== source.reps) {
+        next.reps = source.reps;
+        changed = true;
+      }
+      if (next.repsExplicit !== true) {
+        next.repsExplicit = true;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   function selectWorkoutDraft(day, session, existingDraft, nowMs) {
     if (existingDraft && session && existingDraft.sessionId === session.public_id) {
       return existingDraft;
@@ -287,5 +339,6 @@
     flushWorkoutDraft: flushWorkoutDraft,
     selectWorkoutDraft: selectWorkoutDraft,
     deriveActiveWorkout: deriveActiveWorkout,
+    prepareNextSet: prepareNextSet,
   };
 }));
