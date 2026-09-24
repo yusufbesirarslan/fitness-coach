@@ -7,22 +7,24 @@ external/AI calls — it only reads existing canonical sources:
 * schedule   → newest ``TrainingPlan.plan_data.program`` matched to today's
                Istanbul weekday (the same ``WEEKDAYS``/``VALID_TIPS`` vocabulary
                the plan generator validates against — no second definition).
-* completion → today's ``PumpCheck`` (canonical, matching /workout/status and the
-               completion idempotency guard).
+* completion → today's canonical completion claim (``PumpCheck.date_key``),
+               read through ``workout_completion.queries.completed_days`` — the
+               same definition as the completion idempotency guard. A standalone
+               Pump Check (``date_key IS NULL``) is not completion.
 * execution  → non-marker ``WorkoutLog`` rows via the training-history reader.
 
-Istanbul-day windows come from ``app.timeutil`` (``WorkoutLog``/``PumpCheck``
-``created_at`` are naive UTC — never compared raw).
+Istanbul-day windows come from ``app.timeutil`` (``WorkoutLog`` ``created_at``
+is naive UTC — never compared raw).
 """
 import json
 from datetime import date, timedelta
 from typing import Optional, Tuple
 
 from app.extensions import db
-from app.models import PumpCheck, TrainingPlan
+from app.models import TrainingPlan
 from app.services.training_generation.response_validator import VALID_TIPS, WEEKDAYS
 from app.services.training_history import fetch_workout_entries
-from app.timeutil import app_date_of, utc_day_bounds
+from app.services.workout_completion.queries import completed_days
 
 from .models import (
     ACTIVE_SESSION_FACTS_NONE,
@@ -113,17 +115,9 @@ def _load_execution(user_id: int, today: date) -> Tuple[bool, bool, int, bool]:
             else:
                 real_yest += 1
 
-    # PumpCheck completion for the same 2-day window, bucketed by Istanbul day.
-    start_utc = utc_day_bounds(yesterday)[0]
-    end_utc = utc_day_bounds(today)[1]
-    pump_days = {
-        app_date_of(created_at)
-        for (created_at,) in db.session.query(PumpCheck.created_at).filter(
-            PumpCheck.user_id == user_id,
-            PumpCheck.created_at >= start_utc,
-            PumpCheck.created_at < end_utc,
-        ).all()
-    }
+    # Canonical completion claim for the same 2-day window — the ONE definition
+    # shared with the completion preflight (standalone Pump Checks never count).
+    pump_days = completed_days(user_id, (yesterday, today))
     completed_today = today in pump_days
     completed_yest = yesterday in pump_days
 

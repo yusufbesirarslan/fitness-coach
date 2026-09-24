@@ -139,8 +139,10 @@ def _add_workout(user_id, day, volume=100.0, sets=3, reps=10, weight=50.0, marke
 
 
 def _add_pump(user_id, day):
+    # A canonical completion proof (complete_workout always writes date_key).
     db.session.add(PumpCheck(
         user_id=user_id,
+        date_key=day.isoformat(),
         created_at=datetime(day.year, day.month, day.day, 12),
     ))
 

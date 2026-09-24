@@ -444,9 +444,24 @@ def test_today_signals_take_their_day_from_the_istanbul_authority(module):
     source = _source(module)
     assert "date.today()" not in source
     assert "datetime.now()" not in source
+    if module in _DAY_FROM_CALLER:
+        # Native Progress PR2: this adapter no longer touches a clock at all -
+        # it receives `today` as an explicit parameter from a caller that
+        # resolves it from the one clock authority (asserted here, not assumed).
+        assert "from app.timeutil import" not in source
+        assert "utcnow" not in source and "app_today" not in source
+        assert "from app.timeutil import app_today" in _source(
+            _DAY_FROM_CALLER[module])
+        return
     # Since UX-2 PR4 every module here -- today_facts included -- resolves the
     # day from the one clock authority rather than inheriting it implicitly.
     assert "from app.timeutil import" in source
+
+
+# Modules that take the Istanbul day as a parameter -> the module that resolves it.
+_DAY_FROM_CALLER = {
+    "app/services/workout_state/queries.py": "app/services/workout_state/__init__.py",
+}
 
 
 def test_mobile_nutrition_publishes_the_zone_that_resolved_the_day():

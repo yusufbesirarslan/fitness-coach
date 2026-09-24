@@ -67,7 +67,10 @@ def _seed_plan(user_id, plan_data="{}"):
 def _seed_pumpcheck_today(user_id):
     from app.extensions import db
     from app.models import PumpCheck
-    db.session.add(PumpCheck(user_id=user_id))  # created_at defaults to now → today
+    from app.timeutil import app_today
+    # A canonical completion claim (complete_workout always writes date_key);
+    # a date_key-less row is a standalone Pump Check, never completion.
+    db.session.add(PumpCheck(user_id=user_id, date_key=app_today().isoformat()))
     db.session.commit()
 
 
