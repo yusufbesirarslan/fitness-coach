@@ -46,12 +46,11 @@
    client-side weight/goal arithmetic, which the canonical summary now owns
    server-side. The check-in field still pre-fills from `current_weight`
    (_progress_checkin_sheet.html) — a form default, not a Progress signal. #}
-{# progress_presentation.js first: progress.js and progress_history.js read
-   its state → copy tables and the summary view model. #}
+{# progress_presentation.js first: progress.js (including its history module)
+   reads its state → copy tables and the summary view model. #}
 <script src="/static/progress_presentation.js?v={{ _v }}"></script>
 <script src="/static/progress_insights.js?v={{ _v }}"></script>
 <script src="/static/progress_physique.js?v={{ _v }}"></script>
-<script src="/static/progress_history.js?v={{ _v }}"></script>
 <script src="/static/progress.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>
 </body>

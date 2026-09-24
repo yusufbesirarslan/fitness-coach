@@ -55,16 +55,33 @@ CLIENT_KEYS = (
 )
 
 
-def _js(client):
-    r = client.get("/static/progress_history.js")
+# Since Progress V2 PR1 the history consumer ships INSIDE progress.js (the
+# page keeps its pre-V2 static request count), as one self-contained IIFE
+# between these markers. Every history guard below runs on that block alone,
+# and every controller guard on progress.js WITHOUT it, so neither side can
+# hide behind the other.
+_HISTORY_BEGIN = "/* ═══ BEGIN progress history module"
+_HISTORY_END = "/* ═══ END progress history module ═══ */"
+
+
+def _progress_source(client):
+    r = client.get("/static/progress.js")
     assert r.status_code == 200
-    return r.get_data(as_text=True)
+    src = r.get_data(as_text=True)
+    assert src.count(_HISTORY_BEGIN) == 1 and src.count(_HISTORY_END) == 1
+    begin, end = src.index(_HISTORY_BEGIN), src.index(_HISTORY_END)
+    assert begin < end
+    return src, begin, end + len(_HISTORY_END)
+
+
+def _js(client):
+    src, begin, end = _progress_source(client)
+    return src[begin:end]
 
 
 def _progress_js(client):
-    r = client.get("/static/progress.js")
-    assert r.status_code == 200
-    return r.get_data(as_text=True)
+    src, begin, end = _progress_source(client)
+    return src[:begin] + src[end:]
 
 
 def _executable_js(js):
@@ -85,7 +102,9 @@ def test_history_heading_and_module_are_wired(app, client, make_user, login):
     html = _progress_html(client, make_user, login, "phuiwire")
     assert 'id="ph-h"' in html
     assert 'id="history-list"' in html
-    assert "/static/progress_history.js" in html
+    assert "/static/progress.js" in html
+    # The history consumer is no longer a separate request (see _js).
+    assert "/static/progress_history.js" not in html
     # Rendered through Jinja autoescape ("SON CHECK-IN'LER" → &#39;).
     assert str(escape(_CATALOG["tr"]["progress.recent_checkins_label"])) in html
 

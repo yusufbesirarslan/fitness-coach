@@ -14,7 +14,7 @@
       mapped to locale KEYS. They are never rendered, never prettified with
       string surgery, and an identifier this build does not know maps to
       nothing — the caller then renders the neutral/unavailable state, never
-      a guess. progress.js and progress_history.js both read these tables,
+      a guess. progress.js (controller and its history module) reads these tables,
       so a state has one wording across the whole page.
 
    2. The summary view model. GET /api/progress/summary is fetched once and

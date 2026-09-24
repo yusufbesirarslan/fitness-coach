@@ -318,8 +318,15 @@ pure `buildSummaryView(payload)` that turns this contract into
 Every rendered string is a `{key, params}` descriptor; internal identifiers are
 never rendered or reshaped into copy. The consistency state renders exactly
 once (its Trends card). `static/progress.js` only writes the view into the DOM,
-and `static/progress_history.js` reads the same tables. The module is pure, so
-`tests/test_progress_presentation_js.py` executes it under node. The wire
+and its history module reads the same tables. The module is pure, so
+`tests/test_progress_presentation_js.py` executes it under node.
+
+Static cost: none. The page keeps its pre-V2 count of 15 static files. The
+history consumer (formerly `static/progress_history.js`) now ships as a
+self-contained IIFE at the end of `static/progress.js`, between
+`BEGIN/END progress history module` markers. Its guards in
+`tests/test_progress_history_ui.py` run on that block alone, and the
+controller guards run on the rest of the file. The wire
 contract in §3 is unchanged — this is a presentation adapter, not a new
 contract.
 

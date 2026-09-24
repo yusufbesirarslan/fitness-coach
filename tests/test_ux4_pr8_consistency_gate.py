@@ -140,8 +140,7 @@ UX4_TEMPLATES = ("today", "plan", "coach_v2", "nutrition", "manage_stack",
 UX4_SCRIPTS = ("today", "training_plan_management", "plan_training_manage",
                "plan_workout", "workout_execution", "workout_state_client",
                "weekly_program", "workout_draft", "coach_widget", "nutrition",
-               "progress", "progress_presentation", "progress_history",
-               "progress_insights",
+               "progress", "progress_presentation", "progress_insights",
                "progress_physique", "profile", "actions", "i18n", "modal", "auth")
 
 _T_CALL = re.compile(r"""\b(?:t|__t)\(\s*['"]([a-z0-9_]+(?:\.[a-z0-9_]+)+)['"]""")

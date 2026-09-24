@@ -139,18 +139,17 @@ SCRIPTS = {
     "coach": _SHELL | {"actions.js", "coach_widget.js"},
     "nutrition": _SHELL | {"actions.js", "coach_widget.js", "nutrition.js"},
     "supplements": _SHELL | {"actions.js"},
-    "progress": _SHELL | {"actions.js", "progress.js", "progress_history.js",
+    "progress": _SHELL | {"actions.js", "progress.js",
                           "progress_insights.js", "progress_physique.js",
                           "progress_presentation.js"},
     "account": _SHELL | {"actions.js", "profile.js"},
     "notifications": _SHELL | {"actions.js"},
 }
-# Progress V2 PR1 raised Progress 15 → 16 deliberately: one pure, cache-busted
-# presentation module (progress_presentation.js) that now owns the state → copy
-# tables progress.js and progress_history.js each used to carry. It is a static
-# asset, not an app read — DEFAULT_READS["progress"] is unchanged.
+# Progress V2 PR1 added progress_presentation.js (the pure state → copy module)
+# WITHOUT raising the Progress ceiling: the history consumer moved into
+# progress.js, so the separate progress_history.js request is gone.
 STATIC_CEILING = {"today": 11, "plan": 13, "coach": 12, "nutrition": 14,
-                  "supplements": 11, "progress": 16, "account": 12,
+                  "supplements": 11, "progress": 15, "account": 12,
                   "notifications": 11}
 # Third-party origins each surface may ask for. Coach (and Nutrition, which
 # hosts the Menu Scan widget) pin marked + DOMPurify from jsDelivr with SRI.
