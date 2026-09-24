@@ -152,7 +152,7 @@ class WorkoutStateInputs:
     has_plan: bool
     schedule_valid: bool                      # plan_data parsed to a 7-day program
     today_schedule_kind: Optional[str]        # KIND_WORKOUT | KIND_REST | None
-    completed_today: bool                     # today's PumpCheck exists (canonical)
+    completed_today: bool                     # canonical completion claim (date_key) today
     has_completion_marker_today: bool         # corroborating WorkoutLog marker today
     real_entry_count_today: int               # non-marker WorkoutLog rows today
     stale_previous_workout: bool              # prior-day real rows w/ no completion

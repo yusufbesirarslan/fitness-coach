@@ -1,9 +1,10 @@
 from datetime import timedelta
 
-from app.models import PumpCheck, WeeklyCheckIn
+from app.models import WeeklyCheckIn
 from app.services.training_generation.models import PerformanceHistory
 from app.services.training_history import fetch_workout_entries, total_volume
-from app.timeutil import app_today, utc_day_bounds
+from app.services.workout_completion.queries import completed_days
+from app.timeutil import app_today
 
 
 def build_performance_history(user_id: int) -> PerformanceHistory:
@@ -19,13 +20,10 @@ def build_performance_history(user_id: int) -> PerformanceHistory:
         entries = fetch_workout_entries(user_id, start_day, window_end, include_markers=True)
         sessions = len(entries)
         volume = total_volume(entries)
-        start, _ = utc_day_bounds(start_day)
-        _, end = utc_day_bounds(window_end)
-        pump_sessions = PumpCheck.query.filter(
-            PumpCheck.user_id == user_id,
-            PumpCheck.created_at >= start,
-            PumpCheck.created_at < end,
-        ).count()
+        # Canonical completion claims only — a standalone Pump Check is not a
+        # training session (same definition as workout_state / the preflight).
+        pump_sessions = len(completed_days(
+            user_id, (start_day + timedelta(days=i) for i in range(7))))
         weekly_sessions.append(max(sessions, pump_sessions))
         volume_trend.append(float(volume))
 

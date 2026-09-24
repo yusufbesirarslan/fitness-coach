@@ -1,15 +1,15 @@
 """Native Progress PR1 — executable evidence for the discovery specification.
 
-See ``docs/mobile/progress-vertical-slice.md``. These tests change no production
-behaviour. They pin two facts the specification depends on:
+See ``docs/mobile/progress-vertical-slice.md``. These tests pin two facts the
+specification depends on:
 
-1. (strict xfail, defect D1) A standalone ``POST /api/v1/pump-checks`` made
-   earlier on the same Istanbul day currently makes the canonical WorkoutSession
-   completion answer ``already_completed`` and write no completion marker, XP or
-   proof, because ``already_completed_today`` counts *any* PumpCheck by
-   ``created_at``. Standalone Pump Check is not a completion. The fix belongs to a
-   later backend PR, which must delete the ``xfail`` marker; ``strict=True`` makes
-   the fix fail this file until it does.
+1. (regression, defect D1 — fixed in Native Progress PR2) A standalone
+   ``POST /api/v1/pump-checks`` made earlier on the same Istanbul day must not
+   make the canonical WorkoutSession completion answer ``already_completed``.
+   Before PR2, ``already_completed_today`` counted *any* PumpCheck by
+   ``created_at`` and the completion wrote no marker, XP or proof. Completion
+   evidence is now the canonical ``date_key`` claim only; the full matrix lives in
+   ``tests/test_progress_pump_check_completion_proof.py``.
 
 2. (characterization) The completion-proof PumpCheck written by the canonical
    completion transaction has no ``public_id`` and no ``captured_at``, so it is
@@ -77,11 +77,6 @@ def _create_standalone_on_fixed_day(client, headers):
     db.session.commit()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="D1: already_completed_today counts standalone Pump Checks "
-    "(docs/mobile/progress-vertical-slice.md)",
-)
 def test_standalone_pump_check_does_not_suppress_canonical_completion(
     client, owner, as_mobile, workout_ref, completion_proof,
     standalone_dependencies,

@@ -38,6 +38,15 @@ Three findings drive the plan. Everything else is secondary.
    competing authorities on the server. Native Progress must not expose
    standalone creation until this is fixed. The strict-xfail test in this PR
    reproduces D1.
+
+   **Status (PR2): fixed in code, not yet deployed.** Completion evidence is now the canonical
+   claim only (`PumpCheck.date_key`, the column `uq_pump_check_day` claims),
+   read through ONE helper — `workout_completion.queries.completed_days` /
+   `already_completed_today` — shared by the preflight, `workout_state`
+   (Today, `/workout/status`, `/api/v1/today`) and the training-generation
+   adherence input. The xfail is gone; the scenario is a permanent regression
+   test plus `tests/test_progress_pump_check_completion_proof.py` (matrix A–G)
+   and `tests/test_progress_pump_check_completion_pg.py` (postgres:16 races).
 2. **D2 — P1, mobile.** On mobile `main`, the "New Pump Check" and "Pump Check
    history" entries render only inside `_ProgressContent`, which appears only in
    the `ProgressData` state (`lib/features/progress/presentation/progress_screen.dart`).

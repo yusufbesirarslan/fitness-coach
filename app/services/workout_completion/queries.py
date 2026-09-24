@@ -13,15 +13,23 @@ Two responsibilities, both deliberately tiny and side-effect free:
   and only so it is mapped to the deterministic ``ALREADY_COMPLETED`` replay
   outcome. Any other integrity failure must surface as an internal error.
 
-Completion identity uses the repository's canonical Istanbul-day semantics
-(``app.timeutil``), matching the existing completion guards *and* the Sprint 7
-PR1 resolver's ``completed_today`` (``workout_state/queries.py``) — today's
-``PumpCheck`` bucketed by ``created_at`` into the Istanbul day. In production
-this is equivalent to the ``date_key`` the row is written with (both derive from
-the same instant); the unique constraint on ``date_key`` is the durable claim.
+Completion identity is the **canonical completion claim** itself: a
+``PumpCheck`` whose ``date_key`` is the Istanbul ISO day (``app.timeutil``).
+``date_key`` is written ONLY by :func:`service.complete_workout` and is exactly
+the column the ``uq_pump_check_day`` constraint claims, so the preflight, the
+read-model (``workout_state``) and the durable claim can never disagree about
+what "completed today" means.
+
+A ``PumpCheck`` with ``date_key IS NULL`` is **not** completion evidence. The
+same table also holds standalone Pump Checks (``POST /api/v1/pump-checks``,
+``mobile_pump_checks.service`` writes ``date_key=None``) and pre-2026-06-22
+legacy rows (the ``a7b8c9d0e1f2`` migration added the column without a
+backfill). Bucketing by ``created_at`` alone let a standalone Pump Check taken
+earlier the same day make the day look completed and suppress the real
+completion's marker/XP (Native Progress D1).
 """
 from datetime import date, datetime
-from typing import Optional
+from typing import Iterable, Optional, Set
 
 from app.extensions import db
 from app.models import (
@@ -30,30 +38,44 @@ from app.models import (
     PumpCheck,
     WorkoutSession,
 )
-from app.timeutil import utc_day_bounds
 
 # The daily-completion unique constraint (app/models.py PumpCheck.__table_args__).
 PUMP_CHECK_DAY_CONSTRAINT = "uq_pump_check_day"
 
 
-def already_completed_today(user_id: int, today: date) -> bool:
-    """True if ``user_id`` already has a completion ``PumpCheck`` for Istanbul
-    day ``today``. Read-only; no flush/commit.
+def completion_proof_clause():
+    """The ONE predicate that makes a ``PumpCheck`` completion evidence.
 
-    Byte-identical in intent to the pre-PR2 inline guards (``training.py`` and
-    the AI-coach tool) and to PR1's ``completed_today`` — same Istanbul-day
-    ``created_at`` window, so the mutation preflight and the read-model never
-    disagree about what "completed today" means.
+    Every completion-state reader must go through this (or the helpers below)
+    rather than re-deriving "completed" from row existence or ``created_at``.
     """
-    start_utc, end_utc = utc_day_bounds(today)
-    return (
-        PumpCheck.query.filter(
-            PumpCheck.user_id == user_id,
-            PumpCheck.created_at >= start_utc,
-            PumpCheck.created_at < end_utc,
-        ).first()
-        is not None
-    )
+    return PumpCheck.date_key.isnot(None)
+
+
+def completed_days(user_id: int, days: Iterable[date]) -> Set[date]:
+    """The subset of Istanbul ``days`` on which ``user_id`` holds the canonical
+    completion claim. One bounded, read-only query; no flush/commit."""
+    keys = {day.isoformat(): day for day in days}
+    if not keys:
+        return set()
+    rows = db.session.query(PumpCheck.date_key).filter(
+        PumpCheck.user_id == user_id,
+        completion_proof_clause(),
+        PumpCheck.date_key.in_(tuple(keys)),
+    ).all()
+    return {keys[date_key] for (date_key,) in rows}
+
+
+def already_completed_today(user_id: int, today: date) -> bool:
+    """True if ``user_id`` already holds the canonical completion claim for
+    Istanbul day ``today``. Read-only; no flush/commit.
+
+    Shared by every completion entry path (browser route, AI-coach tool, native
+    session completion) and by ``workout_state``'s ``completed_today`` via
+    :func:`completed_days` — one definition of "completed". A standalone Pump
+    Check (``date_key IS NULL``) never satisfies it.
+    """
+    return today in completed_days(user_id, (today,))
 
 
 def is_pump_check_day_violation(exc) -> bool:
