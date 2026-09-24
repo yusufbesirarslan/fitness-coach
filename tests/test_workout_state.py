@@ -33,7 +33,7 @@ from app.services import workout_state as ws
 from app.services.workout_state import models as m
 from app.services.workout_state import resolve_workout_state
 from app.services.workout_state.resolver import resolve
-from app.timeutil import app_today
+from app.timeutil import app_date_of, app_today
 
 # A fixed Thursday ("Perşembe"); noon UTC → 15:00 Istanbul, safely inside the day.
 TODAY = date(2026, 7, 23)
@@ -361,8 +361,10 @@ def _add_workout(user_id, when=NOON_TODAY, marker=False, name="Squat"):
 
 
 def _add_pump(user_id, when=NOON_TODAY, day_key=None):
+    # A canonical completion claim: complete_workout writes date_key as the
+    # Istanbul day of the instant (never the UTC calendar date).
     db.session.add(PumpCheck(user_id=user_id, valid=True,
-                             date_key=(day_key or when.date().isoformat()),
+                             date_key=(day_key or app_date_of(when).isoformat()),
                              created_at=when))
     db.session.commit()
 
