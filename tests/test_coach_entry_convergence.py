@@ -281,7 +281,7 @@ def test_no_contextual_entry_serializes_user_data_into_the_url():
     """Honest handoff: the Coach reads plan, targets and metrics server-side, so
     the link carries nothing. A query string here would be a privacy decision,
     not a convenience."""
-    for name in ("progress.html", "nutrition.html", "plan.html"):
+    for name in ("_progress_current_state.html", "nutrition.html", "plan.html"):
         for href in re.findall(r'href="(/coach[^"]*)"', _read(TEMPLATES / name)):
             assert href == "/coach", (name, href)
 

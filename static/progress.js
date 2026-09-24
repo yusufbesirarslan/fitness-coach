@@ -1,17 +1,18 @@
 /* ══════════════════════════════════════════════════════════════════════
-   progress.js — Progress redesign PR1 (shell) + PR2 (canonical summary)
+   progress.js — Progress page controller (redesign PR1/PR2, V2 PR1)
 
    showToast / escapeHTML / selectOverload / submitCheckin / openCheckin /
    closeCheckin / activateOnEnter are preserved VERBATIM — the weekly
    Check-In POST flow must keep working unchanged.
 
-   Hard rule for this file: it TRANSLATES, it does not decide. YOUR PROGRESS,
-   BODY, PERFORMANCE and CONSISTENCY all render one canonical server payload
-   (GET /api/progress/summary); there is no `sessions >= 3 → on track`,
-   no `weight dropped → good`, no streak-as-consistency, and no threshold of
-   any kind below. Every state arrives as a bounded enum and is looked up in
-   a table — an enum this file does not know renders the neutral state rather
-   than a guess, exactly like a missing signal.
+   Hard rule for this file: it RENDERS, it does not decide. CURRENT STATE
+   and the three TRENDS cards all render one canonical server payload
+   (GET /api/progress/summary) through the view model in
+   static/progress_presentation.js, which owns every state → copy table;
+   there is no `sessions >= 3 → on track`, no `weight dropped → good`, no
+   streak-as-consistency, and no threshold of any kind below. An enum the
+   presentation model does not know renders the neutral state rather than a
+   guess, exactly like a missing signal.
 
    No IIFE: functions must resolve as window.<name> for actions.js's
    data-action dispatcher (see static/actions.js).
@@ -159,22 +160,15 @@ document.addEventListener('keydown', function (e) {
 // Small helpers ───────────────────────────────────────────────────────
 function _el(id) { return document.getElementById(id); }
 
-// Signed number for a delta ("+0.4" / "-1.2"). Callers only pass values they
-// already proved are finite numbers.
-function _signed(n, digits) {
-  var v = n.toFixed(digits == null ? 1 : digits);
-  return (n > 0 ? '+' : '') + v;
-}
-
-// Fills one WHAT CHANGED card. `sub` is optional; when a card has no signal
-// the caller passes the neutral copy so the card never renders blank.
-function _fillCard(id, value, sub) {
+// Fills one TRENDS card. `detail` may be empty; the value never is (a card
+// with no signal shows the neutral dash).
+function _fillCard(id, value, detail) {
   var card = _el(id);
   if (!card) return;
   var v = card.querySelector('[data-slot="value"]');
-  var s = card.querySelector('[data-slot="sub"]');
+  var s = card.querySelector('[data-slot="detail"]');
   if (v) v.textContent = value;
-  if (s) s.textContent = sub;
+  if (s) s.textContent = detail;
 }
 
 // A section that fails to load says so plainly instead of showing a stale or
@@ -225,57 +219,19 @@ function loadAxisInsights() {
 document.addEventListener('DOMContentLoaded', initProgress);
 
 /* ── THE CANONICAL SUMMARY ────────────────────────────────────────────
-   One fetch of /api/progress/summary drives YOUR PROGRESS and all three
-   WHAT CHANGED cards, so they can never contradict each other. The server
-   owns every state below; these tables are pure enum → i18n key lookups.
-   A value missing from a table is treated exactly like a missing signal. */
+   One fetch of /api/progress/summary drives CURRENT STATE and all three
+   TRENDS cards, so they can never contradict each other. The server owns
+   every state; static/progress_presentation.js turns the payload into one
+   view model (current_state + metrics.{weight,training_volume,consistency})
+   and owns every state → copy table. This file only writes that view into
+   the DOM — it holds no mapping of its own. */
 
-var TRAJECTORY_LABEL = {
-  building_baseline: 'progress.traj_building_baseline',
-  on_track: 'progress.traj_on_track',
-  needs_attention: 'progress.traj_needs_attention'
-};
+function _presentation() { return window.FitXProgressPresentation || null; }
 
-// Keyed by trajectory.reason — the canonical training signal. One line per
-// signal, deterministic, bounded. Richer interpretation belongs to PR3.
-var TRAJECTORY_LEDE = {
-  insufficient_data: 'progress.traj_lede_insufficient_data',
-  progressing: 'progress.traj_lede_progressing',
-  keep_pushing: 'progress.traj_lede_keep_pushing',
-  build_consistency: 'progress.traj_lede_build_consistency',
-  plateau: 'progress.traj_lede_plateau',
-  deload: 'progress.traj_lede_deload'
-};
-
-var PERFORMANCE_LABEL = {
-  building_baseline: 'progress.perf_state_building_baseline',
-  progressing: 'progress.perf_state_progressing',
-  steady: 'progress.perf_state_steady',
-  building_consistency: 'progress.perf_state_building_consistency',
-  plateau: 'progress.perf_state_plateau',
-  deload: 'progress.perf_state_deload'
-};
-
-var CONSISTENCY_LABEL = {
-  consistent: 'progress.cons_state_consistent',
-  inconsistent: 'progress.cons_state_inconsistent',
-  insufficient_data: 'progress.cons_state_insufficient_data'
-};
-
-var TREND_LABEL = {
-  up: 'progress.trend_up',
-  flat: 'progress.trend_flat',
-  down: 'progress.trend_down'
-};
-
-// Translate an enum through a table, or return null when the server sent
-// something this build does not know. Null always degrades to the neutral
-// state — never to a plausible-looking default.
-function _label(table, value) {
-  return (typeof value === 'string' && table[value]) ? __t(table[value]) : null;
+// A copy descriptor ({key, params}) → text; no descriptor → empty line.
+function _text(desc) {
+  return desc ? __t(desc.key, desc.params || undefined) : '';
 }
-
-function _isNumber(v) { return typeof v === 'number' && isFinite(v); }
 
 function loadSummary() {
   _getJSON('/api/progress/summary')
@@ -284,114 +240,61 @@ function loadSummary() {
 }
 
 function renderSummary(d) {
-  if (!d || !d.trajectory) { summaryUnavailable(); return; }
-  renderTrajectory(d);
-  renderBodyCard(d.body);
-  renderPerformanceCard(d.performance);
-  renderConsistencyCard(d.consistency);
+  var P = _presentation();
+  if (!P) { _summaryModuleMissing(); return; }
+  renderSummaryView(P.buildSummaryView(d));
 }
 
 // A failed summary must NOT read as "building baseline": that is a truthful
 // statement about the user's history, and the request failing says nothing
-// about their history at all.
+// about their history at all. The presentation model's unavailable view is
+// the one definition of that state.
 function summaryUnavailable() {
-  _setTrajectory('', __t('progress.traj_unavailable'), __t('progress.load_error'), '');
-  _fillCard('wc-body', '—', __t('progress.card_nodata'));
-  _fillCard('wc-perf', '—', __t('progress.card_nodata'));
-  _fillCard('wc-cons', '—', __t('progress.card_nodata'));
+  var P = _presentation();
+  if (!P) { _summaryModuleMissing(); return; }
+  renderSummaryView(P.buildSummaryView(null));
 }
 
-function _setTrajectory(state, label, lede, meta) {
+// The presentation script itself failed to load: degrade this section only,
+// and never leave it on "Loading…".
+function _summaryModuleMissing() {
+  _setCurrentState('', __t('progress.load_error'), '', '');
+  ['tr-weight', 'tr-volume', 'tr-consistency'].forEach(function (id) {
+    _fillCard(id, '—', __t('progress.load_error'));
+  });
+}
+
+function renderSummaryView(view) {
+  renderCurrentState(view.current_state);
+  renderMetric('tr-weight', view.metrics.weight);
+  renderMetric('tr-volume', view.metrics.training_volume);
+  renderMetric('tr-consistency', view.metrics.consistency);
+}
+
+// ── CURRENT STATE ──
+function _setCurrentState(state, headline, summary, evidence) {
   var card = _el('ps-card');
   var stateEl = _el('ps-state');
   var ledeEl = _el('ps-lede');
   var metaEl = _el('ps-meta');
-  // The accent is decoration; the label carries the meaning either way.
+  // The accent is decoration; the headline carries the meaning either way.
   if (card) card.setAttribute('data-state', state || '');
-  if (stateEl) stateEl.textContent = label;
-  if (ledeEl) ledeEl.textContent = lede;
-  if (metaEl) metaEl.textContent = meta;
+  if (stateEl) stateEl.textContent = headline;
+  if (ledeEl) ledeEl.textContent = summary;
+  if (metaEl) metaEl.textContent = evidence;
 }
 
-function renderTrajectory(d) {
-  var label = _label(TRAJECTORY_LABEL, d.trajectory.state);
-  var lede = _label(TRAJECTORY_LEDE, d.trajectory.reason);
-  if (!label || !lede) { summaryUnavailable(); return; }
-  _setTrajectory(d.trajectory.state, label, lede, _summaryMeta(d));
+function renderCurrentState(cs) {
+  _setCurrentState(cs.state, _text(cs.headline), _text(cs.summary), _text(cs.evidence));
 }
 
-// "Last 4 weeks · 12 sessions · CONSISTENT". Each part is dropped rather
-// than faked when the server did not send it; no percentage is derived.
-function _summaryMeta(d) {
-  var parts = [];
-  var w = d.window || {};
-  var c = d.consistency || {};
-  if (_isNumber(w.weeks)) parts.push(__t('progress.meta_window', { weeks: w.weeks }));
-  if (_isNumber(c.sessions)) parts.push(__t('progress.meta_sessions', { n: c.sessions }));
-  var cons = _label(CONSISTENCY_LABEL, c.state);
-  if (cons) parts.push(cons);
-  return parts.join(' · ');
-}
-
-// BODY — reported, never judged. The card shows the canonical current weight
-// and ONE piece of context, in order of how directly it was observed:
-// a two-check-in delta, else distance to a configured target, else nothing.
-// No delta is classified as success or failure.
-function renderBodyCard(body) {
-  if (!body || !_isNumber(body.current_weight_kg)) {
-    _fillCard('wc-body', '—', __t('progress.body_sub_none'));
-    return;
-  }
-
-  var value = body.current_weight_kg.toFixed(1) + ' ' + __t('progress.unit_kg');
-  var sub;
-  if (_isNumber(body.weight_delta_kg)) {
-    sub = Math.abs(body.weight_delta_kg) < 0.05
-      ? __t('progress.body_sub_flat')
-      : __t('progress.body_sub_delta', { delta: _signed(body.weight_delta_kg) });
-  } else if (_isNumber(body.distance_to_target_kg)) {
-    // Absolute distance; the server deliberately does not say which side of
-    // the target the user is on, because that is not a verdict it can make.
-    sub = __t('progress.body_sub_target', {
-      distance: body.distance_to_target_kg.toFixed(1)
-    });
-  } else {
-    sub = __t('progress.body_sub_partial');
-  }
-  _fillCard('wc-body', value, sub);
-}
-
-// PERFORMANCE — the canonical training state, plus at most one compact
-// canonical trend. No volume number, no session count, no chart.
-function renderPerformanceCard(perf) {
-  var label = perf ? _label(PERFORMANCE_LABEL, perf.state) : null;
-  if (!label) {
-    _fillCard('wc-perf', '—', __t('progress.card_nodata'));
-    return;
-  }
-  var trend = _label(TREND_LABEL, perf.volume_trend);
-  _fillCard('wc-perf', label,
-    trend ? __t('progress.perf_sub_volume', { trend: trend }) : '');
-}
-
-// CONSISTENCY — canonical training consistency, explained by the counts the
-// server sent. The gamification streak is deliberately no longer used here:
-// logging in is not training.
-function renderConsistencyCard(cons) {
-  var label = cons ? _label(CONSISTENCY_LABEL, cons.state) : null;
-  if (!label) {
-    _fillCard('wc-cons', '—', __t('progress.card_nodata'));
-    return;
-  }
-  // Both counts or neither: they are one sentence, and a half-known one
-  // ("of the last — weeks") says less than the state label already did. No
-  // threshold on either number — the server sizes the window, not this file.
-  var sub = '';
-  if (_isNumber(cons.active_weeks) && _isNumber(cons.analyzed_weeks)) {
-    sub = __t('progress.cons_active_weeks',
-              { active: cons.active_weeks, total: cons.analyzed_weeks });
-  }
-  _fillCard('wc-cons', label, sub);
+// ── TRENDS ──
+// One card per metric. status is published on the card so styling and
+// later PRs can key on availability without re-deriving it.
+function renderMetric(id, metric) {
+  var card = _el(id);
+  if (card) card.setAttribute('data-status', metric.status);
+  _fillCard(id, metric.value ? _text(metric.value) : '—', _text(metric.detail));
 }
 
 // ── PROGRESS HISTORY ─────────────────────────────────────────────────

@@ -1,0 +1,13 @@
+{#- Progress V2 PR1 · RecentCheckins. Unchanged content (Progress redesign
+    PR5): reconstructed historical Progress state per qualifying check-in,
+    server-owned. GET /api/progress/history decides the rows;
+    static/progress_history.js only translates them, through the shared tables
+    in static/progress_presentation.js. The browser never classifies a period
+    and never computes a weight delta. -#}
+<section class="prog-section" id="progress-recent-checkins"
+         data-progress-section="recent-checkins" aria-labelledby="ph-h">
+    <h2 class="sec-label" id="ph-h">{{ t('progress.recent_checkins_label') }}</h2>
+    <div id="history-list" aria-live="polite">
+        <p class="prog-loading">{{ t('progress.loading') }}</p>
+    </div>
+</section>

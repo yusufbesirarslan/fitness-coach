@@ -286,12 +286,49 @@ newest covers `[end_day - 6, end_day]`.
 
 ## 10. Frontend ownership boundary
 
-`static/progress.js` **translates**; it does not decide.
+**Progress V2 PR1** re-cut the page into explicit, independently replaceable
+sections — one Jinja partial each, rendered in this order:
 
-- YOUR PROGRESS, BODY, PERFORMANCE and CONSISTENCY all render one payload, so
-  the page cannot show a card that disagrees with its own headline.
-- Every state arrives as a bounded enum and is looked up in an explicit table.
-  An enum the build does not know renders the neutral state, never a guess.
+| Section | Partial | Question it owns |
+|---|---|---|
+| ProgressHeader | `_progress_header.html` | — |
+| Current State | `_progress_current_state.html` | What is my current state? + next action |
+| Trends | `_progress_trends.html` | What changed? (measurable evidence) |
+| Axis Insight | `_progress_axis_insight.html` | What does Axis infer, and what next? |
+| Physique | `_progress_physique.html` | (PR4 read model, unchanged) |
+| Recent Check-ins | `_progress_recent_checkins.html` | (PR5 history read model, unchanged) |
+
+`static/progress_presentation.js` (`window.FitXProgressPresentation`) is the
+**one** presentation model: every state → locale-key table on the page and a
+pure `buildSummaryView(payload)` that turns this contract into
+
+- `current_state` — `status`, `state` (accent only), `headline`, `summary`,
+  `evidence` (the window). Keyed on the **trajectory**, never on
+  `trajectory.reason`: which signal needs attention is Axis Insight's to say,
+  so Current State cannot repeat it (the retired per-signal ledes restated the
+  WATCH headline verbatim).
+- `metrics.weight` — `status`, `unit`, `current`, `delta`,
+  `comparison_period` (`previous_checkin` | null), `distance_to_target`.
+- `metrics.training_volume` — `status`, `trend`, `comparison_period`. The
+  canonical trend is `flat` when there is nothing to compare, so
+  `building_baseline` maps to `insufficient_data`, never "Steady".
+- `metrics.consistency` — `status`, `state`, `active_weeks`, `total_weeks`,
+  `session_count`, `comparison_period`.
+
+Every rendered string is a `{key, params}` descriptor; internal identifiers are
+never rendered or reshaped into copy. The consistency state renders exactly
+once (its Trends card). `static/progress.js` only writes the view into the DOM,
+and `static/progress_history.js` reads the same tables. The module is pure, so
+`tests/test_progress_presentation_js.py` executes it under node. The wire
+contract in §3 is unchanged — this is a presentation adapter, not a new
+contract.
+
+Rules that still hold:
+
+- Every surface renders one summary payload, fetched once, so the page cannot
+  show a card that disagrees with its own headline.
+- An enum the build does not know renders the neutral/unavailable state, never
+  a guess.
 - Forbidden and test-enforced: `sessions >= 3 → on_track`,
   `weightDelta < 0 → success`, `streak >= X → consistent`, or any threshold on
   a summary field (`test_client_never_fabricates_a_trajectory`).
@@ -300,10 +337,9 @@ newest covers `[end_day - 6, end_day]`.
   still serves its other consumers.
 - Trajectory is never communicated by colour alone: `#ps-state` always spells
   the state out, and `data-state` (accent only) is written by the same function
-  that writes the label.
-- A summary failure degrades YOUR PROGRESS and WHAT CHANGED only. AXIS
-  INSIGHTS, PHYSIQUE PROGRESS and PROGRESS HISTORY own separate fetches and keep
-  loading.
+  that writes the headline.
+- A summary failure degrades Current State and Trends only. Axis Insight,
+  Physique and Recent Check-ins own separate fetches and keep loading.
 
 ---
 

@@ -1,0 +1,82 @@
+{#- Progress V2 PR1: the weekly check-in sheet, extracted verbatim from
+    progress.html (ids unchanged so submitCheckin/selectOverload keep working).
+    It is the Current State's recommended next action. -#}
+<div class="sheet-backdrop" id="checkin-sheet" data-action-self="closeCheckin">
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="checkin-sheet-title" tabindex="-1">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title" id="checkin-sheet-title">{{ t('progress.checkin_title') }}</div>
+        <div class="section-sub">{{ t('progress.checkin_sub') }}</div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label class="form-lbl" for="ci-weight">{{ t('progress.current_weight') }}</label>
+                <input type="number" id="ci-weight" step="0.1"
+                       placeholder="{{ '%g'|format(current_weight) if current_weight else t('progress.weight_ph') }}"
+                       value="{{ '%g'|format(current_weight) if current_weight else '' }}">
+            </div>
+            <div class="form-group">
+                <label class="form-lbl" for="ci-note">{{ t('progress.note_label') }}</label>
+                <input type="text" id="ci-note" placeholder="{{ t('progress.note_ph') }}">
+            </div>
+
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.intensity') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-yogunluk" min="1" max="5" value="3" data-action-input="fxSetText" data-target="yogunluk-val">
+                    <div class="slider-val" id="yogunluk-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_verylow') }}</span><span>{{ t('progress.slider_veryhigh') }}</span></div>
+            </div>
+
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.fatigue') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-fatigue" min="1" max="5" value="3" data-action-input="fxSetText" data-target="fatigue-val">
+                    <div class="slider-val" id="fatigue-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_notired') }}</span><span>{{ t('progress.slider_verytired') }}</span></div>
+            </div>
+
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.sleep') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-uyku" min="1" max="5" value="3" data-action-input="fxSetText" data-target="uyku-val">
+                    <div class="slider-val" id="uyku-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_verybad') }}</span><span>{{ t('progress.slider_verygood') }}</span></div>
+            </div>
+
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.nutrition_adh') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-beslenme" min="1" max="5" value="3" data-action-input="fxSetText" data-target="beslenme-val">
+                    <div class="slider-val" id="beslenme-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_noadherence') }}</span><span>{{ t('progress.slider_fulladherence') }}</span></div>
+            </div>
+
+            <div class="form-group form-full">
+                <label class="form-lbl">Progressive Overload</label>
+                <div class="section-sub" style="margin-bottom:10px">{{ t('progress.overload_q') }}</div>
+                <div class="overload-grid">
+                    <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="true">{{ t('progress.overload_yes') }}</div>
+                    <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_partial') }}</div>
+                    <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_no') }}</div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn-volt w-full" id="checkin-btn" data-action="submitCheckin">{{ t('progress.submit_checkin') }}</button>
+
+        <div class="feedback-card" id="feedback-card">
+            <div class="feedback-header">
+                <div class="feedback-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg></div>
+                <div class="feedback-title">{{ t('progress.coach_feedback') }}</div>
+            </div>
+            <div class="feedback-text" id="feedback-text"></div>
+        </div>
+    </div>
+</div>

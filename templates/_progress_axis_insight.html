@@ -1,0 +1,40 @@
+{#- Progress V2 PR1 · AxisProgressInsight — "What does Axis infer, and what next?"
+
+    The SOLE owner of interpretation on the page: which signal is working,
+    which one to watch, and the next training move. Current State only names
+    the overall state; Trends only shows the measurable evidence.
+
+    PR3: exactly three semantic slots, server-selected. The three <article>
+    elements and their headings are STRUCTURAL — they ship in the markup rather
+    than being generated, so the section is always three labelled slots (no
+    list, no carousel, no ranking) whatever the payload says and whether or not
+    the fetch succeeds.
+
+    GET /api/progress/axis-insights decides which canonical signal earns which
+    slot; static/progress_insights.js only translates the codes it is handed.
+    data-status on each slot drives the accent ONLY — the state is always
+    spelled out in the slot's own text as well (WCAG 1.4.1). -#}
+<section class="prog-section" id="progress-axis-insight"
+         data-progress-section="axis-insight" aria-labelledby="ai-h">
+    <h2 class="sec-label" id="ai-h">{{ t('progress.insights_label') }}</h2>
+
+    <div class="ax-slots" id="insight-list" aria-live="polite">
+        <article class="ax-slot" id="ax-working" aria-labelledby="ax-working-h">
+            <h3 class="ax-slot-label" id="ax-working-h">{{ t('progress.axis_working_label') }}</h3>
+            <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
+            <p class="ax-detail" data-slot="detail" hidden></p>
+        </article>
+
+        <article class="ax-slot" id="ax-watch" aria-labelledby="ax-watch-h">
+            <h3 class="ax-slot-label" id="ax-watch-h">{{ t('progress.axis_watch_label') }}</h3>
+            <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
+            <p class="ax-detail" data-slot="detail" hidden></p>
+        </article>
+
+        <article class="ax-slot" id="ax-next" aria-labelledby="ax-next-h">
+            <h3 class="ax-slot-label" id="ax-next-h">{{ t('progress.axis_next_label') }}</h3>
+            <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
+            <p class="ax-detail" data-slot="detail" hidden></p>
+        </article>
+    </div>
+</section>

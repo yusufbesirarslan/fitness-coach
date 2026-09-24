@@ -14,39 +14,23 @@
    Every string from the payload is written with textContent. No innerHTML of
    payload fields. Dates are localized from ISO; numbers are formatted.
 
-   progress.js only calls window.FitXProgressHistory.load().
+   progress.js only calls window.FitXProgressHistory.load(). State labels come
+   from the shared tables in static/progress_presentation.js (V2 PR1).
    ══════════════════════════════════════════════════════════════════════ */
 
 (function () {
   var __t = (window.t) || function (k) { return k; };
   var ENDPOINT = '/api/progress/history';
 
-  var TRAJECTORY_LABEL = {
-    building_baseline: 'progress.traj_building_baseline',
-    on_track: 'progress.traj_on_track',
-    needs_attention: 'progress.traj_needs_attention'
-  };
-
-  var PERFORMANCE_LABEL = {
-    building_baseline: 'progress.perf_state_building_baseline',
-    progressing: 'progress.perf_state_progressing',
-    steady: 'progress.perf_state_steady',
-    building_consistency: 'progress.perf_state_building_consistency',
-    plateau: 'progress.perf_state_plateau',
-    deload: 'progress.perf_state_deload'
-  };
-
-  var CONSISTENCY_LABEL = {
-    consistent: 'progress.cons_state_consistent',
-    inconsistent: 'progress.cons_state_inconsistent',
-    insufficient_data: 'progress.cons_state_insufficient_data'
-  };
-
-  var TREND_LABEL = {
-    up: 'progress.trend_up',
-    flat: 'progress.trend_flat',
-    down: 'progress.trend_down'
-  };
+  // State → copy tables are shared with CURRENT STATE and TRENDS and live in
+  // static/progress_presentation.js, so a state reads the same everywhere on
+  // the page. If that script failed to load, every table is empty and each
+  // row degrades to its neutral '—' instead of guessing.
+  var P = window.FitXProgressPresentation || {};
+  var TRAJECTORY_LABEL = P.TRAJECTORY || {};
+  var PERFORMANCE_LABEL = P.TRAINING_STATE || {};
+  var CONSISTENCY_LABEL = P.CONSISTENCY_STATE || {};
+  var TREND_LABEL = P.TREND_INLINE || {};
 
   var STATES = { empty: true, available: true };
 
@@ -64,7 +48,9 @@
   }
 
   function _label(table, value) {
-    return (typeof value === 'string' && table[value]) ? __t(table[value]) : null;
+    var key = (typeof value === 'string' &&
+               Object.prototype.hasOwnProperty.call(table, value)) ? table[value] : null;
+    return key ? __t(key) : null;
   }
 
   function _isNumber(v) { return typeof v === 'number' && isFinite(v); }

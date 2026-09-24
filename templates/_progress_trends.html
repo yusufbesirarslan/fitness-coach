@@ -1,0 +1,33 @@
+{#- Progress V2 PR1 · ProgressTrends — "What changed?"
+
+    The measurable evidence, one card per progress SIGNAL (not per category):
+    weight · training volume · training consistency. Each card has a stable
+    data-metric id matching the view model in static/progress_presentation.js
+    (metrics.weight / metrics.training_volume / metrics.consistency), so a
+    later PR can replace one card's rendering without touching the others.
+    All three read the same canonical summary as Current State; each renders
+    its own neutral state when its signal is unavailable. -#}
+<section class="prog-section" id="progress-trends"
+         data-progress-section="trends" aria-labelledby="tr-h">
+    <h2 class="sec-label" id="tr-h">{{ t('progress.trends_label') }}</h2>
+
+    <div class="wc-grid">
+        <article class="wc-card" id="tr-weight" data-metric="weight" aria-labelledby="tr-weight-h">
+            <h3 class="wc-label" id="tr-weight-h">{{ t('progress.metric_weight_label') }}</h3>
+            <div class="wc-value" data-slot="value">—</div>
+            <p class="wc-sub" data-slot="detail">{{ t('progress.loading') }}</p>
+        </article>
+
+        <article class="wc-card" id="tr-volume" data-metric="training_volume" aria-labelledby="tr-volume-h">
+            <h3 class="wc-label" id="tr-volume-h">{{ t('progress.metric_volume_label') }}</h3>
+            <div class="wc-value" data-slot="value">—</div>
+            <p class="wc-sub" data-slot="detail">{{ t('progress.loading') }}</p>
+        </article>
+
+        <article class="wc-card" id="tr-consistency" data-metric="consistency" aria-labelledby="tr-consistency-h">
+            <h3 class="wc-label" id="tr-consistency-h">{{ t('progress.metric_consistency_label') }}</h3>
+            <div class="wc-value" data-slot="value">—</div>
+            <p class="wc-sub" data-slot="detail">{{ t('progress.loading') }}</p>
+        </article>
+    </div>
+</section>
