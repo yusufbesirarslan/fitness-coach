@@ -3,16 +3,15 @@ import logging
 import threading
 from dataclasses import dataclass
 
-from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
-
 try:
-    import anthropic  # Bedrock/Claude (ağır görevler)
+    import anthropic  # Bedrock Messages (Sonnet and Haiku)
 except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalır
     anthropic = None
 
-from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
-from app.extensions import bedrock_client, openai_client
+from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL
+from app.extensions import bedrock_client
 from app.services import ai_provider_call, ai_recovery
+from app.services.ai_model_policy import haiku_policy, sonnet_policy
 from app.services.ai_recovery import TransientAIError
 from app.services.ai_spend_guard import AISpendLimitExceeded
 
@@ -40,61 +39,88 @@ def _remember_completion(result: "ChatCompletion") -> "ChatCompletion":
 # (meallog/ai_nutrition `from app.services.ai import PORTION_SANITY_RULE`) korunur.
 from app.prompts.nutrition import PORTION_SANITY_RULE  # noqa: E402,F401 (re-export)
 
+# Same Bedrock client as Sonnet. Tests may replace this name without replacing
+# the heavy client, so a Sonnet failure can be scripted apart from Haiku.
+light_client = bedrock_client
 
-def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
-                 feature="other"):
-    """Merkezi LLM sohbet çağrısı (OpenAI Chat Completions).
 
-    `messages` Anthropic ile uyumlu [{"role","content"}] listesidir; system_prompt
-    varsa başa bir system mesajı olarak eklenir. Hata durumunda kullanıcı-dostu bir
-    RuntimeError fırlatır; çağıranlar bunu kendi try/except fallback'leriyle yakalar.
-    """
-    full_messages = []
-    if system_prompt:
-        full_messages.append({"role": "system", "content": system_prompt})
-    full_messages.extend(messages)
+def _anthropic_messages(messages, system_prompt):
+    sys_parts = [system_prompt] if system_prompt else []
+    convo = []
+    for message in messages:
+        if message.get("role") == "system":
+            sys_parts.append(message.get("content", ""))
+        else:
+            convo.append(message)
+    system = "\n\n".join(part for part in sys_parts if part)
+    return system, convo
+
+
+def _text_from_anthropic(resp):
+    for block in getattr(resp, "content", None) or []:
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+            return block.text
+    return ""
+
+
+def _anthropic_chat(policy, messages, system_prompt=None, max_tokens=1024,
+                    temperature=0.7, feature="other", *, client, clamp=False):
+    """One Messages API call. ``client`` is the Bedrock messages client."""
+    if anthropic is None:
+        raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
+    system, convo = _anthropic_messages(messages, system_prompt)
+    capped = min(max_tokens, BEDROCK_MAX_TOKENS) if clamp else max_tokens
     try:
-        # Slot yalnızca gerçek ağ çağrısını sarar — retry/backoff uykular ve
-        # sağlayıcı geçişi slotsuz kalır (triage 2026-07-19 #3, ai_coach deseni).
-        payload = dict(model=OPENAI_MODEL, messages=full_messages,
-                       max_tokens=max_tokens, temperature=temperature)
-        with ai_provider_call.admit(feature=feature, provider="openai",
-                                    payload=payload) as call:
-            resp = call.create(openai_client.chat.completions.create)
-        # `choices` içerik filtresinde boş, `message.content` ise refuse/length
-        # durumlarında None olabilir. Çağıranların çoğu dönüşe doğrudan .strip()
-        # uyguluyor; ham IndexError/None'ı buraya hapsedip her zaman str döndür.
-        if not resp.choices:
-            logger.warning("OpenAI yanıtı boş choices döndürdü (içerik filtresi olası)")
-            _remember_completion(ChatCompletion(
-                text="", truncated=False, finish_reason="empty", provider="openai"))
-            return ""
-        choice = resp.choices[0]
-        finish_reason = getattr(choice, "finish_reason", None)
-        truncated = finish_reason == "length"
+        kwargs = dict(model=policy.model_id, max_tokens=capped,
+                      messages=convo, temperature=temperature)
+        if system:
+            kwargs["system"] = system
+        gate = "bedrock"
+        with ai_provider_call.admit(feature=feature, provider=gate, payload=kwargs) as call:
+            resp = call.create(client.messages.create)
+        finish_reason = getattr(resp, "stop_reason", None)
+        truncated = finish_reason == "max_tokens"
         if truncated:
-            # Yanıt max_tokens sınırında kesildi: çıktı eksik/bozuk olabilir.
-            # Sessizce yutulmasın — çağıranların parse hataları bu uyarıyla
-            # ilişkilendirilebilsin (docs/menu-extraction-truncation-risk.md).
-            logger.warning("OpenAI yanıtı max_tokens=%s sınırında kesildi (finish_reason=length)", max_tokens)
-        text = choice.message.content or ""
+            logger.warning(
+                "Claude yanıtı max_tokens=%s sınırında kesildi (stop_reason=max_tokens)",
+                capped)
+        text = _text_from_anthropic(resp)
         _remember_completion(ChatCompletion(
             text=text, truncated=truncated, finish_reason=finish_reason,
-            provider="openai"))
+            provider=policy.logical_model))
         return text
     except AISpendLimitExceeded:
         raise
-    except RateLimitError:
-        # Geçici: kurtarma katmanı (call_with_recovery) yeniden dener. Metin
-        # dostça ve RuntimeError alt sınıfı → mevcut çağıran fallback'leri korunur.
-        raise TransientAIError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
-    except (APITimeoutError, APIConnectionError):
-        raise TransientAIError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
-    except APIError as e:
-        # Ham sağlayıcı hatası kullanıcıya sızmasın (iç ayrıntı/anahtar metası
-        # içerebilir); detayı logla, kullanıcıya jenerik mesaj dön.
-        logger.warning("OpenAI APIError: %s", e)
+    except anthropic.RateLimitError:
+        raise TransientAIError(
+            "AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError):
+        raise TransientAIError(
+            "AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
+    except anthropic.APIError as exc:
+        logger.warning("Claude/Bedrock APIError: %s", exc)
         raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
+
+
+def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
+                 feature="other"):
+    """Light chat. The name is the historical entry point.
+
+    Implementation is Claude Haiku 4.5 on Bedrock EU Geo. There is no direct
+    OpenAI transport. Feature max_tokens is preserved (not clamped to the
+    Sonnet ceiling); the provider door still refuses an over-cap request.
+    """
+    return _anthropic_chat(
+        haiku_policy(), messages, system_prompt=system_prompt,
+        max_tokens=max_tokens, temperature=temperature, feature=feature,
+        client=light_client, clamp=False)
+
+
+def _light_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
+                feature="other"):
+    return _openai_chat(
+        messages, system_prompt=system_prompt, max_tokens=max_tokens,
+        temperature=temperature, feature=feature)
 
 
 def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
@@ -280,15 +306,15 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
             raise
         except Exception as e:
             fallback_used = True
-            logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
+            logger.warning("Bedrock/Claude çağrısı başarısız, Haiku'ya düşülüyor: %s: %s",
                            type(e).__name__, e)
     try:
-        logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
+        logger.info("[AI] sağlayıcı: Bedrock Haiku (light)")
         reply = ai_recovery.call_with_recovery(
             lambda: _openai_chat(messages, system_prompt=system_prompt,
                                  max_tokens=max_tokens, temperature=temperature,
                                  feature=feature),
-            feature="heavy_chat.openai")
+            feature="heavy_chat.haiku")
         ai_recovery.remember_last_good(lg_key, reply)
         return _completion_from_text(reply, fallback_used=fallback_used)
     except AISpendLimitExceeded:

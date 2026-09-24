@@ -66,7 +66,7 @@ def test_model_slot_wait_is_capped_by_coach_deadline(monkeypatch):
         SimpleNamespace(monotonic=lambda: next(clock_values)),
     )
 
-    with ai_gate.model_concurrency_slot(wait_seconds=5.0, deadline=11.0):
+    with ai_gate.model_concurrency_slot(wait_seconds=5.0, deadline=11.0, spend_class="heavy"):
         pass
 
     assert sem.timeouts == [0.75]
@@ -93,7 +93,7 @@ def test_model_slot_fails_fast_when_full(monkeypatch):
     assert sem.acquire(blocking=False)
     try:
         with pytest.raises(ai_gate.BlockingConcurrencyLimit):
-            with ai_gate.model_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0, spend_class="heavy"):
                 pytest.fail("must not enter")
     finally:
         sem.release()
@@ -106,7 +106,7 @@ def test_shared_then_model_nesting_releases_both(monkeypatch):
 
     for _ in range(2):
         with ai_gate.blocking_concurrency_slot(0):
-            with ai_gate.model_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0, spend_class="heavy"):
                 pass
 
 
@@ -122,7 +122,7 @@ def test_shared_saturation_preserves_reserve_and_recovers_without_deadlock(
 
     def hold_shared_then_model():
         with ai_gate.blocking_concurrency_slot(0):
-            with ai_gate.model_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0, spend_class="heavy"):
                 holders_ready.wait(timeout=2)
                 release_holders.wait(timeout=5)
 
@@ -221,7 +221,7 @@ def test_shared_saturation_preserves_reserve_and_recovers_without_deadlock(
 
     for _ in range(2):
         with ai_gate.blocking_concurrency_slot(0):
-            with ai_gate.model_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0, spend_class="heavy"):
                 pass
 
 
@@ -230,7 +230,7 @@ def test_model_slot_releases_after_error(monkeypatch):
     monkeypatch.setattr(ai_gate, "_model_slots", sem)
 
     with pytest.raises(RuntimeError, match="boom"):
-        with ai_gate.model_concurrency_slot():
+        with ai_gate.model_concurrency_slot(spend_class="heavy"):
             raise RuntimeError("boom")
 
     assert sem.acquire(blocking=False)
@@ -506,7 +506,7 @@ def _counter(runtime_metrics, name):
 
 
 def test_model_slot_records_provider_outcome(metrics_on):
-    with ai_gate.model_concurrency_slot("bedrock"):
+    with ai_gate.model_concurrency_slot("bedrock", spend_class="heavy"):
         pass
     calls = _counter(metrics_on, "AiProviderCalls")
     assert calls == {(("Outcome", "success"), ("Provider", "bedrock")): 1.0}
@@ -518,7 +518,7 @@ class _FakeRateLimitError(RuntimeError):
 
 def test_model_slot_classifies_provider_errors_by_name(metrics_on):
     with pytest.raises(_FakeRateLimitError):
-        with ai_gate.model_concurrency_slot("openai"):
+        with ai_gate.model_concurrency_slot("openai", spend_class="light"):
             raise _FakeRateLimitError("429")
     calls = _counter(metrics_on, "AiProviderCalls")
     assert calls == {(("Outcome", "rate_limit"), ("Provider", "openai")): 1.0}
@@ -528,7 +528,7 @@ def test_client_disconnect_is_cancelled_not_error(metrics_on):
     """İstemci akışı koparınca generator kapanır. Bu NORMAL kullanıcı davranışı;
     "error" sayılırsa sağlayıcı hata oranı şişer ve alarm yanlış tetiklenir."""
     with pytest.raises(GeneratorExit):
-        with ai_gate.model_concurrency_slot("bedrock-stream"):
+        with ai_gate.model_concurrency_slot("bedrock-stream", spend_class="heavy"):
             raise GeneratorExit()
     calls = _counter(metrics_on, "AiProviderCalls")
     assert calls == {
@@ -542,10 +542,10 @@ def test_model_slot_records_contention(metrics_on, monkeypatch):
     entered = threading.Event()
 
     def worker():
-        with ai_gate.model_concurrency_slot("bedrock"):
+        with ai_gate.model_concurrency_slot("bedrock", spend_class="heavy"):
             entered.set()
 
-    with ai_gate.model_concurrency_slot("bedrock"):
+    with ai_gate.model_concurrency_slot("bedrock", spend_class="heavy"):
         thread = threading.Thread(target=worker)
         thread.start()
         assert not entered.wait(timeout=0.1)  # slot dolu → beklemek zorunda
@@ -579,7 +579,7 @@ def test_slot_behaviour_unchanged_when_metrics_disabled(monkeypatch):
     monkeypatch.setattr(runtime_metrics, "RUNTIME_METRICS_ENABLED", False)
     sem = threading.BoundedSemaphore(1)
     monkeypatch.setattr(ai_gate, "_model_slots", sem)
-    with ai_gate.model_concurrency_slot("bedrock"):
+    with ai_gate.model_concurrency_slot("bedrock", spend_class="heavy"):
         assert not sem.acquire(blocking=False)  # slot gerçekten tutuluyor
     assert sem.acquire(blocking=False)          # ve sonra bırakılıyor
     sem.release()

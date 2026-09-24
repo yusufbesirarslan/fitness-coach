@@ -7,8 +7,11 @@ from app.services.vision_images import (
     prepare_image_for_vision as _compress_image_for_vision,
 )
 
-from app.config import OPENAI_MODEL
-from app.extensions import openai_client
+from app.extensions import bedrock_client
+from app.services.ai_model_policy import haiku_policy
+
+# Same client as the other light paths. Tests replace this name.
+light_client = bedrock_client
 
 
 def _sanitize_menu_text(text):
@@ -159,33 +162,35 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         # reaching the provider. A scanned PDF pays per page, up to
         # MENU_OCR_MAX_PAGES pages.
         from app.services import ai_provider_call
+        # L5: çıktı 4000 token ile sınırlı (uzun menülerin tam OCR'ı için
+        # gerekli) ve girdi görseli >1.5MB ise üstte sıkıştırılıyor.
+        # Haiku uses the Anthropic image block, not an OpenAI image_url.
         payload = dict(
-            model=OPENAI_MODEL,
-            # L5: çıktı 4000 token ile sınırlı (uzun menülerin tam OCR'ı için
-            # gerekli) ve girdi görseli >1.5MB ise üstte sıkıştırılıyor.
+            model=haiku_policy().model_id,
             max_tokens=4000,
             temperature=0.0,
-            messages=[
-                {"role": "system", "content": vision_system},
-                {"role": "user", "content": [
-                    {"type": "text", "text": (
-                        "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
-                        "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
-                        "Sadece menüde yazanları aynen oku."
-                    )},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                ]},
-            ],
+            system=vision_system,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": (
+                    "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
+                    "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
+                    "Sadece menüde yazanları aynen oku."
+                )},
+                {"type": "image", "source": {
+                    "type": "base64", "media_type": mime, "data": b64}},
+            ]}],
         )
-        with ai_provider_call.admit(feature="menu_ocr", provider="openai",
+        with ai_provider_call.admit(feature="menu_ocr", provider="bedrock",
                                     payload=payload, gate=False) as call:
-            resp = call.create(openai_client.chat.completions.create)
-        # İçerik filtresi/boş yanıtta choices boş gelebilir — _openai_chat'teki
-        # aynı korumayı buraya da koy ki resp.choices[0] IndexError fırlatmasın (A2).
-        if not resp.choices:
-            current_app.logger.warning("[VISION OCR] Boş choices (içerik filtresi olabilir) — boş metin döndürülüyor")
+            resp = call.create(light_client.messages.create)
+        result = ""
+        for block in getattr(resp, "content", None) or []:
+            if getattr(block, "type", None) == "text" and getattr(block, "text", None):
+                result = block.text.strip()
+                break
+        if not result:
+            current_app.logger.warning("[VISION OCR] Boş metin — boş döndürülüyor")
             return ""
-        result = (resp.choices[0].message.content or "").strip()
         current_app.logger.info(f"[VISION OCR] Extracted {len(result)} chars")
         return result
     except Exception as e:

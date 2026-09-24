@@ -22,12 +22,25 @@ def test_extensions_import_without_openai_key():
     assert result.returncode == 0, result.stderr
 
 
-def test_lazy_client_delegates_to_real_client():
-    from app.extensions import openai_client
-    # İlk öznitelik erişimi gerçek istemciyi kurar ve delege eder
-    # (conftest sahte bir anahtar sağlar; ağ çağrısı yapılmaz).
-    assert hasattr(openai_client, "chat")
-    assert openai_client._client is not None
+def test_lazy_bedrock_client_delegates_without_a_key(monkeypatch):
+    from app import extensions
+    captured = {}
+
+    class _Fake:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def ping(self):
+            return "ok"
+
+    monkeypatch.setattr(extensions, "AnthropicBedrock", _Fake, raising=False)
+    import anthropic
+    monkeypatch.setattr(anthropic, "AnthropicBedrock", _Fake)
+    extensions._LazyAnthropicBedrock._client = None
+    client = extensions._LazyAnthropicBedrock()
+    assert client.ping() == "ok"
+    assert captured["max_retries"] == 0
+    extensions._LazyAnthropicBedrock._client = None
 
 
 class _FakePingRedis:

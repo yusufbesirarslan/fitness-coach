@@ -206,7 +206,7 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
             ai_coach.log_provider_fallback(
                 current_app.logger,
                 "[COACH][stream] Bedrock failed before work; "
-                "trying OpenAI fallback",
+                "trying Haiku fallback",
                 fallback)
 
     yield from _stream_openai_fallback(
@@ -380,9 +380,9 @@ def _stream_openai_fallback(user_id, question, context, history, language,
         deadline = ai_coach._coach_turn_deadline()
     if ai_coach._remaining_coach_turn_seconds(deadline) <= 0:
         current_app.logger.warning(
-            "[COACH][stream] turn budget exhausted before OpenAI fallback")
+            "[COACH][stream] turn budget exhausted before Haiku fallback")
         yield from _emit_text(ai_coach._coach_tool_fallback(language),
-                              provider="openai", usage=None)
+                              provider="haiku", usage=None)
         return
 
     try:
@@ -390,7 +390,7 @@ def _stream_openai_fallback(user_id, question, context, history, language,
             user_id, question, context, history, language,
             deadline=deadline)
     except Exception:
-        current_app.logger.warning("[COACH][stream] OpenAI fallback failed before work")
+        current_app.logger.warning("[COACH][stream] Haiku fallback failed before work")
         # "before work" normalde doğrudur (B-kuralı buraya ancak hiç araç
         # koşmadan gelinmesine izin verir), ama OpenAI döngüsünün İÇİNDE bir
         # plan aracı koşup sonrasında beklenmedik bir istisna kaçarsa mutasyon
@@ -398,7 +398,7 @@ def _stream_openai_fallback(user_id, question, context, history, language,
         yield _bedrock_work_error([], 0)
         return
 
-    yield from _emit_text(text or "", provider="openai", usage=None)
+    yield from _emit_text(text or "", provider="haiku", usage=None)
 
 
 def _emit_text(text, provider, usage=None):

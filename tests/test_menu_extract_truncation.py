@@ -18,6 +18,7 @@ No real network: _openai_chat / openai_client are monkeypatched.
 """
 import os
 import sys
+from types import SimpleNamespace
 
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -119,28 +120,14 @@ def test_extractor_intact_json_still_parses(monkeypatch):
 def test_finish_reason_length_is_logged(monkeypatch, caplog):
     import app.services.ai as ai_mod
 
-    class _Msg:
-        content = '{"categories": {}}'
-
-    class _Choice:
-        finish_reason = "length"
-        message = _Msg()
-
-    class _Resp:
-        choices = [_Choice()]
-
-    class _Completions:
-        def create(self, **kwargs):
-            return _Resp()
-
-    class _Chat:
-        completions = _Completions()
-
     class _Client:
-        chat = _Chat()
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                stop_reason="max_tokens",
+                content=[SimpleNamespace(type="text", text='{"categories": {}}')])
 
-    monkeypatch.setattr(ai_mod, "openai_client", _Client())
+    monkeypatch.setattr(ai_mod, "light_client", SimpleNamespace(messages=_Client()))
     with caplog.at_level("WARNING", logger="app.services.ai"):
         out = ai_mod._openai_chat([{"role": "user", "content": "x"}], max_tokens=10)
     assert out == '{"categories": {}}'
-    assert any("finish_reason=length" in r.getMessage() for r in caplog.records)
+    assert any("max_tokens" in r.getMessage() for r in caplog.records)

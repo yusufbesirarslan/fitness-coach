@@ -131,14 +131,16 @@ class APITimeoutError(Exception):
 @pytest.fixture
 def providers(monkeypatch):
     bedrock = Messages()
+    haiku = Messages()
     openai_fake = OpenAIFake()
     monkeypatch.setattr(ai, "bedrock_client", SimpleNamespace(messages=bedrock))
-    monkeypatch.setattr(ai, "openai_client", openai_fake)
+    monkeypatch.setattr(ai, "light_client", SimpleNamespace(messages=haiku))
+    monkeypatch.setattr(ai, "openai_client", openai_fake, raising=False)
     monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
     monkeypatch.setattr(ai_recovery, "recall_last_good", lambda key: None)
     monkeypatch.setattr(ai_recovery, "remember_last_good", lambda key, value: None)
     monkeypatch.setattr(ai_recovery, "_sleep", lambda s: None)
-    return SimpleNamespace(bedrock=bedrock, openai=openai_fake)
+    return SimpleNamespace(bedrock=bedrock, haiku=haiku, openai=openai_fake)
 
 
 @pytest.fixture
@@ -329,7 +331,8 @@ def _coach_payload(history_pairs, question="GÜNCEL SORU", pad=2000):
         messages.append({"role": "user", "content": f"U{i} " + "x" * pad})
         messages.append({"role": "assistant", "content": f"A{i} " + "y" * pad})
     messages.append({"role": "user", "content": question})
-    return dict(model="m", max_tokens=700, system="SİSTEM-GÜVENLİK", tools=[{"name": "t"}],
+    return dict(model="global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                max_tokens=700, system="SİSTEM-GÜVENLİK", tools=[{"name": "t"}],
                 messages=messages), len(messages) - 1
 
 
@@ -356,7 +359,8 @@ def test_openai_history_reduction_keeps_leading_system_messages(providers, monke
         messages += [{"role": "user", "content": f"U{i}" + "x" * 3000},
                      {"role": "assistant", "content": f"A{i}" + "y" * 3000}]
     messages.append({"role": "user", "content": "Q"})
-    payload = dict(model="gpt-4o-mini", max_tokens=700, messages=messages)
+    payload = dict(model="eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                   max_tokens=700, messages=messages)
     _budget(monkeypatch, "coach", ai_input_budget.input_upper_bound(payload)[0] - 5000)
     with ai_provider_call.admit(feature="coach", provider="openai", payload=payload,
                                 reduce=ai_input_budget.history_reducer(2, 6)) as call:
@@ -467,7 +471,8 @@ def test_budget_holds_without_request_context_and_with_redis_down(monkeypatch, p
     # no app/request context at all: a background worker call
     with pytest.raises(AIInputBudgetExceeded):
         with ai_provider_call.admit(feature="summary", provider="openai",
-                                    payload=dict(model="gpt-4o-mini", max_tokens=500,
+                                    payload=dict(model="eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                                                 max_tokens=500,
                                                  messages=[{"role": "user",
                                                             "content": "x" * 5000}])):
             pass  # pragma: no cover
@@ -487,7 +492,7 @@ def coach_providers(monkeypatch):
     bedrock = Messages()
     openai_fake = OpenAIFake()
     monkeypatch.setattr(ai_coach, "bedrock_client", SimpleNamespace(messages=bedrock))
-    monkeypatch.setattr(ai_coach, "openai_client", openai_fake)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai_fake))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
     monkeypatch.setattr(ai_coach, "_anthropic", object())
     return SimpleNamespace(bedrock=bedrock, openai=openai_fake)
@@ -600,13 +605,14 @@ def test_abandoned_stream_is_recorded_as_estimated_not_zero(usage_events):
 
 def test_menu_ocr_is_budgeted_and_refusal_is_unreadable(app, monkeypatch):
     from app.services import menu_ocr
-    fake = OpenAIFake()
-    monkeypatch.setattr(menu_ocr, "openai_client", fake)
+    fake = Messages()
+    fake.script = [_bedrock_resp(SECRET_REPLY)]
+    monkeypatch.setattr(menu_ocr, "light_client", SimpleNamespace(messages=fake))
     with app.app_context():
         assert menu_ocr._extract_text_from_image(b"\x89PNG" + b"0" * 100, "image/png") \
             == SECRET_REPLY
         assert len(fake.calls) == 1 and _spent() == 1
-        _budget(monkeypatch, "menu_ocr", 10_000)       # below one high-detail image
+        _budget(monkeypatch, "menu_ocr", 500)  # under the Haiku image ceiling
         assert menu_ocr._extract_text_from_image(b"\x89PNG" + b"0" * 100, "image/png") == ""
     assert len(fake.calls) == 1 and _spent() == 1
 
@@ -632,7 +638,8 @@ def test_scanned_pdf_ocr_fan_out_is_capped_by_policy(app, monkeypatch):
 
 def test_the_provider_receives_exactly_the_checked_copy(providers):
     messages = [{"role": "user", "content": "checked"}]
-    payload = dict(model="m", max_tokens=100, messages=messages)
+    payload = dict(model="global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                   max_tokens=100, messages=messages)
     with ai_provider_call.admit(feature="other", provider="bedrock", payload=payload) as call:
         messages.append({"role": "user", "content": "x" * 900_000})   # after the check
         messages[0]["content"] = "mutated"
@@ -665,20 +672,13 @@ def test_sdk_clients_are_built_without_internal_retries(monkeypatch):
     from app import extensions
     captured = {}
 
-    class FakeOpenAI:
-        def __init__(self, **kwargs):
-            captured["openai"] = kwargs
-
     class FakeBedrock:
         def __init__(self, **kwargs):
             captured["bedrock"] = kwargs
 
-    monkeypatch.setattr(extensions, "OpenAI", FakeOpenAI)
     import anthropic
     monkeypatch.setattr(anthropic, "AnthropicBedrock", FakeBedrock)
-    getattr(extensions._LazyOpenAI(), "chat", None)
     getattr(extensions._LazyAnthropicBedrock(), "messages", None)
-    assert captured["openai"]["max_retries"] == 0
     assert captured["bedrock"]["max_retries"] == 0
 
 
@@ -693,26 +693,21 @@ def test_transient_failure_retry_is_a_separately_charged_attempt(providers, usag
     assert outcomes == [(1, "provider_error"), (2, "success")]
 
 
-@pytest.mark.parametrize("provider,expected", [("bedrock", 2), ("openai", 3)])
-def test_retry_count_is_bounded(providers, provider, expected):
-    fake = providers.bedrock if provider == "bedrock" else providers.openai
-    fake.script = [StatusError(503)] * 10
-    method = fake.create if provider == "bedrock" else fake.chat.completions.create
+@pytest.mark.parametrize("provider", ["bedrock", "bedrock-stream"])
+def test_retry_count_follows_transport_not_the_gate_label(providers, provider):
+    providers.bedrock.script = [StatusError(503)] * 10
     with pytest.raises(StatusError):
         with ai_provider_call.admit(feature="other", provider=provider,
                                     payload=_payload("hi")) as call:
-            call.create(method)
-    assert len(fake.calls) == expected
-    assert expected == 1 + (ai_provider_call.BEDROCK_MAX_RETRIES if provider == "bedrock"
-                            else ai_provider_call.OPENAI_MAX_RETRIES)
+            call.create(providers.bedrock.create)
+    assert len(providers.bedrock.calls) == 1 + ai_provider_call.BEDROCK_MAX_RETRIES
 
 
 def _sdk_timeouts():
     import anthropic
     import httpx
-    import openai
     request = httpx.Request("POST", "https://example.invalid")
-    return [anthropic.APITimeoutError(request=request), openai.APITimeoutError(request=request)]
+    return [anthropic.APITimeoutError(request=request)]
 
 
 def test_real_sdk_timeouts_are_connection_errors_but_never_retried():
@@ -748,21 +743,20 @@ def test_a_spend_refusal_on_retry_ends_the_call(providers, monkeypatch, usage_ev
 
 
 def test_recovery_ladder_attempts_are_each_admitted(app, providers):
-    # two recovery attempts x (1 + BEDROCK_MAX_RETRIES) physical attempts,
-    # then the OpenAI fallback with its own charged attempts: all bounded.
+    # two recovery attempts x (1 + BEDROCK_MAX_RETRIES) on Sonnet, then the
+    # same bound on the Haiku fallback. Each physical attempt is charged.
     import anthropic
     import httpx
-    import openai
     request = httpx.Request("POST", "https://example.invalid")
-    providers.bedrock.script = [anthropic.APIConnectionError(request=request)] * 10
-    providers.openai.script = [openai.APIConnectionError(request=request)] * 10
+    error = anthropic.APIConnectionError(request=request)
+    providers.bedrock.script = [error] * 10
+    providers.haiku.script = [error] * 10
     with pytest.raises(Exception):
         ai._heavy_complete([{"role": "user", "content": "hi"}], max_tokens=100)
-    bedrock_attempts = len(providers.bedrock.calls)
-    openai_attempts = len(providers.openai.calls)
-    assert bedrock_attempts == 2 * (1 + ai_provider_call.BEDROCK_MAX_RETRIES)
-    assert openai_attempts == 2 * (1 + ai_provider_call.OPENAI_MAX_RETRIES)
-    assert _spent() == bedrock_attempts + openai_attempts
+    per_model = 2 * (1 + ai_provider_call.BEDROCK_MAX_RETRIES)
+    assert len(providers.bedrock.calls) == per_model
+    assert len(providers.haiku.calls) == per_model
+    assert _spent() == per_model * 2
 
 
 # ── Usage events ────────────────────────────────────────────────────────────

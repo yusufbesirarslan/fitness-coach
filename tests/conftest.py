@@ -53,6 +53,22 @@ os.environ.pop("FLASK_ENV", None)
 
 import pytest  # noqa: E402
 from flask.testing import FlaskClient  # noqa: E402
+
+
+class _LiveModelDetonator:
+    """Fails the test instead of calling Bedrock when a light path is unmocked."""
+
+    def __getattr__(self, name):
+        raise AssertionError(f"unmocked light model client ({name})")
+
+
+@pytest.fixture(autouse=True)
+def _no_live_light_model(monkeypatch):
+    bomb = _LiveModelDetonator()
+    from app.services import ai, ai_coach, menu_ocr
+    monkeypatch.setattr(ai, "light_client", bomb, raising=False)
+    monkeypatch.setattr(ai_coach, "light_client", bomb, raising=False)
+    monkeypatch.setattr(menu_ocr, "light_client", bomb, raising=False)
 from werkzeug.datastructures import Headers  # noqa: E402
 
 

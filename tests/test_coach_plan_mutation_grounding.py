@@ -5,6 +5,7 @@ route with a scripted provider. Persistence assertions are on the plan
 row, the journal, and confirmation proposals — not on mock call counts.
 """
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -425,7 +426,7 @@ def test_route_add_without_rx_asks_and_does_not_mutate(
     before = _snapshot(split_user.id)
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
-        monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([
+        monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([
             _llm_msg(tool_calls=[_tool_call(
                 "add_training_plan_exercise",
                 json.dumps({
@@ -433,7 +434,7 @@ def test_route_add_without_rx_asks_and_does_not_mutate(
                     "sets": 3, "reps": "10",
                 }))]),
             _llm_msg("I added them."),
-        ]))
+        ])))
         reply = ai_coach._run_coach_conversation(
             split_user.id, "Add Walking Lunges to my leg workout.",
             "", client_history=[], language="en")

@@ -34,9 +34,10 @@ import random
 import time
 from contextlib import contextmanager
 
-from app.config import BEDROCK_MAX_RETRIES, OPENAI_MAX_RETRIES
+from app.config import BEDROCK_MAX_RETRIES
 from app.services import ai_input_budget, ai_spend_guard, ai_usage
 from app.services.ai_gate import model_concurrency_slot
+from app.services.ai_model_policy import policy_for_model_id
 
 _log = logging.getLogger(__name__)
 
@@ -59,15 +60,12 @@ class AIInputBudgetExceeded(ai_spend_guard.AISpendLimitExceeded):
         self.feature = feature
 
 
-def _provider_family(provider):
-    return "bedrock" if str(provider).startswith("bedrock") else "openai"
-
-
-def _max_attempts(family):
-    # Extra attempts after the first (each one charged). Same counts the SDKs
-    # used internally before this boundary existed: Bedrock 1, OpenAI 2.
-    extra = BEDROCK_MAX_RETRIES if family == "bedrock" else OPENAI_MAX_RETRIES
-    return 1 + max(0, int(extra))
+def _max_attempts(policy):
+    # One transport. Extra attempts after the first are each charged.
+    # The SDK client is built with max_retries=0; this is the only retry.
+    if policy.transport != "anthropic_bedrock":
+        raise RuntimeError("unsupported model transport")
+    return 1 + max(0, int(BEDROCK_MAX_RETRIES))
 
 
 def _is_timeout(exc):
@@ -93,17 +91,18 @@ def _outcome_of(exc):
     return "provider_error"
 
 
-def _record_rejection(feature, family, model, bound, subject):
-    _log.warning("[AI-BUDGET] input_budget_exceeded provider=%s model=%s feature=%s",
-                 family, ai_usage.normalize_model(family, model), feature)
-    ai_usage.emit(feature=feature, provider=family, model=model,
+def _record_rejection(feature, policy, bound, subject):
+    _log.warning("[AI-BUDGET] input_budget_exceeded provider=%s model=%s feature=%s class=%s",
+                 policy.billing_provider, policy.telemetry_model, feature, policy.spend_class)
+    ai_usage.emit(feature=feature, provider=policy.billing_provider, model=policy.model_id,
                   outcome="input_budget_rejected", subject_id=subject,
-                  input_bound=bound)
+                  input_bound=bound, spend_class=policy.spend_class,
+                  billing_provider=policy.billing_provider)
     try:
         from app.services import runtime_metrics
         runtime_metrics.increment(
             "AiInputBudgetRejections",
-            dimensions={"Class": ai_spend_guard.provider_class(family)})
+            dimensions={"Class": policy.spend_class})
     except Exception:
         pass
 
@@ -112,28 +111,28 @@ def check_payload(feature, provider, payload, reduce=None):
     """Validate (and if needed deterministically reduce) a FROZEN payload.
 
     Returns ``(payload, bound, images)``; raises AIInputBudgetExceeded.
+    ``provider`` is the gate label and is not used to classify spend.
     Separate from admit() only so the policy is testable on its own; admit()
     is the one production caller.
     """
-    family = _provider_family(provider)
+    policy = policy_for_model_id(payload.get("model"))
     feature = ai_input_budget.normalize_feature(feature)
     budget = ai_input_budget.INPUT_BUDGETS[feature]
     subject = ai_spend_guard.current_subject()
-    model = payload.get("model")
 
     max_tokens = payload.get("max_tokens")
     if (not isinstance(max_tokens, int) or max_tokens <= 0
             or max_tokens > ai_input_budget.OUTPUT_BUDGETS[feature]):
         # Output is half the per-call cost; an uncapped or over-cap request is
         # a code defect, refused before anything is spent.
-        _record_rejection(feature, family, model, None, subject)
-        raise AIInputBudgetExceeded(feature, ai_spend_guard.provider_class(family))
+        _record_rejection(feature, policy, None, subject)
+        raise AIInputBudgetExceeded(feature, policy.spend_class)
 
     try:
         bound, images = ai_input_budget.input_upper_bound(payload)
     except ai_input_budget.UnboundablePayload:
-        _record_rejection(feature, family, model, None, subject)
-        raise AIInputBudgetExceeded(feature, ai_spend_guard.provider_class(family))
+        _record_rejection(feature, policy, None, subject)
+        raise AIInputBudgetExceeded(feature, policy.spend_class)
 
     while bound > budget and reduce is not None:
         reduced = reduce(payload)
@@ -143,8 +142,8 @@ def check_payload(feature, provider, payload, reduce=None):
         bound, images = ai_input_budget.input_upper_bound(payload)
 
     if bound > budget or images > ai_input_budget.IMAGE_LIMITS[feature]:
-        _record_rejection(feature, family, model, bound, subject)
-        raise AIInputBudgetExceeded(feature, ai_spend_guard.provider_class(family))
+        _record_rejection(feature, policy, bound, subject)
+        raise AIInputBudgetExceeded(feature, policy.spend_class)
     return payload, bound, images
 
 
@@ -152,10 +151,12 @@ class Admission:
     """One admitted logical provider call. Single use."""
 
     def __init__(self, *, feature, provider, payload, bound, images, charge,
-                 deadline, tool_round, subject):
+                 deadline, tool_round, subject, policy):
         self.feature = feature
         self.provider = provider
-        self.family = _provider_family(provider)
+        self.policy = policy
+        self.family = policy.billing_provider
+        self.spend_class = policy.spend_class
         self._payload = payload
         self.input_bound = bound
         self.images = images
@@ -189,13 +190,15 @@ class Admission:
             outcome=outcome, attempt=attempt, tool_round=self.tool_round,
             subject_id=self.subject, usage=usage, usage_source=source,
             input_bound=self.input_bound, image_units=self.images,
-            output_cap=self._payload.get("max_tokens"))
+            output_cap=self._payload.get("max_tokens"),
+            spend_class=self.spend_class, billing_provider=self.policy.billing_provider)
 
     def _emit_guard_rejection(self):
         ai_usage.emit(feature=self.feature, provider=self.family, model=self.model,
                       outcome="guard_rejected", tool_round=self.tool_round,
                       subject_id=self.subject, input_bound=self.input_bound,
-                      image_units=self.images)
+                      image_units=self.images, spend_class=self.spend_class,
+                      billing_provider=self.policy.billing_provider)
 
     def _remaining(self):
         if self._deadline is None:
@@ -205,13 +208,13 @@ class Admission:
     def create(self, method, **transport):
         """Blocking call with charged, bounded transient retries."""
         transport = self._take(transport)
-        attempts = _max_attempts(self.family)
+        attempts = _max_attempts(self.policy)
         for attempt in range(1, attempts + 1):
             if attempt > 1 and self._charge:
                 # A retry is a new paid attempt: admitted like one. A refusal
                 # propagates — the guard's "stop" is never retried.
                 try:
-                    ai_spend_guard.charge(self.provider)
+                    ai_spend_guard.charge(self.provider, spend_class=self.spend_class)
                 except ai_spend_guard.AISpendLimitExceeded:
                     self._emit_guard_rejection()
                     raise
@@ -279,22 +282,24 @@ def admit(*, feature, provider, payload, deadline=None, tool_round=None,
           reduce=None, gate=True, charge=True):
     """Admit one provider call; yields an `Admission` to make it with.
 
-    ``provider`` is the gate label: "bedrock", "bedrock-stream" or "openai".
-    ``gate=False`` skips the capacity permit but still charges (menu OCR's
-    historical path). ``charge=False`` is reserved for the deep-health probe,
-    whose payload is a fixed one-word prompt with a one-token output.
+    ``provider`` is the gate label ("bedrock" or "bedrock-stream"). Spend
+    class comes from the model policy on ``payload["model"]``, not from this
+    label. ``gate=False`` skips the capacity permit but still charges (menu
+    OCR). ``charge=False`` is reserved for the deep-health probe.
     """
     feature = ai_input_budget.normalize_feature(feature)
     frozen = copy.deepcopy(payload)
+    policy = policy_for_model_id(frozen.get("model"))
     frozen, bound, images = check_payload(feature, provider, frozen, reduce=reduce)
     subject = ai_spend_guard.current_subject()
     admission = Admission(
         feature=feature, provider=provider, payload=frozen, bound=bound,
         images=images, charge=charge, deadline=deadline, tool_round=tool_round,
-        subject=subject)
+        subject=subject, policy=policy)
     if gate:
         try:
-            with model_concurrency_slot(provider, deadline=deadline):
+            with model_concurrency_slot(provider, deadline=deadline,
+                                        spend_class=policy.spend_class):
                 yield admission
         except ai_spend_guard.AISpendLimitExceeded as exc:
             if not admission._used and not isinstance(exc, AIInputBudgetExceeded):
@@ -303,7 +308,7 @@ def admit(*, feature, provider, payload, deadline=None, tool_round=None,
         return
     if charge:
         try:
-            ai_spend_guard.charge(provider)
+            ai_spend_guard.charge(provider, spend_class=policy.spend_class)
         except ai_spend_guard.AISpendLimitExceeded:
             admission._emit_guard_rejection()
             raise

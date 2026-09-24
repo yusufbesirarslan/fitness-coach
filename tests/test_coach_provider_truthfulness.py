@@ -102,7 +102,7 @@ def test_stream_fallback_logs_provider_category_and_request_id(app, caplog):
 
     line = caplog.text
     assert "provider=bedrock" in line
-    assert "fallback_provider=openai" in line
+    assert "fallback_provider=haiku" in line
     assert "exception=PermissionDeniedError" in line
     assert "category=access_denied" in line
     assert "request_id=" in line

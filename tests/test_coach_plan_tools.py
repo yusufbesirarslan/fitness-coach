@@ -18,6 +18,7 @@ Layout:
 * what a plan edit must not touch.
 """
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -183,12 +184,12 @@ def test_the_policy_block_appears_only_when_the_tools_do(
 
     def _system_prompts():
         openai = _ScriptedOpenAI([])
-        monkeypatch.setattr(ai_coach, "openai_client", openai)
+        monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai))
         with app.test_request_context("/ask", method="POST"):
             assign_request_id()
             ai_coach._run_coach_conversation(
                 planned_user.id, "merhaba", "", client_history=[])
-            return (openai.calls[0]["messages"][0]["content"],
+            return (openai.calls[0]["system"],
                     ai_coach._build_bedrock_system("", "tr"))
 
     _openai_only(monkeypatch)
@@ -402,31 +403,27 @@ def test_undo_refuses_arguments_instead_of_ignoring_them(
 # ── Provider reality ─────────────────────────────────────────────────────────
 
 class _ScriptedOpenAI:
-    """A deterministic OpenAI client: a fixed script of tool calls, then text."""
+    """Deterministic Haiku messages client: scripted tool calls, then text."""
 
     def __init__(self, script):
         from types import SimpleNamespace
 
         self.calls = []
-        outer = self
+        self._script = list(script)
+        self._ns = SimpleNamespace
 
-        class _Completions:
-            def create(self, **kwargs):
-                outer.calls.append(kwargs)
-                index = len(outer.calls) - 1
-                if index < len(script):
-                    name, arguments = script[index]
-                    return SimpleNamespace(choices=[SimpleNamespace(
-                        message=SimpleNamespace(content=None, tool_calls=[
-                            SimpleNamespace(
-                                id=f"call_{index}",
-                                function=SimpleNamespace(
-                                    name=name,
-                                    arguments=json.dumps(arguments)))]))])
-                return SimpleNamespace(choices=[SimpleNamespace(
-                    message=SimpleNamespace(content="tamam", tool_calls=None))])
-
-        self.chat = SimpleNamespace(completions=_Completions())
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        index = len(self.calls) - 1
+        if index < len(self._script):
+            name, arguments = self._script[index]
+            return self._ns(
+                stop_reason="tool_use",
+                content=[self._ns(type="tool_use", id=f"call_{index}",
+                                  name=name, input=arguments)])
+        return self._ns(
+            stop_reason="end_turn",
+            content=[self._ns(type="text", text="tamam")])
 
 
 def _openai_only(monkeypatch):
@@ -439,10 +436,10 @@ def test_the_openai_loop_applies_one_change_for_one_intent(
     from app.observability import assign_request_id
 
     _openai_only(monkeypatch)
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedOpenAI([
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedOpenAI([
         (REPLACE, {"day": "Pazartesi", "exercise": "Bench Press",
                    "replacement": "Push-Up"}),
-    ]))
+    ])))
 
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
@@ -465,9 +462,9 @@ def test_a_model_that_repeats_itself_still_changes_the_plan_once(
     arguments = {"day": "Pazartesi", "exercise": "Push-Up",
                  "sets": 3, "reps": "12"}
     _openai_only(monkeypatch)
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedOpenAI([
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedOpenAI([
         (ADD, dict(arguments)), (ADD, dict(arguments)),
-    ]))
+    ])))
 
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
@@ -510,7 +507,7 @@ def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
     monkeypatch.setattr(ai_coach, "_anthropic", object())
     monkeypatch.setattr(ai_coach, "bedrock_client",
                         SimpleNamespace(messages=_Messages()))
-    monkeypatch.setattr(ai_coach, "openai_client", openai)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai))
 
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
@@ -553,9 +550,9 @@ def test_a_fallback_before_any_tool_ran_applies_the_change_once(
     monkeypatch.setattr(ai_coach, "_anthropic", object())
     monkeypatch.setattr(ai_coach, "bedrock_client",
                         SimpleNamespace(messages=_Messages()))
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedOpenAI([
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedOpenAI([
         (ADD, dict(arguments)), (ADD, dict(arguments)),
-    ]))
+    ])))
 
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
@@ -1447,9 +1444,9 @@ def test_asking_twice_in_two_turns_adds_one_slot_through_the_provider_loop(
     arguments = {"day": "Pazartesi", "exercise": "Lat Pulldown",
                  "sets": 3, "reps": "10-12"}
     for _ in range(2):
-        monkeypatch.setattr(ai_coach, "openai_client", _ScriptedOpenAI([
+        monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedOpenAI([
             (ADD, dict(arguments)),
-        ]))
+        ])))
         with app.test_request_context("/ask", method="POST"):
             assign_request_id()
             ai_coach._run_coach_conversation(

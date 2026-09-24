@@ -74,7 +74,7 @@ def test_heavy_chat_falls_back_on_claude_error(monkeypatch, caplog):
 
     with caplog.at_level("WARNING"):
         assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "FALLBACK"
-    assert any("OpenAI'ya düşülüyor" in r.getMessage() for r in caplog.records)
+    assert any("Haiku'ya düşülüyor" in r.getMessage() for r in caplog.records)
 
 
 def test_heavy_chat_passes_kwargs_through(monkeypatch):
@@ -188,19 +188,20 @@ def test_heavy_chat_scopes_model_slot_to_each_provider_call(monkeypatch):
                         SimpleNamespace(messages=SimpleNamespace(create=bedrock_create)))
     monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
 
-    def openai_create(**kwargs):
-        rec.events.append(("openai", rec.held))
-        return SimpleNamespace(choices=[SimpleNamespace(
-            finish_reason="stop", message=SimpleNamespace(content="OK"))])
-    monkeypatch.setattr(ai, "openai_client", SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=openai_create))))
+    def haiku_create(**kwargs):
+        rec.events.append(("haiku", rec.held))
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="OK")])
+    monkeypatch.setattr(ai, "light_client", SimpleNamespace(
+        messages=SimpleNamespace(create=haiku_create)))
 
     assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "OK"
 
     provider_events = [e for e in rec.events if e[0] != "sleep"]
     sleep_events = [e for e in rec.events if e[0] == "sleep"]
-    # 2 Bedrock denemesi (retry) + 1 OpenAI fallback, arada 1 retry uykusu:
-    assert [e[0] for e in rec.events] == ["bedrock", "sleep", "bedrock", "openai"]
+    # 2 Sonnet attempts (retry) + 1 Haiku fallback, with the retry sleep between.
+    assert [e[0] for e in rec.events] == ["bedrock", "sleep", "bedrock", "haiku"]
     # Gerçek ağ çağrısı sırasında slot TUTULUR:
     assert all(held == 1 for _, held in provider_events), rec.events
     # Retry uykusunda slot TUTULMAZ (serbest bırakılmış olmalı):

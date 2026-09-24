@@ -102,6 +102,12 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 # Kimlik bilgisi EC2 IAM Instance Profile'dan gelir (S3 ile aynı); kodda/.env'de anahtar yok.
 BEDROCK_REGION = os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION", "eu-central-1")
 BEDROCK_MODEL = os.getenv("BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
+# Light model. EU Geo Haiku 4.5 only — not the global profile. Spend class is
+# the explicit policy in ai_model_policy, not this string.
+BEDROCK_HAIKU_MODEL = os.getenv(
+    "BEDROCK_HAIKU_MODEL",
+    "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+)
 BEDROCK_MAX_TOKENS = int(os.getenv("BEDROCK_MAX_TOKENS", "8000"))
 BEDROCK_CALL_TIMEOUT_SECONDS = 60.0
 AI_COACH_TURN_TIMEOUT_SECONDS = max(
@@ -437,10 +443,9 @@ def configure_app(app):
     if not _is_dev:
         if "BEDROCK_ENABLED" not in os.environ:
             app.logger.error(
-                "BEDROCK_ENABLED ayarlı değil (vars. 0) — birincil ağır AI yolu "
-                "(Bedrock/Sonnet) KAPALI, koç/menü/plan sessizce OpenAI %s'e düşer. "
-                "Prod .env'de BEDROCK_ENABLED=1 bekleniyor; bilinçliyse =0 yazın.",
-                OPENAI_MODEL)
+                "BEDROCK_ENABLED ayarlı değil (vars. 0) — Sonnet ağır yolu KAPALI. "
+                "Hafif yol da Bedrock Haiku EU'dur; doğrudan OpenAI yok. "
+                "Prod .env'de BEDROCK_ENABLED=1 bekleniyor; bilinçliyse =0 yazın.")
         if not FATSECRET_BASE_URL:
             app.logger.error(
                 "FATSECRET_BASE_URL ayarlı değil — besin aramaları sessizce "

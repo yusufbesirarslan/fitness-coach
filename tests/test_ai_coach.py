@@ -84,7 +84,7 @@ def test_openai_tool_loop_provider_error_returns_friendly_fallback(app, monkeypa
             raise RuntimeError("openai down")
 
     fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_Completions()))
-    monkeypatch.setattr(ai_coach, "openai_client", fake_client)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=fake_client))
 
     with app.test_request_context("/ask"):
         reply = ai_coach._run_coach_conversation_openai(
@@ -370,8 +370,22 @@ def test_sanitize_history_skips_nonstring_text_and_unknown_role():
 # ---------------------------------------------------------------------------
 
 def _llm_msg(content=None, tool_calls=None):
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(
-        content=content, tool_calls=tool_calls))])
+    """Anthropic Messages response. ``tool_calls`` still uses the helper below."""
+    if tool_calls:
+        blocks = []
+        for call in tool_calls:
+            raw = call.function.arguments or "{}"
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, ValueError):
+                parsed = {}
+            blocks.append(SimpleNamespace(
+                type="tool_use", id=call.id, name=call.function.name, input=parsed))
+        return SimpleNamespace(stop_reason="tool_use", content=blocks, usage=None)
+    return SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text=content or "")],
+        usage=None)
 
 
 def _tool_call(name, arguments="{}", call_id="call_1"):
@@ -380,19 +394,17 @@ def _tool_call(name, arguments="{}", call_id="call_1"):
 
 
 class _ScriptedLLM:
+    """light_client.messages stand-in."""
+
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls = []
-        outer = self
 
-        class _Completions:
-            def create(self, **kwargs):
-                outer.calls.append(kwargs)
-                if outer._responses:
-                    return outer._responses.pop(0)
-                return outer_last
-        outer_last = _llm_msg("bitti")
-        self.chat = SimpleNamespace(completions=_Completions())
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._responses:
+            return self._responses.pop(0)
+        return _llm_msg("bitti")
 
 
 class _ControlledClock:
@@ -412,7 +424,7 @@ def _install_advancing_model_slot(monkeypatch, clock, advance_seconds):
     deadlines = []
 
     @contextmanager
-    def advancing_slot(_provider="unknown", *, deadline=None):
+    def advancing_slot(_provider="unknown", *, deadline=None, spend_class=None):
         deadlines.append(deadline)
         clock.now += advance_seconds
         yield
@@ -445,7 +457,7 @@ def test_bedrock_fallback_does_not_reset_exhausted_turn_deadline(
         "bedrock_client",
         SimpleNamespace(messages=_Messages()),
     )
-    monkeypatch.setattr(ai_coach, "openai_client", openai)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai))
 
     answer = _run_coach_conversation(
         auth_user.id, "question", "", client_history=[], language="en"
@@ -464,7 +476,7 @@ def test_openai_call_timeout_uses_remaining_turn_budget(auth_user, monkeypatch):
     )
     monkeypatch.setattr(ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0)
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
-    monkeypatch.setattr(ai_coach, "openai_client", openai)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai))
 
     answer = _run_coach_conversation(
         auth_user.id, "question", "", client_history=[]
@@ -482,7 +494,7 @@ def test_openai_timeout_is_recomputed_after_model_gate_wait(
         ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
     )
     deadlines = _install_advancing_model_slot(monkeypatch, clock, 12.0)
-    monkeypatch.setattr(ai_coach, "openai_client", openai)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai))
 
     answer = ai_coach._run_coach_conversation_openai(
         auth_user.id, "question", "", [], deadline=40.0
@@ -501,7 +513,7 @@ def test_openai_gate_wait_past_deadline_skips_provider(
         ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
     )
     deadlines = _install_advancing_model_slot(monkeypatch, clock, 36.0)
-    monkeypatch.setattr(ai_coach, "openai_client", openai)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai))
 
     answer = ai_coach._run_coach_conversation_openai(
         auth_user.id, "question", "", [], language="en", deadline=40.0
@@ -528,15 +540,12 @@ def test_openai_tool_rounds_share_one_decreasing_deadline(
             clock.now += 10.0
             return response
 
-    client = SimpleNamespace(
-        chat=SimpleNamespace(completions=_Completions())
-    )
     monkeypatch.setattr(
         ai_coach,
         "time",
         SimpleNamespace(monotonic=lambda: clock.now),
     )
-    monkeypatch.setattr(ai_coach, "openai_client", client)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_Completions()))
     monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda *args: "{}")
 
     answer = ai_coach._run_coach_conversation_openai(
@@ -544,7 +553,7 @@ def test_openai_tool_rounds_share_one_decreasing_deadline(
     )
 
     assert answer == "done"
-    assert [call["timeout"] for call in calls] == pytest.approx([30.0, 25.0])
+    assert [call["timeout"] for call in calls] == pytest.approx([35.0, 25.0])
 
 
 def test_openai_exhausted_deadline_skips_provider_call(auth_user, monkeypatch):
@@ -554,7 +563,7 @@ def test_openai_exhausted_deadline_skips_provider_call(auth_user, monkeypatch):
         "time",
         SimpleNamespace(monotonic=lambda: 25.0),
     )
-    monkeypatch.setattr(ai_coach, "openai_client", openai)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=openai))
 
     answer = ai_coach._run_coach_conversation_openai(
         auth_user.id, "question", "", [], language="en", deadline=25.0
@@ -566,14 +575,13 @@ def test_openai_exhausted_deadline_skips_provider_call(auth_user, monkeypatch):
 
 def test_conversation_plain_answer(auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("Protein hedefin 150g.")])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     answer = _run_coach_conversation(auth_user.id, "protein hedefim?", "bağlam",
                                      client_history=[])
     assert answer == "Protein hedefin 150g."
-    sent = llm.calls[0]["messages"]
-    assert sent[0]["role"] == "system"
-    assert "[KULLANICI VERİSİ]" in sent[1]["content"]
-    assert sent[-1] == {"role": "user", "content": "protein hedefim?"}
+    sent = llm.calls[0]
+    assert "[KULLANICI VERİSİ]" in sent["system"]
+    assert sent["messages"][-1] == {"role": "user", "content": "protein hedefim?"}
 
 
 def test_conversation_tool_call_roundtrip(auth_user, monkeypatch):
@@ -586,7 +594,7 @@ def test_conversation_tool_call_roundtrip(auth_user, monkeypatch):
                                         '{"food_query": "muz"}')]),
         _llm_msg("Muz 89 kcal. Kaydedeyim mi?"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
 
     answer = _run_coach_conversation(auth_user.id, "muz yedim", "", client_history=[])
     assert answer == "Muz 89 kcal. Kaydedeyim mi?"
@@ -594,14 +602,15 @@ def test_conversation_tool_call_roundtrip(auth_user, monkeypatch):
 
     second_call = llm.calls[1]["messages"]
     tool_msg = second_call[-1]
-    assert tool_msg["role"] == "tool"
-    assert json.loads(tool_msg["content"])["status"] == "staged"
+    assert tool_msg["role"] == "user"
+    assert tool_msg["content"][0]["type"] == "tool_result"
+    assert json.loads(tool_msg["content"][0]["content"])["status"] == "staged"
 
 
 def test_conversation_tool_loop_capped(auth_user, monkeypatch):
     endless = _llm_msg(tool_calls=[_tool_call("cancel_pending_log")])
     llm = _ScriptedLLM([endless] * 5)
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     answer = _run_coach_conversation(auth_user.id, "x", "", client_history=[])
     assert answer == "İşlemi tamamlayamadım, tekrar dener misin?"
     assert len(llm.calls) == 5
@@ -757,7 +766,7 @@ def test_fallback_text_not_persisted_to_session_history(app, auth_user, monkeypa
     # turda bağlam olarak modele geri besleniyordu — hata-yedeği gibi bastırılmalı.
     endless = _llm_msg(tool_calls=[_tool_call("cancel_pending_log")])
     llm = _ScriptedLLM([endless] * 5)
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     with app.test_request_context("/"):
         from flask import session
         answer = _run_coach_conversation(auth_user.id, "x", "", client_history=None)
@@ -789,7 +798,7 @@ def test_provider_fallback_history_is_unchanged(app, auth_user, monkeypatch):
 
 def test_conversation_drops_trailing_user_turns_from_history(auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("tamam")])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     history = [{"role": "bot", "text": "önceki cevap"},
                {"role": "user", "text": "şimdiki soru"}]  # widget soruyu da iter
     _run_coach_conversation(auth_user.id, "şimdiki soru", "", client_history=history)
@@ -800,7 +809,7 @@ def test_conversation_drops_trailing_user_turns_from_history(auth_user, monkeypa
 
 def test_conversation_session_fallback_persists_history(app, auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("cevap")])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     with app.test_request_context("/"):
         from flask import session
         _run_coach_conversation(auth_user.id, "soru", "", client_history=None)

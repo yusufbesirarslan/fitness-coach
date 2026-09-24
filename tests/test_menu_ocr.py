@@ -7,6 +7,7 @@ bozuk dosya), vision için görsel sıkıştırma ve OpenAI vision OCR sarmalay�
     python -m pytest tests/test_menu_ocr.py -v
 """
 import io
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -147,86 +148,61 @@ def test_extract_text_returns_empty_on_oversized_image(app, monkeypatch):
 class _FakeVision:
     def __init__(self, reply):
         self.calls = []
-        outer = self
+        self._reply = reply
 
-        class _Completions:
-            def create(self, **kwargs):
-                outer.calls.append(kwargs)
-
-                class _Msg:
-                    content = reply
-
-                class _Choice:
-                    message = _Msg()
-
-                class _Resp:
-                    choices = [_Choice()]
-                return _Resp()
-
-        class _Chat:
-            completions = _Completions()
-
-        self.chat = _Chat()
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text=self._reply)])
 
 
 def test_vision_ocr_returns_text_and_sends_data_url(app, monkeypatch):
     fake = _FakeVision("  Mercimek Çorbası\nAdana Kebap  ")
-    monkeypatch.setattr(menu_ocr, "openai_client", fake)
+    monkeypatch.setattr(menu_ocr, "light_client", SimpleNamespace(messages=fake))
     text = _extract_text_from_image(b"kucuk gorsel", "image/png")
     assert text == "Mercimek Çorbası\nAdana Kebap"
-    image_part = fake.calls[0]["messages"][1]["content"][1]
-    assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
+    image_part = fake.calls[0]["messages"][0]["content"][1]
+    assert image_part["type"] == "image"
+    assert image_part["source"]["media_type"] == "image/png"
+    assert image_part["source"]["data"]
 
 
 def test_vision_ocr_unknown_mime_falls_back_to_jpeg(app, monkeypatch):
     fake = _FakeVision("x")
-    monkeypatch.setattr(menu_ocr, "openai_client", fake)
+    monkeypatch.setattr(menu_ocr, "light_client", SimpleNamespace(messages=fake))
     _extract_text_from_image(b"img", "application/octet-stream")
-    image_part = fake.calls[0]["messages"][1]["content"][1]
-    assert image_part["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    image_part = fake.calls[0]["messages"][0]["content"][1]
+    assert image_part["source"]["media_type"] == "image/jpeg"
 
 
 def test_vision_ocr_api_failure_returns_empty(app, monkeypatch):
     class _Boom:
         def __getattr__(self, name):
             raise RuntimeError("openai down")
-    monkeypatch.setattr(menu_ocr, "openai_client", _Boom())
+    monkeypatch.setattr(menu_ocr, "light_client", SimpleNamespace(messages=_Boom()))
     assert _extract_text_from_image(b"img") == ""
 
 
-def test_vision_ocr_empty_choices_returns_empty(app, monkeypatch):
-    # A2: içerik filtresi boş choices döndürebilir. Guard olmadan resp.choices[0]
-    # IndexError fırlatır; guard varsa "" döner. choices hem falsy hem de indeksleme
-    # yapılınca "sızıntı" üretecek şekilde kurulur — yalnızca guard çalışırsa "" gelir.
-    class _Choices:
-        def __bool__(self): return False
-        def __len__(self): return 0
-        def __getitem__(self, i):
-            return type("C", (), {"message": type("M", (), {"content": "SIZAN"})()})()
+def test_vision_ocr_empty_content_returns_empty(app, monkeypatch):
+    class _Empty:
+        def create(self, **kwargs):
+            return SimpleNamespace(stop_reason="end_turn", content=[])
 
-    class _Resp:
-        choices = _Choices()
-
-    class _Client:
-        class chat:
-            class completions:
-                @staticmethod
-                def create(**kwargs):
-                    return _Resp()
-    monkeypatch.setattr(menu_ocr, "openai_client", _Client())
+    monkeypatch.setattr(menu_ocr, "light_client", SimpleNamespace(messages=_Empty()))
     assert _extract_text_from_image(b"img", "image/png") == ""
 
 
 def test_vision_ocr_compresses_oversized_image(app, monkeypatch):
     fake = _FakeVision("ok")
-    monkeypatch.setattr(menu_ocr, "openai_client", fake)
+    monkeypatch.setattr(menu_ocr, "light_client", SimpleNamespace(messages=fake))
     compressed = {}
     monkeypatch.setattr(menu_ocr, "_compress_image_for_vision",
                         lambda b, *a, **k: (compressed.setdefault("hit", True), (b"tiny", "image/jpeg"))[1])
     _extract_text_from_image(b"x" * 1_500_001, "image/png")  # >1.5MB → sıkıştırılır
     assert compressed.get("hit") is True
-    image_part = fake.calls[0]["messages"][1]["content"][1]
-    assert image_part["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    image_part = fake.calls[0]["messages"][0]["content"][1]
+    assert image_part["source"]["media_type"] == "image/jpeg"
 
 
 # ---------------------------------------------------------------------------

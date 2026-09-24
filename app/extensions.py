@@ -8,7 +8,6 @@ from flask_sqlalchemy import SQLAlchemy
 from flask import g, has_request_context, request
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
-from openai import OpenAI
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
@@ -101,27 +100,6 @@ limiter = Limiter(
     storage_options={"socket_connect_timeout": 2} if _REDIS_URL else {},
     in_memory_fallback_enabled=True,
 )
-
-
-class _LazyOpenAI:
-    """OpenAI istemcisini ilk kullanımda kurar. İstemci import sırasında
-    kurulursa OPENAI_API_KEY olmayan her ortam (test, migration, CLI) daha
-    import'ta patlar; lazy kurulumda anahtar yalnızca gerçek bir AI çağrısı
-    yapılırken gerekir. `openai_client.chat...` erişimleri __getattr__ ile
-    gerçek istemciye delege edilir."""
-
-    _client = None
-
-    def __getattr__(self, name):
-        if self._client is None:
-            # max_retries=0: retries happen in ai_provider_call, where each
-            # physical attempt is charged to the spend guard (P2 closeout).
-            self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
-                                  timeout=30.0, max_retries=0)
-        return getattr(self._client, name)
-
-
-openai_client = _LazyOpenAI()
 
 
 class _LazyAnthropicBedrock:

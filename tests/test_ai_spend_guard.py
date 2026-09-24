@@ -144,9 +144,9 @@ def _use_redis(monkeypatch):
     return fake
 
 
-def _charge_as(subject, provider="bedrock"):
+def _charge_as(subject, spend_class="heavy"):
     with ai_spend_guard.subject_scope(subject):
-        ai_spend_guard.charge(provider)
+        ai_spend_guard.charge("policy", spend_class=spend_class)
 
 
 # ── Admission semantics ─────────────────────────────────────────────────────
@@ -168,10 +168,22 @@ def test_one_account_hitting_its_ceiling_does_not_block_another():
 
 def test_heavy_and_light_are_counted_separately():
     for _ in range(3):
-        _charge_as(7, "bedrock")
-    _charge_as(7, "openai")  # light allowance untouched
+        _charge_as(7, "heavy")
+    _charge_as(7, "light")  # light allowance is a different counter
     with pytest.raises(AISpendLimitExceeded):
-        _charge_as(7, "bedrock-stream")  # streaming is heavy too
+        _charge_as(7, "heavy")
+
+
+def test_transport_label_does_not_select_spend_class():
+    """A Bedrock gate label with an explicit light class must not spend heavy."""
+    ai_spend_guard.charge("bedrock", spend_class="light")
+    ai_spend_guard.charge("bedrock-stream", spend_class="light")
+    with pytest.raises(TypeError):
+        ai_spend_guard.charge("bedrock")
+    heavy = [v for k, v in ai_spend_guard._local_counts.items() if ":heavy:" in k]
+    light = [v for k, v in ai_spend_guard._local_counts.items() if ":light:" in k]
+    assert heavy == []
+    assert light == [2]
 
 
 def test_global_ceiling_bounds_many_accounts(monkeypatch):
@@ -186,10 +198,10 @@ def test_global_ceiling_bounds_many_accounts(monkeypatch):
 
 def test_unattributed_calls_still_spend_the_global_budget(monkeypatch):
     _limits(monkeypatch, global_heavy_hour=2)
-    ai_spend_guard.charge("bedrock")
-    ai_spend_guard.charge("bedrock")
+    ai_spend_guard.charge("bedrock", spend_class="heavy")
+    ai_spend_guard.charge("bedrock", spend_class="heavy")
     with pytest.raises(AISpendLimitExceeded):
-        ai_spend_guard.charge("bedrock")
+        ai_spend_guard.charge("bedrock", spend_class="heavy")
 
 
 def test_zero_disables_only_that_ceiling(monkeypatch):
@@ -267,7 +279,7 @@ def _race(n, fn):
 def test_concurrent_callers_never_exceed_a_ceiling(monkeypatch):
     fake = _use_redis(monkeypatch)
     _limits(monkeypatch, user_heavy=0, global_heavy_hour=10, global_heavy_day=1000)
-    admitted, refused = _race(64, lambda i: ai_spend_guard.charge("bedrock"))
+    admitted, refused = _race(64, lambda i: ai_spend_guard.charge("bedrock", spend_class="heavy"))
     assert len(admitted) == 10
     assert len(refused) == 54
     hour_key = next(k for k in fake.data if ":global:heavy:h:" in k)
@@ -326,7 +338,7 @@ def test_redis_outage_degrades_to_a_local_bound_not_fail_open(monkeypatch, caplo
 
 def test_concurrent_callers_never_exceed_the_local_ceiling_without_redis(monkeypatch):
     _limits(monkeypatch, user_heavy=0, global_heavy_hour=10, global_heavy_day=1000)
-    admitted, refused = _race(64, lambda i: ai_spend_guard.charge("bedrock"))
+    admitted, refused = _race(64, lambda i: ai_spend_guard.charge("bedrock", spend_class="heavy"))
     assert len(admitted) == 10
     assert len(refused) == 54
 
@@ -338,14 +350,14 @@ def test_redis_outage_mid_window_admits_at_most_one_extra_local_allowance(monkey
     fake = _use_redis(monkeypatch)
     _limits(monkeypatch, user_heavy=0, global_heavy_hour=5, global_heavy_day=1000)
     for _ in range(5):
-        ai_spend_guard.charge("bedrock")
+        ai_spend_guard.charge("bedrock", spend_class="heavy")
     with pytest.raises(AISpendLimitExceeded):
-        ai_spend_guard.charge("bedrock")
+        ai_spend_guard.charge("bedrock", spend_class="heavy")
     fake.fail = True
     for _ in range(5):
-        ai_spend_guard.charge("bedrock")
+        ai_spend_guard.charge("bedrock", spend_class="heavy")
     with pytest.raises(AISpendLimitExceeded):
-        ai_spend_guard.charge("bedrock")
+        ai_spend_guard.charge("bedrock", spend_class="heavy")
 
 
 # ── Subject attribution across threads ──────────────────────────────────────
@@ -381,7 +393,7 @@ def test_gate_refusal_never_runs_the_body_and_returns_the_permit():
     ran = []
     with ai_spend_guard.subject_scope(7):
         with pytest.raises(AISpendLimitExceeded):
-            with ai_gate.model_concurrency_slot("bedrock"):
+            with ai_gate.model_concurrency_slot("bedrock", spend_class="heavy"):
                 ran.append(True)
     assert ran == []
     assert ai_gate.capacity_snapshot()["model_active"] == 0
@@ -401,7 +413,7 @@ def test_capacity_refusal_does_not_consume_spend_budget(monkeypatch):
             for _ in range(ai_gate.AI_MODEL_MAX_CONCURRENCY)]
     try:
         with pytest.raises(ai_gate.BlockingConcurrencyLimit) as exc:
-            with ai_gate.model_concurrency_slot("bedrock", wait_seconds=0):
+            with ai_gate.model_concurrency_slot("bedrock", wait_seconds=0, spend_class="heavy"):
                 pass
         assert not isinstance(exc.value, AISpendLimitExceeded)
     finally:
@@ -458,13 +470,13 @@ def test_every_provider_sdk_call_site_is_guarded():
 @pytest.fixture
 def providers(monkeypatch):
     bedrock = CountingMessages()
-    openai_fake = CountingOpenAI()
+    haiku = CountingMessages()
     monkeypatch.setattr(ai, "bedrock_client", SimpleNamespace(messages=bedrock))
-    monkeypatch.setattr(ai, "openai_client", openai_fake)
+    monkeypatch.setattr(ai, "light_client", SimpleNamespace(messages=haiku))
     monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
     monkeypatch.setattr(ai_recovery, "recall_last_good", lambda key: None)
     monkeypatch.setattr(ai_recovery, "remember_last_good", lambda key, value: None)
-    return SimpleNamespace(bedrock=bedrock, openai=openai_fake)
+    return SimpleNamespace(bedrock=bedrock, haiku=haiku, openai=haiku)
 
 
 def test_heavy_chat_stops_at_the_ceiling_without_openai_fallback(app, providers):
@@ -535,12 +547,12 @@ def _tool_use_response():
 @pytest.fixture
 def coach_providers(monkeypatch):
     bedrock = CountingMessages()
-    openai_fake = CountingOpenAI()
+    haiku = CountingMessages()
     monkeypatch.setattr(ai_coach, "bedrock_client", SimpleNamespace(messages=bedrock))
-    monkeypatch.setattr(ai_coach, "openai_client", openai_fake)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=haiku))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
     monkeypatch.setattr(ai_coach, "_anthropic", object())
-    return SimpleNamespace(bedrock=bedrock, openai=openai_fake)
+    return SimpleNamespace(bedrock=bedrock, haiku=haiku, openai=haiku)
 
 
 def test_coach_turn_at_ceiling_makes_no_provider_call_and_no_openai_fallback(
@@ -647,10 +659,10 @@ def test_streaming_turn_at_ceiling_yields_error_frame_without_provider_call(
 
 def test_menu_ocr_refusal_returns_unreadable_without_a_provider_call(app, monkeypatch):
     from app.services import menu_ocr
-    fake = CountingOpenAI()
-    monkeypatch.setattr(menu_ocr, "openai_client", fake)
+    fake = CountingMessages()
+    monkeypatch.setattr(menu_ocr, "light_client", SimpleNamespace(messages=fake))
     for _ in range(3):
-        _charge_as(7, "openai")
+        _charge_as(7, "light")
     with ai_spend_guard.subject_scope(7):
         assert menu_ocr._extract_text_from_image(b"tiny", "image/png") == ""
     assert fake.calls == 0
@@ -662,7 +674,7 @@ def test_macro_fan_out_batches_spend_the_requesting_accounts_budget(app, monkeyp
     monkeypatch.setattr(ai_nutrition, "_LLM_MACRO_BATCH_SIZE", 1)
 
     def batch(items, category_map=None, grams_hint=None):
-        ai_spend_guard.charge("bedrock")
+        ai_spend_guard.charge("bedrock", spend_class="heavy")
         return {}
 
     monkeypatch.setattr(ai_nutrition, "_estimate_macros_llm_batch", batch)

@@ -20,7 +20,8 @@ This module is the emergency boundary, not a product quota:
   `ai_gate.model_concurrency_slot()` (menu OCR: charged without the permit),
   so a rejected call never reaches the provider — including tool-loop rounds,
   recovery retries, provider-attempt retries and fan-out batches.
-- Two classes: `heavy` (Bedrock/Sonnet) and `light` (OpenAI gpt-4o-mini).
+- Two classes, from the explicit model policy (`ai_model_policy`), never from
+  the transport name: `heavy` is Sonnet, `light` is Haiku. Both are Bedrock.
   Per-account daily ceilings bound one account; global hourly/daily ceilings
   bound the sum over all accounts (multi-account abuse, runaway loops, bugs).
 - Admission is race-safe across threads, processes and hosts: the Redis
@@ -52,7 +53,7 @@ from app.services.ai_gate import BlockingConcurrencyLimit
 
 _log = logging.getLogger(__name__)
 
-HEAVY_PROVIDERS = frozenset({"bedrock", "bedrock-stream"})
+SPEND_CLASSES = frozenset({"heavy", "light"})
 
 _KEY_PREFIX = "ai:spend:v1"
 _WINDOW_SECONDS = {"h": 3600, "d": 86400}
@@ -95,6 +96,17 @@ class AISpendLimitExceeded(BlockingConcurrencyLimit):
         super().__init__("AI capacity temporarily unavailable")
         self.scope = scope
         self.provider_class = provider_class
+
+
+class UnknownModelPolicy(AISpendLimitExceeded):
+    """The model id is not in the explicit policy. Nothing was charged.
+
+    Subclass of the spend refusal so a heavy-path failure does not fall
+    through to another model, and a retry loop does not try again.
+    """
+
+    def __init__(self):
+        super().__init__("global", "unclassified")
 
 
 # ── Subject (whose budget a call spends) ────────────────────────────────────
@@ -153,10 +165,6 @@ def bind_subject(fn):
 
 
 # ── Counters ────────────────────────────────────────────────────────────────
-
-def provider_class(provider):
-    return "heavy" if str(provider) in HEAVY_PROVIDERS else "light"
-
 
 def _bucket(now, window):
     return int(now // _WINDOW_SECONDS[window])
@@ -261,11 +269,17 @@ def _record_rejection(scope, cls, provider, subject):
         pass
 
 
-def charge(provider):
-    """Admit one provider call or raise AISpendLimitExceeded. Call BEFORE the call."""
+def charge(provider, *, spend_class):
+    """Admit one provider call or raise AISpendLimitExceeded. Call BEFORE the call.
+
+    ``provider`` is only the gate/log label (bedrock, bedrock-stream). It does
+    not select the counter. ``spend_class`` is the policy field (heavy|light).
+    """
+    if spend_class not in SPEND_CLASSES:
+        raise RuntimeError("spend class must be an explicit policy value")
     if not ENABLED:
         return
-    cls = provider_class(provider)
+    cls = spend_class
     subject = current_subject()
     now = time.time()
     planned = _planned_keys(cls, subject, now)
