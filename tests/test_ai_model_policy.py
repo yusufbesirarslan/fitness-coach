@@ -112,6 +112,24 @@ def test_unknown_model_makes_zero_provider_calls():
     assert _counts() == (0, 0)
 
 
+def test_light_launch_ceilings_are_not_the_mini_calibration():
+    """Raising the Haiku launch ceilings back to 400/5000 fails this test."""
+    text = Path(ai_spend_guard.__file__).read_text(encoding="utf-8")
+    assert '_env_limit("AI_SPEND_USER_LIGHT_PER_DAY", 100)' in text
+    assert '_env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 500)' in text
+    assert '_env_limit("AI_SPEND_USER_LIGHT_PER_DAY", 400)' not in text
+    assert '_env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 5000)' not in text
+
+
+def test_haiku_telemetry_has_no_unverified_dollar_price():
+    from app.services import ai_usage
+    assert "bedrock:claude-haiku-4-5" not in ai_usage._PRICES
+    assert ai_usage.estimated_cost_usd(
+        "bedrock", "claude-haiku-4-5",
+        {"input_tokens": 1000, "output_tokens": 100,
+         "cache_write_tokens": 0, "cache_read_tokens": 0}) is None
+
+
 def test_production_tree_has_no_direct_openai_call():
     """A reintroduced api.openai.com / Chat Completions call fails this test."""
     root = Path(ai_spend_guard.__file__).resolve().parents[1]

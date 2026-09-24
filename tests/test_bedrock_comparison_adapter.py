@@ -54,7 +54,10 @@ def test_two_image_adapter_reuses_model_token_ceiling_and_temperature(
         monkeypatch):
     fake = FakeBedrockResponse("comparison-json")
     monkeypatch.setattr(ai, "bedrock_client", fake.client)
-    monkeypatch.setattr(ai, "BEDROCK_MODEL", "test-model")
+    # An unknown id now fails closed before the provider. The adapter must
+    # still pass the admitted Sonnet id, not a literal of its own.
+    sonnet_id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    monkeypatch.setattr(ai, "BEDROCK_MODEL", sonnet_id)
     monkeypatch.setattr(ai, "BEDROCK_MAX_TOKENS", 800)
 
     ai._bedrock_compare_images(
@@ -62,7 +65,7 @@ def test_two_image_adapter_reuses_model_token_ceiling_and_temperature(
         "compare", max_tokens=1200, temperature=0.25,
     )
 
-    assert fake.calls[0]["model"] == "test-model"
+    assert fake.calls[0]["model"] == sonnet_id
     assert fake.calls[0]["max_tokens"] == 800
     assert fake.calls[0]["temperature"] == 0.25
     assert fake.calls[0]["messages"][0]["role"] == "user"

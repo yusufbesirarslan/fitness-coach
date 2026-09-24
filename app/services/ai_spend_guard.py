@@ -73,15 +73,18 @@ def _env_limit(name, default):
 ENABLED = os.getenv("AI_SPEND_GUARD_ENABLED", "1") != "0"
 
 # (scope, class, window) -> maximum admitted provider calls per window.
-# Defaults sit far above observed production use (30 days to 2026-09-23: 197
-# Bedrock calls in total, busiest hour 40, busiest single account 30 coach
-# turns in a day) so no normal account, free or premium, meets them.
+# Heavy defaults sit above observed production use (30 days to 2026-09-23:
+# 197 Bedrock calls, busiest hour 40, busiest account 30 coach turns/day).
+# Light defaults are the Haiku 4.5 EU launch ceilings. The previous 400/5000
+# pair was calibrated for gpt-4o-mini and is not safe at Haiku list price.
+# Production .env does not set the light keys, so these defaults are what a
+# deploy applies. Do not raise them back without a new dollar envelope.
 LIMITS = {
     ("user", "heavy", "d"): _env_limit("AI_SPEND_USER_HEAVY_PER_DAY", 200),
-    ("user", "light", "d"): _env_limit("AI_SPEND_USER_LIGHT_PER_DAY", 400),
+    ("user", "light", "d"): _env_limit("AI_SPEND_USER_LIGHT_PER_DAY", 100),
     ("global", "heavy", "h"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_HOUR", 300),
     ("global", "heavy", "d"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_DAY", 1500),
-    ("global", "light", "d"): _env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 5000),
+    ("global", "light", "d"): _env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 500),
 }
 
 

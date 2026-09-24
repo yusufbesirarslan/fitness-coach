@@ -522,10 +522,10 @@ def test_recovery_never_retries_a_refusal():
 def test_premium_normal_usage_is_unaffected_by_default_limits(app, providers, monkeypatch):
     monkeypatch.setattr(ai_spend_guard, "LIMITS", {
         ("user", "heavy", "d"): 200,
-        ("user", "light", "d"): 400,
+        ("user", "light", "d"): 100,
         ("global", "heavy", "h"): 300,
         ("global", "heavy", "d"): 1500,
-        ("global", "light", "d"): 5000,
+        ("global", "light", "d"): 500,
     })
     # A heavy real day: 30 coach turns (the 30-day per-account maximum observed
     # in production) at the worst-case 5 provider rounds each.

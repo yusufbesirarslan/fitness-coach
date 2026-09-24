@@ -325,8 +325,9 @@ def test_the_guard_sits_on_the_boundary_both_providers_pass_through():
     every provider loop must route its final text through the same guard."""
     from app.services import ai_coach, ai_stream
 
-    for func in (ai_coach._run_coach_conversation_openai,
-                 ai_coach._run_coach_conversation_bedrock,
+    haiku_entry = inspect.getsource(ai_coach._run_coach_conversation_openai)
+    assert "_run_coach_conversation_bedrock" in haiku_entry
+    for func in (ai_coach._run_coach_conversation_bedrock,
                  ai_stream._stream_bedrock):
         source = inspect.cleandoc(inspect.getsource(func))
         assert "grounded_provider_reply" in source, func.__name__

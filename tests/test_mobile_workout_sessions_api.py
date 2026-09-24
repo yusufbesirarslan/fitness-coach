@@ -1239,7 +1239,7 @@ def test_every_non_completion_command_works_with_providers_detonated(
         def __getattr__(self, name):
             raise AssertionError(f"a session write reached provider method {name}")
 
-    monkeypatch.setattr(extensions, "openai_client", _Detonator())
+    monkeypatch.setattr(extensions, "openai_client", _Detonator(), raising=False)
     monkeypatch.setattr(extensions, "bedrock_client", _Detonator())
     headers = as_mobile(owner)
 

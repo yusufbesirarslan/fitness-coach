@@ -86,7 +86,9 @@ retried and never falls back.
 Rate limits count per route and per hour, and premium has no weekly quota, so
 they do not bound spend. `app/services/ai_spend_guard.py` is the emergency
 boundary: a finite number of **provider calls** per account per day and in
-total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
+total per hour/day. `heavy` is Claude Sonnet 4.5 and `light` is Claude Haiku
+4.5 EU Geo. Both are Bedrock. The class is the model-policy field; the
+transport name does not select it.
 
 - Enforced inside `ai_gate.model_concurrency_slot` after the capacity permit
   and **before** the provider call; every provider call reaches the slot
@@ -162,16 +164,16 @@ re-count) → capacity permit → spend-guard charge → provider attempt
 
 | Feature | Provider | Input budget | Output cap | Images |
 |---|---|---|---|---|
-| coach (tool loop, stream, feedback) | Bedrock → OpenAI | 64,000 | 700 | 0 |
-| training_plan (generate + repair) | Bedrock → OpenAI | 32,000 | 7,000 | 0 |
-| nutrition_plan | Bedrock → OpenAI | 32,000 | 2,000 | 0 |
-| nutrition (estimates, macro batches, meal review) | both | 16,000 | 4,000 | 0 |
-| menu_extract | Bedrock → OpenAI | 64,000 | 5,000 | 0 |
-| menu_ocr (per image / scanned-PDF page) | OpenAI | 56,000 | 4,000 | 1 |
-| vision (validation, pump-check analysis/compare) | Bedrock | 12,000 | 1,200 | 2 |
-| summary | OpenAI | 16,000 | 500 | 0 |
-| health_probe (uncharged) | Bedrock | 2,048 | 1 | 0 |
-| other | both | 16,000 | 2,000 | 0 |
+| coach (tool loop, stream, feedback) | Sonnet, Haiku fallback | 64,000 | 700 | 0 |
+| training_plan (generate + repair) | Sonnet, Haiku fallback | 32,000 | 7,000 | 0 |
+| nutrition_plan | Sonnet, Haiku fallback | 32,000 | 2,000 | 0 |
+| nutrition (estimates, macro batches, meal review) | Haiku, some Sonnet | 16,000 | 4,000 | 0 |
+| menu_extract | Sonnet, Haiku fallback | 64,000 | 5,000 | 0 |
+| menu_ocr (per image / scanned-PDF page) | Haiku | 56,000 | 4,000 | 1 |
+| vision (validation, pump-check analysis/compare) | Sonnet | 12,000 | 1,200 | 2 |
+| summary | Haiku | 16,000 | 500 | 0 |
+| health_probe (uncharged) | Sonnet | 2,048 | 1 | 0 |
+| other | either admitted model | 16,000 | 2,000 | 0 |
 
 Scanned-PDF OCR is capped at `AI_MENU_OCR_MAX_PAGES` (5) pages per upload.
 Budgets are env-overridable (`AI_INPUT_BUDGET_<FEATURE>`,
@@ -186,21 +188,49 @@ to bound units (19,795 × 2.09 measured coach ratio ≈ 41K).
 
 ### Worst-case exposure (per attempt × production ceilings)
 
-List prices verified 2026-09-23: Sonnet 4.5 **global** profile $3.00 input /
-$15.00 output per 1M tokens (cache write $3.75, read $0.30); gpt-4o-mini $0.15
-/ $0.60. Max $ per attempt = input budget × input price + output cap × output
-price (cache writes, coach only, stay below the menu_extract figure).
+Sonnet 4.5 global list, verified on the Anthropic price card: $3.00 input /
+$15.00 output per 1M tokens. Haiku 4.5 EU dollars below are **calculated**
+from Anthropic's published Haiku 4.5 list ($1.00 / $5.00) plus the published
+10% Bedrock regional/geo premium ($1.10 / $5.50). No eu-central-1 Bedrock
+Price List SKU for this profile was found, so application telemetry does not
+emit `estimated_cost_usd` for Haiku. Token counts stay provider-reported.
+
+Max $ per attempt = input budget × input price + output cap × output price.
 
 | | Max $ / attempt | Hour | Day | 3 days | Redis-degraded day |
 |---|---|---|---|---|---|
-| Heavy (menu_extract worst: 64K in + 5K out) | $0.267 | 100 → $26.70 | 300 → $80.10 | $240.30 | ≤2× → $160.20 |
-| Light (menu_extract fallback: 64K in + 5K out) | $0.0126 | no hourly cap | 5,000 → $63.00 | $189.00 | ≤3× → $189.00 |
+| Heavy (menu_extract: 64K in + 5K out) | $0.267 | 100 → $26.70 | 300 → $80.10 | $240.30 | ≤2× → $160.20 |
+| Light launch (same shape, Haiku price) | $0.0979 | no hourly cap | 500 → $48.95 | $146.85 | ≤3× → $146.85 |
+| Light user launch | $0.0979 | — | 100 → $9.79 | $29.37 | shares the global cap |
 
-(Production env: heavy 100/hour, 300/day; light code default 5,000/day.)
-Before the input budget the heavy absolute was $0.72/call and $1,080/day at
-the 1,500/day default. Per-attempt maxima for the other features: coach
-$0.2025, training_plan $0.201, nutrition_plan $0.126, nutrition $0.108,
-vision $0.054. Bedrock spend draws on AWS credits; OpenAI spend does not.
+Production `.env` sets heavy to 100/hour and 300/day and does not set the
+light keys, so the code defaults (100/user/day, 500/global/day) are the
+launch ceilings. The retired gpt-4o-mini pair was 400/5000. At the Haiku
+calculated price that retired global cap is about $489.50/day, and the
+mid-window Redis-degraded reading of it is about $1,468.50/day. Do not
+restore it.
+
+Worst single light shapes at the same calculated price: menu OCR page
+(56K bound + 4K out) $0.0836, so a 5-page scanned PDF is $0.418 if every
+page fills the budget; coach fallback round (64K + 700 out) $0.07425, so a
+5-round tool loop is $0.371. The menu-extract fallback remains the single
+attempt maximum.
+
+Redis-degraded multiplier, re-read from compose and `gunicorn.conf.py`:
+one web process (`FITX_WEB_WORKERS=1`, boot-enforced) and one RQ worker.
+Gunicorn's 8 threads and the in-process macro/OCR pools share the web
+counter. The worker forks a child per job and cannot dequeue while Redis
+is down, so a cold outage is the web process only (1×). An outage that
+starts after Redis has already admitted a full window, with one job child
+still running, is (1 + web + that child) = 3× light for that window. A
+process restart clears its local counter and can spend another full window;
+the 3× figure does not cap a restart loop.
+
+A provider 429 is retried once inside `admit()` (`BEDROCK_MAX_RETRIES=1`),
+charged as a new light attempt, then surfaces as the existing soft error
+(coach), HTTP 502 (meal totals), or an empty OCR result. SDK retries stay
+at 0. There is no direct OpenAI fallback. Scanned-PDF OCR is one call per
+page, sequential, at most 5 pages.
 
 ## Usage telemetry
 
@@ -209,8 +239,9 @@ refusal, written to stdout by the dedicated `fitx.ai_usage` logger, so it
 lands in `/axisai/app` (30-day retention) with the web/worker service label.
 No CloudWatch custom metric per user or feature.
 
-Fields: `event, ts, request_id, provider (bedrock|openai), model (normalized:
-claude-sonnet-4-5|gpt-4o-mini|other), feature (fixed taxonomy), subject_id
+Fields: `event, ts, request_id, provider / billing_provider (bedrock|openai),
+spend_class (heavy|light), model (normalized:
+claude-sonnet-4-5|claude-haiku-4-5|gpt-4o-mini|other), feature (fixed taxonomy), subject_id
 (internal account id or null), outcome (success|provider_error|timeout|
 client_disconnect|guard_rejected|input_budget_rejected), attempt, tool_round,
 usage_source (provider|estimated), input_tokens, output_tokens,
@@ -262,10 +293,10 @@ Distribution percentiles use provider-reported tokens where present; filter
 AI_SPEND_GUARD_ENABLED=1
 # production (2026-09-23): AI_SPEND_GLOBAL_HEAVY_PER_HOUR=100, ..._PER_DAY=300
 AI_SPEND_USER_HEAVY_PER_DAY=200
-AI_SPEND_USER_LIGHT_PER_DAY=400
+AI_SPEND_USER_LIGHT_PER_DAY=100
 AI_SPEND_GLOBAL_HEAVY_PER_HOUR=300
 AI_SPEND_GLOBAL_HEAVY_PER_DAY=1500
-AI_SPEND_GLOBAL_LIGHT_PER_DAY=5000   # 0 disables that one ceiling
+AI_SPEND_GLOBAL_LIGHT_PER_DAY=500    # 0 disables that one ceiling
 AI_INPUT_BUDGET_<FEATURE>=<int>     # see the input budget table; must be > 0
 AI_OUTPUT_BUDGET_<FEATURE>=<int>
 AI_MENU_OCR_MAX_PAGES=5

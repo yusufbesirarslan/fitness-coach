@@ -62,13 +62,28 @@ class _LiveModelDetonator:
         raise AssertionError(f"unmocked light model client ({name})")
 
 
+# Kept off the monkeypatch fixture on purpose. An autouse fixture that uses
+# monkeypatch is set up before the app fixture, so monkeypatch's undo runs
+# after the app context tears down. Tests that replace db.session for the
+# body of the test then explode in teardown (session.remove on a lambda).
+_REAL_LIGHT_CLIENTS = {}
+
+
 @pytest.fixture(autouse=True)
-def _no_live_light_model(monkeypatch):
-    bomb = _LiveModelDetonator()
+def _no_live_light_model():
     from app.services import ai, ai_coach, menu_ocr
-    monkeypatch.setattr(ai, "light_client", bomb, raising=False)
-    monkeypatch.setattr(ai_coach, "light_client", bomb, raising=False)
-    monkeypatch.setattr(menu_ocr, "light_client", bomb, raising=False)
+    modules = (ai, ai_coach, menu_ocr)
+    if not _REAL_LIGHT_CLIENTS:
+        for module in modules:
+            _REAL_LIGHT_CLIENTS[module] = module.light_client
+    bomb = _LiveModelDetonator()
+    for module in modules:
+        module.light_client = bomb
+    try:
+        yield
+    finally:
+        for module in modules:
+            module.light_client = _REAL_LIGHT_CLIENTS[module]
 from werkzeug.datastructures import Headers  # noqa: E402
 
 
