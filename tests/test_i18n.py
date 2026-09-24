@@ -678,7 +678,11 @@ def test_workout_already_done_uses_structured_code(app, client, make_user, login
     # complete_workout önce aktif TrainingPlan ister; sonra bugünkü PumpCheck'i
     # görünce "already_completed" döndürür.
     db.session.add(TrainingPlan(user_id=u.id, plan_data="{}"))
-    db.session.add(PumpCheck(user_id=u.id, valid=True, location_type="Spor Salonu"))
+    # Canonical completion claim (date_key) — a date_key-less row is a
+    # standalone Pump Check and is not completion evidence.
+    from app.timeutil import app_today
+    db.session.add(PumpCheck(user_id=u.id, valid=True, location_type="Spor Salonu",
+                             date_key=app_today().isoformat()))
     db.session.commit()
     r = client.post("/workout/complete", json={"image": "x"})
     assert r.status_code == 400
