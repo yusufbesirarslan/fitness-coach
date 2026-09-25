@@ -508,13 +508,7 @@ def test_recovery_never_retries_a_refusal():
 
 
 def test_premium_normal_usage_is_unaffected_by_default_limits(app, providers, monkeypatch):
-    monkeypatch.setattr(ai_spend_guard, "LIMITS", {
-        ("user", "heavy", "d"): 200,
-        ("user", "light", "d"): 400,
-        ("global", "heavy", "h"): 300,
-        ("global", "heavy", "d"): 1500,
-        ("global", "light", "d"): 5000,
-    })
+    monkeypatch.setattr(ai_spend_guard, "LIMITS", _source_default_limits())
     # A heavy real day: 30 coach turns (the 30-day per-account maximum observed
     # in production) at the worst-case 5 provider rounds each.
     with ai_spend_guard.subject_scope(7):
@@ -708,3 +702,155 @@ def test_ask_at_ceiling_returns_the_existing_soft_error(app, auth_user, client, 
     assert resp.get_json()["answer"] == ai_coach._COACH_FALLBACKS["tr"]["error"]
     assert coach_providers.bedrock.calls == 0
     assert coach_providers.openai.calls == 0
+
+
+# ── Launch-bridge light defaults (100/account/day, 500/day global) ──────────
+#
+# The fixture above patches LIMITS to small numbers; these tests use the
+# numbers the module actually ships with, read from its source, so reverting
+# a default (100 -> 400, 500 -> 5000) fails here.
+
+_ENV_TO_KEY = {
+    "AI_SPEND_USER_HEAVY_PER_DAY": ("user", "heavy", "d"),
+    "AI_SPEND_USER_LIGHT_PER_DAY": ("user", "light", "d"),
+    "AI_SPEND_GLOBAL_HEAVY_PER_HOUR": ("global", "heavy", "h"),
+    "AI_SPEND_GLOBAL_HEAVY_PER_DAY": ("global", "heavy", "d"),
+    "AI_SPEND_GLOBAL_LIGHT_PER_DAY": ("global", "light", "d"),
+}
+
+
+def _source_defaults():
+    """{env name: default} from the `_env_limit(...)` calls in LIMITS."""
+    tree = ast.parse(Path(inspect.getsourcefile(ai_spend_guard)).read_text(encoding="utf-8"))
+    found = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "_env_limit"):
+            found[node.args[0].value] = node.args[1].value
+    return found
+
+
+def _source_default_limits():
+    return {_ENV_TO_KEY[name]: value for name, value in _source_defaults().items()}
+
+
+def _limits_in_fresh_process(env_overrides):
+    """LIMITS as a fresh interpreter computes them from the given environment."""
+    import os
+    import subprocess
+    import sys
+    env = {k: v for k, v in os.environ.items() if k not in _ENV_TO_KEY}
+    env.update(env_overrides)
+    code = ("import json; from app.services import ai_spend_guard as g; "
+            "print(json.dumps({'|'.join(k): v for k, v in g.LIMITS.items()}))")
+    out = subprocess.run([sys.executable, "-c", code], env=env, check=True,
+                         capture_output=True, text=True,
+                         cwd=Path(__file__).resolve().parents[1]).stdout
+    return {tuple(k.split("|")): v for k, v in json.loads(out.strip().splitlines()[-1]).items()}
+
+
+def test_light_defaults_are_the_launch_bridge_ceilings_and_heavy_is_unchanged():
+    assert _source_defaults() == {
+        "AI_SPEND_USER_HEAVY_PER_DAY": 200,
+        "AI_SPEND_USER_LIGHT_PER_DAY": 100,
+        "AI_SPEND_GLOBAL_HEAVY_PER_HOUR": 300,
+        "AI_SPEND_GLOBAL_HEAVY_PER_DAY": 1500,
+        "AI_SPEND_GLOBAL_LIGHT_PER_DAY": 500,
+    }
+
+
+def test_unset_env_applies_the_defaults():
+    limits = _limits_in_fresh_process({})
+    assert limits == _source_default_limits()
+    assert limits[("user", "light", "d")] == 100
+    assert limits[("global", "light", "d")] == 500
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("37", 37),       # explicit value overrides the default
+    ("400", 400),     # the old default is still reachable by env
+    ("0", 0),         # 0 disables that one ceiling (documented semantics)
+    ("junk", None),   # unparsable -> default
+    ("-5", None),     # negative -> default
+    ("", None),       # empty -> default
+])
+def test_env_still_overrides_the_light_defaults(raw, expected):
+    limits = _limits_in_fresh_process({"AI_SPEND_USER_LIGHT_PER_DAY": raw,
+                                       "AI_SPEND_GLOBAL_LIGHT_PER_DAY": raw})
+    assert limits[("user", "light", "d")] == (100 if expected is None else expected)
+    assert limits[("global", "light", "d")] == (500 if expected is None else expected)
+    # heavy untouched by the light keys
+    assert limits[("user", "heavy", "d")] == 200
+    assert limits[("global", "heavy", "h")] == 300
+    assert limits[("global", "heavy", "d")] == 1500
+
+
+@pytest.fixture(params=["redis", "local"])
+def shipped_limits(request, monkeypatch):
+    monkeypatch.setattr(ai_spend_guard, "LIMITS", _source_default_limits())
+    if request.param == "redis":
+        _use_redis(monkeypatch)
+
+
+def test_account_light_attempt_100_is_admitted_and_101_is_refused(shipped_limits):
+    for _ in range(100):
+        _charge_as(7, "openai")
+    with pytest.raises(AISpendLimitExceeded) as exc:
+        _charge_as(7, "openai")
+    assert (exc.value.scope, exc.value.provider_class) == ("user", "light")
+    _charge_as(7, "bedrock")  # heavy allowance is separate
+
+
+def test_global_light_attempt_500_is_admitted_and_501_is_refused_across_accounts(
+        shipped_limits):
+    # Five accounts, each exactly at its own 100 ceiling, fill the global 500;
+    # a sixth, fresh account cannot add attempt 501.
+    for subject in range(5):
+        for _ in range(100):
+            _charge_as(subject, "openai")
+    with pytest.raises(AISpendLimitExceeded) as exc:
+        _charge_as(99, "openai")
+    assert (exc.value.scope, exc.value.provider_class) == ("global", "light")
+    with pytest.raises(AISpendLimitExceeded):
+        ai_spend_guard.charge("openai")  # unattributed calls too
+
+
+def test_many_accounts_cannot_bypass_the_global_light_ceiling(shipped_limits):
+    admitted = 0
+    for subject in range(1000):  # 1000 accounts, one attempt each
+        try:
+            _charge_as(subject, "openai")
+            admitted += 1
+        except AISpendLimitExceeded:
+            pass
+    assert admitted == 500
+
+
+def test_concurrent_light_callers_never_exceed_the_account_ceiling(monkeypatch):
+    fake = _use_redis(monkeypatch)
+    monkeypatch.setattr(ai_spend_guard, "LIMITS", _source_default_limits())
+    admitted, refused = _race(64, lambda i: [_charge_as(7, "openai") for _ in range(3)])
+    total = sum(v for k, v in fake.data.items() if ":user:7:light:d:" in k)
+    assert total == 100  # 192 attempts raced; exactly the ceiling admitted
+    assert refused
+
+
+def test_premium_is_entitled_but_does_not_bypass_the_light_ceiling(
+        app, providers, make_user, monkeypatch):
+    from flask_login import login_user
+    from app.services import premium
+
+    monkeypatch.setattr(ai_spend_guard, "LIMITS", _source_default_limits())
+    user = make_user("premium_light", is_premium=True)
+    # Product entitlement is unchanged: premium is not quota-limited.
+    assert premium.reserve_ai_quota(user, "chat", premium.FREE_WEEKLY_AI_CHATS) is True
+    with app.test_request_context("/"):
+        login_user(user)
+        assert ai_spend_guard.current_subject() == user.id
+        for _ in range(100):
+            ai._openai_chat([{"role": "user", "content": "hi"}])
+        with pytest.raises(AISpendLimitExceeded):
+            ai._openai_chat([{"role": "user", "content": "hi"}])
+    # Refused before the provider: no 101st call, no fallback, no retry.
+    assert providers.openai.calls == 100
+    assert providers.bedrock.calls == 0
