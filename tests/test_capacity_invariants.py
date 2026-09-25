@@ -162,7 +162,7 @@ def test_nested_model_permits_are_not_subtracted_twice():
     """
     with ai_gate.blocking_concurrency_slot(wait_seconds=0):
         outer = ai_gate.capacity_snapshot()
-        with ai_gate.model_concurrency_slot("test", wait_seconds=0):
+        with ai_gate.model_concurrency_slot("test", wait_seconds=0, spend_class="heavy"):
             inner = ai_gate.capacity_snapshot()
             assert inner["model_active"] == outer["model_active"] + 1
             assert inner["thread_reserve"] == outer["thread_reserve"]
@@ -177,7 +177,7 @@ def test_permits_return_to_baseline_after_success_failure_or_cancellation(
     before = ai_gate.capacity_snapshot()
 
     def _run():
-        with ai_gate.model_concurrency_slot("test", wait_seconds=0):
+        with ai_gate.model_concurrency_slot("test", wait_seconds=0, spend_class="heavy"):
             if failure is not None:
                 raise failure()
 
@@ -446,7 +446,7 @@ def test_saturation_and_provider_failure_stay_distinguishable():
     taken = _drain_all(ai_gate._model_slots)
     try:
         with pytest.raises(ai_gate.BlockingConcurrencyLimit):
-            with ai_gate.model_concurrency_slot("test", wait_seconds=0):
+            with ai_gate.model_concurrency_slot("test", wait_seconds=0, spend_class="heavy"):
                 pass
     finally:
         _release(ai_gate._model_slots, taken)
@@ -455,7 +455,7 @@ def test_saturation_and_provider_failure_stay_distinguishable():
         pass
 
     with pytest.raises(_ProviderTimeout):
-        with ai_gate.model_concurrency_slot("test", wait_seconds=0):
+        with ai_gate.model_concurrency_slot("test", wait_seconds=0, spend_class="heavy"):
             raise _ProviderTimeout("upstream read timeout")
 
 

@@ -250,16 +250,15 @@ def _fake_bedrock(monkeypatch, responses):
 
 
 def _install_model_slot_probe(monkeypatch):
-    state = {"active": False, "entries": 0, "providers": []}
+    state = {"active": False, "entries": 0, "providers": [], "classes": []}
 
     @contextmanager
-    def slot(provider="unknown", *, deadline=None):
+    def slot(provider="unknown", *, deadline=None, spend_class=None):
         assert state["active"] is False
         state["active"] = True
         state["entries"] += 1
-        # Sağlayıcı etiketi metrik BOYUTUDUR: yanlış etiket, hata oranını yanlış
-        # sağlayıcıya yazar ve bir Bedrock kesintisini OpenAI arızası gibi gösterir.
         state["providers"].append(provider)
+        state["classes"].append(spend_class)
         try:
             yield
         finally:
@@ -276,21 +275,21 @@ def test_openai_coach_provider_call_uses_model_slot(app, monkeypatch):
 
     def create(**kwargs):
         assert state["active"] is True
-        message = SimpleNamespace(content="OPENAI", tool_calls=[])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="HAIKU")])
 
     monkeypatch.setattr(
-        ai_coach,
-        "openai_client",
-        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
-    )
+        ai_coach, "light_client",
+        SimpleNamespace(messages=SimpleNamespace(create=create)))
 
     with app.app_context():
         result = ai_coach._run_coach_conversation_openai(1, "x", "", [])
 
-    assert result == "OPENAI"
+    assert result == "HAIKU"
     assert state["entries"] == 1
-    assert state["providers"] == ["openai"]
+    assert state["providers"] == ["bedrock"]
+    assert state["classes"] == ["light"]
 
 
 def test_bedrock_coach_provider_call_uses_model_slot(app, monkeypatch):
@@ -361,7 +360,7 @@ def test_bedrock_first_call_error_falls_back_to_openai(app, monkeypatch, caplog)
     # sebebi atıyordu ve %100 403 alan bir sağlayıcı tek bir zaman aşımından
     # ayırt edilemiyordu (tests/test_coach_provider_truthfulness.py).
     line = next(r.getMessage() for r in caplog.records
-                if "fallback_provider=openai" in r.getMessage())
+                if "fallback_provider=haiku" in r.getMessage())
     assert "provider=bedrock" in line
     assert "exception=RuntimeError" in line
     assert "category=" in line

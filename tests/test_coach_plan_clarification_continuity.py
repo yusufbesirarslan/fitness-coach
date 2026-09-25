@@ -7,6 +7,7 @@ assertions are on the plan row, journal, proposals and workout logs.
 import json
 import logging
 import time
+from types import SimpleNamespace
 
 import pytest
 from flask import session as flask_session
@@ -76,7 +77,7 @@ def _no_tool_provider_turn(app, user_id, message, provider_text, monkeypatch):
     """Drive the real provider no-tool boundary for one Coach request."""
     provider = _ScriptedLLM([_llm_msg(provider_text)])
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
-    monkeypatch.setattr(ai_coach, "openai_client", provider)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=provider))
     with app.test_request_context("/ask", method="POST"):
         reply = ai_coach._run_coach_conversation(
             user_id, message, "", client_history=[], language="en")
@@ -421,7 +422,7 @@ def test_disabling_no_tool_recovery_reproduces_original_missing_both_failure(
             "should I add for Walking Lunge?"),
     ])
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
-    monkeypatch.setattr(ai_coach, "openai_client", provider)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=provider))
     monkeypatch.setattr(
         coach_confirmation,
         "recover_no_tool_partial_add",
@@ -734,7 +735,7 @@ def test_route_replace_without_sets_reps_does_not_ask_for_them(
     before = _snapshot(user.id)
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
-        monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([
+        monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([
             _llm_msg(tool_calls=[_tool_call(
                 "replace_training_plan_exercise",
                 json.dumps({
@@ -743,7 +744,7 @@ def test_route_replace_without_sets_reps_does_not_ask_for_them(
                     "replacement": "Dumbbell Curl",
                 }))]),
             _llm_msg("Would you like me to replace Hammer Curl?"),
-        ]))
+        ])))
         reply = ai_coach._run_coach_conversation(
             user.id,
             "Replace Hammer Curl with Dumbbell Curl in my Friday workout.",

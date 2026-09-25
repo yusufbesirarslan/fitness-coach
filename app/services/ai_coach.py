@@ -18,8 +18,13 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import (AI_COACH_TURN_TIMEOUT_SECONDS, BEDROCK_ENABLED,
                         BEDROCK_CALL_TIMEOUT_SECONDS, BEDROCK_MAX_TOKENS,
                         BEDROCK_MODEL,
-                        BEDROCK_PROMPT_CACHE, OPENAI_MODEL)
-from app.extensions import bedrock_client, db, openai_client
+                        BEDROCK_PROMPT_CACHE)
+from app.extensions import bedrock_client, db
+
+# Same Bedrock identity as Sonnet. A separate name so tests can script the
+# light tool loop without replacing the heavy client.
+light_client = bedrock_client
+from app.services.ai_model_policy import haiku_policy, sonnet_policy
 from app.models import (WORKOUT_COMPLETION_MARKER, MealLog, PendingAction,
                         PumpCheck, User, UserSession, WaterLog, WeeklyLog,
                         WorkoutLog)
@@ -1065,7 +1070,7 @@ def log_provider_fallback(logger, prefix, fallback):
     """
     try:
         logger.warning(
-            "%s provider=bedrock fallback_provider=openai "
+            "%s provider=bedrock fallback_provider=haiku "
             "exception=%s category=%s request_id=%s",
             prefix,
             getattr(fallback, "exception_class", "none"),
@@ -1126,13 +1131,13 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
         except _BedrockFallback as e:
             log_provider_fallback(
                 current_app.logger,
-                "[COACH] Bedrock first call failed; trying OpenAI fallback",
+                "[COACH] Bedrock first call failed; trying Haiku fallback",
                 e)
             final_text = None
     if final_text is None:
         if _remaining_coach_turn_seconds(deadline) <= 0:
             current_app.logger.warning(
-                "[COACH] turn budget exhausted before OpenAI fallback")
+                "[COACH] turn budget exhausted before Haiku fallback")
             final_text = _coach_tool_fallback(language)
         else:
             final_text = _run_coach_conversation_openai(
@@ -1158,94 +1163,19 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
 
 def _run_coach_conversation_openai(user_id, question, context, history,
                                    language="tr", deadline=None):
-    """OpenAI function-calling döngüsü: system → (gerekirse araç çağrıları) → final metin.
-    Geçmişi session'a YAZMAZ (çağıran yönlendirici halleder)."""
-    if deadline is None:
-        deadline = _coach_turn_deadline()
-    messages = prompt_builder.build_openai_messages(
-        language, context, history, question,
-        adaptive_plan_context=_adaptive_plan_context_enabled(),
-        plan_mutation_tools=coach_plan_tools.plan_mutation_tools_enabled())
+    """Light coach tool loop: Claude Haiku 4.5 on Bedrock EU Geo.
 
-    # History sits between the leading system message(s) and the question; it
-    # is the only part the input budget may drop (oldest first).
-    history_start = sum(1 for m in messages if m.get("role") == "system")
-    history_len = max(0, len(messages) - history_start - 1)
-
-    final_text = ""
-    for tool_round in range(1, _COACH_TOOL_LOOP_CAP + 1):
-        remaining = _remaining_coach_turn_seconds(deadline)
-        if remaining <= 0:
-            current_app.logger.warning("[COACH] OpenAI turn budget exhausted")
-            return _coach_tool_fallback(language)
-        try:
-            payload = dict(
-                model=OPENAI_MODEL,
-                messages=messages,
-                tools=_openai_tools_for_call(user_id),
-                tool_choice="auto",
-                max_tokens=700,
-                temperature=0.6,
-            )
-            with ai_provider_call.admit(
-                    feature="coach", provider="openai", payload=payload,
-                    deadline=deadline, tool_round=tool_round,
-                    reduce=ai_input_budget.history_reducer(
-                        history_start, history_len)) as call:
-                remaining = _remaining_coach_turn_seconds(deadline)
-                if remaining <= 0:
-                    current_app.logger.warning(
-                        "[COACH] OpenAI turn budget exhausted after model gate")
-                    return _coach_tool_fallback(language)
-                resp = call.create(openai_client.chat.completions.create,
-                                   timeout=min(30.0, remaining))
-        except Exception as e:
-            if _remaining_coach_turn_seconds(deadline) <= 0:
-                current_app.logger.warning(
-                    "[COACH] OpenAI turn budget exhausted during model gate")
-                return _coach_tool_fallback(language)
-            current_app.logger.warning("[COACH] OpenAI çağrısı başarısız: %s", type(e).__name__)
-            # Bu tur bir plan aracı koşturduysa "bir şeyler ters gitti" de aynı
-            # yalandır: değişiklik commit'lidir. Aksi halde metin AYNEN eskisi.
-            return _coach_tool_fallback(language, "error")
-        if not resp.choices:
-            # İçerik filtresi boş choices döndürebilir; ham IndexError yerine
-            # boş final_text ile çık (çağıran yönlendirici dostça mesaja düşer).
-            current_app.logger.warning("[COACH] OpenAI boş choices döndürdü")
-            break
-        msg = resp.choices[0].message
-        tool_calls = msg.tool_calls or []
-
-        if not tool_calls:
-            final_text = coach_confirmation.grounded_provider_reply(
-                user_id, language, msg.content or "")
-            break
-
-        # Araç isteyen assistant mesajını (tool_calls ile) sıraya ekle.
-        messages.append({
-            "role": "assistant",
-            "content": msg.content or "",
-            "tool_calls": [
-                {"id": tc.id, "type": "function",
-                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                for tc in tool_calls
-            ],
-        })
-        # Her tool_call_id için tam olarak bir 'tool' yanıtı ekle (API zorunluluğu).
-        payloads = []
-        for tc in tool_calls:
-            result = _dispatch_coach_tool(user_id, tc.function.name, tc.function.arguments)
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
-            parsed = _tool_payload(result)
-            if parsed is not None:
-                payloads.append(parsed)
-        owned = coach_confirmation.reply_after_tools(user_id, language, payloads)
-        if owned:
-            return owned
-        # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
-    else:
-        final_text = _coach_tool_fallback(language)
-    return final_text
+    The name is the historical fallback hook tests patch. There is no direct
+    OpenAI call. A Haiku failure before tools returns the soft error; it does
+    not call another provider.
+    """
+    try:
+        return _run_coach_conversation_bedrock(
+            user_id, question, context, history, language, deadline=deadline,
+            policy=haiku_policy())
+    except _BedrockFallback:
+        current_app.logger.warning("[COACH] Haiku fallback failed before tools")
+        return _coach_tool_fallback(language, "error")
 
 
 def _adaptive_plan_context_enabled():
@@ -1295,7 +1225,7 @@ def _first_text_block(resp):
 
 
 def _run_coach_conversation_bedrock(user_id, question, context, history,
-                                    language="tr", deadline=None):
+                                    language="tr", deadline=None, policy=None):
     """Bedrock (Anthropic Messages API) araç-kullanım döngüsü. stop_reason=='tool_use'
     olduğu sürece araçları çalıştırır, tool_result'ları geri besler ve modelin final
     metnine (stop_reason=='end_turn') ulaşana dek zincirler (güvenli üst sınır).
@@ -1305,6 +1235,8 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
     sağlayıcı DEĞİŞTİRİLMEZ — yumuşak hata metni döner."""
     if deadline is None:
         deadline = _coach_turn_deadline()
+    policy = policy or sonnet_policy()
+    client = light_client if policy.logical_model == "haiku45" else bedrock_client
     system = _build_bedrock_system(context, language)
     tools = _anthropic_tools_for_call(user_id)
     convo = prompt_builder.build_anthropic_messages(history, question)
@@ -1324,7 +1256,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            payload = dict(model=BEDROCK_MODEL, max_tokens=max_tokens,
+            payload = dict(model=policy.model_id, max_tokens=max_tokens,
                            system=system, messages=convo, tools=tools)
             with ai_provider_call.admit(
                     feature="coach", provider="bedrock", payload=payload,
@@ -1336,7 +1268,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                         "[COACH][Bedrock] turn budget exhausted after model gate")
                     return _coach_tool_fallback(language)
                 resp = call.create(
-                    bedrock_client.messages.create,
+                    client.messages.create,
                     timeout=min(BEDROCK_CALL_TIMEOUT_SECONDS, remaining))
 
             if getattr(resp, "stop_reason", None) != "tool_use":

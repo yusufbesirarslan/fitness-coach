@@ -10,6 +10,7 @@ scripted only where the test must prove the LLM is skipped or cannot restage.
     python -m pytest tests/test_coach_confirmation_lifecycle.py tests/test_plan_confirmation_parser.py -v
 """
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -70,7 +71,7 @@ def test_workout_log_proceed_executes_once_and_clears_pending(
             '{"exercise_name": "Lateral Raise", "sets": 3, "reps": 10}')]),
         _llm_msg("Would you like to confirm this workout log?"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
 
     with app.test_request_context("/ask", method="POST"):
@@ -96,7 +97,7 @@ def test_workout_log_proceed_executes_once_and_clears_pending(
 
 
 def test_workout_log_yes_executes_once(app, auth_user, monkeypatch):
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([])))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -114,7 +115,7 @@ def test_workout_log_yes_executes_once(app, auth_user, monkeypatch):
 
 def test_workout_log_no_cancels_without_persistence(
         app, auth_user, monkeypatch):
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([])))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -135,7 +136,7 @@ def test_ambiguous_reply_does_not_execute_or_restage(
             '{"exercise_name": "Lateral Raise", "sets": 3, "reps": 10}')]),
         _llm_msg("Would you like to confirm this workout log?"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -161,7 +162,7 @@ def test_duplicate_proceed_does_not_log_twice(app, auth_user, monkeypatch):
         _llm_msg(tool_calls=[_tool_call("confirm_and_commit_workout_log")]),
         _llm_msg("logged again"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", restage)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=restage))
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
         _stage_workout(auth_user)
@@ -184,7 +185,7 @@ def test_standalone_yes_does_not_execute_stale_or_new_log(
             '{"exercise_name": "Ghost Lift", "sets": 3, "reps": 10}')]),
         _llm_msg("Would you like to confirm this workout log?"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         reply = ai_coach._run_coach_conversation(
@@ -195,7 +196,7 @@ def test_standalone_yes_does_not_execute_stale_or_new_log(
         names = []
         for call in llm.calls:
             names.extend(
-                t["function"]["name"] for t in call.get("tools") or [])
+                t.get("name") for t in call.get("tools") or [])
         assert "stage_workout_log" not in names
         assert "fetch_nutrition_and_stage_log" not in names
 
@@ -205,7 +206,7 @@ def test_standalone_yes_does_not_execute_stale_or_new_log(
 # ---------------------------------------------------------------------------
 
 def test_plan_mutation_yes_applies_once(app, planned_user, tools_on, monkeypatch):
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([])))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -228,7 +229,7 @@ def test_plan_mutation_yes_applies_once(app, planned_user, tools_on, monkeypatch
 
 def test_plan_mutation_proceed_applies_once(
         app, planned_user, tools_on, monkeypatch):
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([])))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -244,7 +245,7 @@ def test_plan_mutation_proceed_applies_once(
 
 def test_plan_add_with_session_impact_yes_adds_once(
         app, planned_user, tools_on, monkeypatch):
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([])))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     from app.services.today_facts import get_active_plan
     plan = get_active_plan(planned_user.id)
@@ -283,7 +284,7 @@ def test_plan_pending_yes_does_not_stage_a_workout_log(
             '{"exercise_name": "Lateral Raise", "sets": 3, "reps": 10}')]),
         _llm_msg("Would you like to confirm this workout log?"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -300,7 +301,7 @@ def test_plan_pending_yes_does_not_stage_a_workout_log(
 
 def test_cross_action_isolation_does_not_resolve_the_wrong_pending(
         app, planned_user, tools_on, monkeypatch):
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([])))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -407,7 +408,7 @@ def test_streaming_proceed_skips_provider(app, auth_user, monkeypatch):
     llm = _ScriptedLLM([
         _llm_msg("Would you like to confirm this workout log?"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -435,7 +436,7 @@ def test_ask_stream_route_proceed_returns_success_after_memory_commit(
     """
     from tests.test_coach_routes import _parse_sse
 
-    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=_ScriptedLLM([])))
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app)
@@ -840,7 +841,7 @@ def test_apply_now_later_yes_does_not_mutate_or_stage_workout(
         ]),
         _llm_msg("I've added Ghost Raise. Confirm?"),
     ])
-    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    monkeypatch.setattr(ai_coach, "light_client", SimpleNamespace(messages=llm))
     with app.test_request_context("/ask", method="POST"):
         ai_coach._run_coach_conversation(
             planned_user.id, "yes", "", client_history=[], language="en")
@@ -854,6 +855,6 @@ def test_apply_now_later_yes_does_not_mutate_or_stage_workout(
         published = []
         for item in llm.calls:
             published.extend(
-                t["function"]["name"] for t in item.get("tools") or [])
+                t.get("name") for t in item.get("tools") or [])
         assert "add_training_plan_exercise" not in published
         assert "stage_workout_log" not in published

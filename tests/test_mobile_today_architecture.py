@@ -259,7 +259,7 @@ def test_today_succeeds_while_every_provider_client_would_explode(
             raise AssertionError(
                 f"GET /api/v1/today invoked a provider client ({name})")
 
-    monkeypatch.setattr(extensions, "openai_client", _Detonator())
+    monkeypatch.setattr(extensions, "openai_client", _Detonator(), raising=False)
     monkeypatch.setattr(extensions, "bedrock_client", _Detonator())
 
     user = make_user("today-arch")

@@ -12,7 +12,6 @@ Authlib==1.7.2
 SQLAlchemy==2.0.51
 Werkzeug==3.1.8
 gunicorn==26.0.0
-openai==2.50.0
 anthropic[bedrock]==0.120.2
 psycopg2-binary==2.9.12
 python-dotenv==1.2.2

@@ -77,11 +77,12 @@ flag is on. Full design: [ADAPTIVE_COACHING.md](ADAPTIVE_COACHING.md) §§19-30.
 
 ## Providers
 
-- **Primary heavy path:** Bedrock / Claude Sonnet 4.5 via the AnthropicBedrock SDK
-  (`BEDROCK_ENABLED=1`). Credentials come from the EC2 IAM instance profile — no
-  keys in code or `.env`.
-- **Fallback / light path:** OpenAI `gpt-4o-mini`.
-- **Provider-switch rule (B-rule):** Bedrock→OpenAI only *before* the first delta
+- **Heavy:** Claude Sonnet 4.5 on Amazon Bedrock (`BEDROCK_MODEL`, global profile).
+  Spend class `heavy`. Credentials come from the EC2 IAM instance profile.
+- **Light:** Claude Haiku 4.5 EU Geo on the same Bedrock client
+  (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`). Spend class `light`.
+  Transport does not select the class. There is no direct OpenAI runtime path.
+- **Provider-switch rule (B-rule):** Sonnet→Haiku only *before* the first delta
   reaches the client *and* before any tool side effect. See [STREAMING.md](STREAMING.md).
   Since PR3 this also guards a durable plan write: once a plan tool has run the
   turn degrades to a soft error instead of replaying against a plan that has

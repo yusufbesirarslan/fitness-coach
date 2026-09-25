@@ -126,7 +126,7 @@ def _install_advancing_model_slot(
     deadlines = []
 
     @contextmanager
-    def advancing_slot(_provider="unknown", *, deadline=None):
+    def advancing_slot(_provider="unknown", *, deadline=None, spend_class=None):
         deadlines.append(deadline)
         clock.now += advance_seconds
         yield
@@ -275,7 +275,7 @@ def test_stream_bedrock_releases_model_slot_before_tool_dispatch(
     monkeypatch.setattr(ai_gate, '_model_slots', threading.BoundedSemaphore(1))
 
     def nested_slot_tool(*args, **kwargs):
-        with ai_gate.model_concurrency_slot():
+        with ai_gate.model_concurrency_slot(spend_class="heavy"):
             return 'araç sonucu'
 
     monkeypatch.setattr(ai_coach, '_dispatch_coach_tool', nested_slot_tool)
@@ -401,15 +401,13 @@ def test_stream_bedrock_fallback_keeps_remaining_budget_for_openai(
 
     def create(**kwargs):
         openai_calls.append(kwargs)
-        message = SimpleNamespace(content="OpenAI answer", tool_calls=[])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="Haiku answer")])
 
     monkeypatch.setattr(
-        ai_coach,
-        "openai_client",
-        SimpleNamespace(chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create))),
-    )
+        ai_coach, "light_client",
+        SimpleNamespace(messages=SimpleNamespace(create=create)))
 
     with app.app_context():
         events = _collect(1, "question", language="en")
@@ -418,9 +416,9 @@ def test_stream_bedrock_fallback_keeps_remaining_budget_for_openai(
     assert openai_calls[0]["timeout"] == pytest.approx(7.5)
     assert events[-1] == {
         "type": "done",
-        "text": "OpenAI answer",
+        "text": "Haiku answer",
         "usage": None,
-        "provider": "openai",
+        "provider": "haiku",
     }
 
 
@@ -474,8 +472,9 @@ def test_stream_openai_timeout_is_recomputed_after_model_gate_wait(
 
     def create(**kwargs):
         calls.append(kwargs)
-        message = SimpleNamespace(content="answer", tool_calls=[])
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="answer")])
 
     monkeypatch.setattr(
         ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
@@ -483,11 +482,8 @@ def test_stream_openai_timeout_is_recomputed_after_model_gate_wait(
     deadlines = _install_advancing_model_slot(
         monkeypatch, ai_coach, clock, 12.0)
     monkeypatch.setattr(
-        ai_coach,
-        "openai_client",
-        SimpleNamespace(chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create))),
-    )
+        ai_coach, "light_client",
+        SimpleNamespace(messages=SimpleNamespace(create=create)))
 
     with app.app_context():
         events = list(ai_stream._stream_openai_fallback(
@@ -497,7 +493,7 @@ def test_stream_openai_timeout_is_recomputed_after_model_gate_wait(
     assert deadlines == [40.0]
     assert events[-1] == {
         "type": "done", "text": "answer", "usage": None,
-        "provider": "openai",
+        "provider": "haiku",
     }
 
 
@@ -516,11 +512,8 @@ def test_stream_openai_gate_wait_past_deadline_skips_provider(
     deadlines = _install_advancing_model_slot(
         monkeypatch, ai_coach, clock, 36.0)
     monkeypatch.setattr(
-        ai_coach,
-        "openai_client",
-        SimpleNamespace(chat=SimpleNamespace(
-            completions=SimpleNamespace(create=create))),
-    )
+        ai_coach, "light_client",
+        SimpleNamespace(messages=SimpleNamespace(create=create)))
 
     with app.app_context():
         events = list(ai_stream._stream_openai_fallback(
@@ -532,7 +525,7 @@ def test_stream_openai_gate_wait_past_deadline_skips_provider(
         "type": "done",
         "text": ai_coach._COACH_FALLBACKS["en"]["tool"],
         "usage": None,
-        "provider": "openai",
+        "provider": "haiku",
     }
 
 
@@ -561,7 +554,7 @@ def test_stream_exhausted_fallback_skips_openai_and_emits_localized_done(
         "type": "done",
         "text": ai_coach._COACH_FALLBACKS["en"]["tool"],
         "usage": None,
-        "provider": "openai",
+        "provider": "haiku",
     }
 
 
@@ -579,7 +572,7 @@ def test_bedrock_error_before_first_delta_falls_back_to_openai(
     assert "".join(e["text"] for e in events if e["type"] == "delta") == "openai cevabı"
     done = events[-1]
     assert done["type"] == "done"
-    assert done["provider"] == "openai"
+    assert done["provider"] == "haiku"
 
 
 def test_bedrock_error_after_first_delta_emits_error_no_fallback(
@@ -599,7 +592,7 @@ def test_bedrock_error_after_first_delta_emits_error_no_fallback(
         e.get("text") or "" for e in events if e.get("type") == "delta")
     assert called["openai"] is True
     assert events[-1]["type"] == "done"
-    assert events[-1]["provider"] == "openai"
+    assert events[-1]["provider"] == "haiku"
     assert events[-1]["text"] == "X"
 
 
@@ -693,7 +686,7 @@ def test_bedrock_empty_answer_no_tools_falls_back(app, bedrock_on, monkeypatch):
     with app.app_context():
         events = _collect(1, "soru")
 
-    assert events[-1]["provider"] == "openai"
+    assert events[-1]["provider"] == "haiku"
     assert events[-1]["text"] == "openai cevabı"
 
 
@@ -709,7 +702,7 @@ def test_disabled_bedrock_uses_openai_fallback(app, monkeypatch):
 
     assert "".join(e["text"] for e in events if e["type"] == "delta") == "openai cevabı"
     assert events[-1] == {"type": "done", "text": "openai cevabı",
-                          "usage": None, "provider": "openai"}
+                          "usage": None, "provider": "haiku"}
 
 
 def test_openai_fallback_chunks_long_text(app, monkeypatch):
@@ -1014,7 +1007,8 @@ def test_stream_bedrock_turn_cancels_producer_on_consumer_close():
 
     # A real (minimal) payload: an empty one is refused by the input budget.
     gen = ai_stream._stream_bedrock_turn(
-        client, {"model": "m", "max_tokens": 10,
+        client, {"model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                 "max_tokens": 10,
                  "messages": [{"role": "user", "content": "x"}]},
         deadline=float("inf"))
     assert next(gen) == {"kind": "delta", "text": "ilk"}

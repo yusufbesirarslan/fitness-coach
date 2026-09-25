@@ -57,9 +57,12 @@ if not _logger.handlers:
 
 
 def normalize_model(provider, model):
+    """Telemetry name only. This does not choose the spend class."""
     name = str(model or "").lower()
-    if provider == "bedrock" and "claude-sonnet-4-5" in name:
+    if "claude-sonnet-4-5" in name or "claude-sonnet-4.5" in name:
         return "claude-sonnet-4-5"
+    if "claude-haiku-4-5" in name or "claude-haiku-4.5" in name:
+        return "claude-haiku-4-5"
     if provider == "openai" and name.startswith("gpt-4o-mini"):
         return "gpt-4o-mini"
     return "other"
@@ -150,19 +153,24 @@ def estimated_cost_usd(provider, model_norm, usage):
 
 def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
          subject_id=None, usage=None, usage_source=None, input_bound=None,
-         image_units=0, output_cap=None):
+         image_units=0, output_cap=None, spend_class=None, billing_provider=None):
     """Write one `[AI-USAGE]` event. Never raises."""
     try:
         feature = normalize_feature(feature)
         provider = provider if provider in ("bedrock", "openai") else "other"
+        billing = billing_provider if billing_provider in ("bedrock", "openai") else provider
+        if spend_class not in ("heavy", "light"):
+            spend_class = None
         outcome = outcome if outcome in OUTCOMES else "provider_error"
-        model_norm = normalize_model(provider, model)
+        model_norm = normalize_model(billing, model)
         usage = usage or {}
         event = {
             "event": "ai_usage",
             "ts": round(time.time(), 3),
             "request_id": current_request_id(),
-            "provider": provider,
+            "provider": billing,
+            "billing_provider": billing,
+            "spend_class": spend_class,
             "model": model_norm,
             "feature": feature,
             "subject_id": subject_id,
@@ -179,11 +187,11 @@ def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
             "output_cap": output_cap,
         }
         if outcome in PROVIDER_ATTEMPT_OUTCOMES:
-            cost = estimated_cost_usd(provider, model_norm, usage)
+            cost = estimated_cost_usd(billing, model_norm, usage)
             if cost is not None:
                 event["estimated_cost_usd"] = cost
                 event["pricing_version"] = PRICING_VERSION
-                event["pricing_model"] = f"{provider}:{model_norm}"
+                event["pricing_model"] = f"{billing}:{model_norm}"
             if (usage_source == "provider" and input_bound is not None
                     and usage.get("input_tokens") is not None
                     and (usage["input_tokens"] + (usage.get("cache_write_tokens") or 0)

@@ -20,7 +20,8 @@ This module is the emergency boundary, not a product quota:
   `ai_gate.model_concurrency_slot()` (menu OCR: charged without the permit),
   so a rejected call never reaches the provider — including tool-loop rounds,
   recovery retries, provider-attempt retries and fan-out batches.
-- Two classes: `heavy` (Bedrock/Sonnet) and `light` (OpenAI gpt-4o-mini).
+- Two classes, from the explicit model policy (`ai_model_policy`), never from
+  the transport name: `heavy` is Sonnet, `light` is Haiku. Both are Bedrock.
   Per-account daily ceilings bound one account; global hourly/daily ceilings
   bound the sum over all accounts (multi-account abuse, runaway loops, bugs).
 - Admission is race-safe across threads, processes and hosts: the Redis
@@ -52,7 +53,7 @@ from app.services.ai_gate import BlockingConcurrencyLimit
 
 _log = logging.getLogger(__name__)
 
-HEAVY_PROVIDERS = frozenset({"bedrock", "bedrock-stream"})
+SPEND_CLASSES = frozenset({"heavy", "light"})
 
 _KEY_PREFIX = "ai:spend:v1"
 _WINDOW_SECONDS = {"h": 3600, "d": 86400}
@@ -72,15 +73,18 @@ def _env_limit(name, default):
 ENABLED = os.getenv("AI_SPEND_GUARD_ENABLED", "1") != "0"
 
 # (scope, class, window) -> maximum admitted provider calls per window.
-# Defaults sit far above observed production use (30 days to 2026-09-23: 197
-# Bedrock calls in total, busiest hour 40, busiest single account 30 coach
-# turns in a day) so no normal account, free or premium, meets them.
+# Heavy defaults sit above observed production use (30 days to 2026-09-23:
+# 197 Bedrock calls, busiest hour 40, busiest account 30 coach turns/day).
+# Light defaults are the Haiku 4.5 EU launch ceilings. The previous 400/5000
+# pair was calibrated for gpt-4o-mini and is not safe at Haiku list price.
+# Production .env does not set the light keys, so these defaults are what a
+# deploy applies. Do not raise them back without a new dollar envelope.
 LIMITS = {
     ("user", "heavy", "d"): _env_limit("AI_SPEND_USER_HEAVY_PER_DAY", 200),
-    ("user", "light", "d"): _env_limit("AI_SPEND_USER_LIGHT_PER_DAY", 400),
+    ("user", "light", "d"): _env_limit("AI_SPEND_USER_LIGHT_PER_DAY", 100),
     ("global", "heavy", "h"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_HOUR", 300),
     ("global", "heavy", "d"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_DAY", 1500),
-    ("global", "light", "d"): _env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 5000),
+    ("global", "light", "d"): _env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 500),
 }
 
 
@@ -95,6 +99,17 @@ class AISpendLimitExceeded(BlockingConcurrencyLimit):
         super().__init__("AI capacity temporarily unavailable")
         self.scope = scope
         self.provider_class = provider_class
+
+
+class UnknownModelPolicy(AISpendLimitExceeded):
+    """The model id is not in the explicit policy. Nothing was charged.
+
+    Subclass of the spend refusal so a heavy-path failure does not fall
+    through to another model, and a retry loop does not try again.
+    """
+
+    def __init__(self):
+        super().__init__("global", "unclassified")
 
 
 # ── Subject (whose budget a call spends) ────────────────────────────────────
@@ -153,10 +168,6 @@ def bind_subject(fn):
 
 
 # ── Counters ────────────────────────────────────────────────────────────────
-
-def provider_class(provider):
-    return "heavy" if str(provider) in HEAVY_PROVIDERS else "light"
-
 
 def _bucket(now, window):
     return int(now // _WINDOW_SECONDS[window])
@@ -261,11 +272,17 @@ def _record_rejection(scope, cls, provider, subject):
         pass
 
 
-def charge(provider):
-    """Admit one provider call or raise AISpendLimitExceeded. Call BEFORE the call."""
+def charge(provider, *, spend_class):
+    """Admit one provider call or raise AISpendLimitExceeded. Call BEFORE the call.
+
+    ``provider`` is only the gate/log label (bedrock, bedrock-stream). It does
+    not select the counter. ``spend_class`` is the policy field (heavy|light).
+    """
+    if spend_class not in SPEND_CLASSES:
+        raise RuntimeError("spend class must be an explicit policy value")
     if not ENABLED:
         return
-    cls = provider_class(provider)
+    cls = spend_class
     subject = current_subject()
     now = time.time()
     planned = _planned_keys(cls, subject, now)

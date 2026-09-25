@@ -169,7 +169,7 @@ def _provider_error_category(exc):
 
 @contextmanager
 def model_concurrency_slot(
-        provider="unknown", wait_seconds=None, *, deadline=None):
+        provider="unknown", wait_seconds=None, *, deadline=None, spend_class):
     """Bound one provider call and retain provider-scoped runtime metrics.
 
     Acquisition is bounded by both the configured gate wait and an optional
@@ -203,7 +203,7 @@ def model_concurrency_slot(
     # call never reaches the provider. Refusal returns the permit.
     try:
         from app.services import ai_spend_guard
-        ai_spend_guard.charge(provider)
+        ai_spend_guard.charge(str(provider), spend_class=spend_class)
     except BaseException:
         _model_slots.release()
         raise

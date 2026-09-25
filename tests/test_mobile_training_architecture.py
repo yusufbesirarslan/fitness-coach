@@ -250,7 +250,7 @@ def test_every_training_read_succeeds_when_provider_clients_are_detonators(
         def __getattr__(self, name):
             raise AssertionError(f"Training read reached provider method {name}")
 
-    monkeypatch.setattr(extensions, "openai_client", _Detonator())
+    monkeypatch.setattr(extensions, "openai_client", _Detonator(), raising=False)
     monkeypatch.setattr(extensions, "bedrock_client", _Detonator())
     user = make_user("training-provider-guard")
     _plan(user)

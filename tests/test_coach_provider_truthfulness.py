@@ -102,7 +102,7 @@ def test_stream_fallback_logs_provider_category_and_request_id(app, caplog):
 
     line = caplog.text
     assert "provider=bedrock" in line
-    assert "fallback_provider=openai" in line
+    assert "fallback_provider=haiku" in line
     assert "exception=PermissionDeniedError" in line
     assert "category=access_denied" in line
     assert "request_id=" in line
@@ -325,8 +325,9 @@ def test_the_guard_sits_on_the_boundary_both_providers_pass_through():
     every provider loop must route its final text through the same guard."""
     from app.services import ai_coach, ai_stream
 
-    for func in (ai_coach._run_coach_conversation_openai,
-                 ai_coach._run_coach_conversation_bedrock,
+    haiku_entry = inspect.getsource(ai_coach._run_coach_conversation_openai)
+    assert "_run_coach_conversation_bedrock" in haiku_entry
+    for func in (ai_coach._run_coach_conversation_bedrock,
                  ai_stream._stream_bedrock):
         source = inspect.cleandoc(inspect.getsource(func))
         assert "grounded_provider_reply" in source, func.__name__
