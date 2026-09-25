@@ -27,6 +27,10 @@
   var __t = (window.t) || function (k) { return k; };
   var ENDPOINT = '/api/progress/physique';
   var GALLERY = '/pump-check-gallery';
+  // On the web a Pump Check is taken when a workout is finished on the Plan
+  // page, so that is where "start your visual timeline" leads (the gallery's
+  // own empty state points to the same place). There is no separate upload.
+  var TRAINING = '/training';
 
   var REGION_LABELS = {
     full_body: 'progress.physique_region_full_body',
@@ -91,13 +95,15 @@
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
-  function _galleryLink(labelKey) {
+  function _link(href, labelKey) {
     var a = document.createElement('a');
     a.className = 'pp-link';
-    a.href = GALLERY;
+    a.href = href;
     a.textContent = __t(labelKey);
     return a;
   }
+
+  function _galleryLink(labelKey) { return _link(GALLERY, labelKey); }
 
   function _figure(url, alt, caption) {
     var fig = document.createElement('figure');
@@ -108,6 +114,11 @@
       img.src = safe;
       img.alt = alt || '';
       img.loading = 'lazy';
+      img.decoding = 'async';
+      // Intrinsic 3:4 box so the lazy image reserves its space (no layout
+      // shift); CSS scales it to the bounded thumbnail width.
+      img.width = 240;
+      img.height = 320;
       fig.appendChild(img);
     } else {
       fig.appendChild(_text('div', __t('progress.physique_image_unavailable'), 'pp-image-missing'));
@@ -138,9 +149,10 @@
     return wrap;
   }
 
+  // Returns true when the chip group rendered (it then names the area).
   function _renderRegions(container, payload) {
     var regions = payload.regions || [];
-    if (regions.length < 2) return;
+    if (regions.length < 2) return false;
     var group = document.createElement('div');
     group.className = 'pp-regions';
     group.setAttribute('role', 'radiogroup');
@@ -180,17 +192,24 @@
       }
     });
     container.appendChild(group);
+    return true;
   }
 
+  // V2 PR4: compact and actionable — purpose, one sentence, ONE action. No
+  // bordered placeholder card, and nothing that implies Axis has looked at
+  // a photo. Older (pre-canonical) Pump Checks only live in the gallery, so
+  // when they exist the one action is the gallery instead of Training.
   function _empty(container, payload) {
     var wrap = document.createElement('div');
-    wrap.className = 'empty-state';
-    wrap.appendChild(_text('div', __t('progress.physique_empty_title'), 'empty-title'));
-    wrap.appendChild(_text('p', __t('progress.physique_empty_desc'), 'empty-desc'));
+    wrap.className = 'pp-empty';
+    wrap.appendChild(_text('p', __t('progress.physique_empty_title'), 'pp-empty-title'));
+    wrap.appendChild(_text('p', __t('progress.physique_empty_desc'), 'pp-note'));
     if (payload && payload.legacy_gallery_available) {
       wrap.appendChild(_text('p', __t('progress.physique_legacy_note'), 'pp-note'));
+      wrap.appendChild(_galleryLink('progress.physique_add_check'));
+    } else {
+      wrap.appendChild(_link(TRAINING, 'progress.physique_empty_cta'));
     }
-    wrap.appendChild(_galleryLink('progress.physique_add_check'));
     container.appendChild(wrap);
   }
 
@@ -274,9 +293,6 @@
       );
       if (reasons) pair.appendChild(reasons);
     } else {
-      if (comparability === 'limited') {
-        pair.appendChild(_text('p', __t('progress.physique_limited_label'), 'pp-limited'));
-      }
       if (typeof analysis.summary === 'string' && analysis.summary) {
         pair.appendChild(_text('p', analysis.summary, 'pp-summary'));
       }
@@ -288,12 +304,12 @@
         );
         if (limits) pair.appendChild(limits);
       }
+      // V2 PR4: observed changes only. Stable and focus areas remain in the
+      // persisted comparison (the native comparison API still publishes
+      // them) but are not rendered here, which keeps this section
+      // secondary to Axis Insight.
       var changes = _list(__t('progress.physique_observed'), analysis.observed_changes, 2);
       if (changes) pair.appendChild(changes);
-      var stable = _list(__t('progress.physique_stable'), analysis.stable_areas, 2);
-      if (stable) pair.appendChild(stable);
-      var focus = _list(__t('progress.physique_focus'), analysis.focus_areas, 2);
-      if (focus) pair.appendChild(focus);
     }
 
     if (typeof analysis.next_check_guidance === 'string' && analysis.next_check_guidance) {
@@ -327,8 +343,8 @@
       container.setAttribute('data-region', payload.selected_region);
       _selectedRegion = payload.selected_region;
     }
-    _renderRegions(container, payload);
-    if (payload.selected_region) {
+    var chips = _renderRegions(container, payload);
+    if (payload.selected_region && !chips && payload.state !== 'empty') {
       container.appendChild(_text(
         'p',
         __t('progress.physique_selected_area', { area: _regionLabel(payload.selected_region) }),

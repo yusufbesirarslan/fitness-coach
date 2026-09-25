@@ -88,11 +88,20 @@ def _historical_body(row, previous):
     return current, summary.weight_delta_kg
 
 
-def _reconstruct_entry(user_id, row, previous) -> HistoryEntry:
-    """One history row: historical training through Istanbul day D + body."""
+def _reconstruct_entry(user_id, row, previous, reports) -> HistoryEntry:
+    """One history row: historical training through Istanbul day D + body.
+
+    ``reports`` memoizes the training report per analysis day for this one
+    build. Reconstruction is day-granular, so every check-in on the same
+    Istanbul day reads the SAME report — rebuilding it per row repeated an
+    identical set of SELECTs for each same-day check-in (Progress V2 PR4).
+    """
     analysis_day = app_date_of(row.created_at)
-    report = build_progression_report(
-        user_id, weeks=SUMMARY_WEEKS, end_day=analysis_day)
+    report = reports.get(analysis_day)
+    if report is None:
+        report = build_progression_report(
+            user_id, weeks=SUMMARY_WEEKS, end_day=analysis_day)
+        reports[analysis_day] = report
 
     trajectory = trajectory_for_signal(report.next_signal)
     performance = summarize_performance(report)
@@ -132,11 +141,13 @@ def build_progress_history(user_id: int) -> ProgressHistory:
 
     has_more = len(rows) > HISTORY_LIMIT
     visible = rows[:HISTORY_LIMIT]
+    reports = {}
     entries = tuple(
         _reconstruct_entry(
             user_id,
             row,
             rows[index + 1] if index + 1 < len(rows) else None,
+            reports,
         )
         for index, row in enumerate(visible)
     )

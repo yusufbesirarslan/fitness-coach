@@ -448,7 +448,7 @@ function loadPhysique() {
 }
 
 /* ═══ BEGIN progress history module ══════════════════════════════════════
-   PROGRESS HISTORY consumer (Progress redesign PR5), carried inside
+   RECENT CHECK-INS consumer (Progress redesign PR5 → V2 PR4), carried inside
    progress.js since V2 PR1 so the page keeps its pre-V2 static request
    count (progress_presentation.js took the slot the separate
    progress_history.js file used to occupy). It stays a self-contained IIFE
@@ -456,37 +456,29 @@ function loadPhysique() {
    only caller, and tests/test_progress_history_ui.py guards this block on
    its own (between the BEGIN/END markers).
 
-   Hard rule for this block: it TRANSLATES canonical facts, it does not
-   decide. The server chose the qualifying check-ins, the analysis day, the
-   trajectory, performance, consistency, weight and weight delta. It never:
+   Hard rule for this block: it RENDERS a view, it does not decide. The
+   server chose the qualifying check-ins, the Istanbul analysis day, every
+   state, the weight and the weight delta; buildHistoryView in
+   static/progress_presentation.js groups the rows by that day and maps
+   every state to its one locale key. This block never:
 
      - computes a trajectory / performance / consistency state
      - subtracts two weights
-     - infers an analysis window
-     - fetches /checkin-history
-     - calls Axis Insights or the planner for a historical row
+     - maps a state to copy (no table of its own)
+     - fetches /checkin-history or anything but /api/progress/history
+     - builds rows it does not show: the groups past the visible bound, and
+       a day's individual check-ins, become DOM only when asked for and are
+       removed again when collapsed — never hidden markup
 
-   Every string from the payload is written with textContent. No innerHTML of
-   payload fields. Dates are localized from ISO; numbers are formatted.
-   State labels come from the shared tables in
-   static/progress_presentation.js.
+   Every string from the payload is written with textContent. No innerHTML.
    ════════════════════════════════════════════════════════════════════════ */
 
 (function () {
   var __t = (window.t) || function (k) { return k; };
   var ENDPOINT = '/api/progress/history';
+  var LIST_ID = 'hist-groups';
 
-  // State → copy tables are shared with CURRENT STATE and TRENDS and live in
-  // static/progress_presentation.js, so a state reads the same everywhere on
-  // the page. If that script failed to load, every table is empty and each
-  // row degrades to its neutral '—' instead of guessing.
   var P = window.FitXProgressPresentation || {};
-  var TRAJECTORY_LABEL = P.TRAJECTORY || {};
-  var PERFORMANCE_LABEL = P.TRAINING_STATE || {};
-  var CONSISTENCY_LABEL = P.CONSISTENCY_STATE || {};
-  var TREND_LABEL = P.TREND_INLINE || {};
-
-  var STATES = { empty: true, available: true };
 
   function _el(id) { return document.getElementById(id); }
 
@@ -501,20 +493,11 @@ function loadPhysique() {
     while (node.firstChild) node.removeChild(node.firstChild);
   }
 
-  function _label(table, value) {
-    var key = (typeof value === 'string' &&
-               Object.prototype.hasOwnProperty.call(table, value)) ? table[value] : null;
-    return key ? __t(key) : null;
-  }
-
-  function _isNumber(v) { return typeof v === 'number' && isFinite(v); }
+  function _say(c) { return c ? __t(c.key, c.params || undefined) : ''; }
 
   function _formatDay(isoDate) {
-    // Calendar-day formatting of an ISO date. UTC noon + timeZone UTC so a
-    // browser timezone cannot change the analysis day the server published.
-    if (typeof isoDate !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(isoDate)) {
-      return isoDate || '';
-    }
+    // Calendar-day formatting of the server's ISO day. UTC noon + timeZone
+    // UTC so a browser timezone cannot move the day the server published.
     var y = +isoDate.slice(0, 4);
     var m = +isoDate.slice(5, 7);
     var d = +isoDate.slice(8, 10);
@@ -523,21 +506,30 @@ function loadPhysique() {
         year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC'
       }).format(new Date(Date.UTC(y, m - 1, d, 12)));
     } catch (e) {
-      return isoDate.slice(0, 10);
+      return isoDate;
     }
   }
 
-  function _signed(n) {
-    var v = n.toFixed(1);
-    return (n > 0 ? '+' : '') + v;
+  function _formatTime(iso, timezone) {
+    // Time of day in the server's app timezone (the payload names it), never
+    // the browser's.
+    if (typeof iso !== 'string') return '';
+    var parsed = new Date(iso);
+    if (isNaN(parsed.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat(window.LOCALE || 'tr', {
+        hour: '2-digit', minute: '2-digit', timeZone: timezone || 'Europe/Istanbul'
+      }).format(parsed);
+    } catch (e) {
+      return iso.slice(11, 16);
+    }
   }
 
-  function _empty(title, desc) {
-    var wrap = document.createElement('div');
-    wrap.className = 'empty-state';
-    wrap.appendChild(_text('div', title, 'empty-title'));
-    wrap.appendChild(_text('p', desc, 'empty-desc'));
-    return wrap;
+  function _metric(weight, delta) {
+    if (!weight) return null;
+    var text = _say(weight);
+    if (delta) text += ' · ' + _say(delta);
+    return _text('p', text, 'hist-metric');
   }
 
   function _unavailable() {
@@ -549,164 +541,131 @@ function loadPhysique() {
     box.appendChild(_text('p', __t('progress.history_unavailable'), 'prog-note'));
   }
 
-  function _toggle(btn, detail) {
-    var expanded = btn.getAttribute('aria-expanded') === 'true';
-    btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-    if (expanded) {
-      detail.setAttribute('hidden', '');
-    } else {
-      detail.removeAttribute('hidden');
-    }
-  }
-
-  function _dlRow(term, value) {
+  function _empty(box) {
     var wrap = document.createElement('div');
-    wrap.className = 'hist-fact';
-    wrap.appendChild(_text('dt', term, 'hist-fact-term'));
-    wrap.appendChild(_text('dd', value, 'hist-fact-value'));
-    return wrap;
+    wrap.className = 'hist-empty';
+    wrap.appendChild(_text('p', __t('progress.history_empty_title'), 'hist-empty-title'));
+    wrap.appendChild(_text('p', __t('progress.history_empty_desc'), 'hist-empty-desc'));
+    box.appendChild(wrap);
   }
 
-  function _renderEntry(entry, index) {
+  // A day's individual check-ins: built on expand, removed on collapse.
+  function _updatesList(group, id) {
+    var ol = document.createElement('ol');
+    ol.className = 'hist-updates';
+    ol.id = id;
+    group.entries.forEach(function (entry) {
+      var li = document.createElement('li');
+      li.className = 'hist-update';
+      var when = _formatTime(entry.checked_in_at, entry.timezone);
+      if (when) {
+        var time = _text('time', when, 'hist-update-time');
+        time.setAttribute('datetime', entry.checked_in_at);
+        li.appendChild(time);
+      }
+      li.appendChild(_text('span', entry.weight ? _say(entry.weight) : '—', 'hist-update-weight'));
+      ol.appendChild(li);
+    });
+    return ol;
+  }
+
+  function _renderGroup(group, index) {
     var item = document.createElement('li');
     item.className = 'hist-item';
-    var trajState = (entry.trajectory && entry.trajectory.state) || '';
-    var trajLabel = _label(TRAJECTORY_LABEL, trajState);
-    if (trajLabel) item.setAttribute('data-state', trajState);
+    item.setAttribute('data-day', group.day);
+    if (group.count > 1) item.setAttribute('data-count', String(group.count));
 
-    var detailId = 'hist-detail-' + index;
-    var dateLabel = _formatDay(entry.analysis_day);
+    item.appendChild(_text('p', group.summary ? _say(group.summary) : '—', 'hist-summary'));
+    var metric = _metric(group.weight, group.delta);
+    if (metric) item.appendChild(metric);
 
-    var perfLabel = entry.performance ? _label(PERFORMANCE_LABEL, entry.performance.state) : null;
-    var consLabel = entry.consistency ? _label(CONSISTENCY_LABEL, entry.consistency.state) : null;
-    var secondaryParts = [];
-    if (perfLabel) secondaryParts.push(perfLabel);
-    if (consLabel) secondaryParts.push(consLabel);
+    var meta = document.createElement('p');
+    meta.className = 'hist-meta';
+    var time = _text('time', _formatDay(group.day), 'hist-date');
+    time.setAttribute('datetime', group.day);
+    meta.appendChild(time);
+    item.appendChild(meta);
 
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'hist-trigger';
-    btn.setAttribute('aria-expanded', 'false');
-    btn.setAttribute('aria-controls', detailId);
-    btn.setAttribute('aria-label', __t('progress.history_expand', { date: dateLabel }));
-
-    var summary = document.createElement('div');
-    summary.className = 'hist-summary';
-    summary.appendChild(_text('span', dateLabel, 'hist-date'));
-    summary.appendChild(_text('span', trajLabel || '—', 'hist-traj'));
-    if (secondaryParts.length) {
-      summary.appendChild(_text('span', secondaryParts.join(' · '), 'hist-meta'));
-    }
-    var body = entry.body || {};
-    if (_isNumber(body.weight_kg)) {
-      summary.appendChild(_text(
-        'span',
-        __t('progress.history_weight', { weight: body.weight_kg.toFixed(1) }),
-        'hist-weight'
-      ));
-    }
-    btn.appendChild(summary);
-
-    var detail = document.createElement('div');
-    detail.id = detailId;
-    detail.className = 'hist-detail';
-    detail.setAttribute('hidden', '');
-
-    detail.appendChild(_text('p', __t('progress.history_asof'), 'hist-asof'));
-
-    var facts = document.createElement('dl');
-    facts.className = 'hist-facts';
-
-    var window = entry.window || {};
-    if (window.start && window.end) {
-      var windowLabel = _isNumber(window.weeks)
-        ? __t('progress.history_window', { weeks: window.weeks })
-        : __t('progress.history_window_range', {
-            start: _formatDay(window.start),
-            end: _formatDay(window.end)
-          });
-      var windowRange = __t('progress.history_window_range', {
-        start: _formatDay(window.start),
-        end: _formatDay(window.end)
+    if (group.updates) {
+      var detailId = 'hist-updates-' + index;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'hist-more';
+      btn.setAttribute('aria-expanded', 'false');
+      btn.setAttribute('aria-controls', detailId);
+      btn.textContent = _say(group.updates);
+      btn.addEventListener('click', function () {
+        var open = btn.getAttribute('aria-expanded') === 'true';
+        var existing = _el(detailId);
+        if (open) {
+          if (existing) existing.remove();
+        } else if (!existing) {
+          item.appendChild(_updatesList(group, detailId));
+        }
+        btn.setAttribute('aria-expanded', open ? 'false' : 'true');
       });
-      facts.appendChild(_dlRow(windowLabel, windowRange));
+      meta.appendChild(btn);
     }
-
-    if (perfLabel) {
-      var perfValue = perfLabel;
-      var trend = entry.performance ? _label(TREND_LABEL, entry.performance.volume_trend) : null;
-      if (trend) perfValue = perfLabel + ' · ' + __t('progress.history_volume', { trend: trend });
-      facts.appendChild(_dlRow(__t('progress.history_performance'), perfValue));
-    }
-
-    if (consLabel) {
-      var consValue = consLabel;
-      var cons = entry.consistency || {};
-      var consBits = [];
-      if (_isNumber(cons.sessions)) {
-        consBits.push(__t('progress.history_sessions', { n: cons.sessions }));
-      }
-      if (_isNumber(cons.active_weeks) && _isNumber(cons.analyzed_weeks)) {
-        consBits.push(__t('progress.history_weeks_active', {
-          active: cons.active_weeks, total: cons.analyzed_weeks
-        }));
-      }
-      if (consBits.length) consValue = consLabel + ' · ' + consBits.join(' · ');
-      facts.appendChild(_dlRow(__t('progress.history_consistency'), consValue));
-    }
-
-    var bodyValue;
-    if (_isNumber(body.weight_kg)) {
-      bodyValue = __t('progress.history_weight', { weight: body.weight_kg.toFixed(1) });
-      if (_isNumber(body.weight_delta_kg)) {
-        bodyValue += ' · ' + __t('progress.history_delta', {
-          delta: _signed(body.weight_delta_kg)
-        });
-      } else {
-        bodyValue += ' · ' + __t('progress.history_no_delta');
-      }
-    } else {
-      bodyValue = __t('progress.history_no_weight');
-    }
-    facts.appendChild(_dlRow(__t('progress.history_body'), bodyValue));
-    detail.appendChild(facts);
-
-    btn.addEventListener('click', function () { _toggle(btn, detail); });
-
-    item.appendChild(btn);
-    item.appendChild(detail);
     return item;
+  }
+
+  function _appendGroups(list, groups, from, to) {
+    for (var i = from; i < to; i++) list.appendChild(_renderGroup(groups[i], i));
   }
 
   function render(payload) {
     var box = _el('history-list');
     if (!box) return;
-    if (!payload || !STATES[payload.state]) {
+    if (typeof P.buildHistoryView !== 'function') {
+      _unavailable();
+      return;
+    }
+    var view = P.buildHistoryView(payload);
+    if (view.status === 'unavailable') {
       _unavailable();
       return;
     }
 
-    box.setAttribute('data-state', payload.state);
+    box.setAttribute('data-state', view.status === 'empty' ? 'empty' : 'available');
     box.removeAttribute('data-status');
     _clear(box);
 
-    if (payload.state === 'empty' || !payload.entries || !payload.entries.length) {
-      box.appendChild(_empty(
-        __t('progress.history_empty_title'),
-        __t('progress.history_empty_desc')
-      ));
+    if (view.status === 'empty') {
+      _empty(box);
       return;
     }
 
-    var list = document.createElement('ul');
+    var list = document.createElement('ol');
     list.className = 'hist-list';
-    for (var i = 0; i < payload.entries.length; i++) {
-      list.appendChild(_renderEntry(payload.entries[i], i));
-    }
+    list.id = LIST_ID;
+    _appendGroups(list, view.groups, 0, view.visible);
     box.appendChild(list);
 
-    if (payload.has_more) {
-      box.appendChild(_text('p', __t('progress.history_has_more'), 'prog-note'));
+    var archive = view.has_more ? _text('p', __t('progress.history_has_more'), 'prog-note hist-archive') : null;
+    var hidden = view.groups.length - view.visible;
+    if (hidden > 0) {
+      var toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'hist-toggle';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.setAttribute('aria-controls', LIST_ID);
+      toggle.textContent = __t('progress.history_show_earlier', { n: hidden });
+      toggle.addEventListener('click', function () {
+        var open = toggle.getAttribute('aria-expanded') === 'true';
+        if (open) {
+          while (list.children.length > view.visible) list.removeChild(list.lastChild);
+          if (archive && archive.parentNode) archive.remove();
+          toggle.textContent = __t('progress.history_show_earlier', { n: hidden });
+        } else {
+          _appendGroups(list, view.groups, view.visible, view.groups.length);
+          if (archive) box.insertBefore(archive, toggle);
+          toggle.textContent = __t('progress.history_show_fewer');
+        }
+        toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+      });
+      box.appendChild(toggle);
+    } else if (archive) {
+      box.appendChild(archive);
     }
   }
 

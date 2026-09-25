@@ -28,6 +28,10 @@ D. PR2 Current State + Trends — state → evidence (<= 2 measured facts) →
    never a fake line.
 E. performance — the model performs no I/O, and the page still fetches the
    summary exactly once.
+F. V2 PR4 Recent Check-ins — buildHistoryView groups rows by the server's
+   Istanbul analysis_day (never the browser's clock or timezone), keeps
+   every same-day record, bounds the visible groups, reuses the shared
+   state tables (one label per row), and never turns a failure into "empty".
 
     python -m pytest tests/test_progress_presentation_js.py -v
 """
@@ -125,6 +129,19 @@ def _run(expression_js):
     return json.loads(out.stdout)
 
 
+def _run_tz(expression_js, tz):
+    """Same as _run, under a given process timezone (the browser's)."""
+    script = (
+        "globalThis.window = {};\n"
+        + SOURCE
+        + "\nvar P = window.FitXProgressPresentation;\n"
+        + "process.stdout.write(JSON.stringify(" + expression_js + "));\n"
+    )
+    out = subprocess.run([NODE, "-e", script], capture_output=True, text=True,
+                         timeout=30, check=True, env={"TZ": tz, "PATH": "/usr/bin:/bin"})
+    return json.loads(out.stdout)
+
+
 def _views(payloads, locale="en"):
     return _run("%s.map(function (d) { return P.buildSummaryView(d, {locale: %s}); })"
                 % (json.dumps(payloads), json.dumps(locale)))
@@ -137,7 +154,7 @@ def _tables():
         " TRAINING_VOLUME_AVAILABILITY: P.TRAINING_VOLUME_AVAILABILITY,"
         " CONSISTENCY_STATE: P.CONSISTENCY_STATE,"
         " CONSISTENCY_AVAILABILITY: P.CONSISTENCY_AVAILABILITY,"
-        " VOLUME_TREND: P.VOLUME_TREND, TREND_INLINE: P.TREND_INLINE,"
+        " VOLUME_TREND: P.VOLUME_TREND,"
         " CURRENT_STATE_NEXT: P.CURRENT_STATE_NEXT, VOLUME_CHANGE: P.VOLUME_CHANGE,"
         " STATE_FACT_VOLUME: P.STATE_FACT_VOLUME}")
 
@@ -224,7 +241,7 @@ def test_tables_cover_every_server_state_exactly():
     assert set(t["TRAINING_VOLUME_AVAILABILITY"]) == set(PERFORMANCE_STATES)
     assert set(t["CONSISTENCY_STATE"]) == set(CONSISTENCY_STATES)
     assert set(t["CONSISTENCY_AVAILABILITY"]) == set(CONSISTENCY_STATES)
-    assert set(t["VOLUME_TREND"]) == set(t["TREND_INLINE"]) == {"up", "flat", "down"}
+    assert set(t["VOLUME_TREND"]) == {"up", "flat", "down"}
     assert set(t["VOLUME_CHANGE"]) == set(t["STATE_FACT_VOLUME"]) == {"up", "flat", "down"}
     assert set(t["CURRENT_STATE_NEXT"]) == set(TRAJECTORY_STATES)
 
@@ -655,3 +672,127 @@ def test_current_state_is_trajectory_level_not_signal_level():
     views = _views([_summary(s) for s in ("build_consistency", "plateau", "deload")])
     states = {json.dumps(v["current_state"], sort_keys=True) for v in views}
     assert len(states) == 1
+
+
+# ── F. V2 PR4 Recent Check-ins view model ───────────────────────────────────
+
+def _entry(day, checked_in_at, perf="steady", traj="on_track", weight=78.0, delta=None):
+    return {
+        "checked_in_at": checked_in_at,
+        "analysis_day": day,
+        "window": {"weeks": 4, "start": "2026-06-18", "end": day,
+                   "timezone": "Europe/Istanbul"},
+        "trajectory": {"state": traj, "reason": "keep_pushing"},
+        "performance": {"state": perf, "volume_trend": "flat"},
+        "consistency": {"state": "consistent", "sessions": 8,
+                        "active_weeks": 4, "analyzed_weeks": 4},
+        "body": {"weight_kg": weight, "weight_delta_kg": delta},
+    }
+
+
+def _history(entries, has_more=False, state="available"):
+    return {"contract_version": 1, "state": state, "entries": entries,
+            "has_more": has_more}
+
+
+def _hview(payload):
+    return _run("P.buildHistoryView(%s)" % json.dumps(payload))
+
+
+@requires_node
+def test_history_groups_same_day_records_without_dropping_any():
+    payload = _history([
+        _entry("2026-07-27", "2026-07-27T21:10:00+03:00", weight=78.0, delta=-0.4),
+        _entry("2026-07-27", "2026-07-27T08:05:00+03:00", weight=78.4, delta=0.0),
+        _entry("2026-07-24", "2026-07-24T09:00:00+03:00", perf="building_baseline",
+               traj="building_baseline", weight=76.0),
+    ])
+    view = _hview(payload)
+    assert view["status"] == "available"
+    assert [g["day"] for g in view["groups"]] == ["2026-07-27", "2026-07-24"]
+    same_day, single = view["groups"]
+    assert same_day["count"] == 2 and len(same_day["entries"]) == 2
+    assert sum(g["count"] for g in view["groups"]) == 3   # nothing lost
+    assert same_day["updates"] == {"key": "progress.history_updates", "params": {"n": 2}}
+    assert single["updates"] is None
+    # The group leads with the NEWEST check-in, as served.
+    assert same_day["weight"]["params"] == {"weight": "78.0"}
+    assert same_day["delta"] == {"key": "progress.history_delta", "params": {"delta": "-0.4"}}
+    assert [e["weight"]["params"]["weight"] for e in same_day["entries"]] == ["78.0", "78.4"]
+    assert same_day["entries"][1]["delta"] == {"key": "progress.history_no_change",
+                                              "params": None}
+    assert single["delta"] is None
+
+
+@requires_node
+def test_history_row_has_one_state_label_from_the_shared_table():
+    t = _tables()
+    for perf in PERFORMANCE_STATES:
+        view = _hview(_history([_entry("2026-07-27", "2026-07-27T10:00:00+03:00",
+                                       perf=perf, traj="needs_attention")]))
+        group = view["groups"][0]
+        assert group["summary"] == {"key": t["TRAINING_STATE"][perf], "params": None}
+        # One label per row: no second state descriptor on the group.
+        labels = [v for k, v in group.items()
+                  if isinstance(v, dict) and str(v.get("key", "")).startswith(
+                      ("progress.traj_", "progress.perf_state_", "progress.cons_state_"))]
+        assert labels == [group["summary"]]
+    # Unknown performance → the shared trajectory label, never an identifier.
+    view = _hview(_history([_entry("2026-07-27", "2026-07-27T10:00:00+03:00",
+                                   perf="mystery", traj="on_track")]))
+    assert view["groups"][0]["summary"]["key"] == t["TRAJECTORY"]["on_track"]
+    view = _hview(_history([_entry("2026-07-27", "2026-07-27T10:00:00+03:00",
+                                   perf="mystery", traj="mystery")]))
+    assert view["groups"][0]["summary"] is None
+
+
+@requires_node
+def test_history_visible_set_is_bounded_and_the_rest_is_kept():
+    days = ["2026-07-%02d" % d for d in (27, 26, 25, 24, 23, 22)]
+    view = _hview(_history([_entry(d, d + "T10:00:00+03:00") for d in days],
+                           has_more=True))
+    bound = _run("P.HISTORY_VISIBLE_GROUPS")
+    assert 3 <= bound <= 5
+    assert view["visible"] == bound
+    assert len(view["groups"]) == 6            # the rest stays available
+    assert view["has_more"] is True
+    few = _hview(_history([_entry("2026-07-27", "2026-07-27T10:00:00+03:00")]))
+    assert few["visible"] == 1 and few["has_more"] is False
+
+
+@requires_node
+def test_history_empty_is_not_failure_and_failure_is_not_empty():
+    assert _hview(_history([], state="empty"))["status"] == "empty"
+    for broken in (None, {}, {"state": "available"}, {"state": "exploded"},
+                   {"state": "available", "entries": "nope"}, "html"):
+        view = _run("P.buildHistoryView(%s)" % json.dumps(broken))
+        assert view["status"] == "unavailable", broken
+        assert view["groups"] == []
+
+
+@requires_node
+def test_history_grouping_ignores_the_browser_timezone():
+    """A check-in at 23:30 Istanbul (20:30 UTC) belongs to the Istanbul day
+    the server published, whatever timezone the browser runs in."""
+    payload = _history([
+        _entry("2026-07-28", "2026-07-28T00:30:00+03:00"),
+        _entry("2026-07-27", "2026-07-27T23:30:00+03:00"),
+        _entry("2026-07-27", "2026-07-27T00:15:00+03:00"),
+    ])
+    expr = "P.buildHistoryView(%s)" % json.dumps(payload)
+    views = [_run_tz(expr, tz) for tz in
+             ("UTC", "America/Los_Angeles", "Pacific/Kiritimati", "Europe/Istanbul")]
+    assert all(v == views[0] for v in views)
+    assert [(g["day"], g["count"]) for g in views[0]["groups"]] == [
+        ("2026-07-28", 1), ("2026-07-27", 2)]
+
+
+@requires_node
+def test_history_unreadable_rows_are_skipped_not_guessed():
+    payload = _history([
+        _entry("2026-07-27", "2026-07-27T10:00:00+03:00"),
+        {"analysis_day": "27.07"},
+        None,
+    ])
+    view = _hview(payload)
+    assert [g["day"] for g in view["groups"]] == ["2026-07-27"]

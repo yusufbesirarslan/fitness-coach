@@ -316,7 +316,9 @@ are not logged.
 
 1 owner-scoped bounded check-in query
 +
-1 `build_progression_report` (itself one workout-history read) per visible entry.
+1 `build_progression_report` (itself one workout-history read) per visible
+**analysis day** (Progress V2 PR4: same-day entries read identical facts, so the
+report is memoized per day within one build).
 
 Measured domain SELECTs:
 
@@ -325,6 +327,9 @@ Measured domain SELECTs:
 | 1 | 2 |
 | 6 | 7 |
 | 12 | 13 |
+
+The table is the worst case (every entry on its own day); same-day entries
+cost nothing extra.
 
 Cost does **not** grow with undisplayed check-in history: the anchor query
 is `LIMIT 13` regardless of how many older rows exist.
@@ -340,10 +345,12 @@ markers, instead of a separate `static/progress_history.js` request.
 
 It may:
 
-- translate bounded machine states;
+- render the view `buildHistoryView` (in `static/progress_presentation.js`)
+  builds: rows grouped by `analysis_day`, one shared-table state word each;
 - format ISO dates and numbers;
 - render empty / unavailable;
-- expand/collapse a row locally.
+- build, on request, a day's individual check-ins or the earlier days, and
+  remove them again on collapse.
 
 It may not:
 
@@ -351,11 +358,18 @@ It may not:
 - fetch `/checkin-history`;
 - construct unescaped HTML from payload text.
 
-Collapsed row: date, trajectory label, one compact secondary line
-(performance · consistency), optional weight.
+Progress V2 PR4 row: ONE summary word (the performance state; trajectory as
+fallback), the weight with its delta, and the date as `<time>` metadata. The
+main page shows the newest `HISTORY_VISIBLE_GROUPS = 4` days of the 12-row
+window; the rest is kept in memory and built only on request. Same-day
+check-ins (legitimate separate records — `POST /checkin` has no per-day
+limit) are grouped under their Istanbul `analysis_day` with a count; nothing
+is dropped. Both disclosures are real `<button>`s with `aria-expanded` /
+`aria-controls`. No colour carries meaning.
 
-Drilldown uses a real `<button>` with `aria-expanded` / `aria-controls`.
-Trajectory meaning is textual, never colour-only.
+Known limitation: the server window is 12 rows, so a day that straddles the
+12th/13th row shows the count of its visible rows only; `has_more` then says
+older check-ins exist.
 
 `static/progress.js` only calls `FitXProgressHistory.load()`.
 

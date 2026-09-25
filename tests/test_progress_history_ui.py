@@ -33,13 +33,25 @@ CONSISTENCY_KEYS = {
     "insufficient_data": "progress.cons_state_insufficient_data",
 }
 
+# Keys the renderer block names itself (section-level copy).
 CLIENT_KEYS = (
     "progress.history_empty_title",
     "progress.history_empty_desc",
-    "progress.history_no_weight",
-    "progress.history_no_delta",
     "progress.history_has_more",
     "progress.history_unavailable",
+    "progress.history_show_earlier",
+    "progress.history_show_fewer",
+)
+# Keys the row view model names (static/progress_presentation.js).
+VIEW_KEYS = (
+    "progress.history_weight",
+    "progress.history_delta",
+    "progress.history_no_change",
+    "progress.history_updates",
+)
+# V2 PR4 retired the per-row drilldown (window, performance, consistency,
+# body facts) and the inline trend words it used. Nothing may name them.
+RETIRED_KEYS = (
     "progress.history_asof",
     "progress.history_expand",
     "progress.history_performance",
@@ -49,9 +61,13 @@ CLIENT_KEYS = (
     "progress.history_window_range",
     "progress.history_sessions",
     "progress.history_weeks_active",
-    "progress.history_weight",
-    "progress.history_delta",
     "progress.history_volume",
+    "progress.history_no_weight",
+    "progress.history_no_delta",
+    "progress.history_sub",
+    "progress.trend_up",
+    "progress.trend_flat",
+    "progress.trend_down",
 )
 
 
@@ -131,22 +147,29 @@ def test_client_reads_only_the_canonical_history_endpoint(app, client, make_user
 def test_client_maps_every_published_state(app, client, make_user, login):
     js = _js(client)
     assert set(STATES) == {"empty", "available"}
-    assert "empty: true" in js and "available: true" in js
-    # V2 PR1: the state → copy tables are shared with CURRENT STATE / TRENDS
-    # and live in progress_presentation.js; history reads them from there and
-    # keeps no copy of its own (one wording per state across the page).
+    # V2 PR4: the renderer holds NO state table at all. The row view model
+    # (grouping + state → key) is buildHistoryView in progress_presentation.js,
+    # which reuses the page's shared tables — one wording per state.
+    assert "P.buildHistoryView" in js
     tables = client.get("/static/progress_presentation.js").get_data(as_text=True)
-    for name in ("P.TRAJECTORY", "P.TRAINING_STATE", "P.CONSISTENCY_STATE",
-                 "P.TREND_INLINE"):
-        assert name in js, name
+    view = tables.split("function buildHistoryView", 1)[1].split("\n  }\n", 1)[0]
+    assert "'empty'" in view and "'available'" in view
+    helper = tables.split("function historyEntry", 1)[1].split("\n  }\n", 1)[0]
+    assert "TRAINING_STATE" in helper and "TRAJECTORY" in helper
     for table in (TRAJECTORY_KEYS, PERFORMANCE_KEYS, CONSISTENCY_KEYS):
         for state, key in table.items():
             assert f"{state}: '{key}'" in tables, state
             assert f"'{key}'" not in js, f"{key} is mapped twice"
             for locale in ("en", "tr"):
                 assert _CATALOG[locale].get(key), f"{key} missing from {locale}"
+    for name in ("TRAJECTORY", "TRAINING_STATE", "CONSISTENCY_STATE"):
+        assert f"P.{name}" not in js, name
     for key in CLIENT_KEYS:
         assert key in js, key
+        for locale in ("en", "tr"):
+            assert _CATALOG[locale].get(key), f"{key} missing from {locale}"
+    for key in VIEW_KEYS:
+        assert f"'{key}'" in tables, key
         for locale in ("en", "tr"):
             assert _CATALOG[locale].get(key), f"{key} missing from {locale}"
     assert set(TRAJECTORY_KEYS) == set(TRAJECTORY_STATES)
@@ -174,16 +197,40 @@ def test_client_does_not_derive_delta_or_state(app, client, make_user, login):
     assert "createElement" in js
 
 
-def test_expand_control_is_a_real_button(app, client, make_user, login):
-    js = _js(client)
-    assert "button" in js
-    assert "aria-expanded" in js
-    assert "aria-controls" in js
-    assert "hist-trigger" in js
+def test_disclosures_are_real_buttons_that_build_on_demand(app, client, make_user, login):
+    """Two disclosures: a day's individual check-ins, and the earlier groups
+    past the visible bound. Both are <button aria-expanded aria-controls>,
+    and both ADD nodes when opened and REMOVE them when closed — nothing is
+    kept as hidden markup (so nothing hidden sits in the a11y tree)."""
+    js = _executable_js(_js(client))
+    assert "document.createElement('button')" in js
+    assert js.count("'aria-expanded'") >= 4       # set + read, per control
+    assert js.count("'aria-controls'") == 2
+    assert "hist-more" in js and "hist-toggle" in js
+    assert "'hidden'" not in js and ".hidden" not in js
+    assert "display = 'none'" not in js
+    assert ".remove()" in js and "removeChild" in js
     css = client.get("/static/progress.css").get_data(as_text=True)
-    assert ".hist-trigger:focus-visible" in css
-    for state in TRAJECTORY_STATES:
-        assert f'.hist-item[data-state="{state}"]' in css
+    assert ".hist-more:focus-visible" in css
+    assert ".hist-toggle:focus-visible" in css
+
+
+def test_rows_are_a_flat_semantic_list_with_dates_as_metadata(app, client):
+    js = _executable_js(_js(client))
+    # An ordered list of days; each date is a <time datetime> in the meta line.
+    assert "document.createElement('ol')" in js
+    assert "_text('time'" in js and "'datetime'" in js
+    assert "hist-meta" in js and "hist-date" in js
+    css = client.get("/static/progress.css").get_data(as_text=True)
+    history = css.split("/* ── 6 · RECENT CHECK-INS", 1)[1].split("/* ── 7 ·", 1)[0]
+    date_rule = history.split(".hist-date", 1)[1].split("}", 1)[0]
+    # Dates are quiet metadata: not the display face, not the link colour.
+    assert "--font-display" not in history
+    assert "--color-primary)" not in date_rule
+    # No coloured state rail per row, no per-row card.
+    assert "data-state" not in history
+    assert "--color-warning" not in history and "--color-success" not in history
+    assert "border-radius" not in history.split(".hist-item {", 1)[1].split("}", 1)[0]
 
 
 def test_unavailable_is_isolated_and_not_empty(app, client, make_user, login):
@@ -210,11 +257,17 @@ def test_xss_payload_cannot_become_html(app, client, make_user, login):
     assert "document.write" not in js
 
 
-def test_history_asof_copy_is_calendar_day_not_timestamp():
-    """Drilldown copy is day-granular. It must not imply a timestamp cutoff."""
-    en = _CATALOG["en"]["progress.history_asof"]
-    tr = _CATALOG["tr"]["progress.history_asof"]
-    assert en == "Based on your data through this check-in day"
-    assert "up to this check-in" not in en
-    assert tr == "Bu check-in gününe kadarki verine göre"
-    assert "check-in'e kadarki" not in tr
+def test_retired_history_keys_have_no_consumer_and_no_catalog_entry(client):
+    shipped = "".join(
+        client.get(path).get_data(as_text=True)
+        for path in ("/static/progress.js", "/static/progress_presentation.js"))
+    for key in RETIRED_KEYS:
+        assert key not in shipped, key
+        for locale in ("en", "tr"):
+            assert key not in _CATALOG[locale], (locale, key)
+
+
+def test_history_catalogs_are_symmetric():
+    en = {k for k in _CATALOG["en"] if k.startswith("progress.history_")}
+    tr = {k for k in _CATALOG["tr"] if k.startswith("progress.history_")}
+    assert en == tr
