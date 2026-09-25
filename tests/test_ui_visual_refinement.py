@@ -236,10 +236,25 @@ def test_log_fab_yields_while_the_meal_list_scrolls():
 # ── Progress ──────────────────────────────────────────────────────────────
 
 
-def test_progress_empty_states_share_the_page_card_grammar():
+def test_progress_secondary_empty_states_are_compact_not_cards():
+    """Progress V2 PR4 superseded the bordered `.prog-section .empty-state`
+    card: Physique and Recent Check-ins are secondary sections, so an empty one
+    is a short block (title + sentence [+ one action]) inside the section, not
+    a large surface competing with Current State. What PR2 guarded still holds
+    — an empty section must read as a STATE, never as a rendering failure —
+    so each keeps a readable body-face title, and no Progress renderer or
+    partial falls back to the page-sized shared `.empty-state` card."""
     css = _css("progress.css")
-    body = _rule(css, ".prog-section .empty-state")
-    assert "background" in body and "border" in body and "border-radius" in body
+    for prefix in ("pp", "hist"):
+        assert "max-width" in _rule(css, f".{prefix}-empty")
+        title = _rule(css, f".{prefix}-empty-title")
+        assert "font-weight" in title and "color" in title
+        assert "font-family" not in title, "body face, not the display face"
+    assert ".prog-section .empty-state" not in css
+    for name in ("progress.js", "progress_physique.js"):
+        assert "empty-state" not in _read(STATIC / name), name
+    for partial in TEMPLATES.glob("_progress_*.html"):
+        assert "empty-state" not in _read(partial), partial.name
 
 
 def test_progress_empty_state_action_is_a_control_not_a_bare_link():

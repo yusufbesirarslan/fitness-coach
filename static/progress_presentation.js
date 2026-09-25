@@ -645,70 +645,6 @@
     };
   }
 
-  // ── Axis Insight view model (V2 PR3) ───────────────────────────────────
-
-  function unavailableAxisInsight() {
-    return {
-      status: UNAVAILABLE,
-      code: null,
-      interpretation: copy('progress.axis_unavailable'),
-      meaning: null,
-      evidence: [],
-      action: null
-    };
-  }
-
-  function axisEvidence(list) {
-    var out = [];
-    if (!Array.isArray(list)) return out;
-    for (var i = 0; i < list.length && out.length < AXIS_MAX_EVIDENCE; i++) {
-      var item = list[i] || {};
-      var key = keyFor(AXIS_EVIDENCE, item.code);
-      if (!key) continue;                       // unknown fact: skipped, not guessed
-      var needs = keyFor(AXIS_EVIDENCE_PARAMS, item.code) || [];
-      var params = item.params || {};
-      var complete = true;
-      for (var j = 0; j < needs.length; j++) {
-        if (!isNumber(params[needs[j]])) complete = false;
-      }
-      if (!complete) continue;
-      var bound = null;
-      if (needs.length) {
-        bound = {};
-        for (var k = 0; k < needs.length; k++) bound[needs[k]] = params[needs[k]];
-      }
-      out.push(copy(key, bound));
-    }
-    return out;
-  }
-
-  /* GET /api/progress/axis-insights → the one Axis Insight surface:
-     interpretation (primary) · meaning (why it matters) · evidence (≤ 2 facts) · action (one move).
-
-     A payload without a readable `insight`, or an interpretation / action
-     this build cannot name, is "unavailable" — never a plausible default:
-     the client must not invent advice nobody decided. `volume_delta` is the
-     planner's signed fraction carried verbatim; the renderer only formats it
-     for display, and a hold (0) carries nothing. */
-  function buildAxisInsightView(d) {
-    var ins = d && typeof d === 'object' ? d.insight : null;
-    if (!ins || typeof ins !== 'object') return unavailableAxisInsight();
-    var interpretation = keyFor(AXIS_INSIGHT, ins.code);
-    var action = ins.action || {};
-    var actionKey = keyFor(AXIS_ACTION, action.code);
-    if (!interpretation || !actionKey) return unavailableAxisInsight();
-    var delta = isNumber(action.volume_delta_pct) && action.volume_delta_pct !== 0
-      ? action.volume_delta_pct : null;
-    return {
-      status: ins.status === INSUFFICIENT ? INSUFFICIENT : AVAILABLE,
-      code: ins.code,
-      interpretation: copy(interpretation),
-      meaning: copy(keyFor(AXIS_MEANING, ins.code)),
-      evidence: axisEvidence(ins.evidence),
-      action: { code: action.code, text: copy(actionKey), volume_delta: delta }
-    };
-  }
-
   // ── Recent Check-ins view model (V2 PR4) ───────────────────────────────
 
   // Date groups the main page shows before the reader asks for more. The
@@ -795,7 +731,9 @@
         summary: lead.summary,
         weight: lead.weight,
         delta: lead.delta,
-        updates: count > 1 ? copy('progress.history_updates', { n: count }) : null,
+        // A group always holds at least one row; only a single-row day has
+        // no count line.
+        updates: count === 1 ? null : copy('progress.history_updates', { n: count }),
         entries: g.entries
       };
     });
@@ -804,6 +742,70 @@
       groups: out,
       visible: Math.min(HISTORY_VISIBLE_GROUPS, out.length),
       has_more: d.has_more === true
+    };
+  }
+
+  // ── Axis Insight view model (V2 PR3) ───────────────────────────────────
+
+  function unavailableAxisInsight() {
+    return {
+      status: UNAVAILABLE,
+      code: null,
+      interpretation: copy('progress.axis_unavailable'),
+      meaning: null,
+      evidence: [],
+      action: null
+    };
+  }
+
+  function axisEvidence(list) {
+    var out = [];
+    if (!Array.isArray(list)) return out;
+    for (var i = 0; i < list.length && out.length < AXIS_MAX_EVIDENCE; i++) {
+      var item = list[i] || {};
+      var key = keyFor(AXIS_EVIDENCE, item.code);
+      if (!key) continue;                       // unknown fact: skipped, not guessed
+      var needs = keyFor(AXIS_EVIDENCE_PARAMS, item.code) || [];
+      var params = item.params || {};
+      var complete = true;
+      for (var j = 0; j < needs.length; j++) {
+        if (!isNumber(params[needs[j]])) complete = false;
+      }
+      if (!complete) continue;
+      var bound = null;
+      if (needs.length) {
+        bound = {};
+        for (var k = 0; k < needs.length; k++) bound[needs[k]] = params[needs[k]];
+      }
+      out.push(copy(key, bound));
+    }
+    return out;
+  }
+
+  /* GET /api/progress/axis-insights → the one Axis Insight surface:
+     interpretation (primary) · meaning (why it matters) · evidence (≤ 2 facts) · action (one move).
+
+     A payload without a readable `insight`, or an interpretation / action
+     this build cannot name, is "unavailable" — never a plausible default:
+     the client must not invent advice nobody decided. `volume_delta` is the
+     planner's signed fraction carried verbatim; the renderer only formats it
+     for display, and a hold (0) carries nothing. */
+  function buildAxisInsightView(d) {
+    var ins = d && typeof d === 'object' ? d.insight : null;
+    if (!ins || typeof ins !== 'object') return unavailableAxisInsight();
+    var interpretation = keyFor(AXIS_INSIGHT, ins.code);
+    var action = ins.action || {};
+    var actionKey = keyFor(AXIS_ACTION, action.code);
+    if (!interpretation || !actionKey) return unavailableAxisInsight();
+    var delta = isNumber(action.volume_delta_pct) && action.volume_delta_pct !== 0
+      ? action.volume_delta_pct : null;
+    return {
+      status: ins.status === INSUFFICIENT ? INSUFFICIENT : AVAILABLE,
+      code: ins.code,
+      interpretation: copy(interpretation),
+      meaning: copy(keyFor(AXIS_MEANING, ins.code)),
+      evidence: axisEvidence(ins.evidence),
+      action: { code: action.code, text: copy(actionKey), volume_delta: delta }
     };
   }
 
