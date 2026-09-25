@@ -112,6 +112,12 @@ total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
   process restart during the outage.
 - Not a billing kill switch for calls already made, and not a product quota:
   defaults sit far above observed use and do not change entitlement.
+- Light launch bridge: while direct OpenAI gpt-4o-mini is the light provider,
+  the light defaults are 100/day per account and 500/day in total (was
+  400/5,000). These are emergency ceilings on light-provider **attempts**: not
+  a subscription quota, a usage promise, a billing quota or an RPM limit.
+  Premium does not bypass them; a premium account keeps its entitlement and
+  gets the busy state while a ceiling is reached.
 - A call ceiling alone is not a dollar ceiling. It becomes one together with
   the hard input budget below: every counted attempt has a bounded maximum
   input and output, so calls × per-attempt maximum is a real bound.
@@ -194,9 +200,10 @@ price (cache writes, coach only, stay below the menu_extract figure).
 | | Max $ / attempt | Hour | Day | 3 days | Redis-degraded day |
 |---|---|---|---|---|---|
 | Heavy (menu_extract worst: 64K in + 5K out) | $0.267 | 100 → $26.70 | 300 → $80.10 | $240.30 | ≤2× → $160.20 |
-| Light (menu_extract fallback: 64K in + 5K out) | $0.0126 | no hourly cap | 5,000 → $63.00 | $189.00 | ≤3× → $189.00 |
+| Light (menu_extract fallback: 64K in + 5K out) | $0.0126 | no hourly cap | 500 → $6.30 | $18.90 | ≤3× → $18.90 |
 
-(Production env: heavy 100/hour, 300/day; light code default 5,000/day.)
+(Production env: heavy 100/hour, 300/day; light code default 500/day, was
+5,000 → $63.00/day. Per account: 100 → $1.26/day, was 400 → $5.04.)
 Before the input budget the heavy absolute was $0.72/call and $1,080/day at
 the 1,500/day default. Per-attempt maxima for the other features: coach
 $0.2025, training_plan $0.201, nutrition_plan $0.126, nutrition $0.108,
@@ -262,10 +269,10 @@ Distribution percentiles use provider-reported tokens where present; filter
 AI_SPEND_GUARD_ENABLED=1
 # production (2026-09-23): AI_SPEND_GLOBAL_HEAVY_PER_HOUR=100, ..._PER_DAY=300
 AI_SPEND_USER_HEAVY_PER_DAY=200
-AI_SPEND_USER_LIGHT_PER_DAY=400
+AI_SPEND_USER_LIGHT_PER_DAY=100
 AI_SPEND_GLOBAL_HEAVY_PER_HOUR=300
 AI_SPEND_GLOBAL_HEAVY_PER_DAY=1500
-AI_SPEND_GLOBAL_LIGHT_PER_DAY=5000   # 0 disables that one ceiling
+AI_SPEND_GLOBAL_LIGHT_PER_DAY=500    # 0 disables that one ceiling
 AI_INPUT_BUDGET_<FEATURE>=<int>     # see the input budget table; must be > 0
 AI_OUTPUT_BUDGET_<FEATURE>=<int>
 AI_MENU_OCR_MAX_PAGES=5
