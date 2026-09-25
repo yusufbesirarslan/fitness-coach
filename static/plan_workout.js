@@ -150,6 +150,10 @@
   // in flight is ignored so it cannot complete the next set as well.
   var completionInFlight = false;
   var completionFlight = null;
+  // Presentation only: whether the next-set editor is open during rest, and
+  // which exercise's completed-set history the user expanded.
+  var restEditOpen = false;
+  var historyOpenFor = null;
 
   var SET_ICONS = { completed: '&#10003;', active: '&#9679;', upcoming: '&#9675;' };
 
@@ -164,6 +168,14 @@
 
   function prescription(exercise) {
     return exercise.sets.length + ' &times; ' + escapeHTML(exercise.tekrar);
+  }
+
+  // "Set X of Y" already says how many sets; the target line only names reps.
+  function targetText(exercise) {
+    var text = exercise.tekrar == null ? '' : String(exercise.tekrar).trim();
+    return /^\d+(\s*[-\u2013]\s*\d+)?$/.test(text)
+      ? copy('training.target_reps', { reps: text })
+      : text;
   }
 
   function renderSetRow(exerciseIndex, set, setIndex, state) {
@@ -204,6 +216,7 @@
 
   function clearRest() {
     restTimer = null;
+    restEditOpen = false;
     if (restTick != null) {
       clearInterval(restTick);
       restTick = null;
@@ -295,6 +308,7 @@
     var eventName = window.FitXWorkoutDraft.claimRestTerminal(timer, 'expired');
     clearRest();
     removeRestBanner();
+    rerenderOpenDraft();
     emitRestTerminal(timer, eventName);
   }
 
@@ -304,7 +318,22 @@
     var eventName = window.FitXWorkoutDraft.claimRestTerminal(timer, 'skipped');
     clearRest();
     removeRestBanner();
+    rerenderOpenDraft();
     emitRestTerminal(timer, eventName);
+  }
+
+  // Rest ending swaps REST MODE for ACTIVE SET MODE in place: no stale rest
+  // UI, no reload. Focus stays on the set heading, never on an input.
+  function rerenderOpenDraft() {
+    var sessionView = document.getElementById('session-view');
+    if (!draft || !sessionView || !sessionView.classList.contains('open')) return;
+    // Removing the rest surface drops focus from its buttons to <body>; the
+    // dialog is modal, so hand that focus back to the set heading.
+    var active = document.activeElement;
+    var hadFocus = !active || active === document.body ||
+      !!(active.closest && active.closest('#sv-body'));
+    renderDraft();
+    if (hadFocus) focusActiveSurface();
   }
 
   function settleCompletion(flight, result) {
@@ -372,35 +401,61 @@
     if (!activeRest()) {
       clearRest();
       removeRestBanner();
+      rerenderOpenDraft();
       return;
     }
     var clock = document.getElementById('aw-rest-clock');
     if (clock) clock.textContent = window.FitXWorkoutDraft.formatRestClock(remaining);
   }
 
-  function renderRestBanner() {
+  function renderRestCue() {
+    var cueType = restTimer.cueType;
+    if (cueType !== 'below_target' && cueType !== 'on_target' && cueType !== 'above_target') {
+      return '';
+    }
+    var detail = restTimer.cueReps != null && restTimer.cueTarget
+      ? '<span class="aw-rest-cue-detail">' + escapeHTML(copy('training.cue_detail', {
+        reps: restTimer.cueReps, target: restTimer.cueTarget })) + '</span>'
+      : '';
+    return '<p class="aw-rest-cue" data-coach-cue="' + cueType + '">' + detail +
+      '<span class="aw-rest-cue-label">' + escapeHTML(copy('training.cue_' + cueType)) +
+      '</span></p>';
+  }
+
+  // REST MODE. `editor` is the next set's weight/reps form: supplied only when
+  // the user opened Edit, and then it REPLACES the one-line summary so the
+  // values are never shown twice. Complete Set never renders here.
+  function renderRestBanner(editor) {
     var rest = activeRest();
     if (!rest) return '';
     var remaining = window.FitXWorkoutDraft.remainingRestMs(restTimer.endsAt, Date.now());
-    var cueType = restTimer.cueType;
-    var cue = cueType === 'below_target' || cueType === 'on_target' || cueType === 'above_target'
-      ? '<p class="aw-rest-cue" data-coach-cue="' + cueType + '">' +
-        escapeHTML(copy('training.cue_' + cueType)) + '</p>'
-      : '';
-    return '<div class="aw-rest" id="aw-rest" role="timer">' +
+    var canEdit = typeof editor === 'string';
+    var next = canEdit && restEditOpen
+      ? '<div class="aw-rest-edit">' + editor +
+        '<button class="btn-ghost aw-rest-link" type="button" data-rest-action="edit-done"' +
+        ' aria-expanded="true">' +
+        escapeHTML(copy('training.done')) + '</button></div>'
+      : '<p class="aw-rest-next"><span class="aw-label">' + escapeHTML(copy('training.next_set')) +
+        '</span> <span class="aw-rest-next-value" id="aw-rest-next-value">' +
+        escapeHTML(setSummary(rest.set)) + '</span>' +
+        (canEdit
+          ? '<button class="btn-ghost aw-rest-link" type="button" data-rest-action="edit"' +
+            ' aria-expanded="false" aria-label="' + escapeHTML(copy('training.edit_next_set')) +
+            '">' + escapeHTML(copy('training.edit_set')) + '</button>'
+          : '') + '</p>';
+    return '<div class="aw-rest" id="aw-rest" data-mode="rest">' +
+      '<div class="aw-rest-timer" role="timer" aria-label="' + escapeHTML(copy('training.rest')) + '">' +
       '<p class="aw-rest-kicker"><span class="aw-label">' + escapeHTML(copy('training.rest')) +
       '</span></p>' +
       '<p class="aw-rest-clock" id="aw-rest-clock">' +
-      escapeHTML(window.FitXWorkoutDraft.formatRestClock(remaining)) + '</p>' +
-      cue +
-      '<p class="aw-rest-next"><span class="aw-label">' + escapeHTML(copy('training.next_up')) +
-      '</span> <span id="aw-rest-next-value">' + escapeHTML(setSummary(rest.set)) +
-      '</span></p>' +
+      escapeHTML(window.FitXWorkoutDraft.formatRestClock(remaining)) + '</p></div>' +
+      renderRestCue() +
+      next +
       '<div class="aw-rest-actions">' +
-      '<button class="btn-ghost" type="button" data-rest-action="add">' +
+      '<button class="btn-ghost aw-rest-link" type="button" data-rest-action="add">' +
       escapeHTML(copy('training.rest_add_30')) + '</button>' +
-      '<button class="btn-ghost" type="button" data-rest-action="skip">' +
-      escapeHTML(copy('training.skip')) + '</button></div></div>';
+      '<button class="btn-ghost aw-rest-link" type="button" data-rest-action="skip">' +
+      escapeHTML(copy('training.skip_rest')) + '</button></div></div>';
   }
 
   function onRestAction(action) {
@@ -417,7 +472,47 @@
       paintRestClock();
       return;
     }
+    if (action === 'edit' || action === 'edit-done') {
+      restEditOpen = action === 'edit';
+      renderDraft();
+      var focusTarget = document.querySelector(restEditOpen
+        ? '#aw-rest [data-field="weight"]'
+        : '#aw-rest [data-rest-action="edit"]');
+      if (focusTarget) focusTarget.focus({ preventScroll: true });
+      return;
+    }
     if (action === 'skip') skipRest();
+  }
+
+  function renderEntryFields(exerciseIndex, setIndex, shown) {
+    return '<div class="aw-current" data-ex="' + exerciseIndex + '" data-set="' + setIndex + '">' +
+      '<div class="aw-fields">' +
+      '<label class="aw-field"><span class="aw-label">' + escapeHTML(copy('training.weight_kg')) +
+      '</span><input class="set-input" type="number" inputmode="decimal" min="0" step="0.5"' +
+      ' data-field="weight" value="' + (shown.weightKg == null ? '' : shown.weightKg) + '"></label>' +
+      '<label class="aw-field"><span class="aw-label">' + escapeHTML(copy('training.reps')) +
+      '</span><input class="set-input" type="number" inputmode="numeric" min="0" step="1"' +
+      ' data-field="reps" value="' + (shown.reps == null ? '' : shown.reps) + '"></label>' +
+      '</div>';
+  }
+
+  // Completed sets, collapsed behind one line so history never competes with
+  // the current set. Every row keeps its Edit action.
+  function renderHistory(exercise, exerciseIndex, openByDefault) {
+    var rows = [];
+    exercise.sets.forEach(function (set, index) {
+      if (set.done) rows.push(renderSetRow(exerciseIndex, set, index, 'completed'));
+    });
+    if (!rows.length) return '';
+    var open = historyOpenFor === exerciseIndex ||
+      (openByDefault && historyOpenFor !== -1 - exerciseIndex);
+    return '<details class="aw-history" data-history-ex="' + exerciseIndex + '"' +
+      (open ? ' open' : '') + '><summary class="aw-history-summary">' +
+      escapeHTML(rows.length === 1
+        ? copy('training.sets_completed_one')
+        : copy('training.sets_completed', { n: rows.length })) + '</summary>' +
+      '<ol class="aw-set-list" aria-label="' + escapeHTML(copy('training.sets')) + '">' +
+      rows.join('') + '</ol></details>';
   }
 
   function renderActiveExercise(exercise, exerciseIndex, setIndex) {
@@ -425,38 +520,37 @@
     var current = setIndex === -1 ? null : exercise.sets[setIndex];
     if (current) ensureLoggingSeed(current, exercise);
     var shown = current ? shownSet(exercise, current, setIndex) : null;
-    var target = prescription(exercise) +
-      (exercise.dinlenme ? ' &middot; ' + escapeHTML(copy('training.rest')) + ' ' +
-        escapeHTML(exercise.dinlenme) : '');
+    var resting = !!(current && activeRest() && restTimer.exerciseIndex === exerciseIndex &&
+      restTimer.setIndex === setIndex);
+    var head = '<h3 class="aw-active-name" id="aw-active-name">' + escapeHTML(exercise.isim) + '</h3>' +
+      '<p class="aw-active-set" id="aw-active-set" tabindex="-1">' +
+      escapeHTML(current
+        ? copy('training.set_of', { n: setIndex + 1, total: total })
+        : copy('training.sets_progress', { done: total, total: total })) + '</p>';
+    if (resting) {
+      // REST MODE: wait, or deliberately skip. The next set's values appear
+      // once; the weight/reps form only replaces them while Edit is open.
+      return '<section class="aw-active is-resting" data-ex="' + exerciseIndex +
+        '" data-exercise-state="active" data-mode="rest" aria-labelledby="aw-active-name">' +
+        head + renderRestBanner(renderEntryFields(exerciseIndex, setIndex, shown) + '</div>') +
+        '</section>';
+    }
+    var target = targetText(exercise);
     var entry = current
-      ? '<div class="aw-current" data-ex="' + exerciseIndex + '" data-set="' + setIndex + '">' +
-        '<div class="aw-fields">' +
-        '<label class="aw-field"><span class="aw-label">' + escapeHTML(copy('training.weight_kg')) +
-        '</span><input class="set-input" type="number" inputmode="decimal" min="0" step="0.5"' +
-        ' data-field="weight" value="' + (shown.weightKg == null ? '' : shown.weightKg) + '"></label>' +
-        '<label class="aw-field"><span class="aw-label">' + escapeHTML(copy('training.reps')) +
-        '</span><input class="set-input" type="number" inputmode="numeric" min="0" step="1"' +
-        ' data-field="reps" value="' + (shown.reps == null ? '' : shown.reps) + '"></label>' +
-        '</div><button class="btn-volt w-full aw-complete" type="button" data-set-action="complete"' +
+      ? renderEntryFields(exerciseIndex, setIndex, shown) +
+        '<button class="btn-volt w-full aw-complete" type="button" data-set-action="complete"' +
         (completionInFlight ? ' disabled' : '') + '>' +
         escapeHTML(copy('training.set_done')) + '</button></div>'
       : '<p class="aw-exercise-done">' + escapeHTML(copy('training.exercise_complete')) + '</p>';
     return '<section class="aw-active" data-ex="' + exerciseIndex +
-      '" data-exercise-state="active" aria-labelledby="aw-active-name">' +
-      '<h3 class="aw-active-name" id="aw-active-name">' + escapeHTML(exercise.isim) + '</h3>' +
-      '<p class="aw-active-set" id="aw-active-set" tabindex="-1">' +
-      escapeHTML(current
-        ? copy('training.set_of', { n: setIndex + 1, total: total })
-        : copy('training.sets_progress', { done: total, total: total })) + '</p>' +
-      '<p class="aw-target"><span class="aw-label">' + escapeHTML(copy('training.target')) +
-      '</span> ' + target + '</p>' +
-      (activeRest() && restTimer.exerciseIndex === exerciseIndex ? renderRestBanner() : '') +
+      '" data-exercise-state="active" data-mode="' + (current ? 'active' : 'review') +
+      '" aria-labelledby="aw-active-name">' + head +
+      (current && target
+        ? '<p class="aw-target"><span class="aw-label">' + escapeHTML(copy('training.target')) +
+          '</span> <span class="aw-target-value">' + escapeHTML(target) + '</span></p>'
+        : '') +
       entry +
-      '<ol class="aw-set-list" aria-label="' + escapeHTML(copy('training.sets')) + '">' +
-      exercise.sets.map(function (set, index) {
-        var state = set.done ? 'completed' : index === setIndex ? 'active' : 'upcoming';
-        return renderSetRow(exerciseIndex, set, index, state);
-      }).join('') + '</ol>' +
+      renderHistory(exercise, exerciseIndex, !current) +
       (exercise.not
         ? '<details class="aw-note"><summary>' + escapeHTML(copy('training.coaching_note')) +
           '</summary><p>' + escapeHTML(exercise.not) + '</p></details>'
@@ -475,12 +569,23 @@
     if (restTimer && !activeRest()) clearRest();
     var rest = activeRest();
     if (rest && view.exerciseIndex !== restTimer.exerciseIndex) {
+      restEditOpen = false;
       parts.push(renderRestBanner());
     }
     if (rest) ensureRestTick();
+    var resting = !!(rest && view.exerciseIndex === restTimer.exerciseIndex &&
+      view.setIndex === restTimer.setIndex);
+    if (rest && !resting) restEditOpen = false;
     if (view.exerciseIndex !== -1) {
       parts.push(renderActiveExercise(
         draft.exercises[view.exerciseIndex], view.exerciseIndex, view.setIndex));
+    }
+    body.dataset.mode = resting ? 'rest' : view.complete ? 'done' : 'active';
+    if (resting) {
+      // The rest surface is the whole task; the workout map returns with it.
+      body.innerHTML = parts.join('');
+      updateProgress(view);
+      return;
     }
     if (view.nextExerciseIndex !== -1) {
       var next = draft.exercises[view.nextExerciseIndex];
@@ -523,6 +628,8 @@
     var finish = document.querySelector('#session-view [data-action="finishSession"]');
     finish.classList.toggle('btn-volt', view.complete);
     finish.classList.toggle('btn-ghost', !view.complete);
+    // While sets remain, Finish is a quiet text action, not a second button.
+    finish.classList.toggle('is-quiet', !view.complete);
   }
 
   function focusActiveSurface() {
@@ -723,6 +830,14 @@
     }
     checkpoint(false);
   });
+  // <details> toggles do not bubble; capture them so a re-render keeps the
+  // user's choice. Pure presentation: no checkpoint, no analytics.
+  document.getElementById('sv-body').addEventListener('toggle', function (event) {
+    var node = event.target;
+    if (!node || !node.matches || !node.matches('details[data-history-ex]')) return;
+    var index = Number(node.dataset.historyEx);
+    historyOpenFor = node.open ? index : -1 - index;
+  }, true);
   document.getElementById('sv-body').addEventListener('click', function (event) {
     if (!draft) return;
     var restButton = event.target.closest('[data-rest-action]');
@@ -741,6 +856,7 @@
     }
     var button = event.target.closest('[data-set-action]');
     if (!button || completionInFlight) return;
+    if (button.dataset.setAction === 'edit') historyOpenFor = null;
     var row = button.closest('[data-set]');
     var exerciseIndex = Number(row.dataset.ex);
     var setIndex = Number(row.dataset.set);
@@ -801,6 +917,9 @@
           endsAt: Date.now() + durationMs,
           durationMs: durationMs,
           cueType: cueType,
+          // Display only: the reps the cue was classified from, and the target.
+          cueReps: set.reps,
+          cueTarget: exercise.tekrar == null ? '' : String(exercise.tekrar).trim(),
           outcome: null,
           telemetryReady: false,
           suppressTelemetry: false,
