@@ -117,7 +117,8 @@ def test_progress_page_renders_new_information_architecture(app, client, make_us
         assert f'id="{legacy}"' not in html
 
     # Data-driven regions the JS fills in.
-    for slot in ("ps-meta", "insight-list", "physique-body", "history-list"):
+    for slot in ("ps-window", "ps-evidence", "ps-next-move", "insight-list",
+                 "physique-body", "history-list"):
         assert f'id="{slot}"' in html
 
     assert "/static/progress.js" in html
@@ -261,7 +262,8 @@ def test_your_progress_slots_are_addressable_and_announced(
     """The trajectory needs fillable slots and a live region to announce them."""
     html = _get_progress_html(client, make_user, login, "pr2slots")
 
-    for slot in ("ps-card", "ps-state", "ps-lede", "ps-meta"):
+    for slot in ("ps-card", "ps-window", "ps-state", "ps-lede", "ps-evidence",
+                 "ps-next-text"):
         assert f'id="{slot}"' in html, slot
     # The three lines update together after an async fetch, so they live in one
     # polite status region rather than three competing announcements.
@@ -397,7 +399,73 @@ def test_trajectory_is_not_communicated_by_colour_alone(app, client, make_user, 
 
 
 def test_no_chart_or_dashboard_is_reintroduced(app, client, make_user, login):
+    """V2 PR2 adds lightweight inline-SVG trend drawings on purpose; what
+    stays banned is a chart LIBRARY, a canvas dashboard, and any drawing
+    built from markup strings or driven by runtime layout/animation."""
     for js in (_progress_js(client), _presentation_js(client)):
+        code = _executable_js(js)
         for banned in ("Chart(", "chart.umd", "canvas", "switchTab", "heatmap",
-                       "sparkline", "<svg"):
-            assert banned not in js, banned
+                       "<svg", "d3.", "apexcharts", "recharts", "echarts"):
+            assert banned not in code, banned
+        for runtime in ("ResizeObserver", "requestAnimationFrame", "setInterval",
+                        "getBoundingClientRect", "offsetWidth", "clientWidth",
+                        "matchMedia"):
+            assert runtime not in code, runtime
+
+
+# ── V2 PR2: Current State + Trends ───────────────────────────────────────
+
+def test_trends_cards_ship_the_five_slots_with_empty_ones_hidden(
+        app, client, make_user, login):
+    """value → change → viz → note → meta, in falling prominence. Nothing
+    that would be an empty frame (change, viz, meta, unit) is visible before
+    the summary fills it — no empty graph container, no fake line."""
+    html = _get_progress_html(client, make_user, login, "pr2trendslots")
+    for card in METRIC_CARDS:
+        body = html.split(f'id="{card}"', 1)[1].split("</article>", 1)[0]
+        order = [body.index(f'data-slot="{slot}"')
+                 for slot in ("value", "change", "viz", "note", "meta")]
+        assert order == sorted(order), card
+        for slot in ("unit", "change", "viz", "meta"):
+            tag = re.search(rf'<[^>]*data-slot="{slot}"[^>]*>', body).group(0)
+            assert "hidden" in tag, (card, slot)
+        assert "<svg" not in body and "<polyline" not in body
+
+
+def test_current_state_ships_evidence_and_next_move_hidden_until_real(
+        app, client, make_user, login):
+    html = _get_progress_html(client, make_user, login, "pr2csslots")
+    evidence = re.search(r'<ul[^>]*id="ps-evidence"[^>]*>', html).group(0)
+    assert "hidden" in evidence and "aria-label=" in evidence
+    move = re.search(r'<div[^>]*id="ps-next-move"[^>]*>', html).group(0)
+    assert "hidden" in move
+    # STATE → EVIDENCE → ACTION reading order inside the one dominant card.
+    card = html.split('id="ps-card"', 1)[1]
+    order = [card.index(f'id="{i}"') for i in
+             ("ps-window", "ps-state", "ps-lede", "ps-evidence", "ps-next-move")]
+    assert order == sorted(order)
+    assert card.index('id="ps-next-move"') < card.index('data-action="openCheckin"')
+
+
+def test_drawings_are_built_as_dom_nodes_and_hidden_from_assistive_tech(
+        app, client):
+    """The SVG is created with createElementNS (never a markup string) and is
+    aria-hidden; its meaning reaches screen readers as text."""
+    js = _executable_js(_progress_js(client))
+    viz = js.split("function _renderViz", 1)[1].split("\n}", 1)[0]
+    assert "createElementNS" in js and "innerHTML" not in viz
+    assert "'aria-hidden': 'true'" in viz
+    assert "tr-sr" in viz          # visually-hidden text equivalent
+    assert "'ol'" in viz           # the week strip is a real list
+    change = js.split("function _renderChange", 1)[1].split("\n}", 1)[0]
+    assert "setAttribute('aria-hidden', 'true')" in change   # the glyph only
+
+
+def test_progress_css_respects_reduced_motion_and_adds_no_animation(app, client):
+    css = client.get("/static/progress.css").get_data(as_text=True)
+    trends = css.split("── 3 · TRENDS", 1)[1].split("── 4 · AXIS", 1)[0]
+    current = css.split("── 2 · CURRENT STATE", 1)[1].split("── 3 · TRENDS", 1)[0]
+    for block in (trends, current):
+        assert "animation" not in block and "transition" not in block
+        assert "#" not in re.sub(r"/\*.*?\*/", "", block, flags=re.S)  # tokens only
+    assert "prefers-reduced-motion" in css

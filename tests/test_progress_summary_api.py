@@ -105,15 +105,22 @@ def test_contract_is_versioned_and_bounded(app, client, make_user, login):
 
     assert d["contract_version"] == CONTRACT_VERSION == 1
     assert set(d) == {"contract_version", "window", "trajectory", "body",
-                      "performance", "consistency"}
+                      "performance", "consistency", "weekly"}
     assert set(d["window"]) == {"weeks", "start", "end", "timezone"}
     assert set(d["trajectory"]) == {"state", "reason"}
     assert set(d["body"]) == {"status", "current_weight_kg", "weight_delta_kg",
-                              "target_weight_kg", "distance_to_target_kg"}
+                              "target_weight_kg", "distance_to_target_kg",
+                              "weight_series"}
     assert set(d["performance"]) == {"state", "volume_trend", "strength_trend",
                                      "next_signal"}
     assert set(d["consistency"]) == {"state", "active_weeks", "analyzed_weeks",
                                      "sessions"}
+    # V2 PR2 additive series.
+    assert len(d["weekly"]) == SUMMARY_WEEKS
+    for week in d["weekly"]:
+        assert set(week) == {"start", "sessions", "active", "volume_kg"}
+    for point in d["body"]["weight_series"]:
+        assert set(point) == {"day", "weight_kg"}
 
     # Every published state is from a bounded enum.
     assert d["trajectory"]["state"] in TRAJECTORY_STATES
@@ -304,3 +311,60 @@ def test_summary_read_performs_no_write(app, client, make_user, login):
     assert refreshed.streak_count == before_streak
     assert refreshed.rank_points == before_xp
     assert WeeklyCheckIn.query.filter_by(user_id=user.id).count() == before_checkins
+
+
+# ---------------------------------------------------------------------------
+# Progress V2 PR2: the additive Trends series
+# ---------------------------------------------------------------------------
+
+def test_weekly_series_is_the_window_the_counts_came_from(app, client, make_user, login):
+    """One entry per analysed week, oldest first, agreeing with the counts."""
+    user = _login(make_user, login, "psweekly")
+    today = app_today()
+    _add_workout(user.id, today, volume=300.0)             # newest week
+    _add_workout(user.id, today - timedelta(days=1), volume=200.0)
+    _add_workout(user.id, today - timedelta(days=15), volume=150.0)  # third week
+    db.session.commit()
+
+    d = client.get(SUMMARY_URL).get_json()
+    weekly = d["weekly"]
+    assert [w["start"] for w in weekly] == sorted(w["start"] for w in weekly)
+    assert weekly[0]["start"] == d["window"]["start"]
+    assert [w["active"] for w in weekly] == [False, True, False, True]
+    assert [w["sessions"] for w in weekly] == [0, 1, 0, 2]
+    assert [w["volume_kg"] for w in weekly] == [0.0, 150.0, 0.0, 500.0]
+    # The series and the aggregate cannot disagree: same buckets.
+    assert sum(w["active"] for w in weekly) == d["consistency"]["active_weeks"]
+    assert sum(w["sessions"] for w in weekly) == d["consistency"]["sessions"]
+
+
+def test_weight_series_is_chronological_qualifying_and_bounded(
+        app, client, make_user, login):
+    from app.services.progress_summary import WEIGHT_SERIES_POINTS
+
+    user = _login(make_user, login, "psseries", weight=78.0)
+    today = app_today()
+    for i in range(WEIGHT_SERIES_POINTS + 3):             # more than the cap
+        _add_checkin(user.id, today - timedelta(days=7 * i), 80.0 - i * 0.5)
+    # A sparse /update-weight row never enters the series (BUG-5 filter).
+    _add_checkin(user.id, today - timedelta(days=3), 99.0, qualifying=False)
+    db.session.commit()
+
+    body = client.get(SUMMARY_URL).get_json()["body"]
+    series = body["weight_series"]
+    assert len(series) == WEIGHT_SERIES_POINTS
+    days = [p["day"] for p in series]
+    assert days == sorted(days)                            # oldest first
+    assert series[-1] == {"day": today.isoformat(), "weight_kg": 80.0}
+    assert 99.0 not in [p["weight_kg"] for p in series]
+    # The delta is unchanged by the wider fetch: newest two qualifying rows.
+    assert body["weight_delta_kg"] == round(80.0 - 79.5, 1)
+
+
+def test_new_user_series_are_empty_or_zero_never_invented(
+        app, client, make_user, login):
+    _login(make_user, login, "psseriesnew")
+    d = client.get(SUMMARY_URL).get_json()
+    assert d["body"]["weight_series"] == []               # no fake flat line
+    assert all(w["sessions"] == 0 and w["active"] is False and w["volume_kg"] == 0.0
+               for w in d["weekly"])                      # measured zeros

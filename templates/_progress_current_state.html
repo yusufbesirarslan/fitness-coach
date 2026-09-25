@@ -1,16 +1,24 @@
-{#- Progress V2 PR1 · ProgressCurrentState — "What is my current state?"
+{#- Progress V2 · ProgressCurrentState — "What is my current state?"
 
-    Owns exactly three things: the concise trajectory-level state (#ps-state
-    headline + #ps-lede summary), the evidence it is based on (#ps-meta: the
-    analysis window) and the recommended next action (#ps-next). It does NOT
-    say which signal drives the state — that interpretation belongs to Axis
-    Insight — and it does NOT restate measurable evidence the Trends section
-    owns (weights, counts, consistency).
+    PR2 structure: STATE → EVIDENCE → ACTION, one dominant surface.
+
+      #ps-window   the window the state covers ("Your last 4 weeks") — metadata,
+                   lowest prominence
+      #ps-state    the trajectory headline — the page's loudest line
+      #ps-lede     one trajectory-level summary sentence
+      #ps-evidence at most two MEASURED facts (weeks trained, volume direction)
+      #ps-next     the recommended next move, keyed on the trajectory, plus the
+                   page's one primary action (weekly check-in) and Coach entry
+
+    It does NOT say which signal drives the state — that interpretation
+    belongs to Axis Insight, and the needs-attention next move hands off to
+    it. The consistency STATE label renders once, on its Trends card.
 
     The state is decided by the server (GET /api/progress/summary →
     app/services/progress_summary) and mapped to copy by
     static/progress_presentation.js. The markup ships neutral copy, which is
-    what a reader sees before the summary resolves.
+    what a reader sees before the summary resolves; the evidence list and the
+    next-move line stay hidden until there is something real to put in them.
 
     data-state on .ps-card drives the accent only — the state is always spelled
     out in #ps-state text as well, so it is never carried by colour alone
@@ -20,22 +28,30 @@
     <h2 class="sec-label" id="ps-h">{{ t('progress.current_state_label') }}</h2>
 
     <div class="ps-card" id="ps-card">
-        <div role="status" aria-live="polite">
+        <div class="ps-status" role="status" aria-live="polite">
+            <p class="ps-window" id="ps-window" data-slot="window">{{ t('progress.loading') }}</p>
             <p class="ps-state" id="ps-state" data-slot="headline">{{ t('progress.summary_state') }}</p>
             <p class="ps-lede" id="ps-lede" data-slot="summary">{{ t('progress.summary_lede') }}</p>
-            <p class="ps-meta" id="ps-meta" data-slot="evidence">{{ t('progress.loading') }}</p>
+            <ul class="ps-evidence" id="ps-evidence" data-slot="evidence"
+                aria-label="{{ t('progress.state_evidence_label') }}" hidden></ul>
         </div>
 
-        <div class="ps-actions" id="ps-next" data-slot="next-action">
-            <button type="button" class="btn-volt" data-action="openCheckin">
-                {{ t('progress.checkin_action') }}
-            </button>
-            {#- Contextual Coach entry (UX-1 PR3): a server-rendered link to the
-                canonical Coach destination, so it cannot silently disappear. It
-                stays subordinate to the check-in action. -#}
-            <a class="btn-ghost" href="/coach" id="ps-ask">
-                {{ t('progress.ask_axis') }}
-            </a>
+        <div class="ps-next" id="ps-next" data-slot="next-action">
+            <div class="ps-next-move" id="ps-next-move" hidden>
+                <p class="ps-next-label">{{ t('progress.state_next_label') }}</p>
+                <p class="ps-next-text" id="ps-next-text"></p>
+            </div>
+            <div class="ps-actions">
+                <button type="button" class="btn-volt" data-action="openCheckin">
+                    {{ t('progress.checkin_action') }}
+                </button>
+                {#- Contextual Coach entry (UX-1 PR3): a server-rendered link to the
+                    canonical Coach destination, so it cannot silently disappear. It
+                    stays subordinate to the check-in action. -#}
+                <a class="btn-ghost" href="/coach" id="ps-ask">
+                    {{ t('progress.ask_axis') }}
+                </a>
+            </div>
         </div>
     </div>
 </section>

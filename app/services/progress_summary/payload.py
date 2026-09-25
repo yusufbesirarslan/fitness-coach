@@ -45,6 +45,11 @@ def progress_summary_payload(summary: ProgressSummary) -> dict:
             "weight_delta_kg": body.weight_delta_kg,
             "target_weight_kg": body.target_weight_kg,
             "distance_to_target_kg": body.distance_to_target_kg,
+            # V2 PR2 (additive): qualifying check-in weights, oldest first.
+            "weight_series": [
+                {"day": p.day.isoformat(), "weight_kg": p.weight_kg}
+                for p in body.weight_series
+            ],
         },
         "performance": {
             "state": performance.state,
@@ -60,4 +65,15 @@ def progress_summary_payload(summary: ProgressSummary) -> dict:
             "analyzed_weeks": consistency.analyzed_weeks,
             "sessions": consistency.sessions,
         },
+        # V2 PR2 (additive): the window's weeks, oldest first — the buckets the
+        # consistency counts and the volume trend above were computed from.
+        "weekly": [
+            {
+                "start": w.start.isoformat(),
+                "sessions": w.sessions,
+                "active": w.active,
+                "volume_kg": w.volume_kg,
+            }
+            for w in summary.weekly
+        ],
     }
