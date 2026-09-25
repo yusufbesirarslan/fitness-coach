@@ -14,12 +14,12 @@ flushes or commits (``tests/test_progress_summary.py`` pins this).
 """
 from app.extensions import db
 from app.models import User, WeeklyCheckIn
+from app.timeutil import app_date_of
 
-from .models import BodyFacts
+from .models import WEIGHT_SERIES_POINTS, BodyFacts, WeightPoint
 
-# The latest weight plus the one before it — a delta needs exactly two points and
-# nothing in the contract is served by fetching more.
-_QUALIFYING_OBSERVATIONS = 2
+# The latest weight plus the one before it — a delta needs exactly two points.
+_DELTA_OBSERVATIONS = 2
 
 
 def _positive(value):
@@ -78,19 +78,32 @@ def fetch_body_facts(user_id: int) -> BodyFacts:
             .filter_by(user_id=user_id)
             .filter(WeeklyCheckIn.yogunluk.isnot(None))
             .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
-            .limit(_QUALIFYING_OBSERVATIONS)
+            # Progress V2 PR2: the SAME statement, a larger bound — the Weight
+            # sparkline reads the rows the delta already came from, so the
+            # summary still issues exactly one check-in-ledger query here.
+            .limit(WEIGHT_SERIES_POINTS)
             .all()
         )
 
     # A row whose weight is not a usable number is not an observation. Dropping it
     # rather than substituting zero is what keeps "fewer than two observations"
-    # honest instead of manufacturing a delta against a fake reading.
+    # honest instead of manufacturing a delta against a fake reading. The delta
+    # still looks at the newest two ROWS only, exactly as before the series
+    # existed: widening the fetch must not change which pair it compares.
     weights = tuple(
-        w for w in (_positive(row.weight) for row in qualifying_rows) if w is not None
+        w for w in (_positive(row.weight) for row in qualifying_rows[:_DELTA_OBSERVATIONS])
+        if w is not None
     )
+    series = []
+    for row in qualifying_rows:
+        weight = _positive(row.weight)
+        if weight is not None and row.created_at is not None:
+            series.append(WeightPoint(day=app_date_of(row.created_at), weight_kg=weight))
+    series.reverse()  # newest-first query → chronological series
 
     return BodyFacts(
         current_weight_kg=current,
         target_weight_kg=_positive(user.target_weight),
         recent_qualifying_weights=weights,
+        weight_series=tuple(series),
     )

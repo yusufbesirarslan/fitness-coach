@@ -36,6 +36,7 @@ from .analysis import (
     summarize_body,
     summarize_consistency,
     summarize_performance,
+    summarize_weeks,
     trajectory_for_signal,
 )
 from .models import (
@@ -56,6 +57,7 @@ from .models import (
     PERFORMANCE_STATES,
     PERFORMANCE_STEADY,
     SUMMARY_WEEKS,
+    WEIGHT_SERIES_POINTS,
     TRAJECTORY_BUILDING_BASELINE,
     TRAJECTORY_NEEDS_ATTENTION,
     TRAJECTORY_ON_TRACK,
@@ -68,6 +70,8 @@ from .models import (
     ProgressWindow,
     Trajectory,
     UnknownProgressionSignal,
+    WeekSummary,
+    WeightPoint,
 )
 from .payload import progress_summary_payload
 from .queries import fetch_body_facts
@@ -81,8 +85,11 @@ __all__ = [
     "ProgressWindow",
     "Trajectory",
     "UnknownProgressionSignal",
+    "WeekSummary",
+    "WeightPoint",
     "CONTRACT_VERSION",
     "SUMMARY_WEEKS",
+    "WEIGHT_SERIES_POINTS",
     "TRAJECTORY_STATES",
     "TRAJECTORY_BUILDING_BASELINE",
     "TRAJECTORY_ON_TRACK",
@@ -110,6 +117,7 @@ __all__ = [
     "summarize_body",
     "summarize_consistency",
     "summarize_performance",
+    "summarize_weeks",
     "fetch_body_facts",
     "progress_summary_payload",
     "build_progress_summary",
@@ -155,4 +163,5 @@ def build_progress_summary(
         body=summarize_body(fetch_body_facts(user_id)),
         performance=summarize_performance(report),
         consistency=summarize_consistency(report),
+        weekly=summarize_weeks(report),
     )

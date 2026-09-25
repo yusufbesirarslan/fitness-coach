@@ -102,13 +102,32 @@ Example (illustrative values only — nothing here is hardcoded):
   "trajectory":  { "state": "on_track", "reason": "progressing" },
   "body":        { "status": "available", "current_weight_kg": 78.4,
                    "weight_delta_kg": -0.6, "target_weight_kg": 75.0,
-                   "distance_to_target_kg": 3.4 },
+                   "distance_to_target_kg": 3.4,
+                   "weight_series": [ { "day": "2026-08-01", "weight_kg": 79.4 },
+                                      { "day": "2026-08-08", "weight_kg": 79.0 },
+                                      { "day": "2026-08-15", "weight_kg": 78.4 } ] },
   "performance": { "state": "progressing", "volume_trend": "up",
                    "strength_trend": "flat", "next_signal": "progressing" },
   "consistency": { "state": "consistent", "active_weeks": 4,
-                   "analyzed_weeks": 4, "sessions": 12 }
+                   "analyzed_weeks": 4, "sessions": 12 },
+  "weekly":      [ { "start": "2026-07-19", "sessions": 3, "active": true,
+                     "volume_kg": 4200.0 }, "… one entry per analysed week …" ]
 }
 ```
+
+**Progress V2 PR2 (additive, `contract_version` unchanged).** Two series feed
+the Trends visualizations; every v1 field is unchanged:
+
+- `body.weight_series` — the qualifying check-in weights (`yogunluk IS NOT
+  NULL`), oldest first, capped at `WEIGHT_SERIES_POINTS = 8`, each on its
+  Istanbul day (`app_date_of`). Produced by the SAME check-in query the delta
+  already used (only its `LIMIT` grew from 2 to 8); the delta still compares
+  the newest two rows only. Empty when there are none — never padded.
+- `weekly` — one entry per analysed week, oldest first: the progression
+  report's own `weekly_volume` buckets (the objects `consistency` counts and
+  `volume_trend` was computed from). `active` is `sessions > 0`, the exact rule
+  `active_weeks` uses; `volume_kg` is rounded to 1 dp. Zero weeks are measured
+  zeros. No extra query, no second report.
 
 Contract rules:
 
@@ -300,20 +319,36 @@ sections — one Jinja partial each, rendered in this order:
 
 `static/progress_presentation.js` (`window.FitXProgressPresentation`) is the
 **one** presentation model: every state → locale-key table on the page and a
-pure `buildSummaryView(payload)` that turns this contract into
+pure `buildSummaryView(payload, {locale})` that turns this contract into
 
-- `current_state` — `status`, `state` (accent only), `headline`, `summary`,
-  `evidence` (the window). Keyed on the **trajectory**, never on
-  `trajectory.reason`: which signal needs attention is Axis Insight's to say,
-  so Current State cannot repeat it (the retired per-signal ledes restated the
-  WATCH headline verbatim).
-- `metrics.weight` — `status`, `unit`, `current`, `delta`,
-  `comparison_period` (`previous_checkin` | null), `distance_to_target`.
-- `metrics.training_volume` — `status`, `trend`, `comparison_period`. The
-  canonical trend is `flat` when there is nothing to compare, so
-  `building_baseline` maps to `insufficient_data`, never "Steady".
-- `metrics.consistency` — `status`, `state`, `active_weeks`, `total_weeks`,
-  `session_count`, `comparison_period`.
+- `current_state` (V2 PR2: STATE → EVIDENCE → ACTION) — `status`, `state`
+  (accent only), `window` ("Your last 4 weeks"), `headline`, `summary`,
+  `evidence` (at most two MEASURED facts, fixed order: weeks trained, then the
+  volume direction when it is evidence) and `next_action` (keyed on the
+  trajectory; `needs_attention` hands off to Axis Insight rather than naming
+  the signal). Keyed on the **trajectory**, never on `trajectory.reason`:
+  which signal needs attention is Axis Insight's to say.
+- every metric carries the same render slots, in falling prominence:
+  `value` · `unit_label` · `change` (`{text, direction}`) · `viz` · `note` ·
+  `meta` (list), plus its facts.
+- `metrics.weight` — value, the server delta as change (direction = its sign,
+  never a verdict), a `line` viz over `weight_series` only when it has at
+  least `MIN_LINE_POINTS = 3` points (fewer → a "not enough check-ins" note,
+  never a fake flat line), target distance as meta.
+- `metrics.training_volume` — value = the newest trailing week's `volume_kg`
+  (compact, locale-formatted), change = the canonical `volume_trend`, a
+  `bars` viz over the weekly totals. `building_baseline` → `insufficient_data`
+  (note, no change, no bars). A payload without `weekly` falls back to the
+  semantic trend word — no number is invented.
+- `metrics.consistency` — value `active / total` + "weeks active", change =
+  the canonical state label (its only rendering on the page), a `weeks` viz
+  (one cell per week, only when the series covers exactly the counted weeks).
+
+Visualization geometry (fixed SVG viewBox) is computed in the model;
+`progress.js` builds a handful of nodes with `createElementNS`, marks the
+drawing `aria-hidden`, and renders its text equivalent (visually hidden
+sentence, or a real `<ol>` for the week cells). No chart library, no canvas,
+no ResizeObserver/rAF/animation; layout is CSS-only (`auto-fit` grid).
 
 Every rendered string is a `{key, params}` descriptor; internal identifiers are
 never rendered or reshaped into copy. The consistency state renders exactly

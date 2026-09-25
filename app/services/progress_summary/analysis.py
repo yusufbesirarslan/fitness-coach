@@ -32,6 +32,7 @@ from .models import (
     BodySummary,
     ConsistencySummary,
     PerformanceSummary,
+    WeekSummary,
     ProgressWindow,
     Trajectory,
     UnknownProgressionSignal,
@@ -147,6 +148,26 @@ def summarize_consistency(report: ProgressionReport) -> ConsistencySummary:
     )
 
 
+def summarize_weeks(report: ProgressionReport) -> tuple[WeekSummary, ...]:
+    """The per-week series behind the consistency counts and the volume trend.
+
+    Read straight off the report's ``weekly_volume`` buckets (oldest first) —
+    the objects ``summarize_consistency`` counts and ``volume_trend`` was
+    computed from — so nothing here is a second measurement. ``active`` uses
+    the exact rule ``summarize_consistency`` uses. Volume is rounded to one
+    decimal for the same float-noise reason derived weights are.
+    """
+    return tuple(
+        WeekSummary(
+            start=w.week_start,
+            sessions=w.session_count,
+            active=w.session_count > 0,
+            volume_kg=round(w.total_volume, _DERIVED_WEIGHT_DP),
+        )
+        for w in report.weekly_volume
+    )
+
+
 def summarize_body(facts: BodyFacts) -> BodySummary:
     """Body facts → the truthful availability state. No judgement, no threshold.
 
@@ -180,4 +201,5 @@ def summarize_body(facts: BodyFacts) -> BodySummary:
         weight_delta_kg=delta,
         target_weight_kg=target,
         distance_to_target_kg=distance,
+        weight_series=facts.weight_series,
     )

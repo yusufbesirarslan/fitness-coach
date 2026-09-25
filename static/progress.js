@@ -6,7 +6,8 @@
    Check-In POST flow must keep working unchanged.
 
    Hard rule for this file: it RENDERS, it does not decide. CURRENT STATE
-   and the three TRENDS cards all render one canonical server payload
+   and the three TRENDS cards (V2 PR2: value · change · viz · note · meta,
+   geometry computed by the presentation model) all render one canonical server payload
    (GET /api/progress/summary) through the view model in
    static/progress_presentation.js, which owns every state → copy table;
    there is no `sessions >= 3 → on track`, no `weight dropped → good`, no
@@ -160,15 +161,26 @@ document.addEventListener('keydown', function (e) {
 // Small helpers ───────────────────────────────────────────────────────
 function _el(id) { return document.getElementById(id); }
 
-// Fills one TRENDS card. `detail` may be empty; the value never is (a card
-// with no signal shows the neutral dash).
-function _fillCard(id, value, detail) {
+// Shows a slot with text, or hides it when there is nothing to say — an
+// empty line never holds space and never reads as a blank value.
+function _setSlot(node, text) {
+  if (!node) return;
+  node.textContent = text || '';
+  if (text) node.removeAttribute('hidden'); else node.setAttribute('hidden', '');
+}
+
+// Fills one TRENDS card's text slots. The value never goes blank (a card
+// with no signal shows the neutral dash); every other slot hides when empty.
+function _fillCard(id, value, note) {
   var card = _el(id);
   if (!card) return;
   var v = card.querySelector('[data-slot="value"]');
-  var s = card.querySelector('[data-slot="detail"]');
   if (v) v.textContent = value;
-  if (s) s.textContent = detail;
+  _setSlot(card.querySelector('[data-slot="unit"]'), '');
+  _setSlot(card.querySelector('[data-slot="change"]'), '');
+  _setSlot(card.querySelector('[data-slot="note"]'), note);
+  _setSlot(card.querySelector('[data-slot="meta"]'), '');
+  _renderViz(card.querySelector('[data-slot="viz"]'), null);
 }
 
 // A section that fails to load says so plainly instead of showing a stale or
@@ -242,7 +254,7 @@ function loadSummary() {
 function renderSummary(d) {
   var P = _presentation();
   if (!P) { _summaryModuleMissing(); return; }
-  renderSummaryView(P.buildSummaryView(d));
+  renderSummaryView(P.buildSummaryView(d, { locale: window.LOCALE }));
 }
 
 // A failed summary must NOT read as "building baseline": that is a truthful
@@ -258,7 +270,7 @@ function summaryUnavailable() {
 // The presentation script itself failed to load: degrade this section only,
 // and never leave it on "Loading…".
 function _summaryModuleMissing() {
-  _setCurrentState('', __t('progress.load_error'), '', '');
+  _setCurrentState('', '', __t('progress.load_error'), '', [], '');
   ['tr-weight', 'tr-volume', 'tr-consistency'].forEach(function (id) {
     _fillCard(id, '—', __t('progress.load_error'));
   });
@@ -272,29 +284,143 @@ function renderSummaryView(view) {
 }
 
 // ── CURRENT STATE ──
-function _setCurrentState(state, headline, summary, evidence) {
+// STATE → EVIDENCE → ACTION. Evidence is a short list of measured facts;
+// the next-move line and the evidence list are hidden when empty.
+function _setCurrentState(state, windowText, headline, summary, evidence, next) {
   var card = _el('ps-card');
   var stateEl = _el('ps-state');
   var ledeEl = _el('ps-lede');
-  var metaEl = _el('ps-meta');
+  var list = _el('ps-evidence');
+  var move = _el('ps-next-move');
   // The accent is decoration; the headline carries the meaning either way.
   if (card) card.setAttribute('data-state', state || '');
+  _setSlot(_el('ps-window'), windowText);
   if (stateEl) stateEl.textContent = headline;
   if (ledeEl) ledeEl.textContent = summary;
-  if (metaEl) metaEl.textContent = evidence;
+  if (list) {
+    var items = evidence.map(function (text) {
+      var li = document.createElement('li');
+      li.textContent = text;
+      return li;
+    });
+    list.replaceChildren.apply(list, items);
+    if (items.length) list.removeAttribute('hidden'); else list.setAttribute('hidden', '');
+  }
+  _setSlot(_el('ps-next-text'), next);
+  if (move) {
+    if (next) move.removeAttribute('hidden'); else move.setAttribute('hidden', '');
+  }
 }
 
 function renderCurrentState(cs) {
-  _setCurrentState(cs.state, _text(cs.headline), _text(cs.summary), _text(cs.evidence));
+  _setCurrentState(cs.state, _text(cs.window), _text(cs.headline), _text(cs.summary),
+                   (cs.evidence || []).map(_text), _text(cs.next_action));
 }
 
 // ── TRENDS ──
 // One card per metric. status is published on the card so styling and
 // later PRs can key on availability without re-deriving it.
+var _DIRECTION_GLYPH = { up: '\u2191', down: '\u2193', flat: '\u2192' };
+var _SVG_NS = 'http://www.w3.org/2000/svg';
+
 function renderMetric(id, metric) {
   var card = _el(id);
-  if (card) card.setAttribute('data-status', metric.status);
-  _fillCard(id, metric.value ? _text(metric.value) : '—', _text(metric.detail));
+  if (!card) return;
+  card.setAttribute('data-status', metric.status);
+  var v = card.querySelector('[data-slot="value"]');
+  if (v) v.textContent = metric.value ? _text(metric.value) : '—';
+  _setSlot(card.querySelector('[data-slot="unit"]'), _text(metric.unit_label));
+  _renderChange(card.querySelector('[data-slot="change"]'), metric.change);
+  _renderViz(card.querySelector('[data-slot="viz"]'), metric.viz);
+  _setSlot(card.querySelector('[data-slot="note"]'), _text(metric.note));
+  _setSlot(card.querySelector('[data-slot="meta"]'),
+           (metric.meta || []).map(_text).join(' \u00b7 '));
+}
+
+// The change line: an aria-hidden direction glyph + the words. The words
+// always carry the direction ("+0.6 kg", "Rising"), so the glyph and any
+// styling are redundant, never the only signal (WCAG 1.4.1).
+function _renderChange(node, change) {
+  if (!node) return;
+  if (!change || !change.text) { _setSlot(node, ''); node.removeAttribute('data-direction'); return; }
+  var parts = [];
+  var glyph = change.direction ? _DIRECTION_GLYPH[change.direction] : null;
+  if (glyph) {
+    var g = document.createElement('span');
+    g.className = 'tr-glyph';
+    g.setAttribute('aria-hidden', 'true');
+    g.textContent = glyph;
+    parts.push(g);
+  }
+  parts.push(document.createTextNode(_text(change.text)));
+  node.replaceChildren.apply(node, parts);
+  if (change.direction) node.setAttribute('data-direction', change.direction);
+  else node.removeAttribute('data-direction');
+  node.removeAttribute('hidden');
+}
+
+function _svg(name, attrs) {
+  var node = document.createElementNS(_SVG_NS, name);
+  for (var k in attrs) {
+    if (Object.prototype.hasOwnProperty.call(attrs, k)) node.setAttribute(k, attrs[k]);
+  }
+  return node;
+}
+
+// Visualizations. The geometry comes from the presentation model in a fixed
+// viewBox, so this only builds a handful of nodes — no measuring, no resize
+// listener, no animation. The drawing is aria-hidden; its text equivalent
+// is a visually-hidden sentence (line / bars) or a real list (weeks).
+function _renderViz(node, viz) {
+  if (!node) return;
+  if (!viz) { node.replaceChildren(); node.setAttribute('hidden', ''); node.removeAttribute('data-kind'); return; }
+  var children = [];
+  if (viz.kind === 'weeks') {
+    var list = document.createElement('ol');
+    list.className = 'tr-weeks';
+    list.setAttribute('aria-label', _text(viz.label));
+    viz.cells.forEach(function (cell) {
+      var li = document.createElement('li');
+      li.className = 'tr-week';
+      li.setAttribute('data-active', cell.active ? 'true' : 'false');
+      var sr = document.createElement('span');
+      sr.className = 'tr-sr';
+      sr.textContent = _text(cell.label);
+      li.appendChild(sr);
+      list.appendChild(li);
+    });
+    children.push(list);
+  } else {
+    var svg = _svg('svg', {
+      viewBox: '0 0 ' + viz.width + ' ' + viz.height,
+      preserveAspectRatio: 'none', 'aria-hidden': 'true', focusable: 'false',
+      'class': 'tr-svg'
+    });
+    if (viz.kind === 'line') {
+      var pts = viz.points.map(function (p) { return p.x + ',' + p.y; }).join(' ');
+      // One polyline, no end marker: the viewBox scales non-uniformly, so a
+      // circle would render as an ellipse. The stroke stays crisp via
+      // vector-effect (progress.css).
+      svg.appendChild(_svg('polyline', { points: pts, 'class': 'tr-line' }));
+    } else if (viz.kind === 'bars') {
+      viz.bars.forEach(function (b, i) {
+        var cls = 'tr-bar' + (i === viz.bars.length - 1 ? ' tr-bar-latest' : '') +
+                  (b.zero ? ' tr-bar-zero' : '');
+        svg.appendChild(_svg('rect', {
+          x: b.x, y: b.zero ? viz.height - 1 : b.y, width: b.width,
+          height: b.zero ? 1 : b.height, rx: 1.5, 'class': cls
+        }));
+      });
+    }
+    children.push(svg);
+    var text = document.createElement('span');
+    text.className = 'tr-sr';
+    text.textContent = _text(viz.label);
+    children.push(text);
+  }
+  node.replaceChildren.apply(node, children);
+  node.setAttribute('data-kind', viz.kind);
+  node.removeAttribute('hidden');
 }
 
 // ── PROGRESS HISTORY ─────────────────────────────────────────────────

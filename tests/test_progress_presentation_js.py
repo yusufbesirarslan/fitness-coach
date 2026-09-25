@@ -1,4 +1,4 @@
-"""Progress V2 PR1 — the Progress presentation model (static/progress_presentation.js).
+"""Progress V2 PR1 + PR2 — the Progress presentation model (static/progress_presentation.js).
 
 The file is the ONE place Progress turns canonical summary state into
 presentation: the state → copy tables and the summary view model
@@ -22,6 +22,10 @@ B. metric contract — weight / training volume / consistency carry their facts,
 C. deduplication — one summary never renders the same sentence twice, the
    consistency state has exactly one rendering, and Current State never
    repeats an Axis Insight sentence.
+D. PR2 Current State + Trends — state → evidence (<= 2 measured facts) →
+   next move; value · change · viz · note · meta per metric; sparkline / bar
+   geometry only from real published series; sparse series yield a note,
+   never a fake line.
 E. performance — the model performs no I/O, and the page still fetches the
    summary exactly once.
 
@@ -73,8 +77,22 @@ def _code_only(source):
 CODE = _code_only(SOURCE)
 
 
+WEEKLY_DEFAULT = [
+    {"start": "2026-08-28", "sessions": 3, "active": True, "volume_kg": 4200.0},
+    {"start": "2026-09-04", "sessions": 3, "active": True, "volume_kg": 4600.0},
+    {"start": "2026-09-11", "sessions": 3, "active": True, "volume_kg": 4900.0},
+    {"start": "2026-09-18", "sessions": 3, "active": True, "volume_kg": 5100.0},
+]
+SERIES_DEFAULT = [
+    {"day": "2026-09-03", "weight_kg": 79.4},
+    {"day": "2026-09-10", "weight_kg": 79.0},
+    {"day": "2026-09-17", "weight_kg": 78.4},
+]
+
+
 def _summary(signal="progressing", *, consistency="consistent",
-             volume_trend="up", body=None, weeks=4, active=4, sessions=12):
+             volume_trend="up", body=None, weeks=4, active=4, sessions=12,
+             weekly=None):
     """A /api/progress/summary payload shaped exactly like the server's."""
     return {
         "contract_version": 1,
@@ -84,12 +102,13 @@ def _summary(signal="progressing", *, consistency="consistent",
         "body": body if body is not None else {
             "status": "available", "current_weight_kg": 78.4,
             "weight_delta_kg": -0.6, "target_weight_kg": 75.0,
-            "distance_to_target_kg": 3.4},
+            "distance_to_target_kg": 3.4, "weight_series": SERIES_DEFAULT},
         "performance": {"state": PERFORMANCE_FOR_SIGNAL[signal],
                         "volume_trend": volume_trend, "strength_trend": "flat",
                         "next_signal": signal},
         "consistency": {"state": consistency, "active_weeks": active,
                         "analyzed_weeks": weeks, "sessions": sessions},
+        "weekly": WEEKLY_DEFAULT if weekly is None else weekly,
     }
 
 
@@ -106,9 +125,9 @@ def _run(expression_js):
     return json.loads(out.stdout)
 
 
-def _views(payloads):
-    return _run("%s.map(function (d) { return P.buildSummaryView(d); })"
-                % json.dumps(payloads))
+def _views(payloads, locale="en"):
+    return _run("%s.map(function (d) { return P.buildSummaryView(d, {locale: %s}); })"
+                % (json.dumps(payloads), json.dumps(locale)))
 
 
 def _tables():
@@ -118,15 +137,26 @@ def _tables():
         " TRAINING_VOLUME_AVAILABILITY: P.TRAINING_VOLUME_AVAILABILITY,"
         " CONSISTENCY_STATE: P.CONSISTENCY_STATE,"
         " CONSISTENCY_AVAILABILITY: P.CONSISTENCY_AVAILABILITY,"
-        " VOLUME_TREND: P.VOLUME_TREND, TREND_INLINE: P.TREND_INLINE}")
+        " VOLUME_TREND: P.VOLUME_TREND, TREND_INLINE: P.TREND_INLINE,"
+        " CURRENT_STATE_NEXT: P.CURRENT_STATE_NEXT, VOLUME_CHANGE: P.VOLUME_CHANGE,"
+        " STATE_FACT_VOLUME: P.STATE_FACT_VOLUME}")
 
 
 def _descriptors(view):
-    """Every copy descriptor the page would render for one view, in order."""
+    """Every copy descriptor the page would render for one view, in order.
+
+    Visually-hidden text equivalents (viz labels, week cells) are included:
+    a screen reader hears them, so they count as rendered sentences."""
     cs = view["current_state"]
-    out = [cs["headline"], cs["summary"], cs["evidence"]]
+    out = [cs["window"], cs["headline"], cs["summary"], *cs["evidence"],
+           cs["next_action"]]
     for metric in view["metrics"].values():
-        out += [metric["value"], metric["detail"]]
+        out += [metric["value"], metric["unit_label"],
+                (metric["change"] or {}).get("text"), metric["note"],
+                *metric["meta"]]
+        viz = metric["viz"] or {}
+        out.append(viz.get("label"))
+        out += [c["label"] for c in viz.get("cells", [])]
     return [d for d in out if d]
 
 
@@ -195,6 +225,8 @@ def test_tables_cover_every_server_state_exactly():
     assert set(t["CONSISTENCY_STATE"]) == set(CONSISTENCY_STATES)
     assert set(t["CONSISTENCY_AVAILABILITY"]) == set(CONSISTENCY_STATES)
     assert set(t["VOLUME_TREND"]) == set(t["TREND_INLINE"]) == {"up", "flat", "down"}
+    assert set(t["VOLUME_CHANGE"]) == set(t["STATE_FACT_VOLUME"]) == {"up", "flat", "down"}
+    assert set(t["CURRENT_STATE_NEXT"]) == set(TRAJECTORY_STATES)
 
 
 @requires_node
@@ -288,40 +320,75 @@ def test_unknown_values_degrade_per_section_without_guessing():
 @requires_node
 def test_weight_metric_contract():
     w = _views([_summary()])[0]["metrics"]["weight"]
-    assert w == {
-        "metric": "weight", "status": "available", "unit": "kg",
-        "current": 78.4, "delta": -0.6, "comparison_period": "previous_checkin",
-        "distance_to_target": 3.4,
-        "value": {"key": "progress.metric_weight_value", "params": {"value": "78.4"}},
-        "detail": {"key": "progress.body_sub_delta", "params": {"delta": "-0.6"}},
-    }
+    assert w["status"] == "available" and w["unit"] == "kg"
+    assert w["current"] == 78.4 and w["delta"] == -0.6
+    assert w["comparison_period"] == "previous_checkin"
+    assert w["distance_to_target"] == 3.4
+    assert w["value"] == {"key": "progress.metric_weight_value", "params": {"value": "78.4"}}
     assert _render(w["value"], "en") == "78.4 kg"
+    # Change: the server's delta, signed, with a direction taken from its sign.
+    assert w["change"] == {"text": {"key": "progress.body_sub_delta",
+                                    "params": {"delta": "-0.6"}},
+                           "direction": "down"}
+    # Three real check-ins → a sparkline over exactly those points.
+    assert w["series_points"] == 3
+    assert w["viz"]["kind"] == "line" and len(w["viz"]["points"]) == 3
+    assert _render(w["viz"]["label"], "en") == (
+        "Weight over your last 3 check-ins, from 79.4 kg to 78.4 kg.")
+    assert w["note"] is None
+    assert [m["key"] for m in w["meta"]] == ["progress.metric_weight_period",
+                                            "progress.body_sub_target"]
+
+
+@requires_node
+def test_weight_sparkline_preserves_chronology_and_direction():
+    """Oldest point on the left; a falling weight ends lower (larger y)."""
+    w = _views([_summary()])[0]["metrics"]["weight"]
+    xs = [p["x"] for p in w["viz"]["points"]]
+    ys = [p["y"] for p in w["viz"]["points"]]
+    assert xs == sorted(xs) and len(set(xs)) == 3
+    assert ys[0] < ys[1] < ys[2]           # 79.4 → 79.0 → 78.4: descending line
+    for p in w["viz"]["points"]:
+        assert 0 <= p["x"] <= w["viz"]["width"] and 0 <= p["y"] <= w["viz"]["height"]
 
 
 @requires_node
 def test_weight_sparse_and_missing_states_are_safe():
     one_checkin = {"status": "partial", "current_weight_kg": 80.0,
                    "weight_delta_kg": None, "target_weight_kg": None,
-                   "distance_to_target_kg": None}
+                   "distance_to_target_kg": None,
+                   "weight_series": [{"day": "2026-09-17", "weight_kg": 80.0}]}
     with_target = dict(one_checkin, target_weight_kg=75.0, distance_to_target_kg=5.0)
     no_weight = {"status": "insufficient_data", "current_weight_kg": None,
                  "weight_delta_kg": None, "target_weight_kg": None,
-                 "distance_to_target_kg": None}
-    flat = dict(one_checkin, status="available", weight_delta_kg=0.0)
+                 "distance_to_target_kg": None, "weight_series": []}
+    two_flat = dict(one_checkin, status="available", weight_delta_kg=0.0,
+                    weight_series=[{"day": "2026-09-10", "weight_kg": 80.0},
+                                   {"day": "2026-09-17", "weight_kg": 80.0}])
+    legacy = {k: v for k, v in one_checkin.items() if k != "weight_series"}
     views = _views([_summary(body=b) for b in
-                    (one_checkin, with_target, no_weight, flat)])
+                    (one_checkin, with_target, no_weight, two_flat, legacy)])
     w = [v["metrics"]["weight"] for v in views]
 
+    # One check-in: value, no change, no line, explicit note.
     assert w[0]["status"] == "partial" and w[0]["delta"] is None
-    assert w[0]["comparison_period"] is None
-    assert w[0]["detail"]["key"] == "progress.body_sub_partial"
-    assert w[1]["detail"] == {"key": "progress.body_sub_target",
-                              "params": {"distance": "5.0"}}
+    assert w[0]["comparison_period"] is None and w[0]["change"] is None
+    assert w[0]["viz"] is None
+    assert w[0]["note"]["key"] == "progress.metric_weight_no_trend"
+    assert w[1]["meta"] == [{"key": "progress.body_sub_target",
+                             "params": {"distance": "5.0"}}]
     # No weight is not zero weight.
     assert w[2]["status"] == "insufficient_data"
     assert w[2]["current"] is None and w[2]["value"] is None
-    assert w[2]["detail"]["key"] == "progress.body_sub_none"
-    assert w[3]["detail"]["key"] == "progress.body_sub_flat"
+    assert w[2]["change"] is None and w[2]["viz"] is None
+    assert w[2]["note"]["key"] == "progress.body_sub_none"
+    # Two points: a real "no change" delta, but NOT a drawn trend line.
+    assert w[3]["change"] == {"text": {"key": "progress.body_sub_flat", "params": None},
+                              "direction": "flat"}
+    assert w[3]["viz"] is None
+    assert w[3]["note"]["key"] == "progress.metric_weight_no_trend"
+    # A pre-PR2 payload without a series degrades to the note, never a line.
+    assert w[4]["viz"] is None and w[4]["value"]["params"] == {"value": "80.0"}
 
 
 @requires_node
@@ -330,52 +397,118 @@ def test_training_volume_metric_contract():
                     _summary("plateau", volume_trend="flat"),
                     _summary("deload", volume_trend="down")])
     vols = [v["metrics"]["training_volume"] for v in views]
-    assert vols[0] == {
-        "metric": "training_volume", "status": "available", "trend": "up",
-        "comparison_period": {"weeks": 4},
-        "value": {"key": "progress.metric_volume_up", "params": None},
-        "detail": {"key": "progress.metric_volume_period", "params": {"weeks": 4}},
-    }
-    assert [v["value"]["key"] for v in vols] == [
-        "progress.metric_volume_up", "progress.metric_volume_flat",
-        "progress.metric_volume_down"]
+    up = vols[0]
+    assert up["status"] == "available" and up["trend"] == "up"
+    assert up["latest_kg"] == 5100.0                    # newest trailing week
+    assert _render(up["value"], "en") == "5.1K kg"
+    assert up["change"] == {"text": {"key": "progress.metric_volume_change_up",
+                                     "params": {"weeks": 4}},
+                            "direction": "up"}
+    assert _render(up["change"]["text"], "en") == "Rising across 4 weeks"
+    assert [m["key"] for m in up["meta"]] == ["progress.metric_volume_latest"]
+    assert up["viz"]["kind"] == "bars" and len(up["viz"]["bars"]) == 4
+    assert _render(up["viz"]["label"], "en") == (
+        "Weekly training volume in kg, oldest to newest: 4.2K, 4.6K, 4.9K, 5.1K.")
+    assert [v["change"]["direction"] for v in vols] == ["up", "flat", "down"]
+
+
+@requires_node
+def test_volume_bars_are_proportional_and_keep_zero_weeks():
+    weekly = [dict(w) for w in WEEKLY_DEFAULT]
+    weekly[1] = dict(weekly[1], volume_kg=0.0, sessions=0, active=False)
+    vol = _views([_summary(weekly=weekly, active=3)])[0]["metrics"]["training_volume"]
+    bars = vol["viz"]["bars"]
+    assert [b["zero"] for b in bars] == [False, True, False, False]
+    assert bars[1]["height"] == 0
+    tallest = max(bars, key=lambda b: b["height"])
+    assert tallest is bars[3]                           # 5100 is the max
+    assert bars[0]["height"] < bars[2]["height"] < bars[3]["height"]
+
+
+@requires_node
+def test_volume_is_formatted_in_the_display_locale():
+    tr = _views([_summary()], locale="tr")[0]["metrics"]["training_volume"]
+    assert tr["value"]["params"]["value"] != "5.1K"     # Turkish compact form
+    assert "5,1" in tr["value"]["params"]["value"]
 
 
 @requires_node
 def test_training_volume_without_history_is_insufficient_not_steady():
     """The canonical trend is 'flat' when there is nothing to compare; a new
-    user must read 'not enough data', never 'Steady'."""
+    user must read 'not enough data', never 'Steady' — and no bars."""
+    zero_weeks = [dict(w, sessions=0, active=False, volume_kg=0.0) for w in WEEKLY_DEFAULT]
     vol = _views([_summary("insufficient_data", volume_trend="flat",
                            consistency="insufficient_data", active=0,
-                           sessions=0)])[0]["metrics"]["training_volume"]
+                           sessions=0, weekly=zero_weeks)])[0]["metrics"]["training_volume"]
     assert vol["status"] == "insufficient_data"
-    assert vol["trend"] is None and vol["value"] is None
-    assert vol["detail"]["key"] == "progress.metric_volume_insufficient"
+    assert vol["trend"] is None and vol["change"] is None and vol["viz"] is None
+    assert vol["note"]["key"] == "progress.metric_volume_insufficient"
+    # The measured zero of the last seven days is real and may be shown.
+    assert vol["latest_kg"] == 0.0
+
+
+@requires_node
+def test_training_volume_semantic_fallback_without_a_series():
+    """Only the canonical direction is known: render it, invent no number."""
+    d = _summary("progressing")
+    del d["weekly"]
+    vol = _views([d])[0]["metrics"]["training_volume"]
+    assert vol["status"] == "available" and vol["latest_kg"] is None
+    assert vol["value"] == {"key": "progress.metric_volume_up", "params": None}
+    assert vol["viz"] is None and vol["change"] is None
+
+
+@requires_node
+def test_malformed_weekly_series_is_ignored_not_guessed():
+    for bad in ([{"start": "x", "sessions": 1, "active": "yes", "volume_kg": 1.0}],
+                [{"start": "x", "sessions": 1, "active": True, "volume_kg": None}],
+                "nope"):
+        view = _views([_summary(weekly=bad)])[0]
+        assert view["metrics"]["training_volume"]["viz"] is None
+        assert view["metrics"]["consistency"]["viz"] is None
 
 
 @requires_node
 def test_consistency_metric_contract():
+    weekly = [dict(w) for w in WEEKLY_DEFAULT]
+    weekly[0] = dict(weekly[0], sessions=0, active=False, volume_kg=0.0)
+    weekly[2] = dict(weekly[2], sessions=0, active=False, volume_kg=0.0)
     c = _views([_summary("build_consistency", consistency="inconsistent",
-                         active=2, sessions=5)])[0]["metrics"]["consistency"]
-    assert c == {
-        "metric": "consistency", "status": "available", "state": "inconsistent",
-        "active_weeks": 2, "total_weeks": 4, "session_count": 5,
-        "comparison_period": {"weeks": 4},
-        "value": {"key": "progress.cons_state_inconsistent", "params": None},
-        "detail": {"key": "progress.metric_consistency_detail",
-                   "params": {"active": 2, "total": 4, "n": 5}},
-    }
-    assert _render(c["detail"], "en") == "2 of the last 4 weeks active · 5 sessions"
+                         active=2, sessions=5, weekly=weekly)])[0]["metrics"]["consistency"]
+    assert c["status"] == "available" and c["state"] == "inconsistent"
+    assert (c["active_weeks"], c["total_weeks"], c["session_count"]) == (2, 4, 5)
+    assert c["comparison_period"] == {"weeks": 4}
+    assert _render(c["value"], "en") == "2 / 4"
+    assert _render(c["unit_label"], "en") == "weeks active"
+    assert c["change"] == {"text": {"key": "progress.cons_state_inconsistent",
+                                    "params": None}, "direction": None}
+    assert [_render(m, "en") for m in c["meta"]] == ["Sessions logged in 4 weeks: 5"]
+    cells = c["viz"]["cells"]
+    assert [cell["active"] for cell in cells] == [False, True, False, True]
+    assert [_render(cell["label"], "en") for cell in cells] == [
+        "Week 1: no sessions", "Week 2: trained",
+        "Week 3: no sessions", "Week 4: trained"]
+    assert _render(c["viz"]["label"], "en") == "Weeks, oldest first"
+
+
+@requires_node
+def test_consistency_cells_never_contradict_the_counts():
+    """A series that does not cover exactly the counted weeks draws nothing."""
+    c = _views([_summary(weekly=WEEKLY_DEFAULT[:3])])[0]["metrics"]["consistency"]
+    assert c["viz"] is None
+    assert _render(c["value"], "en") == "4 / 4"
 
 
 @requires_node
 def test_empty_user_consistency_keeps_real_zeroes():
     """Zero sessions in four weeks is a measured fact, not missing data."""
+    zero_weeks = [dict(w, sessions=0, active=False, volume_kg=0.0) for w in WEEKLY_DEFAULT]
     c = _views([_summary("insufficient_data", consistency="insufficient_data",
-                         active=0, sessions=0)])[0]["metrics"]["consistency"]
+                         active=0, sessions=0, weekly=zero_weeks)])[0]["metrics"]["consistency"]
     assert c["status"] == "insufficient_data"
     assert c["active_weeks"] == 0 and c["session_count"] == 0
-    assert c["detail"]["params"] == {"active": 0, "total": 4, "n": 0}
+    assert c["value"]["params"] == {"active": 0, "total": 4}
+    assert [cell["active"] for cell in c["viz"]["cells"]] == [False] * 4
 
 
 @requires_node
@@ -386,9 +519,67 @@ def test_missing_counts_are_dropped_not_faked():
     view = _views([d])[0]
     c = view["metrics"]["consistency"]
     assert c["active_weeks"] is None and c["session_count"] is None
-    assert c["detail"] is None and c["comparison_period"] is None
-    assert view["current_state"]["evidence"] is None
-    assert view["metrics"]["training_volume"]["detail"] is None
+    assert c["comparison_period"] is None and c["meta"] == []
+    # Without counts the value is the state label, and no cells are drawn.
+    assert c["value"]["key"] == "progress.cons_state_consistent"
+    assert c["unit_label"] is None and c["change"] is None and c["viz"] is None
+    cs = view["current_state"]
+    assert cs["window"] is None
+    assert [e["key"] for e in cs["evidence"]] == ["progress.state_fact_volume_up"]
+    assert view["metrics"]["training_volume"]["change"] is None
+
+
+# ── D. Current State: state → evidence → action ─────────────────────────────
+
+@requires_node
+def test_current_state_follows_state_evidence_action():
+    cs = _views([_summary("build_consistency", consistency="inconsistent",
+                          volume_trend="flat", active=2, sessions=5)])[0]["current_state"]
+    assert _render(cs["window"], "en") == "Your last 4 weeks"
+    assert _render(cs["headline"], "en") == "Needs attention"
+    assert [_render(e, "en") for e in cs["evidence"]] == [
+        "Trained in 2 of the last 4 weeks",
+        "Weekly training volume is holding steady"]
+    assert cs["next_action"]["key"] == "progress.state_next_needs_attention"
+
+
+@requires_node
+@pytest.mark.parametrize("signal", sorted(TRAJECTORY_BY_SIGNAL))
+def test_current_state_evidence_is_bounded_and_measured(signal):
+    cs = _views([_summary(signal)])[0]["current_state"]
+    assert len(cs["evidence"]) <= 2
+    keys = [e["key"] for e in cs["evidence"]]
+    assert len(keys) == len(set(keys))
+    # Evidence is measured facts only — never a state label or a signal name.
+    for key in keys:
+        assert key.startswith("progress.state_fact_")
+    assert cs["next_action"] is not None
+
+
+@requires_node
+def test_brand_new_user_current_state_has_no_volume_claim():
+    """building_baseline: the volume direction is not evidence yet."""
+    zero_weeks = [dict(w, sessions=0, active=False, volume_kg=0.0) for w in WEEKLY_DEFAULT]
+    cs = _views([_summary("insufficient_data", consistency="insufficient_data",
+                          volume_trend="flat", active=0, sessions=0,
+                          weekly=zero_weeks)])[0]["current_state"]
+    assert [e["key"] for e in cs["evidence"]] == ["progress.state_fact_weeks"]
+    assert cs["next_action"]["key"] == "progress.state_next_building_baseline"
+
+
+@requires_node
+def test_unavailable_current_state_has_no_evidence_or_action():
+    cs = _views([None])[0]["current_state"]
+    assert cs["evidence"] == [] and cs["next_action"] is None and cs["window"] is None
+
+
+@requires_node
+def test_geometry_helpers_refuse_to_draw_what_is_not_a_series():
+    out = _run("[P.sparkline([80, 79]), P.sparkline([80, null, 79]),"
+               " P.bars([0, 0, 0]), P.bars([1, -1]), P.bars([]),"
+               " P.sparkline([80, 80, 80]).points.map(function (p) { return p.y; })]")
+    assert out[:5] == [None, None, None, None, None]
+    assert len(set(out[5])) == 1          # equal real values: a level line
 
 
 # ── C. deduplication ────────────────────────────────────────────────────────
@@ -400,8 +591,8 @@ def test_one_summary_never_renders_the_same_sentence_twice(signal):
                    "build_consistency": "inconsistent"}.get(signal, "consistent")
     view = _views([_summary(signal, consistency=consistency)])[0]
     descriptors = _descriptors(view)
-    keys = [d["key"] for d in descriptors]
-    assert len(keys) == len(set(keys)), keys
+    # The "{value} kg" template legitimately serves weight AND volume values
+    # with different numbers; compare the rendered sentences, not keys.
     for locale in LOCALES:
         rendered = [_render(d, locale) for d in descriptors]
         assert len(rendered) == len(set(rendered)), (locale, rendered)
@@ -412,14 +603,15 @@ def test_one_summary_never_renders_the_same_sentence_twice(signal):
 def test_consistency_state_has_exactly_one_rendering(signal):
     """Before V2 PR1 `build_consistency` put the consistency state on screen
     five times (headline meta, lede, Performance card, Consistency card, Axis
-    WATCH). The state now renders once, on its own Trends card."""
+    WATCH). The state label still renders once, on its own Trends card — the
+    Current State evidence is the measured count, not the label."""
     consistency = {"insufficient_data": "insufficient_data",
                    "build_consistency": "inconsistent"}.get(signal, "consistent")
     view = _views([_summary(signal, consistency=consistency)])[0]
     keys = [d["key"] for d in _descriptors(view)]
     cons_keys = [k for k in keys if k.startswith("progress.cons_state_")]
     assert cons_keys == ["progress.cons_state_%s" % consistency]
-    assert view["metrics"]["consistency"]["value"]["key"] == cons_keys[0]
+    assert view["metrics"]["consistency"]["change"]["text"]["key"] == cons_keys[0]
     # No other section carries a training-state label for the same signal.
     assert not [k for k in keys if k.startswith("progress.perf_state_")]
 
@@ -434,14 +626,32 @@ def test_current_state_never_repeats_an_axis_insight_sentence():
                 if k.startswith("progress.axis_")}
         for view in views:
             cs = view["current_state"]
-            for desc in (cs["headline"], cs["summary"], cs["evidence"]):
+            for desc in (cs["window"], cs["headline"], cs["summary"],
+                         *cs["evidence"], cs["next_action"]):
                 assert _render(desc, locale) not in axis
 
 
 @requires_node
+def test_current_state_and_trends_share_no_sentence():
+    for signal in sorted(TRAJECTORY_BY_SIGNAL):
+        view = _views([_summary(signal)])[0]
+        cs = view["current_state"]
+        top = [cs["window"], cs["headline"], cs["summary"], *cs["evidence"],
+               cs["next_action"]]
+        trends = _descriptors({"current_state": {
+            "window": None, "headline": None, "summary": None, "evidence": [],
+            "next_action": None}, "metrics": view["metrics"]})
+        for locale in LOCALES:
+            a = {_render(d, locale) for d in top if d}
+            b = {_render(d, locale) for d in trends}
+            assert not a & b, (signal, locale, a & b)
+
+
+@requires_node
 def test_current_state_is_trajectory_level_not_signal_level():
-    """Three signals share needs_attention; Current State says the same thing
-    for all of them — which one it is, is Axis Insight's job."""
+    """Three signals share needs_attention; given the same measured facts,
+    Current State says the same thing for all of them — which one it is, is
+    Axis Insight's job."""
     views = _views([_summary(s) for s in ("build_consistency", "plateau", "deload")])
     states = {json.dumps(v["current_state"], sort_keys=True) for v in views}
     assert len(states) == 1

@@ -68,8 +68,15 @@ CONSISTENCY_STATES = (
 # changes because the client asked for a different window is not a trajectory.
 SUMMARY_WEEKS = 4
 
-# Bumped only on a breaking change to the wire contract.
+# Bumped only on a breaking change to the wire contract. Progress V2 PR2 added
+# ``body.weight_series`` and the top-level ``weekly`` series ADDITIVELY, so the
+# version did not move: every field a v1 reader knew is unchanged.
 CONTRACT_VERSION = 1
+
+# Upper bound on the qualifying check-ins published as ``body.weight_series``
+# (Progress V2 PR2 Weight sparkline). A small, fixed cap: the Trends card draws
+# a lightweight line, not a history — Recent Check-ins owns the history.
+WEIGHT_SERIES_POINTS = 8
 
 
 class UnknownProgressionSignal(ValueError):
@@ -122,6 +129,9 @@ class BodySummary:
     weight_delta_kg: float | None = None
     target_weight_kg: float | None = None
     distance_to_target_kg: float | None = None
+    # Progress V2 PR2: the qualifying check-in weights, oldest first. Echoed
+    # observations only — never interpolated, never padded, empty when none.
+    weight_series: tuple["WeightPoint", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -148,6 +158,29 @@ class ConsistencySummary:
 
 
 @dataclass(frozen=True)
+class WeightPoint:
+    """One qualifying weekly check-in weight on its Istanbul calendar day."""
+    day: date
+    weight_kg: float
+
+
+@dataclass(frozen=True)
+class WeekSummary:
+    """One trailing 7-day window of the summary window (Progress V2 PR2).
+
+    A projection of the progression report's own ``weekly_volume`` bucket — the
+    SAME objects ``ConsistencySummary`` counts — so the per-week series and the
+    aggregate counts cannot disagree. ``active`` is the one definition
+    ``summarize_consistency`` already uses (``session_count > 0``), published
+    so the client never re-derives it.
+    """
+    start: date
+    sessions: int
+    active: bool
+    volume_kg: float
+
+
+@dataclass(frozen=True)
 class ProgressSummary:
     """The canonical Progress read model for one user over one window."""
     window: ProgressWindow
@@ -155,6 +188,8 @@ class ProgressSummary:
     body: BodySummary
     performance: PerformanceSummary
     consistency: ConsistencySummary
+    # Oldest first, one entry per analysed week (Progress V2 PR2 Trends).
+    weekly: tuple[WeekSummary, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -167,7 +202,11 @@ class BodyFacts:
 
     ``recent_qualifying_weights`` is newest-first and contains at most two
     entries — the latest two *full* weekly check-ins (see ``queries``).
+    ``weight_series`` (Progress V2 PR2) is the same qualifying set extended to
+    ``WEIGHT_SERIES_POINTS`` rows, oldest first; the delta is still derived from
+    ``recent_qualifying_weights`` alone.
     """
     current_weight_kg: float | None = None
     target_weight_kg: float | None = None
     recent_qualifying_weights: tuple[float, ...] = ()
+    weight_series: tuple[WeightPoint, ...] = ()
