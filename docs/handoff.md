@@ -1,3 +1,33 @@
+# Progress V2 PR3 — Axis Insight as one coaching surface
+
+Date: 2026-09-25
+
+The Progress Axis Insight section is one surface in coaching order —
+interpretation (lead + why it matters) → at most two evidence facts → THIS WEEK
+(one action) → "Review with AxisAI" — replacing the three equal WHAT'S WORKING /
+WATCH THIS / NEXT MOVE cards. Deterministic as before: the decision is the
+additive `insight` key on `/api/progress/axis-insights`, selected from the same
+single progression report (keyed on `AdaptivePlan.week_focus`; action ==
+NEXT MOVE). No new request, static file, dependency or model call; contract
+version unchanged; the three slots remain in the payload for Today.
+
+Coach continuation: `/coach?review=progress-insight` (one constant — analytics
+records query strings, so no training state goes in the URL). The Coach route
+re-derives the insight server-side (`app/coach_handoff.py`) and pre-fills the
+existing composer as a draft; never auto-sent, fail-soft.
+
+Current State: the generic "Ask AxisAI" link moved into Axis Insight as the
+contextual review link; the needs-attention next move now reads "Axis Insight
+below explains…". Trends, Physique and History are untouched.
+
+Follow-ups (not in this PR): the Coach page itself spends one progression read
+when opened via the review link; the retired `scripts/frontend_audit/progress_pr3_matrix.py`
+is kept as a historical record only.
+
+Authority: `docs/PROGRESS_INSIGHTS.md` §4b; `docs/PROGRESS_SUMMARY.md` §10.
+
+---
+
 # UX-3 PR5 — Supplements Placement + Cross-Platform Contract
 
 Date: 2026-09-10

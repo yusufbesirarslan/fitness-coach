@@ -220,7 +220,11 @@ CONTEXTUAL_PAGES = (
     ("/training", "cecctxt"),
 )
 
-_ENTRY = re.compile(r'<a\b[^>]*class="btn-ghost"[^>]*href="/coach"[^>]*>(.*?)</a>',
+# Progress V2 PR3: the Progress entry is the Axis Insight's contextual
+# review link — the same secondary ghost link to the Coach route, carrying one
+# constant (never user data) so Coach can pre-fill the insight as a draft.
+_ENTRY = re.compile(r'<a\b[^>]*class="btn-ghost[^"]*"[^>]*'
+                    r'href="/coach(?:\?review=progress-insight)?"[^>]*>(.*?)</a>',
                     re.S)
 
 
@@ -248,7 +252,7 @@ def test_each_contextual_entry_is_one_secondary_link_to_the_coach_route(
     # The primary nav owns the header tab and the bottom bar; the page adds
     # exactly one more. Three good entries beat ten decorative ones.
     nav_links = len(re.findall(r'<a\b[^>]*data-nav-id="coach"', html))
-    all_links = len(re.findall(r'<a\b[^>]*href="/coach"', html))
+    all_links = len(re.findall(r'<a\b[^>]*href="/coach[?"]', html))
     assert all_links >= nav_links + 1, route
 
     entry = _ENTRY.search(html)
@@ -284,6 +288,12 @@ def test_no_contextual_entry_serializes_user_data_into_the_url():
     for name in ("_progress_current_state.html", "nutrition.html", "plan.html"):
         for href in re.findall(r'href="(/coach[^"]*)"', _read(TEMPLATES / name)):
             assert href == "/coach", (name, href)
+    # Progress V2 PR3: the Axis Insight link names only the KIND of handoff —
+    # one constant. The Coach route re-derives the insight server-side, so no
+    # training state ever reaches the URL (and analytics' page location).
+    hrefs = re.findall(r'href="(/coach[^"]*)"',
+                       _read(TEMPLATES / "_progress_axis_insight.html"))
+    assert hrefs == ["/coach?review=progress-insight"]
 
 
 def test_training_keeps_its_dominant_cta_and_places_the_entry_below_the_week(
@@ -307,16 +317,21 @@ def test_the_nutrition_entry_sits_at_the_foot_of_the_target_card(
     assert html.index('id="ring-target"') < entry < html.index('id="meal-timeline"')
 
 
-def test_the_progress_entry_sits_beside_the_check_in_action(
+def test_the_progress_entry_closes_the_axis_insight(
         client, make_user, login):
-    """Both secondary, in the same action row: the interpreted insight above is
-    what the user came to Progress to read."""
+    """Progress V2 PR3: the Coach entry is the continuation of the insight it
+    sits under — the last element of the Axis Insight surface — while the
+    weekly check-in stays Current State's one primary action."""
     html = _html(_seed(client, make_user, login, "cecprg"), "/progress-page")
     actions = html[html.index('class="ps-actions"'):]
     actions = actions[:actions.index("</section>")]
     assert 'data-action="openCheckin"' in actions
-    assert 'id="ps-ask"' in actions
-    assert 'href="/coach"' in actions
+    assert "/coach" not in actions
+
+    axis = html[html.index('id="progress-axis-insight"'):]
+    axis = axis[:axis.index("</section>")]
+    assert axis.index('id="ax-action"') < axis.index('id="ax-review"')
+    assert 'href="/coach?review=progress-insight"' in axis
 
 
 def test_canonical_plan_page_carries_the_coach_entry():

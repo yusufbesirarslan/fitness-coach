@@ -216,7 +216,7 @@ def test_other_progress_sections_remain_in_the_page(
     html = _progress_html(client, make_user, login, "ppuikeep")
     for anchor in ("ps-h", "tr-h", "ai-h", "pp-h", "ph-h"):
         assert f'id="{anchor}"' in html
-    assert 'id="insight-list"' in html
+    assert 'id="ax-card"' in html          # V2 PR3: one Axis Insight surface
     assert 'id="history-list"' in html
 
 

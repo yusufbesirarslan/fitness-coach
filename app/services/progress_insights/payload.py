@@ -17,7 +17,7 @@ All three slots publish the **same** five keys. A uniform shape means a client
 reads one slot renderer, and an absent value is an explicit ``null`` rather than
 a missing key it has to probe for.
 """
-from .models import CONTRACT_VERSION, InsightSlot, ProgressInsights
+from .models import AxisInsight, CONTRACT_VERSION, InsightSlot, ProgressInsights
 
 
 def _slot_payload(slot: InsightSlot) -> dict:
@@ -33,15 +33,50 @@ def _slot_payload(slot: InsightSlot) -> dict:
         "code": slot.code,
         "domain": slot.domain,
         "evidence": None if slot.evidence is None else dict(slot.evidence),
+        "action": _action_payload(action),
+    }
+
+
+def _action_payload(action) -> dict | None:
+    """The canonical adjustment, copied verbatim.
+
+    ``volume_delta_pct`` is the planner's signed fraction, unrounded and
+    unconverted. The client formats it for display; the server does not decide
+    how it reads, and nothing here turns 0.05 into a "5" that would then be
+    ambiguous between a percent and a fraction.
+    """
+    if action is None:
+        return None
+    return {
+        "week_focus": action.week_focus,
+        "volume_action": action.volume_action,
+        "intensity_action": action.intensity_action,
+        "volume_delta_pct": action.volume_delta_pct,
+    }
+
+
+def _insight_payload(insight: AxisInsight | None) -> dict | None:
+    """The unified Axis Insight (V2 PR3), additive to contract version 1.
+
+    ``code`` names the interpretation; ``evidence`` is a bounded list (at most
+    two) of ``{code, params}`` canonical facts; ``action``
+    carries the next-move code and the SAME canonical adjustment the
+    ``next_move`` slot publishes. No prose, no ids.
+    """
+    if insight is None:
+        return None
+    action = insight.action
+    return {
+        "status": insight.status,
+        "code": insight.code,
+        "evidence": [
+            {"code": e.code,
+             "params": None if e.params is None else dict(e.params)}
+            for e in insight.evidence
+        ],
         "action": None if action is None else {
-            "week_focus": action.week_focus,
-            "volume_action": action.volume_action,
-            "intensity_action": action.intensity_action,
-            # The planner's signed fraction, unrounded and unconverted. The
-            # client formats it for display; the server does not decide how it
-            # reads, and nothing here turns 0.05 into a "5" that would then be
-            # ambiguous between a percent and a fraction.
-            "volume_delta_pct": action.volume_delta_pct,
+            "code": insight.action_code,
+            **_action_payload(action),
         },
     }
 
@@ -63,4 +98,5 @@ def progress_insights_payload(insights: ProgressInsights) -> dict:
         "working": _slot_payload(insights.working),
         "watch": _slot_payload(insights.watch),
         "next_move": _slot_payload(insights.next_move),
+        "insight": _insight_payload(insights.insight),
     }

@@ -8,7 +8,7 @@
       #ps-lede     one trajectory-level summary sentence
       #ps-evidence at most two MEASURED facts (weeks trained, volume direction)
       #ps-next     the recommended next move, keyed on the trajectory, plus the
-                   page's one primary action (weekly check-in) and Coach entry
+                   page's one primary action (weekly check-in)
 
     It does NOT say which signal drives the state — that interpretation
     belongs to Axis Insight, and the needs-attention next move hands off to
@@ -45,12 +45,10 @@
                 <button type="button" class="btn-volt" data-action="openCheckin">
                     {{ t('progress.checkin_action') }}
                 </button>
-                {#- Contextual Coach entry (UX-1 PR3): a server-rendered link to the
-                    canonical Coach destination, so it cannot silently disappear. It
-                    stays subordinate to the check-in action. -#}
-                <a class="btn-ghost" href="/coach" id="ps-ask">
-                    {{ t('progress.ask_axis') }}
-                </a>
+                {#- V2 PR3: the page's Coach entry is no longer a generic "Ask
+                    AxisAI" here — it is the Axis Insight's own contextual
+                    "Review with AxisAI" continuation (_progress_axis_insight.html),
+                    so the check-in stays this card's one action. -#}
             </div>
         </div>
     </div>

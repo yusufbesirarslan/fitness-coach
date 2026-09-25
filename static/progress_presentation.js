@@ -7,7 +7,7 @@
    which is what lets tests/test_progress_presentation_js.py execute it
    under node.
 
-   Three responsibilities, nothing else:
+   Four responsibilities, nothing else:
 
    1. The state → copy tables. Internal identifiers (`needs_attention`,
       `insufficient_data`, `building_consistency`, ...) are business values
@@ -39,6 +39,11 @@
       published (body.weight_series, weekly[]). Nothing is interpolated,
       padded or smoothed; a series too short to be a trend yields NO viz and
       an explicit note instead — never a fake flat line or an empty frame.
+
+   4. The Axis Insight view model (V2 PR3). GET /api/progress/axis-insights
+      publishes one server-selected `insight` (interpretation code, ≤ 2
+      evidence facts, one action); buildAxisInsightView maps it to copy
+      descriptors. progress_insights.js only fetches and renders it.
 
    Copy descriptors are `{ key, params }` (or null) — locale keys, never
    prose — so the view model is locale-independent. The only locale-aware
@@ -169,6 +174,69 @@
   };
 
   var BODY_STATUS = { available: AVAILABLE, partial: PARTIAL, insufficient_data: INSUFFICIENT };
+
+  // ── Axis Insight (V2 PR3) ──────────────────────────────────────────────
+  // insight.code → the interpretation: what the signals mean together.
+  // The server (app/services/progress_insights select_insight) chose it from
+  // the planner's canonical week focus; this table only names its words.
+  var AXIS_INSIGHT = {
+    baseline: 'progress.axis_insight_baseline',
+    consistency_gaps: 'progress.axis_insight_consistency_gaps',
+    deload_due: 'progress.axis_insight_deload_due',
+    stalled: 'progress.axis_insight_stalled',
+    ready_to_progress: 'progress.axis_insight_ready_to_progress',
+    holding_steady: 'progress.axis_insight_holding_steady',
+    steady_with_dip: 'progress.axis_insight_steady_with_dip'
+  };
+
+  // insight.code → "why it matters": the quieter second line under the
+  // interpretation. Same code, same decision — just the reason, in words.
+  var AXIS_MEANING = {
+    baseline: 'progress.axis_insight_baseline_why',
+    consistency_gaps: 'progress.axis_insight_consistency_gaps_why',
+    deload_due: 'progress.axis_insight_deload_due_why',
+    stalled: 'progress.axis_insight_stalled_why',
+    ready_to_progress: 'progress.axis_insight_ready_to_progress_why',
+    holding_steady: 'progress.axis_insight_holding_steady_why',
+    steady_with_dip: 'progress.axis_insight_steady_with_dip_why'
+  };
+
+  // insight.evidence[].code → one observable fact. Params (counts) are the
+  // server's; nothing here counts, compares or ranks.
+  var AXIS_EVIDENCE = {
+    sessions_across_weeks: 'progress.axis_evidence_sessions_across_weeks',
+    trained_weeks: 'progress.axis_evidence_trained_weeks',
+    unbroken_block: 'progress.axis_evidence_unbroken_block',
+    volume_flat_run: 'progress.axis_evidence_volume_flat_run',
+    volume_rising: 'progress.axis_evidence_volume_rising',
+    volume_holding: 'progress.axis_evidence_volume_holding',
+    volume_falling: 'progress.axis_evidence_volume_falling',
+    strength_rising: 'progress.axis_evidence_strength_rising',
+    strength_falling: 'progress.axis_evidence_strength_falling'
+  };
+
+  // Each evidence code → the params its copy interpolates, so a fact whose
+  // counts did not arrive is dropped rather than rendered with a hole in it.
+  var AXIS_EVIDENCE_PARAMS = {
+    sessions_across_weeks: ['sessions', 'active', 'total'],
+    trained_weeks: ['active', 'total'],
+    unbroken_block: ['weeks'],
+    volume_flat_run: ['weeks']
+  };
+
+  // insight.action.code → THE recommended move (one, never a list).
+  var AXIS_ACTION = {
+    build_baseline: 'progress.axis_action_build_baseline',
+    prioritize_consistency: 'progress.axis_action_prioritize_consistency',
+    deload: 'progress.axis_action_deload',
+    maintain_and_consolidate: 'progress.axis_action_maintain_and_consolidate',
+    progress_training: 'progress.axis_action_progress_training',
+    maintain_current_training: 'progress.axis_action_maintain_current_training'
+  };
+
+  // The server bounds evidence at two; the view enforces the same ceiling so
+  // a drifting payload can never turn the surface into a metric dump.
+  var AXIS_MAX_EVIDENCE = 2;
 
   // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -572,6 +640,70 @@
     };
   }
 
+  // ── Axis Insight view model (V2 PR3) ───────────────────────────────────
+
+  function unavailableAxisInsight() {
+    return {
+      status: UNAVAILABLE,
+      code: null,
+      interpretation: copy('progress.axis_unavailable'),
+      meaning: null,
+      evidence: [],
+      action: null
+    };
+  }
+
+  function axisEvidence(list) {
+    var out = [];
+    if (!Array.isArray(list)) return out;
+    for (var i = 0; i < list.length && out.length < AXIS_MAX_EVIDENCE; i++) {
+      var item = list[i] || {};
+      var key = keyFor(AXIS_EVIDENCE, item.code);
+      if (!key) continue;                       // unknown fact: skipped, not guessed
+      var needs = keyFor(AXIS_EVIDENCE_PARAMS, item.code) || [];
+      var params = item.params || {};
+      var complete = true;
+      for (var j = 0; j < needs.length; j++) {
+        if (!isNumber(params[needs[j]])) complete = false;
+      }
+      if (!complete) continue;
+      var bound = null;
+      if (needs.length) {
+        bound = {};
+        for (var k = 0; k < needs.length; k++) bound[needs[k]] = params[needs[k]];
+      }
+      out.push(copy(key, bound));
+    }
+    return out;
+  }
+
+  /* GET /api/progress/axis-insights → the one Axis Insight surface:
+     interpretation (primary) · meaning (why it matters) · evidence (≤ 2 facts) · action (one move).
+
+     A payload without a readable `insight`, or an interpretation / action
+     this build cannot name, is "unavailable" — never a plausible default:
+     the client must not invent advice nobody decided. `volume_delta` is the
+     planner's signed fraction carried verbatim; the renderer only formats it
+     for display, and a hold (0) carries nothing. */
+  function buildAxisInsightView(d) {
+    var ins = d && typeof d === 'object' ? d.insight : null;
+    if (!ins || typeof ins !== 'object') return unavailableAxisInsight();
+    var interpretation = keyFor(AXIS_INSIGHT, ins.code);
+    var action = ins.action || {};
+    var actionKey = keyFor(AXIS_ACTION, action.code);
+    if (!interpretation || !actionKey) return unavailableAxisInsight();
+    var delta = isNumber(action.volume_delta_pct) && action.volume_delta_pct !== 0
+      ? action.volume_delta_pct : null;
+    return {
+      status: ins.status === INSUFFICIENT ? INSUFFICIENT : AVAILABLE,
+      code: ins.code,
+      interpretation: copy(interpretation),
+      meaning: copy(keyFor(AXIS_MEANING, ins.code)),
+      evidence: axisEvidence(ins.evidence),
+      action: { code: action.code, text: copy(actionKey), volume_delta: delta }
+    };
+  }
+
   window.FitXProgressPresentation = {
     STATUS: { AVAILABLE: AVAILABLE, PARTIAL: PARTIAL,
               INSUFFICIENT: INSUFFICIENT, UNAVAILABLE: UNAVAILABLE },
@@ -587,6 +719,12 @@
     STATE_FACT_VOLUME: STATE_FACT_VOLUME,
     TREND_INLINE: TREND_INLINE,
     MIN_LINE_POINTS: MIN_LINE_POINTS,
+    AXIS_INSIGHT: AXIS_INSIGHT,
+    AXIS_MEANING: AXIS_MEANING,
+    AXIS_EVIDENCE: AXIS_EVIDENCE,
+    AXIS_ACTION: AXIS_ACTION,
+    AXIS_MAX_EVIDENCE: AXIS_MAX_EVIDENCE,
+    buildAxisInsightView: buildAxisInsightView,
     keyFor: keyFor,
     sparkline: sparkline,
     bars: bars,

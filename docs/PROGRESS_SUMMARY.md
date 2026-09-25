@@ -313,7 +313,7 @@ sections — one Jinja partial each, rendered in this order:
 | ProgressHeader | `_progress_header.html` | — |
 | Current State | `_progress_current_state.html` | What is my current state? + next action |
 | Trends | `_progress_trends.html` | What changed? (measurable evidence) |
-| Axis Insight | `_progress_axis_insight.html` | What does Axis infer, and what next? |
+| Axis Insight | `_progress_axis_insight.html` | What does that mean, and what should I do? (V2 PR3: one surface) |
 | Physique | `_progress_physique.html` | (PR4 read model, unchanged) |
 | Recent Check-ins | `_progress_recent_checkins.html` | (PR5 history read model, unchanged) |
 
@@ -382,6 +382,28 @@ Rules that still hold:
   that writes the headline.
 - A summary failure degrades Current State and Trends only. Axis Insight,
   Physique and Recent Check-ins own separate fetches and keep loading.
+
+**Progress V2 PR3 — Axis Insight as one coaching surface.** The three equal
+WHAT'S WORKING / WATCH THIS / NEXT MOVE cards are retired for ONE surface in
+coaching order: interpretation (lead line + "why it matters") → at most two
+evidence facts → THIS WEEK (one action) → "Review with AxisAI". Semantic
+ownership on the page is now explicit and test-enforced (no rendered sentence
+is shared between sections, `tests/test_progress_axis_insight.py` §C):
+
+| Section | Owns | Never says |
+|---|---|---|
+| Current State | *What state am I in?* — trajectory headline, summary, ≤ 2 measured facts, trajectory-level next move, the check-in | which signal drives the state |
+| Trends | *What happened?* — weight · volume · consistency values, changes, visualizations | any interpretation or advice |
+| Axis Insight | *What does it mean, and what do I do?* — the interpretation, its evidence, the ONE action, the Coach continuation | the trajectory label, a Trends value |
+
+The insight is decided on the server (`app/services/progress_insights`,
+additive `insight` key on `/api/progress/axis-insights`, see
+`docs/PROGRESS_INSIGHTS.md` §4b); `buildAxisInsightView` in
+`progress_presentation.js` maps it to copy and `progress_insights.js` renders
+it. Current State's needs-attention next move now points at "Axis Insight
+below", and its generic "Ask AxisAI" link is gone: the page's one Coach entry is
+the insight's contextual review link. Static cost unchanged (15 files); network
+unchanged (summary, axis-insights, physique, history — one read each).
 
 ---
 

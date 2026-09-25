@@ -1,5 +1,11 @@
 """Progress Redesign PR3 — AXIS INSIGHTS exact browser matrix.
 
+RETIRED by Progress V2 PR3: the three-slot WHAT'S WORKING / WATCH THIS /
+NEXT MOVE surface this matrix audits no longer exists. The unified Axis
+Insight surface is audited by ``tests/test_progress_axis_insight_browser.py``
+(every state x 320/390/1024/1366 x EN/TR, in CI). Kept only as the record of
+the evidence behind the original PR3 report.
+
 Reuses the Sprint-0 hermetic audit harness (``create_audit_app`` + ``AuditServer``
 + fixed browser clock + Chromium) to run the EXACT PR3 matrix: every canonical
 Axis Insights semantic state x every required viewport, plus the endpoint-failure

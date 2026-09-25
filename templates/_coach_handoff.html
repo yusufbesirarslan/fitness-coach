@@ -1,0 +1,17 @@
+{#- Progress V2 PR3 · contextual Coach handoff (both Coach templates).
+
+    `coach_handoff` is a localized DRAFT the route re-derived server-side from
+    the canonical Axis Insight (app/coach_handoff.py) — only when the page was
+    opened as /coach?review=progress-insight. It is written into the existing
+    composer and NEVER sent: rendering costs no model call, and the user
+    decides. Nothing when the value is absent, and an existing draft is never
+    overwritten. Must follow coach_widget.js, which builds #cw-input
+    synchronously when it is evaluated. -#}
+{%- if coach_handoff %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+    var input = document.getElementById('cw-input');
+    if (input && !input.value) input.value = {{ coach_handoff|tojson }};
+})();
+</script>
+{%- endif %}

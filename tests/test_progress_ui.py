@@ -117,7 +117,7 @@ def test_progress_page_renders_new_information_architecture(app, client, make_us
         assert f'id="{legacy}"' not in html
 
     # Data-driven regions the JS fills in.
-    for slot in ("ps-window", "ps-evidence", "ps-next-move", "insight-list",
+    for slot in ("ps-window", "ps-evidence", "ps-next-move", "ax-card",
                  "physique-body", "history-list"):
         assert f'id="{slot}"' in html
 
@@ -168,35 +168,39 @@ def test_weekly_checkin_is_the_one_primary_progress_action(app, client, make_use
     assert body.count('btn-volt') == 1
 
 
-def test_insufficient_insight_slots_explain_their_distinct_roles():
-    keys = (
-        "progress.axis_working_insufficient",
-        "progress.axis_watch_insufficient",
-        "progress.axis_next_insufficient",
-    )
+def test_sparse_axis_insight_does_not_repeat_the_current_state_baseline():
+    """V2 PR3: the three per-slot "insufficient" lines are gone; a sparse
+    user gets ONE baseline interpretation + ONE data-collection action, and
+    neither repeats Current State's baseline sentences."""
     for locale in ("en", "tr"):
         catalog = json.loads((ROOT / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
-        copy = [catalog[key] for key in keys]
-        assert len(set(copy)) == len(copy), (locale, copy)
+        axis = {catalog["progress.axis_insight_baseline"],
+                catalog["progress.axis_action_build_baseline"]}
+        current = {catalog["progress.state_summary_building_baseline"],
+                   catalog["progress.state_next_building_baseline"],
+                   catalog["progress.traj_building_baseline"]}
+        assert len(axis) == 2 and not axis & current, locale
 
 
-def test_ask_axis_action_is_a_server_rendered_link_to_the_coach_destination(
-        app, client, make_user, login):
-    """UX-1 PR3: it used to be a button that toggled the floating coach widget,
-    revealed by JS only once that widget had loaded. Progress no longer loads the
-    widget, so the entry is a plain link to /coach that is always rendered and
-    cannot vanish when a script fails."""
+def test_coach_entry_is_the_axis_insight_review_link(app, client, make_user, login):
+    """UX-1 PR3 made the Progress Coach entry a server-rendered link to /coach
+    (it cannot vanish when a script fails). V2 PR3 moves it: the generic
+    "Ask AxisAI" beside the check-in is gone, and the ONE Coach entry is the
+    Axis Insight's contextual "Review with AxisAI" continuation."""
     html = _get_progress_html(client, make_user, login, "proguiask")
 
-    ask = re.search(r'<a[^>]*id="ps-ask"[^>]*>', html)
-    assert ask, "Ask-AxisAI action is missing"
-    assert 'href="/coach"' in ask.group(0)
-    assert "hidden" not in ask.group(0)
-    assert "btn-ghost" in ask.group(0)      # secondary, like the check-in opener
-    assert "btn-volt" not in ask.group(0)
+    assert 'id="ps-ask"' not in html
+    body = html.split("<main", 1)[1].split("</main>", 1)[0]
+    coach_links = [a for a in re.findall(r"<a\b[^>]*>", body) if "/coach" in a]
+    assert len(coach_links) == 1
+    review = coach_links[0]
+    assert 'id="ax-review"' in review
+    assert 'href="/coach?review=progress-insight"' in review
+    assert "hidden" not in review
+    assert "btn-ghost" in review and "btn-volt" not in review
     assert 'data-action="askAxis"' not in html
 
-    # The client half is gone with it: no gate, no toggle, no widget reference.
+    # No client half: no gate, no toggle, no widget reference.
     js = _progress_js(client)
     assert "askAxis" not in js
     assert "window.CW" not in js
