@@ -314,8 +314,8 @@ sections — one Jinja partial each, rendered in this order:
 | Current State | `_progress_current_state.html` | What is my current state? + next action |
 | Trends | `_progress_trends.html` | What changed? (measurable evidence) |
 | Axis Insight | `_progress_axis_insight.html` | What does that mean, and what should I do? (V2 PR3: one surface) |
-| Physique | `_progress_physique.html` | (PR4 read model, unchanged) |
-| Recent Check-ins | `_progress_recent_checkins.html` | (PR5 history read model, unchanged) |
+| Physique | `_progress_physique.html` | Do I have visual progress data — and if not, how do I start? (V2 PR4: quiet secondary section) |
+| Recent Check-ins | `_progress_recent_checkins.html` | What happened recently? (V2 PR4: flat, day-grouped recent list) |
 
 `static/progress_presentation.js` (`window.FitXProgressPresentation`) is the
 **one** presentation model: every state → locale-key table on the page and a
@@ -404,6 +404,39 @@ it. Current State's needs-attention next move now points at "Axis Insight
 below", and its generic "Ask AxisAI" link is gone: the page's one Coach entry is
 the insight's contextual review link. Static cost unchanged (15 files); network
 unchanged (summary, axis-insights, physique, history — one read each).
+
+**Progress V2 PR4 — Physique + Recent Check-ins as secondary sections.** Both
+stay below the intelligence layer and were made visibly quieter than it:
+
+- *Physique* (`static/progress_physique.js`, same `/api/progress/physique`
+  read): the empty state is a compact title + one sentence + ONE action (no
+  bordered placeholder card). On the web a Pump Check is taken when a workout
+  is finished, so the action is "Go to Training" (`/training`); when only
+  legacy Pump Checks exist it is the gallery instead. Photos render as bounded
+  140px 3:4 thumbnails (lazy, `decoding=async`, intrinsic size reserved), body
+  typography replaces the display face, the duplicate warning-coloured
+  "Limited comparison" line and rail are gone (the reliability is said once,
+  in words), and stable/focus lists stay out of Progress (observed changes,
+  limitations and next-check guidance remain). Nothing is analysed, scored or
+  compared in the browser.
+- *Recent Check-ins*: `buildHistoryView` in `progress_presentation.js` groups
+  `/api/progress/history` rows by the server's Istanbul `analysis_day` (string
+  identity — the browser's timezone cannot regroup), leads each day with its
+  newest check-in, reuses `TRAINING_STATE` (trajectory as fallback) as the ONE
+  summary word per row, and bounds the main page to
+  `HISTORY_VISIBLE_GROUPS = 4` days. Row hierarchy: summary → weight (· delta)
+  → `<time>` date as quiet metadata. Same-day check-ins are real separate
+  records (`POST /checkin` has no per-day limit) and are grouped with a count,
+  never dropped; their individual times/weights and the earlier days are
+  disclosure buttons that BUILD the rows when opened and REMOVE them when
+  closed — no hidden archive in the DOM. The per-row drilldown (window,
+  performance · consistency facts, volume word) and the colour-coded state
+  rails are retired, with their locale keys and `TREND_INLINE`.
+- Cost: static files and reads unchanged (14 scripts/styles measured, the same
+  four Progress reads). Server: same-day history rows now share ONE
+  `build_progression_report` per analysis day (identical facts), so a burst
+  of check-ins on one day no longer multiplies the training reads.
+  Browser matrix: `tests/test_progress_physique_history_browser.py`.
 
 ---
 

@@ -492,3 +492,72 @@ def test_no_competing_today_authority_in_the_package():
         assert "utcnow" not in source, path.name
         assert "date.today" not in source, path.name
         assert "created_at.date()" not in source, path.name
+
+
+# ---------------------------------------------------------------------------
+# Same-day check-ins (Progress V2 PR4)
+# ---------------------------------------------------------------------------
+
+def test_same_day_checkins_are_separate_records_all_kept(make_user):
+    """POST /checkin has no per-day limit: two check-ins on one Istanbul day
+    are two real records, each with its own weight. History keeps both,
+    newest first, on the same analysis day — the UI groups, it never drops."""
+    user = make_user("phsameday")
+    _progressing(user.id, END_DAY)
+    _add_checkin(user.id, END_DAY, 78.4,
+                 created_at=datetime(END_DAY.year, END_DAY.month, END_DAY.day, 6))
+    _add_checkin(user.id, END_DAY, 78.0,
+                 created_at=datetime(END_DAY.year, END_DAY.month, END_DAY.day, 17))
+    db.session.commit()
+
+    entries = build_progress_history(user.id).entries
+    assert [e.weight_kg for e in entries] == [78.0, 78.4]
+    assert [e.analysis_day for e in entries] == [END_DAY, END_DAY]
+    assert entries[0].weight_delta_kg == -0.4      # vs the earlier same-day one
+    assert entries[1].weight_delta_kg is None
+    # Day-granular reconstruction: identical training state for the day.
+    assert entries[0].trajectory == entries[1].trajectory
+    assert entries[0].performance == entries[1].performance
+    assert entries[0].consistency == entries[1].consistency
+
+
+def test_same_day_grouping_key_is_the_istanbul_day_not_utc(make_user):
+    """22:30 UTC is 01:30 the NEXT day in Istanbul: that check-in belongs to
+    the next analysis day even though its UTC date matches the other one."""
+    user = make_user("phtzboundary")
+    _add_checkin(user.id, END_DAY, 80.0,
+                 created_at=datetime(END_DAY.year, END_DAY.month, END_DAY.day, 10))
+    _add_checkin(user.id, END_DAY, 79.8,
+                 created_at=datetime(END_DAY.year, END_DAY.month, END_DAY.day, 22, 30))
+    db.session.commit()
+
+    days = [e.analysis_day for e in build_progress_history(user.id).entries]
+    assert days == [END_DAY + timedelta(days=1), END_DAY]
+    payload = progress_history_payload(build_progress_history(user.id))
+    assert [e["analysis_day"] for e in payload["entries"]] == [
+        (END_DAY + timedelta(days=1)).isoformat(), END_DAY.isoformat()]
+
+
+def test_training_report_is_built_once_per_analysis_day(make_user, monkeypatch):
+    """Same-day rows share one report (they would read identical facts), so a
+    burst of check-ins on one day does not multiply the training reads."""
+    import app.services.progress_history as history_mod
+
+    user = make_user("phmemo")
+    for hour in (6, 9, 12):
+        _add_checkin(user.id, END_DAY, 80.0,
+                     created_at=datetime(END_DAY.year, END_DAY.month, END_DAY.day, hour))
+    _add_checkin(user.id, END_DAY - timedelta(days=7), 80.5)
+    db.session.commit()
+
+    real = history_mod.build_progression_report
+    calls = []
+
+    def counting(user_id, **kw):
+        calls.append(kw["end_day"])
+        return real(user_id, **kw)
+
+    monkeypatch.setattr(history_mod, "build_progression_report", counting)
+    history = build_progress_history(user.id)
+    assert len(history.entries) == 4
+    assert sorted(calls) == [END_DAY - timedelta(days=7), END_DAY]

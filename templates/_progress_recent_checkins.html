@@ -1,9 +1,12 @@
-{#- Progress V2 PR1 · RecentCheckins. Unchanged content (Progress redesign
-    PR5): reconstructed historical Progress state per qualifying check-in,
+{#- Progress V2 PR1 · RecentCheckins; V2 PR4 turned the rows into a flat,
+    day-grouped recent list. Content is still (Progress redesign PR5)
+    reconstructed historical Progress state per qualifying check-in,
     server-owned. GET /api/progress/history decides the rows;
-    the history module in static/progress.js only translates them, through the shared tables
-    in static/progress_presentation.js. The browser never classifies a period
-    and never computes a weight delta. -#}
+    buildHistoryView in static/progress_presentation.js groups them by the
+    server's Istanbul analysis day and names each state, and the history
+    module in static/progress.js only renders that view. The browser never
+    classifies a period, never computes a weight delta, and never regroups by
+    its own timezone. -#}
 <section class="prog-section" id="progress-recent-checkins"
          data-progress-section="recent-checkins" aria-labelledby="ph-h">
     <h2 class="sec-label" id="ph-h">{{ t('progress.recent_checkins_label') }}</h2>

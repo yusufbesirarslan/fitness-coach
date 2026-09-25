@@ -241,6 +241,14 @@ The browser translates labels and writes persisted prose with `textContent`.
 It does not decide whether the physique improved. Unknown comparability is
 treated like not-comparable. Unknown states render unavailable.
 
+Progress V2 PR4 presentation: `empty` is a compact title + one sentence +
+ONE action — `/training` (where a web Pump Check is taken, at workout
+completion) or, when only legacy checks exist, the gallery. Every state has at
+most one link. Photos are bounded thumbnails (lazy, async decode, intrinsic
+3:4 box). The comparison shows its reliability once in words (no warning
+colour), the persisted summary, limitations, observed changes and next-check
+guidance; stable/focus areas are not rendered on Progress.
+
 Persisted comparison analysis is **not** language-localized. Structural UI
 labels are. Do not add an LLM translation call to close that gap.
 

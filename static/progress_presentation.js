@@ -7,7 +7,7 @@
    which is what lets tests/test_progress_presentation_js.py execute it
    under node.
 
-   Four responsibilities, nothing else:
+   Five responsibilities, nothing else:
 
    1. The state → copy tables. Internal identifiers (`needs_attention`,
       `insufficient_data`, `building_consistency`, ...) are business values
@@ -44,6 +44,12 @@
       publishes one server-selected `insight` (interpretation code, ≤ 2
       evidence facts, one action); buildAxisInsightView maps it to copy
       descriptors. progress_insights.js only fetches and renders it.
+
+   5. The Recent Check-ins view model (V2 PR4). GET /api/progress/history
+      rows are grouped by the server's Istanbul `analysis_day`, each group
+      led by its newest check-in and bounded for the main page;
+      buildHistoryView reuses the state tables above (one word per state
+      across the page). progress.js's history module only renders it.
 
    Copy descriptors are `{ key, params }` (or null) — locale keys, never
    prose — so the view model is locale-independent. The only locale-aware
@@ -107,8 +113,9 @@
     needs_attention: 'progress.state_next_needs_attention'
   };
 
-  // performance.state → label. Only the history rows render it; the Trends
-  // section shows the measurable volume trend instead.
+  // performance.state → label. Only Recent Check-ins renders it (as each
+  // row's one summary word); the Trends section shows the measurable volume
+  // trend instead.
   var TRAINING_STATE = {
     building_baseline: 'progress.perf_state_building_baseline',
     progressing: 'progress.perf_state_progressing',
@@ -164,13 +171,6 @@
     up: 'progress.state_fact_volume_up',
     flat: 'progress.state_fact_volume_flat',
     down: 'progress.state_fact_volume_down'
-  };
-
-  // volume_trend → inline word used inside a history sentence ("rising").
-  var TREND_INLINE = {
-    up: 'progress.trend_up',
-    flat: 'progress.trend_flat',
-    down: 'progress.trend_down'
   };
 
   var BODY_STATUS = { available: AVAILABLE, partial: PARTIAL, insufficient_data: INSUFFICIENT };
@@ -270,6 +270,11 @@
   }
 
   function round1(n) { return Number(n.toFixed(1)); }
+
+  // Display tie-break shared by the Weight card and Recent Check-ins: a
+  // delta that would spell "+0.0 kg" reads as "no change" instead. A
+  // rounding rule about text, not a verdict about the user.
+  function spellsZero(n) { return Math.abs(n) < 0.05; }
 
   // Volume is formatted compactly ("24.8K") in the display locale. The
   // number itself is the server's; only its spelling happens here.
@@ -430,7 +435,7 @@
 
     var change = null;
     if (current !== null && delta !== null) {
-      change = Math.abs(delta) < 0.05
+      change = spellsZero(delta)
         ? { text: copy('progress.body_sub_flat'), direction: 'flat' }
         : { text: copy('progress.body_sub_delta', { delta: signed(delta) }),
             direction: direction(delta) };
@@ -640,6 +645,106 @@
     };
   }
 
+  // ── Recent Check-ins view model (V2 PR4) ───────────────────────────────
+
+  // Date groups the main page shows before the reader asks for more. The
+  // rest of the server's bounded window is kept in memory and only turned
+  // into DOM on request — no hidden archive, no second fetch.
+  var HISTORY_VISIBLE_GROUPS = 4;
+
+  var ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+  function historyWeight(body) {
+    return (body && isNumber(body.weight_kg))
+      ? copy('progress.history_weight', { weight: body.weight_kg.toFixed(1) }) : null;
+  }
+
+  // The server's delta vs. the previous qualifying check-in, spelled; the
+  // same sub-0.05 display tie-break the Weight card uses.
+  function historyDelta(body) {
+    if (!body || !isNumber(body.weight_kg) || !isNumber(body.weight_delta_kg)) return null;
+    if (spellsZero(body.weight_delta_kg)) return copy('progress.history_no_change');
+    return copy('progress.history_delta', { delta: signed(body.weight_delta_kg) });
+  }
+
+  // One entry → its row facts. The summary is the entry's performance state
+  // (the most specific canonical word for that period), with the trajectory
+  // as fallback — ONE state label per row, never both.
+  function historyEntry(entry) {
+    var perf = entry.performance || {};
+    var traj = entry.trajectory || {};
+    var key = keyFor(TRAINING_STATE, perf.state) || keyFor(TRAJECTORY, traj.state);
+    return {
+      checked_in_at: typeof entry.checked_in_at === 'string' ? entry.checked_in_at : null,
+      timezone: (entry.window && typeof entry.window.timezone === 'string')
+        ? entry.window.timezone : null,
+      summary: copy(key),
+      weight: historyWeight(entry.body),
+      delta: historyDelta(entry.body)
+    };
+  }
+
+  /* GET /api/progress/history → Recent Check-ins, grouped by calendar day.
+
+     The day is the server's `analysis_day`: the check-in's Europe/Istanbul
+     calendar day, already an ISO string. Grouping is string identity on
+     that value, so neither the browser's timezone nor its locale can move
+     a check-in to another group. Several check-ins on one day are real,
+     separately submitted records (POST /checkin has no per-day limit) —
+     they are grouped and counted, never dropped or merged: the group leads
+     with the newest one and keeps every entry for its disclosure.
+
+     A payload that is not a history at all is "unavailable" — never
+     "empty", which is a true statement about the user a failure cannot
+     make. */
+  function buildHistoryView(d) {
+    if (!d || typeof d !== 'object' ||
+        (d.state !== 'empty' && d.state !== 'available') ||
+        (d.state === 'available' && !Array.isArray(d.entries))) {
+      return { status: UNAVAILABLE, groups: [], visible: 0, has_more: false };
+    }
+    var entries = d.state === 'available' ? d.entries : [];
+    var groups = [];
+    var byDay = {};
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      if (!entry || typeof entry !== 'object' ||
+          typeof entry.analysis_day !== 'string' || !ISO_DAY.test(entry.analysis_day)) {
+        continue;                               // unreadable row: skipped, not guessed
+      }
+      var day = entry.analysis_day;
+      if (!Object.prototype.hasOwnProperty.call(byDay, day)) {
+        byDay[day] = { day: day, entries: [] };
+        groups.push(byDay[day]);
+      }
+      byDay[day].entries.push(historyEntry(entry));
+    }
+    if (!groups.length) {
+      return { status: 'empty', groups: [], visible: 0, has_more: false };
+    }
+    var out = groups.map(function (g) {
+      var lead = g.entries[0];                  // newest first, as served
+      var count = g.entries.length;
+      return {
+        day: g.day,
+        count: count,
+        summary: lead.summary,
+        weight: lead.weight,
+        delta: lead.delta,
+        // A group always holds at least one row; only a single-row day has
+        // no count line.
+        updates: count === 1 ? null : copy('progress.history_updates', { n: count }),
+        entries: g.entries
+      };
+    });
+    return {
+      status: AVAILABLE,
+      groups: out,
+      visible: Math.min(HISTORY_VISIBLE_GROUPS, out.length),
+      has_more: d.has_more === true
+    };
+  }
+
   // ── Axis Insight view model (V2 PR3) ───────────────────────────────────
 
   function unavailableAxisInsight() {
@@ -717,7 +822,6 @@
     VOLUME_TREND: VOLUME_TREND,
     VOLUME_CHANGE: VOLUME_CHANGE,
     STATE_FACT_VOLUME: STATE_FACT_VOLUME,
-    TREND_INLINE: TREND_INLINE,
     MIN_LINE_POINTS: MIN_LINE_POINTS,
     AXIS_INSIGHT: AXIS_INSIGHT,
     AXIS_MEANING: AXIS_MEANING,
@@ -725,6 +829,8 @@
     AXIS_ACTION: AXIS_ACTION,
     AXIS_MAX_EVIDENCE: AXIS_MAX_EVIDENCE,
     buildAxisInsightView: buildAxisInsightView,
+    HISTORY_VISIBLE_GROUPS: HISTORY_VISIBLE_GROUPS,
+    buildHistoryView: buildHistoryView,
     keyFor: keyFor,
     sparkline: sparkline,
     bars: bars,

@@ -24,6 +24,7 @@ CLIENT_KEYS = (
     "progress.physique_empty_title",
     "progress.physique_empty_desc",
     "progress.physique_add_check",
+    "progress.physique_empty_cta",
     "progress.physique_legacy_note",
     "progress.physique_single_title",
     "progress.physique_single_desc",
@@ -37,7 +38,6 @@ CLIENT_KEYS = (
     "progress.physique_comparability_comparable",
     "progress.physique_comparability_limited",
     "progress.physique_comparability_not_comparable",
-    "progress.physique_limited_label",
     "progress.physique_not_comparable_title",
     "progress.physique_unavailable",
     "progress.physique_view_all",
@@ -151,7 +151,7 @@ def test_all_states_have_explicit_copy(app, client):
                 "progress.physique_single_title",
                 "progress.physique_history_title",
                 "progress.physique_not_comparable_title",
-                "progress.physique_limited_label",
+                "progress.physique_comparability_limited",
                 "progress.physique_unavailable"):
         assert key in js
 
@@ -188,7 +188,13 @@ def test_comparability_is_textual_not_colour_only(app, client):
     js = _executable_js(_js(client))
     assert "progress.physique_comparability_limited" in js
     assert "progress.physique_comparability_not_comparable" in js
-    assert "progress.physique_limited_label" in js
+    # V2 PR4: the reliability is said once, in words, in a neutral colour —
+    # no duplicate "Limited comparison" line and no warning-coloured rail.
+    assert "progress.physique_limited_label" not in js
+    css = client.get("/static/progress.css").get_data(as_text=True)
+    physique = css.split("/* ── 5 · PHYSIQUE", 1)[1].split("/* ── 6 ·", 1)[0]
+    assert "--color-warning" not in physique
+    assert "pp-limited" not in physique
 
 
 def test_unknown_comparability_is_not_a_client_vocabulary(app, client):
@@ -225,3 +231,86 @@ def test_gallery_action_remains_reachable(app, client):
     assert "/pump-check-gallery" in js
     assert "progress.physique_view_all" in js
     assert "progress.physique_add_check" in js
+
+
+# ── V2 PR4: compact, actionable empty state; quiet secondary section ────────
+
+RETIRED_KEYS = (
+    "progress.physique_limited_label",
+    "progress.physique_stable",
+    "progress.physique_focus",
+    "progress.physique_recent",
+    "progress.physique_alt",
+)
+
+
+def _function(js, name):
+    return js.split(f"function {name}", 1)[1].split("\n  }\n", 1)[0]
+
+
+def test_empty_state_is_compact_with_exactly_one_action(app, client):
+    js = _executable_js(_js(client))
+    empty = _function(js, "_empty")
+    # No shared bordered .empty-state card, no placeholder illustration.
+    assert "empty-state" not in empty
+    assert "pp-empty" in empty
+    assert "<svg" not in empty and "img" not in empty
+    # One action on either branch: Training (where a web Pump Check is
+    # taken) or, when only legacy Pump Checks exist, the gallery.
+    branches = empty.split("} else {")
+    assert len(branches) == 2
+    for branch in branches:
+        assert branch.count("_link(") + branch.count("_galleryLink(") == 1, branch
+    assert "progress.physique_empty_cta" in empty
+    assert "TRAINING" in empty and "'/training'" in js
+
+
+def test_empty_copy_is_purposeful_and_claims_no_analysis():
+    for locale in ("en", "tr"):
+        title = _CATALOG[locale]["progress.physique_empty_title"]
+        desc = _CATALOG[locale]["progress.physique_empty_desc"]
+        assert title and desc
+        text = (title + " " + desc).lower()
+        for banned in ("no data", "veri yok", "analy", "analiz", "score", "skor"):
+            assert banned not in text, (locale, banned)
+    assert _CATALOG["en"]["progress.physique_empty_title"] == "Build your visual timeline"
+
+
+def test_physique_is_visually_quieter_than_the_intelligence_layer(app, client):
+    css = client.get("/static/progress.css").get_data(as_text=True)
+    physique = css.split("/* ── 5 · PHYSIQUE", 1)[1].split("/* ── 6 ·", 1)[0]
+    # Normal UI typography, no glow, no surface card of its own.
+    assert "--font-display" not in physique
+    assert "box-shadow: var(--glow" not in physique
+    assert ".pp-empty {" in physique
+    empty_rule = physique.split(".pp-empty {", 1)[1].split("}", 1)[0]
+    assert "border" not in empty_rule and "background" not in empty_rule
+    # Photos are bounded thumbnails, never full-column frames.
+    grid = physique.split(".pp-strip {", 1)[1].split("}", 1)[0]
+    assert "minmax(0, 140px)" in grid
+    assert ".prog-section .empty-state" not in css
+
+
+def test_images_stay_lazy_and_reserve_their_box(app, client):
+    js = _executable_js(_js(client))
+    figure = _function(js, "_figure")
+    assert "img.loading = 'lazy'" in figure
+    assert "img.decoding = 'async'" in figure
+    assert "img.width" in figure and "img.height" in figure
+    # Only the server's signed https URL is ever used.
+    assert "_safeHttpUrl(url)" in figure
+
+
+def test_retired_physique_keys_have_no_consumer(app, client):
+    js = _js(client)
+    for key in RETIRED_KEYS:
+        assert f"'{key}'" not in js, key
+        for locale in ("en", "tr"):
+            assert key not in _CATALOG[locale], (locale, key)
+
+
+def test_stable_and_focus_lists_are_not_rendered_on_progress(app, client):
+    js = _executable_js(_js(client))
+    assert "stable_areas" not in js
+    assert "focus_areas" not in js
+    assert "observed_changes" in js
