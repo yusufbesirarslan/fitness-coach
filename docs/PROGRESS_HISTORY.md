@@ -75,7 +75,7 @@ current-state and is not historically safe.
 ## 3. Dependency graph
 
 ```
-progress_history.js
+progress.js (history module)
         ↓
 GET /api/progress/history
         ↓
@@ -333,8 +333,10 @@ is `LIMIT 13` regardless of how many older rows exist.
 
 ## 12. Frontend boundary
 
-`static/progress_history.js` is the only Progress consumer of
-`/api/progress/history`.
+The history module is the only Progress consumer of
+`/api/progress/history`. Since Progress V2 PR1 it is a self-contained IIFE at
+the end of `static/progress.js`, between `BEGIN/END progress history module`
+markers, instead of a separate `static/progress_history.js` request.
 
 It may:
 

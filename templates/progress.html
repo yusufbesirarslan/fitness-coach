@@ -13,227 +13,29 @@
 {% include "_nav.html" %}
 
 <!-- ── MAIN CONTENT ──
-     Progress redesign PR1: the page answers three questions top-to-bottom —
-     "How am I doing?" (YOUR PROGRESS) → "What changed?" (WHAT CHANGED) →
-     "What matters next?" (AXIS INSIGHTS). Physique + History follow as
-     supporting detail. Every section renders from data that ALREADY exists;
-     none of them fabricate a trajectory, score or assessment. -->
+     Progress V2 PR1: the page answers four questions top-to-bottom, one
+     section each, and every section is its own partial so later PRs can
+     replace one without touching the others:
+
+       ProgressHeader       _progress_header.html
+       Current State        _progress_current_state.html   "What is my current state?" + next action
+       Trends               _progress_trends.html          "What changed?" (weight · volume · consistency)
+       Axis Insight         _progress_axis_insight.html    "What does Axis infer?" + recommended move
+       Physique             _progress_physique.html
+       Recent Check-ins     _progress_recent_checkins.html
+
+     Every section renders from data that ALREADY exists; none of them
+     fabricate a trajectory, score or assessment. -->
 <main class="main-content progress-main">
-
-    <div class="page-hdr">
-        <h1>{{ t('progress.h1_a') }} <span>{{ t('progress.h1_b') }}</span></h1>
-        <p>{{ t('progress.page_sub') }}</p>
-    </div>
-
-    <!-- ══ 1 · YOUR PROGRESS ══
-         Primary above-the-fold surface. The trajectory is decided by the
-         server (GET /api/progress/summary → app/services/progress_summary)
-         and only LOCALIZED here; the markup ships the same neutral copy PR1
-         used, which is what a reader sees before the summary resolves and
-         what stays on screen if it fails. The client never classifies.
-
-         data-state on .ps-card drives the accent only — the state is always
-         spelled out in #ps-state text as well, so it is never carried by
-         colour alone (WCAG 1.4.1). -->
-    <section class="prog-section" aria-labelledby="ps-h">
-        <h2 class="sec-label" id="ps-h">{{ t('progress.summary_label') }}</h2>
-
-        <div class="ps-card" id="ps-card">
-            <div role="status" aria-live="polite">
-                <p class="ps-state" id="ps-state">{{ t('progress.summary_state') }}</p>
-                <p class="ps-lede" id="ps-lede">{{ t('progress.summary_lede') }}</p>
-                <p class="ps-meta" id="ps-meta">{{ t('progress.loading') }}</p>
-            </div>
-
-            <div class="ps-actions">
-                <button type="button" class="btn-volt" data-action="openCheckin">
-                    {{ t('progress.checkin_action') }}
-                </button>
-                {#- Contextual Coach entry (UX-1 PR3). It used to be a button that
-                    toggled the floating widget and was revealed by JS only if that
-                    widget had loaded; it is now a server-rendered link to the
-                    canonical Coach destination, so it cannot silently disappear.
-                    It stays subordinate to the check-in action, while the interpreted
-                    insight above remains what the user came here to read. -#}
-                <a class="btn-ghost" href="/coach" id="ps-ask">
-                    {{ t('progress.ask_axis') }}
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- ══ 2 · WHAT CHANGED ══
-         Exactly three cards, one primary signal each. All three now read the
-         SAME canonical summary as YOUR PROGRESS, so the page cannot show a
-         card that disagrees with its own headline. Each renders its own
-         neutral state when its signal is unavailable. -->
-    <section class="prog-section" aria-labelledby="wc-h">
-        <h2 class="sec-label" id="wc-h">{{ t('progress.changed_label') }}</h2>
-
-        <div class="wc-grid">
-            <article class="wc-card" id="wc-body" aria-labelledby="wc-body-h">
-                <h3 class="wc-label" id="wc-body-h">{{ t('progress.card_body') }}</h3>
-                <div class="wc-value" data-slot="value">—</div>
-                <p class="wc-sub" data-slot="sub">{{ t('progress.loading') }}</p>
-            </article>
-
-            <article class="wc-card" id="wc-perf" aria-labelledby="wc-perf-h">
-                <h3 class="wc-label" id="wc-perf-h">{{ t('progress.card_performance') }}</h3>
-                <div class="wc-value" data-slot="value">—</div>
-                <p class="wc-sub" data-slot="sub">{{ t('progress.loading') }}</p>
-            </article>
-
-            <article class="wc-card" id="wc-cons" aria-labelledby="wc-cons-h">
-                <h3 class="wc-label" id="wc-cons-h">{{ t('progress.card_consistency') }}</h3>
-                <div class="wc-value" data-slot="value">—</div>
-                <p class="wc-sub" data-slot="sub">{{ t('progress.loading') }}</p>
-            </article>
-        </div>
-    </section>
-
-    <!-- ══ 3 · AXIS INSIGHTS ══
-         PR3: exactly three semantic slots, server-selected. The three <article>
-         elements and their headings are STRUCTURAL — they ship in the markup
-         rather than being generated, so the section is always three labelled
-         slots (no list, no carousel, no ranking) whatever the payload says and
-         whether or not the fetch succeeds.
-
-         GET /api/progress/axis-insights decides which canonical signal earns
-         which slot; static/progress_insights.js only translates the codes it is
-         handed. data-status on each slot drives the accent ONLY — the state is
-         always spelled out in the slot's own text as well, so it is never
-         carried by colour alone (WCAG 1.4.1). -->
-    <section class="prog-section" aria-labelledby="ai-h">
-        <h2 class="sec-label" id="ai-h">{{ t('progress.insights_label') }}</h2>
-
-        <div class="ax-slots" id="insight-list" aria-live="polite">
-            <article class="ax-slot" id="ax-working" aria-labelledby="ax-working-h">
-                <h3 class="ax-slot-label" id="ax-working-h">{{ t('progress.axis_working_label') }}</h3>
-                <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
-                <p class="ax-detail" data-slot="detail" hidden></p>
-            </article>
-
-            <article class="ax-slot" id="ax-watch" aria-labelledby="ax-watch-h">
-                <h3 class="ax-slot-label" id="ax-watch-h">{{ t('progress.axis_watch_label') }}</h3>
-                <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
-                <p class="ax-detail" data-slot="detail" hidden></p>
-            </article>
-
-            <article class="ax-slot" id="ax-next" aria-labelledby="ax-next-h">
-                <h3 class="ax-slot-label" id="ax-next-h">{{ t('progress.axis_next_label') }}</h3>
-                <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
-                <p class="ax-detail" data-slot="detail" hidden></p>
-            </article>
-        </div>
-    </section>
-
-    <!-- ══ 4 · PHYSIQUE PROGRESS ══
-         PR4: a read-only projection of canonical Pump Check history and any
-         persisted PumpCheckComparison. GET /api/progress/physique owns the
-         facts; static/progress_physique.js only renders them. No comparison
-         is created on page load, and the browser never decides whether the
-         physique improved. -->
-    <section class="prog-section" aria-labelledby="pp-h">
-        <h2 class="sec-label" id="pp-h">{{ t('progress.physique_label') }}</h2>
-        <div id="physique-body" aria-live="polite">
-            <p class="prog-loading">{{ t('progress.loading') }}</p>
-        </div>
-    </section>
-
-    <!-- ══ 5 · PROGRESS HISTORY ══
-         PR5: reconstructed historical Progress state, server-owned.
-         GET /api/progress/history decides the rows; static/progress_history.js
-         only translates them. The browser never classifies a period and never
-         computes a weight delta. -->
-    <section class="prog-section" aria-labelledby="ph-h">
-        <h2 class="sec-label" id="ph-h">{{ t('progress.history_label') }}</h2>
-        <div id="history-list" aria-live="polite">
-            <p class="prog-loading">{{ t('progress.loading') }}</p>
-        </div>
-    </section>
-
+    {% include "_progress_header.html" %}
+    {% include "_progress_current_state.html" %}
+    {% include "_progress_trends.html" %}
+    {% include "_progress_axis_insight.html" %}
+    {% include "_progress_physique.html" %}
+    {% include "_progress_recent_checkins.html" %}
 </main>
 
-<!-- ══ CHECK-IN SHEET — form + fields preserved verbatim from the old progress.html (ids unchanged so submitCheckin/selectOverload keep working) ══ -->
-<div class="sheet-backdrop" id="checkin-sheet" data-action-self="closeCheckin">
-    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="checkin-sheet-title" tabindex="-1">
-        <div class="sheet-handle"></div>
-        <div class="sheet-title" id="checkin-sheet-title">{{ t('progress.checkin_title') }}</div>
-        <div class="section-sub">{{ t('progress.checkin_sub') }}</div>
-
-        <div class="form-grid">
-            <div class="form-group">
-                <label class="form-lbl" for="ci-weight">{{ t('progress.current_weight') }}</label>
-                <input type="number" id="ci-weight" step="0.1"
-                       placeholder="{{ '%g'|format(current_weight) if current_weight else t('progress.weight_ph') }}"
-                       value="{{ '%g'|format(current_weight) if current_weight else '' }}">
-            </div>
-            <div class="form-group">
-                <label class="form-lbl" for="ci-note">{{ t('progress.note_label') }}</label>
-                <input type="text" id="ci-note" placeholder="{{ t('progress.note_ph') }}">
-            </div>
-
-            <div class="slider-group form-full">
-                <label class="form-lbl">{{ t('progress.intensity') }}</label>
-                <div class="slider-row">
-                    <input type="range" id="ci-yogunluk" min="1" max="5" value="3" data-action-input="fxSetText" data-target="yogunluk-val">
-                    <div class="slider-val" id="yogunluk-val">3</div>
-                </div>
-                <div class="slider-labels"><span>{{ t('progress.slider_verylow') }}</span><span>{{ t('progress.slider_veryhigh') }}</span></div>
-            </div>
-
-            <div class="slider-group form-full">
-                <label class="form-lbl">{{ t('progress.fatigue') }}</label>
-                <div class="slider-row">
-                    <input type="range" id="ci-fatigue" min="1" max="5" value="3" data-action-input="fxSetText" data-target="fatigue-val">
-                    <div class="slider-val" id="fatigue-val">3</div>
-                </div>
-                <div class="slider-labels"><span>{{ t('progress.slider_notired') }}</span><span>{{ t('progress.slider_verytired') }}</span></div>
-            </div>
-
-            <div class="slider-group form-full">
-                <label class="form-lbl">{{ t('progress.sleep') }}</label>
-                <div class="slider-row">
-                    <input type="range" id="ci-uyku" min="1" max="5" value="3" data-action-input="fxSetText" data-target="uyku-val">
-                    <div class="slider-val" id="uyku-val">3</div>
-                </div>
-                <div class="slider-labels"><span>{{ t('progress.slider_verybad') }}</span><span>{{ t('progress.slider_verygood') }}</span></div>
-            </div>
-
-            <div class="slider-group form-full">
-                <label class="form-lbl">{{ t('progress.nutrition_adh') }}</label>
-                <div class="slider-row">
-                    <input type="range" id="ci-beslenme" min="1" max="5" value="3" data-action-input="fxSetText" data-target="beslenme-val">
-                    <div class="slider-val" id="beslenme-val">3</div>
-                </div>
-                <div class="slider-labels"><span>{{ t('progress.slider_noadherence') }}</span><span>{{ t('progress.slider_fulladherence') }}</span></div>
-            </div>
-
-            <div class="form-group form-full">
-                <label class="form-lbl">Progressive Overload</label>
-                <div class="section-sub" style="margin-bottom:10px">{{ t('progress.overload_q') }}</div>
-                <div class="overload-grid">
-                    <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'
-                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="true">{{ t('progress.overload_yes') }}</div>
-                    <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'
-                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_partial') }}</div>
-                    <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'
-                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_no') }}</div>
-                </div>
-            </div>
-        </div>
-
-        <button class="btn-volt w-full" id="checkin-btn" data-action="submitCheckin">{{ t('progress.submit_checkin') }}</button>
-
-        <div class="feedback-card" id="feedback-card">
-            <div class="feedback-header">
-                <div class="feedback-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg></div>
-                <div class="feedback-title">{{ t('progress.coach_feedback') }}</div>
-            </div>
-            <div class="feedback-text" id="feedback-text"></div>
-        </div>
-    </div>
-</div>
+{% include "_progress_checkin_sheet.html" %}
 
 {% include "_actionbar.html" %}
 
@@ -243,10 +45,12 @@
 {# window.__PROGRESS is gone with PR2: its only consumer was the BODY card's
    client-side weight/goal arithmetic, which the canonical summary now owns
    server-side. The check-in field still pre-fills from `current_weight`
-   above — that is a form default, not a Progress signal. #}
+   (_progress_checkin_sheet.html) — a form default, not a Progress signal. #}
+{# progress_presentation.js first: progress.js (including its history module)
+   reads its state → copy tables and the summary view model. #}
+<script src="/static/progress_presentation.js?v={{ _v }}"></script>
 <script src="/static/progress_insights.js?v={{ _v }}"></script>
 <script src="/static/progress_physique.js?v={{ _v }}"></script>
-<script src="/static/progress_history.js?v={{ _v }}"></script>
 <script src="/static/progress.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>
 </body>

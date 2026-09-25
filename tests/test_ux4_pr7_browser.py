@@ -255,7 +255,7 @@ def test_progress_browser_covers_sparse_populated_and_pump_check_history(
         db.session.commit()
 
     page.goto("http://localhost/progress-page")
-    expect(page.locator("#wc-body [data-slot=value]")).to_contain_text("81.5")
+    expect(page.locator("#tr-weight [data-slot=value]")).to_contain_text("81.5")
     expect(page.locator("#physique-body .pp-status")).to_have_count(1)
     expect(page.locator("#physique-body .pp-strip figure")).to_have_count(1)
 

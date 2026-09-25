@@ -214,7 +214,7 @@ def test_stale_comparison_copy_is_present(app, client):
 def test_other_progress_sections_remain_in_the_page(
         app, client, make_user, login):
     html = _progress_html(client, make_user, login, "ppuikeep")
-    for anchor in ("ps-h", "wc-h", "ai-h", "pp-h", "ph-h"):
+    for anchor in ("ps-h", "tr-h", "ai-h", "pp-h", "ph-h"):
         assert f'id="{anchor}"' in html
     assert 'id="insight-list"' in html
     assert 'id="history-list"' in html

@@ -131,13 +131,16 @@ def test_focus_ring_is_never_an_outline_value_in_templates_or_scripts():
 # The documents and modules that render the UX4-covered surfaces (and the
 # shared shell they sit in). Community pages are out of UX4 scope.
 UX4_TEMPLATES = ("today", "plan", "coach_v2", "nutrition", "manage_stack",
-                 "progress", "edit_profile", "notifications", "_head", "_nav",
+                 "progress", "_progress_header", "_progress_current_state",
+                 "_progress_trends", "_progress_axis_insight",
+                 "_progress_physique", "_progress_recent_checkins",
+                 "_progress_checkin_sheet", "edit_profile", "notifications", "_head", "_nav",
                  "_actionbar", "404", "500", "login", "register",
                  "forgot_password")
 UX4_SCRIPTS = ("today", "training_plan_management", "plan_training_manage",
                "plan_workout", "workout_execution", "workout_state_client",
                "weekly_program", "workout_draft", "coach_widget", "nutrition",
-               "progress", "progress_history", "progress_insights",
+               "progress", "progress_presentation", "progress_insights",
                "progress_physique", "profile", "actions", "i18n", "modal", "auth")
 
 _T_CALL = re.compile(r"""\b(?:t|__t)\(\s*['"]([a-z0-9_]+(?:\.[a-z0-9_]+)+)['"]""")

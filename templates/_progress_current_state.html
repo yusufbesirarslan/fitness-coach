@@ -1,0 +1,41 @@
+{#- Progress V2 PR1 · ProgressCurrentState — "What is my current state?"
+
+    Owns exactly three things: the concise trajectory-level state (#ps-state
+    headline + #ps-lede summary), the evidence it is based on (#ps-meta: the
+    analysis window) and the recommended next action (#ps-next). It does NOT
+    say which signal drives the state — that interpretation belongs to Axis
+    Insight — and it does NOT restate measurable evidence the Trends section
+    owns (weights, counts, consistency).
+
+    The state is decided by the server (GET /api/progress/summary →
+    app/services/progress_summary) and mapped to copy by
+    static/progress_presentation.js. The markup ships neutral copy, which is
+    what a reader sees before the summary resolves.
+
+    data-state on .ps-card drives the accent only — the state is always spelled
+    out in #ps-state text as well, so it is never carried by colour alone
+    (WCAG 1.4.1). -#}
+<section class="prog-section" id="progress-current-state"
+         data-progress-section="current-state" aria-labelledby="ps-h">
+    <h2 class="sec-label" id="ps-h">{{ t('progress.current_state_label') }}</h2>
+
+    <div class="ps-card" id="ps-card">
+        <div role="status" aria-live="polite">
+            <p class="ps-state" id="ps-state" data-slot="headline">{{ t('progress.summary_state') }}</p>
+            <p class="ps-lede" id="ps-lede" data-slot="summary">{{ t('progress.summary_lede') }}</p>
+            <p class="ps-meta" id="ps-meta" data-slot="evidence">{{ t('progress.loading') }}</p>
+        </div>
+
+        <div class="ps-actions" id="ps-next" data-slot="next-action">
+            <button type="button" class="btn-volt" data-action="openCheckin">
+                {{ t('progress.checkin_action') }}
+            </button>
+            {#- Contextual Coach entry (UX-1 PR3): a server-rendered link to the
+                canonical Coach destination, so it cannot silently disappear. It
+                stays subordinate to the check-in action. -#}
+            <a class="btn-ghost" href="/coach" id="ps-ask">
+                {{ t('progress.ask_axis') }}
+            </a>
+        </div>
+    </div>
+</section>

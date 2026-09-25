@@ -111,7 +111,7 @@ def test_progress_heading_does_not_force_a_mid_word_break(
     html = client.get("/progress-page").get_data(as_text=True)
     assert "PROG<br>" not in html
     assert ">PROG<" not in html
-    hdr = re.search(r'<div class="page-hdr">\s*<h1>(.*?)</h1>', html, re.S)
+    hdr = re.search(r'<div class="page-hdr"[^>]*>\s*<h1>(.*?)</h1>', html, re.S)
     assert hdr, "progress page-hdr h1 is missing"
     heading = hdr.group(1)
     assert "<br" not in heading

@@ -4,6 +4,8 @@
 """
 import re
 
+from markupsafe import escape
+
 from app.i18n import _CATALOG
 from app.services.progress_history import STATES
 from app.services.progress_summary import (
@@ -53,16 +55,33 @@ CLIENT_KEYS = (
 )
 
 
-def _js(client):
-    r = client.get("/static/progress_history.js")
+# Since Progress V2 PR1 the history consumer ships INSIDE progress.js (the
+# page keeps its pre-V2 static request count), as one self-contained IIFE
+# between these markers. Every history guard below runs on that block alone,
+# and every controller guard on progress.js WITHOUT it, so neither side can
+# hide behind the other.
+_HISTORY_BEGIN = "/* ═══ BEGIN progress history module"
+_HISTORY_END = "/* ═══ END progress history module ═══ */"
+
+
+def _progress_source(client):
+    r = client.get("/static/progress.js")
     assert r.status_code == 200
-    return r.get_data(as_text=True)
+    src = r.get_data(as_text=True)
+    assert src.count(_HISTORY_BEGIN) == 1 and src.count(_HISTORY_END) == 1
+    begin, end = src.index(_HISTORY_BEGIN), src.index(_HISTORY_END)
+    assert begin < end
+    return src, begin, end + len(_HISTORY_END)
+
+
+def _js(client):
+    src, begin, end = _progress_source(client)
+    return src[begin:end]
 
 
 def _progress_js(client):
-    r = client.get("/static/progress.js")
-    assert r.status_code == 200
-    return r.get_data(as_text=True)
+    src, begin, end = _progress_source(client)
+    return src[:begin] + src[end:]
 
 
 def _executable_js(js):
@@ -83,8 +102,11 @@ def test_history_heading_and_module_are_wired(app, client, make_user, login):
     html = _progress_html(client, make_user, login, "phuiwire")
     assert 'id="ph-h"' in html
     assert 'id="history-list"' in html
-    assert "/static/progress_history.js" in html
-    assert _CATALOG["tr"]["progress.history_label"] in html
+    assert "/static/progress.js" in html
+    # The history consumer is no longer a separate request (see _js).
+    assert "/static/progress_history.js" not in html
+    # Rendered through Jinja autoescape ("SON CHECK-IN'LER" → &#39;).
+    assert str(escape(_CATALOG["tr"]["progress.recent_checkins_label"])) in html
 
 
 def test_progress_js_only_delegates_history(app, client, make_user, login):
@@ -110,9 +132,17 @@ def test_client_maps_every_published_state(app, client, make_user, login):
     js = _js(client)
     assert set(STATES) == {"empty", "available"}
     assert "empty: true" in js and "available: true" in js
+    # V2 PR1: the state → copy tables are shared with CURRENT STATE / TRENDS
+    # and live in progress_presentation.js; history reads them from there and
+    # keeps no copy of its own (one wording per state across the page).
+    tables = client.get("/static/progress_presentation.js").get_data(as_text=True)
+    for name in ("P.TRAJECTORY", "P.TRAINING_STATE", "P.CONSISTENCY_STATE",
+                 "P.TREND_INLINE"):
+        assert name in js, name
     for table in (TRAJECTORY_KEYS, PERFORMANCE_KEYS, CONSISTENCY_KEYS):
         for state, key in table.items():
-            assert f"{state}: '{key}'" in js, state
+            assert f"{state}: '{key}'" in tables, state
+            assert f"'{key}'" not in js, f"{key} is mapped twice"
             for locale in ("en", "tr"):
                 assert _CATALOG[locale].get(key), f"{key} missing from {locale}"
     for key in CLIENT_KEYS:
@@ -166,7 +196,7 @@ def test_unavailable_is_isolated_and_not_empty(app, client, make_user, login):
 
 def test_ia_five_sections_unchanged(app, client, make_user, login):
     html = _progress_html(client, make_user, login, "phuiia")
-    for anchor in ("ps-h", "wc-h", "ai-h", "pp-h", "ph-h"):
+    for anchor in ("ps-h", "tr-h", "ai-h", "pp-h", "ph-h"):
         assert f'id="{anchor}"' in html
     assert html.count('class="wc-card"') == 3
     assert 'id="ax-working"' in html

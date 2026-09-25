@@ -139,11 +139,15 @@ SCRIPTS = {
     "coach": _SHELL | {"actions.js", "coach_widget.js"},
     "nutrition": _SHELL | {"actions.js", "coach_widget.js", "nutrition.js"},
     "supplements": _SHELL | {"actions.js"},
-    "progress": _SHELL | {"actions.js", "progress.js", "progress_history.js",
-                          "progress_insights.js", "progress_physique.js"},
+    "progress": _SHELL | {"actions.js", "progress.js",
+                          "progress_insights.js", "progress_physique.js",
+                          "progress_presentation.js"},
     "account": _SHELL | {"actions.js", "profile.js"},
     "notifications": _SHELL | {"actions.js"},
 }
+# Progress V2 PR1 added progress_presentation.js (the pure state → copy module)
+# WITHOUT raising the Progress ceiling: the history consumer moved into
+# progress.js, so the separate progress_history.js request is gone.
 STATIC_CEILING = {"today": 11, "plan": 13, "coach": 12, "nutrition": 14,
                   "supplements": 11, "progress": 15, "account": 12,
                   "notifications": 11}
@@ -474,7 +478,7 @@ PARTIAL = [
     ("today", "scheduled", "/checkin-history", {"today-progress-label"}),
     ("today", "scheduled", "/leaderboard/reward-check", set()),
     ("today", "scheduled", "/notifications/unread-count", set()),
-    ("progress", "populated", "/api/progress/summary", {"ps-h", "wc-h"}),
+    ("progress", "populated", "/api/progress/summary", {"ps-h", "tr-h"}),
     ("progress", "populated", "/api/progress/history", {"ph-h"}),
     ("progress", "populated", "/api/progress/axis-insights", {"ai-h"}),
     ("progress", "populated", "/api/progress/physique", {"pp-h"}),

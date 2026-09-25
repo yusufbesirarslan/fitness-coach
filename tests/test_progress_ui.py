@@ -1,4 +1,4 @@
-"""Progress page render tests (Progress redesign PR1 + PR2).
+"""Progress page render tests (Progress redesign PR1 + PR2, Progress V2 PR1).
 
 PR1 guards the redesigned information architecture: the five sections render in
 order, the legacy dashboard surfaces are gone, the weekly check-in stays
@@ -8,13 +8,25 @@ PR2 adds the client-side half of the trajectory contract: the page must
 TRANSLATE the canonical summary and never compute one. Those guards read
 static/progress.js structurally, because the rule they enforce ("no threshold
 lives here") is about what the file may contain, not about one rendered string.
+
+V2 PR1 re-cuts the page into Current State / Trends / Axis Insight / Physique /
+Recent Check-ins and moves every state → copy table into
+static/progress_presentation.js (its behaviour is executed under node in
+tests/test_progress_presentation_js.py). The guards below therefore read the
+page controller AND the presentation model.
 """
 
 import json
 import re
 from pathlib import Path
 
-SECTION_IDS = ("ps-h", "wc-h", "ai-h", "pp-h", "ph-h")
+SECTION_IDS = ("ps-h", "tr-h", "ai-h", "pp-h", "ph-h")
+# V2 PR1 information architecture, top to bottom. Each is its own partial.
+SECTIONS = ("current-state", "trends", "axis-insight", "physique",
+            "recent-checkins")
+# One Trends card per measurable progress signal: element id → view-model metric.
+METRIC_CARDS = {"tr-weight": "weight", "tr-volume": "training_volume",
+                "tr-consistency": "consistency"}
 ROOT = Path(__file__).resolve().parents[1]
 
 # Every state the server may publish, and the i18n key the client maps it to.
@@ -23,13 +35,12 @@ TRAJECTORY_KEYS = {
     "on_track": "progress.traj_on_track",
     "needs_attention": "progress.traj_needs_attention",
 }
-SIGNAL_LEDE_KEYS = {
-    "insufficient_data": "progress.traj_lede_insufficient_data",
-    "progressing": "progress.traj_lede_progressing",
-    "keep_pushing": "progress.traj_lede_keep_pushing",
-    "build_consistency": "progress.traj_lede_build_consistency",
-    "plateau": "progress.traj_lede_plateau",
-    "deload": "progress.traj_lede_deload",
+# Current State's supporting sentence is keyed on the TRAJECTORY, not on the
+# signal behind it — which signal needs attention is Axis Insight's to say.
+CURRENT_STATE_SUMMARY_KEYS = {
+    "building_baseline": "progress.state_summary_building_baseline",
+    "on_track": "progress.state_summary_on_track",
+    "needs_attention": "progress.state_summary_needs_attention",
 }
 PERFORMANCE_KEYS = {
     "building_baseline": "progress.perf_state_building_baseline",
@@ -48,6 +59,12 @@ CONSISTENCY_KEYS = {
 
 def _progress_js(client):
     r = client.get("/static/progress.js")
+    assert r.status_code == 200
+    return r.get_data(as_text=True)
+
+
+def _presentation_js(client):
+    r = client.get("/static/progress_presentation.js")
     assert r.status_code == 200
     return r.get_data(as_text=True)
 
@@ -79,15 +96,25 @@ def test_progress_page_renders_new_information_architecture(app, client, make_us
     for anchor in SECTION_IDS:
         assert f'id="{anchor}"' in html, f"missing section heading {anchor}"
 
-    # ...and appear in the prescribed top-to-bottom order:
-    # YOUR PROGRESS → WHAT CHANGED → AXIS INSIGHTS → PHYSIQUE → HISTORY.
+    # ...and appear in the prescribed top-to-bottom order.
     positions = [html.index(f'id="{a}"') for a in SECTION_IDS]
     assert positions == sorted(positions), "sections are out of order"
 
-    # WHAT CHANGED carries exactly three top-level cards.
+    # V2 PR1: each section is an explicit, independently replaceable boundary:
+    # Current State → Trends → Axis Insight → Physique → Recent Check-ins.
+    main = html.split("<main", 1)[1].split("</main>", 1)[0]
+    found = re.findall(r'<section[^>]*data-progress-section="([a-z-]+)"', main)
+    assert tuple(found) == SECTIONS
+    assert 'data-progress-section="header"' in main
+    assert main.index('data-progress-section="header"') < main.index("<section")
+
+    # TRENDS carries exactly three cards, one per measurable signal — not the
+    # legacy Body / Performance / Consistency categories.
     assert html.count('class="wc-card"') == 3
-    for card in ("wc-body", "wc-perf", "wc-cons"):
-        assert f'id="{card}"' in html
+    for card, metric in METRIC_CARDS.items():
+        assert re.search(rf'id="{card}" data-metric="{metric}"', html), card
+    for legacy in ("wc-body", "wc-perf", "wc-cons"):
+        assert f'id="{legacy}"' not in html
 
     # Data-driven regions the JS fills in.
     for slot in ("ps-meta", "insight-list", "physique-body", "history-list"):
@@ -265,14 +292,20 @@ def test_client_reads_the_canonical_summary_endpoint(app, client, make_user, log
 
 
 def test_client_maps_every_published_state_to_a_locale_key(app, client, make_user, login):
-    """Symmetry guard: server enum ↔ client table ↔ catalog, all three ways."""
+    """Symmetry guard: server enum ↔ client table ↔ catalog, all three ways.
+
+    The tables live in ONE place (progress_presentation.js); the page
+    controller holds no mapping of its own, so a state cannot read two ways.
+    """
     from app.i18n import _CATALOG
 
-    js = _progress_js(client)
-    for table in (TRAJECTORY_KEYS, SIGNAL_LEDE_KEYS, PERFORMANCE_KEYS,
+    tables = _presentation_js(client)
+    controller = _progress_js(client)
+    for table in (TRAJECTORY_KEYS, CURRENT_STATE_SUMMARY_KEYS, PERFORMANCE_KEYS,
                   CONSISTENCY_KEYS):
         for state, key in table.items():
-            assert f"{state}: '{key}'" in js, f"{state} is not mapped in progress.js"
+            assert f"{state}: '{key}'" in tables, f"{state} is not mapped"
+            assert key not in controller, f"{key} is mapped outside the model"
             for locale in ("en", "tr"):
                 assert _CATALOG[locale].get(key), f"{key} missing from {locale}"
 
@@ -280,13 +313,25 @@ def test_client_maps_every_published_state_to_a_locale_key(app, client, make_use
 def test_client_states_match_the_server_contract_exactly(app, client, make_user, login):
     """A state the server can emit that the client cannot render is a bug."""
     from app.services.progress_summary import (
-        CONSISTENCY_STATES, PERFORMANCE_STATES, TRAJECTORY_BY_SIGNAL,
-        TRAJECTORY_STATES,
+        CONSISTENCY_STATES, PERFORMANCE_STATES, TRAJECTORY_STATES,
     )
     assert set(TRAJECTORY_KEYS) == set(TRAJECTORY_STATES)
-    assert set(SIGNAL_LEDE_KEYS) == set(TRAJECTORY_BY_SIGNAL)
+    assert set(CURRENT_STATE_SUMMARY_KEYS) == set(TRAJECTORY_STATES)
     assert set(PERFORMANCE_KEYS) == set(PERFORMANCE_STATES)
     assert set(CONSISTENCY_KEYS) == set(CONSISTENCY_STATES)
+
+
+def test_signal_ledes_are_retired_from_current_state(app, client):
+    """V2 PR1 dedup: the per-signal lede restated the Axis WATCH/WORKING
+    headline (build_consistency rendered the identical sentence twice).
+    Signal interpretation now has exactly one owner — Axis Insight."""
+    from app.i18n import _CATALOG
+
+    for source in (_presentation_js(client), _progress_js(client)):
+        assert "traj_lede" not in source
+        assert "trajectory.reason" not in source
+    for locale in ("en", "tr"):
+        assert not [k for k in _CATALOG[locale] if "traj_lede" in k]
 
 
 def test_client_never_fabricates_a_trajectory(app, client, make_user, login):
@@ -294,10 +339,11 @@ def test_client_never_fabricates_a_trajectory(app, client, make_user, login):
 
     Scanned structurally rather than by eyeballing: the forbidden shape is a
     comparison against a session count, a weight delta or a streak anywhere in
-    the file, which is exactly how the pre-PR2 cards worked.
+    the page controller or the presentation model, which is exactly how the
+    pre-PR2 cards worked.
     """
-    js = _progress_js(client)
-    code = _executable_js(js)
+    code = (_executable_js(_progress_js(client)) + "\n"
+            + _executable_js(_presentation_js(client)))
 
     # No streak anywhere: it is a login counter, not training consistency.
     assert "streak" not in code
@@ -309,23 +355,31 @@ def test_client_never_fabricates_a_trajectory(app, client, make_user, login):
     # No percentage/score arithmetic.
     for banned in ("* 100", "/ 100", "score", "adherence", "percent"):
         assert banned not in code, banned
-    # The only fractional comparison the file is allowed to make is the display
-    # epsilon that decides "+0.0 kg" vs "no change" on the BODY card — a
-    # rounding tie-break, not a verdict. Historical deltas are server-owned.
-    comparisons = set(re.findall(r"[<>]=?\s*0?\.\d+", code))
-    assert comparisons == {"< 0.05"}, comparisons
+    # The only fractional comparison allowed is the display epsilon that
+    # decides "+0.0 kg" vs "no change" on the Weight card — a rounding
+    # tie-break, not a verdict. Historical deltas are server-owned.
+    comparisons = re.findall(r"[<>]=?\s*0?\.\d+", code)
+    assert comparisons == ["< 0.05"], comparisons
     assert "/checkin-history" not in code
 
 
 def test_summary_failure_does_not_read_as_insufficient_data(
         app, client, make_user, login):
-    """Rule 9 on the client too: a failed fetch is not 'building baseline'."""
+    """Rule 9 on the client too: a failed fetch is not 'building baseline'.
+
+    The controller renders the presentation model's unavailable view; that
+    view is defined once, and executed under node in
+    tests/test_progress_presentation_js.py."""
     js = _progress_js(client)
     unavailable = js.split("function summaryUnavailable", 1)[1].split("\n}", 1)[0]
-    assert "progress.traj_unavailable" in unavailable
-    assert "progress.load_error" in unavailable
+    assert "buildSummaryView(null)" in unavailable
     assert "building_baseline" not in unavailable
-    assert "traj_building_baseline" not in unavailable
+
+    model = _presentation_js(client)
+    state = model.split("function unavailableCurrentState", 1)[1].split("\n  }", 1)[0]
+    assert "progress.traj_unavailable" in state
+    assert "progress.load_error" in state
+    assert "building_baseline" not in state
 
 
 def test_trajectory_is_not_communicated_by_colour_alone(app, client, make_user, login):
@@ -335,7 +389,7 @@ def test_trajectory_is_not_communicated_by_colour_alone(app, client, make_user, 
         assert f'.ps-card[data-state="{state}"]' in css
 
     js = _progress_js(client)
-    setter = js.split("function _setTrajectory", 1)[1].split("\n}", 1)[0]
+    setter = js.split("function _setCurrentState", 1)[1].split("\n}", 1)[0]
     # data-state and the visible label are written by the same function, so an
     # accent can never appear without its text.
     assert "setAttribute('data-state'" in setter
@@ -343,6 +397,7 @@ def test_trajectory_is_not_communicated_by_colour_alone(app, client, make_user, 
 
 
 def test_no_chart_or_dashboard_is_reintroduced(app, client, make_user, login):
-    js = _progress_js(client)
-    for banned in ("Chart(", "chart.umd", "canvas", "switchTab", "heatmap"):
-        assert banned not in js, banned
+    for js in (_progress_js(client), _presentation_js(client)):
+        for banned in ("Chart(", "chart.umd", "canvas", "switchTab", "heatmap",
+                       "sparkline", "<svg"):
+            assert banned not in js, banned
