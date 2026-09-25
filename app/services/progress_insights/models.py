@@ -91,6 +91,55 @@ NEXT_MOVE_CODES = (
     NEXT_MAINTAIN_CURRENT_TRAINING,
 )
 
+# ── AXIS INSIGHT (Progress V2 PR3) ─────────────────────────────────────────
+# The unified surface: ONE interpretation, the canonical facts it rests on, and
+# ONE action. Keyed 1:1 on ``AdaptivePlan.week_focus`` (the same decision NEXT
+# MOVE projects), refined only where the planner's own reason codes record a
+# nuance (``steady`` + a recorded down-trend). No new decision is made here —
+# the code names which canonical explanation applies, the client maps it to copy.
+INSIGHT_BASELINE = "baseline"
+INSIGHT_CONSISTENCY_GAPS = "consistency_gaps"
+INSIGHT_DELOAD_DUE = "deload_due"
+INSIGHT_STALLED = "stalled"
+INSIGHT_READY_TO_PROGRESS = "ready_to_progress"
+INSIGHT_HOLDING_STEADY = "holding_steady"
+INSIGHT_STEADY_WITH_DIP = "steady_with_dip"
+
+INSIGHT_CODES = (
+    INSIGHT_BASELINE,
+    INSIGHT_CONSISTENCY_GAPS,
+    INSIGHT_DELOAD_DUE,
+    INSIGHT_STALLED,
+    INSIGHT_READY_TO_PROGRESS,
+    INSIGHT_HOLDING_STEADY,
+    INSIGHT_STEADY_WITH_DIP,
+)
+
+# Evidence: observable facts, each one a canonical value or the canonical rule
+# constant that made a signal fire. Params are counts the upstream layers
+# already computed — never a percentage, never a derived score.
+EVIDENCE_SESSIONS_ACROSS_WEEKS = "sessions_across_weeks"  # {sessions, active, total}
+EVIDENCE_TRAINED_WEEKS = "trained_weeks"                  # {active, total}
+EVIDENCE_UNBROKEN_BLOCK = "unbroken_block"                # {weeks}
+EVIDENCE_VOLUME_FLAT_RUN = "volume_flat_run"              # {weeks}
+EVIDENCE_VOLUME_RISING = "volume_rising"
+EVIDENCE_VOLUME_HOLDING = "volume_holding"
+EVIDENCE_VOLUME_FALLING = "volume_falling"
+EVIDENCE_STRENGTH_RISING = "strength_rising"
+EVIDENCE_STRENGTH_FALLING = "strength_falling"
+
+EVIDENCE_CODES = (
+    EVIDENCE_SESSIONS_ACROSS_WEEKS,
+    EVIDENCE_TRAINED_WEEKS,
+    EVIDENCE_UNBROKEN_BLOCK,
+    EVIDENCE_VOLUME_FLAT_RUN,
+    EVIDENCE_VOLUME_RISING,
+    EVIDENCE_VOLUME_HOLDING,
+    EVIDENCE_VOLUME_FALLING,
+    EVIDENCE_STRENGTH_RISING,
+    EVIDENCE_STRENGTH_FALLING,
+)
+
 # Bumped only on a breaking change to the wire contract. Independent of
 # ``progress_summary``'s version: they are separate published surfaces and one
 # may evolve without the other.
@@ -142,6 +191,31 @@ class InsightSlot:
 
 
 @dataclass(frozen=True)
+class InsightEvidence:
+    """One observable fact behind the Axis Insight: a code + its bounded counts."""
+    code: str
+    params: dict | None = None
+
+
+@dataclass(frozen=True)
+class AxisInsight:
+    """The unified Axis Insight (Progress V2 PR3).
+
+    ``code`` names the interpretation, ``evidence`` carries at most two
+    canonical facts it rests on (possibly none — a
+    sparse user gets no invented fact), and ``action`` is the ONE recommended
+    move: the same canonical projection NEXT MOVE carries, so the two can never
+    disagree. ``status`` is ``available`` or ``insufficient_data``; a failure
+    is an HTTP error, never an insight.
+    """
+    status: str
+    code: str
+    evidence: tuple = ()
+    action_code: str | None = None
+    action: NextMoveAction | None = None
+
+
+@dataclass(frozen=True)
 class ProgressInsights:
     """The canonical Axis Insights read model for one user over one window.
 
@@ -153,6 +227,9 @@ class ProgressInsights:
     working: InsightSlot
     watch: InsightSlot
     next_move: InsightSlot
+    # Additive (V2 PR3): the one coherent insight the Progress page renders.
+    # ``None`` only for callers that build the three slots alone.
+    insight: AxisInsight | None = None
 
 
 __all__ = [
@@ -179,8 +256,28 @@ __all__ = [
     "NEXT_PROGRESS_TRAINING",
     "NEXT_MAINTAIN_CURRENT_TRAINING",
     "NEXT_MOVE_CODES",
+    "INSIGHT_BASELINE",
+    "INSIGHT_CONSISTENCY_GAPS",
+    "INSIGHT_DELOAD_DUE",
+    "INSIGHT_STALLED",
+    "INSIGHT_READY_TO_PROGRESS",
+    "INSIGHT_HOLDING_STEADY",
+    "INSIGHT_STEADY_WITH_DIP",
+    "INSIGHT_CODES",
+    "EVIDENCE_SESSIONS_ACROSS_WEEKS",
+    "EVIDENCE_TRAINED_WEEKS",
+    "EVIDENCE_UNBROKEN_BLOCK",
+    "EVIDENCE_VOLUME_FLAT_RUN",
+    "EVIDENCE_VOLUME_RISING",
+    "EVIDENCE_VOLUME_HOLDING",
+    "EVIDENCE_VOLUME_FALLING",
+    "EVIDENCE_STRENGTH_RISING",
+    "EVIDENCE_STRENGTH_FALLING",
+    "EVIDENCE_CODES",
     "CONTRACT_VERSION",
     "UnknownCanonicalVocabulary",
+    "InsightEvidence",
+    "AxisInsight",
     "NextMoveAction",
     "InsightSlot",
     "ProgressInsights",

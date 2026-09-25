@@ -189,50 +189,119 @@
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 
-/* ── 4 · AXIS INSIGHTS (three fixed slots — no carousel, no ranking) ── */
-/* Exactly three slots, always all three, always stacked. The old row
-   scrolled horizontally and hid content off-screen; core content must never
-   depend on a carousel — and here it must also never depend on the payload,
-   because "there is nothing to watch" is itself the information. Each slot
-   therefore keeps its heading and its box whatever state it is in. */
-.ax-slots { display: flex; flex-direction: column; gap: var(--space-2); }
-.ax-slot {
+/* ── 4 · AXIS INSIGHT (one coherent coaching surface) ───────────────── */
+/* V2 PR3: the intelligence layer is ONE surface — interpretation, the facts
+   behind it, one action, one CTA — not three equal notification cards.
+   Hierarchy comes from type and spacing; the only colour is a restrained
+   Axis-blue rule on the left and a faint blue wash on the action block. No
+   amber: the attention call is Current State's to make, in words. CSS-only
+   layout — nothing is measured at runtime. */
+.ax-card {
   background: var(--color-surface-2);
   border: var(--border-w-1) solid var(--color-border-1);
-  border-left: var(--border-w-3) solid var(--color-border-1);
-  border-radius: var(--radius-lg); padding: var(--space-4);
+  border-left: var(--border-w-3) solid var(--color-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
 }
-/* Accent per slot state. STRICTLY redundant, exactly like .ps-card's: the
-   headline text always states the insight or its absence, so the tint adds
-   emphasis and never information (WCAG 1.4.1). Only the left rule is tinted —
-   no filled green/amber verdict backgrounds. */
-.ax-slot[data-status="available"]         { border-left-color: var(--color-primary); }
-.ax-slot#ax-watch[data-status="available"] { border-left-color: var(--color-warning); }
-.ax-slot[data-status="unavailable"]       { border-left-color: var(--color-border-2); }
+/* `hidden` must win over the flex/grid display rules below: an empty
+   evidence list or a hidden action must take no space at all. */
+.ax-card [hidden] { display: none; }
+/* Loading / baseline / failure read as quiet context, not a claim. The text
+   always states which it is; the rule colour adds nothing (WCAG 1.4.1). */
+.ax-card[data-status="loading"],
+.ax-card[data-status="unavailable"] { border-left-color: var(--color-border-2); }
 
-/* The slot name (WHAT'S WORKING / WATCH THIS / NEXT MOVE) is a permanent
-   label, not a badge that appears with content. */
-.ax-slot-label {
+/* Primary content: what the signals mean together. */
+.ax-interpretation {
+  font-size: var(--text-xl); font-weight: var(--weight-semibold);
+  color: var(--color-text-1); line-height: var(--leading-normal);
+  max-width: 60ch; overflow-wrap: anywhere;
+}
+.ax-card[data-status="loading"] .ax-interpretation,
+.ax-card[data-status="unavailable"] .ax-interpretation {
+  font-size: var(--text-base); font-weight: var(--weight-regular);
+  color: var(--color-text-2);
+}
+
+/* Why it matters: one quieter sentence directly under the lead line. */
+.ax-reading { min-width: 0; }
+.ax-meaning {
+  margin-top: var(--space-2);
+  font-size: var(--text-base); color: var(--color-text-2);
+  line-height: var(--leading-normal);
+  max-width: 60ch; overflow-wrap: anywhere;
+}
+
+/* Supporting evidence: small, neutral, clearly secondary. */
+.ax-evidence {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-1);
+}
+.ax-evidence li {
+  position: relative; padding-left: var(--space-4);
+  font-size: var(--text-md); color: var(--color-text-2);
+  line-height: var(--leading-normal); overflow-wrap: anywhere;
+}
+.ax-evidence li::before {
+  content: ""; position: absolute; left: 0; top: 0.6em;
+  width: 5px; height: 5px; border-radius: var(--radius-full);
+  background: var(--color-text-3);
+}
+
+/* THIS WEEK: the one recommended move — the most findable block. */
+.ax-action {
+  background: var(--color-primary-a06);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  min-width: 0;
+}
+.ax-action-label {
   font-size: var(--text-2xs); font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-widest); text-transform: uppercase;
-  color: var(--color-text-3); margin-bottom: var(--space-2);
+  color: var(--color-primary); margin: 0 0 var(--space-1);
 }
-.ax-headline {
+.ax-action-text {
   font-size: var(--text-base); font-weight: var(--weight-semibold);
   color: var(--color-text-1); line-height: var(--leading-normal);
   overflow-wrap: anywhere;
 }
-/* Empty / insufficient / unavailable slots read as quiet context rather than
-   as a claim with the same weight as a real insight. */
-.ax-slot[data-status="empty"] .ax-headline,
-.ax-slot[data-status="insufficient_data"] .ax-headline,
-.ax-slot[data-status="unavailable"] .ax-headline {
-  font-weight: var(--weight-regular); color: var(--color-text-2);
-}
-.ax-detail {
-  margin-top: var(--space-2);
+.ax-action-detail {
+  margin-top: var(--space-1);
   font-size: var(--text-sm); color: var(--color-text-2);
-  line-height: var(--leading-normal); overflow-wrap: anywhere;
+}
+
+/* The one CTA: a continuation of the insight, secondary weight. */
+.ax-review { display: flex; flex-wrap: wrap; }
+.ax-review-cta { max-width: 100%; white-space: normal; text-align: center; }
+.ax-review-cta:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+/* Wide screens: interpretation + evidence on the left, the action and CTA
+   beside them — one band that still reads left → right as meaning → move. */
+@media (min-width: 900px) {
+  .ax-card {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-areas:
+      "reading action"
+      "facts   review";
+    column-gap: var(--space-8);
+    align-items: start;
+  }
+  /* Loading / failure carry no action: one column, CTA under the line. */
+  .ax-card[data-status="loading"],
+  .ax-card[data-status="unavailable"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "reading" "review";
+  }
+  .ax-reading { grid-area: reading; }
+  .ax-evidence { grid-area: facts; }
+  .ax-action { grid-area: action; }
+  .ax-review { grid-area: review; }
+}
+@media (max-width: 640px) {
+  .ax-card { padding: var(--space-5); }
 }
 
 /* ── 5 · PHYSIQUE PROGRESS (canonical Pump Check projection) ────────── */

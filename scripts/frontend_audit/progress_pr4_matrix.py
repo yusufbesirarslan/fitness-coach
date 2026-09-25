@@ -84,12 +84,13 @@ SETTLED_JS = r"""
   ));
   const your = document.getElementById('ps-state');
   const history = document.getElementById('history-list');
-  const working = document.getElementById('ax-working');
+  // Progress V2 PR3: the one Axis Insight surface settles out of 'loading'.
+  const working = document.getElementById('ax-card');
   return !!(
     physiqueReady &&
     your && your.textContent && your.textContent.trim() &&
     history && history.textContent && history.textContent.trim() &&
-    working && working.getAttribute('data-status')
+    working && working.getAttribute('data-status') !== 'loading'
   );
 }
 """
@@ -169,12 +170,8 @@ MEASURE_JS = r"""
     long_text_overflow: longOverflow,
     your_progress_state: text(document.getElementById('ps-state')),
     what_changed_cards: q('.wc-card').length,
-    axis_working_status: document.getElementById('ax-working')
-      ? document.getElementById('ax-working').getAttribute('data-status') : null,
-    axis_watch_status: document.getElementById('ax-watch')
-      ? document.getElementById('ax-watch').getAttribute('data-status') : null,
-    axis_next_status: document.getElementById('ax-next')
-      ? document.getElementById('ax-next').getAttribute('data-status') : null,
+    axis_working_status: document.getElementById('ax-card')
+      ? document.getElementById('ax-card').getAttribute('data-status') : null,
     history_filled: text(document.getElementById('history-list')).length > 0,
     raw_key_leak: [...new Set(bodyText.match(/\bprogress\.[a-z_]+/g) || [])].slice(0, 10),
     horizontal_scrollers: q('[aria-labelledby="pp-h"] *')

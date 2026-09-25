@@ -199,7 +199,7 @@ def test_ia_five_sections_unchanged(app, client, make_user, login):
     for anchor in ("ps-h", "tr-h", "ai-h", "pp-h", "ph-h"):
         assert f'id="{anchor}"' in html
     assert html.count('class="wc-card"') == 3
-    assert 'id="ax-working"' in html
+    assert 'id="ax-card"' in html          # V2 PR3: one Axis Insight surface
     assert 'id="physique-body"' in html
 
 

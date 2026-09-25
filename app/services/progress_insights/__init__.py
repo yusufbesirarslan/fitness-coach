@@ -48,19 +48,28 @@ from app.services.progress_summary import (
 )
 from app.services.training_planning import derive_adaptive_plan
 from app.services.training_progression import build_progression_report
+from app.services.training_progression.analysis import (
+    MIN_DELOAD_WEEKS,
+    MIN_PLATEAU_WEEKS,
+)
 from app.timeutil import app_today
 
 from .analysis import (
+    INSIGHT_BY_WEEK_FOCUS,
     NEXT_MOVE_BY_WEEK_FOCUS,
     NON_ATTENTION_REASON_CODES,
     WATCH_BY_REASON_CODE,
     WORKING_BY_PERFORMANCE_STATE,
+    select_insight,
     select_next_move,
     select_watch,
     select_working,
 )
 from .models import (
     CONTRACT_VERSION,
+    EVIDENCE_CODES,
+    INSIGHT_BASELINE,
+    INSIGHT_CODES,
     DOMAIN_TRAINING,
     DOMAINS,
     NEXT_BUILD_BASELINE,
@@ -84,6 +93,8 @@ from .models import (
     WORKING_TRAINING_CONSISTENT,
     WORKING_TRAINING_PROGRESSING,
     WORKING_TRAINING_STEADY,
+    AxisInsight,
+    InsightEvidence,
     InsightSlot,
     NextMoveAction,
     ProgressInsights,
@@ -92,6 +103,13 @@ from .models import (
 from .payload import progress_insights_payload
 
 __all__ = [
+    "AxisInsight",
+    "InsightEvidence",
+    "INSIGHT_CODES",
+    "INSIGHT_BASELINE",
+    "EVIDENCE_CODES",
+    "INSIGHT_BY_WEEK_FOCUS",
+    "select_insight",
     "InsightSlot",
     "NextMoveAction",
     "ProgressInsights",
@@ -185,4 +203,13 @@ def build_progress_insights(
         working=select_working(performance, consistency),
         watch=select_watch(plan, consistency),
         next_move=select_next_move(plan),
+        # V2 PR3: the unified surface, selected from the SAME report/plan —
+        # no second history read, no second planning decision.
+        # The two rule constants are handed in (the pure analysis module does
+        # not import training_progression): they are the canonical
+        # definitions of the deload / plateau signals the evidence explains,
+        # never a threshold this package applies.
+        insight=select_insight(
+            plan, performance, consistency,
+            deload_weeks=MIN_DELOAD_WEEKS, plateau_weeks=MIN_PLATEAU_WEEKS),
     )

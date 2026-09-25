@@ -27,6 +27,7 @@
 {# Mevcut yüzen koç widget'ı (kendi CSS'ini enjekte eder, şablon markup'ı gerekmez).
    Coach hedefinin yeniden tasarımı YOK — yalnızca widget'a kanonik bir sayfa verir. #}
 <script src="/static/coach_widget.js"></script>
+{% include "_coach_handoff.html" %}
 <script src="/static/actions.js"></script>
 <script nonce="{{ csp_nonce }}">
 (function(){

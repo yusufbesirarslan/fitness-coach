@@ -21,6 +21,7 @@ from app.services.premium import (
     reservation_week,
     reserve_ai_quota,
 )
+from app.coach_handoff import coach_handoff_message
 from app.i18n import t
 from app.timeutil import app_date_of, app_today
 
@@ -44,8 +45,14 @@ def coach_page():
     request-zamanında okunur; geçersiz/eksik → KAPALI → eski coach.html (fail-safe).
     Veri çekme/iş mantığı yine YOK; her iki yolda da @require_auth korunur."""
     template = "coach_v2.html" if current_app.config.get("UIUX_COACH_PAGE_V2_ENABLED", False) else "coach.html"
+    # Progress V2 PR3: `?review=progress-insight` (a constant, never user
+    # data) asks for the Axis Insight to be pre-filled as a composer DRAFT.
+    # Re-derived server-side for the signed-in user; never auto-sent; any
+    # failure → None and the page renders exactly as without it.
+    handoff = coach_handoff_message(request.args.get("review"), current_user.id)
     return render_template(template, username=current_user.username,
-                           profile_picture=current_user.avatar_src)
+                           profile_picture=current_user.avatar_src,
+                           coach_handoff=handoff)
 
 
 def _ai_cooldown_response():

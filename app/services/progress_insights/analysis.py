@@ -31,6 +31,22 @@ from app.services.training_planning import AdaptivePlan
 
 from .models import (
     DOMAIN_TRAINING,
+    EVIDENCE_SESSIONS_ACROSS_WEEKS,
+    EVIDENCE_STRENGTH_FALLING,
+    EVIDENCE_STRENGTH_RISING,
+    EVIDENCE_TRAINED_WEEKS,
+    EVIDENCE_UNBROKEN_BLOCK,
+    EVIDENCE_VOLUME_FALLING,
+    EVIDENCE_VOLUME_HOLDING,
+    EVIDENCE_VOLUME_FLAT_RUN,
+    EVIDENCE_VOLUME_RISING,
+    INSIGHT_BASELINE,
+    INSIGHT_CONSISTENCY_GAPS,
+    INSIGHT_DELOAD_DUE,
+    INSIGHT_HOLDING_STEADY,
+    INSIGHT_READY_TO_PROGRESS,
+    INSIGHT_STALLED,
+    INSIGHT_STEADY_WITH_DIP,
     NEXT_BUILD_BASELINE,
     NEXT_DELOAD,
     NEXT_MAINTAIN_AND_CONSOLIDATE,
@@ -48,6 +64,8 @@ from .models import (
     WORKING_TRAINING_CONSISTENT,
     WORKING_TRAINING_PROGRESSING,
     WORKING_TRAINING_STEADY,
+    AxisInsight,
+    InsightEvidence,
     InsightSlot,
     NextMoveAction,
     UnknownCanonicalVocabulary,
@@ -251,4 +269,148 @@ def select_next_move(plan: AdaptivePlan) -> InsightSlot:
             intensity_action=plan.intensity_action,
             volume_delta_pct=plan.volume_delta_pct,
         ),
+    )
+
+
+# ── AXIS INSIGHT (Progress V2 PR3) ─────────────────────────────────────────
+# ``AdaptivePlan.week_focus`` → the interpretation the unified surface renders.
+# The SAME key NEXT MOVE is projected from, so the interpretation and the one
+# recommended action always describe the same canonical decision. Exhaustive
+# over the planner's focus vocabulary (tests compare the keys).
+INSIGHT_BY_WEEK_FOCUS = {
+    "insufficient_data": INSIGHT_BASELINE,
+    "build_consistency": INSIGHT_CONSISTENCY_GAPS,
+    "deload": INSIGHT_DELOAD_DUE,
+    "maintenance": INSIGHT_STALLED,
+    "overload": INSIGHT_READY_TO_PROGRESS,
+    "steady": INSIGHT_HOLDING_STEADY,
+}
+
+# The planner's own recorded down-trend nuances. Under ``steady`` the planner
+# deliberately does not ACT on them (see ``derive_week_focus``) but records
+# them; the interpretation names that nuance instead of calling it "holding".
+_DIP_REASON_CODES = ("volume_trend_down", "strength_trend_down")
+
+_VOLUME_EVIDENCE = {
+    "up": EVIDENCE_VOLUME_RISING,
+    "flat": EVIDENCE_VOLUME_HOLDING,
+    "down": EVIDENCE_VOLUME_FALLING,
+}
+_STRENGTH_EVIDENCE = {
+    "up": EVIDENCE_STRENGTH_RISING,
+    "down": EVIDENCE_STRENGTH_FALLING,
+}
+
+
+def _trained_weeks(consistency: ConsistencySummary) -> InsightEvidence:
+    return InsightEvidence(EVIDENCE_TRAINED_WEEKS, {
+        "active": consistency.active_weeks,
+        "total": consistency.analyzed_weeks,
+    })
+
+
+def _trend(table: dict, trend: str) -> InsightEvidence | None:
+    code = table.get(trend)
+    return InsightEvidence(code) if code else None
+
+
+def _insight_evidence(
+    code: str,
+    performance: PerformanceSummary,
+    consistency: ConsistencySummary,
+    *,
+    deload_weeks: int,
+    plateau_weeks: int,
+) -> tuple:
+    """The strongest canonical facts behind ``code``, most explanatory first.
+
+    Every fact is either a count ``progress_summary`` already computed, a trend
+    ``training_progression`` already computed, or the canonical rule constant
+    that made the planner's signal fire (``deload_weeks`` / ``plateau_weeks``,
+    handed in by the orchestrator from ``training_progression`` — a deload is
+    by definition an unbroken block whose volume levelled off). Nothing is
+    measured here. A baseline user gets NO evidence: "not enough history" is
+    the interpretation, not a fact to invent.
+
+    At most TWO facts, by construction of every branch below — the strongest
+    ones, never a metric dump.
+    """
+    volume = _trend(_VOLUME_EVIDENCE, performance.volume_trend)
+    strength = _trend(_STRENGTH_EVIDENCE, performance.strength_trend)
+
+    if code == INSIGHT_BASELINE:
+        facts = []
+    elif code == INSIGHT_CONSISTENCY_GAPS:
+        facts = [InsightEvidence(EVIDENCE_SESSIONS_ACROSS_WEEKS, {
+            "sessions": consistency.sessions,
+            "active": consistency.active_weeks,
+            "total": consistency.analyzed_weeks,
+        })]
+    elif code == INSIGHT_DELOAD_DUE:
+        facts = [
+            InsightEvidence(EVIDENCE_UNBROKEN_BLOCK, {"weeks": deload_weeks}),
+            InsightEvidence(EVIDENCE_VOLUME_FLAT_RUN, {"weeks": plateau_weeks}),
+        ]
+    elif code == INSIGHT_STALLED:
+        facts = [
+            InsightEvidence(EVIDENCE_VOLUME_FLAT_RUN, {"weeks": plateau_weeks}),
+            _trained_weeks(consistency),
+        ]
+    elif code == INSIGHT_READY_TO_PROGRESS:
+        # Progressing means volume OR estimated strength is rising; name
+        # whichever the report actually shows, strength first (it is the one
+        # fact no other Progress section renders).
+        rising = [f for f in (strength, volume)
+                  if f is not None and f.code in (EVIDENCE_STRENGTH_RISING,
+                                                  EVIDENCE_VOLUME_RISING)]
+        facts = rising if len(rising) > 1 else rising + [_trained_weeks(consistency)]
+    elif code == INSIGHT_STEADY_WITH_DIP:
+        falling = [f for f in (volume, strength)
+                   if f is not None and f.code in (EVIDENCE_VOLUME_FALLING,
+                                                   EVIDENCE_STRENGTH_FALLING)]
+        facts = [_trained_weeks(consistency)] + falling[:1]
+    else:  # INSIGHT_HOLDING_STEADY
+        facts = [_trained_weeks(consistency)] + ([volume] if volume else [])
+
+    return tuple(facts)
+
+
+def select_insight(
+    plan: AdaptivePlan,
+    performance: PerformanceSummary,
+    consistency: ConsistencySummary,
+    *,
+    deload_weeks: int,
+    plateau_weeks: int,
+) -> AxisInsight:
+    """The one coherent Axis Insight: interpretation → evidence → action.
+
+    Selection only. The interpretation is keyed on the planner's ``week_focus``
+    (the canonical decision), refined by nothing but the planner's own recorded
+    reason codes; the action is exactly ``select_next_move``'s projection, so
+    the surface can never recommend something NEXT MOVE would not. Unknown
+    vocabulary anywhere fails closed (``UnknownCanonicalVocabulary``).
+    """
+    focus = _require_known(plan.week_focus, INSIGHT_BY_WEEK_FOCUS, "week focus")
+    _require_known(performance.state, PERFORMANCE_STATES, "performance state")
+    _require_known(consistency.state, CONSISTENCY_STATES, "consistency state")
+    for reason_code in plan.reason_codes:
+        if reason_code not in WATCH_BY_REASON_CODE:
+            _require_known(
+                reason_code, NON_ATTENTION_REASON_CODES, "plan reason code")
+
+    code = INSIGHT_BY_WEEK_FOCUS[focus]
+    if code == INSIGHT_HOLDING_STEADY and any(
+            rc in _DIP_REASON_CODES for rc in plan.reason_codes):
+        code = INSIGHT_STEADY_WITH_DIP
+
+    next_move = select_next_move(plan)
+    return AxisInsight(
+        status=SLOT_INSUFFICIENT_DATA if code == INSIGHT_BASELINE else SLOT_AVAILABLE,
+        code=code,
+        evidence=_insight_evidence(
+            code, performance, consistency,
+            deload_weeks=deload_weeks, plateau_weeks=plateau_weeks),
+        action_code=next_move.code,
+        action=next_move.action,
     )

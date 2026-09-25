@@ -123,7 +123,9 @@ def test_contract_is_versioned_and_bounded(app, client, make_user, login):
     d = r.get_json()
 
     assert d["contract_version"] == CONTRACT_VERSION == 1
-    assert set(d) == {"contract_version", "window", "working", "watch", "next_move"}
+    # V2 PR3 grew the contract ADDITIVELY (`insight`); the version is unchanged.
+    assert set(d) == {"contract_version", "window", "working", "watch",
+                      "next_move", "insight"}
     assert set(d["window"]) == {"weeks", "start", "end", "timezone"}
 
     # Exactly three slots, each with the SAME five keys — one renderer, no

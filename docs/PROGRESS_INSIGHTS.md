@@ -254,6 +254,77 @@ constants.
 
 ---
 
+## 4b. The unified `insight` (Progress V2 PR3)
+
+The three slots stay in the contract (Today's supporting line still reads
+`working`/`watch` server-side), but the Progress page no longer renders them as
+three cards. It renders ONE additive key, `insight`, selected by
+`select_insight(plan, performance, consistency, *, deload_weeks, plateau_weeks)`
+from the **same** report/plan the slots use (no second history read, no second
+planning decision; `contract_version` stays 1):
+
+```json
+"insight": {
+  "status": "available",
+  "code": "consistency_gaps",
+  "evidence": [
+    {"code": "sessions_across_weeks", "params": {"sessions": 5, "active": 2, "total": 4}}
+  ],
+  "action": {"code": "prioritize_consistency", "week_focus": "build_consistency",
+             "volume_action": "hold", "intensity_action": "hold",
+             "volume_delta_pct": 0.0}
+}
+```
+
+- **Interpretation** (`code`) is keyed 1:1 on `AdaptivePlan.week_focus` — the
+  decision NEXT MOVE already projects — and refined only by the planner's OWN
+  recorded reason codes (`steady` + `volume_trend_down`/`strength_trend_down` →
+  `steady_with_dip`). `insufficient_data` → `baseline` with status
+  `insufficient_data`.
+
+  | week_focus | insight | action |
+  |---|---|---|
+  | insufficient_data | baseline | build_baseline |
+  | build_consistency | consistency_gaps | prioritize_consistency |
+  | deload | deload_due | deload (−40 %) |
+  | maintenance | stalled | maintain_and_consolidate |
+  | overload | ready_to_progress | progress_training (+5 %) |
+  | steady | holding_steady / steady_with_dip | maintain_current_training |
+
+- **Evidence** is at most two facts per insight, by construction of each branch:
+  a count `progress_summary` already computed (`trained_weeks`,
+  `sessions_across_weeks`), a trend `training_progression` already computed
+  (`volume_*`, `strength_*`), or the canonical rule constant that made the
+  signal fire (`unbroken_block` = `MIN_DELOAD_WEEKS`, `volume_flat_run` =
+  `MIN_PLATEAU_WEEKS`, handed in by the orchestrator — the pure analysis module
+  still does not import `training_progression`). A baseline user gets **no**
+  evidence: "not enough history" is the interpretation, not a fact to invent.
+- **Action** is exactly `select_next_move(plan)` — code and adjustment — so the
+  surface can never recommend something NEXT MOVE would not. One action, never
+  a list. Numbers appear only when the planner owns them (`volume_delta_pct`).
+- Unknown vocabulary anywhere fails closed (`UnknownCanonicalVocabulary`).
+
+Copy: `progress.axis_insight_<code>` (lead) + `…_why` (why it matters),
+`progress.axis_evidence_<code>`, `progress.axis_action_<code>`. The retired
+slot copy (`axis_*_label`, `axis_next_*`, `axis_*_empty`, `axis_*_insufficient`,
+`axis_active_weeks`, `ask_axis`) is gone; `axis_working_*`/`axis_watch_*` code
+copy stays because Today renders it.
+
+### Coach continuation
+
+"Review with AxisAI" links to `/coach?review=progress-insight` — ONE constant,
+never an insight code, count or id: every page loads analytics, which records
+the page location including its query string, so a training state in the URL
+would leave the product. The Coach route (`app/coach_handoff.py`) re-derives the
+insight server-side for the signed-in user through `build_progress_insights`
+and pre-fills the existing composer with a localized, user-voice DRAFT quoting
+the same interpretation + action sentences Progress rendered. It is never
+auto-sent (rendering costs no model call), never overwrites an existing draft,
+adds no persistence and no second Coach; any failure → no draft and Coach opens
+as before. Cost: one deterministic progression read, only on that navigation.
+
+---
+
 ## 5. Why `AdaptivePlan` is the next-move authority
 
 `training_planning` already maps `next_signal` 1:1 onto a weekly decision, with
@@ -369,10 +440,14 @@ persistence, no schema change, no migration. A test runs the whole endpoint with
 - copy comes from `window.I18N` — the same catalog the server uses, so EN and TR
   are symmetric by construction and a missing key is a test failure
 
-The three slots are server-rendered as structural landmarks (`<h2>` section,
-three `<h3>`-labelled `<article>`s in a fixed order) and stay legible without
-JavaScript. Status is never colour-only: each state changes text as well.
-There is no carousel, no tab strip, no chart, and no horizontal scroller.
+**V2 PR3:** the section is ONE server-rendered surface (`#ax-card`):
+`<h2>` section label → interpretation (the only `aria-live` region, one
+sentence) → "why" → evidence list → `<h3>` THIS WEEK + action → the one CTA.
+The code → key tables live in `progress_presentation.js`
+(`buildAxisInsightView`, node-tested); `progress_insights.js` fetches once,
+renders, and formats the planner's volume change. A failed fetch or an
+unmappable payload renders "couldn't be loaded" — never baseline copy, never an
+all-clear. No carousel, tab strip, chart, animation or runtime measurement.
 
 ---
 

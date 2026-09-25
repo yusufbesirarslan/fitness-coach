@@ -64,12 +64,13 @@ SETTLED_JS = r"""
     history.getAttribute('data-status') === 'unavailable'
   ));
   const your = document.getElementById('ps-state');
-  const working = document.getElementById('ax-working');
+  // Progress V2 PR3: the one Axis Insight surface settles out of 'loading'.
+  const working = document.getElementById('ax-card');
   const physique = document.getElementById('physique-body');
   return !!(
     historyReady &&
     your && your.textContent && your.textContent.trim() &&
-    working && working.getAttribute('data-status') &&
+    working && working.getAttribute('data-status') !== 'loading' &&
     physique && physique.textContent && physique.textContent.trim()
   );
 }
@@ -130,8 +131,8 @@ MEASURE_JS = r"""
     long_text_overflow: longOverflow,
     your_progress_state: text(document.getElementById('ps-state')),
     what_changed_cards: q('.wc-card').length,
-    axis_working_status: document.getElementById('ax-working')
-      ? document.getElementById('ax-working').getAttribute('data-status') : null,
+    axis_working_status: document.getElementById('ax-card')
+      ? document.getElementById('ax-card').getAttribute('data-status') : null,
     physique_filled: text(document.getElementById('physique-body')).length > 0,
     raw_key_leak: [...new Set(bodyText.match(/\bprogress\.[a-z_]+/g) || [])].slice(0, 10),
     horizontal_scrollers: q('[aria-labelledby="ph-h"] *')
