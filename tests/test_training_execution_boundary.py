@@ -269,8 +269,8 @@ def test_plan_v2_resume_uses_shared_execution_and_hydrates_acknowledged_progress
     expect(body.locator('.aw-current')).to_have_count(1)
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('45')
     expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('6')
-    expect(body.locator('.set-row[data-ex="1"][data-set="0"]')).to_have_attribute(
-        'data-set-state', 'active')
+    expect(body.locator('.aw-active')).to_have_attribute('data-mode', 'active')
+    # Squat's completed set sits behind the collapsed history line.
     expect(body.locator('.aw-exercise[data-ex="0"]')).to_have_attribute(
         'data-exercise-state', 'completed')
     expect(body.locator('[data-field="done"], input[type="checkbox"]')).to_have_count(0)
@@ -534,6 +534,44 @@ def _complete_current(page, body):
     return json.loads(completed.value.request.post_data)['checkpoint']
 
 
+def _skip_rest(page):
+    page.locator('[data-rest-action="skip"]').click()
+    expect(page.locator('#aw-rest')).to_have_count(0)
+
+
+def _assert_rest_mode(page, body):
+    """REST MODE: timer and one next-set line; no set form, no Complete Set."""
+    expect(page.locator('#aw-rest')).to_be_visible()
+    expect(body.locator('.aw-active')).to_have_attribute('data-mode', 'rest')
+    expect(body.locator('.aw-current')).to_have_count(0)
+    expect(body.locator('[data-set-action="complete"]')).to_have_count(0)
+    expect(body.locator('.aw-history, .aw-exercise-list, .aw-target')).to_have_count(0)
+    expect(page.locator('#aw-rest-next-value')).to_have_count(1)
+    expect(page.locator('[data-rest-action="add"]')).to_be_visible()
+    expect(page.locator('[data-rest-action="skip"]')).to_have_text(re.compile(r'^Skip rest$'))
+
+
+def _assert_active_mode(body, set_index):
+    expect(body.locator('.aw-active')).to_have_attribute('data-mode', 'active')
+    expect(body.locator('#aw-rest, [data-rest-action], [data-coach-cue]')).to_have_count(0)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', str(set_index))
+    expect(body.locator('[data-set-action="complete"]')).to_be_visible()
+
+
+def _edit_completed_set(page, body, exercise_index, set_index):
+    """Open the collapsed history and reopen one completed set."""
+    history = body.locator(f'details[data-history-ex="{exercise_index}"]')
+    expect(history).not_to_have_attribute('open', '')
+    history.locator('summary').click()
+    with page.expect_response(
+        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
+        and response.status == 200
+    ):
+        body.locator(
+            f'.set-row[data-ex="{exercise_index}"][data-set="{set_index}"] '
+            '[data-set-action="edit"]').click()
+
+
 def _clock_seconds(text):
     minutes, seconds = text.split(':')
     return int(minutes) * 60 + int(seconds)
@@ -582,17 +620,26 @@ def test_one_tap_set_progression_prefills_advances_and_survives_refresh(
     assert sent['exercises'][1]['sets'][0] == {
         'index': 0, 'completed': False, 'reps': None, 'weight_kg': None}
 
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
     expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 2 of 3$'))
-    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
-    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
-    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
-        'data-set-state', 'completed')
+    _assert_rest_mode(page, body)
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'^60 kg × 8$'))
     metrics = _surface_metrics(page)
     assert metrics['focusedId'] == 'aw-active-set'
     assert metrics['inputFocused'] is False
     assert metrics['inView'] is True
     assert metrics['overflow'] is False
+    _skip_rest(page)
+    _assert_active_mode(body, 1)
+    expect(body.locator('.aw-target-value')).to_have_text('8-12 reps')
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    history = body.locator('details[data-history-ex="0"]')
+    expect(history).not_to_have_attribute('open', '')
+    expect(history.locator('summary')).to_have_text('1 set completed')
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
+        'data-set-state', 'completed')
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_be_hidden()
+    assert _surface_metrics(page)['focusedId'] == 'aw-active-set'
 
     page.reload()
     expect(page.locator('[data-workout-action="resume"]')).to_have_count(1)
@@ -609,15 +656,14 @@ def test_one_tap_set_progression_prefills_advances_and_survives_refresh(
     assert sent['exercises'][0]['sets'][2] == {
         'index': 2, 'completed': False, 'reps': 8, 'weight_kg': 62.5}
     expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 3 of 3$'))
+    _assert_rest_mode(page, body)
+    _skip_rest(page)
+    _assert_active_mode(body, 2)
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('62.5')
     expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
 
     # Correcting set 1 must not rewind the workout onto set 2 or replace set 3.
-    with page.expect_response(
-        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
-        and response.status == 200
-    ):
-        body.locator('.set-row[data-ex="0"][data-set="0"] [data-set-action="edit"]').click()
+    _edit_completed_set(page, body, 0, 0)
     expect(body.locator('.aw-current')).to_have_attribute('data-set', '0')
     body.locator('.aw-current [data-field="weight"]').fill('55')
     body.locator('.aw-current [data-field="reps"]').fill('5')
@@ -712,29 +758,34 @@ def test_smart_defaults_and_rest_flow_mobile(
         'index': 1, 'completed': False, 'reps': 7, 'weight_kg': 62.5}
     assert sent['exercises'][0]['sets'][2]['reps'] is None
     assert sent['exercises'][0]['sets'][2]['weight_kg'] is None
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
-    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('62.5')
-    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('7')
-    expect(page.locator('#aw-rest')).to_be_visible()
+    _assert_rest_mode(page, body)
     expect(page.locator('#aw-rest-clock')).to_have_text(re.compile(r'^01:(?:30|29)$'))
-    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'62\.5 kg × 7'))
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'^62\.5 kg × 7$'))
     page.locator('[data-rest-action="add"]').click()
     extended = page.locator('#aw-rest-clock').inner_text()
     assert _clock_seconds(extended) >= 110
-    body.locator('.aw-current [data-field="weight"]').fill('65')
-    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'65 kg × 7'))
-    assert _clock_seconds(page.locator('#aw-rest-clock').inner_text()) >= 100
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
-    page.locator('[data-rest-action="skip"]').click()
-    expect(page.locator('#aw-rest')).to_have_count(0)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
-    expect(body.locator('.set-row[data-ex="0"][data-set="1"]')).to_have_attribute(
-        'data-set-state', 'active')
+    # Edit during rest: the form REPLACES the summary, the clock keeps running.
+    page.locator('[data-rest-action="edit"]').click()
+    expect(page.locator('#aw-rest-next-value')).to_have_count(0)
+    expect(body.locator('#aw-rest .aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('[data-set-action="complete"]')).to_have_count(0)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('62.5')
     with page.expect_response(
         lambda response: urlsplit(response.url).path.endswith('/checkpoint')
         and response.status == 200
     ):
-        body.locator('.set-row[data-ex="0"][data-set="0"] [data-set-action="edit"]').click()
+        body.locator('.aw-current [data-field="weight"]').fill('65')
+    before = _clock_seconds(page.locator('#aw-rest-clock').inner_text())
+    page.wait_for_timeout(1100)
+    assert _clock_seconds(page.locator('#aw-rest-clock').inner_text()) < before
+    page.locator('[data-rest-action="edit-done"]').click()
+    expect(body.locator('.aw-current')).to_have_count(0)
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'^65 kg × 7$'))
+    assert _clock_seconds(page.locator('#aw-rest-clock').inner_text()) >= 100
+    _skip_rest(page)
+    _assert_active_mode(body, 1)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('65')
+    _edit_completed_set(page, body, 0, 0)
     expect(body.locator('.aw-current')).to_have_attribute('data-set', '0')
     body.locator('.aw-current [data-field="weight"]').fill('55')
     _complete_current(page, body)
@@ -744,8 +795,8 @@ def test_smart_defaults_and_rest_flow_mobile(
     expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('7')
 
     _complete_current(page, body)
-    expect(page.locator('#aw-rest')).to_be_visible()
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    _assert_rest_mode(page, body)
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 3 of 3$'))
     page.evaluate('''() => {
       const now = Date.now;
       const ahead = now() + 120000;
@@ -754,9 +805,7 @@ def test_smart_defaults_and_rest_flow_mobile(
       Date.now = now;
     }''')
     expect(page.locator('#aw-rest')).to_have_count(0)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
-    expect(body.locator('.set-row[data-ex="0"][data-set="2"]')).to_have_attribute(
-        'data-set-state', 'active')
+    _assert_active_mode(body, 2)
 
     _complete_current(page, body)
     expect(page.locator('#aw-rest')).to_have_count(0)
@@ -796,13 +845,13 @@ def test_smart_defaults_and_rest_flow_desktop(
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
     expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
     _complete_current(page, body)
-    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
-    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    _assert_rest_mode(page, body)
     expect(page.locator('#aw-rest-clock')).to_have_text(re.compile(r'^01:(?:30|29)$'))
     expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'60 kg × 8'))
-    page.locator('[data-rest-action="skip"]').click()
-    expect(page.locator('#aw-rest')).to_have_count(0)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    _skip_rest(page)
+    _assert_active_mode(body, 1)
+    expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
+    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
     metrics = _surface_metrics(page)
     assert metrics['overflow'] is False
     assert metrics['inView'] is True
@@ -821,9 +870,12 @@ def test_one_tap_set_progression_desktop_smoke(
     body.locator('.aw-current [data-field="reps"]').fill('8')
     _complete_current(page, body)
     expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 2 of 3$'))
+    _assert_rest_mode(page, body)
+    _skip_rest(page)
+    _assert_active_mode(body, 1)
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
     expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
-    expect(page.locator('[data-action="finishSession"]')).to_have_class(re.compile(r'\bbtn-ghost\b'))
+    expect(page.locator('[data-action="finishSession"]')).to_have_class(re.compile(r'\bis-quiet\b'))
     metrics = _surface_metrics(page)
     assert metrics == {
         'focusedId': 'aw-active-set',
@@ -928,45 +980,52 @@ def test_execution_v1_closure_mobile(
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
     expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
     _complete_current(page, body)
+    # Glanceable cue: measured reps against the target, then one short verdict.
     expect(page.locator('[data-coach-cue="on_target"]')).to_have_text(
-        'On target — keep the next set controlled.')
-    expect(page.locator('#aw-rest')).to_be_visible()
-    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'60 kg × 8'))
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+        '8 reps · Target 8-12On target')
+    expect(page.locator('[data-coach-cue="on_target"] .aw-rest-cue-label')).to_have_text(
+        'On target')
+    _assert_rest_mode(page, body)
+    expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'^60 kg × 8$'))
+    # UI disclosures are not analytics: opening/closing Edit emits nothing.
+    page.locator('[data-rest-action="edit"]').click()
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
-    expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
+    page.locator('[data-rest-action="edit-done"]').click()
     page.wait_for_function(
         '() => window.__fxEvents.filter(event => event.name === "training_coach_cue_shown").length === 1'
     )
     page.wait_for_timeout(400)
     assert len(_named(_fx_events(page), 'training_coach_cue_shown')) == 1
     page.locator('[data-rest-action="add"]').click()
-    page.locator('[data-rest-action="skip"]').click()
-    expect(page.locator('#aw-rest')).to_have_count(0)
-    expect(page.locator('[data-coach-cue]')).to_have_count(0)
+    _skip_rest(page)
+    _assert_active_mode(body, 1)
 
     _complete_current(page, body)
     expect(page.locator('[data-coach-cue="on_target"]')).to_have_count(1)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    _assert_rest_mode(page, body)
     _expire_rest(page)
     expect(page.locator('#aw-rest')).to_have_count(0)
-    expect(page.locator('[data-coach-cue]')).to_have_count(0)
+    _assert_active_mode(body, 2)
     before_edit = _fx_events(page)
     assert len(_named(before_edit, 'training_set_completed')) == 2
     assert len(_named(before_edit, 'training_rest_skipped')) == 1
     assert len(_named(before_edit, 'training_rest_expired')) == 1
 
-    with page.expect_response(
-        lambda response: urlsplit(response.url).path.endswith('/checkpoint')
-        and response.status == 200
-    ):
-        body.locator('.set-row[data-ex="0"][data-set="0"] [data-set-action="edit"]').click()
+    _edit_completed_set(page, body, 0, 0)
+    expect(body.locator('details[data-history-ex="0"]')).not_to_have_attribute('open', '')
     body.locator('.aw-current [data-field="reps"]').fill('5')
     _complete_current(page, body)
     expect(page.locator('#aw-rest')).to_have_count(0)
     expect(page.locator('[data-coach-cue]')).to_have_count(0)
     assert len(_named(_fx_events(page), 'training_set_completed')) == 2
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    _assert_active_mode(body, 2)
+    # Collapsing and expanding history is presentation, never an event.
+    history = body.locator('details[data-history-ex="0"]')
+    expect(history.locator('summary')).to_have_text('2 sets completed')
+    history.locator('summary').click()
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_be_visible()
+    history.locator('summary').click()
+    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_be_hidden()
 
     _complete_current(page, body)
     expect(page.locator('#aw-rest')).to_have_count(0)
@@ -977,8 +1036,13 @@ def test_execution_v1_closure_mobile(
     _complete_current(page, body)
     expect(page.locator('.aw-all-done')).to_be_visible()
     expect(page.locator('#aw-rest')).to_have_count(0)
+    expect(body.locator('.aw-current, [data-set-action="complete"]')).to_have_count(0)
+    finish = page.locator('[data-action="finishSession"]')
+    expect(finish).to_have_class(re.compile(r'\bbtn-volt\b'))
+    expect(finish).not_to_have_class(re.compile(r'\bis-quiet\b'))
     metrics = _surface_metrics(page)
     assert metrics['overflow'] is False
+    assert not any(path == '/workout/complete' for path, _, _ in traffic)
 
     page.locator('[data-action="finishSession"]').click()
     expect(page.locator('#plan-completion')).to_have_class('plan-completion open')
@@ -1037,6 +1101,7 @@ def test_execution_v1_closure_desktop(
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
     expect(body.locator('.aw-current [data-field="reps"]')).to_have_value('8')
     _complete_current(page, body)
+    _assert_rest_mode(page, body)
     expect(page.locator('[data-coach-cue="on_target"]')).to_be_visible()
     expect(page.locator('#aw-rest-clock')).to_be_visible()
     expect(page.locator('#aw-rest-next-value')).to_have_text(re.compile(r'60 kg × 8'))
@@ -1050,9 +1115,8 @@ def test_execution_v1_closure_desktop(
       };
     }''')
     assert box == {'ordered': True, 'overflow': False}
-    page.locator('[data-rest-action="skip"]').click()
-    expect(page.locator('#aw-rest')).to_have_count(0)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    _skip_rest(page)
+    _assert_active_mode(body, 1)
     expect(body.locator('.aw-current [data-field="weight"]')).to_have_value('60')
     events = _fx_events(page)
     _assert_bounded_events(events)
@@ -1074,19 +1138,23 @@ def test_duplicate_complete_set_is_single_flight(
     control['hold'] = True
     page.evaluate('''() => {
       document.querySelector('[data-set-action="complete"]').click();
+      // REST MODE renders no Complete Set; skip rest to reach it while the
+      // first checkpoint is still in flight, then force a second tap.
+      if (document.querySelector('[data-set-action="complete"]')) throw new Error('rest shows Complete Set');
+      document.querySelector('[data-rest-action="skip"]').click();
       const second = document.querySelector('[data-set-action="complete"]');
+      if (!second.disabled) throw new Error('in-flight Complete Set is enabled');
       second.disabled = false;
       second.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     }''')
-    expect(page.locator('#aw-rest')).to_be_visible()
+    expect(page.locator('#aw-rest')).to_have_count(0)
     assert len(held) == 1
     control['hold'] = False
     assert held[0]() == 200
     expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
         'data-set-state', 'completed')
-    expect(body.locator('.set-row[data-ex="0"][data-set="1"]')).to_have_attribute(
-        'data-set-state', 'active')
-    expect(page.locator('#aw-rest')).to_have_count(1)
+    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
+    expect(body.locator('[data-set-action="complete"]')).to_be_enabled()
     page.wait_for_function(
         '() => window.__fxEvents.filter(event => event.name === "training_set_completed").length === 1'
     )
@@ -1118,8 +1186,7 @@ def test_failed_set_completion_keeps_the_set_open(
     monkeypatch.setattr(training_bp, 'record_checkpoint', fail_checkpoint)
     body.locator('[data-set-action="complete"]').click()
     expect(body.locator('.aw-current')).to_have_attribute('data-set', '0')
-    expect(body.locator('.set-row[data-ex="0"][data-set="0"]')).to_have_attribute(
-        'data-set-state', 'active')
+    expect(body.locator('.aw-history')).to_have_count(0)
     expect(page.locator('#aw-rest')).to_have_count(0)
     expect(page.locator('[data-coach-cue]')).to_have_count(0)
     expect(body.locator('[data-set-action="complete"]')).to_be_enabled()
@@ -1129,8 +1196,8 @@ def test_failed_set_completion_keeps_the_set_open(
 
     monkeypatch.setattr(training_bp, 'record_checkpoint', original)
     _complete_current(page, body)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
-    expect(page.locator('#aw-rest')).to_be_visible()
+    _assert_rest_mode(page, body)
+    expect(page.locator('#aw-active-set')).to_have_text(re.compile(r'^Set 2 of 3$'))
     page.wait_for_function(
         '() => window.__fxEvents.filter(event => event.name === "training_set_completed").length === 1'
     )
@@ -1147,12 +1214,13 @@ def test_analytics_failure_does_not_block_set_completion(
     page.evaluate('''() => { window.fxTrack = () => { throw new Error('analytics down'); }; }''')
     body.locator('.aw-current [data-field="weight"]').fill('50')
     _complete_current(page, body)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '1')
-    expect(page.locator('#aw-rest')).to_be_visible()
-    page.locator('[data-rest-action="skip"]').click()
+    _assert_rest_mode(page, body)
+    _skip_rest(page)
+    _assert_active_mode(body, 1)
     page.evaluate('() => { delete window.fxTrack; }')
     _complete_current(page, body)
-    expect(body.locator('.aw-current')).to_have_attribute('data-set', '2')
+    _skip_rest(page)
+    _assert_active_mode(body, 2)
 
 
 def test_workout_abandon_analytics_follow_canonical_success(
