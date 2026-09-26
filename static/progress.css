@@ -574,6 +574,32 @@ input[type="range"]:focus-visible {
 .feedback-title { font-family: var(--font-display); font-size: 16px; letter-spacing: 2px; color: var(--color-primary); }
 .feedback-text { font-size: var(--text-base); color: var(--color-text-1); line-height: var(--leading-relaxed); font-weight: var(--weight-light); }
 
+/* A completed check-in reads as a settled result, not another primary action. */
+#checkin-btn.checkin-complete:disabled,
+#checkin-btn.checkin-complete:disabled:hover {
+  opacity: 1;
+  background: var(--color-success-soft);
+  border-color: rgba(var(--color-success-rgb), 0.35);
+  color: var(--color-success);
+  font-family: var(--font-body);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+  cursor: default;
+}
+
+/* Live announcements stay available to assistive tech without duplicating
+   the success sentence visually; errors remain visible until retry. */
+#checkin-status {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+#checkin-status.checkin-error {
+  position: static; width: auto; height: auto; margin: var(--space-2) 0 0;
+  overflow: visible; clip-path: none; white-space: normal;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
 /* ── 11 · SECTION SUB (used by the check-in sheet) ──────────────────── */
 .section-sub { font-size: var(--text-md); color: var(--color-text-2); margin-bottom: var(--space-4); font-weight: var(--weight-light); }
 
