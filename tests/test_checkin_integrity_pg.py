@@ -69,10 +69,11 @@ def _client(app):
     headers = {"Origin": "http://localhost", "X-CSRFToken": "pg-checkin-csrf"}
     assert client.post("/login", json={"username": "pgcheckin", "password": "unused"},
                        headers=headers).status_code == 200
-    # Login rotates the synchronizer token; use the authenticated session's
-    # value for the write, just as a real page reads its fresh CSRF meta tag.
+    # Login clears the pre-auth synchronizer token. Seed the authenticated
+    # session as a page GET would before its first write.
     with client.session_transaction() as sess:
-        headers["X-CSRFToken"] = sess["_csrf_token"]
+        sess["_csrf_token"] = "pg-checkin-write-csrf"
+    headers["X-CSRFToken"] = "pg-checkin-write-csrf"
     return client, headers
 
 
