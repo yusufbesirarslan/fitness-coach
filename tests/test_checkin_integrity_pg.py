@@ -69,6 +69,10 @@ def _client(app):
     headers = {"Origin": "http://localhost", "X-CSRFToken": "pg-checkin-csrf"}
     assert client.post("/login", json={"username": "pgcheckin", "password": "unused"},
                        headers=headers).status_code == 200
+    # Login rotates the synchronizer token; use the authenticated session's
+    # value for the write, just as a real page reads its fresh CSRF meta tag.
+    with client.session_transaction() as sess:
+        headers["X-CSRFToken"] = sess["_csrf_token"]
     return client, headers
 
 
@@ -90,9 +94,10 @@ def test_two_concurrent_same_token_requests_share_one_committed_result(pg_app, m
         return "one feedback"
 
     monkeypatch.setattr(tracking, "generate_checkin_feedback", feedback)
-    first_client, headers = _client(pg_app)
-    second_client, _ = _client(pg_app)
-    headers["Idempotency-Key"] = "pg-checkin-attempt-0001"
+    first_client, first_headers = _client(pg_app)
+    second_client, second_headers = _client(pg_app)
+    first_headers["Idempotency-Key"] = "pg-checkin-attempt-0001"
+    second_headers["Idempotency-Key"] = "pg-checkin-attempt-0001"
 
     def observe_lock(_conn, _cursor, statement, _params, _context, _many):
         if (threading.get_ident() == second_thread[0] and
@@ -104,16 +109,16 @@ def test_two_concurrent_same_token_requests_share_one_committed_result(pg_app, m
         engine = db.engine
     sa.event.listen(engine, "before_cursor_execute", observe_lock)
 
-    def submit(client):
+    def submit(client, headers):
         return client.post("/checkin", json={"weight": 79}, headers=headers)
 
     def second_submit():
         second_thread[0] = threading.get_ident()
-        return submit(second_client)
+        return submit(second_client, second_headers)
 
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(submit, first_client)
+            first = pool.submit(submit, first_client, first_headers)
             assert entered.wait(10), "first request did not reach feedback"
             second = pool.submit(second_submit)
             try:
