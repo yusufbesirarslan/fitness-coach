@@ -343,9 +343,10 @@ def test_weight_metric_contract():
     assert w["distance_to_target"] == 3.4
     assert w["value"] == {"key": "progress.metric_weight_value", "params": {"value": "78.4"}}
     assert _render(w["value"], "en") == "78.4 kg"
-    # Change: the server's delta, signed, with a direction taken from its sign.
+    # Change: the server's delta, signed (typographic minus, V2 PR5), with a
+    # direction taken from its sign.
     assert w["change"] == {"text": {"key": "progress.body_sub_delta",
-                                    "params": {"delta": "-0.6"}},
+                                    "params": {"delta": "−0.6"}},
                            "direction": "down"}
     # Three real check-ins → a sparkline over exactly those points.
     assert w["series_points"] == 3
@@ -717,7 +718,7 @@ def test_history_groups_same_day_records_without_dropping_any():
     assert single["updates"] is None
     # The group leads with the NEWEST check-in, as served.
     assert same_day["weight"]["params"] == {"weight": "78.0"}
-    assert same_day["delta"] == {"key": "progress.history_delta", "params": {"delta": "-0.4"}}
+    assert same_day["delta"] == {"key": "progress.history_delta", "params": {"delta": "−0.4"}}
     assert [e["weight"]["params"]["weight"] for e in same_day["entries"]] == ["78.0", "78.4"]
     assert same_day["entries"][1]["delta"] == {"key": "progress.history_no_change",
                                               "params": None}

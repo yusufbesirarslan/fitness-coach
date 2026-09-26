@@ -17,6 +17,13 @@
    room IS the hierarchy here, so it is deliberately generous. */
 .prog-section { margin-bottom: var(--space-8); }
 .prog-section:last-of-type { margin-bottom: var(--space-6); }
+/* V2 PR5: `hidden` always wins on this page. Every slot that JS hides
+   (evidence lists, next move, change/viz/meta lines, the action block) also
+   carries a flex/grid display rule, and a class selector beats the UA's
+   `[hidden] { display: none }` — the PR3 bug, which PR5 found again on
+   #ps-evidence in the failure state. One page-scoped rule instead of one
+   override per component; tests/test_progress_v2_final_ui.py guards it. */
+.progress-main [hidden] { display: none !important; }
 
 /* Shared quiet note / loading line used by several sections. */
 .prog-note,
@@ -47,6 +54,14 @@
 .ps-card[data-state="on_track"]        { border-left-color: var(--color-success); }
 .ps-card[data-state="needs_attention"] { border-left-color: var(--color-warning); }
 .ps-card[data-state="building_baseline"] { border-left-color: var(--color-border-2); }
+/* A failed read is not a state of the user: no accent, and the line reads as
+   a quiet notice, never as the page's display-face verdict. */
+.ps-card[data-status="unavailable"] { border-left-color: var(--color-border-2); }
+.ps-card[data-status="unavailable"] .ps-state {
+  font-family: var(--font-body); font-size: var(--text-xl);
+  font-weight: var(--weight-semibold); letter-spacing: normal;
+  line-height: var(--leading-snug); margin-bottom: var(--space-1);
+}
 /* The window is metadata: body face, sentence case, quiet. */
 .ps-window {
   font-size: var(--text-sm); color: var(--color-text-3);
@@ -105,11 +120,13 @@
 /* ── 3 · TRENDS (three quieter metric panels) ───────────────────────── */
 /* Deliberately quieter than .ps-card: no border, no accent — a flat panel
    so the three read as one row of evidence, not three more verdict cards.
-   CSS-only layout: as many columns as fit at >= 240px (3 on desktop, 2 on
-   tablet, 1 on phones). No JS measures anything. */
+   CSS-only layout: as many columns as fit at >= 200px — 3 from a tablet's
+   720px content box up, 1 on phones. V2 PR5: the 240px floor broke 768px
+   into 2 + 1 with the consistency card orphaned at half width. No JS
+   measures anything. */
 .wc-grid {
   display: grid; gap: var(--space-3);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
 }
 .wc-card {
   background: var(--color-surface-1);
@@ -155,8 +172,10 @@
   stroke-linejoin: round; stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
-.tr-bar { fill: var(--color-surface-3); }
-.tr-bar-latest { fill: var(--color-primary); }
+.tr-bar { fill: var(--color-text-4); }
+/* The latest week is emphasised by brightness, not by Axis blue: blue on
+   this page means intelligence or interaction, and a bar is neither. */
+.tr-bar-latest { fill: var(--color-text-2); }
 .tr-bar-zero { fill: var(--color-border-2); }
 /* Weeks strip: one cell per analysed week, a real list for assistive tech.
    Active/inactive differ by fill AND border style, not by hue alone. */
@@ -206,9 +225,6 @@
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
 }
-/* `hidden` must win over the flex/grid display rules below: an empty
-   evidence list or a hidden action must take no space at all. */
-.ax-card [hidden] { display: none; }
 /* Loading / baseline / failure read as quiet context, not a claim. The text
    always states which it is; the rule colour adds nothing (WCAG 1.4.1). */
 .ax-card[data-status="loading"],
@@ -259,8 +275,7 @@
   min-width: 0;
 }
 .ax-action-label {
-  font-size: var(--text-2xs); font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-widest); text-transform: uppercase;
+  font-size: var(--text-sm); font-weight: var(--weight-semibold);
   color: var(--color-primary); margin: 0 0 var(--space-1);
 }
 .ax-action-text {
@@ -278,27 +293,25 @@
 .ax-review-cta { max-width: 100%; white-space: normal; text-align: center; }
 .ax-review-cta:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
-/* Wide screens: interpretation + evidence on the left, the action and CTA
-   beside them — one band that still reads left → right as meaning → move. */
+/* V2 PR5: two columns of content — what it means (interpretation →
+   evidence) and what to do (this week → review). Each column stacks on its
+   own, so the evidence sits right under the interpretation instead of being
+   pushed down to the height of the action block, as the PR3 grid-area rows
+   did. On phones they are one column in the same reading order. */
+.ax-main,
+.ax-side {
+  display: flex; flex-direction: column; gap: var(--space-4);
+  min-width: 0;
+}
 @media (min-width: 900px) {
   .ax-card {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-    grid-template-areas:
-      "reading action"
-      "facts   review";
     column-gap: var(--space-8);
     align-items: start;
   }
   /* Loading / failure carry no action: one column, CTA under the line. */
   .ax-card[data-status="loading"],
-  .ax-card[data-status="unavailable"] {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "reading" "review";
-  }
-  .ax-reading { grid-area: reading; }
-  .ax-evidence { grid-area: facts; }
-  .ax-action { grid-area: action; }
-  .ax-review { grid-area: review; }
+  .ax-card[data-status="unavailable"] { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 640px) {
   .ax-card { padding: var(--space-5); }
@@ -338,9 +351,8 @@
   box-shadow: var(--focus-ring);
 }
 .pp-area {
-  font-size: var(--text-xs); letter-spacing: var(--tracking-label);
-  text-transform: uppercase; color: var(--color-text-3);
-  margin-bottom: var(--space-3);
+  font-size: var(--text-sm); color: var(--color-text-3);
+  margin-bottom: var(--space-2);
 }
 .pp-status {
   font-size: var(--text-lg); font-weight: var(--weight-semibold);
@@ -348,14 +360,12 @@
   margin-bottom: var(--space-1);
 }
 .pp-note { font-size: var(--text-sm); color: var(--color-text-3); margin-bottom: var(--space-3); }
+/* V2 PR5: the comparability line is the available state's headline, in
+   the same body voice as .pp-status — not an all-caps dashboard badge.
+   Comparability is carried by the words, never by a warning colour. */
 .pp-reliability {
-  font-size: var(--text-xs); font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-label); text-transform: uppercase;
-  color: var(--color-text-2); margin-bottom: var(--space-2);
-}
-/* Comparability is carried by the words, never by a warning colour. */
-.pp-reliability[data-comparability="not_comparable"] {
-  color: var(--color-text-1);
+  font-size: var(--text-lg); font-weight: var(--weight-semibold);
+  color: var(--color-text-1); margin-bottom: var(--space-1);
 }
 .pp-pair,
 .pp-strip {
@@ -386,9 +396,8 @@
 }
 .pp-list { margin: var(--space-3) 0; }
 .pp-list-h {
-  font-size: var(--text-2xs); font-weight: var(--weight-bold);
-  letter-spacing: var(--tracking-label); text-transform: uppercase;
-  color: var(--color-text-3); margin-bottom: var(--space-2);
+  font-size: var(--text-sm); font-weight: var(--weight-semibold);
+  color: var(--color-text-2); margin-bottom: var(--space-1);
 }
 .pp-list ul { margin: 0; padding-left: 1.1em; }
 .pp-list li {
@@ -401,29 +410,20 @@
   font-size: var(--text-sm); color: var(--color-text-2);
   margin: 0;
 }
-/* The only call-to-action inside an empty state must not be a default
-   underlined text link: it read as body copy that happened to be blue, and it
-   was the smallest tap target on the page. Same visual grammar as .btn-ghost,
-   with the 44px minimum honoured. */
-.pp-link {
-  display: inline-flex; align-items: center; justify-content: center;
-  margin-top: var(--space-3); min-height: 44px; padding: 0 var(--space-4);
-  font-size: var(--text-md); font-weight: var(--weight-semibold);
-  color: var(--color-primary); text-decoration: none;
-  background: var(--color-primary-soft);
-  border: var(--border-w-1) solid rgba(var(--color-primary-rgb), 0.28);
-  border-radius: var(--radius-sm);
-  transition: background var(--duration-fast) var(--ease-standard),
-              border-color var(--duration-fast) var(--ease-standard);
-}
-.pp-link:hover { background: var(--color-primary-a12); border-color: var(--color-primary); }
-.pp-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+/* The section's one action is the shared secondary button (.btn-ghost, set
+   by progress_physique.js): the same grammar as "Review with AxisAI", so the
+   page keeps exactly one filled primary (Weekly check-in) and every other
+   action reads as subordinate. Only its spacing is local. */
+.pp-link { margin-top: var(--space-3); }
 
 /* ── 6 · RECENT CHECK-INS (flat list, grouped by day) ─────────────── */
 /* V2 PR4: a list, not a stack of cards. The summary word leads, the weight
    sits beside it, the date is quiet metadata underneath — no coloured state
    rail, no display face, one hairline between days. */
 .hist-list { list-style: none; margin: 0; padding: 0; min-width: 0; }
+/* On wide screens the weight would drift a full page-width away from the
+   summary it belongs to; the list keeps a reading measure instead. */
+#history-list { max-width: 72ch; }
 .hist-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -453,8 +453,10 @@
   min-width: 0;
 }
 .hist-date { color: inherit; }
-/* Same-day check-ins: a quiet text button next to the date. The 44px tap
-   height comes from padding, not from a box. */
+/* Same-day check-ins: a quiet text button next to the date. V2 PR5: the
+   44px hit area is the button's own box — no negative margin borrowing space
+   from the lines around it — so a same-day row's meta line is simply as tall
+   as its control. */
 .hist-more,
 .hist-toggle {
   background: transparent; border: 0; cursor: pointer;
@@ -462,7 +464,10 @@
   text-decoration: underline; text-underline-offset: 2px;
   text-decoration-color: var(--color-border-2);
 }
-.hist-more { min-height: 44px; margin: -12px 0; padding: 0 var(--space-1); }
+.hist-more {
+  display: inline-flex; align-items: center;
+  min-height: 44px; padding: 0 var(--space-2);
+}
 .hist-toggle {
   min-height: 44px; margin-top: var(--space-2); padding: 0;
   font-size: var(--text-md);
@@ -478,7 +483,7 @@
   list-style: none; margin: var(--space-1) 0 0; padding: 0;
   font-size: var(--text-sm); color: var(--color-text-2);
 }
-.hist-update { display: flex; gap: var(--space-3); padding: 2px 0; }
+.hist-update { display: flex; gap: var(--space-3); padding: var(--space-1) 0; }
 .hist-update-time { color: var(--color-text-3); font-variant-numeric: tabular-nums; }
 .hist-archive { margin-top: var(--space-2); }
 .hist-empty { max-width: 56ch; }

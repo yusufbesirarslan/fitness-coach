@@ -58,4 +58,6 @@ def progress_history_payload(history: ProgressHistory) -> dict:
         "state": history.state,
         "entries": [_entry_payload(entry) for entry in history.entries],
         "has_more": history.has_more,
+        "incomplete_day": (history.incomplete_day.isoformat()
+                           if history.incomplete_day is not None else None),
     }

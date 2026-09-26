@@ -48,3 +48,5 @@ class ProgressHistory:
     state: str
     entries: tuple[HistoryEntry, ...] = ()
     has_more: bool = False
+    # Published day proven incomplete by the existing lookahead row.
+    incomplete_day: date | None = None

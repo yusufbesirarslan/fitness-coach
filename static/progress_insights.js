@@ -48,11 +48,14 @@
   function _formatDelta(fraction) {
     if (!_isNumber(fraction)) return null;
     try {
+      // Intl spells a negative with the ASCII hyphen; the page's other
+      // signed numbers use the typographic minus (U+2212), so this one does
+      // too. A glyph swap on the formatted text, not arithmetic.
       return new Intl.NumberFormat(window.LOCALE || 'tr', {
         style: 'percent',
         maximumFractionDigits: 0,
         signDisplay: 'exceptZero'
-      }).format(fraction);
+      }).format(fraction).replace('-', '\u2212');
     } catch (e) {
       // A runtime without the Intl option set must not take the surface
       // down; the action line already carries the instruction on its own.

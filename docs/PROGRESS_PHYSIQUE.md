@@ -280,6 +280,18 @@ No new index: `#218` already added `ix_pump_check_user_captured`.
 `GET /api/progress/physique` failing degrades only PHYSIQUE PROGRESS.
 Empty / single / history-only are valid user-data states, not errors.
 
+### V2 PR5 presentation
+
+Typography only — no data or semantic change. "Area: …" and the
+comparability line ("Limited comparison") are sentence-case body type (the
+comparability line is the available state's headline, like `.pp-status`);
+list headers ("Why this comparison is limited", "Observed changes", "Next
+check") are `h3` in sentence case (they were `h4` directly under the
+section's `h2`). The one action is the shared `.btn-ghost`. `#physique-body`
+is `aria-busy` until its read settles instead of `aria-live`, and a region
+switch returns keyboard focus to the selected chip only while focus remains
+on a region chip when the response arrives; moving away is respected.
+
 ## 16. Legacy gallery compatibility
 
 `/pump-check-gallery` and `/pump-check-gallery/data` are unchanged.

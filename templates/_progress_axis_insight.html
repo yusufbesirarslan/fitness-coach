@@ -29,24 +29,31 @@
     <h2 class="sec-label" id="ai-h">{{ t('progress.insights_label') }}</h2>
 
     <div class="ax-card" id="ax-card" data-status="loading" aria-busy="true">
-        <div class="ax-reading">
-            <p class="ax-interpretation" id="ax-interpretation" data-slot="interpretation"
-               aria-live="polite">{{ t('progress.loading') }}</p>
-            <p class="ax-meaning" id="ax-meaning" data-slot="meaning" hidden></p>
+        {#- V2 PR5: two groups — meaning (interpretation → evidence) and move
+            (this week → review) — so each column stacks on its own on wide
+            screens; on phones they read as one column in the same order. -#}
+        <div class="ax-main">
+            <div class="ax-reading">
+                <p class="ax-interpretation" id="ax-interpretation" data-slot="interpretation"
+                   aria-live="polite">{{ t('progress.loading') }}</p>
+                <p class="ax-meaning" id="ax-meaning" data-slot="meaning" hidden></p>
+            </div>
+
+            <ul class="ax-evidence" id="ax-evidence" data-slot="evidence"
+                aria-label="{{ t('progress.axis_evidence_label') }}" hidden></ul>
         </div>
 
-        <ul class="ax-evidence" id="ax-evidence" data-slot="evidence"
-            aria-label="{{ t('progress.axis_evidence_label') }}" hidden></ul>
+        <div class="ax-side">
+            <div class="ax-action" id="ax-action" data-slot="action" hidden>
+                <h3 class="ax-action-label" id="ax-action-h">{{ t('progress.axis_action_label') }}</h3>
+                <p class="ax-action-text" id="ax-action-text"></p>
+                <p class="ax-action-detail" id="ax-action-detail" hidden></p>
+            </div>
 
-        <div class="ax-action" id="ax-action" data-slot="action" hidden>
-            <h3 class="ax-action-label" id="ax-action-h">{{ t('progress.axis_action_label') }}</h3>
-            <p class="ax-action-text" id="ax-action-text"></p>
-            <p class="ax-action-detail" id="ax-action-detail" hidden></p>
-        </div>
-
-        <div class="ax-review">
-            <a class="btn-ghost ax-review-cta" id="ax-review"
-               href="/coach?review=progress-insight">{{ t('progress.axis_review_cta') }}</a>
+            <div class="ax-review">
+                <a class="btn-ghost ax-review-cta" id="ax-review"
+                   href="/coach?review=progress-insight">{{ t('progress.axis_review_cta') }}</a>
+            </div>
         </div>
     </div>
 </section>

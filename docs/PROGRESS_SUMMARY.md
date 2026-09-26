@@ -438,6 +438,34 @@ stay below the intelligence layer and were made visibly quieter than it:
   of check-ins on one day no longer multiplies the training reads.
   Browser matrix: `tests/test_progress_physique_history_browser.py`.
 
+**Progress V2 PR5 — final hardening (no new feature, no new authority).**
+
+- *One visual system*: `.progress-main [hidden] { display: none !important }`
+  is the page's single `hidden` owner (PR5 found the PR3 defect again on
+  `#ps-evidence`, which kept its flex box in the failure state). Content
+  labels are sentence-case body type (Physique "Area: …", the comparability
+  headline, list headers, Axis "This week"); section headings (`.sec-label`,
+  shared) are unchanged. One filled primary on the page (Weekly check-in);
+  Review with AxisAI and the Physique action are both `.btn-ghost`. Axis blue
+  is kept for intelligence/interaction: the latest volume bar is neutral
+  brightness, not blue.
+- *Truthful states*: a failed or unreadable summary no longer says "No data
+  yet" on the Trends cards (`progress.card_unavailable`, the retired
+  `progress.card_nodata` had no other consumer), and a failed Current State is
+  a quiet body-type notice with a neutral rule (`#ps-card[data-status]`), not
+  a display-face verdict with the blue accent.
+- *Layout*: Axis Insight groups meaning (interpretation → evidence) and move
+  (this week → review) into two columns that stack independently, so the
+  evidence no longer drops to the height of the action block on desktop.
+  Trends go three-across from a 720px content box (768px was 2 + 1 with an
+  orphaned card). The history list keeps a 72ch reading measure.
+- *Signed numbers* use the typographic minus (U+2212) — Weight card, history
+  deltas and the planner percentage. Spelling only; no parsing downstream.
+- Cost: unchanged — 14 CSS/JS files plus the existing shell icon, the same
+  four Progress API reads, no dependency, no model call. Browser fixture
+  photos are counted separately from the CSS/JS gate. Integrated matrix: `tests/test_progress_v2_final_browser.py`;
+  static contract: `tests/test_progress_v2_final_ui.py`.
+
 ---
 
 ## 11. Compatibility
