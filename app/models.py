@@ -321,7 +321,13 @@ class WeeklyCheckIn(db.Model):
     beslenme_uyumu    = db.Column(db.Integer)       # 1-5 arası
     note              = db.Column(db.Text)
     coach_feedback    = db.Column(db.Text)
+    idempotency_key   = db.Column(db.String(64), nullable=True)
+    request_fingerprint = db.Column(db.String(64), nullable=True)
+    response_snapshot = db.Column(db.Text, nullable=True)
     created_at        = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint(
+        "user_id", "idempotency_key", name="uq_weekly_checkin_user_key"),)
 
     def __repr__(self):
         return f"<WeeklyCheckIn {self.user_id} - {self.created_at}>"
