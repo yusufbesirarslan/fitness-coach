@@ -86,7 +86,7 @@ def test_empty_contract(app, client, make_user, login):
     d = r.get_json()
     assert d["contract_version"] == CONTRACT_VERSION == 1
     assert d["state"] == "empty"
-    assert set(d) == {"contract_version", "state", "entries", "has_more"}
+    assert set(d) == {"contract_version", "state", "entries", "has_more", "incomplete_day"}
     assert d["entries"] == []
     assert d["has_more"] is False
 

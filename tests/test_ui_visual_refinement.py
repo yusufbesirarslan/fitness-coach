@@ -258,7 +258,10 @@ def test_progress_secondary_empty_states_are_compact_not_cards():
 
 
 def test_progress_empty_state_action_is_a_control_not_a_bare_link():
-    body = _rule(_css("progress.css"), ".pp-link")
+    # Progress V2 PR5: the action is the shared secondary button, which owns
+    # the border, background and the 44px touch minimum.
+    assert "a.className = 'btn-ghost pp-link';" in _read(STATIC / "progress_physique.js")
+    body = _rule(_css("components.css"), ".btn-ghost")
     assert re.search(r"min-height:\s*44px", body), (
         "the only CTA in an empty state must meet the touch minimum"
     )

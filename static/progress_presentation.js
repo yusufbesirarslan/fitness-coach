@@ -253,8 +253,15 @@
 
   function isNumber(v) { return typeof v === 'number' && isFinite(v); }
 
+  // A signed one-decimal spelling of a server number. The negative sign is
+  // the typographic minus (U+2212), not the ASCII hyphen: "−0.3 kg" reads as
+  // a quantity in both locales and never as a dash. Spelling only — the
+  // number is unchanged and nothing downstream parses this text.
+  var MINUS = '\u2212';
   function signed(n) {
-    return (n > 0 ? '+' : '') + n.toFixed(1);
+    var fixed = n.toFixed(1);
+    if (n > 0) return '+' + fixed;
+    return fixed.charAt(0) === '-' ? MINUS + fixed.slice(1) : fixed;
   }
 
   function period(windowInfo) {
@@ -404,7 +411,9 @@
       unit_label: null,
       change: null,
       viz: null,
-      note: copy('progress.card_nodata'),
+      // V2 PR5: a failed or unreadable read says so. "No data yet" is a true
+      // statement about a new user that a failed request cannot make.
+      note: copy('progress.card_unavailable'),
       meta: []
     };
   }
@@ -733,7 +742,9 @@
         delta: lead.delta,
         // A group always holds at least one row; only a single-row day has
         // no count line.
-        updates: count === 1 ? null : copy('progress.history_updates', { n: count }),
+        updates: count === 1 ? null : copy(
+          d.incomplete_day === g.day ? 'progress.history_updates_at_least'
+                                    : 'progress.history_updates', { n: count }),
         entries: g.entries
       };
     });

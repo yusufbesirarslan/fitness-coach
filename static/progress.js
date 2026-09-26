@@ -186,7 +186,9 @@ function _fillCard(id, value, note) {
 // A section that fails to load says so plainly instead of showing a stale or
 // invented value; one failing fetch must not take the page down.
 function _sectionError(container) {
-  if (container) container.innerHTML = '<p class="prog-note">' + escapeHTML(__t('progress.load_error')) + '</p>';
+  if (!container) return;
+  container.removeAttribute('aria-busy');
+  container.innerHTML = '<p class="prog-note">' + escapeHTML(__t('progress.load_error')) + '</p>';
 }
 
 function _getJSON(url) {
@@ -270,7 +272,7 @@ function summaryUnavailable() {
 // The presentation script itself failed to load: degrade this section only,
 // and never leave it on "Loading…".
 function _summaryModuleMissing() {
-  _setCurrentState('', '', __t('progress.load_error'), '', [], '');
+  _setCurrentState('', '', __t('progress.load_error'), '', [], '', 'unavailable');
   ['tr-weight', 'tr-volume', 'tr-consistency'].forEach(function (id) {
     _fillCard(id, '—', __t('progress.load_error'));
   });
@@ -286,14 +288,19 @@ function renderSummaryView(view) {
 // ── CURRENT STATE ──
 // STATE → EVIDENCE → ACTION. Evidence is a short list of measured facts;
 // the next-move line and the evidence list are hidden when empty.
-function _setCurrentState(state, windowText, headline, summary, evidence, next) {
+function _setCurrentState(state, windowText, headline, summary, evidence, next, status) {
   var card = _el('ps-card');
   var stateEl = _el('ps-state');
   var ledeEl = _el('ps-lede');
   var list = _el('ps-evidence');
   var move = _el('ps-next-move');
   // The accent is decoration; the headline carries the meaning either way.
-  if (card) card.setAttribute('data-state', state || '');
+  if (card) {
+    card.setAttribute('data-state', state || '');
+    // Styling only (the failure reads quietly, without an accent); the text
+    // always says what happened.
+    card.setAttribute('data-status', status || '');
+  }
   _setSlot(_el('ps-window'), windowText);
   if (stateEl) stateEl.textContent = headline;
   if (ledeEl) ledeEl.textContent = summary;
@@ -314,7 +321,7 @@ function _setCurrentState(state, windowText, headline, summary, evidence, next) 
 
 function renderCurrentState(cs) {
   _setCurrentState(cs.state, _text(cs.window), _text(cs.headline), _text(cs.summary),
-                   (cs.evidence || []).map(_text), _text(cs.next_action));
+                   (cs.evidence || []).map(_text), _text(cs.next_action), cs.status);
 }
 
 // ── TRENDS ──
@@ -535,6 +542,7 @@ function loadPhysique() {
   function _unavailable() {
     var box = _el('history-list');
     if (!box) return;
+    box.removeAttribute('aria-busy');
     box.removeAttribute('data-state');
     box.setAttribute('data-status', 'unavailable');
     _clear(box);
@@ -628,6 +636,7 @@ function loadPhysique() {
 
     box.setAttribute('data-state', view.status === 'empty' ? 'empty' : 'available');
     box.removeAttribute('data-status');
+    box.removeAttribute('aria-busy');
     _clear(box);
 
     if (view.status === 'empty') {

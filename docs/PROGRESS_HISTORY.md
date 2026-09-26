@@ -242,7 +242,8 @@ GET /api/progress/history
   "contract_version": 1,
   "state": "empty",
   "entries": [],
-  "has_more": false
+  "has_more": false,
+  "incomplete_day": null
 }
 ```
 
@@ -275,7 +276,8 @@ No qualifying check-ins. HTTP 200.
       "body": { "weight_kg": 78.4, "weight_delta_kg": -0.6 }
     }
   ],
-  "has_more": false
+  "has_more": false,
+  "incomplete_day": null
 }
 ```
 
@@ -290,6 +292,12 @@ Query pattern: latest `HISTORY_LIMIT + 1` qualifying check-ins,
 
 - first 12 → visible rows
 - 13th → prior context for the oldest visible row's delta, and proof of `has_more`
+- Progress V2 PR5: if the 13th row falls on the same Istanbul `analysis_day`
+  as the oldest visible row, that day continues past the bound, so it is left
+  out entirely (`_whole_days`) and every published day is whole. No extra
+  query: the decision reads only the rows already fetched. `entries` is
+  therefore **at most** 12. If that day fills the entire window, retain it
+  and publish `incomplete_day` for a lower-bound count instead (see below).
 
 No `COUNT(*)`. No `WeeklyCheckIn....all()`.
 
@@ -367,9 +375,22 @@ limit) are grouped under their Istanbul `analysis_day` with a count; nothing
 is dropped. Both disclosures are real `<button>`s with `aria-expanded` /
 `aria-controls`. No colour carries meaning.
 
-Known limitation: the server window is 12 rows, so a day that straddles the
-12th/13th row shows the count of its visible rows only; `has_more` then says
-older check-ins exist.
+Day boundary (V2 PR5): a day that straddles the 12th/13th row is no longer
+published half-counted — the server drops that partial oldest day (§ Bounds),
+and `has_more` says additional check-ins exist. When ONE day alone holds
+13+ qualifying check-ins, its 12 visible rows remain available. The additive
+`incomplete_day` field names that Istanbul day (ISO date, otherwise null),
+using the already-fetched 13th row. The UI displays "12+ updates" /
+"12+ güncelleme". Exactly 12 complete records retain an exact count, even
+when an older day makes `has_more` true. Contract version stays 1; no extra
+request, query, COUNT, or larger fetch is introduced.
+
+Accessibility (V2 PR5): `#history-list` is not a live region (it used to
+announce every row appended by "Show earlier check-ins"); it is `aria-busy`
+until its one read settles, and the disclosures report their state through
+`aria-expanded`. A same-day row's 44px "N check-ins this day" control is its
+own box — no negative margin. Signed deltas use the typographic minus
+(U+2212).
 
 `static/progress.js` only calls `FitXProgressHistory.load()`.
 

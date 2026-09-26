@@ -97,7 +97,9 @@
 
   function _link(href, labelKey) {
     var a = document.createElement('a');
-    a.className = 'pp-link';
+    // The shared secondary button: one filled primary per page (Weekly
+    // check-in); this section's action is subordinate to it.
+    a.className = 'btn-ghost pp-link';
     a.href = href;
     a.textContent = __t(labelKey);
     return a;
@@ -136,7 +138,8 @@
     if (!items || !items.length) return null;
     var wrap = document.createElement('div');
     wrap.className = 'pp-list';
-    wrap.appendChild(_text('h4', title, 'pp-list-h'));
+    // h3 under the section's h2: an h4 here skipped a heading level.
+    wrap.appendChild(_text('h3', title, 'pp-list-h'));
     var ul = document.createElement('ul');
     var max = typeof limit === 'number' ? Math.min(limit, items.length) : items.length;
     var i;
@@ -315,7 +318,7 @@
     if (typeof analysis.next_check_guidance === 'string' && analysis.next_check_guidance) {
       var guide = document.createElement('div');
       guide.className = 'pp-guidance';
-      guide.appendChild(_text('h4', __t('progress.physique_guidance'), 'pp-list-h'));
+      guide.appendChild(_text('h3', __t('progress.physique_guidance'), 'pp-list-h'));
       guide.appendChild(_text('p', analysis.next_check_guidance));
       pair.appendChild(guide);
     }
@@ -374,9 +377,19 @@
     _unavailable(container);
   }
 
+  // A region switch re-renders the section, which would drop keyboard focus
+  // from the chip the reader just moved to. Put it back on the selected chip
+  // so arrow-key navigation keeps working.
+  function _restoreChipFocus(box, hadFocus) {
+    if (!hadFocus) return;
+    var chip = box.querySelector('[role="radio"][aria-checked="true"]');
+    if (chip) chip.focus();
+  }
+
   function load(region) {
     var box = _el('physique-body');
     if (!box) return Promise.resolve();
+    box.setAttribute('aria-busy', 'true');
     var url = ENDPOINT;
     var chosen = typeof region === 'string' && region ? region : _selectedRegion;
     if (chosen) url += '?region=' + encodeURIComponent(chosen);
@@ -385,8 +398,15 @@
         if (!r.ok) throw new Error(String(r.status));
         return r.json();
       })
-      .then(function (d) { _render(box, d); })
-      .catch(function () { _unavailable(box); });
+      .then(function (d) {
+        // A slow response must not pull focus back after the reader leaves.
+        var active = document.activeElement;
+        var hadFocus = !!(active && box.contains(active) && active.getAttribute('role') === 'radio');
+        _render(box, d);
+        _restoreChipFocus(box, hadFocus);
+      })
+      .catch(function () { _unavailable(box); })
+      .then(function () { box.removeAttribute('aria-busy'); });
   }
 
   window.FitXPhysiqueProgress = { load: load };

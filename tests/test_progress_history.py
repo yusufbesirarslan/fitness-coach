@@ -151,6 +151,72 @@ def test_has_more_false_at_exactly_twelve(make_user):
     assert history.has_more is False
 
 
+def test_day_cut_by_the_row_bound_is_left_out_whole(make_user):
+    """V2 PR5: a day straddling row 12/13 is not published half-counted.
+
+    Ten single days, then one day with three check-ins whose third falls past
+    the 12-row bound: the page would have said "2 check-ins this day". The
+    split day is dropped entirely; every published day is complete, the
+    oldest kept row still gets its delta, and has_more stays true.
+    """
+    user = make_user("phsplit")
+    newest = date(2026, 6, 30)
+    for i in range(10):
+        _add_checkin(user.id, newest - timedelta(days=i), 80.0 + i)
+    split = newest - timedelta(days=10)
+    for hour, weight in ((18, 91.0), (12, 92.0), (8, 93.0)):
+        _add_checkin(user.id, split, weight,
+                     created_at=datetime(split.year, split.month, split.day, hour))
+    _add_checkin(user.id, split - timedelta(days=1), 95.0)
+    db.session.commit()
+
+    history = build_progress_history(user.id)
+
+    days = [e.analysis_day for e in history.entries]
+    assert split not in days
+    assert len(history.entries) == 10
+    assert history.has_more is True
+    oldest = history.entries[-1]
+    assert oldest.weight_kg == 89.0
+    assert oldest.weight_delta_kg == -2.0      # vs the first dropped row (91.0)
+
+
+def test_day_ending_exactly_at_the_bound_is_kept(make_user):
+    """The 13th row on a different day: nothing is cut, 12 rows stay."""
+    user = make_user("phnosplit")
+    newest = date(2026, 6, 30)
+    for i in range(10):
+        _add_checkin(user.id, newest - timedelta(days=i), 80.0 + i)
+    last = newest - timedelta(days=10)       # rows 11 and 12
+    for hour in (18, 8):
+        _add_checkin(user.id, last, 90.0,
+                     created_at=datetime(last.year, last.month, last.day, hour))
+    _add_checkin(user.id, last - timedelta(days=1), 95.0)
+    db.session.commit()
+
+    history = build_progress_history(user.id)
+
+    assert len(history.entries) == 12
+    assert [e.analysis_day for e in history.entries].count(last) == 2
+    assert history.has_more is True
+
+
+def test_one_day_filling_the_window_is_not_emptied(make_user):
+    """Degenerate bound: 13 check-ins on one day. No whole day exists to
+    keep, so the 12 visible rows are published rather than nothing (the
+    day is marked incomplete for a truthful lower-bound count)."""
+    user = make_user("phoneday")
+    for minute in range(13):
+        _add_checkin(user.id, END_DAY, 80.0,
+                     created_at=datetime(2026, 7, 15, 10, minute))
+    db.session.commit()
+
+    history = build_progress_history(user.id)
+
+    assert len(history.entries) == HISTORY_LIMIT
+    assert history.has_more is True
+
+
 def test_owner_isolation(make_user):
     other = make_user("phother")
     _progressing(other.id, END_DAY)

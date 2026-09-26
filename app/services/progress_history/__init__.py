@@ -122,14 +122,40 @@ def _reconstruct_entry(user_id, row, previous, reports) -> HistoryEntry:
     )
 
 
+def _whole_days(visible, beyond):
+    """Drop a trailing Istanbul day that the row bound cut in two.
+
+    The window is ``HISTORY_LIMIT`` rows, not days. When the prior-context row
+    past the bound falls on the same analysis day as the oldest visible row,
+    that day continues beyond the window, and the page would count only its
+    visible check-ins ("2 check-ins this day" for a day that had more). Such a
+    partial day is left out entirely so every published day is whole; the
+    rows still exist, and ``has_more`` (already true here) says older
+    check-ins are not shown.
+
+    Bounded and query-free: it reads only the ``HISTORY_LIMIT + 1`` rows
+    already fetched. If ONE day fills the whole window there is no whole day
+    to keep, so the window is returned unchanged rather than empty — that day
+    is marked by incomplete_day so its displayed count is a lower bound.
+    """
+    if not beyond or not visible:
+        return visible
+    cut_day = app_date_of(beyond[0].created_at)
+    kept = list(visible)
+    while kept and app_date_of(kept[-1].created_at) == cut_day:
+        kept.pop()
+    return tuple(kept) if kept else visible
+
+
 def build_progress_history(user_id: int) -> ProgressHistory:
     """The canonical Progress History for ``user_id``.
 
     Read-only and deterministic: for the same persisted qualifying check-ins
     and the same historical training facts, the result is equal. The visible
-    window is fixed at ``HISTORY_LIMIT``. One extra qualifying row is fetched
-    so the oldest visible row can compute its delta and so ``has_more`` does
-    not need ``COUNT(*)``.
+    window is at most ``HISTORY_LIMIT`` rows, trimmed to whole Istanbul days
+    (``_whole_days``). One extra qualifying row is fetched so the oldest
+    visible row can compute its delta, so ``has_more`` does not need
+    ``COUNT(*)``, and so a day cut by the bound can be recognised.
 
     Raises ``UnknownProgressionSignal`` if a historical training report yields
     a signal this layer has no mapping for — fail closed rather than invent a
@@ -140,7 +166,13 @@ def build_progress_history(user_id: int) -> ProgressHistory:
         return ProgressHistory(state=STATE_EMPTY, entries=(), has_more=False)
 
     has_more = len(rows) > HISTORY_LIMIT
-    visible = rows[:HISTORY_LIMIT]
+    visible = _whole_days(rows[:HISTORY_LIMIT], rows[HISTORY_LIMIT:])
+    # The lookahead proves whether a retained day continues past the bound.
+    # has_more alone cannot distinguish 12 complete same-day rows + an older
+    # day from 13+ same-day rows. No extra read or count is needed.
+    incomplete_day = (app_date_of(visible[-1].created_at)
+                      if has_more and app_date_of(visible[-1].created_at)
+                      == app_date_of(rows[HISTORY_LIMIT].created_at) else None)
     reports = {}
     entries = tuple(
         _reconstruct_entry(
@@ -155,4 +187,5 @@ def build_progress_history(user_id: int) -> ProgressHistory:
         state=STATE_AVAILABLE,
         entries=entries,
         has_more=has_more,
+        incomplete_day=incomplete_day,
     )
