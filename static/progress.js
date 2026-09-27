@@ -58,31 +58,75 @@ function selectOverload(val, el) {
     el.setAttribute('aria-pressed', 'true');
 }
 
-// ── CHECK-IN ── (verbatim: POST /checkin, coach_feedback escape, CW hand-off)
+// ── CHECK-IN ──
+var checkinSubmissionState = 'idle';
+var checkinSubmissionToken = null;
+var checkinSubmissionBody = null;
+
+function checkinAttemptToken() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    var bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+
+function setCheckinSubmissionState(state, message) {
+    checkinSubmissionState = state;
+    var btn = document.getElementById('checkin-btn');
+    var status = document.getElementById('checkin-status');
+    btn.disabled = state === 'pending' || state === 'success';
+    btn.classList.toggle('loading', state === 'pending');
+    btn.classList.toggle('checkin-complete', state === 'success');
+    btn.textContent = state === 'pending' ? __t('progress.sending') :
+        state === 'success' ? __t('progress.checkin_submitted') :
+        state === 'error' ? __t('progress.retry_checkin') :
+        __t('progress.submit_checkin');
+    status.textContent = message || (state === 'pending' ? __t('progress.sending') :
+        state === 'success' ? __t('progress.checkin_submitted') : '');
+    status.classList.toggle('checkin-error', state === 'error');
+    if (state === 'error') status.scrollIntoView({ block: 'nearest' });
+}
+
 async function submitCheckin() {
+    if (checkinSubmissionState === 'pending' || checkinSubmissionState === 'success') return;
     const weight = document.getElementById('ci-weight').value;
     if (!weight) { showToast(__t('progress.weight_required'), 'error'); return; }
 
-    const btn = document.getElementById('checkin-btn');
-    btn.classList.add('loading');
-    btn.textContent = __t('progress.sending');
+    if (!checkinSubmissionToken) {
+        checkinSubmissionToken = checkinAttemptToken();
+        checkinSubmissionBody = JSON.stringify({
+            weight: parseFloat(weight),
+            yogunluk:       parseInt(document.getElementById('ci-yogunluk').value),
+            fatigue:        parseInt(document.getElementById('ci-fatigue').value),
+            uyku_kalitesi:  parseInt(document.getElementById('ci-uyku').value),
+            beslenme_uyumu: parseInt(document.getElementById('ci-beslenme').value),
+            progressive_overload: selectedOverload,
+            note: document.getElementById('ci-note').value
+        });
+    }
+    setCheckinSubmissionState('pending');
+    const controller = new AbortController();
+    const timeout = setTimeout(function () { controller.abort(); }, 90000);
 
     try {
         const res = await fetch('/checkin', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                weight: parseFloat(weight),
-                yogunluk:       parseInt(document.getElementById('ci-yogunluk').value),
-                fatigue:        parseInt(document.getElementById('ci-fatigue').value),
-                uyku_kalitesi:  parseInt(document.getElementById('ci-uyku').value),
-                beslenme_uyumu: parseInt(document.getElementById('ci-beslenme').value),
-                progressive_overload: selectedOverload,
-                note: document.getElementById('ci-note').value
-            })
+            headers: { 'Content-Type': 'application/json',
+                       'Idempotency-Key': checkinSubmissionToken },
+            body: checkinSubmissionBody,
+            signal: controller.signal
         });
         const data = await res.json();
-        if (data.error) { showToast(data.error, 'error'); return; }
+        if (!res.ok || data.error) {
+            if (res.status === 400) {
+                checkinSubmissionToken = null;
+                checkinSubmissionBody = null;
+            }
+            var errorMessage = data.error || __t('progress.checkin_retry_error');
+            setCheckinSubmissionState('error', errorMessage);
+            showToast(errorMessage, 'error');
+            return;
+        }
 
         const fb = document.getElementById('feedback-card');
         // AI çıktısı güvenilmez: HTML entity'lerini escape et, sonra satır
@@ -95,16 +139,16 @@ async function submitCheckin() {
         document.getElementById('feedback-text').innerHTML = safeFeedback;
         fb.classList.add('visible');
         fb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        showToast(__t('progress.checkin_saved'), 'success');
+        setCheckinSubmissionState('success');
         // A fresh check-in changes Body/Consistency and adds a history row —
         // repaint the data-driven sections so the page stays truthful without
         // a manual reload.
         loadProgress();
     } catch (err) {
-        showToast(__t('progress.error_prefix') + err.message, 'error');
+        setCheckinSubmissionState('error', __t('progress.checkin_retry_error'));
+        showToast(__t('progress.checkin_retry_error'), 'error');
     } finally {
-        btn.classList.remove('loading');
-        btn.textContent = __t('progress.submit_checkin');
+        clearTimeout(timeout);
     }
 }
 
@@ -135,6 +179,12 @@ function activateOnEnter() {
 // Esc-to-close for keyboard/screen-reader users.
 var _checkinOpener = null;
 function openCheckin(btn) {
+  if (checkinSubmissionState === 'success') {
+    checkinSubmissionToken = null;
+    checkinSubmissionBody = null;
+    setCheckinSubmissionState('idle');
+    document.getElementById('feedback-card').classList.remove('visible');
+  }
   _checkinOpener = (btn && typeof btn.focus === 'function') ? btn : document.activeElement;
   document.getElementById('checkin-sheet').classList.add('open');
   var first = document.getElementById('ci-weight');

@@ -313,7 +313,7 @@ def test_pr5_adds_no_migration_and_the_head_the_runbook_names_is_current():
                 downs.update(value)
 
     heads = sorted(set(revisions) - downs)
-    assert heads == ["b7c8d9e0f1a2"], f"expected one head, found {heads}"
+    assert heads == ["c8d9e0f1a2b3"], f"expected one head, found {heads}"
 
 
 # ── The readiness record must stay honest ──────────────────────────────────
