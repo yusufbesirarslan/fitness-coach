@@ -7,12 +7,11 @@
       #ps-state    the trajectory headline — the page's loudest line
       #ps-lede     one trajectory-level summary sentence
       #ps-evidence at most two MEASURED facts (weeks trained, volume direction)
-      #ps-next     the recommended next move, keyed on the trajectory, plus the
-                   page's one primary action (weekly check-in)
+      #ps-next     trajectory guidance, followed by the separate weekly
+                   check-in recording action
 
-    It does NOT say which signal drives the state — that interpretation
-    belongs to Axis Insight, and the needs-attention next move hands off to
-    it. The consistency STATE label renders once, on its Trends card.
+    A known consistency issue is named here; Axis Insight owns its reason and
+    action. The consistency STATE label renders once, on its Trends card.
 
     The state is decided by the server (GET /api/progress/summary →
     app/services/progress_summary) and mapped to copy by
@@ -41,10 +40,13 @@
                 <p class="ps-next-label">{{ t('progress.state_next_label') }}</p>
                 <p class="ps-next-text" id="ps-next-text"></p>
             </div>
-            <div class="ps-actions">
-                <button type="button" class="btn-volt" data-action="openCheckin">
-                    {{ t('progress.checkin_action') }}
-                </button>
+            <div class="ps-checkin">
+                <p class="ps-next-label">{{ t('progress.checkin_context') }}</p>
+                <div class="ps-actions">
+                    <button type="button" class="btn-volt" data-action="openCheckin">
+                        {{ t('progress.checkin_action') }}
+                    </button>
+                </div>
                 {#- V2 PR3: the page's Coach entry is no longer a generic "Ask
                     AxisAI" here — it is the Axis Insight's own contextual
                     "Review with AxisAI" continuation (_progress_axis_insight.html),

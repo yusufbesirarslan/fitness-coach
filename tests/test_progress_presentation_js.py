@@ -36,6 +36,7 @@ F. V2 PR4 Recent Check-ins — buildHistoryView groups rows by the server's
     python -m pytest tests/test_progress_presentation_js.py -v
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -124,7 +125,8 @@ def _run(expression_js):
         + "\nvar P = window.FitXProgressPresentation;\n"
         + "process.stdout.write(JSON.stringify(" + expression_js + "));\n"
     )
-    out = subprocess.run([NODE, "-e", script], capture_output=True, text=True,
+    out = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8",
                          timeout=30, check=True)
     return json.loads(out.stdout)
 
@@ -137,8 +139,9 @@ def _run_tz(expression_js, tz):
         + "\nvar P = window.FitXProgressPresentation;\n"
         + "process.stdout.write(JSON.stringify(" + expression_js + "));\n"
     )
-    out = subprocess.run([NODE, "-e", script], capture_output=True, text=True,
-                         timeout=30, check=True, env={"TZ": tz, "PATH": "/usr/bin:/bin"})
+    out = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8",
+                         timeout=30, check=True, env={**os.environ, "TZ": tz})
     return json.loads(out.stdout)
 
 
@@ -352,7 +355,7 @@ def test_weight_metric_contract():
     assert w["series_points"] == 3
     assert w["viz"]["kind"] == "line" and len(w["viz"]["points"]) == 3
     assert _render(w["viz"]["label"], "en") == (
-        "Weight over your last 3 check-ins, from 79.4 kg to 78.4 kg.")
+        "Weight across 3 recent check-in days, from 79.4 kg to 78.4 kg.")
     assert w["note"] is None
     assert [m["key"] for m in w["meta"]] == ["progress.metric_weight_period",
                                             "progress.body_sub_target"]
@@ -422,7 +425,7 @@ def test_training_volume_metric_contract():
     assert up["change"] == {"text": {"key": "progress.metric_volume_change_up",
                                      "params": {"weeks": 4}},
                             "direction": "up"}
-    assert _render(up["change"]["text"], "en") == "Rising across 4 weeks"
+    assert _render(up["change"]["text"], "en") == "4-week trend: rising"
     assert [m["key"] for m in up["meta"]] == ["progress.metric_volume_latest"]
     assert up["viz"]["kind"] == "bars" and len(up["viz"]["bars"]) == 4
     assert _render(up["viz"]["label"], "en") == (
@@ -562,6 +565,58 @@ def test_current_state_follows_state_evidence_action():
 
 
 @requires_node
+def test_consistency_issue_uses_specific_current_state_copy():
+    cs = _views([_summary("build_consistency", consistency="inconsistent",
+                          active=2, sessions=5)])[0]["current_state"]
+    assert cs["summary"]["key"] == "progress.state_summary_consistency"
+    assert "consistency" in _render(cs["summary"], "en").lower()
+    assert "düzen" in _render(cs["summary"], "tr").lower()
+
+
+@requires_node
+def test_zero_recent_volume_keeps_its_own_window_separate_from_trend():
+    weekly = [dict(w) for w in WEEKLY_DEFAULT]
+    weekly[-1] = dict(weekly[-1], volume_kg=0.0, sessions=0, active=False)
+    vol = _views([_summary("build_consistency", consistency="inconsistent",
+                           volume_trend="flat", weekly=weekly, active=3)])[0]["metrics"]["training_volume"]
+    assert _render(vol["value"], "en") == "0 kg"
+    assert _render(vol["meta"][0], "en") == "Last 7 days"
+    assert _render(vol["change"]["text"], "en") == "4-week trend: steady"
+    assert _render(vol["meta"][0], "tr") == "Son 7 gün"
+    assert _render(vol["change"]["text"], "tr") == "4 haftalık eğilim: sabit"
+
+
+def test_progress_copy_describes_separate_windows_and_bounded_action():
+    for locale in LOCALES:
+        catalog = _CATALOG[locale]
+        if locale == "en":
+            assert "check-in days" in catalog["progress.metric_weight_period"]
+        else:
+            assert "günü" in catalog["progress.metric_weight_period"]
+        assert "{weeks}" in catalog["progress.metric_volume_change_flat"]
+        assert "7" in catalog["progress.metric_volume_latest"]
+        assert "week after" not in catalog["progress.axis_action_prioritize_consistency"]
+        assert "sonraki her hafta" not in catalog["progress.axis_action_prioritize_consistency"]
+        assert catalog["progress.state_next_label"] != "Recommended next move"
+        assert "progress.checkin_context" in catalog
+
+
+def test_progress_internal_vocabulary_does_not_reach_copy():
+    forbidden = ("inconsistent_training", "build_consistency", "next_signal",
+                 "reason_codes", "schema_version", "analysis_day", "AdaptivePlan")
+    for locale in LOCALES:
+        rendered = " ".join(value for key, value in _CATALOG[locale].items()
+                            if key.startswith("progress."))
+        assert not any(term in rendered for term in forbidden)
+
+
+def test_history_steady_state_does_not_claim_volume_is_flat():
+    # A keep_pushing/steady state may carry a separate down-volume signal.
+    assert _CATALOG["en"]["progress.perf_state_steady"] == "Training remained on track"
+    assert _CATALOG["tr"]["progress.perf_state_steady"] == "Antrenmanların yolunda devam etti"
+
+
+@requires_node
 @pytest.mark.parametrize("signal", sorted(TRAJECTORY_BY_SIGNAL))
 def test_current_state_evidence_is_bounded_and_measured(signal):
     cs = _views([_summary(signal)])[0]["current_state"]
@@ -666,13 +721,16 @@ def test_current_state_and_trends_share_no_sentence():
 
 
 @requires_node
-def test_current_state_is_trajectory_level_not_signal_level():
-    """Three signals share needs_attention; given the same measured facts,
-    Current State says the same thing for all of them — which one it is, is
-    Axis Insight's job."""
+def test_current_state_names_only_the_canonical_consistency_issue():
+    """Current State names consistency but leaves other signal detail to Axis Insight."""
     views = _views([_summary(s) for s in ("build_consistency", "plateau", "deload")])
-    states = {json.dumps(v["current_state"], sort_keys=True) for v in views}
-    assert len(states) == 1
+    states = [v["current_state"] for v in views]
+    assert {s["headline"]["key"] for s in states} == {"progress.traj_needs_attention"}
+    assert [s["summary"]["key"] for s in states] == [
+        "progress.state_summary_consistency", "progress.state_summary_needs_attention",
+        "progress.state_summary_needs_attention"]
+    assert len({json.dumps(s["evidence"], sort_keys=True) for s in states}) == 1
+    assert len({json.dumps(s["next_action"], sort_keys=True) for s in states}) == 1
 
 
 # ── F. V2 PR4 Recent Check-ins view model ───────────────────────────────────

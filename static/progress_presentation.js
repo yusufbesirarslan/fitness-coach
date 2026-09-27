@@ -96,12 +96,18 @@
   };
 
   // trajectory.state → the one supporting sentence under the headline.
-  // Keyed on the TRAJECTORY, not on the signal behind it: which signal needs
-  // attention is Axis Insight's to say, so Current State never repeats it.
+  // The trajectory supplies the general summary; a known consistency reason
+  // makes the attention state specific without repeating Axis Insight's why.
   var CURRENT_STATE_SUMMARY = {
     building_baseline: 'progress.state_summary_building_baseline',
     on_track: 'progress.state_summary_on_track',
     needs_attention: 'progress.state_summary_needs_attention'
+  };
+
+  // The summary also publishes the canonical reason. Name the consistency
+  // issue when it is known, while leaving other attention states generic.
+  var CURRENT_STATE_REASON = {
+    build_consistency: 'progress.state_summary_consistency'
   };
 
   // trajectory.state → the recommended next move. Trajectory-level on
@@ -387,7 +393,10 @@
   function currentState(d) {
     var trajectory = d.trajectory || {};
     var headline = keyFor(TRAJECTORY, trajectory.state);
-    var summary = keyFor(CURRENT_STATE_SUMMARY, trajectory.state);
+    var summary = trajectory.state === 'needs_attention'
+      ? (keyFor(CURRENT_STATE_REASON, trajectory.reason) ||
+         keyFor(CURRENT_STATE_SUMMARY, trajectory.state))
+      : keyFor(CURRENT_STATE_SUMMARY, trajectory.state);
     if (!headline || !summary) return unavailableCurrentState();
     var when = period(d.window);
     return {
