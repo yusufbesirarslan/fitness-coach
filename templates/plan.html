@@ -228,14 +228,7 @@
     </section>
 {%- endmacro -%}
 
-<main class="main-content plan-main" id="plan-page" data-plan-v2 data-plan-state="{{ plan.state }}">
-
-  <header class="plan-head">
-    {#- F-14: the destination names itself with the label the user clicked.
-        Training, Nutrition and Supplements stay child-domain headings below. -#}
-    <h1 class="plan-h1">{{ t('nav.plan') }}</h1>
-  </header>
-
+{%- macro plan_overview(plan) -%}
   <section class="plan-domain-overview" aria-label="{{ t('plan.overview.aria') }}">
   <section class="plan-domain plan-domain--training" data-plan-domain="training"
             data-workout-action="{{ plan.workout_action }}" aria-labelledby="plan-training-label">
@@ -293,12 +286,8 @@
              data-domain-state="{{ plan.supplements_state }}" aria-labelledby="plan-supplements-label">
       <div>
         <h3 id="plan-supplements-label" class="plan-domain-child-title">{{ t('plan.domain.supplements') }}</h3>
-        {#- UX-3 PR5 — three states stay three statements. A failed cabinet read
-            is `unavailable` and says so; it must NEVER render as the empty
-            cabinet, because "we could not read it" and "you own nothing" lead a
-            user to opposite actions. `supplements_count` is a bounded COUNT
-            taken in its own savepoint by `plan_facts`; no list, rating, price,
-            review, visibility flag or DB id reaches this page. -#}
+        {#- UX-3 PR5: a failed cabinet read is unavailable, never an empty cabinet.
+            Only the bounded count reaches this overview. -#}
         <p class="plan-domain-summary">
           {% if plan.supplements_state == 'unavailable' %}{{ t('plan.supplements.unavailable') }}
           {% elif plan.supplements_count == 1 %}{{ t('plan.supplements.count_one') }}
@@ -309,11 +298,22 @@
       <a class="plan-domain-link" href="/supplements">{{ t('plan.action.open_supplements') }}</a>
     </section>
   </section>
-
   </section>
+{%- endmacro -%}
 
-  <section class="plan-training-detail" id="plan-training-detail" aria-labelledby="plan-training-detail-label">
-    <h2 id="plan-training-detail-label" class="sec-label">{{ t('plan.training.detail') }}</h2>
+<main class="main-content plan-main" id="plan-page" data-plan-v2 data-plan-state="{{ plan.state }}">
+
+  <header class="plan-head">
+    {#- F-14: the destination names itself with the label the user clicked.
+        Training, Nutrition and Supplements stay child-domain headings below. -#}
+    <h1 class="plan-h1">{{ t('nav.plan') }}</h1>
+  </header>
+
+  {% if plan.state != 'no_active_plan' %}{{ plan_overview(plan) }}{% endif %}
+
+  <section class="plan-training-detail" id="plan-training-detail"
+           aria-labelledby="{{ 'plan-manage-label' if plan.state == 'no_active_plan' else 'plan-training-detail-label' }}">
+    {% if plan.state != 'no_active_plan' %}<h2 id="plan-training-detail-label" class="sec-label">{{ t('plan.training.detail') }}</h2>{% endif %}
     <button class="btn-ghost plan-recovery-action" type="button"
             data-action="recoverBlockedWorkout" hidden>{{ t('plan.action.abandon_workout') }}</button>
 
@@ -481,6 +481,8 @@
   {% endif %}
 
   </section>
+
+  {% if plan.state == 'no_active_plan' %}{{ plan_overview(plan) }}{% endif %}
 
   {% if plan.secondary %}
     <nav class="plan-secondary" aria-label="{{ t('plan.secondary_aria') }}">

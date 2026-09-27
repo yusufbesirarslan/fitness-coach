@@ -459,14 +459,16 @@ def test_the_painted_heading_matches_the_navigation_the_user_clicked(
 def test_desktop_first_run_is_composed_not_stretched(first_run, width):
     page, _ = first_run
     _open(page, width)
-    main = _box(page, "main")
-    assert main["width"] <= 720 + OVERFLOW_TOLERANCE
+    form_surface = _box(page, "#plan-training-detail")
+    assert 480 <= form_surface["width"] <= 720 + OVERFLOW_TOLERANCE
+    if width == 1366:
+        assert _box(page, "main")["width"] > 720 + OVERFLOW_TOLERANCE
     boxes = {name: _box(page, f'[data-plan-field="{name}"]') for name in ESSENTIAL}
     # Essentials share rows on a desktop column instead of four full-width bars.
     for left, right in (("odak_hedef", "ekipman"), ("gun_sayisi", "sure")):
         assert abs(boxes[left]["y"] - boxes[right]["y"]) <= OVERFLOW_TOLERANCE, boxes
         assert boxes[left]["x"] < boxes[right]["x"], boxes
-    assert all(box["width"] < main["width"] / 2 for box in boxes.values()), boxes
+    assert all(box["width"] < form_surface["width"] / 2 for box in boxes.values()), boxes
 
 
 # ══════════════════════════════════════════════════════════════════════════

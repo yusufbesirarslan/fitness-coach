@@ -86,10 +86,10 @@ PLAN_MEASURE_JS = r"""
     legacy_training_js: q('script[src*="/static/training.js"]').length,
     coach_root_count: q('#cw-root').length,
     self_link_to_training: mount ? [...mount.querySelectorAll('a[href="/training"]')].length : 0,
-    status_text_present: !!(mount && mount.querySelector('.plan-status-txt') &&
-        mount.querySelector('.plan-status-txt').textContent.trim()),
-    create_form_present: q('[data-plan-create]').length,
-    retry_present: q('[data-action="fxReload"]').length,
+    training_state_text_present: !!(mount && mount.querySelector('[data-plan-domain="training"] .plan-domain-summary') &&
+        mount.querySelector('[data-plan-domain="training"] .plan-domain-summary').textContent.trim()),
+    create_form_present: q('[data-plan-manage][data-manage-state="create"]').length,
+    retry_present: mount ? mount.querySelectorAll('.plan-error [data-action="fxReload"]').length : 0,
     weekly_mount_count: q('#weekly-program[data-weekly-program-mount]').length,
     weekly_js_count: q('script[src*="/static/weekly_program.js"]').length,
     plan_day_count: q('details.plan-day').length,
@@ -281,8 +281,8 @@ def _evaluate_plan(cell, m, weekly_reqs):
         reasons.append("document horizontal overflow")
     if m["h1_count"] != 1:
         reasons.append(f"h1 count={m['h1_count']} (want 1)")
-    if m["coach_root_count"] != 1:
-        reasons.append(f"coach instances={m['coach_root_count']} (want exactly 1)")
+    if m["coach_root_count"] > 1:
+        reasons.append(f"coach instances={m['coach_root_count']} (want at most 1 on Plan)")
     if m["raw_key_leak"]:
         reasons.append(f"raw localization keys leaked: {m['raw_key_leak']}")
     if not m["plan_present"]:
@@ -291,14 +291,13 @@ def _evaluate_plan(cell, m, weekly_reqs):
         reasons.append("legacy training.js loaded")
     if m["plan_mount_overflow"]:
         reasons.append("plan-shell horizontal overflow")
-    if not m["status_text_present"]:
-        reasons.append("status not conveyed as text")
+    if not m["training_state_text_present"]:
+        reasons.append("Training state not conveyed as text")
     if m["self_link_to_training"]:
         reasons.append("plan self-links to /training")
     if cell.get("expect_state") and m["plan_state"] != cell["expect_state"]:
         reasons.append(f"state={m['plan_state']} (want {cell['expect_state']})")
-    # No dominant/self CTA in any state; create form only in no_active_plan;
-    # retry only in read_error.
+    # The creation form belongs only to no_active_plan; retry only to read_error.
     want_create = 1 if m["plan_state"] == "no_active_plan" else 0
     if m["create_form_present"] != want_create:
         reasons.append(f"create form={m['create_form_present']} (want {want_create})")

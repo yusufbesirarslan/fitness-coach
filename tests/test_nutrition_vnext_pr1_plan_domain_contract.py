@@ -46,7 +46,7 @@ class PlanStructure(HTMLParser):
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
-def test_plan_domains_are_siblings_before_training_detail(
+def test_plan_domains_are_siblings_after_first_run_setup(
     client, make_user, login, language,
 ):
     name = f"pr1-{language}"
@@ -65,7 +65,7 @@ def test_plan_domains_are_siblings_before_training_detail(
     assert any(node[2] == "nutrition" for node in supplements)
     assert tree.headings["plan-training-label"] == tree.headings["plan-nutrition-label"] == "h2"
     assert tree.headings["plan-supplements-label"] == "h3"
-    assert html.index('data-plan-domain="nutrition"') < html.index('class="plan-training-detail"')
+    assert html.index('class="plan-training-detail"') < html.index('data-plan-domain="training"')
     assert sum(href == "/nutrition" for href, _ in tree.links) == 1
     assert sum(href == "/supplements" for href, _ in tree.links) == 1
     assert sum(href == "#plan-training-detail" for href, _ in tree.links) == 1
