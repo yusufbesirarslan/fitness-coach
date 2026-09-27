@@ -458,7 +458,7 @@ def test_390_document_height_falls_by_a_fifth(surface):
 
 
 @pytest.mark.parametrize("scenario", ["scheduled_start", "stale_session", "partial_active_plan"])
-def test_desktop_active_plan_is_composed_not_a_phone_column(surface, scenario):
+def test_desktop_active_plan_shows_equal_domains_before_training_detail(surface, scenario):
     page, _, arrange, _ = surface
     arrange(scenario)
     open_plan(page, 1366, 900)
@@ -467,12 +467,14 @@ def test_desktop_active_plan_is_composed_not_a_phone_column(surface, scenario):
     assert data["content_width"] > BASELINE_CONTENT_WIDTH_1366 * 1.4, data["content_width"]
     assert nutrition["x"] >= training["x"] + training["w"], (training, nutrition)
     assert abs(nutrition["y"] - training["y"]) <= TOLERANCE, (training, nutrition)
-    assert training["w"] >= 2 * nutrition["w"], (training, nutrition)
+    # PR1 retires PR5's wide Training card and narrow Nutrition rail.
+    assert abs(training["w"] - nutrition["w"]) <= TOLERANCE, (training, nutrition)
     assert data["content_width"] < 1366 * 0.85
     assert data["longest_line"] <= 760, data["longest_line"]
     open_plan(page, 768)
     tablet = probe(page)
-    assert tablet["nutrition_box"]["y"] >= tablet["training_box"]["y"] + tablet["training_box"]["h"] - TOLERANCE
+    assert abs(tablet["nutrition_box"]["w"] - tablet["training_box"]["w"]) <= TOLERANCE
+    assert abs(tablet["nutrition_box"]["y"] - tablet["training_box"]["y"]) <= TOLERANCE
 
 
 @pytest.mark.parametrize("language", ["tr", "en"])
@@ -500,8 +502,8 @@ def test_stale_session_explains_itself_before_recovery_and_offers_no_resume(app,
             t("plan.session_stale.previous_day", locale="tr"))
         excluded = {t("plan.workout_state.rest_day", locale="tr"),
                     t("plan.workout_state.completed", locale="tr")}
-    chip = page.locator('[data-plan-domain="training"] .plan-domain-state').inner_text()
-    assert chip not in excluded
+    state = page.locator('[data-plan-domain="training"] .plan-domain-summary--muted').inner_text()
+    assert state not in excluded
     recovery = page.locator('[data-action="recoverBlockedWorkout"]')
     expect(recovery).to_be_visible()
     assert data["stale"]["box"]["top"] < recovery.bounding_box()["y"]

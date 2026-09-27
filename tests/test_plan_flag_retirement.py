@@ -132,7 +132,7 @@ def test_plan_frontend_audit_treats_retired_flag_values_as_inert():
         "plan_present": True,
         "legacy_training_js": 0,
         "plan_mount_overflow": False,
-        "status_text_present": True,
+        "training_state_text_present": True,
         "self_link_to_training": False,
         "plan_state": "active_plan",
         "create_form_present": 0,
@@ -144,6 +144,28 @@ def test_plan_frontend_audit_treats_retired_flag_values_as_inert():
     verdict, reasons = audit._evaluate_plan(cell, measurement, weekly_reqs=0)
 
     assert verdict == "pass", reasons
+    measurement["training_state_text_present"] = False
+    verdict, reasons = audit._evaluate_plan(cell, measurement, weekly_reqs=0)
+    assert verdict == "fail"
+    assert "Training state not conveyed as text" in reasons
+
+    measurement["training_state_text_present"] = True
+    measurement["plan_state"] = "no_active_plan"
+    measurement["create_form_present"] = 1
+    cell["expect_state"] = "no_active_plan"
+    assert audit._evaluate_plan(cell, measurement, weekly_reqs=0)[0] == "pass"
+    measurement["retry_present"] = 1
+    verdict, reasons = audit._evaluate_plan(cell, measurement, weekly_reqs=0)
+    assert verdict == "fail"
+    assert "retry=1 (want 0)" in reasons
+
+    measurement["retry_present"] = 0
+    measurement["coach_root_count"] = 0
+    assert audit._evaluate_plan(cell, measurement, weekly_reqs=0)[0] == "pass"
+    measurement["coach_root_count"] = 2
+    verdict, reasons = audit._evaluate_plan(cell, measurement, weekly_reqs=0)
+    assert verdict == "fail"
+    assert "coach instances=2 (want at most 1 on Plan)" in reasons
 
 
 def test_workout_frontend_audit_reads_only_canonical_shared_assets():

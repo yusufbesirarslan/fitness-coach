@@ -120,12 +120,19 @@ def test_on_shell_is_empty_and_semantic(app, render_training):
     assert "role=" not in match.group(0)
 
 
-def test_on_shell_sits_inside_the_training_domain(app, render_training):
-    """Chosen information architecture: the weekly overview lives on Plan's
-    Training domain, never the Nutrition child and never a new page."""
+def test_on_shell_sits_in_training_detail_after_peer_domain_overview(app, render_training):
+    """Weekly guidance belongs to Training detail below the peer overview."""
     html = render_training(app, enabled=True)
-    assert html.index('data-plan-domain="training"') < html.index(MOUNT_ATTR)
-    assert html.index(MOUNT_ATTR) < html.index('data-plan-domain="nutrition"')
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    overview = soup.select_one(".plan-domain-overview")
+    training = overview.select_one('[data-plan-domain="training"]')
+    nutrition = overview.select_one('[data-plan-domain="nutrition"]')
+    mount = soup.select_one(f"[{MOUNT_ATTR}]")
+    assert training.parent is overview and nutrition.parent is overview
+    assert mount.find_parent(id="plan-training-detail") is not None
+    assert html.index('data-plan-domain="nutrition"') < html.index(MOUNT_ATTR)
 
 
 @pytest.mark.parametrize("field", RECOMMENDATION_FIELDS)

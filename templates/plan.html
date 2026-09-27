@@ -228,59 +228,94 @@
     </section>
 {%- endmacro -%}
 
+{%- macro plan_overview(plan) -%}
+  <section class="plan-domain-overview" aria-label="{{ t('plan.overview.aria') }}">
+  <section class="plan-domain plan-domain--training" data-plan-domain="training"
+            data-workout-action="{{ plan.workout_action }}" aria-labelledby="plan-training-label">
+    <div class="plan-domain-head">
+      <div>
+        <h2 id="plan-training-label" class="plan-domain-title">{{ t('plan.domain.training') }}</h2>
+      </div>
+    </div>
+    <p class="plan-domain-summary">{{ t('plan.training.' ~ ('unavailable' if plan.state == 'read_error' else 'empty' if plan.state == 'no_active_plan' else 'partial' if plan.state == 'partial_active_plan' else 'active')) }}</p>
+    {% if plan.state in ('active_plan', 'partial_active_plan') %}
+      <p class="plan-domain-summary plan-domain-summary--muted">{{ t('plan.workout_state.' ~ plan.workout_state) }}</p>
+      {% if plan.partial %}
+        <p class="plan-partial-note" role="status">{{ t('plan.partial.note') }}</p>
+      {% endif %}
+      {% if plan.workout_session_stale_reason and plan.workout_session_stale_reason != 'none' %}
+        <p class="plan-session-stale" data-plan-session-stale="{{ plan.workout_session_stale_reason }}"
+           role="status">{{ t('plan.session_stale.' ~ plan.workout_session_stale_reason) }}</p>
+      {% endif %}
+    {% endif %}
+    {% if plan.workout_action in ('start', 'resume') and plan.state in ('active_plan', 'partial_active_plan') %}
+      <button class="btn-volt plan-workout-action" type="button"
+              data-action="startWorkout">{{ t(plan.workout_action_label_key) }}</button>
+    {% endif %}
+    <p class="plan-workout-error" id="plan-workout-error" role="alert" hidden></p>
+    <a class="plan-domain-link" href="#plan-training-detail">{{ t('plan.action.open_training') }}</a>
+  </section>
+
+  <section class="plan-domain plan-domain--nutrition" data-plan-domain="nutrition"
+           data-domain-state="{{ plan.nutrition_state }}" aria-labelledby="plan-nutrition-label">
+    <div class="plan-domain-head">
+      <div>
+        <h2 id="plan-nutrition-label" class="plan-domain-title">{{ t('plan.domain.nutrition') }}</h2>
+      </div>
+    </div>
+    {% if plan.nutrition_intake_state == 'available' and plan.nutrition_target_state == 'available' %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_target', consumed=plan.nutrition_consumed_calories, target=plan.nutrition_target_calories) }}</p>
+      <progress class="plan-nutrition-progress" value="{{ plan.nutrition_consumed_calories }}"
+                max="{{ plan.nutrition_target_calories }}"
+                aria-label="{{ t('plan.nutrition.progress_aria') }}"></progress>
+    {% elif plan.nutrition_intake_state == 'available' %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_only', consumed=plan.nutrition_consumed_calories) }}</p>
+    {% elif plan.nutrition_target_state == 'available' %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.target', calories=plan.nutrition_target_calories) }} {{ t('plan.nutrition.intake_unavailable') }}</p>
+    {% else %}
+      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_unavailable') }}</p>
+    {% endif %}
+    <p class="plan-domain-summary plan-domain-summary--muted">
+      {% if plan.nutrition_plan_state == 'available' %}{{ t('plan.nutrition.plan_available') }}
+      {% elif plan.nutrition_plan_state == 'empty' %}{{ t('plan.nutrition.plan_empty') }}
+      {% else %}{{ t('plan.nutrition.plan_unavailable') }}{% endif %}
+    </p>
+    <a class="plan-domain-link" href="/nutrition">{{ t('plan.action.open_nutrition') }}</a>
+
+    <section class="plan-domain-child" data-plan-domain="supplements"
+             data-domain-state="{{ plan.supplements_state }}" aria-labelledby="plan-supplements-label">
+      <div>
+        <h3 id="plan-supplements-label" class="plan-domain-child-title">{{ t('plan.domain.supplements') }}</h3>
+        {#- UX-3 PR5: a failed cabinet read is unavailable, never an empty cabinet.
+            Only the bounded count reaches this overview. -#}
+        <p class="plan-domain-summary">
+          {% if plan.supplements_state == 'unavailable' %}{{ t('plan.supplements.unavailable') }}
+          {% elif plan.supplements_count == 1 %}{{ t('plan.supplements.count_one') }}
+          {% elif plan.supplements_count %}{{ t('plan.supplements.count', count=plan.supplements_count) }}
+          {% else %}{{ t('plan.supplements.empty') }}{% endif %}
+        </p>
+      </div>
+      <a class="plan-domain-link" href="/supplements">{{ t('plan.action.open_supplements') }}</a>
+    </section>
+  </section>
+  </section>
+{%- endmacro -%}
+
 <main class="main-content plan-main" id="plan-page" data-plan-v2 data-plan-state="{{ plan.state }}">
 
   <header class="plan-head">
     {#- F-14: the destination names itself with the label the user clicked.
         Training, Nutrition and Supplements stay child-domain headings below. -#}
     <h1 class="plan-h1">{{ t('nav.plan') }}</h1>
-    {# Durum ikon + METİN (yalnızca renkle iletilmez). Kanonik state'ten gelir;
-       read_error 'no plan'a çevrilmez, populated 'start' göstermez. #}
-    <p class="plan-status plan-status--{{ plan.state }}" role="status">
-      <span class="plan-status-ic" aria-hidden="true">
-        {%- if plan.state == 'active_plan' %}✓{% elif plan.state == 'partial_active_plan' %}!{% elif plan.state == 'read_error' %}!{% else %}◔{% endif -%}
-      </span>
-      <span class="plan-status-txt">{{ t('plan.status.' ~ plan.state) }}</span>
-    </p>
   </header>
 
-  <section class="plan-domain plan-domain--training" data-plan-domain="training"
-           data-workout-action="{{ plan.workout_action }}" aria-labelledby="plan-training-label">
-    <div class="plan-domain-head">
-      <div>
-        <p class="plan-domain-kicker">{{ t('plan.domain.primary') }}</p>
-        <h2 id="plan-training-label" class="plan-domain-title">{{ t('plan.domain.training') }}</h2>
-      </div>
-      {#- With no plan the header status already says so and the create
-          heading says it again; a third chip would only repeat it. -#}
-      {% if plan.state != 'no_active_plan' %}
-      <span class="plan-domain-state">{{ t('plan.workout_state.' ~ plan.workout_state) }}</span>
-      {% endif %}
-    </div>
-    {#- ── ATTENTION FIRST (UX4-PR5) ──
-        What needs attention is said before anything can be done about it, so
-        a stale session reads "needs attention → why → recovery" instead of
-        showing an unexplained recovery button above its own reason. Both
-        sentences are the server's own facts rendered exactly as before; only
-        their position moved. -#}
-    {% if plan.state in ('active_plan', 'partial_active_plan') %}
-      {% if plan.partial %}
-      <p class="plan-partial-note" role="status">{{ t('plan.partial.note') }}</p>
-      {% endif %}
-      {#- ── STALE SESSION, TOLD TRUTHFULLY (UX-3 PR3, brief §38) ──
-          The resolver already refuses to call a stale session "rest", "completed"
-          or resumable — it returns needs_attention/blocked, and the placement
-          below therefore offers no workout action. What was missing was WHY. The
-          reason is the server's own ``stale_reason``; it is never re-classified,
-          softened, or converted into an action here. 'none' is not a reason. -#}
-      {% if plan.workout_session_stale_reason and plan.workout_session_stale_reason != 'none' %}
-      <p class="plan-session-stale" data-plan-session-stale="{{ plan.workout_session_stale_reason }}"
-         role="status">{{ t('plan.session_stale.' ~ plan.workout_session_stale_reason) }}</p>
-      {% endif %}
-    {% endif %}
+  {% if plan.state != 'no_active_plan' %}{{ plan_overview(plan) }}{% endif %}
+
+  <section class="plan-training-detail" id="plan-training-detail"
+           aria-labelledby="{{ 'plan-manage-label' if plan.state == 'no_active_plan' else 'plan-training-detail-label' }}">
+    {% if plan.state != 'no_active_plan' %}<h2 id="plan-training-detail-label" class="sec-label">{{ t('plan.training.detail') }}</h2>{% endif %}
     <button class="btn-ghost plan-recovery-action" type="button"
             data-action="recoverBlockedWorkout" hidden>{{ t('plan.action.abandon_workout') }}</button>
-    <p class="plan-workout-error" id="plan-workout-error" role="alert" hidden></p>
 
   {%- if plan.management_state in ('create', 'regenerate') %}
     {#- ── CANONICAL STALENESS NOTICE (UX-3 PR3, brief §16) ──
@@ -315,11 +350,6 @@
   {% else %}
     {# active_plan / partial_active_plan — plan içeriği hedefin KENDİSİ: baskın CTA
        YOK. partial'da dürüst not gösterilir; plan yine görünür kalır. #}
-    {% if plan.workout_action in ('start', 'resume') %}
-      <button class="btn-volt plan-workout-action" type="button"
-              data-action="startWorkout">{{ t(plan.workout_action_label_key) }}</button>
-    {% endif %}
-
     <div class="plan-meta">
       {% if plan.created_at %}<span class="plan-meta-created">{{ t('plan.created_on', date=plan.created_at) }}</span>{% endif %}
       {% if plan.score is not none %}<span class="badge badge-primary" title="{{ t('plan.score_aria') }}">{{ plan.score }}</span>{% endif %}
@@ -452,54 +482,7 @@
 
   </section>
 
-  <section class="plan-domain plan-domain--nutrition" data-plan-domain="nutrition"
-           data-domain-state="{{ plan.nutrition_state }}" aria-labelledby="plan-nutrition-label">
-    <div class="plan-domain-head">
-      <div>
-        <p class="plan-domain-kicker">{{ t('plan.domain.child') }}</p>
-        <h2 id="plan-nutrition-label" class="plan-domain-title">{{ t('plan.domain.nutrition') }}</h2>
-      </div>
-      <span class="plan-domain-state">{{ t('plan.domain_state.' ~ plan.nutrition_state) }}</span>
-    </div>
-    {% if plan.nutrition_intake_state == 'available' and plan.nutrition_target_state == 'available' %}
-      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_target', consumed=plan.nutrition_consumed_calories, target=plan.nutrition_target_calories) }}</p>
-      <progress class="plan-nutrition-progress" value="{{ plan.nutrition_consumed_calories }}"
-                max="{{ plan.nutrition_target_calories }}"
-                aria-label="{{ t('plan.nutrition.progress_aria') }}"></progress>
-    {% elif plan.nutrition_intake_state == 'available' %}
-      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_only', consumed=plan.nutrition_consumed_calories) }}</p>
-    {% elif plan.nutrition_target_state == 'available' %}
-      <p class="plan-domain-summary">{{ t('plan.nutrition.target', calories=plan.nutrition_target_calories) }} {{ t('plan.nutrition.intake_unavailable') }}</p>
-    {% else %}
-      <p class="plan-domain-summary">{{ t('plan.nutrition.intake_unavailable') }}</p>
-    {% endif %}
-    <p class="plan-domain-summary plan-domain-summary--muted">
-      {% if plan.nutrition_plan_state == 'available' %}{{ t('plan.nutrition.plan_available') }}
-      {% elif plan.nutrition_plan_state == 'empty' %}{{ t('plan.nutrition.plan_empty') }}
-      {% else %}{{ t('plan.nutrition.plan_unavailable') }}{% endif %}
-    </p>
-    <a class="plan-domain-link" href="/nutrition">{{ t('plan.action.open_nutrition') }}</a>
-
-    <section class="plan-domain-child" data-plan-domain="supplements"
-             data-domain-state="{{ plan.supplements_state }}" aria-labelledby="plan-supplements-label">
-      <div>
-        <h3 id="plan-supplements-label" class="plan-domain-child-title">{{ t('plan.domain.supplements') }}</h3>
-        {#- UX-3 PR5 — three states stay three statements. A failed cabinet read
-            is `unavailable` and says so; it must NEVER render as the empty
-            cabinet, because "we could not read it" and "you own nothing" lead a
-            user to opposite actions. `supplements_count` is a bounded COUNT
-            taken in its own savepoint by `plan_facts`; no list, rating, price,
-            review, visibility flag or DB id reaches this page. -#}
-        <p class="plan-domain-summary">
-          {% if plan.supplements_state == 'unavailable' %}{{ t('plan.supplements.unavailable') }}
-          {% elif plan.supplements_count == 1 %}{{ t('plan.supplements.count_one') }}
-          {% elif plan.supplements_count %}{{ t('plan.supplements.count', count=plan.supplements_count) }}
-          {% else %}{{ t('plan.supplements.empty') }}{% endif %}
-        </p>
-      </div>
-      <a class="plan-domain-link" href="/supplements">{{ t('plan.action.open_supplements') }}</a>
-    </section>
-  </section>
+  {% if plan.state == 'no_active_plan' %}{{ plan_overview(plan) }}{% endif %}
 
   {% if plan.secondary %}
     <nav class="plan-secondary" aria-label="{{ t('plan.secondary_aria') }}">

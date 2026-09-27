@@ -3,16 +3,11 @@
    This sheet adds only Plan v2's own layout and re-declares the .weekly-program-*
    rules the reused mount needs, so plan.html never has to load legacy training.css. */
 
-.plan-main { max-width: 720px; margin: 0 auto; padding: var(--space-5) var(--space-4) calc(var(--space-8) + 64px); }
+.plan-main { max-width: 1120px; margin: 0 auto; padding: var(--space-5) var(--space-4) calc(var(--space-8) + 64px); }
 
-/* ── Header + honest status ── */
+/* ── Header ── */
 .plan-head { margin-bottom: var(--space-5); }
 .plan-h1 { margin: 0 0 var(--space-2); font-family: var(--font-display); font-size: var(--text-3xl); letter-spacing: 1px; color: var(--color-text-1); }
-.plan-status { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-1) var(--space-3); border-radius: var(--radius-full); font-size: var(--text-sm); color: var(--color-text-2); background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1); }
-.plan-status-ic { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: var(--weight-bold); color: #fff; background: var(--color-text-3); }
-.plan-status--active_plan .plan-status-ic { background: var(--color-primary); }
-.plan-status--partial_active_plan .plan-status-ic { background: var(--color-warning); }
-.plan-status--read_error .plan-status-ic { background: var(--color-danger); }
 
 /* ── Error state (safe retry, never "Open Plan") ── */
 .plan-error { margin-top: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); align-items: flex-start; }
@@ -57,17 +52,15 @@
 .plan-secondary-link:hover { color: var(--color-text-1); border-color: var(--color-border-2); background: var(--overlay-4); }
 .plan-secondary-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
-/* Plan domain hierarchy: Training leads; Nutrition is subordinate and owns
-   Supplements. Recovery deliberately has no node in this shell. */
-.plan-domain { min-width: 0; margin-top: var(--space-5); padding: var(--space-5); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-lg); background: var(--color-surface-1); }
-.plan-domain--training { border-top: 3px solid var(--color-primary); }
-.plan-domain--nutrition { margin-top: var(--space-4); background: var(--color-surface-2); }
+/* Training and Nutrition share the Plan overview; Supplements stays in Nutrition. */
+.plan-domain-overview { display: grid; gap: var(--space-4); }
+.plan-domain { min-width: 0; padding: var(--space-5); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-lg); background: var(--color-surface-1); }
+.plan-training-detail { max-width: 720px; margin-top: var(--space-6); scroll-margin-top: var(--space-5); }
+.plan-training-detail > .sec-label { margin: 0 0 var(--space-4); }
 .plan-domain-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
-.plan-domain-kicker { margin: 0 0 var(--space-1); color: var(--color-text-3); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label); text-transform: uppercase; }
 .plan-domain-title, .plan-domain-child-title { margin: 0; color: var(--color-text-1); font-family: var(--font-display); letter-spacing: 1px; }
 .plan-domain-title { font-size: var(--text-xl); }
 .plan-domain-child-title { font-size: var(--text-lg); }
-.plan-domain-state { flex: 0 0 auto; padding: var(--space-1) var(--space-3); border-radius: var(--radius-full); background: var(--overlay-6); color: var(--color-text-2); font-size: var(--text-xs); }
 .plan-domain-summary { margin: var(--space-3) 0; color: var(--color-text-2); line-height: var(--leading-relaxed); }
 .plan-domain-summary--muted { margin-top: calc(var(--space-2) * -1); color: var(--color-text-3); font-size: var(--text-sm); }
 .plan-nutrition-progress { display: block; width: min(100%, 360px); height: 6px; margin: calc(var(--space-2) * -1) 0 var(--space-4); accent-color: var(--color-primary); }
@@ -200,7 +193,6 @@ div.aw-exercise-row { border-color: var(--color-primary-a38); background: var(--
   .plan-day-meta { white-space: normal; }
   .plan-domain { padding: var(--space-4); }
   .plan-domain-head, .plan-domain-child { align-items: flex-start; flex-direction: column; }
-  .plan-domain-state { white-space: normal; }
   .plan-workout-action { width: 100%; justify-content: center; }
   /* A full-width link keeps its 44px target but reads on the section's axis. */
   .plan-domain-link { width: 100%; justify-content: flex-start; }
@@ -350,17 +342,17 @@ div.aw-exercise-row { border-color: var(--color-primary-a38); background: var(--
 /* Weekly guidance: a section inside Training, not a second card. The mount's
    classes are applied by weekly_program.js and are left untouched; only how
    they look inside Plan changes. */
-.plan-domain--training .weekly-program-card {
+.plan-training-detail .weekly-program-card {
   margin-top: var(--space-6); padding: var(--space-5) 0 0;
   border: 0; border-top: var(--border-w-1) solid var(--color-border-1); border-radius: 0;
   background: none; overflow: visible;
 }
-.plan-domain--training .weekly-program-action,
-.plan-domain--training .weekly-program-metric {
+.plan-training-detail .weekly-program-action,
+.plan-training-detail .weekly-program-metric {
   padding: 0 0 0 var(--space-3); border: 0; border-left: 2px solid var(--color-border-2);
   border-radius: 0; background: none;
 }
-.plan-domain--training .weekly-program-action { color: var(--color-text-1); }
+.plan-training-detail .weekly-program-action { color: var(--color-text-1); }
 
 /* Week schedule: one structured list. Training days stay native disclosures;
    rest days are quiet text rows; dividers separate days. */
@@ -414,30 +406,19 @@ div.aw-exercise-row { border-color: var(--color-primary-a38); background: var(--
 @media (min-width: 360px) {
   .plan-days details.plan-day > .plan-day-summary { grid-template-columns: minmax(0, 1fr) auto; }
   .plan-days .plan-day-meta { white-space: normal; text-align: right; }
-  .plan-domain--training .weekly-program-actions,
-  .plan-domain--training .weekly-program-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-training-detail .weekly-program-actions,
+  .plan-training-detail .weekly-program-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* One section rhythm inside the active Plan: every divided section inside
    Training (weekly guidance, the week, management) and the secondary links
    open with the same divider + spacing pair. */
-.plan-domain--training .weekly-program-card,
-.plan-domain--training .plan-days,
-.plan-domain--training .plan-manage--regenerate { margin-top: var(--space-5); padding-top: var(--space-4); }
+.plan-training-detail .weekly-program-card,
+.plan-training-detail .plan-days,
+.plan-training-detail .plan-manage--regenerate { margin-top: var(--space-5); padding-top: var(--space-4); }
 .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-secondary { margin-top: var(--space-5); padding-top: var(--space-4); }
 
-/* F-30: on desktop the active Plan is composed, not a phone column. Training
-   keeps the wide reading column; Nutrition (with Supplements) and the
-   secondary links sit in a narrower supporting rail beside it. */
-@media (min-width: 1024px) {
-  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) {
-    max-width: 1120px;
-    display: grid; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto auto 1fr;
-    column-gap: var(--space-8); align-items: start;
-  }
-  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-head { grid-column: 1 / -1; }
-  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-domain--training { grid-column: 1; grid-row: 2 / span 2; }
-  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-domain--nutrition { grid-column: 2; grid-row: 2; margin-top: var(--space-5); }
-  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) > .plan-secondary { grid-column: 2; grid-row: 3; margin-top: var(--space-5); }
-  .plan-main:is([data-plan-state="active_plan"], [data-plan-state="partial_active_plan"]) .plan-domain--nutrition .plan-domain-child { flex-direction: column; align-items: flex-start; gap: 0; }
+/* The overview gives both Plan domains equal desktop width before Training detail. */
+@media (min-width: 768px) {
+  .plan-domain-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

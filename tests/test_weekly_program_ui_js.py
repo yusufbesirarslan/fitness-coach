@@ -286,8 +286,9 @@ def test_plan_css_owns_weekly_program_rules():
     plan = _weekly_rules((static / "plan.css").read_text(encoding="utf-8"))
     assert plan, "no .weekly-program-* rules found in plan.css"
     context = {rule for rule in plan
-               if all(part.strip().startswith(".plan-domain--training ")
+               if all(part.strip().startswith(".plan-training-detail ")
                       for part in rule[0].split(","))}
+    assert context, "weekly guidance must stay scoped to Training detail"
     for selector, declarations in context:
         assert not re.search(r"display:\s*none|visibility:\s*hidden|opacity:\s*0\b|clip", declarations), selector
 
