@@ -227,12 +227,13 @@ def test_the_management_baseline_is_handed_over_unchanged(app, client, auth_user
 
 
 def test_no_active_plan_is_not_announced_three_times(app, client, auth_user):
-    """The header status is the canonical statement; the Training head does not
-    repeat it in a second chip above a heading that says it a third way."""
+    """PR1 scopes the empty state to Training instead of all of Plan."""
     soup, _ = _page(app, client, auth_user)
     training = soup.select_one('[data-plan-domain="training"]')
     assert training.select_one(".plan-domain-state") is None
-    assert soup.select_one(".plan-status--no_active_plan") is not None
+    assert soup.select_one(".plan-status--no_active_plan") is None
+    assert training.select_one(".plan-domain-summary").get_text(strip=True)
+    assert soup.select_one('[data-plan-domain="nutrition"]') is not None
 
 
 # ══════════════════════════════════════════════════════════════════════════

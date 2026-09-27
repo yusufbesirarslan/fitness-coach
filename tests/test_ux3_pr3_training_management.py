@@ -421,7 +421,7 @@ def test_a_stale_session_is_never_shown_as_rest_or_completed(
 
     html = client.get("/training").get_data(as_text=True)
     rendered = re.search(
-        r'<span class="plan-domain-state">([^<]*)</span>', html).group(1)
+        r'<p class="plan-domain-summary plan-domain-summary--muted">([^<]*)</p>', html).group(1)
 
     assert rendered == copy["plan.workout_state.needs_attention"]
     assert rendered != copy["plan.workout_state.rest_day"]
@@ -429,6 +429,9 @@ def test_a_stale_session_is_never_shown_as_rest_or_completed(
     # No resume affordance, and the stale reason is stated in the user's words.
     assert copy["plan.action.resume_workout"] not in _visible_text(html)
     assert copy["plan.session_stale.plan_regenerated_or_replaced"] in html
+    training_summary = html.split('data-plan-domain="training"', 1)[1].split(
+        'data-plan-domain="nutrition"', 1)[0]
+    assert copy["plan.session_stale.plan_regenerated_or_replaced"] in training_summary
 
 
 def _visible_text(html):

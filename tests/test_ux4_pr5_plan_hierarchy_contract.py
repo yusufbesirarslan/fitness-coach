@@ -89,7 +89,7 @@ def test_ownership_is_unchanged(app, client, auth_user, language):
     assert domains == ["training", "nutrition", "supplements"]
     assert len(soup.select("[data-weekly-program-mount]")) == 1
     assert soup.select_one("[data-weekly-program-mount]").find_parent(
-        attrs={"data-plan-domain": "training"}) is not None
+        class_="plan-training-detail") is not None
     assert len(soup.select('[data-action="startWorkout"]')) <= 1
     assert soup.select_one("[data-plan-manage]") is not None
     assert soup.select_one('.coach-entry a[href="/coach"]') is not None
@@ -195,15 +195,9 @@ def test_pr5_css_mints_nothing_and_uses_no_fragile_selectors():
     assert "position: fixed" not in block
 
 
-def test_desktop_widening_is_state_scoped():
-    block = _pr5_css()
-    widening = [line for line in block.splitlines() if "max-width: 1120px" in line]
-    assert widening
-    scoped = block[:block.index("max-width: 1120px")]
-    selector = scoped[scoped.rindex("\n  .plan-main"):]
-    assert '[data-plan-state="active_plan"]' in selector
-    assert '[data-plan-state="partial_active_plan"]' in selector
-    rules = re.sub(r"(?s)/\*.*?\*/", "", block)
-    assert "no_active_plan" not in rules and "read_error" not in rules
-    # The shared base rule the PR4 first run relies on is untouched.
-    assert ".plan-main { max-width: 720px;" in PLAN_CSS.read_text(encoding="utf-8")
+def test_pr1_overview_widens_both_domains_in_all_states():
+    # PR1 replaces PR5's wide Training + narrow Nutrition rail with peers.
+    css = PLAN_CSS.read_text(encoding="utf-8")
+    assert ".plan-main { max-width: 1120px;" in css
+    assert ".plan-domain-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }" in css
+    assert "grid-template-columns: minmax(0, 1fr) 320px" not in css
