@@ -35,6 +35,16 @@ def _locale(code):
     return json.loads(_read(ROOT / "locales" / f"{code}.json"))
 
 
+def test_checkin_is_presented_as_recording_action_separate_from_guidance():
+    markup = _read(TEMPLATES / "_progress_current_state.html")
+    assert markup.index('id="ps-next-move"') < markup.index('class="ps-checkin"')
+    assert "t('progress.checkin_context')" in markup
+    assert markup.index("t('progress.checkin_context')") < markup.index('data-action="openCheckin"')
+    assert "border-top" in _rule(_css(), ".ps-checkin")
+    for locale in ("en", "tr"):
+        assert _locale(locale)["progress.checkin_context"]
+
+
 # ── hidden always hides ─────────────────────────────────────────────────────
 
 def test_hidden_attribute_always_wins_on_the_progress_page():

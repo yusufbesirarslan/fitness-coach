@@ -330,12 +330,14 @@ def test_client_states_match_the_server_contract_exactly(app, client, make_user,
 def test_signal_ledes_are_retired_from_current_state(app, client):
     """V2 PR1 dedup: the per-signal lede restated the Axis WATCH/WORKING
     headline (build_consistency rendered the identical sentence twice).
-    Signal interpretation now has exactly one owner — Axis Insight."""
+    Axis Insight owns interpretation; Current State may name a known issue."""
     from app.i18n import _CATALOG
 
     for source in (_presentation_js(client), _progress_js(client)):
         assert "traj_lede" not in source
-        assert "trajectory.reason" not in source
+    # The controller cannot interpret a signal. The presentation model's
+    # bounded consistency summary is covered by behavioral copy tests.
+    assert "trajectory.reason" not in _progress_js(client)
     for locale in ("en", "tr"):
         assert not [k for k in _CATALOG[locale] if "traj_lede" in k]
 

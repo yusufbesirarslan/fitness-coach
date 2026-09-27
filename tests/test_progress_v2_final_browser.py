@@ -64,6 +64,45 @@ STATES = {
 }
 
 
+@pytest.mark.parametrize("locale,width", [("en", 390), ("tr", 390),
+                                           ("en", 768), ("en", 1366)])
+def test_zero_recent_volume_keeps_seven_day_value_apart_from_four_week_trend(
+        app, gate, make_user, login, locale, width):  # noqa: F811
+    name = "prsemantic_%s_%d" % (locale, width)
+    user = make_user(name)
+    ready(app, user.id, language=locale)
+    login(name)
+    _stage(gate, "needs_attention")
+    summary = json.loads(gate.overrides[SUMMARY][1])
+    summary["weekly"][-1]["volume_kg"] = 0.0
+    gate.overrides[SUMMARY] = (200, json.dumps(summary))
+    gate.visit("/progress-page", width=width)
+    gate.page.wait_for_function(SETTLED, timeout=5000)
+    result = gate.page.evaluate("""() => ({
+      value: document.querySelector('#tr-volume [data-slot="value"]').textContent,
+      change: document.querySelector('#tr-volume [data-slot="change"]').textContent,
+      meta: document.querySelector('#tr-volume [data-slot="meta"]').textContent,
+      summary: document.querySelector('#ps-lede').textContent,
+      action: document.querySelector('#ax-action-text').textContent,
+      context: document.querySelector('.ps-checkin .ps-next-label').textContent,
+      overflow: document.documentElement.scrollWidth > innerWidth
+    })""")
+    assert result["value"].strip().lower() == "0 kg"
+    expected = ({"en": ("4-week trend: steady", "Last 7 days", "consistency",
+                         "this week", "Record your week"),
+                 "tr": ("4 haftalık eğilim: sabit", "Son 7 gün", "düzen",
+                        "Bu hafta", "Bu haftayı kaydet")})[locale]
+    for text, part in zip((result["change"], result["meta"], result["summary"],
+                           result["action"], result["context"]), expected):
+        assert part in text
+    assert not result["overflow"]
+    shots = os.environ.get("PR5_QA_SHOTS")
+    if shots:
+        os.makedirs(shots, exist_ok=True)
+        gate.page.screenshot(path=os.path.join(
+            shots, "zero_volume_%s_%d.png" % (locale, width)), full_page=True)
+
+
 def _stage(gate, state):  # noqa: F811
     summary_kind, phys_kind, hist_kind = STATES[state]
     if state == "failure":
@@ -112,6 +151,9 @@ PROBE = r"""
     leaks: ['undefined', 'null', 'NaN', '{', '}', 'progress.']
         .filter(tok => text.includes(tok)),
     enumLike: (text.match(/\b[a-z]+_[a-z_]+\b/g) || []),
+    internal: ['inconsistent_training', 'build_consistency', 'next_signal',
+               'reason_codes', 'schema_version', 'analysis_day', 'AdaptivePlan']
+        .filter(term => text.includes(term)),
     controls: controls.map(el => ({
       tag: el.tagName, cls: el.className, text: el.textContent.trim(),
       section: sectionOf(el) && sectionOf(el).getAttribute('data-progress-section'),
@@ -192,6 +234,7 @@ def test_progress_v2_integrated_page(app, gate, make_user, login, state, locale)
         check(f["hiddenTakesSpace"] == [], (cell, f["hiddenTakesSpace"]))
         check(f["leaks"] == [], (cell, f["leaks"]))
         check(f["enumLike"] == [], (cell, f["enumLike"]))
+        check(f["internal"] == [], (cell, f["internal"]))
 
         # Controls: tappable, inside the viewport, never overlapping.
         for c in f["controls"]:
