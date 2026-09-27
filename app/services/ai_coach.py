@@ -1141,6 +1141,16 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
 
     # C3/B16 kararı response_formatter.finalize_reply'de: yedek/boş yanıt
     # dostça hata metnine çevrilir ve geçmişe yazılMAZ.
+    if _adaptive_plan_context_enabled():
+        from app.services.moderation import leaks_internal_coach_term
+        if leaks_internal_coach_term(final_text):
+            from app.services.response_formatter import error_fallback
+            final_text = (
+                _coach_tool_fallback(language)
+                if (coach_plan_tools.plan_changed_this_turn()
+                    or coach_plan_tools.proposal_created_this_turn())
+                else error_fallback(language)
+            )
     is_error_fallback = is_coach_error_fallback(final_text)
 
     # Geçmiş client'ta (widget sessionStorage) tutuluyor; client modunda session'a

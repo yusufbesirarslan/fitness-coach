@@ -191,23 +191,24 @@ determinism). Convergence characterization for `/api/progress/workout` lives in
 
 ### Serializer ownership and Version 1 evolution
 
-`app/services/adaptive_plan_context.py` is the only component allowed to transform
-`AdaptivePlan` into prompt-ready data. The Version 1 contract is compact canonical
+`app/services/adaptive_plan_context.py` owns the internal serialization and Coach
+projection of `AdaptivePlan`. The Version 1 internal contract is compact canonical
 JSON with fixed field names/order, complete non-null fields, ordered reason codes,
 and additive-only evolution. Consumers ignore unknown/appended fields and never infer
-meaning from absence. Breaking semantics require a new `schema_version`.
+meaning from absence. Breaking semantics require a new `schema_version`. The Coach
+prompt no longer receives this raw JSON; see the PR3 boundary below.
 
 ### Read-only consumer policy
 
 The Coach is read-only: it explains, personalizes, motivates, educates, and presents
 the deterministic plan. It never reconstructs progression, overload, plateau,
 deload, volume, or intensity decisions. Future runtime consumers either consume
-`AdaptivePlan` directly or use this sole serialized contract.
+`AdaptivePlan` directly or use its internal serialized contract.
 
 ### Prompt authority: one planning source
 
 The read-only policy is enforced by the system prompt itself, not only by the
-serialized block. `app/prompts/system.py` derives `ADAPTIVE_COACH_SYSTEM_PROMPT`
+public context block. `app/prompts/system.py` derives `ADAPTIVE_COACH_SYSTEM_PROMPT`
 from the legacy `COACH_SYSTEM_PROMPT` by:
 
 - rewriting the injury rule so the Coach personalizes exercise selection and
@@ -216,7 +217,7 @@ from the legacy `COACH_SYSTEM_PROMPT` by:
 - rewriting the weekly check-in rule so sleep, fatigue, and progressive-overload
   answers are recovery/safety/education context only — never raw inputs the Coach
   turns into a deload, overload, volume, intensity, or progression decision;
-- appending an explicit authority block that names the contract as the single
+- appending an explicit authority block that names the public guidance as the
   canonical planning decision and forbids recomputing, re-deriving, or overriding
   those five decision classes.
 
@@ -230,7 +231,7 @@ prompts. The switch is an explicit argument threaded from `ai_coach`
 `ai_stream` inherits it through `_build_bedrock_system`), **never** inferred from the
 context text: the composed context also carries user-written fields
 (`manage_user_memory` values, friend activity), so a string that reproduces the
-canonical header must not be able to flip the system prompt or pass a forged block off
+public guidance header must not be able to flip the system prompt or pass a forged block off
 as canonical. Both providers take the same decision — the OpenAI message array and both
 Bedrock `system` shapes (plain and prompt-cached). Default OFF: `build_coach_system()`
 returns the untouched legacy prompt, so no disabled-path bytes change. Pinned by
@@ -252,6 +253,38 @@ session usability when necessary, and emit the complete neutral
 `AdaptivePlan(weeks=0)` contract. Logs are generic debug lifecycle events and contain
 no user or training data. The normalized payload excludes rows and weekly/history
 series; its prompt-footprint target is approximately 100-160 tokens.
+
+### Coach public response boundary (PR3)
+
+The Version 1 JSON serializer above remains an internal domain contract. When
+`AI_ADAPTIVE_PLAN_CONTEXT=1`, `context_builder` now calls
+`build_coach_plan_context` and passes the model a short, localized projection of
+the **same** `AdaptivePlan` instance. The projection uses the existing Progress
+insight and next-move mappings and their EN/TR catalog sentences; it does not
+query again or decide a different action. The planner's volume adjustment is
+copied when relevant. Unknown vocabulary or a failed build produces a neutral
+"guidance unavailable" message, never raw JSON or a guessed decision.
+
+The adaptive system prompt treats that public guidance as the planning authority.
+Raw workout and check-in data may explain or personalize it, but cannot override
+it. The two legacy recovery and overload nudges are omitted on this path because
+they independently prescribe training changes from raw check-ins. The public
+response policy forbids internal identifiers, invented unlock rules and hidden
+thresholds, unsupported future monitoring, and silently expanding the one-session
+consistency action into a mandatory schedule. A user who asks for a schedule may
+still receive practical detail consistent with the canonical decision.
+
+`moderation.leaks_internal_coach_term` detects exact machine vocabulary in final
+adaptive replies. Such a reply becomes the localized error fallback and is not
+persisted or charged as a successful answer. To avoid a partial leak, adaptive
+streamed text is held until that final check; the tool loop and provider call count
+are unchanged, though visible adaptive deltas arrive after generation completes.
+This narrow guard does not attempt to classify all semantic hallucinations: the
+context and prompt policy carry those constraints.
+
+The Progress handoff stays server-derived: `/coach?review=progress-insight` carries
+only a constant, and its draft is not sent automatically. The handoff UX and
+Progress calculations are unchanged.
 
 ### Exact Version 1 key order
 

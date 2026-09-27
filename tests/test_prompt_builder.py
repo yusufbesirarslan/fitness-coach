@@ -23,7 +23,7 @@ def test_build_coach_system_appends_lang_directive():
 
 
 def test_coach_system_keeps_adaptive_plan_as_sole_planning_authority():
-    header = "[ADAPTIVE PLAN CONTRACT v1 - READ ONLY]"
+    header = "[GÜNCEL ANTRENMAN ÖNERİSİ]"
     legacy_checkin = "Antrenman şiddetini [HAFTALIK CHECK-IN TRENDİ]'ne göre ayarla"
     legacy_injury = "hacim ve şiddeti sakatlığı tamamen koruyacak şekilde uyarla"
 
@@ -42,7 +42,7 @@ def test_coach_system_keeps_adaptive_plan_as_sole_planning_authority():
 
     for prompt in (openai_prompt, bedrock_prompt):
         assert header in prompt
-        assert "TEK kanonik planlama kararı" in prompt
+        assert "kanonik planlama kararının kullanıcıya yönelik anlatımıdır" in prompt
         for responsibility in ("açıkla", "kişiselleştir", "motive et", "eğit", "sun"):
             assert responsibility in prompt
         for decision in ("overload", "deload", "hacim", "şiddet", "progresyon"):
