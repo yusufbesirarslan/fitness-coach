@@ -15,8 +15,9 @@ Layering (mirrors ``progress_summary`` / ``progress_physique``):
 
 There is no analysis engine here. Trajectory, performance and consistency are
 the Progress Summary mappings of ``training_progression(..., end_day=D)``.
-Body facts come from the anchored qualifying WeeklyCheckIn and the previous
-one. ``build_progress_summary`` is not called: its body/profile read is
+Body facts come from the anchored qualifying WeeklyCheckIn and the latest valid
+check-in on a previous analysis day, if present in the bounded History read.
+``build_progress_summary`` is not called: its body/profile read is
 current-state and is not historically safe.
 
 Dependency direction is one-way and must stay that way::
@@ -72,7 +73,7 @@ __all__ = [
 
 
 def _historical_body(row, previous):
-    """Anchored check-in weight + delta vs the previous qualifying check-in.
+    """Anchored check-in weight + delta vs the prior qualifying analysis day.
 
     Reuses ``summarize_body`` for the two-point subtraction/rounding. Target
     and current profile are deliberately omitted: they are not historical
@@ -86,6 +87,19 @@ def _historical_body(row, previous):
         recent_qualifying_weights=weights,
     ))
     return current, summary.weight_delta_kg
+
+
+def _previous_daily_row(rows, index):
+    """Latest valid weight on an older Istanbul day within the bounded read.
+
+    History keeps every event, including all same-day rows. Its derived weight
+    change is longitudinal, so same-day events cannot be the prior point.
+    """
+    day = app_date_of(rows[index].created_at)
+    for candidate in rows[index + 1:]:
+        if app_date_of(candidate.created_at) != day and _positive(candidate.weight):
+            return candidate
+    return None
 
 
 def _reconstruct_entry(user_id, row, previous, reports) -> HistoryEntry:
@@ -178,7 +192,7 @@ def build_progress_history(user_id: int) -> ProgressHistory:
         _reconstruct_entry(
             user_id,
             row,
-            rows[index + 1] if index + 1 < len(rows) else None,
+            _previous_daily_row(rows, index),
             reports,
         )
         for index, row in enumerate(visible)

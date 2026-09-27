@@ -62,7 +62,7 @@ History owns no Progress semantics. Existing canonical authorities do.
 | Consistency mapping | `progress_summary.summarize_consistency` |
 | Analysis window | `progress_summary.SUMMARY_WEEKS` + `build_window` |
 | Historical weight | the anchored qualifying WeeklyCheckIn row |
-| Historical weight delta | consecutive qualifying check-ins (same 1 dp subtraction as summary body) |
+| Historical weight delta | anchored weight against the latest valid check-in on a prior Istanbul day, when available in the bounded read |
 | Progress History | this read-model consumer/composer |
 | Browser | translation / presentation only |
 
@@ -183,7 +183,7 @@ caller-controlled range. Unknown progression vocabulary fails closed
 | Field | Source |
 |---|---|
 | `weight_kg` | the anchored check-in's stored weight when it is a positive number; otherwise `null` |
-| `weight_delta_kg` | anchored qualifying weight minus previous qualifying check-in weight when both are valid; otherwise `null` |
+| `weight_delta_kg` | anchored qualifying weight minus the latest valid weight from an earlier analysis day within the bounded History read; otherwise `null` |
 
 Rounding of the derived delta matches Progress Summary (1 decimal place).
 
@@ -291,7 +291,7 @@ Query pattern: latest `HISTORY_LIMIT + 1` qualifying check-ins,
 `created_at DESC, id DESC`.
 
 - first 12 → visible rows
-- 13th → prior context for the oldest visible row's delta, and proof of `has_more`
+- 13th → possible prior-day context for the oldest visible row's delta, and proof of `has_more`
 - Progress V2 PR5: if the 13th row falls on the same Istanbul `analysis_day`
   as the oldest visible row, that day continues past the bound, so it is left
   out entirely (`_whole_days`) and every published day is whole. No extra
