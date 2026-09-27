@@ -425,6 +425,59 @@ def test_same_day_saturation_from_real_endpoint(app, gate, make_user, login, loc
     assert not gate.errors
 
 
+@pytest.mark.parametrize("locale,width", [("en", 390), ("tr", 320)])
+def test_same_day_weight_trend_and_history_from_real_endpoints(
+        app, gate, make_user, login, locale, width):
+    """Two real same-day events remain visible; body trend uses two days."""
+    from datetime import datetime
+
+    from app.extensions import db
+    from app.models import WeeklyCheckIn
+
+    name = "pr2daily" + locale
+    user = make_user(name, weight=77.7)
+    ready(app, user.id, language=locale)
+    login(name)
+    for stamp, weight in ((datetime(2026, 9, 18, 12), 78.0),
+                          (datetime(2026, 9, 26, 17), 77.7),
+                          (datetime(2026, 9, 26, 18), 77.7)):
+        db.session.add(WeeklyCheckIn(user_id=user.id, created_at=stamp,
+                                     weight=weight, yogunluk=3))
+    db.session.commit()
+
+    _stage(gate, "on_track")
+    del gate.overrides[SUMMARY]
+    del gate.overrides[HISTORY]
+    gate.visit("/progress-page", width=width)
+    gate.page.wait_for_function(SETTLED, timeout=5000)
+
+    weight = gate.page.locator("#tr-weight").inner_text()
+    history_metric = gate.page.locator(".hist-metric").first.inner_text()
+    assert "77.7" in weight and "−0.3" in weight
+    assert "77.7" in history_metric and "−0.3" in history_metric
+    expected_headline = ("Building your training baseline" if locale == "en"
+                         else "Antrenman temelin oluşuyor")
+    assert gate.page.locator(".hist-summary").first.inner_text() == expected_headline
+    assert gate.page.locator(".hist-metric").first.evaluate("""el => {
+      const reference = document.createElement('span');
+      reference.style.color = 'var(--color-text-2)';
+      el.parentElement.appendChild(reference);
+      const neutral = getComputedStyle(reference).color;
+      reference.remove();
+      return getComputedStyle(el).color === neutral;
+    }""")
+    assert gate.page.locator(".hist-item[data-count='2']").count() == 1
+    more = gate.page.locator(".hist-item[data-count='2'] .hist-more")
+    more.focus()
+    gate.page.keyboard.press("Enter")
+    assert more.get_attribute("aria-expanded") == "true"
+    assert gate.page.locator(".hist-item[data-count='2'] .hist-update").count() == 2
+    assert sorted(p for p in gate.app_reads() if p.startswith("/api/")) == READS
+    assert len([p for p in gate.static_reads() if not p.endswith(".png")]) <= STATIC_BUDGET
+    assert not gate.page.evaluate(PROBE)["overflow"]
+    assert not gate.errors
+
+
 @pytest.mark.parametrize("locale,width", [("en", 1366), ("tr", 320)])
 def test_physique_region_switch_retains_keyboard_focus(app, gate, make_user, login, locale, width):
     name = "pr5region"

@@ -118,11 +118,12 @@ Example (illustrative values only — nothing here is hardcoded):
 **Progress V2 PR2 (additive, `contract_version` unchanged).** Two series feed
 the Trends visualizations; every v1 field is unchanged:
 
-- `body.weight_series` — the qualifying check-in weights (`yogunluk IS NOT
-  NULL`), oldest first, capped at `WEIGHT_SERIES_POINTS = 8`, each on its
-  Istanbul day (`app_date_of`). Produced by the SAME check-in query the delta
-  already used (only its `LIMIT` grew from 2 to 8); the delta still compares
-  the newest two rows only. Empty when there are none — never padded.
+- `body.weight_series` — one valid full check-in weight per Istanbul analysis
+  day (`app_date_of`), oldest first, capped at eight distinct days. The latest
+  valid row on each day wins (`created_at DESC, id DESC`). The database ranks
+  qualifying rows before the cap, then returns at most eight observations in
+  one query. Delta uses the newest two points from this same daily sequence.
+  Empty when there are none — never padded.
 - `weekly` — one entry per analysed week, oldest first: the progression
   report's own `weekly_volume` buckets (the objects `consistency` counts and
   `volume_trend` was computed from). `active` is `sessions > 0`, the exact rule
@@ -233,7 +234,7 @@ No BMI. No body-fat estimate. No rate-of-loss prescription.
 |---|---|
 | `current_weight_kg` | `User.weight`, falling back to the newest `WeeklyCheckIn` — the same fallback `/progress-page` already established |
 | `target_weight_kg` | `User.target_weight`, `null` when unset |
-| `weight_delta_kg` | latest minus previous of the **two latest qualifying** check-ins, rounded to 1 dp |
+| `weight_delta_kg` | latest canonical daily weight minus the previous distinct day's canonical weight, rounded to 1 dp |
 | `distance_to_target_kg` | `abs(current - target)`, only when both exist |
 
 **Qualifying** means a full weekly check-in, identified by
@@ -259,7 +260,7 @@ never produces a delta).
 | Situation | Published | Never |
 |---|---|---|
 | No target weight configured (or a stored non-positive one) | `null` | `0` |
-| Fewer than two qualifying check-ins | `weight_delta_kg: null` | `0.0` |
+| Fewer than two distinct qualifying analysis days | `weight_delta_kg: null` | `0.0` |
 | No training history | `building_baseline` / `insufficient_data` | flat progress presented as certainty |
 | Four analyzed weeks, none trained | `sessions: 0` (a real measured zero) | `null` |
 

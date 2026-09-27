@@ -124,7 +124,7 @@ def test_same_timestamp_uses_id_desc_tiebreak(make_user):
     db.session.commit()
     history = build_progress_history(user.id)
     assert [e.weight_kg for e in history.entries] == [79.0, 80.0]
-    assert history.entries[0].weight_delta_kg == -1.0
+    assert history.entries[0].weight_delta_kg is None  # only one analysis day
 
 
 def test_twelve_entry_bound_and_thirteenth_delta_context(make_user):
@@ -178,7 +178,7 @@ def test_day_cut_by_the_row_bound_is_left_out_whole(make_user):
     assert history.has_more is True
     oldest = history.entries[-1]
     assert oldest.weight_kg == 89.0
-    assert oldest.weight_delta_kg == -2.0      # vs the first dropped row (91.0)
+    assert oldest.weight_delta_kg == -2.0      # vs the latest row on prior day
 
 
 def test_day_ending_exactly_at_the_bound_is_kept(make_user):
@@ -579,7 +579,7 @@ def test_same_day_checkins_are_separate_records_all_kept(make_user):
     entries = build_progress_history(user.id).entries
     assert [e.weight_kg for e in entries] == [78.0, 78.4]
     assert [e.analysis_day for e in entries] == [END_DAY, END_DAY]
-    assert entries[0].weight_delta_kg == -0.4      # vs the earlier same-day one
+    assert entries[0].weight_delta_kg is None  # no earlier analysis day
     assert entries[1].weight_delta_kg is None
     # Day-granular reconstruction: identical training state for the day.
     assert entries[0].trajectory == entries[1].trajectory

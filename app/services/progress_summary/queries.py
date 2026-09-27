@@ -12,13 +12,17 @@ inside ``db.session.no_autoflush`` so the summary can never be the thing that
 flushes somebody else's pending work, and nothing in the package adds, deletes,
 flushes or commits (``tests/test_progress_summary.py`` pins this).
 """
+from datetime import datetime
+
+from sqlalchemy import Date, cast, func
+
 from app.extensions import db
 from app.models import User, WeeklyCheckIn
 from app.timeutil import app_date_of
 
 from .models import WEIGHT_SERIES_POINTS, BodyFacts, WeightPoint
 
-# The latest weight plus the one before it — a delta needs exactly two points.
+# Latest canonical day plus the previous canonical day.
 _DELTA_OBSERVATIONS = 2
 
 
@@ -38,6 +42,61 @@ def _positive(value):
     except (TypeError, ValueError):
         return None
     return numeric if numeric > 0 else None
+
+
+def _analysis_day_expression():
+    """SQL equivalent of ``app_date_of`` for supported database engines.
+
+    PostgreSQL has IANA timezone support. SQLite uses the same Python helper as
+    History through a deterministic scalar function on this session connection.
+    Registration adds no SELECT and respects historical timezone changes.
+    """
+    connection = db.session.connection()
+    if connection.dialect.name == "sqlite":
+        raw = connection.connection.driver_connection
+        raw.create_function(
+            "app_analysis_day", 1,
+            lambda stamp: app_date_of(datetime.fromisoformat(stamp)).isoformat()
+            if stamp is not None else None,
+            deterministic=True,
+        )
+        return func.app_analysis_day(WeeklyCheckIn.created_at)
+    if connection.dialect.name == "postgresql":
+        utc_instant = func.timezone("UTC", WeeklyCheckIn.created_at)
+        return cast(func.timezone("Europe/Istanbul", utc_instant), Date)
+    raise RuntimeError("unsupported database for Progress analysis day")
+
+
+def _canonical_daily_weights(user_id):
+    """Latest valid full check-in per Istanbul day, newest days first.
+
+    Rank before the eight-day cap so same-day rows cannot crowd older days
+    out. Timestamp then stable ID descending matches History event ordering.
+    One database statement returns at most eight rows; there is no day loop.
+    """
+    ranked = (
+        db.session.query(
+            WeeklyCheckIn.id.label("checkin_id"),
+            func.row_number().over(
+                partition_by=_analysis_day_expression(),
+                order_by=(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc()),
+            ).label("day_rank"),
+        )
+        .filter(WeeklyCheckIn.user_id == user_id,
+                WeeklyCheckIn.yogunluk.isnot(None),
+                WeeklyCheckIn.created_at.isnot(None),
+                WeeklyCheckIn.weight > 0,
+                WeeklyCheckIn.weight < 1e308)
+        .subquery()
+    )
+    return (
+        db.session.query(WeeklyCheckIn)
+        .join(ranked, WeeklyCheckIn.id == ranked.c.checkin_id)
+        .filter(ranked.c.day_rank == 1)
+        .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
+        .limit(WEIGHT_SERIES_POINTS)
+        .all()
+    )
 
 
 def fetch_body_facts(user_id: int) -> BodyFacts:
@@ -73,23 +132,11 @@ def fetch_body_facts(user_id: int) -> BodyFacts:
             )
             current = _positive(latest_any.weight) if latest_any else None
 
-        qualifying_rows = (
-            WeeklyCheckIn.query
-            .filter_by(user_id=user_id)
-            .filter(WeeklyCheckIn.yogunluk.isnot(None))
-            .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
-            # Progress V2 PR2: the SAME statement, a larger bound — the Weight
-            # sparkline reads the rows the delta already came from, so the
-            # summary still issues exactly one check-in-ledger query here.
-            .limit(WEIGHT_SERIES_POINTS)
-            .all()
-        )
+        qualifying_rows = _canonical_daily_weights(user_id)
 
-    # A row whose weight is not a usable number is not an observation. Dropping it
-    # rather than substituting zero is what keeps "fewer than two observations"
-    # honest instead of manufacturing a delta against a fake reading. The delta
-    # still looks at the newest two ROWS only, exactly as before the series
-    # existed: widening the fetch must not change which pair it compares.
+    # Delta and series use the same valid, canonical daily sequence. The query
+    # rejects invalid weights before ranking, so a later bad row cannot hide a
+    # real observation or manufacture a zero.
     weights = tuple(
         w for w in (_positive(row.weight) for row in qualifying_rows[:_DELTA_OBSERVATIONS])
         if w is not None
