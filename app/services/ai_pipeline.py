@@ -21,6 +21,15 @@ from flask import current_app
 from app.services import context_builder, memory_manager, moderation, response_formatter
 
 
+def _public_reply_fallback(language):
+    """Preserve truthful plan-write status if an unsafe reply follows a tool."""
+    from app.services import ai_coach
+    if (ai_coach.coach_plan_tools.plan_changed_this_turn()
+            or ai_coach.coach_plan_tools.proposal_created_this_turn()):
+        return ai_coach._coach_tool_fallback(language)
+    return response_formatter.error_fallback(language)
+
+
 def _maybe_enqueue_summarize(conversation):
     """WS8: özetlemeyi arka-plan işine ver — worker/kuyruk varsa kuyruğa (async,
     istek yolunu bloklamaz) ve None döner. Kuyruk YOKSA satır-içi ÇALIŞTIRMAZ:
@@ -146,6 +155,10 @@ def generate_answer(user_id, question, client_history=None, language="tr"):
             language=language, prepared_history=prepared_history)
 
         answer, is_fallback = response_formatter.finalize_reply(answer, language)
+        if (current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False)
+                and moderation.leaks_internal_coach_term(answer)):
+            answer = _public_reply_fallback(language)
+            is_fallback = True
         answer = moderation.moderate_reply(answer)
     except Exception:
         _emit_metrics("blocking", is_error=True)
@@ -199,6 +212,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
 
     from app.services import ai_stream
     parts = []
+    hold_for_public_check = bool(current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False))
     finished = False
     terminal_done_yielded = False
     try:
@@ -207,13 +221,16 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
             kind = event.get("type")
             if kind == "delta":
                 parts.append(event.get("text") or "")
-                yield event
+                if not hold_for_public_check:
+                    yield event
             elif kind == "error":
                 finished = True
                 partial_text = event.get("partial_text")
                 if partial_text is None:
                     partial_text = "".join(parts)
                 partial_text = partial_text.strip()
+                if hold_for_public_check:
+                    partial_text = ""  # no unchecked partial text is public
                 work_performed = bool(event.get("work_performed") or parts)
                 if partial_text:
                     _record(conversation, question, partial_text,
@@ -227,7 +244,15 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                 finished = True
                 answer, is_fallback = response_formatter.finalize_reply(
                     event.get("text"), language)
+                if hold_for_public_check:
+                    if moderation.leaks_internal_coach_term(answer):
+                        answer = _public_reply_fallback(language)
+                        is_fallback = True
+                    # Adaptive turns are held until validation. Tool calls and
+                    # provider calls are unchanged; only visible deltas wait.
                 answer = moderation.moderate_reply(answer)
+                if hold_for_public_check:
+                    yield {"type": "delta", "text": answer}
                 if not is_fallback:
                     _record(conversation, question, answer,
                             usage=event.get("usage"))
@@ -243,7 +268,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
         # SONRA yield ETMEK YASAK — yalnızca kısmi yanıtı kalıcılaştır ve çık.
         if not finished:
             partial = "".join(parts).strip()
-            if partial:
+            if partial and not hold_for_public_check:
                 _record(conversation, question, partial, interrupted=True)
                 current_app.logger.info(
                     "[PIPELINE][stream] istemci koptu — kısmi yanıt kaydedildi (%s kr)",

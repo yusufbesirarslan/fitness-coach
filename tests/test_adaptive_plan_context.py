@@ -478,7 +478,7 @@ def test_switching_flag_off_restores_exact_baseline(
 
     _stub_baseline_context_sources(monkeypatch)
     monkeypatch.setattr(
-        adapter, "build_adaptive_plan_context", lambda _uid: "[ADAPTIVE TEST BLOCK]"
+        adapter, "build_coach_plan_context", lambda _uid, _lang: "[ADAPTIVE TEST BLOCK]"
     )
 
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
@@ -499,8 +499,8 @@ def test_flag_on_injects_once_after_workout_history(
     calls = []
     monkeypatch.setattr(
         adapter,
-        "build_adaptive_plan_context",
-        lambda user_id: calls.append(user_id) or "[ADAPTIVE TEST BLOCK]",
+        "build_coach_plan_context",
+        lambda user_id, _lang: calls.append(user_id) or "[ADAPTIVE TEST BLOCK]",
     )
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
 
@@ -519,7 +519,7 @@ def test_enabled_context_has_openai_bedrock_provider_parity(
 
     _stub_baseline_context_sources(monkeypatch)
     monkeypatch.setattr(
-        adapter, "build_adaptive_plan_context", lambda _uid: "[ADAPTIVE TEST BLOCK]"
+        adapter, "build_coach_plan_context", lambda _uid, _lang: "[ADAPTIVE TEST BLOCK]"
     )
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
     context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
@@ -539,22 +539,16 @@ def test_enabled_context_has_openai_bedrock_provider_parity(
     assert bedrock_cached[1]["text"] == expected
 
 
-def test_empty_history_enabled_returns_complete_neutral_contract(
+def test_empty_history_enabled_returns_public_baseline(
     app, auth_user, monkeypatch
 ):
     _stub_baseline_context_sources(monkeypatch)
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
 
     context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
-    adaptive_block = context.split(
-        "\n\n[ADAPTIVE PLAN CONTRACT v1 - READ ONLY]\n", 1
-    )[1].split("\n\n[SUPPLEMENT STACK]", 1)[0]
-    serialized = adaptive_block.rsplit("\n", 1)[-1]
-    payload = json.loads(serialized)
-
-    assert payload["plan"]["has_data"] is False
-    assert payload["plan"]["week_focus"] == "insufficient_data"
-    assert payload["plan"]["reason_codes"] == ["insufficient_history"]
+    assert "[GÜNCEL ANTRENMAN ÖNERİSİ]" in context
+    assert "[ADAPTIVE PLAN CONTRACT" not in context
+    assert "schema_version" not in context
 
 
 def test_enabled_planner_is_user_scoped(app, make_user, monkeypatch):
@@ -590,7 +584,8 @@ def test_planner_failure_keeps_later_context_sections_available(
 
     context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
 
-    assert NEUTRAL_JSON in context
+    assert "Güncel öneri şu anda alınamıyor" in context
+    assert NEUTRAL_JSON not in context
     assert "[SUPPLEMENT STACK]\nsupplement-stack" in context
     assert "[BESLENME LOGU (3 g\u00fcn)]\nnutrition-log" in context
     assert "[ARKADA\u015e AKT\u0130V\u0130TELER\u0130]" in context
@@ -602,9 +597,9 @@ def test_prompt_authority_block_names_the_canonical_contract_header():
     from app.prompts import system as prompt_system
     from app.services import adaptive_plan_context as adapter
 
-    assert prompt_system.ADAPTIVE_PLAN_CONTEXT_HEADER == adapter.CONTEXT_HEADER
-    assert adapter.CONTEXT_HEADER in prompt_system.ADAPTIVE_COACH_SYSTEM_PROMPT
-    assert adapter.CONTEXT_HEADER not in prompt_system.COACH_SYSTEM_PROMPT
+    assert prompt_system.ADAPTIVE_PLAN_CONTEXT_HEADER == "[GÜNCEL ANTRENMAN ÖNERİSİ]"
+    assert adapter.CONTEXT_HEADER not in prompt_system.ADAPTIVE_COACH_SYSTEM_PROMPT
+    assert prompt_system.ADAPTIVE_PLAN_CONTEXT_HEADER in prompt_system.ADAPTIVE_COACH_SYSTEM_PROMPT
 
 
 def test_prompt_authority_is_flag_driven_on_both_providers(app, monkeypatch):

@@ -4,6 +4,7 @@ import json
 
 from flask import current_app
 
+from app.i18n import t
 from app.extensions import db
 from app.services.training_planning import AdaptivePlan, build_adaptive_plan
 
@@ -82,3 +83,60 @@ def build_adaptive_plan_context(user_id: int) -> str:
             serialized = _NEUTRAL_JSON
     current_app.logger.debug("[COACH][ADAPTIVE_PLAN] serialization completed")
     return _context_block(serialized)
+
+
+_COACH_NEUTRAL = {
+    "en": ("[CURRENT TRAINING GUIDANCE]\nCurrent guidance is temporarily unavailable. "
+           "Do not infer a new training adjustment from raw logs or check-ins."),
+    "tr": ("[GÜNCEL ANTRENMAN ÖNERİSİ]\nGüncel öneri şu anda alınamıyor. "
+           "Ham kayıtlardan veya check-in verilerinden yeni bir antrenman ayarı çıkarma."),
+}
+
+
+def project_coach_plan(plan: AdaptivePlan, language: str = "tr") -> str:
+    """Present the existing planner decision using Progress's public copy.
+
+    This does not select a new action or fetch a second report. Unknown vocabulary
+    fails neutral instead of exposing a machine code or guessing a decision.
+    """
+    from app.coach_handoff import ACTION_KEYS, INSIGHT_KEYS
+    from app.services.progress_insights.analysis import (
+        INSIGHT_BY_WEEK_FOCUS, NEXT_MOVE_BY_WEEK_FOCUS,
+    )
+
+    locale = language if language in _COACH_NEUTRAL else "tr"
+    try:
+        insight_code = INSIGHT_BY_WEEK_FOCUS[plan.week_focus]
+        action_code = NEXT_MOVE_BY_WEEK_FOCUS[plan.week_focus]
+        insight_key = INSIGHT_KEYS[insight_code]
+        action_key = ACTION_KEYS[action_code]
+    except (KeyError, TypeError):
+        return _COACH_NEUTRAL[locale]
+
+    lines = [
+        "[CURRENT TRAINING GUIDANCE]" if locale == "en" else "[GÜNCEL ANTRENMAN ÖNERİSİ]",
+        t(insight_key, locale=locale),
+        t(action_key, locale=locale),
+    ]
+    if plan.week_focus in ("overload", "deload"):
+        # Copy the planner's adjustment verbatim; do not derive one from trends.
+        percent = plan.volume_delta_pct * 100
+        if not (-100 <= percent <= 100):
+            return _COACH_NEUTRAL[locale]
+        amount = f"{percent:+g}%"
+        lines.append(
+            (f"Planned weekly volume change: {amount}." if locale == "en" else
+             f"Planlanan haftalık hacim değişimi: %{percent:+g}.")
+        )
+    return "\n".join(lines)
+
+
+def build_coach_plan_context(user_id: int, language: str = "tr") -> str:
+    """Build one Coach-safe projection from one canonical planner read."""
+    locale = language if language in _COACH_NEUTRAL else "tr"
+    try:
+        return project_coach_plan(build_adaptive_plan(user_id), locale)
+    except Exception:
+        _restore_session_usability()
+        current_app.logger.debug("[COACH][ADAPTIVE_PLAN] public projection fallback used")
+        return _COACH_NEUTRAL[locale]

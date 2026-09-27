@@ -144,9 +144,9 @@ def fetch_coach_context(user_id, question="", language="tr"):
     except Exception:
         current_app.logger.warning("[COACH] antrenman geçmişi alınamadı", exc_info=True)
     if current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False):
-        from app.services.adaptive_plan_context import build_adaptive_plan_context
+        from app.services.adaptive_plan_context import build_coach_plan_context
 
-        parts.append(build_adaptive_plan_context(user_id))
+        parts.append(build_coach_plan_context(user_id, language))
     try:
         parts.append(
             f"[SUPPLEMENT STACK]\n"
@@ -192,6 +192,11 @@ def fetch_coach_context(user_id, question="", language="tr"):
         }
         nudges = get_nudges(db.session.get(User, user_id), db, models,
                             getattr(g, "prev_last_login", None), language=language)
+        if current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False):
+            # These legacy directives independently prescribe deload/progression
+            # from raw check-ins and conflict with the canonical planner.
+            nudges = [n for n in nudges if not n.startswith(
+                ("NUDGE_RECOVERY:", "NUDGE_OVERLOAD_STALL:"))]
         if nudges:
             parts.append("[PROAKTİF BİLDİRİMLER]\n" + "\n".join(nudges))
     except Exception:
