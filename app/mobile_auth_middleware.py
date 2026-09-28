@@ -12,6 +12,9 @@ _MOBILE_PREAUTH_ENDPOINTS = frozenset({
     "mobile_api.login",
     "mobile_api.refresh",
     "mobile_api.logout",
+    "mobile_api.register",
+    "mobile_api.verify",
+    "mobile_api.verify_resend",
 })
 
 
@@ -107,4 +110,10 @@ def _safe_message(code):
         "AUTH_SESSION_EXPIRED": "Mobile session expired.",
         "AUTH_REFRESH_FAILED": "Refresh failed. Sign in again.",
         "AUTH_TEMPORARILY_UNAVAILABLE": "Authentication is temporarily unavailable.",
+        "AUTH_USERNAME_INVALID": "Username is not valid.",
+        "AUTH_EMAIL_INVALID": "Email address is not valid.",
+        "AUTH_PASSWORD_POLICY": "Password does not meet the password policy.",
+        "AUTH_IDENTITY_UNAVAILABLE": "Username or email is unavailable.",
+        "AUTH_VERIFICATION_CODE_INVALID":
+            "Verification code is invalid or expired.",
     }.get(code, "Authentication failed.")

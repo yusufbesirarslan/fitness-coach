@@ -56,6 +56,9 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/auth/login"),
         ("post", "/api/v1/auth/refresh"),
         ("post", "/api/v1/auth/logout"),
+        ("post", "/api/v1/auth/register"),
+        ("post", "/api/v1/auth/verify"),
+        ("post", "/api/v1/auth/verify/resend"),
         ("get", "/api/v1/account/me"),
         ("get", "/api/v1/nutrition/diary/today"),
         ("get", "/api/v1/today"),
@@ -117,6 +120,11 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         ("/api/v1/auth/login", ("POST",)),
         ("/api/v1/auth/refresh", ("POST",)),
         ("/api/v1/auth/logout", ("POST",)),
+        # LP-01 native registration/verification. Pre-auth, on this blueprint
+        # so they share its gate, envelope, no-store and 429 handler.
+        ("/api/v1/auth/register", ("POST",)),
+        ("/api/v1/auth/verify", ("POST",)),
+        ("/api/v1/auth/verify/resend", ("POST",)),
         ("/api/v1/account/me", ("GET",)),
             # Sprint 9 backend prerequisite. Product routes live on this blueprint
             # too, so the allow-list keeps covering every /api/v1 route there is.
