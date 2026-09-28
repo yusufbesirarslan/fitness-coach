@@ -62,6 +62,8 @@ def test_hierarchy_geometry_keyboard_and_back(app, auth_user, training_page, lan
     expect(page.get_by_role('tab')).to_have_text(labels)
     assert 'Create Plan tab' not in page.locator('main').inner_text()
     assert 'Plan Oluştur sekmesine' not in page.locator('main').inner_text()
+    # Browser coordinates can differ from 44 CSS px by floating-point precision.
+    target_floor = 44 - 0.0001
     for width in (320, 390, 430, 768, 1024, 1366):
         page.set_viewport_size({'width': width, 'height': 900})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
@@ -69,7 +71,8 @@ def test_hierarchy_geometry_keyboard_and_back(app, auth_user, training_page, lan
         for tab in page.get_by_role('tab').all():
             expect(tab).to_be_visible()
             box = tab.bounding_box()
-            assert box['width'] >= 44 and box['height'] >= 44
+            assert box['width'] >= target_floor and box['height'] >= target_floor
+            assert tab.evaluate('e => parseFloat(getComputedStyle(e).minHeight)') >= 44
         if width in (320, 1366):
             evidence = Path('docs/evidence/nutrition-pr2')
             evidence.mkdir(parents=True, exist_ok=True)
@@ -77,7 +80,8 @@ def test_hierarchy_geometry_keyboard_and_back(app, auth_user, training_page, lan
         for name in ('diary', 'history', 'water'):
             control = page.locator('#nutrition-tab-' + name)
             expect(control).to_be_visible()
-            assert control.bounding_box()['height'] >= 44
+            assert control.bounding_box()['height'] >= target_floor
+            assert control.evaluate('e => parseFloat(getComputedStyle(e).minHeight)') >= 44
     today = page.locator('#nutrition-tab-today')
     plan = page.locator('#nutrition-tab-plan')
     today.focus()
