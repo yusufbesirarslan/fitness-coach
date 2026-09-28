@@ -1,37 +1,8 @@
-"""Progress → Coach contextual handoff (Progress V2 PR3).
-
-"Review with AxisAI" on the Progress Axis Insight should land the user in
-Coach with the insight already on the table, so they do not have to re-explain
-their state, the signal, or the recommended move.
-
-How, and why this way:
-
-* The link carries ONE constant — ``/coach?review=progress-insight`` — and no
-  user data. Every page loads analytics (``templates/_head.html``), which
-  records the page location *including its query string*; an insight code in
-  the URL would ship the user's training state to a third party. So the URL
-  only says *which kind* of handoff this is.
-* The Coach route re-derives the insight SERVER-SIDE for the signed-in user
-  from the one canonical read model (``build_progress_insights``) — no second
-  interpretation, no client-supplied facts, nothing spoofable about another
-  user (the builder is owner-scoped by construction).
-* The result is a localized, user-voice message rendered into the existing
-  composer as a DRAFT. It is never auto-sent: rendering the page costs no model
-  call, and the user decides whether to send, edit or discard it. There is no
-  new persistence, no storage and no second Coach implementation.
-* Fail-soft: any failure (read, unknown vocabulary) returns ``None`` and Coach
-  opens exactly as it does without the parameter. A broken handoff must never
-  break the Coach page.
-
-The key tables are the Python twin of ``static/progress_presentation.js``
-``AXIS_INSIGHT`` / ``AXIS_ACTION``; ``tests/test_progress_axis_insight.py``
-proves the two agree, so Coach quotes the exact sentences Progress rendered.
-"""
+"""Progress to Coach handoff. Only the fixed kind crosses the client boundary."""
 from flask import current_app
 
 from app.i18n import t
 
-# The one accepted value of ``?review=``. Anything else is ignored.
 REVIEW_PROGRESS_INSIGHT = "progress-insight"
 
 INSIGHT_KEYS = {
@@ -43,7 +14,6 @@ INSIGHT_KEYS = {
     "holding_steady": "progress.axis_insight_holding_steady",
     "steady_with_dip": "progress.axis_insight_steady_with_dip",
 }
-
 ACTION_KEYS = {
     "build_baseline": "progress.axis_action_build_baseline",
     "prioritize_consistency": "progress.axis_action_prioritize_consistency",
@@ -54,34 +24,81 @@ ACTION_KEYS = {
 }
 
 
-def coach_handoff_message(review, user_id):
-    """The composer draft for ``?review=<review>``, or ``None``.
-
-    ``None`` whenever there is nothing honest to pre-fill: no/unknown
-    ``review`` value, an insight that cannot be built, or vocabulary this build
-    does not map. Never raises.
-    """
-    if review != REVIEW_PROGRESS_INSIGHT:
-        return None
+def _unavailable(exc):
+    from app.extensions import db
     try:
-        # Imported lazily: the Coach page must not pay for (or depend on) the
-        # training read stack unless the handoff was actually requested.
-        from app.services.progress_insights import build_progress_insights
+        db.session.rollback()
+    except Exception:
+        pass
+    current_app.logger.warning(
+        "[COACH][HANDOFF] state=unavailable error_class=%s", type(exc).__name__)
 
-        insight = build_progress_insights(user_id).insight
-    except Exception as e:  # fail-soft by design — see module docstring
-        current_app.logger.warning(
-            "[COACH][HANDOFF] review=%s state=unavailable error_class=%s",
-            REVIEW_PROGRESS_INSIGHT, type(e).__name__)
-        return None
+
+def _public_insight(user_id, language="tr", include_evidence=False):
+    """Re-derive owner-scoped canonical facts and project only public copy."""
+    from app.services.progress_insights import EVIDENCE_CODES, build_progress_insights
+
+    insight = build_progress_insights(user_id).insight
     if insight is None:
         return None
     insight_key = INSIGHT_KEYS.get(insight.code)
     action_key = ACTION_KEYS.get(insight.action_code)
     if not insight_key or not action_key:
         return None
-    # The lead line and its "why" together: the same two sentences Progress
-    # rendered as the interpretation.
-    insight_text = "%s %s" % (t(insight_key), t(insight_key + "_why"))
-    return t("coach.handoff_progress_insight",
-             insight=insight_text, action=t(action_key))
+    lines = [t(insight_key, locale=language),
+             t(insight_key + "_why", locale=language),
+             t(action_key, locale=language)]
+    if any(value.startswith("progress.") or "{" in value for value in lines):
+        return None
+    if include_evidence:
+        from app.services.adaptive_plan_context import planned_volume_copy
+
+        if insight.action is not None:
+            adjustment = planned_volume_copy(insight.action, language)
+            if adjustment:
+                lines.append(adjustment)
+        for item in insight.evidence:
+            if item.code not in EVIDENCE_CODES:
+                return None
+            params = item.params or {}
+            if not isinstance(params, dict) or any(
+                    not isinstance(v, int) or isinstance(v, bool) or v < 0
+                    for v in params.values()):
+                return None
+            rendered = t("progress.axis_evidence_" + item.code,
+                         locale=language, **params)
+            if rendered.startswith("progress.") or "{" in rendered:
+                return None
+            lines.append(rendered)
+    return lines
+
+
+def coach_handoff_message(review, user_id, language="tr"):
+    """Page preview and short draft, or None when the handoff is unavailable."""
+    if review != REVIEW_PROGRESS_INSIGHT:
+        return None
+    try:
+        lines = _public_insight(user_id, language)
+    except Exception as exc:
+        _unavailable(exc)
+        return None
+    if lines is None:
+        return None
+    return {"preview": lines[0], "action": lines[2],
+            "draft": t("coach.handoff_draft", locale=language)}
+
+
+def coach_handoff_context(review, user_id, language="tr"):
+    """Send-time context for the model. Never stored as user speech."""
+    if review != REVIEW_PROGRESS_INSIGHT:
+        return ""
+    try:
+        lines = _public_insight(user_id, language, include_evidence=True)
+    except Exception as exc:
+        _unavailable(exc)
+        return ""
+    if lines is None:
+        return ""
+    header = ("[CURRENT TRAINING GUIDANCE]" if language == "en" else
+              "[GÜNCEL ANTRENMAN ÖNERİSİ]")
+    return header + "\n[PROGRESS CONTEXT]\n" + "\n".join(lines)

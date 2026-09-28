@@ -290,6 +290,9 @@
     _stream:  '',     // akış sırasında biriken ham metin
     _raf:     0,
     _lastQ:   '',     // Yeniden üret için son kullanıcı sorusu
+    handoff:  null,   // fixed first-turn marker from the Coach page only
+    _lastHandoff: null,
+    _activeHandoff: null,
 
     init: function () {
       try {
@@ -378,7 +381,7 @@
       if (!question || this.busy) return;
       input.value = '';
       this._push('user', question);
-      this._ask(question);
+      this._ask(question, this.handoff);
     },
 
     /* Durdur: akışı iptal et. Sunucu bağlantı kopmasını görür ve o ana dek
@@ -397,12 +400,14 @@
       var last = this.messages[this.messages.length - 1];
       if (last && last.role === 'bot' && last.type !== 'menu') this.messages.pop();
       this._save();
-      this._ask(this._lastQ);
+      this._ask(this._lastQ, this._lastHandoff);
     },
 
-    _ask: function (question) {
+    _ask: function (question, handoff) {
       var self = this;
       this._lastQ = question;
+      this._lastHandoff = handoff;
+      this._activeHandoff = handoff;
       this._stream = '';
       this._setLoading(true);
 
@@ -422,7 +427,7 @@
       fetch('/ask/stream', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ question: question, history: history }),
+        body:    JSON.stringify({ question: question, history: history, handoff: handoff }),
         signal:  ctrl ? ctrl.signal : undefined
       })
       .then(function (r) {
@@ -464,11 +469,14 @@
       return fetch('/ask', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ question: question, history: history })
+        body:    JSON.stringify({ question: question, history: history,
+                                  handoff: this._activeHandoff })
       })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        self._finishStream('', false, d.answer || d.error || t('coach.no_reply'));
+        self._finishStream(d.answer || '', false,
+                           d.answer ? null : (d.error || t('coach.no_reply')),
+                           !!d.answer && !d.is_error_fallback);
       })
       .catch(function () {
         self._finishStream('', false, t('coach.conn_error'));
@@ -506,7 +514,8 @@
       try { d = data ? JSON.parse(data) : {}; } catch (_) { return; }
 
       if (ev === 'delta')      this._appendDelta(d.text || '');
-      else if (ev === 'done')  this._finishStream(d.text || this._stream, false);
+      else if (ev === 'done')  this._finishStream(d.text || this._stream, false,
+                                                 null, !d.is_error_fallback);
       else if (ev === 'error') this._finishStream('', false, d.message || t('coach.no_reply'));
       /* 'meta' (conversation_id): şimdilik bilgi amaçlı — WS6'da izleme için kullanılacak */
     },
@@ -535,7 +544,12 @@
 
     /* Akışı sonlandır. finalText: sunucunun kanonik (denetlenmiş) metni.
        stopped: kullanıcı Durdur'a bastı. errorText: dostça hata mesajı. */
-    _finishStream: function (finalText, stopped, errorText) {
+    _finishStream: function (finalText, stopped, errorText, succeeded) {
+      if (succeeded && this._activeHandoff && this.handoff === this._activeHandoff) {
+        this.handoff = null;
+        this._lastHandoff = null;
+        document.dispatchEvent(new CustomEvent('coach:handoff-consumed'));
+      }
       if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
       this._abort = null;
 
