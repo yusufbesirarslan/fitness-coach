@@ -262,17 +262,26 @@ function selectMealType(type, el) {
 }
 
 /* ── LOAD TODAY DATA ── */
-async function loadTodayData() {
+let _todayReadGeneration = 0;
+let _todayRefreshPending = false;
+async function loadTodayData(notifyFailure = false) {
+  const generation = ++_todayReadGeneration;
+  if (notifyFailure) _todayRefreshPending = true;
   try {
     const todayRes = await fetch('/meal-log/today');
+    if (!todayRes.ok) throw new Error('Today read failed');
     const today   = await todayRes.json();
+    if (generation !== _todayReadGeneration) return;
     const eaten = today.totals || {};
     const targets = today.targets;
     updateRing(eaten.kalori || 0, targets ? targets.kalori : null);
     updateMacroBars(eaten, targets);
     renderTimeline(today.meals || []);
+    _todayRefreshPending = false;
   } catch (e) {
     console.error('loadTodayData', e);
+    if (_todayRefreshPending && generation === _todayReadGeneration)
+      showToast(__t('route.macros_unavailable'), 'error');
   }
 }
 
@@ -760,10 +769,16 @@ async function getReview() {
 }
 
 /* ── MEAL HISTORY ── */
-async function loadMealHistory() {
+let _historyReadGeneration = 0;
+let _historyRefreshPending = false;
+async function loadMealHistory(notifyFailure = false) {
+  const generation = ++_historyReadGeneration;
+  if (notifyFailure) _historyRefreshPending = true;
   try {
     const res = await fetch('/meal-log/history');
+    if (!res.ok) throw new Error('History read failed');
     const data = await res.json();
+    if (generation !== _historyReadGeneration) return;
 
     // Weekly chart (last 7 days)
     renderWeeklyChart(data.slice(0, 7).reverse());
@@ -772,6 +787,7 @@ async function loadMealHistory() {
     const list = document.getElementById('history-list');
     if (!data.length) {
       list.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="empty-title">${__t('nutrition.no_records')}</div></div>`;
+      _historyRefreshPending = false;
       return;
     }
     list.innerHTML = data.map(day => `
@@ -791,8 +807,11 @@ async function loadMealHistory() {
             <div class="history-meal-foods">${esc(m.yemekler)}</div>
           </div>`).join('')}
       </div>`).join('');
+    _historyRefreshPending = false;
   } catch (e) {
     console.error('loadMealHistory', e);
+    if (_historyRefreshPending && generation === _historyReadGeneration)
+      showToast(__t('route.macros_unavailable'), 'error');
   }
 }
 
@@ -1925,11 +1944,24 @@ async function logDiaryMeal(mealName) {
     const res = await fetch('/api/diary/meal/' + mealId + '/log', { method: 'POST' });
     const d = await res.json();
     if (d.error) { showToast(d.error, 'error'); return; }
+    if (!res.ok) { showToast(__t('nutrition.save_error'), 'error'); return; }
     showToast(__t('nutrition.meal_saved_named', { meal: mealLabel(mealName) }), 'success');
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
     loadDiary();
+    // Diary is inline in Today: no tab transition will refresh its parent.
+    // Re-read the ledger; staging totals are not canonical consumed totals.
+    loadTodayData(true);
+    if (_nutritionNavigation.mode === 'today' &&
+        document.getElementById('nutrition-tool-history').open) {
+      loadMealHistory(true);
+    } else {
+      // Hidden History stays lazy, including an open disclosure under Plan.
+      _nutritionLoadedTools.delete('history');
+      ++_historyReadGeneration;
+      _historyRefreshPending = true;
+    }
   } catch (e) { showToast(__t('nutrition.save_error'), 'error'); }
 }
 
