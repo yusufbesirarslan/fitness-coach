@@ -48,6 +48,7 @@ response shape.
 | Identity binding | verified `sub` must resolve to the same local user | `test_both_paths_bind_the_verified_subject_to_the_local_user` |
 | Provider tokens | stored server-side, Fernet-encrypted, never returned to a client | `app/services/session_store.py` |
 | Blast radius | one client's rejection never touches the other's session | `test_web_session_row_is_untouched_by_a_mobile_rejection` |
+| Registration / verification | one authority, `app/services/account_registration.py`; neither transport calls the provider primitives; neither issues a session | `tests/test_account_registration_architecture.py` ([MOBILE_REGISTRATION.md](MOBILE_REGISTRATION.md)) |
 
 **`jwks_unavailable` is the load-bearing distinction.** "The signature could
 not be verified" is not "the signature is invalid". A cold JWKS cache is real

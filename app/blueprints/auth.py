@@ -273,6 +273,7 @@ def _registration_failure_response(failure, required_key):
         return jsonify({"error": t("auth.register_failed")}), 503
     return jsonify({"error": failure.detail}), 400
 
+
 def _reconcile_local_user(verified_claims, cognito_username):
     """H2: DOĞRULANMIŞ Cognito kimliğine karşılık gelen yerel kaydı bağla/oluştur.
 

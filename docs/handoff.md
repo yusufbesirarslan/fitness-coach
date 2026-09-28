@@ -1,3 +1,42 @@
+# LP-01 — Native registration & email verification contract
+
+Date: 2026-09-28
+
+`POST /api/v1/auth/register` (201), `/api/v1/auth/verify` (200) and
+`/api/v1/auth/verify/resend` (202) on the existing `mobile_api` blueprint,
+behind the unchanged `MOBILE_AUTH_ENABLED` gate. Web and mobile now share ONE
+registration authority, `app/services/account_registration.py`
+(normalization, validation, collision pre-check, Cognito call inside
+`blocking_concurrency_slot`, closed `Outcome` classification, local row,
+referral + welcome e-mail). Neither transport calls the Cognito registration
+primitives; neither issues a session — a verified user signs in through the
+unchanged login.
+
+Web parity: pinned by `tests/test_web_registration_characterization.py`
+(written against pre-extraction code). Two deliberate deltas
+(`tests/test_web_registration_lp01_deltas.py`): saturated capacity → 503 +
+`Retry-After: 15`; non-string JSON fields → "fields required" 400 instead of a
+500.
+
+Native security: taken username/e-mail, wrong/expired/unknown/confirmed code,
+and every account-specific resend outcome each answer identically; per-IP
+budgets match web; verify adds a per-username budget (charged on failures) and
+fails closed without the distributed throttle; resend adds a per-username
+budget. No flag, migration or rollout change.
+
+Test-harness note: `Limiter.init_app` returns early while disabled, so every
+test app after the first lacks the limiter's after-request hook and any
+`deduct_when` limit silently never charges; `tests/test_mobile_registration_api.py`'s
+`throttled` fixture re-binds it. Existing tests do not exercise login's
+per-username `deduct_when` budget and are unaffected.
+
+Next: LP-02 password recovery backend; LP-07 must not rely on native login to
+say "verify your account" (it answers `AUTH_INVALID_CREDENTIALS`).
+
+Authority: `docs/MOBILE_REGISTRATION.md`.
+
+---
+
 # Progress V2 PR3 — Axis Insight as one coaching surface
 
 Date: 2026-09-25

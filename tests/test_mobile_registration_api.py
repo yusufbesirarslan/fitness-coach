@@ -438,6 +438,9 @@ def test_register_taken_username_and_taken_email_are_indistinguishable(
     make_user("existing", email="existing@example.com")
     by_username = _register(raw_client, username="existing")
     by_email = _register(raw_client, email="EXISTING@example.com")
+    # A local collision is answered before any provider work: no Cognito
+    # account (and so no orphan) is created for an identity already taken.
+    assert provider["calls"]["sign_up"] == []
 
     provider["failures"]["sign_up"] = _provider_error("UsernameExistsException")
     by_provider = _register(raw_client, username="orphanuser",
