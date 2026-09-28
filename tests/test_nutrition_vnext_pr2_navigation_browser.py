@@ -96,6 +96,9 @@ def test_hierarchy_geometry_keyboard_and_back(app, auth_user, training_page, lan
     page.keyboard.press('Enter')
     expect(page.locator('#panel-diary')).to_be_visible()
     expect(diary).to_be_focused()
+    # Native details opens before its queued toggle records the history entry.
+    page.wait_for_function(
+        "history.state?.nutritionNavigation?.tools?.diary === true")
     page.evaluate('history.back()')
     expect(page.locator('#panel-diary')).to_be_hidden()
     expect(diary).to_be_focused()
