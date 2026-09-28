@@ -18,6 +18,7 @@
   "auth.welcome": "Welcome {username}!",
   "auth.login_unavailable": "Login is temporarily unavailable. Please try again shortly.",
   "auth.temporarily_unavailable": "The identity service is unreachable right now. Your session is still active; please try again shortly.",
+  "auth.service_busy": "The identity service is busy right now. Please try again shortly.",
   "auth.bad_credentials": "Incorrect username or password",
   "auth.verify_fields_required": "Username and verification code are required.",
   "auth.verify_done": "Your email is verified! You can now log in.",
