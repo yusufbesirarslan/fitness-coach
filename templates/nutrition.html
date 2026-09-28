@@ -92,42 +92,19 @@
   </div>
 
   <!-- Tab Bar -->
-  <div class="tab-bar" role="tablist">
-    <button id="nutrition-tab-today" class="tab-btn active" data-tab-name="today" data-action="switchTab" data-args='["today"]' role="tab" aria-selected="true" aria-controls="panel-today">
+  <div class="tab-bar" role="tablist" aria-label="{{ t('nutrition.modes_label') }}">
+    <button id="nutrition-tab-today" class="tab-btn active" data-tab-name="today" data-action="switchTab" data-args='["today"]' type="button" tabindex="0" role="tab" aria-selected="true" aria-controls="panel-today">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       {{ t('nutrition.tab_today') }}
     </button>
-    <button id="nutrition-tab-diary" class="tab-btn" data-tab-name="diary" data-action="switchTab" data-args='["diary"]' role="tab" aria-selected="false" aria-controls="panel-diary">
-      <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      {{ t('nutrition.tab_diary') }}
-    </button>
-    <button id="nutrition-tab-plan" class="tab-btn" data-tab-name="plan" data-action="switchTab" data-args='["plan"]' role="tab" aria-selected="false" aria-controls="panel-plan">
+    <button id="nutrition-tab-plan" class="tab-btn" data-tab-name="plan" data-action="switchTab" data-args='["plan"]' type="button" tabindex="-1" role="tab" aria-selected="false" aria-controls="panel-plan">
       <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      {{ t('nutrition.tab_plan') }}
-    </button>
-    <button id="nutrition-tab-history" class="tab-btn" data-tab-name="history" data-action="switchTab" data-args='["history"]' role="tab" aria-selected="false" aria-controls="panel-history">
-      <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      {{ t('nutrition.tab_history') }}
-    </button>
-    <button id="nutrition-tab-water" class="tab-btn" data-tab-name="water" data-action="switchTab" data-args='["water"]' role="tab" aria-selected="false" aria-controls="panel-water">
-      <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
-      {{ t('nutrition.tab_water') }}
+      {{ t('nutrition.mode_plan') }}
     </button>
   </div>
 
-  {#- UX-3 PR5 — Supplements is a CHILD DOMAIN of Nutrition, not a sixth daily
-      workflow tab. It is rendered BELOW the local tablist, outside it, with its
-      own kicker and its own `nav` landmark, so nothing about it reads as a peer
-      of Today/Diary/Nutrition Plan/History/Water. It is one link: the cabinet at
-      `/supplements` stays the only place supplements are edited, and this page
-      issues no Supplement query to draw it. -#}
-  <nav class="nutrition-child-domain" aria-label="{{ t('nutrition.child.aria') }}">
-    <span class="nutrition-child-kicker">{{ t('nutrition.child.kicker') }}</span>
-    <a class="nutrition-child-link" href="/supplements">{{ t('nutrition.child.supplements') }}</a>
-  </nav>
-
   <!-- ════════════════════════════════
-       TAB 1 — BUGÜN
+       TODAY
   ════════════════════════════════ -->
   <div class="tab-panel active" id="panel-today" role="tabpanel" aria-labelledby="nutrition-tab-today">
 
@@ -212,6 +189,29 @@
       </div>
     </div>
 
+  <details class="nutrition-tool" id="nutrition-tool-history" data-nutrition-tool="history">
+    <summary id="nutrition-tab-history" class="nutrition-tool-toggle" data-tab-name="history" aria-controls="panel-history">{{ t('nutrition.tab_history') }}</summary>
+  <div class="nutrition-tool-content" id="panel-history" role="region" aria-labelledby="nutrition-tab-history">
+
+    <div class="card" style="padding:24px;margin-bottom:20px;">
+      <h2 class="sec-label">{{ t('nutrition.weekly_cal') }}</h2>
+      <div class="bar-chart-wrap" id="weekly-chart">
+        <div class="chart-loading">{{ t('nutrition.loading_data') }}</div>
+      </div>
+    </div>
+
+    <h2 class="sec-label">{{ t('nutrition.meal_history') }}</h2>
+    <div id="history-list">
+      <div class="skel-card" style="margin-bottom:12px;">
+        <div class="skeleton" style="height:14px;width:30%;"></div>
+        <div class="skeleton" style="height:12px;width:70%;"></div>
+        <div class="skeleton" style="height:12px;width:55%;"></div>
+      </div>
+    </div>
+
+  </div><!-- /panel-history -->
+  </details>
+
     <!-- Quick add from plan (existing feature) -->
     <div id="quick-add-section" style="margin-top:20px;">
       <div class="fc-divider">
@@ -231,6 +231,27 @@
       <div id="quick-add-cards" style="display:flex;flex-direction:column;gap:8px;"></div>
     </div>
 
+  <details class="nutrition-tool" id="nutrition-tool-water" data-nutrition-tool="water">
+    <summary id="nutrition-tab-water" class="nutrition-tool-toggle" data-tab-name="water" aria-controls="panel-water">{{ t('nutrition.tab_water') }}</summary>
+  <div class="nutrition-tool-content" id="panel-water" role="region" aria-labelledby="nutrition-tab-water">
+
+    <div class="card water-card" style="padding:28px 24px;">
+      <h2 class="water-hdr">
+        <span class="water-dot" aria-hidden="true"></span>{{ t('nutrition.water_tracking') }}
+      </h2>
+      <div class="water-num" id="water-num">0</div>
+      <div class="water-denom">{{ t('nutrition.water_denom') }}</div>
+      <div class="water-glasses" id="water-glasses"></div>
+      <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
+      <button class="water-btn" id="water-btn" data-action="addWater">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        {{ t('nutrition.water_add_cup') }}
+      </button>
+    </div>
+
+  </div><!-- /panel-water -->
+  </details>
+
     <!-- AI daily review -->
     <div class="fc-divider" style="margin-top:20px;">
       <div class="fc-divider-line"></div>
@@ -242,13 +263,9 @@
       <div id="review-text" class="review-text"></div>
     </div>
 
-  </div><!-- /panel-today -->
-
-
-  <!-- ════════════════════════════════
-       TAB 2 — GÜNLÜK OLUŞTURUCU
-  ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-diary" role="tabpanel" aria-labelledby="nutrition-tab-diary">
+  <details class="nutrition-tool" id="nutrition-tool-diary" data-nutrition-tool="diary">
+    <summary id="nutrition-tab-diary" class="nutrition-tool-toggle" data-tab-name="diary" aria-controls="panel-diary">{{ t('nutrition.tab_diary') }}</summary>
+  <div class="nutrition-tool-content" id="panel-diary" role="region" aria-labelledby="nutrition-tab-diary">
 
     <h2 class="sec-label">{{ t('nutrition.diary_builder') }}</h2>
 
@@ -265,12 +282,21 @@
     </div>
 
   </div><!-- /panel-diary -->
+  </details>
+
+  </div><!-- /panel-today -->
 
 
-  <!-- ════════════════════════════════
-       TAB 3 — AI PLAN
-  ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-plan" role="tabpanel" aria-labelledby="nutrition-tab-plan">
+
+
+
+  <div class="tab-panel" id="panel-plan" hidden role="tabpanel" aria-labelledby="nutrition-tab-plan">
+
+    <h2 class="sec-label">{{ t('nutrition.tab_plan') }}</h2>
+  <nav class="nutrition-child-domain" aria-label="{{ t('nutrition.child.aria') }}">
+    <span class="nutrition-child-kicker">{{ t('nutrition.child.kicker') }}</span>
+    <a class="nutrition-child-link" href="/supplements">{{ t('nutrition.child.supplements') }}</a>
+  </nav>
 
     <div id="active-plan-detail" style="display:none;"></div>
 
@@ -306,50 +332,10 @@
   </div><!-- /panel-plan -->
 
 
-  <!-- ════════════════════════════════
-       TAB 4 — GEÇMİŞ
-  ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-history" role="tabpanel" aria-labelledby="nutrition-tab-history">
-
-    <div class="card" style="padding:24px;margin-bottom:20px;">
-      <h2 class="sec-label">{{ t('nutrition.weekly_cal') }}</h2>
-      <div class="bar-chart-wrap" id="weekly-chart">
-        <div class="chart-loading">{{ t('nutrition.loading_data') }}</div>
-      </div>
-    </div>
-
-    <h2 class="sec-label">{{ t('nutrition.meal_history') }}</h2>
-    <div id="history-list">
-      <div class="skel-card" style="margin-bottom:12px;">
-        <div class="skeleton" style="height:14px;width:30%;"></div>
-        <div class="skeleton" style="height:12px;width:70%;"></div>
-        <div class="skeleton" style="height:12px;width:55%;"></div>
-      </div>
-    </div>
-
-  </div><!-- /panel-history -->
 
 
-  <!-- ════════════════════════════════
-       TAB 5 — SU TAKİBİ
-  ════════════════════════════════ -->
-  <div class="tab-panel" id="panel-water" role="tabpanel" aria-labelledby="nutrition-tab-water">
 
-    <div class="card water-card" style="padding:28px 24px;">
-      <h2 class="water-hdr">
-        <span class="water-dot" aria-hidden="true"></span>{{ t('nutrition.water_tracking') }}
-      </h2>
-      <div class="water-num" id="water-num">0</div>
-      <div class="water-denom">{{ t('nutrition.water_denom') }}</div>
-      <div class="water-glasses" id="water-glasses"></div>
-      <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
-      <button class="water-btn" id="water-btn" data-action="addWater">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        {{ t('nutrition.water_add_cup') }}
-      </button>
-    </div>
 
-  </div><!-- /panel-water -->
 
 </main><!-- /main-content -->
 

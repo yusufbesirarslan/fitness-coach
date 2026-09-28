@@ -91,19 +91,92 @@ function showToast(msg, type = 'info', duration = 3500) {
   }, duration);
 }
 
-/* ── TAB SYSTEM ── */
-function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.remove('active');
-    b.setAttribute('aria-selected', 'false');
+/* Nutrition navigation: two modes and native Today disclosures.
+   Only UI state enters history; URLs and all business handlers stay canonical. */
+let _nutritionNavigation = { mode: 'today', tools: {} };
+const _nutritionTools = ['diary', 'history', 'water'];
+const _nutritionLoadedTools = new Set();
+
+function nutritionNavigationState(raw) {
+  const tools = {};
+  _nutritionTools.forEach(name => { tools[name] = Boolean(raw && raw.tools && raw.tools[name] === true); });
+  return { mode: raw && raw.mode === 'plan' ? 'plan' : 'today', tools };
+}
+
+function applyNutritionNavigation(raw, refreshToday = false, focusId = null) {
+  const next = nutritionNavigationState(raw);
+  const previous = _nutritionNavigation;
+  _nutritionNavigation = next;
+  ['today', 'plan'].forEach(name => {
+    const selected = next.mode === name;
+    const tab = document.getElementById('nutrition-tab-' + name);
+    const panel = document.getElementById('panel-' + name);
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    panel.classList.toggle('active', selected);
+    panel.hidden = !selected;
   });
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  btn.setAttribute('aria-selected', 'true');
-  document.getElementById('panel-' + name).classList.add('active');
-  if (name === 'today')   { loadTodayData(); loadQuickAddSection(); }
-  if (name === 'diary')   { loadDiary(); }
-  if (name === 'history') { loadMealHistory(); }
+  _nutritionTools.forEach(name => {
+    document.getElementById('nutrition-tool-' + name).open = next.tools[name];
+    if (next.mode === 'today' && next.tools[name] &&
+        (!previous.tools[name] || !_nutritionLoadedTools.has(name))) {
+      _nutritionLoadedTools.add(name);
+      if (name === 'diary') loadDiary();
+      if (name === 'history') loadMealHistory();
+    }
+  });
+  if (refreshToday && next.mode === 'today') { loadTodayData(); loadQuickAddSection(); }
+  if (focusId) document.getElementById(focusId)?.focus();
+}
+
+function rememberNutritionNavigation() {
+  history.pushState({ ...history.state, nutritionNavigation: _nutritionNavigation }, '', location.href);
+}
+
+// Preserve the published function and all actual in-page entry intents.
+function switchTab(name, btn) {
+  if (!['today', 'plan', ..._nutritionTools].includes(name)) return;
+  const next = nutritionNavigationState(_nutritionNavigation);
+  next.mode = name === 'plan' ? 'plan' : 'today';
+  if (_nutritionTools.includes(name)) next.tools[name] = true;
+  const changed = next.mode !== _nutritionNavigation.mode ||
+    _nutritionTools.some(tool => next.tools[tool] !== _nutritionNavigation.tools[tool]);
+  applyNutritionNavigation(next, name === 'today', 'nutrition-tab-' + name);
+  if (changed) rememberNutritionNavigation();
+}
+
+function initNutritionNavigation() {
+  const initial = nutritionNavigationState(history.state?.nutritionNavigation);
+  applyNutritionNavigation(initial);
+  history.replaceState({ ...history.state, nutritionNavigation: initial }, '', location.href);
+  _nutritionTools.forEach(name => {
+    const detail = document.getElementById('nutrition-tool-' + name);
+    detail.addEventListener('toggle', function () {
+      if (detail.open === _nutritionNavigation.tools[name]) return;
+      const next = nutritionNavigationState(_nutritionNavigation);
+      next.tools[name] = detail.open;
+      applyNutritionNavigation(next);
+      rememberNutritionNavigation();
+    });
+  });
+  document.querySelector('.tab-bar').addEventListener('keydown', function (event) {
+    if (!event.target.matches('[role="tab"]')) return;
+    let name;
+    if (event.key === 'Home') name = 'today';
+    else if (event.key === 'End') name = 'plan';
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+      name = _nutritionNavigation.mode === 'today' ? 'plan' : 'today';
+    else return;
+    event.preventDefault();
+    switchTab(name);
+  });
+  window.addEventListener('popstate', function (event) {
+    const next = nutritionNavigationState(event.state?.nutritionNavigation);
+    const changed = _nutritionTools.find(name => next.tools[name] !== _nutritionNavigation.tools[name]);
+    const focus = next.mode === 'today' && changed ? changed : next.mode;
+    applyNutritionNavigation(next, next.mode !== _nutritionNavigation.mode, 'nutrition-tab-' + focus);
+  });
 }
 
 /* ── OVERLAY A11Y: Esc ile kapat + açılışta odağı içeri al ── */
@@ -189,17 +262,26 @@ function selectMealType(type, el) {
 }
 
 /* ── LOAD TODAY DATA ── */
-async function loadTodayData() {
+let _todayReadGeneration = 0;
+let _todayRefreshPending = false;
+async function loadTodayData(notifyFailure = false) {
+  const generation = ++_todayReadGeneration;
+  if (notifyFailure) _todayRefreshPending = true;
   try {
     const todayRes = await fetch('/meal-log/today');
+    if (!todayRes.ok) throw new Error('Today read failed');
     const today   = await todayRes.json();
+    if (generation !== _todayReadGeneration) return;
     const eaten = today.totals || {};
     const targets = today.targets;
     updateRing(eaten.kalori || 0, targets ? targets.kalori : null);
     updateMacroBars(eaten, targets);
     renderTimeline(today.meals || []);
+    _todayRefreshPending = false;
   } catch (e) {
     console.error('loadTodayData', e);
+    if (_todayRefreshPending && generation === _todayReadGeneration)
+      showToast(__t('route.macros_unavailable'), 'error');
   }
 }
 
@@ -687,10 +769,16 @@ async function getReview() {
 }
 
 /* ── MEAL HISTORY ── */
-async function loadMealHistory() {
+let _historyReadGeneration = 0;
+let _historyRefreshPending = false;
+async function loadMealHistory(notifyFailure = false) {
+  const generation = ++_historyReadGeneration;
+  if (notifyFailure) _historyRefreshPending = true;
   try {
     const res = await fetch('/meal-log/history');
+    if (!res.ok) throw new Error('History read failed');
     const data = await res.json();
+    if (generation !== _historyReadGeneration) return;
 
     // Weekly chart (last 7 days)
     renderWeeklyChart(data.slice(0, 7).reverse());
@@ -699,6 +787,7 @@ async function loadMealHistory() {
     const list = document.getElementById('history-list');
     if (!data.length) {
       list.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="empty-title">${__t('nutrition.no_records')}</div></div>`;
+      _historyRefreshPending = false;
       return;
     }
     list.innerHTML = data.map(day => `
@@ -718,8 +807,11 @@ async function loadMealHistory() {
             <div class="history-meal-foods">${esc(m.yemekler)}</div>
           </div>`).join('')}
       </div>`).join('');
+    _historyRefreshPending = false;
   } catch (e) {
     console.error('loadMealHistory', e);
+    if (_historyRefreshPending && generation === _historyReadGeneration)
+      showToast(__t('route.macros_unavailable'), 'error');
   }
 }
 
@@ -1006,9 +1098,9 @@ async function loadQuickAddSection() {
 
     if (!d.exists) {
       container.innerHTML = `
-        <div class="qab-no-plan" data-action="fxGoToPlanTab">
+        <button type="button" class="qab-no-plan" data-action="fxGoToPlanTab">
           ${__t('nutrition.no_active_plan')}
-        </div>`;
+        </button>`;
       return;
     }
 
@@ -1852,11 +1944,24 @@ async function logDiaryMeal(mealName) {
     const res = await fetch('/api/diary/meal/' + mealId + '/log', { method: 'POST' });
     const d = await res.json();
     if (d.error) { showToast(d.error, 'error'); return; }
+    if (!res.ok) { showToast(__t('nutrition.save_error'), 'error'); return; }
     showToast(__t('nutrition.meal_saved_named', { meal: mealLabel(mealName) }), 'success');
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
     loadDiary();
+    // Diary is inline in Today: no tab transition will refresh its parent.
+    // Re-read the ledger; staging totals are not canonical consumed totals.
+    loadTodayData(true);
+    if (_nutritionNavigation.mode === 'today' &&
+        document.getElementById('nutrition-tool-history').open) {
+      loadMealHistory(true);
+    } else {
+      // Hidden History stays lazy, including an open disclosure under Plan.
+      _nutritionLoadedTools.delete('history');
+      ++_historyReadGeneration;
+      _historyRefreshPending = true;
+    }
   } catch (e) { showToast(__t('nutrition.save_error'), 'error'); }
 }
 
@@ -1922,6 +2027,7 @@ document.addEventListener('click', e => {
 })();
 
 /* ── INIT ── */
+initNutritionNavigation();
 populateFoods();
 loadTodayData();
 loadQuickAddSection();

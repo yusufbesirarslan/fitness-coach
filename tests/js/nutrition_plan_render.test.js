@@ -95,6 +95,7 @@ function loadNutritionPage(activePlanResponse, saveResponse) {
   const context = {
     document,
     console,
+    history: { state: null, replaceState(state) { this.state = state; }, pushState(state) { this.state = state; } },
     window: {
       t: (k) => k,
       LOCALE: 'tr',
@@ -120,7 +121,7 @@ function loadNutritionPage(activePlanResponse, saveResponse) {
     localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
     crypto: { randomUUID: () => 'uuid', getRandomValues: (a) => a },
     navigator: { language: 'tr' },
-    location: { pathname: '/nutrition', search: '' },
+    location: { pathname: '/nutrition', search: '', href: 'http://localhost/nutrition' },
     Intl, Date, JSON, Math,
   };
   context.globalThis = context;

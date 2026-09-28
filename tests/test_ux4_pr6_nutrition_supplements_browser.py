@@ -375,7 +375,8 @@ def test_nutrition_tabs_are_all_discoverable_touchable_and_keyboard_reachable(
           return {tabs, scrollable: bar.scrollWidth > bar.clientWidth + 1,
                   mask: cs.maskImage !== 'none' || (cs.webkitMaskImage || 'none') !== 'none'};
         }""")
-        assert len(bar["tabs"]) == 5
+        assert len(bar["tabs"]) == 2
+        assert not bar["scrollable"]
         # 43.5 matches `_small_controls` / the measure harness. Linux Chromium
         # reports CSS min-height: 44px as 43.99998 via getBoundingClientRect.
         assert all(t["h"] >= 43.5 for t in bar["tabs"]), (language, width, bar)
@@ -395,14 +396,15 @@ def test_nutrition_tabs_are_all_discoverable_touchable_and_keyboard_reachable(
     page.wait_for_selector(".meal-card")
     stops = _tab_walk(page)
     tab_ids = [s["id"] for s in stops if s["id"].startswith("nutrition-tab-")]
-    assert tab_ids == ["nutrition-tab-today", "nutrition-tab-diary", "nutrition-tab-plan",
-                       "nutrition-tab-history", "nutrition-tab-water"]
+    assert tab_ids == ["nutrition-tab-today", "nutrition-tab-history",
+                       "nutrition-tab-water", "nutrition-tab-diary"]
     assert all(s["indicator"] for s in stops)
     assert all(s["tabIndex"] <= 0 for s in stops)
     water = page.locator("#nutrition-tab-water")
     water.focus()
     page.keyboard.press("Enter")
-    expect(water).to_have_attribute("aria-selected", "true")
+    expect(page.locator("#nutrition-tab-today")).to_have_attribute("aria-selected", "true")
+    expect(water).not_to_have_attribute("role", "tab")
     expect(page.locator("#panel-water")).to_be_visible()
     expect(page.locator("#panel-water h2")).to_be_visible()
     traffic.clear()

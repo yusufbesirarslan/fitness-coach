@@ -132,22 +132,25 @@ def test_nutrition_child_entry_reaches_the_cabinet_without_a_sixth_tab(
 
     page.goto("http://localhost/nutrition")
 
-    # The five daily workflows are unchanged and Supplements is not one of them.
-    expect(page.locator('[role="tab"]')).to_have_count(5)
-    expect(page.locator('[role="tabpanel"]')).to_have_count(5)
+    # Two primary modes retain the existing workflows and a child Supplements entry.
+    expect(page.locator('[role="tab"]')).to_have_count(2)
+    expect(page.locator('[role="tabpanel"]')).to_have_count(2)
     expect(page.locator('[data-tab-name="supplements"]')).to_have_count(0)
     child = page.locator(".nutrition-child-domain")
-    expect(child).to_be_visible()
+    expect(child).to_be_hidden()
     expect(child.locator(".tab-btn")).to_have_count(0)
 
-    # The child entry survives switching local tabs — it belongs to the domain,
-    # not to one workflow.
-    for name in ("diary", "plan", "history", "water", "today"):
-        tab = page.locator(f'[data-tab-name="{name}"]')
-        tab.focus()
+    # Supplements belongs specifically to the Plan mode; Today tools stay separate.
+    expect(child).to_be_hidden()
+    for name in ("diary", "history", "water"):
+        control = page.locator(f'[data-tab-name="{name}"]')
+        control.focus()
         page.keyboard.press("Enter")
-        expect(tab).to_have_attribute("aria-selected", "true")
-        expect(child).to_be_visible()
+        expect(control).not_to_have_attribute("role", "tab")
+        expect(page.locator(f"#panel-{name}")).to_be_visible()
+        expect(child).to_be_hidden()
+    page.locator('#nutrition-tab-plan').click()
+    expect(child).to_be_visible()
 
     child.locator('a[href="/supplements"]').click()
     expect(page.locator(".stack-parent-context")).to_be_visible()
@@ -344,8 +347,10 @@ def test_hierarchy_is_readable_at_every_viewport_in_both_languages(
         assert _no_horizontal_overflow(page), ("plan", language, width)
 
         page.goto("http://localhost/nutrition")
+        expect(page.locator(".nutrition-child-domain")).to_be_hidden()
+        page.locator("#nutrition-tab-plan").click()
         expect(page.locator(".nutrition-child-domain")).to_be_visible()
-        expect(page.locator('[role="tab"]')).to_have_count(5)
+        expect(page.locator('[role="tab"]')).to_have_count(2)
         assert _no_horizontal_overflow(page), ("nutrition", language, width)
 
         page.goto("http://localhost/supplements")

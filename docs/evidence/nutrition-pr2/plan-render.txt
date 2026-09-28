@@ -1,0 +1,17 @@
+✔ esc() neutralises every HTML metacharacter (46.1991ms)
+✔ renderActivePlanDetail emits no markup from a poisoned stored plan (15.0361ms)
+✔ renderActivePlanDetail still shows real numbers and names (15.7827ms)
+✔ a legacy non-numeric macro renders as a placeholder, never as markup (15.7649ms)
+✔ a legacy numeric string still renders its value (15.1983ms)
+✔ loadQuickAddSection emits no markup from a poisoned stored plan (18.1078ms)
+✔ renderPlans emits no markup from a poisoned generator response (17.782ms)
+✔ a refused save is not reported as the active plan (18.9267ms)
+✔ an accepted save still marks the plan active (12.7245ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4716.5703

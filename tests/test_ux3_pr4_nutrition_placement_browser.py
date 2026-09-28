@@ -77,17 +77,23 @@ def test_plan_to_nutrition_hierarchy_local_tabs_and_responsive_layout(
 
             expect(page.locator(".nutrition-parent-context")).to_be_visible()
             expect(page.locator('[data-nav-id="plan"][aria-current="page"]')).to_have_count(2)
-            expect(page.locator('[role="tab"]')).to_have_count(5)
-            expect(page.locator('[role="tabpanel"]')).to_have_count(5)
+            expect(page.locator('[role="tab"]')).to_have_count(2)
+            expect(page.locator('[role="tabpanel"]')).to_have_count(2)
             assert page.evaluate(
                 "document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
             )
 
     for name in ("diary", "plan", "history", "water", "today"):
+        if name in ("diary", "history", "water"):
+            page.locator("#nutrition-tab-today").click()
         tab = page.locator(f'[data-tab-name="{name}"]')
         tab.focus()
         page.keyboard.press("Enter")
-        expect(tab).to_have_attribute("aria-selected", "true")
+        if name in ("today", "plan"):
+            expect(tab).to_have_attribute("aria-selected", "true")
+        else:
+            expect(tab).not_to_have_attribute("role", "tab")
+            expect(page.locator("#nutrition-tab-today")).to_have_attribute("aria-selected", "true")
         expect(page.locator(f"#panel-{name}")).to_be_visible()
 
     assert errors == []
@@ -123,7 +129,7 @@ def test_no_plan_mobile_keeps_today_diary_history_water_and_creation_working(
     diary_tab = page.locator('[data-tab-name="diary"]')
     diary_tab.focus()
     page.keyboard.press("Enter")
-    expect(diary_tab).to_have_attribute("aria-selected", "true")
+    expect(page.locator("#nutrition-tab-today")).to_have_attribute("aria-selected", "true")
     expect(page.locator("#panel-diary")).to_be_visible()
     expect(page.locator("#panel-diary .diary-meal-card")).to_have_count(4)
     expect(page.locator("#panel-diary .diary-food-search")).to_have_count(4)
@@ -134,7 +140,7 @@ def test_no_plan_mobile_keeps_today_diary_history_water_and_creation_working(
     history_tab = page.locator('[data-tab-name="history"]')
     history_tab.focus()
     page.keyboard.press("Enter")
-    expect(history_tab).to_have_attribute("aria-selected", "true")
+    expect(page.locator("#nutrition-tab-today")).to_have_attribute("aria-selected", "true")
     expect(page.locator("#panel-history")).to_contain_text("PR4 canonical meal")
 
     plan_tab = page.locator('[data-tab-name="plan"]')
@@ -143,6 +149,7 @@ def test_no_plan_mobile_keeps_today_diary_history_water_and_creation_working(
     expect(page.locator("#plan-form")).to_be_visible()
     expect(page.locator("#plan-btn")).to_be_visible()
 
+    page.locator('[data-tab-name="today"]').click()
     water_tab = page.locator('[data-tab-name="water"]')
     water_tab.focus()
     page.keyboard.press("Enter")

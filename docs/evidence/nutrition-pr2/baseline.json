@@ -1,0 +1,86 @@
+{
+  "query_count": 9,
+  "queries": [
+    "SELECT user.id AS user_id, user.username AS user_username, user.email AS user_email, user.password_hash AS user_password_hash, user.created_at AS user_created_at, user.language AS user_language, user.weight AS user_weight, user.height AS user_height, user.age AS user_age, user.gender AS user_gender, user.goal AS user_goal, user.fitness_level AS user_fitness_level, user.current_activity AS user_current_activity, user.profile_complete AS user_profile_complete, user.profile_picture AS user_profile_picture, user.profile_picture_key AS user_profile_picture_key, user.full_name AS user_full_name, user.target_weight AS user_target_weight, user.goal_type AS user_goal_type, user.streak_count AS user_streak_count, user.rank_points AS user_rank_points, user.weekly_xp AS user_weekly_xp, user.last_reward_week AS user_last_reward_week, user.last_login AS user_last_login, user.cognito_sub AS user_cognito_sub, user.credential_epoch AS user_credential_epoch, user.referral_code AS user_referral_code, user.referred_by_id AS user_referred_by_id, user.is_premium AS user_is_premium, user.premium_since AS user_premium_since, user.user_metadata AS user_user_metadata \nFROM user \nWHERE user.id = ?",
+    "SELECT user.last_login AS user_last_login, user.streak_count AS user_streak_count \nFROM user \nWHERE user.id = ?\n LIMIT ? OFFSET ?",
+    "SELECT challenge.id AS challenge_id, challenge.code AS challenge_code, challenge.title AS challenge_title, challenge.description AS challenge_description, challenge.category AS challenge_category, challenge.metric AS challenge_metric, challenge.target_value AS challenge_target_value, challenge.xp_reward AS challenge_xp_reward, challenge.badge_code AS challenge_badge_code, challenge.challenge_type AS challenge_challenge_type, challenge.period_type AS challenge_period_type, challenge.is_active AS challenge_is_active, challenge.created_at AS challenge_created_at \nFROM challenge \nWHERE challenge.metric = ? AND challenge.is_active = 1",
+    "UPDATE user SET streak_count=?, last_login=? WHERE user.id = ?",
+    "SELECT user.id AS user_id, user.username AS user_username, user.email AS user_email, user.password_hash AS user_password_hash, user.created_at AS user_created_at, user.language AS user_language, user.weight AS user_weight, user.height AS user_height, user.age AS user_age, user.gender AS user_gender, user.goal AS user_goal, user.fitness_level AS user_fitness_level, user.current_activity AS user_current_activity, user.profile_complete AS user_profile_complete, user.profile_picture AS user_profile_picture, user.profile_picture_key AS user_profile_picture_key, user.full_name AS user_full_name, user.target_weight AS user_target_weight, user.goal_type AS user_goal_type, user.streak_count AS user_streak_count, user.rank_points AS user_rank_points, user.weekly_xp AS user_weekly_xp, user.last_reward_week AS user_last_reward_week, user.last_login AS user_last_login, user.cognito_sub AS user_cognito_sub, user.credential_epoch AS user_credential_epoch, user.referral_code AS user_referral_code, user.referred_by_id AS user_referred_by_id, user.is_premium AS user_is_premium, user.premium_since AS user_premium_since, user.user_metadata AS user_user_metadata \nFROM user \nWHERE user.id = ?",
+    "SELECT cognito_session.id AS cognito_session_id, cognito_session.session_id AS cognito_session_session_id, cognito_session.user_id AS cognito_session_user_id, cognito_session.cognito_username AS cognito_session_cognito_username, cognito_session.access_token AS cognito_session_access_token, cognito_session.refresh_token AS cognito_session_refresh_token, cognito_session.access_token_exp AS cognito_session_access_token_exp, cognito_session.created_at AS cognito_session_created_at, cognito_session.last_used_at AS cognito_session_last_used_at \nFROM cognito_session \nWHERE cognito_session.session_id = ?\n LIMIT ? OFFSET ?",
+    "SELECT user.id AS user_id, user.username AS user_username, user.email AS user_email, user.password_hash AS user_password_hash, user.created_at AS user_created_at, user.language AS user_language, user.weight AS user_weight, user.height AS user_height, user.age AS user_age, user.gender AS user_gender, user.goal AS user_goal, user.fitness_level AS user_fitness_level, user.current_activity AS user_current_activity, user.profile_complete AS user_profile_complete, user.profile_picture AS user_profile_picture, user.profile_picture_key AS user_profile_picture_key, user.full_name AS user_full_name, user.target_weight AS user_target_weight, user.goal_type AS user_goal_type, user.streak_count AS user_streak_count, user.rank_points AS user_rank_points, user.weekly_xp AS user_weekly_xp, user.last_reward_week AS user_last_reward_week, user.last_login AS user_last_login, user.cognito_sub AS user_cognito_sub, user.credential_epoch AS user_credential_epoch, user.referral_code AS user_referral_code, user.referred_by_id AS user_referred_by_id, user.is_premium AS user_is_premium, user.premium_since AS user_premium_since, user.user_metadata AS user_user_metadata \nFROM user \nWHERE user.cognito_sub = ?\n LIMIT ? OFFSET ?",
+    "UPDATE cognito_session SET last_used_at=? WHERE cognito_session.session_id = ?",
+    "SELECT user.id AS user_id, user.username AS user_username, user.email AS user_email, user.password_hash AS user_password_hash, user.created_at AS user_created_at, user.language AS user_language, user.weight AS user_weight, user.height AS user_height, user.age AS user_age, user.gender AS user_gender, user.goal AS user_goal, user.fitness_level AS user_fitness_level, user.current_activity AS user_current_activity, user.profile_complete AS user_profile_complete, user.profile_picture AS user_profile_picture, user.profile_picture_key AS user_profile_picture_key, user.full_name AS user_full_name, user.target_weight AS user_target_weight, user.goal_type AS user_goal_type, user.streak_count AS user_streak_count, user.rank_points AS user_rank_points, user.weekly_xp AS user_weekly_xp, user.last_reward_week AS user_last_reward_week, user.last_login AS user_last_login, user.cognito_sub AS user_cognito_sub, user.credential_epoch AS user_credential_epoch, user.referral_code AS user_referral_code, user.referred_by_id AS user_referred_by_id, user.is_premium AS user_is_premium, user.premium_since AS user_premium_since, user.user_metadata AS user_user_metadata \nFROM user \nWHERE user.id = ?"
+  ],
+  "layouts": [
+    {
+      "width": 320,
+      "tabs": [
+        "\n      \n      Bug\u00fcn\n    ",
+        "\n      \n      G\u00fcnl\u00fck\n    ",
+        "\n      \n      Beslenme Plan\u0131\n    ",
+        "\n      \n      Ge\u00e7mi\u015f\n    ",
+        "\n      \n      Su Takibi\n    "
+      ],
+      "overflow": false,
+      "requests": {
+        "/nutrition": 1,
+        "/notifications/unread-count": 1,
+        "/meal-log/today": 1,
+        "/nutrition-plan/active": 1,
+        "/water": 1,
+        "/coach/history": 1
+      }
+    },
+    {
+      "width": 390,
+      "tabs": [
+        "\n      \n      Bug\u00fcn\n    ",
+        "\n      \n      G\u00fcnl\u00fck\n    ",
+        "\n      \n      Beslenme Plan\u0131\n    ",
+        "\n      \n      Ge\u00e7mi\u015f\n    ",
+        "\n      \n      Su Takibi\n    "
+      ],
+      "overflow": false,
+      "requests": {
+        "/nutrition": 1,
+        "/notifications/unread-count": 1,
+        "/meal-log/today": 1,
+        "/nutrition-plan/active": 1,
+        "/water": 1,
+        "/coach/history": 1
+      }
+    },
+    {
+      "width": 1366,
+      "tabs": [
+        "\n      \n      Bug\u00fcn\n    ",
+        "\n      \n      G\u00fcnl\u00fck\n    ",
+        "\n      \n      Beslenme Plan\u0131\n    ",
+        "\n      \n      Ge\u00e7mi\u015f\n    ",
+        "\n      \n      Su Takibi\n    "
+      ],
+      "overflow": false,
+      "requests": {
+        "/nutrition": 1,
+        "/notifications/unread-count": 1,
+        "/meal-log/today": 1,
+        "/nutrition-plan/active": 1,
+        "/water": 1,
+        "/coach/history": 1
+      }
+    }
+  ],
+  "lazy": {
+    "diary": {
+      "/api/diary/today": 1
+    },
+    "history": {
+      "/meal-log/history": 1
+    },
+    "plan": {},
+    "water": {},
+    "today": {
+      "/meal-log/today": 1
+    }
+  }
+}

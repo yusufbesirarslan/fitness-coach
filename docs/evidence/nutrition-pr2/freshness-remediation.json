@@ -1,0 +1,686 @@
+{
+  "baseline": {
+    "starting_head": "648f94568cf37b74a79c1ac6ff482758d1ccb509",
+    "starting_main": "f4b5fcd832b3c2c202d3334db58fa1d537e1fdcf",
+    "green_main_ci_run": 36376686878,
+    "rebased_pr2_head": "8214ed99003e469882849ea9d448c4a44be16694",
+    "merge_base": "f4b5fcd832b3c2c202d3334db58fa1d537e1fdcf",
+    "conflicts": 0,
+    "original_pr2_patch_equivalent": true
+  },
+  "real_diary_reproduction": [
+    {
+      "initial": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:13:56.303662",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "7mm46o7NToeJuih7DFY2MrVc",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 200.0,
+          "karb": 20.0,
+          "protein": 10.0,
+          "yag": 5.0
+        }
+      },
+      "mutation_request": "POST /api/diary/meal/1/log",
+      "mutation_response": {
+        "message": "Kahvaltı logged.",
+        "nutrients": {
+          "kalori": 525.0,
+          "karb": 60.0,
+          "protein": 30.0,
+          "yag": 12.0
+        }
+      },
+      "post_commit_requests": [
+        [
+          "/api/diary/meal/1/log",
+          null,
+          200
+        ],
+        [
+          "/api/diary/today",
+          null,
+          200
+        ]
+      ],
+      "canonical_today": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:13:56.303662",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "7mm46o7NToeJuih7DFY2MrVc",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          },
+          {
+            "created_at": "2026-09-28T05:13:59.115771",
+            "entry_token": "ZiVUAGxFWQEfi6REzA6ncEMD",
+            "has_photo": false,
+            "kalori": 525.0,
+            "karb": 60.0,
+            "ogun": "Kahvaltı",
+            "photo_url": null,
+            "protein": 30.0,
+            "revision": "ukhnu-1hFuLi4oqAPc1SoIEo",
+            "source": "diary",
+            "yag": 12.0,
+            "yemekler": "Freshness oats (100g)"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 725.0,
+          "karb": 80.0,
+          "protein": 40.0,
+          "yag": 17.0
+        }
+      },
+      "visible_today": {
+        "cards": 1,
+        "calories": "200"
+      },
+      "diary": "Breakfast\n525 kcal\nFreshness oats\n525 kcal · P:30g C:60g F:12g\ng\n✓ LOGGED",
+      "canonical_history": [
+        {
+          "tarih": "28.09",
+          "meals": [
+            {
+              "ogun": "Kahvaltı",
+              "yemekler": "Freshness oats (100g)",
+              "kalori": 525.0,
+              "protein": 30.0,
+              "karb": 60.0,
+              "yag": 12.0,
+              "photo_url": null
+            },
+            {
+              "ogun": "Öğle",
+              "yemekler": "Existing canonical meal",
+              "kalori": 200.0,
+              "protein": 10.0,
+              "karb": 20.0,
+              "yag": 5.0,
+              "photo_url": null
+            }
+          ],
+          "totals": {
+            "kalori": 725.0,
+            "protein": 40.0,
+            "karb": 80.0,
+            "yag": 17.0
+          }
+        }
+      ],
+      "history_open": false,
+      "visible_history": ""
+    },
+    {
+      "initial": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:14:06.363232",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "K8diUYT2ZR0fNzLG0UINlE4n",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 200.0,
+          "karb": 20.0,
+          "protein": 10.0,
+          "yag": 5.0
+        }
+      },
+      "mutation_request": "POST /api/diary/meal/1/log",
+      "mutation_response": {
+        "message": "Kahvaltı logged.",
+        "nutrients": {
+          "kalori": 525.0,
+          "karb": 60.0,
+          "protein": 30.0,
+          "yag": 12.0
+        }
+      },
+      "post_commit_requests": [
+        [
+          "/api/diary/meal/1/log",
+          null,
+          200
+        ],
+        [
+          "/api/diary/today",
+          null,
+          200
+        ]
+      ],
+      "canonical_today": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:14:06.363232",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "K8diUYT2ZR0fNzLG0UINlE4n",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          },
+          {
+            "created_at": "2026-09-28T05:14:09.202673",
+            "entry_token": "ZiVUAGxFWQEfi6REzA6ncEMD",
+            "has_photo": false,
+            "kalori": 525.0,
+            "karb": 60.0,
+            "ogun": "Kahvaltı",
+            "photo_url": null,
+            "protein": 30.0,
+            "revision": "tjV0kZgqTsmSjtgGEpDplF_a",
+            "source": "diary",
+            "yag": 12.0,
+            "yemekler": "Freshness oats (100g)"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 725.0,
+          "karb": 80.0,
+          "protein": 40.0,
+          "yag": 17.0
+        }
+      },
+      "visible_today": {
+        "cards": 1,
+        "calories": "200"
+      },
+      "diary": "Breakfast\n525 kcal\nFreshness oats\n525 kcal · P:30g C:60g F:12g\ng\n✓ LOGGED",
+      "canonical_history": [
+        {
+          "tarih": "28.09",
+          "meals": [
+            {
+              "ogun": "Kahvaltı",
+              "yemekler": "Freshness oats (100g)",
+              "kalori": 525.0,
+              "protein": 30.0,
+              "karb": 60.0,
+              "yag": 12.0,
+              "photo_url": null
+            },
+            {
+              "ogun": "Öğle",
+              "yemekler": "Existing canonical meal",
+              "kalori": 200.0,
+              "protein": 10.0,
+              "karb": 20.0,
+              "yag": 5.0,
+              "photo_url": null
+            }
+          ],
+          "totals": {
+            "kalori": 725.0,
+            "protein": 40.0,
+            "karb": 80.0,
+            "yag": 17.0
+          }
+        }
+      ],
+      "history_open": true,
+      "visible_history": "28.09\nCalories: 200\nP: 10g\nC: 20g\nF: 5g\nLUNCH · 200 KCAL\nExisting canonical meal"
+    },
+    {
+      "initial": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:14:16.671015",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "UW96oSi2vkpaqHuFtM9uuleA",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 200.0,
+          "karb": 20.0,
+          "protein": 10.0,
+          "yag": 5.0
+        }
+      },
+      "mutation_request": "POST /api/diary/meal/1/log",
+      "mutation_response": {
+        "message": "Kahvaltı kaydedildi.",
+        "nutrients": {
+          "kalori": 525.0,
+          "karb": 60.0,
+          "protein": 30.0,
+          "yag": 12.0
+        }
+      },
+      "post_commit_requests": [
+        [
+          "/api/diary/meal/1/log",
+          null,
+          200
+        ],
+        [
+          "/api/diary/today",
+          null,
+          200
+        ]
+      ],
+      "canonical_today": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:14:16.671015",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "UW96oSi2vkpaqHuFtM9uuleA",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          },
+          {
+            "created_at": "2026-09-28T05:14:19.697637",
+            "entry_token": "ZiVUAGxFWQEfi6REzA6ncEMD",
+            "has_photo": false,
+            "kalori": 525.0,
+            "karb": 60.0,
+            "ogun": "Kahvaltı",
+            "photo_url": null,
+            "protein": 30.0,
+            "revision": "oq0IycMen7B9vwREwGkI03_G",
+            "source": "diary",
+            "yag": 12.0,
+            "yemekler": "Freshness oats (100g)"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 725.0,
+          "karb": 80.0,
+          "protein": 40.0,
+          "yag": 17.0
+        }
+      },
+      "visible_today": {
+        "cards": 1,
+        "calories": "200"
+      },
+      "diary": "Kahvaltı\n525 kcal\nFreshness oats\n525 kcal · P:30g K:60g Y:12g\ng\n✓ KAYDEDİLDİ",
+      "canonical_history": [
+        {
+          "tarih": "28.09",
+          "meals": [
+            {
+              "ogun": "Kahvaltı",
+              "yemekler": "Freshness oats (100g)",
+              "kalori": 525.0,
+              "protein": 30.0,
+              "karb": 60.0,
+              "yag": 12.0,
+              "photo_url": null
+            },
+            {
+              "ogun": "Öğle",
+              "yemekler": "Existing canonical meal",
+              "kalori": 200.0,
+              "protein": 10.0,
+              "karb": 20.0,
+              "yag": 5.0,
+              "photo_url": null
+            }
+          ],
+          "totals": {
+            "kalori": 725.0,
+            "protein": 40.0,
+            "karb": 80.0,
+            "yag": 17.0
+          }
+        }
+      ],
+      "history_open": false,
+      "visible_history": ""
+    },
+    {
+      "initial": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:14:27.096055",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "NUj34FAqQgBjsfRj_NAmLAN0",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 200.0,
+          "karb": 20.0,
+          "protein": 10.0,
+          "yag": 5.0
+        }
+      },
+      "mutation_request": "POST /api/diary/meal/1/log",
+      "mutation_response": {
+        "message": "Kahvaltı kaydedildi.",
+        "nutrients": {
+          "kalori": 525.0,
+          "karb": 60.0,
+          "protein": 30.0,
+          "yag": 12.0
+        }
+      },
+      "post_commit_requests": [
+        [
+          "/api/diary/meal/1/log",
+          null,
+          200
+        ],
+        [
+          "/api/diary/today",
+          null,
+          200
+        ]
+      ],
+      "canonical_today": {
+        "meals": [
+          {
+            "created_at": "2026-09-28T05:14:27.096055",
+            "entry_token": "OQvAUajFqN6flH77R1qaYEw6",
+            "has_photo": false,
+            "kalori": 200.0,
+            "karb": 20.0,
+            "ogun": "Öğle",
+            "photo_url": null,
+            "protein": 10.0,
+            "revision": "NUj34FAqQgBjsfRj_NAmLAN0",
+            "source": "manual",
+            "yag": 5.0,
+            "yemekler": "Existing canonical meal"
+          },
+          {
+            "created_at": "2026-09-28T05:14:30.419146",
+            "entry_token": "ZiVUAGxFWQEfi6REzA6ncEMD",
+            "has_photo": false,
+            "kalori": 525.0,
+            "karb": 60.0,
+            "ogun": "Kahvaltı",
+            "photo_url": null,
+            "protein": 30.0,
+            "revision": "QcENURKnCxMMDInTlv7ByvBy",
+            "source": "diary",
+            "yag": 12.0,
+            "yemekler": "Freshness oats (100g)"
+          }
+        ],
+        "remaining": null,
+        "targets": null,
+        "tarih": "28.09",
+        "totals": {
+          "kalori": 725.0,
+          "karb": 80.0,
+          "protein": 40.0,
+          "yag": 17.0
+        }
+      },
+      "visible_today": {
+        "cards": 1,
+        "calories": "200"
+      },
+      "diary": "Kahvaltı\n525 kcal\nFreshness oats\n525 kcal · P:30g K:60g Y:12g\ng\n✓ KAYDEDİLDİ",
+      "canonical_history": [
+        {
+          "tarih": "28.09",
+          "meals": [
+            {
+              "ogun": "Kahvaltı",
+              "yemekler": "Freshness oats (100g)",
+              "kalori": 525.0,
+              "protein": 30.0,
+              "karb": 60.0,
+              "yag": 12.0,
+              "photo_url": null
+            },
+            {
+              "ogun": "Öğle",
+              "yemekler": "Existing canonical meal",
+              "kalori": 200.0,
+              "protein": 10.0,
+              "karb": 20.0,
+              "yag": 5.0,
+              "photo_url": null
+            }
+          ],
+          "totals": {
+            "kalori": 725.0,
+            "protein": 40.0,
+            "karb": 80.0,
+            "yag": 17.0
+          }
+        }
+      ],
+      "history_open": true,
+      "visible_history": "28.09\nKalori: 200\nP: 10g\nK: 20g\nY: 5g\nÖĞLE · 200 KCAL\nExisting canonical meal"
+    }
+  ],
+  "request_topology": {
+    "initial_non_static": {
+      "before": 6,
+      "after": 6
+    },
+    "initial_route_queries": {
+      "before": 9,
+      "after": 9
+    },
+    "diary_commit_history_closed": {
+      "before": 2,
+      "after": 3
+    },
+    "diary_commit_history_open": {
+      "before": 2,
+      "after": 4
+    },
+    "new_provider_calls": 0,
+    "new_ai_calls": 0,
+    "new_polling": 0
+  },
+  "validation": {
+    "final_pr2_passed": 57,
+    "freshness_behavioral_cases": 13,
+    "freshness_mutations_detected": 12,
+    "existing_pr2_cases": 32,
+    "other_focused_regressions_passed": 314,
+    "plan_node_rendering_passed": 9,
+    "node_syntax_passed": true,
+    "environment_triage_corrected": {
+      "temp_directory_cases_passed": 4,
+      "remaining_cases_passed": 7
+    },
+    "full_repository_suite": {
+      "status": "Completed; every monolithic failure/error cleared by isolated environment-corrected reruns",
+      "monolithic_result": "160 failed, 8002 passed, 62 skipped, 8 deselected, 123 errors",
+      "environment_causes": [
+        "Windows command length limit in Node -e transport: 22 cases now pass with identical script on stdin",
+        "Windows file descriptor exhaustion after 88 percent: remaining 261 cases rerun in fresh file-level processes"
+      ],
+      "node_stdin_rerun_passed": 22,
+      "isolated_reruns_passed": 282,
+      "unique_failed_or_error_nodes": 282,
+      "rerun_results": [
+        {
+          "file": "tests/test_progress_axis_insight.py",
+          "cases": 22,
+          "exit_code": 1,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-0.txt"
+        },
+        {
+          "file": "tests/test_ux4_pr5_plan_hierarchy_browser.py",
+          "cases": 37,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-1.txt",
+          "passed": 36
+        },
+        {
+          "file": "tests/test_ux4_pr5_plan_hierarchy_contract.py",
+          "cases": 14,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-2.txt",
+          "passed": 14
+        },
+        {
+          "file": "tests/test_ux4_pr6_nutrition_supplements_contract.py",
+          "cases": 18,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-3.txt",
+          "passed": 18
+        },
+        {
+          "file": "tests/test_ux4_pr8_consistency_gate.py",
+          "cases": 99,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-4.txt",
+          "passed": 99
+        },
+        {
+          "file": "tests/test_web_logout_global_revocation.py",
+          "cases": 4,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-5.txt",
+          "passed": 4
+        },
+        {
+          "file": "tests/test_web_meal_correction.py",
+          "cases": 2,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-6.txt",
+          "passed": 2
+        },
+        {
+          "file": "tests/test_ux4_pr6_nutrition_supplements_browser.py",
+          "cases": 10,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-7.txt",
+          "passed": 10
+        },
+        {
+          "file": "tests/test_ux4_pr7_browser.py",
+          "cases": 12,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-8.txt",
+          "passed": 12
+        },
+        {
+          "file": "tests/test_ux4_pr8_browser.py",
+          "cases": 65,
+          "exit_code": 0,
+          "log": "docs\\evidence\\nutrition-pr2\\freshness-resource-rerun-9.txt",
+          "passed": 65
+        }
+      ],
+      "monolithic_green": false,
+      "remaining_failures": 0
+    },
+    "failure_order_regressions": {
+      "red": "3 failed",
+      "green": "3 passed",
+      "mutations_detected": 4
+    }
+  },
+  "independent_review": {
+    "initial_blocking_p2": 2,
+    "hidden_open_history": {
+      "red": "1 failed",
+      "green": "1 passed",
+      "mutation_detected": true
+    },
+    "older_read_overwrite": {
+      "red": "2 failed",
+      "green": "2 passed",
+      "mutations_detected": 2
+    },
+    "other_material_findings": 0,
+    "closure_method": "Real-browser RED-to-GREEN regressions and controlled mutations"
+  },
+  "authority": {
+    "consumed_food": "MealLog",
+    "today": "/meal-log/today",
+    "history": "/meal-log/history",
+    "new_client_business_state": false
+  },
+  "out_of_scope_changed": false,
+  "remote_writes": false,
+  "final_remote_gate": {
+    "origin_main": "f4b5fcd832b3c2c202d3334db58fa1d537e1fdcf",
+    "ci_run": 36376686878,
+    "ci_conclusion": "success",
+    "pr_exists": false,
+    "remote_writes": false
+  }
+}
