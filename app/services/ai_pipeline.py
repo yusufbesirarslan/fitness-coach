@@ -93,11 +93,15 @@ def _memory_stage(user_id):
         return None, None, None
 
 
-def _context_stage(user_id, question, language):
+def _context_stage(user_id, question, language, handoff=None):
     """Bağlam sorgularında geçici DB arızası olsa bile function-calling akışı
     (FatSecret + SQLAlchemy) bağımsız olarak çalışmaya devam eder."""
     try:
-        return context_builder.fetch_coach_context(user_id, question, language=language)
+        if handoff is None:
+            return context_builder.fetch_coach_context(user_id, question,
+                                                       language=language)
+        return context_builder.fetch_coach_context(user_id, question,
+                                                   language=language, handoff=handoff)
     except Exception:
         current_app.logger.warning("[PIPELINE] koç bağlamı kurulamadı", exc_info=True)
         return ""
@@ -131,7 +135,7 @@ def _record(conversation, question, answer, usage=None, interrupted=False):
         current_app.logger.warning("[PIPELINE] tur kalıcılaştırılamadı", exc_info=True)
 
 
-def generate_answer(user_id, question, client_history=None, language="tr"):
+def generate_answer(user_id, question, client_history=None, language="tr", handoff=None):
     """Koç sorusu için uçtan uca modüler hat (bloklayıcı — /ask).
 
     Dönüş: {"answer": str, "is_error_fallback": bool, "conversation_id": int|None,
@@ -144,7 +148,8 @@ def generate_answer(user_id, question, client_history=None, language="tr"):
         raise ValueError(err_key)
 
     conversation, prepared_history, deferred_summarize = _memory_stage(user_id)
-    context = _context_stage(user_id, question, language)
+    context = (_context_stage(user_id, question, language) if handoff is None
+               else _context_stage(user_id, question, language, handoff))
 
     # Çağrı-anı çözümleme (modül attribute'u üzerinden): testler ve gelecekteki
     # sağlayıcı değişimleri ai_coach._run_coach_conversation'ı patch'leyebilsin.
@@ -176,7 +181,7 @@ def generate_answer(user_id, question, client_history=None, language="tr"):
             "deferred_summarize": deferred_summarize}
 
 
-def stream_answer(user_id, question, client_history=None, language="tr"):
+def stream_answer(user_id, question, client_history=None, language="tr", handoff=None):
     """Koç sorusu için AKIŞLI hat (WS2 — /ask/stream). Olay üreticisi.
 
     Ürettiği olaylar (route bunları SSE çerçevesine sarar):
@@ -196,7 +201,8 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
         raise ValueError(err_key)
 
     conversation, prepared_history, deferred_summarize = _memory_stage(user_id)
-    context = _context_stage(user_id, question, language)
+    context = (_context_stage(user_id, question, language) if handoff is None
+               else _context_stage(user_id, question, language, handoff))
 
     # Kalıcı hafıza penceresi varsa onu kullan; yoksa (hafıza kapalı/arızalı)
     # bloklayıcı yoldaki client-history davranışının aynısına düş.

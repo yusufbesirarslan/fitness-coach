@@ -111,7 +111,7 @@ def fetch_profile_and_trends(user_id):
     return parts
 
 
-def fetch_coach_context(user_id, question="", language="tr"):
+def fetch_coach_context(user_id, question="", language="tr", handoff=None):
     assert_principal(user_id)
     # Not: Beslenme makroları artık koç araçları (fetch_nutrition_and_stage_log)
     # üzerinden tek yoldan gelir; burada FatSecret verisi enjekte ETMİYORUZ ki
@@ -143,7 +143,11 @@ def fetch_coach_context(user_id, question="", language="tr"):
             f"{coach_context_queries.get_user_workout_history(user_id, 7)}")
     except Exception:
         current_app.logger.warning("[COACH] antrenman geçmişi alınamadı", exc_info=True)
-    if current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False):
+    from app.coach_handoff import coach_handoff_context
+    handoff_context = coach_handoff_context(handoff, user_id, language)
+    if handoff_context:
+        parts.append(handoff_context)
+    elif current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False):
         from app.services.adaptive_plan_context import build_coach_plan_context
 
         parts.append(build_coach_plan_context(user_id, language))

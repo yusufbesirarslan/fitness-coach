@@ -21,7 +21,7 @@ from app.services.premium import (
     reservation_week,
     reserve_ai_quota,
 )
-from app.coach_handoff import coach_handoff_message
+from app.coach_handoff import REVIEW_PROGRESS_INSIGHT, coach_handoff_message
 from app.i18n import t
 from app.timeutil import app_date_of, app_today
 
@@ -45,11 +45,10 @@ def coach_page():
     request-zamanında okunur; geçersiz/eksik → KAPALI → eski coach.html (fail-safe).
     Veri çekme/iş mantığı yine YOK; her iki yolda da @require_auth korunur."""
     template = "coach_v2.html" if current_app.config.get("UIUX_COACH_PAGE_V2_ENABLED", False) else "coach.html"
-    # Progress V2 PR3: `?review=progress-insight` (a constant, never user
-    # data) asks for the Axis Insight to be pre-filled as a composer DRAFT.
-    # Re-derived server-side for the signed-in user; never auto-sent; any
-    # failure → None and the page renders exactly as without it.
-    handoff = coach_handoff_message(request.args.get("review"), current_user.id)
+    # Only the fixed handoff kind is in the URL. The page renders a short
+    # editable draft and a compact preview; send-time facts are derived again.
+    handoff = coach_handoff_message(request.args.get("review"), current_user.id,
+                                    current_user.language)
     return render_template(template, username=current_user.username,
                            profile_picture=current_user.avatar_src,
                            coach_handoff=handoff)
@@ -218,8 +217,10 @@ def ask_coach():
     lang = current_user.language
     user_id = current_user.id
     try:
+        handoff_kw = ({"handoff": REVIEW_PROGRESS_INSIGHT}
+                      if data.get("handoff") == REVIEW_PROGRESS_INSIGHT else {})
         result = generate_answer(user_id, question, client_history,
-                                 language=lang)
+                                 language=lang, **handoff_kw)
         # Sağlayıcı dostça bir hata metni döndürürse önceden ayrılan hakkı geri ver.
         if result["is_error_fallback"]:
             ai_recovery.record_ai_failure(user_id)  # WS7: ardışık-arıza sayacı
@@ -233,6 +234,7 @@ def ask_coach():
         else:
             ai_recovery.clear_ai_failures(user_id)  # başarı → sayaç sıfırla
         resp = jsonify({"answer": result["answer"],
+                        "is_error_fallback": result["is_error_fallback"],
                         "conversation_id": result["conversation_id"]})
         deferred_summarize = result.get("deferred_summarize")
         if deferred_summarize is not None:
@@ -314,8 +316,10 @@ def ask_coach_stream():
     def generate():
         work_performed = False
         try:
+            handoff_kw = ({"handoff": REVIEW_PROGRESS_INSIGHT}
+                          if data.get("handoff") == REVIEW_PROGRESS_INSIGHT else {})
             for event in stream_answer(user_id, question, client_history,
-                                       language=lang):
+                                       language=lang, **handoff_kw):
                 kind = event["type"]
                 if kind == "meta":
                     yield _sse("meta", {"conversation_id": event["conversation_id"],

@@ -9,9 +9,9 @@ B. View model (node): ``buildAxisInsightView`` maps the REAL server payload
    fails closed on anything it cannot name.
 C. Deduplication: no rendered Axis sentence equals a Current State or Trends
    sentence, for any canonical signal, in either locale.
-D. Coach handoff: ``/coach?review=progress-insight`` pre-fills a DRAFT that
-   quotes the same two sentences Progress rendered, re-derived server-side;
-   no user data in the URL, no auto-send, no model call, fail-soft.
+D. Coach handoff: ``/coach?review=progress-insight`` shows a compact preview
+   and a short editable DRAFT; no user data in the URL, no auto-send, no model
+   call on page render, fail-soft.
 E. Performance: no new Progress request, script or dependency.
 
     python -m pytest tests/test_progress_axis_insight.py -v
@@ -469,16 +469,17 @@ def _coach(client, path):
 
 
 @pytest.mark.parametrize("v2", [False, True])
-def test_review_link_prefills_the_insight_as_a_draft(app, client, make_user, login, v2):
+def test_review_link_prefills_short_draft_and_preview(app, client, make_user, login, v2):
     app.config["UIUX_COACH_PAGE_V2_ENABLED"] = v2
     make_user("axhand%d" % v2, profile_complete=True)
     login("axhand%d" % v2)
-    _, draft = _coach(client, "/coach?review=progress-insight")
+    html, draft = _coach(client, "/coach?review=progress-insight")
     assert draft
     locale = "tr"
-    assert _CATALOG[locale]["progress.axis_insight_baseline"] in draft
-    assert _CATALOG[locale]["progress.axis_insight_baseline_why"] in draft
-    assert _CATALOG[locale]["progress.axis_action_build_baseline"] in draft
+    assert draft == _CATALOG[locale]["coach.handoff_draft"]
+    assert _CATALOG[locale]["progress.axis_insight_baseline"] in html
+    assert _CATALOG[locale]["progress.axis_action_build_baseline"] in html.replace("&#39;", "'")
+    assert len(draft) < 90
 
 
 def test_draft_follows_the_display_locale(app, client, make_user, login):
@@ -486,9 +487,9 @@ def test_draft_follows_the_display_locale(app, client, make_user, login):
     login("axhanden")
     html, draft = _coach(client, "/coach?review=progress-insight")
     assert 'lang="en"' in html
-    assert draft.startswith("I'm reviewing my Axis Insight")
-    assert _CATALOG["en"]["progress.axis_insight_baseline"] in draft
-    assert _CATALOG["en"]["progress.axis_action_build_baseline"] in draft
+    assert draft == _CATALOG["en"]["coach.handoff_draft"]
+    assert _CATALOG["en"]["progress.axis_insight_baseline"] in html
+    assert _CATALOG["en"]["progress.axis_action_build_baseline"] in html
 
 
 @pytest.mark.parametrize("path", ["/coach", "/coach?review=other",
@@ -534,7 +535,7 @@ def test_handoff_draft_is_never_sent_and_calls_no_model(
 
     partial = (ROOT / "templates" / "_coach_handoff.html").read_text(encoding="utf-8")
     code = re.sub(r"\{#.*?#\}", "", partial, flags=re.S)
-    for banned in ("send", "fetch", "submit", "click", "Storage", "setInterval"):
+    for banned in ("fetch", "submit", "Storage", "setInterval", "CW.send"):
         assert banned not in code, banned
     assert "!input.value" in code                       # never overwrites a draft
 
@@ -547,7 +548,9 @@ def test_handoff_module_imports_no_ai_and_quotes_the_page_tables():
             mods.add(node.module)
         elif isinstance(node, ast.Import):
             mods.update(a.name for a in node.names)
-    assert mods == {"flask", "app.i18n", "app.services.progress_insights"}
+    assert mods == {"flask", "app.i18n", "app.extensions",
+                    "app.services.progress_insights",
+                    "app.services.adaptive_plan_context"}
 
     from app.coach_handoff import ACTION_KEYS, INSIGHT_KEYS
     assert set(INSIGHT_KEYS) == set(INSIGHT_CODES)
@@ -555,8 +558,8 @@ def test_handoff_module_imports_no_ai_and_quotes_the_page_tables():
     for code, key in {**INSIGHT_KEYS, **ACTION_KEYS}.items():
         assert f"{code}: '{key}'" in PRESENTATION, code
     for locale in LOCALES:
-        assert "{insight}" in _CATALOG[locale]["coach.handoff_progress_insight"]
-        assert "{action}" in _CATALOG[locale]["coach.handoff_progress_insight"]
+        assert _CATALOG[locale]["coach.handoff_draft"]
+        assert _CATALOG[locale]["coach.handoff_from_progress"]
 
 
 def test_handoff_message_for_every_insight_uses_real_copy(app):
@@ -573,8 +576,8 @@ def test_handoff_message_for_every_insight_uses_real_copy(app):
                 msg = coach_handoff_message("progress-insight", 1)
             finally:
                 pkg.build_progress_insights = original
-            assert msg and "{" not in msg
-            assert "progress." not in msg and "_" not in msg
+            assert msg and "{" not in msg["preview"]
+            assert "progress." not in msg["preview"] and "_" not in msg["preview"]
 
 
 # ── E. performance ──────────────────────────────────────────────────────────

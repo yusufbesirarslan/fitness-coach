@@ -93,6 +93,17 @@ _COACH_NEUTRAL = {
 }
 
 
+def planned_volume_copy(action, language: str = "tr") -> str:
+    """Present the canonical adjustment without selecting or sizing it."""
+    if action.week_focus not in ("overload", "deload"):
+        return ""
+    percent = action.volume_delta_pct * 100
+    if not (-100 <= percent <= 100):
+        raise ValueError("Invalid canonical volume adjustment")
+    return (f"Planned weekly volume change: {percent:+g}%." if language == "en" else
+            f"Planlanan haftalık hacim değişimi: %{percent:+g}.")
+
+
 def project_coach_plan(plan: AdaptivePlan, language: str = "tr") -> str:
     """Present the existing planner decision using Progress's public copy.
 
@@ -118,16 +129,12 @@ def project_coach_plan(plan: AdaptivePlan, language: str = "tr") -> str:
         t(insight_key, locale=locale),
         t(action_key, locale=locale),
     ]
-    if plan.week_focus in ("overload", "deload"):
-        # Copy the planner's adjustment verbatim; do not derive one from trends.
-        percent = plan.volume_delta_pct * 100
-        if not (-100 <= percent <= 100):
-            return _COACH_NEUTRAL[locale]
-        amount = f"{percent:+g}%"
-        lines.append(
-            (f"Planned weekly volume change: {amount}." if locale == "en" else
-             f"Planlanan haftalık hacim değişimi: %{percent:+g}.")
-        )
+    try:
+        adjustment = planned_volume_copy(plan, locale)
+    except ValueError:
+        return _COACH_NEUTRAL[locale]
+    if adjustment:
+        lines.append(adjustment)
     return "\n".join(lines)
 
 

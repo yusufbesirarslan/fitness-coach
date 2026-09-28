@@ -224,6 +224,11 @@
 [data-coach-destination] .cw-row{max-width:min(92%,34rem)}
 [data-coach-destination] .cw-row.cw-menu-row{max-width:100%}
 [data-coach-destination] #cw-irow{padding:var(--space-3) var(--space-4) var(--space-4)}
+#coach-progress-context{margin:0 16px 4px;padding:10px 12px;border:1px solid var(--color-border-solid);border-radius:8px;color:var(--color-text-2);font-size:13px;line-height:1.35}
+#coach-progress-context p{margin:3px 0}
+#coach-progress-context .coach-progress-label{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-3)}
+#coach-progress-dismiss{padding:3px 0;border:0;background:transparent;color:var(--color-primary);font:inherit;cursor:pointer;text-decoration:underline}
+#coach-progress-dismiss:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
 [data-coach-destination] #cw-qr-menu,[data-coach-destination] #cw-urlbox{bottom:72px}
 @media(max-width:480px){
   [data-coach-destination] #cw-window{width:auto;height:auto;border-radius:var(--radius-md)}
