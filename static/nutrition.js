@@ -1170,52 +1170,130 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
 }
 
 
-/* ── SU TAKİBİ (Water tracking) — sunucuda saklanır (/water), cihazlar arası senkron ──
-   "Su Takibi" sekmesindeki bardak widget'ı ile "Bugün" sekmesindeki Hızlı Ekle
-   butonu aynı sayacı paylaşır. localStorage anlık boyama / offline yedek. */
+/* ── SU TAKİBİ (Water tracking) — WaterLog (/water) is the only authority ──
+   "Su Takibi" bardak widget'ı ile "Bugün" Hızlı Ekle butonu aynı durumu paylaşır.
+   The page shows only what the server CONFIRMED:
+   - a failed read is UNKNOWN — never 0 and never a browser cache;
+   - a sent write is not a saved write: controls lock and nothing is announced
+     until POST /water answers. Its body is the committed count, so it IS the
+     confirmation — no second read;
+   - an ambiguous answer (5xx / network / unreadable body) gets exactly ONE
+     reconciliation GET; if that fails too the state is "unconfirmed" and the
+     write is never re-sent automatically;
+   - every request takes a waterSeq ticket and a superseded answer is dropped,
+     so an older response can never overwrite newer truth. */
 const WATER_GOAL_N = 8;
-let waterCount = 0;
+let waterConfirmed = null;   // last server-confirmed count; null = never confirmed
+let waterState = 'loading';  // loading | confirmed | saving | unavailable | unconfirmed
+let waterSeq = 0;
+let waterShown = null;       // count currently drawn (bump animation only)
 
-function readWaterCache() {
-  try {
-    const today = new Date().toDateString();
-    const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
-    return s.date === today ? (s.count || 0) : 0;
-  } catch (e) { return 0; }
-}
-function writeWaterCache(n) {
-  try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n })); } catch (e) {}
-}
-function setWaterSub(n) {
-  const sub = document.getElementById('qab-water-sub');
-  if (sub) sub.textContent = __t('nutrition.water_progress', { n: n, goal: WATER_GOAL_N });
+/* → {kind:'ok', count} | {kind:'rejected'} (4xx: refused, nothing written)
+     | {kind:'unknown'} (5xx, network, unreadable: may have been written) */
+async function requestWater(init) {
+  let res;
+  try { res = await fetch('/water', init); } catch (e) { return { kind: 'unknown' }; }
+  if (res.status >= 400 && res.status < 500) return { kind: 'rejected' };
+  if (!res.ok) return { kind: 'unknown' };
+  let d = null;
+  try { d = await res.json(); } catch (e) {}
+  const n = d && d.count;
+  if (!Number.isInteger(n) || n < 0 || n > WATER_GOAL_N) return { kind: 'unknown' };
+  return { kind: 'ok', count: n };
 }
 
-/* Sayacı kaydet: bellek + cache + sunucu (fire-and-forget) */
-function saveWaterCount(n) {
-  waterCount = n;
-  writeWaterCache(n);
-  fetch('/water', {
+function confirmWater(n) {
+  waterConfirmed = n;
+  waterState = 'confirmed';
+}
+
+async function loadWater() {
+  const seq = ++waterSeq;
+  waterState = 'loading';
+  renderWater(false);
+  const r = await requestWater();
+  if (seq !== waterSeq) return;
+  if (r.kind === 'ok') confirmWater(r.count);
+  else waterState = 'unavailable';
+  renderWater(false);
+}
+
+/* Set the day's total. Resolves to the count when the server committed exactly
+   the requested total, otherwise null (nothing to announce). */
+async function saveWaterCount(next) {
+  if (waterState !== 'confirmed' || next === waterConfirmed) return null;
+  const seq = ++waterSeq;
+  waterState = 'saving';
+  renderWater(false);
+  const r = await requestWater({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ count: n })
-  }).catch(() => {});
+    body: JSON.stringify({ count: next })
+  });
+  if (seq !== waterSeq) return null;
+  if (r.kind === 'ok') {
+    confirmWater(r.count);
+    renderWater();
+    return r.count === next ? next : null;
+  }
+  if (r.kind === 'rejected') {
+    waterState = 'confirmed';
+    renderWater(false);
+    showToast(__t('nutrition.water_save_failed'), 'error');
+    return null;
+  }
+  const check = await requestWater();
+  if (seq !== waterSeq) return null;
+  if (check.kind !== 'ok') {
+    waterState = 'unconfirmed';
+    renderWater(false);
+    return null;
+  }
+  confirmWater(check.count);
+  renderWater();
+  if (check.count === next) return next;
+  showToast(__t('nutrition.water_save_failed'), 'error');
+  return null;
+}
+
+function announceWater(prev, count) {
+  if (count === null || count <= prev) return;
+  if (count >= WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached'), 'success');
+  else showToast(__t('nutrition.cup_drunk', { n: count }), 'info');
+}
+
+function retryWater() {
+  if (waterState === 'unavailable' || waterState === 'unconfirmed') loadWater();
 }
 
 /* Bardak widget'ını ("Su Takibi" sekmesi) + Hızlı Ekle altyazısını çiz */
-function renderWater(count, animate) {
-  waterCount = count;
-  setWaterSub(count);
+function renderWater(animate) {
+  const known = waterState === 'confirmed' || waterState === 'saving';
+  const count = known ? waterConfirmed : 0;
+  const locked = waterState !== 'confirmed';
+
+  const card = document.querySelector('.water-card');
+  if (card) {
+    card.dataset.waterState = waterState;
+    card.setAttribute('aria-busy', String(waterState === 'loading' || waterState === 'saving'));
+  }
+  const sub = document.getElementById('qab-water-sub');
+  if (sub) {
+    sub.textContent = known ? __t('nutrition.water_progress', { n: count, goal: WATER_GOAL_N })
+      : __t(waterState === 'loading' ? 'nutrition.water_loading' : 'nutrition.water_progress_unknown');
+  }
+  const qab = document.getElementById('qab-water');
+  if (qab) qab.disabled = locked;
 
   const numEl = document.getElementById('water-num');
   if (numEl) {
-    const prev = parseInt(numEl.textContent, 10) || 0;
-    numEl.textContent = count;
-    if (animate !== false && count > prev) {
+    numEl.textContent = known ? count : '—';
+    if (animate !== false && known && waterShown !== null && count > waterShown) {
       numEl.classList.remove('bump'); void numEl.offsetWidth; numEl.classList.add('bump');
       setTimeout(() => numEl.classList.remove('bump'), 220);
     }
   }
+  waterShown = known ? count : null;
   const bar = document.getElementById('water-bar');
   if (bar) bar.style.width = Math.min(count / WATER_GOAL_N * 100, 100) + '%';
 
@@ -1231,14 +1309,28 @@ function renderWater(count, animate) {
 
   const btn = document.getElementById('water-btn');
   if (btn) {
-    if (count >= WATER_GOAL_N) {
-      btn.disabled = true;
+    btn.disabled = locked || count >= WATER_GOAL_N;
+    if (known && count >= WATER_GOAL_N) {
       btn.innerHTML = __t('nutrition.water_goal_btn');
     } else {
-      btn.disabled = false;
       btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ' + __t('nutrition.add_cup');
     }
   }
+
+  const status = document.getElementById('water-status');
+  if (status) {
+    const key = { loading: 'nutrition.water_loading', saving: 'nutrition.water_saving',
+                  unavailable: 'nutrition.water_unavailable',
+                  unconfirmed: 'nutrition.water_unconfirmed' }[waterState];
+    status.textContent = key ? __t(key) : '';
+  }
+  const lastKnown = document.getElementById('water-last-known');
+  if (lastKnown) {
+    lastKnown.textContent = !known && waterConfirmed !== null
+      ? __t('nutrition.water_last_confirmed', { n: waterConfirmed, goal: WATER_GOAL_N }) : '';
+  }
+  const retry = document.getElementById('water-retry');
+  if (retry) retry.hidden = !(waterState === 'unavailable' || waterState === 'unconfirmed');
 }
 
 /* Bardakları oluştur ("Su Takibi" sekmesi) */
@@ -1251,14 +1343,9 @@ function buildWaterGlasses() {
     g.className = 'wg';
     g.innerHTML = '<div class="wg-fill"></div>';
     g.addEventListener('click', () => {
-      const cur = waterCount;
-      const next = i < cur ? i : i + 1;
-      saveWaterCount(next);
-      renderWater(next);
-      if (next > cur) {
-        if (next === WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached'), 'success');
-        else showToast(__t('nutrition.cup_drunk', { n: next }), 'info');
-      }
+      if (waterState !== 'confirmed') return;
+      const cur = waterConfirmed;
+      saveWaterCount(i < cur ? i : i + 1).then(n => announceWater(cur, n));
     });
     c.appendChild(g);
   }
@@ -1266,41 +1353,30 @@ function buildWaterGlasses() {
 
 /* "Bardak Ekle" butonu ("Su Takibi" sekmesi) */
 function addWater() {
-  if (waterCount >= WATER_GOAL_N) return;
-  const next = waterCount + 1;
-  saveWaterCount(next);
-  renderWater(next);
-  if (next === WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached'), 'success');
-  else showToast(__t('nutrition.cup_drunk', { n: next }), 'info');
+  if (waterState !== 'confirmed' || waterConfirmed >= WATER_GOAL_N) return;
+  const cur = waterConfirmed;
+  saveWaterCount(cur + 1).then(n => announceWater(cur, n));
 }
 
 /* "Hızlı Ekle" su butonu ("Bugün" sekmesi) */
 async function quickAddWater(btn) {
-  if (waterCount >= WATER_GOAL_N) { showToast(__t('nutrition.water_goal_reached'), 'success'); return; }
-  const next = waterCount + 1;
-  saveWaterCount(next);
-  renderWater(next);
+  if (waterState !== 'confirmed') return;
+  if (waterConfirmed >= WATER_GOAL_N) { showToast(__t('nutrition.water_goal_reached'), 'success'); return; }
+  const cur = waterConfirmed;
+  const n = await saveWaterCount(cur + 1);
+  if (n === null) return;
+  announceWater(cur, n);
   btn.querySelector('.qab-plus').style.display = 'none';
   btn.querySelector('.qab-check').style.display = '';
-  if (next >= WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached'), 'success');
-  else showToast(__t('nutrition.cup_drunk', { n: next }), 'info');
   setTimeout(() => {
     btn.querySelector('.qab-plus').style.display = '';
     btn.querySelector('.qab-check').style.display = 'none';
   }, 1500);
 }
 
-async function initWaterButton() {
+function initWaterButton() {
   buildWaterGlasses();
-  renderWater(readWaterCache(), false);   // önbellekten anlık
-  try {
-    const res = await fetch('/water');
-    if (res.ok) {
-      const d = await res.json();
-      writeWaterCache(d.count || 0);
-      renderWater(d.count || 0, false);
-    }
-  } catch (e) {}
+  return loadWater();
 }
 
 /* ── WATER MODAL ── */

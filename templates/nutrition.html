@@ -219,11 +219,11 @@
         <div class="fc-divider-lbl">{{ t('nutrition.quick_add') }}</div>
         <div class="fc-divider-line"></div>
       </div>
-      <button class="qab" id="qab-water" data-action="quickAddWater" type="button" style="margin-bottom:8px;">
+      <button class="qab" id="qab-water" data-action="quickAddWater" type="button" style="margin-bottom:8px;" disabled>
         <span class="qab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>
         <div class="qab-info">
           <div class="qab-title">{{ t('nutrition.water_1cup_btn') }}</div>
-          <div class="qab-sub" id="qab-water-sub">{{ t('nutrition.water_progress', n=0, goal=8) }}</div>
+          <div class="qab-sub" id="qab-water-sub">{{ t('nutrition.water_loading') }}</div>
         </div>
         <svg class="qab-check" viewBox="0 0 24 24" fill="none" stroke="var(--blue-light)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         <svg class="qab-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -235,18 +235,23 @@
     <summary id="nutrition-tab-water" class="nutrition-tool-toggle" data-tab-name="water" aria-controls="panel-water">{{ t('nutrition.tab_water') }}</summary>
   <div class="nutrition-tool-content" id="panel-water" role="region" aria-labelledby="nutrition-tab-water">
 
-    <div class="card water-card" style="padding:28px 24px;">
+    <div class="card water-card" style="padding:28px 24px;" data-water-state="loading" aria-busy="true">
       <h2 class="water-hdr">
         <span class="water-dot" aria-hidden="true"></span>{{ t('nutrition.water_tracking') }}
       </h2>
-      <div class="water-num" id="water-num">0</div>
+      <div class="water-num" id="water-num">—</div>
       <div class="water-denom">{{ t('nutrition.water_denom') }}</div>
       <div class="water-glasses" id="water-glasses"></div>
       <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
-      <button class="water-btn" id="water-btn" data-action="addWater">
+      <button class="water-btn" id="water-btn" data-action="addWater" disabled>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         {{ t('nutrition.water_add_cup') }}
       </button>
+      {# Only server-confirmed WaterLog counts are drawn above; these carry the
+          loading / saving / unavailable / unconfirmed truth instead of a guess. #}
+      <p class="water-status" id="water-status" role="status" aria-live="polite">{{ t('nutrition.water_loading') }}</p>
+      <p class="water-last-known" id="water-last-known"></p>
+      <button class="btn-ghost water-retry" id="water-retry" type="button" data-action="retryWater" hidden>{{ t('nutrition.water_retry') }}</button>
     </div>
 
   </div><!-- /panel-water -->
