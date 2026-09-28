@@ -448,9 +448,10 @@
               border-color var(--duration-base) var(--ease-standard),
               transform var(--duration-fast) var(--ease-standard);
   text-align: left; font-family: var(--font-body); }
-.qab:hover:not(.qab-done) { border-color: var(--color-primary); transform: translateY(-1px); }
-.qab:active:not(.qab-done) { transform: translateY(0); }
+.qab:hover:not(.qab-done):not(:disabled) { border-color: var(--color-primary); transform: translateY(-1px); }
+.qab:active:not(.qab-done):not(:disabled) { transform: translateY(0); }
 .qab.qab-done { border-color: var(--color-primary); cursor: default; }
+.qab:disabled { opacity: var(--opacity-disabled); cursor: default; }
 /* Icon slot, not a glyph slot: the box is fixed and only the SVG inside it
    changes, so the meal/water markers line up with the rest of the page's
    stroke icons instead of inheriting an emoji's own metrics. */
@@ -534,6 +535,11 @@
 .water-btn:hover:not(:disabled) { border-color: var(--blue-light); }
 .water-btn:active:not(:disabled) { transform: scale(0.97); }
 .water-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
+.water-status, .water-last-known { font-size: var(--text-xs); color: var(--color-text-3); margin: 10px 0 0; text-align: center; }
+.water-status:empty, .water-last-known:empty { display: none; }
+.water-retry { display: block; min-height: 44px; margin: 10px auto 0; }
+.water-retry[hidden] { display: none; }
+.water-card:not([data-water-state="confirmed"]) .wg { cursor: default; }
 
 /* ── 13b · MODALS (water / serving / photo) ───────────────────────── */
 /* Eski satır-içi <style> bloğundan taşındı; kanonik token'lar. .modal-title
