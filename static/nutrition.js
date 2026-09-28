@@ -1,7 +1,4 @@
 
-/* ── CONSTANTS ── */
-const RING_CIRC = 301.6; // 2π × 48
-
 function newIdempotencyKey() {
   return (window.crypto && window.crypto.randomUUID)
     ? window.crypto.randomUUID()
@@ -190,11 +187,13 @@ document.addEventListener('keydown', function (e) {
   var scan = document.getElementById('scan-overlay');
   if (scan && scan.classList.contains('open')) { closeScanOverlay(); return; }
   var overlays = ['photo-modal', 'serving-modal', 'water-modal',
-                  'manual-sheet', 'voice-sheet', 'log-sheet'];
+                  'manual-sheet', 'voice-sheet'];
+  var chooser = document.getElementById('log-sheet');
   for (var i = 0; i < overlays.length; i++) {
     var el = document.getElementById(overlays[i]);
     if (el && el.classList.contains('open')) { el.classList.remove('open'); return; }
   }
+  if (chooser && chooser.classList.contains('open')) dismissLogSheet();
 });
 
 /* ── data-action köprüleri (CSP: satır-içi on* yerine) ──
@@ -210,48 +209,123 @@ function fxUpdateDiaryServingQty(el) { updateDiaryServingQty(el.dataset.itemId, 
 function fxUpdateDiaryServingQtyOnly(el) { updateDiaryServingQtyOnly(el.dataset.itemId, el.value); }
 function fxUpdateDiaryGrams(el) { updateDiaryGrams(el.dataset.itemId, el.value); }
 
-/* ── CALORIE RING ── */
-function updateRing(eaten, target) {
-  const ring = document.getElementById('calorie-ring');
-  // WEB-UX4-PR6 / F-16 — presentation state only. The template cannot tell
-  // "the canonical read published no target" from "not read yet" (both show
-  // the same dash), so the hero is marked here, next to the one branch that
-  // already decides it. No value, arithmetic or request below changes.
-  const hero = ring.closest('.nut-hero');
-  document.getElementById('ring-eaten').textContent = Math.round(eaten);
-  if (!(target > 0)) {
-    if (hero) hero.dataset.targetState = 'absent';
-    ring.style.strokeDashoffset = RING_CIRC;
-    ring.style.stroke = '#3D8BFF';
-    document.getElementById('ring-pct').textContent = '—';
-    document.getElementById('ring-target').textContent = '—';
-    return;
-  }
-  if (hero) hero.dataset.targetState = 'known';
-  const pct = Math.min(eaten / target, 1);
-  ring.style.strokeDashoffset = RING_CIRC * (1 - pct);
-  ring.style.stroke = eaten > target * 1.05 ? '#FF4D4D' : '#3D8BFF';
-  document.getElementById('ring-pct').textContent   = Math.round(pct * 100) + '%';
-  document.getElementById('ring-target').textContent = Math.round(target);
+/* ── DAILY SUMMARY (NUTR-PR3) ──
+   One canonical read (`/meal-log/today`) carries both facts this card shows:
+   the consumed totals (MealLog) and the target projection (`nutrition_targets`,
+   `targets: null` when none is configured). This code only PRESENTS them:
+
+     intake  loading | confirmed | stale (a refresh failed after a confirmed
+             read — the last confirmed values stay, labelled) | unavailable
+     target  pending | known | absent (authority published none) |
+             unavailable (read failed, or its target was unusable)
+
+   UNKNOWN is never drawn as 0: before a read proves a value the card shows
+   "—", and "remaining" exists only when BOTH sides are confirmed. Remaining is
+   the one piece of arithmetic here — target minus intake, on the rounded
+   numbers the card shows, so the three figures always agree. The server's own
+   `remaining` is clamped at zero and cannot say "over target", so it is not
+   used for kcal. No macro arithmetic, no percentages, no scores. */
+const MACRO_KEYS = ['protein', 'karb', 'yag'];
+
+function isNum(v) { return typeof v === 'number' && Number.isFinite(v); }
+
+/* A usable read has numeric totals and a meals list; anything else is invalid
+   and presented as unavailable, never coerced to zeros. */
+function validTodayPayload(d) {
+  if (!d || typeof d !== 'object' || !Array.isArray(d.meals)) return false;
+  const t = d.totals;
+  return !!t && ['kalori', ...MACRO_KEYS].every(k => isNum(t[k]));
 }
 
-/* ── MACRO BARS ── */
-function updateMacroBars(totals, targets) {
-  const cfg = [
-    { key:'protein', elVal:'macro-protein', elBar:'bar-protein' },
-    { key:'karb',    elVal:'macro-karb',    elBar:'bar-karb' },
-    { key:'yag',     elVal:'macro-yag',     elBar:'bar-yag' },
-  ];
-  cfg.forEach(c => {
-    const val = totals[c.key] || 0;
-    document.getElementById(c.elVal).textContent = Math.round(val);
-    const bar = document.getElementById(c.elBar);
-    if (!targets || !(targets[c.key] > 0)) {
+/* → {state:'absent'} | {state:'known', kalori, macros} | {state:'unavailable'} */
+function readTarget(d) {
+  if (d.targets === null) return { state: 'absent' };
+  const t = d.targets;
+  if (!t || typeof t !== 'object' || !isNum(t.kalori) || !(t.kalori > 0)) return { state: 'unavailable' };
+  const macros = {};
+  MACRO_KEYS.forEach(k => { macros[k] = isNum(t[k]) && t[k] > 0 ? t[k] : null; });
+  return { state: 'known', kalori: t.kalori, macros };
+}
+
+function setIntakeStatus(key) {
+  const box = document.getElementById('nut-intake-status');
+  document.getElementById('nut-intake-status-text').textContent = key ? __t(key) : '';
+  document.getElementById('nut-intake-retry').hidden = !key;
+  box.classList.toggle('is-empty', !key);
+}
+
+function renderDaySummary(totals, target) {
+  const hero = document.getElementById('nut-day');
+  hero.dataset.intakeState = 'confirmed';
+  hero.dataset.targetState = target.state;
+  hero.setAttribute('aria-busy', 'false');
+  setIntakeStatus(null);
+
+  const eaten = Math.round(totals.kalori);
+  document.getElementById('nut-intake').textContent = eaten;
+  document.getElementById('nut-target').textContent = target.state === 'known' ? Math.round(target.kalori) : '—';
+
+  const remaining = document.getElementById('nut-remaining');
+  const fill = document.getElementById('bar-kcal');
+  if (target.state === 'known') {
+    const goal = Math.round(target.kalori);
+    const left = goal - eaten;
+    remaining.textContent = left >= 0
+      ? __t('nutrition.remaining_left', { n: left })
+      : __t('nutrition.remaining_over', { n: -left });
+    remaining.hidden = false;
+    fill.style.width = (Math.min(eaten / goal, 1) * 100) + '%';
+    fill.classList.toggle('is-over', left < 0);
+  } else {
+    remaining.textContent = '';
+    remaining.hidden = true;
+    fill.style.width = '0%';
+  }
+
+  MACRO_KEYS.forEach(k => {
+    const val = Math.round(totals[k]);
+    document.getElementById('macro-' + k).textContent = val;
+    const goal = target.state === 'known' ? target.macros[k] : null;
+    const targetEl = document.getElementById('macro-' + k + '-target');
+    const bar = document.getElementById('bar-' + k);
+    if (goal) {
+      targetEl.textContent = '/ ' + Math.round(goal);
+      targetEl.hidden = false;
+      bar.style.width = (Math.min(val / goal, 1) * 100) + '%';
+      bar.parentElement.hidden = false;
+    } else {
+      targetEl.textContent = '';
+      targetEl.hidden = true;
       bar.style.width = '0%';
-      return;
+      bar.parentElement.hidden = true;
     }
-    bar.style.width = (Math.min(val / targets[c.key], 1) * 100) + '%';
   });
+}
+
+/* The read failed. With nothing confirmed yet the whole card is unknown; after
+   a confirmed read the values stay but are labelled as not refreshed (PR2's
+   post-commit contract keeps them — they are the last truth we have). */
+function renderDaySummaryFailure() {
+  const hero = document.getElementById('nut-day');
+  hero.setAttribute('aria-busy', 'false');
+  if (_todayConfirmed) {
+    hero.dataset.intakeState = 'stale';
+    setIntakeStatus('nutrition.intake_stale');
+    return;
+  }
+  hero.dataset.intakeState = 'unavailable';
+  hero.dataset.targetState = 'unavailable';
+  document.getElementById('nut-intake').textContent = '—';
+  document.getElementById('nut-target').textContent = '—';
+  const remaining = document.getElementById('nut-remaining');
+  remaining.textContent = '';
+  remaining.hidden = true;
+  MACRO_KEYS.forEach(k => {
+    document.getElementById('macro-' + k).textContent = '—';
+    document.getElementById('macro-' + k + '-target').hidden = true;
+    document.getElementById('bar-' + k).parentElement.hidden = true;
+  });
+  setIntakeStatus('nutrition.meals_unavailable');
 }
 
 /* ── MEAL TYPE SELECTOR ── */
@@ -264,26 +338,31 @@ function selectMealType(type, el) {
 /* ── LOAD TODAY DATA ── */
 let _todayReadGeneration = 0;
 let _todayRefreshPending = false;
+let _todayConfirmed = false;   // a canonical read has been rendered at least once
 async function loadTodayData(notifyFailure = false) {
   const generation = ++_todayReadGeneration;
   if (notifyFailure) _todayRefreshPending = true;
   try {
     const todayRes = await fetch('/meal-log/today');
     if (!todayRes.ok) throw new Error('Today read failed');
-    const today   = await todayRes.json();
+    const today = await todayRes.json();
     if (generation !== _todayReadGeneration) return;
-    const eaten = today.totals || {};
-    const targets = today.targets;
-    updateRing(eaten.kalori || 0, targets ? targets.kalori : null);
-    updateMacroBars(eaten, targets);
-    renderTimeline(today.meals || []);
+    if (!validTodayPayload(today)) throw new Error('Today read invalid');
+    renderDaySummary(today.totals, readTarget(today));
+    renderTimeline(today.meals);
+    _todayConfirmed = true;
     _todayRefreshPending = false;
   } catch (e) {
     console.error('loadTodayData', e);
-    if (_todayRefreshPending && generation === _todayReadGeneration)
+    if (generation !== _todayReadGeneration) return;
+    renderDaySummaryFailure();
+    renderTimelineFailure();
+    if (_todayRefreshPending)
       showToast(__t('route.macros_unavailable'), 'error');
   }
 }
+
+function retryTodayData() { loadTodayData(); }
 
 /* ── MEAL TIMELINE ── */
 var _SLOT_ICONS = {
@@ -394,6 +473,9 @@ async function deleteMeal(entryToken, revision, hasPhoto, el) {
   }
 }
 
+/* The ledger: MealLog rows only, grouped into the four canonical slots in the
+   order the server returned them. A slot with nothing logged is one line — its
+   name and the existing contextual "add to this meal" action. */
 function renderTimeline(meals) {
   var box = document.getElementById('meal-timeline');
   if (!box) return;
@@ -401,18 +483,37 @@ function renderTimeline(meals) {
   (meals || []).forEach(function (m) {
     (bySlot[m.ogun] || bySlot['Ara Öğün']).push(m);
   });
-  box.innerHTML = SLOTS.map(function (slot) {
+  var note = (meals || []).length ? '' :
+    '<p class="nut-ledger-note">' + esc(__t('nutrition.empty_today_title')) + '</p>';
+  box.innerHTML = note + SLOTS.map(function (slot) {
     var items = bySlot[slot.key] || [];
+    var add = '<button type="button" class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
+          '"]\'>+ ' + __t('nutrition.add_to_meal') + '</button>';
     var kcal = items.reduce(function (a, m) { return a + (m.kalori || 0); }, 0);
     var head = '<div class="slot-head"><span class="slot-ic" aria-hidden="true">' + (slot.icon || '') +
       '</span><span class="slot-name">' + esc(mealLabel(slot.key)) + '</span>' +
-      '<span class="slot-kcal">' + Math.round(kcal) + ' kcal</span></div>';
-    var body = items.length
-      ? items.map(mealCardHTML).join('')
-      : '<button type="button" class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
-          '"]\'>+ ' + __t('nutrition.add_to_meal') + '</button>';
-    return '<div class="meal-slot">' + head + body + '</div>';
+      (items.length ? '<span class="slot-kcal">' + Math.round(kcal) + ' kcal</span>' : add) + '</div>';
+    return '<div class="meal-slot' + (items.length ? '' : ' is-empty') + '">' + head +
+      items.map(mealCardHTML).join('') + '</div>';
   }).join('');
+  box.dataset.ledgerState = (meals || []).length ? 'available' : 'empty';
+  box.setAttribute('aria-busy', 'false');
+  var count = document.getElementById('nut-meal-count');
+  count.textContent = __t('nutrition.meal_count', { n: (meals || []).length });
+  count.hidden = false;
+}
+
+/* A failed ledger read. Before any confirmed read the list is UNKNOWN — never
+   "no meals". After one, the confirmed rows stay (the summary above says they
+   were not refreshed) so correction/delete keep working on what is known. */
+function renderTimelineFailure() {
+  var box = document.getElementById('meal-timeline');
+  if (!box) return;
+  box.setAttribute('aria-busy', 'false');
+  if (_todayConfirmed) return;
+  box.dataset.ledgerState = 'unavailable';
+  box.innerHTML = '<p class="nut-ledger-note">' + esc(__t('nutrition.meals_unavailable')) + '</p>';
+  document.getElementById('nut-meal-count').hidden = true;
 }
 
 /* Öğün tipini programatik seç (quick edit / boş slot). */
@@ -428,9 +529,30 @@ function selectMealTypeByValue(ogun) {
 function quickEditMeal(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
 function logManualSlot(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
 
-/* ── LOG BOTTOM SHEET (FAB) ── */
-function openLogSheet()  { var s = document.getElementById('log-sheet'); s.classList.add('open'); _focusInto(s); }
-function closeLogSheet() { document.getElementById('log-sheet').classList.remove('open'); }
+/* ── LOG FOOD CHOOSER (NUTR-PR3: opened only by #log-food-btn) ──
+   Choosing a method closes the chooser and hands focus to that method's own
+   surface. Dismissing it (Escape, backdrop) returns focus to the control that
+   opened it, so keyboard users land back on "Log food". */
+var _logSheetOpener = null;
+function openLogSheet() {
+  var s = document.getElementById('log-sheet');
+  _logSheetOpener = document.activeElement;
+  s.classList.add('open');
+  document.getElementById('log-food-btn').setAttribute('aria-expanded', 'true');
+  _focusInto(s);
+}
+function closeLogSheet() {
+  document.getElementById('log-sheet').classList.remove('open');
+  document.getElementById('log-food-btn').setAttribute('aria-expanded', 'false');
+}
+function dismissLogSheet() {
+  var wasOpen = document.getElementById('log-sheet').classList.contains('open');
+  closeLogSheet();
+  var back = _logSheetOpener && document.contains(_logSheetOpener)
+    ? _logSheetOpener : document.getElementById('log-food-btn');
+  _logSheetOpener = null;
+  if (wasOpen && back) back.focus();
+}
 
 /* ── MANUAL ENTRY SHEET ── */
 function openManualSheet()  {
@@ -1013,8 +1135,10 @@ async function selectPlan(i, plan, score) {
 let _activePlanCache = null;
 function getActivePlan(force = false) {
   if (force || !_activePlanCache) {
+    // A failed read rejects (and is not cached) — it is never `exists:false`.
     _activePlanCache = fetch('/nutrition-plan/active')
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error('Plan read failed'); return r.json(); })
+      .then(d => { if (!d || typeof d.exists !== 'boolean') throw new Error('Plan read invalid'); return d; })
       .catch(err => { _activePlanCache = null; throw err; });
   }
   return _activePlanCache;
@@ -1090,83 +1214,107 @@ function resetPlan() {
   document.getElementById('plan-form').style.display = 'block';
 }
 
-/* ── QUICK ADD FROM PLAN ── */
-async function loadQuickAddSection() {
-  const container = document.getElementById('quick-add-cards');
-  try {
-    const d = await getActivePlan();
-
-    if (!d.exists) {
-      container.innerHTML = `
-        <button type="button" class="qab-no-plan" data-action="fxGoToPlanTab">
-          ${__t('nutrition.no_active_plan')}
-        </button>`;
-      return;
-    }
-
-    const MEALS = [
-      { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: _SLOT_ICONS.breakfast },
-      { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: _SLOT_ICONS.lunch },
-      { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: _SLOT_ICONS.dinner },
-      { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: _SLOT_ICONS.snack }
-    ];
-
-    container.innerHTML = MEALS.map(m => {
-      const ml  = d.plan[m.key];
-      if (!ml) return '';
-      const sub = `${fmtNum(ml.kalori)} kcal · ${fmtNum(ml.protein)}g ${__t('nutrition.unit_protein')} · ${fmtNum(ml.karb)}g ${__t('nutrition.unit_carb')}`;
-      return `
-        <button class="qab" id="qab-${m.key}"
-          data-action="quickAddMeal" data-args='["${m.key}","${m.label}"]' type="button">
-          <span class="qab-icon" aria-hidden="true">${m.icon}</span>
-          <div class="qab-info">
-            <div class="qab-title">${m.label} — ${esc(d.plan.isim || 'Aktif Plan')}</div>
-            <div class="qab-sub">${sub}</div>
-          </div>
-          <svg class="qab-check" viewBox="0 0 24 24" fill="none"
-               stroke="#3D8BFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          <svg class="qab-plus" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-        </button>`;
-    }).join('');
-
-  } catch (e) {
-    container.innerHTML = '';
-  }
+/* ── FROM YOUR PLAN (planned shortcuts) ──
+   The existing `/api/quick-add-meal` shortcut, presented as what it is: a
+   PLANNED meal until that write confirms, and only then "Logged". States:
+   loading · available · no plan (`exists:false`) · unavailable (read failed).
+   Deferred, NOT fixed here: the endpoint's idempotency replay is user-wide and
+   runs before plan/meal validation, so nothing on this surface claims
+   exactly-once. It only avoids a double tap and never re-sends an ambiguous
+   write by itself. */
+function setPlanState(state) {
+  document.getElementById('quick-add-section').dataset.planState = state;
 }
+
+async function loadQuickAddSection(force = false) {
+  const container = document.getElementById('quick-add-cards');
+  let d;
+  try {
+    d = await getActivePlan(force);
+  } catch (e) {
+    setPlanState('unavailable');
+    container.innerHTML = `
+      <div class="nut-planned-state">
+        <p class="nut-planned-note">${esc(__t('nutrition.plan_unavailable'))}</p>
+        <button type="button" class="btn-ghost nut-retry" data-action="retryPlanShortcuts">${esc(__t('nutrition.try_again'))}</button>
+      </div>`;
+    return;
+  }
+
+  if (!d.exists) {
+    setPlanState('none');
+    container.innerHTML = `
+      <button type="button" class="qab-no-plan" data-action="fxGoToPlanTab">
+        ${__t('nutrition.no_active_plan')}
+      </button>`;
+    return;
+  }
+
+  const MEALS = [
+    { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: _SLOT_ICONS.breakfast },
+    { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: _SLOT_ICONS.lunch },
+    { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: _SLOT_ICONS.dinner },
+    { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: _SLOT_ICONS.snack }
+  ];
+
+  setPlanState('available');
+  const plan = d.plan && typeof d.plan === 'object' ? d.plan : {};
+  container.innerHTML = MEALS.map(m => {
+    const ml  = plan[m.key];
+    if (!ml) return '';
+    const sub = `${fmtNum(ml.kalori)} kcal · ${fmtNum(ml.protein)}g ${__t('nutrition.unit_protein')} · ${fmtNum(ml.karb)}g ${__t('nutrition.unit_carb')}`;
+    return `
+      <button class="qab" id="qab-${m.key}" data-planned="true"
+        data-action="quickAddMeal" data-args='["${m.key}","${m.label}"]' type="button">
+        <span class="qab-icon" aria-hidden="true">${m.icon}</span>
+        <div class="qab-info">
+          <span class="qab-badge">${esc(__t('nutrition.planned'))}</span>
+          <div class="qab-title">${m.label} — ${esc(plan.isim || __t('nutrition.active_plan_name'))}</div>
+          <div class="qab-sub">${sub}</div>
+        </div>
+        <span class="qab-action">${esc(__t('nutrition.log_planned'))}</span>
+      </button>`;
+  }).join('');
+}
+
+function retryPlanShortcuts() { loadQuickAddSection(true); }
 
 async function quickAddMeal(mealKey, mealLabel, btn) {
   if (btn.classList.contains('qab-done') || btn.disabled) return;
   btn.disabled = true;
-  btn.style.opacity = '0.65';
-
+  btn.setAttribute('aria-busy', 'true');
+  let res = null, d = null;
   try {
-    const idempotencyHeaders = mealWriteHeaders();
-    const res = await fetch('/api/quick-add-meal', {
+    res = await fetch('/api/quick-add-meal', {
       method:  'POST',
-      headers: idempotencyHeaders,
+      headers: mealWriteHeaders(),
       body:    JSON.stringify({ meal_key: mealKey })
     });
-    const d = await res.json();
-    if (d.error) { showToast(d.error, 'error'); btn.disabled = false; btn.style.opacity = '1'; return; }
+    d = await res.json().catch(() => null);
+  } catch (e) { res = null; }
+  btn.removeAttribute('aria-busy');
 
-    // Success state — swap + icon for animated checkmark
+  if (res && res.ok && d && !d.error) {
+    // Confirmed write: only now does this planned meal read "Logged".
     btn.classList.add('qab-done');
-    btn.style.opacity = '1';
-    btn.querySelector('.qab-plus').style.display  = 'none';
-
+    btn.querySelector('.qab-action').textContent = __t('nutrition.logged_state');
+    const badge = btn.querySelector('.qab-badge');
+    if (badge) badge.textContent = __t('nutrition.logged_state');
     showToast(`${mealLabel} ${__t('nutrition.added_suffix')}`, 'success');
-    loadTodayData(); // live-refresh calorie ring + macro bars
-
-  } catch (e) {
-    showToast(__t('nutrition.add_failed_prefix') + e.message, 'error');
-    btn.disabled = false;
-    btn.style.opacity = '1';
+    if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
+    loadTodayData(); // canonical refresh: summary + ledger
+    return;
   }
+  btn.disabled = false;
+  if (res && res.status >= 400 && res.status < 500) {
+    // Refused: nothing was written.
+    showToast((d && d.error) || __t('nutrition.add_error'), 'error');
+    return;
+  }
+  // 5xx, network or unreadable reply: the write may have committed. Say so,
+  // re-read the ledger (the only authority) and do NOT re-send by ourselves.
+  showToast(__t('nutrition.quick_add_uncertain'), 'warning');
+  loadTodayData();
 }
 
 
@@ -2052,54 +2200,6 @@ document.addEventListener('click', e => {
   const name = document.getElementById('sb-name')?.textContent?.trim() || '';
   const av   = document.getElementById('sb-avatar');
   if (av && name) av.textContent = name[0].toUpperCase();
-})();
-
-/* ── LOG FAB: yield to the meal list while scrolling ──
-   The FAB moved to the left rail (nutrition.css) because on the right it sat
-   exactly on top of each meal card's score badge and quick-edit button —
-   confirmed in a rendered 390px viewport. A floating button still overlays the
-   list wherever it rests, though, so it also steps aside while the list is
-   being read.
-
-   It therefore tucks away while the user is reading down the list and
-   returns as soon as they stop or scroll back, which is the standard behaviour
-   for a floating action button over a scrolling list. It is purely presentational:
-   `.is-tucked` only translates and fades, so the control keeps its DOM position,
-   its accessible name and its keyboard reachability, and it is restored on any
-   upward scroll, on rest, and whenever the log sheet opens. Reduced-motion is
-   honoured by the transition rule in nutrition.css (the state still applies —
-   an occluding control must still move out of the way). */
-(function initLogFabScrollBehaviour() {
-  var fab = document.getElementById('log-fab');
-  if (!fab) return;
-  var lastY = window.scrollY, ticking = false, restTimer = null;
-  var HIDE_AFTER_PX = 12;   // ignore sub-pixel / rubber-band jitter
-  var REST_MS = 700;        // "the user stopped scrolling"
-
-  function show() { fab.classList.remove('is-tucked'); }
-
-  function onFrame() {
-    ticking = false;
-    var y = window.scrollY;
-    var dy = y - lastY;
-    if (Math.abs(dy) < HIDE_AFTER_PX) return;
-    lastY = y;
-    // Never tuck at the very top: there is no list under the FAB to protect.
-    if (dy > 0 && y > 120) fab.classList.add('is-tucked');
-    else show();
-    if (restTimer) clearTimeout(restTimer);
-    restTimer = setTimeout(show, REST_MS);
-  }
-
-  window.addEventListener('scroll', function () {
-    if (ticking) return;
-    ticking = true;
-    window.requestAnimationFrame(onFrame);
-  }, { passive: true });
-
-  // Opening the sheet from anywhere must not leave the trigger tucked away.
-  fab.addEventListener('focus', show);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Tab') show(); });
 })();
 
 /* ── INIT ── */

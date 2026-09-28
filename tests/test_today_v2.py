@@ -560,7 +560,7 @@ def test_the_capabilities_the_dashboard_hosted_are_still_reachable(
 
     # Meal logging and the menu scanner → Nutrition.
     nutrition = _html(client, "/nutrition")
-    assert 'id="log-fab"' in nutrition
+    assert 'id="log-food-btn"' in nutrition
     assert 'data-action="logMenuScan"' in nutrition
 
     # Level / XP / quests → Account.
