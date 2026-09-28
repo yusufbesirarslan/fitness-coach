@@ -21,8 +21,8 @@
 
 /* UX-3 PR5 — the Nutrition → Supplements child-domain entry. Styled as a quiet
    inset row, NOT as a `.tab-btn`: no pill, no icon, no active state, and it sits
-   outside the `role="tablist"` element. That separation is the point — the five
-   local tabs are daily Nutrition workflows, while Supplements is a child domain
+   outside the `role="tablist"` element. That separation is the point — the two
+   local modes organize Nutrition, while Supplements is a child domain
    with its own canonical page. */
 .nutrition-child-domain {
   display: flex; flex-wrap: wrap; align-items: center;
@@ -466,7 +466,7 @@
 .qab-check { width: 18px; height: 18px; flex-shrink: 0; display: none; }
 @keyframes qab-pop { 0% { transform: scale(0.6); opacity: 0; } 70% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
 .qab-done .qab-check { display: block; animation: qab-pop 0.3s ease; }
-.qab-no-plan { padding: var(--space-3) var(--space-4); border: 1.5px dashed var(--color-border-2);
+.qab-no-plan { width: 100%; min-height: 44px; background: transparent; font-family: inherit; padding: var(--space-3) var(--space-4); border: 1.5px dashed var(--color-border-2);
   border-radius: var(--radius-md); font-size: var(--text-sm); color: var(--color-text-3);
   text-align: center; cursor: pointer; transition: border-color var(--duration-base) var(--ease-standard), color var(--duration-base) var(--ease-standard); }
 .qab-no-plan:hover { border-color: var(--color-primary); color: var(--color-primary); }
@@ -599,31 +599,23 @@
 /* `.sec-label` now ships as real <h2>/<h3> elements on this page (F-17). */
 .card > .sec-label:first-child { margin-bottom: var(--space-4); }
 
-/* ── WEB-UX4-PR6 · F-35 — five workflows, all discoverable ──────────────────
-   Every tab meets the 44px floor. Below 640px each tab stacks its icon over a
-   label that may wrap between words, so all five fit a 320px column in both
-   locales instead of hiding History and Water off-screen. The shared scroller
-   is kept as the fallback (large text / zoom): if the row still overflows, a
-   scroll-driven edge fade shows there is more — and only while there is. */
-.tab-bar .tab-btn { min-height: 44px; }
-@media (max-width: 640px) {
-  .tab-bar { gap: 2px; margin-bottom: var(--space-6); }
-  .tab-bar .tab-btn {
-    flex: 1 1 0; min-width: min-content;
-    flex-direction: column; gap: 3px;
-    padding: var(--space-1) 6px;
-    font-size: var(--text-xs); line-height: var(--leading-tight);
-    white-space: normal; text-align: center; overflow-wrap: normal; hyphens: none;
-  }
+/* Nutrition PR2: two modes, with quieter in-place workflow disclosures. */
+.tab-bar { display: flex; overflow: visible; }
+.tab-bar .tab-btn {
+  flex: 1 1 0; min-width: 0; min-height: 44px;
+  white-space: normal; justify-content: center;
 }
-@supports (animation-timeline: scroll()) {
-  .tab-bar {
-    animation: nut-tab-more linear both;
-    animation-timeline: scroll(self inline);
-  }
-  @keyframes nut-tab-more {
-    from { -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); }
-    96%  { -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); mask-image: linear-gradient(to right, currentColor calc(100% - 32px), transparent); }
-    to   { -webkit-mask-image: none; mask-image: none; }
-  }
+.tab-bar .tab-btn[aria-selected="true"] { border-bottom: 3px solid var(--color-primary); }
+.tab-panel[hidden] { display: none; }
+.nutrition-tool {
+  margin: var(--space-4) 0; border-top: var(--border-w-1) solid var(--color-border-2);
 }
+.nutrition-tool-toggle {
+  min-height: 44px; padding: var(--space-3) var(--space-2);
+  cursor: pointer; color: var(--color-text-2); font-size: var(--text-base);
+  line-height: var(--leading-normal);
+}
+.nutrition-tool-toggle:focus-visible {
+  outline: 2px solid var(--color-primary); outline-offset: 2px;
+}
+.nutrition-tool-content { padding-top: var(--space-3); }

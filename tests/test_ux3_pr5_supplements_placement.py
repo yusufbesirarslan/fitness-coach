@@ -275,11 +275,11 @@ def test_nutrition_exposes_supplements_as_a_child_domain_not_a_sixth_tab(
 
     html = client.get("/nutrition").get_data(as_text=True)
 
-    # The five daily workflow tabs are unchanged — Supplements is not among them.
-    assert html.count('role="tab"') == 5
-    assert html.count('role="tabpanel"') == 5
+    # Two primary modes; the three workflows are nested in Today.
+    assert html.count('role="tab"') == 2
+    assert html.count('role="tabpanel"') == 2
     tabs = html.split('class="tab-bar" role="tablist"', 1)[1].split("</div>", 1)[0]
-    for label in ("Today", "Diary", "Nutrition Plan", "History", "Water"):
+    for label in ("Today", "Plan"):
         assert label in tabs, label
     assert 'data-tab-name="supplements"' not in html
     assert 'id="panel-supplements"' not in html
@@ -811,4 +811,4 @@ def test_pr4_nutrition_placement_survives_pr5(app, client, make_user, login):
 
     nutrition_html = client.get("/nutrition").get_data(as_text=True)
     assert 'class="nutrition-parent-context"' in nutrition_html
-    assert nutrition_html.count('role="tab"') == 5
+    assert nutrition_html.count('role="tab"') == 2

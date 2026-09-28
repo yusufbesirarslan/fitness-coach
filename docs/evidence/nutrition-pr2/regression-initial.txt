@@ -1,0 +1,25 @@
+.....F.................................................................. [ 14%]
+........................................................................ [ 29%]
+........................................................................ [ 44%]
+........................................................................ [ 59%]
+........................................................................ [ 74%]
+........................................................................ [ 89%]
+...................................................                      [100%]
+================================== FAILURES ===================================
+____ test_nutrition_page_shows_plan_parent_and_preserves_five_local_areas _____
+tests\test_ux3_pr4_nutrition_placement.py:172: in test_nutrition_page_shows_plan_parent_and_preserves_five_local_areas
+    assert html.count('role="tab"') == 5
+E   assert 2 == 5
+E    +  where 2 = <built-in method count of str object at 0x000001CA2F94D960>('role="tab"')
+E    +    where <built-in method count of str object at 0x000001CA2F94D960> = '<!DOCTYPE html>\n<html lang="en" data-theme="dark">\n<head>\n  \n<meta charset="UTF-8">\n<meta name="viewport" conten...tic/coach_widget.js?v=1790565016"></script>\n<script src="/static/actions.js?v=1790565016"></script>\n</body>\n</html>'.count
+----------------------------- Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKT�F � create_all/migration/seed atlan�yor. Bu bayrak yaln�zca CI/migration komutlar� i�indir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call ------------------------------
+INFO     app:observability.py:171 request id=a67b174e119846eb method=POST path=/login status=200 dur_ms=40.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=a67ebcb97d6945b4 method=GET path=/nutrition status=200 dur_ms=364.7 user=1 ip=127.0.0.1
+=========================== short test summary info ===========================
+FAILED tests/test_ux3_pr4_nutrition_placement.py::test_nutrition_page_shows_plan_parent_and_preserves_five_local_areas
+1 failed, 482 passed, 3612 warnings in 413.60s (0:06:53)

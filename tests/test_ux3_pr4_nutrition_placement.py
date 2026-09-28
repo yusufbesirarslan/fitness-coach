@@ -156,7 +156,7 @@ def test_plan_renders_bounded_read_only_nutrition_summary(app, client, make_user
     assert "/static/nutrition.js" not in html
 
 
-def test_nutrition_page_shows_plan_parent_and_preserves_five_local_areas(
+def test_nutrition_page_shows_plan_parent_and_preserves_all_local_capabilities(
     app, client, make_user, login,
 ):
     _login_user(client, make_user, login, "nutrition-placement", "en")
@@ -169,8 +169,8 @@ def test_nutrition_page_shows_plan_parent_and_preserves_five_local_areas(
     assert "Plan" in html and "Nutrition" in html
     for label in ("Today", "Diary", "Nutrition Plan", "History", "Water"):
         assert label in html
-    assert html.count('role="tab"') == 5
-    assert html.count('role="tabpanel"') == 5
+    assert html.count('role="tab"') == 2
+    assert html.count('role="tabpanel"') == 2
     assert html.count('aria-controls="panel-') == 5
     assert "sidebar" not in html.lower()
 

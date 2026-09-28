@@ -142,8 +142,8 @@ def test_inline_font_size_detector_is_not_vacuous():
 # ─────────────────────────────────────────────────────────────────────────────
 
 NAMES = {
-    "en": {"nutrition": "Nutrition", "plan_tab": "Nutrition Plan", "supplements": "Supplements"},
-    "tr": {"nutrition": "Beslenme", "plan_tab": "Beslenme Planı", "supplements": "Takviyeler"},
+    "en": {"nutrition": "Nutrition", "plan_tab": "Plan", "supplements": "Supplements"},
+    "tr": {"nutrition": "Beslenme", "plan_tab": "Plan", "supplements": "Takviyeler"},
 }
 
 
@@ -165,8 +165,8 @@ def test_nutrition_destination_name_and_headings(app, client, make_user, login, 
     assert tab_label.casefold() != h1.casefold()
     assert names["nutrition"] in outline.title
 
-    # Exactly five local workflow tabs; Supplements is not one of them.
-    assert html.count('role="tab"') == 5
+    # Exactly two modes; Supplements is a child within Plan.
+    assert html.count('role="tab"') == 2
     assert 'data-tab-name="supplements"' not in html
 
 

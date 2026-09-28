@@ -1,0 +1,250 @@
+.FF...............................................                       [100%]
+================================== FAILURES ===================================
+_____ test_hierarchy_is_readable_at_every_viewport_in_both_languages[en] ______
+tests\test_ux3_pr5_supplements_placement_browser.py:350: in test_hierarchy_is_readable_at_every_viewport_in_both_languages
+    expect(page.locator(".nutrition-child-domain")).to_be_hidden()
+E   AssertionError: Locator expected to be visible
+E   Actual value: hidden
+E   Call log:
+E     - Expect "to_be_visible" with timeout 5000ms
+E     - waiting for locator(".nutrition-child-domain")
+E       13 � locator resolved to <nav class="nutrition-child-domain" aria-label="Nutrition child domain">�</nav>
+E          - unexpected value "hidden"
+E
+E   Aria snapshot:
+E   - banner:
+E     - link "AxisAI":
+E       - /url: /
+E     - link "Notifications":
+E       - /url: /notifications
+E     - link "My Profile":
+E       - /url: /edit-profile
+E       - text: T
+E   - main:
+E     - navigation "Plan hierarchy":
+E       - link "Plan":
+E         - /url: /training
+E       - text: Nutrition
+E     - heading "Nutrition" [level=1]
+E     - paragraph: Track your daily meals and build a nutrition plan.
+E     - tablist "Nutrition views":
+E       - tab "Today" [selected]:
+E         - img
+E         - text: Today
+E       - tab "Plan":
+E         - img
+E         - text: Plan
+E     - tabpanel "Today":
+E       - img
+E       - text: 0 kcal Target not set yet Protein 0g Carbohydrate 0g Fat 0g
+E       - link "Ask AxisAI about your target":
+E         - /url: /coach
+E       - heading "Today's Meals" [level=2]
+E       - text: Breakfast 0 kcal
+E       - button "+ Add to this meal"
+E       - text: Lunch 0 kcal
+E       - button "+ Add to this meal"
+E       - text: Dinner 0 kcal
+E       - button "+ Add to this meal"
+E       - text: Snack 0 kcal
+E       - button "+ Add to this meal"
+E       - group: History
+E       - text: Quick Add
+E       - button "Water � 1 Cup Today 0 / 8 cups":
+E         - text: Water � 1 Cup Today 0 / 8 cups
+E         - img
+E       - button "No active plan yet � open Plan"
+E       - group: Water
+E       - text: AI Review
+E       - button "END-OF-DAY AI REVIEW"
+E       - group: Diary
+E   - navigation "Primary navigation":
+E     - link "Today":
+E       - /url: /
+E     - link "Plan":
+E       - /url: /training
+E     - link "Coach":
+E       - /url: /coach
+E     - link "Progress":
+E       - /url: /progress-page
+E   - button "Add Meal":
+E     - img
+E   - dialog "AxisAI Coach":
+E     - text: AxisAI Coach
+E     - button "Close":
+E       - img
+E     - log "Coach conversation": Hi! \U0001f4aa I'm your AI fitness coach. Ask me anything about training, nutrition or health. Tap the QR icon on the left to scan a menu. 06:25 AM
+E     - textbox "Your message to the coach":
+E       - /placeholder: Ask something...
+E     - button "Scan a menu":
+E       - img
+E     - button "Send":
+E       - img
+----------------------------- Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKT�F � create_all/migration/seed atlan�yor. Bu bayrak yaln�zca CI/migration komutlar� i�indir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+INFO     app:observability.py:171 request id=cbd88d8631684098 method=POST path=/login status=200 dur_ms=35.1 user=1 ip=127.0.0.1
+------------------------------ Captured log call ------------------------------
+INFO     app:observability.py:171 request id=d956f1b6ede84fac method=GET path=/training status=200 dur_ms=614.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=8ae11f671e694298 method=GET path=/static/<path:filename> status=200 dur_ms=7.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=c61f46a3e4d74d8d method=GET path=/static/<path:filename> status=200 dur_ms=6.4 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=3491cd17ef13415f method=GET path=/static/<path:filename> status=200 dur_ms=7.8 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=1bad21976c344551 method=GET path=/static/<path:filename> status=200 dur_ms=5.1 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=af07f585a6b64886 method=GET path=/static/<path:filename> status=200 dur_ms=5.6 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=5b49f6a763264362 method=GET path=/static/<path:filename> status=200 dur_ms=6.9 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=672122c4ceaf4235 method=GET path=/static/<path:filename> status=200 dur_ms=6.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=73175ab6c7a5497f method=GET path=/static/<path:filename> status=200 dur_ms=7.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=0fdd49a8eefe4599 method=GET path=/static/<path:filename> status=200 dur_ms=9.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=570d62a67e614807 method=GET path=/static/<path:filename> status=200 dur_ms=8.4 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=74ce207128874349 method=GET path=/static/<path:filename> status=200 dur_ms=8.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=cb41f4bd7e474be8 method=GET path=/static/<path:filename> status=200 dur_ms=5.1 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=ddcb925bf3124a52 method=GET path=/static/<path:filename> status=200 dur_ms=7.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=43523e374f854f50 method=GET path=/notifications/unread-count status=200 dur_ms=30.4 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=3248c538d4e5470e method=GET path=/nutrition status=200 dur_ms=141.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=645193ea216f4792 method=GET path=/static/<path:filename> status=200 dur_ms=6.9 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=1864ed17c1a94b7e method=GET path=/static/<path:filename> status=200 dur_ms=6.1 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=9ccd587247264e7b method=GET path=/static/<path:filename> status=200 dur_ms=6.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=893255b4c8854dc0 method=GET path=/static/<path:filename> status=200 dur_ms=5.0 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=62b9d1dcaba548d6 method=GET path=/static/<path:filename> status=200 dur_ms=6.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=252ccf3c136246db method=GET path=/static/<path:filename> status=200 dur_ms=5.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=feaa9f03de184029 method=GET path=/static/<path:filename> status=200 dur_ms=5.6 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=ae5a30a834784041 method=GET path=/static/<path:filename> status=200 dur_ms=6.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=e536f7f8eb254b0c method=GET path=/static/<path:filename> status=200 dur_ms=5.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=7779552073254f75 method=GET path=/static/<path:filename> status=200 dur_ms=5.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=4a6e0862fd6d49b7 method=GET path=/static/<path:filename> status=200 dur_ms=6.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=00fc9e59a91448ca method=GET path=/static/<path:filename> status=200 dur_ms=6.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=77b263d4688749a0 method=GET path=/static/<path:filename> status=200 dur_ms=7.0 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=b343d6fb11a54c30 method=GET path=/notifications/unread-count status=200 dur_ms=15.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=0a581e272432435d method=GET path=/meal-log/today status=200 dur_ms=26.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=b58c541810ca4cba method=GET path=/nutrition-plan/active status=200 dur_ms=21.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=c1710e3f706c4a55 method=GET path=/water status=200 dur_ms=24.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=6605668b12ad4692 method=GET path=/static/<path:filename> status=200 dur_ms=7.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=99f54d11624a4a3c method=GET path=/coach/history status=200 dur_ms=30.1 user=1 ip=127.0.0.1
+_____ test_hierarchy_is_readable_at_every_viewport_in_both_languages[tr] ______
+tests\test_ux3_pr5_supplements_placement_browser.py:350: in test_hierarchy_is_readable_at_every_viewport_in_both_languages
+    expect(page.locator(".nutrition-child-domain")).to_be_hidden()
+E   AssertionError: Locator expected to be visible
+E   Actual value: hidden
+E   Call log:
+E     - Expect "to_be_visible" with timeout 5000ms
+E     - waiting for locator(".nutrition-child-domain")
+E       13 � locator resolved to <nav class="nutrition-child-domain" aria-label="Beslenme alt alan�">�</nav>
+E          - unexpected value "hidden"
+E
+E   Aria snapshot:
+E   - banner:
+E     - link "AxisAI":
+E       - /url: /
+E     - link "Bildirimler":
+E       - /url: /notifications
+E     - link "Profilim":
+E       - /url: /edit-profile
+E       - text: T
+E   - main:
+E     - navigation "Plan hiyerar�isi":
+E       - link "Plan":
+E         - /url: /training
+E       - text: Beslenme
+E     - heading "Beslenme" [level=1]
+E     - paragraph: G�nl�k ���nlerini takip et, beslenme plan� olu�tur.
+E     - tablist "Beslenme g�r�n�mleri":
+E       - tab "Bug�n" [selected]:
+E         - img
+E         - text: Bug�n
+E       - tab "Plan":
+E         - img
+E         - text: Plan
+E     - tabpanel "Bug�n":
+E       - img
+E       - text: 0 kcal Hedef hen�z belirlenmedi Protein 0g Karbonhidrat 0g Ya� 0g
+E       - link "Hedefin hakk�nda AxisAI'ya sor":
+E         - /url: /coach
+E       - heading "Bug�nk� ���nler" [level=2]
+E       - text: Kahvalt� 0 kcal
+E       - button "+ Bu ���ne ekle"
+E       - text: ��le 0 kcal
+E       - button "+ Bu ���ne ekle"
+E       - text: Ak�am 0 kcal
+E       - button "+ Bu ���ne ekle"
+E       - text: Ara ���n 0 kcal
+E       - button "+ Bu ���ne ekle"
+E       - group: Ge�mi�
+E       - text: H�zl� Ekle
+E       - button "Su � 1 Bardak Bug�n 0 / 8 bardak":
+E         - text: Su � 1 Bardak Bug�n 0 / 8 bardak
+E         - img
+E       - button "Hen�z aktif plan�n yok � Plan� a�"
+E       - group: Su Takibi
+E       - text: AI De�erlendirme
+E       - button "G�N SONU AI DE�ERLEND�RMES�"
+E       - group: G�nl�k
+E   - navigation "Birincil gezinme":
+E     - link "Bug�n":
+E       - /url: /
+E     - link "Plan":
+E       - /url: /training
+E     - link "Ko�":
+E       - /url: /coach
+E     - link "�lerleme":
+E       - /url: /progress-page
+E   - button "���n Ekle":
+E     - img
+E   - dialog "AxisAI Ko�":
+E     - text: AxisAI Ko�
+E     - button "Kapat":
+E       - img
+E     - log "Ko\xe7 konu\u015fmas\u0131": Merhaba! \U0001f4aa Ben AI fitness ko\xe7unum. Antrenman, beslenme veya sa\u011fl\u0131kla ilgili her \u015feyi sorabilirsin. Men\xfc taramak i\xe7in soldaki QR ikonuna dokun. 06:25
+E     - textbox "Ko�a mesaj�n":
+E       - /placeholder: Bir �ey sor...
+E     - button "Men� tara":
+E       - img
+E     - button "G�nder":
+E       - img
+----------------------------- Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKT�F � create_all/migration/seed atlan�yor. Bu bayrak yaln�zca CI/migration komutlar� i�indir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+INFO     app:observability.py:171 request id=58b547cbc4974433 method=POST path=/login status=200 dur_ms=36.2 user=1 ip=127.0.0.1
+------------------------------ Captured log call ------------------------------
+INFO     app:observability.py:171 request id=c7071f27398849f3 method=GET path=/training status=200 dur_ms=463.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=246b4a01cc234b54 method=GET path=/static/<path:filename> status=200 dur_ms=5.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=f16fd8b7c1294f6e method=GET path=/static/<path:filename> status=200 dur_ms=7.1 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=bf8d3ba533484b55 method=GET path=/static/<path:filename> status=200 dur_ms=6.9 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=083f5d540878450f method=GET path=/static/<path:filename> status=200 dur_ms=5.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=8f44beb533f74bb5 method=GET path=/static/<path:filename> status=200 dur_ms=5.4 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=f50b93235a9b4f89 method=GET path=/static/<path:filename> status=200 dur_ms=5.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=fe1f4cfb30204604 method=GET path=/static/<path:filename> status=200 dur_ms=5.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=8cc956da65f34c8e method=GET path=/static/<path:filename> status=200 dur_ms=5.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=5e737ee059af44fd method=GET path=/static/<path:filename> status=200 dur_ms=5.4 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=43a3def537314dc3 method=GET path=/static/<path:filename> status=200 dur_ms=8.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=01f069f59b314e9c method=GET path=/static/<path:filename> status=200 dur_ms=6.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=6db83123121b41e1 method=GET path=/static/<path:filename> status=200 dur_ms=5.1 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=d8c542ee20134fd0 method=GET path=/static/<path:filename> status=200 dur_ms=4.8 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=969e0dbfa4df4bd9 method=GET path=/notifications/unread-count status=200 dur_ms=22.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=5c422e2d2cdf495c method=GET path=/nutrition status=200 dur_ms=161.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=88b1bd24c576446d method=GET path=/static/<path:filename> status=200 dur_ms=4.9 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=1f4320f1ce0e4146 method=GET path=/static/<path:filename> status=200 dur_ms=6.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=3cc88f5f20354d7e method=GET path=/static/<path:filename> status=200 dur_ms=7.4 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=e2cc9792f55c4a40 method=GET path=/static/<path:filename> status=200 dur_ms=5.0 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=7e953d7ddf4540b9 method=GET path=/static/<path:filename> status=200 dur_ms=8.0 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=18bc0f3fd5434b1c method=GET path=/static/<path:filename> status=200 dur_ms=6.4 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=169dfe99f9f74be4 method=GET path=/static/<path:filename> status=200 dur_ms=5.8 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=4f2fca8fff1c4a37 method=GET path=/static/<path:filename> status=200 dur_ms=6.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=81a2a97da56c4439 method=GET path=/static/<path:filename> status=200 dur_ms=5.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=4afb426f56ac48fa method=GET path=/static/<path:filename> status=200 dur_ms=5.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=61382afff5554f42 method=GET path=/static/<path:filename> status=200 dur_ms=7.5 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=b7c7b97561434738 method=GET path=/static/<path:filename> status=200 dur_ms=6.9 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=bd3c3c5325bd4cc3 method=GET path=/static/<path:filename> status=200 dur_ms=11.3 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=998396984ad34e20 method=GET path=/notifications/unread-count status=200 dur_ms=15.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=024000388b7149b4 method=GET path=/meal-log/today status=200 dur_ms=23.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=26707565ee7344cd method=GET path=/nutrition-plan/active status=200 dur_ms=18.7 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=56b4f56aae7b4149 method=GET path=/water status=200 dur_ms=20.0 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=270fe6c31fad4ff3 method=GET path=/static/<path:filename> status=200 dur_ms=5.2 user=1 ip=127.0.0.1
+INFO     app:observability.py:171 request id=c8650ac7912240d0 method=GET path=/coach/history status=200 dur_ms=17.5 user=1 ip=127.0.0.1
+=========================== short test summary info ===========================
+FAILED tests/test_ux3_pr5_supplements_placement_browser.py::test_hierarchy_is_readable_at_every_viewport_in_both_languages[en]
+FAILED tests/test_ux3_pr5_supplements_placement_browser.py::test_hierarchy_is_readable_at_every_viewport_in_both_languages[tr]
+2 failed, 48 passed, 626 warnings in 116.98s (0:01:56)
