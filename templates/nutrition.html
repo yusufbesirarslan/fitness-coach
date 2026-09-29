@@ -37,41 +37,6 @@
   </div>
 </div>
 
-<!-- ── SERVING SELECTOR MODAL (diary + barcode) ── -->
-<div class="modal-overlay" id="serving-modal" data-action-self="closeServingModal">
-  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="sm-title">
-    <div class="modal-title" id="sm-title">{{ t('nutrition.add_food_title') }}</div>
-    <div id="sm-food-name" class="sm-food-name"></div>
-    <div id="sm-brand" class="sm-brand"></div>
-    <div id="sm-body">
-      <div id="sm-loading" style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-        <div class="diary-serving-loading"></div>
-        <span class="sm-loading-text">{{ t('nutrition.serving_loading') }}</span>
-      </div>
-      <div id="sm-serving-row" style="display:none;margin-bottom:12px;">
-        <label class="sm-field-label">{{ t('nutrition.serving_label') }}</label>
-        <select class="fc-input" id="sm-serving-select" data-action-change="updateSmPreview" style="width:100%;"></select>
-      </div>
-      <div id="sm-gram-row" style="display:none;margin-bottom:12px;">
-        <label class="sm-field-label">{{ t('nutrition.gram_label') }}</label>
-        <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" data-action-input="updateSmPreview" style="width:100%;">
-      </div>
-      <div id="sm-qty-row" style="display:none;margin-bottom:16px;">
-        <label class="sm-field-label">{{ t('nutrition.qty_label') }}</label>
-        <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" data-action-input="updateSmPreview" style="width:100%;">
-      </div>
-    </div>
-    <div class="sm-macros">
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--color-primary);" id="sm-cal">0</div><div class="sm-macro-lbl">KCAL</div></div>
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--blue-light);" id="sm-pro">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_protein_abbr') }}</div></div>
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--orange);" id="sm-carb">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_carb_abbr') }}</div></div>
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--green);" id="sm-fat">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_fat_abbr') }}</div></div>
-    </div>
-    <button class="btn-volt w-full" id="sm-confirm-btn" data-action="confirmServingModal">{{ t('nutrition.add') }}</button>
-    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeServingModal">{{ t('nutrition.cancel') }}</button>
-  </div>
-</div>
-
 <!-- ── TOAST CONTAINER ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
@@ -463,6 +428,43 @@
       <input class="fc-input" id="barcode-manual-input" inputmode="numeric" placeholder="{{ t('nutrition.barcode_manual_ph') }}" autocomplete="off">
       <button class="btn-volt" data-action="onBarcodeManual">{{ t('nutrition.barcode_lookup') }}</button>
     </div>
+  </div>
+</div>
+
+<!-- ── SERVING SELECTOR MODAL (diary + barcode) ── -->
+<!-- NUTR-PR4: after every sheet/overlay it opens over (Search food sheet, barcode
+     scanner, builder). Same --z-overlay layer, so DOM order puts it on top. -->
+<div class="modal-overlay" id="serving-modal" data-action-self="closeServingModal">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="sm-title">
+    <div class="modal-title" id="sm-title">{{ t('nutrition.add_food_title') }}</div>
+    <div id="sm-food-name" class="sm-food-name"></div>
+    <div id="sm-brand" class="sm-brand"></div>
+    <div id="sm-body">
+      <div id="sm-loading" style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+        <div class="diary-serving-loading"></div>
+        <span class="sm-loading-text">{{ t('nutrition.serving_loading') }}</span>
+      </div>
+      <div id="sm-serving-row" style="display:none;margin-bottom:12px;">
+        <label class="sm-field-label">{{ t('nutrition.serving_label') }}</label>
+        <select class="fc-input" id="sm-serving-select" data-action-change="updateSmPreview" style="width:100%;"></select>
+      </div>
+      <div id="sm-gram-row" style="display:none;margin-bottom:12px;">
+        <label class="sm-field-label">{{ t('nutrition.gram_label') }}</label>
+        <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" data-action-input="updateSmPreview" style="width:100%;">
+      </div>
+      <div id="sm-qty-row" style="display:none;margin-bottom:16px;">
+        <label class="sm-field-label">{{ t('nutrition.qty_label') }}</label>
+        <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" data-action-input="updateSmPreview" style="width:100%;">
+      </div>
+    </div>
+    <div class="sm-macros">
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--color-primary);" id="sm-cal">0</div><div class="sm-macro-lbl">KCAL</div></div>
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--blue-light);" id="sm-pro">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_protein_abbr') }}</div></div>
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--orange);" id="sm-carb">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_carb_abbr') }}</div></div>
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--green);" id="sm-fat">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_fat_abbr') }}</div></div>
+    </div>
+    <button class="btn-volt w-full" id="sm-confirm-btn" data-action="confirmServingModal">{{ t('nutrition.add') }}</button>
+    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeServingModal">{{ t('nutrition.cancel') }}</button>
   </div>
 </div>
 

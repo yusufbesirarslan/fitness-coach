@@ -94,7 +94,7 @@ There is no polling, and no LLM or provider call on open.
 
 | Defect (pre-existing on 9576d5a) | Treatment |
 | --- | --- |
-| Serving modal painted under the Search sheet (same `--z-overlay`, earlier in the DOM), covering its Add button, so the Search → serving → confirm path was blocked on the page. | **Fixed** (CSS only): `#serving-modal` takes `calc(var(--z-overlay) + 1)` (toasts stay above). |
+| Serving modal painted under the Search sheet (same `--z-overlay`, earlier in the DOM), covering its Add button, so the Search → serving → confirm path was blocked on the page. | **Fixed** (template order only): `#serving-modal` stays on the `--z-overlay` token and now sits AFTER the sheets/overlays it opens over, so DOM order paints it on top (toasts stay above). A raw `calc()` layer would break the UX4-PR8 z-index token gate (`tests/test_ux4_pr8_consistency_gate.py`). |
 | Diary read failure drew four empty meals (unknown shown as empty). | **Fixed**: `#diary-meals[data-diary-state]` loading/available/unavailable, "Your meal builder couldn't be loaded." + Try again, and a generation guard. Staged items live on the server, so nothing is discarded. |
 | A second Enter during a free-text/search log sent a second `POST /meal-log` with a new key. | **Fixed** (smallest UI containment): `logMeal` is single-flight; the body is `submitMealLog`, unchanged. |
 | Focus was lost (to `<body>`) after cancelling the search sheet, barcode scanner, photo modal or serving modal. | **Fixed**: deterministic return (§2). |

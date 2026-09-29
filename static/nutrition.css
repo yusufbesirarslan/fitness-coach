@@ -607,9 +607,9 @@
 .modal-overlay.open { display: flex; animation: fade-in var(--duration-base) var(--ease-standard); }
 /* NUTR-PR4: the serving step is opened FROM the Search food sheet (and from
    the builder / a barcode lookup). Same layer + earlier in the DOM meant it
-   painted UNDER that sheet, with its Add button covered. It is the step on
-   top, so it takes the one slot above the overlay layer (toasts stay above). */
-#serving-modal { z-index: calc(var(--z-overlay) + 1); }
+   painted UNDER that sheet, with its Add button covered. It stays on the
+   --z-overlay token; templates/nutrition.html places it AFTER every sheet
+   and overlay it opens over, so DOM order paints it on top (toasts above). */
 .modal-box {
   background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1);
   border-radius: var(--radius-xl); padding: var(--space-6); width: 100%; max-width: 360px;
