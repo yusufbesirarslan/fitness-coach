@@ -230,6 +230,7 @@ def fixture_catalog(tmp_path, monkeypatch):
 
 
 def _session(user):
+    user.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     db.session.add(UserSession(
         user_id=user.id, goal="kas kazanma", fitness_level="intermediate",
         current_activity="active", tdee=2600,

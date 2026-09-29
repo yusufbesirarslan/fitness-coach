@@ -64,6 +64,7 @@ def quota_on(app):
 
 @pytest.fixture
 def training_session(auth_user):
+    auth_user.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     db.session.add(UserSession(user_id=auth_user.id, goal="kilo verme",
                                fitness_level="beginner", current_activity="active",
                                tdee=2700))

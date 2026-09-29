@@ -22,6 +22,7 @@ from playwright.sync_api import sync_playwright
 
 from app.extensions import db
 from app.models import User
+from onboarding_support import mark_onboarded
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -67,7 +68,7 @@ def ready(app, user_id, language="en"):
     app.config["WEEKLY_PROGRAM_UI_ENABLED"] = True
     with app.app_context():
         user = db.session.get(User, user_id)
-        user.profile_complete = True
+        mark_onboarded(user)
         user.language = language
         db.session.commit()
 

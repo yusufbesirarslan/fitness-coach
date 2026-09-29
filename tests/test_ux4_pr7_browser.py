@@ -19,6 +19,7 @@ from app.today_presenter import (STATE_ERROR, STATE_IN_PROGRESS,
                                  TodayPlanSummary)
 from test_training_execution_boundary import training_page  # noqa: F401
 from test_today_v2 import _seed_plan, _seed_pumpcheck_today, _week
+from onboarding_support import mark_onboarded
 
 
 WIDTHS = (320, 390, 768, 1024, 1366)
@@ -67,7 +68,7 @@ PROBE = r"""
 
 def _ready(user_id, language):
     user = db.session.get(User, user_id)
-    user.profile_complete = True
+    mark_onboarded(user)
     user.language = language
     db.session.commit()
 

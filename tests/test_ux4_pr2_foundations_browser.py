@@ -22,6 +22,7 @@ from playwright.sync_api import sync_playwright
 from app.extensions import db
 from app.models import MealLog, User
 from app.timeutil import app_today
+from onboarding_support import mark_onboarded
 
 # Today / Plan / Coach / Progress are the primary IA; Nutrition, Supplements,
 # Account and Notifications are the other surfaces discovery audited.
@@ -152,7 +153,7 @@ def surface(client):
 
 def _ready(user_id, language="en"):
     user = db.session.get(User, user_id)
-    user.profile_complete = True
+    mark_onboarded(user)
     user.language = language
     db.session.commit()
 

@@ -21,6 +21,7 @@ from test_sprint14_workout_execution_contract import (
     SQUAT, BENCH, ROW, checkpoint_over_http, proof_accepted, row_for,
     save_workout_plan, sessions_on, start_session_over_http,
 )
+from onboarding_support import mark_onboarded
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture
 def execution_session(app, auth_user, client, sessions_on):
     with app.app_context():
-        db.session.get(User, auth_user.id).profile_complete = True
+        mark_onboarded(db.session.get(User, auth_user.id))
         plan = save_workout_plan(auth_user.id)
         data = json.loads(plan.plan_data)
         for day in data['program']:
@@ -294,7 +295,7 @@ def test_plan_v2_start_refresh_checkpoint_and_complete_use_durable_contract(
     app, auth_user, client, sessions_on, proof_accepted, training_page,
 ):
     with app.app_context():
-        db.session.get(User, auth_user.id).profile_complete = True
+        mark_onboarded(db.session.get(User, auth_user.id))
         plan = save_workout_plan(auth_user.id)
         data = json.loads(plan.plan_data)
         for day in data['program']:
@@ -412,7 +413,7 @@ def test_plan_v2_shell_browser_qa_across_locales_and_viewports(
 ):
     with app.app_context():
         user = db.session.get(User, auth_user.id)
-        user.profile_complete = True
+        mark_onboarded(user)
         plan = save_workout_plan(auth_user.id)
         data = json.loads(plan.plan_data)
         for day in data['program']:
@@ -467,7 +468,7 @@ def test_plan_v2_sessions_off_refresh_preserves_open_legacy_draft(
 ):
     with app.app_context():
         user = db.session.get(User, auth_user.id)
-        user.profile_complete = True
+        mark_onboarded(user)
         plan = save_workout_plan(auth_user.id)
         data = json.loads(plan.plan_data)
         for day in data['program']:
@@ -501,7 +502,7 @@ def _seed_progression_plan(app, user_id):
     then one set that must not inherit the previous exercise."""
     with app.app_context():
         user = db.session.get(User, user_id)
-        user.profile_complete = True
+        mark_onboarded(user)
         user.language = 'en'
         plan = save_workout_plan(user_id)
         data = json.loads(plan.plan_data)

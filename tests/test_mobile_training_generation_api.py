@@ -80,6 +80,7 @@ def _document(exercise_count=1):
 @pytest.fixture
 def mobile_user(make_user):
     user = make_user("training-generation-mobile")
+    user.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     db.session.add(UserSession(
         user_id=user.id, goal="fit", fitness_level="beginner",
         current_activity="active", tdee=2400))
@@ -262,6 +263,7 @@ def test_provider_unavailable_is_safe_retryable_503_and_replays_failure(
 def test_post_is_owner_scoped_even_when_users_share_a_key(
         client, mobile_user, make_user, as_mobile, successful_provider):
     other = make_user("training-generation-other")
+    other.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     db.session.add(UserSession(user_id=other.id, goal="fit", fitness_level="beginner"))
     db.session.commit()
     key = "generation-key-shared"

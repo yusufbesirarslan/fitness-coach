@@ -60,6 +60,7 @@ CANDIDATE_DOCUMENT = {
 @pytest.fixture
 def command_user(make_user):
     user = make_user("native-generation-command")
+    user.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     db.session.add(UserSession(
         user_id=user.id, goal="fit", fitness_level="beginner",
         current_activity="active", tdee=2400))
