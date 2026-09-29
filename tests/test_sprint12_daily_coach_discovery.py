@@ -38,7 +38,8 @@ def _source(relative):
 # one. Mobile Training PR2 later added three bounded, read-only projections of
 # canonical Training authority. The tests below now pin that post-PR2 truth:
 # one canonical Today aggregate, the three approved Training reads, and no
-# other Daily-Coach domain.
+# other Daily-Coach domain. LP-04 adds the one approved Progress read: the
+# canonical `progress_summary` read model the web Progress page already serves.
 
 @pytest.fixture(scope="module")
 def mobile_enabled_app():
@@ -89,7 +90,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
 
     `/api/v1/today` joined the set in Sprint 12 PR3; LP-01 adds the three
     pre-auth registration/verification routes, LP-02 the two pre-auth
-    password-recovery routes, and LP-03 the native onboarding profile write. Mobile Training PR2 adds
+    password-recovery routes, LP-03 the native onboarding profile write, and
+    LP-04 the canonical Progress summary read. Mobile Training PR2 adds
     exactly three canonical read projections, PR4A one native plan write, and
     PR5 the six native workout-session contracts. The referenced-session read
     adds one owner-scoped canonical projection. Any further path means
@@ -124,6 +126,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/pump-checks/<pump_check_token>",
         "/api/v1/pump-check-comparisons",
         "/api/v1/pump-check-comparisons/<comparison_id>",
+        # LP-04 canonical Progress summary read (owner = bearer principal).
+        "/api/v1/progress/summary",
         "/api/v1/today",
         "/api/v1/training/preferences",
         "/api/v1/training/plans",
@@ -145,6 +149,15 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
 _APPROVED_TODAY_PATHS = {
     "/api/v1/nutrition/diary/today",
     "/api/v1/today",
+}
+
+# The only `/api/v1` path allowed to carry "progress". LP-04 (spec J1) exposes
+# the canonical `progress_summary` read model the web Progress page already
+# renders - one builder, one hand-written projection - so it is a transport of
+# an existing authority, not a new Progress domain on mobile. Admitted here by
+# review, not by widening the guard: a second Progress read would still fail.
+_APPROVED_PROGRESS_PATHS = {
+    "/api/v1/progress/summary",
 }
 
 _APPROVED_TRAINING_PATHS = {
@@ -199,6 +212,7 @@ def test_no_unapproved_mobile_endpoint_serves_a_daily_coach_domain(
         path for path in _mobile_paths(mobile_enabled_app)
         if (domain in path
             and path not in _APPROVED_TODAY_PATHS
+            and path not in _APPROVED_PROGRESS_PATHS
             and path not in _APPROVED_TRAINING_PATHS)
     }
     assert offenders == set(), (
