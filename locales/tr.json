@@ -211,6 +211,8 @@
   "nutrition.logged_state": "Kaydedildi",
   "nutrition.plan_unavailable": "Planın şu an yüklenemedi.",
   "nutrition.quick_add_uncertain": "Bu öğünün kaydedildiği doğrulanamadı. Tekrar denemeden önce kaydedilen öğünlerine bak.",
+  "nutrition.unconfirmed_state": "Doğrulanmadı",
+  "nutrition.check_logged_meals": "Kaydedilen öğünleri kontrol et",
   "nutrition.ask_coach": "Hedefin hakkında AxisAI'ya sor",
   "nutrition.macro_protein": "Protein",
   "nutrition.carb_short": "Karb",

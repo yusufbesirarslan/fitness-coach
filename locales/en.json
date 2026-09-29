@@ -200,6 +200,8 @@
   "nutrition.logged_state": "Logged",
   "nutrition.plan_unavailable": "Your plan couldn't be loaded.",
   "nutrition.quick_add_uncertain": "We couldn't confirm this meal was logged. Check your logged meals before trying again.",
+  "nutrition.unconfirmed_state": "Not confirmed",
+  "nutrition.check_logged_meals": "Check Logged meals",
   "nutrition.ask_coach": "Ask AxisAI about your target",
   "nutrition.macro_protein": "Protein",
   "nutrition.carb_short": "Carb",

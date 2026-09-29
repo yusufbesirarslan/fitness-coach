@@ -422,7 +422,7 @@ NUTRITION_JS = Path(__file__).resolve().parents[1] / "static" / "nutrition.js"
 PLAN_RENDERERS = (
     "function renderPlans(data)",
     "function renderActivePlanDetail(plan, score, createdAt)",
-    "async function loadQuickAddSection()",
+    "async function loadQuickAddSection(force = false)",
 )
 
 # Identifiers that carry server/provider data on this page. An interpolation
@@ -596,11 +596,15 @@ EXPECTED_INTERPOLATIONS = {
         "m.label",
         "mealsHtml",
     }),
-    "async function loadQuickAddSection()": frozenset({
+    "async function loadQuickAddSection(force = false)": frozenset({
         "__t('nutrition.no_active_plan')",
         "__t('nutrition.unit_carb')",
         "__t('nutrition.unit_protein')",
-        "esc(d.plan.isim || 'Aktif Plan')",
+        "esc(__t('nutrition.log_planned'))",
+        "esc(__t('nutrition.plan_unavailable'))",
+        "esc(__t('nutrition.planned'))",
+        "esc(__t('nutrition.try_again'))",
+        "esc(plan.isim || __t('nutrition.active_plan_name'))",
         "fmtNum(ml.kalori)",
         "fmtNum(ml.karb)",
         "fmtNum(ml.protein)",

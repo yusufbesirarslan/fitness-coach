@@ -1221,7 +1221,19 @@ function resetPlan() {
    Deferred, NOT fixed here: the endpoint's idempotency replay is user-wide and
    runs before plan/meal validation, so nothing on this surface claims
    exactly-once. It only avoids a double tap and never re-sends an ambiguous
-   write by itself. */
+   write by itself. An ambiguous row stays locked and "Not confirmed" for the
+   rest of this page's life, re-renders included: only a reload rebuilds it
+   from the server, so the row itself never invites a second uncertain write. */
+const _plannedWriteLocks = new Map(); // meal key → 'pending' | 'unconfirmed'
+
+function lockPlannedRow(row, state) {
+  row.disabled = true;
+  row.dataset.writeState = state;
+  if (state !== 'unconfirmed') return;
+  row.querySelector('.qab-badge').textContent = __t('nutrition.unconfirmed_state');
+  row.querySelector('.qab-action').textContent = __t('nutrition.check_logged_meals');
+}
+
 function setPlanState(state) {
   document.getElementById('quick-add-section').dataset.planState = state;
 }
@@ -1275,13 +1287,18 @@ async function loadQuickAddSection(force = false) {
         <span class="qab-action">${esc(__t('nutrition.log_planned'))}</span>
       </button>`;
   }).join('');
+  _plannedWriteLocks.forEach((state, key) => {
+    const row = document.getElementById('qab-' + key);
+    if (row) lockPlannedRow(row, state);
+  });
 }
 
 function retryPlanShortcuts() { loadQuickAddSection(true); }
 
 async function quickAddMeal(mealKey, mealLabel, btn) {
-  if (btn.classList.contains('qab-done') || btn.disabled) return;
-  btn.disabled = true;
+  if (btn.classList.contains('qab-done') || btn.disabled || _plannedWriteLocks.has(mealKey)) return;
+  _plannedWriteLocks.set(mealKey, 'pending');
+  lockPlannedRow(btn, 'pending');
   btn.setAttribute('aria-busy', 'true');
   let res = null, d = null;
   try {
@@ -1293,8 +1310,11 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
     d = await res.json().catch(() => null);
   } catch (e) { res = null; }
   btn.removeAttribute('aria-busy');
+  if (!btn.isConnected) btn = document.getElementById('qab-' + mealKey) || btn;
 
   if (res && res.ok && d && !d.error) {
+    _plannedWriteLocks.delete(mealKey);
+    delete btn.dataset.writeState;
     // Confirmed write: only now does this planned meal read "Logged".
     btn.classList.add('qab-done');
     btn.querySelector('.qab-action').textContent = __t('nutrition.logged_state');
@@ -1305,14 +1325,20 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
     loadTodayData(); // canonical refresh: summary + ledger
     return;
   }
-  btn.disabled = false;
   if (res && res.status >= 400 && res.status < 500) {
-    // Refused: nothing was written.
+    // Refused: nothing was written, so the row may be tried again.
+    _plannedWriteLocks.delete(mealKey);
+    delete btn.dataset.writeState;
+    btn.disabled = false;
     showToast((d && d.error) || __t('nutrition.add_error'), 'error');
     return;
   }
-  // 5xx, network or unreadable reply: the write may have committed. Say so,
-  // re-read the ledger (the only authority) and do NOT re-send by ourselves.
+  // 5xx, network or unreadable reply: the write may have committed. Neither
+  // "Logged" nor "failed" is known, so the row stays locked and says so until
+  // a reload; the one ledger re-read below refreshes the day but never decides
+  // this row. Nothing is re-sent, by us or by a second tap.
+  _plannedWriteLocks.set(mealKey, 'unconfirmed');
+  lockPlannedRow(btn, 'unconfirmed');
   showToast(__t('nutrition.quick_add_uncertain'), 'warning');
   loadTodayData();
 }

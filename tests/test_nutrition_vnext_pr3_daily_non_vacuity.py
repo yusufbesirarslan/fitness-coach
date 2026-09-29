@@ -12,6 +12,7 @@ automatically when the test ends.
   M6 History eager-loaded                     → request-topology test fails
   M7 Water unavailable drawn as 0 cups        → hydration failure test fails
   M8 secondary content placed before the core → first-viewport test fails
+  M9 ambiguous planned row re-enabled         → ambiguous-write test fails
 """
 import pytest
 
@@ -49,6 +50,11 @@ SCRIPT_MUTATIONS = {
             "    closeManualSheet();\n  } catch (e) {\n")],
     'M6': [("initWaterButton();\n", "initWaterButton();\nloadMealHistory();\n")],
     'M7': [("  else waterState = 'unavailable';\n", "  else confirmWater(0);\n")],
+    # The pre-remediation bug: after a 5xx/network/unreadable answer the row
+    # returned to an actionable Planned / Log and a re-tap minted a new key.
+    'M9': [("  _plannedWriteLocks.set(mealKey, 'unconfirmed');\n  lockPlannedRow(btn, 'unconfirmed');\n",
+            "  _plannedWriteLocks.delete(mealKey);\n  delete btn.dataset.writeState;\n"
+            "  btn.disabled = false;\n")],
 }
 
 
@@ -130,3 +136,11 @@ def test_m7_water_unavailable_as_zero_is_detected(app, auth_user, client, traini
     with pytest.raises(AssertionError):
         browser.test_water_failure_leaves_the_day_usable(app, auth_user, client, training_page,
                                                          'unavailable')
+
+
+def test_m9_ambiguous_row_re_enabled_is_detected(app, auth_user, client, training_page):
+    page, _, _, _ = training_page
+    serve_mutated_script(page, client, 'M9')
+    with pytest.raises(AssertionError):
+        browser.test_ambiguous_planned_write_is_not_retried_or_claimed(
+            app, auth_user, client, training_page, '5xx')

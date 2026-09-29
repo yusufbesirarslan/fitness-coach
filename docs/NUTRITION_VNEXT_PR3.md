@@ -20,8 +20,9 @@ Hydration: `GET /water` (hydration-repair state machine).
 - a failed or never-answered `/meal-log/today` left the server-rendered `0` kcal / `0` g visible and the
   skeleton spinning forever — an unknown intake read as a confirmed zero;
 - a failed `/nutrition-plan/active` blanked the plan shortcuts silently (indistinguishable from nothing);
-- an ambiguous (5xx/network) planned-meal write re-enabled the button with an error, inviting a second
-  write under a fresh idempotency key;
+- an ambiguous (5xx/network/unreadable) planned-meal write returned the row to an actionable
+  *Planned / Log*, so a second tap sent a second write under a fresh idempotency key. The row now stays
+  locked and visibly *Not confirmed* until the page is reloaded (see §3, planned write outcomes);
 - the ring's `%` was a completion percentage and the ring repeated the intake/target pair as a picture.
 
 **Logging entry points (all remain reachable after PR3):**
@@ -74,6 +75,20 @@ The page header drops its explanatory sub-line. Exactly two primary tabs remain 
 | Plan shortcuts (`data-plan-state`) | `loading` · `available` · `none` (`exists:false`) · `unavailable` (+ *Try again*) | `/nutrition-plan/active` |
 | Hydration | `loading` · `confirmed` · `saving` · `unavailable` · `unconfirmed` (unchanged) | `/water` |
 
+**Planned write outcomes (`/api/quick-add-meal`, per row; `data-write-state` on the row):**
+
+| Outcome | Row | Ledger |
+| --- | --- | --- |
+| in flight | disabled, still *Planned* (`pending`) | — |
+| 2xx confirmed | *Logged* | one canonical `/meal-log/today` re-read |
+| 4xx refused (nothing accepted) | error toast; back to *Planned / Log*, may be tapped again | — |
+| 5xx / network / unreadable (ambiguous) | warning toast **and** a persistent row state *Not confirmed · Check Logged meals* (`unconfirmed`); disabled; never *Logged*, never "failed" | one canonical re-read refreshes totals and the ledger, but does **not** decide this row |
+
+An ambiguous row is never re-sent automatically and cannot be activated again (tap, forced click,
+keyboard, or a re-render of the plan section, including tab/back navigation) for the rest of the page's
+life. The user checks *Logged meals*. Only a full page reload rebuilds the row from the server and makes it
+actionable again. This is deliberately conservative because backend idempotency is deferred (§4).
+
 Topology note: target and intake come from **one** read, so a server failure takes both down together
 (both shown as unavailable). An unusable target inside a healthy reply is the independent case and shows
 *Target unavailable* next to the confirmed intake.
@@ -81,9 +96,12 @@ Topology note: target and intake come from **one** read, so a server failure tak
 ## 4. Deferred / not owned
 
 - **Planned-meal idempotency (known defect, not repaired):** `/api/quick-add-meal` replay lookup is
-  user-wide and runs before plan/meal validation. PR3 claims no exactly-once behaviour; it only disables
-  the row while in flight, shows *Logged* after a confirmed response, and on an ambiguous outcome warns,
-  re-reads the ledger and never re-sends by itself.
+  user-wide and runs before plan/meal validation. PR3 claims no exactly-once behaviour and does not change
+  the endpoint. It only disables the row while in flight and shows *Logged* after a confirmed response.
+  On an ambiguous outcome it warns, re-reads the ledger once, and keeps the row disabled and *Not
+  confirmed* until reload, so the UI never invites a second uncertain write. A duplicate is still possible
+  if the user reloads and logs the same meal again without checking *Logged meals*; only a backend fix
+  closes that.
 - NUTR-PR4 owns food-method convergence (chooser contents, search/barcode/menu/manual/build-meal UX).
 - NUTR-PR5 owns the Nutrition Plan; NUTR-PR6 owns insight/coaching; native/Flutter are PR7/PR8.
 - `/coach/history` on initial load is the Coach widget's pre-existing behaviour, recorded, not changed.
@@ -94,6 +112,9 @@ Topology note: target and intake come from **one** read, so a server failure tak
   contract, endpoint allow-list, routes/destinations, read shape, locale parity/plain copy.
 - `tests/test_nutrition_vnext_pr3_daily_browser.py` — hierarchy EN/TR, over-target, F1–F5 failure
   isolation, empty, stale refresh, real-write freshness (manual log, planned shortcut, delete), ambiguous
-  planned write, request topology, first-viewport geometry (320×640, 390×844, 430×844 EN/TR), responsive
+  planned write (5xx/network/unreadable: one POST, one ledger re-read, row locked and *Not confirmed*
+  through forced/keyboard activation and re-render, actionable only after reload), refused 4xx write
+  (retryable), request topology, first-viewport geometry (320×640, 390×844, 430×844 EN/TR), responsive
   320–1366, keyboard/focus return.
-- `tests/test_nutrition_vnext_pr3_daily_non_vacuity.py` — M1–M8 mutations, each proven to fail its guard.
+- `tests/test_nutrition_vnext_pr3_daily_non_vacuity.py` — M1–M9 mutations, each proven to fail its guard
+  (M9 restores the pre-remediation re-enable of an ambiguous planned row).

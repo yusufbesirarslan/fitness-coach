@@ -414,24 +414,84 @@ def test_planned_shortcut_is_planned_until_the_write_confirms(app, auth_user, cl
     assert paths(traffic)['/meal-log/today'] == 1
 
 
-def test_ambiguous_planned_write_is_not_retried_or_claimed(app, auth_user, client, training_page):
+AMBIGUOUS = {
+    '5xx': fail,
+    'network': lambda route: route.abort('failed'),
+    'unreadable': lambda route: route.fulfill(status=200, content_type='application/json', body='<html>'),
+}
+
+
+@pytest.mark.parametrize('outcome', list(AMBIGUOUS))
+def test_ambiguous_planned_write_is_not_retried_or_claimed(app, auth_user, client, training_page,
+                                                           outcome):
     seed(app, auth_user.id)
     page, traffic, _, _ = training_page
     open_today(page)
+    copy = CATALOG['en']
     attempts = []
 
     def ambiguous(route):
         attempts.append(route.request.headers.get('idempotency-key'))
-        fail(route)
+        AMBIGUOUS[outcome](route)
     page.route('**/api/quick-add-meal', ambiguous)
     traffic.clear()
-    page.locator('#qab-kahvalti').click()
+    row = page.locator('#qab-kahvalti')
+    row.click()
     expect(page.locator('#toast-wrap .toast-warning')).to_be_visible()
-    expect(page.locator('#qab-kahvalti .qab-badge')).to_have_text('Planned')
-    expect(page.locator('#qab-kahvalti')).to_be_enabled()
+    # Persistent on the row, not only in the toast: neither Logged nor failed.
+    expect(row.locator('.qab-badge')).to_have_text(copy['nutrition.unconfirmed_state'])
+    expect(row.locator('.qab-action')).to_have_text(copy['nutrition.check_logged_meals'])
+    for part in ('.qab-badge', '.qab-action'):
+        expect(row.locator(part)).not_to_have_text(copy['nutrition.logged_state'])
+        expect(row.locator(part)).not_to_have_text(copy['nutrition.log_planned'])
+    expect(row).not_to_have_class(re.compile(r'\bqab-done\b'))
+    expect(row).to_be_disabled()
+    # The one canonical ledger re-read still refreshes the day.
     page.wait_for_timeout(300)
-    assert len(attempts) == 1 and attempts[0]           # sent once, never re-sent by itself
-    assert paths(traffic)['/meal-log/today'] == 1       # the ledger decides what happened
+    assert paths(traffic)['/meal-log/today'] == 1
+    assert_summary_matches_server(page, client)
+    # No second write: not by itself, not by a forced tap, not by keyboard,
+    # not after the toast is gone, not after the planned section re-renders.
+    row.click(force=True)
+    row.dispatch_event('click')
+    row.focus()
+    page.keyboard.press('Enter')
+    page.evaluate('() => loadQuickAddSection(true)')
+    expect(page.locator('#quick-add-section')).to_have_attribute('data-plan-state', 'available')
+    expect(row).to_be_disabled()
+    expect(row.locator('.qab-badge')).to_have_text(copy['nutrition.unconfirmed_state'])
+    row.click(force=True)
+    page.wait_for_timeout(4000)
+    expect(row).to_be_disabled()
+    expect(row.locator('.qab-badge')).to_have_text(copy['nutrition.unconfirmed_state'])
+    assert len(attempts) == 1 and attempts[0]           # sent once, never re-sent
+    assert paths(traffic)['/meal-log/today'] == 1       # exactly one ledger re-read
+    # Recovery boundary: a reload rebuilds the row from the server.
+    page.reload()
+    expect(page.locator('#quick-add-section')).to_have_attribute('data-plan-state', 'available')
+    expect(row).to_be_enabled()
+    expect(row.locator('.qab-badge')).to_have_text(copy['nutrition.planned'])
+    assert len(attempts) == 1
+
+
+def test_refused_planned_write_can_be_tried_again(app, auth_user, client, training_page):
+    seed(app, auth_user.id)
+    page, _, _, _ = training_page
+    open_today(page)
+    attempts = []
+
+    def refused(route):
+        attempts.append(route.request.headers.get('idempotency-key'))
+        route.fulfill(status=422, content_type='application/json', body='{"error": "refused"}')
+    page.route('**/api/quick-add-meal', refused)
+    row = page.locator('#qab-kahvalti')
+    row.click()
+    expect(page.locator('#toast-wrap .toast-error')).to_be_visible()
+    expect(row).to_be_enabled()
+    expect(row.locator('.qab-badge')).to_have_text('Planned')
+    row.click()
+    page.wait_for_timeout(300)
+    assert len(attempts) == 2 and attempts[0] != attempts[1]
 
 
 def test_delete_refreshes_canonically(app, auth_user, client, training_page):
