@@ -500,6 +500,136 @@ def test_refused_planned_write_can_be_tried_again(app, auth_user, client, traini
     assert len(attempts) == 2 and attempts[0] != attempts[1]
 
 
+# ── CONFIRMED PLANNED WRITE: page-life Logged lock ───────────────────────
+# Each is a normal redraw that rebuilds #quick-add-cards from scratch.
+
+def _plan_then_today(page):
+    page.locator('#nutrition-tab-plan').click()
+    expect(page.locator('#panel-plan')).to_be_visible()
+    page.locator('#nutrition-tab-today').click()
+
+
+def _plan_back_today(page):
+    page.locator('#nutrition-tab-plan').click()
+    expect(page.locator('#panel-plan')).to_be_visible()
+    page.go_back()
+
+
+REDRAWS = {
+    'plan_to_today': _plan_then_today,
+    'reselect_today': lambda page: page.locator('#nutrition-tab-today').click(),
+    'back_to_today': _plan_back_today,
+}
+
+
+def meal_log_count(app, user_id):
+    with app.app_context():
+        return MealLog.query.filter_by(user_id=user_id).count()
+
+
+def planned_posts(traffic):
+    return [status for path, _, status in traffic if path == '/api/quick-add-meal']
+
+
+def assert_logged_and_inert(page, row):
+    """Logged, locked, and no activation path reaches the server — including
+    one with `disabled` and `qab-done` stripped, so the page-life lock map
+    alone must hold."""
+    logged = CATALOG['en']['nutrition.logged_state']
+    expect(row).to_be_disabled()
+    expect(row).to_have_attribute('data-write-state', 'logged')
+    expect(row).to_have_class(re.compile(r'\bqab-done\b'))
+    expect(row.locator('.qab-badge')).to_have_text(logged)
+    expect(row.locator('.qab-action')).to_have_text(logged)
+    row.evaluate('el => el.click()')
+    row.dispatch_event('click')
+    row.focus()
+    page.keyboard.press('Enter')
+    row.evaluate("""el => { el.disabled = false; el.classList.remove('qab-done'); el.click();
+                            el.disabled = true; el.classList.add('qab-done'); }""")
+    page.wait_for_timeout(300)
+
+
+def confirm_planned_breakfast(app, user_id, page, traffic):
+    row = page.locator('#qab-kahvalti')
+    expect(page.locator('#quick-add-section')).to_have_attribute('data-plan-state', 'available')
+    expect(row).to_be_enabled()
+    expect(row.locator('.qab-badge')).to_have_text(CATALOG['en']['nutrition.planned'])
+    before = meal_log_count(app, user_id)
+    traffic.clear()
+    row.click()                                         # the real write, real server
+    expect(row.locator('.qab-action')).to_have_text(CATALOG['en']['nutrition.logged_state'])
+    expect(page.locator('#toast-wrap .toast-success')).to_be_visible()
+    page.wait_for_timeout(300)
+    assert planned_posts(traffic) == [200]
+    assert paths(traffic)['/meal-log/today'] == 1       # canonical refresh still runs
+    assert meal_log_count(app, user_id) == before + 1
+    return row, before
+
+
+@pytest.mark.parametrize('redraw', list(REDRAWS))
+def test_confirmed_planned_write_stays_logged_through_redraw(app, auth_user, client, training_page,
+                                                             redraw):
+    seed(app, auth_user.id)
+    page, traffic, _, _ = training_page
+    open_today(page)
+    row, before = confirm_planned_breakfast(app, auth_user.id, page, traffic)
+    assert_logged_and_inert(page, row)
+    assert len(planned_posts(traffic)) == 1
+    row.evaluate('el => { el.dataset.redrawProbe = "1"; }')
+    REDRAWS[redraw](page)
+    expect(page.locator('#nutrition-tab-today')).to_have_attribute('aria-selected', 'true')
+    # The row really was rebuilt (the probe is gone), and it is still Logged.
+    expect(page.locator('#qab-kahvalti[data-redraw-probe]')).to_have_count(0)
+    assert_logged_and_inert(page, row)
+    assert len(planned_posts(traffic)) == 1, redraw     # no second POST, by any path
+    assert meal_log_count(app, auth_user.id) == before + 1
+    # The lock is per meal: the same plan's other shortcut stays actionable.
+    expect(page.locator('#qab-aksam')).to_be_enabled()
+
+
+def test_confirmed_logged_lock_ends_at_a_full_reload(app, auth_user, client, training_page):
+    """PR3 boundary, stated rather than hidden: the Logged lock lives for one
+    page life. A reload rebuilds from the server and the current plan, and the
+    shortcut is offered again — backend exactly-once remains deferred."""
+    seed(app, auth_user.id)
+    page, traffic, _, _ = training_page
+    open_today(page)
+    row, before = confirm_planned_breakfast(app, auth_user.id, page, traffic)
+    page.reload()
+    expect(page.locator('#quick-add-section')).to_have_attribute('data-plan-state', 'available')
+    expect(row).to_be_enabled()
+    expect(row.locator('.qab-badge')).to_have_text(CATALOG['en']['nutrition.planned'])
+    expect(row).not_to_have_attribute('data-write-state', 'logged')
+    assert meal_log_count(app, auth_user.id) == before + 1   # the reload wrote nothing
+
+
+def test_new_active_plan_does_not_inherit_an_old_logged_lock(app, auth_user, client, training_page):
+    """The active plan can be replaced in the same page life (Plan → select →
+    `invalidateActivePlan()` → Today). The old plan's Logged breakfast must not
+    disable the new plan's breakfast."""
+    seed(app, auth_user.id)
+    page, traffic, _, _ = training_page
+    open_today(page)
+    confirm_planned_breakfast(app, auth_user.id, page, traffic)
+    replacement = {**PLAN, 'isim': 'Fresh plan',
+                   'kahvalti': {**PLAN['kahvalti'], 'kalori': 520, 'yemekler': ['Eggs']}}
+    with app.app_context():
+        NutritionPlan.query.filter_by(user_id=auth_user.id).delete()
+        db.session.add(NutritionPlan(user_id=auth_user.id, score=9,
+                                     plan_data=json.dumps(replacement, ensure_ascii=False)))
+        db.session.commit()
+    page.evaluate('() => invalidateActivePlan()')         # what a confirmed plan save does
+    traffic.clear()
+    _plan_then_today(page)
+    row = page.locator('#qab-kahvalti')
+    expect(row.locator('.qab-title')).to_contain_text('Fresh plan')
+    expect(row).to_be_enabled()
+    expect(row.locator('.qab-badge')).to_have_text(CATALOG['en']['nutrition.planned'])
+    expect(row).not_to_have_class(re.compile(r'\bqab-done\b'))
+    assert paths(traffic)['/nutrition-plan/active'] == 1
+
+
 def test_delete_refreshes_canonically(app, auth_user, client, training_page):
     seed(app, auth_user.id)
     page, traffic, _, _ = training_page

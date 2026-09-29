@@ -13,6 +13,7 @@ automatically when the test ends.
   M7 Water unavailable drawn as 0 cups        → hydration failure test fails
   M8 secondary content placed before the core → first-viewport test fails
   M9 ambiguous planned row re-enabled         → ambiguous-write test fails
+  M10 confirmed Logged lock dropped on 2xx    → confirmed-redraw test fails
 """
 import pytest
 
@@ -55,6 +56,10 @@ SCRIPT_MUTATIONS = {
     'M9': [("  _plannedWriteLocks.set(mealKey, 'unconfirmed');\n  lockPlannedRow(btn, 'unconfirmed');\n",
             "  _plannedWriteLocks.delete(mealKey);\n  delete btn.dataset.writeState;\n"
             "  btn.disabled = false;\n")],
+    # The pre-remediation P1: a confirmed 2xx marked only the drawn row, so the
+    # next redraw rebuilt it as an actionable Planned / Log.
+    'M10': [("    _plannedWriteLocks.set(mealKey, 'logged');\n",
+             "    _plannedWriteLocks.delete(mealKey);\n")],
 }
 
 
@@ -144,3 +149,16 @@ def test_m9_ambiguous_row_re_enabled_is_detected(app, auth_user, client, trainin
     with pytest.raises(AssertionError):
         browser.test_ambiguous_planned_write_is_not_retried_or_claimed(
             app, auth_user, client, training_page, '5xx')
+
+
+@pytest.mark.parametrize('redraw', list(browser.REDRAWS))
+def test_m10_confirmed_logged_lock_dropped_is_detected(app, auth_user, client, training_page, redraw):
+    page, _, _, _ = training_page
+    serve_mutated_script(page, client, 'M10')
+    with pytest.raises(AssertionError):
+        browser.test_confirmed_planned_write_stays_logged_through_redraw(
+            app, auth_user, client, training_page, redraw)
+    # The browser really ran the mutated script, not the shipped one.
+    served = page.evaluate('() => quickAddMeal.toString()')
+    assert "_plannedWriteLocks.set(mealKey, 'logged')" not in served
+    assert "_plannedWriteLocks.delete(mealKey);\n    lockPlannedRow(btn, 'logged')" in served

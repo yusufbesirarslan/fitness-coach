@@ -1221,17 +1221,30 @@ function resetPlan() {
    Deferred, NOT fixed here: the endpoint's idempotency replay is user-wide and
    runs before plan/meal validation, so nothing on this surface claims
    exactly-once. It only avoids a double tap and never re-sends an ambiguous
-   write by itself. An ambiguous row stays locked and "Not confirmed" for the
-   rest of this page's life, re-renders included: only a reload rebuilds it
-   from the server, so the row itself never invites a second uncertain write. */
-const _plannedWriteLocks = new Map(); // meal key → 'pending' | 'unconfirmed'
+   write by itself. A row whose write was sent stays locked for the rest of
+   this page's life, re-renders included: "Not confirmed" after an ambiguous
+   answer, "Logged" after a confirmed one. Only a reload rebuilds it from the
+   server, so a redraw never re-offers a write that was already sent.
+   The locks are presentation containment, not consumption authority (MealLog
+   is): they belong to the plan they were taken on and are dropped when a
+   different active plan is drawn, so an old "Logged" never disables a new
+   plan's meal. No plan id is published, so the plan is named by its payload. */
+const _plannedWriteLocks = new Map(); // meal key → 'pending' | 'unconfirmed' | 'logged'
+let _plannedLocksPlan = null;         // the drawn plan those locks belong to
+
+const _PLANNED_ROW_COPY = {           // badge, action; pending keeps Planned / Log
+  unconfirmed: ['nutrition.unconfirmed_state', 'nutrition.check_logged_meals'],
+  logged:      ['nutrition.logged_state', 'nutrition.logged_state']
+};
 
 function lockPlannedRow(row, state) {
   row.disabled = true;
   row.dataset.writeState = state;
-  if (state !== 'unconfirmed') return;
-  row.querySelector('.qab-badge').textContent = __t('nutrition.unconfirmed_state');
-  row.querySelector('.qab-action').textContent = __t('nutrition.check_logged_meals');
+  row.classList.toggle('qab-done', state === 'logged');
+  const copy = _PLANNED_ROW_COPY[state];
+  if (!copy) return;
+  row.querySelector('.qab-badge').textContent = __t(copy[0]);
+  row.querySelector('.qab-action').textContent = __t(copy[1]);
 }
 
 function setPlanState(state) {
@@ -1271,6 +1284,8 @@ async function loadQuickAddSection(force = false) {
 
   setPlanState('available');
   const plan = d.plan && typeof d.plan === 'object' ? d.plan : {};
+  const planKey = JSON.stringify([plan, d.score, d.created_at]);
+  if (planKey !== _plannedLocksPlan) { _plannedWriteLocks.clear(); _plannedLocksPlan = planKey; }
   container.innerHTML = MEALS.map(m => {
     const ml  = plan[m.key];
     if (!ml) return '';
@@ -1297,6 +1312,7 @@ function retryPlanShortcuts() { loadQuickAddSection(true); }
 
 async function quickAddMeal(mealKey, mealLabel, btn) {
   if (btn.classList.contains('qab-done') || btn.disabled || _plannedWriteLocks.has(mealKey)) return;
+  const planKey = _plannedLocksPlan;
   _plannedWriteLocks.set(mealKey, 'pending');
   lockPlannedRow(btn, 'pending');
   btn.setAttribute('aria-busy', 'true');
@@ -1310,22 +1326,31 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
     d = await res.json().catch(() => null);
   } catch (e) { res = null; }
   btn.removeAttribute('aria-busy');
+  const ok = Boolean(res && res.ok && d && !d.error);
+  const refused = Boolean(res && res.status >= 400 && res.status < 500);
+  if (planKey !== _plannedLocksPlan) {
+    // A different plan was drawn while this write was in flight: its row and
+    // lock are gone. Report the answer and re-read the ledger, never lock the
+    // new plan's row with the old plan's outcome.
+    if (ok) showToast(`${mealLabel} ${__t('nutrition.added_suffix')}`, 'success');
+    else if (refused) showToast((d && d.error) || __t('nutrition.add_error'), 'error');
+    else showToast(__t('nutrition.quick_add_uncertain'), 'warning');
+    loadTodayData();
+    return;
+  }
   if (!btn.isConnected) btn = document.getElementById('qab-' + mealKey) || btn;
 
-  if (res && res.ok && d && !d.error) {
-    _plannedWriteLocks.delete(mealKey);
-    delete btn.dataset.writeState;
-    // Confirmed write: only now does this planned meal read "Logged".
-    btn.classList.add('qab-done');
-    btn.querySelector('.qab-action').textContent = __t('nutrition.logged_state');
-    const badge = btn.querySelector('.qab-badge');
-    if (badge) badge.textContent = __t('nutrition.logged_state');
+  if (ok) {
+    // Confirmed write: only now does this planned meal read "Logged", and it
+    // keeps reading so (locked) through every redraw until a reload.
+    _plannedWriteLocks.set(mealKey, 'logged');
+    lockPlannedRow(btn, 'logged');
     showToast(`${mealLabel} ${__t('nutrition.added_suffix')}`, 'success');
     if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
     loadTodayData(); // canonical refresh: summary + ledger
     return;
   }
-  if (res && res.status >= 400 && res.status < 500) {
+  if (refused) {
     // Refused: nothing was written, so the row may be tried again.
     _plannedWriteLocks.delete(mealKey);
     delete btn.dataset.writeState;

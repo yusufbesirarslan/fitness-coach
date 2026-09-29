@@ -80,7 +80,7 @@ The page header drops its explanatory sub-line. Exactly two primary tabs remain 
 | Outcome | Row | Ledger |
 | --- | --- | --- |
 | in flight | disabled, still *Planned* (`pending`) | — |
-| 2xx confirmed | *Logged* | one canonical `/meal-log/today` re-read |
+| 2xx confirmed | *Logged · Logged*, `qab-done`, disabled (`logged`); page-life lock kept | one canonical `/meal-log/today` re-read |
 | 4xx refused (nothing accepted) | error toast; back to *Planned / Log*, may be tapped again | — |
 | 5xx / network / unreadable (ambiguous) | warning toast **and** a persistent row state *Not confirmed · Check Logged meals* (`unconfirmed`); disabled; never *Logged*, never "failed" | one canonical re-read refreshes totals and the ledger, but does **not** decide this row |
 
@@ -88,6 +88,26 @@ An ambiguous row is never re-sent automatically and cannot be activated again (t
 keyboard, or a re-render of the plan section, including tab/back navigation) for the rest of the page's
 life. The user checks *Logged meals*. Only a full page reload rebuilds the row from the server and makes it
 actionable again. This is deliberately conservative because backend idempotency is deferred (§4).
+
+A **confirmed** row is contained the same way. After a 2xx the page keeps a `logged` page-life lock for that
+meal (`_plannedWriteLocks`: `pending` · `unconfirmed` · `logged`, drawn by the single `lockPlannedRow`
+renderer) instead of dropping it. Every normal redraw of the section re-applies it: Plan → Today,
+re-selecting Today, and Plan → browser Back → Today. The rebuilt row still reads *Logged*, stays disabled,
+and cannot send a second POST from that row before a reload, whether by tap, dispatched click, keyboard, or
+with `disabled` stripped (the lock map itself refuses). No extra server read rebuilds this state. The lock
+is presentation containment only; MealLog remains the consumption authority.
+
+Locks belong to the plan they were taken on. The active plan **can** change within one page life (Plan tab →
+select a generated plan → `invalidateActivePlan()` → Today redraw renders the new plan). No plan id is
+published (`created_at` is day-granular), so the drawn plan is fingerprinted client-side as
+`JSON.stringify([plan, score, created_at])`. When a different fingerprint is drawn, every planned-row lock
+is cleared, so an old plan's *Logged* breakfast never disables the new plan's breakfast. A write whose
+answer arrives after a different plan was drawn only toasts and re-reads the ledger; it never locks the new
+plan's row. Re-saving a byte-identical plan keeps the locks, which is the conservative case.
+
+**Full reload boundary:** both `logged` and `unconfirmed` are page-life state. A full reload rebuilds the
+section from the server and the current plan, and the shortcut may be actionable again. PR3 does not claim
+duplicate protection across reloads (no localStorage/sessionStorage, no new backend state).
 
 Topology note: target and intake come from **one** read, so a server failure takes both down together
 (both shown as unavailable). An unusable target inside a healthy reply is the independent case and shows
@@ -97,11 +117,13 @@ Topology note: target and intake come from **one** read, so a server failure tak
 
 - **Planned-meal idempotency (known defect, not repaired):** `/api/quick-add-meal` replay lookup is
   user-wide and runs before plan/meal validation. PR3 claims no exactly-once behaviour and does not change
-  the endpoint. It only disables the row while in flight and shows *Logged* after a confirmed response.
+  the endpoint. It only disables the row while in flight and shows *Logged* after a confirmed response,
+  kept *Logged* and non-actionable through section redraws for the rest of the page life.
   On an ambiguous outcome it warns, re-reads the ledger once, and keeps the row disabled and *Not
   confirmed* until reload, so the UI never invites a second uncertain write. A duplicate is still possible
-  if the user reloads and logs the same meal again without checking *Logged meals*; only a backend fix
-  closes that.
+  if the user reloads and logs the same meal again without checking *Logged meals* (after a confirmed or an
+  ambiguous write); only backend request-bound idempotency, still deferred, closes that. No exactly-once
+  claim is made.
 - NUTR-PR4 owns food-method convergence (chooser contents, search/barcode/menu/manual/build-meal UX).
 - NUTR-PR5 owns the Nutrition Plan; NUTR-PR6 owns insight/coaching; native/Flutter are PR7/PR8.
 - `/coach/history` on initial load is the Coach widget's pre-existing behaviour, recorded, not changed.
@@ -114,7 +136,12 @@ Topology note: target and intake come from **one** read, so a server failure tak
   isolation, empty, stale refresh, real-write freshness (manual log, planned shortcut, delete), ambiguous
   planned write (5xx/network/unreadable: one POST, one ledger re-read, row locked and *Not confirmed*
   through forced/keyboard activation and re-render, actionable only after reload), refused 4xx write
-  (retryable), request topology, first-viewport geometry (320×640, 390×844, 430×844 EN/TR), responsive
+  (retryable, new Idempotency-Key), confirmed write held *Logged* through each redraw path (Plan → Today,
+  re-select Today, Plan → Back → Today: row proven rebuilt, one POST, MealLog +1 exactly, no POST by tap,
+  dispatched click, Enter, or with `disabled`/`qab-done` stripped), full-reload boundary (actionable again,
+  nothing written), new active plan not inheriting an old *Logged* lock, request topology, first-viewport geometry (320×640, 390×844, 430×844 EN/TR), responsive
   320–1366, keyboard/focus return.
-- `tests/test_nutrition_vnext_pr3_daily_non_vacuity.py` — M1–M9 mutations, each proven to fail its guard
-  (M9 restores the pre-remediation re-enable of an ambiguous planned row).
+- `tests/test_nutrition_vnext_pr3_daily_non_vacuity.py` — M1–M10 mutations, each proven to fail its guard
+  (M9 restores the pre-remediation re-enable of an ambiguous planned row; M10 drops the `logged` lock on a
+  confirmed 2xx, restoring the redraw duplicate-write P1, and is detected on all three redraw paths, with
+  the served script checked to be the mutated one).
