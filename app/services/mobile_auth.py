@@ -130,16 +130,28 @@ def _claim_expiry(claims):
             "provider_expiry_unavailable") from exc
 
 
-def _resolve_user(claims, username):
+def _resolve_user(claims):
+    """The local row of the VERIFIED ID-token subject; bind or create it once.
+
+    A row created or bound here is keyed by the provider username from the
+    verified token, never by the identifier the login was submitted as (an
+    e-mail alias or another casing): `User.username` must name the provider
+    user, or recovery by that username cannot find the row.
+    """
     sub = (claims.get("sub") or "").strip()
     email = (claims.get("email") or "").strip().lower()
     if not sub:
         return None
     user = User.query.filter_by(cognito_sub=sub).first()
     if user is not None:
+        if cognito_identity.diverges_from_provider(user, claims):
+            _security_event("identity_divergent", category="identity")
         return user
     verified = claims.get("email_verified")
     if not email or (verified is not True and str(verified).lower() != "true"):
+        return None
+    username = cognito_identity.provider_username(claims)
+    if username is None:
         return None
     user, denial = reconcilable_local_user(username, email, sub)
     if denial is not None:
@@ -343,7 +355,7 @@ def login(username, password, now=None):
             "session_commit_failed") from exc
 
     try:
-        user = _resolve_user(id_claims, username)
+        user = _resolve_user(id_claims)
         if user is None:
             raise _failure(
                 "AUTH_INVALID_CREDENTIALS", 401, False,

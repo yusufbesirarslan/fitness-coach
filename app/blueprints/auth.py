@@ -20,7 +20,9 @@ from app.services.account_registration import (
     RegistrationFailure)
 from app.services.cognito_service import CognitoServiceError
 from app.services.cognito_jwt import TokenValidationError
-from app.services.cognito_identity import reconcilable_local_user
+from app.services.cognito_identity import (
+    diverges_from_provider, provider_username, reconcilable_local_user,
+)
 from app.services.gamification import complete_quest_for_user
 from app.services.referral import ensure_referral_code
 from app.i18n import AVAILABLE_LOCALES, set_locale, t
@@ -279,7 +281,7 @@ def _registration_failure_response(failure, required_key):
     return jsonify({"error": failure.detail}), 400
 
 
-def _reconcile_local_user(verified_claims, cognito_username):
+def _reconcile_local_user(verified_claims, submitted_username):
     """H2: DOĞRULANMIŞ Cognito kimliğine karşılık gelen yerel kaydı bağla/oluştur.
 
     Neden var: /register önce Cognito'da kullanıcı yaratır, SONRA yerel satırı
@@ -292,9 +294,15 @@ def _reconcile_local_user(verified_claims, cognito_username):
 
     Girdi, authenticate()'in DOĞRULAMASIZ decode'u değil, cognito_jwt.validate_token
     ile imzası/issuer/audience'ı sınanmış claim'lerdir — çağıran bunu garantiler.
+
+    Yerel `username` = sağlayıcı kullanıcı adı (doğrulanmış `cognito:username`),
+    ASLA giriş formuna yazılan tanımlayıcı değil: giriş e-posta takma adıyla ya
+    da başka harf büyüklüğüyle yapılmış olabilir; o değer yazılırsa kurtarma bu
+    satırı sağlayıcı kullanıcı adıyla bulamaz (docs/MOBILE_PASSWORD_RECOVERY.md §11).
     """
     sub = (verified_claims.get("sub") or "").strip()
     email = (verified_claims.get("email") or "").strip().lower()
+    cognito_username = provider_username(verified_claims)
     if not sub or not email:
         return None
 
@@ -306,7 +314,12 @@ def _reconcile_local_user(verified_claims, cognito_username):
     if verified is not True and str(verified).lower() != "true":
         current_app.logger.warning(
             "[LOGIN] orphan uzlaştırma reddedildi: email_verified değil (user=%s)",
-            cognito_username)
+            submitted_username)
+        return None
+    if cognito_username is None:
+        current_app.logger.warning(
+            "[LOGIN] orphan uzlaştırma reddedildi: doğrulanmış sağlayıcı "
+            "kullanıcı adı yok (user=%s)", submitted_username)
         return None
 
     existing, denial = reconcilable_local_user(cognito_username, email, sub)
@@ -319,6 +332,13 @@ def _reconcile_local_user(verified_claims, cognito_username):
         current_app.logger.warning(
             "[LOGIN] orphan uzlaştırma atlandı: yerel kayıt başka bir sub'a "
             "bağlı (user=%s)", cognito_username)
+        return None
+    if denial is not None:
+        # Every other denial (e.g. identity_ambiguous) refuses too: falling
+        # through would create a new row beside the ones that matched.
+        current_app.logger.warning(
+            "[LOGIN] orphan uzlaştırma reddedildi: %s (user=%s)",
+            denial, cognito_username)
         return None
     if existing is not None:
         existing.cognito_sub = sub
@@ -433,6 +453,9 @@ def login():
             user = _reconcile_local_user(verified_claims, username)
         if user is None:
             return jsonify({"error": t("auth.bad_credentials")}), 401
+        if diverges_from_provider(user, verified_claims):
+            current_app.logger.warning(
+                "[LOGIN] identity_divergent user=%s", user.id)
         _login_fresh(user)
         # _login_fresh session.clear() yapar → cognito_sid'i SONRA yaz. Token'lar
         # sunucu tarafında şifreli saklanır; çerezde yalnızca opak session_id taşınır.

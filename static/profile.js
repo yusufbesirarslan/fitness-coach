@@ -61,7 +61,6 @@ async function saveProfile() {
   var tw = document.getElementById('target_weight');
   var payload = {
     full_name: document.getElementById('full_name').value.trim(),
-    username: document.getElementById('username').value.trim(),
     goal: selectedGoal,
     target_weight: tw ? tw.value.trim() : ''
   };

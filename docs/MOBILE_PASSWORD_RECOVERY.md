@@ -312,7 +312,8 @@ Users: `account_recovery` (reset target, provider identity for an e-mail) and
 two therefore cannot disagree about which account a casing names.
 
 **Ambiguity.** Local `username` and `email` uniqueness is case-SENSITIVE in
-the schema, so `Alice` and `alice` can both be stored (see below). When an
+the schema, so `Alice` and `alice` can both be stored by legacy data (no new
+write can create them — see below). When an
 identifier matches more than one row:
 
 - reset fails closed BEFORE the provider call — the password does not change,
@@ -329,24 +330,57 @@ this environment). Suggested read-only check:
 `SELECT lower(username), count(*) FROM "user" GROUP BY 1 HAVING count(*) > 1;`
 and the same for `lower(email)`.
 
-**Not closed here** (pre-existing; each needs a product decision):
+**Immutable identity (closed).** Recovery reaches the account only through
+`User.username` — a submitted username directly, an e-mail through its
+owner's username — and the provider username can never change. The reset has
+no other key: `ForgotPassword`/`ConfirmForgotPassword` are unauthenticated on
+a public client, so no `sub` is available there, and legacy rows may have a
+NULL `cognito_sub`. Therefore `User.username` IS the provider username:
 
-1. **Username rename.** `/edit-profile` lets a user change `User.username`
-   (exact-case collision check only). Cognito usernames are immutable, so after
-   a rename the local username no longer names the provider user: a reset under
-   the provider username finds no local row (nothing revoked), or finds a
-   different user who took that name; and an e-mail reset sends the renamed
-   username to the provider, which does not know it. A rename can also create a
-   local case twin (`bob` → `alice` while `Alice` exists).
-2. **Case twin of a non-provider row.** Registration's local pre-check is
-   exact-case; the provider refuses a case twin of a provider user
-   (`UsernameExistsException`, pinned by
-   `test_registration_cannot_create_a_case_twin_of_a_provider_account`) but
-   not of a legacy local row that has no provider account. Login
-   reconciliation (`reconcilable_local_user`) is also exact-case and can create
-   the same twin on first sign-in.
-3. **Per-identifier reset budget** counts `alice` and `alice@example.com`
-   separately (two budgets for one account); the provider's own attempt limit
-   still applies per user.
+- written once, at account creation, from the provider's own value —
+  registration (`sign_up(username=…)` then `User(username=…)`), or the
+  login-time orphan reconciliation (web `_reconcile_local_user`, native
+  `mobile_auth._resolve_user`), which uses the VERIFIED ID token's
+  `cognito:username` (`cognito_identity.provider_username`), never the
+  identifier the login was typed as (an e-mail alias or another casing). No
+  usable claim → no row, login refused;
+- never changed afterwards: `/edit-profile` accepts `username` only unchanged
+  and refuses anything else with 400 before any side effect (the field is
+  read-only in the page; the display name is `full_name`, still editable). An
+  AST gate (`tests/test_identity_immutability.py`) fails on any attribute
+  assignment, `setattr`, bulk `update`/`values` or `User(username=…)` outside
+  the three creators;
+- new writes follow the provider's folding (`CaseSensitive=false`):
+  registration's local pre-check and `reconcilable_local_user` compare
+  `lower()`; a case variant with another e-mail is refused, never bound or
+  twinned; more than one match is `identity_ambiguous`, refused.
 
-Tests: `tests/test_recovery_identity_case.py`.
+**Rows renamed before this closure** cannot be repaired from the reset (no
+key reaches them). They are surfaced instead: a login whose verified
+`cognito:username` differs (case-folded) from the row's username logs
+`identity_divergent` (web `[LOGIN] identity_divergent user=<id>`, native
+`mobile_auth event=identity_divergent`) and proceeds; login never rewrites
+identity. Until such a row is repaired, a reset under its provider username
+finds no local row (password changes, its sessions are not revoked) and an
+e-mail reset sends its local name to the provider. Read-only audit (operator,
+production credentials; nothing here was run against production):
+
+1. Duplicates: `SELECT lower(username), count(*) FROM "user" GROUP BY 1 HAVING
+   count(*) > 1;` and the same for `lower(email)`.
+2. Divergence: `aws cognito-idp list-users --user-pool-id <pool>` (Username +
+   `sub`, paginated) joined on `"user".cognito_sub`; every row where
+   `lower(Username) <> lower("user".username)` is renamed.
+3. Unbound rows: `SELECT id, username, email FROM "user" WHERE cognito_sub IS
+   NULL;` — join on `lower(email)` to the ListUsers e-mail instead.
+4. After deploy: search logs for `identity_divergent`.
+
+Repair (set `username` back to the provider username) is a production data
+change and needs its own authorization; it is not part of this PR.
+
+**Still open (follow-up):** the per-identifier reset budget counts `alice` and
+`alice@example.com` separately (two budgets for one account); the provider's
+own per-user attempt limit still applies. Closing it means keying the budget
+on the resolved owner, which changes the limiter contract (§6).
+
+Tests: `tests/test_recovery_identity_case.py`,
+`tests/test_identity_immutability.py`.

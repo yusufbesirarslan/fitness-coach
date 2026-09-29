@@ -8,6 +8,15 @@ that user's e-mail in any casing. `local_users_for_identifier` is the one rule
 that maps such an identifier back to local rows; password recovery and the
 mobile credential fence both go through it, so the account a reset revokes and
 the account a racing login is fenced against cannot differ by casing.
+
+`User.username` IS the provider username. Registration creates both from one
+value and login reconciliation copies the verified `cognito:username` claim
+(`provider_username`); nothing may change it afterwards, because the provider
+username cannot change (`/edit-profile` refuses, and
+`tests/test_identity_immutability.py` gates every writer). That is what makes
+a username or an e-mail — through its owner's username — name the same
+account locally and at the provider. The profile's display name is
+`User.full_name`.
 """
 
 from app.extensions import db
@@ -18,8 +27,9 @@ class AmbiguousLocalIdentity(Exception):
     """More than one local account answers to one provider identifier.
 
     Local `username`/`email` uniqueness is case-SENSITIVE, so rows that differ
-    only by case are storable (a legacy row without a provider account, or a
-    profile rename). The provider knows at most one of them; which one cannot
+    only by case are storable (legacy data: a row without a provider account,
+    or a profile rename from before usernames became immutable; no new write
+    can create them). The provider knows at most one of them; which one cannot
     be told from the identifier, so callers must fail closed, never pick.
     """
 
@@ -54,11 +64,44 @@ def resolve_local_user(identifier, *columns):
     return rows[0] if rows else None
 
 
+def provider_username(verified_claims):
+    """The provider's own username for a VERIFIED ID token, or None.
+
+    This, not the identifier the user typed, is what a new local row's
+    `username` must be: a login may be submitted as the e-mail alias or in any
+    casing. A value containing "@" is refused too — `local_users_for_identifier`
+    reads such an identifier as an e-mail, so it could never name the row.
+    """
+    value = verified_claims.get("cognito:username")
+    value = value.strip() if isinstance(value, str) else ""
+    return value if value and "@" not in value else None
+
+
+def diverges_from_provider(user, verified_claims):
+    """True when a verified login proves `user.username` is not the provider
+    username — a row renamed before usernames became immutable. Recovery by
+    that username cannot find this row; the operator repair is in
+    docs/MOBILE_PASSWORD_RECOVERY.md §11."""
+    canonical = provider_username(verified_claims)
+    return (canonical is not None
+            and canonical.lower() != (user.username or "").lower())
+
+
 def reconcilable_local_user(username, verified_email, verified_sub):
-    """Return an existing safe binding candidate and a stable denial reason."""
+    """Return an existing safe binding candidate and a stable denial reason.
+
+    Both lookups use the provider's case folding (`local_users_for_identifier`):
+    an exact-case match would miss a local `alice` for provider `Alice` and
+    create a case twin beside it. More than one row for either identifier is
+    `identity_ambiguous` — there is no safe first match.
+    """
     email = (verified_email or "").strip().lower()
-    email_user = User.query.filter(db.func.lower(User.email) == email).first()
-    username_user = User.query.filter_by(username=username).first()
+    email_rows = local_users_for_identifier(email)
+    username_rows = local_users_for_identifier(username)
+    if len(email_rows) > 1 or len(username_rows) > 1:
+        return None, "identity_ambiguous"
+    email_user = email_rows[0] if email_rows else None
+    username_user = username_rows[0] if username_rows else None
     if (username_user is not None
             and (username_user.email or "").strip().lower() != email):
         return None, "username_email_mismatch"

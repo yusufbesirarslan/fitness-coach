@@ -206,8 +206,10 @@ def mobile_provider(monkeypatch):
 
     def validate(token, expected_use, leeway_seconds=0):
         if expected_use == "id":
+            # A real Cognito ID token always names the provider username;
+            # an orphan login creates the local row from it (LP-02).
             return {"sub": "sub-alice", "email": "alice@example.com",
-                    "email_verified": True}
+                    "email_verified": True, "cognito:username": "alice"}
         return {"sub": "sub-alice",
                 "exp": calendar.timegm(
                     (_mobile_now() + timedelta(hours=1)).timetuple())}

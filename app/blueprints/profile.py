@@ -14,7 +14,7 @@ from app.models import PumpCheck, Supplement, User, UserWearableConnection
 from app.services import account_profile
 from app.services.avatars import release_unreferenced_avatar, set_user_avatar
 from app.services.pump_checks import release_pump_check_image, serialize_pump_check_card
-from app.services.validators import validate_full_name, validate_username
+from app.services.validators import validate_full_name
 
 
 bp = Blueprint("profile", __name__)
@@ -165,17 +165,16 @@ def edit_profile():
         release_unreferenced_avatar(current_user, old_key)
         return jsonify({"message": t("editprofile.avatar_updated")})
 
-    new_username = (data.get("username") or "").strip()
+    # `username` is the Cognito username, which the provider cannot change; a
+    # local rename would make recovery by it miss (or hit another) account
+    # (docs/MOBILE_PASSWORD_RECOVERY.md §11). It is read-only here: accepted
+    # only unchanged, refused before any side effect. The display name is
+    # `full_name`.
+    if "username" in data and (
+            (data.get("username") or "").strip() != current_user.username):
+        return jsonify({"error": t("route.username_immutable")}), 400
     new_full_name = (data.get("full_name") or "").strip()
     new_goal = (data.get("goal") or "").strip()
-
-    username_error = validate_username(new_username)
-    if username_error:
-        return jsonify({"error": username_error}), 400
-
-    if new_username != current_user.username:
-        if User.query.filter_by(username=new_username).first():
-            return jsonify({"error": t("route.username_taken")}), 400
 
     full_name_error = validate_full_name(new_full_name)
     if full_name_error:
@@ -195,7 +194,6 @@ def edit_profile():
     if new_goal not in valid_goals:
         return jsonify({"error": t("route.invalid_goal")}), 400
 
-    current_user.username = new_username
     current_user.full_name = new_full_name if new_full_name else None
     if new_goal:
         current_user.goal = new_goal
@@ -211,9 +209,9 @@ def edit_profile():
     try:
         db.session.commit()
     except IntegrityError:
-        # Username benzersizlik kontrolü (yukarıda) ile commit atomik değil — iki
-        # eşzamanlı istek aynı adı alabilir. DB unique kısıtı (models.py) gerçek
-        # guard; çakışmada 500 yerine dostça "kullanımda" mesajı dön (2.4).
+        # Bu uç artık kullanıcı adı yazmaz (yukarıda salt-okunur); benzersiz
+        # kısıtlı başka sütun da yazılmıyor. Savunma amaçlı: beklenmedik bir
+        # kısıt ihlalinde 500 yerine 400 dön ve yüklenen avatarı bırak.
         db.session.rollback()
         if "profile_picture" in data:
             release_unreferenced_avatar(current_user, uploaded_avatar_key)

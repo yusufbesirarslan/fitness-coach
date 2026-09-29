@@ -1,3 +1,4 @@
+import pytest
 """Route tests for the profile blueprint (app/blueprints/profile.py).
 
 /setup (ilk profil + ilk UserSession) ve /edit-profile (kullanıcı adı/foto/
@@ -84,7 +85,7 @@ def test_edit_profile_page_is_not_cached_after_update(client, auth_user):
     assert "no-store" in first.headers.get("Cache-Control", "")
 
     saved = client.post("/edit-profile", json={
-        "username": "newprofile", "full_name": "Updated Name", "goal": "kas kazanma",
+        "username": "testuser", "full_name": "Updated Name", "goal": "kas kazanma",
         "target_weight": "85",
     })
     assert saved.status_code == 200
@@ -94,18 +95,18 @@ def test_edit_profile_page_is_not_cached_after_update(client, auth_user):
     refreshed = client.get("/edit-profile")
     assert refreshed.status_code == 200
     assert 'value="Updated Name"' in refreshed.get_data(as_text=True)
-    assert 'value="newprofile"' in refreshed.get_data(as_text=True)
+    assert 'value="testuser"' in refreshed.get_data(as_text=True)
     assert 'value="85.0"' in refreshed.get_data(as_text=True)
 
 
 def test_edit_profile_updates_fields(client, auth_user):
     response = client.post("/edit-profile", json={
-        "username": "yeniad", "full_name": "Yusuf B", "goal": "kas kazanma",
+        "full_name": "Yusuf B", "goal": "kas kazanma",
         "target_weight": 85,
     })
     assert response.status_code == 200
     user = _fresh_user(auth_user.id)
-    assert user.username == "yeniad"
+    assert user.username == "testuser"
     assert user.full_name == "Yusuf B"
     assert user.goal == "kas kazanma"
     assert user.goal_type == "gain"
@@ -117,11 +118,19 @@ def test_edit_profile_keeping_own_username_ok(client, auth_user):
     assert response.status_code == 200
 
 
-def test_edit_profile_taken_username_rejected(client, auth_user, make_user):
+@pytest.mark.parametrize("submitted", ["mevcut", "yeniad", "TESTUSER", "", "a b"])
+def test_edit_profile_refuses_any_username_change(
+        client, auth_user, make_user, submitted):
+    """The username is the immutable Cognito username (LP02-43): any change is
+    refused before any other field is written."""
     make_user("mevcut")
-    response = client.post("/edit-profile", json={"username": "mevcut"})
+    response = client.post("/edit-profile", json={
+        "username": submitted, "full_name": "Should Not Save"})
     assert response.status_code == 400
-    assert "alınmış" in response.get_json()["error"]
+    assert "değiştirilemez" in response.get_json()["error"]
+    user = _fresh_user(auth_user.id)
+    assert (user.username, user.full_name) != (submitted, "Should Not Save")
+    assert user.username == "testuser" and user.full_name != "Should Not Save"
 
 
 def test_edit_profile_invalid_username_rejected(client, auth_user):

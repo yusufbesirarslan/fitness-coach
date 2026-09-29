@@ -47,12 +47,22 @@ the ONE rule (one column, `lower()` both sides, exact), used by
 `account_recovery` (owner resolved BEFORE the provider call; ambiguity fails
 closed as a wrong code, password unchanged) and `mobile_auth._credential_fence`
 (epochs of every matching row, compared against the row the verified `sub`
-picks). Tests: `tests/test_recovery_identity_case.py`. Not closed (pre-existing,
-product decisions): `/edit-profile` username rename breaks the local↔provider
-username mapping and can create case twins; registration/login reconciliation
-can create a case twin of a legacy non-provider row; production was not
-queried for existing duplicates. Details: `docs/MOBILE_PASSWORD_RECOVERY.md`
-§11.
+picks). Tests: `tests/test_recovery_identity_case.py`.
+
+Immutable identity (closure). `/edit-profile` could rename `User.username`,
+but the Cognito username is immutable and recovery reaches the account only
+through the local username (the reset is unauthenticated: no `sub`). A rename
+made a reset change a password and revoke nothing, or land on whoever took
+the old name. `User.username` is now the provider username, written once:
+`/edit-profile` refuses any change (400, before side effects; display name =
+`full_name`), login-time orphan reconciliation (web + native) writes the
+verified `cognito:username` instead of the typed identifier (an e-mail login
+used to become the username), and registration + reconciliation compare
+case-insensitively (no local case twins; ambiguity refused). Legacy renamed
+rows are logged `identity_divergent` at login, never rewritten. No schema
+change. Tests: `tests/test_identity_immutability.py` (incl. an AST gate on
+every `username` writer). Production audit (read-only, not run here) and the
+open per-identifier budget follow-up: `docs/MOBILE_PASSWORD_RECOVERY.md` §11.
 
 Next: LP-07/LP-09 Flutter recovery screens consume
 `docs/MOBILE_PASSWORD_RECOVERY.md` §2–§3 and §7.
