@@ -542,12 +542,14 @@ def test_login_returns_quest_awarded_when_login_quest_exists(client, make_user, 
 # Artık giriş, DOĞRULANMIŞ id-token claim'lerinden yerel kaydı bağlar/oluşturur.
 # ---------------------------------------------------------------------------
 
-def _verified_claims(monkeypatch, sub, email, name="", email_verified=True):
+def _verified_claims(monkeypatch, sub, email, name="", email_verified=True,
+                     username=None):
     """cognito_jwt.validate_token'ı TAM (doğrulanmış) claim seti dönecek şekilde kur."""
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: {
-        "sub": sub, "email": email, "email_verified": email_verified,
-        "name": name,
-    })
+    claims = {"sub": sub, "email": email, "email_verified": email_verified,
+              "name": name}
+    if username is not None:
+        claims["cognito:username"] = username
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: claims)
 
 
 def _make_orphan(client, monkeypatch, username="yarisan", email="orphan@example.com"):
@@ -572,7 +574,8 @@ def _make_orphan(client, monkeypatch, username="yarisan", email="orphan@example.
 def test_cognito_orphan_recovers_at_login(client, cognito_native, monkeypatch):
     """Orphan kullanıcı giriş yapabilmeli — yerel kayıt claim'lerden oluşturulur."""
     _make_orphan(client, monkeypatch)
-    _verified_claims(monkeypatch, "sub-yarisan", "orphan@example.com", name="Yarisan")
+    _verified_claims(monkeypatch, "sub-yarisan", "orphan@example.com", name="Yarisan",
+                     username="yarisan")
     monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: {
         "tokens": {"access_token": "acc", "id_token": "id", "refresh_token": "ref",
                    "expires_in": 3600},
@@ -595,7 +598,8 @@ def test_orphan_recovery_links_existing_unbound_row(client, cognito_native, monk
     db.session.add(User(username="bagsiz", email="bagsiz@example.com"))
     db.session.commit()
 
-    _verified_claims(monkeypatch, "sub-bagsiz", "bagsiz@example.com")
+    _verified_claims(monkeypatch, "sub-bagsiz", "bagsiz@example.com",
+                     username="bagsiz")
     monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: {
         "tokens": {"access_token": "acc", "id_token": "id", "refresh_token": "ref",
                    "expires_in": 3600},

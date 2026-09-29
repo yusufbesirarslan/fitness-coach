@@ -206,8 +206,10 @@ def mobile_provider(monkeypatch):
 
     def validate(token, expected_use, leeway_seconds=0):
         if expected_use == "id":
+            # A real Cognito ID token always names the provider username;
+            # an orphan login creates the local row from it (LP-02).
             return {"sub": "sub-alice", "email": "alice@example.com",
-                    "email_verified": True}
+                    "email_verified": True, "cognito:username": "alice"}
         return {"sub": "sub-alice",
                 "exp": calendar.timegm(
                     (_mobile_now() + timedelta(hours=1)).timetuple())}
@@ -380,25 +382,34 @@ def test_provider_revocation_is_gated_and_capacity_refusal_is_not_fatal(
     One worker with 8 threads cannot afford an ungated sequence of provider
     calls; a capacity refusal must still leave the reset successful, because
     local revocation — not the provider call — is what ends the sessions.
+
+    Since LP-02 the revocation lives in the shared recovery authority, whose
+    slot also bounds the password change itself: the first entry (the change)
+    is admitted, the second (the advisory revocation) is refused.
     """
-    from app.blueprints import auth as auth_bp
+    import contextlib
+
     from app.models import MobileAuthSession
-    from app.services import ai_gate
+    from app.services import account_recovery, ai_gate
 
     user = User(username="alice", email="alice@example.com", cognito_sub="sub-alice")
     db.session.add(user)
     db.session.commit()
     _mobile_login()
     entered = []
-    monkeypatch.setattr(
-        auth_bp, "blocking_concurrency_slot",
-        lambda *args, **kwargs: entered.append(True) or (_ for _ in ()).throw(
-            ai_gate.BlockingConcurrencyLimit("exhausted")))
+
+    def slot(*args, **kwargs):
+        entered.append(True)
+        if len(entered) == 1:
+            return contextlib.nullcontext()
+        raise ai_gate.BlockingConcurrencyLimit("exhausted")
+
+    monkeypatch.setattr(account_recovery, "blocking_concurrency_slot", slot)
 
     _reset_context(client)
     response = client.post("/reset-password", json=_reset_payload())
 
-    assert entered == [True]
+    assert entered == [True, True]
     assert mobile_provider == []          # gate refused before any network call
     assert response.status_code == 200    # …and the reset still succeeded
     assert MobileAuthSession.query.one().revoked_at is not None
@@ -406,14 +417,14 @@ def test_provider_revocation_is_gated_and_capacity_refusal_is_not_fatal(
 
 def test_provider_revocation_is_bounded_so_a_thread_cannot_park_for_minutes(
         client, mobile_provider, monkeypatch):
-    from app.blueprints import auth as auth_bp
     from app.models import MobileAuthSession
+    from app.services import account_recovery
 
     user = User(username="alice", email="alice@example.com", cognito_sub="sub-alice")
     db.session.add(user)
     db.session.commit()
     _mobile_login()
-    limit = auth_bp._PROVIDER_REVOKE_LIMIT
+    limit = account_recovery.PROVIDER_REVOKE_LIMIT
     for index in range(limit + 3):
         db.session.add(CognitoSession(
             session_id=f"web-{index}",

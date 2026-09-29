@@ -12,8 +12,8 @@ from app.models import (
     MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
 )
 from app.services import (
-    auth_contract, cognito_jwt, cognito_service, mobile_credentials,
-    session_store,
+    auth_contract, cognito_identity, cognito_jwt, cognito_service,
+    mobile_credentials, session_store,
 )
 from app.services.ai_gate import (
     BlockingConcurrencyLimit, blocking_concurrency_slot,
@@ -130,16 +130,28 @@ def _claim_expiry(claims):
             "provider_expiry_unavailable") from exc
 
 
-def _resolve_user(claims, username):
+def _resolve_user(claims):
+    """The local row of the VERIFIED ID-token subject; bind or create it once.
+
+    A row created or bound here is keyed by the provider username from the
+    verified token, never by the identifier the login was submitted as (an
+    e-mail alias or another casing): `User.username` must name the provider
+    user, or recovery by that username cannot find the row.
+    """
     sub = (claims.get("sub") or "").strip()
     email = (claims.get("email") or "").strip().lower()
     if not sub:
         return None
     user = User.query.filter_by(cognito_sub=sub).first()
     if user is not None:
+        if cognito_identity.diverges_from_provider(user, claims):
+            _security_event("identity_divergent", category="identity")
         return user
     verified = claims.get("email_verified")
     if not email or (verified is not True and str(verified).lower() != "true"):
+        return None
+    username = cognito_identity.provider_username(claims)
+    if username is None:
         return None
     user, denial = reconcilable_local_user(username, email, sub)
     if denial is not None:
@@ -208,24 +220,29 @@ def _credential_fence(username):
 
     The epoch answers it without a clock and without a timeout. It is read here,
     then re-read under a row lock next to the INSERT (see
-    `_assert_credential_unchanged`). The key is `username`, the SAME key
-    `auth.reset_password` resolves the account by, so the fence is exactly as
-    reachable as the revocation it protects.
+    `_assert_credential_unchanged`). The rows are found by
+    `cognito_identity.local_users_for_identifier`, the SAME rule
+    `account_recovery` resolves a reset's account by: the provider accepts
+    `Alice`, `alice` and the account's e-mail alias as one user, so a login as
+    any of them is fenced against a reset submitted as any other.
 
-    Returns (user_id, epoch) or None for an account with no local row yet, and
-    leaves no transaction open: the provider call is next and a pooled
-    connection must not sit idle inside one for the length of it.
+    Returns `{user_id: epoch}` for every local row the identifier can name —
+    empty for an account with no local row yet. More than one row means local
+    data is ambiguous by case; no row is picked here, the provider's verified
+    subject picks it after the call and the epoch captured for THAT row is the
+    one compared. Leaves no transaction open: the provider call is next and a
+    pooled connection must not sit idle inside one for the length of it.
     """
     try:
-        fence = db.session.query(User.id, User.credential_epoch).filter(
-            User.username == username).first()
+        rows = cognito_identity.local_users_for_identifier(
+            username, User.id, User.credential_epoch)
     except Exception as exc:
         db.session.rollback()
         raise _failure(
             "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
             "storage_unavailable") from exc
     db.session.rollback()
-    return fence
+    return {user_id: epoch for user_id, epoch in rows}
 
 
 def _assert_credential_unchanged(user, fence):
@@ -241,11 +258,12 @@ def _assert_credential_unchanged(user, fence):
 
     A row this login created or reconciled during the provider call has no
     fenced epoch of its own. Requiring 0 from it is not a guess: the only writer
-    of the epoch resolves the account by `username`, so a row carrying a
-    non-zero epoch was reset under the same username this login just presented
-    to the provider, and the fence would have covered it.
+    of the epoch is a reset, which resolves its account with the same
+    case-insensitive username/e-mail rule the fence read used, so a row carrying
+    a non-zero epoch was reset under an identifier this login's fence would
+    have covered.
     """
-    expected = fence[1] if fence is not None and fence[0] == user.id else 0
+    expected = fence.get(user.id, 0)
     try:
         current = db.session.query(User.credential_epoch).filter(
             User.id == user.id).with_for_update().scalar()
@@ -337,7 +355,7 @@ def login(username, password, now=None):
             "session_commit_failed") from exc
 
     try:
-        user = _resolve_user(id_claims, username)
+        user = _resolve_user(id_claims)
         if user is None:
             raise _failure(
                 "AUTH_INVALID_CREDENTIALS", 401, False,

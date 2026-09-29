@@ -214,7 +214,7 @@ pre-extraction code). Two deliberate differences, `tests/test_web_registration_l
 
 ## 10. Not in LP-01
 
-Password recovery (LP-02), Flutter signup/verification UI (LP-07),
+Password recovery (LP-02 — [MOBILE_PASSWORD_RECOVERY.md](MOBILE_PASSWORD_RECOVERY.md)), Flutter signup/verification UI (LP-07),
 onboarding (LP-03/LP-08), referral input on native, account deletion, any
 flag/rollout change. Native login still answers an unconfirmed account with
 `AUTH_INVALID_CREDENTIALS` (pinned by `test_mobile_unconfirmed_and_invalid_logins_are_indistinguishable`);

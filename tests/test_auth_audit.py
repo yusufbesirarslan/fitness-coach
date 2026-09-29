@@ -25,7 +25,10 @@ MOBILE_PUBLIC_ENDPOINTS = {
     "mobile_api.login", "mobile_api.refresh", "mobile_api.logout",
     # LP-01 pre-auth registration: public by design (no account exists yet),
     # never issue a credential. docs/MOBILE_REGISTRATION.md.
-    "mobile_api.register", "mobile_api.verify", "mobile_api.verify_resend"}
+    "mobile_api.register", "mobile_api.verify", "mobile_api.verify_resend",
+    # LP-02 pre-auth password recovery: public by design (the caller cannot
+    # sign in), never issue a credential. docs/MOBILE_PASSWORD_RECOVERY.md.
+    "mobile_api.password_forgot", "mobile_api.password_reset"}
 
 
 def test_every_non_public_route_uses_require_auth(app):

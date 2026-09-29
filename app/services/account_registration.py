@@ -191,7 +191,12 @@ def register_account(username, email, password, language=None,
 
     # One outcome for a taken username and a taken e-mail: the answer must not
     # say which one exists (enumeration hardening, pinned by tests).
-    taken = (User.query.filter_by(username=username).first()
+    # Case-insensitive like the provider (CaseSensitive=false): a local row
+    # `alice` makes `Alice` taken even when the provider has no such user, so
+    # registration can never write a local case twin (that would make both
+    # accounts unrecoverable by username — cognito_identity fails closed).
+    taken = (User.query.filter(
+        db.func.lower(User.username) == username.lower()).first()
              or User.query.filter(db.func.lower(User.email) == email).first())
     # Close the read transaction before the provider round-trip so no pooled
     # connection idles inside a transaction for its length.

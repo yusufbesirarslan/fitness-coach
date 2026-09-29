@@ -15,6 +15,8 @@ _MOBILE_PREAUTH_ENDPOINTS = frozenset({
     "mobile_api.register",
     "mobile_api.verify",
     "mobile_api.verify_resend",
+    "mobile_api.password_forgot",
+    "mobile_api.password_reset",
 })
 
 

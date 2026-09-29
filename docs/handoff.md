@@ -1,3 +1,76 @@
+# LP-02 — Native password recovery contract
+
+Date: 2026-09-29
+
+`POST /api/v1/auth/password/forgot` (202) and `/api/v1/auth/password/reset`
+(200) on the existing `mobile_api` blueprint, behind the unchanged
+`MOBILE_AUTH_ENABLED` gate. Web and mobile now share ONE recovery authority,
+`app/services/account_recovery.py` (identifier normalization + e-mail →
+username resolution, canonical password policy, Cognito forgot/confirm inside
+`blocking_concurrency_slot`, closed `Outcome` classification, the
+non-enumeration rule, and the post-reset session revocation that PR #312/F12
+had put in the web blueprint — moved unchanged). Neither transport calls the
+Cognito recovery primitives or `mobile_auth.revoke_all_for_user`; neither
+issues a session — the user signs in through the unchanged login.
+
+Web parity: pinned by `tests/test_web_recovery_characterization.py` (passes on
+the pre-extraction base). Three deliberate deltas
+(`tests/test_web_recovery_lp02_deltas.py`, each fails on the base): saturated
+capacity → 503 + `Retry-After: 15`; non-string JSON fields → "required" 400
+instead of a 500; provider password-history rejection → the policy sentence.
+
+Native security: forgot answers one 202 for every account state, provider
+failures included (with `PreventUserExistenceErrors` only existing accounts
+reach them); reset answers wrong/expired/unknown-account codes identically;
+per-IP budgets match web, forgot adds 3/15 min per identifier, reset adds
+5/15 min per identifier charged on code failures only and fails closed without
+the distributed throttle store. A successful native reset revokes every web
+and native session and bumps the credential fence, exactly like web. No flag,
+migration or rollout change; no new error code.
+
+Found by falsification: a raw-body substring check cannot see Turkish
+provider sentences (JSON escapes them), and the limiter hook swallows
+credential-lookup exceptions, so a raising `authenticate_access` stub can never
+fail a pre-auth bearer test. Fixed in the LP-02 tests and, test-only, in
+`tests/test_mobile_registration_api.py` (decoded-JSON checks; the bearer test
+records lookups instead of raising). Each hardened check fails under a leak /
+lookup mutation that the old check passed.
+
+Case-insensitive identity (closure). Production Cognito was verified from AWS:
+`CaseSensitive=false`, `AliasAttributes=[email]`. The local schema's
+username/e-mail uniqueness is case-SENSITIVE, and recovery + the credential
+fence matched `User.username` exactly, so a reset as `alice` for `Alice`
+changed the password and revoked nothing; a mobile login by e-mail after any
+reset was refused forever (the fence read no row and expected epoch 0).
+`cognito_identity.local_users_for_identifier` / `resolve_local_user` are now
+the ONE rule (one column, `lower()` both sides, exact), used by
+`account_recovery` (owner resolved BEFORE the provider call; ambiguity fails
+closed as a wrong code, password unchanged) and `mobile_auth._credential_fence`
+(epochs of every matching row, compared against the row the verified `sub`
+picks). Tests: `tests/test_recovery_identity_case.py`.
+
+Immutable identity (closure). `/edit-profile` could rename `User.username`,
+but the Cognito username is immutable and recovery reaches the account only
+through the local username (the reset is unauthenticated: no `sub`). A rename
+made a reset change a password and revoke nothing, or land on whoever took
+the old name. `User.username` is now the provider username, written once:
+`/edit-profile` refuses any change (400, before side effects; display name =
+`full_name`), login-time orphan reconciliation (web + native) writes the
+verified `cognito:username` instead of the typed identifier (an e-mail login
+used to become the username), and registration + reconciliation compare
+case-insensitively (no local case twins; ambiguity refused). Legacy renamed
+rows are logged `identity_divergent` at login, never rewritten. No schema
+change. Tests: `tests/test_identity_immutability.py` (incl. an AST gate on
+every `username` writer). Production audit (read-only, not run here) and the
+open per-identifier budget follow-up: `docs/MOBILE_PASSWORD_RECOVERY.md` §11.
+
+Next: LP-07/LP-09 Flutter recovery screens consume
+`docs/MOBILE_PASSWORD_RECOVERY.md` §2–§3 and §7.
+
+Authority: `docs/MOBILE_PASSWORD_RECOVERY.md`.
+
+---
+
 # LP-01 — Native registration & email verification contract
 
 Date: 2026-09-28
