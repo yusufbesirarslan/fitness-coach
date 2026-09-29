@@ -16,6 +16,7 @@ from app.models import (DailyActivity, MealLog, User, UserQuestProgress, UserSes
                         WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog,
                         WeeklyWinner, WorkoutLog)
 from app.services.ai_coach import generate_checkin_feedback
+from app.services import account_profile
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user, get_level, level_title
@@ -92,7 +93,9 @@ def _parse_weight(value):
         return None, "route.weight_range"
     except (TypeError, ValueError):
         return None, "route.weight_numeric"
-    if not math.isfinite(weight) or not 20 <= weight <= 500:
+    if not math.isfinite(weight) or not (
+            account_profile.BODY_WEIGHT_MIN_KG <= weight
+            <= account_profile.BODY_WEIGHT_MAX_KG):
         return None, "route.weight_range"
     return weight, None
 
@@ -109,7 +112,7 @@ def home():
     SAME source `/training-plan/active`, `/workout/status` and `GET /api/v1/today`
     use - then mapped by the pure presenter. Nothing on this page decides state.
     """
-    if not current_user.profile_complete:
+    if not account_profile.onboarding_state(current_user).complete:
         return redirect(url_for("profile.setup"))
     today_view = build_today_view(gather_today_facts(current_user.id))
     return render_template("today.html",

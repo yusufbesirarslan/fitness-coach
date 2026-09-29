@@ -10,8 +10,8 @@ from app.models import (
     TRAINING_PLAN_GENERATION_IN_PROGRESS,
     TRAINING_PLAN_GENERATION_SUCCEEDED,
     TrainingPlan,
-    UserSession,
 )
+from app.services.account_profile import onboarding_state
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.output_errors import GenerationOutputError
 from app.services.training_generation.service import generate_training_plan_candidate
@@ -33,12 +33,18 @@ class GenerationCommandResult:
     replayed: bool
 
 
-def _required_session(user_id):
-    session = (UserSession.query.filter_by(user_id=user_id)
-               .order_by(UserSession.created_at.desc()).first())
-    if session is None:
+def _required_session(user):
+    """The canonical onboarding session, or the typed prerequisite failure.
+
+    Readiness is `account_profile.onboarding_state` — the same rule behind
+    `account/me.profile_complete` — so this command can never accept an
+    account the account surface calls incomplete, or refuse one it calls
+    complete.
+    """
+    state = onboarding_state(user)
+    if not state.complete:
         raise GenerationPrerequisiteMissing()
-    return session
+    return state.session
 
 
 def _inspect_durable(user_id, key, fingerprint):
@@ -71,7 +77,7 @@ def generate_and_persist(
     """Generate and atomically persist one first plan, or replay its outcome."""
     if not isinstance(request, NativePlanRequest):
         raise TypeError("request must be NativePlanRequest")
-    last_session = _required_session(user.id)
+    last_session = _required_session(user)
 
     _operation, result = _inspect_durable(user.id, key, request.fingerprint)
     if result is not None:
