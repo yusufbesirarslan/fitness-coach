@@ -67,7 +67,7 @@ def seed_all(app) -> dict[str, int]:
     from app.models import (
         CoachConversation, CoachMessage, DailyActivity, Friendship, MealLog,
         Notification, NutritionPlan, PumpCheck, Supplement, TrainingPlan, User,
-        UserWearableConnection, WeeklyLog, WorkoutLog,
+        UserSession, UserWearableConnection, WeeklyLog, WorkoutLog,
     )
     from app.timeutil import audit_clock
 
@@ -120,6 +120,17 @@ def seed_all(app) -> dict[str, int]:
         )
         db.session.add(friend)
         db.session.flush()
+
+        # Onboarded = the flag AND the canonical onboarding session
+        # (app/services/account_profile.py); the flag alone reads incomplete.
+        for user in [*users.values(), friend]:
+            if user.profile_complete:
+                db.session.add(UserSession(
+                    user_id=user.id, name=user.username, age=user.age,
+                    gender=user.gender, weight=user.weight, height=user.height,
+                    goal=user.goal, fitness_level=user.fitness_level,
+                    current_activity=user.current_activity, coach_reply="",
+                ))
 
         for scenario_id in ("active-workout", "completed-workout", "progress-history", "coach-history", "wearable-connected", "wearable-disconnected"):
             user = users[scenario_id]

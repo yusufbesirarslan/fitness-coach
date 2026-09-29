@@ -489,6 +489,7 @@ def test_training_plan_prompt_localized_keeps_canonical_fields(app, client, make
 
     u = make_user("trplanen", language="en")
     login("trplanen")
+    u.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     db.session.add(UserSession(user_id=u.id, goal="kas_kutlesi", fitness_level="beginner",
                                current_activity="orta", tdee=2400))
     db.session.commit()
