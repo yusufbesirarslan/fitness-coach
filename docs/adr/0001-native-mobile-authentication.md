@@ -23,6 +23,14 @@
 > one registration authority with the web routes. They issue no session.
 > Contract: [../MOBILE_REGISTRATION.md](../MOBILE_REGISTRATION.md).
 
+> **Amendment (2026-09-29, LP-02).** Password recovery is no longer deferred:
+> `POST /api/v1/auth/password/forgot` and `/api/v1/auth/password/reset` use
+> this ADR's envelope and blueprint and share one recovery authority with the
+> web `/forgot-password` and `/reset-password`. They issue no session; a
+> successful reset revokes every existing web and native session exactly as
+> the web reset already did. No new error code.
+> Contract: [../MOBILE_PASSWORD_RECOVERY.md](../MOBILE_PASSWORD_RECOVERY.md).
+
 ## Context
 
 AxisAI web authentication uses Flask-Login and a signed browser cookie containing
@@ -514,10 +522,10 @@ undeployed checks or future IaC work:
 
 ## Deferred Flows
 
-Password recovery, account deletion, Flutter secure
+Account deletion, Flutter secure
 storage, Flutter refresh interception, authenticated mobile routing, and all
 non-auth product APIs remain deferred. (Registration and verification:
-see the LP-01 amendment above.)
+see the LP-01 amendment above; password recovery: the LP-02 amendment.)
 
 ## Rollback
 

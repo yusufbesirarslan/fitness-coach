@@ -1,3 +1,54 @@
+# LP-02 — Native password recovery contract
+
+Date: 2026-09-29
+
+`POST /api/v1/auth/password/forgot` (202) and `/api/v1/auth/password/reset`
+(200) on the existing `mobile_api` blueprint, behind the unchanged
+`MOBILE_AUTH_ENABLED` gate. Web and mobile now share ONE recovery authority,
+`app/services/account_recovery.py` (identifier normalization + e-mail →
+username resolution, canonical password policy, Cognito forgot/confirm inside
+`blocking_concurrency_slot`, closed `Outcome` classification, the
+non-enumeration rule, and the post-reset session revocation that PR #312/F12
+had put in the web blueprint — moved unchanged). Neither transport calls the
+Cognito recovery primitives or `mobile_auth.revoke_all_for_user`; neither
+issues a session — the user signs in through the unchanged login.
+
+Web parity: pinned by `tests/test_web_recovery_characterization.py` (passes on
+the pre-extraction base). Three deliberate deltas
+(`tests/test_web_recovery_lp02_deltas.py`, each fails on the base): saturated
+capacity → 503 + `Retry-After: 15`; non-string JSON fields → "required" 400
+instead of a 500; provider password-history rejection → the policy sentence.
+
+Native security: forgot answers one 202 for every account state, provider
+failures included (with `PreventUserExistenceErrors` only existing accounts
+reach them); reset answers wrong/expired/unknown-account codes identically;
+per-IP budgets match web, forgot adds 3/15 min per identifier, reset adds
+5/15 min per identifier charged on code failures only and fails closed without
+the distributed throttle store. A successful native reset revokes every web
+and native session and bumps the credential fence, exactly like web. No flag,
+migration or rollout change; no new error code.
+
+Found by falsification and fixed in the new tests (not in LP-01's): a raw-body
+substring check cannot see Turkish provider sentences (JSON escapes them), and
+the limiter hook swallows credential-lookup exceptions, so a raising
+`authenticate_access` stub can never fail a pre-auth bearer test.
+`tests/test_mobile_registration_api.py` has both patterns — worth tightening.
+
+Open (pre-existing, not changed): revocation and the credential fence match
+`User.username` exactly. If the Cognito pool is case-insensitive (not in IaC),
+a reset requested as `alice` for `Alice` revokes nothing locally. Affects web
+and native equally. Recommended follow-up: confirm the pool's
+`UsernameConfiguration`, then resolve the local row case-insensitively in
+`account_recovery._canonical_identity` and `mobile_auth._credential_fence`
+together.
+
+Next: LP-07/LP-09 Flutter recovery screens consume
+`docs/MOBILE_PASSWORD_RECOVERY.md` §2–§3 and §7.
+
+Authority: `docs/MOBILE_PASSWORD_RECOVERY.md`.
+
+---
+
 # LP-01 — Native registration & email verification contract
 
 Date: 2026-09-28

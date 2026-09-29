@@ -49,6 +49,7 @@ response shape.
 | Provider tokens | stored server-side, Fernet-encrypted, never returned to a client | `app/services/session_store.py` |
 | Blast radius | one client's rejection never touches the other's session | `test_web_session_row_is_untouched_by_a_mobile_rejection` |
 | Registration / verification | one authority, `app/services/account_registration.py`; neither transport calls the provider primitives; neither issues a session | `tests/test_account_registration_architecture.py` ([MOBILE_REGISTRATION.md](MOBILE_REGISTRATION.md)) |
+| Password recovery | one authority, `app/services/account_recovery.py`; neither transport calls the provider primitives or the credential-change sweep; neither issues a session; both revoke every existing session on success | `tests/test_account_recovery_architecture.py` ([MOBILE_PASSWORD_RECOVERY.md](MOBILE_PASSWORD_RECOVERY.md)) |
 
 **`jwks_unavailable` is the load-bearing distinction.** "The signature could
 not be verified" is not "the signature is invalid". A cold JWKS cache is real
