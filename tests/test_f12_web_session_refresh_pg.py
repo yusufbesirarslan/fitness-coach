@@ -25,7 +25,7 @@ from flask import Flask
 from app.blueprints import auth as auth_bp
 from app.extensions import db
 from app.models import CognitoSession, User
-from app.services import ai_gate, cognito_service, session_store
+from app.services import account_recovery, ai_gate, cognito_service, session_store
 from app.services.cognito_service import CognitoServiceError
 
 
@@ -247,7 +247,7 @@ def test_password_reset_revocation_during_provider_io_wins_permanently(
     a = _start(pg_app, provider, "A", uid, sid, results)
     assert provider.entered["A"].wait(WAIT)
     with pg_app.app_context():
-        auth_bp._revoke_all_sessions_after_credential_change(uid)
+        account_recovery.revoke_all_sessions_after_credential_change(uid)
         db.session.remove()
     provider.release["A"].set()
     _join(a)

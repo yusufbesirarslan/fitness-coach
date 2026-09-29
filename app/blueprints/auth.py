@@ -7,25 +7,22 @@ from flask import (Blueprint, abort, current_app, flash, jsonify, redirect,
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import func
 
 from app.config import COGNITO_ENABLED
 from app.extensions import db, limiter, login_throttle_available
 from app.models import User
-from app.services import (account_registration, cognito_jwt, cognito_service,
-                          email_service, email_templates, mobile_auth,
-                          session_store)
+from app.services import (account_recovery, account_registration, cognito_jwt,
+                          cognito_service, mobile_auth, session_store)
+from app.services.account_recovery import (
+    Outcome as RecoveryOutcome, Phase as RecoveryPhase, RecoveryFailure)
 from app.services.account_registration import (
     Outcome as RegistrationOutcome, Phase as RegistrationPhase,
     RegistrationFailure)
-from app.services.ai_gate import (BlockingConcurrencyLimit,
-                                  blocking_concurrency_slot)
 from app.services.cognito_service import CognitoServiceError
 from app.services.cognito_jwt import TokenValidationError
 from app.services.cognito_identity import reconcilable_local_user
 from app.services.gamification import complete_quest_for_user
 from app.services.referral import ensure_referral_code
-from app.services.validators import validate_password
 from app.i18n import AVAILABLE_LOCALES, set_locale, t
 
 
@@ -42,9 +39,6 @@ _RESET_USERNAME_KEY = "password_reset_username"
 _RESET_STARTED_KEY = "password_reset_started_at"
 _RESET_CONTEXT_MINUTES = 15
 _FORGOT_GENERIC_KEY = "auth.forgot_generic"
-# Most provider refresh tokens one credential change will try to revoke. Local
-# revocation is unbounded and authoritative; this only bounds the network work.
-_PROVIDER_REVOKE_LIMIT = 20
 
 
 @bp.route("/set-language", methods=["POST"])
@@ -128,11 +122,36 @@ def _valid_reset_username():
     return username
 
 
-def _reset_error_response(exc):
-    if exc.code in {"LimitExceededException", "TooManyRequestsException"}:
-        return jsonify({"error": t("auth.reset_throttled")}), 429
-    if exc.code == "InvalidPasswordException":
+def _service_busy():
+    """Saturated blocking capacity: retryable 503, never a crash (LP-01 idiom)."""
+    response = jsonify({"error": t("auth.service_busy")})
+    response.status_code = 503
+    response.headers["Retry-After"] = "15"
+    return response
+
+
+def _reset_failure_response(failure):
+    """Map a canonical recovery failure onto the pre-LP-02 browser answers.
+
+    Pinned by tests/test_web_recovery_characterization.py: a local policy
+    failure renders the validator sentence, a provider policy rejection its
+    fixed sentence, a provider throttle 429, and every other provider answer
+    the one "invalid or expired" sentence — including answers the native
+    transport reports as unavailable, which the browser never distinguished.
+    """
+    outcome = failure.outcome
+    if outcome == RecoveryOutcome.CAPACITY_EXHAUSTED:
+        return _service_busy()
+    if outcome == RecoveryOutcome.SESSIONS_NOT_REVOKED:
+        return jsonify({"error": t("auth.reset_sessions_not_cleared")}), 503
+    if outcome == RecoveryOutcome.FIELDS_REQUIRED:
+        return jsonify({"error": t("auth.reset_fields_required")}), 400
+    if outcome == RecoveryOutcome.PASSWORD_INVALID:
+        if failure.phase == RecoveryPhase.VALIDATION:
+            return jsonify({"error": failure.detail}), 400
         return jsonify({"error": t("auth.reset_password_rejected")}), 400
+    if outcome == RecoveryOutcome.THROTTLED:
+        return jsonify({"error": t("auth.reset_throttled")}), 429
     return jsonify({"error": t("auth.reset_invalid_or_expired")}), 400
 
 
@@ -142,19 +161,17 @@ def forgot_password():
     if request.method == "GET":
         return render_template("forgot_password.html")
     data = request.get_json(silent=True) or {}
-    identifier = (data.get("identifier") or "").strip()
-    if not identifier:
-        return jsonify({"error": t("auth.identifier_required")}), 400
-    canonical = identifier.lower() if "@" in identifier else identifier
-    if "@" in canonical:
-        user = User.query.filter(func.lower(User.email) == canonical).first()
-        if user:
-            canonical = user.username
+    # Normalization, e-mail → username resolution, the provider call and the
+    # non-enumeration rule live in the ONE recovery authority (shared with
+    # native /api/v1/auth/password/forgot).
     try:
-        cognito_service.forgot_password(canonical)
-    except CognitoServiceError:
-        pass
-    session[_RESET_USERNAME_KEY] = canonical
+        requested = account_recovery.request_password_reset(
+            data.get("identifier"))
+    except RecoveryFailure as failure:
+        if failure.outcome == RecoveryOutcome.CAPACITY_EXHAUSTED:
+            return _service_busy()
+        return jsonify({"error": t("auth.identifier_required")}), 400
+    session[_RESET_USERNAME_KEY] = requested.identity
     session[_RESET_STARTED_KEY] = time.time()
     return jsonify({
         "message": t(_FORGOT_GENERIC_KEY),
@@ -174,36 +191,24 @@ def reset_password():
     if request.method == "GET":
         return render_template("reset_password.html")
     data = request.get_json(silent=True) or {}
-    code = (data.get("code") or "").strip()
-    password = data.get("password") or ""
-    confirmation = data.get("confirm_password") or ""
-    if not code or not password or not confirmation:
+    code, password, confirmation = (
+        data.get("code"), data.get("password"), data.get("confirm_password"))
+    # The confirmation field is a browser form concern; the service validates
+    # everything else (fields, canonical password policy, provider answer) and
+    # revokes every session issued under the old credential.
+    # Only the code is trimmed; a password is checked exactly as typed.
+    if not (isinstance(code, str) and code.strip()
+            and isinstance(password, str) and password
+            and isinstance(confirmation, str) and confirmation):
         return jsonify({"error": t("auth.reset_fields_required")}), 400
     if password != confirmation:
         return jsonify({"error": t("auth.password_mismatch")}), 400
-    password_error = validate_password(password)
-    if password_error:
-        return jsonify({"error": password_error}), 400
     try:
-        cognito_service.confirm_forgot_password(username, code, password)
-    except CognitoServiceError as exc:
-        return _reset_error_response(exc)
-    user = User.query.filter_by(username=username).first()
-    if user:
-        try:
-            _revoke_all_sessions_after_credential_change(user.id)
-        except mobile_auth.MobileAuthFailure:
-            # Şifre Cognito'da ÇOKTAN değişti ama açık oturumları kapatamadık.
-            # 200 dönmek "her yerde çıkış yapıldı" yalanı olur; depolama geçici
-            # olarak ulaşılamıyor demektir, bunu olduğu gibi söyle.
-            current_app.logger.error(
-                "[AUTH] şifre değişti ama oturumlar kapatılamadı (user=%s)",
-                user.id)
-            return jsonify({"error": t("auth.reset_sessions_not_cleared")}), 503
+        account_recovery.reset_password(username, code, password)
+    except RecoveryFailure as failure:
+        return _reset_failure_response(failure)
     logout_user()
     session.clear()
-    # Şifre değişti bildirimi — best-effort; sıfırlama yanıtını ASLA etkilemez.
-    _send_password_changed_email(username)
     flash(t("auth.reset_success"), "success")
     return jsonify({
         "message": t("auth.reset_success"),
@@ -481,39 +486,6 @@ def verify_resend():
     return jsonify({"message": t("auth.resend_done")})
 
 
-def _revoke_all_sessions_after_credential_change(user_id):
-    """End every session issued under the OLD credential, then tell the provider.
-
-    Web and mobile fail differently, so both are handled here explicitly:
-
-    * Web sessions die with their server-side row — `require_auth` resolves
-      `cognito_sid` against CognitoSession on every request — so deleting the
-      rows is sufficient locally, and that is the pre-existing behaviour kept
-      byte-for-byte below.
-    * Mobile sessions do NOT. `mobile_auth.authenticate_access` validates the
-      STORED provider access token offline, so an opaque credential stays
-      accepted for its whole TTL — and its family keeps minting new ones until
-      the absolute expiry — unless the family row itself is revoked. That is the
-      revocation added here.
-
-    Local revocation is what actually ends the sessions, so it runs first and is
-    allowed to fail the request: "nothing is live" and "I could not check" must
-    not look the same to the caller.
-
-    The provider calls come last and are best-effort. `ConfirmForgotPassword`
-    changes the password but does not revoke refresh tokens, and this route runs
-    unauthenticated: `GlobalSignOut` needs the user's own access token and
-    `AdminUserGlobalSignOut` needs AWS credentials this UNSIGNED public client
-    does not have. Revoking each stored refresh token reaches the same set —
-    every session this app issued — and a provider outage must never make an
-    already-changed password look unchanged.
-    """
-    mobile_results = mobile_auth.revoke_all_for_user(user_id)
-    web_provider_refresh = session_store.provider_refresh_tokens_for_user(user_id)
-    session_store.delete_for_user(user_id)
-    _best_effort_provider_revoke_all(user_id, mobile_results, web_provider_refresh)
-
-
 def _revoke_local_sessions_for_global_logout(user_id):
     """End every locally-authoritative session this user already holds.
 
@@ -537,66 +509,6 @@ def _revoke_local_sessions_for_global_logout(user_id):
     mobile_results = mobile_auth.revoke_all_for_global_logout(user_id)
     web_deleted = session_store.delete_for_user(user_id)
     return mobile_results, web_deleted
-
-
-def _best_effort_provider_revoke_all(user_id, mobile_results, web_refresh_tokens):
-    """Tell Cognito about revocations already committed locally. Never raises.
-
-    Every call here is a blocking provider round-trip, so it takes the shared
-    `blocking_concurrency_slot` the same way every other Cognito/FatSecret/model
-    caller does: one gunicorn worker with 8 threads cannot afford an ungated
-    sequence of network calls (each up to the client's 5s connect + 10s read) or
-    /health queues behind it and the deploy gate rolls a healthy build back. One
-    slot covers the whole sequence because the sequence is nothing BUT network —
-    no cache read, DB write or lock happens while it is held.
-
-    Bounded on purpose: sessions accumulate for the family's whole absolute
-    lifetime, so a busy account can hold dozens, and "revoke them all" must not
-    become "park a thread for minutes". Anything past the cap stays locally
-    revoked — which is what actually ends the session — and is logged.
-
-    Capacity rejection is not an error either: local revocation already ran, so
-    skipping the advisory provider call is strictly better than failing a
-    password reset that has already changed the password.
-    """
-    tokens = [result.provider_refresh_token for result in mobile_results
-              if result.provider_refresh_token]
-    tokens.extend(web_refresh_tokens)
-    if not tokens:
-        return
-    skipped = max(0, len(tokens) - _PROVIDER_REVOKE_LIMIT)
-    if skipped:
-        current_app.logger.warning(
-            "[AUTH] sağlayıcı iptali üst sınırda kesildi (user=%s skipped=%d)",
-            user_id, skipped)
-    try:
-        with blocking_concurrency_slot():
-            for refresh_token in tokens[:_PROVIDER_REVOKE_LIMIT]:
-                try:
-                    cognito_service.revoke_token(refresh_token)
-                except Exception:
-                    current_app.logger.warning(
-                        "[AUTH] refresh token iptal edilemedi (user=%s)", user_id)
-    except BlockingConcurrencyLimit:
-        current_app.logger.warning(
-            "[AUTH] sağlayıcı iptali kapasite nedeniyle atlandı (user=%s)", user_id)
-
-
-def _send_password_changed_email(username):
-    """Şifre değişikliği bildirimi — best-effort, ASLA yükseltmez.
-
-    Sıfırlama Cognito'da ÇOKTAN başarılı; e-posta hatası akışı bozamaz."""
-    try:
-        user = User.query.filter_by(username=username).first()
-        if user is None or not user.email:
-            return
-        subject, html, text = email_templates.password_changed_email(user.username)
-        email_service.send_html_email(user.email, subject, html, text=text)
-        current_app.logger.info("[AUTH-EMAIL] password-changed kuyruklandı: user=%s to=%s",
-                                username, email_service.mask_email(user.email))
-    except Exception:
-        current_app.logger.warning("[AUTH-EMAIL] password-changed gönderilemedi (user=%s)",
-                                   username, exc_info=True)
 
 
 @bp.route("/login/cognito")

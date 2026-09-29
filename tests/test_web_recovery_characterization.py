@@ -308,6 +308,9 @@ def test_reset_password_mismatch(client, provider):
     ("x" * 120 + "12345678a", "validate.password_max"),
     ("12345678", "validate.password_letter"),
     ("abcdefgh", "validate.password_digit"),
+    # Whitespace is not "missing": it reaches the policy, untrimmed.
+    ("   ", "validate.password_min"),
+    ("        ", "validate.password_letter"),
 ])
 def test_reset_weak_password_renders_the_canonical_validator_sentence(
         client, provider, password, key):
