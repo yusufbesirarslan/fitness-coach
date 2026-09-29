@@ -450,18 +450,24 @@ def test_ambiguous_planned_write_is_not_retried_or_claimed(app, auth_user, clien
     page.wait_for_timeout(300)
     assert paths(traffic)['/meal-log/today'] == 1
     assert_summary_matches_server(page, client)
-    # No second write: not by itself, not by a forced tap, not by keyboard,
-    # not after the toast is gone, not after the planned section re-renders.
-    row.click(force=True)
+    # No second write: not by itself, not by a tap on the element, not by
+    # keyboard, not with `disabled` stripped (the page-life lock alone must
+    # hold), not after the toast is gone, not after the section re-renders.
+    # Activation targets the element, never screen coordinates: a forced
+    # coordinate click lands on whatever overlays the row at that viewport.
+    url = page.url
+    row.evaluate('el => el.click()')
     row.dispatch_event('click')
     row.focus()
     page.keyboard.press('Enter')
+    row.evaluate('el => { el.disabled = false; el.click(); el.disabled = true; }')
     page.evaluate('() => loadQuickAddSection(true)')
     expect(page.locator('#quick-add-section')).to_have_attribute('data-plan-state', 'available')
     expect(row).to_be_disabled()
     expect(row.locator('.qab-badge')).to_have_text(copy['nutrition.unconfirmed_state'])
-    row.click(force=True)
+    row.evaluate('el => { el.disabled = false; el.click(); el.disabled = true; }')
     page.wait_for_timeout(4000)
+    assert page.url == url
     expect(row).to_be_disabled()
     expect(row.locator('.qab-badge')).to_have_text(copy['nutrition.unconfirmed_state'])
     assert len(attempts) == 1 and attempts[0]           # sent once, never re-sent
