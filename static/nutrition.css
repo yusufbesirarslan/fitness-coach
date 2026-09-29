@@ -279,9 +279,33 @@
 .slot-head .slot-empty { margin-left: auto; flex-shrink: 0; }
 
 /* ── 3 · LOG FOOD CHOOSER SHEET ───────────────────────────────────── */
-/* NUTR-PR3: the floating log button (.log-fab) is retired — it opened the same
-   chooser as the in-flow "Log food" action and competed with it as a second
-   primary. The chooser sheet below is unchanged. */
+/* NUTR-PR3 retired the floating log button; NUTR-PR4 converges the methods
+   behind the one "Log food" action: title · one line of orientation · the five
+   methods as one vertical list (screen-reader order = visual order) · a quiet
+   secondary group · an explicit close. Same surface language as the rest of
+   the page — no tabs, no card grid. */
+.log-sheet-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+}
+#log-sheet .sheet-title { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+#manual-sheet .sheet-title { margin: 0 0 var(--space-4); }
+.log-sheet-close {
+  flex-shrink: 0; width: 44px; height: 44px; border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--color-text-2); cursor: pointer;
+  border: var(--border-w-1) solid var(--color-border-1);
+}
+.log-sheet-close svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+.log-sheet-close:hover { color: var(--color-text-1); border-color: var(--color-border-2); }
+.log-sheet-lead {
+  margin: var(--space-1) 0 var(--space-4);
+  font-size: var(--text-md); color: var(--color-text-3); line-height: var(--leading-normal);
+}
+.log-sheet-group {
+  margin: var(--space-5) 0 var(--space-2);
+  font-family: var(--font-body); font-size: var(--text-sm); font-weight: var(--weight-semibold);
+  color: var(--color-text-3); letter-spacing: normal; text-transform: none;
+}
 .log-sheet-grid { display: flex; flex-direction: column; gap: var(--space-2); }
 .log-sheet-opt {
   display: flex; align-items: center; gap: var(--space-3);
@@ -305,11 +329,9 @@
 .lso-txt { flex: 1; min-width: 0; }
 .lso-title { display: block; font-weight: var(--weight-semibold); font-size: var(--text-md); }
 .lso-sub { display: block; font-size: var(--text-sm); color: var(--color-text-3); margin-top: 1px; }
-.lso-badge {
-  flex-shrink: 0; font-size: var(--text-2xs, var(--text-xs)); color: var(--color-primary);
-  background: var(--color-primary-soft); padding: 3px 8px; border-radius: var(--radius-full);
-  letter-spacing: 0.04em;
-}
+/* The secondary method is quieter, not smaller: same 44px+ target, no fill. */
+.log-sheet-opt--secondary { background: transparent; min-height: 52px; }
+.log-sheet-opt--secondary .lso-ic { background: transparent; border: var(--border-w-1) solid var(--color-border-1); }
 
 /* ── 4 · BARCODE SCAN OVERLAY ─────────────────────────────────────── */
 .scan-overlay {
@@ -348,24 +370,6 @@
 .scan-manual-row { display: flex; gap: var(--space-2); }
 .scan-manual-row .fc-input { flex: 1; }
 .scan-overlay.manual-only .scan-stage { display: none; }
-
-/* ── 5 · VOICE PLACEHOLDER ────────────────────────────────────────── */
-.voice-placeholder {
-  text-align: center; padding: var(--space-6) var(--space-4);
-  display: flex; flex-direction: column; align-items: center; gap: var(--space-3);
-}
-.voice-mic {
-  width: 88px; height: 88px; border-radius: var(--radius-full);
-  background: var(--color-primary-soft); color: var(--color-primary);
-  display: flex; align-items: center; justify-content: center;
-}
-.voice-mic svg { width: 40px; height: 40px; stroke: currentColor; fill: none; stroke-width: 1.6; }
-.voice-title { font-family: var(--font-display); letter-spacing: 2px; font-size: var(--text-xl); color: var(--color-text-1); }
-.voice-body  { font-size: var(--text-md); color: var(--color-text-3); max-width: 300px; line-height: var(--leading-normal); }
-.voice-badge {
-  font-size: var(--text-sm); color: var(--color-primary);
-  background: var(--color-primary-soft); padding: 6px 14px; border-radius: var(--radius-full);
-}
 
 /* ── 6 · PHOTO CONFIRM ────────────────────────────────────────────── */
 .photo-preview {
@@ -601,6 +605,11 @@
   display: none; align-items: center; justify-content: center; padding: var(--space-4);
 }
 .modal-overlay.open { display: flex; animation: fade-in var(--duration-base) var(--ease-standard); }
+/* NUTR-PR4: the serving step is opened FROM the Search food sheet (and from
+   the builder / a barcode lookup). Same layer + earlier in the DOM meant it
+   painted UNDER that sheet, with its Add button covered. It is the step on
+   top, so it takes the one slot above the overlay layer (toasts stay above). */
+#serving-modal { z-index: calc(var(--z-overlay) + 1); }
 .modal-box {
   background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1);
   border-radius: var(--radius-xl); padding: var(--space-6); width: 100%; max-width: 360px;
@@ -610,6 +619,9 @@
 
 /* ── 13c · FOCUS VISIBLE (keyboard) ───────────────────────────────── */
 .log-sheet-opt:focus-visible,
+.log-sheet-close:focus-visible,
+#nut-planned-title:focus-visible,
+#diary-builder-title:focus-visible,
 .meal-card .mc-edit:focus-visible,
 .meal-card .mc-del:focus-visible,
 .slot-empty:focus-visible,
@@ -623,6 +635,7 @@
 @media (prefers-reduced-motion: reduce) {
   .meal-card, .wg.just-filled, .qab-done .qab-check, .water-num { animation: none !important; transition: none !important; }
   .log-sheet-opt, .mc-edit, .mc-del, .slot-empty { transition: none !important; }
+  .log-sheet-opt:active { transform: none; }
 }
 
 /* ── WEB-UX4-PR6 · F-34 — typography that used to be inline `style` ─────────

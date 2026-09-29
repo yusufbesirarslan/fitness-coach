@@ -449,8 +449,13 @@ def test_diary_provider_writes_send_semantics_not_canonical_nutrition():
 
 
 def test_the_multi_food_quick_log_computes_no_macros_of_its_own():
-    """F4: the per-100 g aggregate is gone from the persistence path."""
-    body = _js_function_body("logMeal")
+    """F4: the per-100 g aggregate is gone from the persistence path.
+
+    NUTR-PR4 made `logMeal` a single-flight wrapper; the write path it runs
+    is `submitMealLog`, so that is the body these guards inspect."""
+    wrapper = _js_function_body("logMeal")
+    assert "submitMealLog()" in wrapper and "fetch(" not in wrapper
+    body = _js_function_body("submitMealLog")
 
     assert "per_100g" not in body, (
         "F4 regression: a browser per-100 g figure is back in the write path.")

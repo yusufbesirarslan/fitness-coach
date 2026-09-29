@@ -236,11 +236,12 @@ def test_nutrition_renders_localized(app, client, make_user, login):
     # Faz 4: timeline + FAB kayıt sayfası. Manuel form artık bir sheet içinde.
     # ("Today's Meals" apostrofu Jinja autoescape ile &#39;e döner — kırılgan;
     #  yerine apostrofsuz, kararlı görünür dizeler kontrol edilir.)
-    assert "Manual Entry" in body and "LOG MEAL" in body
-    # FAB kayıt seçenekleri lokalize
-    assert "Add Meal" in body and "Scan Barcode" in body and "Take Photo" in body
-    # Voice = placeholder ("mobil uygulamada")
-    assert "In the mobile app" in body
+    assert "Search food" in body and "LOG MEAL" in body
+    # "Log food" seçici yöntemleri lokalize (NUTR-PR4)
+    assert "Add Meal" in body and "Scan barcode" in body and "Log with a photo" in body
+    assert "Quick add" in body and "Build meal" in body and "Scan menu" in body
+    # Sesli giriş yer tutucusu NUTR-PR4'te emekliye ayrıldı (hiçbir şey kaydedemiyordu)
+    assert "In the mobile app" not in body and "logVoice" not in body
     assert "Bugünkü Öğünler" not in body
     # Öğün tipi data-args TR kalmalı (backend kanonik değer)
     assert 'data-args=\'["Kahvaltı"]\'' in body

@@ -4,11 +4,11 @@ Rendered `/nutrition` plus the shipped script, asserted by meaning rather than
 pixels:
 
   * Nutrition keeps EXACTLY two primary modes (Today / Plan);
-  * Today has ONE dominant "Log food" front door into the unchanged chooser;
+  * Today has ONE dominant "Log food" front door into the method chooser;
   * the factual daily summary precedes every secondary capability;
   * Diary / History / Water stay secondary disclosures, never tabs;
   * the shipped hydration reliability contract is untouched;
-  * no NUTR-PR4 method redesign, no new endpoint, no new global destination;
+  * no new endpoint, no new global destination (NUTR-PR4 owns the methods);
   * `/nutrition` stays the one canonical route; locale parity is exact.
 """
 import html as html_lib
@@ -23,9 +23,12 @@ from test_nutrition_vnext_pr2_navigation_contract import Elements, render
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = (ROOT / 'static' / 'nutrition.js').read_text(encoding='utf-8').replace('\r\n', '\n')
 
-# Every entry into food logging the chooser offered before PR3, in order. PR3
-# converges the front door only; the rooms behind it are NUTR-PR4's.
-CHOOSER_METHODS = ['logTakePhoto', 'logScanBarcode', 'logMenuScan', 'logVoice', 'logManual']
+# Every entry into food logging behind the one front door, in order. PR3
+# converged the front door; NUTR-PR4 converged the methods behind it (Search,
+# Barcode, Menu, Quick add, Build meal; Photo secondary; the voice placeholder
+# retired) — tests/test_nutrition_vnext_pr4_log_food_contract.py owns them.
+CHOOSER_METHODS = ['logManual', 'logScanBarcode', 'logMenuScan', 'logQuickAdd',
+                   'logBuildMeal', 'logTakePhoto']
 
 # The network surface Nutrition's script is allowed to reach — exactly the
 # pre-PR3 set. A new endpoint here is a backend/API change PR3 does not own.
@@ -104,7 +107,7 @@ def test_one_dominant_log_food_action(client, make_user, login, language):
     assert len(re.findall(r'class="[^"]*\bbtn-volt\b', today)) == 1
 
 
-def test_log_food_opens_the_unchanged_chooser():
+def test_log_food_opens_the_method_chooser():
     template = (ROOT / 'templates' / 'nutrition.html').read_text(encoding='utf-8')
     sheet = template[template.index('id="log-sheet"'):template.index('<!-- ── MANUAL ENTRY SHEET')]
     assert re.findall(r'data-action="(log\w+)"', sheet) == CHOOSER_METHODS
