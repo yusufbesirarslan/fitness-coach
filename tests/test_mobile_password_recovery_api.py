@@ -117,6 +117,12 @@ def _wire(response):
     return response.status_code, json.dumps(body, sort_keys=True), headers
 
 
+def _decoded(response):
+    """The body as a reader sees it. `get_data()` alone would miss non-ASCII
+    provider sentences, which JSON escapes (`İ` → `\\u0130`)."""
+    return json.dumps(response.get_json(), ensure_ascii=False)
+
+
 def _assert_no_session_material(response):
     assert "Set-Cookie" not in response.headers
     assert response.headers["Cache-Control"] == "no-store"
@@ -382,7 +388,7 @@ def test_reset_provider_failures_are_typed_and_sanitized(
     assert response.status_code == status
     error = _error(response)
     assert (error["code"], error["retryable"]) == (code, retryable)
-    text = response.get_data(as_text=True)
+    text = _decoded(response)
     leaked = [provider_code or None, "Exception", "Traceback", "Cognito",
               _ERROR_MESSAGES.get(provider_code), "İşlem başarısız",
               "alice", "sub-"]
@@ -396,7 +402,7 @@ def test_forgot_provider_failures_never_leak_either(raw_client, provider):
             "CodeDeliveryFailureException", ""]:
         provider["failures"]["forgot"] = _provider_error(provider_code)
         response = _forgot(raw_client, f"{provider_code or 'x'}@example.com")
-        text = response.get_data(as_text=True)
+        text = _decoded(response)
         assert response.status_code == 202
         assert "Exception" not in text and "İşlem" not in text
 
@@ -409,7 +415,7 @@ def test_reset_unexpected_service_exception_is_normalized(
     response = _reset(raw_client)
     assert response.status_code == 503
     assert _error(response)["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
-    assert "secret internals" not in response.get_data(as_text=True)
+    assert "secret internals" not in _decoded(response)
 
 
 def test_reset_is_unavailable_when_provider_not_configured(
@@ -567,12 +573,15 @@ def test_native_reset_sends_the_same_password_changed_notice_as_web(
 
 def test_preauth_routes_ignore_a_presented_bearer(raw_client, provider,
                                                   monkeypatch, throttled):
-    monkeypatch.setattr(
-        mobile_auth, "authenticate_access",
-        lambda raw: (_ for _ in ()).throw(AssertionError("must not resolve")))
+    """No credential lookup runs for a bearer on a pre-auth route. Recorded,
+    not raised: the limiter hook swallows lookup exceptions, so a raising stub
+    could never fail this test."""
+    looked_up = []
+    monkeypatch.setattr(mobile_auth, "authenticate_access", looked_up.append)
     headers = {"Authorization": "Bearer " + "A" * 43}
     assert _forgot(raw_client, headers=headers).status_code == 202
     assert _reset(raw_client, headers=headers).status_code == 200
+    assert looked_up == []
 
 
 # ---------------------------------------------------------------------------
