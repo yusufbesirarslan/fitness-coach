@@ -217,6 +217,7 @@ def _prompt_for(style="genel", **pref_overrides):
 
 
 def _session(auth_user, **kwargs):
+    auth_user.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     row = UserSession(
         user_id=auth_user.id,
         goal=kwargs.get("goal", "kas kazanma"),

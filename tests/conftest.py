@@ -139,11 +139,18 @@ def make_user(app):
     from app.models import User
 
     def _make(username="testuser", password="Sifre123", email=None, **fields):
+        from onboarding_support import mark_onboarded
+
         user = User(username=username, email=email or f"{username}@example.com")
         fields.setdefault("cognito_sub", f"sub-{username}")
+        onboarded = fields.pop("profile_complete", None) is True
         for key, value in fields.items():
             setattr(user, key, value)
         db.session.add(user)
+        if onboarded:
+            # "Profile complete" means onboarded under the ONE canonical rule
+            # (flag AND canonical UserSession) — see tests/onboarding_support.py.
+            mark_onboarded(user)
         db.session.commit()
         return user
 
@@ -216,6 +223,9 @@ def make_users_bulk(app):
     from app.models import User
 
     def _make(n, prefix="bulk", **fields):
+        from onboarding_support import mark_onboarded
+
+        onboarded = fields.pop("profile_complete", None) is True
         users = []
         for i in range(n):
             user = User(
@@ -227,6 +237,9 @@ def make_users_bulk(app):
                 setattr(user, key, value)
             users.append(user)
             db.session.add(user)
+        if onboarded:
+            for user in users:
+                mark_onboarded(user)
         db.session.commit()
         return users
 

@@ -50,7 +50,8 @@ def pg_generation_app(monkeypatch):
         users = [
             User(username=f"pg-generation-{index}",
                  email=f"pg-generation-{index}@example.invalid",
-                 cognito_sub=f"pg-generation-sub-{index}")
+                 cognito_sub=f"pg-generation-sub-{index}",
+                 profile_complete=True)
             for index in range(2)
         ]
         db.session.add_all(users)

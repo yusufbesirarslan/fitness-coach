@@ -154,6 +154,7 @@ def _expect_saved_document(program, equipment="spor_salonu"):
 
 @pytest.fixture
 def with_session(auth_user):
+    auth_user.profile_complete = True  # onboarded = flag + canonical session (LP-03)
     db.session.add(UserSession(user_id=auth_user.id, goal="kilo verme",
                                fitness_level="beginner", current_activity="active",
                                tdee=2700))

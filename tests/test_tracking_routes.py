@@ -12,6 +12,7 @@ from app.blueprints import tracking as tracking_bp
 from app.extensions import db
 from app.models import DailyActivity, User, UserSession, WeeklyCheckIn, WeeklyLog
 from app.timeutil import day_key
+from onboarding_support import mark_onboarded
 
 
 @pytest.fixture
@@ -35,6 +36,9 @@ def test_home_redirects_to_setup_when_profile_incomplete(client, auth_user):
 
 
 def test_home_renders_for_complete_profile(client, complete_user):
+    # Onboarded = the flag AND the canonical onboarding session (LP-03).
+    mark_onboarded(complete_user)
+    db.session.commit()
     assert client.get("/").status_code == 200
 
 

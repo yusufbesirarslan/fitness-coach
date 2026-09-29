@@ -424,10 +424,17 @@ or deployed in PR4.
 
 - `username` as the current public account identifier
 - `display_name` from `full_name` with username fallback
-- `profile_complete`
+- `profile_complete` — the canonical onboarding rule
+  (`account_profile.onboarding_state`: flag AND canonical `UserSession`), the
+  same answer the first-plan prerequisite gives (LP-03)
 - `preferred_language`
-- `goal`
+- `goal` — the locale-independent token `lose_weight` / `build_muscle`, or
+  `null` when the stored value is not a canonical goal; never the stored
+  Turkish literal (LP-03)
 - `goal_type`
+
+`PUT /api/v1/account/profile` (LP-03, [MOBILE_ONBOARDING.md](../MOBILE_ONBOARDING.md))
+answers with exactly this projection.
 
 Units, a separate onboarding flag, public UUID, and provider account state are
 omitted because the backend does not currently store authoritative values for

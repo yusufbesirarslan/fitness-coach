@@ -16,7 +16,8 @@ from app.config import (
 from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import current_locale, t
 from app.observability import current_request_id
-from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
+from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, WaterLog, WorkoutLog
+from app.services import account_profile
 from app.services.ai import _heavy_complete as _heavy_chat
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.gamification import complete_quest_for_user
@@ -223,9 +224,9 @@ def training_plan_generate():
     if data is None:
         data = {}
 
-    last = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc())\
-        .first()
+    # First-plan readiness is the ONE canonical onboarding rule, not "some
+    # UserSession exists" (app/services/account_profile.py).
+    last = account_profile.onboarding_state(current_user).session
 
     if not last:
         return jsonify({

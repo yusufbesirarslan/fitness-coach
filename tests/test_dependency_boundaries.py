@@ -674,8 +674,12 @@ def test_mobile_auth_dependency_direction_is_one_way():
 
     # The exact service dependencies of each upper layer, so a new one has to be
     # added here deliberately rather than appearing by accident.
+    # LP-03: account/me projects onboarding readiness from the ONE canonical
+    # rule in app.services.account_profile, which owns its own ORM access
+    # (mobile_api still imports no models), so it joins the set deliberately.
     assert _service_modules(api) == {
-        "app.services.mobile_auth", "app.services.mobile_credentials"}
+        "app.services.account_profile", "app.services.mobile_auth",
+        "app.services.mobile_credentials"}
     assert _service_modules(middleware) == {
         "app.services.auth_contract", "app.services.mobile_auth"}
 

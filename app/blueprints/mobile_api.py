@@ -10,7 +10,7 @@ from app.mobile_auth_middleware import (
 )
 from app.observability import current_request_id
 from app.extensions import db, limiter, login_throttle_available
-from app.services import mobile_auth
+from app.services import account_profile, mobile_auth
 from app.services.mobile_credentials import (
     InvalidMobileCredential, credential_rate_limit_key,
 )
@@ -196,18 +196,31 @@ def normalize_unhandled_mobile_failure(error):
         "Authentication is temporarily unavailable.", 503, True)
 
 
+def account_projection(user):
+    """The ONE native projection of the current account.
+
+    Shared by `GET /account/me` and `PUT /account/profile`, so the answer after
+    an onboarding write is exactly what the next read returns.
+    `profile_complete` is the canonical onboarding rule
+    (`account_profile.onboarding_state`) — the same one the first-plan
+    prerequisite uses — never the raw column. `goal` is the locale-independent
+    token (`lose_weight` / `build_muscle`), or null when the stored value is
+    not a canonical goal; the stored Turkish literal never reaches the wire.
+    """
+    return {"user": {
+        "username": user.username,
+        "display_name": user.full_name or user.username,
+        "profile_complete": account_profile.onboarding_state(user).complete,
+        "preferred_language": user.language,
+        "goal": account_profile.goal_token(user.goal),
+        "goal_type": user.goal_type,
+    }}
+
+
 @bp.get("/account/me")
 @require_mobile_auth
 def me():
-    user = g.mobile_user
-    return jsonify({"user": {
-        "username": user.username,
-        "display_name": user.full_name or user.username,
-        "profile_complete": bool(user.profile_complete),
-        "preferred_language": user.language,
-        "goal": user.goal,
-        "goal_type": user.goal_type,
-    }})
+    return jsonify(account_projection(g.mobile_user))
 
 
 # Product route modules that extend this same blueprint, imported last so `bp`
@@ -215,6 +228,7 @@ def me():
 # `/api/v1` surface, one no-store policy, one throttling handler and one feature
 # gate — and keeps every mobile route inside the approved-route allow-list in
 # tests/test_mobile_auth_feature_gate.py.
+from app.blueprints import mobile_account_profile  # noqa: E402,F401
 from app.blueprints import mobile_nutrition  # noqa: E402,F401
 from app.blueprints import mobile_pump_checks  # noqa: E402,F401
 from app.blueprints import mobile_pump_check_comparisons  # noqa: E402,F401
