@@ -27,9 +27,11 @@ Mobile POST /api/v1/auth/password/{forgot,   │
             reset} ──────────────────────────┘
 ```
 
-`account_recovery` owns identifier normalization (a username is used as
-submitted; an e-mail is lower-cased and replaced by the username of the local
-account carrying it, else used as-is), the canonical password policy
+`account_recovery` owns identifier normalization (a username is sent to the
+provider as submitted; an e-mail is lower-cased and replaced by the username of
+the local account carrying it, else used as-is), the resolution of the
+identifier to ONE local account through the case-insensitive rule of §11, the
+canonical password policy
 (`validators.validate_password` — the rule registration uses), the provider
 call inside `blocking_concurrency_slot`, classification of provider failures
 into a closed `Outcome` vocabulary, the non-enumeration rule for reset
@@ -115,7 +117,7 @@ new code was added; all are LP-01 / ADR codes.
 |---|---:|---|---|
 | `AUTH_INVALID_REQUEST` | 400 | false | non-JSON / non-object body; missing, non-string, blank or over-long `identifier` / `code`; missing or non-string `new_password` |
 | `AUTH_PASSWORD_POLICY` | 400 | false | reset: local policy (8–128, letter + digit) or provider password / password-history policy |
-| `AUTH_VERIFICATION_CODE_INVALID` | 400 | false | reset: wrong code, expired code, unknown account, unconfirmed / disabled account, account without a verified e-mail |
+| `AUTH_VERIFICATION_CODE_INVALID` | 400 | false | reset: wrong code, expired code, unknown account, unconfirmed / disabled account, account without a verified e-mail, or an identifier that matches more than one local account by case (§11; refused BEFORE the provider, the password does not change) |
 | `AUTH_RATE_LIMITED` | 429 | true | our per-IP / per-identifier budget (`Retry-After` set), or the provider's own attempt limit on reset |
 | `AUTH_TEMPORARILY_UNAVAILABLE` | 503 | true | blocking capacity full (`Retry-After: 15`), reset: provider transient or unrecognized failure, provider not configured, reset throttle store down, local storage failure |
 | `AUTH_TEMPORARILY_UNAVAILABLE` | 503 | **false** | reset only: the password **did** change but open sessions could not be revoked (§4). Replaying the spent code cannot help; the client restarts recovery, whose next success revokes them |
@@ -147,10 +149,13 @@ validator sentences and limiter internals never reach a client
   4. the password-changed notice is sent, best-effort.
   Steps 1–2 are authoritative: if storage fails there the answer is the
   non-retryable 503 above, never success, and no notice is sent.
-- Revocation is keyed on the local account whose `username` equals the
-  resolved identity — the same key the credential fence uses. A reset for an
-  identity with no local row changes the provider password and revokes
-  nothing locally (there is nothing local to revoke).
+- Revocation is keyed on the ONE local account the submitted identifier
+  resolves to under §11 (username or e-mail, case-insensitive), resolved
+  BEFORE the provider call and addressed by id afterwards — the same rule the
+  credential fence reads with. `Alice`, `alice`, `ALICE` and the account's
+  e-mail in any casing all revoke the same account and never another one. A
+  reset for an identity with no local row changes the provider password and
+  revokes nothing locally (there is nothing local to revoke).
 - Login, refresh, logout, `account/me`, token TTLs and refresh-family rotation
   are untouched.
 
@@ -236,7 +241,9 @@ Never an identifier, password, code or token
 (`test_no_password_code_or_identifier_reaches_the_logs`). The relocated
 pre-existing lines are unchanged: `[AUTH] şifre değişti ama oturumlar
 kapatılamadı (user=<id>)`, the provider-revoke warnings (`user=<id>`), and the
-password-changed notice (`user=<username> to=<masked>`).
+password-changed notice (`user=<id> to=<masked>`; it used to log the
+username). An ambiguous identifier logs `outcome=identity_ambiguous` at ERROR —
+an operator must resolve the duplicate rows (§11).
 
 ---
 
@@ -269,9 +276,77 @@ admitting the password change, refusing the advisory revocation — and reads
 Flutter recovery screens, any change to login/refresh/logout, a new revocation
 policy, account deletion, any flag/rollout change.
 
-Known pre-existing gap, not changed here: revocation and the credential fence
-match the local `username` exactly. If the Cognito pool treats usernames
-case-insensitively (not recorded in IaC), a reset requested as `alice` for the
-account `Alice` changes the password but does not find the local row to
-revoke. It affects web and native equally and predates LP-02; see the handoff
-for the recommended follow-up.
+The case-sensitivity gap recorded here earlier is closed by §11. What remains
+open is recorded there under "Not closed here".
+
+---
+
+## 11. Provider identity policy (verified)
+
+Verified against the production pool (AxisAI Production) directly from AWS on
+2026-09-29 — not inferred from behaviour or defaults, and not recorded in IaC:
+
+| Setting | Value |
+|---|---|
+| `UsernameConfiguration.CaseSensitive` | `false` |
+| `UsernameAttributes` | none |
+| `AliasAttributes` | `email` |
+
+So `Alice`, `alice` and `ALICE` are ONE provider user, and that user's e-mail
+(any casing) is an alias for it. The setting cannot change after pool
+creation. **Never write auth code that assumes an identifier's casing names a
+local row exactly.**
+
+The one rule that maps a provider identifier to local rows is
+`app/services/cognito_identity.py`:
+
+- `local_users_for_identifier(identifier)` — an identifier with `@` is an
+  e-mail, anything else a username (`validate_username` forbids `@`); exactly
+  that one column is compared, `lower(column) = lower(identifier)`. No prefix,
+  pattern or cross-column match.
+- `resolve_local_user(identifier)` — the single row, None, or
+  `AmbiguousLocalIdentity`; there is no "first match".
+
+Users: `account_recovery` (reset target, provider identity for an e-mail) and
+`mobile_auth._credential_fence` (the epochs a login is fenced against). The
+two therefore cannot disagree about which account a casing names.
+
+**Ambiguity.** Local `username` and `email` uniqueness is case-SENSITIVE in
+the schema, so `Alice` and `alice` can both be stored (see below). When an
+identifier matches more than one row:
+
+- reset fails closed BEFORE the provider call — the password does not change,
+  so no session is left valid under a changed password — answered exactly like
+  a wrong code and logged `identity_ambiguous` at ERROR; an account with a
+  case twin can still be reset through its (unique) e-mail;
+- forgot still sends the identifier to the provider and answers 202 like any
+  other account;
+- the fence records the epoch of every matching row and compares the one the
+  provider's verified `sub` resolves to, so it neither picks nor misses a row.
+
+Production was NOT queried for existing duplicates (no approved read path from
+this environment). Suggested read-only check:
+`SELECT lower(username), count(*) FROM "user" GROUP BY 1 HAVING count(*) > 1;`
+and the same for `lower(email)`.
+
+**Not closed here** (pre-existing; each needs a product decision):
+
+1. **Username rename.** `/edit-profile` lets a user change `User.username`
+   (exact-case collision check only). Cognito usernames are immutable, so after
+   a rename the local username no longer names the provider user: a reset under
+   the provider username finds no local row (nothing revoked), or finds a
+   different user who took that name; and an e-mail reset sends the renamed
+   username to the provider, which does not know it. A rename can also create a
+   local case twin (`bob` → `alice` while `Alice` exists).
+2. **Case twin of a non-provider row.** Registration's local pre-check is
+   exact-case; the provider refuses a case twin of a provider user
+   (`UsernameExistsException`, pinned by
+   `test_registration_cannot_create_a_case_twin_of_a_provider_account`) but
+   not of a legacy local row that has no provider account. Login
+   reconciliation (`reconcilable_local_user`) is also exact-case and can create
+   the same twin on first sign-in.
+3. **Per-identifier reset budget** counts `alice` and `alice@example.com`
+   separately (two budgets for one account); the provider's own attempt limit
+   still applies per user.
+
+Tests: `tests/test_recovery_identity_case.py`.

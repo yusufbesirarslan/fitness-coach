@@ -9,7 +9,10 @@ calls `cognito_service.forgot_password` / `confirm_forgot_password` itself
 
 The module owns everything that is not presentation:
 
-  - identifier normalization and the e-mail → username resolution,
+  - identifier normalization, the e-mail → username resolution and the
+    local owner of the identity, all through the one case-insensitive rule in
+    `cognito_identity` (the provider pool is case-insensitive with an e-mail
+    alias; a reset for `alice` must revoke `Alice`),
   - the canonical password policy (`validators.validate_password`, the same
     rule registration uses),
   - the provider call, bounded by the shared `blocking_concurrency_slot`,
@@ -44,8 +47,8 @@ from app.extensions import db
 from app.models import User
 from app.observability import current_request_id
 from app.services import (
-    cognito_service, email_service, email_templates, mobile_auth,
-    session_store,
+    cognito_identity, cognito_service, email_service, email_templates,
+    mobile_auth, session_store,
 )
 from app.services.ai_gate import (
     BlockingConcurrencyLimit, blocking_concurrency_slot,
@@ -156,22 +159,32 @@ def _text(value):
     return value.strip() if isinstance(value, str) else ""
 
 
-def _canonical_identity(identifier):
-    """The provider username a submitted identifier names.
+def _resolve(identifier):
+    """The provider username a submitted identifier names, and its local owner.
 
-    A username is used as submitted (trimmed, never lower-cased). An e-mail is
-    lower-cased and, when a local account carries it, replaced by that
-    account's username; otherwise the e-mail itself is used, so a known and an
-    unknown account take the same path to the provider. Leaves no transaction
-    open: a provider round-trip follows.
+    Returns `(identity, owner)`. `owner` is the one local account the provider
+    identity belongs to (id, username, email), or None when there is none; it is
+    resolved by `cognito_identity.resolve_local_user` — username or e-mail,
+    compared case-insensitively, because the provider pool is — so the account
+    a reset revokes is the account the provider changed, whatever the casing.
+
+    `identity` is what the provider is asked about. A username is used as
+    submitted (trimmed; the provider folds case itself). An e-mail is replaced
+    by its owner's username when a local account carries it, otherwise it is
+    lower-cased and used as-is, so a known and an unknown account take the same
+    path to the provider.
+
+    Raises `AmbiguousLocalIdentity` when more than one local row matches. Leaves
+    no transaction open: a provider round-trip follows.
     """
+    try:
+        owner = cognito_identity.resolve_local_user(
+            identifier, User.id, User.username, User.email)
+    finally:
+        db.session.rollback()
     if "@" not in identifier:
-        return identifier
-    email = identifier.lower()
-    username = db.session.query(User.username).filter(
-        db.func.lower(User.email) == email).scalar()
-    db.session.rollback()
-    return username or email
+        return identifier, owner
+    return (owner.username if owner is not None else identifier.lower()), owner
 
 
 def _call_provider(event, operation, *args):
@@ -201,7 +214,15 @@ def request_password_reset(identifier):
     identifier = _text(identifier)
     if not identifier:
         raise RecoveryFailure(Outcome.FIELDS_REQUIRED, Phase.VALIDATION)
-    identity = _canonical_identity(identifier)
+    try:
+        identity, _ = _resolve(identifier)
+    except cognito_identity.AmbiguousLocalIdentity:
+        # Local data cannot say which account this is; the provider can still
+        # send the code to the one user it knows. The confirm step refuses to
+        # change a password it could not revoke for (`reset_password`), and the
+        # answer here stays the same as for any other account.
+        _event("request", "identity_ambiguous", "error")
+        identity = identifier.lower() if "@" in identifier else identifier
     try:
         _call_provider("request", cognito_service.forgot_password, identity)
     except cognito_service.CognitoServiceError as exc:
@@ -230,7 +251,16 @@ def reset_password(identifier, code, new_password):
         raise RecoveryFailure(
             Outcome.PASSWORD_INVALID, Phase.VALIDATION, detail=policy_error)
 
-    identity = _canonical_identity(identifier)
+    # The local owner is resolved BEFORE the provider call. If it cannot be
+    # resolved unambiguously the password must not change at all: a changed
+    # password whose sessions nobody revoked is exactly the failure this
+    # resolution exists to prevent. Answered like a wrong code — non-retryable,
+    # and no oracle for which identifiers collide locally.
+    try:
+        identity, owner = _resolve(identifier)
+    except cognito_identity.AmbiguousLocalIdentity as exc:
+        _event("reset", "identity_ambiguous", "error")
+        raise RecoveryFailure(Outcome.CODE_INVALID, Phase.PROVIDER) from exc
     try:
         _call_provider(
             "reset", cognito_service.confirm_forgot_password,
@@ -240,21 +270,20 @@ def reset_password(identifier, code, new_password):
         _event("reset", outcome)
         raise RecoveryFailure(outcome, Phase.PROVIDER) from exc
 
-    user = User.query.filter_by(username=identity).first()
-    if user is not None:
+    if owner is not None:
         try:
-            revoke_all_sessions_after_credential_change(user.id)
+            revoke_all_sessions_after_credential_change(owner.id)
         except mobile_auth.MobileAuthFailure as exc:
             # The password ALREADY changed at the provider, but open sessions
             # could not be closed. Success would be the lie "you are signed out
             # everywhere"; storage is transiently unreachable, so say that.
             current_app.logger.error(
                 "[AUTH] şifre değişti ama oturumlar kapatılamadı (user=%s)",
-                user.id)
+                owner.id)
             _event("reset", Outcome.SESSIONS_NOT_REVOKED, "error")
             raise RecoveryFailure(
                 Outcome.SESSIONS_NOT_REVOKED, Phase.REVOCATION) from exc
-    _send_password_changed_email(identity)
+        _send_password_changed_email(owner.id)
     _event("reset", "password_changed")
     return PasswordReset(identity=identity)
 
@@ -335,19 +364,19 @@ def _best_effort_provider_revoke_all(user_id, mobile_results, web_refresh_tokens
             "[AUTH] sağlayıcı iptali kapasite nedeniyle atlandı (user=%s)", user_id)
 
 
-def _send_password_changed_email(username):
+def _send_password_changed_email(user_id):
     """Password-changed notice — best-effort, NEVER raises.
 
     The reset already succeeded at the provider; an e-mail failure cannot undo
-    or fail it."""
+    or fail it. Addressed by id: the account notified is the account revoked."""
     try:
-        user = User.query.filter_by(username=username).first()
+        user = db.session.get(User, user_id)
         if user is None or not user.email:
             return
         subject, html, text = email_templates.password_changed_email(user.username)
         email_service.send_html_email(user.email, subject, html, text=text)
         current_app.logger.info("[AUTH-EMAIL] password-changed kuyruklandı: user=%s to=%s",
-                                username, email_service.mask_email(user.email))
+                                user_id, email_service.mask_email(user.email))
     except Exception:
         current_app.logger.warning("[AUTH-EMAIL] password-changed gönderilemedi (user=%s)",
-                                   username, exc_info=True)
+                                   user_id, exc_info=True)

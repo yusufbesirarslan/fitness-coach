@@ -28,19 +28,31 @@ the distributed throttle store. A successful native reset revokes every web
 and native session and bumps the credential fence, exactly like web. No flag,
 migration or rollout change; no new error code.
 
-Found by falsification and fixed in the new tests (not in LP-01's): a raw-body
-substring check cannot see Turkish provider sentences (JSON escapes them), and
-the limiter hook swallows credential-lookup exceptions, so a raising
-`authenticate_access` stub can never fail a pre-auth bearer test.
-`tests/test_mobile_registration_api.py` has both patterns — worth tightening.
+Found by falsification: a raw-body substring check cannot see Turkish
+provider sentences (JSON escapes them), and the limiter hook swallows
+credential-lookup exceptions, so a raising `authenticate_access` stub can never
+fail a pre-auth bearer test. Fixed in the LP-02 tests and, test-only, in
+`tests/test_mobile_registration_api.py` (decoded-JSON checks; the bearer test
+records lookups instead of raising). Each hardened check fails under a leak /
+lookup mutation that the old check passed.
 
-Open (pre-existing, not changed): revocation and the credential fence match
-`User.username` exactly. If the Cognito pool is case-insensitive (not in IaC),
-a reset requested as `alice` for `Alice` revokes nothing locally. Affects web
-and native equally. Recommended follow-up: confirm the pool's
-`UsernameConfiguration`, then resolve the local row case-insensitively in
-`account_recovery._canonical_identity` and `mobile_auth._credential_fence`
-together.
+Case-insensitive identity (closure). Production Cognito was verified from AWS:
+`CaseSensitive=false`, `AliasAttributes=[email]`. The local schema's
+username/e-mail uniqueness is case-SENSITIVE, and recovery + the credential
+fence matched `User.username` exactly, so a reset as `alice` for `Alice`
+changed the password and revoked nothing; a mobile login by e-mail after any
+reset was refused forever (the fence read no row and expected epoch 0).
+`cognito_identity.local_users_for_identifier` / `resolve_local_user` are now
+the ONE rule (one column, `lower()` both sides, exact), used by
+`account_recovery` (owner resolved BEFORE the provider call; ambiguity fails
+closed as a wrong code, password unchanged) and `mobile_auth._credential_fence`
+(epochs of every matching row, compared against the row the verified `sub`
+picks). Tests: `tests/test_recovery_identity_case.py`. Not closed (pre-existing,
+product decisions): `/edit-profile` username rename breaks the local↔provider
+username mapping and can create case twins; registration/login reconciliation
+can create a case twin of a legacy non-provider row; production was not
+queried for existing duplicates. Details: `docs/MOBILE_PASSWORD_RECOVERY.md`
+§11.
 
 Next: LP-07/LP-09 Flutter recovery screens consume
 `docs/MOBILE_PASSWORD_RECOVERY.md` §2–§3 and §7.

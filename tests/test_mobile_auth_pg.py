@@ -19,7 +19,8 @@ from app.models import (
     MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
 )
 from app.services import (
-    ai_gate, cognito_jwt, cognito_service, mobile_auth, session_store,
+    account_recovery, ai_gate, cognito_jwt, cognito_service, mobile_auth,
+    session_store,
 )
 
 
@@ -424,6 +425,73 @@ def test_login_authenticated_before_a_credential_change_cannot_land_after_it(
         assert MobileAuthSession.query.count() == 0
         assert MobileAccessCredential.query.count() == 0
         assert MobileRefreshCredential.query.count() == 0
+        assert db.session.query(User.credential_epoch).scalar() == 1
+
+
+@pytest.mark.parametrize(("login_as", "reset_as"), [
+    ("PG-Mobile-Race", "pg-mobile-race"),
+    ("pg-mobile-race", "PG-MOBILE-RACE"),
+    ("PG-Race@Example.Invalid", "pg-mobile-race"),
+    ("PG-MOBILE-RACE", "pg-race@EXAMPLE.invalid"),
+])
+def test_a_reset_under_another_casing_fences_the_in_flight_login(
+        pg_app, monkeypatch, login_as, reset_as):
+    """The same race, driven through the real recovery service on PostgreSQL.
+
+    The provider pool is case-insensitive with an e-mail alias, so the login and
+    the reset may spell one account differently. Both resolve it through the
+    same `lower()` rule, evaluated here by PostgreSQL itself.
+    """
+    app, _counter = pg_app
+    at_provider = threading.Event()
+    release = threading.Event()
+    outcome = {}
+    confirmed = []
+
+    def authenticate(username, password):
+        at_provider.set()
+        assert release.wait(timeout=15)
+        return {
+            "tokens": {
+                "access_token": "pg-provider-old", "id_token": "pg-provider-id",
+                "refresh_token": "pg-provider-refresh", "expires_in": 901,
+            },
+            "claims": {"sub": "pg-mobile-race-sub"},
+        }
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+    monkeypatch.setattr(cognito_service, "confirm_forgot_password",
+                        lambda *args: confirmed.append(args[0]))
+
+    def sign_in():
+        with app.app_context():
+            try:
+                outcome["login"] = ("issued", mobile_auth.login(
+                    login_as, "old-password", now=NOW))
+            except mobile_auth.MobileAuthFailure as exc:
+                outcome["login"] = ("failed", exc.code, exc.reason)
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcome["login"] = (
+                    "unexpected", type(exc).__name__, str(exc))
+            finally:
+                db.session.remove()
+
+    thread = threading.Thread(target=sign_in, daemon=True)
+    thread.start()
+    assert at_provider.wait(timeout=15), outcome
+    with app.app_context():
+        account_recovery.reset_password(reset_as, "123456", "Newpass123")
+        db.session.remove()
+    release.set()
+    thread.join(timeout=30)
+
+    assert not thread.is_alive(), outcome
+    assert len(confirmed) == 1
+    assert outcome["login"] == (
+        "failed", "AUTH_INVALID_CREDENTIALS",
+        "credential_changed_during_login"), outcome
+    with app.app_context():
+        assert MobileAuthSession.query.count() == 0
         assert db.session.query(User.credential_epoch).scalar() == 1
 
 
