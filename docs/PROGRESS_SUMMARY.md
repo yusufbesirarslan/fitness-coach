@@ -32,10 +32,13 @@ Dependency direction is one-way and enforced by a test
 (`tests/test_progress_summary.py::test_dependency_direction_is_one_way`):
 
 ```
-static/progress.js
-      ↓
-GET /api/progress/summary          (app/blueprints/tracking.py)
-      ↓
+static/progress.js                 native client (LP-06)
+      ↓                                   ↓
+GET /api/progress/summary          GET /api/v1/progress/summary
+(app/blueprints/tracking.py)       (app/blueprints/mobile_progress.py, LP-04)
+      ↓                                   ↓
+      └───────────────┬───────────────────┘
+                      ↓
 progress_summary                   (+ narrow User / WeeklyCheckIn reads)
       ↓
 training_progression
@@ -480,6 +483,12 @@ their other consumers:
 
 No schema change, no migration, no new table, no persisted summary, no cached
 trajectory. The summary is a read model, recomputed per request.
+
+**Native transport (LP-04).** `GET /api/v1/progress/summary` publishes this same
+builder and this same `progress_summary_payload` to Bearer-authenticated native
+clients — byte-identical body, `Cache-Control: no-store`, and a typed 503
+`PROGRESS_UNAVAILABLE` instead of the web's generic 500. It adds no rule of its
+own. Contract: [MOBILE_PROGRESS_SUMMARY.md](MOBILE_PROGRESS_SUMMARY.md).
 
 ---
 

@@ -64,6 +64,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/account/me"),
         ("put", "/api/v1/account/profile"),
         ("get", "/api/v1/nutrition/diary/today"),
+        ("get", "/api/v1/progress/summary"),
         ("get", "/api/v1/today"),
         ("get", "/api/v1/training/preferences"),
         ("get", "/api/v1/training/plans/current"),
@@ -150,6 +151,10 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/pump-checks/<pump_check_token>", ("GET",)),
             ("/api/v1/pump-check-comparisons", ("POST",)),
             ("/api/v1/pump-check-comparisons/<comparison_id>", ("GET",)),
+            # LP-04 canonical Progress summary read (spec J1). Bearer-only, on
+            # this blueprint so it shares its gate, envelope, no-store and 429
+            # handler; the same read model the web Progress page serves.
+            ("/api/v1/progress/summary", ("GET",)),
             # Sprint 12 PR3. Canonical Today read; on this blueprint so it cannot
             # become an ungated parallel mobile surface.
             ("/api/v1/today", ("GET",)),

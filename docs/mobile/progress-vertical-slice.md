@@ -265,7 +265,7 @@ No stale Pump Check mobile code was found beyond the D2 entry gating. The old
 | `POST /api/v1/training/workout-sessions/{ref}/complete` | bearer, flag-gated | multipart plus `If-Match`, `Idempotency-Key` | `{session, completion}` | – | typed session errors | 10/h, AI gate, day claim | proof → S3 | `no-store` | EXISTING NATIVE — Training-owned; Progress never calls it |
 | `GET /api/v1/today` | bearer | – | includes `completed` | – | – | safe | – | `no-store` | EXISTING NATIVE — REUSE (affected by D1) |
 | `GET /api/progress/summary` | web cookie session | – | `contract_version:1` summary | – | 500 generic | – | – | web | WEB CONTRACT — DO NOT CONSUME. **SERVER INTERNAL — REUSE BELOW HTTP** (`build_progress_summary` + `progress_summary_payload`) |
-| `GET /api/v1/progress/summary` | – | – | – | – | – | – | – | – | **MISSING NATIVE CONTRACT** (J1) |
+| `GET /api/v1/progress/summary` | bearer | – | `contract_version:1` summary (same builder + projection as web) | – | 401 `AUTH_*`; 503 `PROGRESS_UNAVAILABLE` (retryable) | none / safe | – | `no-store` | **NATIVE CONTRACT — J1 shipped (LP-04)**, `docs/MOBILE_PROGRESS_SUMMARY.md` |
 | `/api/progress/{axis-insights,physique,history}` | web cookie | – | versioned read models | – | – | – | – | – | WEB — DO NOT CONSUME (future native wrappers possible) |
 | `/api/progress/{workout,heatmap,achievements}`, `/api/progress` | web cookie | – | ad hoc | – | – | – | – | – | LEGACY — DO NOT CONSUME |
 | `/pump-check-gallery/data`, `DELETE /pump-check-gallery/<int:id>` | web cookie | – | integer ids | offset | – | – | presigned | – | WEB — DO NOT CONSUME |
@@ -327,6 +327,12 @@ No stale Pump Check mobile code was found beyond the D2 entry gating. The old
   - Architecture test: the blueprint imports only the service and payload.
   - No new flag: a read-only, id-free projection of an already-shipped read
     model. It stays unreachable in practice while mobile auth is OFF.
+  - **Status (LP-04): implemented as specified, not yet deployed.**
+    `app/blueprints/mobile_progress.py`; contract, isolation and architecture
+    tests in `tests/test_mobile_progress_summary_{api,architecture}.py`;
+    contract document `docs/MOBILE_PROGRESS_SUMMARY.md`. Any computation failure
+    (not only `UnknownProgressionSignal`) is the typed 503 — never the
+    blueprint's `AUTH_TEMPORARILY_UNAVAILABLE` catch-all.
 
 No other backend prerequisite exists for V1.
 
