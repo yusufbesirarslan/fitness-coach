@@ -59,6 +59,8 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/auth/register"),
         ("post", "/api/v1/auth/verify"),
         ("post", "/api/v1/auth/verify/resend"),
+        ("post", "/api/v1/auth/password/forgot"),
+        ("post", "/api/v1/auth/password/reset"),
         ("get", "/api/v1/account/me"),
         ("put", "/api/v1/account/profile"),
         ("get", "/api/v1/nutrition/diary/today"),
@@ -126,6 +128,10 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         ("/api/v1/auth/register", ("POST",)),
         ("/api/v1/auth/verify", ("POST",)),
         ("/api/v1/auth/verify/resend", ("POST",)),
+        # LP-02 native password recovery. Pre-auth, same blueprint, gate,
+        # envelope, no-store and 429 handler as registration.
+        ("/api/v1/auth/password/forgot", ("POST",)),
+        ("/api/v1/auth/password/reset", ("POST",)),
         ("/api/v1/account/me", ("GET",)),
         # LP-03 native onboarding profile. Bearer-only, on this blueprint so it
         # shares its gate, envelope, no-store and 429 handler.

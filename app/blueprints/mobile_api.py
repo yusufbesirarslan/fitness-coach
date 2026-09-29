@@ -230,6 +230,7 @@ def me():
 # tests/test_mobile_auth_feature_gate.py.
 from app.blueprints import mobile_account_profile  # noqa: E402,F401
 from app.blueprints import mobile_nutrition  # noqa: E402,F401
+from app.blueprints import mobile_password_recovery  # noqa: E402,F401
 from app.blueprints import mobile_pump_checks  # noqa: E402,F401
 from app.blueprints import mobile_pump_check_comparisons  # noqa: E402,F401
 from app.blueprints import mobile_registration  # noqa: E402,F401
