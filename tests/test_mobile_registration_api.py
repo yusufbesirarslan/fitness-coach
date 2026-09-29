@@ -119,10 +119,16 @@ def _comparable(response):
     return response.status_code, json.dumps(body, sort_keys=True)
 
 
+def _decoded(response):
+    """The body as a reader sees it. `get_data()` alone would miss non-ASCII
+    provider sentences, which JSON escapes (`İ` → `\\u0130`)."""
+    return json.dumps(response.get_json(), ensure_ascii=False)
+
+
 def _assert_no_session_material(response):
     assert "Set-Cookie" not in response.headers
     assert response.headers["Cache-Control"] == "no-store"
-    text = response.get_data(as_text=True)
+    text = _decoded(response)
     for forbidden in ("session", "credential", "token", "sub-"):
         assert forbidden not in text
 
@@ -239,7 +245,7 @@ def test_register_provider_failures_are_typed_and_sanitized(
     error = _error(response)
     assert error["code"] == code
     assert error["retryable"] is retryable
-    text = response.get_data(as_text=True)
+    text = _decoded(response)
     assert provider_code not in text if provider_code else True
     for sentence in set(_ERROR_MESSAGES.values()):
         assert sentence not in text
@@ -268,7 +274,7 @@ def test_register_unexpected_provider_exception_is_normalized(
     response = _register(raw_client)
     assert response.status_code == 503
     assert _error(response)["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
-    assert "raw internal detail" not in response.get_data(as_text=True)
+    assert "raw internal detail" not in _decoded(response)
 
 
 def test_register_is_unavailable_when_provider_not_configured(
@@ -346,7 +352,7 @@ def test_verify_provider_failures_are_typed_and_sanitized(
     response = _verify(raw_client)
     assert response.status_code == status
     assert _error(response)["code"] == code
-    text = response.get_data(as_text=True)
+    text = _decoded(response)
     for sentence in set(_ERROR_MESSAGES.values()):
         assert sentence not in text
 
@@ -537,14 +543,16 @@ def test_verified_account_signs_in_only_through_the_existing_login(
 def test_preauth_routes_ignore_a_presented_bearer(raw_client, provider,
                                                   monkeypatch, throttled):
     """A bearer header on a pre-auth route is not resolved into a principal
-    (the default limiter stays IP-keyed and no credential lookup runs)."""
-    monkeypatch.setattr(
-        mobile_auth, "authenticate_access",
-        lambda raw: (_ for _ in ()).throw(AssertionError("must not resolve")))
+    (the default limiter stays IP-keyed and no credential lookup runs).
+    Recorded, not raised: the limiter hook swallows lookup exceptions, so a
+    raising stub could never fail this test."""
+    looked_up = []
+    monkeypatch.setattr(mobile_auth, "authenticate_access", looked_up.append)
     headers = {"Authorization": "Bearer " + "A" * 43}
     assert _register(raw_client, headers=headers).status_code == 201
     assert _verify(raw_client, headers=headers).status_code == 200
     assert _resend(raw_client, headers=headers).status_code == 202
+    assert looked_up == []
 
 
 # ---------------------------------------------------------------------------
