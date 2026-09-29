@@ -96,7 +96,7 @@ def test_nutrition_heading_does_not_glue_or_split_the_word(
     html = client.get("/nutrition").get_data(as_text=True)
     assert "NUT<" not in html
     assert ">RITION<" not in html
-    hdr = re.search(r'<div class="page-hdr">\s*<h1>(.*?)</h1>', html, re.S)
+    hdr = re.search(r'<div class="page-hdr[^"]*">\s*<h1>(.*?)</h1>', html, re.S)
     assert hdr, "nutrition page-hdr h1 is missing"
     heading = hdr.group(1)
     assert "<br" not in heading

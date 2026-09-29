@@ -112,7 +112,7 @@ def test_no_plan_mobile_keeps_today_diary_history_water_and_creation_working(
     page.goto("http://localhost/nutrition")
 
     # Log through the canonical web write flow; PR4 must not replace it.
-    page.locator("#log-fab").click()
+    page.locator("#log-food-btn").click()
     page.locator('[data-action="logManual"]').click()
     page.locator("#meal-input").fill("PR4 canonical meal")
     with page.expect_response(

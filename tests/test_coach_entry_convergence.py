@@ -38,7 +38,8 @@ CORE_ROUTES = ("/", "/training", "/nutrition", "/progress-page")
 LAUNCHER_ONLY_TEMPLATES = ("today.html", "plan.html", "progress.html")
 
 # Only these still carry a floating control of their own.
-FAB_RAIL_TEMPLATES = {"nutrition.html", "coach.html", "coach_v2.html"}
+# NUTR-PR3 retired Nutrition's floating log button, so it no longer opts in.
+FAB_RAIL_TEMPLATES = {"coach.html", "coach_v2.html"}
 
 
 def _read(path):
@@ -307,14 +308,16 @@ def test_training_keeps_its_dominant_cta_and_places_the_entry_below_the_week(
     assert "data-plan-v2" in html
 
 
-def test_the_nutrition_entry_sits_at_the_foot_of_the_target_card(
+def test_the_nutrition_entry_is_a_secondary_handoff_after_the_daily_job(
         client, make_user, login):
-    """"Is this target right for me?" is asked at the target, and the page's own
-    dominant control — the logging FAB — is untouched."""
+    """NUTR-PR3: Today leads with the day's state and its one primary action
+    ("Log food"); the Coach entry is Tier-3 review/handoff, after the logged
+    meals — still exactly one plain /coach link."""
     html = _html(_seed(client, make_user, login, "cecnut"), "/nutrition")
-    assert 'id="log-fab"' in html
+    assert 'id="log-fab"' not in html
     entry = html.index('class="coach-entry"')
-    assert html.index('id="ring-target"') < entry < html.index('id="meal-timeline"')
+    assert html.index('id="log-food-btn"') < html.index('id="meal-timeline"') < entry
+    assert html.count('class="coach-entry"') == 1
 
 
 def test_the_progress_entry_closes_the_axis_insight(

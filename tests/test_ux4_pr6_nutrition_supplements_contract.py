@@ -404,7 +404,7 @@ def test_each_nutrition_workflow_panel_opens_with_a_real_section_heading(
     _login(client, make_user, login, f"pr6-panels-{language}", language)
     html = _body(client.get("/nutrition").get_data(as_text=True))
     expected = {
-        "panel-today": "nutrition.todays_meals",
+        "panel-today": "nutrition.todays_intake",   # NUTR-PR3: the daily state leads
         "panel-diary": "nutrition.diary_builder",
         "panel-history": "nutrition.weekly_cal",
         "panel-water": "nutrition.water_tracking",

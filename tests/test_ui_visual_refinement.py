@@ -214,23 +214,16 @@ def test_stat_labels_wrap_between_words():
 # ── Nutrition ─────────────────────────────────────────────────────────────
 
 
-def test_log_fab_does_not_share_the_coach_fab_rail():
-    """Two identical primary FABs stacked, and the upper one covered each meal
-    card's score badge and quick-edit button at 390px."""
-    body = _rule(_css("nutrition.css"), ".log-fab")
-    assert "left:" in body, "the log FAB moved off the coach FAB's right rail"
-    assert "right:" not in body
-
-
-def test_log_fab_yields_while_the_meal_list_scrolls():
-    css = _css("nutrition.css")
-    assert ".log-fab.is-tucked" in css
-    tucked = _rule(css, ".log-fab.is-tucked")
-    assert "transform:" in tucked and "opacity:" in tucked, (
-        "tucking must be transform/opacity only — never layout"
-    )
-    assert "is-tucked" in _read(STATIC / "nutrition.js")
-    assert "prefers-reduced-motion" in css
+def test_nutrition_carries_no_floating_log_control():
+    """The log FAB (left rail, tucking while the list scrolled) is retired by
+    NUTR-PR3: it opened the same chooser as the in-flow "Log food" action and
+    competed with it as a second primary. Nothing floats over the meal list
+    any more, so neither the control nor its scroll machinery may return."""
+    assert ".log-fab" not in _css("nutrition.css").replace("(.log-fab)", "")
+    script = _read(STATIC / "nutrition.js")
+    assert "log-fab" not in script and "is-tucked" not in script
+    template = _read(TEMPLATES / "nutrition.html")
+    assert 'id="log-fab"' not in template and "has-fab-rail" not in template
 
 
 # ── Progress ──────────────────────────────────────────────────────────────
@@ -295,14 +288,15 @@ def test_page_shell_reserves_the_floating_fab_rail():
     assert "var(--fab-rail-h)" in body, (
         "a page that carries a FAB must still reserve the rail"
     )
-    for name in ("nutrition.html", "coach.html", "coach_v2.html"):
+    for name in ("coach.html", "coach_v2.html"):
         assert "has-fab-rail" in _read(TEMPLATES / name), name
     tokens = _css("tokens.css")
     assert re.search(r"--fab-rail-h:\s*calc\(", tokens), (
         "--fab-rail-h must be derived from the inset and button size"
     )
-    # One number, three consumers: drift here silently un-fixes the occlusion.
-    for name in ("coach_widget.css", "nutrition.css"):
+    # One number for every FAB consumer (NUTR-PR3 retired Nutrition's log FAB,
+    # leaving the coach launcher): drift here silently un-fixes the occlusion.
+    for name in ("coach_widget.css",):
         assert "--fab-rail-inset" in _css(name), (
             f"{name} must position its FAB from the shared rail inset"
         )
@@ -318,9 +312,7 @@ def test_fab_size_is_one_canonical_token():
     assert "var(--fab-btn)" in size.group(1), (
         "--fab-size must alias --fab-btn, not carry a second literal"
     )
-    body = _rule(_css("nutrition.css"), ".log-fab")
-    assert "var(--fab-btn)" in body
-    assert "--fab-size" not in body
+    # NUTR-PR3 retired Nutrition's log FAB; the coach launcher is the one FAB.
     coach = _rule(_css("coach_widget.css"), "#cw-fab")
     assert "var(--fab-btn)" in coach
     assert not re.search(r"width:\s*\d+px", coach)

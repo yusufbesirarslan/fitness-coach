@@ -45,49 +45,98 @@
 .nutrition-child-link:hover { text-decoration: underline; }
 .nutrition-child-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 
+/* NUTR-PR3: Nutrition is a repeated daily tool, so its header is the H1 alone
+   (no explanatory sub-line) on a tighter rhythm than the shell default. */
+.page-hdr.nut-page-hdr { margin-bottom: var(--space-5); }
+
+/* NUTR-PR3 — the daily summary. One card, one number that matters (what was
+   eaten), the target beside it, what remains, the macros, then the page's one
+   primary action. The ring gauge that used to lead this card is retired: it
+   repeated the intake/target pair as a second picture of the same two numbers
+   and cost a 150px square of the first viewport on phones. */
 .nut-hero {
-  display: grid; grid-template-columns: auto 1fr;
-  gap: var(--space-5); align-items: center;
+  display: flex; flex-direction: column;
+  padding: var(--space-4); margin-bottom: var(--space-5);
 }
-@media (max-width: 560px) {
-  .nut-hero { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+/* Sibling margins, not flex gap: the status line below is a live region that
+   must stay in the accessibility tree while empty, and an empty child must not
+   leave a gap-sized hole in the card. */
+.nut-hero > * + * { margin-top: var(--space-3); }
+.nut-hero > .sec-label { margin-bottom: 0; }
+.nut-intake-line {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: var(--space-1) var(--space-3); min-width: 0;
 }
-.nut-hero-target {
-  font-size: var(--text-xs); color: var(--color-text-3);
-  font-weight: var(--weight-bold); letter-spacing: 0.1em;
-  text-transform: uppercase; margin-bottom: var(--space-4);
+.nut-intake { display: inline-flex; align-items: baseline; gap: var(--space-1); white-space: nowrap; }
+.nut-intake-val {
+  font-family: var(--font-display); font-size: var(--text-metric-md);
+  color: var(--color-text-1); letter-spacing: 1px; line-height: var(--leading-none);
+  font-variant-numeric: tabular-nums;
 }
-.nut-hero-target #ring-target { color: var(--color-text-2); }
-/* WEB-UX4-PR6 / F-16 — target presentation state, set by nutrition.js from
-   the canonical `/meal-log/today` read. `pending` = not read yet (or the read
-   failed): the neutral "Target: — kcal" line, but no bare "—" percentage under
-   the ring. `absent` = the authority published NO target: one intentional
-   sentence replaces both dashes. No state ever renders an invented number. */
-.nut-target-absent { display: none; }
+.nut-intake-unit { font-size: var(--text-sm); color: var(--color-text-3); font-weight: var(--weight-semibold); }
+.nut-hero-target { font-size: var(--text-sm); color: var(--color-text-3); min-width: 0; }
+.nut-hero-target #nut-target { color: var(--color-text-2); font-weight: var(--weight-semibold); }
+/* WEB-UX4-PR6 / F-16 + NUTR-PR3 — target presentation state, set by
+   nutrition.js from the canonical `/meal-log/today` read. `pending` = not read
+   yet; `known` = the authority published a target; `absent` = it published
+   NONE (one sentence, never a number); `unavailable` = the read failed or its
+   target was unusable — unknown, which is not the same as "not set". */
+.nut-target-absent, .nut-target-unavailable { display: none; }
 .nut-hero[data-target-state="absent"] .nut-target-known { display: none; }
-.nut-hero[data-target-state="absent"] .nut-target-absent {
-  display: inline; color: var(--color-text-2);
-  text-transform: none; letter-spacing: normal; font-weight: var(--weight-medium);
-  font-size: var(--text-sm);
+.nut-hero[data-target-state="unavailable"] .nut-target-known { display: none; }
+.nut-hero[data-target-state="absent"] .nut-target-absent,
+.nut-hero[data-target-state="unavailable"] .nut-target-unavailable {
+  display: inline; color: var(--color-text-2); font-weight: var(--weight-medium);
 }
-.nut-hero:not([data-target-state="known"]) .ring-pct { visibility: hidden; }
-.nut-macros {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-2);
-  width: 100%;
+/* Progress toward the kcal target is drawn only when both sides are known. */
+.nut-kcal-track { display: none; }
+.nut-hero[data-target-state="known"][data-intake-state="confirmed"] .nut-kcal-track,
+.nut-hero[data-target-state="known"][data-intake-state="stale"] .nut-kcal-track { display: block; }
+.nut-kcal-fill { background: var(--color-primary); }
+.nut-kcal-fill.is-over { background: var(--color-text-3); }
+.nut-remaining {
+  margin: 0; font-size: var(--text-sm); color: var(--color-text-2);
+  font-variant-numeric: tabular-nums;
 }
-@media (max-width: 420px) { .nut-macros { grid-template-columns: repeat(2, 1fr); } }
-/* Hero macro bars. One full-width column pushed each value ~1000px away from
-   its own label on a desktop viewport — the label and the number it belongs to
-   have to be readable in one glance. Three across from tablet up; still stacked
-   on phones, where a full-width bar is the readable arrangement. */
-.nut-macros-hero { grid-template-columns: 1fr; gap: 14px; }
+.nut-remaining[hidden] { display: none; }
+.nut-intake-status {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
+  font-size: var(--text-sm); color: var(--color-text-2);
+}
+.nut-hero > .nut-intake-status.is-empty { margin-top: 0; }
+.nut-retry { min-height: 44px; }
+.nut-retry[hidden] { display: none; }
+.nut-log-food {
+  display: flex; align-items: center; justify-content: center; gap: var(--space-2);
+  width: 100%; min-height: 48px; margin-top: var(--space-1);
+}
+.nut-log-food svg {
+  width: 18px; height: 18px; stroke: currentColor; fill: none;
+  stroke-width: 2.4; stroke-linecap: round; flex-shrink: 0;
+}
 @media (min-width: 768px) {
-  .nut-macros-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); }
+  .nut-log-food { width: auto; align-self: flex-start; padding-left: var(--space-8); padding-right: var(--space-8); }
 }
+.nut-macros { display: grid; width: 100%; }
+/* NUTR-PR3 macro row. Three compact columns at every width (label over value
+   over bar), protein first and a step louder because it is the macro people
+   act on during the day. A bar is drawn only against a KNOWN target — with no
+   target the value stands alone, never as progress toward zero. */
+.nut-macros-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
 .nut-macro { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.nut-macro-hdr { display: flex; justify-content: space-between; align-items: baseline; }
+.nut-macro-hdr { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .nut-macro-name { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--color-text-3); }
-.nut-macro-val  { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--color-text-1); }
+.nut-macro-val  {
+  display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 3px;
+  font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--color-text-1);
+  font-variant-numeric: tabular-nums;
+}
+.nut-macro-target, .nut-macro-unit { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--color-text-3); }
+.nut-macro-target[hidden] { display: none; }
+.nut-macro--protein .nut-macro-name { color: var(--color-text-2); }
+.nut-macro--protein .nut-macro-val { font-size: var(--text-md); }
+.nut-macro .pbar-track[hidden] { display: none; }
+.nut-hero:not([data-intake-state="confirmed"]):not([data-intake-state="stale"]) .nut-macro-unit { display: none; }
 
 /* ── 2 · MEAL TIMELINE ────────────────────────────────────────────── */
 .meal-timeline { display: flex; flex-direction: column; gap: var(--space-4); }
@@ -214,51 +263,25 @@
 /* Day-level empty / skeleton */
 .timeline-skeleton { display: flex; flex-direction: column; gap: var(--space-4); }
 
-/* ── 3 · LOG FAB + BOTTOM SHEET ───────────────────────────────────── */
-.log-fab {
-  /* Left rail. It was moved here because it stacked above the global coach FAB
-     (#cw-fab), which UX-1 PR3 retired; the reasoning below is what put it on the
-     left and what still keeps it clear of `.mc-side`, so the position stands.
-     Two 56px primary-blue circles in one right-hand column read as one
-     ambiguous control pair, and — confirmed in a rendered 390px viewport —
-     the upper one sat exactly on top of `.mc-side`, covering each meal card's
-     quick-edit button with an opaque, higher z-index button.
-     The left rail is where components.css already documents the app's
-     quick-add FAB, and the only thing under it in the meal list is the card's
-     photo thumbnail, never a control. Same bottom offset as the coach FAB so
-     the two read as one rail across the foot of the screen.
-     z-fab (200) < the coach window (9998), so opening the chat still covers
-     this button cleanly. */
-  position: fixed; left: 20px;
-  bottom: calc(var(--action-bar-h, 68px) + var(--fab-rail-inset, 15px)); z-index: var(--z-fab);
-  width: var(--fab-btn); height: var(--fab-btn);
-  border-radius: var(--radius-full); border: none; cursor: pointer;
-  background: var(--color-primary); color: var(--color-on-primary);
-  box-shadow: var(--elevation-3);
-  display: flex; align-items: center; justify-content: center;
-  transition: transform var(--duration-slow) var(--ease-out-quint),
-              opacity var(--duration-base) var(--ease-standard),
-              box-shadow var(--duration-base) var(--ease-standard);
+/* NUTR-PR3 ledger. The heading names what these rows ARE — logged, consumed
+   records — and carries the day's count once a read proves it. */
+.nut-section-head { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.nut-section-head .sec-label { flex: 1 1 auto; }
+.nut-count {
+  flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-3);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
-.log-fab svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; }
-.log-fab:hover  { box-shadow: var(--shadow-primary, var(--elevation-3)); transform: translateY(-1px); }
-.log-fab:active { transform: scale(0.94); }
-.log-fab:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
-/* Tucked state (static/nutrition.js): the FAB slides off the left edge while
-   the user scrolls down the meal list, so nothing floats over the meals being
-   read. Transform + opacity only — no layout, no reflow of the list. */
-.log-fab.is-tucked {
-  transform: translateX(calc(-100% - var(--space-5))); opacity: 0; pointer-events: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  /* The control still gets out of the way — only the travel is removed. */
-  .log-fab { transition: opacity var(--duration-fast) linear; }
-  .log-fab.is-tucked { transform: none; }
-}
-/* ≥1024px: the bottom action bar is gone and the coach FAB moves to
-   bottom 36px / right 36px — mirror it on the left so the rail stays level. */
-@media (min-width: 1024px) { .log-fab { bottom: var(--fab-rail-inset, 36px); left: 36px; } }
+.nut-count[hidden] { display: none; }
+.nut-ledger-note { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-3); }
+/* An empty meal slot is one line: its name and the contextual add action,
+   not a header plus a second dashed block. */
+.meal-slot.is-empty .slot-head { margin-bottom: 0; }
+.slot-head .slot-empty { margin-left: auto; flex-shrink: 0; }
 
+/* ── 3 · LOG FOOD CHOOSER SHEET ───────────────────────────────────── */
+/* NUTR-PR3: the floating log button (.log-fab) is retired — it opened the same
+   chooser as the in-flow "Log food" action and competed with it as a second
+   primary. The chooser sheet below is unchanged. */
 .log-sheet-grid { display: flex; flex-direction: column; gap: var(--space-2); }
 .log-sheet-opt {
   display: flex; align-items: center; gap: var(--space-3);
@@ -472,6 +495,33 @@
   text-align: center; cursor: pointer; transition: border-color var(--duration-base) var(--ease-standard), color var(--duration-base) var(--ease-standard); }
 .qab-no-plan:hover { border-color: var(--color-primary); color: var(--color-primary); }
 
+/* NUTR-PR3 — compact hydration (Tier 2) and planned shortcuts (Tier 3). Both
+   reuse `.qab`; hydration is quieted to a surface row so it never reads as a
+   second primary next to "Log food". */
+.nut-hydration { margin: var(--space-5) 0; }
+.nut-hydration .qab { background: var(--color-surface-2); border-color: var(--color-border-1); }
+.nut-planned { margin-top: var(--space-6); }
+.nut-planned-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.nut-planned .qab { background: transparent; border: var(--border-w-1) dashed var(--color-border-2); }
+.nut-planned .qab.qab-done { border-style: solid; }
+.qab-badge {
+  display: inline-block; margin-bottom: 2px; padding: 1px 8px;
+  border: var(--border-w-1) solid var(--color-border-2); border-radius: var(--radius-full);
+  font-size: var(--text-2xs, var(--text-xs)); color: var(--color-text-3);
+  letter-spacing: 0.04em;
+}
+.qab-action {
+  flex-shrink: 0; font-size: var(--text-sm); font-weight: var(--weight-semibold);
+  color: var(--color-primary); white-space: nowrap;
+}
+.qab-done .qab-action { color: var(--color-text-2); }
+.nut-planned-note { margin: 0; font-size: var(--text-sm); color: var(--color-text-3); }
+.nut-planned-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.nutrition-secondary { margin-top: var(--space-6); }
+.nutrition-secondary .nutrition-tool { margin: 0; }
+.nutrition-secondary .nutrition-tool:last-child { border-bottom: var(--border-w-1) solid var(--color-border-2); }
+.nut-review { margin-top: var(--space-5); }
+
 /* ── 11 · ACTIVE PLAN DETAIL ──────────────────────────────────────── */
 .apd-header { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); margin-bottom: var(--space-5); }
 .apd-title { font-family: var(--font-display); font-size: var(--text-2xl); letter-spacing: 3px; color: var(--color-primary); margin-bottom: 4px; }
@@ -559,7 +609,6 @@
 .modal-box .modal-title { margin-bottom: var(--space-5); }
 
 /* ── 13c · FOCUS VISIBLE (keyboard) ───────────────────────────────── */
-.log-fab:focus-visible,
 .log-sheet-opt:focus-visible,
 .meal-card .mc-edit:focus-visible,
 .meal-card .mc-del:focus-visible,
@@ -573,7 +622,7 @@
 /* ── 14 · REDUCED MOTION ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .meal-card, .wg.just-filled, .qab-done .qab-check, .water-num { animation: none !important; transition: none !important; }
-  .log-fab, .log-sheet-opt, .mc-edit, .mc-del, .slot-empty { transition: none !important; }
+  .log-sheet-opt, .mc-edit, .mc-del, .slot-empty { transition: none !important; }
 }
 
 /* ── WEB-UX4-PR6 · F-34 — typography that used to be inline `style` ─────────
@@ -588,12 +637,6 @@
   font-size: var(--text-xs); color: var(--color-text-3);
   font-weight: var(--weight-semibold); letter-spacing: var(--tracking-label); text-transform: uppercase;
 }
-.ring-eaten {
-  font-family: var(--font-display); font-size: var(--text-metric-md);
-  color: var(--color-primary); letter-spacing: 1px; line-height: var(--leading-none);
-}
-.ring-unit { font-size: var(--text-xs); color: var(--color-text-3); font-weight: var(--weight-semibold); margin-top: 2px; }
-.ring-pct { font-size: var(--text-2xs); color: var(--color-text-3); font-weight: var(--weight-medium); }
 .review-text { font-size: var(--text-base); color: var(--color-text-2); line-height: var(--leading-relaxed); }
 .chart-loading { flex: 1; align-self: center; text-align: center; font-size: var(--text-md); color: var(--color-text-3); }
 .selected-foods-label { margin-bottom: var(--space-2); }

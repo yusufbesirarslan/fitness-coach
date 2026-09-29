@@ -427,10 +427,10 @@ def test_nutrition_target_present_renders_the_canonical_value_unchanged(
         page.goto("http://localhost/nutrition")
     hero = page.locator(".nut-hero")
     expect(hero).to_have_attribute("data-target-state", "known")
-    expect(page.locator("#ring-target")).to_have_text("2100")
-    expect(page.locator("#ring-pct")).to_have_text("59%")   # Math.round(1235 / 2100 * 100)
-    expect(page.locator("#ring-pct")).to_be_visible()
-    expect(page.locator("#ring-eaten")).to_have_text("1235")
+    expect(page.locator("#nut-target")).to_have_text("2100")
+    expect(page.locator("#nut-intake")).to_have_text("1235")
+    # NUTR-PR3: no completion percentage; what remains is the factual projection.
+    expect(page.locator("#nut-remaining")).to_have_text("865 kcal left")
     expect(page.locator(".nut-target-known")).to_be_visible()
     expect(page.locator(".nut-target-absent")).to_be_hidden()
     expect(page.locator("#macro-protein")).to_have_text("60")
@@ -461,10 +461,12 @@ def test_nutrition_absent_target_is_intentional_and_never_numeric(
     # innerText, not textContent: what is rendered and exposed, not what is hidden.
     assert page.locator(".nut-hero-target").inner_text().strip() == copy
     expect(page.locator(".nut-hero-target")).to_match_aria_snapshot(f"- text: {copy}")
-    expect(page.locator("#ring-pct")).to_be_hidden()
-    visible_target = page.locator(".nut-hero-target").inner_text() + page.locator(".ring-label").inner_text()
+    expect(page.locator("#nut-remaining")).to_be_hidden()
+    visible_target = page.locator(".nut-hero-target").inner_text() + page.locator(".nut-intake").inner_text()
     numbers = re.findall(r"\d+", visible_target)
     assert numbers == ["1235"], numbers          # what was eaten — never a target
     for invented in ("1800", "2500", "2000", "%"):
-        assert invented not in visible_target
-    assert page.locator(".pbar-fill").evaluate_all("els => els.map(e => e.style.width)") == ["0%"] * 3
+        assert invented not in page.locator(".nut-hero").inner_text()
+    # NUTR-PR3: with no target there is no progress to draw — no bar at all.
+    for track in page.locator(".nut-hero .pbar-track").all():
+        expect(track).to_be_hidden()

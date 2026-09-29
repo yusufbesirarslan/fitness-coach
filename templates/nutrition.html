@@ -8,9 +8,10 @@
   <link rel="stylesheet" href="/static/nutrition.css?v={{ _v }}">
 </head>
 
-{#- has-fab-rail: this page still carries a floating control (#log-fab), so it
-    keeps the rail reserve the shell no longer applies globally (UX-1 PR3). -#}
-<body class="page-body has-fab-rail">
+{#- NUTR-PR3: no floating control. The floating log button opened the same
+    chooser as the in-flow "Log food" action and was retired, so this page no
+    longer opts in to the shell's FAB-rail reserve (UX-1 PR3). -#}
+<body class="page-body">
 
 <!-- ── LOADING OVERLAY ── -->
 <div class="loading-overlay" id="loading">
@@ -86,9 +87,8 @@
     <span aria-hidden="true">/</span>
     <span aria-current="page">{{ t('nutrition.parent.current') }}</span>
   </nav>
-  <div class="page-hdr">
+  <div class="page-hdr nut-page-hdr">
     <h1>{{ t('nutrition.parent.current') }}</h1>
-    <p>{{ t('nutrition.page_sub') }}</p>
   </div>
 
   <!-- Tab Bar -->
@@ -108,87 +108,109 @@
   ════════════════════════════════ -->
   <div class="tab-panel active" id="panel-today" role="tabpanel" aria-labelledby="nutrition-tab-today">
 
-    <!-- Macro Ring + Macro Bars -->
-    <div class="card" style="padding:24px;margin-bottom:20px;">
-      <div class="nut-hero" data-target-state="pending">
-        <!-- Ring -->
-        <div class="ring-wrap">
-          <svg class="ring-svg" width="150" height="150" viewBox="0 0 120 120">
-            <circle class="ring-track" cx="60" cy="60" r="48" stroke-width="8"/>
-            <circle class="ring-fill" id="calorie-ring"
-              cx="60" cy="60" r="48" stroke-width="8"
-              stroke="#3D8BFF" stroke-dasharray="301.6" stroke-dashoffset="301.6"/>
-          </svg>
-          <div class="ring-label">
-            <div class="ring-eaten" id="ring-eaten">0</div>
-            <div class="ring-unit">kcal</div>
-            <div class="ring-pct" id="ring-pct">0%</div>
+    {#- ── NUTR-PR3 — Today is one daily job ──
+        see today's state → Log food → see what is logged → secondary detail.
+        TIER 1 is this summary and its one front door. Every number below comes
+        from ONE canonical read (`/meal-log/today`: MealLog totals + the
+        `nutrition_targets` projection); nutrition.js only presents it. Each
+        section carries its own state, so one failed read never blanks a
+        healthy sibling: UNKNOWN is never drawn as 0. -#}
+    <section class="card nut-hero" id="nut-day" aria-labelledby="nut-day-title"
+             data-target-state="pending" data-intake-state="loading" aria-busy="true">
+      <h2 class="sec-label" id="nut-day-title">{{ t('nutrition.todays_intake') }}</h2>
+      <div class="nut-intake-line">
+        <span class="nut-intake"><span class="nut-intake-val" id="nut-intake">—</span> <span class="nut-intake-unit">kcal</span></span>
+        {#- WEB-UX4-PR6 / F-16 — `nutrition_targets` is the only target
+            authority. `absent` = the authority published NO target (one
+            sentence, never a number); `unavailable` = the read failed or its
+            target was unusable (never treated as "not set"). -#}
+        <span class="nut-hero-target">
+          <span class="nut-target-known">{{ t('nutrition.target_label') }} <span id="nut-target">—</span> kcal</span>
+          <span class="nut-target-absent">{{ t('nutrition.target_absent') }}</span>
+          <span class="nut-target-unavailable">{{ t('nutrition.target_unavailable') }}</span>
+        </span>
+      </div>
+      <div class="pbar-track nut-kcal-track" aria-hidden="true"><div class="pbar-fill nut-kcal-fill" id="bar-kcal"></div></div>
+      <p class="nut-remaining" id="nut-remaining" hidden></p>
+      <div class="nut-intake-status is-empty" id="nut-intake-status" role="status" aria-live="polite">
+        <span id="nut-intake-status-text"></span>
+        <button class="btn-ghost nut-retry" id="nut-intake-retry" type="button" data-action="retryTodayData" hidden>{{ t('nutrition.try_again') }}</button>
+      </div>
+      <div class="nut-macros nut-macros-hero">
+        <div class="nut-macro nut-macro--protein">
+          <div class="nut-macro-hdr">
+            <span class="nut-macro-name">{{ t('nutrition.macro_protein') }}</span>
+            <span class="nut-macro-val"><span id="macro-protein">—</span><span class="nut-macro-target" id="macro-protein-target" hidden></span><span class="nut-macro-unit">g</span></span>
           </div>
+          <div class="pbar-track" hidden><div class="pbar-fill" id="bar-protein" style="background:var(--blue-light);"></div></div>
         </div>
-
-        <!-- Macro bars -->
-        <div style="min-width:0;width:100%;">
-          {#- WEB-UX4-PR6 / F-16 — `nutrition_targets` is the only authority.
-              When it publishes no target, nutrition.js marks the hero
-              `data-target-state="absent"` and the sentence below replaces the
-              stacked "TARGET: — KCAL" + "—"; no number is ever shown for it. -#}
-          <div class="nut-hero-target">
-            <span class="nut-target-known">{{ t('nutrition.target_label') }} <span id="ring-target">—</span> kcal</span>
-            <span class="nut-target-absent">{{ t('nutrition.target_absent') }}</span>
+        <div class="nut-macro">
+          <div class="nut-macro-hdr">
+            <span class="nut-macro-name">{{ t('nutrition.carb_short') }}</span>
+            <span class="nut-macro-val"><span id="macro-karb">—</span><span class="nut-macro-target" id="macro-karb-target" hidden></span><span class="nut-macro-unit">g</span></span>
           </div>
-          <div class="nut-macros nut-macros-hero">
-            <!-- Protein -->
-            <div class="nut-macro">
-              <div class="nut-macro-hdr">
-                <span class="nut-macro-name">{{ t('nutrition.macro_protein') }}</span>
-                <span class="nut-macro-val"><span id="macro-protein">0</span>g</span>
-              </div>
-              <div class="pbar-track"><div class="pbar-fill" id="bar-protein" style="width:0%;background:var(--blue-light);"></div></div>
-            </div>
-            <!-- Karbonhidrat -->
-            <div class="nut-macro">
-              <div class="nut-macro-hdr">
-                <span class="nut-macro-name">{{ t('nutrition.macro_carb') }}</span>
-                <span class="nut-macro-val"><span id="macro-karb">0</span>g</span>
-              </div>
-              <div class="pbar-track"><div class="pbar-fill" id="bar-karb" style="width:0%;background:var(--orange);"></div></div>
-            </div>
-            <!-- Yağ -->
-            <div class="nut-macro">
-              <div class="nut-macro-hdr">
-                <span class="nut-macro-name">{{ t('nutrition.macro_fat') }}</span>
-                <span class="nut-macro-val"><span id="macro-yag">0</span>g</span>
-              </div>
-              <div class="pbar-track"><div class="pbar-fill" id="bar-yag" style="width:0%;background:var(--green);"></div></div>
-            </div>
+          <div class="pbar-track" hidden><div class="pbar-fill" id="bar-karb" style="background:var(--orange);"></div></div>
+        </div>
+        <div class="nut-macro">
+          <div class="nut-macro-hdr">
+            <span class="nut-macro-name">{{ t('nutrition.macro_fat') }}</span>
+            <span class="nut-macro-val"><span id="macro-yag">—</span><span class="nut-macro-target" id="macro-yag-target" hidden></span><span class="nut-macro-unit">g</span></span>
+          </div>
+          <div class="pbar-track" hidden><div class="pbar-fill" id="bar-yag" style="background:var(--green);"></div></div>
+        </div>
+      </div>
+      {#- The ONE front door into food logging. It opens the existing chooser
+          (#log-sheet) unchanged — every method behind it is the one that
+          shipped before (NUTR-PR4 owns method convergence). -#}
+      <button class="btn-volt nut-log-food" id="log-food-btn" type="button"
+              data-action="openLogSheet" aria-haspopup="dialog" aria-controls="log-sheet" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        {{ t('nutrition.log_food') }}
+      </button>
+    </section>
+
+    {#- TIER 2 — what is already logged. MealLog is the only consumed record:
+        nothing staged, planned or analysed is drawn here before a confirmed
+        write. -#}
+    <section class="nut-ledger" aria-labelledby="nut-ledger-title">
+      <div class="nut-section-head">
+        <h2 class="sec-label" id="nut-ledger-title">{{ t('nutrition.logged_meals') }}</h2>
+        <span class="nut-count" id="nut-meal-count" hidden></span>
+      </div>
+      <div class="meal-timeline" id="meal-timeline" data-ledger-state="loading" aria-busy="true">
+        <div class="timeline-skeleton" id="today-skeleton">
+          <div class="skel-card">
+            <div class="skeleton" style="height:12px;width:40%;"></div>
+            <div class="skeleton" style="height:16px;width:80%;"></div>
           </div>
         </div>
       </div>
+    </section>
 
-      {#- ── CONTEXTUAL COACH ENTRY (UX-1 PR3) ──
-          At the foot of the target card, where "is this target right for me?"
-          is asked. Secondary text-weight link; the dominant action on this page
-          is logging (#log-fab), which is untouched. Plain link to /coach — no
-          nutrition data is serialized into the URL; the Coach reads the
-          canonical targets server-side. -#}
-      <div class="coach-entry">
-        <a class="btn-ghost" href="/coach">{{ t('nutrition.ask_coach') }}</a>
-      </div>
+    {#- TIER 2 — compact hydration. The Water state machine (loading ·
+        confirmed · saving · unavailable · unconfirmed) is unchanged and shared
+        with the Water detail below; this is only its place on the page. -#}
+    <div class="nut-hydration">
+      <button class="qab" id="qab-water" data-action="quickAddWater" type="button" disabled>
+        <span class="qab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>
+        <div class="qab-info">
+          <div class="qab-title">{{ t('nutrition.water_1cup_btn') }}</div>
+          <div class="qab-sub" id="qab-water-sub">{{ t('nutrition.water_loading') }}</div>
+        </div>
+        <svg class="qab-check" viewBox="0 0 24 24" fill="none" stroke="var(--blue-light)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <svg class="qab-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
     </div>
 
-    <!-- Meal Timeline -->
-    <h2 class="sec-label">{{ t('nutrition.todays_meals') }}</h2>
-    <div class="meal-timeline" id="meal-timeline">
-      <!-- Skeleton -->
-      <div class="timeline-skeleton" id="today-skeleton">
-        <div class="skel-card">
-          <div class="skeleton" style="height:12px;width:40%;"></div>
-          <div class="skeleton" style="height:16px;width:80%;"></div>
-          <div class="skeleton" style="height:12px;width:60%;"></div>
-        </div>
-      </div>
-    </div>
+    {#- TIER 3 — planned shortcuts. A planned meal is a proposal, never a
+        consumed record: it reads "Planned" until the existing quick-add write
+        confirms, and only then "Logged". -#}
+    <section class="nut-planned" id="quick-add-section" data-plan-state="loading" aria-labelledby="nut-planned-title">
+      <h2 class="sec-label" id="nut-planned-title">{{ t('nutrition.from_plan') }}</h2>
+      <div id="quick-add-cards" class="nut-planned-list"></div>
+    </section>
 
+  <div class="nutrition-secondary">
   <details class="nutrition-tool" id="nutrition-tool-history" data-nutrition-tool="history">
     <summary id="nutrition-tab-history" class="nutrition-tool-toggle" data-tab-name="history" aria-controls="panel-history">{{ t('nutrition.tab_history') }}</summary>
   <div class="nutrition-tool-content" id="panel-history" role="region" aria-labelledby="nutrition-tab-history">
@@ -211,25 +233,6 @@
 
   </div><!-- /panel-history -->
   </details>
-
-    <!-- Quick add from plan (existing feature) -->
-    <div id="quick-add-section" style="margin-top:20px;">
-      <div class="fc-divider">
-        <div class="fc-divider-line"></div>
-        <div class="fc-divider-lbl">{{ t('nutrition.quick_add') }}</div>
-        <div class="fc-divider-line"></div>
-      </div>
-      <button class="qab" id="qab-water" data-action="quickAddWater" type="button" style="margin-bottom:8px;" disabled>
-        <span class="qab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>
-        <div class="qab-info">
-          <div class="qab-title">{{ t('nutrition.water_1cup_btn') }}</div>
-          <div class="qab-sub" id="qab-water-sub">{{ t('nutrition.water_loading') }}</div>
-        </div>
-        <svg class="qab-check" viewBox="0 0 24 24" fill="none" stroke="var(--blue-light)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-        <svg class="qab-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
-      <div id="quick-add-cards" style="display:flex;flex-direction:column;gap:8px;"></div>
-    </div>
 
   <details class="nutrition-tool" id="nutrition-tool-water" data-nutrition-tool="water">
     <summary id="nutrition-tab-water" class="nutrition-tool-toggle" data-tab-name="water" aria-controls="panel-water">{{ t('nutrition.tab_water') }}</summary>
@@ -257,17 +260,6 @@
   </div><!-- /panel-water -->
   </details>
 
-    <!-- AI daily review -->
-    <div class="fc-divider" style="margin-top:20px;">
-      <div class="fc-divider-line"></div>
-      <div class="fc-divider-lbl">{{ t('nutrition.ai_review') }}</div>
-      <div class="fc-divider-line"></div>
-    </div>
-    <button class="btn-ghost w-full" id="review-btn" data-action="getReview" style="width:100%;">{{ t('nutrition.eod_review') }}</button>
-    <div class="card" id="review-card" style="padding:20px;margin-top:12px;display:none;">
-      <div id="review-text" class="review-text"></div>
-    </div>
-
   <details class="nutrition-tool" id="nutrition-tool-diary" data-nutrition-tool="diary">
     <summary id="nutrition-tab-diary" class="nutrition-tool-toggle" data-tab-name="diary" aria-controls="panel-diary">{{ t('nutrition.tab_diary') }}</summary>
   <div class="nutrition-tool-content" id="panel-diary" role="region" aria-labelledby="nutrition-tab-diary">
@@ -288,7 +280,20 @@
 
   </div><!-- /panel-diary -->
   </details>
+  </div><!-- /nutrition-secondary -->
 
+    {#- TIER 3 — review / handoff. Both pre-existing and unchanged in scope:
+        the end-of-day review runs only on click, and the Coach entry is a
+        plain /coach link (no nutrition data in the URL; UX-1 PR3). -#}
+    <div class="nut-review">
+      <button class="btn-ghost w-full" id="review-btn" data-action="getReview" type="button">{{ t('nutrition.eod_review') }}</button>
+      <div class="card" id="review-card" style="padding:20px;margin-top:12px;display:none;">
+        <div id="review-text" class="review-text"></div>
+      </div>
+      <div class="coach-entry">
+        <a class="btn-ghost" href="/coach">{{ t('nutrition.ask_coach') }}</a>
+      </div>
+    </div>
   </div><!-- /panel-today -->
 
 
@@ -349,18 +354,15 @@
 
 
 <!-- ══════════════════════════════════════════════════
-     LOG FAB + BOTTOM SHEET (image-first logging)
+     LOG FOOD CHOOSER (opened by #log-food-btn only)
 ══════════════════════════════════════════════════ -->
-<button class="log-fab" id="log-fab" data-action="openLogSheet" aria-label="{{ t('nutrition.log_add') }}">
-  <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-</button>
 
 <input type="file" id="photo-input" accept="image/*" capture="environment" data-action-change="onPhotoPicked" style="display:none;">
 
-<div class="sheet-backdrop" id="log-sheet" data-action-self="closeLogSheet">
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="{{ t('nutrition.log_add') }}">
+<div class="sheet-backdrop" id="log-sheet" data-action-self="dismissLogSheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="log-sheet-title">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">{{ t('nutrition.log_add') }}</div>
+    <div class="sheet-title" id="log-sheet-title">{{ t('nutrition.log_food') }}</div>
     <div class="log-sheet-grid">
       <button class="log-sheet-opt" data-action="logTakePhoto">
         <span class="lso-ic"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span>

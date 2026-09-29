@@ -373,8 +373,10 @@ def test_web_today_imports_the_canonical_authority():
 
 def test_browser_load_today_consumes_server_targets_and_derives_none():
     js = NUTRITION_JS.read_text(encoding="utf-8")
-    body = _js_function_body(js, "loadTodayData")
-    assert "targets" in body
+    # NUTR-PR3: the read's target projection is interpreted in ONE helper.
+    assert "readTarget(today)" in _js_function_body(js, "loadTodayData")
+    body = _js_function_body(js, "readTarget")
+    assert "d.targets" in body
     assert "0.30 / 4" not in body
     assert "0.40 / 4" not in body
     assert "0.30 / 9" not in body
@@ -385,7 +387,7 @@ def test_browser_load_today_consumes_server_targets_and_derives_none():
 
 def test_browser_macro_bars_do_not_fabricate_fallback_grams():
     js = NUTRITION_JS.read_text(encoding="utf-8")
-    body = _js_function_body(js, "updateMacroBars")
+    body = _js_function_body(js, "renderDaySummary")   # NUTR-PR3 (was updateMacroBars)
     assert "|| 140" not in body
     assert "|| 200" not in body
     assert "|| 60" not in body

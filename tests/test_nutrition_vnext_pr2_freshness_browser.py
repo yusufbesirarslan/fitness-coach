@@ -33,7 +33,7 @@ def prepare(app, auth_user, client, training_page, history_open=False, language=
     page.set_viewport_size({'width': width, 'height': 900})
     page.goto('http://localhost/nutrition')
     expect(page.locator('#meal-timeline .meal-card')).to_have_count(1)
-    expect(page.locator('#ring-eaten')).to_have_text('200')
+    expect(page.locator('#nut-intake')).to_have_text('200')
     page.locator('#nutrition-tab-diary').click()
     expect(page.locator('[data-meal-name="Kahvaltı"]')).to_contain_text('Freshness oats')
     if history_open:
@@ -55,7 +55,7 @@ def commit(page, meal_id):
 def assert_today(page):
     expect(page.locator('#meal-timeline .meal-card')).to_have_count(2, timeout=2500)
     expect(page.locator('#meal-timeline')).to_contain_text('Freshness oats (100g)')
-    expect(page.locator('#ring-eaten')).to_have_text('725')
+    expect(page.locator('#nut-intake')).to_have_text('725')
     for key, value in [('protein', '40'), ('karb', '80'), ('yag', '17')]:
         expect(page.locator('#macro-' + key)).to_have_text(value)
 
@@ -82,7 +82,7 @@ def test_diary_commit_refreshes_visible_canonical_projections(app, auth_user, cl
     print(json.dumps({'initial': initial, 'mutation_request': f'POST /api/diary/meal/{meal_id}/log',
         'mutation_response': mutation, 'post_commit_requests': list(traffic), 'canonical_today': canonical,
         'visible_today': {'cards': page.locator('#meal-timeline .meal-card').count(),
-                          'calories': page.locator('#ring-eaten').inner_text()},
+                          'calories': page.locator('#nut-intake').inner_text()},
         'diary': page.locator('[data-meal-name="Kahvaltı"]').inner_text(),
         'canonical_history': history, 'history_open': history_open, 'initial_history': initial_history,
         'visible_history': page.locator('#history-list').inner_text()}))
@@ -119,7 +119,7 @@ def test_diary_rejected_mutation_does_not_advance_today(app, auth_user, client, 
         page.locator('[data-meal-name="Kahvaltı"] .diary-log-btn').click()
     assert response.value.status == 400
     expect(page.locator('.toast-error')).to_be_visible()
-    expect(page.locator('#ring-eaten')).to_have_text('200')
+    expect(page.locator('#nut-intake')).to_have_text('200')
     expect(page.locator('#meal-timeline .meal-card')).to_have_count(1)
     assert paths(traffic) == Counter({f'/api/diary/meal/{meal_id}/log': 1})
     assert len(client.get('/meal-log/today').json['meals']) == 1
@@ -192,7 +192,7 @@ def test_post_commit_today_failure_preserves_confirmed_values_and_navigation(app
     commit(page, meal_id)
     expect(page.locator('[data-meal-name="Kahvaltı"] .diary-log-btn')).to_have_count(0)
     expect(page.locator('.toast-error')).to_be_visible(timeout=2500)
-    expect(page.locator('#ring-eaten')).to_have_text('200')
+    expect(page.locator('#nut-intake')).to_have_text('200')
     expect(page.locator('#meal-timeline .meal-card')).to_have_count(1)
     assert client.get('/meal-log/today').json['totals']['kalori'] == 725
     page.locator('#nutrition-tab-plan').click()
@@ -225,7 +225,7 @@ def test_superseding_failed_read_keeps_post_commit_failure_visible(app, auth_use
     pending[0][0].fulfill(status=200, content_type='application/json', body=pending[0][1])
     page.wait_for_timeout(200)
     if projection == 'today':
-        expect(page.locator('#ring-eaten')).to_have_text('200')
+        expect(page.locator('#nut-intake')).to_have_text('200')
         expect(page.locator('#meal-timeline .meal-card')).to_have_count(1)
     else:
         expect(page.locator('#history-list .history-meal')).to_have_count(1)
