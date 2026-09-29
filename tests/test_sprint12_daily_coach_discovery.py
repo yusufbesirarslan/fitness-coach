@@ -88,7 +88,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
     of whole domains, and a subset assertion would not notice one arriving.
 
     `/api/v1/today` joined the set in Sprint 12 PR3; LP-01 adds the three
-    pre-auth registration/verification routes. Mobile Training PR2 adds
+    pre-auth registration/verification routes, and LP-03 the
+    native onboarding profile write. Mobile Training PR2 adds
     exactly three canonical read projections, PR4A one native plan write, and
     PR5 the six native workout-session contracts. The referenced-session read
     adds one owner-scoped canonical projection. Any further path means
@@ -108,6 +109,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/auth/verify",
         "/api/v1/auth/verify/resend",
         "/api/v1/account/me",
+        # LP-03 native onboarding profile write (owner = bearer principal).
+        "/api/v1/account/profile",
         "/api/v1/nutrition/diary/today",
         "/api/v1/nutrition/foods/search",
         "/api/v1/nutrition/foods/fatsecret/<food_id>/servings",

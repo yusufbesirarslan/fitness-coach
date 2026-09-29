@@ -5,15 +5,16 @@ shared onboarding service, so the extraction can be checked against the old
 behaviour instead of against a description of it. Exact bodies, statuses,
 messages and persisted columns are pinned on purpose.
 
-The `CURRENT DEFECT` tests pin the behaviour LP-03 is authorized to change
-(duplicate `UserSession` per submission; a profile marked complete before the
-session that makes it usable is persisted). They assert today's behaviour so
-the change is visible as a deliberate diff in the PR, not as silent drift.
+Every test here passes on the pre-LP-03 route AND on the extracted one. The
+behaviour LP-03 deliberately changes (duplicate `UserSession` per submission,
+a profile marked complete before its session is durable, two readiness rules,
+unvalidated crafted input) was pinned here first and now lives, asserted as
+the NEW invariant, in tests/test_web_setup_lp03_deltas.py — those tests fail
+against the pre-LP-03 code.
 
     python -m pytest tests/test_web_setup_characterization.py -v
 """
 import pytest
-from sqlalchemy import event
 
 from app.extensions import db
 from app.models import User, UserSession
@@ -181,22 +182,14 @@ def test_first_missing_field_in_declared_order_is_reported(client, auth_user):
     assert response.get_json() == {"error": "weight alanı eksik"}
 
 
-@pytest.mark.parametrize("body", [None, "not json", [1, 2]])
-def test_non_object_body_reports_first_field_missing(app, client, auth_user, body):
-    app.config["PROPAGATE_EXCEPTIONS"] = False
+@pytest.mark.parametrize("body", [None, "not json"])
+def test_non_object_body_reports_first_field_missing(client, auth_user, body):
     if body is None:
         response = client.post("/setup", data="x", content_type="text/plain")
-    elif isinstance(body, str):
+    else:
         response = client.post("/setup", data=body, content_type="application/json")
-    else:
-        response = client.post("/setup", json=body)
-    if isinstance(body, list):
-        # A JSON array survives `or {}` and then fails `.get` — a crash, not
-        # a validation answer. Recorded, not endorsed.
-        assert response.status_code == 500
-    else:
-        assert response.status_code == 400
-        assert response.get_json() == {"error": "weight alanı eksik"}
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "weight alanı eksik"}
 
 
 @pytest.mark.parametrize(("field", "value"), [
@@ -208,121 +201,3 @@ def test_non_numeric_values_rejected(client, auth_user, field, value):
     assert response.get_json() == {"error": "Kilo, boy ve yaş sayısal olmalıdır"}
     assert _user(auth_user.id).profile_complete is not True
     assert _sessions(auth_user.id) == []
-
-
-# ---------------------------------------------------------------------------
-# CURRENT DEFECTS — pinned here, changed deliberately by LP-03
-# ---------------------------------------------------------------------------
-
-def test_current_defect_repeat_submission_appends_a_session(client, auth_user):
-    client.post("/setup", json=PAYLOAD)
-    client.post("/setup", json={**PAYLOAD, "weight": 78})
-    assert len(_sessions(auth_user.id)) == 2
-
-
-def test_current_defect_session_failure_leaves_profile_complete(app, client, auth_user):
-    app.config["PROPAGATE_EXCEPTIONS"] = False
-
-    def refuse_session_rows(session, _flush_context, _instances):
-        if any(isinstance(obj, UserSession) for obj in session.new | session.dirty):
-            raise RuntimeError("injected UserSession persistence failure")
-
-    event.listen(db.session, "before_flush", refuse_session_rows)
-    try:
-        response = client.post("/setup", json=PAYLOAD)
-    finally:
-        event.remove(db.session, "before_flush", refuse_session_rows)
-    assert response.status_code == 500
-    assert _sessions(auth_user.id) == []
-    assert _user(auth_user.id).profile_complete is True
-
-
-@pytest.mark.parametrize(("field", "value"), [
-    ("goal", "tamamen uydurma"), ("gender", "robot"),
-    ("fitness_level", "olympian"), ("current_activity", "couch"),
-])
-def test_current_defect_unknown_vocabulary_is_persisted(client, auth_user, field, value):
-    assert client.post("/setup", json={**PAYLOAD, field: value}).status_code == 200
-    assert getattr(_user(auth_user.id), field) == value
-
-
-@pytest.mark.parametrize(("field", "value"), [
-    ("weight", -80), ("height", 0.0001), ("weight", 5), ("age", -3),
-])
-def test_current_defect_physically_invalid_numbers_are_persisted(
-        client, auth_user, field, value):
-    assert client.post("/setup", json={**PAYLOAD, field: value}).status_code == 200
-    assert _user(auth_user.id).profile_complete is True
-
-
-def test_current_defect_nan_weight_crashes_after_marking_complete(
-        app, client, auth_user):
-    # SQLite stores NaN as NULL; the reloaded NULL weight then crashes the BMR
-    # formula after the first commit already marked the profile complete.
-    app.config["PROPAGATE_EXCEPTIONS"] = False
-    response = client.post("/setup", json={**PAYLOAD, "weight": "nan"})
-    assert response.status_code == 500
-    assert _user(auth_user.id).profile_complete is True
-    assert _sessions(auth_user.id) == []
-
-
-def test_current_defect_infinite_height_persists_then_crashes(
-        app, client, auth_user):
-    # Both commits succeed with an infinite height; `round(inf)` then turns the
-    # already-persisted onboarding into a 500 for the caller.
-    app.config["PROPAGATE_EXCEPTIONS"] = False
-    response = client.post("/setup", json={**PAYLOAD, "height": "inf"})
-    assert response.status_code == 500
-    assert _user(auth_user.id).profile_complete is True
-    assert len(_sessions(auth_user.id)) == 1
-
-
-# ---------------------------------------------------------------------------
-# CURRENT DEFECT — two readiness rules
-#
-# `profile_complete` (account/me, `/` gate, `/setup` GET) and "a UserSession
-# exists" (both first-plan generators) answer the same question differently.
-# ---------------------------------------------------------------------------
-
-def _divergent_user(make_user, *, flag, with_session):
-    user = make_user("divergent", profile_complete=flag)
-    if with_session:
-        db.session.add(UserSession(
-            user_id=user.id, goal="kilo verme", fitness_level="beginner",
-            current_activity="active", tdee=2400))
-        db.session.commit()
-    return user
-
-
-def _mobile_me(raw_client, monkeypatch, user):
-    from types import SimpleNamespace
-    from app.services import mobile_auth
-    monkeypatch.setattr(
-        mobile_auth, "authenticate_access",
-        lambda raw: mobile_auth.MobilePrincipal(
-            user, SimpleNamespace(id=1), {"sub": user.cognito_sub}))
-    return raw_client.get(
-        "/api/v1/account/me", headers={"Authorization": "Bearer opaque"})
-
-
-def _first_plan_prerequisite_met(user):
-    from app.services.mobile_training_generation import service
-    from app.services.mobile_training_generation.errors import (
-        GenerationPrerequisiteMissing)
-    try:
-        service._required_session(user.id)
-    except GenerationPrerequisiteMissing:
-        return False
-    return True
-
-
-def test_current_defect_complete_flag_without_session(raw_client, make_user, monkeypatch):
-    user = _divergent_user(make_user, flag=True, with_session=False)
-    assert _mobile_me(raw_client, monkeypatch, user).json["user"]["profile_complete"] is True
-    assert _first_plan_prerequisite_met(user) is False
-
-
-def test_current_defect_session_without_complete_flag(raw_client, make_user, monkeypatch):
-    user = _divergent_user(make_user, flag=False, with_session=True)
-    assert _mobile_me(raw_client, monkeypatch, user).json["user"]["profile_complete"] is False
-    assert _first_plan_prerequisite_met(user) is True

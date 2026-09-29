@@ -60,6 +60,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/auth/verify"),
         ("post", "/api/v1/auth/verify/resend"),
         ("get", "/api/v1/account/me"),
+        ("put", "/api/v1/account/profile"),
         ("get", "/api/v1/nutrition/diary/today"),
         ("get", "/api/v1/today"),
         ("get", "/api/v1/training/preferences"),
@@ -126,6 +127,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         ("/api/v1/auth/verify", ("POST",)),
         ("/api/v1/auth/verify/resend", ("POST",)),
         ("/api/v1/account/me", ("GET",)),
+        # LP-03 native onboarding profile. Bearer-only, on this blueprint so it
+        # shares its gate, envelope, no-store and 429 handler.
+        ("/api/v1/account/profile", ("PUT",)),
             # Sprint 9 backend prerequisite. Product routes live on this blueprint
             # too, so the allow-list keeps covering every /api/v1 route there is.
             ("/api/v1/nutrition/diary/today", ("GET",)),
