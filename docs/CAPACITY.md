@@ -76,6 +76,7 @@ Kanıta dayalı; her satır gerçek koda karşı doğrulanmıştır.
 | `respond_suggestion` (social) | `blocking_concurrency_slot` | 0 | 5–10 sn | Degrade | Hayır |
 | Mobil `/api/v1/auth/login` | `blocking_concurrency_slot` | 0 | Cognito 5+10 sn, 2 deneme | `AUTH_TEMPORARILY_UNAVAILABLE` | Hayır |
 | Mobil `/api/v1/auth/refresh` | `blocking_concurrency_slot` | 0 | aynı | aynı | **Hayır** — iki fazlı: ağ ÖNCE, kilit SONRA |
+| Kayıt / doğrulama / kod yeniden gönderme — web `/register`, `/verify`, `/verify/resend` + mobil `/api/v1/auth/{register,verify,verify/resend}` (LP-01) | `blocking_concurrency_slot` (`account_registration`) | 0 | Cognito 5+10 sn, 2 deneme | web: 503 + `Retry-After: 15` (`auth.service_busy`); mobil: `AUTH_TEMPORARILY_UNAVAILABLE` + `Retry-After: 15` | Hayır — ön-kontrol okuma tx'i ağdan ÖNCE kapanır, yerel yazım izin bırakıldıktan SONRA |
 | Menü scrape (`proxy_scan_menu`) | `scrape_concurrency_gate` (`_scrape_slots`) | `SCRAPE_GATE_WAIT_SECONDS` (10) | 10 sn/sayfa | 503 + `Retry-After: 15` | Hayır |
 | Giyilebilir `callback` / `sync` / `whoop` | **`blocking_concurrency_slot` (PR4'te eklendi)** | 0 | 10 sn × ≤3 ardışık | 503 + `Retry-After: 15` | Hayır — izin yalnız ağ'ı sarar |
 | JWKS anahtar çözümü (mobil token doğrulama) | Kapı yok — **PR4'te tek-uçuş + soğuma** | — | 5 sn | Kesin `invalid_key` | Hayır |

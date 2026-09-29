@@ -22,7 +22,10 @@ PUBLIC_ENDPOINTS = {
 
 TEARDOWN_ENDPOINTS = {"auth.logout"}
 MOBILE_PUBLIC_ENDPOINTS = {
-    "mobile_api.login", "mobile_api.refresh", "mobile_api.logout"}
+    "mobile_api.login", "mobile_api.refresh", "mobile_api.logout",
+    # LP-01 pre-auth registration: public by design (no account exists yet),
+    # never issue a credential. docs/MOBILE_REGISTRATION.md.
+    "mobile_api.register", "mobile_api.verify", "mobile_api.verify_resend"}
 
 
 def test_every_non_public_route_uses_require_auth(app):

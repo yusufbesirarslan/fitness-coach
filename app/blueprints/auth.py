@@ -8,21 +8,24 @@ from flask_login import current_user, login_required, login_user, logout_user
 from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import COGNITO_ENABLED
 from app.extensions import db, limiter, login_throttle_available
 from app.models import User
-from app.services import (cognito_jwt, cognito_service, email_service,
-                          email_templates, mobile_auth, session_store)
+from app.services import (account_registration, cognito_jwt, cognito_service,
+                          email_service, email_templates, mobile_auth,
+                          session_store)
+from app.services.account_registration import (
+    Outcome as RegistrationOutcome, Phase as RegistrationPhase,
+    RegistrationFailure)
 from app.services.ai_gate import (BlockingConcurrencyLimit,
                                   blocking_concurrency_slot)
 from app.services.cognito_service import CognitoServiceError
 from app.services.cognito_jwt import TokenValidationError
 from app.services.cognito_identity import reconcilable_local_user
 from app.services.gamification import complete_quest_for_user
-from app.services.referral import consume_referral, ensure_referral_code
-from app.services.validators import validate_email, validate_password, validate_username
+from app.services.referral import ensure_referral_code
+from app.services.validators import validate_password
 from app.i18n import AVAILABLE_LOCALES, set_locale, t
 
 
@@ -35,7 +38,6 @@ _AUTH_ERROR_KEYS = {
     "link": "auth.err_link",
 }
 
-_PENDING_REFERRAL_KEY = "pending_referral_code"
 _RESET_USERNAME_KEY = "password_reset_username"
 _RESET_STARTED_KEY = "password_reset_started_at"
 _RESET_CONTEXT_MINUTES = 15
@@ -43,27 +45,6 @@ _FORGOT_GENERIC_KEY = "auth.forgot_generic"
 # Most provider refresh tokens one credential change will try to revoke. Local
 # revocation is unbounded and authoritative; this only bounds the network work.
 _PROVIDER_REVOKE_LIMIT = 20
-
-
-def _consume_pending_referral(user):
-    """Consume and clear a referral saved during unverified Cognito signup."""
-    metadata = dict(user.user_metadata or {})
-    code = metadata.get(_PENDING_REFERRAL_KEY)
-    if not code:
-        return False
-
-    referred = bool(consume_referral(user, code))
-
-    # consume_referral may commit or roll back its atomic claim. Reload the row,
-    # then clear the one-time marker for valid and invalid referral codes alike.
-    user = db.session.get(User, user.id)
-    db.session.refresh(user)
-    metadata = dict(user.user_metadata or {})
-    metadata.pop(_PENDING_REFERRAL_KEY, None)
-    user.user_metadata = metadata
-    flag_modified(user, "user_metadata")
-    db.session.commit()
-    return referred
 
 
 @bp.route("/set-language", methods=["POST"])
@@ -238,91 +219,60 @@ def register():
     if not COGNITO_ENABLED:
         return jsonify({"error": t("auth.login_unavailable")}), 503
     data = request.get_json(silent=True) or {}
-    username = data.get("username")
-    # E-posta normalizasyonu: kırp + küçük harfe indir. Aynı adresin farklı
-    # büyük/küçük yazımları tek kimliğe iner; Cognito'ya ve yerel kayda hep
-    # normalize edilmiş hali gider (claim e-postaları zaten lowercase işlenir,
-    # bkz. cognito_service._decode_claims).
-    email = (data.get("email") or "").strip().lower()
-    password = data.get("password")
     # Kayıt-öncesi seçilen dil: gövdeden gelir; yoksa session'daki seçime, o da
     # yoksa varsayılana düşer. Yeni kullanıcıya kalıcılaştırılır.
     chosen_lang = data.get("language")
     if chosen_lang not in AVAILABLE_LOCALES:
         chosen_lang = session.get("lang") if session.get("lang") in AVAILABLE_LOCALES else "tr"
-
-    if not username or not email or not password:
-        return jsonify({"error": t("auth.all_fields_required")}), 400
-
-    password_error = validate_password(password)
-    if password_error:
-        return jsonify({"error": password_error}), 400
-
-    username_error = validate_username(username)
-    if username_error:
-        return jsonify({"error": username_error}), 400
-
-    email_error = validate_email(email)
-    if email_error:
-        return jsonify({"error": email_error}), 400
-
-    # Username/email collision. Return one generic message for both checks so the
-    # response can't be used to confirm whether a specific username OR e-mail is
-    # already registered (account-enumeration hardening). Combined with the per-IP
-    # rate limit on this route, this raises the cost of enumeration. Note that
-    # usernames are inherently discoverable via the friend search and there is no
-    # e-mail login / reset flow, so the residual exposure is low.
-    if (User.query.filter_by(username=username).first()
-            or User.query.filter(db.func.lower(User.email) == email).first()):
-        return jsonify({"error": t("auth.user_or_email_taken")}), 400
-
     # Davet döngüsü: kayıt davet bağlantısından geldiyse (cookie veya body)
-    # davetçi ile bağla ve iki tarafa da XP ver.
-    ref_code = (data.get("ref") or request.cookies.get("fitx_ref") or "").strip()
+    # bekleyen davet olarak saklanır; ödül doğrulamada verilir.
+    ref_code = data.get("ref") or request.cookies.get("fitx_ref")
 
-    if COGNITO_ENABLED:
-        # Native Cognito kaydı: kullanıcıyı Cognito'da oluştur (e-postaya DOĞRULAMA
-        # KODU gider), `name` attribute'u Cognito'ya BURADA geçer. Kullanıcı /verify
-        # sayfasında kodu girene kadar GİRİŞ YAPAMAZ (login Cognito'dan geçer; kod
-        # girilmedikçe Cognito UserNotConfirmed döner).
-        try:
-            sub = cognito_service.sign_up(username=username, password=password,
-                                          email=email, name=username)
-        except CognitoServiceError as e:
-            return jsonify({"error": e.message}), 400
-        # Yerel kayıt: profil/davet verisi için hemen oluştur ama parolayı
-        # KULLANILAMAZ yap — giriş yalnızca Cognito üzerinden (cognito_sub dolu →
-        # yerel parola yolu hiç çalışmaz). app/services/cognito.py ile aynı desen.
-        user = User(username=username, email=email, cognito_sub=sub or None,
-                    full_name=username, language=chosen_lang)
-        if ref_code:
-            user.user_metadata = {_PENDING_REFERRAL_KEY: ref_code}
-        ensure_referral_code(user)
-        db.session.add(user)
-        try:
-            db.session.commit()
-        except Exception as e:
-            # Cognito kullanıcı OLUŞTU ama yerel kayıt başarısız → Cognito ORPHAN
-            # (Cognito'da hesap var, yerelde yok). UNSIGNED public client admin-delete
-            # yapamaz; ops temizliği için AÇIKÇA logla — 500 ile sessizce yutma.
-            # Kurtarma (H2): kullanıcı e-postasını doğrulayıp giriş yaptığında
-            # _reconcile_local_user, DOĞRULANMIŞ id-token claim'lerinden yerel kaydı
-            # bağlar/oluşturur — yani orphan kullanıcı kilitlenmez.
-            db.session.rollback()
-            current_app.logger.error(
-                "[REGISTER] Cognito sign_up başarılı ama yerel commit başarısız "
-                "— Cognito orphan olası, manuel temizlik/retry gerekir: %s",
-                type(e).__name__)
-            if isinstance(e, IntegrityError):
-                return jsonify({"error": t("auth.user_or_email_taken")}), 409
-            return jsonify({"error": t("auth.register_failed")}), 503
-        session["lang"] = chosen_lang
-        resp = jsonify({"message": t("auth.register_verify_sent"),
-                        "needs_verification": True, "username": username,
-                        "referred": False})
-        if request.cookies.get("fitx_ref"):
-            resp.delete_cookie("fitx_ref")
-        return resp
+    # Normalizasyon, doğrulama, çakışma kontrolü, Cognito kaydı ve yerel satır
+    # TEK kanonik serviste (mobil /api/v1/auth/register ile ortak).
+    try:
+        account = account_registration.register_account(
+            data.get("username"), data.get("email"), data.get("password"),
+            language=chosen_lang, referral_code=ref_code)
+    except RegistrationFailure as failure:
+        return _registration_failure_response(
+            failure, required_key="auth.all_fields_required")
+    session["lang"] = chosen_lang
+    resp = jsonify({"message": t("auth.register_verify_sent"),
+                    "needs_verification": True, "username": account.username,
+                    "referred": False})
+    if request.cookies.get("fitx_ref"):
+        resp.delete_cookie("fitx_ref")
+    return resp
+
+
+def _registration_failure_response(failure, required_key):
+    """Map a canonical registration failure onto the pre-LP-01 browser answers.
+
+    The browser contract is pinned by tests/test_web_registration_characterization.py:
+    a provider rejection keeps rendering the provider's Turkish sentence (400),
+    a local collision the one generic "taken" sentence, the post-sign-up commit
+    race 409 and any other commit failure 503. Capacity exhaustion is the one
+    answer that did not exist before: the provider call now runs inside the
+    shared blocking slot, and a full slot is a retryable 503, never a crash.
+    """
+    outcome = failure.outcome
+    if outcome == RegistrationOutcome.CAPACITY_EXHAUSTED:
+        response = jsonify({"error": t("auth.service_busy")})
+        response.status_code = 503
+        response.headers["Retry-After"] = "15"
+        return response
+    if failure.provider_message is not None:
+        return jsonify({"error": failure.provider_message}), 400
+    if outcome == RegistrationOutcome.FIELDS_REQUIRED:
+        return jsonify({"error": t(required_key)}), 400
+    if outcome == RegistrationOutcome.IDENTITY_UNAVAILABLE:
+        status = 409 if failure.phase == RegistrationPhase.PERSISTENCE else 400
+        return jsonify({"error": t("auth.user_or_email_taken")}), status
+    if outcome == RegistrationOutcome.STORAGE_FAILED:
+        return jsonify({"error": t("auth.register_failed")}), 503
+    return jsonify({"error": failure.detail}), 400
+
 
 def _reconcile_local_user(verified_claims, cognito_username):
     """H2: DOĞRULANMIŞ Cognito kimliğine karşılık gelen yerel kaydı bağla/oluştur.
@@ -506,20 +456,14 @@ def verify_confirm():
     if not COGNITO_ENABLED:
         abort(404)
     data = request.get_json(silent=True) or {}
-    username = (data.get("username") or "").strip()
-    code = (data.get("code") or "").strip()
-    if not username or not code:
-        return jsonify({"error": t("auth.verify_fields_required")}), 400
     try:
-        cognito_service.confirm_sign_up(username, code)
-    except CognitoServiceError as e:
-        return jsonify({"error": e.message}), 400
-    user = User.query.filter_by(username=username).first()
-    referred = _consume_pending_referral(user) if user else False
-    # Hesap doğrulandı → markalı hoş geldin e-postası (best-effort; doğrulama
-    # yanıtı e-posta hatasından ASLA etkilenmez).
-    _send_welcome_email(user)
-    return jsonify({"message": t("auth.verify_done"), "referred": referred})
+        confirmed = account_registration.confirm_account(
+            data.get("username"), data.get("code"))
+    except RegistrationFailure as failure:
+        return _registration_failure_response(
+            failure, required_key="auth.verify_fields_required")
+    return jsonify({"message": t("auth.verify_done"),
+                    "referred": confirmed.referred})
 
 
 @bp.route("/verify/resend", methods=["POST"])
@@ -529,32 +473,12 @@ def verify_resend():
     if not COGNITO_ENABLED:
         abort(404)
     data = request.get_json(silent=True) or {}
-    username = (data.get("username") or "").strip()
-    if not username:
-        return jsonify({"error": t("auth.username_required")}), 400
     try:
-        cognito_service.resend_code(username)
-    except CognitoServiceError as e:
-        return jsonify({"error": e.message}), 400
+        account_registration.resend_confirmation(data.get("username"))
+    except RegistrationFailure as failure:
+        return _registration_failure_response(
+            failure, required_key="auth.username_required")
     return jsonify({"message": t("auth.resend_done")})
-
-
-def _send_welcome_email(user):
-    """Doğrulama sonrası hoş geldin e-postası — best-effort, ASLA yükseltmez.
-
-    E-posta katmanı bloklamaz: şablon/DB/gönderim hatası yalnızca loglanır,
-    doğrulama yanıtı etkilenmez (email_service zaten graceful; buradaki
-    try/except şablon-render ve beklenmedik hataları da kapsar)."""
-    try:
-        if user is None or not user.email:
-            return
-        subject, html, text = email_templates.welcome_email(user.username)
-        email_service.send_html_email(user.email, subject, html, text=text)
-        current_app.logger.info("[AUTH-EMAIL] welcome kuyruklandı: user=%s to=%s",
-                                user.username, email_service.mask_email(user.email))
-    except Exception:
-        current_app.logger.warning("[AUTH-EMAIL] welcome gönderilemedi (user=%s)",
-                                   getattr(user, "username", "?"), exc_info=True)
 
 
 def _revoke_all_sessions_after_credential_change(user_id):

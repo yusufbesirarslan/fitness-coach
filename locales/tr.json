@@ -29,6 +29,7 @@
   "auth.welcome": "Hoş geldin {username}!",
   "auth.login_unavailable": "Giriş geçici olarak kullanılamıyor. Lütfen birazdan tekrar deneyin.",
   "auth.temporarily_unavailable": "Kimlik servisine şu an ulaşılamıyor. Oturumun açık; lütfen birazdan tekrar deneyin.",
+  "auth.service_busy": "Kimlik servisi şu an yoğun. Lütfen birazdan tekrar dene.",
   "auth.bad_credentials": "Kullanıcı adı veya şifre hatalı",
   "auth.verify_fields_required": "Kullanıcı adı ve doğrulama kodu zorunludur.",
   "auth.verify_done": "E-postan doğrulandı! Şimdi giriş yapabilirsin.",

@@ -17,6 +17,12 @@
 > expiry. A host that still sets the key is rejected at boot. Rationale and
 > migration: [../AUTH_CONTRACT.md](../AUTH_CONTRACT.md) §3.
 
+> **Amendment (2026-09-28, LP-01).** Registration and e-mail verification are
+> no longer deferred: `POST /api/v1/auth/register`, `/api/v1/auth/verify` and
+> `/api/v1/auth/verify/resend` use this ADR's envelope and blueprint and share
+> one registration authority with the web routes. They issue no session.
+> Contract: [../MOBILE_REGISTRATION.md](../MOBILE_REGISTRATION.md).
+
 ## Context
 
 AxisAI web authentication uses Flask-Login and a signed browser cookie containing
@@ -501,9 +507,10 @@ undeployed checks or future IaC work:
 
 ## Deferred Flows
 
-Registration, verification, password recovery, account deletion, Flutter secure
+Password recovery, account deletion, Flutter secure
 storage, Flutter refresh interception, authenticated mobile routing, and all
-non-auth product APIs remain deferred.
+non-auth product APIs remain deferred. (Registration and verification:
+see the LP-01 amendment above.)
 
 ## Rollback
 
