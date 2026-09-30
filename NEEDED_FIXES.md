@@ -1,173 +1,169 @@
-# FitX — Needed Fixes (Triage Report)
+# FitX (fitness-coach) — Triage & Needed Fixes
 
-**Date:** 2026-07-21
-**Scope:** 3 parallel read-only deep-dive audits — (1) Security, (2) Correctness bugs, (3) Architecture/Reliability.
-**Method:** Adversarial trace of every attack surface and high-risk flow. Every claim was verified against the code (cited `file:line`), not against CLAUDE.md.
-**Commit reviewed:** `21f2608` on `claude/amazing-dijkstra-numbn8` (== `main`).
-**Baseline:** The prior triage (`NEEDED_FIXES.md` @ `022d821`, PR #171) was resolved by PR #172. All 10 prior items were re-verified as genuinely fixed at HEAD (see appendix). This report lists only **new / still-open** findings.
+_Generated 2026-09-30 by an automated deep-dive triage (3 parallel review agents: security, core business logic, API/data/structure). Read-only investigation — no code was changed. Every finding below is backed by code that was actually read; the two highest-impact items were independently re-verified._
 
-## Headline
+## Executive summary
 
-The codebase remains **mature and defense-in-depth**. **No Critical or High-severity issues were found.** The three audits surfaced **1 Medium** reliability gap, **4 Low / Low–Medium** issues (one gamification-integrity, one security-hardening, two latent/low-blast-radius), and **2 open structural tech-debt** items carried over from the prior audit.
+The codebase is **mature and unusually well-hardened**. Security posture is strong (no Critical/High/Medium security vulnerabilities found), the pure/dirty service layering is rigorous and enforced by AST/import gates, single-authority discipline has been actively maintained, and concurrency-critical paths are covered by CI-selected PostgreSQL race suites.
 
-| # | Severity | Area | Type | Confidence |
-|---|----------|------|------|------------|
-| 1 | Medium | `ai_gate.py` thread-reserve breachable by ungated `_model_slots` callers | Reliability | Confirmed |
-| 2 | Low–Medium | `weekly_water` challenge counts toggle-events, not days | Correctness / integrity | Confirmed |
-| 3 | Low | `ProxyFix` trusts `X-Forwarded-Host`/`-Port` that nginx never sets | Security | Confirmed |
-| 4 | Low | OpenAI non-stream coach loop has no per-turn wall-clock budget | Reliability | Confirmed |
-| 5 | ~~Low~~ → **Resolved** | `detect_deload_due` effectively gated on "trained today" | Correctness | Confirmed → **fixed 2026-07-22** (re-rated High once PR5 exposed it) |
-| 6 | Low | `ai_coach.py` (1199 lines) god-module — still open | Structure | Confirmed |
-| 7 | Low | `social.py` (1033 lines, 3 domains) — still open | Structure | Confirmed |
+The findings are **consistency gaps and a gamification correctness bug**, not structural rot. Two items have real user-facing consequences and are the recommended fixes:
 
-> **Sprint 6 PR6.3 update (2026-07-23).** The combined PR6.1–PR6.3 Weekly Program UI
-> production-readiness re-audit surfaced **no new Critical, High, or Medium findings**.
-> It closed two nice-to-haves deferred from the PR5 audit (see `docs/WEEKLY_PROGRAM.md`
-> F6 and the PR5 handoff "next steps"): the endpoint now sends
-> `Cache-Control: private, no-store`, and the observability line was promoted from a
-> PII-bearing `debug` line to a classified, id-free `state=` line at `info`/`warning`
-> (CloudWatch metric promotion explicitly deferred, with a Logs Insights query recorded
-> in the handoff). The one Low finding raised earlier — live-browser responsive/a11y
-> validation — was subsequently **resolved**: a headless Chromium/Blink pass against an
-> ephemeral local fixture harness (real `training.css` + `weekly_program.js` + faithful
-> mount, mock responses, no prod credentials) rendered every state at 320/390/768/1366 px in
-> tr/en with zero overflow, correct status/alert semantics, Enter+Space retry, retry focus
-> lifecycle, stale/detached-response drop, 44 px tap target, heading contrast 6.85:1, and
-> one request per mount (+1 per retry). The one browser-sourced defect on record (card-heading
-> contrast 4.22:1) was fixed to `--color-text-2` and re-measured green. The full Python suite
-> also ran clean (2268 passed / 0 failed, reconciled to 2271 collected). Only an optional
-> manual interactive spot-check at Stage-1 remains. Items #1–#4, #6, #7 above are untouched
-> by PR6.3.
+| # | Finding | Severity | User impact |
+|---|---------|----------|-------------|
+| 1 | Meal-logging drops "log N meals/week" challenge progress after the first meal each day | **Medium** | Weekly meal challenge is effectively uncompletable; users lose earned XP/badges |
+| 2 | Pump-check read routes report storage faults as `AUTH_TEMPORARILY_UNAVAILABLE` | **Medium** | Native clients log the user out on a transient DB blip |
+| 3 | `/chat` bypasses the AI weekly quota / failure-cooldown that `/ask` enforces | Low | Freemium boundary inconsistency; `UserSession` row inflation |
+| 4 | `/chat` has no try/except or rollback around the AI call | Low | Latent generic 500 vs. the hardened `/ask` path |
+| 5 | Water quest claim and its award commit in two separate transactions | Low | Rare commit-failure window loses that day's water XP |
+| 6 | `_apply_move` reports `changed=True` for a no-op day swap | Low | Version churn / needless `plan_data` rewrite |
+| 7 | Raw exception objects logged on a few provider-failure paths | Low | Minor internal info in server logs (not to clients) |
+| 8 | CSP keeps `'unsafe-inline'` for inline `style` attributes | Low | Defense-in-depth gap (no live sink) |
 
 ---
 
-## 1. [Medium] Thread-reserve invariant is breachable by ungated routes blocking on `_model_slots`
-**Files:** `app/services/ai_gate.py:53,57-64` (`_model_slots`, `model_concurrency_slot`), invariant `ai_gate.py:68-91`; ungated callers `app/blueprints/food.py:22` (`food_search`) and `app/blueprints/social.py:881` (`respond_suggestion`).
+## 1. Meal challenge progress silently dropped after the first meal each day — Medium
 
-The A1/I1 "reserve 2 threads for `/health`" guarantee is computed as `WEB_THREADS − (AI_MAX_CONCURRENCY + SCRAPE_MAX_CONCURRENCY)` = `8 − (4 + 2)` = 2 (`ai_gate.py:70`). But `model_concurrency_slot()` acquires a **third** semaphore, `_model_slots` (default 4), with **no timeout** (`_model_slots.acquire()`, `ai_gate.py:60`) — and it is used by routes that are **not** behind `ai_concurrency_gate`: `food_search` (only per-user rate-limited) and `respond_suggestion`. Each request parked on that semaphore holds a gunicorn web thread.
+**Files**
+- `app/services/gamification.py:318-362` (`_claim_quest`, `complete_quest_for_user`) — **verified**
+- Callers: `app/blueprints/nutrition/diary.py:249,608`, `app/blueprints/nutrition/meallog.py:200,272,325`
 
-**Failure scenario:** 4 coach turns hold all `_ai_slots` + `_model_slots`. A cross-user burst of `food_search` cache-misses (per-user limits don't stop *different* users) or `respond_suggestion` calls then block on `_model_slots.acquire()` with no timeout → up to 4 more threads parked → all 8 web threads consumed → `/health` queues behind AI work → Docker HEALTHCHECK / deploy gate times out → **false rollback or restart-loop**. This is the exact starvation the reserve was designed to prevent; `test_ai_gate.py` asserts the reserve math only against the two gates it counts, giving false confidence.
+**Mechanism**
+`_claim_quest` calls `record_event(user_id, "meal_logged")` **first** — which stages a `weekly_meals` challenge `+1` via `begin_nested` savepoints and deliberately does **not** commit. It then checks the per-day `UserQuestProgress`; if today's daily quest is already claimed it `return None`. `complete_quest_for_user` sees `None` and returns **without `db.session.commit()`** (see `gamification.py:354-356`). The meal row itself was already committed earlier (`meal_idempotency.commit_once` / explicit commit), so the staged challenge increment sits in a fresh uncommitted transaction and is rolled back at request teardown.
 
-**Fix:** Give `model_concurrency_slot` a bounded `acquire(timeout=…)` returning a friendly 503 instead of blocking indefinitely; and/or put `ai_concurrency_gate` on `food_search` and `respond_suggestion`; and/or fold `_model_slots` consumers into the reserve invariant. At minimum, document that ungated model callers can breach the reserve.
+**Failure scenario**
+User logs 4 meals today:
+- Meal #1: daily quest unclaimed → `complete_quest_for_user` commits → `weekly_meals` progress `+1` persists.
+- Meals #2–#4: daily quest already claimed → `_claim_quest` returns `None` before the commit → each `+1` is staged and lost.
 
----
+Net: the "Bu hafta 10 öğün kaydet" challenge (`target_value=10`, metric `meal_logged`) increments **at most once per day**, so it maxes at 7/week and is effectively uncompletable. Users lose challenge XP/badges they legitimately earned.
 
-## 2. [Low–Medium] `weekly_water` challenge counts toggle-events, not days — completable in a single day
-**Files:** `app/blueprints/training.py:347-353` (emit) + `app/services/challenges.py:110-133` (`record_event`, no per-day dedup) + seed `challenges.py:184-186`.
+**Why other funnels are safe**
+- `workout_logged` → `workout_completion.complete_workout` commits unconditionally, and is 1/day anyway.
+- `water_logged` is gated to 1/day by `WaterLog.quest_fired` **and** its challenge counts days, so once/day is correct.
+- Only the meal path counts per-event while being gated by a per-day quest claim.
 
-The `weekly_water` challenge is `metric="water_logged", target_value=5`, described "log water on **5 days** this week". The funnel event fires only on the day's `0→positive` transition:
+**Fix direction**
+When `_claim_quest` finds the daily quest already claimed but `record_event` still staged challenge progress, that staged work must be committed. Options: have the meal-logging callers commit the session after `complete_quest_for_user` returns `None` (since `record_event` no-commit is by contract), or split the challenge funnel so `record_event`'s staged increments are committed independently of the daily-quest short-circuit. Add a regression test that logs ≥2 meals in one day and asserts `weekly_meals` progress increments per meal.
 
-```python
-if count > 0 and prev_count == 0:
-    complete_quest_for_user(current_user.id, "water_logged")  # → record_event("water_logged")
-```
-
-But `record_event` has only a **weekly** `period_key` and blindly does `progress = progress + amount` (`challenges.py:122-124`) — **no per-day guard**. The caller's "dedup" is `prev_count == 0`, which is defeatable: `count` is user-supplied, clamped to `0..8` (`training.py:319`), so a user can POST `count=5` (fires), POST `count=0` (prev=5, no fire), POST `count=5` (prev=0, **fires again**) — all on the **same calendar day**.
-
-**Failure scenario:** Toggle water `0→5` five times in one afternoon → `weekly_water` progress reaches 5 → a "log water 5 days" challenge completes in a single day, awarding its XP. (The DailyQuest XP itself is safe — deduped by `UserQuestProgress` per `date_key` — but the **challenge counter is inflated**.) The inline comment at `training.py:347-349` claims parity with the `active_day` pattern, but that analogy is broken: `active_day` fires exactly once per Istanbul day from a `FOR UPDATE`-locked branch (`hooks.py`), which is genuinely idempotent; `prev_count==0` is not.
-
-**Fix:** Give day-semantic challenge metrics a per-day idempotency key — e.g. `record_event` dedupes `water_logged` per Istanbul day (persist `last_event_day` on the progress row), or gate the emit on a persisted "first positive log today" marker instead of the mutable `prev_count`.
-
----
-
-## 3. [Low] `ProxyFix` trusts `X-Forwarded-Host` / `X-Forwarded-Port` that the reverse proxy never sets
-**Files:** `app/config.py:231` (`ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)`) vs `nginx.conf:107-110,121-124`.
-
-nginx sets only `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto` — it does **not** set or strip `X-Forwarded-Host` / `X-Forwarded-Port`. But ProxyFix is configured with `x_host=1, x_port=1`, so it reads those hyphenated headers, which nginx forwards from the client as-is. An external client can send `X-Forwarded-Host: evil.com` and ProxyFix overwrites Flask's host → `request.host` / `request.host_url` / `url_for(_external=True)` reflect the attacker value.
-
-**Blast radius (why Low, not High):** CSRF Layer 1 (`hooks.py:150`, Origin vs `request.host_url`) can be satisfied by a matching spoofed host, but **Layer 2** (per-session synchronizer token, `hooks.py:177-183`) still holds — cross-origin JS cannot read it, so this is **not** a CSRF bypass. External-URL generation (referral link `pages.py:75`) is self-inflicted per-request; logout referer check (`auth.py:590`) is primarily guarded by the unspoofable `Sec-Fetch-Site`. Defense-in-depth holds throughout.
-
-**Fix (simplest, closes it fully):** set `x_host=0, x_port=0` in the ProxyFix call — nginx forwards the correct `Host` natively, so nothing is lost. Alternatively, have nginx explicitly `proxy_set_header X-Forwarded-Host $host;` / `X-Forwarded-Port $server_port;` so the trusted proxy — not the client — controls them.
+_Pre-existing (history obscured by a file rename in commit e8b34d3)._
 
 ---
 
-## 4. [Low] OpenAI non-stream coach loop has no per-turn wall-clock budget
-**File:** `app/services/ai_coach.py:1010-1013` (`_run_coach_conversation_openai`).
+## 2. Pump-check read routes report storage faults as an auth failure — Medium
 
-PR #172 added per-turn deadlines (`_coach_turn_deadline` / `_remaining_coach_turn_seconds`) to the Bedrock non-stream loop (`ai_coach.py:1093`) and the stream loop (`ai_stream.py`), but the **OpenAI fallback** loop was not updated. Up to `_COACH_TOOL_LOOP_CAP` (5) rounds × 30 s OpenAI timeout ≈ 150 s single-turn thread-hold on the fallback path — each round holding one `_ai_slot` + `_model_slot` + web thread.
+**Files**
+- `app/blueprints/mobile_pump_checks.py:79-104` (`list_pump_checks`), `:107-119` (`get_pump_check`) — **verified**
+- `app/services/mobile_pump_checks/history.py`, `service.py:get_owned` (read paths raise only `InvalidPageSize`/`InvalidCursor`/`PumpCheckNotFound`)
+- Catch-all: `app/blueprints/mobile_api.py:184-196` (`normalize_unhandled_mobile_failure` → `AUTH_TEMPORARILY_UNAVAILABLE` 503)
 
-**Failure scenario:** Bedrock down → all coach turns route through OpenAI; a slow multi-tool turn holds an AI slot + thread ~150 s, compounding finding #1's starvation. Bounded by gunicorn `timeout=300` so no hard hang, but exceeds the intended per-turn budget and the parity #172 established.
+**Mechanism**
+The two GET routes catch only their expected domain exceptions. A DB/storage fault during a history list or single read is uncaught in-route, so it falls through to the blueprint-wide catch-all which answers `AUTH_TEMPORARILY_UNAVAILABLE` 503.
 
-**Fix:** Apply the same `_coach_turn_deadline` / `_remaining_coach_turn_seconds` guard (`timeout=min(30, remaining)`) to the OpenAI loop.
+**Impact**
+This is exactly the anti-pattern the codebase explicitly guards against elsewhere (`mobile_progress.py:41-60`, `mobile_today.py:34-51`, `mobile_nutrition.py:43-59`, `mobile_training.py` `TrainingReadUnavailable`): a well-behaved native client that reads `AUTH_TEMPORARILY_UNAVAILABLE` discards a perfectly good session and forces re-login. The pump-check read routes are the one native surface missing the domain-shaped 503 wrapper their siblings all have. (No stack-trace/DB-identity leak — the catch-all logs the type name only.)
 
----
-
-## 5. [RESOLVED 2026-07-22] `detect_deload_due` was effectively gated on "trained *today*" via the forward-looking current-week window
-
-> **Status: fixed.** `weekly_windows` now returns **trailing** windows — the newest one
-> *ends* on `end_day` (`[today - 6, today]`) instead of starting on it. The newest
-> bucket is a complete lived week, so it no longer reads as a phantom rest week and
-> `detect_deload_due` evaluates the block it was written for. No progression, planning,
-> or volume threshold changed; this was a windowing-correctness fix.
->
-> **Re-rated on discovery, before the fix:** the *Low / Suspected* rating below rested
-> explicitly on this layer being "not yet wired into runtime". Sprint 6 PR5 part 2
-> removed that basis by exposing `GET /api/training/weekly-program`, which published
-> the same partial window as `baseline_weekly_volume` — a user-facing weekly total
-> understated by roughly the user's training frequency (a 15000 kg week reported as the
-> 5000 kg session logged that day). The combined PR5 production-readiness audit raised
-> it to **High** on those grounds; both symptoms shared this one cause and were fixed
-> together.
->
-> **Regression cover:** `tests/test_training_progression.py::test_deload_is_not_gated_on_having_trained_today`,
-> `tests/test_training_history.py::test_weekly_windows_are_trailing_and_never_reach_past_end_day`,
-> and the multi-session block in `tests/test_weekly_program.py` (all five fail against
-> the pre-fix geometry). See `docs/TRAINING_HISTORY.md` and `docs/WEEKLY_PROGRAM.md`.
-
-**Files:** `app/services/training_progression/analysis.py:137-142` + windowing `training_history/analysis.py:41-49` (`weekly_windows`).
-
-*Original finding, retained for the record:*
-
-`weekly_windows(end_day, weeks)` makes the newest window **start** on `end_day`, covering `[today, today+6]`; since data only exists up to today, that bucket only ever contains **today's** entries. `volume_trend` / `series_trend` / `detect_plateau` tolerate this because they filter to active (`v > 0`) windows — but `detect_deload_due` does **not**:
-
-```python
-if any(v <= 0 for v in vols[-MIN_DELOAD_WEEKS:]):  # newest window == today only
-    return False
-```
-
-**Failure scenario:** A user in a genuine multi-week accumulation block, checked on a day they haven't yet trained → newest window volume = 0 → deload never flags. Deload can only ever fire on days the user already trained.
-
-**Severity Low / Suspected** because this progression/planning layer is **not yet wired into runtime** (docs: "later PRs wire it in"; only `tracking.py` heatmap/insights/workout + `time_series_model` consume the foundation today, and those use explicit trailing `[start, today]` ranges). The forward-window convention matches pre-existing `build_performance_history`, so it is consistent — but for `detect_deload_due` specifically it yields systematically never-fire output.
-
-**Fix:** Exclude the current partial window from the deload "all-active" check, or make the newest `weekly_windows` bucket trailing (`[today-6, today]`) if the intent is "last N trailing weeks."
+**Fix direction**
+Wrap the two GET service calls and map unexpected exceptions to a pump-check-shaped retryable 503 (e.g. `PUMP_CHECK_TEMPORARILY_UNAVAILABLE`, `retryable=True`), mirroring the sibling routes. Add a test that forces a storage fault on these GET routes (currently untested).
 
 ---
 
-## Structural tech-debt (open, unchanged severity — schedule as their own PRs)
+## 3. `/chat` is not covered by the AI weekly quota / failure-cooldown that `/ask` enforces — Low
 
-### 6. [Low] `ai_coach.py` god-module — 1199 lines
-Still the largest module; the prior audit's suggested `coach_tools/` extraction did not happen (it grew from 1178). No behavior change needed; refactor to reduce blast radius and monkeypatch surface.
+**File:** `app/blueprints/coach.py:70-175`
 
-### 7. [Low] `social.py` — 1033 lines spanning 3 product domains (chat / feed / pump-check + moderation)
-Still a catch-all HTTP surface. Consider splitting into per-domain blueprints.
+`/chat` calls `generate_coach_reply` (the same Bedrock Sonnet path as `/ask`) with only `AI_RATELIMIT` + `BEDROCK_RATELIMIT` limiters and the `MAX_QUESTION_CHARS` gate. It has **no** `reserve_ai_quota`, **no** `_ai_cooldown_response()`, and commits a new `UserSession` row on every call.
+
+**Impact:** A non-premium user can drive unlimited (within rate limit) heavy Sonnet calls through `/chat`, bypassing the freemium `FREE_WEEKLY_AI_CHATS` intent that `/ask` and `/ask/stream` enforce; also inflates the `UserSession` table (the `target_calories` authority). Exposure is limited by the legacy calculator path requiring a full BMR payload — hence Low, but it is an inconsistent freemium boundary.
+
+**Fix direction:** Bring `/chat` under the same `reserve_ai_quota` + cooldown treatment as `/ask`, or explicitly document why `/chat` is exempt.
 
 ---
 
-## Appendix — prior-audit (PR #171 → #172) status at HEAD
+## 4. `/chat` has no try/except around the AI call and does not roll back — Low
 
-All 10 prior findings verified **resolved**:
+**File:** `app/blueprints/coach.py:127-155`
 
-| # | Prior finding | Status |
-|---|---|---|
-| 1 | ai_gate boot invariant only warns | ✅ Fatal in prod (`enforce_gate_invariants`, `ai_gate.py:68-91`) |
-| 2 | Per-process gates assume workers=1, unenforced | ✅ `WEB_WORKERS!=1` fatal + single-source env (`gunicorn.conf.py` reads same vars) |
-| 3 | Hydration nudge divides by logged-days | ✅ Fixed 7-day window (`analytics_engine._check_hydration`) |
-| 4 | `ai_coach.py` god-module | ⚠️ **Still open** → finding #6 |
-| 5 | `social.py` multi-domain | ⚠️ **Still open** → finding #7 |
-| 6 | Inline `WorkoutLog` readers | ✅ Routed through `training_history.fetch_workout_entries` |
-| 7 | Bedrock 60s per-call not per-turn | ✅ Bedrock + stream loops; ⚠️ OpenAI loop missed → finding #4 |
-| 8 | Dead quota-counter functions | ✅ Removed (`premium.py`, no dangling refs) |
-| 9 | Unescaped LIKE wildcards | ✅ `ilike(..., escape="\\")` (`social.py:566`) |
-| 10 | Stream quota on immediate disconnect | By-design, unchanged |
+Unlike `/ask` (which wraps generation, rolls back, records failure, refunds quota), `/chat` calls `generate_coach_reply` bare. In practice `generate_coach_reply` returns a friendly fallback rather than raising (COACH_FALLBACKS), so this is latent — but any unexpected raise yields a generic Flask 500 with no `db.session.rollback()`. No commit precedes it, so no data corruption; just an inconsistency with the hardened `/ask` path. Fix alongside #3.
 
-## Areas verified clean (no new issues)
+---
 
-- **AuthZ / IDOR:** every record-by-id load ownership-scoped to `current_user.id`; feed/pump-check via `_visible_*_or_403`; reposts block audience-widening; S3 keys carry per-user segment guard.
-- **CSRF / CSP / XSS:** two-layer CSRF on all writes, no state-changing GET; per-request nonce, no `unsafe-inline`, jsdelivr SRI-pinned; zero `|safe` on user data; frontend `esc()` before `innerHTML`.
-- **Auth/JWT:** full RS256 + `iss`/`aud`/`exp`/`token_use` validation; session-fixation-safe login; Fernet-encrypted server-side tokens.
-- **SSRF:** positive `is_global` allow-list, port allowlist, per-hop redirect re-validation, DNS-pinning, body-size caps.
-- **AI failover B-rule / B16 / quota:** fallback text classified as fallback → not persisted, quota refunded; provider switch only before first delta AND `tools_ran==0`.
-- **Gamification tx-safety:** `FOR UPDATE` XP, savepoint-isolated challenges, `count_challenge_xp=False` recursion cut, idempotent rollover via `WeeklyResetLog` UNIQUE.
-- **Meal idempotency:** `commit_once` resolves uniqueness race; XP/quests only on `created==True`.
-- **Deploy/rollback:** no new migrations since baseline; the two recent ones are expand-only + re-runnable; boot-upgrade FATAL fail-fast intact.
-- **Layering:** `training_*/` and `app/prompts/` import no Flask/db; dependency direction one-way as documented.
+## 5. Water quest claim and its award live in two separate transactions — Low
+
+**File:** `app/blueprints/training.py:955-984` (`set_water` / `_claim_water_funnel_for_today`)
+
+`_claim_water_funnel_for_today` commits `quest_fired=True` in its own transaction, then `complete_quest_for_user("water_logged")` commits the DailyQuest claim + XP + challenge increment separately. If the second commit fails/rolls back, `quest_fired` stays `True`, permanently suppressing retry → that day's water challenge/quest XP is lost. Narrow (commit-failure) window.
+
+**Fix direction:** Set `quest_fired` and perform the award in a single transaction, or make the flag advisory (re-check actual award state) so a failed award can be retried.
+
+---
+
+## 6. `_apply_move` reports `changed=True` for a no-op day swap — Low
+
+**File:** `app/services/plan_mutation/document.py:605-625` (`_apply_move`)
+
+Every non-same-day move returns `True`, so swapping two days whose content is identical bumps `mutation_version` and rewrites `plan_data` bytes despite no effective change — contradicting the module's "deterministic no-op" principle honored by the other `_apply_*` helpers. Churn only; the resulting plan is correct.
+
+**Fix direction:** Compare source/target content and return `changed=False` when the move produces byte-identical `plan_data`.
+
+---
+
+## 7. Raw exception objects logged on a few provider-failure paths — Low
+
+**Files:** `app/services/ai_coach.py:686`, `app/services/fatsecret.py:304`, and several full-URL logs in `app/blueprints/menu.py`
+
+Most of the codebase logs `type(e).__name__` only (PII/secret-free) and masks emails. A handful of paths log the full exception object, which for an `S3Error`/provider error can carry internal detail (S3 object keys, bucket, internal URLs) into logs. Server-logs-only exposure; requires log access to read. Inconsistent with the repo's otherwise-strict PII-free logging convention.
+
+**Fix direction:** Normalize these to `type(e).__name__` (or an explicitly sanitized message) to match convention.
+
+---
+
+## 8. CSP permits inline `style` attributes — Low (accepted tradeoff)
+
+**File:** `app/hooks.py:62-67` (`style-src-attr 'unsafe-inline'`)
+
+The CSP keeps `'unsafe-inline'` for inline `style="..."` attributes (used for dynamic progress-bar widths) while correctly forbidding inline `<script>`/`<style>` blocks (nonce-gated) and `on*` handlers (`script-src-attr 'none'`). If a stored/reflected HTML-injection primitive were ever introduced, an attacker could inject `style` attributes (CSS-based UI-redress / limited selector-based exfil) — no script execution. There is currently no injection sink feeding this (Jinja autoescape + `|tojson`). Documented, deliberate tradeoff.
+
+**Fix direction (optional):** Move dynamic widths to nonce'd `<style>` or CSS custom properties and drop `style-src-attr 'unsafe-inline'`.
+
+---
+
+## What was audited and found solid (no action)
+
+**Security (strong):**
+- JWT validation (`cognito_jwt.py`): RS256 enforced, issuer + audience/client_id + `token_use` checked; forced JWKS refresh is single-flight + cooldown-gated; `jwks_unavailable` (503, session preserved) distinguished from definitive rejects. `auth_contract.py` pins `token_use="access"`, leeway hard-pinned to 0, AST allow-list of call sites.
+- CSRF: Origin/Referer + per-session synchronizer token (constant-time compare); mobile API correctly Bearer-only.
+- SSRF (`menu_fetch.py`, `wearables.py`): positive `is_global` IP check, IPv4-mapped-IPv6 unwrap, port allow-list, per-hop re-validation, DNS-rebinding TOCTOU closed via pinned `getaddrinfo`, size caps.
+- Path traversal / S3 (`s3_helper.py`): bucket server-chosen; strict key grammar + owner-equality; `expected_user_id` IDOR defense-in-depth (incl. LLM-supplied keys).
+- Injection: no `eval`/`exec`/`os.system`/`subprocess`/`pickle`; all raw SQL parameterized; no SSTI.
+- File upload (`validators.py`): data-URL decode + Pillow `verify()` + format allow-list + 40MP decompression-bomb cap + size caps + global `MAX_CONTENT_LENGTH`.
+- IDOR / owner-scoping: reads/writes consistently `filter_by(user_id=current_user.id)`; `CustomMealItem` queries safe via owner-scoped parent load; social gated by friend/visibility checks.
+- Secrets/cookies: `SECRET_KEY` required in prod; HttpOnly/SameSite=Lax/Secure cookies; IAM instance profiles (no hardcoded AWS keys); emails masked in logs.
+
+**Core logic (correct, high confidence):**
+- `nutrition_targets.py` macro split / remaining budget + all four consumers (F2/F3a consistent, null-vs-zero handled).
+- JS↔Python rounding parity (`plan_facts._display_kcal` reproduces `Math.round`); no meal double-counting (ledger-only reads).
+- `plan_mutation` / `plan_replacement` / `plan_owner_lock` / `plan_confirmation`: lock ordering (op-row → user → plan-rows), `populate_existing().with_for_update()` staleness fix, `expected_plan` freshness all correct.
+- `workout_session` checkpoint (single conditional UPDATE keyed on base revision), replay/idempotency, single-active-session partial-unique-index, completion double-write prevention (`uq_pump_check_day`), `expected_checkpoint_revision` verified under row lock.
+- `timeutil.py`: no forbidden `date.today()`/`utcnow().strftime`/`created_at.date()` bypasses; Istanbul-day windows + ISO-week boundaries consistent.
+- `award_xp`/`update_streak`: column-level `FOR UPDATE` re-read avoids identity-map lost-update; `record_event` per-challenge savepoint isolation avoids session poisoning.
+
+**API / data / structure (healthy):**
+- Migration re-runnability: every table-creating migration after the fresh-schema stamp is `has_table`/column-inspection guarded.
+- Cascade-delete: all 41 user-FK models covered (in `cli.py _user_child_models` or via parent/bidirectional handling).
+- AI pipeline: Bedrock→OpenAI B-rule guard consistent; cache-key isolation hashes full context (no cross-user collision); error-fallback correctly skips persistence (B16); no transaction held across provider network I/O.
+- Boot fail-fast on migration failure (health gate → rollback); expand/contract migration discipline honored.
+
+**Structure notes:**
+- `ai_coach.py` (~70KB) and `social.py` (~55KB) are god-modules — the hardest surfaces to reason about; `ai_coach` is partly mitigated by extraction with back-compat re-exports. Candidate for further decomposition, not urgent.
+- The blueprint-wide `@bp.errorhandler(Exception)` on `mobile_api` is a double-edged net: it prevents leaks but converts un-wrapped domain faults into an auth outcome (root cause of #2). Consider a non-auth default (`TEMPORARILY_UNAVAILABLE`) so a missed wrapper degrades safely.
+- Test gaps: mobile pump-check read-failure path (#2) untested; Windows-only `node -e` presentation tests are CI-authoritative only.
+
+---
+
+## Recommended order of work
+
+1. **#1 (meal challenge)** — real correctness bug affecting earned rewards; add a per-day multi-meal regression test.
+2. **#2 (pump-check 503)** — one-surface consistency fix with clear user impact; add a storage-fault test.
+3. **#3/#4 (`/chat` hardening)** — align the freemium/rollback boundary with `/ask`.
+4. **#5, #6, #7** — low-risk polish.
+5. **#8 + the `mobile_api` catch-all default** — defense-in-depth, schedule as tech-debt.
