@@ -16,7 +16,7 @@ from app.blueprints import coach as coach_bp
 from app.extensions import db
 from app.models import User, UserSession
 from app.services import ai_coach, context_builder, premium
-from app.services.response_formatter import COACH_FALLBACKS
+from app.services.response_formatter import COACH_FALLBACKS, PLAN_REPLY_FALLBACKS
 
 CHAT_PAYLOAD = {
     "weight": 80, "height": 180, "age": 30, "gender": "male",
@@ -176,6 +176,35 @@ def test_chat_model_fallback_refunds_quota_and_records_failure(
     db.session.expire_all()
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
     assert recorded == [auth_user.id]
+
+
+@pytest.mark.parametrize("language", ["tr", "en"])
+def test_chat_real_provider_failure_text_refunds_quota_and_records_failure(
+        client, auth_user, monkeypatch, language):
+    # The REAL provider-failure path: generate_coach_reply swallows the model
+    # error and returns its own fallback text. That text must be recognised as a
+    # hata-yedeği, otherwise the failed turn keeps its quota charge and resets
+    # the failure counter (the hand-picked COACH_FALLBACKS string above is not
+    # what generate_coach_reply returns).
+    auth_user.language = language
+    db.session.commit()
+    recorded, cleared = [], []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda uid: recorded.append(uid))
+    monkeypatch.setattr(coach_bp.ai_recovery, "clear_ai_failures",
+                        lambda uid: cleared.append(uid))
+
+    def boom(**kwargs):
+        raise RuntimeError("bedrock and openai are both down")
+    monkeypatch.setattr(ai_coach, "_heavy_chat", boom)
+
+    resp = client.post("/chat", json=CHAT_PAYLOAD)
+    assert resp.status_code == 200
+    assert resp.get_json()["coach_reply"] in PLAN_REPLY_FALLBACKS.values()
+    db.session.expire_all()
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+    assert recorded == [auth_user.id]
+    assert cleared == []
 
 
 def test_chat_success_clears_failure_counter_and_keeps_quota_spent(

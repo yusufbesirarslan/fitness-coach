@@ -63,6 +63,7 @@ from app.services.memory_manager import (  # noqa: F401 (re-export)
 from app.services.pump_checks import latest_training_plan_score
 from app.services.response_formatter import (  # noqa: F401 (re-export)
     COACH_FALLBACKS as _COACH_FALLBACKS,
+    PLAN_REPLY_FALLBACKS as _PLAN_REPLY_FALLBACKS,
     is_coach_error_fallback,
 )
 from app.timeutil import app_today, day_key, utc_day_bounds
@@ -1423,9 +1424,7 @@ def generate_coach_reply(name, age, gender, weight, height,
         )
     except Exception:
         current_app.logger.exception("Koç yorumu üretilemedi")
-        return ("Coach feedback is unavailable right now, please try again."
-                if _coach_lang(language) == "en"
-                else "Koç yorumu şu an alınamıyor, lütfen tekrar dene.")
+        return _PLAN_REPLY_FALLBACKS["en" if _coach_lang(language) == "en" else "tr"]
 
 
 def generate_checkin_feedback(name, weight, prev_weight, days_passed,
