@@ -659,7 +659,9 @@ def test_initial_request_topology_is_unchanged(app, auth_user, client, training_
     # widget's own pre-existing hydration (it hosts the menu scanner).
     assert paths(traffic) == Counter({'/nutrition': 1, '/meal-log/today': 1,
         '/nutrition-plan/active': 1, '/water': 1, '/notifications/unread-count': 1,
-        '/coach/history': 1}), paths(traffic)
+        '/coach/history': 1,
+        # NUTR-PR6: the ONE server-owned day-view read at load.
+        '/nutrition-day-view': 1}), paths(traffic)
     for lazy in ('/meal-log/history', '/api/diary/today', '/api/food', '/api/menu',
                  '/supplements', '/meal-log/review', '/nutrition-plan/save'):
         assert not any(p.startswith(lazy) for p in paths(traffic)), lazy

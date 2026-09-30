@@ -548,9 +548,12 @@ def test_handoff_module_imports_no_ai_and_quotes_the_page_tables():
             mods.add(node.module)
         elif isinstance(node, ast.Import):
             mods.update(a.name for a in node.names)
-    assert mods == {"flask", "app.i18n", "app.extensions",
+    # NUTR-PR6 added the nutrition-day kind: `math` (display rounding) and the
+    # read-only day view. Still no AI/provider import.
+    assert mods == {"flask", "app.i18n", "app.extensions", "math",
                     "app.services.progress_insights",
-                    "app.services.adaptive_plan_context"}
+                    "app.services.adaptive_plan_context",
+                    "app.services.nutrition_day_view"}
 
     from app.coach_handoff import ACTION_KEYS, INSIGHT_KEYS
     assert set(INSIGHT_KEYS) == set(INSIGHT_CODES)

@@ -143,11 +143,12 @@ def fetch_coach_context(user_id, question="", language="tr", handoff=None):
             f"{coach_context_queries.get_user_workout_history(user_id, 7)}")
     except Exception:
         current_app.logger.warning("[COACH] antrenman geçmişi alınamadı", exc_info=True)
-    from app.coach_handoff import coach_handoff_context
+    from app.coach_handoff import coach_handoff_context, replaces_plan_projection
     handoff_context = coach_handoff_context(handoff, user_id, language)
     if handoff_context:
         parts.append(handoff_context)
-    elif current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False):
+    if ((not handoff_context or not replaces_plan_projection(handoff))
+            and current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False)):
         from app.services.adaptive_plan_context import build_coach_plan_context
 
         parts.append(build_coach_plan_context(user_id, language))

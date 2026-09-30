@@ -39,6 +39,7 @@ KNOWN_ENDPOINTS = {
     "'/api/food/barcode?code='", "'/api/food/search?q='", "'/api/diary/today'",
     "'/api/diary/meal'", "'/api/diary/meal/'", "'/api/diary/item/'",
     'url',   # fetchServings: '/api/food/<id>/servings' | '/api/food/servings-by-name?name='
+    "'/nutrition-day-view'",  # NUTR-PR6: the bounded server-owned day view (read only)
 }
 
 PR3_KEYS = [

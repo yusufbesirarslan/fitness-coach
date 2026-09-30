@@ -353,6 +353,9 @@ async function loadTodayData(notifyFailure = false) {
     renderTimeline(today.meals);
     _todayConfirmed = true;
     _todayRefreshPending = false;
+    // NUTR-PR6: a Next step that asked to retry the ledger is re-read once the
+    // ledger is readable again (single flight; no read otherwise).
+    if (_nextKind === 'retry') loadDayView();
   } catch (e) {
     console.error('loadTodayData', e);
     if (generation !== _todayReadGeneration) return;
@@ -364,6 +367,101 @@ async function loadTodayData(notifyFailure = false) {
 }
 
 function retryTodayData() { loadTodayData(); }
+
+/* ── NUTR-PR6 NEXT STEP ──
+   `next_action` is SERVER-OWNED (app/services/nutrition_day_view.py). This
+   script never derives it from totals, targets, water or the plan: it reads
+   `GET /nutrition-day-view` once at load (and on an explicit retry only —
+   never on a tab switch or redraw, never by polling) and maps an ALLOWLISTED
+   kind to an action that already exists. The server's label_key must equal the
+   allowlist's; any other kind/key/shape is shown as "no step", never run.
+     log_food   → openLogSheet()  (the PR4 chooser; opening it writes nothing)
+     set_target → /setup?yeniden=1 (the onboarding form, the one target writer;
+                  a constant link in the template, never a URL from JSON)
+     retry      → re-read the day view + Today's ledger (the failed read)     */
+const NEXT_ACTIONS = Object.freeze({
+  log_food: Object.freeze({ label: 'nutrition.next.log_food', lead: 'nutrition.next.log_food_lead' }),
+  set_target: Object.freeze({ label: 'nutrition.next.set_target', lead: 'nutrition.next.set_target_lead' }),
+  retry: Object.freeze({ label: 'nutrition.next.retry', lead: 'nutrition.next.retry_lead' }),
+});
+let _dayViewSeq = 0;           // every read takes a ticket; a superseded answer is dropped
+let _dayViewInFlight = null;   // single flight: a double retry is ONE request
+let _nextKind = null;          // the allowlisted kind currently on screen, or null
+
+function allowedNextAction(view) {
+  const na = view && typeof view === 'object' ? view.next_action : null;
+  if (!na || typeof na !== 'object' || na.state !== 'available') return null;
+  if (typeof na.kind !== 'string' || !Object.prototype.hasOwnProperty.call(NEXT_ACTIONS, na.kind)) return null;
+  return NEXT_ACTIONS[na.kind].label === na.label_key ? na.kind : null;
+}
+
+function renderNextStep(state, kind) {
+  const box = document.getElementById('nut-next');
+  const lead = document.getElementById('nut-next-lead');
+  const button = document.getElementById('nut-next-action');
+  const link = document.getElementById('nut-next-link');
+  // Focus inside the section (a retried control, or the heading that held it
+  // while loading) follows the section's new control; nothing else moves it.
+  const hadFocus = box.contains(document.activeElement);
+  _nextKind = kind;
+  box.dataset.nextState = state;
+  box.dataset.nextKind = kind || '';
+  box.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
+  let leadKey = 'nutrition.next.none';
+  if (state === 'loading') leadKey = 'nutrition.next.loading';
+  else if (state === 'unavailable') leadKey = 'nutrition.next.unavailable';
+  else if (kind) leadKey = NEXT_ACTIONS[kind].lead;
+  lead.textContent = __t(leadKey);
+  link.hidden = kind !== 'set_target';
+  const buttonKey = state === 'unavailable' ? 'nutrition.next.retry'
+    : (kind && kind !== 'set_target' ? NEXT_ACTIONS[kind].label : null);
+  button.hidden = !buttonKey;
+  button.textContent = buttonKey ? __t(buttonKey) : '';
+  if (kind === 'log_food') {
+    button.setAttribute('aria-haspopup', 'dialog');
+    button.setAttribute('aria-controls', 'log-sheet');
+  } else {
+    button.removeAttribute('aria-haspopup');
+    button.removeAttribute('aria-controls');
+  }
+  if (hadFocus) {
+    const into = !link.hidden ? link : (!button.hidden ? button : document.getElementById('nut-next-title'));
+    into.focus();
+  }
+}
+
+function loadDayView() {
+  if (_dayViewInFlight) return _dayViewInFlight;
+  const seq = ++_dayViewSeq;
+  renderNextStep('loading', null);
+  const read = (async () => {
+    let view = null;
+    let ok = false;
+    try {
+      const res = await fetch('/nutrition-day-view', { headers: { Accept: 'application/json' } });
+      if (res.ok) { view = await res.json(); ok = !!view && typeof view === 'object'; }
+    } catch (e) { ok = false; }
+    if (seq !== _dayViewSeq) return;
+    if (!ok) { renderNextStep('unavailable', null); return; }
+    const kind = allowedNextAction(view);
+    renderNextStep(kind ? 'available' : 'empty', kind);
+  })();
+  _dayViewInFlight = read;
+  read.finally(() => { if (_dayViewInFlight === read) _dayViewInFlight = null; });
+  return read;
+}
+
+/* The one data-action on the Next step button. It re-checks the allowlist at
+   click time, so nothing but the three known actions can ever run. */
+function runNextAction(el) {
+  const box = document.getElementById('nut-next');
+  if (box.dataset.nextState === 'unavailable') { retryDayView(); return; }
+  if (!_nextKind || !Object.prototype.hasOwnProperty.call(NEXT_ACTIONS, _nextKind)) return;
+  if (_nextKind === 'log_food') openLogSheet();
+  else if (_nextKind === 'retry') { retryDayView(); loadTodayData(); }
+}
+
+function retryDayView() { return loadDayView(); }
 
 /* ── MEAL TIMELINE ── */
 var _SLOT_ICONS = {
@@ -2786,3 +2884,4 @@ loadTodayData();
 loadQuickAddSection();
 loadActivePlan();
 initWaterButton();
+loadDayView();

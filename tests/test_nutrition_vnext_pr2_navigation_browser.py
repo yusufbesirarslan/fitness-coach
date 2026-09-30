@@ -29,7 +29,8 @@ def test_initial_and_lazy_requests(app, auth_user, training_page):
     page.goto('http://localhost/nutrition')
     page.wait_for_timeout(300)
     assert paths(traffic) == Counter({'/nutrition': 1, '/meal-log/today': 1,
-        '/nutrition-plan/active': 1, '/water': 1, '/notifications/unread-count': 1, '/coach/history': 1}), paths(traffic)
+        '/nutrition-plan/active': 1, '/water': 1, '/notifications/unread-count': 1, '/coach/history': 1,
+        '/nutrition-day-view': 1}), paths(traffic)   # NUTR-PR6: one day-view read at load
     evidence = Path('docs/evidence/nutrition-pr2')
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / 'after-requests.json').write_text(json.dumps(dict(paths(traffic)), indent=2), encoding='utf-8')

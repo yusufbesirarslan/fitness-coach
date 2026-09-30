@@ -603,6 +603,8 @@ def test_the_web_nutrition_blueprint_publishes_one_ledger_mutation_route(app):
         ("/nutrition-plan", frozenset({"POST"})),
         ("/nutrition-plan/save", frozenset({"POST"})),
         ("/nutrition-plan/active", frozenset({"GET"})),
+        # NUTR-PR6: read-only day view (a projection, not a ledger mutation).
+        ("/nutrition-day-view", frozenset({"GET"})),
     }
     ledger_mutations = {
         rule for rule in nutrition_rules

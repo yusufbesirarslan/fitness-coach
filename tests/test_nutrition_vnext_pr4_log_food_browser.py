@@ -30,7 +30,8 @@ from test_nutrition_vnext_pr3_daily_browser import CATALOG, PLAN, fail, open_tod
 OPEN = re.compile(r'\bopen\b')
 PRIMARY = ['search', 'barcode', 'menu', 'quick-add', 'build-meal']
 INITIAL = Counter({'/nutrition': 1, '/meal-log/today': 1, '/nutrition-plan/active': 1,
-                   '/water': 1, '/notifications/unread-count': 1, '/coach/history': 1})
+                   '/water': 1, '/notifications/unread-count': 1, '/coach/history': 1,
+                   '/nutrition-day-view': 1})   # NUTR-PR6: one day-view read at load
 PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==')
 
 # One provider product per discovery method: what FatSecret would answer to

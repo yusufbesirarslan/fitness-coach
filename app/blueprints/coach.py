@@ -22,7 +22,7 @@ from app.services.premium import (
     reservation_week,
     reserve_ai_quota,
 )
-from app.coach_handoff import REVIEW_PROGRESS_INSIGHT, coach_handoff_message
+from app.coach_handoff import coach_handoff_message, handoff_marker
 from app.i18n import t
 from app.timeutil import app_date_of, app_today
 
@@ -262,8 +262,8 @@ def ask_coach():
     lang = current_user.language
     user_id = current_user.id
     try:
-        handoff_kw = ({"handoff": REVIEW_PROGRESS_INSIGHT}
-                      if data.get("handoff") == REVIEW_PROGRESS_INSIGHT else {})
+        marker = handoff_marker(data.get("handoff"))
+        handoff_kw = {"handoff": marker} if marker else {}
         result = generate_answer(user_id, question, client_history,
                                  language=lang, **handoff_kw)
         # Sağlayıcı dostça bir hata metni döndürürse önceden ayrılan hakkı geri ver.
@@ -361,8 +361,8 @@ def ask_coach_stream():
     def generate():
         work_performed = False
         try:
-            handoff_kw = ({"handoff": REVIEW_PROGRESS_INSIGHT}
-                          if data.get("handoff") == REVIEW_PROGRESS_INSIGHT else {})
+            marker = handoff_marker(data.get("handoff"))
+            handoff_kw = {"handoff": marker} if marker else {}
             for event in stream_answer(user_id, question, client_history,
                                        language=lang, **handoff_kw):
                 kind = event["type"]
