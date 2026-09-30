@@ -649,7 +649,9 @@
 .apd-sub { margin: 0; }
 .apd-meals { list-style: none; padding: 0; margin: 0; }
 .apd-meal-hdr { flex-wrap: wrap; }
-.apd-meal-name { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+/* The slot name keeps its natural width: on a narrow card the badge and kcal
+   wrap to the next line instead of squeezing "Breakfast" into "Bre/akf/ast". */
+.apd-meal-name { margin: 0; min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
 .apd-meal-list li, .plan-meal-items li { overflow-wrap: anywhere; }
 .apd-badge, .plan-badge {
   display: inline-block; font-size: var(--text-2xs); font-weight: var(--weight-bold);

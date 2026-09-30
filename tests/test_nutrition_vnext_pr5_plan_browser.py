@@ -802,7 +802,20 @@ GEOMETRY = """() => {
   const clipped = [...document.querySelectorAll('#panel-plan *, #plan-replace-modal *')]
     .filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1 && getComputedStyle(e).overflowX !== 'auto')
     .map(e => e.id || e.className);
-  return {overflow, clipped, vw: innerWidth, vh: innerHeight};
+  // A slot name ("Breakfast") must never be broken inside a word: its box is at
+  // least as wide as its widest word (clipping alone misses a mid-word wrap).
+  const brokenWords = [...document.querySelectorAll('#panel-plan .apd-meal-name')]
+    .filter(e => e.offsetParent && e.textContent.trim().split(/\\s+/).some(w => {
+      const probe = document.createElement('span');
+      probe.style.whiteSpace = 'nowrap';
+      probe.textContent = w;
+      e.appendChild(probe);
+      const wide = probe.getBoundingClientRect().width > e.clientWidth + 1;
+      probe.remove();
+      return wide;
+    }))
+    .map(e => e.textContent);
+  return {overflow, clipped, brokenWords, vw: innerWidth, vh: innerHeight};
 }"""
 
 
@@ -823,7 +836,7 @@ def test_plan_layout_holds_from_320_to_1366(app, auth_user, training_page, gener
     for width in (320, 390, 430, 768, 1024, 1366):
         page.set_viewport_size({'width': width, 'height': 800})
         g = page.evaluate(GEOMETRY)
-        assert not g['overflow'] and g['clipped'] == [], (width, g)
+        assert not g['overflow'] and g['clipped'] == [] and g['brokenWords'] == [], (width, g)
         assert_control(page, '#plan-replace-btn', width)
     open_builder(page)
     generate(page)
