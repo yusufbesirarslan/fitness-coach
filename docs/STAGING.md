@@ -60,15 +60,16 @@ enforced by a mechanism, not by an operator remembering it.
 | Staging tooling can never target the production instance | `scripts/staging_control.py` requires **both** `AXISAI_STAGING_INSTANCE_ID` and `AXISAI_PRODUCTION_INSTANCE_ID` and aborts if they are equal, then sends the production id to the host, where `assert_staging_instance` compares it against the live IMDSv2 instance id. Invoked directly over an SSM session with no production id supplied, that second comparison is skipped and the marker files below are the guard that remains — so deploy through the controller |
 | The host cannot be mistaken for production | `/opt/axisai-staging/ENVIRONMENT` must read exactly `staging`, and `/opt/axisai-staging/INSTANCE_ID` must equal the live instance id |
 | Staging metrics cannot contaminate production metrics | the staging instance role allows `cloudwatch:PutMetricData` only for `AxisAI/Staging/Runtime` and `AxisAI/Staging/AI`; `FitX/Runtime` and `FitX/AI` return `AccessDenied` (verified in both directions) |
-| Staging cannot email a real person | the staging Cognito pool has no CustomEmailSender Lambda, and `RESEND_API_KEY` is unset |
+| Staging application code sends no email | `RESEND_API_KEY` is unset, so the app's own mail service is a no-op. **This does not cover Cognito.** The staging pool sends with `COGNITO_DEFAULT` and has no CustomEmailSender Lambda, so Cognito really delivers verification and password-reset codes to whatever address an account carries. What keeps real people out of staging mail is the account convention in §7, which is a rule and not a mechanism |
 | Staging cannot write to production storage | `S3_BUCKET_NAME` is unset, so `s3_helper.is_enabled()` is `False` |
 | The production deploy path cannot reach staging | production authority (`.github/workflows/deploy.yml` → `scripts/deploy_control.py` → `scripts/production_deploy.sh`) names only the production instance; nothing in it accepts a staging target |
 | The staging schedule cannot stop production | `axisai-staging-scheduler-role` is scoped to the staging instance ARN, and its inline policy grants `ec2:StopInstances` only |
 
 Staging holds **no production data of any kind**: no real emails, password
 hashes, food logs, workout logs, photos, coach conversations, tokens, or
-sessions. Its accounts are synthetic (§7). No production snapshot was restored
-into it.
+sessions. Its accounts are synthetic (§7). The one narrow exception is a
+short-lived qualification account on a controlled mailbox, deleted once the
+qualification finishes. No production snapshot was restored into it.
 
 ## 4. Starting staging
 
@@ -200,8 +201,53 @@ Accounts live in the **staging** Cognito pool and are synthetic. The convention:
 * created with `--message-action SUPPRESS` and confirmed administratively, so no
   message is generated at all.
 
-Never create a staging account with a real address, and never copy a production
-account into this pool.
+**Real addresses.** Use the synthetic convention above by default. It is the
+only thing standing between staging and a real inbox: the pool sends with
+`COGNITO_DEFAULT`, so an account with a real address really receives
+verification and reset codes (§3).
+
+The one exception is a qualification where real email delivery is itself under
+test, such as signup verification or a password-reset code on a physical
+device. An account created under this exception:
+
+* uses a real mailbox the operator controls, approved explicitly and in
+  advance for that one qualification. It is never a third party's address;
+* is never a production identity. Never copy a production account into this
+  pool, or reuse a production username or email here;
+* is deleted as soon as the qualification finishes, from Cognito **and** from
+  the application database (below);
+* gets an entry in the log below: which qualification, who approved it, and
+  the cleanup evidence. Record it as "controlled mailbox". Never record the
+  address, verification or reset codes, or passwords.
+
+**Removing a qualification account.** Delete Cognito and the database together,
+never one alone. Login provisions a local `User` from any live Cognito identity
+(`app/services/mobile_auth.py`), so delete the Cognito user **first**, then
+immediately purge the local account with the canonical CLI inside the `web`
+container. Purging the local account first leaves a window in which a login
+recreates it.
+
+```bash
+aws cognito-idp admin-delete-user --region eu-central-1 \
+  --user-pool-id eu-central-1_KH1YUFTCK --username <username>
+
+# on the host, in /opt/axisai-staging/repo:
+DC="docker compose -f docker-compose.yml -f /opt/axisai-staging/docker-compose.staging.yml"
+$DC exec -T web flask --app starter cleanup-test-users --username <username>        # dry run
+$DC exec -T web flask --app starter cleanup-test-users --username <username> --yes
+```
+
+`cleanup-test-users` deletes through `_purge_user` (`app/cli.py`), which
+removes every row that references the user, including `MobileAuthSession` and
+`CognitoSession`. Afterwards, check that `admin-get-user` answers
+`UserNotFoundException` and that no `User` row matches the username, the email
+or the `cognito_sub`.
+
+**Qualification exception log**
+
+| Window | Qualification | Accounts | Approval | Cleanup evidence |
+| --- | --- | --- | --- | --- |
+| 2026-09-29 → 2026-09-30 | LP-07 physical iPhone qualification (`axisai-mobile` #26): real signup verification and password-reset delivery | `lp07qa_a`, `lp07qa_b`, `lp07qa_c`, all on controlled mailboxes | Repository owner, for LP-07. This rule did not exist yet, so the entry was recorded retroactively | 2026-09-30: `admin-delete-user` for all three, then `cleanup-test-users --username … --yes` (3 local users, 7 `MobileAuthSession` rows, no other owned data). Verified: `UserNotFoundException` for each, and no `User`/session row by username, email alias or `cognito_sub` |
 
 **Credential handling — known gap, recorded honestly.** The password for the
 readiness account was set through an SSM command rather than stored as an SSM
