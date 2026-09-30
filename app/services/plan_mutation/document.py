@@ -615,6 +615,14 @@ def _apply_move(program, command):
     source_content = {k: v for k, v in source.items() if k != FIELD_DAY}
     target_content = {k: v for k, v in target.items() if k != FIELD_DAY}
 
+    # Swapping two days that already hold the same content changes nothing, so it
+    # is reported as nothing (two rest days, say): claiming ``changed`` would burn
+    # a mutation_version and rewrite identical plan bytes -- the same
+    # deterministic no-op the other ``_apply_*`` helpers honour (triage
+    # 2026-09-30 #6). Nothing has been touched yet, so the document stays as read.
+    if source_content == target_content:
+        return False
+
     source.clear()
     source[FIELD_DAY] = source_label
     source.update(target_content)

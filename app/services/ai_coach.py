@@ -63,6 +63,7 @@ from app.services.memory_manager import (  # noqa: F401 (re-export)
 from app.services.pump_checks import latest_training_plan_score
 from app.services.response_formatter import (  # noqa: F401 (re-export)
     COACH_FALLBACKS as _COACH_FALLBACKS,
+    PLAN_REPLY_FALLBACKS as _PLAN_REPLY_FALLBACKS,
     is_coach_error_fallback,
 )
 from app.timeutil import app_today, day_key, utc_day_bounds
@@ -683,7 +684,7 @@ def _tool_analyze_gym_photo(user_id, s3_key):
     try:
         image_bytes = s3_helper.get_object_bytes(s3_key, expected_user_id=user_id)
     except Exception as e:
-        current_app.logger.info("[ANALYZE PHOTO] görsel alınamadı: %s: %s", type(e).__name__, e)
+        current_app.logger.info("[ANALYZE PHOTO] görsel alınamadı: %s", type(e).__name__)
         return json.dumps({"status": "error", "message": "Görsel alınamadı veya sana ait değil."},
                           ensure_ascii=False)
 
@@ -1392,7 +1393,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                 return _coach_tool_fallback(language)
             if tools_ran == 0:
                 raise _BedrockFallback(f"{type(e).__name__}: {e}", cause=e)
-            current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", e)
+            current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", type(e).__name__)
             return _coach_tool_fallback(language)
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
 
@@ -1423,9 +1424,7 @@ def generate_coach_reply(name, age, gender, weight, height,
         )
     except Exception:
         current_app.logger.exception("Koç yorumu üretilemedi")
-        return ("Coach feedback is unavailable right now, please try again."
-                if _coach_lang(language) == "en"
-                else "Koç yorumu şu an alınamıyor, lütfen tekrar dene.")
+        return _PLAN_REPLY_FALLBACKS["en" if _coach_lang(language) == "en" else "tr"]
 
 
 def generate_checkin_feedback(name, weight, prev_weight, days_passed,

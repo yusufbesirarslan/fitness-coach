@@ -162,6 +162,24 @@ def _safe_requests_get(url, *, timeout, headers=None, cookies=None,
     raise http_req.exceptions.TooManyRedirects("Çok fazla yönlendirme.")
 
 
+def loggable_url(url):
+    """scheme://host/path only -- no userinfo, query string or fragment.
+
+    A menu URL is caller-supplied and its query string can carry a token or a
+    signed-URL signature; server logs get the location, never the credential
+    (triage 2026-09-30 #7). Never raises: an unparsable value logs as a constant.
+    """
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(str(url))
+        host = parts.hostname or ""
+        if not (parts.scheme and host):
+            return "<unparsable-url>"
+        return f"{parts.scheme}://{host}{parts.path}"
+    except Exception:
+        return "<unparsable-url>"
+
+
 def _validate_menu_url(url):
     from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
     import re as _re

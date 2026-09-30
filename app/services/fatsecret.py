@@ -301,7 +301,7 @@ def _food_find_by_barcode(code):
     try:
         token = _get_fatsecret_token()
     except Exception as e:  # pragma: no cover - token yolu ayrı test edilir
-        current_app.logger.error("_food_find_by_barcode token failed: %s", e)
+        current_app.logger.error("_food_find_by_barcode token failed: %s", type(e).__name__)
         return None
 
     try:
@@ -334,7 +334,7 @@ def _food_find_by_barcode(code):
             if name:
                 break
     except Exception as e:
-        current_app.logger.info("_food_find_by_barcode name lookup soft-fail: %s", e)
+        current_app.logger.info("_food_find_by_barcode name lookup soft-fail: %s", type(e).__name__)
 
     servings = _food_get_servings(fid) or []
     return {"food_id": fid, "name": name, "brand": brand, "servings": servings}

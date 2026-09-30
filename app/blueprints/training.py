@@ -491,7 +491,7 @@ def complete_workout():
                 prefix="pump-checks", user_id=current_user.id,
             )
     except Exception as e:
-        current_app.logger.info(f"[S3] Pump Check yüklemesi başarısız: {type(e).__name__}: {e}")
+        current_app.logger.info(f"[S3] Pump Check yüklemesi başarısız: {type(e).__name__}")
 
     # Kanonik tamamlanma mutasyonu (Sprint 7 PR2): PumpCheck + marker + XP + görev +
     # challenge + activity'nin TEK atomik transaction'ının sahibi
@@ -953,6 +953,8 @@ def set_water():
     # ama hiç claim edilmiyordu (ölü görev — 1.1).
     resp = {"count": row.count, "goal": WATER_GOAL}
     if count > 0 and _claim_water_funnel_for_today(current_user.id, today_key):
+        # Tek commit: quest_fired iddiası + görev/XP/challenge birlikte kalıcılaşır
+        # (complete_quest_for_user commit eder; başarısızsa ikisi de geri alınır).
         quest_result = complete_quest_for_user(current_user.id, "water_logged")
         if quest_result:
             resp["quest_awarded"] = quest_result
@@ -974,13 +976,20 @@ def _claim_water_funnel_for_today(user_id, today_key):
     UPDATE ... WHERE quest_fired = false, uq_user_water_day sayesinde satırın
     kendisi gün-başına tek olduğu için eşzamanlı iki isteğin ikisinin birden
     ateşlemesini de engeller (DB-düzeyi tek iddia; ayrı kilit gerekmez).
+
+    COMMIT ETMEZ: iddia ile ödülü (DailyQuest + XP + challenge) TEK transaction'da
+    olmalı; çağıran hemen ardından `complete_quest_for_user` ile commit eder. Eskiden
+    iddia kendi transaction'ında commit ediliyordu — ödül commit'i patlarsa
+    `quest_fired` True kalıp retry'ı kalıcı bastırıyor ve günün su XP'si kayboluyordu
+    (triage 2026-09-30 #5). Şimdi ödül commit'i patlarsa iddia da geri alınır ve bir
+    sonraki su güncellemesi yeniden dener. Satır kilidi (UPDATE) commit'e dek tutulur,
+    yani eşzamanlı ikinci iddia bekler ve `quest_fired` dolu görür → yine tek ateşleme.
     """
     claimed = (db.session.query(WaterLog)
                .filter(WaterLog.user_id == user_id,
                        WaterLog.date_key == today_key,
                        WaterLog.quest_fired.is_(False))
                .update({WaterLog.quest_fired: True}, synchronize_session=False))
-    db.session.commit()
     return bool(claimed)
 
 

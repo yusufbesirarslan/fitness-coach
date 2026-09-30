@@ -32,7 +32,17 @@ COACH_FALLBACKS = {
                "cancel it.")},
 }
 
-_ALL_FALLBACKS = {t for d in COACH_FALLBACKS.values() for t in d.values()}
+# `generate_coach_reply` (POST /chat) swallows a provider failure and RETURNS this
+# text instead of raising. It must be registered as a hata-yedeği like the ones
+# above, otherwise `is_coach_error_fallback` calls it a real answer and /chat keeps
+# the weekly quota charge and resets the failure counter on a failed turn.
+PLAN_REPLY_FALLBACKS = {
+    "tr": "Koç yorumu şu an alınamıyor, lütfen tekrar dene.",
+    "en": "Coach feedback is unavailable right now, please try again.",
+}
+
+_ALL_FALLBACKS = ({t for d in COACH_FALLBACKS.values() for t in d.values()}
+                  | set(PLAN_REPLY_FALLBACKS.values()))
 
 
 def error_fallback(language="tr"):
