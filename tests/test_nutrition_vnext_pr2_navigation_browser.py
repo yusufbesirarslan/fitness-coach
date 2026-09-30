@@ -46,7 +46,8 @@ def test_initial_and_lazy_requests(app, auth_user, training_page):
     page.locator('#nutrition-tab-water').click()
     expect(page.locator('#water-btn')).to_be_visible()
     page.locator('#nutrition-tab-plan').click()
-    expect(page.locator('#plan-btn')).to_be_visible()
+    # NUTR-PR5: generation opens only from Create plan (no plan here).
+    expect(page.locator('#plan-create-btn')).to_be_visible()
     expect(page.locator('.nutrition-child-domain')).to_be_visible()
     assert paths(traffic) == Counter()
 
@@ -138,7 +139,9 @@ def test_no_plan_shortcut_retains_real_handoff(app, auth_user, training_page):
     shortcut.focus()
     page.keyboard.press('Enter')
     expect(page.locator('#nutrition-tab-plan')).to_have_attribute('aria-selected', 'true')
-    expect(page.locator('#plan-btn')).to_be_visible()
+    # NUTR-PR5: the handoff lands on the honest empty state and its Create plan.
+    expect(page.locator('#plan-current')).to_have_attribute('data-plan-state', 'absent')
+    expect(page.locator('#plan-create-btn')).to_be_visible()
 
 
 @pytest.mark.parametrize('language', ['en', 'tr'])

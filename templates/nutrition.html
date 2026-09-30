@@ -270,42 +270,67 @@
 
   <div class="tab-panel" id="panel-plan" hidden role="tabpanel" aria-labelledby="nutrition-tab-plan">
 
-    <h2 class="sec-label">{{ t('nutrition.tab_plan') }}</h2>
+    {#- NUTR-PR5 — Plan answers "what am I planning to eat?", "do I already
+        have a plan?" and "how do I intentionally replace it?", in that order:
+        target → current plan → planned meals → Create / Replace → Supplements.
+        Authorities: the target is the SAME `/meal-log/today` projection Today
+        already read (no read of its own); the current plan is NutritionPlan via
+        the ONE shared `/nutrition-plan/active` read; a generated option is a
+        PROPOSAL until `/nutrition-plan/save` confirms. Planned meals are never
+        "Logged" here — MealLog is written only from Today. -#}
+    <h2 class="sec-label" id="nut-plan-title">{{ t('nutrition.plan.title') }}</h2>
+
+    <section class="card plan-block plan-target" id="plan-target" data-target-state="pending" aria-labelledby="plan-target-title">
+      <h3 class="plan-block-title" id="plan-target-title">{{ t('nutrition.plan.target_title') }}</h3>
+      <p class="plan-target-value" id="plan-target-value">—</p>
+      <p class="plan-target-macros" id="plan-target-macros" hidden></p>
+      <p class="plan-note" id="plan-target-note" hidden></p>
+    </section>
+
+    <section class="card plan-block plan-current" id="plan-current" data-plan-state="loading" aria-busy="true" aria-labelledby="plan-current-title">
+      <h3 class="plan-block-title" id="plan-current-title" tabindex="-1">{{ t('nutrition.plan.current_title') }}</h3>
+      <div id="active-plan-detail"><p class="plan-note">{{ t('nutrition.plan.loading') }}</p></div>
+      <p class="plan-status" id="plan-current-status" role="status" aria-live="polite"></p>
+    </section>
+
+    {#- Generation is subordinate to current-plan review: it opens only from
+        Create plan / Replace plan, and nothing in it runs until Generate. -#}
+    <section class="card plan-block plan-builder" id="plan-builder" hidden aria-labelledby="plan-builder-title"
+             data-gen-state="idle" data-save-state="idle">
+      <h3 class="plan-block-title" id="plan-builder-title" tabindex="-1">{{ t('nutrition.plan.builder_create') }}</h3>
+      <p class="plan-note" id="plan-builder-lead">{{ t('nutrition.plan.builder_lead') }}</p>
+      <div id="plan-form">
+        <h4 class="cat-label" id="plan-cat-animal">{{ t('nutrition.cat_protein_animal') }}</h4>
+        <div class="chip-grid" id="protein-hayvansal" role="group" aria-labelledby="plan-cat-animal"></div>
+        <h4 class="cat-label" id="plan-cat-plant">{{ t('nutrition.cat_protein_plant') }}</h4>
+        <div class="chip-grid" id="protein-bitkisel" role="group" aria-labelledby="plan-cat-plant"></div>
+        <h4 class="cat-label" id="plan-cat-carb">{{ t('nutrition.cat_carb') }}</h4>
+        <div class="chip-grid" id="karb-list" role="group" aria-labelledby="plan-cat-carb"></div>
+        <h4 class="cat-label" id="plan-cat-fat">{{ t('nutrition.cat_fat') }}</h4>
+        <div class="chip-grid" id="yag-list" role="group" aria-labelledby="plan-cat-fat"></div>
+        <h4 class="cat-label" id="plan-cat-custom">{{ t('nutrition.cat_custom') }}</h4>
+        <div class="custom-food-row">
+          <input class="fc-input" id="custom-input" placeholder="{{ t('nutrition.custom_ph') }}" aria-labelledby="plan-cat-custom">
+          <button class="btn-ghost" type="button" data-action="addCustomFood">{{ t('nutrition.add_btn') }}</button>
+        </div>
+        <div class="custom-tags" id="custom-tags"></div>
+      </div>
+      <div class="plan-actions">
+        <button class="btn-volt" id="plan-btn" type="button" data-action="generatePlan">{{ t('nutrition.plan.generate') }}</button>
+        <button class="btn-ghost" id="plan-builder-cancel" type="button" data-action="closePlanBuilder">{{ t('nutrition.cancel') }}</button>
+      </div>
+      <p class="plan-status" id="plan-gen-status" role="status" aria-live="polite"></p>
+      <div id="plan-results" hidden>
+        <h4 class="plan-block-sub" id="plan-options-title">{{ t('nutrition.plan.options_title') }}</h4>
+        <p class="plan-note" id="score-banner-wrap"></p>
+        <div class="plans-grid" id="plans-grid" role="list" aria-labelledby="plan-options-title"></div>
+      </div>
+    </section>
+
   <nav class="nutrition-child-domain" aria-label="{{ t('nutrition.child.aria') }}">
     <span class="nutrition-child-kicker">{{ t('nutrition.child.kicker') }}</span>
     <a class="nutrition-child-link" href="/supplements">{{ t('nutrition.child.supplements') }}</a>
   </nav>
-
-    <div id="active-plan-detail" style="display:none;"></div>
-
-    <div id="plan-form">
-      <div class="card" style="padding:24px;margin-bottom:20px;">
-        <div class="cat-label">{{ t('nutrition.cat_protein_animal') }}</div>
-        <div class="chip-grid" id="protein-hayvansal"></div>
-        <div class="cat-label">{{ t('nutrition.cat_protein_plant') }}</div>
-        <div class="chip-grid" id="protein-bitkisel"></div>
-        <div class="cat-label">{{ t('nutrition.cat_carb') }}</div>
-        <div class="chip-grid" id="karb-list"></div>
-        <div class="cat-label">{{ t('nutrition.cat_fat') }}</div>
-        <div class="chip-grid" id="yag-list"></div>
-        <div class="cat-label">{{ t('nutrition.cat_custom') }}</div>
-        <div class="custom-food-row">
-          <input class="fc-input" id="custom-input" placeholder="{{ t('nutrition.custom_ph') }}" style="flex:1;">
-          <button class="btn-ghost" data-action="addCustomFood">{{ t('nutrition.add_btn') }}</button>
-        </div>
-        <div class="custom-tags" id="custom-tags"></div>
-      </div>
-
-      <button class="btn-volt w-full" id="plan-btn" data-action="generatePlan">
-        <svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:#121212;fill:none;stroke-width:2.2;stroke-linecap:round;"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83"/></svg>
-        {{ t('nutrition.plan_create') }}
-      </button>
-
-      <div id="plan-results" style="display:none;margin-top:32px;">
-        <div id="score-banner-wrap"></div>
-        <div class="plans-grid" id="plans-grid"></div>
-      </div>
-    </div><!-- /plan-form -->
 
   </div><!-- /panel-plan -->
 
@@ -319,6 +344,19 @@
 
 
 {% include "_actionbar.html" %}
+
+<!-- ── REPLACE PLAN CONFIRMATION (NUTR-PR5) ──
+     The save route DELETES the stored plan before inserting the chosen one,
+     so choosing an option while a plan may exist is confirmed here first.
+     Cancel / Escape / backdrop write nothing and return focus to the option. -->
+<div class="modal-overlay" id="plan-replace-modal" data-action-self="cancelPlanReplace">
+  <div class="modal-box plan-replace-box" role="dialog" aria-modal="true" aria-labelledby="plan-replace-title" aria-describedby="plan-replace-body">
+    <h2 class="modal-title" id="plan-replace-title">{{ t('nutrition.plan.confirm_title') }}</h2>
+    <p class="nut-modal-lead" id="plan-replace-body"></p>
+    <button class="btn-volt w-full" id="plan-replace-confirm" type="button" data-action="confirmPlanReplace">{{ t('nutrition.plan.replace') }}</button>
+    <button class="btn-ghost w-full plan-replace-keep" id="plan-replace-cancel" type="button" data-action="cancelPlanReplace">{{ t('nutrition.plan.confirm_keep') }}</button>
+  </div>
+</div>
 
 
 <!-- ══════════════════════════════════════════════════

@@ -30,11 +30,8 @@ var FOOD_LABELS_EN = {
   'Yulaf Ezmesi':'Oatmeal','Pirinç':'Rice','Bulgur':'Bulgur','Tatlı Patates':'Sweet Potato','Tam Buğday Ekmeği':'Whole Wheat Bread','Muz':'Banana','Elma':'Apple','Makarna':'Pasta',
   'Zeytinyağı':'Olive Oil','Avokado':'Avocado','Badem':'Almonds','Ceviz':'Walnuts','Fındık':'Hazelnuts','Fıstık Ezmesi':'Peanut Butter'
 };
-/* Skor etiketi: backend TR döndürür → görünen etiket. */
-var SCORE_LABELS_EN = { 'İyi': 'Good', 'Orta': 'Fair', 'Kötü': 'Poor' };
 function mealLabel(v)  { return (_EN && MEAL_LABELS_EN[v])  ? MEAL_LABELS_EN[v]  : v; }
 function foodLabel(v)  { return (_EN && FOOD_LABELS_EN[v])  ? FOOD_LABELS_EN[v]  : v; }
-function scoreLabel(v) { return (_EN && SCORE_LABELS_EN[v]) ? SCORE_LABELS_EN[v] : v; }
 
 /* ── HTML ESCAPE (XSS guard — innerHTML'e giren kullanıcı/AI/FatSecret metni) ── */
 function esc(s) {
@@ -180,6 +177,7 @@ function initNutritionNavigation() {
 /* Escape closes the top-most surface through its OWN close function, so a
    cancelled method hands focus back exactly as its Cancel button does. */
 var _ESCAPE_CLOSERS = [
+  ['plan-replace-modal', function () { cancelPlanReplace(); }],
   ['photo-modal', function () { closePhotoConfirm(); }],
   ['serving-modal', function () { closeServingModal(); }],
   ['water-modal', function () { closeWater(); }],
@@ -301,6 +299,7 @@ function renderDaySummary(totals, target) {
       bar.parentElement.hidden = true;
     }
   });
+  renderPlanTarget(target);
 }
 
 /* The read failed. With nothing confirmed yet the whole card is unknown; after
@@ -327,6 +326,7 @@ function renderDaySummaryFailure() {
     document.getElementById('bar-' + k).parentElement.hidden = true;
   });
   setIntakeStatus('nutrition.meals_unavailable');
+  renderPlanTarget({ state: 'unavailable' });
 }
 
 /* ── MEAL TYPE SELECTOR ── */
@@ -628,6 +628,20 @@ document.addEventListener('keydown', function (e) {
   var first = items[0], last = items[items.length - 1];
   var active = document.activeElement;
   if (!s.contains(active)) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+});
+
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Tab') return;
+  var m = document.getElementById('plan-replace-modal');
+  if (!m || !m.classList.contains('open')) return;
+  var items = Array.prototype.filter.call(m.querySelectorAll('button'),
+    function (el) { return !el.disabled && el.offsetParent !== null; });
+  if (!items.length) return;
+  var first = items[0], last = items[items.length - 1];
+  var active = document.activeElement;
+  if (!m.contains(active)) { e.preventDefault(); first.focus(); }
   else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
   else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
 });
@@ -1086,7 +1100,30 @@ function renderWeeklyChart(days) {
   }).join('');
 }
 
-/* ── FOOD CHIPS (Plan Tab) ── */
+/* ── NUTRITION PLAN (NUTR-PR5) ──
+   Plan is planning and review; Today is where food is logged. Every fact on
+   this surface belongs to an authority this code only presents:
+
+     target        the `/meal-log/today` projection Today already read —
+                   renderPlanTarget is fed by the Today read, no read of its own
+     current plan  NutritionPlan, through the ONE shared /nutrition-plan/active
+                   read (getActivePlan, also used by "From your plan")
+     option        POST /nutrition-plan output: a PROPOSAL, never the current plan
+     replacement   POST /nutrition-plan/save, the only thing that changes the plan
+
+   Current-plan states (`#plan-current[data-plan-state]`): loading · active ·
+   absent (`exists:false`) · unavailable (the read failed — never "no plan") ·
+   invalid (a stored document this page cannot draw safely).
+
+   A proposal becomes the current plan only after the save answers AND a
+   canonical re-read draws it: nothing is marked active optimistically. Generate
+   and save are single-flight. Choosing an option while a plan exists (or might)
+   is confirmed first, because the save route deletes the stored plan. A refused
+   save (4xx) changed nothing and may be retried. A save whose answer does not
+   say what happened (5xx, network, unreadable) is NEVER re-sent: it gets at
+   most ONE canonical re-read, which proves the new plan, proves the old plan
+   (retry allowed), or leaves it "couldn't confirm" (these options stay
+   disabled; a reload or a new generation starts over). */
 const FOODS = {
   protein_hayvansal: ['Tavuk Göğsü','Yumurta','Ton Balığı','Kırmızı Et','Yoğurt','Somon','Hindi'],
   protein_bitkisel:  ['Mercimek','Nohut','Tofu','Kinoa','Edamame','Fasulye'],
@@ -1096,15 +1133,18 @@ const FOODS = {
 const selected    = { proteins: new Set(), carbs: new Set(), fats: new Set() };
 const customFoods = [];
 
+/* A food choice is a real toggle button (keyboard + screen reader state). */
 function createFoodChip(name, category) {
-  const el = document.createElement('div');
+  const el = document.createElement('button');
+  el.type = 'button';
   el.className = 'chip';
-  el.innerHTML = `<span class="chip-dot"></span>${esc(foodLabel(name))}`;
+  el.setAttribute('aria-pressed', 'false');
+  el.innerHTML = `<span class="chip-dot" aria-hidden="true"></span>${esc(foodLabel(name))}`;
   el.addEventListener('click', () => {
     const isSelected = el.classList.toggle('selected');
+    el.setAttribute('aria-pressed', String(isSelected));
     if (isSelected) selected[category].add(name);
     else            selected[category].delete(name);
-    el.querySelector('.chip-dot').style.background = isSelected ? '#3D8BFF' : '';
   });
   return el;
 }
@@ -1124,7 +1164,7 @@ function addCustomFood() {
   input.value = '';
   const tag = document.createElement('div');
   tag.className = 'custom-tag';
-  tag.innerHTML = `<span>${esc(val)}</span><span class="custom-tag-remove" data-action="removeCustomFood">×</span>`;
+  tag.innerHTML = `<span>${esc(val)}</span><button type="button" class="custom-tag-remove" data-action="removeCustomFood" aria-label="${esc(__t('nutrition.plan.remove_food', { food: val }))}">×</button>`;
   document.getElementById('custom-tags').appendChild(tag);
 }
 document.getElementById('custom-input').addEventListener('keydown', e => { if (e.key === 'Enter') addCustomFood(); });
@@ -1135,22 +1175,288 @@ function removeCustomFood(el) {
   const i = customFoods.indexOf(name);
   if (i > -1) customFoods.splice(i, 1);
   tag.remove();
+  const input = document.getElementById('custom-input');
+  if (input) input.focus();
 }
 
-/* ── GENERATE PLAN ── */
+/* The four canonical meal slots of a plan document (keys are the contract). */
+function planMealSlots() {
+  return [
+    { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: _SLOT_ICONS.breakfast },
+    { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: _SLOT_ICONS.lunch },
+    { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: _SLOT_ICONS.dinner },
+    { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: _SLOT_ICONS.snack }
+  ];
+}
+function isMealObject(ml) { return !!ml && typeof ml === 'object' && !Array.isArray(ml); }
+/* Drawable = an object with at least one meal slot. Anything else that the
+   server calls a plan is shown as `invalid`, never as "no plan". */
+function drawablePlan(plan) {
+  return !!plan && typeof plan === 'object' && !Array.isArray(plan) &&
+    planMealSlots().some(m => isMealObject(plan[m.key]));
+}
+/* Rows persisted before the schema existed may hold one string, not a list. */
+function planItems(ml) {
+  if (Array.isArray(ml.yemekler)) return ml.yemekler.filter(y => typeof y === 'string' || typeof y === 'number');
+  if (typeof ml.yemekler === 'string') return [ml.yemekler];
+  return [];
+}
+function planName(plan, i) {
+  if (plan && typeof plan.isim === 'string' && plan.isim) return plan.isim;
+  return i == null ? __t('nutrition.plan.unnamed') : __t('nutrition.plan.option_n', { n: i + 1 });
+}
+/* The same payload fingerprint "From your plan" scopes its row locks with. */
+function planKeyOf(d) { return JSON.stringify([d.plan && typeof d.plan === 'object' ? d.plan : {}, d.score, d.created_at]); }
+/* Two plan documents say the same thing (the save route re-builds the
+   document and may turn "420" into 420, so raw JSON is not comparable). */
+function planDocumentKey(p) {
+  if (!p || typeof p !== 'object') return null;
+  const num = v => ((typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && Number.isFinite(Number(v))) ? Number(v) : null;
+  const out = { isim: typeof p.isim === 'string' ? p.isim : null };
+  planMealSlots().forEach(m => {
+    const ml = p[m.key];
+    out[m.key] = isMealObject(ml) ? {
+      yemekler: Array.isArray(ml.yemekler) ? ml.yemekler.map(String) : [],
+      kalori: num(ml.kalori), protein: num(ml.protein), karb: num(ml.karb), yag: num(ml.yag)
+    } : null;
+  });
+  ['toplam_kalori', 'toplam_protein', 'toplam_karb', 'toplam_yag'].forEach(k => { out[k] = num(p[k]); });
+  return JSON.stringify(out);
+}
+function samePlanDocument(a, b) {
+  const ka = planDocumentKey(a);
+  return ka !== null && ka === planDocumentKey(b);
+}
+
+/* ── TARGET (read-only mirror of Today's canonical read) ── */
+function renderPlanTarget(target) {
+  const box = document.getElementById('plan-target');
+  const value = document.getElementById('plan-target-value');
+  const macros = document.getElementById('plan-target-macros');
+  const note = document.getElementById('plan-target-note');
+  box.dataset.targetState = target.state;
+  macros.hidden = true; macros.textContent = '';
+  note.hidden = true; note.textContent = '';
+  if (target.state === 'known') {
+    value.textContent = __t('nutrition.plan.target_value', { n: Math.round(target.kalori) });
+    const m = target.macros;
+    if (m.protein && m.karb && m.yag) {
+      macros.textContent = __t('nutrition.plan.target_macros',
+        { p: Math.round(m.protein), c: Math.round(m.karb), f: Math.round(m.yag) });
+      macros.hidden = false;
+    }
+    note.textContent = __t('nutrition.plan.target_source');
+    note.hidden = false;
+  } else if (target.state === 'absent') {
+    value.textContent = __t('nutrition.target_absent');
+    note.textContent = __t('nutrition.plan.target_absent_hint');
+    note.hidden = false;
+  } else {
+    value.textContent = __t('nutrition.target_unavailable');   // never 0
+  }
+}
+
+/* ── CURRENT PLAN ── */
+let _planShown = { state: 'loading', key: null, name: null, plan: null };
+let _planOptions = null;        // { plans, score } — the last generated proposals
+let _planGenInFlight = false;
+let _planSaveInFlight = false;
+let _planSaveLocked = false;    // an unconfirmable save: these options stay disabled
+let _planReplaceIndex = null;
+let _planReplaceOpener = null;
+
+function setCurrentPlanState(state) {
+  const section = document.getElementById('plan-current');
+  section.dataset.planState = state;
+  section.setAttribute('aria-busy', 'false');
+}
+
+function planCta(kind) {
+  if (kind === 'retry')
+    return `<button type="button" class="btn-ghost nut-retry" data-action="retryActivePlan">${esc(__t('nutrition.try_again'))}</button>`;
+  if (kind === 'create')
+    return `<button type="button" class="btn-volt plan-cta" id="plan-create-btn" data-action="openPlanBuilder" aria-controls="plan-builder" aria-expanded="false">${esc(__t('nutrition.plan.create'))}</button>`;
+  return `<button type="button" class="btn-ghost plan-cta" id="plan-replace-btn" data-action="openPlanBuilder" aria-controls="plan-builder" aria-expanded="false">${esc(__t('nutrition.plan.replace'))}</button>`;
+}
+
+function renderPlanStateBlock(textKey, hintKey, kind) {
+  document.getElementById('active-plan-detail').innerHTML = `
+    <p class="plan-state-text">${esc(__t(textKey))}</p>
+    <p class="plan-note">${esc(__t(hintKey))}</p>
+    <div class="plan-actions">${planCta(kind)}</div>`;
+}
+
+function renderCurrentPlan(d) {
+  if (!d.exists) {
+    _planShown = { state: 'absent', key: 'absent', name: null, plan: null };
+    setCurrentPlanState('absent');
+    renderPlanStateBlock('nutrition.plan.absent', 'nutrition.plan.absent_hint', 'create');
+  } else if (!drawablePlan(d.plan)) {
+    _planShown = { state: 'invalid', key: planKeyOf(d), name: null, plan: null };
+    setCurrentPlanState('invalid');
+    renderPlanStateBlock('nutrition.plan.invalid', 'nutrition.plan.invalid_hint', 'replace');
+  } else {
+    _planShown = { state: 'active', key: planKeyOf(d), name: planName(d.plan), plan: d.plan };
+    setCurrentPlanState('active');
+    renderActivePlanDetail(d.plan, d.score, d.created_at);
+  }
+  syncPlanBuilder();
+  return _planShown;
+}
+
+function renderCurrentPlanUnavailable() {
+  _planShown = { state: 'unavailable', key: null, name: null, plan: null };
+  setCurrentPlanState('unavailable');
+  renderPlanStateBlock('nutrition.plan_unavailable', 'nutrition.plan.unavailable_hint', 'retry');
+  syncPlanBuilder();
+  return _planShown;
+}
+
+/* Draws what the shared read says. An answer that belongs to a read that has
+   since been replaced (after a save, or a retry) is dropped: the newer read
+   is awaited instead, so an old plan can never overwrite a newer one. */
+async function loadActivePlan(force = false) {
+  const section = document.getElementById('plan-current');
+  section.setAttribute('aria-busy', 'true');
+  let d, epoch;
+  const superseded = () => {
+    if (_activePlanCache) return loadActivePlan();
+    section.setAttribute('aria-busy', String(_planShown.state === 'loading'));
+    return _planShown;
+  };
+  try {
+    const read = getActivePlan(force);
+    epoch = _activePlanEpoch;
+    d = await read;
+  } catch (e) {
+    if (epoch !== _activePlanEpoch) return superseded();
+    return renderCurrentPlanUnavailable();
+  }
+  if (epoch !== _activePlanEpoch) return superseded();
+  return renderCurrentPlan(d);
+}
+
+function retryActivePlan() {
+  document.getElementById('plan-current-status').textContent = '';
+  loadActivePlan(true);
+}
+
+function renderActivePlanDetail(plan, score, createdAt) {
+  const meals = planMealSlots();
+  const mealsHtml = meals.map(m => {
+    const ml = plan[m.key];
+    if (!isMealObject(ml)) return '';
+    const items = planItems(ml).map(y => `<li>${esc(y)}</li>`).join('');
+    return `
+      <li class="apd-meal" data-planned="true">
+        <div class="apd-meal-hdr">
+          <span class="apd-meal-icon" aria-hidden="true">${m.icon}</span>
+          <h5 class="apd-meal-name">${m.label}</h5>
+          <span class="apd-badge">${esc(__t('nutrition.planned'))}</span>
+          <span class="apd-meal-kcal">${fmtNum(ml.kalori)} kcal</span>
+        </div>
+        <ul class="apd-meal-list">${items}</ul>
+      </li>`;
+  }).join('');
+
+  const created = typeof createdAt === 'string' && createdAt
+    ? `<p class="apd-sub">${esc(__t('nutrition.plan.created', { date: createdAt }))}</p>` : '';
+  const hasTotals = ['toplam_kalori', 'toplam_protein', 'toplam_karb', 'toplam_yag']
+    .some(k => fmtNum(plan[k]) !== '—');
+  const totals = hasTotals ? `
+    <h4 class="plan-block-sub">${esc(__t('nutrition.plan.totals'))}</h4>
+    <div class="apd-macro-grid">
+      <div class="apd-macro-item"><div class="apd-macro-val">${fmtNum(plan.toplam_kalori)}</div><div class="apd-macro-lbl">kcal</div></div>
+      <div class="apd-macro-item"><div class="apd-macro-val">${fmtNum(plan.toplam_protein)}g</div><div class="apd-macro-lbl">${__t('nutrition.macro_protein')}</div></div>
+      <div class="apd-macro-item"><div class="apd-macro-val">${fmtNum(plan.toplam_karb)}g</div><div class="apd-macro-lbl">${__t('nutrition.carb_short')}</div></div>
+      <div class="apd-macro-item"><div class="apd-macro-val">${fmtNum(plan.toplam_yag)}g</div><div class="apd-macro-lbl">${__t('nutrition.macro_fat')}</div></div>
+    </div>` : '';
+  // The stored score is the generator's average rating of the chosen FOODS
+  // (micronutrients, bioavailability, gluten). It is secondary metadata, not
+  // a verdict on the plan, so it is small, neutral text — no colour, no label.
+  const rating = fmtNum(score);
+  const ratingNote = rating === '—' ? '' : `
+    <p class="plan-note plan-rating">${esc(__t('nutrition.plan.rating', { n: rating }))} · ${esc(__t('nutrition.plan.rating_hint'))}</p>`;
+
+  document.getElementById('active-plan-detail').innerHTML = `
+    <div class="apd-header">
+      <p class="apd-title">${esc(plan.isim || __t('nutrition.plan.unnamed'))}</p>
+      ${created}
+    </div>
+    ${totals}
+    <h4 class="plan-block-sub">${esc(__t('nutrition.plan.planned_meals'))}</h4>
+    <ul class="apd-meals">${mealsHtml}</ul>
+    <p class="plan-note">${esc(__t('nutrition.plan.planned_note'))}</p>
+    ${ratingNote}
+    <div class="plan-actions">${planCta('replace')}</div>`;
+}
+
+/* ── CREATE / REPLACE WORKFLOW ── */
+function setPlanGenStatus(key, vars) {
+  document.getElementById('plan-gen-status').textContent = key ? __t(key, vars) : '';
+}
+
+/* One place decides what the builder says and which controls may act. */
+function syncPlanBuilder() {
+  const builder = document.getElementById('plan-builder');
+  const creating = _planShown.state === 'absent';
+  document.getElementById('plan-builder-title').textContent =
+    __t(creating ? 'nutrition.plan.builder_create' : 'nutrition.plan.builder_replace');
+  document.getElementById('plan-builder-lead').textContent =
+    __t(creating ? 'nutrition.plan.builder_lead' : 'nutrition.plan.builder_lead_replace');
+  document.querySelectorAll('#plan-current .plan-cta').forEach(b => {
+    b.hidden = !builder.hidden;
+    b.setAttribute('aria-expanded', String(!builder.hidden));
+  });
+  const busy = _planGenInFlight || _planSaveInFlight;
+  document.querySelectorAll('#plans-grid .btn-select-plan').forEach(b => {
+    b.disabled = busy || _planSaveLocked;
+  });
+  document.getElementById('plan-builder-cancel').disabled = _planSaveInFlight;
+}
+
+function openPlanBuilder() {
+  const builder = document.getElementById('plan-builder');
+  document.getElementById('plan-current-status').textContent = '';
+  builder.hidden = false;
+  syncPlanBuilder();
+  const title = document.getElementById('plan-builder-title');
+  try { title.focus({ preventScroll: true }); } catch (e) { title.focus(); }
+  try { title.scrollIntoView({ block: 'start' }); } catch (e) {}
+}
+
+function closePlanBuilder(returnFocus = true) {
+  const builder = document.getElementById('plan-builder');
+  if (builder.hidden || _planSaveInFlight) return;
+  builder.hidden = true;
+  syncPlanBuilder();
+  if (!returnFocus) return;
+  const back = document.querySelector('#plan-current .plan-cta') ||
+               document.getElementById('plan-current-title');
+  try { back.focus({ preventScroll: true }); } catch (e) { back.focus(); }
+}
+
+/* Explicit action only; exactly one request however often it is pressed. It
+   never touches the current plan: success and failure both leave it drawn. */
 async function generatePlan() {
+  if (_planGenInFlight || _planSaveInFlight) return;
   if (!selected.proteins.size) { showToast(__t('nutrition.need_protein'), 'error'); return; }
   if (!selected.carbs.size)    { showToast(__t('nutrition.need_carb'), 'error'); return; }
   if (!selected.fats.size)     { showToast(__t('nutrition.need_fat'), 'error'); return; }
 
+  const builder = document.getElementById('plan-builder');
   const btn = document.getElementById('plan-btn');
-  const loading = document.getElementById('loading');
-  btn.classList.add('loading');
-  btn.textContent = __t('nutrition.preparing');
-  loading.classList.add('active');
+  _planGenInFlight = true;
+  builder.dataset.genState = 'loading';
+  btn.disabled = true;
+  btn.setAttribute('aria-busy', 'true');
+  btn.textContent = __t('nutrition.plan.generating');
+  setPlanGenStatus('nutrition.plan.generating');
+  syncPlanBuilder();
 
+  let res = null, data = null;
   try {
-    const res = await fetch('/nutrition-plan', {
+    res = await fetch('/nutrition-plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1160,192 +1466,223 @@ async function generatePlan() {
         custom_foods: customFoods
       })
     });
-    const data = await res.json();
-    if (data.error) { showToast(data.error, 'error'); return; }
-    renderPlans(data);
-  } catch (e) {
-    showToast(__t('nutrition.plan_failed_prefix') + e.message, 'error');
-  } finally {
-    btn.classList.remove('loading');
-    btn.textContent = __t('nutrition.plan_create');
-    loading.classList.remove('active');
+    data = await res.json().catch(() => null);
+  } catch (e) { res = null; }
+
+  _planGenInFlight = false;
+  btn.disabled = false;
+  btn.removeAttribute('aria-busy');
+  btn.textContent = __t('nutrition.plan.generate');
+  const plans = res && res.ok && data && !data.error && Array.isArray(data.planlar)
+    ? data.planlar.filter(p => p && typeof p === 'object' && !Array.isArray(p)) : [];
+  if (!plans.length) {
+    // Earlier options (if any) stay as they were; the current plan was never touched.
+    builder.dataset.genState = 'failed';
+    setPlanGenStatus('nutrition.plan.gen_failed');
+    if (res && res.status >= 400 && res.status < 500 && data && typeof data.error === 'string')
+      showToast(data.error, 'error');
+    syncPlanBuilder();
+    return;
   }
+  _planOptions = { plans, score: data.overall_score };
+  _planSaveLocked = false;
+  builder.dataset.genState = 'ready';
+  builder.dataset.saveState = 'idle';
+  renderPlans({ planlar: plans, overall_score: data.overall_score });
+  setPlanGenStatus('nutrition.plan.options_ready', { n: plans.length });
 }
 
+/* Generated options: proposals, each with its own "Use this plan". None of
+   them is, or is ever labelled, the current plan. */
 function renderPlans(data) {
-  document.getElementById('plan-results').style.display = 'block';
+  document.getElementById('plan-results').hidden = false;
+  const rating = fmtNum(data.overall_score);
+  document.getElementById('score-banner-wrap').textContent = rating === '—' ? ''
+    : __t('nutrition.plan.rating', { n: rating }) + ' · ' + __t('nutrition.plan.rating_hint');
 
-  // Score banner
-  const scoreColors = { 'İyi': '#3D8BFF', 'Orta': '#FFB020', 'Kötü': '#FF4D4D' };
-  const color = scoreColors[data.score_label] || '#9A9A9A';
-  document.getElementById('score-banner-wrap').innerHTML = `
-    <div class="score-banner" style="margin-bottom:24px;">
-      <div class="score-big" style="color:${color};">${fmtNum(data.overall_score)}</div>
-      <div>
-        <div class="score-label" style="color:${color};">${esc(scoreLabel(data.score_label))} ${__t('nutrition.plan_word')}</div>
-        <div class="score-desc">${__t('nutrition.score_desc')}</div>
-      </div>
-    </div>`;
-
-  // Plan cards
-  const grid = document.getElementById('plans-grid');
-  grid.innerHTML = '';
-  data.planlar.forEach((plan, i) => {
-    const meals = [
-      { key:'kahvalti',  label: __t('nutrition.meal_breakfast') },
-      { key:'ogle',      label: __t('nutrition.meal_lunch')     },
-      { key:'aksam',     label: __t('nutrition.meal_dinner')    },
-      { key:'ara_ogun',  label: __t('nutrition.meal_snack')     }
-    ];
-    const mealsHtml = meals.map(m => {
+  document.getElementById('plans-grid').innerHTML = data.planlar.map((plan, i) => {
+    const mealsHtml = planMealSlots().map(m => {
       const ml = plan[m.key];
-      if (!ml) return '';
+      if (!isMealObject(ml)) return '';
       return `
         <div class="plan-meal-sec">
-          <div class="plan-meal-title">${m.label} · ${fmtNum(ml.kalori)} kcal</div>
-          <ul class="plan-meal-items">${(ml.yemekler || []).map(y => `<li>${esc(y)}</li>`).join('')}</ul>
+          <p class="plan-meal-title">${m.label} · ${fmtNum(ml.kalori)} kcal</p>
+          <ul class="plan-meal-items">${planItems(ml).map(y => `<li>${esc(y)}</li>`).join('')}</ul>
         </div>`;
     }).join('');
-
-    const card = document.createElement('div');
-    card.className = 'plan-card';
-    card.id = `plan-card-${i}`;
-    card.innerHTML = `
-      <div class="plan-card-hdr">
-        <div class="plan-card-name">${esc(plan.isim ?? 'Plan ' + (i+1))}</div>
-        <div class="plan-card-kcal">${fmtNum(plan.toplam_kalori)} kcal</div>
-      </div>
-      <div class="plan-card-body">
-        ${mealsHtml}
-        <div class="plan-macro-grid">
-          <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_protein)}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_protein')}</div></div>
-          <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_karb)}g</div><div class="plan-macro-lbl">${__t('nutrition.carb_short')}</div></div>
-          <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_yag)}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_fat')}</div></div>
+    return `
+      <article class="plan-card" id="plan-card-${i}" role="listitem" aria-labelledby="plan-card-name-${i}">
+        <div class="plan-card-hdr">
+          <div class="plan-card-id">
+            <span class="plan-badge">${esc(__t('nutrition.plan.option_badge'))}</span>
+            <h5 class="plan-card-name" id="plan-card-name-${i}">${esc(planName(plan, i))}</h5>
+          </div>
+          <div class="plan-card-kcal">${fmtNum(plan.toplam_kalori)} kcal</div>
         </div>
-        <button class="btn-select-plan" id="sel-btn-${i}"
-          data-action="selectPlan" data-args="${esc(JSON.stringify([i, plan, data.overall_score]))}">
-          ${__t('nutrition.select_plan')}
-        </button>
-      </div>`;
-    grid.appendChild(card);
-  });
-
-  setTimeout(() => document.getElementById('plan-results').scrollIntoView({ behavior:'smooth', block:'start' }), 200);
+        <div class="plan-card-body">
+          ${mealsHtml}
+          <div class="plan-macro-grid">
+            <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_protein)}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_protein')}</div></div>
+            <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_karb)}g</div><div class="plan-macro-lbl">${__t('nutrition.carb_short')}</div></div>
+            <div class="plan-macro-item"><div class="plan-macro-val">${fmtNum(plan.toplam_yag)}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_fat')}</div></div>
+          </div>
+          <button class="btn-select-plan" id="sel-btn-${i}" type="button" data-action="selectPlan" data-args="[${i}]">${esc(__t('nutrition.plan.use'))}</button>
+        </div>
+      </article>`;
+  }).join('');
+  syncPlanBuilder();
 }
 
-async function selectPlan(i, plan, score) {
+/* "Use this plan". With a confirmed absence there is nothing to replace; in
+   every other state (a plan, a plan we cannot draw, or a state we could not
+   read) the replacement is confirmed first. */
+function selectPlan(i, btn) {
+  if (_planSaveInFlight || _planGenInFlight || _planSaveLocked) return;
+  if (!_planOptions || !_planOptions.plans[i]) return;
+  if (_planShown.state === 'absent') return savePlanOption(i);
+  openPlanReplace(i, btn);
+}
+
+function openPlanReplace(i, opener) {
+  _planReplaceIndex = i;
+  _planReplaceOpener = opener && opener.nodeType === 1 ? opener : document.activeElement;
+  const next = planName(_planOptions.plans[i], i);
+  let body;
+  if (_planShown.state === 'active')
+    body = __t('nutrition.plan.confirm_body', { current: _planShown.name, next });
+  else if (_planShown.state === 'invalid')
+    body = __t('nutrition.plan.confirm_body_unnamed', { next });
+  else
+    body = __t('nutrition.plan.confirm_body_unknown', { next });
+  document.getElementById('plan-replace-body').textContent = body;
+  document.getElementById('plan-replace-confirm').disabled = false;
+  document.getElementById('plan-replace-modal').classList.add('open');
+  // The non-destructive choice takes focus first.
+  document.getElementById('plan-replace-cancel').focus();
+}
+
+function cancelPlanReplace() {
+  const modal = document.getElementById('plan-replace-modal');
+  const wasOpen = modal.classList.contains('open');
+  modal.classList.remove('open');
+  const back = _planReplaceOpener;
+  _planReplaceIndex = null;
+  _planReplaceOpener = null;
+  if (wasOpen && back && document.contains(back) && !back.disabled) back.focus();
+}
+
+function confirmPlanReplace() {
+  const i = _planReplaceIndex;
+  if (i === null || _planSaveInFlight) return;
+  document.getElementById('plan-replace-confirm').disabled = true;
+  document.getElementById('plan-replace-modal').classList.remove('open');
+  _planReplaceIndex = null;
+  _planReplaceOpener = null;
+  savePlanOption(i);
+}
+
+/* The ONE canonical replacement. */
+async function savePlanOption(i) {
+  if (_planSaveInFlight || _planSaveLocked || !_planOptions || !_planOptions.plans[i]) return;
+  const sent = _planOptions.plans[i];
+  const replacing = _planShown.state !== 'absent';
+  const before = ['active', 'absent', 'invalid'].includes(_planShown.state) ? _planShown.key : null;
+  const builder = document.getElementById('plan-builder');
+  _planSaveInFlight = true;
+  builder.dataset.saveState = 'saving';
+  setPlanGenStatus('nutrition.plan.saving');
+  syncPlanBuilder();
+  const title = document.getElementById('plan-builder-title');
+  try { title.focus({ preventScroll: true }); } catch (e) { title.focus(); }
+
+  let res = null, body = null;
   try {
-    const res = await fetch('/nutrition-plan/save', {
+    res = await fetch('/nutrition-plan/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plan, score })
+      body: JSON.stringify({ plan: sent, score: _planOptions.score })
     });
-    /* The save route can now refuse (F2 schema / F3 score). Claiming success
-       on a refusal would show the card as the active plan while the server
-       holds the OLD one — the user's next reload would silently disagree. */
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      showToast(d.error || __t('nutrition.save_error_prefix'), 'error');
-      return;
-    }
-    invalidateActivePlan();
-    document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('chosen'));
-    document.querySelectorAll('.btn-select-plan').forEach(b => { b.textContent = __t('nutrition.select_plan'); b.classList.remove('chosen'); });
-    document.getElementById(`plan-card-${i}`).classList.add('chosen');
-    const btn = document.getElementById(`sel-btn-${i}`);
-    btn.textContent = __t('nutrition.active_plan');
-    btn.classList.add('chosen');
-    showToast(__t('nutrition.plan_saved'), 'success');
-  } catch (e) {
-    showToast(__t('nutrition.save_error_prefix') + e.message, 'error');
+    body = await res.json().catch(() => null);
+  } catch (e) { res = null; }
+  const ok = Boolean(res && res.ok && body && !body.error);
+  const refused = Boolean(res && res.status >= 400 && res.status < 500);
+
+  if (refused) {
+    // Definite rejection: the route validates before it deletes, so the
+    // current plan was never touched. The option may be chosen again.
+    _planSaveInFlight = false;
+    builder.dataset.saveState = 'rejected';
+    setPlanGenStatus('nutrition.plan.save_rejected');
+    showToast((body && typeof body.error === 'string' && body.error) || __t('nutrition.plan.save_rejected'), 'error');
+    syncPlanBuilder();
+    return;
   }
+
+  // Confirmed, or unknown: ONE canonical re-read, shared by Plan and Today.
+  invalidateActivePlan();
+  const reread = loadActivePlan();
+  loadQuickAddSection();
+  const shown = await reread;
+  _planSaveInFlight = false;
+
+  if (ok || (shown.state === 'active' && samePlanDocument(sent, shown.plan))) {
+    finishPlanSave();
+    return;
+  }
+  if (shown.state !== 'unavailable' && before !== null && shown.key === before) {
+    // The canonical read proves nothing changed: a retry is safe.
+    builder.dataset.saveState = 'failed';
+    setPlanGenStatus(replacing ? 'nutrition.plan.save_not_replaced' : 'nutrition.plan.save_not_saved');
+    showToast(__t(replacing ? 'nutrition.plan.save_not_replaced' : 'nutrition.plan.save_not_saved'), 'error');
+    syncPlanBuilder();
+    return;
+  }
+  // Neither outcome can be proven. Never re-send; these options stay disabled.
+  _planSaveLocked = true;
+  builder.dataset.saveState = 'unconfirmed';
+  setPlanGenStatus(replacing ? 'nutrition.plan.save_unconfirmed' : 'nutrition.plan.save_unconfirmed_new');
+  showToast(__t(replacing ? 'nutrition.plan.save_unconfirmed' : 'nutrition.plan.save_unconfirmed_new'), 'warning');
+  syncPlanBuilder();
+}
+
+function finishPlanSave() {
+  _planOptions = null;
+  _planSaveLocked = false;
+  const builder = document.getElementById('plan-builder');
+  document.getElementById('plans-grid').innerHTML = '';
+  document.getElementById('plan-results').hidden = true;
+  document.getElementById('score-banner-wrap').textContent = '';
+  builder.dataset.genState = 'idle';
+  builder.dataset.saveState = 'idle';
+  setPlanGenStatus(null);
+  closePlanBuilder(false);
+  document.getElementById('plan-current-status').textContent = __t('nutrition.plan.saved');
+  const title = document.getElementById('plan-current-title');
+  try { title.focus({ preventScroll: true }); } catch (e) { title.focus(); }
 }
 
 /* ── AKTİF PLAN CACHE ──
    loadActivePlan() ve loadQuickAddSection() açılışta arka arkaya çağrılıyordu;
    ikisi de /nutrition-plan/active'i çekince istek iki kez gidiyordu. In-flight
-   promise'i paylaşarak tek isteğe indir; plan değişince invalidateActivePlan(). */
+   promise'i paylaşarak tek isteğe indir; plan değişince invalidateActivePlan().
+   `_activePlanEpoch` names the current read: a consumer whose read was
+   replaced (invalidation or a forced retry) drops its answer, so an older
+   response can never overwrite a newer canonical state. */
 let _activePlanCache = null;
+let _activePlanEpoch = 0;
 function getActivePlan(force = false) {
   if (force || !_activePlanCache) {
+    _activePlanEpoch++;
     // A failed read rejects (and is not cached) — it is never `exists:false`.
-    _activePlanCache = fetch('/nutrition-plan/active')
+    const read = fetch('/nutrition-plan/active')
       .then(r => { if (!r.ok) throw new Error('Plan read failed'); return r.json(); })
       .then(d => { if (!d || typeof d.exists !== 'boolean') throw new Error('Plan read invalid'); return d; })
-      .catch(err => { _activePlanCache = null; throw err; });
+      .catch(err => { if (_activePlanCache === read) _activePlanCache = null; throw err; });
+    _activePlanCache = read;
   }
   return _activePlanCache;
 }
-function invalidateActivePlan() { _activePlanCache = null; }
-
-async function loadActivePlan() {
-  try {
-    const d = await getActivePlan();
-    if (!d.exists) return;
-    renderActivePlanDetail(d.plan, d.score, d.created_at);
-    document.getElementById('active-plan-detail').style.display = 'block';
-    document.getElementById('plan-form').style.display = 'none';
-  } catch (e) {}
-}
-
-function renderActivePlanDetail(plan, score, createdAt) {
-  const meals = [
-    { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: _SLOT_ICONS.breakfast },
-    { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: _SLOT_ICONS.lunch },
-    { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: _SLOT_ICONS.dinner },
-    { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: _SLOT_ICONS.snack }
-  ];
-
-  const mealsHtml = meals.map(m => {
-    const ml = plan[m.key];
-    if (!ml) return '';
-    const items = (ml.yemekler || []).map(y => `<li>${esc(y)}</li>`).join('');
-    return `
-      <div class="apd-meal">
-        <div class="apd-meal-hdr">
-          <span class="apd-meal-icon" aria-hidden="true">${m.icon}</span>
-          <span class="apd-meal-name">${m.label}</span>
-          <span class="apd-meal-kcal">${fmtNum(ml.kalori)} kcal</span>
-        </div>
-        <ul class="apd-meal-list">${items}</ul>
-      </div>`;
-  }).join('');
-
-  document.getElementById('active-plan-detail').innerHTML = `
-    <div class="apd-header">
-      <div>
-        <div class="apd-title">${esc(plan.isim || __t('nutrition.active_plan_name'))}</div>
-        <div class="apd-sub">${esc(createdAt)} · ${__t('nutrition.score_text')} ${fmtNum(score)}/10</div>
-      </div>
-      <button class="btn-ghost" data-action="resetPlan">${__t('nutrition.new_plan')}</button>
-    </div>
-
-    <div class="apd-macro-grid">
-      <div class="apd-macro-item">
-        <div class="apd-macro-val">${fmtNum(plan.toplam_kalori)}</div>
-        <div class="apd-macro-lbl">kcal</div>
-      </div>
-      <div class="apd-macro-item">
-        <div class="apd-macro-val">${fmtNum(plan.toplam_protein)}g</div>
-        <div class="apd-macro-lbl">${__t('nutrition.macro_protein')}</div>
-      </div>
-      <div class="apd-macro-item">
-        <div class="apd-macro-val">${fmtNum(plan.toplam_karb)}g</div>
-        <div class="apd-macro-lbl">${__t('nutrition.carb_short')}</div>
-      </div>
-      <div class="apd-macro-item">
-        <div class="apd-macro-val">${fmtNum(plan.toplam_yag)}g</div>
-        <div class="apd-macro-lbl">${__t('nutrition.macro_fat')}</div>
-      </div>
-    </div>
-
-    <div class="apd-meals">${mealsHtml}</div>`;
-}
-
-function resetPlan() {
-  document.getElementById('active-plan-detail').style.display = 'none';
-  document.getElementById('plan-form').style.display = 'block';
-}
+function invalidateActivePlan() { _activePlanCache = null; _activePlanEpoch++; }
 
 /* ── FROM YOUR PLAN (planned shortcuts) ──
    The existing `/api/quick-add-meal` shortcut, presented as what it is: a
@@ -1386,10 +1723,13 @@ function setPlanState(state) {
 
 async function loadQuickAddSection(force = false) {
   const container = document.getElementById('quick-add-cards');
-  let d;
+  let d, epoch;
   try {
-    d = await getActivePlan(force);
+    const read = getActivePlan(force);
+    epoch = _activePlanEpoch;
+    d = await read;
   } catch (e) {
+    if (epoch !== _activePlanEpoch) return _activePlanCache ? loadQuickAddSection() : undefined;
     setPlanState('unavailable');
     container.innerHTML = `
       <div class="nut-planned-state">
@@ -1398,6 +1738,8 @@ async function loadQuickAddSection(force = false) {
       </div>`;
     return;
   }
+  // A newer read replaced this one (e.g. a confirmed plan save): draw that one.
+  if (epoch !== _activePlanEpoch) return _activePlanCache ? loadQuickAddSection() : undefined;
 
   if (!d.exists) {
     setPlanState('none');

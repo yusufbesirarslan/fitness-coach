@@ -146,8 +146,10 @@ def test_no_plan_mobile_keeps_today_diary_history_water_and_creation_working(
     plan_tab = page.locator('[data-tab-name="plan"]')
     plan_tab.focus()
     page.keyboard.press("Enter")
-    expect(page.locator("#plan-form")).to_be_visible()
-    expect(page.locator("#plan-btn")).to_be_visible()
+    # NUTR-PR5: Plan leads with the current plan; generation opens on demand.
+    expect(page.locator("#plan-current")).to_be_visible()
+    expect(page.locator("#plan-current")).not_to_have_attribute("data-plan-state", "loading")
+    expect(page.locator("#plan-builder")).to_be_hidden()
 
     page.locator('[data-tab-name="today"]').click()
     water_tab = page.locator('[data-tab-name="water"]')
