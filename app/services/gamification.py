@@ -28,6 +28,23 @@ def lb_sync_user(user):
         pass  # Postgres kaynak; boot/rollover'daki lb_rebuild sürüklenmeyi düzeltir
 
 
+def lb_remove_user(user_id):
+    """Silinen bir hesabı iki liderlik setinden düşür (LP-11 hesap silme).
+
+    Setler Postgres'in türetilmiş önbelleğidir; tek üye silmek tam bir
+    lb_rebuild'in istek yolundaki maliyetini ödemez. Redis yoksa/çökerse
+    sessizce geç — okuyucular olmayan kullanıcıyı zaten atlar, boot/rollover
+    lb_rebuild'i kalan sürüklenmeyi düzeltir."""
+    if not redis_client:
+        return
+    try:
+        uid = str(user_id)
+        redis_client.zrem(LB_ALLTIME_KEY, uid)
+        redis_client.zrem(LB_WEEKLY_KEY, uid)
+    except Exception:
+        pass
+
+
 def _iter_leaderboard_users(batch_size=500):
     """Yield User rows in keyset batches to bound leaderboard rebuild memory use."""
     last_id = 0

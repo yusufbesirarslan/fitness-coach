@@ -522,10 +522,10 @@ undeployed checks or future IaC work:
 
 ## Deferred Flows
 
-Account deletion, Flutter secure
-storage, Flutter refresh interception, authenticated mobile routing, and all
-non-auth product APIs remain deferred. (Registration and verification:
-see the LP-01 amendment above; password recovery: the LP-02 amendment.)
+Flutter secure storage, Flutter refresh interception, authenticated mobile
+routing, and all non-auth product APIs remain deferred. (Registration and
+verification: see the LP-01 amendment above; password recovery: the LP-02
+amendment; account deletion: LP-11, docs/MOBILE_ACCOUNT_DELETION.md.)
 
 ## Rollback
 

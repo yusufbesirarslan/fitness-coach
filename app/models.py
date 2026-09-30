@@ -720,6 +720,23 @@ class MealPhotoCleanup(db.Model):
         return f"<MealPhotoCleanup {self.user_id} - {self.entry_id}>"
 
 
+class DeletedIdentityTombstone(db.Model):
+    """LP-11 anti-resurrection record for a Cognito identity deleted by
+    `DELETE /api/v1/account` (app/services/deleted_identity.py).
+
+    Written in the same transaction that purges the account; login refuses to
+    give a local row back to a subject that has one. Holds ONLY a keyed
+    HMAC-SHA256 fingerprint of the subject and the time — never the subject,
+    a username, an e-mail, a token or profile data. A security record, not
+    retained account data; kept indefinitely (docs/MOBILE_ACCOUNT_DELETION.md §6).
+    Deliberately no user FK: the user row is deleted in the same transaction.
+    """
+    __tablename__ = "deleted_identity_tombstone"
+
+    fingerprint = db.Column(db.String(64), primary_key=True)
+    deleted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+
 class BarcodeFoodCache(db.Model):
     """Normalized packaged-food cache keyed by barcode.
 

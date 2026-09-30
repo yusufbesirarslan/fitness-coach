@@ -36,8 +36,8 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # Check-in's submission-key revision follows the Coach-message index.
-    assert heads == ["c8d9e0f1a2b3"]
+    # LP-11's deleted-identity tombstone follows Check-in's submission key.
+    assert heads == ["d0e1f2a3b4c5"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -60,9 +60,10 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # Training PR5's f5a6b7c8d9e0, which adds COLUMNS to the existing
     # workout_session table and no new table; 41 = plus the F1 credential epoch,
     # one COLUMN on the existing user table; 42 = plus F7's Coach-message
-    # composite index; 43 = Check-in submission integrity. Sprint 11 PR4 still contributes none of them, which is
-    # the claim this test guards.
-    assert len(revision_files) == 43
+    # composite index; 43 = Check-in submission integrity; 44 = LP-11's
+    # deleted-identity tombstone table. Sprint 11 PR4 still contributes none
+    # of them, which is the claim this test guards.
+    assert len(revision_files) == 44
     assert not any("exercise" in name for name in revision_files)
 
     catalog_path = (

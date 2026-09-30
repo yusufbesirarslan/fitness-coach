@@ -12,7 +12,8 @@ from app.config import COGNITO_ENABLED
 from app.extensions import db, limiter, login_throttle_available
 from app.models import User
 from app.services import (account_recovery, account_registration, cognito_jwt,
-                          cognito_service, mobile_auth, session_store)
+                          cognito_service, deleted_identity, mobile_auth,
+                          session_store)
 from app.services.account_recovery import (
     Outcome as RecoveryOutcome, Phase as RecoveryPhase, RecoveryFailure)
 from app.services.account_registration import (
@@ -281,6 +282,22 @@ def _registration_failure_response(failure, required_key):
     return jsonify({"error": failure.detail}), 400
 
 
+def _identity_deleted(sub):
+    """LP-11: True — and this login's pending row write rolled back — when
+    `DELETE /api/v1/account` removed this Cognito subject. Called after the
+    subject is written onto the row and before commit, so a login that
+    authenticated before the deletion cannot give the deleted identity a
+    local account back (app/services/deleted_identity.py)."""
+    try:
+        deleted_identity.refuse_if_deleted(sub)
+    except deleted_identity.IdentityDeleted:
+        db.session.rollback()
+        current_app.logger.warning("[LOGIN] identity_deleted: yerel kayıt "
+                                   "geri oluşturulmadı")
+        return True
+    return False
+
+
 def _reconcile_local_user(verified_claims, submitted_username):
     """H2: DOĞRULANMIŞ Cognito kimliğine karşılık gelen yerel kaydı bağla/oluştur.
 
@@ -342,6 +359,8 @@ def _reconcile_local_user(verified_claims, submitted_username):
         return None
     if existing is not None:
         existing.cognito_sub = sub
+        if _identity_deleted(sub):
+            return None
         db.session.commit()
         current_app.logger.info(
             "[LOGIN] Cognito orphan kurtarıldı: mevcut yerel kayıt bağlandı (user=%s)",
@@ -355,6 +374,8 @@ def _reconcile_local_user(verified_claims, submitted_username):
     ensure_referral_code(user)
     db.session.add(user)
     try:
+        if _identity_deleted(sub):
+            return None
         db.session.commit()
     except IntegrityError:
         db.session.rollback()

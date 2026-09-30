@@ -94,8 +94,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
     `/api/v1/today` joined the set in Sprint 12 PR3; LP-01 adds the three
     pre-auth registration/verification routes, LP-02 the two pre-auth
     password-recovery routes, LP-03 the native onboarding profile write,
-    LP-04 the canonical Progress summary read, and LP-09 the native Coach
-    message write + history read. Mobile Training PR2 adds
+    LP-04 the canonical Progress summary read, LP-09 the native Coach
+    message write + history read, and LP-11 the native account deletion
+    (`DELETE /api/v1/account`). Mobile Training PR2 adds
     exactly three canonical read projections, PR4A one native plan write, and
     PR5 the six native workout-session contracts. The referenced-session read
     adds one owner-scoped canonical projection. Any further path means
@@ -123,6 +124,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # LP-09 native Coach (owner = bearer principal; web Coach pipeline).
         "/api/v1/coach/messages",
         "/api/v1/coach/history",
+        # LP-11 native account deletion (owner = bearer principal).
+        "/api/v1/account",
         "/api/v1/nutrition/diary/today",
         "/api/v1/nutrition/foods/search",
         "/api/v1/nutrition/foods/fatsecret/<food_id>/servings",
