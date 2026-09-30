@@ -617,7 +617,68 @@
 }
 .modal-box .modal-title { margin-bottom: var(--space-5); }
 
+/* ── 13b2 · NUTRITION PLAN (NUTR-PR5) ─────────────────────────────── */
+/* Target → current plan → planned meals → Create/Replace. State is always
+   carried by words (Planned, Option, Target not set…), never by colour. */
+.plan-block { margin-bottom: var(--space-4); min-width: 0; }
+.plan-block-title {
+  font-family: var(--font-display); font-size: var(--text-lg); letter-spacing: 1.5px;
+  color: var(--color-text-1); margin: 0 0 var(--space-2);
+}
+.plan-block-title:focus { outline: none; }
+.plan-block-title:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.plan-block-sub {
+  font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label);
+  text-transform: uppercase; color: var(--color-text-3); margin: var(--space-4) 0 var(--space-2);
+}
+.plan-target-value {
+  font-family: var(--font-display); font-size: var(--text-2xl); letter-spacing: 1px;
+  color: var(--color-text-1); margin: 0; font-variant-numeric: tabular-nums;
+}
+.plan-target[data-target-state="known"] .plan-target-value { color: var(--color-primary); }
+.plan-target-macros { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--color-text-2); }
+.plan-note { margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--color-text-3); line-height: var(--leading-normal); }
+.plan-note:empty { display: none; }
+.plan-state-text { margin: 0; font-size: var(--text-md); color: var(--color-text-1); }
+.plan-status { margin: var(--space-3) 0 0; font-size: var(--text-sm); color: var(--color-text-2); }
+.plan-status:empty { display: none; }
+.plan-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.plan-actions > button { min-height: 44px; flex: 0 1 auto; }
+.plan-actions > [hidden] { display: none; }
+.apd-title { overflow-wrap: anywhere; }
+.apd-sub { margin: 0; }
+.apd-meals { list-style: none; padding: 0; margin: 0; }
+.apd-meal-hdr { flex-wrap: wrap; }
+/* The slot name keeps its natural width: on a narrow card the badge and kcal
+   wrap to the next line instead of squeezing "Breakfast" into "Bre/akf/ast". */
+.apd-meal-name { margin: 0; min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
+.apd-meal-list li, .plan-meal-items li { overflow-wrap: anywhere; }
+.apd-badge, .plan-badge {
+  display: inline-block; font-size: var(--text-2xs); font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--color-text-2);
+  border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-full);
+  padding: 2px var(--space-2); white-space: nowrap;
+}
+.plan-builder #plan-form .chip { min-height: 44px; }
+.plan-builder .custom-food-row .fc-input { flex: 1; min-width: 0; }
+.plan-builder .custom-tag-remove {
+  background: none; border: 0; padding: 0; min-width: 44px; min-height: 44px;
+  display: inline-flex; align-items: center; justify-content: center; font: inherit; font-size: 18px;
+}
+.plan-builder .plans-grid { margin-top: var(--space-3); }
+.plan-card-hdr { gap: var(--space-3); flex-wrap: wrap; }
+.plan-card-id { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.plan-card-name { margin: 0; overflow-wrap: anywhere; }
+.plan-meal-title { margin: 0 0 6px; }
+.plan-card .btn-select-plan { min-height: 44px; }
+.plan-card .btn-select-plan:disabled { opacity: 0.5; cursor: not-allowed; }
+.plan-replace-keep { margin-top: var(--space-2); }
+.plan-replace-box .nut-modal-lead { overflow-wrap: anywhere; }
+
 /* ── 13c · FOCUS VISIBLE (keyboard) ───────────────────────────────── */
+.plan-builder .chip:focus-visible,
+.plan-builder .custom-tag-remove:focus-visible,
+.plan-card .btn-select-plan:focus-visible,
 .log-sheet-opt:focus-visible,
 .log-sheet-close:focus-visible,
 #nut-planned-title:focus-visible,
@@ -636,6 +697,8 @@
   .meal-card, .wg.just-filled, .qab-done .qab-check, .water-num { animation: none !important; transition: none !important; }
   .log-sheet-opt, .mc-edit, .mc-del, .slot-empty { transition: none !important; }
   .log-sheet-opt:active { transform: none; }
+  .plan-card, .chip { transition: none !important; }
+  .plan-card:hover, .chip:active { transform: none; }
 }
 
 /* ── WEB-UX4-PR6 · F-34 — typography that used to be inline `style` ─────────

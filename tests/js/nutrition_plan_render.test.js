@@ -97,7 +97,9 @@ function loadNutritionPage(activePlanResponse, saveResponse) {
     console,
     history: { state: null, replaceState(state) { this.state = state; }, pushState(state) { this.state = state; } },
     window: {
-      t: (k) => k,
+      // Keys stay visible; interpolated values are appended so a test can
+      // see that (escaped) data reached the rendered string.
+      t: (k, vars) => (vars ? k + ' ' + Object.values(vars).join(' ') : k),
       LOCALE: 'tr',
       addEventListener() {},
       requestAnimationFrame() {},
@@ -105,7 +107,8 @@ function loadNutritionPage(activePlanResponse, saveResponse) {
     },
     fetch: (url, init) => {
       if (activePlanResponse && String(url).startsWith('/nutrition-plan/active')) {
-        return Promise.resolve({ ok: true, json: async () => activePlanResponse });
+        const body = typeof activePlanResponse === 'function' ? activePlanResponse() : activePlanResponse;
+        return Promise.resolve({ ok: true, json: async () => body });
       }
       if (saveResponse && String(url).startsWith('/nutrition-plan/save')) {
         saveResponse.sent.push(init);
@@ -221,28 +224,48 @@ test('renderPlans emits no markup from a poisoned generator response', () => {
   }
 });
 
-/* F2/F3 gave the save route two new ways to say no. `selectPlan()` never
- * looked at the response at all, so a refused save still lit the card up as
- * the active plan and toasted success — the page would claim to have stored a
- * document the server threw away. */
-test('a refused save is not reported as the active plan', async () => {
+/* F2/F3 gave the save route two new ways to say no. The old `selectPlan()`
+ * never looked at the response, so a refused save lit the card up as the
+ * active plan. NUTR-PR5: an option is a proposal until the save answers, and
+ * only a canonical re-read draws the current plan. */
+const OPTION = { isim: 'Plan A', ogle: { yemekler: ['Tavuk - 150g'], kalori: 380 } };
+
+function offer(context) {
+  vm.runInContext(`_planOptions = { plans: [${JSON.stringify(OPTION)}], score: 8 };`, context);
+}
+
+test('a refused save changes nothing and marks nothing current', async () => {
   const refusal = {
     ok: false, status: 400, sent: [],
     body: { error: 'Nutrition plan data is invalid.', code: 'nutrition_plan_invalid' },
   };
-  const { context, elements } = loadNutritionPage(null, refusal);
-  context.renderPlans({ overall_score: 8, score_label: 'İyi', planlar: [{ isim: 'Plan A' }] });
-  await context.selectPlan(0, { isim: 'Plan A' }, 8);
+  const { context, elements } = loadNutritionPage({ exists: false }, refusal);
+  await context.loadActivePlan();
+  offer(context);
+  context.renderPlans({ overall_score: 8, planlar: [OPTION] });
+  await context.selectPlan(0);
   assert.equal(refusal.sent.length, 1, 'the save was never attempted');
-  const button = elements['sel-btn-0'];
-  assert.notEqual(button && button.textContent, 'nutrition.active_plan',
-    'a refused save marked the plan active');
+  assert.equal(elements['plan-builder'].dataset.saveState, 'rejected');
+  assert.equal(vm.runInContext('_planShown.state', context), 'absent',
+    'a refused save changed the drawn current plan');
+  assert.ok(!elements['active-plan-detail'].innerHTML.includes('Tavuk - 150g'),
+    'the refused option was drawn as the current plan');
 });
 
-test('an accepted save still marks the plan active', async () => {
+test('an accepted save draws the plan only from the canonical re-read', async () => {
   const accepted = { ok: true, status: 200, sent: [], body: { message: 'ok' } };
-  const { context, elements } = loadNutritionPage(null, accepted);
-  context.renderPlans({ overall_score: 8, score_label: 'İyi', planlar: [{ isim: 'Plan A' }] });
-  await context.selectPlan(0, { isim: 'Plan A' }, 8);
-  assert.equal(elements['sel-btn-0'].textContent, 'nutrition.active_plan');
+  let stored = { exists: false };
+  const { context, elements } = loadNutritionPage(() => stored, accepted);
+  await context.loadActivePlan();
+  offer(context);
+  context.renderPlans({ overall_score: 8, planlar: [OPTION] });
+  assert.ok(!elements['active-plan-detail'].innerHTML.includes('Tavuk - 150g'),
+    'a generated option was drawn as the current plan before any save');
+  stored = { exists: true, plan: OPTION, score: 8, created_at: '01.10.2026' };
+  await context.selectPlan(0);
+  assert.equal(accepted.sent.length, 1);
+  assert.deepEqual(JSON.parse(accepted.sent[0].body), { plan: OPTION, score: 8 });
+  assert.equal(vm.runInContext('_planShown.state', context), 'active');
+  assert.ok(elements['active-plan-detail'].innerHTML.includes('Tavuk - 150g'));
+  assert.equal(elements['plan-current-status'].textContent, 'nutrition.plan.saved');
 });

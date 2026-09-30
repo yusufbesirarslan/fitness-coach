@@ -418,11 +418,14 @@ class TestLegacyRowsStillReadable:
 
 NUTRITION_JS = Path(__file__).resolve().parents[1] / "static" / "nutrition.js"
 
-# The three functions that interpolate a stored or generated plan into innerHTML.
+# The functions that interpolate a stored or generated plan (or the markup
+# around it) into innerHTML. NUTR-PR5 added the two current-plan state blocks.
 PLAN_RENDERERS = (
     "function renderPlans(data)",
     "function renderActivePlanDetail(plan, score, createdAt)",
     "async function loadQuickAddSection(force = false)",
+    "function planCta(kind)",
+    "function renderPlanStateBlock(textKey, hintKey, kind)",
 )
 
 # Identifiers that carry server/provider data on this page. An interpolation
@@ -537,36 +540,32 @@ class TestNutritionRenderContract:
         body = _function_body(_read_nutrition_js(), signature)
         assert set(_interpolations(body)) == EXPECTED_INTERPOLATIONS[signature]
 
-    def test_the_action_argument_attribute_escapes_ampersands_too(self):
-        """The old `.replace(/"/g,'&quot;')` left `&` and `<` alone.
+    def test_no_plan_document_rides_in_an_action_attribute(self):
+        """The old `.replace(/"/g,'&quot;')` left `&` and `<` alone, and the
+        whole generated plan travelled through a `data-args` attribute.
 
-        `<` rode into the attribute verbatim and a stored `&quot;` corrupted the
-        JSON actions.js parses back out. esc() covers both and round-trips
-        through the HTML parser.
+        NUTR-PR5 removed the attribute channel altogether: the generated
+        options stay in page memory and "Use this plan" carries only its
+        index, so no provider text crosses an attribute boundary at all.
         """
         source = _read_nutrition_js()
-        assert "esc(JSON.stringify([i, plan, data.overall_score]))" in source
-        # Scoped to this slot on purpose: the food-autocomplete attributes use
-        # their own escaper, and that one already replaces `&` FIRST, so it is
-        # correct and out of F2's scope.
+        assert 'data-action="selectPlan" data-args="[${i}]"' in source
+        assert "JSON.stringify([i, plan" not in source
         assert "data.overall_score]).replace(" not in source
 
 
 EXPECTED_INTERPOLATIONS = {
+    # NUTR-PR5: options are proposals ("Option" badge, "Use this plan" carrying
+    # only an index); the food-choice rating moved to plain textContent.
     "function renderPlans(data)": frozenset({
-        "(ml.yemekler || []).map(y => `<li>${esc(y)}</li>`).join('')",
+        "planItems(ml).map(y => `<li>${esc(y)}</li>`).join('')",
         "__t('nutrition.carb_short')",
         "__t('nutrition.macro_fat')",
         "__t('nutrition.macro_protein')",
-        "__t('nutrition.plan_word')",
-        "__t('nutrition.score_desc')",
-        "__t('nutrition.select_plan')",
-        "color",
-        "esc(JSON.stringify([i, plan, data.overall_score]))",
-        "esc(plan.isim ?? 'Plan ' + (i+1))",
-        "esc(scoreLabel(data.score_label))",
+        "esc(__t('nutrition.plan.option_badge'))",
+        "esc(__t('nutrition.plan.use'))",
+        "esc(planName(plan, i))",
         "esc(y)",
-        "fmtNum(data.overall_score)",
         "fmtNum(ml.kalori)",
         "fmtNum(plan.toplam_kalori)",
         "fmtNum(plan.toplam_karb)",
@@ -576,25 +575,44 @@ EXPECTED_INTERPOLATIONS = {
         "m.label",
         "mealsHtml",
     }),
+    # NUTR-PR5: the current plan with Planned meals; created date, totals and
+    # the demoted rating are optional fragments assembled from guarded slots.
     "function renderActivePlanDetail(plan, score, createdAt)": frozenset({
         "__t('nutrition.carb_short')",
         "__t('nutrition.macro_fat')",
         "__t('nutrition.macro_protein')",
-        "__t('nutrition.new_plan')",
-        "__t('nutrition.score_text')",
-        "esc(createdAt)",
-        "esc(plan.isim || __t('nutrition.active_plan_name'))",
+        "created",
+        "esc(__t('nutrition.plan.created', { date: createdAt }))",
+        "esc(__t('nutrition.plan.planned_meals'))",
+        "esc(__t('nutrition.plan.planned_note'))",
+        "esc(__t('nutrition.plan.rating', { n: rating }))",
+        "esc(__t('nutrition.plan.rating_hint'))",
+        "esc(__t('nutrition.plan.totals'))",
+        "esc(__t('nutrition.planned'))",
+        "esc(plan.isim || __t('nutrition.plan.unnamed'))",
         "esc(y)",
         "fmtNum(ml.kalori)",
         "fmtNum(plan.toplam_kalori)",
         "fmtNum(plan.toplam_karb)",
         "fmtNum(plan.toplam_protein)",
         "fmtNum(plan.toplam_yag)",
-        "fmtNum(score)",
         "items",
         "m.icon",
         "m.label",
         "mealsHtml",
+        "planCta('replace')",
+        "ratingNote",
+        "totals",
+    }),
+    "function planCta(kind)": frozenset({
+        "esc(__t('nutrition.try_again'))",
+        "esc(__t('nutrition.plan.create'))",
+        "esc(__t('nutrition.plan.replace'))",
+    }),
+    "function renderPlanStateBlock(textKey, hintKey, kind)": frozenset({
+        "esc(__t(textKey))",
+        "esc(__t(hintKey))",
+        "planCta(kind)",
     }),
     "async function loadQuickAddSection(force = false)": frozenset({
         "__t('nutrition.no_active_plan')",
