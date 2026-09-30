@@ -315,7 +315,10 @@ def test_review_opens_coach_without_sending_and_send_uses_the_marker(
     page.on('request', lambda r: bodies.append(r.post_data) if r.url.endswith('/ask/stream') else None)
     gate.traffic.clear()
     page.locator('#nut-review-coach').dblclick()                   # double-click: still no send
-    page.wait_for_url('**/coach?review=nutrition-day')
+    # The second click supersedes the first click's navigation (net::ERR_ABORTED
+    # on a request the server answered 200). `wait_for_url` latches onto that
+    # first navigation event and raises; polling the committed URL does not.
+    expect(page).to_have_url(re.compile(r'/coach\?review=nutrition-day$'))
     page.wait_for_load_state('networkidle')
     context = page.locator('#coach-nutrition-context')
     expect(context).to_be_visible()
