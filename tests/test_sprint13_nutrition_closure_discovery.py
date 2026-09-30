@@ -432,7 +432,11 @@ def test_the_mobile_surface_publishes_no_history_menu_plan_or_water(
     They are asserted together because they share one reason: each would be a
     new capability, and none is required for consumption correctness.
     """
-    paths = {rule[0] for rule in api_v1_rules}
+    # LP-09's Coach history is the one approved "history" path: it is the web
+    # Coach's conversation window, not a nutrition history. Exempted by exact
+    # path, so any other history surface (nutrition or not) still fails here.
+    approved = {"/api/v1/coach/history"}
+    paths = {rule[0] for rule in api_v1_rules} - approved
     for absent in ("history", "menu", "nutrition-plan", "water", "draft",
                    "diary/builder"):
         assert not any(absent in path for path in paths), (
