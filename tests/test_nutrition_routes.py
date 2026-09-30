@@ -861,6 +861,38 @@ def test_meal_log_override_macros_awards_meal_logged_quest(client, auth_user, mo
     assert db.session.get(type(auth_user), auth_user.id).rank_points == 20
 
 
+def test_meal_log_counts_every_meal_toward_weekly_meals_challenge(
+        client, auth_user, monkeypatch):
+    # triage 2026-09-30 #1: only meal #1 claims the daily quest; meals #2..N used
+    # to lose their weekly_meals +1 because nothing committed the staged progress.
+    from app.models import Challenge, DailyQuest, UserChallengeProgress
+    db.session.add(DailyQuest(title="Öğün Kaydet", description="Bugün bir öğün kaydet",
+                              points_reward=20, quest_type="meal_logged"))
+    ch = Challenge(code="weekly_meals", title="Beslenme Takibi",
+                   description="Bu hafta 10 öğün kaydet", category="nutrition",
+                   metric="meal_logged", target_value=10, xp_reward=100,
+                   badge_code=None, challenge_type="global", period_type="weekly",
+                   is_active=True)
+    db.session.add(ch)
+    db.session.commit()
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("AI çağrılmamalı")))
+
+    awarded = []
+    for n in range(4):
+        body = client.post("/meal-log", json={
+            "ogun": "Akşam", "yemekler": "tavuk %d" % n,
+            "override_macros": {"kalori": 300, "protein": 30, "karb": 0, "yag": 5},
+        }).get_json()
+        awarded.append("quest_awarded" in body)
+
+    assert awarded == [True, False, False, False]     # daily quest: once per day
+    db.session.expire_all()
+    row = UserChallengeProgress.query.filter_by(
+        user_id=auth_user.id, challenge_id=ch.id).one()
+    assert row.progress == 4                          # ...challenge: every meal
+
+
 def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypatch):
     captured = {}
 

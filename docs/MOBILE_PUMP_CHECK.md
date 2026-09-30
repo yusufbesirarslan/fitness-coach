@@ -50,6 +50,7 @@ owner-only endpoint.
 | PUMP_CHECK_ANALYSIS_INVALID | 503 | Retry with same key |
 | PUMP_CHECK_PROVIDER_BUSY | 503 | Honor Retry-After; retry with same key |
 | PUMP_CHECK_PERSISTENCE_UNAVAILABLE | 503 | Fetch/retry same key; analysis is not automatically duplicated |
+| PUMP_CHECK_TEMPORARILY_UNAVAILABLE | 503 | `GET` history/detail storage fault; retry the read. The session is still valid — this is never an auth outcome |
 | AUTH_RATE_LIMITED | 429 | Honor Retry-After; retry with same key |
 
 The semantic fingerprint includes image SHA-256, normalized region,

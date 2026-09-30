@@ -7,7 +7,7 @@ import pytest
 from app.extensions import db
 from app.models import (
     Activity, Challenge, DailyQuest, Notification, User, UserBadge,
-    UserChallengeProgress,
+    UserChallengeProgress, UserQuestProgress,
 )
 
 
@@ -251,6 +251,82 @@ def test_quest_event_funnels_to_challenge(app):
     row = (UserChallengeProgress.query.join(Challenge)
            .filter(Challenge.code == "weekly_meals").one())
     assert row.progress == 1
+
+
+# ── Regression: per-event challenge progress survives the daily-quest short-circuit
+# (triage 2026-09-30 #1) ─────────────────────────────────────────────────────
+def test_complete_quest_for_user_commits_challenge_progress_after_daily_claim(app):
+    """Only the FIRST meal of the day claims the daily quest; meals 2..N used to stage
+    a weekly_meals +1 that was never committed and vanished at request teardown."""
+    from app.services.gamification import complete_quest_for_user
+    u = _mkuser(app)
+    db.session.add(DailyQuest(title="Öğün", description="x", points_reward=20,
+                              quest_type="meal_logged", is_active=True))
+    _seed_challenge(app, code="weekly_meals", metric="meal_logged",
+                    target_value=10, xp_reward=100)
+    db.session.commit()
+
+    first = complete_quest_for_user(u.id, "meal_logged")
+    second = complete_quest_for_user(u.id, "meal_logged")
+    third = complete_quest_for_user(u.id, "meal_logged")
+
+    assert first is not None and first["awarded"] is True
+    assert second is None and third is None          # daily quest: once per day
+    db.session.rollback()                            # what request teardown does
+    row = (UserChallengeProgress.query.join(Challenge)
+           .filter(Challenge.code == "weekly_meals").one())
+    assert row.progress == 3                         # ...but the challenge counts every meal
+
+
+def test_complete_quest_for_user_commits_challenge_progress_without_daily_quest(app):
+    """No DailyQuest row at all: _claim_quest returns None immediately, yet the
+    challenge increment staged ahead of it must still persist."""
+    from app.services.gamification import complete_quest_for_user
+    u = _mkuser(app)
+    _seed_challenge(app, code="weekly_meals", metric="meal_logged",
+                    target_value=10, xp_reward=100)
+    db.session.commit()
+
+    assert complete_quest_for_user(u.id, "meal_logged") is None
+    db.session.rollback()
+    row = (UserChallengeProgress.query.join(Challenge)
+           .filter(Challenge.code == "weekly_meals").one())
+    assert row.progress == 1
+
+
+def test_weekly_meals_challenge_completes_after_ten_meals_in_one_day(app):
+    """End-to-end consequence of #1: the 10-meal weekly challenge is reachable."""
+    from app.services.gamification import complete_quest_for_user
+    u = _mkuser(app)
+    db.session.add(DailyQuest(title="Öğün", description="x", points_reward=20,
+                              quest_type="meal_logged", is_active=True))
+    _seed_challenge(app, code="weekly_meals", metric="meal_logged",
+                    target_value=10, xp_reward=100)
+    db.session.commit()
+
+    for _ in range(10):
+        complete_quest_for_user(u.id, "meal_logged")
+
+    db.session.rollback()
+    row = (UserChallengeProgress.query.join(Challenge)
+           .filter(Challenge.code == "weekly_meals").one())
+    assert row.progress == 10
+    assert row.completed_at is not None
+
+
+def test_complete_quest_for_user_commit_failure_rolls_back_and_returns_none(app, monkeypatch):
+    from app.services.gamification import complete_quest_for_user
+    u = _mkuser(app)
+    db.session.add(DailyQuest(title="Öğün", description="x", points_reward=20,
+                              quest_type="meal_logged", is_active=True))
+    db.session.commit()
+
+    def _boom():
+        raise RuntimeError("db down")
+    with monkeypatch.context() as patched:
+        patched.setattr(db.session, "commit", _boom)
+        assert complete_quest_for_user(u.id, "meal_logged") is None
+    assert UserQuestProgress.query.filter_by(user_id=u.id).count() == 0
 
 
 # ── Regression: transaction poisoning (#2, triage 2026-07-17) ──────────────

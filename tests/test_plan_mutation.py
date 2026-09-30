@@ -606,6 +606,34 @@ class TestMoveTrainingDay:
         assert result.changed is False
         assert _stored_text(user.id) == text
 
+    def test_swapping_two_identical_days_reports_no_change(
+            self, app, make_user, seed_plan):
+        # triage 2026-09-30 #6: Salı and Perşembe are the same rest day.
+        user = make_user("identicalswap")
+        text = seed_plan(user.id)
+
+        result = _mutate(user.id, MoveTrainingDayCommand(
+            day="Salı", target_day="Perşembe"))
+
+        assert result.changed is False
+        assert _stored_text(user.id) == text
+
+    def test_swapping_days_that_differ_in_any_field_still_changes(
+            self, app, make_user, seed_plan):
+        user = make_user("differingswap")
+        document = _seven_day_program()
+        document["program"][3]["odak"] = "Mobilite"        # Perşembe now differs
+        text = seed_plan(user.id, document)
+
+        result = _mutate(user.id, MoveTrainingDayCommand(
+            day="Salı", target_day="Perşembe"))
+
+        assert result.changed is True
+        assert _stored_text(user.id) != text
+        stored = _stored(user.id)
+        assert _day(stored, "Salı")["odak"] == "Mobilite"
+        assert _day(stored, "Perşembe")["odak"] == "Aktif Toparlanma"
+
     def test_unknown_target_day_is_rejected(self, app, make_user, seed_plan):
         user = make_user("badtarget")
         text = seed_plan(user.id)

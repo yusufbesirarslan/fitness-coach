@@ -584,6 +584,83 @@ def test_water_zero_post_never_fires_the_funnel(client, auth_user):
     assert row.progress == 1                        # ilk POZİTİF kayıt ateşler
 
 
+def test_water_quest_claim_and_award_commit_together(client, auth_user, monkeypatch):
+    """triage 2026-09-30 #5: `quest_fired` and the award are ONE transaction.
+
+    If the award commit fails, the claim is rolled back with it, so the next water
+    update can retry — instead of `quest_fired=True` permanently suppressing the
+    day's water quest/challenge XP."""
+    from app.models import DailyQuest, UserQuestProgress
+    db.session.add(DailyQuest(title="Su", description="x", points_reward=10,
+                              quest_type="water_logged", is_active=True))
+    _seed_weekly_water_challenge()
+
+    real_commit = db.session.commit
+    state = {"claimed": False, "failed": False}
+    real_claim = training_bp._claim_water_funnel_for_today
+
+    def spy_claim(user_id, today_key):
+        result = real_claim(user_id, today_key)
+        state["claimed"] = result
+        return result
+
+    def flaky_commit():
+        if state["claimed"] and not state["failed"]:
+            state["failed"] = True
+            raise RuntimeError("commit failed")
+        return real_commit()
+
+    with monkeypatch.context() as patched:     # scoped: fixture patches stay intact
+        patched.setattr(training_bp, "_claim_water_funnel_for_today", spy_claim)
+        patched.setattr(db.session, "commit", flaky_commit)
+        first = client.post("/water", json={"count": 2})
+    assert first.status_code == 200
+    assert "quest_awarded" not in first.get_json()
+    assert state["failed"] is True
+
+    db.session.expire_all()
+    log = WaterLog.query.filter_by(user_id=auth_user.id).one()
+    assert log.quest_fired is False                  # claim rolled back with the award
+    assert UserQuestProgress.query.filter_by(user_id=auth_user.id).count() == 0
+
+    retry = client.post("/water", json={"count": 3})  # the next update retries
+    assert retry.get_json()["quest_awarded"]["xp"] == 10
+    db.session.expire_all()
+    assert WaterLog.query.filter_by(user_id=auth_user.id).one().quest_fired is True
+
+
+def test_water_quest_claim_not_committed_before_the_award(client, auth_user, monkeypatch):
+    """The claim must not commit on its own: between claim and award there is no
+    commit that could persist `quest_fired` without the award."""
+    _seed_weekly_water_challenge()
+    events = []
+    real_commit = db.session.commit
+    real_claim = training_bp._claim_water_funnel_for_today
+    real_complete = training_bp.complete_quest_for_user
+
+    def spy_claim(user_id, today_key):
+        result = real_claim(user_id, today_key)
+        events.append("claim")
+        return result
+
+    def spy_commit():
+        events.append("commit")
+        return real_commit()
+
+    def spy_complete(user_id, quest_type):
+        events.append("award_start")
+        return real_complete(user_id, quest_type)
+
+    monkeypatch.setattr(training_bp, "_claim_water_funnel_for_today", spy_claim)
+    monkeypatch.setattr(training_bp, "complete_quest_for_user", spy_complete)
+    monkeypatch.setattr(db.session, "commit", spy_commit)
+    assert client.post("/water", json={"count": 2}).status_code == 200
+
+    assert "claim" in events
+    tail = events[events.index("claim"):]
+    assert tail[:2] == ["claim", "award_start"]       # nothing commits in between
+
+
 def test_training_page_renders(client, auth_user):
     assert client.get("/training").status_code == 200
 
