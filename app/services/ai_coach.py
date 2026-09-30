@@ -683,7 +683,7 @@ def _tool_analyze_gym_photo(user_id, s3_key):
     try:
         image_bytes = s3_helper.get_object_bytes(s3_key, expected_user_id=user_id)
     except Exception as e:
-        current_app.logger.info("[ANALYZE PHOTO] görsel alınamadı: %s: %s", type(e).__name__, e)
+        current_app.logger.info("[ANALYZE PHOTO] görsel alınamadı: %s", type(e).__name__)
         return json.dumps({"status": "error", "message": "Görsel alınamadı veya sana ait değil."},
                           ensure_ascii=False)
 
@@ -1392,7 +1392,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                 return _coach_tool_fallback(language)
             if tools_ran == 0:
                 raise _BedrockFallback(f"{type(e).__name__}: {e}", cause=e)
-            current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", e)
+            current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", type(e).__name__)
             return _coach_tool_fallback(language)
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
 

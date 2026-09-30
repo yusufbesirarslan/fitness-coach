@@ -25,7 +25,10 @@ from app.services.nutrition_targets import (
     derive_daily_macro_targets,
     remaining_macro_budget,
 )
-from app.services.menu_fetch import _fetch_page, _is_google_drive_url, _process_google_drive_url, _validate_menu_url
+from app.services.menu_fetch import (
+    _fetch_page, _is_google_drive_url, _process_google_drive_url, _validate_menu_url,
+    loggable_url,
+)
 
 
 bp = Blueprint("menu", __name__)
@@ -111,7 +114,7 @@ def proxy_scan_menu():
     url = clean_url
 
     if _is_google_drive_url(url):
-        current_app.logger.debug(f"[DRIVE] Intercepted Google Drive URL: {url}")
+        current_app.logger.debug(f"[DRIVE] Intercepted Google Drive URL: {loggable_url(url)}")
         drive_result, drive_err = _process_google_drive_url(url)
         if drive_err:
             try:
@@ -132,10 +135,10 @@ def proxy_scan_menu():
             try:
                 cached_result = json.loads(cached_raw)
                 cached_result["cached"] = True
-                current_app.logger.info(f"[MENU CACHE] HIT — {url}")
+                current_app.logger.info(f"[MENU CACHE] HIT — {loggable_url(url)}")
                 return jsonify(cached_result)
             except (json.JSONDecodeError, TypeError):
-                current_app.logger.warning(f"[MENU CACHE] corrupt entry for {url} — ignoring")
+                current_app.logger.warning(f"[MENU CACHE] corrupt entry for {loggable_url(url)} — ignoring")
 
     try:
         resp = _fetch_page(url)
@@ -152,7 +155,7 @@ def proxy_scan_menu():
         return jsonify({"error": t("route.menu.unsupported_type")}), 415
 
     raw_html = resp.text
-    current_app.logger.info(f"[SCRAPER] Page 1 (main) — {url} — HTTP {resp.status_code} — {len(raw_html)} bytes")
+    current_app.logger.info(f"[SCRAPER] Page 1 (main) — {loggable_url(url)} — HTTP {resp.status_code} — {len(raw_html)} bytes")
 
     # Ana sayfa HTML'i TEK KEZ parse edilir ve her tüketiciye aynı soup verilir:
     # framework_state (script tag'leri henüz decompose edilmeden), link keşfi ve
@@ -182,7 +185,7 @@ def proxy_scan_menu():
         def _crawl_sub_page(idx, sub_url):
             try:
                 sub_resp = _fetch_page(sub_url, timeout=6)
-                app.logger.info(f"[SCRAPER] Page {idx+2}/{len(targets)+1} — {sub_url} — HTTP {sub_resp.status_code}")
+                app.logger.info(f"[SCRAPER] Page {idx+2}/{len(targets)+1} — {loggable_url(sub_url)} — HTTP {sub_resp.status_code}")
                 sub_soup = BeautifulSoup(sub_resp.text, "html.parser")
                 for tag in sub_soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
                     tag.decompose()
@@ -191,7 +194,7 @@ def proxy_scan_menu():
                 return sub_sections, None
             except Exception as e:
                 status = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
-                app.logger.warning(f"[SCRAPER] Page {idx+2} FAILED — {sub_url} — Status: {status} — {type(e).__name__}: {e}")
+                app.logger.warning(f"[SCRAPER] Page {idx+2} FAILED — {loggable_url(sub_url)} — Status: {status} — {type(e).__name__}")
                 return [], {"url": sub_url, "error": f"{type(e).__name__}: {status}"}
 
         with ThreadPoolExecutor(max_workers=min(4, len(targets))) as ex:
@@ -271,7 +274,7 @@ def proxy_scan_menu():
     if redis_client:
         try:
             redis_client.setex(cache_key, MENU_SCAN_CACHE_TTL, json.dumps(result, ensure_ascii=False))
-            current_app.logger.info(f"[MENU CACHE] STORE — {url} (ttl={MENU_SCAN_CACHE_TTL}s)")
+            current_app.logger.info(f"[MENU CACHE] STORE — {loggable_url(url)} (ttl={MENU_SCAN_CACHE_TTL}s)")
         except Exception as e:
             current_app.logger.warning(f"[MENU CACHE] store failed: {type(e).__name__}: {e}")
 

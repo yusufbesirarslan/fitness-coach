@@ -349,11 +349,16 @@ def _claim_quest(user_id, quest_type):
 
 
 def complete_quest_for_user(user_id, quest_type):
-    """Tek-görev kısayolu: _claim_quest + kendi commit'i (mevcut tüm çağıranlar için
-    davranış AYNI kalır). Atomik akışlarda doğrudan _claim_quest kullan."""
+    """Tek-görev kısayolu: _claim_quest + kendi commit'i. Atomik akışlarda doğrudan
+    _claim_quest kullan.
+
+    Commit, _claim_quest None dönse BİLE yapılır: _claim_quest challenge
+    ilerlemesini (record_event) günlük-görev kısa devresinden ÖNCE sahneler; görev
+    bugün zaten alınmışsa None döner ama sahnelenen `+1` hâlâ oturumda bekler.
+    Burada commit edilmezse istek sonunda geri alınırdı ve olay-başına sayan
+    challenge'lar ("10 öğün kaydet" — meal_logged) günde en fazla bir kez ilerlerdi
+    (triage 2026-09-30 #1). Sahnelenecek bir şey yoksa commit zararsız no-op'tur."""
     result = _claim_quest(user_id, quest_type)
-    if result is None:
-        return None
     try:
         db.session.commit()
     except Exception:

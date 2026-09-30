@@ -278,5 +278,5 @@ def food_servings_by_name():
         # kapasite reddi bir "besin bulunamadı" DEĞİLDİR → açık 503 + Retry-After.
         return _fatsecret_busy_response("food_servings_by_name")
     except Exception as e:
-        current_app.logger.warning("servings-by-name failed for '%s': %s", name, e)
+        current_app.logger.warning("servings-by-name failed for '%s': %s", name, type(e).__name__)
     return jsonify({"servings": [], "food_id": ""})

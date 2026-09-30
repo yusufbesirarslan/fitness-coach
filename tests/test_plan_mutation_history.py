@@ -978,6 +978,44 @@ class TestMoveDay:
         assert _text(user.id) == original
 
 
+    def test_swapping_two_identical_days_is_a_journalled_no_op(
+            self, app, make_user, seed_plan):
+        """triage 2026-09-30 #6: Salı and Perşembe are both the same rest day, so
+        exchanging them changes nothing. It must not burn a mutation_version, rewrite
+        plan_data, or leave an `applied` row undo would then 'reverse'."""
+        user = make_user("m_move_noop")
+        original = seed_plan(user.id)
+
+        result = apply_plan_mutation(
+            user.id,
+            MoveTrainingDayCommand(day="Salı", target_day="Perşembe"),
+            _ctx("m-move-noop-01"))
+
+        assert result.changed is False
+        assert result.outcome == OUTCOME_NO_OP
+        assert _version(user.id) == 0                     # version did not churn
+        assert _text(user.id) == original                 # byte-identical plan
+        record, = _records(user.id)                       # still durably recorded,
+        assert record.outcome == OUTCOME_NO_OP            # so a retry cannot reapply
+        with pytest.raises(UndoUnavailable):              # and undo has nothing to undo
+            undo_last_change(user.id, _ctx("m-move-noop-02"))
+
+    def test_a_real_swap_after_a_no_op_swap_still_bumps_the_version_once(
+            self, app, make_user, seed_plan):
+        user = make_user("m_move_real")
+        seed_plan(user.id)
+        apply_plan_mutation(
+            user.id, MoveTrainingDayCommand(day="Salı", target_day="Perşembe"),
+            _ctx("m-move-real-01"))
+
+        result = apply_plan_mutation(
+            user.id, MoveTrainingDayCommand(day="Pazartesi", target_day="Salı"),
+            _ctx("m-move-real-02"))
+
+        assert result.changed is True
+        assert result.plan_version == 1
+
+
 # ── Sprint 11 PR4 Task 5: canonical plans keep PR2's history semantics ───────
 #
 # Task 5 changes what an exercise *is* inside a mutation. It must change nothing

@@ -143,7 +143,7 @@ def log_meal():
                     prefix="meals", user_id=current_user.id,
                 )
         except Exception as e:
-            current_app.logger.info(f"[S3] Öğün fotoğrafı yüklemesi başarısız: {type(e).__name__}: {e}")
+            current_app.logger.info(f"[S3] Öğün fotoğrafı yüklemesi başarısız: {type(e).__name__}")
 
     _FITNESS_DICT = {
         r'(?i)\b(\d+)\s*(?:ölçek|scoop)\s*(?:whey|protein\s*tozu|protein\s*powder)':

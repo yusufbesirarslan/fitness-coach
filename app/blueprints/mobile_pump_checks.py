@@ -20,6 +20,28 @@ def _response(row, status=200):
     return response
 
 
+def _read_unavailable(error, event):
+    """A Pump Check-shaped, retryable 503 for an unexpected READ failure.
+
+    The blueprint-wide handler answers any uncaught exception with
+    `AUTH_TEMPORARILY_UNAVAILABLE`; a client that reads that code discards a
+    perfectly good session and forces a re-login over a transient storage blip.
+    A history/detail read never decides authentication, so its fault must not
+    be spoken in the auth vocabulary (the sibling Progress/Today/Nutrition/
+    Training reads wrap the same way). A type name and a request id only.
+    """
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+    current_app.logger.error(
+        "mobile_pump_check event=%s error_type=%s request_id=%s",
+        event, type(error).__name__, current_request_id())
+    return mobile_error(
+        "PUMP_CHECK_TEMPORARILY_UNAVAILABLE",
+        "Pump Check is temporarily unavailable.", 503, True)
+
+
 @bp.post("/pump-checks")
 @require_mobile_auth
 @limiter.limit(BEDROCK_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
@@ -101,6 +123,8 @@ def list_pump_checks():
     except history.InvalidCursor:
         return mobile_error(
             "INVALID_PAGE_CURSOR", "The page cursor is not usable.", 400, False)
+    except Exception as error:
+        return _read_unavailable(error, "list_failed")
     return jsonify(page)
 
 
@@ -113,7 +137,9 @@ def get_pump_check(pump_check_token):
             pump_check_token,
             current_app.config["SECRET_KEY"],
         )
+        return _response(row)
     except service.PumpCheckNotFound:
         return mobile_error(
             "PUMP_CHECK_NOT_FOUND", "Pump Check was not found.", 404, False)
-    return _response(row)
+    except Exception as error:
+        return _read_unavailable(error, "get_failed")

@@ -13,6 +13,7 @@ from app.services.ai_coach import generate_coach_reply
 from app.services.ai_gate import ai_concurrency_gate, ai_stream_concurrency_gate
 from app.services.ai_pipeline import generate_answer, stream_answer
 from app.services.moderation import MAX_QUESTION_CHARS, validate_question
+from app.services.response_formatter import is_coach_error_fallback
 from app.observability import current_request_id
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.premium import (
@@ -100,59 +101,92 @@ def chat():
     if len(raw_message) > MAX_QUESTION_CHARS:
         return jsonify({"reply": t("coach.question_too_long")}), 400
 
-    name             = current_user.username  # formdan değil, oturumdan al
-    gender           = data["gender"]
-    goal             = data["goal"]
-    level            = data["fitness_level"]
-    current_activity = data["current_activity"]
-    user_message     = raw_message
+    # /chat AYNI pahalı Sonnet yoluna gider; /ask ile AYNI kapılar: önce arıza
+    # soğuması (soğuyan kullanıcı hak harcamasın), sonra premium-duyarlı haftalık
+    # kota. Yoksa non-premium /chat üzerinden freemium sınırını delerdi
+    # (triage 2026-09-30 #3). Kova /ask ile ORTAK ("chat").
+    cooling = _ai_cooldown_response()
+    if cooling is not None:
+        return cooling
 
-    # Kullanıcının önceki kaydını çek
-    previous_session = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc())\
-        .first()
+    quota_enabled = current_app.config.get("AI_CHAT_QUOTA_ENABLED", True)
+    if quota_enabled and not reserve_ai_quota(
+            current_user, "chat", FREE_WEEKLY_AI_CHATS):
+        return jsonify({"reply": t("coach.chat_quota_reached"),
+                        "premium_required": True}), 402
 
-    # Önceki veriler ve geçen süre
-    previous_weight  = None
-    previous_date    = None
-    days_passed      = None
+    user_id = current_user.id
+    try:
+        name             = current_user.username  # formdan değil, oturumdan al
+        gender           = data["gender"]
+        goal             = data["goal"]
+        level            = data["fitness_level"]
+        current_activity = data["current_activity"]
+        user_message     = raw_message
 
-    if previous_session:
-        previous_weight = previous_session.weight
-        previous_date   = previous_session.created_at
-        # Istanbul gün sınırına göre (CLAUDE.md); ham UTC farkı gece-yarısı
-        # yakınında bir gün kayardı (F1.2).
-        days_passed     = (app_today() - app_date_of(previous_date)).days
+        # Kullanıcının önceki kaydını çek
+        previous_session = UserSession.query.filter_by(user_id=user_id)\
+            .order_by(UserSession.created_at.desc())\
+            .first()
 
-    bmr             = calculate_bmr(weight, height, age, gender)
-    tdee            = calculate_tdee(bmr, current_activity)
-    target_calories = calculate_target(tdee, goal)
-    training_plan   = generate_training_plan(goal, level)
-    nutrition_plan  = generate_nutrition_plan(goal, target_calories)
-    coach_reply     = generate_coach_reply(
-                          name, age, gender, weight, height,
-                          goal, level, current_activity,
-                          bmr, tdee, target_calories,
-                          training_plan, nutrition_plan,
-                          user_message,
-                          previous_weight, days_passed,
-                          language=current_user.language
-                      )
-    
-    new_session = UserSession(
-        name=name, age=age, gender=gender,
-        weight=weight, height=height,
-        goal=goal, fitness_level=level,
-        current_activity=current_activity,
-        bmr=bmr, tdee=tdee,
-        target_calories=target_calories,
-        training_plan=training_plan,
-        nutrition_plan=nutrition_plan,
-        coach_reply=coach_reply,
-        user_id=current_user.id
-    )
-    db.session.add(new_session)
-    db.session.commit()
+        # Önceki veriler ve geçen süre
+        previous_weight  = None
+        previous_date    = None
+        days_passed      = None
+
+        if previous_session:
+            previous_weight = previous_session.weight
+            previous_date   = previous_session.created_at
+            # Istanbul gün sınırına göre (CLAUDE.md); ham UTC farkı gece-yarısı
+            # yakınında bir gün kayardı (F1.2).
+            days_passed     = (app_today() - app_date_of(previous_date)).days
+
+        bmr             = calculate_bmr(weight, height, age, gender)
+        tdee            = calculate_tdee(bmr, current_activity)
+        target_calories = calculate_target(tdee, goal)
+        training_plan   = generate_training_plan(goal, level)
+        nutrition_plan  = generate_nutrition_plan(goal, target_calories)
+        coach_reply     = generate_coach_reply(
+                              name, age, gender, weight, height,
+                              goal, level, current_activity,
+                              bmr, tdee, target_calories,
+                              training_plan, nutrition_plan,
+                              user_message,
+                              previous_weight, days_passed,
+                              language=current_user.language
+                          )
+
+        new_session = UserSession(
+            name=name, age=age, gender=gender,
+            weight=weight, height=height,
+            goal=goal, fitness_level=level,
+            current_activity=current_activity,
+            bmr=bmr, tdee=tdee,
+            target_calories=target_calories,
+            training_plan=training_plan,
+            nutrition_plan=nutrition_plan,
+            coach_reply=coach_reply,
+            user_id=user_id
+        )
+        db.session.add(new_session)
+        db.session.commit()
+    except Exception:
+        # /ask ile AYNI sözleşme: beklenmeyen hata → rollback, arıza sayacı, kota
+        # iadesi, dostça 500 (triage 2026-09-30 #4). Yanıt kalıcılaşmadan önce
+        # düştüğü için yarım UserSession satırı kalmaz.
+        current_app.logger.exception("Koç yanıtı üretilemedi (/chat)")
+        db.session.rollback()
+        ai_recovery.record_ai_failure(user_id)
+        _refund_chat_quota_safely(quota_enabled)
+        return jsonify({"reply": t("coach.reply_failed")}), 500
+
+    # generate_coach_reply sağlayıcı arızasında fırlatmaz, dostça yedek metin
+    # döndürür: o turda kullanıcıya hak harcatma ve arıza sayacını ilerlet.
+    if is_coach_error_fallback(coach_reply):
+        ai_recovery.record_ai_failure(user_id)
+        _refund_chat_quota_safely(quota_enabled)
+    else:
+        ai_recovery.clear_ai_failures(user_id)
 
     # Karşılaştırma verisi frontend'e gönder
     comparison = None
@@ -173,6 +207,17 @@ def chat():
         "coach_reply"    : coach_reply,
         "comparison"     : comparison
     })
+
+
+def _refund_chat_quota_safely(quota_enabled):
+    """/chat için kota iadesi: iade patlarsa yanıtı bozmaz (yalnızca loglar)."""
+    if not quota_enabled:
+        return
+    try:
+        refund_ai_quota(current_user, "chat")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("AI chat quota refund failed")
 
 
 @bp.route("/ask", methods=["POST"])

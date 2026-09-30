@@ -117,6 +117,127 @@ def test_chat_second_session_returns_weight_comparison(client, auth_user, fake_r
     assert comparison["days_passed"] == 0
 
 
+def test_chat_cooldown_returns_429_before_quota_and_model(
+        client, auth_user, monkeypatch):
+    # triage 2026-09-30 #3: /chat honours the same failure cooldown as /ask,
+    # checked BEFORE the quota reservation and before the model is called.
+    monkeypatch.setattr(coach_bp.ai_recovery, "ai_cooldown_remaining", lambda uid: 30)
+    monkeypatch.setattr(coach_bp, "generate_coach_reply",
+                        lambda *a, **k: pytest.fail("cooldown must skip the model"))
+    resp = client.post("/chat", json=CHAT_PAYLOAD)
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == "30"
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+    assert UserSession.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+def test_chat_quota_exhausted_returns_402_without_model_or_session(
+        client, auth_user, monkeypatch):
+    monkeypatch.setattr(coach_bp, "reserve_ai_quota",
+                        lambda user, counter_key, limit: False)
+    monkeypatch.setattr(coach_bp, "generate_coach_reply",
+                        lambda *a, **k: pytest.fail("no quota → no model call"))
+    resp = client.post("/chat", json=CHAT_PAYLOAD)
+    assert resp.status_code == 402
+    assert resp.get_json()["premium_required"] is True
+    assert UserSession.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+def test_chat_consumes_shared_weekly_quota_until_blocked(
+        client, auth_user, fake_reply):
+    # Free users get FREE_WEEKLY_AI_CHATS turns in the SAME bucket /ask uses;
+    # the next /chat is refused and adds no UserSession row.
+    for _ in range(premium.FREE_WEEKLY_AI_CHATS):
+        assert client.post("/chat", json=CHAT_PAYLOAD).status_code == 200
+    db.session.expire_all()
+    assert premium.remaining_ai_chats(auth_user) == 0
+    resp = client.post("/chat", json=CHAT_PAYLOAD)
+    assert resp.status_code == 402
+    assert UserSession.query.filter_by(user_id=auth_user.id).count() == \
+        premium.FREE_WEEKLY_AI_CHATS
+
+
+def test_chat_quota_gate_can_be_disabled_like_ask(
+        client, auth_user, fake_reply, app):
+    app.config["AI_CHAT_QUOTA_ENABLED"] = False
+    for _ in range(premium.FREE_WEEKLY_AI_CHATS + 1):
+        assert client.post("/chat", json=CHAT_PAYLOAD).status_code == 200
+
+
+def test_chat_model_fallback_refunds_quota_and_records_failure(
+        client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda uid: recorded.append(uid))
+    monkeypatch.setattr(coach_bp, "generate_coach_reply",
+                        lambda *a, **k: COACH_FALLBACKS["tr"]["error"])
+    resp = client.post("/chat", json=CHAT_PAYLOAD)
+    assert resp.status_code == 200
+    db.session.expire_all()
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+    assert recorded == [auth_user.id]
+
+
+def test_chat_success_clears_failure_counter_and_keeps_quota_spent(
+        client, auth_user, fake_reply, monkeypatch):
+    cleared = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "clear_ai_failures",
+                        lambda uid: cleared.append(uid))
+    assert client.post("/chat", json=CHAT_PAYLOAD).status_code == 200
+    db.session.expire_all()
+    assert cleared == [auth_user.id]
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
+
+
+def test_chat_unexpected_error_rolls_back_refunds_and_answers_typed_500(
+        client, auth_user, monkeypatch):
+    # triage 2026-09-30 #4: a raise from the model layer is no longer a bare
+    # Flask 500 — it rolls back, counts as a failure, refunds the reservation.
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda uid: recorded.append(uid))
+
+    def boom(*a, **k):
+        raise RuntimeError("provider exploded: secret-internal-detail")
+    monkeypatch.setattr(coach_bp, "generate_coach_reply", boom)
+
+    resp = client.post("/chat", json=CHAT_PAYLOAD)
+    assert resp.status_code == 500
+    body = resp.get_json()
+    assert "secret-internal-detail" not in json.dumps(body)
+    assert body["reply"]
+    db.session.expire_all()
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+    assert recorded == [auth_user.id]
+    assert UserSession.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+def test_chat_persistence_failure_is_rolled_back_and_refunded(
+        client, auth_user, fake_reply, monkeypatch):
+    real_commit = db.session.commit
+    state = {"armed": False}
+
+    def commit_then_fail():
+        # Fail only the UserSession commit (after the quota commit happened).
+        if state["armed"]:
+            state["armed"] = False
+            raise RuntimeError("db down")
+        return real_commit()
+    original_generate = coach_bp.generate_coach_reply
+
+    def arm(*a, **k):
+        state["armed"] = True
+        return original_generate(*a, **k)
+    with monkeypatch.context() as patched:
+        patched.setattr(coach_bp, "generate_coach_reply", arm)
+        patched.setattr(db.session, "commit", commit_then_fail)
+        resp = client.post("/chat", json=CHAT_PAYLOAD)
+    assert resp.status_code == 500
+    db.session.expire_all()
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+    assert UserSession.query.filter_by(user_id=auth_user.id).count() == 0
+
+
 # ---------------------------------------------------------------------------
 # /ask
 # ---------------------------------------------------------------------------
