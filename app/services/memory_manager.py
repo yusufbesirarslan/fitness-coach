@@ -131,21 +131,28 @@ def recent_messages(user_id, limit=50):
 
 def record_turn(conversation, question, answer, usage=None, interrupted=False):
     """Bir user+assistant turunu kalıcılaştır. usage: sağlayıcı yanıtındaki
-    gerçek token sayıları ({'prompt_tokens': .., 'completion_tokens': ..})."""
+    gerçek token sayıları ({'prompt_tokens': .., 'completion_tokens': ..}).
+
+    Dönüş: (user_message, assistant_message) — BU çağrının yazdığı satırlar.
+    Mobil taşıma (LP-09) yanıtını bunlardan kurar; konuşmayı yeniden okuyup
+    "son iki satır" almak eşzamanlı başka bir turun satırlarını döndürebilirdi."""
     from app.extensions import db
     from app.models import CoachMessage
 
     usage = usage or {}
-    db.session.add(CoachMessage(
+    user_message = CoachMessage(
         conversation_id=conversation.id, role="user", content=question,
-        token_estimate=estimate_tokens(question)))
-    db.session.add(CoachMessage(
+        token_estimate=estimate_tokens(question))
+    assistant_message = CoachMessage(
         conversation_id=conversation.id, role="assistant", content=answer,
         token_estimate=estimate_tokens(answer),
         prompt_tokens=usage.get("prompt_tokens"),
         completion_tokens=usage.get("completion_tokens"),
-        interrupted=bool(interrupted)))
+        interrupted=bool(interrupted))
+    db.session.add(user_message)
+    db.session.add(assistant_message)
     db.session.commit()
+    return user_message, assistant_message
 
 
 def _normalize_context_budget(budget):

@@ -97,7 +97,8 @@ def test_pipeline_stage_order_and_passthrough(app, monkeypatch):
         out = ai_pipeline.generate_answer(7, "protein?", client_history=[], language="en")
 
     assert out == {"answer": "cevap", "is_error_fallback": False,
-                   "conversation_id": None, "deferred_summarize": None}
+                   "conversation_id": None, "deferred_summarize": None,
+                   "recorded_turn": None}
     # Hafıza kapalıyken prepared_history None kalır → ai_coach eski client-history
     # yolunu kullanır (davranış Sprint 3 ile birebir aynı).
     assert seen == {"user_id": 7, "question": "protein?", "context": "BAĞLAM",
@@ -166,7 +167,8 @@ def test_pipeline_memory_failure_degrades_to_client_history(app, monkeypatch):
         out = ai_pipeline.generate_answer(1, "soru", client_history=[{"role": "user"}])
 
     assert out == {"answer": "cevap", "is_error_fallback": False,
-                   "conversation_id": None, "deferred_summarize": None}
+                   "conversation_id": None, "deferred_summarize": None,
+                   "recorded_turn": None}
     assert seen == {"context": "BAĞLAM", "prepared_history": None}
 
 
