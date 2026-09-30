@@ -229,6 +229,7 @@ def me():
 # gate — and keeps every mobile route inside the approved-route allow-list in
 # tests/test_mobile_auth_feature_gate.py.
 from app.blueprints import mobile_account_profile  # noqa: E402,F401
+from app.blueprints import mobile_coach  # noqa: E402,F401
 from app.blueprints import mobile_nutrition  # noqa: E402,F401
 from app.blueprints import mobile_password_recovery  # noqa: E402,F401
 from app.blueprints import mobile_progress  # noqa: E402,F401

@@ -123,25 +123,30 @@ def _emit_metrics(mode, is_error=False, usage=None):
 
 
 def _record(conversation, question, answer, usage=None, interrupted=False):
-    """Turu kalıcılaştır — hata sohbeti/akışı BOZMAZ (yalnızca loglanır)."""
+    """Turu kalıcılaştır — hata sohbeti/akışı BOZMAZ (yalnızca loglanır).
+    Yazılan (user, assistant) satırlarını, yazılamadıysa None döndürür."""
     if conversation is None:
-        return
+        return None
     try:
-        memory_manager.record_turn(conversation, question, answer,
-                                   usage=usage, interrupted=interrupted)
+        return memory_manager.record_turn(conversation, question, answer,
+                                          usage=usage, interrupted=interrupted)
     except Exception:
         from app.extensions import db
         db.session.rollback()
         current_app.logger.warning("[PIPELINE] tur kalıcılaştırılamadı", exc_info=True)
+        return None
 
 
 def generate_answer(user_id, question, client_history=None, language="tr", handoff=None):
     """Koç sorusu için uçtan uca modüler hat (bloklayıcı — /ask).
 
     Dönüş: {"answer": str, "is_error_fallback": bool, "conversation_id": int|None,
-    "deferred_summarize": callable|None}. Son alan, worker'sız kurulumda yanıt
-    istemciye gönderildikten SONRA koşulacak özetlemedir — route bunu
-    response.call_on_close'a bağlar (triage 2026-07-19 #4). Geçersiz girdi için
+    "deferred_summarize": callable|None, "recorded_turn": tuple|None}.
+    `deferred_summarize`, worker'sız kurulumda yanıt istemciye gönderildikten
+    SONRA koşulacak özetlemedir — route bunu response.call_on_close'a bağlar
+    (triage 2026-07-19 #4). `recorded_turn`, bu turun kalıcılaşan (user,
+    assistant) CoachMessage satırlarıdır; hata-yedeği, hafıza kapalı/arızalı ya
+    da yazım hatasında None (LP-09 mobil taşıması okur). Geçersiz girdi için
     ValueError(i18n-anahtarı) fırlatır — HTTP durum/çeviri kararı route'undur."""
     err_key = moderation.validate_question(question)
     if err_key:
@@ -171,14 +176,16 @@ def generate_answer(user_id, question, client_history=None, language="tr", hando
 
     # B16 disiplini hafızada da geçerli: hata-yedeği turları kalıcılaşmaz
     # (sonraki pencereye girip modeli kirletmesin, kota iadesiyle tutarlı).
+    recorded_turn = None
     if not is_fallback:
-        _record(conversation, question, answer)
+        recorded_turn = _record(conversation, question, answer)
     _emit_metrics("blocking", is_error=is_fallback)
 
     return {"answer": answer,
             "is_error_fallback": is_fallback,
             "conversation_id": conversation.id if conversation is not None else None,
-            "deferred_summarize": deferred_summarize}
+            "deferred_summarize": deferred_summarize,
+            "recorded_turn": recorded_turn}
 
 
 def stream_answer(user_id, question, client_history=None, language="tr", handoff=None):

@@ -40,6 +40,9 @@ def _source(relative):
 # one canonical Today aggregate, the three approved Training reads, and no
 # other Daily-Coach domain. LP-04 adds the one approved Progress read: the
 # canonical `progress_summary` read model the web Progress page already serves.
+# LP-09 adds the two approved Coach paths: a Bearer transport over the web
+# Coach pipeline (same memory, grounding, quota and provider), not a second
+# Coach.
 
 @pytest.fixture(scope="module")
 def mobile_enabled_app():
@@ -90,8 +93,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
 
     `/api/v1/today` joined the set in Sprint 12 PR3; LP-01 adds the three
     pre-auth registration/verification routes, LP-02 the two pre-auth
-    password-recovery routes, LP-03 the native onboarding profile write, and
-    LP-04 the canonical Progress summary read. Mobile Training PR2 adds
+    password-recovery routes, LP-03 the native onboarding profile write,
+    LP-04 the canonical Progress summary read, and LP-09 the native Coach
+    message write + history read. Mobile Training PR2 adds
     exactly three canonical read projections, PR4A one native plan write, and
     PR5 the six native workout-session contracts. The referenced-session read
     adds one owner-scoped canonical projection. Any further path means
@@ -116,6 +120,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/account/me",
         # LP-03 native onboarding profile write (owner = bearer principal).
         "/api/v1/account/profile",
+        # LP-09 native Coach (owner = bearer principal; web Coach pipeline).
+        "/api/v1/coach/messages",
+        "/api/v1/coach/history",
         "/api/v1/nutrition/diary/today",
         "/api/v1/nutrition/foods/search",
         "/api/v1/nutrition/foods/fatsecret/<food_id>/servings",
@@ -158,6 +165,17 @@ _APPROVED_TODAY_PATHS = {
 # review, not by widening the guard: a second Progress read would still fail.
 _APPROVED_PROGRESS_PATHS = {
     "/api/v1/progress/summary",
+}
+
+# The only `/api/v1` paths allowed to carry "coach". LP-09 is a transport over
+# the web Coach's own authority (`ai_pipeline.generate_answer`, the persisted
+# CoachConversation memory, the shared "chat" allowance) - not a Daily-Coach
+# aggregate and not a second Coach. Admitted here by review, not by widening
+# the guard: any other coach path (a `/api/v1/coach/today`, a reset, a stream)
+# still fails.
+_APPROVED_COACH_PATHS = {
+    "/api/v1/coach/messages",
+    "/api/v1/coach/history",
 }
 
 _APPROVED_TRAINING_PATHS = {
@@ -213,6 +231,7 @@ def test_no_unapproved_mobile_endpoint_serves_a_daily_coach_domain(
         if (domain in path
             and path not in _APPROVED_TODAY_PATHS
             and path not in _APPROVED_PROGRESS_PATHS
+            and path not in _APPROVED_COACH_PATHS
             and path not in _APPROVED_TRAINING_PATHS)
     }
     assert offenders == set(), (

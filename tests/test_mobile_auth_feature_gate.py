@@ -63,6 +63,8 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/auth/password/reset"),
         ("get", "/api/v1/account/me"),
         ("put", "/api/v1/account/profile"),
+        ("post", "/api/v1/coach/messages"),
+        ("get", "/api/v1/coach/history"),
         ("get", "/api/v1/nutrition/diary/today"),
         ("get", "/api/v1/progress/summary"),
         ("get", "/api/v1/today"),
@@ -155,6 +157,11 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # this blueprint so it shares its gate, envelope, no-store and 429
             # handler; the same read model the web Progress page serves.
             ("/api/v1/progress/summary", ("GET",)),
+            # LP-09 native Coach. Bearer-only transport over the web Coach
+            # pipeline (same memory, grounding, quota bucket and provider);
+            # on this blueprint for its gate, envelope and no-store.
+            ("/api/v1/coach/messages", ("POST",)),
+            ("/api/v1/coach/history", ("GET",)),
             # Sprint 12 PR3. Canonical Today read; on this blueprint so it cannot
             # become an ungated parallel mobile surface.
             ("/api/v1/today", ("GET",)),

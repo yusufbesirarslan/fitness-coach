@@ -296,6 +296,9 @@ EXPECTED_GATED_ENDPOINTS = {
     # training.complete_workout ile AYNI bloklayıcı Bedrock görü doğrulamasını
     # (validate_pump_check) çalıştırır — aynı thread riski, aynı kapı.
     "mobile_api.complete_workout_session",
+    # LP-09 native Coach: the same blocking generate_answer turn as
+    # coach.ask_coach (Bedrock/OpenAI tool loop) — same thread risk, same gate.
+    "mobile_api.send_coach_message",
 }
 
 
