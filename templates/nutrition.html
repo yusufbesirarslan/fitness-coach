@@ -37,41 +37,6 @@
   </div>
 </div>
 
-<!-- ── SERVING SELECTOR MODAL (diary + barcode) ── -->
-<div class="modal-overlay" id="serving-modal" data-action-self="closeServingModal">
-  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="sm-title">
-    <div class="modal-title" id="sm-title">{{ t('nutrition.add_food_title') }}</div>
-    <div id="sm-food-name" class="sm-food-name"></div>
-    <div id="sm-brand" class="sm-brand"></div>
-    <div id="sm-body">
-      <div id="sm-loading" style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-        <div class="diary-serving-loading"></div>
-        <span class="sm-loading-text">{{ t('nutrition.serving_loading') }}</span>
-      </div>
-      <div id="sm-serving-row" style="display:none;margin-bottom:12px;">
-        <label class="sm-field-label">{{ t('nutrition.serving_label') }}</label>
-        <select class="fc-input" id="sm-serving-select" data-action-change="updateSmPreview" style="width:100%;"></select>
-      </div>
-      <div id="sm-gram-row" style="display:none;margin-bottom:12px;">
-        <label class="sm-field-label">{{ t('nutrition.gram_label') }}</label>
-        <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" data-action-input="updateSmPreview" style="width:100%;">
-      </div>
-      <div id="sm-qty-row" style="display:none;margin-bottom:16px;">
-        <label class="sm-field-label">{{ t('nutrition.qty_label') }}</label>
-        <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" data-action-input="updateSmPreview" style="width:100%;">
-      </div>
-    </div>
-    <div class="sm-macros">
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--color-primary);" id="sm-cal">0</div><div class="sm-macro-lbl">KCAL</div></div>
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--blue-light);" id="sm-pro">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_protein_abbr') }}</div></div>
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--orange);" id="sm-carb">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_carb_abbr') }}</div></div>
-      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--green);" id="sm-fat">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_fat_abbr') }}</div></div>
-    </div>
-    <button class="btn-volt w-full" id="sm-confirm-btn" data-action="confirmServingModal">{{ t('nutrition.add') }}</button>
-    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeServingModal">{{ t('nutrition.cancel') }}</button>
-  </div>
-</div>
-
 <!-- ── TOAST CONTAINER ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
@@ -159,9 +124,9 @@
           <div class="pbar-track" hidden><div class="pbar-fill" id="bar-yag" style="background:var(--green);"></div></div>
         </div>
       </div>
-      {#- The ONE front door into food logging. It opens the existing chooser
-          (#log-sheet) unchanged — every method behind it is the one that
-          shipped before (NUTR-PR4 owns method convergence). -#}
+      {#- The ONE front door into food logging. It opens the method chooser
+          (#log-sheet, NUTR-PR4): every method behind it is a workflow that
+          already shipped, reached from here and nowhere else. -#}
       <button class="btn-volt nut-log-food" id="log-food-btn" type="button"
               data-action="openLogSheet" aria-haspopup="dialog" aria-controls="log-sheet" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -206,7 +171,7 @@
         consumed record: it reads "Planned" until the existing quick-add write
         confirms, and only then "Logged". -#}
     <section class="nut-planned" id="quick-add-section" data-plan-state="loading" aria-labelledby="nut-planned-title">
-      <h2 class="sec-label" id="nut-planned-title">{{ t('nutrition.from_plan') }}</h2>
+      <h2 class="sec-label" id="nut-planned-title" tabindex="-1">{{ t('nutrition.from_plan') }}</h2>
       <div id="quick-add-cards" class="nut-planned-list"></div>
     </section>
 
@@ -264,9 +229,12 @@
     <summary id="nutrition-tab-diary" class="nutrition-tool-toggle" data-tab-name="diary" aria-controls="panel-diary">{{ t('nutrition.tab_diary') }}</summary>
   <div class="nutrition-tool-content" id="panel-diary" role="region" aria-labelledby="nutrition-tab-diary">
 
-    <h2 class="sec-label">{{ t('nutrition.diary_builder') }}</h2>
+    <h2 class="sec-label" id="diary-builder-title" tabindex="-1">{{ t('nutrition.diary_builder') }}</h2>
 
-    <div id="diary-meals"><!-- Rendered by loadDiary() --></div>
+    {#- Staging only (CustomMeal): nothing here is intake until a meal's own
+        "Log this meal" commit succeeds. A failed read is unavailable, never an
+        empty builder. -#}
+    <div id="diary-meals" data-diary-state="idle"><!-- Rendered by loadDiary() --></div>
 
     <div class="card" id="diary-grand-total" style="padding:16px;margin-top:16px;display:none;">
       <h3 class="sec-label">{{ t('nutrition.daily_total') }}</h3>
@@ -359,31 +327,54 @@
 
 <input type="file" id="photo-input" accept="image/*" capture="environment" data-action-change="onPhotoPicked" style="display:none;">
 
+{#- NUTR-PR4 — one front door, several truthful methods. The chooser asks HOW
+    to log, never which subsystem: each method hands off to the workflow that
+    already owns it, and nothing here writes. Opening it is local UI only (no
+    request); a method's own network starts only once the user acts in it.
+      Search food  → the search sheet (provider search + serving → /meal-log)
+      Scan barcode → barcode lookup (discovery) → serving → /meal-log
+      Scan menu    → the Coach widget's menu scanner (analysis only)
+      Quick add    → the existing "From your plan" rows (/api/quick-add-meal)
+      Build meal   → the meal builder (staging) → its explicit "Log this meal"
+    Photo stays as a secondary method (photo + note → /meal-log on confirm).
+    The voice placeholder is retired: it could not log anything. -#}
 <div class="sheet-backdrop" id="log-sheet" data-action-self="dismissLogSheet">
-  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="log-sheet-title">
+  <div class="sheet log-sheet" role="dialog" aria-modal="true" aria-labelledby="log-sheet-title" aria-describedby="log-sheet-lead">
     <div class="sheet-handle"></div>
-    <div class="sheet-title" id="log-sheet-title">{{ t('nutrition.log_food') }}</div>
-    <div class="log-sheet-grid">
-      <button class="log-sheet-opt" data-action="logTakePhoto">
-        <span class="lso-ic"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span>
-        <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_photo') }}</span><span class="lso-sub">{{ t('nutrition.log_photo_sub') }}</span></span>
+    <div class="log-sheet-head">
+      <h2 class="sheet-title" id="log-sheet-title">{{ t('nutrition.log_food') }}</h2>
+      <button class="log-sheet-close" type="button" data-action="dismissLogSheet" aria-label="{{ t('nutrition.close') }}">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
-      <button class="log-sheet-opt" data-action="logScanBarcode">
-        <span class="lso-ic"><svg viewBox="0 0 24 24"><path d="M3 5v14M7 5v14M11 5v14M15 5v10M19 5v14M23 5v14" stroke-width="1.6"/></svg></span>
+    </div>
+    <p class="log-sheet-lead" id="log-sheet-lead">{{ t('nutrition.log_food_prompt') }}</p>
+    <div class="log-sheet-grid">
+      <button class="log-sheet-opt" type="button" data-method="search" data-action="logManual">
+        <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></span>
+        <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_manual') }}</span><span class="lso-sub">{{ t('nutrition.log_manual_sub') }}</span></span>
+      </button>
+      <button class="log-sheet-opt" type="button" data-method="barcode" data-action="logScanBarcode">
+        <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5v14M7 5v14M11 5v14M15 5v10M19 5v14M23 5v14" stroke-width="1.6"/></svg></span>
         <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_barcode') }}</span><span class="lso-sub">{{ t('nutrition.log_barcode_sub') }}</span></span>
       </button>
-      <button class="log-sheet-opt" data-action="logMenuScan">
-        <span class="lso-ic"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h12"/></svg></span>
+      <button class="log-sheet-opt" type="button" data-method="menu" data-action="logMenuScan">
+        <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h12"/></svg></span>
         <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_menu') }}</span><span class="lso-sub">{{ t('nutrition.log_menu_sub') }}</span></span>
       </button>
-      <button class="log-sheet-opt" data-action="logVoice">
-        <span class="lso-ic"><svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4"/></svg></span>
-        <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_voice') }}</span><span class="lso-sub">{{ t('nutrition.log_voice_sub') }}</span></span>
-        <span class="lso-badge">{{ t('nutrition.mobile_only') }}</span>
+      <button class="log-sheet-opt" type="button" data-method="quick-add" data-action="logQuickAdd" data-plan-state="loading">
+        <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></span>
+        <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_quick_add') }}</span><span class="lso-sub" id="lso-quick-add-sub">{{ t('nutrition.log_quick_add_loading') }}</span></span>
       </button>
-      <button class="log-sheet-opt" data-action="logManual">
-        <span class="lso-ic"><svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span>
-        <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_manual') }}</span><span class="lso-sub">{{ t('nutrition.log_manual_sub') }}</span></span>
+      <button class="log-sheet-opt" type="button" data-method="build-meal" data-action="logBuildMeal">
+        <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><line x1="17.5" y1="14" x2="17.5" y2="21"/><line x1="14" y1="17.5" x2="21" y2="17.5"/></svg></span>
+        <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_build_meal') }}</span><span class="lso-sub">{{ t('nutrition.log_build_meal_sub') }}</span></span>
+      </button>
+    </div>
+    <h3 class="log-sheet-group" id="log-sheet-more">{{ t('nutrition.log_more_methods') }}</h3>
+    <div class="log-sheet-grid" role="group" aria-labelledby="log-sheet-more">
+      <button class="log-sheet-opt log-sheet-opt--secondary" type="button" data-method="photo" data-action="logTakePhoto">
+        <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span>
+        <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_photo') }}</span><span class="lso-sub">{{ t('nutrition.log_photo_sub') }}</span></span>
       </button>
     </div>
   </div>
@@ -391,9 +382,9 @@
 
 <!-- ── MANUAL ENTRY SHEET ── -->
 <div class="sheet-backdrop" id="manual-sheet" data-action-self="closeManualSheet">
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="{{ t('nutrition.log_manual') }}">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="manual-sheet-title">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">{{ t('nutrition.log_manual') }}</div>
+    <h2 class="sheet-title" id="manual-sheet-title">{{ t('nutrition.log_manual') }}</h2>
 
     <div class="meal-type-grid" id="meal-type-grid">
       <div class="meal-type-opt selected" data-action="selectMealType" data-args='["Kahvaltı"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg></span>{{ t('nutrition.meal_breakfast') }}</div>
@@ -418,23 +409,6 @@
   </div>
 </div>
 
-<!-- ── VOICE PLACEHOLDER SHEET ── -->
-<div class="sheet-backdrop" id="voice-sheet" data-action-self="closeVoiceSheet">
-  <div class="sheet" role="dialog" aria-modal="true" aria-label="{{ t('nutrition.log_voice') }}">
-    <div class="sheet-handle"></div>
-    <div class="voice-placeholder">
-      <div class="voice-mic">
-        <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
-      </div>
-      <div class="voice-title">{{ t('nutrition.voice_title') }}</div>
-      <div class="voice-body">{{ t('nutrition.voice_body') }}</div>
-      <div class="voice-badge">{{ t('nutrition.mobile_only') }}</div>
-      <!-- NATIVE-VOICE-HOOK: native STT sonucu openManualSheet() + #meal-input'a yazılacak -->
-      <button class="btn-ghost" style="margin-top:8px;" data-action="closeVoiceSheet">{{ t('nutrition.cancel') }}</button>
-    </div>
-  </div>
-</div>
-
 <!-- ── BARCODE SCAN OVERLAY ── -->
 <div class="scan-overlay" id="scan-overlay">
   <div class="scan-topbar">
@@ -454,6 +428,43 @@
       <input class="fc-input" id="barcode-manual-input" inputmode="numeric" placeholder="{{ t('nutrition.barcode_manual_ph') }}" autocomplete="off">
       <button class="btn-volt" data-action="onBarcodeManual">{{ t('nutrition.barcode_lookup') }}</button>
     </div>
+  </div>
+</div>
+
+<!-- ── SERVING SELECTOR MODAL (diary + barcode) ── -->
+<!-- NUTR-PR4: after every sheet/overlay it opens over (Search food sheet, barcode
+     scanner, builder). Same --z-overlay layer, so DOM order puts it on top. -->
+<div class="modal-overlay" id="serving-modal" data-action-self="closeServingModal">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="sm-title">
+    <div class="modal-title" id="sm-title">{{ t('nutrition.add_food_title') }}</div>
+    <div id="sm-food-name" class="sm-food-name"></div>
+    <div id="sm-brand" class="sm-brand"></div>
+    <div id="sm-body">
+      <div id="sm-loading" style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+        <div class="diary-serving-loading"></div>
+        <span class="sm-loading-text">{{ t('nutrition.serving_loading') }}</span>
+      </div>
+      <div id="sm-serving-row" style="display:none;margin-bottom:12px;">
+        <label class="sm-field-label">{{ t('nutrition.serving_label') }}</label>
+        <select class="fc-input" id="sm-serving-select" data-action-change="updateSmPreview" style="width:100%;"></select>
+      </div>
+      <div id="sm-gram-row" style="display:none;margin-bottom:12px;">
+        <label class="sm-field-label">{{ t('nutrition.gram_label') }}</label>
+        <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" data-action-input="updateSmPreview" style="width:100%;">
+      </div>
+      <div id="sm-qty-row" style="display:none;margin-bottom:16px;">
+        <label class="sm-field-label">{{ t('nutrition.qty_label') }}</label>
+        <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" data-action-input="updateSmPreview" style="width:100%;">
+      </div>
+    </div>
+    <div class="sm-macros">
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--color-primary);" id="sm-cal">0</div><div class="sm-macro-lbl">KCAL</div></div>
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--blue-light);" id="sm-pro">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_protein_abbr') }}</div></div>
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--orange);" id="sm-carb">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_carb_abbr') }}</div></div>
+      <div style="text-align:center;"><div class="sm-macro-val" style="color:var(--green);" id="sm-fat">0</div><div class="sm-macro-lbl">{{ t('nutrition.macro_fat_abbr') }}</div></div>
+    </div>
+    <button class="btn-volt w-full" id="sm-confirm-btn" data-action="confirmServingModal">{{ t('nutrition.add') }}</button>
+    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeServingModal">{{ t('nutrition.cancel') }}</button>
   </div>
 </div>
 

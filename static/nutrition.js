@@ -176,22 +176,23 @@ function initNutritionNavigation() {
   });
 }
 
-/* ── OVERLAY A11Y: Esc ile kapat + açılışta odağı içeri al ── */
-function _focusInto(el) {
-  if (!el) return;
-  var f = el.querySelector('input, select, textarea, button, [tabindex]');
-  if (f) { try { f.focus({ preventScroll: true }); } catch (e) { f.focus(); } }
-}
+/* ── OVERLAY A11Y: Esc ile kapat (açılışta odak: _focusFirstVisible) ── */
+/* Escape closes the top-most surface through its OWN close function, so a
+   cancelled method hands focus back exactly as its Cancel button does. */
+var _ESCAPE_CLOSERS = [
+  ['photo-modal', function () { closePhotoConfirm(); }],
+  ['serving-modal', function () { closeServingModal(); }],
+  ['water-modal', function () { closeWater(); }],
+  ['manual-sheet', function () { closeManualSheet(); }],
+];
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Escape') return;
   var scan = document.getElementById('scan-overlay');
   if (scan && scan.classList.contains('open')) { closeScanOverlay(); return; }
-  var overlays = ['photo-modal', 'serving-modal', 'water-modal',
-                  'manual-sheet', 'voice-sheet'];
   var chooser = document.getElementById('log-sheet');
-  for (var i = 0; i < overlays.length; i++) {
-    var el = document.getElementById(overlays[i]);
-    if (el && el.classList.contains('open')) { el.classList.remove('open'); return; }
+  for (var i = 0; i < _ESCAPE_CLOSERS.length; i++) {
+    var el = document.getElementById(_ESCAPE_CLOSERS[i][0]);
+    if (el && el.classList.contains('open')) { _ESCAPE_CLOSERS[i][1](); return; }
   }
   if (chooser && chooser.classList.contains('open')) dismissLogSheet();
 });
@@ -529,63 +530,178 @@ function selectMealTypeByValue(ogun) {
 function quickEditMeal(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
 function logManualSlot(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
 
-/* ── LOG FOOD CHOOSER (NUTR-PR3: opened only by #log-food-btn) ──
-   Choosing a method closes the chooser and hands focus to that method's own
-   surface. Dismissing it (Escape, backdrop) returns focus to the control that
-   opened it, so keyboard users land back on "Log food". */
+/* ── LOG FOOD CHOOSER (NUTR-PR4) ──
+   ONE front door (#log-food-btn), several methods. The chooser is local UI
+   only: opening, closing and re-opening it issue no request and add no
+   listener, and choosing a method only HANDS OFF to the workflow that already
+   owns it. None of these functions writes anything — every consumed record
+   still comes from that workflow's own explicit, confirmed log:
+
+     Search food  logManual      → search sheet → serving → POST /meal-log
+     Scan barcode logScanBarcode → /api/food/barcode (discovery) → serving → POST /meal-log
+     Scan menu    logMenuScan    → Coach widget scanner (analysis, not a log)
+     Quick add    logQuickAdd    → the existing "From your plan" rows
+     Build meal   logBuildMeal   → the meal builder (staging) → its "Log this meal"
+     Photo        logTakePhoto   → photo + note → POST /meal-log on confirm
+
+   Focus is deterministic: into the chooser on open; back to "Log food" when
+   the chooser, or a method surface it launched, is dismissed. */
 var _logSheetOpener = null;
+
+function _logFoodButton() { return document.getElementById('log-food-btn'); }
+
+/* Where focus goes when a surface closes without handing it on: the element
+   that opened that surface if it is still on the page, else "Log food". Only
+   when focus would otherwise be lost (on <body> or inside the closed
+   surface) — a surface that already moved focus somewhere real is left alone. */
+function _returnFocus(surface, opener) {
+  var active = document.activeElement;
+  var lost = !active || active === document.body || active.offsetParent === null ||
+             (surface && surface.contains(active));
+  if (!lost) return;
+  var back = opener && document.contains(opener) && opener.offsetParent !== null
+    ? opener : _logFoodButton();
+  if (back) back.focus();
+}
+
+/* The first control a keyboard user can actually reach inside `el`. */
+function _focusFirstVisible(el) {
+  if (!el) return;
+  var all = el.querySelectorAll('input, select, textarea, button, [tabindex]:not([tabindex="-1"])');
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].offsetParent !== null && !all[i].disabled) {
+      try { all[i].focus({ preventScroll: true }); } catch (e) { all[i].focus(); }
+      return;
+    }
+  }
+}
+
+/* The Quick add option states the plan's truth from what the page already
+   holds (`#quick-add-section[data-plan-state]`) — no read of its own, and
+   "no active plan" is never shown for a plan that failed to load. */
+var _QUICK_ADD_SUB = {
+  available: 'nutrition.log_quick_add_sub',
+  none: 'nutrition.log_quick_add_none',
+  unavailable: 'nutrition.plan_unavailable',
+  loading: 'nutrition.log_quick_add_loading'
+};
+function _syncQuickAddOption() {
+  var state = document.getElementById('quick-add-section').dataset.planState;
+  if (!_QUICK_ADD_SUB[state]) state = 'loading';
+  var opt = document.querySelector('#log-sheet [data-method="quick-add"]');
+  opt.dataset.planState = state;
+  document.getElementById('lso-quick-add-sub').textContent = __t(_QUICK_ADD_SUB[state]);
+}
+
 function openLogSheet() {
   var s = document.getElementById('log-sheet');
+  if (s.classList.contains('open')) return;
   _logSheetOpener = document.activeElement;
+  _syncQuickAddOption();
   s.classList.add('open');
-  document.getElementById('log-food-btn').setAttribute('aria-expanded', 'true');
-  _focusInto(s);
+  _logFoodButton().setAttribute('aria-expanded', 'true');
+  _focusFirstVisible(s.querySelector('.log-sheet-grid'));
 }
 function closeLogSheet() {
   document.getElementById('log-sheet').classList.remove('open');
-  document.getElementById('log-food-btn').setAttribute('aria-expanded', 'false');
+  _logFoodButton().setAttribute('aria-expanded', 'false');
 }
 function dismissLogSheet() {
   var wasOpen = document.getElementById('log-sheet').classList.contains('open');
   closeLogSheet();
   var back = _logSheetOpener && document.contains(_logSheetOpener)
-    ? _logSheetOpener : document.getElementById('log-food-btn');
+    ? _logSheetOpener : _logFoodButton();
   _logSheetOpener = null;
   if (wasOpen && back) back.focus();
 }
 
-/* ── MANUAL ENTRY SHEET ── */
+/* aria-modal is a promise: while the chooser is open Tab cycles inside it.
+   One listener for the page's life, installed here once, never per open. */
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Tab') return;
+  var s = document.getElementById('log-sheet');
+  if (!s || !s.classList.contains('open')) return;
+  var items = Array.prototype.filter.call(
+    s.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+    function (el) { return !el.disabled && el.offsetParent !== null; });
+  if (!items.length) return;
+  var first = items[0], last = items[items.length - 1];
+  var active = document.activeElement;
+  if (!s.contains(active)) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+});
+
+/* ── SEARCH FOOD SHEET ── */
+var _manualOpener = null;
 function openManualSheet()  {
+  var fromChooser = document.getElementById('log-sheet').classList.contains('open');
+  _manualOpener = fromChooser ? _logFoodButton() : document.activeElement;
   closeLogSheet();
   var s = document.getElementById('manual-sheet');
   s.classList.add('open');
   var inp = document.getElementById('food-search-input');
   if (inp) { try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); } }
 }
-function closeManualSheet() { document.getElementById('manual-sheet').classList.remove('open'); }
+function closeManualSheet() {
+  var s = document.getElementById('manual-sheet');
+  var wasOpen = s.classList.contains('open');
+  s.classList.remove('open');
+  if (wasOpen) _returnFocus(s, _manualOpener);
+  _manualOpener = null;
+}
 
-/* ── VOICE PLACEHOLDER SHEET (mobil uygulamada) ──
-   Web MVP'de sesli giriş YOK; bileşen mimarisi native iOS/Android STT için hazır.
-   NATIVE-VOICE-HOOK: native STT metnini şuraya bağla:
-     selectMealTypeByValue(<algılanan öğün>); openManualSheet();
-     document.getElementById('meal-input').value = <transkript>;
-   Böylece UI/UX değişmeden native ses kaydı takılabilir. */
-function logVoice()        { closeLogSheet(); document.getElementById('voice-sheet').classList.add('open'); }
-function closeVoiceSheet() { document.getElementById('voice-sheet').classList.remove('open'); }
-
-/* ── MENU SCANNER (mevcut koç widget'ını yeniden kullan) ── */
+/* ── SCAN MENU (the Coach widget's scanner, reused as is) ──
+   Menu analysis produces suggestions, not intake: nothing is logged here. If
+   the scanner is not on the page the chooser says so and every other method
+   stays usable. */
 function logMenuScan() {
   closeLogSheet();
   if (window.CW && typeof window.CW.startScan === 'function') {
     window.CW.startScan();               // #cw-scan overlay'ini kendisi açar
   } else {
     showToast(__t('nutrition.menu_unavailable'), 'error');
+    _returnFocus(null, null);
   }
 }
 
-/* ── MANUAL / TAKE PHOTO FAB OPTIONS ── */
+/* ── QUICK ADD → the existing "From your plan" rows ──
+   Navigation only. The planned-row state machine (pending · unconfirmed ·
+   logged, its page-life locks and the one quickAddMeal writer) stays the
+   ONLY way a planned meal is logged; this just takes the user there and
+   focuses the first thing they can act on — a planned row, "Try again" for a
+   failed plan read, or the no-plan link — else the section title. */
+function logQuickAdd() {
+  closeLogSheet();
+  var section = document.getElementById('quick-add-section');
+  var target = section.querySelector('#quick-add-cards button:not(:disabled)') ||
+               document.getElementById('nut-planned-title');
+  try { section.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { section.scrollIntoView(); }
+  try { target.focus({ preventScroll: true }); } catch (e) { target.focus(); }
+}
+
+/* ── BUILD MEAL → the existing meal builder (CustomMeal staging) ──
+   Opens the builder disclosure through the normal navigation path, so its
+   staging read runs once, lazily, exactly as when the disclosure itself is
+   opened. Adding foods there is staging; only its "Log this meal" commit
+   creates a consumed record. */
+function logBuildMeal() {
+  closeLogSheet();
+  switchTab('diary');
+  var title = document.getElementById('diary-builder-title');
+  try { title.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { title.scrollIntoView(); }
+  try { title.focus({ preventScroll: true }); } catch (e) { title.focus(); }
+}
+
+/* ── SEARCH FOOD / PHOTO ── */
 function logManual()    { openManualSheet(); }
-function logTakePhoto() { closeLogSheet(); document.getElementById('photo-input').click(); }
+function logTakePhoto() {
+  closeLogSheet();
+  // Focus must not be lost while the system file picker is up (a cancelled
+  // picker never tells the page): park it on "Log food" first.
+  _returnFocus(null, null);
+  document.getElementById('photo-input').click();
+}
 
 /* ── TAKE PHOTO FLOW ── */
 var _photoDataUrl = null, _photoMealType = 'Kahvaltı';
@@ -619,11 +735,16 @@ function openPhotoConfirm(dataUrl) {
   var suggested = h < 11 ? 'Kahvaltı' : h < 16 ? 'Öğle' : h < 22 ? 'Akşam' : 'Ara Öğün';
   selectPhotoMealType(suggested);
   document.getElementById('photo-note-input').value = '';
-  document.getElementById('photo-modal').classList.add('open');
+  var modal = document.getElementById('photo-modal');
+  modal.classList.add('open');
+  _focusFirstVisible(modal);
 }
 function closePhotoConfirm() {
-  document.getElementById('photo-modal').classList.remove('open');
+  var modal = document.getElementById('photo-modal');
+  var wasOpen = modal.classList.contains('open');
+  modal.classList.remove('open');
   _photoDataUrl = null;
+  if (wasOpen) _returnFocus(modal, null);
 }
 
 function selectPhotoMealType(ogun) {
@@ -738,7 +859,9 @@ function stopBarcodeScan() {
 
 function closeScanOverlay() {
   stopBarcodeScan();
-  document.getElementById('scan-overlay').classList.remove('open');
+  var ov = document.getElementById('scan-overlay');
+  ov.classList.remove('open');
+  _returnFocus(ov, null);
 }
 
 function onBarcodeManual() {
@@ -806,7 +929,17 @@ function postSelectedFood(entry, ogun, idempotencyKey) {
     method: 'POST', headers: headers, body: JSON.stringify(body) });
 }
 
+/* One log per action. The loading overlay stops a second click, but not a
+   second Enter on the still-focused button — and each call mints a fresh
+   idempotency key, so a second call would be a second meal. */
+let _mealLogInFlight = false;
 async function logMeal() {
+  if (_mealLogInFlight) return;
+  _mealLogInFlight = true;
+  try { await submitMealLog(); } finally { _mealLogInFlight = false; }
+}
+
+async function submitMealLog() {
   const input = document.getElementById('meal-input');
   const loading = document.getElementById('loading');
 
@@ -1748,12 +1881,50 @@ const DIARY_MEALS = [
   { key: 'Ara Öğün', icon: _SLOT_ICONS.snack }
 ];
 
+/* NUTR-PR4: the builder's staging read has its own state on #diary-meals
+   (loading · available · unavailable). A failed or unreadable read is
+   UNAVAILABLE with a retry — never four empty meals, which would claim the
+   user has nothing staged. Staged items live on the server (CustomMeal), so
+   a failed read or leaving the builder discards nothing. */
+let _diaryReadGeneration = 0;
+function validDiaryPayload(d) {
+  return !!d && typeof d === 'object' && Array.isArray(d.meals) &&
+    !!d.totals && typeof d.totals === 'object';
+}
+
 async function loadDiary() {
+  const box = document.getElementById('diary-meals');
+  const generation = ++_diaryReadGeneration;
+  if (box.dataset.diaryState !== 'available') {
+    box.dataset.diaryState = 'loading';
+    box.setAttribute('aria-busy', 'true');
+  }
   try {
     const res = await fetch('/api/diary/today');
+    if (!res.ok) throw new Error('Diary read failed');
     const data = await res.json();
+    if (generation !== _diaryReadGeneration) return;
+    if (!validDiaryPayload(data)) throw new Error('Diary read invalid');
     renderDiary(data);
-  } catch (e) { console.error('loadDiary', e); }
+    box.dataset.diaryState = 'available';
+  } catch (e) {
+    console.error('loadDiary', e);
+    if (generation !== _diaryReadGeneration) return;
+    renderDiaryFailure();
+  } finally {
+    if (generation === _diaryReadGeneration) box.setAttribute('aria-busy', 'false');
+  }
+}
+
+function renderDiaryFailure() {
+  const box = document.getElementById('diary-meals');
+  box.dataset.diaryState = 'unavailable';
+  box.innerHTML = `
+    <div class="nut-planned-state diary-unavailable" role="status">
+      <p class="nut-planned-note">${esc(__t('nutrition.diary_unavailable'))}</p>
+      <button type="button" class="btn-ghost nut-retry" data-action="loadDiary">${esc(__t('nutrition.try_again'))}</button>
+    </div>`;
+  document.getElementById('diary-grand-total').style.display = 'none';
 }
 
 function renderDiary(data) {
@@ -1881,6 +2052,7 @@ let _smMealName = null;
 let _smServings = null;
 let _smMode = 'diary';
 let _smLogOgun = 'Kahvaltı';
+let _smOpener = null;
 
 /* Modal alanlarını başlangıç durumuna getir (gram modu görünür). */
 function _smResetFields(food) {
@@ -1892,8 +2064,11 @@ function _smResetFields(food) {
   document.getElementById('sm-gram-input').value = 100;
   document.getElementById('sm-qty-input').value = 1;
   document.getElementById('sm-confirm-btn').disabled = false;
-  document.getElementById('serving-modal').classList.add('open');
+  var modal = document.getElementById('serving-modal');
+  _smOpener = document.activeElement;
+  modal.classList.add('open');
   updateSmPreview();
+  _focusFirstVisible(modal);
 }
 
 /* Porsiyon listesini modale uygula (fetch veya barkod ile hazır gelen). */
@@ -1929,6 +2104,9 @@ function openServingModal(mealName, food) {
   if (searchInput) { searchInput.value = ''; searchInput.nextElementSibling.style.display = 'none'; }
 
   _smResetFields(food);
+  // The builder re-renders after an add, so its search field cannot be the
+  // stable return point: the builder title is.
+  _smOpener = document.getElementById('diary-builder-title');
 
   const lookupKey = food.food_id || food.name;
   if (!lookupKey) {
@@ -1976,7 +2154,13 @@ function openSelectServing(food) {
 }
 
 function closeServingModal() {
-  document.getElementById('serving-modal').classList.remove('open');
+  var modal = document.getElementById('serving-modal');
+  var wasOpen = modal.classList.contains('open');
+  modal.classList.remove('open');
+  // Back to whatever opened it (the search field for Search food, the
+  // builder title for Build meal); a barcode lookup falls back to Log food.
+  if (wasOpen) _returnFocus(modal, _smOpener);
+  _smOpener = null;
   _smFood = null; _smMealName = null; _smServings = null; _smMode = 'diary';
 }
 
