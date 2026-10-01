@@ -29,7 +29,8 @@ from test_nutrition_vnext_pr3_daily_browser import CATALOG, PLAN, fail, seed
 
 OPEN = re.compile(r'\bopen\b')
 INITIAL = Counter({'/nutrition': 1, '/meal-log/today': 1, '/nutrition-plan/active': 1,
-                   '/water': 1, '/notifications/unread-count': 1, '/coach/history': 1})
+                   '/water': 1, '/notifications/unread-count': 1, '/coach/history': 1,
+                   '/nutrition-day-view': 1})   # NUTR-PR6: one day-view read at load
 FORWARDED_HEADERS = {'content-type', 'origin', 'x-csrftoken', 'if-match', 'idempotency-key'}
 
 

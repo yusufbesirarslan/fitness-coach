@@ -474,7 +474,8 @@ def test_request_topology(app, auth_user, client, training_page):
     # Initial: exactly the PR2 set (Water's one eager read is pre-existing).
     assert Counter(p for p, _, _ in traffic if not p.startswith('/static/')) == Counter({
         '/nutrition': 1, '/meal-log/today': 1, '/nutrition-plan/active': 1, '/water': 1,
-        '/notifications/unread-count': 1, '/coach/history': 1})
+        '/notifications/unread-count': 1, '/coach/history': 1,
+        '/nutrition-day-view': 1})   # NUTR-PR6: one day-view read at load
     water = WaterRoute(page, client)
     open_water(page)
     page.wait_for_timeout(200)
@@ -498,7 +499,8 @@ def test_request_topology(app, auth_user, client, training_page):
     # No write or failure touched any other surface (no provider/AI/meal re-read).
     assert Counter(p for p, _, _ in traffic if not p.startswith('/static/') and p != '/water') == Counter({
         '/nutrition': 1, '/meal-log/today': 1, '/nutrition-plan/active': 1,
-        '/notifications/unread-count': 1, '/coach/history': 1})
+        '/notifications/unread-count': 1, '/coach/history': 1,
+        '/nutrition-day-view': 1})   # the load-time read only; water writes add none
 
 
 # ── I18N / A11Y ─────────────────────────────────────────────────────────

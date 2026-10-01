@@ -521,6 +521,16 @@
 .qab-done .qab-action { color: var(--color-text-2); }
 .nut-planned-note { margin: 0; font-size: var(--text-sm); color: var(--color-text-3); }
 .nut-planned-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+/* NUTR-PR6 — Next step: one compact server-authorized action, quieter than
+   "Log food" (ghost, not volt). Words carry the state; no colour-only meaning. */
+.nut-next { margin-top: var(--space-6); padding: var(--space-4) var(--space-5); }
+.nut-next .sec-label { margin-bottom: var(--space-2); }
+.nut-next-lead { margin: 0; font-size: var(--text-sm); color: var(--color-text-2); overflow-wrap: anywhere; }
+.nut-next-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+.nut-next-actions:not(:has(.nut-next-action:not([hidden]))) { display: none; }
+.nut-next-action { min-height: 44px; max-width: 100%; white-space: normal; text-align: center; text-decoration: none; }
+.nut-next-action[hidden] { display: none; }
+#nut-review-coach { max-width: 100%; white-space: normal; text-align: center; }
 .nutrition-secondary { margin-top: var(--space-6); }
 .nutrition-secondary .nutrition-tool { margin: 0; }
 .nutrition-secondary .nutrition-tool:last-child { border-bottom: var(--border-w-1) solid var(--color-border-2); }
@@ -682,6 +692,9 @@
 .log-sheet-opt:focus-visible,
 .log-sheet-close:focus-visible,
 #nut-planned-title:focus-visible,
+#nut-next-title:focus-visible,
+.nut-next-action:focus-visible,
+#nut-review-coach:focus-visible,
 #diary-builder-title:focus-visible,
 .meal-card .mc-edit:focus-visible,
 .meal-card .mc-del:focus-visible,

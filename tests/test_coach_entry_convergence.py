@@ -224,8 +224,10 @@ CONTEXTUAL_PAGES = (
 # Progress V2 PR3: the Progress entry is the Axis Insight's contextual
 # review link — the same secondary ghost link to the Coach route, carrying one
 # constant (never user data) so Coach can pre-fill the insight as a draft.
+# NUTR-PR6: Nutrition's entry became "Review with AxisAI", the same pattern
+# with its own allowlisted constant.
 _ENTRY = re.compile(r'<a\b[^>]*class="btn-ghost[^"]*"[^>]*'
-                    r'href="/coach(?:\?review=progress-insight)?"[^>]*>(.*?)</a>',
+                    r'href="/coach(?:\?review=(?:progress-insight|nutrition-day))?"[^>]*>(.*?)</a>',
                     re.S)
 
 
@@ -286,9 +288,13 @@ def test_no_contextual_entry_serializes_user_data_into_the_url():
     """Honest handoff: the Coach reads plan, targets and metrics server-side, so
     the link carries nothing. A query string here would be a privacy decision,
     not a convenience."""
-    for name in ("_progress_current_state.html", "nutrition.html", "plan.html"):
+    for name in ("_progress_current_state.html", "plan.html"):
         for href in re.findall(r'href="(/coach[^"]*)"', _read(TEMPLATES / name)):
             assert href == "/coach", (name, href)
+    # NUTR-PR6: "Review with AxisAI" names only the KIND - one constant; Coach
+    # re-derives today's nutrition server-side at render and again at send.
+    assert re.findall(r'href="(/coach[^"]*)"', _read(TEMPLATES / "nutrition.html")) == [
+        "/coach?review=nutrition-day"]
     # Progress V2 PR3: the Axis Insight link names only the KIND of handoff —
     # one constant. The Coach route re-derives the insight server-side, so no
     # training state ever reaches the URL (and analytics' page location).
@@ -312,7 +318,8 @@ def test_the_nutrition_entry_is_a_secondary_handoff_after_the_daily_job(
         client, make_user, login):
     """NUTR-PR3: Today leads with the day's state and its one primary action
     ("Log food"); the Coach entry is Tier-3 review/handoff, after the logged
-    meals — still exactly one plain /coach link."""
+    meals — still exactly one Coach link (NUTR-PR6: "Review with AxisAI",
+    carrying only the constant `nutrition-day`)."""
     html = _html(_seed(client, make_user, login, "cecnut"), "/nutrition")
     assert 'id="log-fab"' not in html
     entry = html.index('class="coach-entry"')

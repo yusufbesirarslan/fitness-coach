@@ -175,6 +175,22 @@
       <div id="quick-add-cards" class="nut-planned-list"></div>
     </section>
 
+    {#- NUTR-PR6 — Next step. ONE server-authorized action from the bounded
+        NutritionDayView (`GET /nutrition-day-view`, read once at load and on
+        retry only). The browser never derives it: it maps an allowlisted kind
+        (log_food · set_target · retry) to an existing action and shows nothing
+        actionable for anything else. No score, no verdict, no advice. -#}
+    <section class="card nut-next" id="nut-next" aria-labelledby="nut-next-title"
+             data-next-state="loading" aria-busy="true">
+      <h2 class="sec-label" id="nut-next-title" tabindex="-1">{{ t('nutrition.next.title') }}</h2>
+      <p class="nut-next-lead" id="nut-next-lead" role="status" aria-live="polite">{{ t('nutrition.next.loading') }}</p>
+      <div class="nut-next-actions">
+        <button class="btn-ghost nut-next-action" id="nut-next-action" type="button"
+                data-action="runNextAction" hidden></button>
+        <a class="btn-ghost nut-next-action" id="nut-next-link" href="/setup?yeniden=1" hidden>{{ t('nutrition.next.set_target') }}</a>
+      </div>
+    </section>
+
   <div class="nutrition-secondary">
   <details class="nutrition-tool" id="nutrition-tool-history" data-nutrition-tool="history">
     <summary id="nutrition-tab-history" class="nutrition-tool-toggle" data-tab-name="history" aria-controls="panel-history">{{ t('nutrition.tab_history') }}</summary>
@@ -250,16 +266,17 @@
   </details>
   </div><!-- /nutrition-secondary -->
 
-    {#- TIER 3 — review / handoff. Both pre-existing and unchanged in scope:
-        the end-of-day review runs only on click, and the Coach entry is a
-        plain /coach link (no nutrition data in the URL; UX-1 PR3). -#}
+    {#- TIER 3 — review / handoff. The end-of-day review runs only on click.
+        "Review with AxisAI" (NUTR-PR6) carries ONE allowlisted constant —
+        never a number, meal, water amount or plan — so Coach re-derives the
+        day server-side; opening it sends nothing and calls no model. -#}
     <div class="nut-review">
       <button class="btn-ghost w-full" id="review-btn" data-action="getReview" type="button">{{ t('nutrition.eod_review') }}</button>
       <div class="card" id="review-card" style="padding:20px;margin-top:12px;display:none;">
         <div id="review-text" class="review-text"></div>
       </div>
       <div class="coach-entry">
-        <a class="btn-ghost" href="/coach">{{ t('nutrition.ask_coach') }}</a>
+        <a class="btn-ghost" id="nut-review-coach" href="/coach?review=nutrition-day">{{ t('nutrition.review_with_axisai') }}</a>
       </div>
     </div>
   </div><!-- /panel-today -->

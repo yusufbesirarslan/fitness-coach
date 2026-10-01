@@ -1,27 +1,35 @@
 {%- if coach_handoff %}
-<aside id="coach-progress-context" aria-label="{{ t('coach.handoff_from_progress') }}">
-    <span class="coach-progress-label">{{ t('coach.handoff_from_progress') }}</span>
-    <p>{{ coach_handoff.preview }}</p>
-    <p>{{ coach_handoff.action }}</p>
-    <button type="button" id="coach-progress-dismiss">{{ t('coach.handoff_dismiss') }}</button>
+{#- One aside for every allowlisted handoff kind (app/coach_handoff.py). The
+    kind comes from the server's allowlist, never from the URL verbatim; the
+    lines are the server's bounded preview. Nothing here sends or calls a model:
+    the draft is only placed in the composer, and the marker rides the user's
+    own first Send. Progress keeps its original element ids. -#}
+{%- set hid = 'coach-progress' if coach_handoff.kind == 'progress-insight' else 'coach-nutrition' %}
+<aside id="{{ hid }}-context" class="coach-handoff-context" data-handoff-kind="{{ coach_handoff.kind }}" aria-label="{{ coach_handoff.label }}">
+    <span class="coach-progress-label">{{ coach_handoff.label }}</span>
+    {%- for line in coach_handoff.lines %}
+    <p>{{ line }}</p>
+    {%- endfor %}
+    <button type="button" id="{{ hid }}-dismiss" class="coach-handoff-dismiss">{{ coach_handoff.dismiss }}</button>
 </aside>
 <script nonce="{{ csp_nonce }}">
 (function () {
+    var kind = {{ coach_handoff.kind|tojson }};
     var input = document.getElementById('cw-input');
-    var context = document.getElementById('coach-progress-context');
+    var context = document.getElementById({{ (hid ~ '-context')|tojson }});
     var composer = document.getElementById('cw-irow');
     if (!input || !context || !composer || !window.CW) return;
     composer.parentNode.insertBefore(context, composer);
     if (!input.value) input.value = {{ coach_handoff.draft|tojson }};
-    window.CW.handoff = 'progress-insight';
+    window.CW.handoff = kind;
     function clearContext() {
         context.remove();
-        if (window.location.search === '?review=progress-insight') {
+        if (window.location.search === '?review=' + kind) {
             window.history.replaceState(window.history.state, '', '/coach');
         }
     }
     document.addEventListener('coach:handoff-consumed', clearContext, { once: true });
-    document.getElementById('coach-progress-dismiss').addEventListener('click', function () {
+    document.getElementById({{ (hid ~ '-dismiss')|tojson }}).addEventListener('click', function () {
         window.CW.handoff = null;
         window.CW._lastHandoff = null;
         clearContext();

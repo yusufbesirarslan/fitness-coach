@@ -8,4 +8,4 @@ from flask import Blueprint
 
 bp = Blueprint("nutrition", __name__)
 
-from app.blueprints.nutrition import diary, meallog, plan  # noqa: E402,F401
+from app.blueprints.nutrition import day_view, diary, meallog, plan  # noqa: E402,F401

@@ -59,10 +59,12 @@ function makeElement(id, sink) {
     insertBefore() {},
     remove() {},
     setAttribute() {},
+    removeAttribute() {},
     getAttribute() { return null; },
     querySelector() { return makeElement('q', sink); },
     querySelectorAll() { return []; },
     closest() { return null; },
+    contains() { return false; },  // NUTR-PR6 Next step asks where focus is
     focus() {},
     scrollIntoView() {},
     getBoundingClientRect() { return { top: 0, bottom: 0, height: 0 }; },

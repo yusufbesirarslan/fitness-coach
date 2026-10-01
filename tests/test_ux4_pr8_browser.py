@@ -119,7 +119,9 @@ DEFAULT_READS = {
     "plan": {"/training", "/notifications/unread-count"},
     "coach": {"/coach", "/notifications/unread-count", "/coach/history"},
     "nutrition": {"/nutrition", "/notifications/unread-count", "/meal-log/today",
-                  "/nutrition-plan/active", "/water", "/coach/history"},
+                  "/nutrition-plan/active", "/water", "/coach/history",
+                  # NUTR-PR6: the ONE server-owned day-view read at load.
+                  "/nutrition-day-view"},
     "supplements": {"/supplements", "/notifications/unread-count"},
     "progress": {"/progress-page", "/notifications/unread-count",
                  "/api/progress/summary", "/api/progress/history",
