@@ -11,6 +11,7 @@ API'sine gider:
   - authenticate          → USER_PASSWORD_AUTH ile giriş; ham token'lar + claim'ler
   - refresh_tokens        → REFRESH_TOKEN_AUTH ile access token'ı yeniler
   - global_sign_out       → kullanıcının TÜM refresh token'larını iptal eder (logout)
+  - delete_user           → kullanıcı KENDİ profilini siler (access token ile; LP-11)
   - initiate_auth         → geriye dönük uyum shim'i (yalnızca claim'leri döner)
 
 Bu uç noktalar İMZASIZ (public app client) çağrılır — AWS IAM kimliği GEREKMEZ;
@@ -287,6 +288,19 @@ def global_sign_out(access_token):
     """Cognito GlobalSignOut — kullanıcının TÜM refresh token'larını iptal eder."""
     try:
         _get_client().global_sign_out(AccessToken=access_token)
+    except Exception as e:
+        raise _wrap(e)
+
+
+def delete_user(access_token):
+    """Cognito DeleteUser — the signed-in user deletes their OWN profile.
+
+    Authorized solely by the user's access token: there is no username
+    parameter and Cognito evaluates no IAM policy for this operation, so the
+    only identity it can ever delete is the principal the token was issued to.
+    Only `app/services/account_deletion.py` may call it (LP-11)."""
+    try:
+        _get_client().delete_user(AccessToken=access_token)
     except Exception as e:
         raise _wrap(e)
 

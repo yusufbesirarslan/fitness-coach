@@ -13,7 +13,7 @@ from app.models import (
 )
 from app.services import (
     auth_contract, cognito_identity, cognito_jwt, cognito_service,
-    mobile_credentials, session_store,
+    deleted_identity, mobile_credentials, session_store,
 )
 from app.services.ai_gate import (
     BlockingConcurrencyLimit, blocking_concurrency_slot,
@@ -137,6 +137,10 @@ def _resolve_user(claims):
     verified token, never by the identifier the login was submitted as (an
     e-mail alias or another casing): `User.username` must name the provider
     user, or recovery by that username cannot find the row.
+
+    Binding or creating refuses a subject deleted by account deletion
+    (`deleted_identity`): these are the only branches that could otherwise
+    hand a deleted identity a local account from a login already in flight.
     """
     sub = (claims.get("sub") or "").strip()
     email = (claims.get("email") or "").strip().lower()
@@ -158,12 +162,20 @@ def _resolve_user(claims):
         return None
     if user is not None:
         user.cognito_sub = sub
-        return user
-    user = User(
-        username=username, email=email, cognito_sub=sub,
-        full_name=claims.get("name") or username, language="tr")
-    db.session.add(user)
-    db.session.flush()
+    else:
+        user = User(
+            username=username, email=email, cognito_sub=sub,
+            full_name=claims.get("name") or username, language="tr")
+        db.session.add(user)
+    try:
+        # LP-11: a subject `DELETE /api/v1/account` removed never gets a local
+        # row back — not even from a login that authenticated before the
+        # deletion. `login` rolls this write back on the failure.
+        deleted_identity.refuse_if_deleted(sub)
+    except deleted_identity.IdentityDeleted:
+        _security_event("identity_deleted", category="identity")
+        raise _failure(
+            "AUTH_INVALID_CREDENTIALS", 401, False, "identity_deleted") from None
     return user
 
 

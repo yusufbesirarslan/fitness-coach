@@ -65,6 +65,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("put", "/api/v1/account/profile"),
         ("post", "/api/v1/coach/messages"),
         ("get", "/api/v1/coach/history"),
+        ("delete", "/api/v1/account"),
         ("get", "/api/v1/nutrition/diary/today"),
         ("get", "/api/v1/progress/summary"),
         ("get", "/api/v1/today"),
@@ -79,7 +80,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/training/workout-sessions/abc/abandon"),
         ("post", "/api/v1/training/workout-sessions/abc/complete"),
     ):
-        headers = post_headers if method in ("post", "put") else None
+        headers = post_headers if method in ("post", "put", "delete") else None
         assert getattr(client, method)(path, headers=headers).status_code == 404
 
 
@@ -139,6 +140,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         # LP-03 native onboarding profile. Bearer-only, on this blueprint so it
         # shares its gate, envelope, no-store and 429 handler.
         ("/api/v1/account/profile", ("PUT",)),
+        # LP-11 native account deletion. Bearer-only, on this blueprint so it
+        # shares its gate, envelope, no-store and 429 handler.
+        ("/api/v1/account", ("DELETE",)),
             # Sprint 9 backend prerequisite. Product routes live on this blueprint
             # too, so the allow-list keeps covering every /api/v1 route there is.
             ("/api/v1/nutrition/diary/today", ("GET",)),

@@ -124,7 +124,9 @@ def _user_child_models():
         # (it already removes MealLog rows holding live photo_keys the same
         # way), and giving it network calls mid-transaction would be a much
         # larger change than this table warrants. Releasing an erased account's
-        # stored objects is a separate lifecycle question, recorded as debt.
+        # stored objects is a separate lifecycle question, recorded as debt for
+        # this operator path; native self-deletion (LP-11,
+        # app/services/account_deletion.py) releases them BEFORE calling here.
         MealPhotoCleanup, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
         # Sprint 10 PR3: the request ledger points at the comparison, and the
         # comparison points at both source Pump Checks — so erasure runs

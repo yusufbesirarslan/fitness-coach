@@ -228,6 +228,7 @@ def me():
 # `/api/v1` surface, one no-store policy, one throttling handler and one feature
 # gate — and keeps every mobile route inside the approved-route allow-list in
 # tests/test_mobile_auth_feature_gate.py.
+from app.blueprints import mobile_account_deletion  # noqa: E402,F401
 from app.blueprints import mobile_account_profile  # noqa: E402,F401
 from app.blueprints import mobile_coach  # noqa: E402,F401
 from app.blueprints import mobile_nutrition  # noqa: E402,F401
