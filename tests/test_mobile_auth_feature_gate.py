@@ -67,6 +67,18 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/coach/history"),
         ("delete", "/api/v1/account"),
         ("get", "/api/v1/nutrition/diary/today"),
+        ("get", "/api/v1/nutrition/day-view"),
+        ("get", "/api/v1/nutrition/plan"),
+        ("put", "/api/v1/nutrition/plan"),
+        ("post", "/api/v1/nutrition/plan/generate"),
+        ("post", "/api/v1/nutrition/plan/meals/abc/log"),
+        ("get", "/api/v1/nutrition/hydration"),
+        ("put", "/api/v1/nutrition/hydration"),
+        ("get", "/api/v1/nutrition/history"),
+        ("get", "/api/v1/nutrition/supplements"),
+        ("post", "/api/v1/nutrition/supplements"),
+        ("patch", "/api/v1/nutrition/supplements/abc"),
+        ("delete", "/api/v1/nutrition/supplements/abc"),
         ("get", "/api/v1/progress/summary"),
         ("get", "/api/v1/today"),
         ("get", "/api/v1/training/preferences"),
@@ -80,7 +92,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/training/workout-sessions/abc/abandon"),
         ("post", "/api/v1/training/workout-sessions/abc/complete"),
     ):
-        headers = post_headers if method in ("post", "put", "delete") else None
+        headers = post_headers if method in ("post", "put", "patch", "delete") else None
         assert getattr(client, method)(path, headers=headers).status_code == 404
 
 
@@ -152,6 +164,20 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/nutrition/logs", ("POST",)),
             ("/api/v1/nutrition/logs/<entry_token>", ("PATCH",)),
             ("/api/v1/nutrition/logs/<entry_token>", ("DELETE",)),
+            # NUTR-PR7 native Nutrition closure. Each route is admitted by
+            # name — never a /nutrition prefix — so accidental growth fails.
+            ("/api/v1/nutrition/day-view", ("GET",)),
+            ("/api/v1/nutrition/plan", ("GET",)),
+            ("/api/v1/nutrition/plan", ("PUT",)),
+            ("/api/v1/nutrition/plan/generate", ("POST",)),
+            ("/api/v1/nutrition/plan/meals/<planned_meal_id>/log", ("POST",)),
+            ("/api/v1/nutrition/hydration", ("GET",)),
+            ("/api/v1/nutrition/hydration", ("PUT",)),
+            ("/api/v1/nutrition/history", ("GET",)),
+            ("/api/v1/nutrition/supplements", ("GET",)),
+            ("/api/v1/nutrition/supplements", ("POST",)),
+            ("/api/v1/nutrition/supplements/<supplement_token>", ("PATCH",)),
+            ("/api/v1/nutrition/supplements/<supplement_token>", ("DELETE",)),
             ("/api/v1/pump-checks", ("POST",)),
             ("/api/v1/pump-checks", ("GET",)),
             ("/api/v1/pump-checks/<pump_check_token>", ("GET",)),

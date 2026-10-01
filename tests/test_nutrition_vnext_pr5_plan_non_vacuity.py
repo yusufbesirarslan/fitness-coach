@@ -142,7 +142,8 @@ def test_n3_success_before_the_answer_is_detected(app, auth_user, client, traini
 # ── P5-N4 · backend order ──────────────────────────────────────────────
 
 
-DELETE = '    NutritionPlan.query.filter_by(user_id=current_user.id).delete()\n'
+# NUTR-PR7: the destructive step is the shared replacement boundary call.
+DELETE = '    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL)\n'
 SCORE = '    score = data.get("score")\n'
 
 

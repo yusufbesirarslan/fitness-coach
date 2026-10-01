@@ -299,6 +299,9 @@ EXPECTED_GATED_ENDPOINTS = {
     # LP-09 native Coach: the same blocking generate_answer turn as
     # coach.ask_coach (Bedrock/OpenAI tool loop) — same thread risk, same gate.
     "mobile_api.send_coach_message",
+    # NUTR-PR7 native plan generation: the same blocking generate_plan_options
+    # turn as nutrition.nutrition_plan_generate — same thread risk, same gate.
+    "mobile_api.nutrition_plan_generate_native",
 }
 
 
