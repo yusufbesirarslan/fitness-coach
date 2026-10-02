@@ -284,7 +284,7 @@ def _today_totals(user_id):
 
 
 def get_user_barcode_context(user_id, meal_time=""):
-    session = UserSession.query.filter_by(user_id=user_id).order_by(UserSession.created_at.desc()).first()
+    session = UserSession.query.filter_by(user_id=user_id).order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
     targets = _target_macros(session)
     consumed = _today_totals(user_id)
     return {
@@ -487,7 +487,7 @@ def goal_impact_for_add(user_id, added_macros):
         "carbs": _round1(before["carbs"] + added_macros["carbs"]),
         "fat": _round1(before["fat"] + added_macros["fat"]),
     }
-    session = UserSession.query.filter_by(user_id=user_id).order_by(UserSession.created_at.desc()).first()
+    session = UserSession.query.filter_by(user_id=user_id).order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
     return {"before": before, "after": after,
             "targets": _published_macros(_target_macros(session))}
 

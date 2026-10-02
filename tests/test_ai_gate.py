@@ -158,7 +158,8 @@ def test_shared_saturation_preserves_reserve_and_recovers_without_deadlock(
 
     def food_attempt():
         with app.test_request_context("/api/food/search?q=muz"):
-            return original_view(food_bp.food_search)().get_json()
+            response = original_view(food_bp.food_search)()
+            return response.status_code, response.headers.get("Retry-After")
 
     def suggestion_attempt():
         snapshot = SimpleNamespace(
@@ -212,7 +213,7 @@ def test_shared_saturation_preserves_reserve_and_recovers_without_deadlock(
     assert finished_before_release
     assert not errors_before_release
     assert results_before_release == {
-        "food": {"results": []},
+        "food": (503, "15"),
         "suggestion": None,
         "mobile": (503, "AUTH_TEMPORARILY_UNAVAILABLE"),
     }

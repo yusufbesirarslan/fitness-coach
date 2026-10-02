@@ -79,7 +79,7 @@ def get_user_fitness_summary(user_id: int) -> str:
 
         cur.execute(
             "SELECT weight, target_calories, bmr, tdee, goal, fitness_level, created_at "
-            "FROM user_session WHERE user_id = %s ORDER BY created_at DESC LIMIT 1",
+            "FROM user_session WHERE user_id = %s ORDER BY created_at DESC, id DESC LIMIT 1",
             (user_id,),
         )
         session = cur.fetchone()

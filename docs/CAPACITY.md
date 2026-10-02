@@ -72,7 +72,7 @@ Kanıta dayalı; her satır gerçek koda karşı doğrulanmıştır.
 |---|---|---|---|---|---|
 | `/ask`, `/ask/stream`, plan/menü/analiz route'ları | `ai_concurrency_gate` / `ai_stream_concurrency_gate` (`_ai_slots`) | `AI_GATE_WAIT_SECONDS` (0) | `min(30, kalan bütçe)` / `min(BEDROCK_CALL_TIMEOUT_SECONDS, kalan)` | 503 + `Retry-After: 15` | Hayır |
 | Bedrock/OpenAI model çağrıları | `model_concurrency_slot` (`_model_slots`, iç içe) | `min(kapı beklemesi, deadline)` | yukarıdaki ile aynı | `BlockingConcurrencyLimit` → route sözleşmesi | Hayır |
-| `food_search` (FatSecret + LLM normalizasyon) | `blocking_concurrency_slot` | 0 | 5–10 sn | Boş sonuç (degrade) | Hayır |
+| `food_search` (FatSecret + LLM normalizasyon) | `blocking_concurrency_slot` | 0 | 5–10 sn | 503 + `Retry-After: 15` (`error.ai_busy`; boş sonuç DEĞİL) | Hayır |
 | `respond_suggestion` (social) | `blocking_concurrency_slot` | 0 | 5–10 sn | Degrade | Hayır |
 | Mobil `/api/v1/auth/login` | `blocking_concurrency_slot` | 0 | Cognito 5+10 sn, 2 deneme | `AUTH_TEMPORARILY_UNAVAILABLE` | Hayır |
 | Mobil `/api/v1/auth/refresh` | `blocking_concurrency_slot` | 0 | aynı | aynı | **Hayır** — iki fazlı: ağ ÖNCE, kilit SONRA |

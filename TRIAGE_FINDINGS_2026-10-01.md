@@ -17,6 +17,20 @@
 
 ---
 
+## Resolution (2026-10-02, PR #374)
+
+| # | Status | Change |
+|---|---|---|
+| 1 | Fixed | `food_search` returns `_fatsecret_busy_response` (503 + `Retry-After: 15`). This degrade had been pinned by `tests/test_food_routes.py`/`tests/test_ai_gate.py` and `docs/CAPACITY.md` ("Boş sonuç (degrade)"), all from the same PR (#319) that wrote the global "never 'no result'" rule; tests + doc row updated. `static/nutrition.js` (both search dropdowns) now shows the server's busy text on a non-OK answer instead of "no result". |
+| 2 | Fixed | Path-keyed `private, no-store` guards extended: `tracking` (7 paths, joined to the Progress set), `training` (`/workout/status`, `/water`), new `nutrition` blueprint guard (`/meal-log/today`, `/nutrition-plan/active`, `/api/diary/today`). `/training/bootstrap` already set it (report was wrong there). |
+| 3 | Fixed | Every "latest `UserSession`" selector — 15 ORM sites incl. the weight write path, plus raw SQL in `coach_context_queries.py` and `fitx_mcp/server.py` — orders `created_at DESC, id DESC`. |
+| 4 | Fixed | `get_active_plan` and its three inline mirrors (`workout_state`, `workout_session`, `/workout/complete`) order `created_at DESC, id DESC`. |
+| 5 | Fixed | `fitx_ref` cookie takes `secure=SESSION_COOKIE_SECURE` (the session cookie's gate). |
+| 6 | Not a bug | The address is already masked via `email_service.mask_email` (`y***@example.com`), the repo-wide convention. No change. |
+| 7 | Fixed | `auth.js` storage reads/writes wrapped in try/catch; an unguarded throw in `initTheme` also aborted the DOMContentLoaded handler on login/register/reset pages. |
+
+Regression tests: `tests/test_triage_2026_10_01_fixes.py` (each fails on the pre-fix code; includes source-scan drift guards for #3/#4).
+
 ## Needed fixes (ranked)
 
 ### 1. [MEDIUM] `GET /api/food/search` masks server overload as "no results" (HTTP 200)

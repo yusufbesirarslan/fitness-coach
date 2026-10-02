@@ -63,9 +63,8 @@ def food_search():
         with blocking_concurrency_slot():
             results = _coach_search_food(q)
     except BlockingConcurrencyLimit:
-        current_app.logger.warning(
-            "food_search event=blocking_capacity_exhausted")
-        results = []
+        # Kapasite reddi bir "besin bulunamadı" DEĞİLDİR → açık 503 + Retry-After.
+        return _fatsecret_busy_response("food_search")
 
     return jsonify({"results": results})
 

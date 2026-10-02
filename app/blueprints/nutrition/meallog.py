@@ -384,7 +384,7 @@ def today_meals():
     # It must not invent a 30/40/30 split, a 2000 kcal stand-in, or a remaining
     # budget of its own. Absence is a real domain state.
     last = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc()).first()
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
     configured = derive_daily_macro_targets(
         getattr(last, "target_calories", None),
         getattr(last, "goal", None),
@@ -538,7 +538,7 @@ def review_meals():
         return jsonify({"error": t("route.no_meals_today")}), 400
 
     last_session = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc()).first()
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
 
     # F3b vs F3a (Sprint 13 PR2, §15). Bu route'un `2000`'i PR1'de "yalnızca
     # LLM istemi içinde niteliksel metin üreten iç yedek" diye sınıflandırıldı

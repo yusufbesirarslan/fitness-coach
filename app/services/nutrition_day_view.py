@@ -190,7 +190,7 @@ def _read_target(user_id) -> TargetSection:
     with db.session.begin_nested():
         row = (UserSession.query.filter_by(user_id=user_id)
                .with_entities(UserSession.target_calories, UserSession.goal)
-               .order_by(UserSession.created_at.desc()).first())
+               .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first())
     if row is None or row[0] is None:
         return TargetSection(EMPTY)
     raw = row[0]

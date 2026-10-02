@@ -139,7 +139,7 @@ def nutrition_plan_generate():
 }
     # Kullanıcının son oturumundan kalori hedefini al
     last = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc())\
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc())\
         .first()
 
     if not last:

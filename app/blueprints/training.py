@@ -139,12 +139,18 @@ _SESSION_ERROR_RENDERING = {
 _RESOLUTION_HEADER = "Session-Resolution"
 
 _WEEKLY_PROGRAM_PATH = "/api/training/weekly-program"
+# Per-user JSON reads (and the /water SET, whose body is the committed count).
+_PRIVATE_JSON_PATHS = frozenset({
+    _WEEKLY_PROGRAM_PATH,
+    "/workout/status",
+    "/water",
+})
 
 
 @bp.after_request
-def _weekly_program_private_no_store(response):
-    """Prevent storage of per-user recommendations for the original API request."""
-    if request.path == _WEEKLY_PROGRAM_PATH:
+def _private_json_no_store(response):
+    """Prevent storage of per-user JSON for the original API request."""
+    if request.path in _PRIVATE_JSON_PATHS:
         response.headers["Cache-Control"] = "private, no-store"
     return response
 
@@ -373,7 +379,7 @@ def save_training_plan():
 @ai_concurrency_gate  # A1: bloklayıcı Bedrock görü çağrısı tüm thread'leri doldurmasın
 def complete_workout():
     plan = TrainingPlan.query.filter_by(user_id=current_user.id)\
-        .order_by(TrainingPlan.created_at.desc()).first()
+        .order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc()).first()
     if not plan:
         return jsonify({"error": t("route.no_active_training_plan")}), 400
 

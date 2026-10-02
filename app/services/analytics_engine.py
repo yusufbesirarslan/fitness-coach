@@ -111,7 +111,7 @@ def _check_protein_goal(user, db, models, today, nudges, en=False):
     MealLog = models["MealLog"]
 
     sess = UserSession.query.filter_by(user_id=user.id)\
-        .order_by(UserSession.created_at.desc()).first()
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
     if not sess or not sess.target_calories:
         return
 

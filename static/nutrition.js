@@ -2188,6 +2188,12 @@ async function searchFood(query) {
   try {
     const res = await fetch('/api/food/search?q=' + encodeURIComponent(query), { signal: acController.signal });
     const data = await res.json();
+    // A refusal (503 capacity, 429) is not "no results": say so, never "not found".
+    if (!res.ok) {
+      dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);cursor:default;">' + esc(data.error || __t('error.ai_busy')) + '</div>';
+      dropdown.style.display = 'block';
+      return;
+    }
     if (!data.results.length) {
       dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);cursor:default;">' + __t('nutrition.no_result_freetext') + '</div>';
       dropdown.style.display = 'block';
@@ -2465,6 +2471,11 @@ function diaryFoodSearch(input, mealName) {
     try {
       const res = await fetch('/api/food/search?q=' + encodeURIComponent(q), { signal: diaryAcController.signal });
       const data = await res.json();
+      if (!res.ok) {
+        dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);">' + esc(data.error || __t('error.ai_busy')) + '</div>';
+        dropdown.style.display = 'block';
+        return;
+      }
       if (!data.results.length) {
         dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);">' + __t('nutrition.no_result') + '</div>';
         dropdown.style.display = 'block';

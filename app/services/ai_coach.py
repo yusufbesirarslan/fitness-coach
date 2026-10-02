@@ -150,7 +150,7 @@ def _remaining_macros_for_user(user_id):
     uydurulmaz (F3a).
     """
     sess = (UserSession.query.filter_by(user_id=user_id)
-            .order_by(UserSession.created_at.desc()).first())
+            .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first())
     targets = derive_daily_macro_targets(
         getattr(sess, "target_calories", None), getattr(sess, "goal", None))
     if targets is None:
