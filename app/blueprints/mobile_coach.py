@@ -15,8 +15,10 @@ runs through `ai_pipeline.generate_answer` - the same memory window, grounding
 cooldown, then the premium-aware weekly quota in the SHARED "chat" bucket, then
 the provider. What this module adds is only what a Bearer client needs:
 
-  * the owner is `g.mobile_user`; the body is the closed key set {"message"},
-    so no client-supplied owner, conversation or transcript is ever read;
+  * the owner is `g.mobile_user`; the body is the closed key set {"message"}
+    plus (NUTR-PR7) an optional allowlisted `handoff` marker
+    (`"nutrition-day"`), so no client-supplied owner, conversation, transcript
+    or nutrition fact is ever read;
   * the server owns the history - `client_history` is always `[]`, so the
     pipeline uses the persisted window and never the browser cookie session;
   * a provider failure is a typed 503, never the fallback sentence dressed up
@@ -29,6 +31,7 @@ from flask import after_this_request, current_app, g, jsonify, request, session
 from flask_limiter.errors import RateLimitExceeded
 
 from app.blueprints.mobile_api import bp, mobile_error
+from app.coach_handoff import REVIEW_NUTRITION_DAY, handoff_marker
 from app.config import AI_BURST_RATELIMIT, AI_RATELIMIT
 from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
@@ -43,6 +46,11 @@ from app.services.premium import (
 
 
 _REQUEST_KEYS = frozenset({"message"})
+# NUTR-PR7: the ONE optional addition — an allowlisted handoff MARKER, never a
+# fact. Only the Nutrition review is published natively; the server re-derives
+# the PR6 day view for the Bearer owner at send time (app/coach_handoff.py).
+_OPTIONAL_KEYS = frozenset({"handoff"})
+NATIVE_HANDOFF_KINDS = frozenset({REVIEW_NUTRITION_DAY})
 
 
 def _owner_key():
@@ -111,10 +119,18 @@ def send_coach_message():
             retry_after=error.limit.limit.get_expiry())
 
     data = request.get_json(silent=True)
-    if (not isinstance(data, dict) or set(data) != _REQUEST_KEYS
+    if (not isinstance(data, dict) or not _REQUEST_KEYS <= set(data)
+            or set(data) - _REQUEST_KEYS - _OPTIONAL_KEYS
             or not isinstance(data["message"], str)):
         return mobile_error(
             "COACH_INVALID_REQUEST", "Invalid request.", 400, False)
+    handoff = None
+    if "handoff" in data:
+        # Refused, not ignored: an unknown/forged marker never reaches the model.
+        handoff = handoff_marker(data["handoff"])
+        if handoff not in NATIVE_HANDOFF_KINDS:
+            return mobile_error(
+                "COACH_INVALID_REQUEST", "Invalid request.", 400, False)
     # Same normalisation and the same gate (moderation.validate_question) as
     # web `/ask`, so both surfaces accept exactly the same messages.
     question = data["message"].strip()
@@ -143,8 +159,9 @@ def send_coach_message():
 
     result = None
     try:
+        handoff_kw = {"handoff": handoff} if handoff else {}
         result = generate_answer(
-            user_id, question, [], language=user.language)
+            user_id, question, [], language=user.language, **handoff_kw)
     except Exception as error:
         db.session.rollback()
         # A type name and a request id only - never the message, the prompt,

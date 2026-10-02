@@ -132,6 +132,16 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/nutrition/foods/barcode",
         "/api/v1/nutrition/logs",
         "/api/v1/nutrition/logs/<entry_token>",
+        # NUTR-PR7 native Nutrition closure: transports over the existing
+        # day view, NutritionPlan, WaterLog, MealLog and Supplement authorities.
+        "/api/v1/nutrition/day-view",
+        "/api/v1/nutrition/plan",
+        "/api/v1/nutrition/plan/generate",
+        "/api/v1/nutrition/plan/meals/<planned_meal_id>/log",
+        "/api/v1/nutrition/hydration",
+        "/api/v1/nutrition/history",
+        "/api/v1/nutrition/supplements",
+        "/api/v1/nutrition/supplements/<supplement_token>",
         "/api/v1/pump-checks",
         "/api/v1/pump-checks/<pump_check_token>",
         "/api/v1/pump-check-comparisons",
@@ -179,6 +189,14 @@ _APPROVED_PROGRESS_PATHS = {
 _APPROVED_COACH_PATHS = {
     "/api/v1/coach/messages",
     "/api/v1/coach/history",
+}
+
+# NUTR-PR7: the native Nutrition Plan transport. It projects the saved
+# NutritionPlan (not a Training plan) and is admitted by exact path only.
+_APPROVED_NUTRITION_PLAN_PATHS = {
+    "/api/v1/nutrition/plan",
+    "/api/v1/nutrition/plan/generate",
+    "/api/v1/nutrition/plan/meals/<planned_meal_id>/log",
 }
 
 _APPROVED_TRAINING_PATHS = {
@@ -235,7 +253,8 @@ def test_no_unapproved_mobile_endpoint_serves_a_daily_coach_domain(
             and path not in _APPROVED_TODAY_PATHS
             and path not in _APPROVED_PROGRESS_PATHS
             and path not in _APPROVED_COACH_PATHS
-            and path not in _APPROVED_TRAINING_PATHS)
+            and path not in _APPROVED_TRAINING_PATHS
+            and path not in _APPROVED_NUTRITION_PLAN_PATHS)
     }
     assert offenders == set(), (
         "an unapproved mobile endpoint now serves '%s'; review the mobile "
