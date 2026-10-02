@@ -262,7 +262,7 @@ def test_a_plan_changed_elsewhere_refuses_the_replacement_without_writing(
 
     page.locator("[data-plan-manage-confirm]").click()
     page.locator('[data-action="planManageReplace"]').click()
-    expect(page.locator("[data-plan-manage-msg]")).to_be_visible()
+    expect(page.locator("[data-plan-manage-msg].plan-manage-msg--error")).to_be_visible()
 
     assert not any(path == "/training-plan/save" for path, _, _ in traffic)
     assert _stored(app, profile_ready.id) == before
