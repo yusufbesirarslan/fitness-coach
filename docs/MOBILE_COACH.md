@@ -168,3 +168,12 @@ proven by tests to make no provider call and spend no allowance.
 
 Streaming, conversation reset, pagination beyond the window, message addressing
 by id, `handoff`, native Flutter UI (LP-10).
+
+## NUTR-PR7: Nutrition review handoff (additive)
+
+The request body may carry ONE optional key besides `message`: `"handoff":
+"nutrition-day"`. It is a marker, never data. Any other key or marker value is a
+400 `COACH_INVALID_REQUEST` that spends nothing. At send time the server
+re-derives the PR6 NutritionDayView for the Bearer owner and adds it as model
+context (not user speech); an unreadable intake adds no context. Gates, quota,
+persistence and failure semantics are unchanged. See `docs/NUTRITION_VNEXT_PR7.md` §18.

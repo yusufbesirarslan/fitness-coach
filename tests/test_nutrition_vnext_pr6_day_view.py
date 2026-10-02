@@ -168,7 +168,9 @@ def test_route_failure_is_typed_never_a_partial_view(app, client, make_user, log
 def test_no_browser_session_route_is_native(app):
     rules = {r.rule for r in app.url_map.iter_rules()}
     assert '/nutrition-day-view' in rules
-    assert not any('day-view' in r or 'day_view' in r for r in rules if r.startswith('/api/'))
+    # NUTR-PR7 wraps the same service in exactly ONE native transport.
+    native = {r for r in rules if r.startswith('/api/') and ('day-view' in r or 'day_view' in r)}
+    assert native == {'/api/v1/nutrition/day-view'}
 
 
 # ── PERSISTENCE / WRITES / AI ───────────────────────────────────────────

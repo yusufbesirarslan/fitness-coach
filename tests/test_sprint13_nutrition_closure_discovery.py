@@ -216,6 +216,7 @@ def test_canonical_ledger_writer_inventory_is_closed():
         "app/services/ai_coach.py",               # W5 coach confirmation
         "app/services/barcode.py",                # W4 barcode add
         "app/services/mobile_log_food/service.py",  # W7 mobile LogFood
+        "app/services/nutrition_native/plan.py",  # W12 NUTR-PR7 planned meal
         "scripts/frontend_audit/seed.py",         # W10 audit seeder, not production
     }
 
@@ -409,7 +410,7 @@ def api_v1_rules():
 
 
 def test_mobile_nutrition_route_inventory(api_v1_rules):
-    """Section 8: exactly seven mobile nutrition routes, and no more."""
+    """Section 8 (+ NUTR-PR7): the exact mobile nutrition routes, and no more."""
     nutrition = {
         rule for rule in api_v1_rules if rule[0].startswith("/api/v1/nutrition")
     }
@@ -422,6 +423,22 @@ def test_mobile_nutrition_route_inventory(api_v1_rules):
         ("/api/v1/nutrition/logs", frozenset({"POST"})),
         ("/api/v1/nutrition/logs/<entry_token>", frozenset({"PATCH"})),
         ("/api/v1/nutrition/logs/<entry_token>", frozenset({"DELETE"})),
+        # NUTR-PR7 native Nutrition closure (docs/NUTRITION_VNEXT_PR7.md).
+        ("/api/v1/nutrition/day-view", frozenset({"GET"})),
+        ("/api/v1/nutrition/plan", frozenset({"GET"})),
+        ("/api/v1/nutrition/plan", frozenset({"PUT"})),
+        ("/api/v1/nutrition/plan/generate", frozenset({"POST"})),
+        ("/api/v1/nutrition/plan/meals/<planned_meal_id>/log",
+         frozenset({"POST"})),
+        ("/api/v1/nutrition/hydration", frozenset({"GET"})),
+        ("/api/v1/nutrition/hydration", frozenset({"PUT"})),
+        ("/api/v1/nutrition/history", frozenset({"GET"})),
+        ("/api/v1/nutrition/supplements", frozenset({"GET"})),
+        ("/api/v1/nutrition/supplements", frozenset({"POST"})),
+        ("/api/v1/nutrition/supplements/<supplement_token>",
+         frozenset({"PATCH"})),
+        ("/api/v1/nutrition/supplements/<supplement_token>",
+         frozenset({"DELETE"})),
     }
 
 
@@ -436,6 +453,12 @@ def test_the_mobile_surface_publishes_no_history_menu_plan_or_water(
     # Coach's conversation window, not a nutrition history. Exempted by exact
     # path, so any other history surface (nutrition or not) still fails here.
     approved = {"/api/v1/coach/history"}
+    # NUTR-PR7 made History, the Nutrition Plan and hydration (water) native
+    # by explicit owner decision — admitted by EXACT path only. Menu, drafts
+    # and the diary builder remain deliberately absent.
+    approved |= {"/api/v1/nutrition/history", "/api/v1/nutrition/hydration",
+                 "/api/v1/nutrition/plan", "/api/v1/nutrition/plan/generate",
+                 "/api/v1/nutrition/plan/meals/<planned_meal_id>/log"}
     paths = {rule[0] for rule in api_v1_rules} - approved
     for absent in ("history", "menu", "nutrition-plan", "water", "draft",
                    "diary/builder"):

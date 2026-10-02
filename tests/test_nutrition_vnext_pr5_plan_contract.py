@@ -272,14 +272,37 @@ def _call_order(source):
         if isinstance(node, ast.Call):
             name = ast.unparse(node.func)
             if name in ('parse_plan_score', 'validate_nutrition_plan_for_save', 'db.session.add',
-                        'db.session.commit') or name.endswith('.delete'):
+                        'db.session.commit', 'replace_nutrition_plan') or name.endswith('.delete'):
                 order.append((node.lineno, 'delete' if name.endswith('.delete') else name))
     return [name for _, name in sorted(order)]
 
 
 def test_save_route_validates_before_it_deletes(source=PLAN_ROUTES):
-    assert _call_order(source) == ['parse_plan_score', 'validate_nutrition_plan_for_save', 'delete',
-                                   'db.session.add', 'db.session.commit']
+    # NUTR-PR7 moved delete → insert → commit into the ONE replacement boundary
+    # (app/services/nutrition_plan_store.py) shared with the native transport;
+    # the route still validates score and schema BEFORE it reaches it.
+    assert _call_order(source) == ['parse_plan_score', 'validate_nutrition_plan_for_save',
+                                   'replace_nutrition_plan']
+
+
+PLAN_STORE = (ROOT / 'app' / 'services' / 'nutrition_plan_store.py').read_text(encoding='utf-8')
+
+
+def _store_order(source):
+    tree = ast.parse(source)
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == 'replace_nutrition_plan')
+    order = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            name = ast.unparse(node.func)
+            if name in ('check', 'db.session.add', 'db.session.commit') or name.endswith('.delete'):
+                order.append((node.lineno, 'delete' if name.endswith('.delete') else name))
+    return [name for _, name in sorted(order)]
+
+
+def test_replacement_boundary_checks_before_it_deletes(source=PLAN_STORE):
+    assert _store_order(source) == ['check', 'delete', 'db.session.add', 'db.session.commit']
 
 
 def _active(client):

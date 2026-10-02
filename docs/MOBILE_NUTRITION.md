@@ -519,3 +519,13 @@ The existing PostgreSQL concurrency CI job runs these races in
 their Flask-Login, CSRF, payload, numeric, response, and no-precondition
 behavior. PR3B must wait until this backend contract is reviewed, CI-green, and
 merged.
+
+## NUTR-PR7 additions (additive)
+
+The diary/LogFood/mutation contract above is unchanged. NUTR-PR7 adds Bearer
+transports on the same `mobile_api` blueprint for the day view, Nutrition Plan
+(read / generate / save / planned-meal log), hydration, bounded history and the
+Supplement cabinet, plus an optional `"handoff": "nutrition-day"` marker on the
+native Coach. Planned-meal logging writes the same `MealLog` ledger with
+`source = "ai_plan"` and returns the LogFood `meal` projection. Full contract,
+error taxonomy, ambiguous-write matrix and PR8 map: `docs/NUTRITION_VNEXT_PR7.md`.

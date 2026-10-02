@@ -376,12 +376,22 @@ def test_page_query_budget_is_unchanged(app, client, make_user, login, path, tot
 
 def test_supplement_routes_are_unchanged(app):
     rules = {r.rule: sorted(r.methods - {"HEAD", "OPTIONS"})
-             for r in app.url_map.iter_rules() if "supplement" in r.rule}
+             for r in app.url_map.iter_rules()
+             if "supplement" in r.rule and not r.rule.startswith("/api/v1/")}
     assert rules == {
         "/supplements": ["GET"],
         "/supplement/add": ["POST"],
         "/supplement/edit/<int:sid>": ["POST"],
         "/supplement/delete/<int:sid>": ["POST"],
+    }
+    # NUTR-PR7 adds the native Bearer cabinet; pin that surface exactly too.
+    native = {}
+    for r in app.url_map.iter_rules():
+        if "supplement" in r.rule and r.rule.startswith("/api/v1/"):
+            native.setdefault(r.rule, set()).update(r.methods - {"HEAD", "OPTIONS"})
+    assert {rule: sorted(methods) for rule, methods in native.items()} == {
+        "/api/v1/nutrition/supplements": ["GET", "POST"],
+        "/api/v1/nutrition/supplements/<supplement_token>": ["DELETE", "PATCH"],
     }
 
 
