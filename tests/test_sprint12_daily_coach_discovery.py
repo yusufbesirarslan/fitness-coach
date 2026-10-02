@@ -119,7 +119,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/auth/password/forgot",
         "/api/v1/auth/password/reset",
         "/api/v1/account/me",
-        # LP-03 native onboarding profile write (owner = bearer principal).
+        # LP-03 native onboarding profile write + its LP-12 prefill read
+        # (owner = bearer principal).
         "/api/v1/account/profile",
         # LP-09 native Coach (owner = bearer principal; web Coach pipeline).
         "/api/v1/coach/messages",

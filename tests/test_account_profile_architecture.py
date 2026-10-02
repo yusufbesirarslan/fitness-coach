@@ -10,6 +10,8 @@ the native surface.
 import ast
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE = "app/services/account_profile.py"
 WEB = "app/blueprints/profile.py"
@@ -158,18 +160,58 @@ def test_native_body_is_a_closed_set_without_authority_fields():
         "profile_complete", "id"}
 
 
-def test_native_route_takes_the_owner_from_the_bearer_principal_only():
-    tree = _tree(MOBILE)
-    route = next(node for node in ast.walk(tree)
-                 if isinstance(node, ast.FunctionDef)
-                 and node.name == "put_account_profile")
+def _function(tree, name):
+    return next(node for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef) and node.name == name)
+
+
+@pytest.mark.parametrize("name", ["put_account_profile", "get_account_profile"])
+def test_native_route_takes_the_owner_from_the_bearer_principal_only(name):
+    route = _function(_tree(MOBILE), name)
     decorators = {ast.unparse(d) for d in route.decorator_list}
     assert "require_mobile_auth" in decorators
     attributes = {ast.unparse(node) for node in ast.walk(route)
                   if isinstance(node, ast.Attribute)}
     assert "g.mobile_user" in attributes
+    # No `request.` at all: a query string cannot select or shape the answer.
     assert not {a for a in attributes if a.startswith("request.")}
     assert not {a for a in attributes if a.startswith("current_user")}
+
+
+def test_native_read_delegates_to_the_service_projection():
+    route = _function(_tree(MOBILE), "get_account_profile")
+    source = ast.unparse(route)
+    assert "account_profile.current_profile(g.mobile_user)" in source
+    names = {node.id for node in ast.walk(route) if isinstance(node, ast.Name)}
+    assert not names & {"User", "UserSession"}
+    attributes = {node.attr for node in ast.walk(route)
+                  if isinstance(node, ast.Attribute)}
+    # Every value comes from the projection; the route reads no column.
+    assert not attributes & {
+        "weight", "height", "age", "gender", "goal", "fitness_level",
+        "current_activity", "target_weight"}
+
+
+def test_the_read_answers_exactly_the_fields_the_write_takes():
+    from app.blueprints import mobile_account_profile as module
+
+    assert set(module.READ_FIELDS) == module.ALLOWED_FIELDS
+
+
+def test_the_service_read_writes_locks_and_commits_nothing():
+    read = _function(_tree(SERVICE), "current_profile")
+    # The docstring describes what is NOT done; only the code is checked.
+    body = [statement for statement in read.body
+            if not (isinstance(statement, ast.Expr)
+                    and isinstance(statement.value, ast.Constant))]
+    source = "\n".join(ast.unparse(statement) for statement in body)
+    for forbidden in ("db.", "session", "commit", "with_for_update",
+                      "_lock_owner", "UserSession", "canonical_session"):
+        assert forbidden not in source, forbidden
+    stores = [node for node in ast.walk(read)
+              if isinstance(node, ast.Attribute)
+              and isinstance(node.ctx, ast.Store)]
+    assert stores == []
 
 
 def test_postgres_race_proof_is_selected_by_ci():
