@@ -174,9 +174,12 @@ tombstone" never exists for a subject this lifecycle removed.
   A tombstoned subject is refused with the path's ordinary answer (native
   `401 AUTH_INVALID_CREDENTIALS`, internal reason `identity_deleted`; web
   `401 auth.bad_credentials`): no `User`, no family, no `CognitoSession`.
-  Registration is exempt: its subject is minted by the provider's `SignUp` in
-  the same request and cannot be a deleted one. The set is pinned by
-  `tests/test_account_deletion_architecture.py` — a third writer fails there.
+  Registration (`account_registration.register_account`) is guarded the same
+  way: its subject is minted by `SignUp` in the same request, but a request
+  stalled after `SignUp` could INSERT it after that identity was confirmed,
+  signed in and deleted; it is refused as `IDENTITY_UNAVAILABLE` (native
+  `409 AUTH_IDENTITY_UNAVAILABLE`, web 409). The set is pinned by
+  `tests/test_account_deletion_architecture.py` — a fourth writer fails there.
 - The existing-row path needs no check: a live row with the subject means the
   subject was not deleted. A login that found the row before the purge is
   handled by the owner-row lock (its session INSERT waits and then fails, or
@@ -189,7 +192,7 @@ is uncommitted the write WAITS; so it can only succeed after the purge — and
 its tombstone — committed, and the check, a later statement under the
 default READ COMMITTED isolation, sees it. No lock is held across a provider
 call, nothing global is locked, no new provider call is made. Proved on
-PostgreSQL for both transports
+PostgreSQL for web, mobile and registration
 (`test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone`).
 
 **What is stored and for how long.** `fingerprint` = HMAC-SHA256 of the
@@ -222,7 +225,7 @@ lifecycle releases media before purging.
   single callers of `delete_user` / `_purge_user`.
 - `tests/test_account_deletion_pg.py` — PostgreSQL lock races, including a
   login's create waiting on an uncommitted purge and then seeing its tombstone
-  (web and mobile).
+  (web, mobile and registration).
 - `tests/test_mobile_auth_feature_gate.py`,
   `tests/test_sprint12_daily_coach_discovery.py` — route allow-lists.
 - `tests/test_account_deletion_resurrection.py` — anti-resurrection: in-flight

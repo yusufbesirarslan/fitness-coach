@@ -28,7 +28,8 @@ from app.models import (
     CognitoSession, DeletedIdentityTombstone, MobileAuthSession, User,
 )
 from app.services import (
-    account_deletion, cognito_service, deleted_identity, mobile_auth,
+    account_deletion, account_registration, cognito_service, deleted_identity,
+    mobile_auth,
 )
 
 
@@ -335,3 +336,88 @@ def test_fingerprint_depends_on_the_server_key(app):
     first = deleted_identity.fingerprint("sub-x")
     app.config["SECRET_KEY"] = "a-different-server-key"
     assert deleted_identity.fingerprint("sub-x") != first
+
+
+# -- 9: a registration request that stalls past SignUp ------------------------
+REGISTRATION_TRANSPORTS = ("service", "mobile", "web")
+
+
+def _register(transport, client, raw_client, username):
+    """Run one real registration. Returns ("registered" | "refused", detail)."""
+    body = {"username": username, "email": f"{username}@example.com",
+            "password": PASSWORD}
+    if transport == "service":
+        try:
+            account_registration.register_account(**body)
+        except account_registration.RegistrationFailure as failure:
+            return "refused", failure.outcome
+        return "registered", None
+    if transport == "mobile":
+        response = raw_client.post("/api/v1/auth/register", json=body)
+        if response.status_code == 409:
+            return "refused", response.get_json()["error"]["code"]
+    else:
+        response = client.post("/register", json=body)
+        if response.status_code == 409:
+            return "refused", response.status_code
+    assert response.status_code in (200, 201, 202), response.get_data()
+    return "registered", None
+
+
+@pytest.mark.parametrize("transport", REGISTRATION_TRANSPORTS)
+def test_stalled_registration_cannot_recreate_an_identity_deleted_meanwhile(
+        pair, client, raw_client, monkeypatch, transport):
+    """SignUp minted the subject; before this request reaches its INSERT the
+    same person confirms, signs in (login creates the row) and deletes the
+    account. The late INSERT would otherwise give the deleted subject a local
+    row back — a resurrection with no login involved at all."""
+    import app.blueprints.mobile_registration as mobile_registration
+    monkeypatch.setattr(mobile_registration, "COGNITO_ENABLED", True)
+    p = pair
+    sub = "sub-dana_lp11"
+    seen = {}
+
+    def sign_up(username, password, email, name):
+        p.cognito.live.add(sub)
+        issued = mobile_auth.login(username, PASSWORD)
+        seen["created"] = User.query.filter_by(cognito_sub=sub).count()
+        seen["delete"] = raw_client.delete(PATH, headers={
+            "Authorization": f"Bearer {issued.access_credential}"}).status_code
+        return sub
+    monkeypatch.setattr(cognito_service, "sign_up", sign_up)
+
+    outcome, detail = _register(transport, client, raw_client, "dana_lp11")
+
+    assert seen == {"created": 1, "delete": 204}
+    assert outcome == "refused"
+    if transport == "service":
+        assert detail == account_registration.Outcome.IDENTITY_UNAVAILABLE
+    else:
+        assert detail == ("AUTH_IDENTITY_UNAVAILABLE"
+                          if transport == "mobile" else 409)
+    _no_local_trace(sub, "dana_lp11")
+    assert User.query.filter_by(email="dana_lp11@example.com").count() == 0
+    assert [t.fingerprint for t in _tombstones()] == [
+        deleted_identity.fingerprint(sub)]
+    _b_still_works(p, raw_client)
+
+
+@pytest.mark.parametrize("transport", REGISTRATION_TRANSPORTS)
+def test_registration_is_not_blocked_by_another_identity_s_tombstone(
+        pair, client, raw_client, monkeypatch, transport):
+    """Same e-mail and username as a deleted account, NEW subject: registers."""
+    import app.blueprints.mobile_registration as mobile_registration
+    monkeypatch.setattr(mobile_registration, "COGNITO_ENABLED", True)
+    p = pair
+    assert raw_client.delete(PATH, headers=p.a_bearer).status_code == 204
+    monkeypatch.setattr(cognito_service, "sign_up",
+                        lambda **_kwargs: "sub2-alice_lp11")
+
+    outcome, _detail = _register(transport, client, raw_client, "alice_lp11")
+
+    assert outcome == "registered"
+    fresh = User.query.filter_by(cognito_sub="sub2-alice_lp11").one()
+    assert (fresh.username, fresh.email) == (
+        "alice_lp11", "alice_lp11@example.com")
+    assert [t.fingerprint for t in _tombstones()] == [
+        deleted_identity.fingerprint(p.a_sub)]
