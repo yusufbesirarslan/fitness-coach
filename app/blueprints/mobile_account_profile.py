@@ -1,6 +1,13 @@
-"""Native onboarding profile contract (LP-03).
+"""Native onboarding profile contract (LP-03, read added for LP-12).
 
+    GET /api/v1/account/profile   200  {"profile": {...}}
     PUT /api/v1/account/profile   200  {"user": {...}}
+
+The GET answers the stored values under exactly the PUT body's wire names, so
+a client can prefill the full-replace write from it. It is
+`account_profile.current_profile` mapped onto wire names — no value is
+derived, defaulted or range-checked here. A query string is ignored, like
+`account/me`'s.
 
 The response is `account_projection` — byte-for-byte what the next
 `GET /api/v1/account/me` returns — so `profile_complete` in it is the server's
@@ -50,6 +57,8 @@ REQUIRED_FIELDS = {
 }
 OPTIONAL_FIELDS = {"target_weight_kg": account_profile.TARGET_WEIGHT}
 ALLOWED_FIELDS = frozenset(REQUIRED_FIELDS) | frozenset(OPTIONAL_FIELDS)
+# The read answers every field the write takes, under the same wire names.
+READ_FIELDS = {**REQUIRED_FIELDS, **OPTIONAL_FIELDS}
 
 
 def _invalid_request():
@@ -67,6 +76,32 @@ def _unavailable():
     return mobile_error(
         "PROFILE_TEMPORARILY_UNAVAILABLE",
         "Profile is temporarily unavailable.", 503, True)
+
+
+def _log_failure(event, error):
+    cause = error.__cause__ if error.__cause__ is not None else error
+    current_app.logger.error(
+        "mobile_account_profile event=%s error_type=%s request_id=%s",
+        event, type(cause).__name__, current_request_id())
+
+
+@bp.get("/account/profile")
+@require_mobile_auth
+def get_account_profile():
+    try:
+        values = account_profile.current_profile(g.mobile_user)
+    except Exception as error:
+        # A storage fault reading the owner's row is not an authentication
+        # outcome: a profile-shaped retryable error, never the blueprint's
+        # auth-flavoured handler, so a client keeps a good session.
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        _log_failure("profile_read_failed", error)
+        return _unavailable()
+    return jsonify({"profile": {
+        wire: values[domain] for wire, domain in READ_FIELDS.items()}})
 
 
 @bp.put("/account/profile")
@@ -103,10 +138,6 @@ def put_account_profile():
             db.session.rollback()
         except Exception:
             pass
-        cause = error.__cause__ if error.__cause__ is not None else error
-        current_app.logger.error(
-            "mobile_account_profile event=profile_write_failed "
-            "error_type=%s request_id=%s",
-            type(cause).__name__, current_request_id())
+        _log_failure("profile_write_failed", error)
         return _unavailable()
     return jsonify(payload)

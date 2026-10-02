@@ -37,6 +37,12 @@ the one the weight log already enforces (`BODY_WEIGHT_MIN_KG`..`MAX`). There
 is no canonical backend range for height or age, and LP-03 does not invent
 one: they must be finite and positive (age a whole number), which is the
 structural minimum that keeps the BMR formula and the stored row meaningful.
+
+Reading
+-------
+`current_profile` is the one read of the stored profile values, in the same
+domain names and tokens the write takes, so a native client can prefill the
+full-replace write from it.
 """
 from __future__ import annotations
 
@@ -215,6 +221,49 @@ def onboarding_state(user):
     complete = bool(user.profile_complete) and session is not None
     return OnboardingState(complete=complete,
                            session=session if complete else None)
+
+
+def _stored_number(value):
+    """A stored finite number as it is, else None (NULL, NaN, ±Inf)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def _stored_whole(value):
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _stored_token(value, vocabulary):
+    return value if isinstance(value, str) and value in vocabulary else None
+
+
+def current_profile(user):
+    """The canonical stored profile of `user`, in domain field names.
+
+    Read-only: no write, no commit, no lock. The `User` columns are the
+    profile — `complete_onboarding`, the weight log and the web profile edit
+    all write them — so the canonical `UserSession`, a derived copy that can
+    lag them, is not read.
+
+    A value is returned as stored, without the onboarding ranges applied: a
+    legacy number outside them is still the truth, and a caller must correct
+    it before writing it back. Only what is not a usable value at all is
+    None — NULL, a non-finite number, a token outside the vocabulary. The goal
+    is its token, never the stored literal.
+    """
+    return {
+        WEIGHT: _stored_number(user.weight),
+        HEIGHT: _stored_number(user.height),
+        AGE: _stored_whole(user.age),
+        GENDER: _stored_token(user.gender, GENDERS),
+        GOAL: goal_token(user.goal),
+        FITNESS_LEVEL: _stored_token(user.fitness_level, FITNESS_LEVELS),
+        CURRENT_ACTIVITY: _stored_token(user.current_activity, ACTIVITY_LEVELS),
+        TARGET_WEIGHT: _stored_number(user.target_weight),
+    }
 
 
 def _lock_owner(user_id):

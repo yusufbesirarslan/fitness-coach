@@ -11,6 +11,7 @@ Companion documents: [adr/0001-native-mobile-authentication.md](adr/0001-native-
 (the first-plan command whose prerequisite this clears).
 
 Executable form: `tests/test_mobile_account_profile_api.py`,
+`tests/test_mobile_account_profile_read_api.py`,
 `tests/test_account_profile_service.py`,
 `tests/test_account_profile_architecture.py`,
 `tests/test_mobile_onboarding_first_plan.py`,
@@ -119,6 +120,56 @@ and returns the same projection; it never creates a second `UserSession`.
 Logging: success logs nothing; failure logs one line
 `mobile_account_profile event=profile_write_failed error_type=<class> request_id=<id>`
 — no profile value, token, username or exception text.
+
+## 3a. `GET /api/v1/account/profile` (LP-12)
+
+The read half of §3: the canonical stored values, so a native client can
+prefill the full-replace `PUT` (an edit form after onboarding). Same module,
+blueprint, gate, `no-store`, envelope and 429 handler as the `PUT`.
+
+```json
+{"profile": {"weight_kg": 80.5, "height_cm": 180.0, "age": 30,
+             "gender": "male", "goal": "lose_weight",
+             "fitness_level": "beginner", "activity_level": "active",
+             "target_weight_kg": 75.0}}
+```
+
+- **Keys** — exactly the `PUT` body's wire names, always all eight
+  (`READ_FIELDS == ALLOWED_FIELDS`, pinned by the architecture gate). No
+  identifier, no `profile_complete` (that is `account/me`'s), nothing derived
+  (no BMR/TDEE/calories).
+- **Source** — the `User` columns, through
+  `account_profile.current_profile(user)`. They are the profile: this
+  service, the weight log (`tracking._apply_weight_to_profile`) and the web
+  profile edit (`/edit-profile`: goal, target weight) all write them. The
+  canonical `UserSession` holds a derived copy that can lag them and is not
+  read.
+- **Values** — as stored. A finite number outside the `PUT` ranges (a legacy
+  row; the web profile edit does not range-check a target weight) is answered
+  truthfully; a client must validate it and have the user correct it before
+  writing back. `null` means nothing usable is stored: NULL, a non-finite
+  number (NaN/±Inf — never emitted as a non-standard JSON literal), or a token
+  outside the vocabulary (§4; the goal is its token, never the stored
+  literal). A fresh account answers eight `null`s; that body is not a valid
+  `PUT` (seven fields are required).
+- **Owner** — the Bearer principal only. A query string (`?user_id=`,
+  `?username=`, …) is ignored, as on `account/me`; it can neither select an
+  account nor shape the answer.
+- **Read-only** — no write, flush, commit or lock.
+
+| HTTP | Code | Retryable | When |
+|---|---|---|---|
+| 200 | — | — | always for an authenticated owner, complete or not |
+| 401 | `AUTH_SESSION_EXPIRED` / … | — | Bearer missing/invalid (middleware) |
+| 503 | `PROFILE_TEMPORARILY_UNAVAILABLE` | true | the stored values could not be read — never the blueprint's auth-shaped `AUTH_TEMPORARILY_UNAVAILABLE`, which would make a client discard a good session |
+| 429 | `AUTH_RATE_LIMITED` | true | default per-user limit |
+
+Logging: success logs nothing; failure logs one line
+`mobile_account_profile event=profile_read_failed error_type=<class> request_id=<id>`.
+
+Writing it back: the `PUT` is unchanged. `target_weight_kg: null` (or absent)
+keeps the stored target — a target cannot be cleared through this contract —
+so a client leaving the target unchanged omits it.
 
 ## 4. Vocabulary
 
