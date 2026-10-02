@@ -2188,9 +2188,10 @@ async function searchFood(query) {
   try {
     const res = await fetch('/api/food/search?q=' + encodeURIComponent(query), { signal: acController.signal });
     const data = await res.json();
-    // A refusal (503 capacity, 429) is not "no results": say so, never "not found".
+    // A refusal (503 capacity, 429) is not "no results": a non-selectable
+    // status line says so — never "not found", never a pickable item.
     if (!res.ok) {
-      dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);cursor:default;">' + esc(data.error || __t('error.ai_busy')) + '</div>';
+      dropdown.innerHTML = '<div class="autocomplete-status" role="status">' + esc(data.error || __t('error.ai_busy')) + '</div>';
       dropdown.style.display = 'block';
       return;
     }
@@ -2472,7 +2473,7 @@ function diaryFoodSearch(input, mealName) {
       const res = await fetch('/api/food/search?q=' + encodeURIComponent(q), { signal: diaryAcController.signal });
       const data = await res.json();
       if (!res.ok) {
-        dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);">' + esc(data.error || __t('error.ai_busy')) + '</div>';
+        dropdown.innerHTML = '<div class="autocomplete-status" role="status">' + esc(data.error || __t('error.ai_busy')) + '</div>';
         dropdown.style.display = 'block';
         return;
       }

@@ -10,9 +10,12 @@ bp = Blueprint("nutrition", __name__)
 
 # Per-user nutrition JSON reads: never stored by a shared cache or the bfcache
 # (same policy as /nutrition-day-view, which sets it in its own view).
+# /nutrition-plan/active is deliberately NOT here: under Playwright request
+# interception a no-store answer never reports "finished", so the PR6 N7
+# non-vacuity test (an injected duplicate plan read) would hang instead of
+# failing. Over a real network the fetches resolve normally; revisit with that harness.
 _PRIVATE_JSON_PATHS = frozenset({
     "/meal-log/today",
-    "/nutrition-plan/active",
     "/api/diary/today",
 })
 

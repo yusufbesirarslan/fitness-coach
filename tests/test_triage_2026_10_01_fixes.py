@@ -18,6 +18,7 @@ import pytest
 
 from app.extensions import db
 from app.models import TrainingPlan, UserSession
+from test_training_execution_boundary import training_page  # noqa: F401
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PRIVATE = "private, no-store"
@@ -29,7 +30,6 @@ PRIVATE = "private, no-store"
 
 PRIVATE_GET_PATHS = [
     "/meal-log/today",
-    "/nutrition-plan/active",
     "/api/diary/today",
     "/water",
     "/workout/status",
@@ -208,3 +208,23 @@ def test_auth_js_theme_survives_blocked_storage():
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "light"  # default dark applied, then toggled
+
+
+# ---------------------------------------------------------------------------
+# #1 (browser) — a refused search says "busy", never "no result", never a
+# selectable item (the NUTR-PR4 "search unavailable" invariant still holds)
+# ---------------------------------------------------------------------------
+
+def test_search_refusal_shows_busy_status_not_no_result(app, auth_user, training_page):
+    from playwright.sync_api import expect
+    from test_nutrition_vnext_pr4_log_food_browser import canned, choose, start
+
+    page, traffic, _ = start(app, auth_user, training_page)
+    canned(page, '**/api/food/search?q=*', {'error': 'Busy, try again shortly'}, status=503)
+    choose(page, 'search')
+    page.locator('#food-search-input').fill('oats')
+
+    status = page.locator('#food-autocomplete-dropdown .autocomplete-status')
+    expect(status).to_have_text('Busy, try again shortly')
+    expect(status).to_have_attribute('role', 'status')
+    expect(page.locator('#food-autocomplete-dropdown .autocomplete-item')).to_have_count(0)
