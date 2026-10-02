@@ -41,7 +41,9 @@ from app.extensions import db
 from app.i18n import AVAILABLE_LOCALES
 from app.models import User
 from app.observability import current_request_id
-from app.services import cognito_service, email_service, email_templates
+from app.services import (
+    cognito_service, deleted_identity, email_service, email_templates,
+)
 from app.services.ai_gate import (
     BlockingConcurrencyLimit, blocking_concurrency_slot,
 )
@@ -220,7 +222,19 @@ def register_account(username, email, password, language=None,
     ensure_referral_code(user)
     db.session.add(user)
     try:
+        if sub:
+            # LP-11: the subject was minted above, but this request can stall
+            # past SignUp while the same person confirms, signs in (login
+            # creates the row), and deletes the account. The stale INSERT must
+            # not give that deleted identity a local row back. Written first,
+            # checked after — the order `deleted_identity` requires.
+            deleted_identity.refuse_if_deleted(sub)
         db.session.commit()
+    except deleted_identity.IdentityDeleted as exc:
+        db.session.rollback()
+        _event("register", Outcome.IDENTITY_UNAVAILABLE, "warning")
+        raise RegistrationFailure(
+            Outcome.IDENTITY_UNAVAILABLE, Phase.PERSISTENCE) from exc
     except Exception as exc:
         # The provider account exists but the local row does not (a Cognito
         # orphan). An unsigned public client cannot delete it; login-time

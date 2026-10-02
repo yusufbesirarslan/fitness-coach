@@ -1,7 +1,8 @@
 """Anti-resurrection record for provider identities deleted by LP-11.
 
     record(sub)                 inside the account-deletion purge transaction
-    refuse_if_deleted(sub)      before a login commits a local row for `sub`
+    refuse_if_deleted(sub)      before a login or registration commits a local
+                                row for `sub`
 
 The race this closes (docs/MOBILE_ACCOUNT_DELETION.md §6): a login that
 authenticated at Cognito BEFORE `DeleteUser` and reaches local-user resolution
@@ -25,8 +26,14 @@ same subkey idiom as the persisted pump-check/nutrition identities). Rotating
 logins already in flight across the rotation, because a deleted identity can
 no longer authenticate at the provider.
 
+The callers are every place a local row gains a Cognito subject: web and
+mobile login reconciliation, and registration — whose subject SignUp minted in
+the same request, but a request stalled after SignUp could otherwise INSERT it
+after that identity was confirmed, signed in and deleted
+(tests/test_account_deletion_architecture.py pins the set).
+
 WHY THE CHECK IS RACE-FREE (the caller's side of the contract):
-the login puts the subject on its row first — a new `User(cognito_sub=sub)` or
+the caller puts the subject on its row first — a new `User(cognito_sub=sub)` or
 `row.cognito_sub = sub` on a reconciled one — and only then calls
 `refuse_if_deleted`, which flushes that write before it reads, in the same
 transaction, before anything is committed or a session is issued.

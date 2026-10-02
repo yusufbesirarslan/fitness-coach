@@ -146,10 +146,11 @@ def test_the_tombstone_is_written_inside_the_purge_transaction():
 
 def test_every_path_that_binds_a_provider_subject_refuses_a_deleted_one():
     """A local row gains a Cognito subject in exactly these functions. A NEW
-    one fails here first. Every login path checks the tombstone AFTER each
+    one fails here first. Every one of them checks the tombstone AFTER each
     write (the order the race argument needs: deleted_identity module doc).
-    Registration is the one exception: its subject was minted by the
-    provider's SignUp in the same request, so it cannot be a deleted one."""
+    Registration is no exception: its subject was minted by SignUp in the
+    same request, but that request can stall while the same person confirms,
+    signs in and deletes the account — its late INSERT must be refused too."""
     found = {}
     for path in _python_sources():
         for node in ast.walk(_tree(path)):
@@ -164,13 +165,10 @@ def test_every_path_that_binds_a_provider_subject_refuses_a_deleted_one():
         (WEB_LOGIN, "_reconcile_local_user"),
         (REGISTRATION, "register_account"),
     }
-    for key in ((MOBILE_LOGIN, "_resolve_user"),
-                (WEB_LOGIN, "_reconcile_local_user")):
-        writes, checks = found[key]
+    for key, (writes, checks) in found.items():
         assert checks, key
         for write in writes:
             assert any(check > write for check in checks), (key, write)
-    assert found[(REGISTRATION, "register_account")][1] == []
 
 
 def test_the_web_wrapper_is_the_shared_guard():

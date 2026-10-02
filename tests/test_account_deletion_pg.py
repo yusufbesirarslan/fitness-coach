@@ -94,6 +94,34 @@ def _meal(user_id, photo_key=None):
                    tarih="2026-09-30", photo_key=photo_key)
 
 
+def _wait_for_lock_waiter(app, timeout=10):
+    """Block until another backend in this database is WAITING ON A LOCK.
+
+    The observable fact a "this write is blocked by that transaction" claim
+    rests on, read from PostgreSQL itself instead of inferred from a sleep: a
+    sleep that is too short lets the assertion after it pass vacuously,
+    before the blocked statement was even issued. Each poll runs in its own
+    autocommit transaction, so `pg_stat_activity` is never a stale snapshot.
+    """
+    from app.extensions import db
+
+    with app.app_context():
+        engine = db.engine
+    deadline = time.monotonic() + timeout
+    with engine.connect().execution_options(
+            isolation_level="AUTOCOMMIT") as connection:
+        while time.monotonic() < deadline:
+            waiting = connection.execute(sa.text(
+                "SELECT count(*) FROM pg_stat_activity "
+                "WHERE datname = current_database() "
+                "AND pid <> pg_backend_pid() "
+                "AND wait_event_type = 'Lock'")).scalar()
+            if waiting:
+                return True
+            time.sleep(0.01)
+    return False
+
+
 def test_child_committed_during_deletion_is_purged_and_its_media_released(
         pg_app):
     """A racing writer holds a key-share lock on the owner row with a new meal
@@ -137,7 +165,7 @@ def test_child_committed_during_deletion_is_purged_and_its_media_released(
     threads = [threading.Thread(target=writer), threading.Thread(target=deleter)]
     for thread in threads:
         thread.start()
-    time.sleep(0.8)                      # deleter is now blocked on the lock
+    assert _wait_for_lock_waiter(app)    # deleter is blocked on the lock
     assert "deleter_done_at" not in outcome
     release_writer.set()
     for thread in threads:
@@ -169,7 +197,7 @@ def test_writer_blocked_by_purge_lock_fails_its_foreign_key(
 
     def slow_purge(user):
         locked.set()
-        time.sleep(0.8)                  # writer arrives and blocks meanwhile
+        assert _wait_for_lock_waiter(app)  # the writer is blocked on our lock
         real_purge(user)
     monkeypatch.setattr(cli, "_purge_user", slow_purge)
     outcome = {}
@@ -241,7 +269,7 @@ def test_concurrent_duplicate_deletions_converge(pg_app):
     assert b_avatar in s3.objects and b_avatar not in s3.deleted
 
 
-@pytest.mark.parametrize("transport", ["mobile", "web"])
+@pytest.mark.parametrize("transport", ["mobile", "web", "registration"])
 def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
         pg_app, monkeypatch, transport):
     """The one interleaving in which "check for a tombstone, then create"
@@ -255,7 +283,9 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
     follows sees the tombstone committed with it. Checking before writing
     would pass here and then create the row. The renamed-legacy shape (local
     username/e-mail differ from the provider's) is what makes reconciliation
-    fall through to creation.
+    fall through to creation. Registration is the same race with a different
+    pause: its subject was minted by SignUp, and the request stalls between
+    SignUp and its INSERT while that identity is signed in and deleted.
     """
     import contextlib
 
@@ -263,7 +293,10 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
     from app.blueprints import auth as auth_bp
     from app.extensions import db
     from app.models import DeletedIdentityTombstone, User
-    from app.services import account_deletion, deleted_identity, mobile_auth
+    from app.services import (
+        account_deletion, account_registration, cognito_service,
+        deleted_identity, mobile_auth,
+    )
 
     app, cognito, s3 = pg_app
     sub = "sub-pg_legacy"
@@ -273,14 +306,22 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
     purged, go_commit = threading.Event(), threading.Event()
     outcome = {}
 
-    module = mobile_auth if transport == "mobile" else auth_bp
-    real_reconcilable = module.reconcilable_local_user
+    if transport == "registration":
+        def paused_sign_up(**_kwargs):
+            looked_up.set()              # taken-check passed, subject minted
+            go_login.wait(timeout=10)
+            return sub
+        monkeypatch.setattr(cognito_service, "sign_up", paused_sign_up)
+    else:
+        module = mobile_auth if transport == "mobile" else auth_bp
+        real_reconcilable = module.reconcilable_local_user
 
-    def paused_reconcilable(*args):
-        looked_up.set()
-        go_login.wait(timeout=10)
-        return real_reconcilable(*args)
-    monkeypatch.setattr(module, "reconcilable_local_user", paused_reconcilable)
+        def paused_reconcilable(*args):
+            looked_up.set()
+            go_login.wait(timeout=10)
+            return real_reconcilable(*args)
+        monkeypatch.setattr(
+            module, "reconcilable_local_user", paused_reconcilable)
 
     real_purge = cli._purge_user
 
@@ -292,11 +333,15 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
     monkeypatch.setattr(cli, "_purge_user", purge_and_hold)
 
     def login():
-        context = (app.test_request_context() if transport == "web"
+        context = (app.test_request_context() if transport != "mobile"
                    else contextlib.nullcontext())
         with app.app_context(), context:
             try:
-                if transport == "mobile":
+                if transport == "registration":
+                    account_registration.register_account(
+                        "pg_frank", "pg_frank@example.invalid", "Sifre123!x")
+                    outcome["login"] = "created"
+                elif transport == "mobile":
                     user = mobile_auth._resolve_user(claims)
                 else:
                     assert User.query.filter_by(cognito_sub=sub).first() is None
@@ -308,6 +353,8 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
                     outcome["login"] = "created"
             except mobile_auth.MobileAuthFailure as failure:
                 outcome["login"] = failure.reason
+            except account_registration.RegistrationFailure as failure:
+                outcome["login"] = failure.outcome
             db.session.rollback()
             outcome["login_done_at"] = time.monotonic()
             db.session.remove()
@@ -326,15 +373,16 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
     deleter_thread.start()
     assert purged.wait(timeout=10)
     go_login.set()
-    time.sleep(0.8)
-    assert "login_done_at" not in outcome        # INSERT waits on the purge
+    assert _wait_for_lock_waiter(app)            # INSERT waits on the purge
+    assert "login_done_at" not in outcome
     go_commit.set()
     for thread in (login_thread, deleter_thread):
         thread.join(timeout=20)
 
     assert outcome["deleter"] == "ok"
-    assert outcome["login"] == (
-        "identity_deleted" if transport == "mobile" else "refused")
+    assert outcome["login"] == {
+        "mobile": "identity_deleted", "web": "refused",
+        "registration": "identity_unavailable"}[transport]
     with app.app_context():
         assert db.session.get(User, a_id) is None
         assert User.query.filter_by(cognito_sub=sub).count() == 0
