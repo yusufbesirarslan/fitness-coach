@@ -179,7 +179,7 @@ tombstone" never exists for a subject this lifecycle removed.
   stalled after `SignUp` could INSERT it after that identity was confirmed,
   signed in and deleted; it is refused as `IDENTITY_UNAVAILABLE` (native
   `409 AUTH_IDENTITY_UNAVAILABLE`, web 409). The set is pinned by
-  `tests/test_account_deletion_architecture.py` — a third writer fails there.
+  `tests/test_account_deletion_architecture.py` — a fourth writer fails there.
 - The existing-row path needs no check: a live row with the subject means the
   subject was not deleted. A login that found the row before the purge is
   handled by the owner-row lock (its session INSERT waits and then fails, or
@@ -225,7 +225,7 @@ lifecycle releases media before purging.
   single callers of `delete_user` / `_purge_user`.
 - `tests/test_account_deletion_pg.py` — PostgreSQL lock races, including a
   login's create waiting on an uncommitted purge and then seeing its tombstone
-  (web and mobile).
+  (web, mobile and registration).
 - `tests/test_mobile_auth_feature_gate.py`,
   `tests/test_sprint12_daily_coach_discovery.py` — route allow-lists.
 - `tests/test_account_deletion_resurrection.py` — anti-resurrection: in-flight
