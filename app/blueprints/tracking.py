@@ -55,12 +55,24 @@ _PROGRESS_PRIVATE_PATHS = frozenset({
     _PROGRESS_PHYSIQUE_PATH,
     _PROGRESS_HISTORY_PATH,
 })
+# Other per-user JSON reads served from this blueprint (weights, check-ins,
+# workout totals, nudges). Same policy as the Progress read models: a shared
+# device's back button / bfcache must not replay them after logout.
+_PRIVATE_JSON_PATHS = _PROGRESS_PRIVATE_PATHS | frozenset({
+    "/checkin-history",
+    "/api/activity/today",
+    "/last-session",
+    "/dashboard-nudges",
+    "/api/progress/workout",
+    "/api/progress/heatmap",
+    "/api/progress/achievements",
+})
 
 
 @bp.after_request
-def _progress_summary_private_no_store(response):
-    """Per-user trajectory/advice must not be stored by a shared cache or bfcache."""
-    if request.path in _PROGRESS_PRIVATE_PATHS:
+def _private_json_no_store(response):
+    """Per-user progress data must not be stored by a shared cache or bfcache."""
+    if request.path in _PRIVATE_JSON_PATHS:
         response.headers["Cache-Control"] = "private, no-store"
     return response
 
@@ -286,7 +298,7 @@ def checkin():
 
     # Son oturum bilgilerini al
     last_session = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc())\
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc())\
         .first()
 
     goal = last_session.goal if last_session else "genel sağlık"
@@ -401,7 +413,7 @@ def update_weight():
 
 
     last_sess = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc()).first()
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
 
     # Kiloyu kanonik profile yaz + profil TAM ise BMR/TDEE/hedefi yeniden hesapla
     # (ortak yardımcı; /checkin ile aynı davranış). Profil eksikse türetilmiş
@@ -570,7 +582,7 @@ def progress_page():
 @require_auth
 def history():
     sessions = UserSession.query.filter_by(user_id = current_user.id)\
-    .order_by(UserSession.created_at.desc())\
+    .order_by(UserSession.created_at.desc(), UserSession.id.desc())\
     .limit(5).all()
 
     result = []
@@ -591,7 +603,7 @@ def history():
 @require_auth
 def last_session():
     s = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc())\
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc())\
         .first()
 
     if not s:

@@ -102,7 +102,9 @@ def nutrition():
 def nutrition_plan_generate():
     data = request.get_json(silent=True) or {}
     # Kullanıcının son oturumundan kalori hedefini al
-    last = UserSession.query.filter_by(user_id=current_user.id)        .order_by(UserSession.created_at.desc())        .first()
+    last = UserSession.query.filter_by(user_id=current_user.id)\
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc())\
+        .first()
 
     if not last:
         return jsonify({"error": t("plan.no_session")}), 400

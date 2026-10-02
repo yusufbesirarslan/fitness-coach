@@ -50,8 +50,10 @@ def invite(code):
     clean = (code or "").strip().upper()[:16]  # davet kodu 16 karaktere yükseltildi
     if clean and User.query.filter_by(referral_code=clean).first():
         # 30 gün; SameSite=Lax — sadece kendi sitemizden gelen kayıt akışında okunur.
+        # Secure, oturum çereziyle AYNI kapıdan (dev dışında yalnız HTTPS).
         resp.set_cookie("fitx_ref", clean, max_age=60 * 60 * 24 * 30,
-                        samesite="Lax", httponly=True)
+                        samesite="Lax", httponly=True,
+                        secure=current_app.config["SESSION_COOKIE_SECURE"])
     return resp
 
 

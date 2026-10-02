@@ -12,11 +12,17 @@
 
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
-    localStorage.setItem("theme", document.documentElement.dataset.theme);
+    try {
+      localStorage.setItem("theme", document.documentElement.dataset.theme);
+    } catch (e) { /* storage blocked (private mode etc.) — theme still applies */ }
   }
 
   function initTheme() {
-    setTheme(localStorage.getItem("theme") || "dark");
+    var stored = null;
+    try {
+      stored = localStorage.getItem("theme");
+    } catch (e) { /* storage blocked — fall back to the default theme */ }
+    setTheme(stored || "dark");
   }
 
   window.toggleTheme = function () {

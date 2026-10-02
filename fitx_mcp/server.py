@@ -546,7 +546,7 @@ def analyze_and_rank_menu(raw_menu_text: str, user_id: int) -> str:
 
         cur.execute(
             "SELECT target_calories, goal FROM user_session "
-            "WHERE user_id = %s ORDER BY created_at DESC LIMIT 1",
+            "WHERE user_id = %s ORDER BY created_at DESC, id DESC LIMIT 1",
             (user_id,),
         )
         sess = cur.fetchone()

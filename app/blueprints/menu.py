@@ -301,7 +301,7 @@ def analyze_menu():
         }), 400
 
     sess = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc()).first()
+        .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
     # Hedef makro dagilimi ARTIK burada turetilmez (Sprint 13 PR2, C2): tek
     # kanonik otorite `app.services.nutrition_targets`. Otorite yapilandirilmis
     # hedef yoksa yoklugu (None) doner; bu endpoint onu KENDI mevcut

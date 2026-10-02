@@ -202,7 +202,7 @@ def _read_nutrition_target(user_id):
     """Latest canonical daily target; absence is unknown, never numeric zero."""
     with db.session.begin_nested():
         session = (UserSession.query.filter_by(user_id=user_id)
-                   .order_by(UserSession.created_at.desc()).first())
+                   .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first())
     target = getattr(session, "target_calories", None) if session else None
     if isinstance(target, (int, float)) and not isinstance(target, bool) and target > 0:
         displayed = _display_kcal(target)

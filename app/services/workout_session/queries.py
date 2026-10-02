@@ -79,7 +79,7 @@ def _weekday_name(d: date) -> str:
 def _newest_plan(user_id: int) -> Optional[TrainingPlan]:
     return (
         TrainingPlan.query.filter_by(user_id=user_id)
-        .order_by(TrainingPlan.created_at.desc())
+        .order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
         .first()
     )
 

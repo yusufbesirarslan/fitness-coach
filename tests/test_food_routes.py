@@ -55,9 +55,9 @@ def test_search_cache_miss_uses_coach_search(client, auth_user, monkeypatch):
     assert client.get("/api/food/search?q=muz").get_json()["results"] == canned
 
 
-def test_search_cache_miss_saturation_returns_empty_without_lookup(
+def test_search_cache_miss_saturation_returns_503_without_lookup(
         client, auth_user, monkeypatch):
-    """A missing shared admission must preserve the food route's empty fallback."""
+    """Capacity refusal is an explicit 503 + Retry-After, never "no results"."""
     semaphore = threading.BoundedSemaphore(1)
     monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
     calls = 0
@@ -74,8 +74,9 @@ def test_search_cache_miss_saturation_returns_empty_without_lookup(
     finally:
         semaphore.release()
 
-    assert response.status_code == 200
-    assert response.get_json() == {"results": []}
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "15"
+    assert "results" not in response.get_json()
     assert calls == 0
 
 

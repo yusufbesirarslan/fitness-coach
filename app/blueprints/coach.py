@@ -126,7 +126,7 @@ def chat():
 
         # Kullanıcının önceki kaydını çek
         previous_session = UserSession.query.filter_by(user_id=user_id)\
-            .order_by(UserSession.created_at.desc())\
+            .order_by(UserSession.created_at.desc(), UserSession.id.desc())\
             .first()
 
         # Önceki veriler ve geçen süre

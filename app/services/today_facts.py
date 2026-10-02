@@ -79,7 +79,7 @@ def get_active_plan(user_id):
     """
     return (
         TrainingPlan.query.filter_by(user_id=user_id)
-        .order_by(TrainingPlan.created_at.desc())
+        .order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
         .first()
     )
 
