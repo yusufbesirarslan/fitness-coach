@@ -25,6 +25,9 @@ one:
     (``GET /workout-sessions/current``) and rebuild it.
 ``retryable=False`` with ``requires_reread=False``
     Terminal/permanent for this input; neither retry nor re-read helps.
+    "Terminal" here (``Session-Resolution: terminal``) is about the submitted
+    command and input, NOT the session lifecycle. Only ``SessionTerminal``
+    reports a COMPLETED/ABANDONED session.
 """
 
 
@@ -127,7 +130,14 @@ class IdempotencyConflict(SessionCommandError):
 
 
 class CompletionRejected(SessionCommandError):
-    """The completion gate refused this attempt (unusable proof image)."""
+    """The completion gate refused this attempt (unusable proof image).
+
+    Raised before the completion transaction, so nothing is written: the session
+    stays ACTIVE, its checkpoint and revision are untouched, and no PumpCheck,
+    marker, XP or upload exists. ``terminal`` means "do not resend this proof".
+    It does not mean the session is over, and a later attempt with a different
+    proof can complete it.
+    """
 
     public_code = "TRAINING_SESSION_COMPLETION_REJECTED"
     http_status = 422

@@ -6,6 +6,7 @@ side-effect rows) rather than mirroring the implementation, so a refactor that
 changes behaviour fails here instead of silently shipping.
 """
 import json
+import logging
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -14,6 +15,7 @@ import pytest
 from app.extensions import db
 from app.models import (
     WORKOUT_COMPLETION_MARKER,
+    Activity,
     PumpCheck,
     TrainingPlan,
     User,
@@ -1440,24 +1442,157 @@ def test_an_abandoned_session_can_never_be_completed(
     assert completion_proof["validate"] == 0
 
 
-def test_a_rejected_completion_proof_writes_nothing(
-    client, owner, as_mobile, workout_ref, completion_proof, monkeypatch
-):
+_MODEL_REASON = "MODEL-REASON-SENTINEL not a gym"
+
+
+@pytest.fixture
+def rejected_proof(monkeypatch, completion_proof):
+    """The vision gate refuses the proof while the object store is ARMED and
+    counted, so an upload that ran despite the refusal would be visible.
+    ``verdict`` is mutable so a test can submit a later, accepted proof."""
     from app.blueprints import mobile_workout_sessions as routes
 
-    monkeypatch.setattr(
-        routes, "validate_pump_check",
-        lambda *args: {"valid": False, "reason": "not a gym"})
+    verdict = {"valid": False, "fallback": False, "reason": _MODEL_REASON}
+
+    def _validate_pump(image_bytes, location_type, description):
+        completion_proof["validate"] += 1
+        return dict(verdict)
+
+    def _upload(*args, **kwargs):
+        completion_proof["upload"] += 1
+        return "pump-checks/upload-sentinel"
+
+    monkeypatch.setattr(routes, "validate_pump_check", _validate_pump)
+    monkeypatch.setattr(routes.s3_helper, "is_enabled", lambda: True)
+    monkeypatch.setattr(routes.s3_helper, "upload_image", _upload)
+    return SimpleNamespace(calls=completion_proof, verdict=verdict)
+
+
+def _session_columns(user):
+    db.session.expire_all()
+    row = _session_row(user)
+    return {c.name: getattr(row, c.name) for c in WorkoutSession.__table__.columns}
+
+
+def test_a_rejected_completion_proof_writes_nothing(
+    client, owner, as_mobile, workout_ref, rejected_proof, monkeypatch
+):
+    """LP-13 PR3: the 422 refuses the submitted PROOF, not the session.
+
+    Pins the whole contract a client builds its state machine on: the exact
+    status/code/resolution, an unchanged envelope, a refusal decided BEFORE the
+    completion transaction, an ACTIVE session whose every persisted column
+    (checkpoint payload and revision included) is untouched, and no completion
+    or history artefact of any kind.
+    """
+    from app.services import mobile_workout_sessions as service
+    from app.services.workout_completion import already_completed_today
+
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+    _checkpoint(client, headers, reference, 0, "rejected-key-00001")
+    with audit_clock(FIXED_NOW):
+        before_read = client.get(CURRENT_PATH, headers=headers).json
+    before_columns = _session_columns(owner)
+    before_xp = db.session.get(User, owner.id).rank_points or 0
+    before_activity = Activity.query.filter_by(user_id=owner.id).count()
+    entered_transaction = []
+    real_complete = service.complete
+
+    def _spy_complete(*args, **kwargs):
+        entered_transaction.append(True)
+        return real_complete(*args, **kwargs)
+
+    monkeypatch.setattr(service, "complete", _spy_complete)
+
+    response = _complete(client, headers, reference, 1)
+
+    # Response: exact code + resolution, envelope unchanged (no new fields).
+    assert response.status_code == 422
+    assert set(response.json) == {"error"}
+    error = response.json["error"]
+    assert set(error) == {"code", "message", "retryable", "request_id"}
+    assert error["code"] == "TRAINING_SESSION_COMPLETION_REJECTED"
+    assert error["retryable"] is False
+    assert response.headers["Session-Resolution"] == "terminal"
+    assert "Retry-After" not in response.headers
+    # Decided before the completion transaction: the gate ran, nothing after it.
+    assert rejected_proof.calls["validate"] == 1
+    assert entered_transaction == []
+    assert rejected_proof.calls["upload"] == 0
+    # Lifecycle + checkpoint: the session is ACTIVE and byte-identical.
+    assert before_columns["status"] == "active"
+    assert before_columns["checkpoint_revision"] == 1
+    assert _session_columns(owner) == before_columns
+    with audit_clock(FIXED_NOW):
+        after_read = client.get(CURRENT_PATH, headers=headers).json
+    assert after_read == before_read
+    assert after_read["session"]["status"] == "active"
+    assert after_read["session"]["revision"] == 1
+    assert after_read["session"]["checkpoint"] == _snapshot()
+    assert after_read["session"]["completed_at"] is None
+    # No completion / history artefact.
+    assert PumpCheck.query.count() == 0
+    assert WorkoutLog.query.count() == 0
+    assert Activity.query.filter_by(user_id=owner.id).count() == before_activity
+    assert (db.session.get(User, owner.id).rank_points or 0) == before_xp
+    assert already_completed_today(owner.id, date.fromisoformat(FIXED_DAY)) is False
+
+
+def test_a_rejected_proof_leaves_the_session_completable_by_a_later_proof(
+    client, owner, as_mobile, workout_ref, rejected_proof
+):
+    """``Session-Resolution: terminal`` is terminal for the submitted proof only:
+    the same ACTIVE session, at the same revision, completes with a later one."""
+    headers = as_mobile(owner)
+    reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
+    _checkpoint(client, headers, reference, 0, "later-proof-key-01")
+
+    rejected = _complete(client, headers, reference, 1, key="later-proof-key-02")
+    rejected_proof.verdict["valid"] = True
+    accepted = _complete(client, headers, reference, 1, key="later-proof-key-03")
+
+    assert rejected.status_code == 422
+    assert rejected.headers["Session-Resolution"] == "terminal"
+    assert accepted.status_code == 200
+    assert accepted.json["completion"]["outcome"] == "created"
+    assert accepted.json["session"]["status"] == "completed"
+    assert accepted.json["session"]["revision"] == 1
+    assert accepted.json["session"]["checkpoint"] == _snapshot()
+    assert PumpCheck.query.count() == 1
+    assert WorkoutLog.query.filter_by(
+        exercise_name=WORKOUT_COMPLETION_MARKER).count() == 1
+    # Only the accepted proof reached the object store.
+    assert rejected_proof.calls["validate"] == 2
+    assert rejected_proof.calls["upload"] == 1
+
+
+def test_a_rejected_completion_proof_emits_one_bounded_diagnostic_line(
+    client, owner, as_mobile, workout_ref, rejected_proof, caplog
+):
+    """The refusal is diagnosable by request id and a fixed category, and the
+    line carries nothing the mobile boundary keeps out of its logs."""
     headers = as_mobile(owner)
     reference = _start(client, headers, workout_ref).json["session"]["session_ref"]
 
-    response = _complete(client, headers, reference, 0)
+    with caplog.at_level(logging.INFO):
+        response = _complete(client, headers, reference, 0)
 
     assert response.status_code == 422
-    assert (response.json["error"]["code"]
-            == "TRAINING_SESSION_COMPLETION_REJECTED")
-    assert PumpCheck.query.count() == 0
-    assert _session_row(owner).status == "active"
+    lines = [r.getMessage() for r in caplog.records
+             if "event=completion_rejected" in r.getMessage()]
+    assert len(lines) == 1, lines
+    fields = dict(part.split("=", 1) for part in lines[0].split()[1:])
+    assert lines[0].split()[0] == "mobile_workout_session"
+    assert fields == {
+        "event": "completion_rejected",
+        "category": "completion_proof_rejected",
+        "request_id": response.json["error"]["request_id"],
+    }
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    for leak in ("MODEL-REASON-SENTINEL", "leg day", reference,
+                 "upload-sentinel", "opaque-access-credential"):
+        assert leak not in logged
 
 
 def test_an_unusable_completion_image_writes_nothing(
