@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
+from flask import has_request_context
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
-from app.services.exercise_catalog import ExerciseContext
+from app.observability import current_request_id
+from app.services.exercise_catalog import ExerciseContext, load_exercise_catalog
 from app.services.training_generation.capability import require_supported
 from app.services.training_generation.classifier_service import classify_user
 from app.services.training_generation.exercise_context_token import (
@@ -336,7 +338,22 @@ def generate_training_plan_candidate(
     # parse/truncation-repairable outcome.
     # Injury annotation is warn-only and must run AFTER identity is
     # catalog-owned; a raw provider spelling is not warning authority.
-    plan = canonicalize_plan_exercises(plan, exercise_context)
+    try:
+        plan = canonicalize_plan_exercises(plan, exercise_context)
+    except GenerationExerciseUnresolvedError as exc:
+        # Fixed fields only. Provider text, the prompt, and injuries never enter
+        # this diagnostic event. The request ID joins it to the route log.
+        _log(
+            logger, "exercise_resolution_failed",
+            code=exc.public_code,
+            category=exc.resolution_category,
+            request_id=current_request_id() if has_request_context() else "-",
+            catalog_version=load_exercise_catalog().version,
+            equipment=exercise_context.equipment_context,
+            cardio_type=exercise_context.cardio_type,
+            completion_count=len(budget.calls),
+        )
+        raise
     injury_warnings = annotate_injuries(plan, preferences.injuries)
 
     ozet = plan.get("haftalik_ozet", {})

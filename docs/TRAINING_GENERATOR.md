@@ -399,6 +399,20 @@ None of the four generation codes is parse-repairable: a well-formed plan
 outside the constrained vocabulary is a closed-authority failure, not a
 malformed response.
 
+The table above describes the browser `POST /training-plan` response. The
+native `POST /api/v1/training/plans` command currently stores an unresolved
+exercise as a terminal `FAILED` operation and returns HTTP 422 with
+`retryable=false`; it refunds reserved quota and creates no TrainingPlan.
+Replaying the same idempotency key returns that stored failure without another
+model call. A new key starts a fresh generation attempt, which may independently
+succeed or fail. The browser and native status/retryability difference is an
+explicit follow-up decision, not reconciled by this reliability change.
+
+On unresolved generation, `exercise_resolution_failed` logs only the public
+code, fixed resolution category, request ID, catalog version, coarse equipment
+and cardio context, and provider completion count. It does not log the generated
+name, prompt, injuries, model response, credentials, or idempotency key.
+
 At the save boundary the *five* distinguishable reasons (unknown, ambiguous,
 inactive, fake ID, equipment-incompatible) deliberately collapse into one
 `SAVE_EXERCISE_INVALID`. Telling a client which one it hit turns the save

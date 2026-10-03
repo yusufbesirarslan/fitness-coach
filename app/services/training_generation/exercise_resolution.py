@@ -84,13 +84,20 @@ def _resolve_generated_name(
         # from generation's point of view this is the same "not currently
         # resolvable" outcome as no match at all.
         raise GenerationExerciseUnresolvedError(
-            "generated exercise name does not match any active catalog entry") from exc
+            "generated exercise name does not match any active catalog entry",
+            resolution_category=(
+                "inactive_match" if isinstance(exc, ExerciseInactive)
+                else "unresolved_name"
+            ),
+        ) from exc
     except ExerciseResolutionError as exc:  # pragma: no cover - defensive fail-closed
         # Any future domain resolution failure this module does not yet know
         # about must still fail closed as a typed generation error, never as
         # a raw domain ValueError leaking past this boundary.
         raise GenerationExerciseUnresolvedError(
-            "generated exercise reference could not be resolved") from exc
+            "generated exercise reference could not be resolved",
+            resolution_category="resolution_error",
+        ) from exc
 
     cache[normalized] = exercise
     return exercise
