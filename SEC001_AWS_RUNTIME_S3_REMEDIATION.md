@@ -1,6 +1,18 @@
 # SEC-001: production runtime identity and S3 remediation preparation
 
-Status: **prepared, not cut over** (2026-10-03). This document contains no credentials. The production RDS incident and SEC-005 PR #378 remain separate.
+Status: **NOT CUTOVER READY; draft policy only** (2026-10-03). This document contains no credentials. The production RDS incident and SEC-005 PR #378 remain separate.
+
+### Evidence-gate review (2026-10-03)
+
+| Gate | Verified finding | Remaining read-only evidence |
+| --- | --- | --- |
+| Current container identity and credential source | **Unknown live.** Historical deployment instructions identify a host `.env` IAM-user key; Compose injects `.env` into both containers. Environment credentials win over EC2 metadata credentials if present. | An authorized production operator runs `aws sts get-caller-identity` inside **web and worker**, reporting ARN/account/principal type only, and reports presence/absence (never values) of `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, shared-credential/config-file overrides, and `AWS_EC2_METADATA_DISABLED`. The staging operator has no production-container execution grant. |
+| EC2 instance profile and contained role | `i-0c6f5352fc214e68d` is running with profile `AxisAI-EC2-Role-`; IMDSv2 is required, endpoint enabled, hop limit 2. The 2026-10-03 `DescribeInstances` read reconfirmed this. | Profile's role name, trust policy, inline/attached policies, and last-used metadata from an authorized production IAM reader. `iam:GetInstanceProfile` was already denied; `ec2:DescribeIamInstanceProfileAssociations` returned an explicit deny on 2026-10-03. No alternative access route was attempted. Suitability for reuse and host-agent impact remain unknown. |
+| Production S3 and KMS | Code uses one configured `S3_BUCKET_NAME`; all live upload call sites pass `avatars`, `meals`, or `pump-checks`. No runtime bucket listing call exists. | Production config **bucket name/region** (values of these non-secret configuration fields only), bucket encryption/versioning/Public Access Block/policy metadata, exact KMS key and key policy if SSE-KMS, and a database **key-prefix inventory without object reads**. Account-wide bucket listing was explicitly denied earlier. |
+| Bedrock and metrics | Source defaults to Sonnet 4.5 global profile in `eu-central-1`; code invokes both normal and streaming inference. Metrics code only calls `PutMetricData`, with default `FitX/AI` and `FitX/Runtime` namespaces. | Non-secret live `BEDROCK_MODEL`, `BEDROCK_REGION`, metric flags/namespaces; authorized `GetInferenceProfile` model ARN list and currently attached identity-policy scope. Staging `GetInferenceProfile` was explicitly denied earlier. |
+| Six-hour avatar presigned URL | **Incompatible with a guaranteed six-hour lifetime** when signed by EC2 role credentials. Effective lifetime is `min(21,600 seconds, remaining lifetime of the signing credential)`. | Confirm whether existing clients tolerate an earlier expiry and can obtain a fresh avatar URL. If the six-hour guarantee is required, design a server-side refresh/signing path and validate it before cutover. No production object or client behavior was changed here. |
+
+**CURRENT CONTAINER IDENTITY:** unverified. **CREDENTIAL SOURCE:** historical static `.env` key, current source unverified. **CONFIDENCE:** high for repository behavior and EC2 profile attachment; low for live container/provider and production IAM/S3/Bedrock metadata. The staging role's `sts:GetCallerIdentity` returned `axisai-staging-operator/yusuf`, which establishes the investigator identity only, not the production container identity.
 
 ## 1. Executive verdict
 
@@ -11,7 +23,7 @@ Status: **prepared, not cut over** (2026-10-03). This document contains no crede
 | Required S3 bucket/resources | One configured `S3_BUCKET_NAME`, under `avatars/`, `meals/`, and `pump-checks/`. **The production bucket name remains unverified** because this task's staging operator is explicitly denied account-wide S3 listing and production IAM reads. The proposed policy is a template that must be resolved to the exact production bucket before creation. |
 | Required S3 actions | `GetObject`, `PutObject`, `DeleteObject` on those object prefixes. No bucket-level action found in runtime code. |
 | Bucket policy / KMS change? | **Unknown until production-authorized metadata review.** Do not cut over until bucket policy, default encryption, KMS key policy, and object ownership are checked. |
-| Presigned URL effect? | **Potentially yes.** Most GET URLs request 1 hour; avatar URLs request 6 hours. A URL signed with temporary credentials expires no later than those credentials, so a 6-hour avatar URL may expire early. Validate refresh behavior before cutover. |
+| Presigned URL effect? | **Yes.** Most GET URLs request 1 hour; avatar URLs request 6 hours. EC2 role credentials have a maximum validity around 6 hours and rotate, so a URL signed partway through a credential session expires before its requested 6 hours. The existing 6-hour lifetime is not guaranteed. Validate client refresh behavior before cutover. |
 | Code change required? | No change to the SDK construction. A backend URL refresh/lifetime change may be needed if the six-hour avatar contract proves necessary; this report does not change behavior. |
 | Is production cutover safe after the RDS incident? | **Not yet.** Resolve the evidence gates below and validate both web and worker against the role in a separately authorized task. |
 
@@ -65,7 +77,7 @@ The deployment workflow uses GitHub OIDC and its separate deployer role. It is n
 
 No runtime `ListBucket`, `ListAllMyBuckets`, `HeadBucket`, tagging, ACL, lifecycle, bucket policy, bucket encryption, bucket create/delete, or object attribute API call was found. `PutObject` sets `ServerSideEncryption="AES256"` and does not set ACL. The repository describes the bucket as private / Block Public Access, but **actual bucket settings, public state, lifecycle, versioning, object ownership, default encryption, bucket policies, and SSE-KMS are unverified** because the staging identity cannot inspect production S3. Do not read user objects to answer these questions.
 
-Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py` requests 21,600 seconds. AWS states a presigned URL created with temporary credentials expires when the credential expires, even if its requested expiration is later ([S3 presigned URL guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)). Validate whether avatar clients re-fetch URLs. No mobile change is proposed.
+Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py` requests 21,600 seconds. AWS states that an EC2 role presigned URL expires when its signing credential expires, even if the requested URL expiration is later; EC2 metadata credentials rotate with a maximum validity of approximately six hours ([S3 presigned URL guide](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)). Thus **REQUESTED URL TTL: 6 hours; EXPECTED EFFECTIVE TTL WITH EC2 ROLE: at most 6 hours and commonly less; SAFE AS-IS: NO for a guaranteed six-hour URL; REQUIRED CHANGE: verify a client/server refresh route or use a separately reviewed server-side signing design if six-hour validity is essential**. Rotation does not extend an already issued URL. A local signing test could verify the `X-Amz-Expires` field but cannot prove S3 accepts it after the signing session expires; AWS's documented lifetime rule is decisive. No mobile change is proposed.
 
 ## 5. Existing versus required permissions
 
@@ -83,7 +95,7 @@ Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py`
 
 ## 6. Proposed `AxisAIProdRuntimeRole`
 
-**Production policy template, not deployable until every `${...}` token is replaced and the metadata gates are passed.** The account ID and region are confirmed; the bucket and live model/profile configuration are not. Do not substitute a wildcard bucket. If legacy DB keys exist outside the three prefixes, enumerate keys from application metadata only and add the minimal proven prefix before cutover.
+**Production policy template, not deployable until every `${...}` token is replaced and the metadata gates are passed. PROPOSED ROLE POLICY FINALIZED: NO.** The account ID and instance region are confirmed; the bucket, bucket/KMS policy, live model/profile configuration, and contained EC2 role are not. Do not substitute a wildcard bucket. If legacy DB keys exist outside the three prefixes, enumerate keys from application metadata only and add the minimal proven prefix before cutover. The EC2 trust policy below is structurally final for a newly created EC2 role; its use remains conditional on the host-agent/profile review.
 
 ```json
 {
@@ -209,6 +221,16 @@ Positive production checks during the separately authorized cutover: create a co
 
 Negative checks with the new role: `DeleteBucket`, `PutBucketPolicy`, `DeleteBucketPolicy`, `ListAllMyBuckets`, `ListBucket` for the required bucket, `GetObject` and `PutObject` in an unrelated bucket, object access outside the three prefixes, IAM mutation, unrelated Secrets Manager read, RDS administration, and unapproved Bedrock model invocation must be denied. Use policy simulation where a destructive request could have an effect if accidentally allowed; never issue a destructive live API call merely to test denial. For unrelated object access use a controlled object owned by the test operator. Re-test after policy changes. Confirm explicit bucket policy denies do not break the intended role.
 
+| Expected-deny probe | Why the proposed template denies it | Later validation |
+| --- | --- | --- |
+| `s3:DeleteBucket`, `s3:PutBucketPolicy`, `s3:DeleteBucketPolicy` | No allow for bucket administration; the template's bucket TLS deny does not grant an action. | Simulate on the exact production bucket ARN; do not call a destructive live API. |
+| `s3:ListBucket`, `s3:ListAllMyBuckets` | No bucket-listing allow. | Simulate; runtime code has no listing call. |
+| `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on unrelated buckets or prefixes | Object allows name only the three configured production prefixes. | Simulate unrelated ARNs; use only controlled objects for any later real probe. |
+| IAM modification, Secrets Manager reads, RDS administration | No service actions granted. | Simulate representative actions and resources. |
+| `bedrock:InvokeModel` and streaming invocation on unapproved models | Allows only the named inference profile and matching model resources with profile conditions. | Simulate exact approved and unapproved ARNs after profile metadata is verified. |
+
+These are **policy-template expectations**, not proof of effective production authorization. Effective denial also depends on the final role's other attached policies, permissions boundary, resource policies, and organization controls; inspect the complete role and simulate the final identity before cutover. Never add a broad policy merely to make a positive test pass.
+
 ## 10. Rollback plan
 
 At the first failed S3 write/read/presign, Bedrock inference, or sustained metric delivery, stop the cutover and diagnose the exact denied action, resource, bucket/KMS policy, namespace, or credential provider. Metrics loss alone is nonblocking for user requests but still fails the acceptance gate. Re-enable the previous known-working **configuration** only if service recovery requires it, with access to the old key limited to the designated operator; do not print or recreate a key in logs. Recreate only the affected web/worker containers after restoring their prior environment, then verify identity and all positive flows. If profile replacement itself caused host-agent failure or role resolution failure, restore the previously recorded profile association and validate host management. If a process keeps stale or environment credentials, restart/recreate that process at a controlled time, then verify the effective ARN and refresh; do not widen role permissions to mask precedence problems. If the old key was already disabled, temporarily re-enable the same known key only as a last-resort recovery step, with time-boxed monitoring and immediate follow-up. Never grant AdministratorAccess or broad S3 to the new role. Do not modify RDS during rollback.
@@ -228,7 +250,7 @@ The backend still returns the same URL fields. Early expiry of an avatar presign
 - A compromised runtime can still access every object under the three legitimate prefixes and may issue presigned URLs. IAM cannot distinguish application users sharing one EC2 role. Application ownership checks remain essential.
 - The exact production bucket, bucket policy, public state, encryption/KMS policy, existing profile role, live Bedrock model and metric overrides, and legacy stored key prefixes could not be read with `axisai-staging-operator`. `ListBuckets`, `iam:GetInstanceProfile`, `iam:GetUser`, and `bedrock:GetInferenceProfile` were explicitly denied. The AWS MCP server's read-only policy must not be worked around either. These gates block a final deployable policy and cutover approval.
 - If bucket policy names the IAM user ARN, add the new role principal minimally during the later cutover, validate, then remove the user after observation. If the bucket uses SSE-KMS, add exact KMS key permissions and key-policy access only if required. If an encryption or TLS condition conflicts with current requests, resolve it before cutover.
-- Six-hour avatar URLs may expire when temporary credentials rotate. Existing clients must obtain fresh URLs; if they cannot, a backend-only URL refresh strategy may be required before cutover. No mobile/API change is assumed or made.
+- Six-hour avatar URLs **will not have a guaranteed six-hour lifetime** with EC2 role credentials. Existing clients must obtain fresh URLs; if they cannot, a backend-only URL refresh strategy or separately reviewed signer is required before cutover. No mobile/API change is assumed or made.
 - Replacing the sole EC2 instance profile can affect host CloudWatch and SSM agents. Inventory those host permissions separately, keeping deployer, developer/admin, and application runtime privilege boundaries distinct.
 - The new role/profile and validation requests have small IAM/CloudWatch/S3 request and Bedrock inference cost implications; no new storage service or migration of user objects is proposed.
 
