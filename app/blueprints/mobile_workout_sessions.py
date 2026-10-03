@@ -39,7 +39,8 @@ import s3_helper
 # What a client should DO about a refusal, independent of the HTTP status
 # (PR5 section 42). ``retry`` = send the same command again; ``reread`` = the
 # command can never succeed as sent, re-read canonical state and rebuild it;
-# ``terminal`` = neither helps.
+# ``terminal`` = neither helps. ``terminal`` describes the submitted command and
+# input, never the session: a 422 completion rejection leaves the session ACTIVE.
 _RESOLUTION_HEADER = "Session-Resolution"
 
 # The native completion contract is deliberately PRIVATE-only: PR5 excludes the
@@ -242,6 +243,15 @@ def _completion_proof():
 
     check = validate_pump_check(image_bytes, location_type, description)
     if not check.get("valid"):
+        # Refuses THIS proof, not the session: nothing has been written, the
+        # session stays ACTIVE with its checkpoint, and a later attempt may
+        # succeed. Fixed category + request id only -- the model's free-text
+        # reason, the user's description and the session reference are never
+        # logged (the mobile request log keeps owner handles out on purpose).
+        current_app.logger.info(
+            "mobile_workout_session event=completion_rejected "
+            "category=completion_proof_rejected request_id=%s",
+            current_request_id())
         raise sessions.CompletionRejected("the completion proof was rejected")
 
     image_key = None

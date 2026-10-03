@@ -532,6 +532,17 @@ for all of its callers.
 * Every response carries `Idempotency-Replayed: true|false`. Every refusal carries
   `Session-Resolution: retry|reread|terminal`, so a client learns what to DO
   without parsing status codes.
+* `terminal` is about the submitted command or input, NOT the session. Only
+  `TRAINING_SESSION_TERMINAL` (409, `reread`) says the session is
+  COMPLETED/ABANDONED. `TRAINING_SESSION_COMPLETION_REJECTED` (422, `terminal`)
+  refuses this completion proof before the completion transaction: the session
+  stays ACTIVE with its checkpoint and revision unchanged, and nothing is
+  written (no PumpCheck, marker, XP or upload). Do not resend the same proof.
+  A later completion with a different proof against the same revision can
+  succeed. The server logs one bounded
+  `mobile_workout_session event=completion_rejected category=completion_proof_rejected request_id=...`
+  line. It never logs the model's reason, the description or the session
+  reference.
 * Completion carries the client's `If-Match` revision into the completion
   transaction, where it is checked under the session row's `FOR UPDATE` lock —
   the only race-free place — so completing can never silently discard a
