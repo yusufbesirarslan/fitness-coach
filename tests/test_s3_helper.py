@@ -55,6 +55,24 @@ def test_disabled_without_bucket(monkeypatch):
         upload_image(b"img")
 
 
+def test_s3_client_uses_default_credential_provider_chain(monkeypatch):
+    calls = []
+    fake = _FakeS3()
+
+    def make_client(service, **kwargs):
+        calls.append((service, kwargs))
+        return fake
+
+    monkeypatch.setattr(s3_helper, "S3_BUCKET_NAME", "test-bucket")
+    monkeypatch.setattr(s3_helper, "_client", None)
+    monkeypatch.setattr(s3_helper.boto3, "client", make_client)
+
+    assert s3_helper._get_client() is fake
+    assert len(calls) == 1
+    assert calls[0][0] == "s3"
+    assert set(calls[0][1]) == {"region_name", "config"}
+
+
 def test_build_key_layout_and_unknown_mime():
     key = _build_key("meals", "image/png", 42)
     assert re.fullmatch(r"meals/42/\d{4}/\d{2}/[0-9a-f]{32}\.png", key)
