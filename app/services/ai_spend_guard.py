@@ -29,11 +29,8 @@ This module is the emergency boundary, not a product quota:
   decrements what it added. Two concurrent callers can never both be admitted
   past a limit; at the boundary the error is always a spurious rejection, never
   an over-admission.
-- Redis unavailable -> process-local counters with the same limits. That is
-  neither fail-open (unbounded spend) nor fail-closed (AI outage on a Redis
-  blip). Local counters cannot see what Redis already admitted, so an outage
-  that starts mid-window allows up to one more limit per process: at most
-  (1 + processes) x limit per window, and a process restart resets its share.
+- Redis configured but unavailable -> refuse provider attempts. Process-local
+  counters are used only when Redis is intentionally unconfigured (local/test).
 
 A rejection raises `AISpendLimitExceeded`, a `BlockingConcurrencyLimit`, so
 every existing capacity handler already turns it into a deterministic
@@ -55,18 +52,20 @@ _log = logging.getLogger(__name__)
 HEAVY_PROVIDERS = frozenset({"bedrock", "bedrock-stream"})
 
 _KEY_PREFIX = "ai:spend:v1"
-_WINDOW_SECONDS = {"h": 3600, "d": 86400}
+_WINDOW_SECONDS = {"m": 60, "h": 3600, "d": 86400}
 # Keys outlive their window so a late EXPIRE never truncates a live bucket.
 _KEY_TTL_GRACE_SECONDS = 300
 
 
-def _env_limit(name, default):
-    """Non-negative int from env; 0 disables that one ceiling; junk -> default."""
+def _env_limit(name, default, allow_zero=True):
+    """Parse a ceiling strictly at startup; heavy isolation is mandatory."""
     try:
         value = int(os.getenv(name, str(default)))
     except (TypeError, ValueError):
-        return default
-    return value if value >= 0 else default
+        raise ValueError(f"{name} must be a positive integer") from None
+    if value < 0 or (value == 0 and not allow_zero):
+        raise ValueError(f"{name} must be a positive integer")
+    return value
 
 
 ENABLED = os.getenv("AI_SPEND_GUARD_ENABLED", "1") != "0"
@@ -78,12 +77,20 @@ ENABLED = os.getenv("AI_SPEND_GUARD_ENABLED", "1") != "0"
 # Light (direct OpenAI gpt-4o-mini) is held at a tighter launch-bridge ceiling,
 # 100/account/day and 500/day in total, while it stays the light provider.
 LIMITS = {
-    ("user", "heavy", "d"): _env_limit("AI_SPEND_USER_HEAVY_PER_DAY", 200),
+    ("user", "heavy", "d"): _env_limit("AI_SPEND_USER_HEAVY_PER_DAY", 200, False),
+    ("user", "heavy", "h"): _env_limit("AI_SPEND_USER_HEAVY_PER_HOUR", 20, False),
+    ("user", "heavy", "m"): _env_limit("AI_SPEND_USER_HEAVY_PER_MINUTE", 5, False),
     ("user", "light", "d"): _env_limit("AI_SPEND_USER_LIGHT_PER_DAY", 100),
-    ("global", "heavy", "h"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_HOUR", 300),
-    ("global", "heavy", "d"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_DAY", 1500),
+    ("global", "heavy", "h"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_HOUR", 300, False),
+    ("global", "heavy", "d"): _env_limit("AI_SPEND_GLOBAL_HEAVY_PER_DAY", 1500, False),
     ("global", "light", "d"): _env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 500),
 }
+
+# At the verified production ceilings (100/hour, 300/day), a user can spend
+# at most 20/hour and 60/day even if the legacy 200/day env override remains.
+# Two accounts therefore leave at least 60% of each shared window available.
+_MIN_GLOBAL_SHARES = 5
+_EXPENSIVE_FEATURES = frozenset({"training_plan", "nutrition_plan", "menu_extract", "vision"})
 
 
 class AISpendLimitExceeded(BlockingConcurrencyLimit):
@@ -103,6 +110,20 @@ class AISpendLimitExceeded(BlockingConcurrencyLimit):
 
 _tls = threading.local()
 _UNSET = object()
+
+
+@contextmanager
+def feature_scope(feature):
+    """Carry the normalized provider feature through the existing model gate."""
+    previous = getattr(_tls, "feature", _UNSET)
+    _tls.feature = feature
+    try:
+        yield
+    finally:
+        if previous is _UNSET:
+            del _tls.feature
+        else:
+            _tls.feature = previous
 
 
 @contextmanager
@@ -154,6 +175,23 @@ def bind_subject(fn):
     return wrapper
 
 
+def owner_argument(fn):
+    """Bind a server-side function's first user_id across its provider calls.
+
+    Reject disagreement with an already authenticated request owner. This is
+    for domain functions whose owner comes from the route/auth or DB, never a
+    client-supplied field.
+    """
+    @wraps(fn)
+    def wrapper(user_id, *args, **kwargs):
+        subject = current_subject()
+        if subject is not None and str(subject) != str(user_id):
+            raise AISpendLimitExceeded("identity", "heavy")
+        with subject_scope(user_id):
+            return fn(user_id, *args, **kwargs)
+    return wrapper
+
+
 # ── Counters ────────────────────────────────────────────────────────────────
 
 def provider_class(provider):
@@ -164,21 +202,32 @@ def _bucket(now, window):
     return int(now // _WINDOW_SECONDS[window])
 
 
-def _planned_keys(cls, subject, now):
+def _planned_keys(cls, subject, now, feature=None):
     """[(key, limit, ttl_seconds, scope)] for every active ceiling of `cls`."""
     planned = []
-    for (scope, klass, window), limit in LIMITS.items():
+    for (scope, klass, window), configured in LIMITS.items():
+        limit = configured
         if klass != cls or limit <= 0:
             continue
         if scope == "user":
             if subject is None:
                 continue
+            global_limit = LIMITS.get(("global", cls, window), 0)
+            if global_limit > 0:
+                limit = min(limit, max(1, global_limit // _MIN_GLOBAL_SHARES))
             owner = f"user:{subject}"
         else:
             owner = "global"
         key = f"{_KEY_PREFIX}:{owner}:{cls}:{window}:{_bucket(now, window)}"
         ttl = _WINDOW_SECONDS[window] + _KEY_TTL_GRACE_SECONDS
         planned.append((key, limit, ttl, scope))
+    if cls == "heavy" and subject is not None and feature in _EXPENSIVE_FEATURES:
+        daily = next((limit for key, limit, _ttl, scope in planned
+                      if scope == "user" and ":heavy:d:" in key), None)
+        if daily is not None:
+            key = f"{_KEY_PREFIX}:user:{subject}:feature:{feature}:heavy:d:{_bucket(now, 'd')}"
+            planned.append((key, max(1, daily // 3),
+                            _WINDOW_SECONDS["d"] + _KEY_TTL_GRACE_SECONDS, "feature"))
     # Global first: when both are exceeded the operator must see the global one.
     planned.sort(key=lambda item: item[3] != "global")
     return planned
@@ -249,7 +298,7 @@ def _warn_redis_degraded():
     now = time.monotonic()
     if now - _redis_warned_at >= 60:
         _redis_warned_at = now
-        _log.warning("[AI-SPEND] Redis unavailable; enforcing process-local ceilings")
+        _log.error("[AI-SPEND] Redis unavailable; refusing provider attempts")
 
 
 def _record_rejection(scope, cls, provider, subject):
@@ -263,14 +312,16 @@ def _record_rejection(scope, cls, provider, subject):
         pass
 
 
-def charge(provider):
+def charge(provider, feature=None):
     """Admit one provider call or raise AISpendLimitExceeded. Call BEFORE the call."""
     if not ENABLED:
         return
     cls = provider_class(provider)
     subject = current_subject()
+    if feature is None:
+        feature = getattr(_tls, "feature", None)
     now = time.time()
-    planned = _planned_keys(cls, subject, now)
+    planned = _planned_keys(cls, subject, now, feature)
     if not planned:
         return
     client = _get_redis()
@@ -280,7 +331,7 @@ def charge(provider):
             rejected = _redis_admit(client, planned)
         except _RedisUnavailable:
             _warn_redis_degraded()
-            rejected = _local_admit(planned, now)
+            rejected = "backend"
     else:
         rejected = _local_admit(planned, now)
     if rejected is not None:

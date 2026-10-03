@@ -84,9 +84,16 @@ retried and never falls back.
 ## Spend guard (Phase 2 P2-C)
 
 Rate limits count per route and per hour, and premium has no weekly quota, so
-they do not bound spend. `app/services/ai_spend_guard.py` is the emergency
-boundary: a finite number of **provider calls** per account per day and in
-total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
+they do not bound spend. `app/services/ai_spend_guard.py` charges every
+**physical provider attempt**. Heavy calls have shared user minute/hour/day
+ceilings across routes. The effective user hour/day allowance is the smaller
+of its configured ceiling and one fifth of the matching global ceiling. With
+the verified production heavy ceilings (100/hour, 300/day), the existing
+200/user/day setting therefore yields 20/user/hour and 60/user/day. The
+minute default is 5, matching the existing Coach burst allowance. Training
+and nutrition plan generation, menu extraction, and vision also have a daily
+feature ceiling of one third of the effective user day (20 in production).
+Each retry, tool round, summary job and fan-out call spends a separate attempt.
 
 - Enforced inside `ai_gate.model_concurrency_slot` after the capacity permit
   and **before** the provider call; every provider call reaches the slot
@@ -104,12 +111,10 @@ total per hour/day, split into `heavy` (Bedrock) and `light` (OpenAI).
   (Scope × Class, 4 series max).
 - Redis MULTI/EXEC INCR (+EXPIRE NX), admit only if every post-increment
   count is within its limit, compensate on refusal → concurrent callers can
-  never over-admit. Redis down → same limits process-locally (bounded, not
-  fail-open). The local counters do not see what Redis already admitted, so
-  an outage that starts mid-window allows up to (1 + processes) × limit. Prod
-  runs 1 gunicorn process (enforced at boot) + 1 RQ worker, and only the web
-  process makes heavy calls: ≤2× heavy, ≤3× light, plus one more allowance per
-  process restart during the outage.
+  never over-admit. A configured Redis outage now refuses provider attempts;
+  intentional Redis-less local/test runs use process-local counters. This
+  trades temporary AI availability for a bounded shared budget during an
+  infrastructure failure.
 - Not a billing kill switch for calls already made, and not a product quota:
   defaults sit far above observed use and do not change entitlement.
 - Light launch bridge: while direct OpenAI gpt-4o-mini is the light provider,
@@ -269,6 +274,8 @@ Distribution percentiles use provider-reported tokens where present; filter
 AI_SPEND_GUARD_ENABLED=1
 # production (2026-09-23): AI_SPEND_GLOBAL_HEAVY_PER_HOUR=100, ..._PER_DAY=300
 AI_SPEND_USER_HEAVY_PER_DAY=200
+AI_SPEND_USER_HEAVY_PER_HOUR=20
+AI_SPEND_USER_HEAVY_PER_MINUTE=5
 AI_SPEND_USER_LIGHT_PER_DAY=100
 AI_SPEND_GLOBAL_HEAVY_PER_HOUR=300
 AI_SPEND_GLOBAL_HEAVY_PER_DAY=1500
