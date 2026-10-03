@@ -705,6 +705,35 @@ def test_unresolved_provider_name_is_typed_and_not_repaired(monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("name,expected_id", [
+    ("Barbell Back Squat", "ex_barbell_back_squat"),
+    ("Back Squat", "ex_barbell_back_squat"),
+])
+def test_canonical_and_explicit_alias_names_resolve(name, expected_id):
+    plan, _ = validate_generated_plan(_week(exercises=[_exercise(name)]), _prefs())
+    canonical = canonicalize_plan_exercises(
+        plan, ExerciseContext(equipment_context="spor_salonu"))
+    assert canonical["program"][0]["egzersizler"][0]["exercise_id"] == expected_id
+
+
+@pytest.mark.parametrize("name", ["Halterle Çömelme", "Incline Benhc Press"])
+def test_translated_or_typo_name_does_not_silently_resolve(name):
+    plan, _ = validate_generated_plan(_week(exercises=[_exercise(name)]), _prefs())
+    with pytest.raises(GenerationExerciseUnresolvedError) as caught:
+        canonicalize_plan_exercises(
+            plan, ExerciseContext(equipment_context="spor_salonu"))
+    assert caught.value.resolution_category == "unresolved_name"
+
+
+def test_retired_catalog_name_has_bounded_inactive_category(fixture_catalog):
+    plan, _ = validate_generated_plan(
+        _week(exercises=[_exercise("Fixture Retired")]), _prefs())
+    with pytest.raises(GenerationExerciseUnresolvedError) as caught:
+        canonicalize_plan_exercises(
+            plan, ExerciseContext(equipment_context="ev"))
+    assert caught.value.resolution_category == "inactive_match"
+
+
 def test_ambiguous_generated_exercise_is_typed(monkeypatch):
     def fake_resolve(*, name, catalog=None):
         raise ExerciseAmbiguous("ambiguous")
@@ -763,6 +792,34 @@ def test_http_typed_exercise_unresolved(client, auth_user, monkeypatch):
     assert body["code"] == CODE_GENERATION_EXERCISE_UNRESOLVED
     assert body["retryable"] is True
     assert "Invented Laser Row" not in body["error"]
+    assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+def test_browser_unresolved_keeps_existing_plan_but_persists_posted_injuries(
+        client, auth_user, monkeypatch):
+    _session(auth_user)
+    original_data = json.dumps({"existing": "unchanged"})
+    existing = TrainingPlan(user_id=auth_user.id, plan_data=original_data)
+    db.session.add(existing)
+    db.session.commit()
+    original_id = existing.id
+    monkeypatch.setattr(
+        training_bp, "_heavy_chat",
+        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Invented Laser Row")])),
+    )
+
+    response = client.post("/training-plan", json={
+        "gun_sayisi": 3, "sure": 45, "injuries": "knee sensitivity"})
+
+    assert response.status_code == 500
+    assert response.get_json()["code"] == CODE_GENERATION_EXERCISE_UNRESOLVED
+    assert response.get_json()["retryable"] is True
+    rows = TrainingPlan.query.filter_by(user_id=auth_user.id).all()
+    assert len(rows) == 1
+    assert rows[0].id == original_id
+    assert rows[0].plan_data == original_data
+    db.session.refresh(auth_user)
+    assert auth_user.user_metadata["injuries"] == "knee sensitivity"
 
 
 # ── Architecture guards: canonicalization boundary ───────────────────────────

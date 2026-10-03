@@ -94,6 +94,16 @@ class GenerationExerciseUnresolvedError(GenerationOutputError):
     public_code = CODE_GENERATION_EXERCISE_UNRESOLVED
     i18n_key = I18N_GENERATION_EXERCISE_UNRESOLVED
     repairable = False
+    _RESOLUTION_CATEGORIES = frozenset({
+        "unresolved_name", "inactive_match", "resolution_error",
+    })
+
+    def __init__(self, message, *, resolution_category="unresolved_name"):
+        super().__init__(message)
+        # Internal, fixed vocabulary for diagnostics; never the provider name.
+        if resolution_category not in self._RESOLUTION_CATEGORIES:
+            raise ValueError("invalid resolution category")
+        self.resolution_category = resolution_category
 
 
 class GenerationExerciseAmbiguousError(GenerationOutputError):
