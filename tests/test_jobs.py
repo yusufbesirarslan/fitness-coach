@@ -466,12 +466,15 @@ def test_summarize_task_inline_runs_without_queue(app, make_user, monkeypatch):
     # Kuyruk yokken görev SATIR-İÇİ çalışır (mevcut app context'i yeniden kullanır,
     # yeni create_app KURMAZ) ve maybe_summarize'a delege eder.
     from app.jobs import tasks
-    from app.services import memory_manager
+    from app.services import ai_spend_guard, memory_manager
     user = make_user("inlineu")
     conv = memory_manager.get_or_create_active_conversation(user.id)
     called = {"n": 0}
-    monkeypatch.setattr(memory_manager, "maybe_summarize",
-                        lambda c: called.__setitem__("n", called["n"] + 1) or True)
+    def summarize(c):
+        assert ai_spend_guard.current_subject() == user.id
+        called["n"] += 1
+        return True
+    monkeypatch.setattr(memory_manager, "maybe_summarize", summarize)
     result = tasks.summarize_conversation(conv.id)
     assert result is True
     assert called["n"] == 1

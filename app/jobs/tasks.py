@@ -59,12 +59,15 @@ def summarize_conversation(conversation_id):
     def _body():
         from app.extensions import db
         from app.models import CoachConversation
-        from app.services import ai_metrics, memory_manager
+        from app.services import ai_metrics, ai_spend_guard, memory_manager
         conv = db.session.get(CoachConversation, conversation_id)
         if conv is None:
             _log.info("[JOBS] summarize: konusma %s bulunamadi", conversation_id)
             return False
-        did = memory_manager.maybe_summarize(conv)
+        # RQ/deferred jobs have no request context. Attribute the paid summary
+        # attempt to the conversation's database owner, never an enqueued id.
+        with ai_spend_guard.subject_scope(conv.user_id):
+            did = memory_manager.maybe_summarize(conv)
         ai_metrics.increment("SummarizeJob",
                              dimensions={"result": "done" if did else "skip"})
         return did
