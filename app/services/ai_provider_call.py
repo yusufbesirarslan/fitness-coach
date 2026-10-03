@@ -211,7 +211,7 @@ class Admission:
                 # A retry is a new paid attempt: admitted like one. A refusal
                 # propagates — the guard's "stop" is never retried.
                 try:
-                    ai_spend_guard.charge(self.provider)
+                    ai_spend_guard.charge(self.provider, feature=self.feature)
                 except ai_spend_guard.AISpendLimitExceeded:
                     self._emit_guard_rejection()
                     raise
@@ -294,8 +294,9 @@ def admit(*, feature, provider, payload, deadline=None, tool_round=None,
         subject=subject)
     if gate:
         try:
-            with model_concurrency_slot(provider, deadline=deadline):
-                yield admission
+            with ai_spend_guard.feature_scope(feature):
+                with model_concurrency_slot(provider, deadline=deadline):
+                    yield admission
         except ai_spend_guard.AISpendLimitExceeded as exc:
             if not admission._used and not isinstance(exc, AIInputBudgetExceeded):
                 admission._emit_guard_rejection()
@@ -303,9 +304,8 @@ def admit(*, feature, provider, payload, deadline=None, tool_round=None,
         return
     if charge:
         try:
-            ai_spend_guard.charge(provider)
+            ai_spend_guard.charge(provider, feature=feature)
         except ai_spend_guard.AISpendLimitExceeded:
             admission._emit_guard_rejection()
             raise
     yield admission
-

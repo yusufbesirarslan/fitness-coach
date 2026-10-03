@@ -35,6 +35,7 @@ from app.observability import current_request_id
 from app.services import provider_failure
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
 from app.services import ai_input_budget, ai_provider_call
+from app.services import ai_spend_guard
 from app.services.ai_spend_guard import AISpendLimitExceeded
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 # The ONLY route from the Coach to the training-plan mutation boundary. This
@@ -1077,6 +1078,7 @@ def log_provider_fallback(logger, prefix, fallback):
         pass
 
 
+@ai_spend_guard.owner_argument
 def _run_coach_conversation(user_id, question, context, client_history=None,
                             language="tr", prepared_history=None):
     """Koç sohbeti yönlendiricisi: ortak mesajları kurar, Bedrock açıksa Bedrock
@@ -1167,6 +1169,7 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
     return final_text
 
 
+@ai_spend_guard.owner_argument
 def _run_coach_conversation_openai(user_id, question, context, history,
                                    language="tr", deadline=None):
     """OpenAI function-calling döngüsü: system → (gerekirse araç çağrıları) → final metin.
@@ -1305,6 +1308,7 @@ def _first_text_block(resp):
     return ""
 
 
+@ai_spend_guard.owner_argument
 def _run_coach_conversation_bedrock(user_id, question, context, history,
                                     language="tr", deadline=None):
     """Bedrock (Anthropic Messages API) araç-kullanım döngüsü. stop_reason=='tool_use'
