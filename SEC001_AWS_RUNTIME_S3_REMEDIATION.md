@@ -1,8 +1,98 @@
 # SEC-001: production runtime identity and S3 remediation preparation
 
-Status: **NOT CUTOVER READY; draft policy only** (2026-10-03). This document contains no credentials. The production RDS incident and SEC-005 PR #378 remain separate.
+Status: **NOT CUTOVER READY** (2026-10-03, second evidence pass). The role policy is finalized against live production metadata (§6). One production evidence gate remains open: the in-container identity/credential-source probe (§0.5). This document contains no credentials. The production RDS incident and SEC-005 PR #378 remain separate.
 
-### Evidence-gate review (2026-10-03)
+## 0. Production-operator evidence (2026-10-03)
+
+Read-only metadata collected with the production operator `arn:aws:iam::852128326881:user/axisai-deployer` (default profile, `eu-central-1`). No create/put/update/attach/delete/start/stop call was issued. No object was listed or read. No Bedrock model was invoked. No metric was published.
+
+### 0.1 Instance profile and role
+
+| Field | Live value |
+| --- | --- |
+| Instance profile | `arn:aws:iam::852128326881:instance-profile/AxisAI-EC2-Role-` (created 2026-07-10) |
+| Contained role | `AxisAI-EC2-Role-`, `arn:aws:iam::852128326881:role/AxisAI-EC2-Role-`. No permissions boundary. Max session 3600 s. Last used 2026-10-03 13:47Z. |
+| Trust | `ec2.amazonaws.com` → `sts:AssumeRole`. No conditions. |
+| Attached managed | `AxisAI-EC2-Role-Policy` (customer, v1, attached only here), `CloudWatchAgentServerPolicy` (AWS, v3), `AmazonSSMManagedInstanceCore` (AWS, v2) |
+| Inline | none |
+
+`AxisAI-EC2-Role-Policy` v1 grants:
+
+- `secretsmanager:GetSecretValue`/`DescribeSecret` on `secret:axisai/prod*`;
+- `s3:ListBucket`/`GetBucketLocation` on `axisai-user-storage`;
+- `s3:Get/Put/DeleteObject` and `s3:Put/GetObjectAcl` on `axisai-user-storage/*`;
+- `bedrock:InvokeModel`, `InvokeModelWithResponseStream` and `ListFoundationModels` on `*`;
+- `logs:Create*`/`PutLogEvents`/`DescribeLogStreams` on `*`;
+- `cloudwatch:PutMetricData` on `*` (no namespace condition);
+- SSM agent channel actions.
+
+The two AWS policies are the standard CloudWatch agent and SSM agent sets.
+
+**IAM Access Advisor (action-level, generated 2026-10-03):**
+
+- **Role:** authenticated to `cloudwatch`, `ec2`, `ec2messages`, `logs`, `ssm` and `ssmmessages`. That is host agent traffic: `CreateLogStream`, `DescribeLogGroups`, `GetParameter`, `UpdateInstanceInformation` and `ListInstanceAssociations`. The role has **never authenticated to `s3`, `bedrock`, or `secretsmanager`**.
+- **`fitx-s3-user`:** authenticated to `s3` (last 2026-09-29 07:09Z), `bedrock` (last 2026-10-02 18:48Z, the deploy deep-health probe) and `cloudwatch` (last 2026-10-03 13:44Z, minutely `FitX/Runtime` flush).
+
+**Effective summary.** The role is today a **host-agent identity only**. Its app grants are dormant and aimed at the wrong bucket. Every application AWS call observed in production is made by the static `fitx-s3-user` key.
+
+### 0.2 Role reuse decision: CREATE NEW DEDICATED ROLE
+
+- **Do not reuse the current policy.** It names `axisai-user-storage`, which is not the live bucket (§0.3). It grants Bedrock on `*`, Secrets Manager `axisai/prod*` (never used; the app reads `.env`), `ListBucket` (no call site) and object-ACL actions (meaningless under `BucketOwnerEnforced`). Its `PutMetricData` has no namespace condition.
+- **Create `AxisAIProdRuntimeRole` and a new instance profile.** Attach the finalized application policy (§6) **plus** `AmazonSSMManagedInstanceCore` and `CloudWatchAgentServerPolicy`.
+- **Why the agent policies stay:** an EC2 instance carries exactly one instance profile. The SSM agent and the CloudWatch agent actively use the current role (Access Advisor above). A runtime-only role would break SSM deploys and log shipping. Containers can reach IMDS (hop limit 2), so they can also use these host permissions; that is accepted and documented in §12.
+- **Why a new role instead of editing the old one:** cutover becomes `replace-iam-instance-profile-association`, and rollback is the same call back to `AxisAI-EC2-Role-`, which stays untouched.
+
+### 0.3 Production user-storage bucket: `fitx-user-bucket-2026`
+
+| Bucket | Created | `NumberOfObjects` (AWS/S3 daily storage metric) | Interpretation |
+| --- | --- | --- | --- |
+| `fitx-user-bucket-2026` | 2026-06-07 | 1 → 62 (Jun 9 – Jul 8), then 62 → 1 on 2026-08-15, then 1 → 6 (Aug 15 – Sep 15); latest datapoint 2026-10-02 | **Live.** It is the only bucket whose contents changed after July. |
+| `axisai-user-storage` | 2026-07-10, same day as the instance role/profile | 62 since 2026-07-11, unchanged through 2026-10-02 | A one-time 62-object copy for a role-based migration that never cut over. The role never accessed S3. |
+| `fitx-user-storage` | 2026-06-15, 5 min before the `fitx-s3-user` key | no storage datapoints (empty) | Unused. Public-read bucket policy, see §12. |
+
+Supporting evidence:
+
+- Only `fitx-s3-user` has ever authenticated to S3 (§0.1).
+- The 2026-10-03 audit independently found current user objects in `fitx-user-bucket-2026`.
+- The repository has no committed bucket name: `S3_BUCKET_NAME` comes only from host `.env`, and git history contains none of the three names.
+
+**PRODUCTION USER STORAGE BUCKET:** `fitx-user-bucket-2026`. **CONFIDENCE:** HIGH, from metadata, metrics and Access Advisor. It is not CONFIRMED from the live `S3_BUCKET_NAME` value: the in-container read was not executed (§0.5) and is the closing check.
+
+### 0.4 Live bucket metadata (`fitx-user-bucket-2026`)
+
+| Property | Exact AWS response |
+| --- | --- |
+| Region | `eu-central-1` |
+| Default encryption | `SSEAlgorithm: AES256`, `BucketKeyEnabled: true`, `BlockedEncryptionTypes: [SSE-C]` |
+| Public Access Block | all four `true` |
+| Versioning | empty response (never enabled) |
+| Object ownership | `BucketOwnerEnforced` (ACLs disabled) |
+| Bucket policy | `NoSuchBucketPolicy` |
+| Lifecycle | `NoSuchLifecycleConfiguration` |
+| CORS | `NoSuchCORSConfiguration` |
+
+**KMS REQUIRED: NO.** The bucket uses SSE-S3 and the app sends `ServerSideEncryption="AES256"`. **BUCKET POLICY ROLE CHANGE REQUIRED: NO.** There is no bucket policy, and same-account identity policy is sufficient.
+
+### 0.5 Container identity: OPEN GATE (not executed)
+
+`aws ssm send-command` carrying a read-only probe was **refused by the operator workstation's tool-permission classifier** before it reached AWS. The CloudWatch `ListMetrics` read was refused the same way. Neither was retried or worked around.
+
+Current conclusion from indirect evidence:
+
+| | Principal | Credential source | Confidence |
+| --- | --- | --- | --- |
+| web | `arn:aws:iam::852128326881:user/fitx-s3-user` | static env key from host `.env` (`env_file`), which precedes IMDS in the SDK chain | HIGH (inferred) |
+| worker | same | same `env_file` | HIGH (inferred) |
+
+The inference rests on three facts:
+
+- the role has zero S3/Bedrock authentications;
+- `fitx-s3-user` authenticates to S3, Bedrock and CloudWatch, including the worker-independent minutely metric flush;
+- both services load the same `.env`.
+
+The probe in the appendix closes this gate. It prints principal ARN, `botocore` credential provider name, variable **presence**, and only the `S3_BUCKET_NAME`/model/metric configuration values. A second process with key variables unset proves the role is reachable from each container.
+
+### Evidence-gate review (first pass, staging operator; superseded by §0)
 
 | Gate | Verified finding | Remaining read-only evidence |
 | --- | --- | --- |
@@ -20,9 +110,9 @@ Status: **NOT CUTOVER READY; draft policy only** (2026-10-03). This document con
 | --- | --- |
 | Does application code require static AWS keys? | **No.** S3 and CloudWatch use `boto3.client` without credential arguments; Bedrock uses `AnthropicBedrock` without credential arguments. |
 | Can runtime use a role without mobile or API changes? | **Yes in code.** Live container metadata reachability and credential precedence require cutover validation. |
-| Required S3 bucket/resources | One configured `S3_BUCKET_NAME`, under `avatars/`, `meals/`, and `pump-checks/`. **The production bucket name remains unverified** because this task's staging operator is explicitly denied account-wide S3 listing and production IAM reads. The proposed policy is a template that must be resolved to the exact production bucket before creation. |
+| Required S3 bucket/resources | `fitx-user-bucket-2026` (HIGH confidence, §0.3) under `avatars/`, `meals/`, and `pump-checks/`. |
 | Required S3 actions | `GetObject`, `PutObject`, `DeleteObject` on those object prefixes. No bucket-level action found in runtime code. |
-| Bucket policy / KMS change? | **Unknown until production-authorized metadata review.** Do not cut over until bucket policy, default encryption, KMS key policy, and object ownership are checked. |
+| Bucket policy / KMS change? | **No.** No bucket policy; SSE-S3 `AES256`; `BucketOwnerEnforced`; PAB fully on (§0.4). |
 | Presigned URL effect? | **Yes.** Most GET URLs request 1 hour; avatar URLs request 6 hours. EC2 role credentials have a maximum validity around 6 hours and rotate, so a URL signed partway through a credential session expires before its requested 6 hours. The existing 6-hour lifetime is not guaranteed. Validate client refresh behavior before cutover. |
 | Code change required? | No change to the SDK construction. A backend URL refresh/lifetime change may be needed if the six-hour avatar contract proves necessary; this report does not change behavior. |
 | Is production cutover safe after the RDS incident? | **Not yet.** Resolve the evidence gates below and validate both web and worker against the role in a separately authorized task. |
@@ -41,8 +131,9 @@ production EC2 i-0c6f5352fc214e68d (AxisAI-server)
   -> previously verified broad S3, scoped Bedrock, CloudWatch metric capability
 
 same EC2 currently has instance profile AxisAI-EC2-Role- attached
-  -> its role and permissions could not be read with axisai-staging-operator
-  -> current effective container identity must be confirmed during cutover
+  -> role AxisAI-EC2-Role-: host SSM + CloudWatch agents only (Access Advisor, §0.1)
+  -> its dormant app grants target axisai-user-storage, not the live bucket
+  -> in-container identity probe still to be executed (§0.5)
 ```
 
 Read-only EC2 metadata confirmed the instance is running, IMDSv2 is required, endpoint enabled, and hop limit is 2. EC2 is therefore the appropriate native runtime mechanism. Use a separate `AxisAIProdRuntimeRole` and instance profile. The existing profile association should be **replaced** after reviewing its existing role and host-agent requirements; do not silently edit or remove the existing host role. EC2 supports replacement of a profile association on a running instance; application processes may still need a controlled recreation to remove environment credentials. AWS recommends replacing the profile to force a role change rather than only swapping its contained role. See [EC2 profile attachment](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/attach-iam-role.html) and [instance profiles](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use_switch-role-ec2_instance-profiles.html).
@@ -69,9 +160,9 @@ The deployment workflow uses GitHub OIDC and its separate deployer role. It is n
 
 | Bucket / prefix | Purpose and sensitivity | Read | Write | Delete | List | Runtime admin |
 | --- | --- | --- | --- | --- | --- | --- |
-| `${PROD_S3_BUCKET}/pump-checks/<user_id>/<YYYY>/<MM>/<uuid>.<ext>` | Body/progress photos; sensitive | bytes for AI/comparison, presigned GET for gallery | Pump Check upload | account deletion / check lifecycle | No | No |
-| `${PROD_S3_BUCKET}/meals/<user_id>/<YYYY>/<MM>/<uuid>.<ext>` | Meal images; private user content | presigned GET | meal upload | meal correction / account deletion | No | No |
-| `${PROD_S3_BUCKET}/avatars/<user_id>/<YYYY>/<MM>/<uuid>.<ext>` | Profile images; private user content | presigned GET | avatar upload | avatar replacement / account deletion | No | No |
+| `fitx-user-bucket-2026/pump-checks/<user_id>/<YYYY>/<MM>/<uuid>.<ext>` | Body/progress photos; sensitive | bytes for AI/comparison, presigned GET for gallery | Pump Check upload | account deletion / check lifecycle | No | No |
+| `fitx-user-bucket-2026/meals/<user_id>/<YYYY>/<MM>/<uuid>.<ext>` | Meal images; private user content | presigned GET | meal upload | meal correction / account deletion | No | No |
+| `fitx-user-bucket-2026/avatars/<user_id>/<YYYY>/<MM>/<uuid>.<ext>` | Profile images; private user content | presigned GET | avatar upload | avatar replacement / account deletion | No | No |
 
 `S3_BUCKET_NAME` is server configuration, not a request parameter. `_build_key` derives the user segment and UUID on the server. Delete functions validate a tight key grammar and owner ID. Download and presign helpers validate the user segment when passed `expected_user_id`; some callers first prove ownership through database queries. IAM prefix isolation can prevent access to unrelated prefixes and buckets, but one shared runtime role cannot enforce per-user isolation for all user IDs. Application authorization remains the per-user boundary. Audit every caller for `expected_user_id` or prior owner query before cutover; this work does not alter authorization.
 
@@ -95,7 +186,17 @@ Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py`
 
 ## 6. Proposed `AxisAIProdRuntimeRole`
 
-**Production policy template, not deployable until every `${...}` token is replaced and the metadata gates are passed. PROPOSED ROLE POLICY FINALIZED: NO.** The account ID and instance region are confirmed; the bucket, bucket/KMS policy, live model/profile configuration, and contained EC2 role are not. Do not substitute a wildcard bucket. If legacy DB keys exist outside the three prefixes, enumerate keys from application metadata only and add the minimal proven prefix before cutover. The EC2 trust policy below is structurally final for a newly created EC2 role; its use remains conditional on the host-agent/profile review.
+**PROPOSED ROLE POLICY FINALIZED: YES (application policy), against live metadata of 2026-10-03.** Resources are the verified bucket (§0.3–0.4) and the verified inference-profile model set (`aws bedrock get-inference-profile`, status `ACTIVE`, type `SYSTEM_DEFINED`). The profile declares exactly two model ARNs: the region-less global ARN and the `eu-central-1` ARN. No wildcard bucket. No KMS. No `ListBucket`. No Secrets Manager/SSM/IAM/RDS. One input is still configuration-dependent: `CloudWatch` namespaces assume the live `AI_METRICS_ENABLED` is unset/0. Today `fitx-s3-user` may publish only `FitX/Runtime`, so a `FitX/AI` emitter would already be failing. Add `FitX/AI` only if the §0.5 probe shows it enabled.
+
+S3 prefixes, re-verified on `origin/main` `d1252df`. Every `upload_image` caller passes an explicit prefix. The default `uploads/` is not a live call site.
+
+| Prefix | Feature | GetObject | PutObject | DeleteObject | ListBucket |
+| --- | --- | --- | --- | --- | --- |
+| `pump-checks/` | web + native Pump Check, workout completion photo, gallery/Physique, comparison bytes, Coach photo tool | yes (bytes + presign) | yes | yes (`delete_managed_object`, account deletion) | no |
+| `meals/` | meal-log photo | yes (presign) | yes | yes (`delete_meal_photo`, correction, account deletion) | no |
+| `avatars/` | profile picture | yes (presign) | yes | yes (replacement, account deletion) | no |
+
+**`ListBucket` is not required.** There is no listing call. Without it, a `GetObject` on a missing key returns 403 instead of 404. Both raise `S3Error` and are handled identically. `DeleteObject` does not need it, and missing-object deletes stay idempotent. The Coach `analyze_gym_photo` tool reads a model-supplied key, owner-checked by user segment. Under this policy, any legacy key outside the three prefixes becomes unreadable. That is acceptable: it is a stricter boundary, and the 2026-08-15 purge left one object. The exact legacy-prefix inventory would need object listing or a DB key read, both outside this read-only task.
 
 ```json
 {
@@ -106,9 +207,9 @@ Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py`
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:DeleteObject"],
       "Resource": [
-        "arn:aws:s3:::${PROD_S3_BUCKET}/pump-checks/*",
-        "arn:aws:s3:::${PROD_S3_BUCKET}/meals/*",
-        "arn:aws:s3:::${PROD_S3_BUCKET}/avatars/*"
+        "arn:aws:s3:::fitx-user-bucket-2026/pump-checks/*",
+        "arn:aws:s3:::fitx-user-bucket-2026/meals/*",
+        "arn:aws:s3:::fitx-user-bucket-2026/avatars/*"
       ]
     },
     {
@@ -116,9 +217,9 @@ Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py`
       "Effect": "Allow",
       "Action": "s3:PutObject",
       "Resource": [
-        "arn:aws:s3:::${PROD_S3_BUCKET}/pump-checks/*",
-        "arn:aws:s3:::${PROD_S3_BUCKET}/meals/*",
-        "arn:aws:s3:::${PROD_S3_BUCKET}/avatars/*"
+        "arn:aws:s3:::fitx-user-bucket-2026/pump-checks/*",
+        "arn:aws:s3:::fitx-user-bucket-2026/meals/*",
+        "arn:aws:s3:::fitx-user-bucket-2026/avatars/*"
       ],
       "Condition": {"StringEquals": {"s3:x-amz-server-side-encryption": "AES256"}}
     },
@@ -127,8 +228,8 @@ Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py`
       "Effect": "Deny",
       "Action": "s3:*",
       "Resource": [
-        "arn:aws:s3:::${PROD_S3_BUCKET}",
-        "arn:aws:s3:::${PROD_S3_BUCKET}/*"
+        "arn:aws:s3:::fitx-user-bucket-2026",
+        "arn:aws:s3:::fitx-user-bucket-2026/*"
       ],
       "Condition": {"Bool": {"aws:SecureTransport": "false"}}
     },
@@ -164,11 +265,17 @@ Presigned URLs use `GetObject`: default 3,600 seconds; avatar in `app/models.py`
       "Effect": "Allow",
       "Action": "cloudwatch:PutMetricData",
       "Resource": "*",
-      "Condition": {"StringEquals": {"cloudwatch:namespace": ["FitX/AI", "FitX/Runtime"]}}
+      "Condition": {"StringEquals": {"cloudwatch:namespace": "FitX/Runtime"}}
     }
   ]
 }
 ```
+
+**The role also requires two AWS-managed policies, attached unchanged:** `arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore` and `arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy`. One profile per instance; see §0.2. They are host-agent permissions, not application permissions.
+
+**Bedrock condition fallback.** The conditioned three-statement form follows AWS global-inference guidance, but it has not run in production. The unconditioned set already works in production on `fitx-s3-user` (`FitxBedrockInvokeSonnet45`, since 2026-09-04): both actions on exactly the profile ARN and the two model ARNs above. If `simulate-custom-policy` or the cutover deep-health probe denies the conditioned form, fall back to that proven set. Never fall back to `Resource: "*"` or `bedrock:*`.
+
+**Both Bedrock actions are required.** `InvokeModel` serves `messages.create` (blocking AI paths). `InvokeModelWithResponseStream` serves `messages.stream`, which is used by the live Coach path `/ask/stream` and by `bedrock_health`, the deploy gate's deep-health probe. A role without the stream action passes no deploy.
 
 AWS's [global inference IAM guidance](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html) requires profile, source-region model, and global model authorization; the latter has region `unspecified`. Confirm the actual profile's `models` metadata and live `BEDROCK_MODEL` before finalizing. If the profile's model IDs differ, use those exact IDs only. CloudWatch `PutMetricData` has no useful resource ARN for this call; its [namespace condition](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/iam-cw-condition-keys-namespace.html) limits both namespaces. Confirm live namespace overrides before finalizing. No `kms:*` or KMS action is included because the code requests SSE-S3 (`AES256`); add only `kms:GenerateDataKey`/`kms:Decrypt` on a verified exact key ARN, with `kms:ViaService`, if bucket/object metadata proves SSE-KMS is necessary.
 
@@ -228,6 +335,14 @@ Negative checks with the new role: `DeleteBucket`, `PutBucketPolicy`, `DeleteBuc
 | `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` on unrelated buckets or prefixes | Object allows name only the three configured production prefixes. | Simulate unrelated ARNs; use only controlled objects for any later real probe. |
 | IAM modification, Secrets Manager reads, RDS administration | No service actions granted. | Simulate representative actions and resources. |
 | `bedrock:InvokeModel` and streaming invocation on unapproved models | Allows only the named inference profile and matching model resources with profile conditions. | Simulate exact approved and unapproved ARNs after profile metadata is verified. |
+| S3 on `axisai-user-storage`, `fitx-user-storage`, `aws-sam-cli-managed-default-samclisourcebucket-tu9ljea0ritx` | Object allows name only `fitx-user-bucket-2026/{pump-checks,meals,avatars}/*`. The old role's `axisai-user-storage` grant is not carried over. | `simulate-custom-policy` per bucket ARN. |
+| `s3:PutObject` without `AES256` header | `PutObject` is conditional on `s3:x-amz-server-side-encryption = AES256`. | Simulate with and without the context key. |
+| `s3:PutObjectAcl`, `s3:GetObjectAcl` | Not granted. The bucket is `BucketOwnerEnforced`, so ACLs are disabled anyway. | Simulate. |
+| `secretsmanager:GetSecretValue` on `axisai/prod*` | Not granted. The old role's grant is dropped; Access Advisor shows it was never used. | Simulate. |
+| `cloudwatch:PutMetricData` to any namespace other than `FitX/Runtime` | Namespace condition. | Simulate `FitX/Runtime` (allow) and `FitX/UnauthorizedProbe` (deny). Do not publish. |
+| `bedrock:ListFoundationModels`, `bedrock:*` admin | Not granted. | Simulate. |
+
+**Host-agent caveat.** The two required AWS-managed agent policies carry `logs:*Create*/Put*`, `ssm:GetParameter(s)` (including `AmazonCloudWatch-*`), `ec2:DescribeTags/Volumes`, `xray:Put*` and SSM channel actions. The final-role simulation will therefore show those as **allowed**. That is expected and is not a runtime grant. Expected-deny tests must target the services and actions above, not "everything except S3/Bedrock/CloudWatch".
 
 These are **policy-template expectations**, not proof of effective production authorization. Effective denial also depends on the final role's other attached policies, permissions boundary, resource policies, and organization controls; inspect the complete role and simulate the final identity before cutover. Never add a broad policy merely to make a positive test pass.
 
@@ -247,6 +362,20 @@ The backend still returns the same URL fields. Early expiry of an avatar presign
 
 ## 12. Remaining risks and evidence gates
 
+**Six-hour avatar URL (verified 2026-10-03).** `User.avatar_src` signs with `expires_in=21600`. Every web consumer calls it per request, from server-rendered pages and JSON payloads (social, feed, leaderboard, challenges, notifications). No avatar URL is cached in Redis or the DB, so reloading always yields a fresh URL. The native `/api/v1` surface exposes no avatar field. `axisai_mobile` `origin/main` `7a7ccfa` has no avatar consumer, so **mobile does not consume avatar URLs**.
+
+Under EC2 role credentials, botocore refreshes when 15 minutes remain (10 minutes mandatory). A URL's effective lifetime is therefore between about 10 minutes and about 6 hours. The same bound shortens the 1-hour Pump Check, meal and Physique URLs, including those the native gallery consumes.
+
+- **6H URL REQUIREMENT:** not a product contract; nothing depends on it surviving 6 h.
+- **CURRENT CLIENT DEPENDENCY:** web only, regenerated on every load; mobile none for avatars.
+- **SAFE FOR ROLE CUTOVER:** CONDITIONAL. Accept that a web page left open long enough can show the initials fallback or a broken image until reload. Re-check the native gallery's expired-URL behavior during the cutover window.
+
+**New findings outside SEC-001 scope (record only; no change made):**
+
+- `fitx-user-storage` is empty but has a **public-read bucket policy** (`Principal: "*"`, `s3:GetObject` on `/*`; `PolicyStatus.IsPublic = True`). Its Public Access Block is fully disabled, and CORS allows `GET/PUT/POST/DELETE` from `https://fitx-chatbot.duckdns.org`. Pointing `S3_BUCKET_NAME` at it would publish every upload. This is the audit's SEC-021, now re-confirmed.
+- `axisai-user-storage` holds a **frozen 62-object copy** of production user images, taken on 2026-07-10. In-app account deletion only releases objects in the configured bucket, so photos of users deleted since July may persist in this copy. Treat it as a retention/erasure finding, not as a runtime dependency.
+- `fitx-user-bucket-2026` has versioning disabled and no lifecycle policy. Deletes are permanent, and there is no object-level backup.
+
 - A compromised runtime can still access every object under the three legitimate prefixes and may issue presigned URLs. IAM cannot distinguish application users sharing one EC2 role. Application ownership checks remain essential.
 - The exact production bucket, bucket policy, public state, encryption/KMS policy, existing profile role, live Bedrock model and metric overrides, and legacy stored key prefixes could not be read with `axisai-staging-operator`. `ListBuckets`, `iam:GetInstanceProfile`, `iam:GetUser`, and `bedrock:GetInferenceProfile` were explicitly denied. The AWS MCP server's read-only policy must not be worked around either. These gates block a final deployable policy and cutover approval.
 - If bucket policy names the IAM user ARN, add the new role principal minimally during the later cutover, validate, then remove the user after observation. If the bucket uses SSE-KMS, add exact KMS key permissions and key-policy access only if required. If an encryption or TLS condition conflicts with current requests, resolve it before cutover.
@@ -257,6 +386,21 @@ The backend still returns the same URL fields. Early expiry of an avatar presign
 ## 13. Recommended separately authorized cutover task
 
 Authorize a production operator **after the RDS incident** to resolve the metadata gates; produce a final concrete bucket/model/KMS/bucket-policy diff; review existing host-profile dependencies; create the exact role/profile; perform controlled positive and negative tests; replace the live profile association; remove static AWS variables from both containers; observe credential refresh and URL behavior; disable and later delete the old key. Keep the deployer role and SEC-002 work separate. This report does **not** authorize or execute those steps.
+
+## Appendix: container identity probe (§0.5 gate)
+
+This probe is read-only. A production operator runs it via SSM `AWS-RunShellScript` on `i-0c6f5352fc214e68d`.
+
+**What it does:**
+
+- For each of `web` and `worker`, it runs one Python process inside the container.
+- That process prints the presence (`present`/`absent`) of `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_PROFILE`, `AWS_DEFAULT_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE` and `AWS_EC2_METADATA_DISABLED`.
+- It prints the values of `S3_BUCKET_NAME`, `BEDROCK_MODEL`, `BEDROCK_REGION`, `AI_METRICS_ENABLED` and `RUNTIME_METRICS_ENABLED`, plus the `botocore` credential `method` and the `sts:GetCallerIdentity` ARN.
+- It repeats the identity call in a second process with the three key variables unset **for that process only**. That shows whether IMDS role credentials are reachable from the container.
+
+It never prints a credential value or the raw `docker inspect` environment, and it changes nothing.
+
+**Expected result if the inference holds:** method `env`, ARN `user/fitx-s3-user`, key variables `present`. The second process should show method `iam-role` and ARN `assumed-role/AxisAI-EC2-Role-/i-0c6f5352fc214e68d`.
 
 ## Safety counters for this preparation
 
