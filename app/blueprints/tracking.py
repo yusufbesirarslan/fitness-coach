@@ -293,7 +293,7 @@ def checkin():
     # check-in'ler daima yogunluk alanını taşır.
     previous = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
         .filter(WeeklyCheckIn.yogunluk.isnot(None))\
-        .order_by(WeeklyCheckIn.created_at.desc())\
+        .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())\
         .first()
 
     # Son oturum bilgilerini al
@@ -570,7 +570,7 @@ def progress_page():
     current_weight = current_user.weight
     if not current_weight:
         last_ci = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
-            .order_by(WeeklyCheckIn.created_at.desc()).first()
+            .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc()).first()
         current_weight = last_ci.weight if last_ci else None
     return render_template("progress.html", username=current_user.username,
         profile_picture=current_user.avatar_src,

@@ -69,7 +69,7 @@ def fetch_profile_and_trends(user_id):
     # şiddeti/deload kararları bunlara dayanmalı.
     try:
         checkins = (WeeklyCheckIn.query.filter_by(user_id=user_id)
-                    .order_by(WeeklyCheckIn.created_at.desc()).limit(4).all())
+                    .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc()).limit(4).all())
         if checkins:
             rows = []
             for c in checkins:

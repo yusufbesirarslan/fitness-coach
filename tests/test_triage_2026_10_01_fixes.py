@@ -122,7 +122,7 @@ _SCANNED = [*sorted((ROOT / "app").rglob("*.py")),
             *sorted((ROOT / "fitx_mcp").rglob("*.py"))]
 
 
-@pytest.mark.parametrize("model", ["UserSession", "TrainingPlan"])
+@pytest.mark.parametrize("model", ["UserSession", "TrainingPlan", "NutritionPlan", "WeeklyCheckIn"])
 def test_latest_row_selectors_break_ties_by_id(model):
     offenders = []
     for path in _SCANNED:
@@ -132,12 +132,13 @@ def test_latest_row_selectors_break_ties_by_id(model):
     assert offenders == []
 
 
-def test_raw_sql_latest_session_breaks_ties_by_id():
+@pytest.mark.parametrize("table", ["user_session", "nutrition_plan", "weekly_check_in"])
+def test_raw_sql_latest_session_breaks_ties_by_id(table):
     offenders = []
     for path in _SCANNED:
         # Join implicit string concatenation so a split SQL literal reads whole.
         sql = re.sub(r'"\s*\n\s*"', "", path.read_text(encoding="utf-8"))
-        for match in re.finditer(r"FROM user_session\b[^\"]*", sql):
+        for match in re.finditer(rf"FROM {table}\b[^\"]*", sql):
             statement = match.group(0)
             if ("ORDER BY created_at DESC" in statement
                     and "ORDER BY created_at DESC, id DESC" not in statement):

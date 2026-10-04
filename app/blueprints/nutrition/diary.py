@@ -198,7 +198,7 @@ def quick_add_meal():
         })
 
     plan_record = NutritionPlan.query.filter_by(user_id=current_user.id)\
-        .order_by(NutritionPlan.created_at.desc()).first()
+        .order_by(NutritionPlan.created_at.desc(), NutritionPlan.id.desc()).first()
 
     if not plan_record:
         return jsonify({"error": t("route.no_active_nutrition_plan")}), 404

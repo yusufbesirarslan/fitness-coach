@@ -73,7 +73,7 @@ def save_nutrition_plan():
 @require_auth
 def get_active_nutrition_plan():
     plan = NutritionPlan.query.filter_by(user_id=current_user.id)\
-        .order_by(NutritionPlan.created_at.desc())\
+        .order_by(NutritionPlan.created_at.desc(), NutritionPlan.id.desc())\
         .first()
 
     if not plan:
