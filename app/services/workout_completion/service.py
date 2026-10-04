@@ -58,6 +58,7 @@ from .models import (
 from .queries import (
     already_completed_today,
     is_pump_check_day_violation,
+    lock_completion_day,
     lock_session_for_completion,
     mark_session_completed,
 )
@@ -149,6 +150,15 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         shared_friend_ids=list(command.shared_friend_ids),
     )
     try:
+        # LP-13: the claim is written ONLY under the (owner, day) boundary that
+        # start_session also takes before it re-checks the claim and inserts, so
+        # a start can never slip a new ACTIVE session in between its guard and
+        # this commit — the gap a session-less completion (no session row to
+        # lock or terminalize) used to leave open. Taken after the session row
+        # (fixed order: session row -> day lock -> artifacts) and after every
+        # replay short-circuit, so replays stay lock-free; the lock is held only
+        # for this local transaction, never across provider I/O.
+        lock_completion_day(command.user_id, command.today)
         db.session.add(pump_check)
         # Flush now so a concurrent uq_pump_check_day conflict surfaces here (and
         # is handled identically to a commit-time conflict), and so pump_check.id

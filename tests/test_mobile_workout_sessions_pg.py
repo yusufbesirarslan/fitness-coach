@@ -605,3 +605,494 @@ def test_free_running_start_versus_completion_never_leaves_a_new_active_row():
         _assert_no_active_on_completed_day(flask_app, user_id)
     finally:
         _teardown(flask_app)
+
+
+# -- LP-13 P2: start racing a SESSION-LESS completion -------------------------
+#
+# A session-less completion (the browser's legacy ``/workout/complete`` and the
+# AI-coach gym-photo tool: ``CompleteWorkoutCommand(session_id=None)``) has no
+# session row to lock or terminalize, so the #385 argument above does not cover
+# it. Without a shared serialization point it could commit the day's claim
+# between a start's completed-today guard and its INSERT, leaving a NEW active
+# session on a completed day (``lifecycle_inconsistent``).
+#
+# The boundary is ``workout_completion.lock_completion_day``: a transaction-
+# scoped PostgreSQL advisory lock on (owner, Istanbul day) taken by
+# ``complete_workout`` before it writes the claim and by ``start_session``
+# before it re-checks the claim and inserts. Each ordering below is pinned at a
+# real seam. A side that must be serialized is released only once PostgreSQL
+# itself reports the other side WAITING on an advisory lock (or the other side
+# has already finished, which is what happens when no boundary exists, so the
+# same tests fail closed on the unfixed code).
+
+_ADVISORY_WAIT_SQL = (
+    "SELECT count(*) FROM pg_stat_activity "
+    "WHERE datname = current_database() "
+    "AND wait_event_type = 'Lock' AND wait_event = 'advisory'"
+)
+
+
+class _AdvisoryWatch:
+    """Observe advisory-lock waiters on a connection outside the app's pool."""
+
+    def __init__(self):
+        import sqlalchemy as sa
+
+        self._engine = sa.create_engine(_PG_URL)
+        self._text = sa.text(_ADVISORY_WAIT_SQL)
+
+    def waiters(self):
+        with self._engine.connect() as conn:
+            return int(conn.execute(self._text).scalar())
+
+    def wait_for_waiter_or(self, done, timeout=_STEP_TIMEOUT):
+        """True once some backend waits on an advisory lock; False if ``done``
+        is set first (the contender finished without ever waiting)."""
+        import time
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.waiters() > 0:
+                return True
+            if done.is_set():
+                return False
+            time.sleep(0.02)
+        raise AssertionError("contender neither waited nor finished")
+
+    def dispose(self):
+        self._engine.dispose()
+
+
+def _legacy_complete(user_id):
+    """The session-less canonical completion, exactly as the browser legacy path
+    and the AI-coach tool reach it (remote proof work already done)."""
+    from app.services.workout_completion import (
+        CompleteWorkoutCommand,
+        complete_workout,
+    )
+    from app.timeutil import app_today
+
+    result = complete_workout(CompleteWorkoutCommand(
+        user_id=user_id, today=app_today(), session_id=None,
+        **_completion_kwargs()))
+    return result.outcome.value
+
+
+def _day_rows(flask_app, user_id):
+    from app.models import PumpCheck, WorkoutSession
+    from app.timeutil import app_today
+
+    with flask_app.app_context():
+        claims = PumpCheck.query.filter_by(
+            user_id=user_id, date_key=app_today().isoformat()).count()
+        statuses = [row.status for row in WorkoutSession.query.filter_by(
+            user_id=user_id).order_by(WorkoutSession.id).all()]
+    return claims, statuses
+
+
+def _assert_claim_and_no_session(flask_app, user_id):
+    claims, statuses = _day_rows(flask_app, user_id)
+    assert claims == 1
+    # The integrity failure this section exists for: a completed day that ALSO
+    # holds a session the start inserted after the claim committed.
+    assert statuses == [], (
+        f"completed claim + new session(s) {statuses} on the same day")
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_session_less_completion_between_guard_and_insert_leaves_no_active_row(
+    monkeypatch,
+):
+    """Race A (the LP-13 reproducer): the start has passed its active lookup and
+    its first completed-today guard; a session-less completion then commits the
+    claim; the start resumes. It must be refused, never insert."""
+    _require_pg()
+    from app.services import mobile_workout_sessions as sessions
+    from app.services.workout_session import service as session_service
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    past_guard, committed = threading.Event(), threading.Event()
+    real_guard = session_service.completed_today
+
+    def _guard_then_pause(owner_id, day):
+        answer = real_guard(owner_id, day)
+        if getattr(_ROLE, "name", None) == "start" and not past_guard.is_set():
+            assert answer is False
+            past_guard.set()
+            assert committed.wait(_STEP_TIMEOUT), "completion never committed"
+        return answer
+
+    monkeypatch.setattr(session_service, "completed_today", _guard_then_pause)
+
+    def _complete():
+        try:
+            assert past_guard.wait(_STEP_TIMEOUT), "start never passed the guard"
+            return _legacy_complete(user_id)
+        finally:
+            committed.set()
+
+    def _start():
+        _ROLE.name = "start"
+        try:
+            return sessions.start(user_id, secret, reference).status
+        finally:
+            _ROLE.name = None
+            past_guard.set()
+
+    try:
+        results = _race(
+            flask_app, user_id, {"complete": _complete, "start": _start})
+        assert results["complete"] == ("ok", "created"), results
+        assert results["start"] == ("raise", "WorkoutNotStartable"), results
+        _assert_claim_and_no_session(flask_app, user_id)
+    finally:
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_start_holding_the_day_lock_serializes_a_session_less_completion(
+    monkeypatch,
+):
+    """Race B: the start owns the boundary (lock taken, claim re-checked) and is
+    about to INSERT when a session-less completion arrives. The completion must
+    WAIT for the start's commit, so the history is exactly the serial order
+    start -> complete — never a claim committed inside the start's window."""
+    _require_pg()
+    from app.services import mobile_workout_sessions as sessions
+    from app.services.workout_session import service as session_service
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    at_insert, complete_done = threading.Event(), threading.Event()
+    seen = {}
+    watch = _AdvisoryWatch()
+    real_insert = session_service.insert_active_session
+
+    def _insert_after_completion_queues(*args, **kwargs):
+        at_insert.set()
+        seen["completion_waited"] = watch.wait_for_waiter_or(complete_done)
+        seen["claims_at_insert"] = _committed_claims(user_id)
+        return real_insert(*args, **kwargs)
+
+    monkeypatch.setattr(
+        session_service, "insert_active_session", _insert_after_completion_queues)
+
+    def _complete():
+        try:
+            assert at_insert.wait(_STEP_TIMEOUT), "start never reached insert"
+            return _legacy_complete(user_id)
+        finally:
+            complete_done.set()
+
+    def _start():
+        try:
+            return sessions.start(user_id, secret, reference).status
+        finally:
+            at_insert.set()
+
+    try:
+        results = _race(
+            flask_app, user_id, {"complete": _complete, "start": _start})
+        assert seen.get("completion_waited") is True, (
+            "the completion committed its claim inside the start's window", seen)
+        assert seen["claims_at_insert"] == 0, seen
+        assert results["start"] == ("ok", 201), results
+        assert results["complete"] == ("ok", "created"), results
+        claims, statuses = _day_rows(flask_app, user_id)
+        # Serial start -> legacy completion: the session-less path never
+        # terminalizes a session (unchanged legacy contract), so the start's
+        # session stays ACTIVE exactly as it would sequentially.
+        assert (claims, statuses) == (1, ["active"])
+    finally:
+        watch.dispose()
+        _teardown(flask_app)
+
+
+def _committed_claims(user_id):
+    """Claims visible to a brand-new connection (i.e. committed)."""
+    import sqlalchemy as sa
+
+    engine = sa.create_engine(_PG_URL)
+    try:
+        with engine.connect() as conn:
+            return int(conn.execute(sa.text(
+                "SELECT count(*) FROM pump_check "
+                "WHERE user_id = :u AND date_key IS NOT NULL"), {"u": user_id}
+            ).scalar())
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_start_waits_for_a_session_less_completion_then_refuses(monkeypatch):
+    """Race C: the completion owns the boundary and has staged (not committed)
+    its claim. The start must queue on the same lock, wake after the commit,
+    see the claim and refuse — no ACTIVE row."""
+    _require_pg()
+    from app.services import mobile_workout_sessions as sessions
+    from app.services.workout_completion import service as completion_service
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    staged, start_done = threading.Event(), threading.Event()
+    seen = {}
+    watch = _AdvisoryWatch()
+    real_stage = completion_service._record_pump_check_created
+
+    # The seam is right after the claim is flushed and BEFORE award_xp takes the
+    # owner row FOR UPDATE, so the only thing a start can queue on here is the
+    # day boundary itself (a row-lock wait would prove nothing).
+    def _stage_then_hold(*args, **kwargs):
+        real_stage(*args, **kwargs)
+        staged.set()
+        seen["start_waited"] = watch.wait_for_waiter_or(start_done)
+
+    monkeypatch.setattr(
+        completion_service, "_record_pump_check_created", _stage_then_hold)
+
+    def _complete():
+        try:
+            return _legacy_complete(user_id)
+        finally:
+            staged.set()
+
+    def _start():
+        try:
+            assert staged.wait(_STEP_TIMEOUT), "completion never staged"
+            return sessions.start(user_id, secret, reference).status
+        finally:
+            start_done.set()
+
+    try:
+        results = _race(
+            flask_app, user_id, {"complete": _complete, "start": _start})
+        assert results["complete"] == ("ok", "created"), results
+        assert results["start"] == ("raise", "WorkoutNotStartable"), results
+        assert seen.get("start_waited") is True, seen
+        _assert_claim_and_no_session(flask_app, user_id)
+    finally:
+        watch.dispose()
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_two_starts_serialized_on_the_day_lock_leave_one_active_session(
+    monkeypatch,
+):
+    """Race D (deterministic): the second start queues on the boundary while the
+    first holds it at INSERT; it then re-checks, loses the partial-index claim
+    and replays the winner — exactly one ACTIVE session."""
+    _require_pg()
+    from app.extensions import db
+    from app.models import WORKOUT_SESSION_ACTIVE, WorkoutSession
+    from app.services import mobile_workout_sessions as sessions
+    from app.services.workout_session import service as session_service
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    first_at_insert, second_done = threading.Event(), threading.Event()
+    seen = {}
+    watch = _AdvisoryWatch()
+    real_insert = session_service.insert_active_session
+
+    def _insert(*args, **kwargs):
+        if getattr(_ROLE, "name", None) == "first":
+            first_at_insert.set()
+            seen["second_waited"] = watch.wait_for_waiter_or(second_done)
+        return real_insert(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "insert_active_session", _insert)
+
+    def _first():
+        _ROLE.name = "first"
+        try:
+            result = sessions.start(user_id, secret, reference)
+            return result.status, result.payload["session"]["session_ref"]
+        finally:
+            _ROLE.name = None
+            first_at_insert.set()
+
+    def _second():
+        try:
+            assert first_at_insert.wait(_STEP_TIMEOUT), "first never at insert"
+            result = sessions.start(user_id, secret, reference)
+            return result.status, result.payload["session"]["session_ref"]
+        finally:
+            second_done.set()
+
+    try:
+        results = _race(
+            flask_app, user_id, {"first": _first, "second": _second})
+        assert seen.get("second_waited") is True, seen
+        assert results["first"][1][0] == 201, results
+        assert results["second"][1] == (200, results["first"][1][1]), results
+        with flask_app.app_context():
+            assert db.session.query(WorkoutSession).filter_by(
+                user_id=user_id, status=WORKOUT_SESSION_ACTIVE).count() == 1
+    finally:
+        watch.dispose()
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_free_running_session_less_completion_versus_start_stays_serial():
+    """Race F (stress): many owners, each racing one start against one
+    session-less completion with no seams. Every owner must end in one of the
+    two serial histories, with no deadlock and no unexpected error:
+    complete -> start (refused, no session) or start -> complete (201, one
+    ACTIVE session, which the legacy completion leaves as is)."""
+    _require_pg()
+    from app.extensions import db
+    from app.models import TrainingPlan, User
+    from app.services import mobile_training
+    from app.services import mobile_workout_sessions as sessions
+    from app.timeutil import app_today
+
+    flask_app, first_user, first_ref = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    owners = [(first_user, first_ref)]
+    with flask_app.app_context():
+        template = TrainingPlan.query.filter_by(user_id=first_user).one()
+        slot = app_today().weekday()
+        for index in range(1, 12):
+            user = User(
+                username=f"pg_native_{index}",
+                email=f"pg_native_{index}@example.com",
+                cognito_sub=f"sub-pg-native-{index}")
+            db.session.add(user)
+            db.session.flush()
+            db.session.add(TrainingPlan(
+                user_id=user.id, plan_data=template.plan_data, score=8.0,
+                created_at=template.created_at,
+                lineage_id=f"{LINEAGE}-{index}", mutation_version=VERSION))
+            owners.append((user.id, mobile_training.workout_ref(
+                secret, user.id, f"{LINEAGE}-{index}", VERSION, slot)))
+        db.session.commit()
+
+    try:
+        for owner_id, reference in owners:
+            results = _race(flask_app, owner_id, {
+                "complete": lambda o=owner_id: _legacy_complete(o),
+                "start": lambda o=owner_id, r=reference: sessions.start(
+                    o, secret, r).status,
+            })
+            assert results["complete"] == ("ok", "created"), results
+            claims, statuses = _day_rows(flask_app, owner_id)
+            assert claims == 1
+            if results["start"] == ("raise", "WorkoutNotStartable"):
+                assert statuses == [], (owner_id, statuses)
+            else:
+                assert results["start"] == ("ok", 201), results
+                assert statuses == ["active"], (owner_id, statuses)
+    finally:
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_day_lock_domains_are_per_owner_and_per_day():
+    """Different owners, and the same owner on another Istanbul day, never queue
+    behind a held (owner, day) lock; the same (owner, day) does."""
+    _require_pg()
+    from datetime import timedelta
+
+    from app.extensions import db
+    from app.services.workout_completion import lock_completion_day
+    from app.timeutil import app_today
+
+    flask_app, user_id, _ = _make_pg_app()
+    other_id = user_id + 1000
+    day = app_today()
+    held, release, same_done = (
+        threading.Event(), threading.Event(), threading.Event())
+    watch = _AdvisoryWatch()
+    seen = {}
+
+    def _holder():
+        with flask_app.app_context():
+            lock_completion_day(user_id, day)
+            held.set()
+            assert release.wait(_STEP_TIMEOUT)
+            db.session.rollback()  # the xact lock ends with the transaction
+            db.session.remove()
+
+    def _acquire(owner, on_day):
+        with flask_app.app_context():
+            lock_completion_day(owner, on_day)
+            db.session.rollback()
+            db.session.remove()
+
+    holder = threading.Thread(target=_holder)
+    holder.start()
+    try:
+        assert held.wait(_STEP_TIMEOUT)
+        for owner, on_day in ((other_id, day), (user_id, day + timedelta(days=1))):
+            free = threading.Thread(target=_acquire, args=(owner, on_day))
+            free.start()
+            free.join(timeout=5)
+            assert not free.is_alive(), f"blocked on an unrelated domain {owner}"
+        assert watch.waiters() == 0
+
+        def _same():
+            try:
+                _acquire(user_id, day)
+            finally:
+                same_done.set()
+
+        same = threading.Thread(target=_same)
+        same.start()
+        seen["queued"] = watch.wait_for_waiter_or(same_done)
+        release.set()
+        same.join(timeout=_STEP_TIMEOUT)
+        assert not same.is_alive()
+        assert seen["queued"] is True
+    finally:
+        release.set()
+        holder.join(timeout=_STEP_TIMEOUT)
+        watch.dispose()
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_a_failed_completion_releases_the_day_lock(monkeypatch):
+    """A completion that raises inside its critical section rolls back: no claim
+    survives and the boundary is released, so a following start proceeds."""
+    _require_pg()
+    from app.services import mobile_workout_sessions as sessions
+    from app.services.workout_completion import service as completion_service
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    watch = _AdvisoryWatch()
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("activity write failed")
+
+    monkeypatch.setattr(completion_service, "log_activity", _boom)
+    try:
+        with flask_app.app_context():
+            with pytest.raises(RuntimeError):
+                _legacy_complete(user_id)
+            from app.extensions import db
+            db.session.remove()
+        monkeypatch.undo()
+        done = threading.Event()
+        results = {}
+
+        def _start():
+            with flask_app.app_context():
+                try:
+                    results["start"] = sessions.start(
+                        user_id, secret, reference).status
+                finally:
+                    done.set()
+
+        starter = threading.Thread(target=_start)
+        starter.start()
+        assert watch.wait_for_waiter_or(done) is False, "the lock leaked"
+        starter.join(timeout=_STEP_TIMEOUT)
+        assert results["start"] == 201
+        assert _day_rows(flask_app, user_id) == (0, ["active"])
+    finally:
+        watch.dispose()
+        _teardown(flask_app)

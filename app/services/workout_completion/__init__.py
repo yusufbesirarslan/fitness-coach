@@ -11,6 +11,8 @@ Public contract:
     :class:`CompletionOutcome` — the typed input/output.
   * :func:`already_completed_today` — read-only completion preflight for entry
     paths to skip expensive provider work on obvious replays.
+  * :func:`lock_completion_day` — the (owner, Istanbul day) serialization point
+    the completion claim write shares with ``workout_session.start_session``.
 
 Layering mirrors ``workout_state``: ``queries`` (impure reads) + ``service``
 (the mutation) + ``models`` (framework-free value objects).
@@ -21,12 +23,13 @@ from .models import (
     CompletionResult,
     SessionCompletionConflict,
 )
-from .queries import already_completed_today
+from .queries import already_completed_today, lock_completion_day
 from .service import complete_workout
 
 __all__ = [
     "complete_workout",
     "already_completed_today",
+    "lock_completion_day",
     "CompleteWorkoutCommand",
     "CompletionResult",
     "CompletionOutcome",

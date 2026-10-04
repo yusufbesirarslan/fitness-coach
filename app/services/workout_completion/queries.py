@@ -28,8 +28,11 @@ backfill). Bucketing by ``created_at`` alone let a standalone Pump Check taken
 earlier the same day make the day look completed and suppress the real
 completion's marker/XP (Native Progress D1).
 """
+import hashlib
 from datetime import date, datetime
 from typing import Iterable, Optional, Set
+
+from sqlalchemy import text
 
 from app.extensions import db
 from app.models import (
@@ -41,6 +44,11 @@ from app.models import (
 
 # The daily-completion unique constraint (app/models.py PumpCheck.__table_args__).
 PUMP_CHECK_DAY_CONSTRAINT = "uq_pump_check_day"
+
+# Namespace for the (owner, Istanbul day) advisory lock below, so its 64-bit key
+# can never coincide with another advisory-lock user in the same database
+# (``mobile_training_generation.locking`` hashes its own domain the same way).
+_COMPLETION_DAY_LOCK_DOMAIN = b"fitx:workout-completion-day-lock:v1\0"
 
 
 def completion_proof_clause():
@@ -76,6 +84,48 @@ def already_completed_today(user_id: int, today: date) -> bool:
     Check (``date_key IS NULL``) never satisfies it.
     """
     return today in completed_days(user_id, (today,))
+
+
+def completion_day_lock_key(user_id: int, day: date) -> int:
+    """The signed 64-bit advisory-lock key for ``(user_id, day)``."""
+    material = f"{int(user_id)}:{day.isoformat()}".encode("ascii")
+    digest = hashlib.sha256(_COMPLETION_DAY_LOCK_DOMAIN + material).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=True)
+
+
+def lock_completion_day(user_id: int, day: date) -> None:
+    """Serialize on ``(user_id, Istanbul day)`` until the transaction ends (LP-13).
+
+    The ONE boundary shared by the two writers whose interleaving could leave a
+    new ACTIVE session on an already-completed day:
+
+    * :func:`service.complete_workout` takes it before it writes the day's
+      canonical claim (the ``PumpCheck`` with ``date_key``);
+    * ``workout_session.start_session`` takes it before it re-checks that claim
+      and inserts a session.
+
+    So a start's re-check and INSERT and a completion's claim write can never
+    interleave: whichever transaction holds the lock commits (or rolls back)
+    before the other proceeds, and the waiter's next statement runs on a fresh
+    READ COMMITTED snapshot that already contains the holder's commit.
+
+    ``pg_advisory_xact_lock`` is cluster-wide, so it serializes every web
+    worker, process and host on the same database (a Python lock would not),
+    and PostgreSQL releases it on COMMIT, ROLLBACK or a dropped connection —
+    there is no unlock to forget. Different owners and different days hash to
+    different keys and never wait on each other. The caller owns the
+    transaction and must not do network I/O while holding it.
+
+    On SQLite this is a no-op, as everywhere else in the repository: that
+    backend admits one writer at a time, so the critical section is already
+    exclusive.
+    """
+    if db.session.get_bind().dialect.name != "postgresql":
+        return
+    db.session.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": completion_day_lock_key(user_id, day)},
+    )
 
 
 def is_pump_check_day_violation(exc) -> bool:

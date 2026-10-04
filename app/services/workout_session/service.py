@@ -56,6 +56,7 @@ from .queries import (
     heartbeat,
     insert_active_session,
     is_active_session_owner_violation,
+    lock_completion_day,
     planned_workout_for_slot,
     terminalize_abandon,
     touch_active,
@@ -192,6 +193,15 @@ def start_session(
     the PumpCheck, so a racing start either still sees that session ACTIVE
     (replay) or already sees the claim (refused) — never neither. An abandoned
     session is not completion evidence, so abandon → restart stays valid.
+
+    A SESSION-LESS completion (browser legacy path, AI-coach tool) has no row
+    to terminalize, so the argument above does not cover it. The insert is
+    therefore guarded by the (owner, day) lock the completion takes before it
+    writes the claim: the claim is re-checked UNDER that lock, on a fresh READ
+    COMMITTED snapshot, and the insert commits before the lock is released. A
+    completion that committed first is seen and refused; one that arrives
+    later waits for this commit. The unlocked first check stays as the cheap
+    common-case refusal and is not trusted on its own.
     """
     day = today or app_today()
     now = datetime.utcnow()
@@ -202,6 +212,13 @@ def start_session(
         return _existing_or_conflict(existing, day, snapshot, native)
 
     if completed_today(user_id, day):
+        _log("start_refused_completed_today", user_id)
+        return SessionResult(SessionOutcome.INVALID_TRANSITION)
+
+    # LP-13: serialize with the completion claim write, then decide again.
+    lock_completion_day(user_id, day)
+    if completed_today(user_id, day):
+        db.session.rollback()  # end the transaction: releases the day lock
         _log("start_refused_completed_today", user_id)
         return SessionResult(SessionOutcome.INVALID_TRANSITION)
 
