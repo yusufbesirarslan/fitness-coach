@@ -1,4 +1,5 @@
 import json
+import logging
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -8,10 +9,11 @@ from sqlalchemy import event
 from app.extensions import db
 from app.models import (
     Activity, CoachConversation, FeedItem, NutritionPlan, PumpCheck,
-    TrainingPlan, TrainingPlanGenerationOperation, UserQuestProgress,
+    TrainingPlan, TrainingPlanGenerationOperation, User, UserQuestProgress,
     UserSession, WorkoutLog, WorkoutSession,
 )
 from app.services import mobile_auth
+from app.services import premium
 from app.services.ai_gate import BlockingConcurrencyLimit
 from app.services.mobile_training_generation import (
     GenerationInProgress, GenerationPersistenceUnavailable,
@@ -75,6 +77,17 @@ def _document(exercise_count=1):
             "catalog_version": "2026.07",
         },
     }
+
+
+def _provider_document(name):
+    """Provider shape: no server-owned IDs or persisted context."""
+    document = _document()
+    del document["exercise_context"]
+    for day in document["program"]:
+        for exercise in day["egzersizler"]:
+            del exercise["exercise_id"]
+            exercise["isim"] = name
+    return document
 
 
 @pytest.fixture
@@ -207,6 +220,112 @@ def test_response_loss_retry_is_exact_replay_without_provider(
     assert replay.json == first.json
     assert replay.headers["Idempotency-Replayed"] == "true"
     assert TrainingPlan.query.count() == 1
+
+
+def test_unresolved_native_failure_is_durable_and_new_key_can_recover(
+        app, client, mobile_user, as_mobile, monkeypatch):
+    app.config["AI_PLAN_QUOTA_ENABLED"] = True
+    calls = []
+
+    def complete(**kwargs):
+        calls.append(kwargs)
+        name = "Invented Laser Row" if len(calls) == 1 else "Barbell Back Squat"
+        return json.dumps(_provider_document(name))
+
+    monkeypatch.setattr("app.blueprints.mobile_training._heavy_chat", complete)
+    failed_headers = as_mobile(mobile_user, "unresolved-first-key")
+    first = client.post(POST_PATH, json=CANONICAL, headers=failed_headers)
+
+    assert first.status_code == 422
+    assert first.json["error"]["code"] == (
+        "TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED")
+    assert first.json["error"]["retryable"] is False
+    assert len(calls) == 1
+    db.session.expire_all()  # read the committed failure, not a pending identity-map copy
+    failed = TrainingPlanGenerationOperation.query.one()
+    assert failed.status == "FAILED"
+    assert failed.error_code == "TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED"
+    assert failed.error_http_status == 422
+    assert failed.error_retryable is False
+    assert failed.candidate_plan_data is None
+    assert failed.candidate_score is None
+    assert failed.training_plan_id is None
+    assert failed.quota_reserved is False
+    assert premium.remaining_ai_plans(
+        db.session.get(User, mobile_user.id), "training") == 1
+    assert TrainingPlan.query.count() == 0
+    current = client.get(CURRENT_PATH, headers=as_mobile(mobile_user))
+    assert current.status_code == 200
+    assert current.json == {"plan": None}
+
+    replay = client.post(POST_PATH, json=CANONICAL, headers=failed_headers)
+    assert replay.status_code == 422
+    for field in ("code", "message", "retryable"):
+        assert replay.json["error"][field] == first.json["error"][field]
+    assert len(calls) == 1
+    assert TrainingPlan.query.count() == 0
+
+    fresh = client.post(
+        POST_PATH, json=CANONICAL,
+        headers=as_mobile(mobile_user, "unresolved-second-key"))
+    assert fresh.status_code == 201
+    assert len(calls) == 2
+    assert TrainingPlan.query.count() == 1
+    assert premium.remaining_ai_plans(
+        db.session.get(User, mobile_user.id), "training") == 0
+    assert [op.status for op in TrainingPlanGenerationOperation.query.order_by(
+        TrainingPlanGenerationOperation.id).all()] == ["FAILED", "SUCCEEDED"]
+    assert fresh.json["plan"]["days"][0]["exercises"][0]["exercise_id"] == (
+        "ex_barbell_back_squat")
+
+
+def test_unresolved_diagnostic_is_bounded_correlated_and_private(
+        client, mobile_user, as_mobile, monkeypatch, caplog):
+    raw_name = "LEAK_GENERATED_EXERCISE_NAME"
+    prompt = "LEAK_PROMPT_TEXT"
+    injury = "LEAK_INJURY_TEXT"
+    key = "LEAK_IDEMPOTENCY_KEY"
+    token = "LEAK_AUTH_TOKEN"
+    response_text = json.dumps(_provider_document(raw_name)).replace(
+        "Controlled", "LEAK_MODEL_RESPONSE_CONTENT")
+    monkeypatch.setattr(
+        "app.services.training_generation.service.build_training_prompt",
+        lambda *args, **kwargs: prompt)
+    monkeypatch.setattr(
+        "app.blueprints.mobile_training._heavy_chat",
+        lambda **kwargs: response_text)
+    headers = as_mobile(mobile_user, key)
+    headers["Authorization"] = f"Bearer {token}"
+
+    with caplog.at_level(logging.INFO, logger="app"):
+        result = client.post(
+            POST_PATH, json={**CANONICAL, "injuries": injury}, headers=headers)
+
+    assert result.status_code == 422
+    events = [record.getMessage() for record in caplog.records
+              if "[TRAINING] exercise_resolution_failed " in record.getMessage()]
+    assert len(events) == 1
+    fields = dict(part.split("=", 1) for part in events[0].split()[2:])
+    assert set(fields) == {
+        "code", "category", "request_id", "catalog_version",
+        "equipment", "cardio_type", "completion_count",
+    }
+    assert fields == {
+        "code": "TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED",
+        "category": "unresolved_name",
+        "request_id": result.json["error"]["request_id"],
+        "catalog_version": "1",
+        "equipment": "spor_salonu",
+        "cardio_type": "yok",
+        "completion_count": "1",
+    }
+    assert any(
+        f"request id={fields['request_id']} " in record.getMessage()
+        for record in caplog.records)
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    for sentinel in (raw_name, prompt, injury, key, token,
+                     "LEAK_MODEL_RESPONSE_CONTENT", response_text):
+        assert sentinel not in logged
 
 
 def test_post_existing_plan_refuses_replacement(
