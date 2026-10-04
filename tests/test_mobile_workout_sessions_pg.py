@@ -440,3 +440,168 @@ def test_complete_versus_checkpoint_leaves_a_coherent_terminal_state():
                 assert results["complete"][1] == "RevisionConflict"
     finally:
         _teardown(flask_app)
+
+
+# -- LP-13 P2: start racing a session-linked completion -----------------------
+#
+# Invariant: once both transactions settle, no NEW active session exists on a
+# day whose linked completion committed. The completion authority terminalizes
+# the linked session in the SAME commit as the day's PumpCheck claim, so a start
+# either still sees that session ACTIVE (replay) or already sees the claim
+# (refused by the completed-today guard). The two orderings are pinned with
+# events at the real seams, not with sleeps.
+
+_ROLE = threading.local()
+_STEP_TIMEOUT = 15
+
+
+def _assert_no_active_on_completed_day(flask_app, user_id):
+    from app.models import (
+        WORKOUT_SESSION_ACTIVE,
+        WORKOUT_SESSION_COMPLETED,
+        PumpCheck,
+        WorkoutSession,
+    )
+
+    with flask_app.app_context():
+        rows = WorkoutSession.query.filter_by(user_id=user_id).all()
+        assert [row.status for row in rows] == [WORKOUT_SESSION_COMPLETED], rows
+        assert WorkoutSession.query.filter_by(
+            user_id=user_id, status=WORKOUT_SESSION_ACTIVE).count() == 0
+        assert PumpCheck.query.filter_by(user_id=user_id).count() == 1
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_start_seeing_the_session_active_before_completion_commits_replays(
+    monkeypatch,
+):
+    """Ordering A: completion has staged its PumpCheck + COMPLETED transition but
+    not committed; the start reads the session as still ACTIVE and replays it."""
+    _require_pg()
+    from app.services import mobile_workout_sessions as sessions
+    from app.services.workout_completion import service as completion_service
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    with flask_app.app_context():
+        session_ref = sessions.start(
+            user_id, secret, reference).payload["session"]["session_ref"]
+
+    staged, start_done = threading.Event(), threading.Event()
+    real_mark = completion_service.mark_session_completed
+
+    def _hold_before_commit(session, now):
+        changed = real_mark(session, now)
+        staged.set()
+        assert start_done.wait(_STEP_TIMEOUT), "start never finished"
+        return changed
+
+    monkeypatch.setattr(
+        completion_service, "mark_session_completed", _hold_before_commit)
+
+    def _complete():
+        try:
+            return sessions.complete(
+                user_id, session_ref, 0, **_completion_kwargs()).status
+        finally:
+            staged.set()
+
+    def _start():
+        try:
+            assert staged.wait(_STEP_TIMEOUT), "completion never staged"
+            result = sessions.start(user_id, secret, reference)
+            return result.status, result.payload["session"]["session_ref"]
+        finally:
+            start_done.set()
+
+    try:
+        results = _race(
+            flask_app, user_id, {"complete": _complete, "start": _start})
+        assert results["complete"] == ("ok", 200), results
+        assert results["start"] == ("ok", (200, session_ref)), results
+        _assert_no_active_on_completed_day(flask_app, user_id)
+    finally:
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_start_after_a_racing_completion_commits_is_refused(monkeypatch):
+    """Ordering B: the start's transaction is already open (plan snapshot read)
+    when the linked completion commits; its active lookup then finds no active
+    session and the completed-today guard must refuse instead of inserting."""
+    _require_pg()
+    from app.services import mobile_workout_sessions as sessions
+    from app.services.workout_session import service as session_service
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    with flask_app.app_context():
+        session_ref = sessions.start(
+            user_id, secret, reference).payload["session"]["session_ref"]
+
+    at_lookup, committed = threading.Event(), threading.Event()
+    real_lookup = session_service.get_active_session
+
+    def _lookup_after_completion(owner_id):
+        if getattr(_ROLE, "name", None) == "start":
+            at_lookup.set()
+            assert committed.wait(_STEP_TIMEOUT), "completion never committed"
+        return real_lookup(owner_id)
+
+    monkeypatch.setattr(
+        session_service, "get_active_session", _lookup_after_completion)
+
+    def _complete():
+        try:
+            assert at_lookup.wait(_STEP_TIMEOUT), "start never reached lookup"
+            return sessions.complete(
+                user_id, session_ref, 0, **_completion_kwargs()).status
+        finally:
+            committed.set()
+
+    def _start():
+        _ROLE.name = "start"
+        try:
+            return sessions.start(user_id, secret, reference).status
+        finally:
+            _ROLE.name = None
+            at_lookup.set()
+
+    try:
+        results = _race(
+            flask_app, user_id, {"complete": _complete, "start": _start})
+        assert results["complete"] == ("ok", 200), results
+        assert results["start"] == ("raise", "WorkoutNotStartable"), results
+        _assert_no_active_on_completed_day(flask_app, user_id)
+    finally:
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_free_running_start_versus_completion_never_leaves_a_new_active_row():
+    _require_pg()
+    from app.services import mobile_workout_sessions as sessions
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    with flask_app.app_context():
+        session_ref = sessions.start(
+            user_id, secret, reference).payload["session"]["session_ref"]
+
+    def _complete():
+        return sessions.complete(
+            user_id, session_ref, 0, **_completion_kwargs()).status
+
+    def _start():
+        return sessions.start(user_id, secret, reference).status
+
+    try:
+        results = _race(
+            flask_app, user_id, {"complete": _complete, "start": _start})
+        assert results["complete"] == ("ok", 200), results
+        # Either ordering is legal; a new 201 session never is.
+        assert results["start"] in (
+            ("ok", 200), ("raise", "WorkoutNotStartable")), results
+        _assert_no_active_on_completed_day(flask_app, user_id)
+    finally:
+        _teardown(flask_app)

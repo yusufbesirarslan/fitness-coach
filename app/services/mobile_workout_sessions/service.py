@@ -173,6 +173,9 @@ def start(user_id: int, secret, workout_ref: object) -> SessionCommandResult:
         plan_mutation_version=workout["mutation_version"],
     )
     result = start_session(user_id, today=today, native=identity)
+    if result.outcome is SessionOutcome.INVALID_TRANSITION:
+        # Today is already completed: the workout is no longer startable today.
+        raise WorkoutNotStartable("today's workout is already completed")
     if result.outcome is SessionOutcome.CONFLICT:
         if result.session is None:
             raise SessionPersistenceUnavailable("session state is unavailable")
