@@ -243,11 +243,11 @@ def _completion_proof():
 
     check = validate_pump_check(image_bytes, location_type, description)
     if check.get("fallback"):
-        # Fail closed (LP-13 P2): the proof could not be EVALUATED (provider
-        # error, timeout, malformed answer). Checked first and independently of
-        # ``valid``, so fallback=True can never be read as permission. Not a
-        # rejection either: nothing is written, the session stays ACTIVE, and
-        # the same command may be retried.
+        # Fail closed (LP-13 P2): the proof could not be EVALUATED (validator
+        # unavailable, provider error, timeout, malformed answer). Checked first
+        # and independently of ``valid``, so fallback=True can never be read as
+        # permission. Not a rejection either: nothing is written, the session
+        # stays ACTIVE, and the same command may be retried.
         current_app.logger.warning(
             "mobile_workout_session event=completion_unverified "
             "category=completion_proof_unverified request_id=%s",

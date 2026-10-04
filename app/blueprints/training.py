@@ -486,9 +486,10 @@ def complete_workout():
 
     check = validate_pump_check(image_bytes, location_type, description)
     if check.get("fallback"):
-        # LP-13 P2 — FAIL-CLOSED: kanıt DEĞERLENDİRİLEMEDİ (Bedrock hatası, zaman
-        # aşımı, bozuk yanıt). Ret değil (fotoğraf kötü değil), onay hiç değil:
-        # hiçbir şey yazılmaz, kullanıcı aynı isteği sonra tekrar dener.
+        # LP-13 P2 — FAIL-CLOSED: kanıt DEĞERLENDİRİLEMEDİ (doğrulayıcı kapalı/yok,
+        # Bedrock hatası, zaman aşımı, bozuk yanıt). Ret değil (fotoğraf kötü
+        # değil), onay hiç değil: hiçbir şey yazılmaz, kullanıcı aynı isteği
+        # sonra tekrar dener.
         current_app.logger.warning(
             "[WORKOUT] event=completion_unverified category=completion_proof_unverified")
         return jsonify({"error": t("pump.verify_unavailable"),

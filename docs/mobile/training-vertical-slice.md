@@ -546,9 +546,10 @@ for all of its callers.
 * The completion proof is FAIL-CLOSED (LP-13 P2). The media type sent to the
   vision model is decided from the image BYTES (JPEG/PNG/WebP; GIF on the
   browser route), never from size, filename or the client's declaration. When
-  the proof could not be EVALUATED -- provider 4xx/5xx, timeout, transport
-  failure, a malformed model answer, an image-preparation failure -- the answer
-  is the existing retryable `TRAINING_SESSION_UNAVAILABLE` (503, `retry`,
+  the proof could not be EVALUATED -- validator unavailable (`BEDROCK_ENABLED=0`
+  or no provider client; there is no mock pass), provider 4xx/5xx, timeout,
+  transport failure, a malformed model answer, an image-preparation failure --
+  the answer is the existing retryable `TRAINING_SESSION_UNAVAILABLE` (503, `retry`,
   `Retry-After: 15`), never a completion and never the 422 above: nothing is
   written, the session stays ACTIVE, and resending the same command is safe
   (exact-once is still `uq_pump_check_day`). Logged as one bounded

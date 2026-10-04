@@ -196,6 +196,14 @@ UNVERIFIED_STEPS = {
     "no_text_block": lambda: SimpleNamespace(stop_reason="end_turn", content=[]),
 }
 
+# The validator itself is unavailable before any provider call: Bedrock is
+# switched off, or the SDK package could not be imported (``anthropic is None``).
+# Either way the proof is NOT evaluated, so it can never become a verified one.
+VALIDATOR_UNAVAILABLE = {
+    "bedrock_disabled": lambda mp: mp.setattr("app.config.BEDROCK_ENABLED", False),
+    "client_unavailable": lambda mp: mp.setattr(ai, "anthropic", None),
+}
+
 
 # ==============================================================================
 # 1. validate_pump_check -- media-type authority + three explicit outcomes
@@ -304,21 +312,52 @@ def test_fallback_never_accompanies_valid(app, bedrock):
         outcomes.append(validate_pump_check(PNG, "gym", ""))
     bedrock.always = None
     outcomes.append(validate_pump_check(NOT_AN_IMAGE, "gym", ""))
+    for disable in VALIDATOR_UNAVAILABLE.values():
+        with pytest.MonkeyPatch.context() as mp:
+            disable(mp)
+            outcomes.append(validate_pump_check(PNG, "gym", ""))
 
     assert not any(o["valid"] and o["fallback"] for o in outcomes)
     assert [o for o in outcomes if o["valid"]] == [outcomes[0]]
 
 
-def test_disabled_vision_keeps_the_honest_mock_contract(app, monkeypatch):
-    """BEDROCK_ENABLED=0 (local/test setups only; prod expects =1) is a
-    configuration, not a failure: the pre-existing mock is unchanged."""
-    monkeypatch.setattr("app.config.BEDROCK_ENABLED", False)
+@pytest.mark.parametrize("state", sorted(VALIDATOR_UNAVAILABLE))
+def test_an_unavailable_validator_is_unverified_not_verified(
+    app, bedrock, monkeypatch, caplog, state
+):
+    """Final-review blocker: BEDROCK_ENABLED=0 or a missing provider client
+    used to return valid=True ("honest mock") and the workout completed on a
+    proof nobody evaluated. It is now the third outcome: unverified."""
+    VALIDATOR_UNAVAILABLE[state](monkeypatch)
 
+    with caplog.at_level(logging.INFO):
+        for raw in (PNG, JPEG, NOT_AN_IMAGE):
+            result = validate_pump_check(raw, "gym", "")
+            assert result == {"valid": False, "fallback": True,
+                              "reason": result["reason"]}
+            assert result["reason"]
+
+    # Never reached the provider, and said so in one bounded line per call.
+    assert bedrock.sent == []
+    lines = [r.getMessage() for r in caplog.records
+             if "event=proof_validation" in r.getMessage()]
+    assert len(lines) == 3
+    for line in lines:
+        fields = dict(part.split("=", 1) for part in line.split()[2:])
+        assert fields == {
+            "event": "proof_validation", "outcome": "validator_unavailable",
+            "media_type": "-", "error_type": "-", "provider_status": "-",
+        }
+
+
+def test_the_default_test_environment_cannot_verify_a_proof(app):
+    """conftest sets BEDROCK_ENABLED=0. With no explicit validator fake there
+    is no implicit success: a caller that expects completion must fake one."""
+    from app import config
+
+    assert config.BEDROCK_ENABLED is False
     result = validate_pump_check(PNG, "gym", "")
-
-    assert result["valid"] is True
-    assert result["fallback"] is False
-    assert "kaydedildi" in result["reason"].lower()
+    assert (result["valid"], result["fallback"]) == (False, True)
 
 
 def test_validation_logs_are_bounded(app, bedrock, caplog):
@@ -631,6 +670,64 @@ def test_an_unverified_completion_emits_one_bounded_diagnostic_line(
         assert leak not in logged
 
 
+@pytest.mark.parametrize("state", sorted(VALIDATOR_UNAVAILABLE))
+def test_an_unavailable_validator_never_completes_on_mobile(
+    client, owner, as_mobile, workout_ref, bedrock, armed_store, monkeypatch, state
+):
+    """BEDROCK_ENABLED=0 / no provider client: the same retryable 503 as any
+    other unevaluated proof -- not a completion, not the 422 rejection."""
+    from app.services import mobile_workout_sessions as service
+
+    entered_transaction = []
+    real_complete = service.complete
+    monkeypatch.setattr(
+        service, "complete",
+        lambda *a, **k: entered_transaction.append(True) or real_complete(*a, **k))
+    headers = as_mobile(owner)
+    reference = _started(client, headers, workout_ref)
+    with audit_clock(FIXED_NOW):
+        before_read = client.get(CURRENT_PATH, headers=headers).json
+    before = _session_columns(owner)
+    VALIDATOR_UNAVAILABLE[state](monkeypatch)
+
+    response = _complete_with(client, headers, reference, 1, PNG)
+
+    assert response.status_code == 503
+    error = response.json["error"]
+    assert set(error) == {"code", "message", "retryable", "request_id"}
+    assert error["code"] == "TRAINING_SESSION_UNAVAILABLE"
+    assert error["retryable"] is True
+    assert response.headers["Session-Resolution"] == "retry"
+    assert response.headers["Retry-After"] == "15"
+    assert bedrock.sent == []
+    assert entered_transaction == []
+    assert armed_store == []
+    assert before["status"] == "active" and before["checkpoint_revision"] == 1
+    assert _session_columns(owner) == before
+    with audit_clock(FIXED_NOW):
+        after_read = client.get(CURRENT_PATH, headers=headers).json
+    assert after_read == before_read
+    assert after_read["session"]["completed_at"] is None
+    assert _side_effects(owner) == NOTHING
+
+
+def test_an_unfaked_validator_in_the_default_environment_never_completes(
+    client, owner, as_mobile, workout_ref, armed_store
+):
+    """No ``bedrock`` fixture, no validator fake: the conftest default
+    (BEDROCK_ENABLED=0) must not be an implicit pass."""
+    headers = as_mobile(owner)
+    reference = _started(client, headers, workout_ref)
+    before = _session_columns(owner)
+
+    response = _complete_with(client, headers, reference, 1, PNG)
+
+    assert response.status_code == 503
+    assert response.json["error"]["code"] == "TRAINING_SESSION_UNAVAILABLE"
+    assert _session_columns(owner) == before
+    assert _side_effects(owner) == NOTHING
+
+
 def test_the_route_refuses_a_fallback_even_if_it_claims_valid(
     client, owner, as_mobile, workout_ref, armed_store, monkeypatch
 ):
@@ -723,6 +820,24 @@ def test_browser_unverified_proof_never_completes(
     body = response.get_json()
     assert body["code"] == "proof_unverified"
     assert body["error"]
+    assert browser_store == []
+    assert _browser_effects(browser_plan.id) == before
+    assert already_completed_today(browser_plan.id, app_today()) is False
+
+
+@pytest.mark.parametrize("state", sorted(VALIDATOR_UNAVAILABLE))
+def test_browser_unavailable_validator_never_completes(
+    client, browser_plan, bedrock, browser_store, monkeypatch, state
+):
+    VALIDATOR_UNAVAILABLE[state](monkeypatch)
+    before = _browser_effects(browser_plan.id)
+
+    response = client.post("/workout/complete", json={
+        "image": _data_url(PNG, "png"), "location_type": "salon"})
+
+    assert response.status_code == 503
+    assert response.get_json()["code"] == "proof_unverified"
+    assert bedrock.sent == []
     assert browser_store == []
     assert _browser_effects(browser_plan.id) == before
     assert already_completed_today(browser_plan.id, app_today()) is False

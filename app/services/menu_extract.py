@@ -368,18 +368,22 @@ def validate_pump_check(image_bytes, location_type, user_description):
     fallback=True HİÇBİR ZAMAN valid=True ile birlikte dönmez ve medya tipi
     istemcinin beyanından değil baytların kendisinden belirlenir.
 
-    BEDROCK_ENABLED kapalıyken (yalnızca yerel/test kurulumları; prod .env =1 bekler)
-    dürüst mock davranışı aynen korunur."""
+    Doğrulayıcının kendisi yoksa (BEDROCK_ENABLED kapalı ya da anthropic paketi
+    yüklenemedi) kanıt DEĞERLENDİRİLMEMİŞTİR → doğrulanamadı. Eskiden burada
+    valid=True dönen bir "mock" vardı; o da kanıtı değerlendirmeden tamamlamaya
+    izin verdiği için kaldırıldı. Başarılı tamamlama bekleyen yerel/test kurulumları
+    doğrulayıcıyı açıkça sahtelemelidir."""
     location_type = (location_type or "").strip() or "belirtilmedi"
     user_description = (user_description or "").strip() or "belirtilmedi"
 
     from app.config import BEDROCK_ENABLED
     from app.services.ai import _bedrock_validate_image, anthropic as _anthropic
 
-    # Bedrock kapalı/paket yok → dürüst MOCK: biçimi geçerli her gönderimi kabul et,
-    # "doğrulandı" DEME (otomatik görsel doğrulama yok).
+    # Bedrock kapalı / istemci yok → kanıt değerlendirilemez: doğrulanamadı
+    # (fail-closed, yeniden denenebilir). ASLA "doğrulandı" ya da "reddedildi" değil.
     if not (BEDROCK_ENABLED and _anthropic is not None):
-        return {"valid": True, "reason": "Pump Check kaydedildi (otomatik görsel doğrulama yakında).", "fallback": False}
+        _log_pump_check("validator_unavailable", media_type=None)
+        return _PUMP_CHECK_UNVERIFIED.copy()
 
     from app.services.vision_images import detect_image_media_type, prepare_image_for_vision
 
