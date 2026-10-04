@@ -22,6 +22,7 @@ os.environ["DATABASE_URL"] = "sqlite://"  # in-memory, per-app engine
 os.environ["FATSECRET_BASE_URL"] = "https://fatsecret.invalid"  # TLS guard passes, host unroutable
 os.environ["FITX_SKIP_DB_INIT"] = "1"  # tables come from db.create_all() in the app fixture
 os.environ["AUTH_WRITE_RATELIMIT"] = "2 per minute"
+os.environ["LOGIN_FAIL_CLOSED"] = "1"
 # REDIS_URL: pop YETMEZ — app/config.py'deki load_dotenv() .env'deki
 # 'redis://redis:6379' (docker hostname) değerini geri yükler ve limiter/redis
 # çözümlenemeyen host'a bağlanmaya çalışır. Boş string ata: load_dotenv mevcut
@@ -54,6 +55,16 @@ os.environ.pop("FLASK_ENV", None)
 import pytest  # noqa: E402
 from flask.testing import FlaskClient  # noqa: E402
 from werkzeug.datastructures import Headers  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ai_spend_guard_local_counters():
+    # The production guard uses Redis windows. Hermetic tests intentionally
+    # have no Redis, so process-local windows must not leak between test cases.
+    from app.services import ai_spend_guard
+    ai_spend_guard._reset_local_for_tests()
+    yield
+    ai_spend_guard._reset_local_for_tests()
 
 
 def pytest_addoption(parser):

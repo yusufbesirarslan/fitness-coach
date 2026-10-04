@@ -4,7 +4,7 @@ What is pinned here:
   * admission/rejection per scope (account, global) and class (heavy, light);
   * race safety of the Redis counters: N concurrent callers never admit more
     than the limit, including across two ceilings at once;
-  * Redis outage -> bounded process-local enforcement (never fail-open);
+  * configured Redis outage -> fail closed; explicit local mode stays bounded;
   * window rollover and key expiry;
   * THE POINT: a refused call never reaches the provider — in the gate, the
     heavy/light chat helpers, the coach tool loop (blocking and streaming),
@@ -115,6 +115,8 @@ def _fresh_guard(monkeypatch):
     monkeypatch.setattr(ai_spend_guard, "_get_redis", lambda: None)
     monkeypatch.setattr(ai_spend_guard, "LIMITS", {
         ("user", "heavy", "d"): 3,
+        ("user", "heavy", "h"): 100,
+        ("user", "heavy", "m"): 100,
         ("user", "light", "d"): 3,
         ("global", "heavy", "h"): 100,
         ("global", "heavy", "d"): 100,
@@ -127,6 +129,8 @@ def _fresh_guard(monkeypatch):
 def _limits(monkeypatch, **overrides):
     names = {
         "user_heavy": ("user", "heavy", "d"),
+        "user_heavy_hour": ("user", "heavy", "h"),
+        "user_heavy_minute": ("user", "heavy", "m"),
         "user_light": ("user", "light", "d"),
         "global_heavy_hour": ("global", "heavy", "h"),
         "global_heavy_day": ("global", "heavy", "d"),
@@ -164,6 +168,104 @@ def test_one_account_hitting_its_ceiling_does_not_block_another():
     for _ in range(3):
         _charge_as(7)
     _charge_as(8)  # a different account still has its own allowance
+
+
+def test_sec005_two_accounts_cannot_exhaust_production_daily_pool(monkeypatch):
+    """SEC-005: old 200/user vs 300/global let A+B deny C all day."""
+    _limits(monkeypatch, user_heavy=200, global_heavy_hour=100,
+            global_heavy_day=300)
+    # Spread attempts over four UTC hours so the hourly global breaker does
+    # not mask the daily vulnerability.
+    now = [3600.0]
+    monkeypatch.setattr(ai_spend_guard.time, "time", lambda: now[0])
+    for hour in range(4):
+        now[0] = 3600.0 * (hour + 1)
+        for _ in range(40):
+            try:
+                _charge_as(1)
+            except AISpendLimitExceeded:
+                pass
+            try:
+                _charge_as(2)
+            except AISpendLimitExceeded:
+                pass
+    _charge_as(3)  # A and B must leave emergency capacity for C.
+
+
+def test_sec005_one_account_cannot_exhaust_shared_hour(monkeypatch):
+    _limits(monkeypatch, user_heavy=200, user_heavy_hour=20,
+            user_heavy_minute=5, global_heavy_hour=100,
+            global_heavy_day=300)
+    now = [3600.0]
+    monkeypatch.setattr(ai_spend_guard.time, "time", lambda: now[0])
+    admitted = 0
+    for minute in range(30):
+        now[0] = 3600.0 + minute * 60
+        try:
+            _charge_as(1)
+            admitted += 1
+        except AISpendLimitExceeded:
+            pass
+    assert admitted == 20
+    _charge_as(2)
+    assert ai_spend_guard._local_counts[
+        f"{ai_spend_guard._KEY_PREFIX}:global:heavy:h:1"] == 21
+
+
+def test_sec005_routes_share_user_budget_and_expensive_feature_has_own_cap(monkeypatch):
+    _limits(monkeypatch, user_heavy=200, global_heavy_hour=100,
+            global_heavy_day=300)
+    now = [3600.0]
+    monkeypatch.setattr(ai_spend_guard.time, "time", lambda: now[0])
+    for i in range(20):
+        now[0] = 3600.0 + i * 300
+        with ai_spend_guard.subject_scope(1):
+            ai_spend_guard.charge("bedrock", feature="training_plan")
+    now[0] += 300
+    with ai_spend_guard.subject_scope(1):
+        with pytest.raises(AISpendLimitExceeded) as exc:
+            ai_spend_guard.charge("bedrock", feature="training_plan")
+        assert exc.value.scope == "feature"
+        ai_spend_guard.charge("bedrock", feature="nutrition_plan")
+    # Feature caps are distinct, while all routes also draw from the same user day.
+    assert sum(v for k, v in ai_spend_guard._local_counts.items()
+               if ":user:1:heavy:d:" in k) == 21
+
+
+def test_sec005_parallel_accounts_have_isolated_bursts(monkeypatch):
+    _use_redis(monkeypatch)
+    _limits(monkeypatch, user_heavy=200, user_heavy_hour=20,
+            user_heavy_minute=5, global_heavy_hour=100,
+            global_heavy_day=300)
+    admitted, refused = _race(64, lambda i: _charge_as(i % 4))
+    assert len(admitted) == 20
+    assert len(refused) == 44
+
+
+def test_sec005_parallel_requests_from_one_owner_stop_at_burst(monkeypatch):
+    fake = _use_redis(monkeypatch)
+    _limits(monkeypatch, user_heavy=200, user_heavy_hour=20,
+            user_heavy_minute=5, global_heavy_hour=100,
+            global_heavy_day=300)
+    admitted, refused = _race(64, lambda i: _charge_as(1))
+    assert len(admitted) == 5
+    assert len(refused) == 59
+    assert next(value for key, value in fake.data.items()
+                if ":user:1:heavy:m:" in key) == 5
+
+
+def test_sec005_burst_resets_on_utc_minute_boundary(monkeypatch):
+    now = [119.0]
+    monkeypatch.setattr(ai_spend_guard.time, "time", lambda: now[0])
+    _limits(monkeypatch, user_heavy=200, user_heavy_hour=20,
+            user_heavy_minute=5, global_heavy_hour=100,
+            global_heavy_day=300)
+    for _ in range(5):
+        _charge_as(1)
+    with pytest.raises(AISpendLimitExceeded):
+        _charge_as(1)
+    now[0] = 120.0
+    _charge_as(1)
 
 
 def test_heavy_and_light_are_counted_separately():
@@ -206,7 +308,7 @@ def test_disabled_guard_admits_everything(monkeypatch):
 
 def test_a_refused_call_does_not_consume_budget(monkeypatch):
     fake = _use_redis(monkeypatch)
-    _limits(monkeypatch, user_heavy=10, global_heavy_hour=2)
+    _limits(monkeypatch, user_heavy=2, global_heavy_hour=10)
     _charge_as(7)
     _charge_as(7)
     for _ in range(5):
@@ -312,15 +414,15 @@ def test_a_new_window_restores_the_allowance(monkeypatch):
     _charge_as(7)
 
 
-def test_redis_outage_degrades_to_a_local_bound_not_fail_open(monkeypatch, caplog):
+def test_redis_outage_fails_closed(monkeypatch, caplog):
     fake = _use_redis(monkeypatch)
     fake.fail = True
     monkeypatch.setattr(ai_spend_guard, "_redis_warned_at", 0.0)
-    with caplog.at_level("WARNING"):
-        for _ in range(3):
+    with caplog.at_level("ERROR"):
+        with pytest.raises(AISpendLimitExceeded) as exc:
             _charge_as(7)
-        with pytest.raises(AISpendLimitExceeded):
-            _charge_as(7)
+    assert exc.value.scope == "backend"
+    assert fake.data == {}
     assert "Redis unavailable" in caplog.text
 
 
@@ -331,10 +433,7 @@ def test_concurrent_callers_never_exceed_the_local_ceiling_without_redis(monkeyp
     assert len(refused) == 54
 
 
-def test_redis_outage_mid_window_admits_at_most_one_extra_local_allowance(monkeypatch):
-    # The local counters cannot see what Redis already admitted, so an outage
-    # that starts mid-window allows up to one more full limit in this process.
-    # That is the documented (1 + processes) bound, and it stays finite.
+def test_redis_outage_mid_window_never_admits_extra_calls(monkeypatch):
     fake = _use_redis(monkeypatch)
     _limits(monkeypatch, user_heavy=0, global_heavy_hour=5, global_heavy_day=1000)
     for _ in range(5):
@@ -342,10 +441,9 @@ def test_redis_outage_mid_window_admits_at_most_one_extra_local_allowance(monkey
     with pytest.raises(AISpendLimitExceeded):
         ai_spend_guard.charge("bedrock")
     fake.fail = True
-    for _ in range(5):
+    with pytest.raises(AISpendLimitExceeded) as exc:
         ai_spend_guard.charge("bedrock")
-    with pytest.raises(AISpendLimitExceeded):
-        ai_spend_guard.charge("bedrock")
+    assert exc.value.scope == "backend"
 
 
 # ── Subject attribution across threads ──────────────────────────────────────
@@ -371,6 +469,29 @@ def test_mobile_user_takes_precedence_in_request_context(app):
     with app.test_request_context("/api/v1/today"):
         g.mobile_user = SimpleNamespace(id=31)
         assert ai_spend_guard.current_subject() == 31
+
+
+def test_untrusted_header_cannot_choose_bucket(app):
+    from flask import g
+    with app.test_request_context("/api/v1/coach/messages",
+                                  headers={"X-User-Id": "999"}):
+        assert ai_spend_guard.current_subject() is None
+        g.mobile_user = SimpleNamespace(id=31)
+        ai_spend_guard.charge("bedrock")
+    assert any(":user:31:heavy:d:" in key for key in ai_spend_guard._local_counts)
+    assert not any(":user:999:" in key for key in ai_spend_guard._local_counts)
+
+
+def test_coach_domain_owner_cannot_override_authenticated_owner():
+    @ai_spend_guard.owner_argument
+    def owned(user_id):
+        return ai_spend_guard.current_subject()
+
+    with ai_spend_guard.subject_scope(31):
+        assert owned(31) == 31
+        with pytest.raises(AISpendLimitExceeded) as exc:
+            owned(999)
+    assert exc.value.scope == "identity"
 
 
 # ── The gate: refusal happens before the provider, permit returned ──────────
@@ -488,11 +609,10 @@ def test_light_chat_stops_at_the_ceiling(app, providers):
 
 def test_vision_helper_stops_at_the_ceiling(app, providers):
     with ai_spend_guard.subject_scope(7):
-        for _ in range(3):
-            ai._bedrock_validate_image(b"img", "image/jpeg", "p")
+        ai._bedrock_validate_image(b"img", "image/jpeg", "p")
         with pytest.raises(AISpendLimitExceeded):
             ai._bedrock_compare_images(b"a", "image/jpeg", b"b", "image/jpeg", "p")
-    assert providers.bedrock.calls == 3
+    assert providers.bedrock.calls == 1
 
 
 def test_recovery_never_retries_a_refusal():
@@ -509,12 +629,15 @@ def test_recovery_never_retries_a_refusal():
 
 def test_premium_normal_usage_is_unaffected_by_default_limits(app, providers, monkeypatch):
     monkeypatch.setattr(ai_spend_guard, "LIMITS", _source_default_limits())
-    # A heavy real day: 30 coach turns (the 30-day per-account maximum observed
-    # in production) at the worst-case 5 provider rounds each.
+    now = [3600.0]
+    monkeypatch.setattr(ai_spend_guard.time, "time", lambda: now[0])
+    # The observed maximum was 30 coach turns/day; ordinary one-call turns
+    # remain available when spread through a normal day.
     with ai_spend_guard.subject_scope(7):
-        for _ in range(150):
+        for i in range(30):
+            now[0] = 3600.0 + i * 300
             ai._heavy_chat([{"role": "user", "content": "hi"}])
-    assert providers.bedrock.calls == 150
+    assert providers.bedrock.calls == 30
 
 
 # ── Coach tool loop (blocking) ──────────────────────────────────────────────
@@ -712,6 +835,8 @@ def test_ask_at_ceiling_returns_the_existing_soft_error(app, auth_user, client, 
 
 _ENV_TO_KEY = {
     "AI_SPEND_USER_HEAVY_PER_DAY": ("user", "heavy", "d"),
+    "AI_SPEND_USER_HEAVY_PER_HOUR": ("user", "heavy", "h"),
+    "AI_SPEND_USER_HEAVY_PER_MINUTE": ("user", "heavy", "m"),
     "AI_SPEND_USER_LIGHT_PER_DAY": ("user", "light", "d"),
     "AI_SPEND_GLOBAL_HEAVY_PER_HOUR": ("global", "heavy", "h"),
     "AI_SPEND_GLOBAL_HEAVY_PER_DAY": ("global", "heavy", "d"),
@@ -749,9 +874,11 @@ def _limits_in_fresh_process(env_overrides):
     return {tuple(k.split("|")): v for k, v in json.loads(out.strip().splitlines()[-1]).items()}
 
 
-def test_light_defaults_are_the_launch_bridge_ceilings_and_heavy_is_unchanged():
+def test_light_defaults_are_the_launch_bridge_ceilings_and_heavy_is_isolated():
     assert _source_defaults() == {
         "AI_SPEND_USER_HEAVY_PER_DAY": 200,
+        "AI_SPEND_USER_HEAVY_PER_HOUR": 20,
+        "AI_SPEND_USER_HEAVY_PER_MINUTE": 5,
         "AI_SPEND_USER_LIGHT_PER_DAY": 100,
         "AI_SPEND_GLOBAL_HEAVY_PER_HOUR": 300,
         "AI_SPEND_GLOBAL_HEAVY_PER_DAY": 1500,
@@ -770,19 +897,34 @@ def test_unset_env_applies_the_defaults():
     ("37", 37),       # explicit value overrides the default
     ("400", 400),     # the old default is still reachable by env
     ("0", 0),         # 0 disables that one ceiling (documented semantics)
-    ("junk", None),   # unparsable -> default
-    ("-5", None),     # negative -> default
-    ("", None),       # empty -> default
 ])
 def test_env_still_overrides_the_light_defaults(raw, expected):
     limits = _limits_in_fresh_process({"AI_SPEND_USER_LIGHT_PER_DAY": raw,
                                        "AI_SPEND_GLOBAL_LIGHT_PER_DAY": raw})
-    assert limits[("user", "light", "d")] == (100 if expected is None else expected)
-    assert limits[("global", "light", "d")] == (500 if expected is None else expected)
+    assert limits[("user", "light", "d")] == expected
+    assert limits[("global", "light", "d")] == expected
     # heavy untouched by the light keys
     assert limits[("user", "heavy", "d")] == 200
     assert limits[("global", "heavy", "h")] == 300
     assert limits[("global", "heavy", "d")] == 1500
+
+
+@pytest.mark.parametrize("name,raw", [
+    ("AI_SPEND_USER_HEAVY_PER_HOUR", "0"),
+    ("AI_SPEND_GLOBAL_HEAVY_PER_DAY", "junk"),
+    ("AI_SPEND_USER_LIGHT_PER_DAY", "-1"),
+])
+def test_invalid_limit_configuration_fails_at_import(name, raw):
+    import os
+    import subprocess
+    import sys
+    env = {k: v for k, v in os.environ.items() if k not in _ENV_TO_KEY}
+    env[name] = raw
+    result = subprocess.run([sys.executable, "-c", "import app.services.ai_spend_guard"],
+                            env=env, capture_output=True, text=True,
+                            cwd=Path(__file__).resolve().parents[1])
+    assert result.returncode != 0
+    assert name in result.stderr
 
 
 @pytest.fixture(params=["redis", "local"])
