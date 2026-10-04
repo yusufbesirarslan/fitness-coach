@@ -1,7 +1,7 @@
-from typing import Sequence
-
 from app.services import injury_constraints
-from app.services.exercise_catalog import ExerciseContext, compatible_exercises
+from app.services.training_generation.exercise_choices import (
+    CompatibleExerciseChoices,
+)
 from app.services.training_generation.models import ClassificationResult, ProgramContext, TrainingPreferences, UserTrainingFeatures
 from app.services.training_generation.preference_contract import load_focus_directive
 from app.services.training_generation.program_generator import canonical_style, load_few_shot
@@ -12,7 +12,9 @@ def build_system_prompt(language: str = "tr") -> str:
         return (
             "You are an experienced personal trainer. Return ONLY one valid "
             "JSON object. No markdown, no code fences, no commentary. "
-            "Keep gun as Turkish weekday names and tip as antrenman/dinlenme/kardiyo."
+            "Keep gun as Turkish weekday names and tip as antrenman/dinlenme/kardiyo. "
+            "exercise_id values are opaque catalog IDs: copy them exactly from "
+            "the supplied list; never translate or invent them."
         )
     # Prompt gövdesi (contract + few-shot) İngilizce-ağırlıklı; tek satırlık
     # zayıf yönerge modeli İngilizce içeriğe kaydırabiliyor → direktif vurgulu.
@@ -20,20 +22,23 @@ def build_system_prompt(language: str = "tr") -> str:
         "Sen deneyimli bir kişisel antrenörsün. SADECE tek bir geçerli JSON "
         "nesnesi döndür. Markdown, kod çiti veya açıklama yok. "
         "odak, not ve tüm görünen metin alanlarını TÜRKÇE yaz — talimat ve "
-        "örnekler İngilizce olsa bile."
+        "örnekler İngilizce olsa bile. exercise_id bir metin değil, opak "
+        "katalog kimliğidir: verilen listeden BİREBİR kopyala, asla çevirme "
+        "veya uydurma."
     )
 
 
-def canonical_exercise_vocabulary(context: ExerciseContext) -> tuple[str, ...]:
-    """Deduplicated, sorted canonical display names compatible with context.
+# The JSON FORMAT example names one real ID. It is taken from the request's
+# own choice set, so the example itself can never show an ID the server will
+# refuse for this request (e.g. a dumbbell lift to a bodyweight-only user).
+_EXAMPLE_EXERCISE_IDS = ("ex_goblet_squat", "ex_bodyweight_squat")
 
-    This is a prompt-side hint only, not an authority — it narrows what the
-    LLM is told it may use. It never carries aliases, exercise IDs, or
-    equipment metadata; server-side resolution (against the same catalog)
-    remains the sole authority over what an "isim" value actually means.
-    """
-    names = {exercise.canonical_name for exercise in compatible_exercises(context)}
-    return tuple(sorted(names))
+
+def _example_exercise_id(exercise_choices: CompatibleExerciseChoices) -> str:
+    for exercise_id in _EXAMPLE_EXERCISE_IDS:
+        if exercise_id in exercise_choices:
+            return exercise_id
+    return exercise_choices.choices[0].exercise_id
 
 
 def build_training_prompt(
@@ -43,20 +48,28 @@ def build_training_prompt(
     context: ProgramContext,
     language: str = "tr",
     *,
-    exercise_vocabulary: Sequence[str] = (),
+    exercise_choices: CompatibleExerciseChoices,
 ) -> str:
+    """The generation prompt. ``exercise_choices`` is required and non-empty:
+    the provider output contract is an ``exercise_id`` from this closed set,
+    so a prompt without it would ask for something the server must refuse."""
+    if not isinstance(exercise_choices, CompatibleExerciseChoices) or not exercise_choices.choices:
+        raise ValueError("a non-empty closed exercise choice set is required")
     few_shot = load_few_shot(preferences.antrenman_tarzi)
     injury_text = injury_constraints.build_injury_directive(preferences.injuries)
     cardio_days = preferences.kardiyo_gun if preferences.kardiyo_tipi != "yok" else 0
     dinlenme_gun = 7 - preferences.gun_sayisi - cardio_days
     if language == "en":
-        lang_rule = "İçerik dili: ENGLISH; ama gun ve tip kanonik Türkçe kalacak."
+        lang_rule = ("İçerik dili: ENGLISH; ama gun ve tip kanonik Türkçe kalacak; "
+                     "exercise_id opak kimliktir, çevrilmez.")
     else:
         # Few-shot ve kural metinleri İngilizce; içerik dili kuralı vurgulu
         # olmazsa model İngilizceye kayıyor (TR kullanıcı EN plan görüyordu).
         lang_rule = ("İçerik dili: TÜRKÇE — odak, not ve tüm görünen metinler "
                      "Türkçe yazılacak (yukarıdaki İngilizce kural/örnek "
-                     "metinlerine rağmen); gun ve tip kanonik Türkçe kalacak.")
+                     "metinlerine rağmen); gun ve tip kanonik Türkçe kalacak; "
+                     "exercise_id görünen metin DEĞİLDİR, opak kimliktir ve "
+                     "ASLA çevrilmez.")
     cardio_labels = {
         "kosu": "koşu",
         "bisiklet": "bisiklet",
@@ -78,18 +91,24 @@ def build_training_prompt(
         )
     else:
         cardio_block = "- Cardio: none (no dedicated cardio-day allocation)"
-    if exercise_vocabulary:
-        vocabulary_lines = "\n".join(f"- {name}" for name in exercise_vocabulary)
-        exercise_vocabulary_block = (
-            "\nEXERCISE VOCABULARY (kapalı liste)\n"
-            "\"isim\" alanı SADECE aşağıdaki kanonik listeden seçilecek; listede "
-            "olmayan veya uydurma egzersiz adı yazma. Sunucu döndürdüğün her "
-            "\"isim\" değerini bu kanonik kataloğa göre yeniden çözümleyecek; "
-            "listede olmayan adlar kabul edilmeyebilir.\n"
-            f"{vocabulary_lines}\n"
-        )
-    else:
-        exercise_vocabulary_block = ""
+    choice_lines = "\n".join(
+        f"- {choice.exercise_id} | {choice.canonical_name}"
+        for choice in exercise_choices.choices
+    )
+    exercise_choices_block = (
+        "\nEXERCISE CHOICES (kapalı liste — exercise_id | katalog adı)\n"
+        "Her egzersiz için \"exercise_id\" alanına SADECE aşağıdaki listeden "
+        "bir kimliği BİREBİR kopyala.\n"
+        "- exercise_id opak bir kimliktir: çevirme, yeniden yazma, kısaltma, "
+        "harf değiştirme; listede olmayan kimlik uydurma.\n"
+        "- İçerik dili kuralı exercise_id değerlerine UYGULANMAZ.\n"
+        "- Katalog adı yalnızca seçim içindir; çıktıya \"isim\" yazma — "
+        "egzersiz adını sunucu katalogdan yazar.\n"
+        "- Sunucu her exercise_id değerini bu listeye karşı doğrular; listede "
+        "olmayan bir kimlik planı geçersiz kılar.\n"
+        f"{choice_lines}\n"
+    )
+    example_id = _example_exercise_id(exercise_choices)
     return f"""
 PROGRAM GENERATION CONTRACT
 - LLM sınıflandırma yapmayacak; sınıflandırma deterministik olarak önceden yapıldı.
@@ -120,7 +139,7 @@ USER PROFILE
 
 MOVEMENT COVERAGE REQUIRED
 {', '.join(context.movement_coverage)}
-{exercise_vocabulary_block}
+{exercise_choices_block}
 STYLE FEW-SHOT REFERENCE
 {few_shot[:2500]}
 
@@ -135,11 +154,11 @@ PROGRAM RULES
 6. {lang_rule}
 7. SADECE tek bir JSON nesnesi döndür. Markdown/kod çiti/yorum yok.
 8. Yalnızca şemadaki anahtarları kullan; ekstra anahtar ekleme.
-9. Egzersiz nesnesi tam olarak isim, set, tekrar, dinlenme, not içersin.
+9. Egzersiz nesnesi tam olarak exercise_id, set, tekrar, dinlenme, not içersin; exercise_id EXERCISE CHOICES listesinden birebir kopyalanır, "isim" alanı yazılmaz.
 10. set bir tamsayı olsun; sure_dk ve tahmini_kalori tamsayı olsun.
 11. Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) SADECE tip="kardiyo" günlerine yazılsın; tip="antrenman" gününe kardiyo egzersizi koyma.
 12. tip="dinlenme" günü HİÇBİR egzersiz içermez: "egzersizler": [] olmalı. Aktif toparlanma önerisini o günün "odak" alanına yaz; yürüyüş/esneme/mobilite dahil hiçbir hareketi dinlenme gününün egzersiz listesine ekleme.
 
 JSON FORMAT
-{{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"isim":"Goblet Squat","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}
+{{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"exercise_id":"{example_id}","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}
 """.strip()

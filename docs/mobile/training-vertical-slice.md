@@ -147,12 +147,12 @@ POST /training-plan (browser)
   -> build_features from User + latest UserSession
   -> classify_user
   -> build_program_context
-  -> canonical exercise vocabulary
+  -> closed compatible exercise choice set (exercise_id | catalog name)
   -> provider completion (maximum two calls)
   -> JSON extraction
   -> structural and semantic validation
   -> one bounded repair only for parse/truncation failures
-  -> canonicalize exercise names to catalog identities
+  -> validate each chosen exercise_id against that same set; catalog writes the name
   -> warn-only injury annotation after identity resolution
   -> candidate response + signed exercise-context token
 ```

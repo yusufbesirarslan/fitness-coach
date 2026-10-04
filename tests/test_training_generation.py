@@ -196,8 +196,8 @@ def test_response_validator_rejects_invalid_tip_and_wrong_training_day_count():
         "program": [
             {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full", "sure_dk": 45,
              "tahmini_kalori": 300,
-             "egzersizler": [{"isim": "Squat", "set": 3, "tekrar": "8-12",
-                              "dinlenme": "90 sn", "not": ""}]},
+             "egzersizler": [{"exercise_id": "ex_barbell_back_squat", "set": 3,
+                              "tekrar": "8-12", "dinlenme": "90 sn", "not": ""}]},
             {"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0,
              "tahmini_kalori": 0, "egzersizler": []},
             {"gun": "Çarşamba", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0,
@@ -250,8 +250,8 @@ def test_response_validator_rejects_messy_numeric_fields():
     plan = {"program": [
         {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full",
          "sure_dk": "45 dk", "tahmini_kalori": "~300",
-         "egzersizler": [{"isim": "Squat", "set": "3-4", "tekrar": "8-12",
-                          "dinlenme": "90 sn", "not": ""}]},
+         "egzersizler": [{"exercise_id": "ex_barbell_back_squat", "set": "3-4",
+                          "tekrar": "8-12", "dinlenme": "90 sn", "not": ""}]},
     ] + [_rest_day(g) for g in ["Salı", "Çarşamba", "Perşembe", "Cuma",
                                  "Cumartesi", "Pazar"]],
         "haftalik_ozet": {"yogunluk_skoru": 7, "denge_skoru": 7, "uygunluk_skoru": 7}}
@@ -260,7 +260,19 @@ def test_response_validator_rejects_messy_numeric_fields():
 
 
 def _valid_exercise():
-    return {"isim": "Squat", "set": 3, "tekrar": "8-12", "dinlenme": "90 sn", "not": ""}
+    # PR B provider shape: a catalog ID chosen from the closed set, no name.
+    return {"exercise_id": "ex_barbell_back_squat", "set": 3, "tekrar": "8-12",
+            "dinlenme": "90 sn", "not": ""}
+
+
+def _canonical(validated):
+    from app.services.exercise_catalog import ExerciseContext
+    from app.services.training_generation.exercise_choices import (
+        compatible_exercise_choices)
+    from app.services.training_generation.exercise_resolution import (
+        canonicalize_generated_exercises)
+    return canonicalize_generated_exercises(validated, compatible_exercise_choices(
+        ExerciseContext(equipment_context="spor_salonu")))
 
 
 def _valid_generated_plan():
@@ -300,7 +312,8 @@ def test_generated_day_duration_in_bounds_is_preserved():
     generated["program"][0]["sure_dk"] = 45
 
     validated, _ = validate_generated_plan(generated, preferences)
-    serialized = serialize_plan(validated)
+    # The catalog writes the display name before anything is persisted/served.
+    serialized = serialize_plan(_canonical(validated))
 
     assert validated["program"][0]["sure_dk"] == 45
     assert serialized["program"][0]["sure_dk"] == 45
@@ -322,7 +335,8 @@ def test_generated_exercise_sets_in_bounds_are_preserved():
     generated["program"][0]["egzersizler"][0]["set"] = 3
 
     validated, _ = validate_generated_plan(generated, preferences)
-    serialized = serialize_plan(validated)
+    # The catalog writes the display name before anything is persisted/served.
+    serialized = serialize_plan(_canonical(validated))
 
     assert validated["program"][0]["egzersizler"][0]["set"] == 3
     assert serialized["program"][0]["egzersizler"][0]["set"] == 3

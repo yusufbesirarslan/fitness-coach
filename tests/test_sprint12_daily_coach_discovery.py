@@ -461,7 +461,7 @@ def test_injury_annotation_follows_canonical_exercise_resolution():
     )
     lines = {
         "_parse_and_validate": [],
-        "canonicalize_plan_exercises": [],
+        "canonicalize_generated_exercises": [],
         "annotate_injuries": [],
     }
     for node in ast.walk(target):
@@ -470,11 +470,11 @@ def test_injury_annotation_follows_canonical_exercise_resolution():
             lines[node.func.id].append(node.lineno)
 
     assert lines["_parse_and_validate"], "validation call site disappeared"
-    assert lines["canonicalize_plan_exercises"], "canonicalization call site disappeared"
+    assert lines["canonicalize_generated_exercises"], "canonicalization call site disappeared"
     assert lines["annotate_injuries"], "injury annotation left the generation pipeline"
     assert (max(lines["_parse_and_validate"])
-            < min(lines["canonicalize_plan_exercises"]))
-    assert (max(lines["canonicalize_plan_exercises"])
+            < min(lines["canonicalize_generated_exercises"]))
+    assert (max(lines["canonicalize_generated_exercises"])
             < min(lines["annotate_injuries"]))
 
     validate_source = _source(

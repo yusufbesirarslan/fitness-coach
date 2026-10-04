@@ -16,14 +16,22 @@ DAY_KEYS = frozenset({
     "gun", "tip", "odak", "sure_dk", "tahmini_kalori", "egzersizler",
 })
 EXERCISE_KEYS = frozenset({"isim", "set", "tekrar", "dinlenme", "not"})
-# Sprint 11 PR4 Task 3: the canonical exercise-identity key generation-time
-# canonicalization (exercise_resolution.py) writes onto an accepted plan.
-# Deliberately NOT in EXERCISE_KEYS: generation must keep rejecting a
-# provider-authored ID. Task 4 lets save opt in (allow_exercise_id=True) —
-# there the key is optional INPUT that catalog resolution re-checks, never
-# an identity the caller gets to assert.
+# Sprint 11 PR4 Task 3: the canonical exercise-identity key canonicalization
+# (exercise_resolution.py) writes onto an accepted plan. Not in EXERCISE_KEYS:
+# a name-only client plan carries none. Task 4 lets save opt in
+# (allow_exercise_id=True) — there the key is optional INPUT that catalog
+# resolution re-checks, never an identity the caller gets to assert.
 EXERCISE_ID_KEY = "exercise_id"
 EXERCISE_KEYS_WITH_ID = EXERCISE_KEYS | frozenset({EXERCISE_ID_KEY})
+# PR B: the PROVIDER's exercise shape. The provider chooses identity from the
+# request's closed compatible-choice set and prescribes the rest; it does not
+# author a display name. ``isim`` is therefore an unknown key here, not an
+# ignored one — the catalog writes it after the ID has been validated
+# (exercise_resolution.canonicalize_generated_exercises). EXERCISE_KEYS and
+# EXERCISE_KEYS_WITH_ID above remain the CLIENT save shapes.
+PROVIDER_EXERCISE_KEYS = frozenset({
+    EXERCISE_ID_KEY, "set", "tekrar", "dinlenme", "not",
+})
 # Bound only. The real gate is ID_PATTERN + catalog membership; structure
 # just refuses to carry an unbounded string that far.
 EXERCISE_ID_MAX = 64

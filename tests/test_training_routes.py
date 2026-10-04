@@ -18,6 +18,7 @@ from app.services.training_generation.exercise_context_token import (
     sign_exercise_context,
 )
 from tests.test_validators import _image_data_url
+from tests.training_provider_support import as_provider_document
 from tests.test_workout_state import assert_valid_state_contract
 
 PLAN_JSON = {
@@ -173,7 +174,7 @@ def test_plan_requires_existing_session(client, auth_user):
 
 
 def test_plan_parses_fenced_json_and_scores(client, with_session, monkeypatch):
-    raw = "```json\n" + json.dumps(PLAN_JSON, ensure_ascii=False) + "\n```"
+    raw = "```json\n" + json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False) + "\n```"
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: raw)
 
     body = client.post("/training-plan", json={"gun_sayisi": 3}).get_json()
@@ -186,7 +187,7 @@ def test_plan_zero_scores_are_schema_invalid(client, with_session, monkeypatch):
     plan = dict(PLAN_JSON, haftalik_ozet={"yogunluk_skoru": 0, "denge_skoru": 0,
                                           "uygunluk_skoru": 0})
     monkeypatch.setattr(training_bp, "_heavy_chat",
-                        lambda **kwargs: json.dumps(plan, ensure_ascii=False))
+                        lambda **kwargs: json.dumps(as_provider_document(plan), ensure_ascii=False))
     response = client.post("/training-plan", json={})
     assert response.status_code == 500
     assert response.get_json()["code"] == "TRAINING_PLAN_GENERATION_SCHEMA_INVALID"
@@ -225,7 +226,7 @@ def test_plan_prompt_includes_cardio_preferences(client, with_session, monkeypat
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return json.dumps(cardio_plan, ensure_ascii=False)
+        return json.dumps(as_provider_document(cardio_plan), ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
     client.post("/training-plan", json={"kardiyo_tipi": "kosu", "kardiyo_gun": 2})
@@ -256,7 +257,7 @@ INJURY_PLAN["program"] = _seven_day_program("Conventional Deadlift", include_saf
 def test_plan_persists_posted_injuries(client, with_session, auth_user, monkeypatch):
     from app.models import User
     monkeypatch.setattr(training_bp, "_heavy_chat",
-                        lambda **kwargs: json.dumps(PLAN_JSON, ensure_ascii=False))
+                        lambda **kwargs: json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False))
 
     client.post("/training-plan", json={"injuries": "Menisküs"})
 
@@ -270,7 +271,7 @@ def test_plan_prompt_includes_strict_injury_directive(client, with_session, monk
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+        return json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
     client.post("/training-plan", json={"injuries": "bel fıtığı"})
@@ -281,7 +282,7 @@ def test_plan_prompt_includes_strict_injury_directive(client, with_session, monk
 
 def test_plan_flags_contraindicated_exercise_that_slips_through(client, with_session, monkeypatch):
     monkeypatch.setattr(training_bp, "_heavy_chat",
-                        lambda **kwargs: json.dumps(INJURY_PLAN, ensure_ascii=False))
+                        lambda **kwargs: json.dumps(as_provider_document(INJURY_PLAN), ensure_ascii=False))
 
     body = client.post("/training-plan", json={"injuries": "bel fıtığı"}).get_json()
 
@@ -300,7 +301,7 @@ def test_plan_without_injuries_is_unconstrained(client, with_session, monkeypatc
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+        return json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
     body = client.post("/training-plan", json={}).get_json()
@@ -314,7 +315,7 @@ def test_plan_hicbiri_clears_stored_injuries(client, with_session, auth_user, mo
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+        return json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
     client.post("/training-plan", json={"injuries": "Menisküs"})
@@ -670,7 +671,7 @@ def test_plan_prompt_includes_deterministic_classification_and_style(client, wit
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+        return json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
     body = client.post("/training-plan", json={

@@ -7,6 +7,14 @@ spelling that happened to resolve to that identity.
 Alias pair used throughout (real catalog entries, not fixtures):
 
     "Squat" / "Barbell Squat" → ex_barbell_back_squat / "Barbell Back Squat"
+
+PR B (server-validated catalog identity): the provider no longer spells an
+exercise at all — it returns the chosen ``exercise_id``. Two alias spellings
+of one lift therefore reach generation as the SAME ID, so alias-equivalence
+of warnings is now structural. The alias tests are kept as regression pins
+that the warning and the persisted ``not`` key off catalog identity; the
+alias pair is still exercised directly at the save boundary, which keeps
+name-only client plans.
 """
 import ast
 import json
@@ -18,7 +26,7 @@ from app.blueprints import training as training_bp
 from app.models import TrainingPlan
 from app.services.exercise_catalog import ExerciseContext, resolve_exercise, load_exercise_catalog
 from app.services.training_generation.output_errors import (
-    GenerationExerciseAmbiguousError,
+    GenerationExerciseIdentityInvalidError,
     GenerationExerciseUnresolvedError,
 )
 from app.services.training_generation.plan_schema import EXERCISE_ID_KEY, EXERCISE_KEYS, NOTE_MAX
@@ -33,12 +41,12 @@ from app.services.training_generation import exercise_resolution
 from app.services.today_facts import get_active_plan
 from app.services.training_generation import service as training_service
 from tests.test_sprint11_training_generation_output import (
-    _exercise,
     _generate,
     _prefs,
+    _provider_exercise,
+    _provider_week,
     _session,
     _stored_document,
-    _week,
 )
 
 
@@ -51,11 +59,12 @@ WRIST = "bilek sakatlığı"
 WARNING_PREFIX = "⚠️ SAKATLIK RİSKİ"
 
 
-def _alias_week(provider_name):
-    return _week(exercises=[
-        _exercise(provider_name),
-        _exercise("Row"),
-        _exercise("Push-up"),
+def _alias_week(alias):
+    """Provider week for the lift ``alias`` names: by its catalog ID (PR B)."""
+    return _provider_week(exercises=[
+        _provider_exercise(resolve_exercise(name=alias).exercise_id),
+        _provider_exercise("ex_barbell_row"),
+        _provider_exercise("ex_push_up"),
     ])
 
 
@@ -128,10 +137,10 @@ def test_alias_equivalent_exercises_remain_warning_free_when_injury_is_irrelevan
 def test_existing_deadlift_warning_survives_canonicalization(monkeypatch):
     """Known warn-producing case remains warn-only after identity resolution."""
     def fake(**kwargs):
-        return json.dumps(_week(exercises=[
-            _exercise("Conventional Deadlift"),
-            _exercise("Leg Press"),
-            _exercise("Row"),
+        return json.dumps(_provider_week(exercises=[
+            _provider_exercise("ex_barbell_deadlift"),
+            _provider_exercise("ex_leg_press"),
+            _provider_exercise("ex_barbell_row"),
         ]))
 
     payload = _generate(
@@ -207,15 +216,16 @@ def test_alias_equivalent_warnings_persist_into_stored_plan_data(
     assert stored_notes[0].startswith(WARNING_PREFIX)
 
 
-def test_unresolved_exercise_fails_closed_before_injury_annotation(monkeypatch):
-    """Unknown names must not be annotated and then persisted."""
+def test_unknown_exercise_id_fails_closed_before_injury_annotation(monkeypatch):
+    """Unknown identity must not be annotated and then persisted."""
     calls = []
 
     def fake(**kwargs):
         calls.append(kwargs)
-        return json.dumps(_week(exercises=[_exercise("Invented Laser Row")]))
+        return json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_invented_laser_row")]))
 
-    with pytest.raises(GenerationExerciseUnresolvedError):
+    with pytest.raises(GenerationExerciseIdentityInvalidError):
         _generate(monkeypatch, fake, preferences=_prefs(injuries=MENISCUS))
     assert len(calls) == 1
 
@@ -225,7 +235,8 @@ def test_unresolved_exercise_with_injuries_does_not_persist(
     _session(auth_user)
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
-        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Invented Laser Row")])),
+        lambda **kwargs: json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_invented_laser_row")])),
     )
     response = client.post("/training-plan", json={
         "gun_sayisi": 3, "sure": 45, "injuries": MENISCUS,
@@ -234,20 +245,26 @@ def test_unresolved_exercise_with_injuries_does_not_persist(
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
 
 
-def test_ambiguous_exercise_remains_fail_closed_and_is_not_an_injury_tiebreaker(
+def test_unexpected_resolution_failure_remains_fail_closed_and_is_not_an_injury_tiebreaker(
         monkeypatch):
+    """Formerly the ambiguous-NAME case. ID lookup is exact, so ambiguity is
+    unreachable from generation; any unexpected catalog resolution failure on
+    the ID path must still fail closed, typed, before annotation."""
     from app.services.exercise_catalog import ExerciseAmbiguous
 
-    def fake_resolve(*, name, catalog=None, exercise_id=None):
+    alias_week = _alias_week(ALIAS_A)  # resolve the alias before patching
+
+    def fake_resolve(*, name=None, catalog=None, exercise_id=None):
         raise ExerciseAmbiguous("ambiguous")
 
     monkeypatch.setattr(exercise_resolution, "resolve_exercise", fake_resolve)
 
     def fake(**kwargs):
-        return json.dumps(_alias_week(ALIAS_A))
+        return json.dumps(alias_week)
 
-    with pytest.raises(GenerationExerciseAmbiguousError):
+    with pytest.raises(GenerationExerciseUnresolvedError) as caught:
         _generate(monkeypatch, fake, preferences=_prefs(injuries=MENISCUS))
+    assert caught.value.resolution_category == "resolution_error"
 
 
 def test_injury_annotation_is_warn_only(monkeypatch):
@@ -271,11 +288,16 @@ def test_injury_annotation_does_not_add_provider_calls(monkeypatch):
     assert len(calls) == 1
 
 
-def test_raw_provider_name_cannot_reach_the_warning_matcher():
-    """Architecture guard: annotation requires canonical identity, not isim."""
+def test_raw_provider_entry_cannot_reach_the_warning_matcher():
+    """Architecture guard: annotation requires a canonical (ID, name) pair.
+
+    PR B: a validated provider entry now HAS an ``exercise_id`` (raw, not yet
+    checked against the catalog or the choice set) and no name, so presence
+    of an ID is no longer proof of canonicalization."""
     structured, _ = validate_generated_plan(_alias_week(ALIAS_A), _prefs())
     raw = structured["program"][0]["egzersizler"][0]
-    assert EXERCISE_ID_KEY not in raw
+    assert raw[EXERCISE_ID_KEY] == CANONICAL_ID
+    assert "isim" not in raw
     original_note = raw["not"]
 
     with pytest.raises((TypeError, ValueError)):
@@ -283,6 +305,27 @@ def test_raw_provider_name_cannot_reach_the_warning_matcher():
 
     assert raw["not"] == original_note
     assert WARNING_PREFIX not in (raw["not"] or "")
+
+
+def test_forged_identity_pair_cannot_reach_the_warning_matcher():
+    """A real ID beside a non-catalog name — or an unknown ID beside a real
+    name — is refused, and refused before ANY entry is annotated."""
+    structured, _ = validate_generated_plan(_alias_week(ALIAS_A), _prefs())
+    days = structured["program"]
+    for day in days:
+        for ex in day["egzersizler"]:
+            ex["isim"] = load_exercise_catalog().by_id[ex[EXERCISE_ID_KEY]].canonical_name
+    last = days[2]["egzersizler"][-1]
+    for forged in ({"isim": "Magic Squat"},
+                   {EXERCISE_ID_KEY: "ex_unknown_squat", "isim": CANONICAL_NAME}):
+        snapshot = json.dumps(structured, sort_keys=True)
+        original = dict(last)
+        last.update(forged)
+        with pytest.raises(TypeError):
+            annotate_injuries(structured, MENISCUS)
+        last.clear()
+        last.update(original)
+        assert json.dumps(structured, sort_keys=True) == snapshot
 
 
 def test_annotate_injuries_is_not_called_from_structural_validation():
@@ -312,7 +355,7 @@ def test_generation_annotates_after_canonical_exercise_resolution():
         and node.name == "generate_training_plan_candidate"
     )
     lines = {
-        "canonicalize_plan_exercises": [],
+        "canonicalize_generated_exercises": [],
         "annotate_injuries": [],
     }
     for node in ast.walk(target):
@@ -320,12 +363,12 @@ def test_generation_annotates_after_canonical_exercise_resolution():
                 and node.func.id in lines):
             lines[node.func.id].append(node.lineno)
 
-    assert lines["canonicalize_plan_exercises"], "canonicalization call site disappeared"
+    assert lines["canonicalize_generated_exercises"], "canonicalization call site disappeared"
     assert lines["annotate_injuries"], "injury annotation is not in the generation pipeline"
-    assert max(lines["canonicalize_plan_exercises"]) < min(lines["annotate_injuries"])
+    assert max(lines["canonicalize_generated_exercises"]) < min(lines["annotate_injuries"])
 
     # Canonicalization stays outside the parse/truncation repair boundary.
-    canonicalize_call = "plan = canonicalize_plan_exercises(plan, exercise_context)"
+    canonicalize_call = "plan = canonicalize_generated_exercises(plan, exercise_choices)"
     annotate_call = "annotate_injuries("
     ozet_line = 'ozet = plan.get("haftalik_ozet", {})'
     assert source.index(canonicalize_call) < source.index(annotate_call)
@@ -338,7 +381,7 @@ def test_generation_annotates_after_canonical_exercise_resolution():
         "except (ParseFailedError, TruncatedError, SchemaInvalidError) as exc:"
     )[1].split("except SemanticInvalidError:")[0]
     assert "annotate_injuries" not in repair_block
-    assert "canonicalize_plan_exercises" not in repair_block
+    assert "canonicalize_generated_exercises" not in repair_block
 
 
 def test_persisted_not_key_remains_the_warning_channel():

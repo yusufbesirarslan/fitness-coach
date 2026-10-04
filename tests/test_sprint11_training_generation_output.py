@@ -63,7 +63,10 @@ from app.services.training_generation.preference_contract import (
     CODE_SAVE_INVALID,
     CODE_UNSUPPORTED,
 )
-from app.services.training_generation.response_validator import validate_generated_plan
+from app.services.training_generation.response_validator import (
+    validate_generated_plan,
+    validate_plan_structure,
+)
 from app.services.training_generation.service import (
     generate_training_plan_payload,
     resolve_save_exercise_context,
@@ -116,6 +119,42 @@ def _week(training_days=3, cardio_days=0, exercises=None, duration=45,
             "yogunluk_skoru": 7, "denge_skoru": 7, "uygunluk_skoru": 7,
         },
     }
+
+
+def _provider_exercise(exercise_id="ex_goblet_squat", sets=3):
+    """PR B provider shape: a chosen catalog ID plus prescription, no name.
+
+    ``_exercise`` above stays the CLIENT (save) name-only shape; the save
+    boundary still accepts it.
+    """
+    return {
+        "exercise_id": exercise_id,
+        "set": sets,
+        "tekrar": "8-12",
+        "dinlenme": "90 sn",
+        "not": "kontrollü",
+    }
+
+
+def _provider_week(training_days=3, cardio_days=0, exercises=None, duration=45,
+                   cardio_duration=20, cardio_exercises=None):
+    """``_week`` in the provider shape, with the same default lifts by ID."""
+    return _week(
+        training_days, cardio_days,
+        exercises=exercises or [
+            _provider_exercise(), _provider_exercise("ex_barbell_row"),
+            _provider_exercise("ex_push_up"),
+        ],
+        duration=duration,
+        cardio_duration=cardio_duration,
+        cardio_exercises=cardio_exercises or [
+            _provider_exercise("ex_outdoor_run", 1)],
+    )
+
+
+def _client_plan(plan):
+    """Structure-validate a name-only CLIENT plan (the save path's shape)."""
+    return validate_plan_structure(plan, require_ozet=True)
 
 
 def _prefs(**overrides):
@@ -314,56 +353,59 @@ def test_incomplete_structure_helper_detects_open_brace():
 
 
 def test_valid_plan_passes_structure_and_semantics():
-    plan, warnings = validate_generated_plan(_week(), _prefs())
+    plan, warnings = validate_generated_plan(_provider_week(), _prefs())
     assert len(plan["program"]) == 7
     assert warnings == []
     assert plan["haftalik_ozet"]["toplam_antrenman_gun"] == 3
 
 
 def test_missing_required_exercise_fields_are_schema_invalid():
-    plan = _week()
-    plan["program"][0]["egzersizler"][0] = {"isim": "Squat"}
+    plan = _provider_week()
+    plan["program"][0]["egzersizler"][0] = {"exercise_id": "ex_barbell_back_squat"}
     with pytest.raises(SchemaInvalidError):
         validate_generated_plan(plan, _prefs())
 
 
 def test_unknown_day_key_is_schema_invalid():
-    plan = _week()
+    plan = _provider_week()
     plan["program"][0]["secret"] = True
     with pytest.raises(SchemaInvalidError, match="unknown"):
         validate_generated_plan(plan, _prefs())
 
 
 def test_wrong_nested_type_is_schema_invalid():
-    plan = _week()
-    plan["program"][0]["egzersizler"] = {"isim": "Squat"}
+    plan = _provider_week()
+    plan["program"][0]["egzersizler"] = {"exercise_id": "ex_barbell_back_squat"}
     with pytest.raises(SchemaInvalidError):
         validate_generated_plan(plan, _prefs())
 
 
-def test_oversized_name_is_schema_invalid():
-    plan = _week()
-    plan["program"][0]["egzersizler"][0]["isim"] = "x" * 121
+def test_oversized_exercise_id_is_schema_invalid():
+    """PR B: the provider no longer writes a name, so the bounded provider
+    string at the exercise level is the ID (NAME_MAX still bounds client
+    names at save)."""
+    plan = _provider_week()
+    plan["program"][0]["egzersizler"][0]["exercise_id"] = "ex_" + "a" * 62
     with pytest.raises(SchemaInvalidError):
         validate_generated_plan(plan, _prefs())
 
 
 def test_invalid_weekday_is_schema_invalid():
-    plan = _week()
+    plan = _provider_week()
     plan["program"][0]["gun"] = "Monday"
     with pytest.raises(SchemaInvalidError, match="gun"):
         validate_generated_plan(plan, _prefs())
 
 
 def test_float_sets_are_schema_invalid():
-    plan = _week()
+    plan = _provider_week()
     plan["program"][0]["egzersizler"][0]["set"] = 3.0
     with pytest.raises(SchemaInvalidError, match="integer"):
         validate_generated_plan(plan, _prefs())
 
 
 def test_messy_numeric_strings_are_schema_invalid():
-    plan = _week()
+    plan = _provider_week()
     plan["program"][0]["sure_dk"] = "45 dk"
     with pytest.raises(SchemaInvalidError):
         validate_generated_plan(plan, _prefs())
@@ -374,19 +416,19 @@ def test_messy_numeric_strings_are_schema_invalid():
 
 def test_wrong_training_day_count_is_semantic():
     with pytest.raises(SemanticInvalidError, match="antrenman günü"):
-        validate_generated_plan(_week(training_days=1), _prefs(gun_sayisi=3))
+        validate_generated_plan(_provider_week(training_days=1), _prefs(gun_sayisi=3))
 
 
 def test_empty_training_day_is_schema_not_semantic():
-    plan = _week()
+    plan = _provider_week()
     plan["program"][0]["egzersizler"] = []
     with pytest.raises(SchemaInvalidError, match="en az bir egzersiz"):
         validate_generated_plan(plan, _prefs())
 
 
 def test_rest_day_with_exercises_is_schema_invalid():
-    plan = _week()
-    plan["program"][3]["egzersizler"] = [_exercise()]
+    plan = _provider_week()
+    plan["program"][3]["egzersizler"] = [_provider_exercise()]
     with pytest.raises(SchemaInvalidError, match="dinlenme"):
         validate_generated_plan(plan, _prefs())
 
@@ -394,19 +436,21 @@ def test_rest_day_with_exercises_is_schema_invalid():
 def test_cardio_day_count_must_match_request():
     prefs = _prefs(kardiyo_tipi="kosu", kardiyo_gun=2, gun_sayisi=3)
     with pytest.raises(SemanticInvalidError, match="kardiyo"):
-        validate_generated_plan(_week(training_days=3, cardio_days=0), prefs)
-    plan, _ = validate_generated_plan(_week(training_days=3, cardio_days=2), prefs)
+        validate_generated_plan(_provider_week(training_days=3, cardio_days=0), prefs)
+    plan, _ = validate_generated_plan(_provider_week(training_days=3, cardio_days=2), prefs)
     assert sum(1 for day in plan["program"] if day["tip"] == "kardiyo") == 2
 
 
 def test_bodybuilding_requires_hypertrophy_sized_sessions():
     prefs = _prefs(antrenman_tarzi="bodybuilding")
-    small = _week(exercises=[_exercise()])
+    small = _provider_week(exercises=[_provider_exercise()])
     with pytest.raises(SemanticInvalidError, match="bodybuilding"):
         validate_generated_plan(small, prefs)
-    bulky = _week(exercises=[
-        _exercise("Bench Press"), _exercise("Row"),
-        _exercise("Squat"), _exercise("Curl"),
+    bulky = _provider_week(exercises=[
+        _provider_exercise("ex_barbell_bench_press"),
+        _provider_exercise("ex_barbell_row"),
+        _provider_exercise("ex_barbell_back_squat"),
+        _provider_exercise("ex_dumbbell_biceps_curl"),
     ])
     validate_generated_plan(bulky, prefs)
 
@@ -414,25 +458,33 @@ def test_bodybuilding_requires_hypertrophy_sized_sessions():
 def test_powerlifting_requires_multi_lift_sessions():
     prefs = _prefs(antrenman_tarzi="powerlifting")
     with pytest.raises(SemanticInvalidError, match="powerlifting"):
-        validate_generated_plan(_week(exercises=[_exercise()]), prefs)
-    validate_generated_plan(_week(exercises=[
-        _exercise("Back Squat"), _exercise("Bench Press"), _exercise("Deadlift"),
+        validate_generated_plan(
+            _provider_week(exercises=[_provider_exercise()]), prefs)
+    validate_generated_plan(_provider_week(exercises=[
+        _provider_exercise("ex_barbell_back_squat"),
+        _provider_exercise("ex_barbell_bench_press"),
+        _provider_exercise("ex_barbell_deadlift"),
     ]), prefs)
 
 
-def test_invented_exercise_names_still_pass_without_catalog():
-    plan = _week(exercises=[
-        _exercise("Quantum Trap Bar Snatch"),
-        _exercise("Invented Laser Row"),
-        _exercise("Photon Curl"),
+def test_unknown_but_well_formed_ids_still_pass_structure_without_catalog():
+    """Structure never confers identity (PR B form of the invented-names
+    test): a well-formed ID the catalog does not own passes shape and
+    semantics, carries no name, and is refused later by the catalog."""
+    plan = _provider_week(exercises=[
+        _provider_exercise("ex_quantum_trap_bar_snatch"),
+        _provider_exercise("ex_invented_laser_row"),
+        _provider_exercise("ex_photon_curl"),
     ])
     validated, warnings = validate_generated_plan(plan, _prefs())
-    assert validated["program"][0]["egzersizler"][0]["isim"] == "Quantum Trap Bar Snatch"
+    exercise = validated["program"][0]["egzersizler"][0]
+    assert exercise["exercise_id"] == "ex_quantum_trap_bar_snatch"
+    assert "isim" not in exercise
     assert warnings == []
 
 
 def test_focus_mismatch_is_not_invented_without_catalog():
-    plan = _week()
+    plan = _provider_week()
     plan["program"][0]["odak"] = "Göğüs"
     validate_generated_plan(plan, _prefs(odak="alt_vucut"))
 
@@ -445,7 +497,7 @@ def test_valid_first_response_is_one_call(monkeypatch):
 
     def fake(**kwargs):
         calls.append(kwargs)
-        return json.dumps(_week())
+        return json.dumps(_provider_week())
 
     _generate(monkeypatch, fake)
     assert len(calls) == 1
@@ -454,7 +506,7 @@ def test_valid_first_response_is_one_call(monkeypatch):
 
 def test_parse_failure_gets_one_repair(monkeypatch):
     calls = []
-    responses = iter(("{", json.dumps(_week())))
+    responses = iter(("{", json.dumps(_provider_week())))
 
     def fake(**kwargs):
         calls.append(kwargs)
@@ -470,7 +522,7 @@ def test_truncation_metadata_uses_repair_token_budget(monkeypatch):
     calls = []
     responses = iter((
         ChatCompletion(text='{"program": [', truncated=True, finish_reason="max_tokens"),
-        json.dumps(_week()),
+        json.dumps(_provider_week()),
     ))
 
     def fake(**kwargs):
@@ -500,7 +552,7 @@ def test_semantic_failure_does_not_enter_repair(monkeypatch):
 
     def fake(**kwargs):
         calls.append(kwargs)
-        return json.dumps(_week(training_days=1))
+        return json.dumps(_provider_week(training_days=1))
 
     with pytest.raises(SemanticInvalidError):
         _generate(monkeypatch, fake, preferences=_prefs(gun_sayisi=4))
@@ -509,11 +561,11 @@ def test_semantic_failure_does_not_enter_repair(monkeypatch):
 
 def test_truncated_closed_json_still_gets_one_repair(monkeypatch):
     calls = []
-    short = _week(training_days=1)
+    short = _provider_week(training_days=1)
     responses = iter((
         ChatCompletion(
             text=json.dumps(short), truncated=True, finish_reason="max_tokens"),
-        json.dumps(_week(training_days=4)),
+        json.dumps(_provider_week(training_days=4)),
     ))
 
     def fake(**kwargs):
@@ -548,7 +600,7 @@ def test_semantic_failure_does_not_enter_repair(monkeypatch):
     not a formatting slip — it stays terminal on the first completion."""
     from app.services.training_generation.output_errors import SemanticInvalidError
 
-    week = _week()
+    week = _provider_week()
     for day in week["program"]:
         day["tip"] = "dinlenme"
         day["egzersizler"] = []
@@ -569,7 +621,7 @@ def test_contract_rejection_never_enters_repair(monkeypatch):
 
     def fake(**kwargs):
         calls.append(kwargs)
-        return json.dumps(_week())
+        return json.dumps(_provider_week())
 
     from app.services.training_generation.preference_contract import PreferenceContractError
     with pytest.raises(PreferenceContractError):
@@ -612,7 +664,7 @@ def test_completion_budget_never_exceeds_two(monkeypatch):
 
 def test_pr3_valid_aliases_become_canonical_ids():
     plan = _week(exercises=[_exercise("Back Squat")])
-    validated, _ = validate_generated_plan(plan, _prefs())
+    validated = _client_plan(plan)
 
     canonical = canonicalize_plan_exercises(
         validated, ExerciseContext(equipment_context="spor_salonu"))
@@ -627,7 +679,7 @@ def test_duplicate_exercise_references_resolve_to_the_same_stable_id():
     plan = _week(exercises=[
         _exercise("Squat"), _exercise("Back Squat"), _exercise("Barbell Squat"),
     ])
-    validated, _ = validate_generated_plan(plan, _prefs())
+    validated = _client_plan(plan)
 
     canonical = canonicalize_plan_exercises(
         validated, ExerciseContext(equipment_context="spor_salonu"))
@@ -645,7 +697,7 @@ def test_canonicalization_dedupes_repeated_lookups_and_loads_catalog_once(monkey
     plan = _week(exercises=[
         _exercise("Back Squat"), _exercise("Back Squat"), _exercise("Row"),
     ])
-    validated, _ = validate_generated_plan(plan, _prefs())
+    validated = _client_plan(plan)
 
     catalog_loads = []
     real_load = exercise_resolution.load_exercise_catalog
@@ -680,7 +732,7 @@ def test_canonicalization_dedupes_repeated_lookups_and_loads_catalog_once(monkey
 
 def test_canonicalization_preserves_prescription_fields_and_adds_only_identity():
     plan = _week(exercises=[_exercise("Back Squat", sets=5)])
-    validated, _ = validate_generated_plan(plan, _prefs())
+    validated = _client_plan(plan)
 
     canonical = canonicalize_plan_exercises(
         validated, ExerciseContext(equipment_context="spor_salonu"))
@@ -693,15 +745,20 @@ def test_canonicalization_preserves_prescription_fields_and_adds_only_identity()
     assert set(ex) == {"isim", "set", "tekrar", "dinlenme", "not", "exercise_id"}
 
 
-def test_unresolved_provider_name_is_typed_and_not_repaired(monkeypatch):
+def test_unknown_provider_id_is_typed_and_not_repaired(monkeypatch):
+    """Supersedes the PR A unresolved-NAME pin: the provider now chooses an
+    ID, so an invented exercise is an unknown ID — typed, terminal, and never
+    sent back through the repair turn."""
     calls = []
 
     def fake(**kwargs):
         calls.append(kwargs)
-        return json.dumps(_week(exercises=[_exercise("Invented Laser Row")]))
+        return json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_invented_laser_row")]))
 
-    with pytest.raises(GenerationExerciseUnresolvedError):
+    with pytest.raises(GenerationExerciseIdentityInvalidError) as caught:
         _generate(monkeypatch, fake)
+    assert caught.value.resolution_category == "unknown_id"
     assert len(calls) == 1
 
 
@@ -710,7 +767,7 @@ def test_unresolved_provider_name_is_typed_and_not_repaired(monkeypatch):
     ("Back Squat", "ex_barbell_back_squat"),
 ])
 def test_canonical_and_explicit_alias_names_resolve(name, expected_id):
-    plan, _ = validate_generated_plan(_week(exercises=[_exercise(name)]), _prefs())
+    plan = _client_plan(_week(exercises=[_exercise(name)]))
     canonical = canonicalize_plan_exercises(
         plan, ExerciseContext(equipment_context="spor_salonu"))
     assert canonical["program"][0]["egzersizler"][0]["exercise_id"] == expected_id
@@ -718,7 +775,11 @@ def test_canonical_and_explicit_alias_names_resolve(name, expected_id):
 
 @pytest.mark.parametrize("name", ["Halterle Çömelme", "Incline Benhc Press"])
 def test_translated_or_typo_name_does_not_silently_resolve(name):
-    plan, _ = validate_generated_plan(_week(exercises=[_exercise(name)]), _prefs())
+    """PR A pin, now scoped to the SAVE resolver: a client's name-only plan
+    is still resolved by exact normalized name/alias, with no fuzzy match or
+    translation alias added. Generation no longer reaches this path at all
+    (see test_translated_text_beside_a_valid_id_cannot_cause_unresolved)."""
+    plan = _client_plan(_week(exercises=[_exercise(name)]))
     with pytest.raises(GenerationExerciseUnresolvedError) as caught:
         canonicalize_plan_exercises(
             plan, ExerciseContext(equipment_context="spor_salonu"))
@@ -726,39 +787,36 @@ def test_translated_or_typo_name_does_not_silently_resolve(name):
 
 
 def test_retired_catalog_name_has_bounded_inactive_category(fixture_catalog):
-    plan, _ = validate_generated_plan(
-        _week(exercises=[_exercise("Fixture Retired")]), _prefs())
+    plan = _client_plan(_week(exercises=[_exercise("Fixture Retired")]))
     with pytest.raises(GenerationExerciseUnresolvedError) as caught:
         canonicalize_plan_exercises(
             plan, ExerciseContext(equipment_context="ev"))
     assert caught.value.resolution_category == "inactive_match"
 
 
-def test_ambiguous_generated_exercise_is_typed(monkeypatch):
+def test_ambiguous_client_name_is_typed(monkeypatch):
     def fake_resolve(*, name, catalog=None):
         raise ExerciseAmbiguous("ambiguous")
 
     monkeypatch.setattr(exercise_resolution, "resolve_exercise", fake_resolve)
-    plan, _ = validate_generated_plan(_week(), _prefs())
+    plan = _client_plan(_week())
 
     with pytest.raises(GenerationExerciseAmbiguousError):
         canonicalize_plan_exercises(
             plan, ExerciseContext(equipment_context="spor_salonu"))
 
 
-def test_id_looking_generated_name_is_identity_invalid():
-    plan, _ = validate_generated_plan(
-        _week(exercises=[_exercise("ex_fake_exercise")]), _prefs())
+def test_id_looking_client_name_is_identity_invalid():
+    plan = _client_plan(_week(exercises=[_exercise("ex_fake_exercise")]))
 
     with pytest.raises(GenerationExerciseIdentityInvalidError):
         canonicalize_plan_exercises(
             plan, ExerciseContext(equipment_context="spor_salonu"))
 
 
-def test_equipment_incompatible_generated_exercise_is_typed():
+def test_equipment_incompatible_client_name_is_typed():
     """An 'ev' (home/bodyweight-only) plan containing a barbell squat fails closed."""
-    plan, _ = validate_generated_plan(
-        _week(exercises=[_exercise("Back Squat")]), _prefs())
+    plan = _client_plan(_week(exercises=[_exercise("Back Squat")]))
 
     with pytest.raises(GenerationExerciseIncompatibleError):
         canonicalize_plan_exercises(plan, ExerciseContext(equipment_context="ev"))
@@ -771,18 +829,43 @@ def test_generation_pipeline_rejects_incompatible_equipment(monkeypatch):
 
     def fake(**kwargs):
         calls.append(kwargs)
-        return json.dumps(_week(exercises=[_exercise("Back Squat")]))
+        return json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_barbell_back_squat")]))
 
     with pytest.raises(GenerationExerciseIncompatibleError):
         _generate(monkeypatch, fake, preferences=_prefs(ekipman="ev"))
     assert len(calls) == 1
 
 
-def test_http_typed_exercise_unresolved(client, auth_user, monkeypatch):
+def test_http_typed_exercise_identity_invalid(client, auth_user, monkeypatch):
+    """Browser shape of an invalid provider identity (formerly pinned as the
+    unresolved-name case): same 500/retryable contract, no plan, no echo."""
     _session(auth_user)
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
-        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Invented Laser Row")])),
+        lambda **kwargs: json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_invented_laser_row")])),
+    )
+
+    response = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
+
+    assert response.status_code == 500
+    body = response.get_json()
+    assert body["code"] == CODE_GENERATION_EXERCISE_IDENTITY_INVALID
+    assert body["retryable"] is True
+    assert "ex_invented_laser_row" not in json.dumps(body)
+    assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+def test_http_typed_exercise_unresolved_for_a_retired_id(
+        client, auth_user, monkeypatch, fixture_catalog):
+    """UNRESOLVED stays reachable from generation for exactly one reason: a
+    real but retired catalog ID."""
+    _session(auth_user)
+    monkeypatch.setattr(
+        training_bp, "_heavy_chat",
+        lambda **kwargs: json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_fixture_retired")])),
     )
 
     response = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
@@ -791,12 +874,11 @@ def test_http_typed_exercise_unresolved(client, auth_user, monkeypatch):
     body = response.get_json()
     assert body["code"] == CODE_GENERATION_EXERCISE_UNRESOLVED
     assert body["retryable"] is True
-    assert "Invented Laser Row" not in body["error"]
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
 
 
 def test_browser_unresolved_keeps_existing_plan_but_persists_posted_injuries(
-        client, auth_user, monkeypatch):
+        client, auth_user, monkeypatch, fixture_catalog):
     _session(auth_user)
     original_data = json.dumps({"existing": "unchanged"})
     existing = TrainingPlan(user_id=auth_user.id, plan_data=original_data)
@@ -805,7 +887,8 @@ def test_browser_unresolved_keeps_existing_plan_but_persists_posted_injuries(
     original_id = existing.id
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
-        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Invented Laser Row")])),
+        lambda **kwargs: json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_fixture_retired")])),
     )
 
     response = client.post("/training-plan", json={
@@ -830,7 +913,7 @@ def test_canonicalization_runs_after_the_full_try_except_not_inside_repair():
     entry_repair_catch = (
         "except (ParseFailedError, TruncatedError, SchemaInvalidError) as exc:")
     ozet_line = 'ozet = plan.get("haftalik_ozet", {})'
-    canonicalize_call = "plan = canonicalize_plan_exercises(plan, exercise_context)"
+    canonicalize_call = "plan = canonicalize_generated_exercises(plan, exercise_choices)"
 
     assert entry_repair_catch in source
     assert canonicalize_call in source
@@ -842,6 +925,7 @@ def test_canonicalization_runs_after_the_full_try_except_not_inside_repair():
     # handling — canonicalization must never be reachable from inside it.
     repair_block = source.split(entry_repair_catch)[1].split(
         "except SemanticInvalidError:")[0]
+    assert "canonicalize_generated_exercises" not in repair_block
     assert "canonicalize_plan_exercises" not in repair_block
     assert "GenerationExercise" not in repair_block
 
@@ -872,7 +956,7 @@ def test_generated_exercise_id_is_accepted_by_save(client, auth_user, monkeypatc
     a signed exercise context, and both survive the round trip into save. This
     test replaces the transient-gap test that asserted the opposite."""
     _session(auth_user)
-    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_provider_week()))
 
     generated = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
     assert generated.status_code == 200
@@ -909,7 +993,7 @@ def test_day_count_mismatch_does_not_retry(client, auth_user, monkeypatch):
 
     def fake(**kwargs):
         calls.append(kwargs)
-        return json.dumps(_week(training_days=1))
+        return json.dumps(_provider_week(training_days=1))
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake)
     response = client.post("/training-plan", json={"gun_sayisi": 4, "sure": 45})
@@ -1024,7 +1108,7 @@ def test_validate_plan_for_save_rejects_schema_errors():
 def test_generate_then_save_mocked_path(client, auth_user, monkeypatch):
     _session(auth_user)
     monkeypatch.setattr(
-        training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
+        training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_provider_week()))
     generated = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
     assert generated.status_code == 200
     body = generated.get_json()
@@ -1118,9 +1202,9 @@ def test_pr2_contract_still_runs_before_provider(monkeypatch):
 
 
 def test_representative_plan_fits_primary_token_budget():
-    bulky = _week(
+    bulky = _provider_week(
         training_days=6,
-        exercises=[_exercise(f"Lift {n}") for n in range(8)],
+        exercises=[_provider_exercise("ex_" + "x" * 40 + str(n)) for n in range(8)],
     )
     encoded = json.dumps(bulky, ensure_ascii=False)
     # 4 chars/token is a conservative overestimate of serialized JSON.
@@ -1370,7 +1454,8 @@ def test_a_cardio_exercise_cannot_be_saved_onto_a_training_day(
     _session(auth_user)
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
-        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Push-Up")])))
+        lambda **kwargs: json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_push_up")])))
 
     generated = client.post("/training-plan", json={
         "gun_sayisi": 3, "sure": 45, "ekipman": "ev",
@@ -1427,7 +1512,8 @@ def test_generation_fails_closed_when_the_provider_puts_cardio_on_a_training_day
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
         lambda **kwargs: json.dumps(
-            _week(exercises=[_exercise("Push-Up"), _exercise("Brisk Walk")])))
+            _provider_week(exercises=[_provider_exercise("ex_push_up"),
+                                     _provider_exercise("ex_brisk_walk")])))
 
     response = client.post("/training-plan", json={
         "gun_sayisi": 3, "sure": 45, "ekipman": "ev",
@@ -1647,7 +1733,7 @@ def test_save_route_verifies_context_before_it_validates_or_replaces():
 def test_generate_route_always_returns_a_context_token(
         client, auth_user, monkeypatch):
     _session(auth_user)
-    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_provider_week()))
 
     body = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45}).get_json()
 
@@ -1665,7 +1751,7 @@ def test_generate_route_binds_the_token_factory_to_the_signed_in_user(
     would satisfy any "the right strings appear in the route" assertion."""
     _session(auth_user)
     monkeypatch.setattr(
-        training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
+        training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_provider_week()))
 
     token = client.post("/training-plan", json={
         "gun_sayisi": 3, "sure": 45,
@@ -1681,7 +1767,7 @@ def test_generate_route_binds_the_token_factory_to_the_signed_in_user(
 
 
 def test_generation_payload_omits_the_token_without_a_factory(monkeypatch):
-    payload = _generate(monkeypatch, lambda **kwargs: json.dumps(_week()))
+    payload = _generate(monkeypatch, lambda **kwargs: json.dumps(_provider_week()))
     assert "exercise_context_token" not in payload
 
 
@@ -1690,7 +1776,8 @@ def test_generated_token_matches_the_accepted_equipment_context(
     _session(auth_user)
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
-        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Push-Up")])))
+        lambda **kwargs: json.dumps(_provider_week(
+            exercises=[_provider_exercise("ex_push_up")])))
 
     body = client.post("/training-plan", json={
         "gun_sayisi": 3, "sure": 45, "ekipman": "ev",
@@ -1704,11 +1791,24 @@ def test_generated_token_matches_the_accepted_equipment_context(
 # ── Structural validation opts in to exercise_id only where save asks ───────
 
 
-def test_generation_structural_validation_still_rejects_provider_authored_ids():
-    plan = _week()
-    plan["program"][0]["egzersizler"][0]["exercise_id"] = "ex_barbell_bench_press"
+def test_generation_structural_validation_requires_ids_and_rejects_names():
+    """Supersedes "generation rejects provider-authored IDs" (PR4 Task 3):
+    under PR B the ID IS the provider's answer and the NAME is what it may
+    not author. A name-only payload, a name beside an ID, and an entry with
+    no identity are all schema failures — never resolved by name."""
+    name_only = _week()
     with pytest.raises(SchemaInvalidError):
-        validate_generated_plan(plan, _prefs())
+        validate_generated_plan(name_only, _prefs())
+
+    name_beside_id = _provider_week()
+    name_beside_id["program"][0]["egzersizler"][0]["isim"] = "Magic Chest Exercise"
+    with pytest.raises(SchemaInvalidError, match="unknown"):
+        validate_generated_plan(name_beside_id, _prefs())
+
+    no_identity = _provider_week()
+    del no_identity["program"][0]["egzersizler"][0]["exercise_id"]
+    with pytest.raises(SchemaInvalidError, match="exercise_id"):
+        validate_generated_plan(no_identity, _prefs())
 
 
 def test_only_one_resolution_path_exists_for_plan_exercises():

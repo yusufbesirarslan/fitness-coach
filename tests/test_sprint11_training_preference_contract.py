@@ -17,6 +17,9 @@ from app.services.training_generation.capability import (
     evaluate_capability,
 )
 from app.services.exercise_catalog import ExerciseContext
+from app.services.training_generation.exercise_choices import (
+    compatible_exercise_choices,
+)
 from app.services.training_generation.classifier_service import classify_user
 from app.services.training_generation.feature_extractor import parse_preferences
 from app.services.training_generation.models import (
@@ -47,6 +50,7 @@ from app.services.training_generation.response_validator import (
     validate_generated_plan,
 )
 from app.services.training_generation import service as training_service
+from tests.training_provider_support import as_provider_document
 
 
 ASSET_ROOT = (
@@ -213,7 +217,12 @@ def _prompt_for(style="genel", **pref_overrides):
     features = _features()
     classification = classify_user(features)
     context = build_program_context(features, prefs, classification)
-    return build_training_prompt(features, prefs, classification, context), prefs, context
+    choices = compatible_exercise_choices(ExerciseContext(
+        equipment_context=prefs.ekipman, cardio_type=prefs.kardiyo_tipi,
+        style=prefs.antrenman_tarzi))
+    prompt = build_training_prompt(
+        features, prefs, classification, context, exercise_choices=choices)
+    return prompt, prefs, context
 
 
 def _session(auth_user, **kwargs):
@@ -616,7 +625,8 @@ def test_supported_request_sends_canonical_style_and_focus_to_prompt(
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return __import__("json").dumps(_seven_day_plan(3, "Goblet Squat", canonical=True))
+        return __import__("json").dumps(as_provider_document(
+            _seven_day_plan(3, "Goblet Squat", canonical=True)))
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     response = client.post("/training-plan", json={
@@ -645,7 +655,8 @@ def test_supported_powerlifting_reaches_generation(client, auth_user, monkeypatc
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return __import__("json").dumps(_seven_day_plan(3, "Back Squat", canonical=True))
+        return __import__("json").dumps(as_provider_document(
+            _seven_day_plan(3, "Back Squat", canonical=True)))
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     body = client.post("/training-plan", json={
@@ -684,7 +695,8 @@ def _captured_supported_prompt(client, auth_user, monkeypatch, **overrides):
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return __import__("json").dumps(_seven_day_plan(overrides.get("gun_sayisi", 3), canonical=True))
+        return __import__("json").dumps(as_provider_document(
+            _seven_day_plan(overrides.get("gun_sayisi", 3), canonical=True)))
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     payload = {
@@ -737,11 +749,23 @@ def test_prompt_tells_the_provider_cardio_belongs_only_on_kardiyo_days(
     assert "Kardiyo egzersizleri" in prompt
 
 
-def test_direct_prompt_builder_call_without_vocabulary_omits_exercise_section():
-    """Callers that don't pass exercise_vocabulary (app/prompts/workout.py,
-    tests/test_i18n.py, ...) must see byte-identical prompts to before Task 2."""
-    prompt, _prefs, _context = _prompt_for("genel", ekipman="ev")
-    assert "EXERCISE VOCABULARY" not in prompt
+def test_prompt_builder_requires_a_non_empty_closed_choice_set():
+    """Supersedes the Task 2 "no vocabulary → no exercise section" pin. Under
+    PR B the provider's answer IS an ``exercise_id`` from the closed set, so
+    a prompt without that set would ask for something the server must refuse.
+    No production caller ever built one (``app/prompts/workout.py`` only
+    re-exports); the builder now refuses instead of silently omitting it."""
+    prompt, prefs, context = _prompt_for("genel", ekipman="ev")
+    assert "EXERCISE CHOICES" in prompt
+    features = _features()
+    classification = classify_user(features)
+    with pytest.raises(TypeError):
+        build_training_prompt(features, prefs, classification, context)
+    empty = compatible_exercise_choices(ExerciseContext(equipment_context="ev"))
+    object.__setattr__(empty, "choices", ())
+    with pytest.raises(ValueError):
+        build_training_prompt(
+            features, prefs, classification, context, exercise_choices=empty)
 
 
 # ── odak_hedef cannot be accepted and ignored ────────────────────────────────
@@ -794,7 +818,7 @@ def test_day_count_mismatch_does_not_retry_and_is_semantic(
         client, auth_user, monkeypatch):
     _session(auth_user)
     calls = []
-    wrong = _seven_day_plan(training_days=1)
+    wrong = as_provider_document(_seven_day_plan(training_days=1))
 
     def fake_chat(**kwargs):
         calls.append(kwargs)
@@ -856,11 +880,14 @@ def test_rejected_generate_cannot_be_saved_as_success(client, auth_user, monkeyp
 # ── Schema pins left for later PRs ───────────────────────────────────────────
 
 
-def test_invented_exercise_names_still_pass_shape_validator():
+def test_invented_exercise_ids_still_pass_shape_validator():
+    """PR B form: structure checks the ID's shape only; the catalog decides."""
     prefs = TrainingPreferences(gun_sayisi=3, ekipman="ev")
-    plan = _seven_day_plan(training_days=3, exercise_name="Quantum Trap Bar Snatch")
+    plan = as_provider_document(_seven_day_plan(
+        training_days=3, exercise_name="Quantum Trap Bar Snatch"))
     validated, warnings = validate_generated_plan(plan, prefs)
-    assert validated["program"][0]["egzersizler"][0]["isim"] == "Quantum Trap Bar Snatch"
+    assert validated["program"][0]["egzersizler"][0]["exercise_id"] == (
+        "ex_quantum_trap_bar_snatch")
     assert warnings == []
 
 

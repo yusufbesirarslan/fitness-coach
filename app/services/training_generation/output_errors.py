@@ -94,8 +94,11 @@ class GenerationExerciseUnresolvedError(GenerationOutputError):
     public_code = CODE_GENERATION_EXERCISE_UNRESOLVED
     i18n_key = I18N_GENERATION_EXERCISE_UNRESOLVED
     repairable = False
+    # ``inactive_id`` is the only one generation can still reach (PR B): a
+    # provider that copies a real but retired catalog ID. The name categories
+    # remain for the save boundary, which still accepts legacy name-only plans.
     _RESOLUTION_CATEGORIES = frozenset({
-        "unresolved_name", "inactive_match", "resolution_error",
+        "unresolved_name", "inactive_match", "inactive_id", "resolution_error",
     })
 
     def __init__(self, message, *, resolution_category="unresolved_name"):
@@ -122,29 +125,51 @@ class GenerationExerciseAmbiguousError(GenerationOutputError):
 class GenerationExerciseIdentityInvalidError(GenerationOutputError):
     """A generated exercise reference is not usable as catalog identity.
 
-    Providers are only ever prompted with display names (PR3/Task 2), never
-    IDs. A generated name shaped like a catalog ID is never authoritative —
-    it is rejected outright rather than silently falling through to
-    "unresolved" for an unrelated reason.
+    PR B: the provider chooses an ``exercise_id`` from the request's closed
+    compatible-choice set. An ID that is not ID-shaped (``malformed_id``) or
+    names no catalog entry (``unknown_id``) is refused here — never resolved
+    by name, never substituted. ``identity_invalid`` is the save boundary's
+    and the legacy name path's undifferentiated case.
     """
 
     public_code = CODE_GENERATION_EXERCISE_IDENTITY_INVALID
     i18n_key = I18N_GENERATION_EXERCISE_IDENTITY_INVALID
     repairable = False
+    _RESOLUTION_CATEGORIES = frozenset({
+        "identity_invalid", "malformed_id", "unknown_id",
+    })
+
+    def __init__(self, message, *, resolution_category="identity_invalid"):
+        super().__init__(message)
+        # Fixed vocabulary only; never the provider-supplied ID itself.
+        if resolution_category not in self._RESOLUTION_CATEGORIES:
+            raise ValueError("invalid resolution category")
+        self.resolution_category = resolution_category
 
 
 class GenerationExerciseIncompatibleError(GenerationOutputError):
     """A generated exercise resolves, but not to a place the context allows.
 
-    Two ways to earn this: the entry's equipment is outside the accepted
-    equipment context, or it is a cardio movement placed on a day whose
-    ``tip`` is not ``kardiyo`` (see ``exercise_resolution.check_placement``).
-    Both are the same answer to the caller on purpose.
+    Three ways to earn this: a generated ID outside the request's closed
+    compatible-choice set (``outside_choice_set``), an entry whose equipment
+    is outside the accepted equipment context (``equipment``), or a cardio
+    movement placed on a day whose ``tip`` is not ``kardiyo``
+    (``cardio_placement``, see ``exercise_resolution.check_placement``). All
+    are the same answer to the caller on purpose; the category is internal.
     """
 
     public_code = CODE_GENERATION_EXERCISE_INCOMPATIBLE
     i18n_key = I18N_GENERATION_EXERCISE_INCOMPATIBLE
     repairable = False
+    _RESOLUTION_CATEGORIES = frozenset({
+        "outside_choice_set", "equipment", "cardio_placement",
+    })
+
+    def __init__(self, message, *, resolution_category="equipment"):
+        super().__init__(message)
+        if resolution_category not in self._RESOLUTION_CATEGORIES:
+            raise ValueError("invalid resolution category")
+        self.resolution_category = resolution_category
 
 
 class GenerationUnavailableError(GenerationOutputError):

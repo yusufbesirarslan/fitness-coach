@@ -35,6 +35,7 @@ from app.services.workout_state.serialization import (
     serialize_plan,
     serialize_today_plan,
 )
+from tests.training_provider_support import as_provider_document
 from tests.test_training_routes import (  # canonical fixtures/helpers, one definition
     PLAN_JSON,
     _seven_day_program,
@@ -282,7 +283,7 @@ def test_basic_supported_preferences_generate_a_valid_plan(
         client, with_session, monkeypatch):  # noqa: F811
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
-        lambda **kwargs: json.dumps(PLAN_JSON, ensure_ascii=False))
+        lambda **kwargs: json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False))
 
     response = client.post("/training-plan", json={})
 
@@ -302,7 +303,7 @@ def test_generation_does_not_touch_the_existing_plan(
     plan_id, before = plan.id, plan.plan_data
     monkeypatch.setattr(
         training_bp, "_heavy_chat",
-        lambda **kwargs: json.dumps(PLAN_JSON, ensure_ascii=False))
+        lambda **kwargs: json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False))
 
     assert client.post("/training-plan", json={}).status_code == 200
 
@@ -318,7 +319,7 @@ def test_prompt_states_the_rest_day_rule_it_is_judged_by(
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+        return json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     client.post("/training-plan", json={})
@@ -341,8 +342,8 @@ def test_rest_day_exercise_defect_is_repaired_within_budget(
     def fake_chat(**kwargs):
         calls.append(kwargs["messages"][0]["content"])
         if len(calls) == 1:
-            return json.dumps(broken, ensure_ascii=False)
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+            return json.dumps(as_provider_document(broken), ensure_ascii=False)
+        return json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
@@ -366,8 +367,8 @@ def test_repair_prompt_never_invents_user_preferences(
     def fake_chat(**kwargs):
         calls.append(kwargs["messages"][0]["content"])
         if len(calls) == 1:
-            return json.dumps(broken, ensure_ascii=False)
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+            return json.dumps(as_provider_document(broken), ensure_ascii=False)
+        return json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     client.post("/training-plan", json={})
@@ -386,7 +387,7 @@ def test_unrecoverable_schema_defect_fails_closed_and_keeps_the_plan(
 
     def fake_chat(**kwargs):
         calls.append(1)
-        return json.dumps(broken, ensure_ascii=False)
+        return json.dumps(as_provider_document(broken), ensure_ascii=False)
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
@@ -418,7 +419,7 @@ def test_semantic_violation_is_still_terminal(
 
     def fake_chat(**kwargs):
         calls.append(1)
-        return json.dumps(wrong_day_count, ensure_ascii=False)
+        return json.dumps(as_provider_document(wrong_day_count), ensure_ascii=False)
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
