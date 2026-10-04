@@ -183,6 +183,15 @@ def start_session(
     ``native`` (PR5) is the already server-resolved native workout identity. It
     is recorded on the row; it is never a second source of the day, the plan or
     the workout content, all of which stay server-derived exactly as before.
+
+    A day that already holds the canonical completion claim cannot start a new
+    session: with no ACTIVE session to replay, the start is refused as
+    INVALID_TRANSITION and nothing is written. The check runs AFTER the active
+    lookup so replay / conflict semantics are unchanged, and BEFORE the insert.
+    A session-linked completion terminalizes its session in the same commit as
+    the PumpCheck, so a racing start either still sees that session ACTIVE
+    (replay) or already sees the claim (refused) — never neither. An abandoned
+    session is not completion evidence, so abandon → restart stays valid.
     """
     day = today or app_today()
     now = datetime.utcnow()
@@ -191,6 +200,10 @@ def start_session(
     existing = get_active_session(user_id)
     if existing is not None:
         return _existing_or_conflict(existing, day, snapshot, native)
+
+    if completed_today(user_id, day):
+        _log("start_refused_completed_today", user_id)
+        return SessionResult(SessionOutcome.INVALID_TRANSITION)
 
     try:
         session = insert_active_session(user_id, day, snapshot, now, native)

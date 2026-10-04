@@ -427,7 +427,17 @@ NOT_FOUND, INVALID_TRANSITION`.
   **server-side** (no client body trusted); inserts ACTIVE. On the partial-index
   `IntegrityError` it loads the existing active session → same intended workout ⇒
   idempotent `EXISTING_ACTIVE`, different ⇒ `CONFLICT`. Replay-safe after a client
-  timeout.
+  timeout. **LP-13:** with no ACTIVE session to replay, a day that already holds
+  the canonical completion claim (`already_completed_today`, i.e. today's
+  `PumpCheck.date_key`) is refused as `INVALID_TRANSITION` with nothing written
+  (browser 409 `invalid_transition`; native 409 `TRAINING_WORKOUT_NOT_STARTABLE`,
+  `Session-Resolution: reread`). Order is active lookup → completed-today →
+  insert, so replay/conflict are unchanged, an ACTIVE `lifecycle_inconsistent`
+  session is still replayed, and abandon → restart on a not-completed day stays
+  valid. A session-linked completion terminalizes its session in the same commit
+  as the claim, so a racing start either replays or is refused (PG-pinned). A
+  session-less completion committing between the guard and the insert remains
+  a documented residual window.
 - **`resume_session`** — normal `RESUMED` **only** for an owned, ACTIVE, same-day
   session whose relationship is `matching_current_plan` (or `unscheduled`). Any
   mismatch/stale case ⇒ `STALE_SESSION_REQUIRES_RESOLUTION`: the session is
