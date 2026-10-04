@@ -1051,6 +1051,7 @@
   "pump.not_found": "Pump Check not found.",
   "pump.visibility_invalid": "Choose where to share this Pump Check.",
   "pump.friend_ids_invalid": "Select valid friends to share with.",
+  "pump.verify_unavailable": "Your photo couldn't be verified right now. Please try again in a moment.",
   "pump.friend_required": "Select at least one friend.",
   "pump.share_to": "SHARE TO",
   "pump.share_feed": "Feed",

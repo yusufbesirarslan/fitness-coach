@@ -34,6 +34,7 @@ from app.services.workout_session import (
     MAX_WEIGHT_KG,
     ActiveSessionExists,
     Checkpoint,
+    CompletionProofUnverified,
     CompletionRejected,
     IdempotencyConflict,
     InvalidIdempotencyKey,
@@ -106,6 +107,7 @@ __all__ = [
     "SessionStale",
     "RevisionConflict",
     "IdempotencyConflict",
+    "CompletionProofUnverified",
     "CompletionRejected",
     "SessionPersistenceUnavailable",
 ]

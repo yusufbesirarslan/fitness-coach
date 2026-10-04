@@ -52,6 +52,7 @@ from app.services.training_generation.service import (
     validate_plan_for_save,
 )
 from app.services.validators import validate_pump_check_image
+from app.services.vision_images import detect_image_media_type
 from app.services.weekly_program import build_weekly_program, weekly_program_payload
 from app.services.workout_completion import (
     CompleteWorkoutCommand,
@@ -484,8 +485,16 @@ def complete_workout():
             return jsonify({"error": t("pump.friend_ids_invalid")}), 400
 
     check = validate_pump_check(image_bytes, location_type, description)
-    if not check["valid"]:
-        # Doğrulama başarısız (fail-open değil) → XP yok, kullanıcı yeniden denesin.
+    if check.get("fallback"):
+        # LP-13 P2 — FAIL-CLOSED: kanıt DEĞERLENDİRİLEMEDİ (Bedrock hatası, zaman
+        # aşımı, bozuk yanıt). Ret değil (fotoğraf kötü değil), onay hiç değil:
+        # hiçbir şey yazılmaz, kullanıcı aynı isteği sonra tekrar dener.
+        current_app.logger.warning(
+            "[WORKOUT] event=completion_unverified category=completion_proof_unverified")
+        return jsonify({"error": t("pump.verify_unavailable"),
+                        "code": "proof_unverified"}), 503
+    if check.get("valid") is not True:
+        # Doğrulama başarısız (model değerlendirdi ve reddetti) → XP yok, kullanıcı yeniden denesin.
         return jsonify({"error": check["reason"]}), 422
 
     # Doğrulanan fotoğrafı S3'e yükle. S3 hatası antrenman tamamlamayı bloklamaz
@@ -494,7 +503,8 @@ def complete_workout():
     try:
         if s3_helper.is_enabled():
             pump_image_key = s3_helper.upload_image(
-                image_bytes, content_type=img_mime,
+                # Nesne tipi baytlardan (data-URL'in beyan ettiği tip değil).
+                image_bytes, content_type=detect_image_media_type(image_bytes) or img_mime,
                 prefix="pump-checks", user_id=current_user.id,
             )
     except Exception as e:
@@ -522,7 +532,7 @@ def complete_workout():
             visibility=visibility,
             shared_friend_ids=tuple(selected_friend_ids),
             valid=True,
-            fallback=check.get("fallback", False),
+            fallback=False,  # yalnızca değerlendirilip kabul edilen kanıt buraya ulaşır
             base_xp=10,
             photo_bonus=photo_bonus,
             activity_text="Bugünkü antrenmanını tamamladı (foto eklendi)",

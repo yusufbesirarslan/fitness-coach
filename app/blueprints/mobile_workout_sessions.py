@@ -242,7 +242,19 @@ def _completion_proof():
     description = (request.form.get("description") or "")[:200]
 
     check = validate_pump_check(image_bytes, location_type, description)
-    if not check.get("valid"):
+    if check.get("fallback"):
+        # Fail closed (LP-13 P2): the proof could not be EVALUATED (provider
+        # error, timeout, malformed answer). Checked first and independently of
+        # ``valid``, so fallback=True can never be read as permission. Not a
+        # rejection either: nothing is written, the session stays ACTIVE, and
+        # the same command may be retried.
+        current_app.logger.warning(
+            "mobile_workout_session event=completion_unverified "
+            "category=completion_proof_unverified request_id=%s",
+            current_request_id())
+        raise sessions.CompletionProofUnverified(
+            "the completion proof could not be verified")
+    if check.get("valid") is not True:
         # Refuses THIS proof, not the session: nothing has been written, the
         # session stays ACTIVE with its checkpoint, and a later attempt may
         # succeed. Fixed category + request id only -- the model's free-text
@@ -272,7 +284,8 @@ def _completion_proof():
         "workout_score": latest_training_plan_score(g.mobile_user.id),
         "visibility": _NATIVE_VISIBILITY,
         "valid": True,
-        "fallback": bool(check.get("fallback", False)),
+        # Only an evaluated, accepted proof reaches here (fallback raised above).
+        "fallback": False,
         "base_xp": _BASE_XP,
         "photo_bonus": _PHOTO_BONUS,
         "activity_text": _NATIVE_ACTIVITY_TEXT,

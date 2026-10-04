@@ -1051,6 +1051,7 @@
   "pump.not_found": "Pump Check bulunamadı.",
   "pump.visibility_invalid": "Bu Pump Check'i nerede paylaşacağını seç.",
   "pump.friend_ids_invalid": "Paylaşmak için geçerli arkadaşlar seç.",
+  "pump.verify_unavailable": "Fotoğrafın şu an doğrulanamadı. Lütfen biraz sonra tekrar dene.",
   "pump.friend_required": "En az bir arkadaş seç.",
   "pump.share_to": "PAYLAŞ",
   "pump.share_feed": "Feed",
