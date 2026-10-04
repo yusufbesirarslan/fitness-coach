@@ -611,10 +611,6 @@ def analyze_menu():
     all_scored.sort(key=lambda x: (-x["score"], x["name"]))
     coach_picks = all_scored[:3]
 
-    current_app.logger.info(f"[DEBUG] Total unique categories found: {len(categories_result.keys())} — Categories: {list(categories_result.keys())}")
-    current_app.logger.info(f"[DEBUG] Total items in payload: {sum(len(v) for v in categories_result.values())} — Scored items: {len(all_scored)}")
-    current_app.logger.info(f"[ALGORITHM DEBUG] Top 3 Raw Scores: {[(item['name'], item['score']) for item in coach_picks]}")
-
     source_label = {"google_drive": "Google Drive", "web_scraper": "Web Scraper"}.get(menu_source, menu_source)
 
     return jsonify({

@@ -231,7 +231,7 @@ def _read_nutrition_plan_presence(user_id):
     with db.session.begin_nested():
         plan_id = (NutritionPlan.query.filter_by(user_id=user_id)
                    .with_entities(NutritionPlan.id)
-                   .order_by(NutritionPlan.created_at.desc()).first())
+                   .order_by(NutritionPlan.created_at.desc(), NutritionPlan.id.desc()).first())
     return ("available", True) if plan_id is not None else ("empty", False)
 
 

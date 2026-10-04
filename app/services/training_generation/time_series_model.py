@@ -36,7 +36,7 @@ def build_performance_history(user_id: int) -> PerformanceHistory:
             break
 
     checkins = (WeeklyCheckIn.query.filter_by(user_id=user_id)
-                .order_by(WeeklyCheckIn.created_at.desc()).limit(4).all())
+                .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc()).limit(4).all())
     fatigue_values = [c.fatigue for c in checkins if c.fatigue is not None]
     sleep_values = [c.uyku_kalitesi for c in checkins if c.uyku_kalitesi is not None]
     fatigue = sum(fatigue_values) / len(fatigue_values) if fatigue_values else 3.0

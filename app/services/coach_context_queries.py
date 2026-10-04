@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 import psycopg2
 import psycopg2.extras
 
+from app.timeutil import app_date_of
+
 
 _APP_TZ = ZoneInfo("Europe/Istanbul")
 
@@ -86,7 +88,7 @@ def get_user_fitness_summary(user_id: int) -> str:
 
         cur.execute(
             "SELECT weight, created_at FROM weekly_check_in "
-            "WHERE user_id = %s ORDER BY created_at DESC LIMIT 5",
+            "WHERE user_id = %s ORDER BY created_at DESC, id DESC LIMIT 5",
             (user_id,),
         )
         checkins = cur.fetchall()
@@ -125,7 +127,7 @@ def get_user_fitness_summary(user_id: int) -> str:
 
         if checkins:
             result["recent_checkins"] = [
-                {"weight": c["weight"], "date": str(c["created_at"].date())}
+                {"weight": c["weight"], "date": str(app_date_of(c["created_at"]))}
                 for c in checkins
             ]
 
@@ -177,7 +179,7 @@ def get_user_workout_history(user_id: int, days: int = 7) -> str:
             result["training_plans"].append({
                 "plan": plan_parsed,
                 "score": p["score"],
-                "created_at": str(p["created_at"].date()),
+                "created_at": str(app_date_of(p["created_at"])),
             })
 
         for c in completed:
@@ -228,7 +230,7 @@ def get_user_supplement_stack(user_id: int) -> str:
                 },
                 "review": s["review_text"],
                 "price_paid": s["price_paid"],
-                "added": str(s["created_at"].date()),
+                "added": str(app_date_of(s["created_at"])),
             })
 
         return json.dumps(result, ensure_ascii=False, default=str)
@@ -306,14 +308,14 @@ def get_user_nutrition_log(user_id: int, days: int = 3) -> str:
 
         cur.execute(
             "SELECT plan_data, score, created_at FROM nutrition_plan "
-            "WHERE user_id = %s ORDER BY created_at DESC LIMIT 1",
+            "WHERE user_id = %s ORDER BY created_at DESC, id DESC LIMIT 1",
             (user_id,),
         )
         plan = cur.fetchone()
 
         by_date = {}
         for m in meals:
-            d = m["tarih"] or str(m["created_at"].date())
+            d = m["tarih"] or str(app_date_of(m["created_at"]))
             if d not in by_date:
                 by_date[d] = {"meals": [], "total_cal": 0, "total_protein": 0, "total_carb": 0, "total_fat": 0}
             by_date[d]["meals"].append({

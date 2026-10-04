@@ -246,7 +246,7 @@ def _read_plan(user_id) -> PlanSection:
     with db.session.begin_nested():
         row = (NutritionPlan.query.filter_by(user_id=user_id)
                .with_entities(NutritionPlan.plan_data)
-               .order_by(NutritionPlan.created_at.desc()).first())
+               .order_by(NutritionPlan.created_at.desc(), NutritionPlan.id.desc()).first())
     if row is None:
         return PlanSection(EMPTY)
     try:

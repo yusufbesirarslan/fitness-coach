@@ -174,7 +174,7 @@ def _latest_checkin(user, models):
         return None
     return WeeklyCheckIn.query.filter_by(user_id=user.id)\
         .filter(WeeklyCheckIn.yogunluk.isnot(None))\
-        .order_by(WeeklyCheckIn.created_at.desc()).first()
+        .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc()).first()
 
 
 def _check_recovery_signals(user, db, models, nudges, en=False):
