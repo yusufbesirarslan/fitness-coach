@@ -86,3 +86,38 @@ def _encode_jpeg(image, quality):
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=quality)
     return buffer.getvalue()
+
+
+# Formats a vision proof may be sent as. The keys are Pillow's own format names
+# (decoded from the leading magic bytes, never a filename or a client header);
+# every value is a media type the Bedrock image block accepts.
+_PROOF_MEDIA_TYPES = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+    "GIF": "image/gif",
+}
+
+
+def detect_image_media_type(image_bytes) -> str | None:
+    """Return the media type the BYTES actually are, or None.
+
+    None means "not a structurally valid image of a supported format" --
+    malformed, truncated past the header, a decompression bomb, an
+    unsupported format or not an image at all. The caller must treat None as
+    unusable proof; it is never a reason to fall back to a default type.
+    """
+    if not isinstance(image_bytes, bytes) or not image_bytes:
+        return None
+    Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        media_type = _PROOF_MEDIA_TYPES.get((image.format or "").upper())
+        width, height = image.size
+        # verify() must follow open() directly and leaves the image unusable.
+        image.verify()
+    except Exception:
+        return None
+    if media_type is None or width * height > MAX_IMAGE_PIXELS:
+        return None
+    return media_type

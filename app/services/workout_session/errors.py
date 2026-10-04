@@ -144,6 +144,24 @@ class CompletionRejected(SessionCommandError):
     retryable = False
 
 
+class CompletionProofUnverified(SessionCommandError):
+    """The completion proof could not be EVALUATED (LP-13 P2).
+
+    Provider 4xx/5xx, timeout, transport failure, a malformed model answer or an
+    image-preparation failure. This is not evidence that the proof is bad, so it
+    is not a ``CompletionRejected``; it is not evidence that it is good either,
+    so the completion never proceeds. Raised before the completion transaction:
+    nothing is written and the session stays ACTIVE. On the wire it is the
+    existing retryable ``TRAINING_SESSION_UNAVAILABLE`` envelope (503), which
+    native clients already treat as "retry the same command later"; the
+    distinct class keeps the cause explicit server-side.
+    """
+
+    public_code = "TRAINING_SESSION_UNAVAILABLE"
+    http_status = 503
+    retryable = True
+
+
 class SessionPersistenceUnavailable(SessionCommandError):
     public_code = "TRAINING_SESSION_UNAVAILABLE"
     http_status = 503

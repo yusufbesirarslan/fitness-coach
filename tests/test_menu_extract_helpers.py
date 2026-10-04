@@ -278,12 +278,14 @@ def test_menu_score_flags_low_protein_food_in_turkish():
 
 
 def test_pump_check_contract(app):
+    # LP-13 P2: Bedrock kapalıyken (testlerin varsayılanı) kanıt DEĞERLENDİRİLEMEZ
+    # → doğrulanamadı (fail-closed). Eski "mock kabul" (valid=True) kaldırıldı;
+    # "doğrulandı" ya da "kaydedildi" iddiası da yok.
     result = validate_pump_check(b"img", "salon", "ağırlık bölgesi")
-    # F7: mock doğrulama "doğrulandı" İDDİA ETMEZ; dürüst "kaydedildi" mesajı.
-    assert result["valid"] is True
-    assert result["fallback"] is False
-    assert "doğruland" not in result["reason"].lower()
-    assert "kaydedildi" in result["reason"].lower()
+    assert result["valid"] is False
+    assert result["fallback"] is True
+    assert "doğrulanamadı" in result["reason"].lower()
+    assert "kaydedildi" not in result["reason"].lower()
     # Boş girdiler de biçim hatasız işlenmeli.
     result = validate_pump_check(b"img", None, "")
-    assert result["valid"] is True
+    assert (result["valid"], result["fallback"]) == (False, True)

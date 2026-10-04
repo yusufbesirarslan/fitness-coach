@@ -543,6 +543,19 @@ for all of its callers.
   `mobile_workout_session event=completion_rejected category=completion_proof_rejected request_id=...`
   line. It never logs the model's reason, the description or the session
   reference.
+* The completion proof is FAIL-CLOSED (LP-13 P2). The media type sent to the
+  vision model is decided from the image BYTES (JPEG/PNG/WebP; GIF on the
+  browser route), never from size, filename or the client's declaration. When
+  the proof could not be EVALUATED -- validator unavailable (`BEDROCK_ENABLED=0`
+  or no provider client; there is no mock pass), provider 4xx/5xx, timeout,
+  transport failure, a malformed model answer, an image-preparation failure --
+  the answer is the existing retryable `TRAINING_SESSION_UNAVAILABLE` (503, `retry`,
+  `Retry-After: 15`), never a completion and never the 422 above: nothing is
+  written, the session stays ACTIVE, and resending the same command is safe
+  (exact-once is still `uq_pump_check_day`). Logged as one bounded
+  `mobile_workout_session event=completion_unverified category=completion_proof_unverified request_id=...`
+  line. The browser `/workout/complete` answers the same case with
+  `503 {"code": "proof_unverified"}`.
 * Completion carries the client's `If-Match` revision into the completion
   transaction, where it is checked under the session row's `FOR UPDATE` lock —
   the only race-free place — so completing can never silently discard a

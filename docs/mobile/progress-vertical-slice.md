@@ -177,8 +177,10 @@ Other Pump Check authority facts:
   rate limit.
 - **Delete.** Web only (`profile.py:243`). The row is deleted first and the
   object is released after commit. **No native delete.**
-- **Fallback.** A completion proof may record `fallback=True` (the vision gate
-  failed open). Standalone analysis never falls back: it fails with a 503.
+- **Fallback.** Since LP-13 P2 a completion proof never records `fallback=True`:
+  an unevaluated proof fails closed (503, nothing written). Rows written before
+  that fix may still carry `fallback=True`. Standalone analysis never falls
+  back: it fails with a 503.
 
 ---
 
