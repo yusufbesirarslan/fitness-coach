@@ -402,6 +402,9 @@ SSM_MENTION_ALLOWED = STAGING_SSM_LIFECYCLE | frozenset({
     Path("docs/superpowers/plans/2026-08-25-production-deploy-hardening-pr1-remediation.md"),
     Path("docs/superpowers/specs/2026-08-22-production-deploy-hardening-pr1-design.md"),
     Path("docs/superpowers/specs/2026-08-24-production-deploy-hardening-pr1-remediation-design.md"),
+    # SEC-001 runtime-identity record: names the host SSM agent and its AWS
+    # managed policy as facts of the instance role; contains no send-command.
+    Path("SEC001_AWS_RUNTIME_S3_REMEDIATION.md"),
 })
 
 SSM_LIFECYCLE_OWNERS = frozenset({
