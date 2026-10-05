@@ -28,7 +28,10 @@ from app.services.exercise_catalog import (
     resolve_exercise,
 )
 from app.services.training_generation.response_validator import VALID_TIPS, WEEKDAYS
-from app.services.workout_completion import already_completed_today
+from app.services.workout_completion import (
+    already_completed_today,
+    lock_completion_day,
+)
 
 from .models import SOURCE_SCHEDULED, SOURCE_UNSCHEDULED, compute_fingerprint
 

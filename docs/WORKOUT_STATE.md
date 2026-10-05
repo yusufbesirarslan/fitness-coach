@@ -436,8 +436,21 @@ NOT_FOUND, INVALID_TRANSITION`.
   session is still replayed, and abandon → restart on a not-completed day stays
   valid. A session-linked completion terminalizes its session in the same commit
   as the claim, so a racing start either replays or is refused (PG-pinned). A
-  session-less completion committing between the guard and the insert remains
-  a documented residual window.
+  **session-less** completion (browser legacy path, AI-coach tool) has no row to
+  terminalize, so both writers also share one PostgreSQL serialization point,
+  `workout_completion.lock_completion_day` — `pg_advisory_xact_lock` on a
+  domain-hashed `(owner, Istanbul day)` key, cluster-wide across workers and
+  hosts, released by COMMIT/ROLLBACK. `complete_workout` takes it before it
+  writes the claim; `start_session` takes it after the cheap guard, **re-checks
+  the claim under it** (fresh READ COMMITTED statement) and inserts + commits
+  before releasing. A completion that committed first is seen and refused; one
+  that arrives later waits for the start's commit (serial start → complete; the
+  session-less path still never terminalizes a session — an accepted,
+  pre-existing contract boundary, see "Follow-up — session-less completion
+  contract" below, not a concurrency race). Replays, the active
+  lookup and the cheap refusal take no lock; other owners and other days never
+  wait. SQLite: no-op (single writer). PG-pinned in
+  `tests/test_mobile_workout_sessions_pg.py` (LP-13 session-less section).
 - **`resume_session`** — normal `RESUMED` **only** for an owned, ACTIVE, same-day
   session whose relationship is `matching_current_plan` (or `unscheduled`). Any
   mismatch/stale case ⇒ `STALE_SESSION_REQUIRES_RESOLUTION`: the session is
@@ -509,7 +522,11 @@ ACTIVE→COMPLETED transition **inside its single transaction**:
 - **Fixed lock order** (documented + tested, both paths, so create and
   reconciliation can never deadlock): the session row is locked **first**
   (`SELECT … FOR UPDATE` on PG; the enclosing txn suffices on SQLite —
-  `lock_session_for_completion`), *then* the PumpCheck/completion artifacts.
+  `lock_session_for_completion`), *then* the `(owner, day)` advisory lock
+  (`lock_completion_day`, LP-13; only on the claim-writing path, never on a
+  replay), *then* the PumpCheck/completion artifacts. `start_session` takes only
+  the day lock and never waits on a session row while holding it, so the two
+  orders cannot form a cycle.
 - **Fresh completion (`CREATED`):** create the PR2 artifacts, then — before the
   single `commit()` — terminalize the session (`mark_session_completed`:
   conditional on `status='active'`, sets `completed_at`, bumps `version`). One
@@ -531,6 +548,33 @@ two-contender proof: `tests/test_workout_session_pg.py` (opt-in, `pg_concurrency
 marker + env-gated) — **executed 2026-07-25 on a disposable `postgres:16` (16.14),
 all 3 tests passed** (concurrent-start, complete-vs-abandon, concurrent-completion
 reconciliation); see `docs/handoff.md` for the full execution record.
+
+### Follow-up — session-less completion contract (LP-13, deliberately unchanged)
+
+LP-13 guarantees one ordering: **if the canonical same-day completion claim
+commits first, no later start for that `(owner, Istanbul day)` may create an
+ACTIVE session.** The opposite ordering is legal under the existing contract
+and is left exactly as it was:
+
+```text
+start      -> owner/day lock -> no claim -> INSERT ACTIVE -> COMMIT
+completion -> owner/day lock -> INSERT claim -> COMMIT   (session-less)
+           => completed day + the start's ACTIVE session, untouched
+```
+
+If an ACTIVE session already exists and a session-less completion (browser
+legacy `/workout/complete`, AI-coach gym-photo tool) occurs afterward, the
+completion remains allowed by the existing contract and does **not**
+terminalize the session, because the caller supplies neither session identity
+nor `expected_checkpoint_revision` (terminalizing could silently discard
+progress another client committed; refusing would be a new externally visible
+failure). The resulting ACTIVE + completed-day state is detected as
+`lifecycle_inconsistent` (not resumable; a start replays it) and remains
+recoverable through the existing session-resolution / abandon flow. It is
+reachable sequentially on main with no concurrency at all, so it is a
+sequential contract inconsistency, **not** an unfixed race. Changing it
+requires a separate API/lifecycle design decision. PG-pinned as Race B in
+`tests/test_mobile_workout_sessions_pg.py`.
 
 ### API routes
 

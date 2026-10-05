@@ -544,3 +544,145 @@ def test_native_completion_blocks_browser_start_and_vice_versa(
     assert PumpCheck.query.filter_by(user_id=owner.id).count() == 1
     assert WorkoutLog.query.filter_by(
         user_id=owner.id, exercise_name=WORKOUT_COMPLETION_MARKER).count() == 1
+
+
+# -- 9. the (owner, day) boundary shared with the completion claim ------------
+#
+# The guard above is read before the insert; a session-less completion could
+# commit the claim in between. Both writers therefore take ONE boundary,
+# ``workout_completion.lock_completion_day``, and the start re-reads the claim
+# under it. These pin the call order hermetically; the real interleavings are
+# PostgreSQL-proven in ``test_mobile_workout_sessions_pg.py``.
+
+def test_day_lock_key_is_stable_and_separates_owners_and_days():
+    from datetime import date
+
+    from app.services.workout_completion.queries import completion_day_lock_key
+
+    day = date(2026, 7, 23)
+    key = completion_day_lock_key(7, day)
+    assert key == completion_day_lock_key(7, day)
+    assert -(2 ** 63) <= key < 2 ** 63
+    assert key != completion_day_lock_key(8, day)
+    assert key != completion_day_lock_key(7, date(2026, 7, 24))
+
+
+def test_day_lock_is_a_no_op_on_sqlite(app, owner):
+    from sqlalchemy import event
+
+    from app.services.workout_completion import lock_completion_day
+
+    statements = []
+
+    def _record(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    engine = db.engine
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        lock_completion_day(owner.id, datetime(2026, 7, 23).date())
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+    assert statements == []
+
+
+def test_start_rechecks_the_claim_under_the_day_lock(
+    app, owner, plan, monkeypatch
+):
+    """A claim that appears between the cheap guard and the insert (what a
+    racing session-less completion produces) is seen by the re-check UNDER the
+    lock: refused, nothing written."""
+    from app.services.workout_session import service as wservice
+
+    calls = []
+    answers = iter([False, True])
+
+    def _guard(user_id, day):
+        calls.append(("check", day.isoformat()))
+        return next(answers)
+
+    def _lock(user_id, day):
+        calls.append(("lock", day.isoformat()))
+
+    def _insert(*_args, **_kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("inserted on a completed day")
+
+    monkeypatch.setattr(wservice, "completed_today", _guard)
+    monkeypatch.setattr(wservice, "lock_completion_day", _lock)
+    monkeypatch.setattr(wservice, "insert_active_session", _insert)
+
+    assert _service_start(owner.id).outcome is SessionOutcome.INVALID_TRANSITION
+    assert calls == [
+        ("check", FIXED_DAY), ("lock", FIXED_DAY), ("check", FIXED_DAY)]
+    assert _sessions(owner.id) == []
+
+
+def test_start_inserts_only_after_taking_the_day_lock(
+    app, owner, plan, monkeypatch
+):
+    from app.services.workout_session import service as wservice
+
+    calls = []
+    real_insert = wservice.insert_active_session
+
+    def _lock(user_id, day):
+        calls.append(("lock", user_id, day.isoformat()))
+
+    def _insert(*args, **kwargs):
+        calls.append(("insert",))
+        return real_insert(*args, **kwargs)
+
+    monkeypatch.setattr(wservice, "lock_completion_day", _lock)
+    monkeypatch.setattr(wservice, "insert_active_session", _insert)
+
+    assert _service_start(owner.id).outcome is SessionOutcome.CREATED
+    assert calls == [("lock", owner.id, FIXED_DAY), ("insert",)]
+
+
+def test_replay_and_conflict_never_take_the_day_lock(
+    app, owner, plan, monkeypatch
+):
+    from app.services.workout_session import service as wservice
+
+    first = _service_start(owner.id)
+    assert first.outcome is SessionOutcome.CREATED
+    taken = []
+    monkeypatch.setattr(
+        wservice, "lock_completion_day", lambda *a: taken.append(a))
+    assert _service_start(owner.id).outcome is SessionOutcome.EXISTING_ACTIVE
+    assert taken == []
+
+
+def test_completion_writes_the_claim_only_under_the_same_day_lock(
+    app, owner, plan, monkeypatch
+):
+    """The session-less completion (browser legacy / AI-coach) takes the SAME
+    (owner, day) lock before its claim exists, and a replay takes none."""
+    from app.services.workout_completion import (
+        CompleteWorkoutCommand,
+        complete_workout,
+    )
+    from app.services.workout_completion import service as cservice
+
+    taken = []
+    real_lock = cservice.lock_completion_day
+
+    def _lock(user_id, day):
+        claims = PumpCheck.query.filter(
+            PumpCheck.user_id == user_id, PumpCheck.date_key.isnot(None)).count()
+        taken.append((user_id, day.isoformat(), claims))
+        real_lock(user_id, day)
+
+    monkeypatch.setattr(cservice, "lock_completion_day", _lock)
+
+    def _complete():
+        return complete_workout(CompleteWorkoutCommand(
+            user_id=owner.id, today=datetime(2026, 7, 23).date(),
+            session_id=None, location_type="gym", description="lp13",
+            valid=True, fallback=False, base_xp=10, photo_bonus=25,
+            activity_text="lp13", entry_path="test"))
+
+    assert _complete().outcome.value == "created"
+    assert taken == [(owner.id, FIXED_DAY, 0)]
+    assert _complete().outcome.value == "already_completed"
+    assert len(taken) == 1  # the preflight replay is lock-free
