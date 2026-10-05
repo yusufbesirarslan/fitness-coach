@@ -287,9 +287,21 @@ Same key with a different fingerprint always returns typed 409 before provider
 execution and never changes the stored fingerprint.
 
 A definitive post-claim failure consumes the key. Its replay returns the same
-bounded error classification. If the error is retryable, the client may start a
-new logical attempt with a new key after it has received that definitive result;
-repeating the old key only resolves ambiguity and cannot spend again.
+bounded error classification. If the cause is transient (the public code is
+`TRAINING_PLAN_GENERATION_UNAVAILABLE`), the client may start a new logical
+attempt with a new key after it has received that definitive result; repeating
+the old key only resolves ambiguity and cannot spend again.
+
+LP-14 PR-B2 made the envelope agree with this rule. The `retryable` flag means
+"sending this same command with this same key can make progress" (ADR 0001;
+the shipped Flutter client reads it the same way), so a `FAILED` answer is
+always `retryable=false`, first response and replay alike. That includes rows
+recorded before the change. The ledger's `error_retryable` column still records
+the cause classification for audit, and it is never projected. Every
+`retryable=true` answer this command still gives makes progress on the same
+key. In-progress proceeds once the live worker releases. Persistence-unavailable
+resumes the same operation. Busy and rate-limited answers create no operation,
+so the same key claims fresh.
 
 Pre-execution request, capability, prerequisite, existing-plan, entitlement,
 and rate-limit failures do not create an operation record.
@@ -308,8 +320,8 @@ and rate-limit failures do not create an operation record.
 | quota exhausted | 402 | existing premium limit | no | no | no |
 | request/provider rate limited | 429 | training rate limited | yes | no | no |
 | capacity unavailable | 503 | generation busy | yes | no | no |
-| provider timeout/unavailable | 503 | generation unavailable | yes | yes | no |
-| parse/repair exhausted | canonical generator status | canonical output code | as canonical | bounded | no |
+| provider timeout/unavailable | 503 | generation unavailable | no (key consumed; new key may succeed) | yes | no |
+| parse/repair exhausted | canonical generator status | canonical output code | no (key consumed) | bounded | no |
 | schema/semantic/exercise rejection | 422 | canonical output code | no | bounded | no |
 | candidate staging/persistence failure | 503 | persistence unavailable | yes | maybe | no partial plan |
 | projection fails after commit | 503 | Training read unavailable | yes | no additional | plan committed |

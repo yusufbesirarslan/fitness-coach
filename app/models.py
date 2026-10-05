@@ -388,6 +388,8 @@ class TrainingPlanGenerationOperation(db.Model):
     quota_week = db.Column(db.String(8))
     error_code = db.Column(db.String(64))
     error_http_status = db.Column(db.Integer)
+    # Cause classification for audit (transient vs. definitive), not the public
+    # `retryable` flag: a FAILED key is consumed and always replays retryable=false.
     error_retryable = db.Column(db.Boolean)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(

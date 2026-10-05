@@ -123,7 +123,7 @@ def _run(app, user_id, request, key, outcomes, index):
     from app.models import User
     from app.services.mobile_training_generation import (
         ExistingPlanRefused, GenerationInProgress, IdempotencyConflict,
-        generate_and_persist,
+        StoredGenerationFailure, generate_and_persist,
     )
     try:
         with app.app_context():
@@ -139,6 +139,8 @@ def _run(app, user_id, request, key, outcomes, index):
                 outcomes[index] = ("conflict",)
             except ExistingPlanRefused:
                 outcomes[index] = ("existing",)
+            except StoredGenerationFailure as error:
+                outcomes[index] = ("failed", error.public_code, error.retryable)
             finally:
                 db.session.remove()
     except Exception as error:  # pragma: no cover - surfaced by assertions
@@ -330,3 +332,147 @@ def test_generated_crash_recovery_persists_without_provider(pg_generation_app):
         assert operation.status == "SUCCEEDED"
         assert operation.training_plan_id == outcomes[0][2]
         assert operation.candidate_plan_data is None
+
+
+def _seed_failed(app, user_id, request, key):
+    """A durable provider-unavailable FAILED key, through the real store."""
+    from app.extensions import db
+    from app.services.mobile_training_generation import store
+    from app.services.training_generation.output_errors import (
+        GenerationUnavailableError,
+    )
+    with app.app_context():
+        operation = store.claim(user_id, key, request.fingerprint)
+        failure = store.record_failure(
+            operation.id, GenerationUnavailableError("seeded"))
+        assert failure.retryable is False
+        db.session.remove()
+
+
+_FAILED_REPLAY = (
+    "failed", "TRAINING_PLAN_GENERATION_UNAVAILABLE", False)
+
+
+def test_concurrent_retries_of_a_failed_key_replay_without_provider(
+        pg_generation_app):
+    from app.models import TrainingPlan, TrainingPlanGenerationOperation
+    from app.services.mobile_training_generation import service, store
+    app, user_ids, monkeypatch = pg_generation_app
+    request = _request()
+    _seed_failed(app, user_ids[0], request, "pg-generation-failed-1")
+    monkeypatch.setattr(
+        service, "generate_training_plan_candidate",
+        lambda *args, **kwargs: pytest.fail("provider called for a FAILED key"))
+    barrier = threading.Barrier(2)
+    real_find = store.find_by_key
+
+    def find_together(*args, **kwargs):
+        barrier.wait(timeout=20)
+        return real_find(*args, **kwargs)
+
+    monkeypatch.setattr(store, "find_by_key", find_together)
+    outcomes = {}
+    threads = [threading.Thread(
+        target=_run,
+        args=(app, user_ids[0], request, "pg-generation-failed-1", outcomes, index),
+        daemon=True) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert not any(thread.is_alive() for thread in threads), outcomes
+    assert [outcomes[index] for index in range(2)] == [_FAILED_REPLAY] * 2
+    with app.app_context():
+        operation = TrainingPlanGenerationOperation.query.filter_by(
+            user_id=user_ids[0]).one()
+        assert (operation.status, operation.attempt_count) == ("FAILED", 1)
+        assert TrainingPlan.query.filter_by(user_id=user_ids[0]).count() == 0
+
+
+def test_failed_key_retry_racing_a_new_key_runs_one_execution_and_charges_once(
+        pg_generation_app):
+    from app.extensions import db
+    from app.models import TrainingPlan, TrainingPlanGenerationOperation, User
+    from app.services import premium
+    from app.services.mobile_training_generation import service
+    app, user_ids, monkeypatch = pg_generation_app
+    app.config["AI_PLAN_QUOTA_ENABLED"] = True
+    request = _request()
+    _seed_failed(app, user_ids[0], request, "pg-generation-failed-2")
+    entered, release, calls = _install_blocking_provider(monkeypatch)
+    outcomes = {}
+    fresh = threading.Thread(
+        target=_run,
+        args=(app, user_ids[0], request, "pg-generation-new-2", outcomes, 0),
+        daemon=True)
+    fresh.start()
+    assert entered.wait(timeout=20)
+    contenders = [threading.Thread(
+        target=_run, args=(app, user_ids[0], request, key, outcomes, index),
+        daemon=True) for index, key in (
+            (1, "pg-generation-failed-2"), (2, "pg-generation-new-3"))]
+    for thread in contenders:
+        thread.start()
+    for thread in contenders:
+        thread.join(timeout=10)
+    assert not any(thread.is_alive() for thread in contenders), \
+        "a contender blocked behind the live provider call"
+    release.set()
+    fresh.join(timeout=20)
+
+    assert outcomes[0][0:2] == ("ok", False)
+    assert outcomes[1] == _FAILED_REPLAY
+    assert outcomes[2] == ("in_progress",)
+    assert len(calls) == 1
+
+    monkeypatch.setattr(
+        service, "generate_training_plan_candidate",
+        lambda *args, **kwargs: pytest.fail("provider called on replay"))
+    _run(app, user_ids[0], request, "pg-generation-new-2", outcomes, 3)
+    _run(app, user_ids[0], request, "pg-generation-failed-2", outcomes, 4)
+    assert outcomes[3] == ("ok", True, outcomes[0][2])
+    assert outcomes[4] == _FAILED_REPLAY
+    with app.app_context():
+        operations = TrainingPlanGenerationOperation.query.filter_by(
+            user_id=user_ids[0]).order_by(TrainingPlanGenerationOperation.id).all()
+        assert [(op.status, op.attempt_count) for op in operations] == [
+            ("FAILED", 1), ("SUCCEEDED", 1)]
+        assert operations[0].quota_reserved is False
+        assert TrainingPlan.query.filter_by(user_id=user_ids[0]).count() == 1
+        owner = db.session.get(User, user_ids[0])
+        assert premium.remaining_ai_plans(owner, "training") == 0
+
+
+def test_new_attempt_after_failure_refuses_a_plan_another_writer_committed(
+        pg_generation_app):
+    from app.extensions import db
+    from app.models import TrainingPlan, TrainingPlanGenerationOperation
+    app, user_ids, monkeypatch = pg_generation_app
+    request = _request()
+    _seed_failed(app, user_ids[0], request, "pg-generation-failed-4")
+    entered, release, calls = _install_blocking_provider(monkeypatch)
+    outcomes = {}
+    fresh = threading.Thread(
+        target=_run,
+        args=(app, user_ids[0], request, "pg-generation-new-4", outcomes, 0),
+        daemon=True)
+    fresh.start()
+    assert entered.wait(timeout=20)
+    with app.app_context():
+        db.session.add(TrainingPlan(
+            user_id=user_ids[0], plan_data='{"program": []}'))
+        db.session.commit()
+        db.session.remove()
+    release.set()
+    fresh.join(timeout=20)
+
+    assert outcomes[0] == ("existing",)
+    assert len(calls) == 1
+    _run(app, user_ids[0], request, "pg-generation-failed-4", outcomes, 1)
+    assert outcomes[1] == _FAILED_REPLAY
+    with app.app_context():
+        assert TrainingPlan.query.filter_by(user_id=user_ids[0]).count() == 1
+        statuses = [op.status for op in TrainingPlanGenerationOperation.query.filter_by(
+            user_id=user_ids[0]).order_by(TrainingPlanGenerationOperation.id)]
+        assert statuses == ["FAILED", "GENERATED"]

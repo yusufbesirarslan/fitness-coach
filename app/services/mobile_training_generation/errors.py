@@ -61,10 +61,17 @@ class GenerationPersistenceUnavailable(PlanGenerationCommandError):
 
 
 class StoredGenerationFailure(PlanGenerationCommandError):
-    """A bounded terminal result reconstructed from the durable ledger."""
+    """A bounded terminal result reconstructed from the durable ledger.
 
-    def __init__(self, public_code, http_status, retryable):
+    Never retryable: a FAILED operation consumes its key, so sending the same
+    command with the same key can only replay this answer. Whether a NEW
+    logical attempt (a new key) may succeed is said by `public_code`
+    (`TRAINING_PLAN_GENERATION_UNAVAILABLE` = yes), never by this flag.
+    """
+
+    retryable = False
+
+    def __init__(self, public_code, http_status):
         super().__init__("stored training plan generation failure")
         self.public_code = public_code
         self.http_status = http_status
-        self.retryable = retryable
