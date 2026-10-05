@@ -98,3 +98,11 @@ The disposable PostgreSQL schema experiment ran the full Alembic chain to the pr
 | Replace revision < MAX with <= MAX | test_v2_saturation_atomicity[999999999] | 1 failed |
 
 All targets are in tests/test_ti01a_execution_context.py. Each mutation was temporary and restored before final qualification. Additionally test_v1_selection_only_preserves_context_with_subset_checkpoint failed before its projection fix and passed afterward. Mutation-only code is absent from this branch.
+
+The first full GitHub run caught four stale endpoint-inventory assertions in the mobile-auth and Daily-Coach discovery guards: the newly required capabilities route needed explicit admission. Their closed allow-lists were updated, including the dark-route assertion; no application behavior changed. The corrective focused command passed 164 tests:
+
+```sh
+python -m pytest -q tests/test_mobile_auth_feature_gate.py tests/test_sprint12_daily_coach_discovery.py tests/test_mobile_workout_sessions_architecture.py tests/test_ti01a_execution_context.py
+```
+
+That first run also passed 10,420 backend tests and the full PostgreSQL gate's 144 tests. Final merge qualification requires all five gates on the corrected head, not these partial results.
