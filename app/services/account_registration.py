@@ -319,7 +319,8 @@ def _send_welcome_email(user):
     try:
         if user is None or not user.email:
             return
-        subject, html, text = email_templates.welcome_email(user.username)
+        subject, html, text = email_templates.welcome_email(
+            user.username, language=user.language)
         email_service.send_html_email(user.email, subject, html, text=text)
         current_app.logger.info("[AUTH-EMAIL] welcome kuyruklandı: user=%s to=%s",
                                 user.username, email_service.mask_email(user.email))

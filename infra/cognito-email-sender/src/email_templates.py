@@ -16,6 +16,13 @@ bunu zorlar). Değişiklikten sonra kopyayı güncelle:
 
     cp app/services/email_templates.py infra/cognito-email-sender/src/email_templates.py
 
+Dil (LP-14): her şablon `language` alır ("tr" | "en"). Dili şablon SEÇMEZ —
+çağıran, hesabın kanonik dilini (User.language) verir. Eksik/geçersiz/
+desteklenmeyen dil DEFAULT_LANGUAGE'a (= app.i18n.DEFAULT_LOCALE, "tr") düşer;
+app/* import edilemediği için değerler burada tekrarlanır ve
+tests/test_auth_email_language.py eşitliklerini zorlar. Dil yalnızca sunumu
+(konu, gövde, <html lang>) değiştirir; kod, bağlantı ve alıcı dilden bağımsızdır.
+
 Güvenlik: doğrulama/sıfırlama kodları YALNIZCA gövdede yer alır, konu satırında
 ASLA bulunmaz (konu satırları loglanır). Kullanıcıdan gelen `name` HTML-escape
 edilir (Cognito 'name' attribute'u kullanıcı girdisidir).
@@ -40,8 +47,18 @@ _SOCIAL_LINKS = (
 # parametresinden gelir; ikisinde de yoksa canlı site varsayılır.
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "https://www.axisaiapp.com").rstrip("/")
 
+# app.i18n.AVAILABLE_LOCALES / DEFAULT_LOCALE ile aynı olmalı (test zorlar).
+SUPPORTED_LANGUAGES = ("tr", "en")
+DEFAULT_LANGUAGE = "tr"
 
-def render_branded_email(body_html, cta_label, cta_url, footer_extra_html=""):
+
+def _lang(language):
+    """Desteklenen dil aynen; eksik/geçersiz/desteklenmeyen dil → DEFAULT_LANGUAGE."""
+    return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+
+
+def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
+                         language=DEFAULT_LANGUAGE):
     """İçeriği ortak AxisAI kabuğuna sar; tam HTML dokümanı döndürür."""
     social = " &nbsp;&middot;&nbsp; ".join(
         '<a href="%s" style="color:%s;text-decoration:underline">%s</a>' % (url, _MUTED, name)
@@ -49,7 +66,7 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html=""):
     )
     return (
         '<!DOCTYPE html>'
-        '<html lang="tr"><body style="margin:0;padding:0;background:%(bg)s">'
+        '<html lang="%(lang)s"><body style="margin:0;padding:0;background:%(bg)s">'
         '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"'
         ' style="background:%(bg)s;padding:32px 16px"><tr><td align="center">'
         '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"'
@@ -79,6 +96,7 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html=""):
         "muted": _MUTED, "violet": _VIOLET, "body": body_html,
         "cta_label": cta_label, "cta_url": cta_url,
         "footer_extra": footer_extra_html, "social": social,
+        "lang": _lang(language),
     }
 
 
@@ -96,98 +114,209 @@ def _code_block(code, label):
          "label": label, "code": _html.escape(str(code))}
 
 
-def _greeting(name):
+# Dil-başına metinler. "tr" değerleri LP-14 öncesi metinlerin birebir aynısıdır;
+# "en" aynı olayı aynı güvenlik anlamıyla söyler. Buradaki metinler statiktir —
+# kullanıcı girdisi yalnızca escape'lenmiş isim ve kod olarak girer.
+_COPY = {
+    "tr": {
+        "greet_named": "Merhaba %s,",
+        "greet": "Merhaba,",
+        "verification": {
+            "subject": "AxisAI — e-posta doğrulama kodun",
+            "text": (
+                "%(greet)s\n\n"
+                "AxisAI hesabını doğrulamak için kodun: %(code)s\n\n"
+                "Kodu %(base)s/verify sayfasına gir.\n\n"
+                "Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin.\n"),
+            "title": "E-postanı doğrula",
+            "intro": "AxisAI hesabını doğrulamak için kodun aşağıda.",
+            "note": "Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin.",
+            "code_label": "Doğrulama kodu",
+            "cta": "Hesabını doğrula",
+        },
+        "reset": {
+            "subject": "AxisAI — şifre sıfırlama kodun",
+            "text": (
+                "%(greet)s\n\n"
+                "Şifreni sıfırlamak için kodun: %(code)s\n\n"
+                "Kodu %(base)s/reset-password sayfasına gir. Kod kısa süreliğine geçerlidir.\n\n"
+                "Bu isteği sen yapmadıysan şifren değişmedi; bu e-postayı yok sayabilirsin.\n"),
+            "title": "Şifreni sıfırla",
+            "intro": "şifreni sıfırlamak için kodun aşağıda. Kod kısa süreliğine geçerlidir.",
+            "note": "Bu isteği sen yapmadıysan şifren değişmedi; bu e-postayı yok sayabilirsin.",
+            "code_label": "Sıfırlama kodu",
+            "cta": "Şifreni sıfırla",
+        },
+        "welcome": {
+            "subject_named": "AxisAI'ye hoş geldin, %s!",
+            "subject": "AxisAI'ye hoş geldin!",
+            "text": (
+                "%(greet)s\n\n"
+                "E-postan doğrulandı, hesabın hazır!\n\n"
+                "AxisAI ile hedefine uygun beslenme ve antrenman planları oluşturabilir, "
+                "ilerlemeni takip edebilir ve AI koçunla her an konuşabilirsin.\n\n"
+                "Giriş yap: %(base)s/login\n"),
+            "title": "Hoş geldin%(comma_name)s!",
+            "intro": (
+                "E-postan doğrulandı, hesabın hazır. "
+                "AxisAI ile hedefine uygun beslenme ve antrenman planları oluşturabilir, "
+                "ilerlemeni takip edebilir ve AI koçunla her an konuşabilirsin."),
+            "cta": "Giriş yap",
+        },
+        "password_changed": {
+            "subject": "AxisAI — şifren değiştirildi",
+            "text": (
+                "%(greet)s\n\n"
+                "Hesabının şifresi az önce değiştirildi.\n\n"
+                "Bu işlemi sen yaptıysan yapman gereken bir şey yok.\n"
+                "Sen yapmadıysan hemen şifreni sıfırla (%(base)s/forgot-password) ve "
+                "hello@axisaiapp.com adresinden bize ulaş.\n"),
+            "title": "Şifren değiştirildi",
+            "intro": "hesabının şifresi az önce değiştirildi.",
+            "note": ("Bu işlemi sen yaptıysan yapman gereken bir şey yok. Sen yapmadıysan "
+                     "hemen şifreni sıfırla ve bize ulaş."),
+            "support": "Soruların için:",
+            "cta": "Şifreni sıfırla",
+        },
+    },
+    "en": {
+        "greet_named": "Hi %s,",
+        "greet": "Hi,",
+        "verification": {
+            "subject": "AxisAI — your email verification code",
+            "text": (
+                "%(greet)s\n\n"
+                "Your code to verify your AxisAI account: %(code)s\n\n"
+                "Enter the code at %(base)s/verify.\n\n"
+                "If you didn't request this, you can ignore this email.\n"),
+            "title": "Verify your email",
+            "intro": "here is your code to verify your AxisAI account.",
+            "note": "If you didn't request this, you can ignore this email.",
+            "code_label": "Verification code",
+            "cta": "Verify your account",
+        },
+        "reset": {
+            "subject": "AxisAI — your password reset code",
+            "text": (
+                "%(greet)s\n\n"
+                "Your code to reset your password: %(code)s\n\n"
+                "Enter the code at %(base)s/reset-password. The code is valid for a short time.\n\n"
+                "If you didn't request this, your password has not changed; "
+                "you can ignore this email.\n"),
+            "title": "Reset your password",
+            "intro": "here is your code to reset your password. The code is valid for a short time.",
+            "note": ("If you didn't request this, your password has not changed; "
+                     "you can ignore this email."),
+            "code_label": "Reset code",
+            "cta": "Reset your password",
+        },
+        "welcome": {
+            "subject_named": "Welcome to AxisAI, %s!",
+            "subject": "Welcome to AxisAI!",
+            "text": (
+                "%(greet)s\n\n"
+                "Your email is verified and your account is ready!\n\n"
+                "With AxisAI you can create nutrition and training plans that fit your goal, "
+                "track your progress and talk to your AI coach anytime.\n\n"
+                "Sign in: %(base)s/login\n"),
+            "title": "Welcome%(comma_name)s!",
+            "intro": (
+                "Your email is verified and your account is ready. "
+                "With AxisAI you can create nutrition and training plans that fit your goal, "
+                "track your progress and talk to your AI coach anytime."),
+            "cta": "Sign in",
+        },
+        "password_changed": {
+            "subject": "AxisAI — your password was changed",
+            "text": (
+                "%(greet)s\n\n"
+                "Your account password was just changed.\n\n"
+                "If you made this change, there's nothing you need to do.\n"
+                "If you didn't, reset your password right away (%(base)s/forgot-password) and "
+                "contact us at hello@axisaiapp.com.\n"),
+            "title": "Your password was changed",
+            "intro": "your account password was just changed.",
+            "note": ("If you made this change, there's nothing you need to do. If you didn't, "
+                     "reset your password right away and contact us."),
+            "support": "Questions?",
+            "cta": "Reset your password",
+        },
+    },
+}
+
+
+def _greeting(name, language=None):
     """Escape'lenmiş kişisel selamlama; isim yoksa nötr selamlama."""
+    copy = _COPY[_lang(language)]
     name = (name or "").strip()
-    return "Merhaba %s," % _html.escape(name) if name else "Merhaba,"
+    return copy["greet_named"] % _html.escape(name) if name else copy["greet"]
 
 
-def verification_code_email(name, code):
+def _code_email(kind, name, code, language, path):
+    """Kod taşıyan iki e-postanın (doğrulama, sıfırlama) ortak gövdesi."""
+    lang = _lang(language)
+    copy = _COPY[lang][kind]
+    greet = _greeting(name, lang)
+    text = copy["text"] % {"greet": greet, "code": code, "base": APP_BASE_URL}
+    body_html = (
+        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">%(title)s</h1>'
+        '<p style="margin:0 0 16px">%(greet)s %(intro)s</p>'
+        '%(code_block)s'
+        '<p style="margin:0 0 8px;color:%(muted)s;font-size:13px">%(note)s</p>'
+    ) % {"text": _TEXT, "muted": _MUTED, "greet": greet, "title": copy["title"],
+         "intro": copy["intro"], "note": copy["note"],
+         "code_block": _code_block(code, copy["code_label"])}
+    html = render_branded_email(body_html, copy["cta"], APP_BASE_URL + path,
+                                language=lang)
+    return copy["subject"], html, text
+
+
+def verification_code_email(name, code, language=None):
     """Kayıt/yeniden-gönderim doğrulama kodu e-postası. (subject, html, text) döndürür."""
-    subject = "AxisAI — e-posta doğrulama kodun"
-    text = (
-        "%s\n\n"
-        "AxisAI hesabını doğrulamak için kodun: %s\n\n"
-        "Kodu %s/verify sayfasına gir.\n\n"
-        "Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin.\n"
-    ) % (_greeting(name), code, APP_BASE_URL)
-    body_html = (
-        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">E-postanı doğrula</h1>'
-        '<p style="margin:0 0 16px">%(greet)s AxisAI hesabını doğrulamak için kodun aşağıda.</p>'
-        '%(code_block)s'
-        '<p style="margin:0 0 8px;color:%(muted)s;font-size:13px">'
-        'Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin.</p>'
-    ) % {"text": _TEXT, "muted": _MUTED, "greet": _greeting(name),
-         "code_block": _code_block(code, "Doğrulama kodu")}
-    html = render_branded_email(body_html, "Hesabını doğrula", APP_BASE_URL + "/verify")
-    return subject, html, text
+    return _code_email("verification", name, code, language, "/verify")
 
 
-def reset_code_email(name, code):
+def reset_code_email(name, code, language=None):
     """Şifre sıfırlama kodu e-postası. (subject, html, text) döndürür."""
-    subject = "AxisAI — şifre sıfırlama kodun"
-    text = (
-        "%s\n\n"
-        "Şifreni sıfırlamak için kodun: %s\n\n"
-        "Kodu %s/reset-password sayfasına gir. Kod kısa süreliğine geçerlidir.\n\n"
-        "Bu isteği sen yapmadıysan şifren değişmedi; bu e-postayı yok sayabilirsin.\n"
-    ) % (_greeting(name), code, APP_BASE_URL)
-    body_html = (
-        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">Şifreni sıfırla</h1>'
-        '<p style="margin:0 0 16px">%(greet)s şifreni sıfırlamak için kodun aşağıda. '
-        'Kod kısa süreliğine geçerlidir.</p>'
-        '%(code_block)s'
-        '<p style="margin:0 0 8px;color:%(muted)s;font-size:13px">'
-        'Bu isteği sen yapmadıysan şifren değişmedi; bu e-postayı yok sayabilirsin.</p>'
-    ) % {"text": _TEXT, "muted": _MUTED, "greet": _greeting(name),
-         "code_block": _code_block(code, "Sıfırlama kodu")}
-    html = render_branded_email(body_html, "Şifreni sıfırla", APP_BASE_URL + "/reset-password")
-    return subject, html, text
+    return _code_email("reset", name, code, language, "/reset-password")
 
 
-def welcome_email(name):
+def welcome_email(name, language=None):
     """Hesap doğrulaması sonrası hoş geldin e-postası. (subject, html, text) döndürür."""
-    safe = _html.escape((name or "").strip())
-    subject = ("AxisAI'ye hoş geldin, %s!" % (name or "").strip()) if (name or "").strip() \
-        else "AxisAI'ye hoş geldin!"
-    text = (
-        "%s\n\n"
-        "E-postan doğrulandı, hesabın hazır!\n\n"
-        "AxisAI ile hedefine uygun beslenme ve antrenman planları oluşturabilir, "
-        "ilerlemeni takip edebilir ve AI koçunla her an konuşabilirsin.\n\n"
-        "Giriş yap: %s/login\n"
-    ) % (_greeting(name), APP_BASE_URL)
+    lang = _lang(language)
+    copy = _COPY[lang]["welcome"]
+    raw = (name or "").strip()
+    safe = _html.escape(raw)
+    subject = copy["subject_named"] % raw if raw else copy["subject"]
+    text = copy["text"] % {"greet": _greeting(name, lang), "base": APP_BASE_URL}
     body_html = (
-        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">Hoş geldin%(comma_name)s!</h1>'
-        '<p style="margin:0 0 16px">E-postan doğrulandı, hesabın hazır. '
-        'AxisAI ile hedefine uygun beslenme ve antrenman planları oluşturabilir, '
-        'ilerlemeni takip edebilir ve AI koçunla her an konuşabilirsin.</p>'
-    ) % {"text": _TEXT, "comma_name": (", " + safe) if safe else ""}
-    html = render_branded_email(body_html, "Giriş yap", APP_BASE_URL + "/login")
+        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">%(title)s</h1>'
+        '<p style="margin:0 0 16px">%(intro)s</p>'
+    ) % {"text": _TEXT, "intro": copy["intro"],
+         "title": copy["title"] % {"comma_name": (", " + safe) if safe else ""}}
+    html = render_branded_email(body_html, copy["cta"], APP_BASE_URL + "/login",
+                                language=lang)
     return subject, html, text
 
 
-def password_changed_email(name):
+def password_changed_email(name, language=None):
     """Şifre değişikliği sonrası güvenlik bildirimi. (subject, html, text) döndürür."""
-    subject = "AxisAI — şifren değiştirildi"
-    text = (
-        "%s\n\n"
-        "Hesabının şifresi az önce değiştirildi.\n\n"
-        "Bu işlemi sen yaptıysan yapman gereken bir şey yok.\n"
-        "Sen yapmadıysan hemen şifreni sıfırla (%s/forgot-password) ve "
-        "hello@axisaiapp.com adresinden bize ulaş.\n"
-    ) % (_greeting(name), APP_BASE_URL)
+    lang = _lang(language)
+    copy = _COPY[lang]["password_changed"]
+    greet = _greeting(name, lang)
+    text = copy["text"] % {"greet": greet, "base": APP_BASE_URL}
     body_html = (
-        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">Şifren değiştirildi</h1>'
-        '<p style="margin:0 0 16px">%(greet)s hesabının şifresi az önce değiştirildi.</p>'
-        '<p style="margin:0 0 8px;color:%(muted)s;font-size:13px">'
-        'Bu işlemi sen yaptıysan yapman gereken bir şey yok. Sen yapmadıysan '
-        'hemen şifreni sıfırla ve bize ulaş.</p>'
-    ) % {"text": _TEXT, "muted": _MUTED, "greet": _greeting(name)}
+        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">%(title)s</h1>'
+        '<p style="margin:0 0 16px">%(greet)s %(intro)s</p>'
+        '<p style="margin:0 0 8px;color:%(muted)s;font-size:13px">%(note)s</p>'
+    ) % {"text": _TEXT, "muted": _MUTED, "greet": greet, "title": copy["title"],
+         "intro": copy["intro"], "note": copy["note"]}
     footer_extra = (
-        '<div>Soruların için: <a href="mailto:hello@axisaiapp.com" '
-        'style="color:%s;text-decoration:underline">hello@axisaiapp.com</a></div>' % _MUTED
+        '<div>%s <a href="mailto:hello@axisaiapp.com" '
+        'style="color:%s;text-decoration:underline">hello@axisaiapp.com</a></div>'
+        % (copy["support"], _MUTED)
     )
-    html = render_branded_email(body_html, "Şifreni sıfırla",
-                                APP_BASE_URL + "/forgot-password", footer_extra)
-    return subject, html, text
+    html = render_branded_email(body_html, copy["cta"],
+                                APP_BASE_URL + "/forgot-password", footer_extra,
+                                language=lang)
+    return copy["subject"], html, text
