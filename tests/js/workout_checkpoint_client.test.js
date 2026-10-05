@@ -548,7 +548,7 @@ test('an acknowledged checkpoint hydrates a separate page instance after reload'
   assert.equal(reloadedDraft.checkpointRevision, 5);
   assert.equal(reloadedDraft.elapsedBaselineSeconds, 60);
   assert.deepEqual(reloadedDraft.exercises[0].sets[0], {
-    index: 0, weightKg: 100, reps: 6, done: true, isPR: false,
+    index: 0, weightKg: 100, reps: 6, done: true, isPR: false, repsExplicit: true,
   });
 });
 
