@@ -153,6 +153,11 @@ authorize an unknown command. The instance profile needs `ssm:GetParameter` only
 `/axisai/production-deploy-authority/*`; the deploy role needs narrowly scoped
 `ssm:PutParameter` and `ssm:DeleteParameter` on the same prefix. B deletes the
 authority value after the terminal result, with bounded best-effort cleanup.
+`DeleteParameter` succeeds with empty CLI output, which the runner accepts for
+that operation only. B logs exactly one cleanup outcome: `removed`,
+`already absent` (`ParameterNotFound`), or `cleanup failed code=<AWS code>
+kind=<timeout|start|exit|invalid-json|not-object>`, never the parameter name or
+value.
 
 The 1,860-second AWS expiry is derived from the 60-second delivery timeout plus
 the 1,800-second execution timeout; the 2,100-second polling horizon retains the

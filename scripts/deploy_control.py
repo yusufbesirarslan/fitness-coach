@@ -43,6 +43,11 @@ DEPLOY_DIR_RE = re.compile(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+")
 AWS_ERROR_CODE_RE = re.compile(
     r"An error occurred \(([A-Za-z][A-Za-z0-9]*)\) when calling"
 )
+SAFE_LOG_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,63}")
+# Operations whose AWS result shape has no members.  AWS CLI v2's JSON
+# formatter prints nothing for an empty response, so success is exit 0 with
+# no stdout at all -- not a JSON object.
+EMPTY_RESULT_OPERATIONS = (["ssm", "delete-parameter"],)
 
 DELIVERY_TIMEOUT_SECONDS = 60
 EXECUTION_TIMEOUT_SECONDS = SSM_EXECUTION_TIMEOUT_SECONDS
@@ -515,9 +520,18 @@ class PreflightError(RuntimeError):
 class AwsCliError(RuntimeError):
     """Raised by an AWS JSON runner when the AWS CLI command fails."""
 
-    def __init__(self, message: str, *, code: str | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        kind: str | None = None,
+    ):
         super().__init__(message)
         self.code = code
+        # Fixed failure class from the runner: timeout, start, exit,
+        # invalid-json or not-object.
+        self.kind = kind
 
 
 class InvocationProtocolError(RuntimeError):
@@ -672,9 +686,11 @@ def run_aws_json(
     try:
         completed = run(command, **run_options)
     except subprocess.TimeoutExpired as error:
-        raise AwsCliError(f"{operation} timed out after {timeout} seconds") from error
+        raise AwsCliError(
+            f"{operation} timed out after {timeout} seconds", kind="timeout",
+        ) from error
     except (OSError, UnicodeError) as error:
-        raise AwsCliError(f"{operation} could not start") from error
+        raise AwsCliError(f"{operation} could not start", kind="start") from error
 
     if completed.returncode != 0:
         error_code = None
@@ -685,13 +701,20 @@ def run_aws_json(
         raise AwsCliError(
             f"{operation} failed with exit code {completed.returncode}",
             code=error_code,
+            kind="exit",
         )
+    if args[:2] in EMPTY_RESULT_OPERATIONS and completed.stdout == "":
+        return {}
     try:
         response = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError) as error:
-        raise AwsCliError(f"{operation} returned invalid JSON") from error
+        raise AwsCliError(
+            f"{operation} returned invalid JSON", kind="invalid-json",
+        ) from error
     if not isinstance(response, dict):
-        raise AwsCliError(f"{operation} must return one JSON object")
+        raise AwsCliError(
+            f"{operation} must return one JSON object", kind="not-object",
+        )
     return response
 
 
@@ -1182,6 +1205,38 @@ def delete_authority_parameter(
     ])
 
 
+def _safe_log_token(value: str | None, missing: str) -> str:
+    if value is None:
+        return missing
+    if SAFE_LOG_TOKEN_RE.fullmatch(value) is None:
+        return "invalid"
+    return value
+
+
+def cleanup_authority_parameter(
+    config: DeployConfig,
+    authority_token: str,
+    aws: AwsJsonRunner,
+    log: Callable[[str], None],
+) -> None:
+    """Delete one authority value once; never fail the finished transaction.
+
+    The log line carries only the sanitized AWS error code and the runner's
+    fixed failure class -- never the parameter name, its value, or error text.
+    """
+    try:
+        delete_authority_parameter(config, authority_token, aws)
+    except AwsCliError as error:
+        if error.code == "ParameterNotFound":
+            log("SSM delivery authority already absent")
+            return
+        code = _safe_log_token(error.code, "none")
+        kind = _safe_log_token(error.kind, "unclassified")
+        log(f"SSM delivery authority cleanup failed code={code} kind={kind}")
+        return
+    log("SSM delivery authority removed")
+
+
 def read_invocation(
     config: DeployConfig,
     command_id: str,
@@ -1341,10 +1396,7 @@ def run_deploy(
         _emit_invocation_output(error.result, log)
         raise
     finally:
-        try:
-            delete_authority_parameter(config, authority_token, aws)
-        except AwsCliError:
-            log("SSM delivery authority cleanup failed")
+        cleanup_authority_parameter(config, authority_token, aws, log)
     _emit_invocation_output(result, log)
     return result
 

@@ -2922,12 +2922,13 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
         f"python3 - '{VALID_ENV['DEPLOY_USER']}' \"$script_path\" "
         f"'{VALID_ENV['DEPLOY_SHA']}' \"$deploy_dir\""
     ) in inner_bootstrap
-    assert messages[-9:] == [
+    assert messages[-10:] == [
         "SSM command delivery authorized",
         "SSM status: Pending",
         "SSM status: In Progress",
         "SSM reports command InProgress",
         "SSM status: Success",
+        "SSM delivery authority removed",
         "SSM stdout:",
         "exact deploy complete",
         "SSM stderr:",
@@ -3689,3 +3690,280 @@ def test_the_gates_that_failed_in_production_now_resolve(tmp_path):
 
     for name in SBIN_ONLY_DEPLOY_EXECUTABLES:
         assert _resolve_under(tmp_path, RETIRED_HARDENED_PATH, name) is None
+
+
+# ---- SSM delivery authority cleanup ---------------------------------------
+#
+# DeleteParameter has an empty result shape.  AWS CLI v2's JSON formatter
+# prints nothing for an empty response (awscli/formatter.py: `if response !=
+# {}`), so a *successful* delete exits 0 with empty stdout.  The fakes above
+# return `{}` from the runner and therefore never exercised that real shape.
+
+def test_aws_json_runner_accepts_empty_success_output_for_delete_parameter():
+    completed = FakeAwsCompletedProcess(stdout="")
+
+    assert run_aws_json(
+        ["ssm", "delete-parameter", "--name", "/x"],
+        run=lambda args, **kwargs: completed,
+    ) == {}
+
+
+@pytest.mark.parametrize("args", [
+    ["ec2", "describe-instances"],
+    ["ssm", "put-parameter"],
+    ["ssm", "send-command"],
+    ["ssm", "get-command-invocation"],
+])
+def test_aws_json_runner_still_rejects_empty_output_for_result_operations(args):
+    completed = FakeAwsCompletedProcess(stdout="")
+
+    with pytest.raises(AwsCliError, match="invalid JSON") as captured:
+        run_aws_json(args, run=lambda command, **kwargs: completed)
+
+    assert captured.value.kind == "invalid-json"
+
+
+def test_aws_json_runner_rejects_nonempty_garbage_for_delete_parameter():
+    completed = FakeAwsCompletedProcess(stdout="not-json")
+
+    with pytest.raises(AwsCliError, match="invalid JSON"):
+        run_aws_json(
+            ["ssm", "delete-parameter"], run=lambda args, **kwargs: completed,
+        )
+
+
+def test_aws_json_runner_rejects_failed_delete_even_with_empty_output():
+    completed = FakeAwsCompletedProcess(
+        returncode=254, stdout="",
+        stderr=(
+            "An error occurred (AccessDeniedException) when calling the "
+            "DeleteParameter operation: secret-principal-detail"
+        ),
+    )
+
+    with pytest.raises(AwsCliError) as captured:
+        run_aws_json(
+            ["ssm", "delete-parameter"], run=lambda args, **kwargs: completed,
+        )
+
+    assert captured.value.code == "AccessDeniedException"
+    assert captured.value.kind == "exit"
+    assert "secret-principal-detail" not in str(captured.value)
+
+
+@pytest.mark.parametrize("raised,kind", [
+    (subprocess.TimeoutExpired(["aws"], 60), "timeout"),
+    (FileNotFoundError("aws"), "start"),
+])
+def test_aws_json_runner_classifies_process_failures(raised, kind):
+    def run(args, **kwargs):
+        raise raised
+
+    with pytest.raises(AwsCliError) as captured:
+        run_aws_json(["ssm", "delete-parameter"], run=run)
+
+    assert captured.value.kind == kind
+    assert captured.value.code is None
+
+
+def test_authority_cleanup_uses_the_default_bounded_cli_timeout():
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(kwargs)
+        return FakeAwsCompletedProcess(stdout="")
+
+    run_aws_json(["ssm", "delete-parameter"], run=run)
+
+    assert calls[0]["timeout"] == AWS_CLI_CALL_TIMEOUT_SECONDS
+    # Unlike SendCommand, DeleteParameter is idempotent, so the CLI's own
+    # bounded standard-mode retries stay enabled inside that one call.
+    assert "env" not in calls[0]
+    assert (
+        deploy_control.AUTHORITY_CLEANUP_RESERVE_SECONDS
+        == AWS_CLI_CALL_TIMEOUT_SECONDS
+    )
+
+
+def _run_authority_lifecycle(monkeypatch, workspace_tmp_dir, fake_clock,
+                             delete, *, states=("In Progress", "Success")):
+    """Drive run_deploy through one authority lifecycle with a fake AWS."""
+    _write_integration_host_script(workspace_tmp_dir)
+    monkeypatch.setattr(deploy_control, "validate_candidate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(deploy_control, "preflight", lambda *args, **kwargs: None)
+    seen = {"put": [], "delete": [], "calls": []}
+    invocation_states = iter(states)
+
+    def aws(args):
+        seen["calls"].append(args[:2])
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return managed_instance_response(NOW)
+        if args[:2] == ["ssm", "send-command"]:
+            return {"Command": {
+                "CommandId": "11111111-1111-1111-1111-111111111111",
+            }}
+        if args[:2] == ["ssm", "put-parameter"]:
+            seen["put"].append((
+                args[args.index("--name") + 1], args[args.index("--value") + 1],
+            ))
+            return {"Version": 1, "Tier": "Standard"}
+        if args[:2] == ["ssm", "get-command-invocation"]:
+            state = next(invocation_states)
+            if state is None:
+                # Simulate a host that never reaches a terminal state.
+                fake_clock.now += POLL_HORIZON_SECONDS
+                state = "In Progress"
+            return invocation_response(
+                state, response_code=0 if state == "Success" else -1,
+            )
+        if args[:2] == ["ssm", "delete-parameter"]:
+            seen["delete"].append(args[args.index("--name") + 1])
+            return delete(seen)
+        raise AssertionError(f"unexpected AWS call: {args}")
+
+    messages = []
+    error = None
+    try:
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws,
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            fake_clock.monotonic, fake_clock.sleep, messages.append,
+        )
+    except Exception as raised:  # noqa: BLE001 - asserted by each caller
+        error = raised
+    return seen, messages, error
+
+
+def _cleanup_messages(messages):
+    return [
+        message for message in messages
+        if message.startswith("SSM delivery authority")
+    ]
+
+
+def _assert_authority_never_logged(seen, messages):
+    name, value = seen["put"][0]
+    token = name.rsplit("/", 1)[1]
+    for message in messages:
+        assert token not in message
+        assert value not in message
+
+
+def test_authority_cleanup_success_after_successful_deploy_logs_success(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    seen, messages, error = _run_authority_lifecycle(
+        monkeypatch, workspace_tmp_dir, fake_clock, lambda seen: {},
+    )
+
+    assert error is None
+    assert seen["delete"] == [seen["put"][0][0]]
+    assert _cleanup_messages(messages) == ["SSM delivery authority removed"]
+    _assert_authority_never_logged(seen, messages)
+
+
+def test_authority_cleanup_runs_once_after_failed_deploy(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    seen, messages, error = _run_authority_lifecycle(
+        monkeypatch, workspace_tmp_dir, fake_clock, lambda seen: {},
+        states=("In Progress", "Failed"),
+    )
+
+    assert isinstance(error, InvocationFailed)
+    assert seen["delete"] == [seen["put"][0][0]]
+    assert _cleanup_messages(messages) == ["SSM delivery authority removed"]
+
+
+def test_authority_cleanup_runs_once_after_polling_budget_exhaustion(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    seen, messages, error = _run_authority_lifecycle(
+        monkeypatch, workspace_tmp_dir, fake_clock, lambda seen: {},
+        states=("In Progress", None),
+    )
+
+    assert isinstance(error, InvocationPollingTimeout)
+    assert seen["delete"] == [seen["put"][0][0]]
+    assert _cleanup_messages(messages) == ["SSM delivery authority removed"]
+
+
+def test_authority_already_absent_is_a_successful_cleanup(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    def delete(seen):
+        raise AwsCliError(
+            "aws ssm delete-parameter failed with exit code 254",
+            code="ParameterNotFound", kind="exit",
+        )
+
+    seen, messages, error = _run_authority_lifecycle(
+        monkeypatch, workspace_tmp_dir, fake_clock, delete,
+    )
+
+    assert error is None
+    assert seen["calls"].count(["ssm", "delete-parameter"]) == 1
+    assert _cleanup_messages(messages) == ["SSM delivery authority already absent"]
+
+
+@pytest.mark.parametrize("code,kind,expected", [
+    ("AccessDeniedException", "exit", "code=AccessDeniedException kind=exit"),
+    ("InternalServerError", "exit", "code=InternalServerError kind=exit"),
+    ("ThrottlingException", "exit", "code=ThrottlingException kind=exit"),
+    (None, "exit", "code=none kind=exit"),
+    (None, "timeout", "code=none kind=timeout"),
+    (None, "start", "code=none kind=start"),
+    (None, "invalid-json", "code=none kind=invalid-json"),
+    (None, None, "code=none kind=unclassified"),
+])
+def test_authority_cleanup_failure_is_best_effort_and_observable(
+        monkeypatch, workspace_tmp_dir, fake_clock, code, kind, expected):
+    def delete(seen):
+        raise AwsCliError("aws ssm delete-parameter failed", code=code, kind=kind)
+
+    seen, messages, error = _run_authority_lifecycle(
+        monkeypatch, workspace_tmp_dir, fake_clock, delete,
+    )
+
+    # The host transaction already finished; cleanup stays best-effort, is
+    # attempted exactly once (the CLI's own bounded retries live inside that
+    # one call), and the deploy is still classified by its SSM status alone.
+    assert error is None
+    assert seen["calls"].count(["ssm", "delete-parameter"]) == 1
+    assert _cleanup_messages(messages) == [
+        f"SSM delivery authority cleanup failed {expected}"
+    ]
+
+
+def test_authority_cleanup_failure_never_logs_token_value_or_error_text(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    def delete(seen):
+        name, value = seen["put"][0]
+        raise AwsCliError(
+            f"leak {name} {value} aws_secret_access_key=SECRET",
+            code=f"Bad code {name}", kind=f"exit {value}",
+        )
+
+    seen, messages, error = _run_authority_lifecycle(
+        monkeypatch, workspace_tmp_dir, fake_clock, delete,
+    )
+
+    assert error is None
+    assert _cleanup_messages(messages) == [
+        "SSM delivery authority cleanup failed code=invalid kind=invalid"
+    ]
+    _assert_authority_never_logged(seen, messages)
+    assert not any("SECRET" in message for message in messages)
+
+
+def test_authority_cleanup_with_real_cli_shape_is_not_reported_as_failure(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    """Regression: production logged 'cleanup failed' after every success."""
+    def delete(seen):
+        return run_aws_json(
+            ["ssm", "delete-parameter"],
+            run=lambda args, **kwargs: FakeAwsCompletedProcess(stdout=""),
+        )
+
+    seen, messages, error = _run_authority_lifecycle(
+        monkeypatch, workspace_tmp_dir, fake_clock, delete,
+    )
+
+    assert error is None
+    assert _cleanup_messages(messages) == ["SSM delivery authority removed"]
