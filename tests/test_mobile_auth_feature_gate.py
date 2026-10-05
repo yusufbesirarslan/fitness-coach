@@ -85,6 +85,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/training/preferences"),
         ("get", "/api/v1/training/plans/current"),
         ("get", "/api/v1/training/workouts/AAAAAAAAAAAAAAAAAAAAAAAA"),
+        ("get", "/api/v1/training/workout-execution-capabilities"),
         ("post", "/api/v1/training/workout-sessions"),
         ("get", "/api/v1/training/workout-sessions/current"),
         ("get", "/api/v1/training/workout-sessions/abc"),
@@ -205,6 +206,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # Mobile Training session contracts; behind
             # FITX_WORKOUT_SESSIONS_ENABLED at request time, but the ROUTES are
             # registered unconditionally, so they belong in this allow-list.
+            # TI-00 negotiated execution capabilities, same auth/session gate.
+            ("/api/v1/training/workout-execution-capabilities", ("GET",)),
             ("/api/v1/training/workout-sessions", ("POST",)),
             ("/api/v1/training/workout-sessions/current", ("GET",)),
             ("/api/v1/training/workout-sessions/<session_reference>",

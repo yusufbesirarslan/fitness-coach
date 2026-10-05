@@ -48,6 +48,7 @@ PACKAGE_PATHS = (
 # surface reaches production through them.
 CANONICAL_PATHS = (CHECKPOINT_PATH, ERRORS_PATH, EXECUTION_PATH)
 ENDPOINTS = (
+    "mobile_api.workout_execution_capabilities",
     "mobile_api.start_workout_session",
     "mobile_api.current_workout_session",
     "mobile_api.read_workout_session",
@@ -425,7 +426,7 @@ def test_the_migration_only_adds_columns_and_keeps_one_alembic_head():
     # The head moves with every added revision; f5a6b7c8d9e0 must still
     # exist (asserted above) but is no longer the tip. F7 chains its Coach
     # history index onto F1's credential-epoch revision.
-    assert revisions - parents == {"d0e1f2a3b4c5"}, sorted(revisions - parents)
+    assert revisions - parents == {"e1f2a3b4c5d6"}, sorted(revisions - parents)
 
 
 # 13/14. Untouched neighbours.

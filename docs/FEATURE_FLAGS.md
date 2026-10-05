@@ -350,3 +350,11 @@ cannot answer the question. Two surfaces can:
   booleans, never values, secrets or connection strings).
 
 There is deliberately **no public flag endpoint**.
+# TI-01A execution context
+
+`FITX_TRAINING_EXECUTION_CONTEXT_ENABLED` defaults OFF and requires
+`FITX_WORKOUT_SESSIONS_ENABLED` plus migration `e1f2a3b4c5d6`.
+It enables negotiated native V2 and the P0 capability. Preservation on V1
+checkpoints always runs, including while P0 is OFF. No insight surface is added.
+Owner: @yusufbesirarslan; review by 2026-11-01. Disable P0 to roll back;
+retain schema and data. See [TI-01A](TI_01A_EXECUTION_CONTEXT.md).

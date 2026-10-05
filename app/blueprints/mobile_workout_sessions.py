@@ -18,7 +18,7 @@ route and the AI-coach tool already share.
 """
 from functools import wraps
 
-from flask import current_app, g, jsonify, request
+from flask import current_app, g, jsonify, make_response, request
 
 from app.blueprints.mobile_api import bp, mobile_error
 from app.blueprints.mobile_training import _sessions_enabled
@@ -28,6 +28,12 @@ from app.mobile_auth_middleware import require_mobile_auth
 from app.models import WORKOUT_SESSION_COMPLETED
 from app.observability import current_request_id
 from app.services import mobile_workout_sessions as sessions
+from app.services.workout_session.context import (
+    MAX_V2_BODY_BYTES, parse_contract, parse_v2, project_context,
+)
+from app.services.workout_session.execution import owned_session
+from app.services.workout_session.service import build_session_view
+from app.services.workout_session.prescription import project as project_prescription
 from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services.menu_extract import validate_pump_check
 from app.services.pump_checks import latest_training_plan_score
@@ -76,7 +82,18 @@ def _flag_gated(view):
     def wrapper(*args, **kwargs):
         if not _sessions_enabled():
             return _disabled()
-        return view(*args, **kwargs)
+        try:
+            g.workout_contract = parse_contract(request.headers.get("AxisAI-Workout-Contract"))
+            if g.workout_contract == 2 and not _context_enabled():
+                response = _disabled()
+            else:
+                response = view(*args, **kwargs)
+        except sessions.SessionCommandError as error:
+            response = _failure(error)
+        response = make_response(response)
+        response.vary.add("AxisAI-Workout-Contract")
+        response.headers['Cache-Control'] = 'private, no-store'
+        return response
 
     return wrapper
 
@@ -103,10 +120,37 @@ def _failure(error):
 
 
 def _ok(result):
+    if g.workout_contract == 2:
+        try:
+            session_payload = result.payload.get('session')
+            row = owned_session(g.mobile_user.id, session_payload['session_ref']) if session_payload else None
+            if row:
+                # Build the entire negotiated envelope from one row snapshot,
+                # even if another writer advanced after command acceptance.
+                result.payload['session'] = sessions.project_session(row, build_session_view(row, app_today()))
+            result.payload['execution_context'] = project_context(row)
+            result.payload['prescription'] = project_prescription(row.prescription_data) if row else None
+        except sessions.SessionCommandError as error:
+            return _failure(error)
+        except Exception as error:  # noqa: BLE001 - same bounded API failure path
+            return _unavailable(error, 'projection_failed')
     response = jsonify(result.payload)
     response.status_code = result.status
     response.headers["Idempotency-Replayed"] = str(result.replayed).lower()
     return response
+
+
+def _context_enabled():
+    return _sessions_enabled() and current_app.config.get('FITX_TRAINING_EXECUTION_CONTEXT_ENABLED', False)
+
+
+@bp.get('/training/workout-execution-capabilities')
+@require_mobile_auth
+@_flag_gated
+def workout_execution_capabilities():
+    enabled = _context_enabled()
+    return jsonify({'contract_version': 1, 'checkpoint_versions': [1, 2] if enabled else [1],
+                    'execution_context_enabled': bool(enabled), 'insights_enabled': False})
 
 
 def _unavailable(error, event):
@@ -186,6 +230,10 @@ def checkpoint_workout_session(session_reference):
     one conditional UPDATE. ``If-Match`` and ``Idempotency-Key`` are both
     REQUIRED -- a progress write with no declared base revision cannot be
     ordered, and one with no key cannot be safely retried."""
+    # Bound the decoded transport body as well as canonical component JSON.
+    # V1 and multipart completion retain their existing transport limits.
+    if g.workout_contract == 2 and len(request.get_data(cache=True)) > MAX_V2_BODY_BYTES:
+        return _failure(sessions.InvalidSessionRequest('V2 checkpoint exceeds its size bound'))
     body = request.get_json(silent=True)
     try:
         key = sessions.parse_idempotency_key(request.headers.get("Idempotency-Key"))
@@ -197,7 +245,8 @@ def checkpoint_workout_session(session_reference):
             session_reference,
             key,
             revision,
-            lambda allowed: sessions.parse_checkpoint(payload, allowed),
+            lambda allowed: parse_v2(body, allowed) if g.workout_contract == 2
+            else sessions.parse_checkpoint(payload, allowed),
         )
     except sessions.SessionCommandError as error:
         return _failure(error)

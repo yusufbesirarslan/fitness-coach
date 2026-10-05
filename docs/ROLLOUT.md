@@ -280,3 +280,11 @@ no record becomes an unexplained OFF flag that nobody dares touch.
    in every test matrix.
 4. If the decision was `remove` instead, delete the flag **and the feature
    branch it gated** — leaving unreachable code behind is the worse outcome.
+# TI-01A P0 rollout addition
+
+`FITX_TRAINING_EXECUTION_CONTEXT_ENABLED=0` is the default. Before activation,
+apply Alembic head `e1f2a3b4c5d6`, qualify V1 regressions and real PostgreSQL
+V1/V2 races, and verify workout-session readiness. Enable only after the frozen
+cross-repository release gates. TI-01A does not authorize activation.
+Rollback: set P0 OFF, retain additive columns and stored context. V1 writes keep
+preserving unchanged-set context and invalidating edited sets while dark.

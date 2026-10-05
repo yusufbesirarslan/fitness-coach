@@ -306,6 +306,18 @@ def insert_active_session(
         last_activity_at=now,
         version=1,
     )
+    # Same start authority for browser/native. Existing rows are never backfilled.
+    if snapshot.source == SOURCE_SCHEDULED:
+        from .prescription import capture
+        plan = db.session.get(TrainingPlan, snapshot.planned_training_plan_id)
+        program = _parse_program(plan) if plan is not None else None
+        if program:
+            _, entries = _weekday_entries(program, snapshot.weekday_slot)
+            try:
+                session.prescription_data = capture(plan, entries)
+            except (ValueError, TypeError, OverflowError):
+                # Optional unrepresentable targets cannot change start semantics.
+                session.prescription_data = None
     db.session.add(session)
     db.session.flush()
     return session
@@ -360,10 +372,12 @@ def advance_checkpoint(
     fingerprint: str,
     key: str,
     now: datetime,
+    execution_context_json: Optional[str] = None,
 ) -> int:
     """Durably advance progress by exactly one revision (PR5).
 
-    ONE atomic conditional UPDATE is the whole concurrency story: it matches the
+    Base, bound execution context and request replay identity move in ONE atomic
+    conditional UPDATE. It matches the
     owned session, the ACTIVE status and the caller's declared base revision, so
 
       * a late request built on an older revision matches 0 rows (it can never
@@ -392,6 +406,7 @@ def advance_checkpoint(
         .values(
             checkpoint_revision=base_revision + 1,
             checkpoint_data=snapshot_json,
+            execution_context_data=execution_context_json,
             checkpoint_fingerprint=fingerprint,
             checkpoint_idempotency_key=key,
             checkpoint_at=now,

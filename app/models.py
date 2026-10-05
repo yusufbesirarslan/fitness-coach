@@ -1350,6 +1350,8 @@ class WorkoutSession(db.Model):
     # contract validates shape, membership, ranges and total size BEFORE this is
     # written (app/services/mobile_workout_sessions/checkpoint.py).
     checkpoint_data = db.Column(db.Text, nullable=True)
+    execution_context_data = db.Column(db.Text, nullable=True)
+    prescription_data = db.Column(db.Text, nullable=True)
     checkpoint_at = db.Column(db.DateTime, nullable=True)
     # Durable replay identity of the LAST accepted checkpoint. Same key + same
     # fingerprint replays without advancing the revision; same key + a different
