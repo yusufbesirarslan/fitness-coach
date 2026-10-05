@@ -9,6 +9,8 @@ import threading
 
 import pytest
 
+from app.services.workout_session.checkpoint import MAX_REVISION
+
 from tests.test_mobile_workout_sessions_pg import (
     _ENABLED,
     _PG_URL,
@@ -64,7 +66,8 @@ def _start_native(flask_app, user_id, reference):
         ).payload["session"]["session_ref"]
 
 
-def test_pr4_same_base_checkpoint_writers_have_one_persisted_winner():
+@pytest.mark.parametrize("base", [0, MAX_REVISION - 1])
+def test_pr4_same_base_checkpoint_writers_have_one_persisted_winner(base, monkeypatch):
     _require_pg()
     from app.models import WorkoutSession
     from app.services import mobile_workout_sessions as sessions
@@ -77,10 +80,27 @@ def test_pr4_same_base_checkpoint_writers_have_one_persisted_winner():
     secret = flask_app.config["SECRET_KEY"]
     session_ref = _start_native(flask_app, user_id, reference)
 
+    if base:
+        from app.extensions import db
+        with flask_app.app_context():
+            row = WorkoutSession.query.filter_by(user_id=user_id).one()
+            row.checkpoint_revision = base
+            db.session.commit()
+
+    from app.services.workout_session import execution
+    original_advance = execution.advance_checkpoint
+    ready_to_write = threading.Barrier(2)
+
+    def synchronized_advance(*args, **kwargs):
+        ready_to_write.wait(timeout=20)
+        return original_advance(*args, **kwargs)
+
+    monkeypatch.setattr(execution, "advance_checkpoint", synchronized_advance)
+
     def native_writer():
         def work():
             result = sessions.checkpoint(
-                user_id, secret, session_ref, "pr4-writer-native", 0,
+                user_id, secret, session_ref, "pr4-writer-native", base,
                 lambda allowed: sessions.parse_checkpoint(
                     _snapshot(60), allowed),
             )
@@ -89,7 +109,7 @@ def test_pr4_same_base_checkpoint_writers_have_one_persisted_winner():
 
     def browser_writer():
         result = record_checkpoint(
-            user_id, session_ref, "pr4-writer-browser", 0,
+            user_id, session_ref, "pr4-writer-browser", base,
             planned_exercise_identities,
             lambda allowed: sessions.parse_checkpoint(_snapshot(900), allowed),
         )
@@ -106,7 +126,7 @@ def test_pr4_same_base_checkpoint_writers_have_one_persisted_winner():
         winner = 60 if results["native"][0] == "ok" else 900
         with flask_app.app_context():
             row = WorkoutSession.query.filter_by(user_id=user_id).one()
-            assert row.checkpoint_revision == 1
+            assert row.checkpoint_revision == base + 1
             assert json.loads(row.checkpoint_data)["elapsed_seconds"] == winner
     finally:
         _teardown(flask_app)

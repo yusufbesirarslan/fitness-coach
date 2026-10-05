@@ -35,11 +35,12 @@ from typing import Callable, Optional, Tuple
 from app.models import WORKOUT_SESSION_ABANDONED, WORKOUT_SESSION_ACTIVE
 from app.timeutil import app_today
 
-from .checkpoint import Checkpoint
+from .checkpoint import MAX_REVISION, Checkpoint
 from .metrics import record_lifecycle_event
 from .errors import (
     IdempotencyConflict,
     RevisionConflict,
+    RevisionExhausted,
     SessionNotFound,
     SessionStale,
     SessionTerminal,
@@ -216,6 +217,8 @@ def record_checkpoint(
         if replay is not None:
             return replay
         reject_terminal(row)
+        if row.checkpoint_revision == base_revision == MAX_REVISION:
+            raise RevisionExhausted("checkpoint revision cannot advance further")
         record_lifecycle_event("revision_conflict")
         raise RevisionConflict("the declared revision is not current")
     record_lifecycle_event("checkpointed")

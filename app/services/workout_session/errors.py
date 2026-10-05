@@ -121,6 +121,14 @@ class RevisionConflict(SessionCommandError):
     requires_reread = True
 
 
+class RevisionExhausted(SessionCommandError):
+    """The V1 revision domain is full; replay and completion remain possible."""
+
+    public_code = "TRAINING_SESSION_REVISION_EXHAUSTED"
+    http_status = 409
+    retryable = False
+
+
 class IdempotencyConflict(SessionCommandError):
     """The key was already used for a DIFFERENT semantic command."""
 

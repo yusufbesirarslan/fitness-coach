@@ -33,6 +33,7 @@ from app.services.workout_completion import (
     lock_completion_day,
 )
 
+from .checkpoint import MAX_REVISION
 from .models import SOURCE_SCHEDULED, SOURCE_UNSCHEDULED, compute_fingerprint
 
 # The active-session partial unique index (app/models.py WorkoutSession).
@@ -374,7 +375,9 @@ def advance_checkpoint(
     The snapshot, its fingerprint, the replay key, the new revision and the
     checkpoint timestamp move together in that single statement, so a revision
     can never advance without the snapshot that justified it. Returns the
-    affected row count (0 = the caller lost / is stale / is terminal).
+    affected row count (0 = lost / stale / terminal / revision exhausted).
+    The revision bound is part of the CAS, so even direct callers cannot advance
+    outside the V1 domain or partially replace a saturated checkpoint.
     """
     result = db.session.execute(
         update(WorkoutSession)
@@ -383,6 +386,8 @@ def advance_checkpoint(
             WorkoutSession.user_id == user_id,
             WorkoutSession.status == WORKOUT_SESSION_ACTIVE,
             WorkoutSession.checkpoint_revision == base_revision,
+            WorkoutSession.checkpoint_revision >= 0,
+            WorkoutSession.checkpoint_revision < MAX_REVISION,
         )
         .values(
             checkpoint_revision=base_revision + 1,

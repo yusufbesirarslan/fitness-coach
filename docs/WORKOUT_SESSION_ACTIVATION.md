@@ -472,12 +472,19 @@ they are read from `app/blueprints/training.py`,
 | session absent | `not_found` / 404 | `TRAINING_SESSION_NOT_FOUND` / 404 |
 | no base revision declared | `revision_required` / **428** | `TRAINING_SESSION_INVALID_REVISION` / 428 |
 | declared revision is stale | `revision_conflict` / 409 | `TRAINING_SESSION_REVISION_CONFLICT` / 409 |
+| checkpoint revision is at MAX and a new command would advance it | `revision_exhausted` / 409 | `TRAINING_SESSION_REVISION_EXHAUSTED` / 409 |
 | malformed idempotency key | `idempotency_key_invalid` / 400 | `TRAINING_SESSION_INVALID_IDEMPOTENCY_KEY` / 400 |
 | same key, different snapshot | `idempotency_conflict` / 409 | `TRAINING_SESSION_IDEMPOTENCY_CONFLICT` / 409 |
 | snapshot invalid or over bounds | `invalid_checkpoint` / 400 | `TRAINING_SESSION_INVALID_REQUEST` / 400 |
 | session already terminal | `session_terminal` / 409 | `TRAINING_SESSION_TERMINAL` / 409 |
 | session stale vs. current plan | `stale_session_requires_resolution` / 409 | `TRAINING_SESSION_STALE` / 409 |
 | backend failure | `session_unavailable` / 503 | `TRAINING_SESSION_UNAVAILABLE` / 503 |
+
+Revision exhaustion is non-retryable (`Session-Resolution: terminal`) for further
+checkpoint advancement. It leaves the checkpoint and activity timestamps
+unchanged. An exact last-key/fingerprint replay still returns the existing
+acknowledgement at `MAX_REVISION = 999_999_999`; an older base remains a stale
+revision conflict. Completion acknowledging MAX and abandon remain allowed.
 
 Both transports also publish:
 
