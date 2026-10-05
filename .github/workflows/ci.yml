@@ -258,6 +258,7 @@ jobs:
           tests/test_plan_confirmation_pg.py
           tests/test_diary_provider_truth_pg.py
           tests/test_mobile_workout_sessions_pg.py
+          tests/test_ti01b_exercise_notes_pg.py
           tests/test_workout_completion_pg.py
           tests/test_workout_session_pg.py
           tests/test_nutrition_vnext_pr7_pg.py

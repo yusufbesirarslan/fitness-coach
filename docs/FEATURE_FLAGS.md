@@ -358,3 +358,13 @@ It enables negotiated native V2 and the P0 capability. Preservation on V1
 checkpoints always runs, including while P0 is OFF. No insight surface is added.
 Owner: @yusufbesirarslan; review by 2026-11-01. Disable P0 to roll back;
 retain schema and data. See [TI-01A](TI_01A_EXECUTION_CONTEXT.md).
+
+## TI-01B P0 note authority
+
+`FITX_TRAINING_EXECUTION_CONTEXT_ENABLED` defaults OFF. In TI-01B it gates
+native persistent exercise-note GET/PUT, with `FITX_WORKOUT_SESSIONS_ENABLED`
+and the applied note schema required. Owner: @yusufbesirarslan; review 2026-11-01.
+Qualification: owner isolation, note CAS, account deletion, PostgreSQL races.
+Rollback: set the flag to 0 and retain note schema/data. No note telemetry.
+Merged TI-01A independently owns the execution-context portion of this shared
+TI-00 P0 flag. The lifecycle record now lists both foundations’ prerequisites.

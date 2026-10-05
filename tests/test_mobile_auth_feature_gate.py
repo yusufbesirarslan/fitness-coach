@@ -200,6 +200,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # become an ungated parallel mobile surface.
             ("/api/v1/today", ("GET",)),
             ("/api/v1/training/preferences", ("GET",)),
+            # TI-01B private catalog note, independently gated by P0 readiness.
+            ("/api/v1/training/exercises/<exercise_id>/note", ("GET", "PUT")),
             ("/api/v1/training/plans", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),
             ("/api/v1/training/workouts/<workout_reference>", ("GET",)),

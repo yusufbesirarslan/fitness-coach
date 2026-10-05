@@ -97,7 +97,7 @@ _DEFAULT_TEST_RE = re.compile(
 # Sıra FK-güvenli: PumpCheckLike/Comment, PumpCheck'ten önce gelir.
 def _user_child_models():
     from app.models import (
-        Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
+        Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity, ExerciseNote,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, MealPhotoCleanup, MobileAuthSession, Notification,
         NutritionPlan, PendingAction,
@@ -111,7 +111,7 @@ def _user_child_models():
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog, WorkoutSession,
     )
     return (
-        UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
+        ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         # PlanMutationRecord before TrainingPlan: the journal describes plan
         # history, so nothing should ever observe entries for a plan that is
         # already gone.

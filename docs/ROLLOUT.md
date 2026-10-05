@@ -288,3 +288,13 @@ V1/V2 races, and verify workout-session readiness. Enable only after the frozen
 cross-repository release gates. TI-01A does not authorize activation.
 Rollback: set P0 OFF, retain additive columns and stored context. V1 writes keep
 preserving unchanged-set context and invalidating edited sets while dark.
+
+## TI-01B persistent exercise notes
+
+Keep `FITX_TRAINING_EXECUTION_CONTEXT_ENABLED=0` until migration
+`e2f3a4b5c6d7`, workout-session readiness and TI-01B ownership/CAS/deletion/race
+qualification are green. No activation is performed by this PR. Notes require
+both P0 and workout-session flags plus the applied note schema; dark returns 404.
+Rollback disables P0 while retaining data. A downgrade deliberately erases notes.
+Migration e2f3a4b5c6d7 follows merged TI-01A e1f2a3b4c5d6; the shared P0
+lifecycle record lists both foundations’ prerequisites.
