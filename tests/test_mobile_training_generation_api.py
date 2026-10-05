@@ -366,7 +366,7 @@ def test_post_fingerprint_conflict_is_409_without_second_provider(
     assert response.json["error"]["code"] == "TRAINING_PLAN_IDEMPOTENCY_CONFLICT"
 
 
-def test_provider_unavailable_is_safe_retryable_503_and_replays_failure(
+def test_provider_unavailable_is_safe_503_and_replays_failure_not_retryable(
         client, mobile_user, as_mobile, monkeypatch):
     calls = []
 
@@ -383,6 +383,8 @@ def test_provider_unavailable_is_safe_retryable_503_and_replays_failure(
     for field in ("code", "message", "retryable"):
         assert first.json["error"][field] == second.json["error"][field]
     assert first.json["error"]["code"] == "TRAINING_PLAN_GENERATION_UNAVAILABLE"
+    # The key is consumed: a new logical attempt (new key) is the recovery.
+    assert first.json["error"]["retryable"] is False
     assert "secret" not in json.dumps(first.json)
     assert calls == ["provider"]
 

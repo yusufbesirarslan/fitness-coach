@@ -66,10 +66,12 @@ def find_active_for_owner(user_id):
 
 
 def stored_failure(operation):
+    # `error_retryable` is the recorded cause classification (transient, so a
+    # new key may succeed). It is deliberately not projected: the public flag
+    # answers "will the same key make progress?", and for FAILED it never will.
     return StoredGenerationFailure(
         operation.error_code or "TRAINING_PLAN_GENERATION_COMMAND_FAILED",
         operation.error_http_status or 500,
-        bool(operation.error_retryable),
     )
 
 

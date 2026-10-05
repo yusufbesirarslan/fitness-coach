@@ -435,6 +435,15 @@ model call. A new key starts a fresh generation attempt, which may independently
 succeed or fail. The browser and native status/retryability difference is an
 explicit follow-up decision, not reconciled by this reliability change.
 
+Since LP-14 PR-B2, every native `FAILED` answer is `retryable=false`, because
+the same key can only replay it. That covers `GENERATION_UNAVAILABLE` (503) and
+`PARSE_FAILED`/`TRUNCATED` (500) too. Native `retryable` means "the same key can
+make progress"; it does not mean "asking the provider again may help". The
+public code carries that second fact: `TRAINING_PLAN_GENERATION_UNAVAILABLE`
+tells the client to start a new request. The browser `POST /training-plan`
+table above is unchanged. It has no idempotency key, so a browser retry already
+is a new attempt.
+
 On any generation exercise-authority failure (identity invalid, unresolved,
 incompatible), `exercise_resolution_failed` logs only the public code, the
 fixed resolution category from the table above, request ID, catalog version,
