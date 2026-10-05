@@ -78,6 +78,8 @@ def generate_and_persist(
     if not isinstance(request, NativePlanRequest):
         raise TypeError("request must be NativePlanRequest")
     last_session = _required_session(user)
+    # Read before the claim commit expires `user`: no extra row reload.
+    language = user.language or "tr"
 
     _operation, result = _inspect_durable(user.id, key, request.fingerprint)
     if result is not None:
@@ -116,7 +118,7 @@ def generate_and_persist(
                     last_session,
                     request.preferences,
                     chat_fn,
-                    language=getattr(user, "preferred_language", None) or "tr",
+                    language=language,
                     logger=logger,
                 )
         except GenerationOutputError as error:

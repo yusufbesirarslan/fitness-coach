@@ -191,7 +191,7 @@ def test_turkish_visible_text_beside_valid_ids_succeeds_with_catalog_names(
         client, mobile_user, as_mobile, monkeypatch):
     """The request language is Turkish and every visible provider field is
     Turkish; identity is the ID, so nothing has to be translated back."""
-    mobile_user.preferred_language = "tr"
+    mobile_user.language = "tr"
     db.session.commit()
     _native_provider(monkeypatch, _turkish_week())
 
