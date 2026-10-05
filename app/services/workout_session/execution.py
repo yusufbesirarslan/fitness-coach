@@ -36,6 +36,7 @@ from app.models import WORKOUT_SESSION_ABANDONED, WORKOUT_SESSION_ACTIVE
 from app.timeutil import app_today
 
 from .checkpoint import MAX_REVISION, Checkpoint
+from .context import bind_context
 from .metrics import record_lifecycle_event
 from .errors import (
     IdempotencyConflict,
@@ -207,6 +208,7 @@ def record_checkpoint(
     written = advance_checkpoint(
         user_id, row.public_id, base_revision, parsed.to_json(),
         parsed.fingerprint, key, datetime.utcnow(),
+        execution_context_json=bind_context(row, parsed, base_revision + 1),
     )
     row = owned_session(user_id, row.public_id)
     if not written:
@@ -222,6 +224,8 @@ def record_checkpoint(
         record_lifecycle_event("revision_conflict")
         raise RevisionConflict("the declared revision is not current")
     record_lifecycle_event("checkpointed")
+    if parsed.execution_context is not None:
+        record_lifecycle_event("context_accepted")
     return CheckpointResult(row, build_session_view(row, day), False)
 
 

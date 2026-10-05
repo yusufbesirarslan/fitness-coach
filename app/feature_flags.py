@@ -135,6 +135,22 @@ def _rollback(key):
 # no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
+        key="FITX_TRAINING_EXECUTION_CONTEXT_ENABLED",
+        capability="Negotiated native checkpoint V2 and P0 execution capability; V1 preservation always runs.",
+        owner=_OWNER,
+        default=False,
+        depends_on=("FITX_WORKOUT_SESSIONS_ENABLED",),
+        observability="Fixed WorkoutSessionLifecycle context_accepted event on new V2 CAS commits only.",
+        prerequisites=("migration e1f2a3b4c5d6 applied", "workout sessions readiness green",
+                       "TI-01A cross-transport and PostgreSQL qualification green"),
+        success_signals=("V1 contract unchanged", "one combined checkpoint revision"),
+        abort_signals=("V1 regression", "context binding or CAS mismatch"),
+        rollback="Set FITX_TRAINING_EXECUTION_CONTEXT_ENABLED=0; retain schema and canonical data. V1 preservation stays active.",
+        lifecycle=LIFECYCLE_SHIPPED_DARK,
+        review_by="2026-11-01",
+        decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="WEEKLY_PROGRAM_UI_ENABLED",
         capability=(
             "Renders the read-only weekly-program card on the canonical Plan "

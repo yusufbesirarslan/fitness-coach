@@ -915,3 +915,11 @@ context should be able to answer all eleven:
 
 If any answer becomes "no" as the code changes, this runbook is stale and must
 be corrected before the next activation attempt.
+# TI-01A additive readiness
+
+Current Alembic head: `e1f2a3b4c5d6`. TI-01A adds nullable same-session context
+and prescription columns; Sprint 14's historical migration statements refer
+to that sprint. P0 remains default OFF; apply schema before deploying this binary.
+`context_accepted` joins the fixed `WorkoutSessionLifecycle` events and counts
+new accepted V2 CAS commits, including explicit clears, never replay or refusal.
+No new browser refusal code. See [TI-01A](TI_01A_EXECUTION_CONTEXT.md).

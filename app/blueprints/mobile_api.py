@@ -21,7 +21,8 @@ bp = Blueprint("mobile_api", __name__, url_prefix="/api/v1")
 
 @bp.after_request
 def prevent_mobile_response_caching(response):
-    response.headers["Cache-Control"] = "no-store"
+    response.headers["Cache-Control"] = (
+        "private, no-store" if getattr(g, "workout_contract", None) == 2 else "no-store")
     return response
 
 

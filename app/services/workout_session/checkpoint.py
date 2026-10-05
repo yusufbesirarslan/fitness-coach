@@ -70,6 +70,7 @@ class Checkpoint:
 
     snapshot: dict
     fingerprint: str
+    execution_context: Optional[dict] = None
 
     def to_json(self) -> str:
         return _canonical_json(self.snapshot)

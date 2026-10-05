@@ -7,6 +7,7 @@ EVENTS = frozenset({
     "started",
     "resumed",
     "checkpointed",
+    "context_accepted",
     "abandoned",
     "completed",
     "revision_conflict",
