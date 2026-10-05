@@ -246,19 +246,31 @@ def test_generated_plan_rejects_out_of_bounds_before_bootstrap(
 
 def test_training_bootstrap_serves_validator_accepted_generated_plan(
         client, auth_user, monkeypatch):
+    from app.services.exercise_catalog import ExerciseContext
+    from app.services.training_generation.exercise_choices import (
+        compatible_exercise_choices)
+    from app.services.training_generation.exercise_resolution import (
+        canonicalize_generated_exercises)
+
     program = _program()
     for day in program:
         for exercise in day.get("egzersizler") or []:
             exercise.pop("internal_id", None)
+            # PR B provider shape: a chosen catalog ID, no name.
+            del exercise["isim"]
+            exercise["exercise_id"] = "ex_barbell_row"
     generated = {
         "program": program,
         "haftalik_ozet": {"yogunluk_skoru": 7, "denge_skoru": 7, "uygunluk_skoru": 7},
     }
     validated, _ = validate_generated_plan(
         generated, TrainingPreferences(gun_sayisi=1, sure=45))
+    canonical = canonicalize_generated_exercises(
+        validated, compatible_exercise_choices(
+            ExerciseContext(equipment_context="spor_salonu")))
     db.session.add(TrainingPlan(
         user_id=auth_user.id,
-        plan_data=json.dumps(validated, ensure_ascii=False),
+        plan_data=json.dumps(canonical, ensure_ascii=False),
         score=8,
     ))
     db.session.commit()

@@ -18,6 +18,7 @@ from app.blueprints import training as training_bp
 from app.extensions import db
 from app.models import User, UserSession
 from app.services import premium
+from tests.training_provider_support import as_provider_document
 
 PLAN_JSON = {
     "program": [{"gun": "Pazartesi", "tip": "antrenman", "odak": "Sırt",
@@ -52,7 +53,7 @@ PLAN_JSON["program"] = [
 
 
 def _mock_plan(monkeypatch):
-    raw = json.dumps(PLAN_JSON, ensure_ascii=False)
+    raw = json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kw: raw)
 
 

@@ -12,7 +12,11 @@ from app.services.training_generation.exercise_context_token import (
     ExerciseContextInvalid,
     verify_exercise_context,
 )
+from app.services.training_generation.exercise_choices import (
+    compatible_exercise_choices,
+)
 from app.services.training_generation.exercise_resolution import (
+    canonicalize_generated_exercises,
     canonicalize_plan_exercises,
 )
 from app.services.training_generation.extractor import extract_plan_object
@@ -46,7 +50,6 @@ from app.services.training_generation.program_generator import build_program_con
 from app.services.training_generation.prompt_builder import (
     build_system_prompt,
     build_training_prompt,
-    canonical_exercise_vocabulary,
 )
 from app.services.training_generation.response_validator import (
     annotate_injuries,
@@ -72,9 +75,10 @@ _REPAIR_SCHEMA_SUFFIX = (
     "shape. Keep every requested preference above exactly as stated and fix "
     "ONLY the structure: exactly 7 days with the canonical Turkish weekday "
     'names; "tip" one of antrenman/dinlenme/kardiyo; a tip="dinlenme" day '
-    'MUST have "egzersizler": []; every exercise object exactly isim, set, '
-    "tekrar, dinlenme, not; set/sure_dk/tahmini_kalori integers; no extra "
-    "keys anywhere. Return ONLY the complete JSON object."
+    'MUST have "egzersizler": []; every exercise object exactly exercise_id, '
+    "set, tekrar, dinlenme, not, with exercise_id copied exactly from the "
+    'EXERCISE CHOICES list and no "isim"; set/sure_dk/tahmini_kalori '
+    "integers; no extra keys anywhere. Return ONLY the complete JSON object."
 )
 
 
@@ -269,10 +273,12 @@ def generate_training_plan_candidate(
         cardio_type=preferences.kardiyo_tipi,
         style=preferences.antrenman_tarzi,
     )
-    exercise_vocabulary = canonical_exercise_vocabulary(exercise_context)
+    # PR B: ONE closed choice set per request. The prompt offers exactly these
+    # IDs and canonicalization below enforces membership in this same object.
+    exercise_choices = compatible_exercise_choices(exercise_context)
     prompt = build_training_prompt(
         features, preferences, classification, context, language=language,
-        exercise_vocabulary=exercise_vocabulary)
+        exercise_choices=exercise_choices)
     system_prompt = build_system_prompt(language)
     budget = _CompletionBudget(chat_fn)
 
@@ -330,19 +336,27 @@ def generate_training_plan_candidate(
         _log(logger, "semantic_invalid", calls=len(budget.calls), repair_eligible=0)
         raise
 
-    # Sprint 11 PR4 Task 3 / Sprint 12 PR2B: canonicalize exercise identity
-    # exactly once, on the final accepted candidate, strictly OUTSIDE the
-    # try/except above. Never move this inside the repair except clauses —
+    # Sprint 11 PR4 Task 3 / Sprint 12 PR2B / PR B: canonicalize exercise
+    # identity exactly once, on the final accepted candidate, strictly OUTSIDE
+    # the try/except above. Never move this inside the repair except clauses —
     # the repair path re-enters _parse_and_validate, so an exercise-authority
     # failure canonicalized there would be misclassified as a
     # parse/truncation-repairable outcome.
+    # Identity is the provider's chosen exercise_id, validated against the
+    # request's closed choice set; the name is the catalog's. There is no name
+    # lookup here.
     # Injury annotation is warn-only and must run AFTER identity is
     # catalog-owned; a raw provider spelling is not warning authority.
     try:
-        plan = canonicalize_plan_exercises(plan, exercise_context)
-    except GenerationExerciseUnresolvedError as exc:
-        # Fixed fields only. Provider text, the prompt, and injuries never enter
-        # this diagnostic event. The request ID joins it to the route log.
+        plan = canonicalize_generated_exercises(plan, exercise_choices)
+    except (
+        GenerationExerciseIdentityInvalidError,
+        GenerationExerciseIncompatibleError,
+        GenerationExerciseUnresolvedError,
+    ) as exc:
+        # Fixed fields only. Provider text, the chosen ID, the prompt, and
+        # injuries never enter this diagnostic event. The request ID joins it
+        # to the route log.
         _log(
             logger, "exercise_resolution_failed",
             code=exc.public_code,

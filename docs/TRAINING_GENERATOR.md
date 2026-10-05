@@ -128,7 +128,8 @@ Raw provider text is never returned.
 
 ## Generated-plan schema
 
-Canonical object:
+Canonical provider object (PR B — the provider chooses identity, the catalog
+names it):
 
 ```json
 {
@@ -140,7 +141,7 @@ Canonical object:
       "sure_dk": 45,
       "tahmini_kalori": 320,
       "egzersizler": [
-        {"isim": "Goblet Squat", "set": 3, "tekrar": "8-12", "dinlenme": "90 sn", "not": ""}
+        {"exercise_id": "ex_goblet_squat", "set": 3, "tekrar": "8-12", "dinlenme": "90 sn", "not": ""}
       ]
     }
   ],
@@ -158,12 +159,14 @@ Canonical object:
 - `tip` ∈ {antrenman, dinlenme, kardiyo}.
 - Closed keys. Unknown fields fail.
 - Numeric fields are integers in bounds; strings such as `"45 dk"` fail.
-- Exercise `isim` in a *provider response* is an untrusted bounded string, and
-  `exercise_id` is **not** an accepted generation key — the provider never
-  authors identity. Server-side canonicalization then replaces `isim` with the
-  catalog's canonical display name and writes the catalog-owned `exercise_id`;
-  from that point identity is `exercise_id` and `isim` is presentation only.
-  See "Exercise identity — the canonical catalog".
+- A *provider* exercise is exactly `exercise_id` / `set` / `tekrar` /
+  `dinlenme` / `not` (`PROVIDER_EXERCISE_KEYS`). `exercise_id` is required and
+  `isim` is an **unknown key**: the provider chooses an ID from the request's
+  closed choice set and never writes a display name. Structure checks only that
+  the ID is a bounded string; generation canonicalization then validates it
+  against the catalog and that set and writes the catalog's canonical `isim`.
+  The persisted/served exercise shape is unchanged (`isim` + `exercise_id` +
+  prescription). See "Exercise identity — the canonical catalog".
 
 `POST /training-plan/save` accepts the generate `program` array (what both web
 clients persist) or the full object. Missing `haftalik_ozet` on save is derived
@@ -299,47 +302,66 @@ token is not compatible with anything; it fails closed rather than widening.
 > `core_anti_rotation` versus `anti_extension` / `anti_rotation`). Renaming
 > either to match the other changes the text of the generation prompt.
 
-### The provider never authors identity
+### The provider chooses identity; the server validates and names it
 
-The prompt carries a **closed vocabulary of canonical display names**
-(`canonical_exercise_vocabulary(context)` in `prompt_builder.py`) filtered to
-the accepted context, sorted and deduplicated. It carries no aliases, no IDs and
-no equipment metadata — it is a hint that narrows what the model is told it may
-use, never an authority.
+PR B (training generation reliability). Before it the prompt carried a closed
+vocabulary of display NAMES, the provider returned a free-form `isim`, and the
+server tried to map that string back to the catalog. A translated, misspelled
+or invented name passed structure and then failed resolution as a terminal
+`EXERCISE_UNRESOLVED` (seen on a physical device during first-plan
+onboarding). Identity no longer depends on any provider-written text.
 
-Structurally, `EXERCISE_KEYS` does not contain `exercise_id`.
-`validate_plan_structure` takes a keyword-only `allow_exercise_id: bool = False`:
+1. **One closed choice set per request.** `exercise_choices.compatible_exercise_choices(context)`
+   returns a frozen `CompatibleExerciseChoices`: every active,
+   context-compatible catalog entry as an `(exercise_id, canonical_name)` pair,
+   sorted by name — no aliases, no equipment metadata. `service.py` builds it
+   ONCE and passes the same object to the prompt and to validation.
+2. **Prompt (advisory).** `build_training_prompt(..., exercise_choices=...)`
+   (required, non-empty) renders an `EXERCISE CHOICES` block of
+   `- ex_… | Name` lines, tells the provider to copy `exercise_id` exactly, never
+   translate, re-case, shorten or invent one, and never write `isim`; both the
+   system prompt and the content-language rule carve `exercise_id` out of "all
+   visible text is Turkish". The JSON FORMAT example uses an ID taken from the
+   same set, so the example can never teach an ID this request will refuse.
+3. **Structure.** `validate_generated_plan` →
+   `validate_plan_structure(..., provider_identity=True)`: exact
+   `PROVIDER_EXERCISE_KEYS`, `exercise_id` required and a bounded string,
+   `isim` unknown. A name-only or name-bearing entry is `SCHEMA_INVALID` — a
+   provider formatting miss, eligible for the one existing bounded repair turn
+   (whose text now names the ID contract). Save keeps its own shapes
+   (`allow_exercise_id=True`); the two flags are exclusive and both call sites
+   are pinned by AST.
+4. **Authority (server).** `exercise_resolution.canonicalize_generated_exercises(plan, choices)`
+   validates each ID in a fixed order — `ID_PATTERN` shape → exists → active →
+   member of THIS request's set — then re-checks equipment compatibility
+   (defence in depth) and cardio placement, and rebuilds the entry field by
+   field: `isim` and `exercise_id` from the catalog, `set`/`tekrar`/`dinlenme`/
+   `not` from the provider. There is no name lookup on this path.
 
-- the **generation** call site (`validate_generated_plan`) leaves it `False`, so
-  a provider-authored ID is a schema violation;
-- the **save** call site (`validate_plan_for_save`) passes `True`, where the key
-  is optional *input* that catalog resolution re-checks from scratch — never an
-  identity the caller gets to assert.
-
-Both call sites are pinned by AST, and a third one fails the guard.
+`canonicalize_plan_exercises` (exact normalized name/alias, or a declared ID)
+remains the SAVE boundary's resolver, because a browser client may still post
+a name-only plan. No fuzzy matching, translation alias or substitution was
+added anywhere.
 
 ### Canonicalization on generate
 
-`exercise_resolution.canonicalize_plan_exercises(plan, context)` runs **exactly
-once**, on the final accepted candidate, strictly outside the parse/truncation
-repair boundary in `service.py`. Moving it inside would let an
-exercise-authority failure be misclassified as repairable and re-sent to the
-provider.
-
-For each entry it writes `exercise_id` and replaces `isim` with the catalog's
-canonical display name; every prescription field (`set` / `tekrar` /
-`dinlenme` / `not`) is carried through unchanged. It never adds catalog
+`canonicalize_generated_exercises` runs **exactly once**, on the final accepted
+candidate, strictly outside the parse/truncation/schema repair boundary in
+`service.py`. Moving it inside would let an exercise-authority failure be
+misclassified as repairable and re-sent to the provider. It never adds catalog
 metadata (equipment / movement / region) to the plan — that stays server-side.
 
 ### Injury annotation (warn-only, after identity)
 
-`annotate_injuries` runs **after** canonicalization. It requires a
-non-empty `exercise_id` (canonical identity as a gate) and then matches
-with the existing string overlay against the catalog display name already
-written into `isim`. It is warn-only: it prepends a note onto `not` and
+`annotate_injuries` runs **after** canonicalization. It requires every
+entry to be an exact catalog `(exercise_id, canonical name)` pair — since PR B
+a validated provider entry carries a raw, unchecked `exercise_id`, so the mere
+presence of an ID is no longer proof — and checks all entries before it
+annotates any. It then matches with the existing string overlay against the
+catalog display name written into `isim`. It is warn-only: it prepends a note onto `not` and
 never rejects, deletes, substitutes, or mutates sets/reps/load. A plan
-entry without `exercise_id` cannot reach the matcher, so a raw provider
-spelling is not warning authority. Save does not re-derive the overlay;
+entry that is not a canonical pair cannot reach the matcher, so raw provider
+output is not warning authority. Save does not re-derive the overlay;
 it re-validates the already-canonical annotated payload and preserves
 `not`. Historical rows are not rewritten.
 
@@ -386,12 +408,12 @@ boundary's typed `SaveContextInvalidError`.
 
 ### Typed failures
 
-| Code | HTTP | Raised when | Retryable |
+| Code | HTTP | Raised when (generation, PR B) | Retryable |
 | --- | --- | --- | --- |
-| `TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED` | 500 | generated name matches no active catalog entry | yes |
-| `TRAINING_PLAN_GENERATION_EXERCISE_AMBIGUOUS` | 500 | generated name matches more than one entry | yes |
-| `TRAINING_PLAN_GENERATION_EXERCISE_IDENTITY_INVALID` | 500 | generated reference is not usable catalog identity (e.g. an ID-shaped name) | yes |
-| `TRAINING_PLAN_GENERATION_EXERCISE_INCOMPATIBLE` | 500 | resolves, but outside the accepted equipment context, or cardio on a non-cardio day | yes |
+| `TRAINING_PLAN_GENERATION_EXERCISE_IDENTITY_INVALID` | 500 | chosen `exercise_id` is malformed (`malformed_id`) or names no catalog entry (`unknown_id`) | yes |
+| `TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED` | 500 | chosen `exercise_id` is a real but retired entry (`inactive_id`) | yes |
+| `TRAINING_PLAN_GENERATION_EXERCISE_INCOMPATIBLE` | 500 | real active ID outside this request's choice set (`outside_choice_set`), outside the equipment context (`equipment`), or cardio on a non-cardio day (`cardio_placement`) | yes |
+| `TRAINING_PLAN_GENERATION_EXERCISE_AMBIGUOUS` | 500 | unreachable from generation (ID lookup is exact); kept for the save resolver's name path | yes |
 | `TRAINING_PLAN_SAVE_CONTEXT_INVALID` | 422 | the signed exercise context could not be trusted for this user | no |
 | `TRAINING_PLAN_SAVE_EXERCISE_INVALID` | 422 | the saved plan names an exercise the catalog will not authorize | no |
 
@@ -399,19 +421,41 @@ None of the four generation codes is parse-repairable: a well-formed plan
 outside the constrained vocabulary is a closed-authority failure, not a
 malformed response.
 
+`EXERCISE_UNRESOLVED` is no longer reachable from a translated, misspelled or
+invented NAME: generation never resolves a name. A provider that still writes
+a name produces `SCHEMA_INVALID` after the one bounded repair, never
+`UNRESOLVED`.
+
 The table above describes the browser `POST /training-plan` response. The
-native `POST /api/v1/training/plans` command currently stores an unresolved
-exercise as a terminal `FAILED` operation and returns HTTP 422 with
+native `POST /api/v1/training/plans` command currently stores every
+exercise-authority failure as a terminal `FAILED` operation and returns HTTP 422 with
 `retryable=false`; it refunds reserved quota and creates no TrainingPlan.
 Replaying the same idempotency key returns that stored failure without another
 model call. A new key starts a fresh generation attempt, which may independently
 succeed or fail. The browser and native status/retryability difference is an
 explicit follow-up decision, not reconciled by this reliability change.
 
-On unresolved generation, `exercise_resolution_failed` logs only the public
-code, fixed resolution category, request ID, catalog version, coarse equipment
-and cardio context, and provider completion count. It does not log the generated
-name, prompt, injuries, model response, credentials, or idempotency key.
+On any generation exercise-authority failure (identity invalid, unresolved,
+incompatible), `exercise_resolution_failed` logs only the public code, the
+fixed resolution category from the table above, request ID, catalog version,
+coarse equipment and cardio context, and provider completion count. It does not
+log the chosen ID, any generated name, prompt, injuries, model response,
+credentials, or idempotency key. Categories are a closed set validated at
+construction; there is no per-ID metric.
+
+### Provider last-good cache (PR B)
+
+`ai._heavy_complete` writes the raw provider text to the last-good cache on
+every successful provider call — before any validation — and serves it when
+both providers fail. Generation treats a cached answer exactly like a live
+one: it goes through the same `_parse_and_validate` and
+`canonicalize_generated_exercises` against the CURRENT catalog and the CURRENT
+request's choice set. No cache versioning was needed: a pre-PR B name-only
+payload fails the provider schema (`isim` unknown, `exercise_id` missing), an
+unknown/retired/incompatible cached ID fails identity validation, and the cache
+key is a hash of the full prompt, which now embeds the closed ID set, so a
+pre-PR B prompt and a different choice set can never address the same entry.
+Caching raw output before validation is pre-existing behaviour and unchanged.
 
 At the save boundary the *five* distinguishable reasons (unknown, ambiguous,
 inactive, fake ID, equipment-incompatible) deliberately collapse into one

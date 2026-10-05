@@ -47,10 +47,13 @@ from app.services.training_generation.plan_schema import (
     EXERCISE_KEYS,
     EXERCISE_KEYS_WITH_ID,
     MAX_PROVIDER_COMPLETIONS,
+    PROVIDER_EXERCISE_KEYS,
     PRIMARY_MAX_TOKENS,
     REPAIR_MAX_TOKENS,
 )
-from app.services.training_generation.prompt_builder import canonical_exercise_vocabulary
+from app.services.training_generation.exercise_choices import (
+    compatible_exercise_choices,
+)
 from app.services.training_generation.response_validator import validate_plan_structure
 
 
@@ -554,37 +557,56 @@ def test_compatible_exercises_excludes_inactive_entries(catalog_asset_path):
     assert compatible_ids == {"ex_test_squat"}
 
 
-# ── canonical_exercise_vocabulary (prompt-side hint, not an authority) ──────
+# ── compatible_exercise_choices (PR B: the closed set, prompt AND authority) ─
+#
+# Supersedes the Task 2 name-only vocabulary tests. The old vocabulary
+# deliberately carried NO IDs because names were the provider contract; under
+# PR B the provider chooses an ``exercise_id``, so the closed set must carry
+# exactly the stable IDs — and still no aliases or equipment metadata.
 
 
-def test_prompt_vocabulary_is_bounded():
-    names = canonical_exercise_vocabulary(
+def test_prompt_choices_are_bounded():
+    choices = compatible_exercise_choices(
         ExerciseContext(equipment_context="spor_salonu")
     )
-    assert len("\n".join(names)) <= 8000
+    rendered = "\n".join(
+        f"- {c.exercise_id} | {c.canonical_name}" for c in choices.choices)
+    assert len(rendered) <= 8000
 
 
-def test_prompt_vocabulary_is_sorted_and_deduplicated():
-    names = canonical_exercise_vocabulary(ExerciseContext(equipment_context="ev"))
-    assert names == tuple(sorted(names))
-    assert len(names) == len(set(names))
+def test_prompt_choices_are_sorted_and_deduplicated():
+    choices = compatible_exercise_choices(ExerciseContext(equipment_context="ev"))
+    names = [c.canonical_name for c in choices.choices]
+    ids = [c.exercise_id for c in choices.choices]
+    assert names == sorted(names)
+    assert len(ids) == len(set(ids)) == len(choices.exercise_ids)
 
 
-def test_prompt_vocabulary_excludes_aliases_ids_and_equipment_metadata():
+def test_prompt_choices_are_exact_catalog_pairs_without_aliases_or_metadata():
     context = ExerciseContext(equipment_context="spor_salonu")
-    names = canonical_exercise_vocabulary(context)
+    choices = compatible_exercise_choices(context)
+    catalog = load_exercise_catalog()
 
+    assert choices.context == context
+    assert choices.catalog_version == catalog.version
+    assert choices.exercise_ids == {
+        exercise.exercise_id for exercise in compatible_exercises(context)}
+    for choice in choices.choices:
+        entry = catalog.by_id[choice.exercise_id]
+        assert choice.canonical_name == entry.canonical_name
+        assert entry.active
+        assert vars(choice) == {
+            "exercise_id": entry.exercise_id,
+            "canonical_name": entry.canonical_name,
+        }
+    names = {c.canonical_name for c in choices.choices}
     for exercise in compatible_exercises(context):
-        assert exercise.canonical_name in names
         for alias in exercise.aliases:
             if alias != exercise.canonical_name:
                 assert alias not in names
-        assert exercise.exercise_id not in names
-    for equipment_item in EXPECTED_EQUIPMENT:
-        assert equipment_item not in names
 
 
-def test_prompt_vocabulary_filters_by_equipment_context(catalog_asset_path):
+def test_prompt_choices_filter_by_equipment_context_and_activity(catalog_asset_path):
     asset = _valid_asset()
     barbell_only = dict(asset["exercises"][0])
     barbell_only.update({
@@ -593,18 +615,27 @@ def test_prompt_vocabulary_filters_by_equipment_context(catalog_asset_path):
         "aliases": [],
         "equipment": ["barbell"],
     })
-    asset["exercises"].append(barbell_only)
+    retired = dict(asset["exercises"][0])
+    retired.update({
+        "exercise_id": "ex_fixture_retired_home",
+        "canonical_name": "Fixture Retired Home",
+        "aliases": [],
+        "equipment": ["bodyweight"],
+        "active": False,
+    })
+    asset["exercises"].extend([barbell_only, retired])
     _write_asset(catalog_asset_path, asset)
 
-    home_names = canonical_exercise_vocabulary(ExerciseContext(equipment_context="ev"))
-    gym_names = canonical_exercise_vocabulary(
-        ExerciseContext(equipment_context="spor_salonu")
-    )
+    home = compatible_exercise_choices(ExerciseContext(equipment_context="ev"))
+    gym = compatible_exercise_choices(
+        ExerciseContext(equipment_context="spor_salonu"))
 
-    assert "Test Squat" in home_names
-    assert "Fixture Barbell Row" not in home_names
-    assert "Test Squat" in gym_names
-    assert "Fixture Barbell Row" in gym_names
+    assert "ex_test_squat" in home
+    assert "ex_fixture_barbell_row" not in home
+    assert "ex_test_squat" in gym
+    assert "ex_fixture_barbell_row" in gym
+    assert "ex_fixture_retired_home" not in home
+    assert "ex_fixture_retired_home" not in gym
 
 
 # ── Signed exercise-context token (Task 4) ─────────────────────────────────
@@ -1110,20 +1141,26 @@ def test_representative_plan_resolution_executes_no_sql(app, query_counter):
                for exercise in resolved)
 
 
-def test_architecture_provider_schema_never_accepts_exercise_id():
-    """Generation leaves ``allow_exercise_id`` off; only save opts in.
+def test_architecture_structure_call_sites_pin_who_may_assert_identity():
+    """Supersedes "provider schema never accepts exercise_id" (PR4 Task 3).
 
-    Structure is where a provider-authored identity would enter, so the
-    default is the safe one and the two call sites are pinned individually —
-    a generation path that started passing ``True`` would accept an ID the
-    model invented.
+    PR B inverts the provider half: the provider's answer IS a chosen
+    ``exercise_id`` (``provider_identity=True``, no ``isim``), validated
+    afterwards against the request's closed choice set. Save keeps the
+    client shapes (``allow_exercise_id=True``: name plus optional ID). Both
+    flags are keyword-only and default off, and exactly two call sites in
+    the generation package exist — a third would be a third opinion about
+    what identity a caller may assert.
     """
-    parameter = inspect.signature(
-        validate_plan_structure).parameters["allow_exercise_id"]
-    assert parameter.default is False
-    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    signature = inspect.signature(validate_plan_structure)
+    for flag in ("allow_exercise_id", "provider_identity"):
+        parameter = signature.parameters[flag]
+        assert parameter.default is False
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
     assert EXERCISE_ID_KEY not in EXERCISE_KEYS
     assert EXERCISE_ID_KEY in EXERCISE_KEYS_WITH_ID
+    assert EXERCISE_ID_KEY in PROVIDER_EXERCISE_KEYS
+    assert "isim" not in PROVIDER_EXERCISE_KEYS
 
     call_sites = {}
     for path in production_exercise_source_paths():
@@ -1138,24 +1175,28 @@ def test_architecture_provider_schema_never_accepts_exercise_id():
                 if isinstance(parent, ast.FunctionDef)
                 and parent.lineno <= node.lineno <= (parent.end_lineno or 0)
             )
-            flags = [
-                keyword.value for keyword in node.keywords
-                if keyword.arg == "allow_exercise_id"
-            ]
-            call_sites[enclosing] = (
-                None if not flags else ast.literal_eval(flags[0]))
+            call_sites[enclosing] = {
+                keyword.arg: ast.literal_eval(keyword.value)
+                for keyword in node.keywords
+                if keyword.arg in ("allow_exercise_id", "provider_identity")
+            }
 
-    # Exactly two call sites. A third would be a third opinion about whether
-    # a caller may assert identity.
     assert call_sites == {
-        "validate_generated_plan": None,   # generation: default False
-        "validate_plan_for_save": True,    # save: ID is optional INPUT
+        "validate_generated_plan": {"provider_identity": True},
+        "validate_plan_for_save": {"allow_exercise_id": True},
     }
 
+    # The default (name-only client) shape still refuses a declared ID ...
     generated = many_exercise_plan()
     generated["program"][0]["egzersizler"][0]["exercise_id"] = "ex_barbell_back_squat"
     with pytest.raises(SchemaInvalidError):
         validate_plan_structure(generated, require_ozet=True)
+    # ... and the provider shape refuses a name, even beside a valid ID.
+    with pytest.raises(SchemaInvalidError):
+        validate_plan_structure(generated, require_ozet=True, provider_identity=True)
+    with pytest.raises(TypeError):
+        validate_plan_structure(
+            generated, allow_exercise_id=True, provider_identity=True)
 
 
 def test_architecture_catalog_never_persists():

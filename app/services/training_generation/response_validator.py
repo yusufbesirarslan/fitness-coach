@@ -7,6 +7,7 @@ Numeric clamps and weekday backfill are gone — malformed values are rejected.
 from __future__ import annotations
 
 from app.services import injury_constraints
+from app.services.exercise_catalog import load_exercise_catalog
 from app.services.training_generation.output_errors import (
     PlanValidationError,
     SchemaInvalidError,
@@ -27,6 +28,7 @@ from app.services.training_generation.plan_schema import (
     OZET_KEYS,
     OZET_REQUIRED_KEYS,
     PLAN_KEYS,
+    PROVIDER_EXERCISE_KEYS,
     REPS_MAX,
     REST_MAX,
     SCORE_MAX,
@@ -89,21 +91,52 @@ def _validate_exercise(raw, *, allow_exercise_id: bool = False) -> dict:
         "dinlenme": _require_str(ex["dinlenme"], "dinlenme", REST_MAX),
         "not": _require_str(note, "not", NOTE_MAX, allow_empty=True),
     }
-    # Shape only. Whether this string is real, active and allowed by the
-    # accepted equipment context is the catalog's call, made afterwards in
-    # exercise_resolution — structure never confers identity. Deliberately
-    # passed through unstripped, unlike every display string above: an ID is
-    # round-tripped verbatim, so surrounding whitespace means it was edited,
-    # and ID_PATTERN must be the gate rather than a lenient normalizer.
     if allow_exercise_id and EXERCISE_ID_KEY in ex:
-        raw_id = ex[EXERCISE_ID_KEY]
-        if not isinstance(raw_id, str) or not raw_id or len(raw_id) > EXERCISE_ID_MAX:
-            raise SchemaInvalidError("exercise_id must be a bounded string")
-        validated[EXERCISE_ID_KEY] = raw_id
+        validated[EXERCISE_ID_KEY] = _require_exercise_id(ex[EXERCISE_ID_KEY])
     return validated
 
 
-def _validate_day(raw, *, allow_exercise_id: bool = False) -> dict:
+def _require_exercise_id(raw_id) -> str:
+    # Shape only. Whether this string is real, active and allowed by the
+    # accepted equipment context is the catalog's call, made afterwards in
+    # exercise_resolution — structure never confers identity. Deliberately
+    # passed through unstripped, unlike every display string: an ID is copied
+    # verbatim, so surrounding whitespace means it was edited, and ID_PATTERN
+    # must be the gate rather than a lenient normalizer.
+    if not isinstance(raw_id, str) or not raw_id or len(raw_id) > EXERCISE_ID_MAX:
+        raise SchemaInvalidError("exercise_id must be a bounded string")
+    return raw_id
+
+
+def _validate_provider_exercise(raw) -> dict:
+    """PR B provider shape: catalog identity plus prescription, no name.
+
+    ``exercise_id`` is required and ``isim`` is an unknown key: the provider
+    chooses identity, the catalog names it. A name-only (pre-PR B) payload —
+    including one recalled from the provider last-good cache — therefore
+    cannot pass this point.
+    """
+    ex = _require_mapping(raw, "egzersiz")
+    _forbid_unknown(ex, PROVIDER_EXERCISE_KEYS, "egzersiz")
+    for key in (EXERCISE_ID_KEY, "set", "tekrar", "dinlenme"):
+        if key not in ex:
+            raise SchemaInvalidError(f"egzersiz missing {key}")
+    note = ex["not"] if "not" in ex else ""
+    return {
+        EXERCISE_ID_KEY: _require_exercise_id(ex[EXERCISE_ID_KEY]),
+        "set": _require_int(ex["set"], "set", SET_MIN, SET_MAX),
+        "tekrar": _require_str(ex["tekrar"], "tekrar", REPS_MAX),
+        "dinlenme": _require_str(ex["dinlenme"], "dinlenme", REST_MAX),
+        "not": _require_str(note, "not", NOTE_MAX, allow_empty=True),
+    }
+
+
+def _validate_day(
+    raw,
+    *,
+    allow_exercise_id: bool = False,
+    provider_identity: bool = False,
+) -> dict:
     day = _require_mapping(raw, "gün")
     _forbid_unknown(day, DAY_KEYS, "gün")
     for key in DAY_KEYS:
@@ -118,10 +151,13 @@ def _validate_day(raw, *, allow_exercise_id: bool = False) -> dict:
     exercises_raw = day["egzersizler"]
     if not isinstance(exercises_raw, list):
         raise SchemaInvalidError("egzersizler liste olmalı")
-    exercises = [
-        _validate_exercise(item, allow_exercise_id=allow_exercise_id)
-        for item in exercises_raw
-    ]
+    if provider_identity:
+        exercises = [_validate_provider_exercise(item) for item in exercises_raw]
+    else:
+        exercises = [
+            _validate_exercise(item, allow_exercise_id=allow_exercise_id)
+            for item in exercises_raw
+        ]
     if tip == "antrenman" and len(exercises) < 1:
         raise SchemaInvalidError("antrenman günü en az bir egzersiz içermeli")
     if tip == "kardiyo" and len(exercises) < 1:
@@ -170,18 +206,27 @@ def validate_plan_structure(
     *,
     require_ozet: bool = False,
     allow_exercise_id: bool = False,
+    provider_identity: bool = False,
 ) -> dict:
     """Validate the canonical 7-day shape of a CLIENT- or provider-authored plan.
 
-    ``allow_exercise_id`` is off by default so provider generation keeps
-    rejecting a provider-authored ``exercise_id``: providers are prompted with
-    display names only, and an ID they invented is not identity. Save opts in
-    — a client legitimately hands back the ID canonicalization gave it — but
-    the top-level allow-list is NOT widened for either caller: ``PLAN_KEYS``
+    Exercise shape, by caller:
+
+    - ``provider_identity=True`` (generation, PR B): exactly
+      ``PROVIDER_EXERCISE_KEYS`` — a required ``exercise_id`` chosen from the
+      request's closed choice set, no ``isim``. Catalog validation of that ID
+      and the canonical name happen afterwards, in exercise_resolution.
+    - default: the name-only client shape (``EXERCISE_KEYS``).
+    - ``allow_exercise_id=True`` (save): name plus an optional ID — a client
+      legitimately hands back the ID canonicalization gave it.
+
+    The top-level allow-list is NOT widened for any caller: ``PLAN_KEYS``
     must keep rejecting ``exercise_context`` and every other authority key, so
     a caller cannot declare its own equipment truth. The server attaches that
     block after validation, from the verified token alone.
     """
+    if provider_identity and allow_exercise_id:
+        raise TypeError("provider_identity and allow_exercise_id are exclusive")
     document = coerce_plan_document(plan)
     extra_top = set(document) - PLAN_KEYS
     if extra_top:
@@ -190,7 +235,11 @@ def validate_plan_structure(
     if not isinstance(program_raw, list) or len(program_raw) != 7:
         raise SchemaInvalidError("program tam 7 gün içermeli")
     days = [
-        _validate_day(item, allow_exercise_id=allow_exercise_id)
+        _validate_day(
+            item,
+            allow_exercise_id=allow_exercise_id,
+            provider_identity=provider_identity,
+        )
         for item in program_raw
     ]
     seen = [day["gun"] for day in days]
@@ -218,19 +267,25 @@ def annotate_injuries(plan: dict, injuries: str = "") -> list[dict]:
     """Warn-only injury overlay on an already-canonicalized plan.
 
     Not catalog authority, not a repair, and not a medical engine. Matching
-    uses the canonical server-owned display name written by
-    ``canonicalize_plan_exercises``. A raw provider spelling without
-    ``exercise_id`` cannot reach the matcher.
+    uses the canonical server-owned display name written by catalog
+    canonicalization. Since PR B a provider plan carries a raw, not yet
+    validated ``exercise_id``, so the mere presence of an ID no longer proves
+    canonicalization: each entry must be an exact catalog (ID, canonical
+    name) pair, or annotation refuses before touching anything.
     """
     warnings: list[dict] = []
     if not injuries:
         return warnings
+    catalog = load_exercise_catalog()
     for day in plan["program"]:
         for ex in day["egzersizler"]:
             exercise_id = ex.get(EXERCISE_ID_KEY)
-            if not isinstance(exercise_id, str) or not exercise_id:
+            entry = catalog.by_id.get(exercise_id) if isinstance(exercise_id, str) else None
+            if entry is None or ex.get("isim") != entry.canonical_name:
                 raise TypeError(
                     "injury annotation requires canonical exercise identity")
+    for day in plan["program"]:
+        for ex in day["egzersizler"]:
             hit = injury_constraints.find_contraindicated(ex["isim"], injuries)
             if hit:
                 warn = f"⚠️ SAKATLIK RİSKİ ({hit}) - güvenli alternatifle değiştir"
@@ -243,16 +298,18 @@ def annotate_injuries(plan: dict, injuries: str = "") -> list[dict]:
 
 
 def validate_generated_plan(plan: dict, preferences, injuries: str = "") -> tuple[dict, list[dict]]:
-    """Structural + semantic validation used by generate and tests.
+    """Structural + semantic validation of a PROVIDER plan (generate, tests).
 
+    Uses the PR B provider exercise shape (``exercise_id``, no ``isim``).
     Injury annotation is not performed here. Warnings require canonical
-    exercise identity and are applied after ``canonicalize_plan_exercises``.
+    exercise identity and are applied after ``canonicalize_generated_exercises``.
     ``injuries`` is accepted for call-site compatibility and ignored.
     """
     from app.services.training_generation.semantic_validator import (
         validate_plan_semantics,
     )
 
-    structured = validate_plan_structure(plan, require_ozet=True)
+    structured = validate_plan_structure(
+        plan, require_ozet=True, provider_identity=True)
     validate_plan_semantics(structured, preferences)
     return structured, []

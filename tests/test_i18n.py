@@ -461,21 +461,21 @@ def test_training_plan_prompt_localized_keeps_canonical_fields(app, client, make
             "program": [
                 {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full Body",
                  "sure_dk": 45, "tahmini_kalori": 320,
-                 "egzersizler": [{"isim": "Goblet Squat", "set": 3,
+                 "egzersizler": [{"exercise_id": "ex_goblet_squat", "set": 3,
                                   "tekrar": "8-12", "dinlenme": "90 sn",
                                   "not": "controlled tempo"}]},
                 {"gun": "Salı", "tip": "dinlenme", "odak": "Active Recovery",
                  "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
                 {"gun": "Çarşamba", "tip": "antrenman", "odak": "Upper Body",
                  "sure_dk": 45, "tahmini_kalori": 300,
-                 "egzersizler": [{"isim": "Seated Row", "set": 3,
+                 "egzersizler": [{"exercise_id": "ex_seated_cable_row", "set": 3,
                                   "tekrar": "10-12", "dinlenme": "75 sn",
                                   "not": "pull with control"}]},
                 {"gun": "Perşembe", "tip": "dinlenme", "odak": "Active Recovery",
                  "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
                 {"gun": "Cuma", "tip": "antrenman", "odak": "Lower Body",
                  "sure_dk": 45, "tahmini_kalori": 330,
-                 "egzersizler": [{"isim": "Leg Press", "set": 3,
+                 "egzersizler": [{"exercise_id": "ex_leg_press", "set": 3,
                                   "tekrar": "10-12", "dinlenme": "90 sn",
                                   "not": "smooth reps"}]},
                 {"gun": "Cumartesi", "tip": "dinlenme", "odak": "Active Recovery",
@@ -649,11 +649,17 @@ def test_training_prompt_turkish_content_directive():
                          intensity_guideline="i", progression_guideline="p",
                          deload_guideline="d", movement_coverage=["squat"],
                          style_directive="s", risk_flags=[], constraints_applied=[])
+    from app.services.exercise_catalog import ExerciseContext
+    from app.services.training_generation.exercise_choices import (
+        compatible_exercise_choices)
+    choices = compatible_exercise_choices(ExerciseContext(equipment_context="ev"))
     assert "TÜRKÇE" in build_system_prompt("tr")
-    p_tr = build_training_prompt(feats, prefs, cls, ctx, language="tr")
+    p_tr = build_training_prompt(
+        feats, prefs, cls, ctx, language="tr", exercise_choices=choices)
     assert "TÜRKÇE" in p_tr and "ENGLISH" not in p_tr
     # EN davranışı korunur (mevcut kontrat)
-    p_en = build_training_prompt(feats, prefs, cls, ctx, language="en")
+    p_en = build_training_prompt(
+        feats, prefs, cls, ctx, language="en", exercise_choices=choices)
     assert "ENGLISH" in p_en
 
 

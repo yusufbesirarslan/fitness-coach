@@ -12,9 +12,10 @@ from app.services.training_generation.service import (
 )
 
 
-def _exercise(name="Goblet Squat"):
+def _exercise(exercise_id="ex_goblet_squat"):
+    """PR B provider shape: a chosen catalog ID, no name."""
     return {
-        "isim": name,
+        "exercise_id": exercise_id,
         "set": 3,
         "tekrar": "8-12",
         "dinlenme": "90 sn",
@@ -33,7 +34,7 @@ def _provider_document():
             "sure_dk": 45 if training else 0,
             "tahmini_kalori": 300 if training else 0,
             "egzersizler": (
-                [_exercise(), _exercise("Row"), _exercise("Push-up")]
+                [_exercise(), _exercise("ex_barbell_row"), _exercise("ex_push_up")]
                 if training else []
             ),
         })

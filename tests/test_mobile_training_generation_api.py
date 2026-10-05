@@ -79,14 +79,14 @@ def _document(exercise_count=1):
     }
 
 
-def _provider_document(name):
-    """Provider shape: no server-owned IDs or persisted context."""
+def _provider_document(exercise_id):
+    """PR B provider shape: a chosen catalog ID, no name, no persisted context."""
     document = _document()
     del document["exercise_context"]
     for day in document["program"]:
         for exercise in day["egzersizler"]:
-            del exercise["exercise_id"]
-            exercise["isim"] = name
+            del exercise["isim"]
+            exercise["exercise_id"] = exercise_id
     return document
 
 
@@ -222,15 +222,21 @@ def test_response_loss_retry_is_exact_replay_without_provider(
     assert TrainingPlan.query.count() == 1
 
 
-def test_unresolved_native_failure_is_durable_and_new_key_can_recover(
+def test_invalid_identity_native_failure_is_durable_and_new_key_can_recover(
         app, client, mobile_user, as_mobile, monkeypatch):
+    """PR A pinned this with an unresolved provider NAME. Under PR B a
+    name-only provider payload is schema-invalid (and takes the bounded
+    repair turn), so the terminal exercise-authority failure on the first
+    completion is now an unknown ID. Every durable-failure property PR A
+    pinned is asserted unchanged; only the public code moves."""
     app.config["AI_PLAN_QUOTA_ENABLED"] = True
     calls = []
 
     def complete(**kwargs):
         calls.append(kwargs)
-        name = "Invented Laser Row" if len(calls) == 1 else "Barbell Back Squat"
-        return json.dumps(_provider_document(name))
+        exercise_id = (
+            "ex_invented_laser_row" if len(calls) == 1 else "ex_barbell_back_squat")
+        return json.dumps(_provider_document(exercise_id))
 
     monkeypatch.setattr("app.blueprints.mobile_training._heavy_chat", complete)
     failed_headers = as_mobile(mobile_user, "unresolved-first-key")
@@ -238,13 +244,13 @@ def test_unresolved_native_failure_is_durable_and_new_key_can_recover(
 
     assert first.status_code == 422
     assert first.json["error"]["code"] == (
-        "TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED")
+        "TRAINING_PLAN_GENERATION_EXERCISE_IDENTITY_INVALID")
     assert first.json["error"]["retryable"] is False
     assert len(calls) == 1
     db.session.expire_all()  # read the committed failure, not a pending identity-map copy
     failed = TrainingPlanGenerationOperation.query.one()
     assert failed.status == "FAILED"
-    assert failed.error_code == "TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED"
+    assert failed.error_code == "TRAINING_PLAN_GENERATION_EXERCISE_IDENTITY_INVALID"
     assert failed.error_http_status == 422
     assert failed.error_retryable is False
     assert failed.candidate_plan_data is None
@@ -279,9 +285,11 @@ def test_unresolved_native_failure_is_durable_and_new_key_can_recover(
         "ex_barbell_back_squat")
 
 
-def test_unresolved_diagnostic_is_bounded_correlated_and_private(
+def test_exercise_identity_diagnostic_is_bounded_correlated_and_private(
         client, mobile_user, as_mobile, monkeypatch, caplog):
-    raw_name = "LEAK_GENERATED_EXERCISE_NAME"
+    """PR A's privacy pin, re-expressed for the ID contract: same event,
+    same seven fixed fields; the provider-chosen ID is never logged."""
+    raw_name = "ex_leak_generated_exercise_id"
     prompt = "LEAK_PROMPT_TEXT"
     injury = "LEAK_INJURY_TEXT"
     key = "LEAK_IDEMPOTENCY_KEY"
@@ -311,8 +319,8 @@ def test_unresolved_diagnostic_is_bounded_correlated_and_private(
         "equipment", "cardio_type", "completion_count",
     }
     assert fields == {
-        "code": "TRAINING_PLAN_GENERATION_EXERCISE_UNRESOLVED",
-        "category": "unresolved_name",
+        "code": "TRAINING_PLAN_GENERATION_EXERCISE_IDENTITY_INVALID",
+        "category": "unknown_id",
         "request_id": result.json["error"]["request_id"],
         "catalog_version": "1",
         "equipment": "spor_salonu",
