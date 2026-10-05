@@ -754,10 +754,19 @@ def test_session_less_completion_between_guard_and_insert_leaves_no_active_row(
 def test_start_holding_the_day_lock_serializes_a_session_less_completion(
     monkeypatch,
 ):
-    """Race B: the start owns the boundary (lock taken, claim re-checked) and is
-    about to INSERT when a session-less completion arrives. The completion must
-    WAIT for the start's commit, so the history is exactly the serial order
-    start -> complete — never a claim committed inside the start's window."""
+    """Race B (start-first, ACCEPTED CONTRACT): the start owns the boundary
+    (lock taken, claim re-checked) and is about to INSERT when a session-less
+    completion arrives. The completion must WAIT for the start's commit, so the
+    history is exactly the serial order start -> complete — never a claim
+    committed inside the start's window.
+
+    The end state (completed day + the start's untouched ACTIVE session,
+    classified ``lifecycle_inconsistent``) is deliberate, NOT a missing
+    assertion: it is the same state main reaches sequentially (start, then a
+    legacy/AI-coach completion). A session-less completion carries no
+    session_id / expected_checkpoint_revision, so it may neither terminalize
+    the session nor be refused under the current contract. See
+    docs/WORKOUT_STATE.md, "Follow-up — session-less completion contract"."""
     _require_pg()
     from app.services import mobile_workout_sessions as sessions
     from app.services.workout_session import service as session_service
@@ -773,7 +782,9 @@ def test_start_holding_the_day_lock_serializes_a_session_less_completion(
         at_insert.set()
         seen["completion_waited"] = watch.wait_for_waiter_or(complete_done)
         seen["claims_at_insert"] = _committed_claims(user_id)
-        return real_insert(*args, **kwargs)
+        row = real_insert(*args, **kwargs)
+        seen["session_id"] = row.id
+        return row
 
     monkeypatch.setattr(
         session_service, "insert_active_session", _insert_after_completion_queues)
@@ -800,13 +811,35 @@ def test_start_holding_the_day_lock_serializes_a_session_less_completion(
         assert results["start"] == ("ok", 201), results
         assert results["complete"] == ("ok", "created"), results
         claims, statuses = _day_rows(flask_app, user_id)
-        # Serial start -> legacy completion: the session-less path never
-        # terminalizes a session (unchanged legacy contract), so the start's
-        # session stays ACTIVE exactly as it would sequentially.
+        # Exactly one claim (no lost/double completion) and exactly one session
+        # (no duplicate, no post-completion start insert).
         assert (claims, statuses) == (1, ["active"])
+        _assert_start_first_session_untouched(
+            flask_app, user_id, seen["session_id"])
     finally:
         watch.dispose()
         _teardown(flask_app)
+
+
+def _assert_start_first_session_untouched(flask_app, user_id, session_id):
+    """Accepted start-first contract: the later session-less completion leaves
+    the start's session exactly as the start committed it, and readers surface
+    the pair as ``lifecycle_inconsistent`` (existing, recoverable via abandon)."""
+    from app.models import WorkoutSession
+    from app.services.workout_session import (
+        STALE_LIFECYCLE_INCONSISTENT, build_session_view)
+    from app.timeutil import app_today
+
+    with flask_app.app_context():
+        row = WorkoutSession.query.filter_by(user_id=user_id).one()
+        assert row.id == session_id
+        assert row.status == "active"
+        assert (row.version, row.checkpoint_revision) == (1, 0)
+        assert (row.completed_at, row.abandoned_at, row.terminal_reason) == (
+            None, None, None)
+        view = build_session_view(row, app_today())
+        assert view.stale_reason == STALE_LIFECYCLE_INCONSISTENT
+        assert view.resumable is False
 
 
 def _committed_claims(user_id):
