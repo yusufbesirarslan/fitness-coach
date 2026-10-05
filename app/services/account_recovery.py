@@ -373,7 +373,8 @@ def _send_password_changed_email(user_id):
         user = db.session.get(User, user_id)
         if user is None or not user.email:
             return
-        subject, html, text = email_templates.password_changed_email(user.username)
+        subject, html, text = email_templates.password_changed_email(
+            user.username, language=user.language)
         email_service.send_html_email(user.email, subject, html, text=text)
         current_app.logger.info("[AUTH-EMAIL] password-changed kuyruklandı: user=%s to=%s",
                                 user_id, email_service.mask_email(user.email))
