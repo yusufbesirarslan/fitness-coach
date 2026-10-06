@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 import s3_helper
 from app.extensions import db
+from app.i18n import DEFAULT_LOCALE
 from app.models import (
     PumpCheck,
     PumpCheckComparison,
@@ -273,7 +274,8 @@ def _create_or_get_pair_and_request(user_id, key, digest, sources):
     return attached_id, created and attached_id == row_id
 
 
-def create_or_replay(user_id, key, command):
+def create_or_replay(user_id, key, command, *, language=DEFAULT_LOCALE):
+    """Language controls new attempts; completed pairs retain stored prose."""
     digest = fingerprint(
         command.baseline_token, command.current_token, ANALYSIS_VERSION)
     existing_request = _request_for_key(user_id, key)
@@ -288,7 +290,8 @@ def create_or_replay(user_id, key, command):
         row_id, created = _create_or_get_pair_and_request(
             user_id, key, digest, sources)
     db.session.rollback()
-    return _run_or_reuse_analysis(user_id, row_id, created, media)
+    return _run_or_reuse_analysis(
+        user_id, row_id, created, media, language=language)
 
 
 def _terminal_state(user_id, row_id):
@@ -316,7 +319,8 @@ def _media_for_row(user_id, row_id):
     return media
 
 
-def _run_or_reuse_analysis(user_id, row_id, created, media):
+def _run_or_reuse_analysis(user_id, row_id, created, media, *,
+                          language=DEFAULT_LOCALE):
     status, _kind = _terminal_state(user_id, row_id)
     if status == "completed":
         return _fresh(row_id), created
@@ -342,7 +346,7 @@ def _run_or_reuse_analysis(user_id, row_id, created, media):
         comparability, analysis = analyze_images(
             baseline_image, current_image,
             {"body_region": media.body_region},
-            media.source_quality_cap)
+            media.source_quality_cap, language=language)
         if not _finalize_success(
                 row_id, user_id, attempt, comparability, analysis):
             return _fresh(row_id), False

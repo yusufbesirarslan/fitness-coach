@@ -95,7 +95,7 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         session = lock_session_for_completion(command.user_id, command.session_id)
         if session is not None and session.status == WORKOUT_SESSION_ABANDONED:
             db.session.rollback()
-            _log(command, "session_abandoned_conflict")
+            _log(command.entry_path, "session_abandoned_conflict")
             raise SessionCompletionConflict(
                 "cannot complete an abandoned workout session", reason="abandoned"
             )
@@ -111,7 +111,7 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
             != command.expected_checkpoint_revision
         ):
             db.session.rollback()
-            _log(command, "session_revision_conflict")
+            _log(command.entry_path, "session_revision_conflict")
             from app.services.workout_session.metrics import record_lifecycle_event
             record_lifecycle_event("revision_conflict")
             raise SessionCompletionConflict(
@@ -127,14 +127,14 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         # locked in this transaction; terminalize + commit.
         if mark_session_completed(session, now):
             db.session.commit()
-            _log(command, "already_completed_preflight_session_reconciled")
+            _log(command.entry_path, "already_completed_preflight_session_reconciled")
         else:
             # No session terminalization needed. Release the FOR UPDATE lock if we
             # took one (session already terminal); the pure legacy path (no
             # session) is left byte-identical — no write, no rollback.
             if session is not None:
                 db.session.rollback()
-            _log(command, "already_completed_preflight")
+            _log(command.entry_path, "already_completed_preflight")
         return CompletionResult(outcome=CompletionOutcome.ALREADY_COMPLETED)
 
     pump_check = PumpCheck(
@@ -205,17 +205,17 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
             # terminalize the owned matching ACTIVE session in a fresh transaction
             # (no duplicate artifacts) — it must never be left permanently ACTIVE.
             _reconcile_session_after_race(command, now)
-            _log(command, "already_completed_race")
+            _log(command.entry_path, "already_completed_race")
             return CompletionResult(outcome=CompletionOutcome.ALREADY_COMPLETED)
-        _log(command, "integrity_error")
+        _log(command.entry_path, "integrity_error")
         raise
     except Exception:
         db.session.rollback()
-        _log(command, "rollback")
+        _log(command.entry_path, "rollback")
         raise
 
     level = get_level(new_total)
-    _log(command, "created")
+    _log(command.entry_path, "created")
     if session_completed:
         from app.services.workout_session.metrics import record_lifecycle_event
         record_lifecycle_event("completed")
@@ -286,14 +286,15 @@ def _fan_out_friend_messages(command: CompleteWorkoutCommand, pump_check: PumpCh
         )
 
 
-def _log(command: CompleteWorkoutCommand, outcome: str) -> None:
-    """Safe, bounded operational log — no PII, no workout content. Best-effort."""
+def _log(entry_path: str, outcome: str) -> None:
+    """Safe, bounded operational log — no identity, no workout content.
+    Best-effort. Takes only the two bounded labels it emits (never the command,
+    which carries the owner), so identity is unreachable from here."""
     try:
         current_app.logger.info(
-            "[WORKOUT_COMPLETION] rid=%s op=complete_workout entry=%s user_id=%s outcome=%s",
+            "[WORKOUT_COMPLETION] rid=%s op=complete_workout entry=%s outcome=%s",
             current_request_id(),
-            command.entry_path,
-            command.user_id,
+            entry_path,
             outcome,
         )
     except Exception:  # noqa: BLE001 — logging must never break the mutation

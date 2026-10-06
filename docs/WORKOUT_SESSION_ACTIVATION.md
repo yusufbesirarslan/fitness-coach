@@ -540,11 +540,13 @@ defect.
 
 ### 9.5 Evidence hygiene
 
-`WorkoutSessionLifecycle` contains no identity. **The log lines do**: both
-`[WORKOUT_SESSION] rid=… event=… user_id=…` and
-`[WORKOUT_STATE] anomaly rid=… user_id=… category=… detail=…` carry `user_id`.
-Redact it from anything committed to this repository. Prefer aggregate counts to
-raw log excerpts. Never commit session public IDs, cookies, tokens or
+`WorkoutSessionLifecycle` contains no identity. Since TI-06 neither do the
+lifecycle log lines `[WORKOUT_SESSION] rid=… event=…` and
+`[WORKOUT_COMPLETION] rid=… op=complete_workout entry=… outcome=…`, and since
+TI-07 neither does `[WORKOUT_STATE] anomaly rid=… category=… detail=…` (request
+id is their only correlation). The web request log line still carries `user=`;
+redact it from anything committed to this repository. Prefer aggregate counts
+to raw log excerpts. Never commit session public IDs, cookies, tokens or
 credentials.
 
 ---

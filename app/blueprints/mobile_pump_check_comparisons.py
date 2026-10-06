@@ -9,6 +9,7 @@ from app.observability import current_request_id
 from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services import meal_idempotency
 from app.services.mobile_pump_check_comparisons import service
+from app.services.mobile_pump_checks.analysis import resolve_content_language
 
 
 def _response(row, status=200):
@@ -34,7 +35,8 @@ def create_pump_check_comparison():
     try:
         command = service.create_command(request.get_json(silent=True))
         row, created = service.create_or_replay(
-            g.mobile_user.id, key, command)
+            g.mobile_user.id, key, command,
+            language=resolve_content_language(g.mobile_user.language))
         return _response(row, 201 if created else 200)
     except service.InvalidCommand:
         return mobile_error(
