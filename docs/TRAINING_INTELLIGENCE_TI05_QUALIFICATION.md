@@ -577,3 +577,29 @@ Accepted limitations remain only those in the original product-boundary section:
 no historical/Today/Progress re-entry, Coach handoff, physiological rest, e1RM,
 plan mutation, persistent insight cache; legacy context/prescription may be absent.
 Future feature work belongs in a new scoped lane.
+
+
+### TI-05B final local mobile results and main movement
+
+Mobile focused: **1,694 passed, 0 skipped, 0 failed**, 145.985s.
+Full: **3,500 passed, 0 skipped, 0 failed**, JSON reporter success.
+Analysis: **No issues found**, 5.0s. Format: **617 files, 0 changed**, 4.32s.
+Both `git diff --check` gates PASS. Ignored generated localization was regenerated
+with `flutter gen-l10n` after integrating main; the initial stale-generated-output
+attempt is excluded from valid qualification results. No production repair.
+All ten existing mutations PASS detection; final summary is
+`docs/evidence/ti05b/mutations.json`. All 311 backend app and 339 mobile lib tracked
+files in disposable copies were verified equal to qualified sources after restoration.
+
+Native simulator compile **PASS**, 125.2s: unsigned debug simulator binary,
+native auth ON, local insight switch ON, reserved `https://api.example.invalid`
+validation URL. Backend P0/P1 not connected/not exercised. This is not native
+happy/failure flow proof. Physical installation/flows remain NOT RUN.
+
+Backend main subsequently advanced to `01d3a711e2cae14fd6dd9adeedc2290e3474b272`
+(#404, Cognito code-email language). Inspection shows no TI contract/lifecycle/
+privacy code changes; the conftest change is an optional registration-stub language
+argument unused by TI fixtures. Candidate stays on repaired integrated main
+`0e560f93142434265be5814b345bceedd2654555`; no unrelated reintegration.
+Final PR diffs use merge-base comparison and contain **no production code changes**.
+The native gate still prevents P1 activation irrespective of CI results.
