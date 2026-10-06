@@ -96,7 +96,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
     password-recovery routes, LP-03 the native onboarding profile write,
     LP-04 the canonical Progress summary read, LP-09 the native Coach
     message write + history read, and LP-11 the native account deletion
-    (`DELETE /api/v1/account`). Mobile Training PR2 adds
+    (`DELETE /api/v1/account`). LP14 PR-D adds the dedicated account language
+    write (`PUT /api/v1/account/language`). Mobile Training PR2 adds
     exactly three canonical read projections, PR4A one native plan write, and
     PR5 the six native workout-session contracts. The referenced-session read
     adds one owner-scoped canonical projection. Any further path means
@@ -119,6 +120,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/auth/password/forgot",
         "/api/v1/auth/password/reset",
         "/api/v1/account/me",
+        "/api/v1/account/language",
         # LP-03 native onboarding profile write + its LP-12 prefill read
         # (owner = bearer principal).
         "/api/v1/account/profile",
