@@ -181,6 +181,24 @@ def load_snapshot(raw: object) -> Optional[dict]:
     return parsed if isinstance(parsed, dict) else None
 
 
+def parse_stored_exercises(snapshot: object) -> list:
+    """Re-validate a PERSISTED snapshot's exercises for read-only consumers.
+
+    The same closed exercise/set rules the write path enforces, with the
+    snapshot's own exercise identities as the membership list (the canonical
+    workout is not re-resolved, so a later plan change cannot reinterpret
+    history). Anything the write contract would refuse raises
+    :class:`InvalidSessionRequest`; callers treat that as unavailable evidence.
+    """
+    if not isinstance(snapshot, dict) or set(snapshot) != _SNAPSHOT_FIELDS:
+        raise InvalidSessionRequest("stored checkpoint fields do not match the contract")
+    raw = snapshot["exercises"]
+    if not isinstance(raw, list):
+        raise InvalidSessionRequest("exercises must be a list")
+    own = tuple(item.get("exercise_id") for item in raw if isinstance(item, dict))
+    return _parse_exercises(raw, own)
+
+
 def _parse_exercises(raw, allowed) -> list:
     if not isinstance(raw, list):
         raise InvalidSessionRequest("exercises must be a list")

@@ -267,6 +267,7 @@ jobs:
           tests/test_checkin_integrity_pg.py
           tests/test_sprint14_workout_execution_reliability_pg.py
           tests/test_ti01a_execution_context_pg.py
+          tests/test_ti03_pg.py
           tests/test_ux3_pr4_nutrition_placement_pg.py
           tests/test_f11_error_handler_pg.py
           tests/test_f12_web_session_refresh_pg.py

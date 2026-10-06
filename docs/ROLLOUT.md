@@ -298,3 +298,13 @@ both P0 and workout-session flags plus the applied note schema; dark returns 404
 Rollback disables P0 while retaining data. A downgrade deliberately erases notes.
 Migration e2f3a4b5c6d7 follows merged TI-01A e1f2a3b4c5d6; the shared P0
 lifecycle record lists both foundations’ prerequisites.
+
+## TI-03 P1 rollout addition
+
+`FITX_TRAINING_INSIGHTS_ENABLED=0` is the default. Valid states are OFF/OFF,
+P0 ON/P1 OFF and ON/ON; P1 ON with P0 OFF keeps the insight route absent. Enable
+P1 only after P0 is qualified and the TI-03 ruleset `ti_rules_v1` passes its
+PostgreSQL and projection qualification. Rollback: set P1 OFF. TI-03 has no
+schema, no stored diagnostics and no write path, so rollback deletes nothing and
+P0 context and V1/V2 checkpoint storage are unaffected. TI-03 does not authorize
+activation.

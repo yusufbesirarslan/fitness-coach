@@ -28,6 +28,7 @@ from app.mobile_auth_middleware import require_mobile_auth
 from app.models import WORKOUT_SESSION_COMPLETED
 from app.observability import current_request_id
 from app.services import mobile_workout_sessions as sessions
+from app.services import training_intelligence
 from app.services.workout_session.context import (
     MAX_V2_BODY_BYTES, parse_contract, parse_v2, project_context,
 )
@@ -144,13 +145,44 @@ def _context_enabled():
     return _sessions_enabled() and current_app.config.get('FITX_TRAINING_EXECUTION_CONTEXT_ENABLED', False)
 
 
+def _insights_enabled():
+    """P1 readiness (TI-00 §17): P1 ON requires P0 ON. P1 ON with P0 OFF is an
+    invalid rollout state, so P1 is absent rather than silently advertised."""
+    return bool(_context_enabled()
+                and current_app.config.get('FITX_TRAINING_INSIGHTS_ENABLED', False))
+
+
 @bp.get('/training/workout-execution-capabilities')
 @require_mobile_auth
 @_flag_gated
 def workout_execution_capabilities():
     enabled = _context_enabled()
     return jsonify({'contract_version': 1, 'checkpoint_versions': [1, 2] if enabled else [1],
-                    'execution_context_enabled': bool(enabled), 'insights_enabled': False})
+                    'execution_context_enabled': bool(enabled),
+                    'insights_enabled': _insights_enabled()})
+
+
+@bp.get("/training/workout-sessions/<session_reference>/training-insight")
+@require_mobile_auth
+@_flag_gated
+def read_training_insight(session_reference):
+    """TI-03 deterministic Training Insight: a read projection, never a write.
+
+    Absent while P1 is not ready (404, the same envelope as an absent session).
+    An absent or foreign session is 404. Missing history is a 200 with explicit
+    missing codes; only a genuine read failure is a retryable 503.
+    """
+    if not _insights_enabled():
+        return _disabled()
+    try:
+        payload = training_intelligence.build_training_insight(
+            g.mobile_user.id, session_reference)
+    except sessions.SessionCommandError as error:
+        return _failure(error)
+    except Exception as error:  # noqa: BLE001 - never leak an internal failure
+        training_intelligence.record_insight_event("insight_unavailable")
+        return _unavailable(error, "insight_failed")
+    return jsonify(payload)
 
 
 def _unavailable(error, event):

@@ -90,6 +90,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/training/workout-sessions"),
         ("get", "/api/v1/training/workout-sessions/current"),
         ("get", "/api/v1/training/workout-sessions/abc"),
+        ("get", "/api/v1/training/workout-sessions/abc/training-insight"),
         ("post", "/api/v1/training/workout-sessions/abc/resume"),
         ("put", "/api/v1/training/workout-sessions/abc/checkpoint"),
         ("post", "/api/v1/training/workout-sessions/abc/abandon"),
@@ -214,6 +215,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/workout-execution-capabilities", ("GET",)),
             ("/api/v1/training/workout-sessions", ("POST",)),
             ("/api/v1/training/workout-sessions/current", ("GET",)),
+            # TI-03 read-only Training Insight; additionally behind P1 readiness.
+            ("/api/v1/training/workout-sessions/<session_reference>/training-insight",
+             ("GET",)),
             ("/api/v1/training/workout-sessions/<session_reference>",
              ("GET",)),
             ("/api/v1/training/workout-sessions/<session_reference>/resume",
