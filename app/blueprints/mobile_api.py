@@ -200,7 +200,8 @@ def normalize_unhandled_mobile_failure(error):
 def account_projection(user):
     """The ONE native projection of the current account.
 
-    Shared by `GET /account/me` and `PUT /account/profile`, so the answer after
+    Shared by `GET /account/me`, `PUT /account/language` and
+    `PUT /account/profile`, so the answer after
     an onboarding write is exactly what the next read returns.
     `profile_complete` is the canonical onboarding rule
     (`account_profile.onboarding_state`) — the same one the first-plan
@@ -230,6 +231,7 @@ def me():
 # gate — and keeps every mobile route inside the approved-route allow-list in
 # tests/test_mobile_auth_feature_gate.py.
 from app.blueprints import mobile_account_deletion  # noqa: E402,F401
+from app.blueprints import mobile_account_language  # noqa: E402,F401
 from app.blueprints import mobile_account_profile  # noqa: E402,F401
 from app.blueprints import mobile_coach  # noqa: E402,F401
 from app.blueprints import mobile_nutrition  # noqa: E402,F401

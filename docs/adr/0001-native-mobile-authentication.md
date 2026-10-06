@@ -444,6 +444,21 @@ or deployed in PR4.
 `PUT /api/v1/account/profile` (LP-03, [MOBILE_ONBOARDING.md](../MOBILE_ONBOARDING.md))
 answers with exactly this projection.
 
+`PUT /api/v1/account/language` (LP14 PR-D) also returns this same
+`account_projection` with HTTP 200 after commit. Its closed JSON object is
+exactly `{"language":"en"}` or `{"language":"tr"}`; no normalization or
+extra keys are accepted. The verified Bearer principal selects the owner;
+only `User.language` is written. Repeated values succeed without side effects.
+It reuses account/profile's verified-user default limiter (`DEFAULT_RATELIMIT`,
+600 per hour by default) and the mobile feature gate, no-store and CSRF policy.
+Invalid bodies return 400 `LANGUAGE_INVALID_REQUEST` (retryable=false), and
+storage/projection failures return 503 `LANGUAGE_TEMPORARILY_UNAVAILABLE`
+(retryable=true), using the envelope below. Missing Bearer credentials use
+401 `AUTH_SESSION_EXPIRED`; throttling uses 429 `AUTH_RATE_LIMITED` with
+`Retry-After`. Account/profile's closed replacement body and web
+`POST /set-language` remain unchanged. This updates the local account language
+only; Cognito locale is not synchronized.
+
 Units, a separate onboarding flag, public UUID, and provider account state are
 omitted because the backend does not currently store authoritative values for
 them. Authentication provider identifiers and database primary keys are not
