@@ -50,7 +50,7 @@ verilmezse `HasAlarmEmail` yanlışa döner ve `EmailAlarmSubscription` SİLİN�
 Kanonik giriş noktası `scripts/deploy_email_lambda.py`'dir:
 
 ```bash
-# Deploy edilecek revizyonun deposunun kökünden (temiz çalışma ağacı):
+# Deploy edilecek revizyonun deposunun kökünden (sarmalayıcı + kaynak commit'li ve temiz):
 read -rs RESEND_API_KEY && export RESEND_API_KEY    # ekrana/geçmişe düşmez
 python scripts/deploy_email_lambda.py \
     --stack-name axisai-cognito-email-sender --region eu-central-1 \
@@ -75,7 +75,12 @@ Sarmalayıcı SAM'i başlatmadan önce REDDEDER (çıkış 2) eğer:
   (başka stack/bölge, `confirm_changeset` kapalı, eklenmiş
   `parameter_overrides`, `ResendApiKey`'de `NoEcho: true` yok, parametre kümesi
   farklı);
-- kaynak dizin temiz bir git çalışma ağacı değil;
+- sarmalayıcının KENDİSİ (`scripts/deploy_email_lambda.py`, çalışan dosya)
+  git'te izlenmiyor ya da yerel değişikliği var (düzenlenmiş bir kopya bir
+  korumayı kapatmış olabilir);
+- `--source-dir` bir git çalışma ağacındaki izlenen
+  `infra/cognito-email-sender` değil (ör. gitignore'lu `.aws-sam/` altına
+  kopya) ya da o alt ağaçta commit'lenmemiş/izlenmeyen değişiklik var;
 - stdin terminal değil (changeset onayını bir insan vermeli).
 
 Sonra sırayla `sam validate --lint` → `sam build --use-container` (Linux
@@ -256,7 +261,10 @@ python scripts/deploy_email_lambda.py \
 Aynı zorunlu parametreler, aynı changeset kuralı, aynı deploy-sonrası
 doğrulama; ek olarak `CodeSha256` önceden yakalanan değere dönmeli.
 Sarmalayıcı hiçbir revizyon SEÇMEZ (pull/checkout/reset yapmaz) — verilen
-ağacı deploy eder.
+ağacı deploy eder. Sarmalayıcı ve kaynak FARKLI revizyonlardan gelebilir
+(güncel sarmalayıcı + önceki worktree); ikisi de ayrı ayrı izlenen+temiz
+olmalıdır ve önizleme deploy'dan önce İKİ revizyonu da gösterir
+(`Wrapper revision` / `Source revision`).
 
 **Yalnızca ACİL DURUM (dil rollback'i DEĞİL):** Lambda tamamen kırıksa ve
 korumalı yeniden deploy mümkün değilse trigger havuzdan ayrılır; Cognito'nun

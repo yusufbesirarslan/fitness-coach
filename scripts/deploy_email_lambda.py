@@ -12,9 +12,13 @@ Raw ``sam deploy`` has two silent production hazards:
 
 This wrapper refuses to start SAM unless both are supplied, the stack and
 region are explicitly acknowledged and match the pinned values, the tracked
-SAM config and template still match the reviewed contract, and the source
-tree is a clean git work tree. It then runs, in order and stopping on the
-first failure::
+SAM config and template still match the reviewed contract, and two separate
+git integrity checks pass: this wrapper file itself is tracked and unmodified
+(an edited copy could have switched a guard off), and the Lambda source tree
+is the tracked ``infra/cognito-email-sender`` of a git work tree (not a copy
+under an ignored path) with no uncommitted changes. Both revisions are shown;
+they may differ (current wrapper + rollback worktree). It then runs, in order
+and stopping on the first failure::
 
     sam validate --lint
     sam build --use-container
@@ -65,7 +69,14 @@ REGION = "eu-central-1"
 CAPABILITIES = "CAPABILITY_IAM"
 SECRET_ENV = "RESEND_API_KEY"
 ALARM_ENV = "ALARM_EMAIL"
-DEFAULT_SOURCE_DIR = Path(__file__).resolve().parents[1] / "infra" / "cognito-email-sender"
+WRAPPER_PATH = Path(__file__).resolve()
+DEFAULT_SOURCE_DIR = WRAPPER_PATH.parents[1] / "infra" / "cognito-email-sender"
+# Repository-relative locations the integrity checks pin.
+WRAPPER_REPO_PATH = "scripts/deploy_email_lambda.py"
+SOURCE_REPO_PATH = "infra/cognito-email-sender"
+# Tracked files that prove --source-dir is the reviewed Lambda tree rather
+# than a copy (e.g. under a gitignored .aws-sam/, where `git status` is silent).
+CANONICAL_SOURCE_FILES = ("template.yaml", "samconfig.toml", "src/handler.py")
 BUILT_TEMPLATE = ".aws-sam/build/template.yaml"
 REDACTED = "<redacted>"
 
@@ -138,9 +149,19 @@ class _Secret:
 
 
 @dataclass(frozen=True)
+class Provenance:
+    """A tracked, clean path: its git work tree root, repo path and HEAD."""
+
+    root: Path
+    path: str
+    revision: str
+
+
+@dataclass(frozen=True)
 class Plan:
     source_dir: Path
-    revision: str
+    wrapper: Provenance
+    source: Provenance
     alarm_email: str
     preserved: tuple[tuple[str, str], ...]
     profile: str | None
@@ -291,31 +312,99 @@ def check_template(path: Path) -> None:
             "CloudFormation would otherwise display the secret).")
 
 
-def _git(source_dir: Path, args: list[str], run: Callable[..., Any]) -> str:
+def _git(directory: Path, args: list[str], run: Callable[..., Any],
+         failure: str | None = None) -> str:
     # Read-only queries only; --no-optional-locks keeps `status` from
-    # rewriting the index.
+    # rewriting the index, --literal-pathspecs keeps paths from globbing.
     completed = run(
-        ["git", "--no-optional-locks", "-C", str(source_dir), *args],
+        ["git", "--no-optional-locks", "--literal-pathspecs", "-C", str(directory), *args],
         capture_output=True, text=True, check=False, timeout=60,
     )
     if completed.returncode != 0:
-        raise DeployRefused(f"git {args[0]} failed in {source_dir}; is it a git work tree?")
+        raise DeployRefused(
+            failure or f"git {args[0]} failed in {directory}; is it a git work tree?")
     return completed.stdout
 
 
-def source_revision(source_dir: Path, run: Callable[..., Any]) -> str:
-    revision = _git(source_dir, ["rev-parse", "HEAD"], run).strip()
+def locate(path: Path, run: Callable[..., Any]) -> tuple[Path, str, str]:
+    """The git work tree owning ``path``, the path inside it, and its HEAD."""
+    path = path.resolve()
+    start = path if path.is_dir() else path.parent
+    root = Path(_git(start, ["rev-parse", "--show-toplevel"], run,
+                     f"{path} is not inside a git work tree.").strip()).resolve()
+    try:
+        inside = path.relative_to(root).as_posix()
+    except ValueError:
+        raise DeployRefused(f"{path} is not inside its git work tree {root}.") from None
+    revision = _git(root, ["rev-parse", "HEAD"], run).strip()
     if not SHA_RE.fullmatch(revision):
         raise DeployRefused("git rev-parse HEAD returned an unexpected value.")
-    return revision
+    return root, inside, revision
 
 
-def source_changes(source_dir: Path, run: Callable[..., Any]) -> str:
-    return _git(source_dir, ["status", "--porcelain", "--", "."], run).strip()
+def require_tracked(root: Path, path: str, required: Sequence[str],
+                    run: Callable[..., Any]) -> None:
+    """Every ``required`` file is in the index, and nothing under ``path``
+    hides edits from ``git status`` (assume-unchanged / skip-worktree)."""
+    listing = _git(root, ["ls-files", "-v", "-z", "--", path], run)
+    tags = {}
+    for entry in filter(None, listing.split("\0")):
+        tag, _, name = entry.partition(" ")
+        tags[name] = tag
+    missing = [name for name in required if name not in tags]
+    if missing:
+        raise DeployRefused(
+            f"{', '.join(missing)} not tracked by git in {root}; deploy only a "
+            "tracked, committed tree (not a copy under an ignored path).")
+    hidden = sorted(name for name, tag in tags.items() if tag != "H")
+    if hidden:
+        raise DeployRefused(
+            f"{', '.join(hidden)} marked assume-unchanged/skip-worktree (or "
+            "unmerged); git status cannot vouch for it.")
+
+
+def changes(root: Path, path: str, run: Callable[..., Any]) -> str:
+    return _git(root, ["status", "--porcelain", "--untracked-files=all", "--", path],
+                run).strip()
+
+
+def wrapper_provenance(wrapper: Path, run: Callable[..., Any]) -> Provenance:
+    """Proves the executing wrapper file is tracked and unmodified."""
+    root, path, revision = locate(wrapper, run)
+    require_tracked(root, path, [path], run)
+    if path != WRAPPER_REPO_PATH:
+        raise DeployRefused(
+            f"the deploy wrapper must run as {WRAPPER_REPO_PATH} of a git work "
+            f"tree; this copy is {path}.")
+    if changes(root, path, run):
+        raise DeployRefused(
+            f"{WRAPPER_REPO_PATH} has uncommitted changes in {root}; run only a "
+            "committed wrapper (its guards are the deploy contract).")
+    return Provenance(root, path, revision)
+
+
+def source_provenance(source_dir: Path, run: Callable[..., Any]) -> Provenance:
+    """Proves --source-dir is the tracked Lambda tree with no local changes."""
+    root, path, revision = locate(source_dir, run)
+    require_tracked(root, path, [f"{path}/{name}" for name in CANONICAL_SOURCE_FILES], run)
+    if path != SOURCE_REPO_PATH:
+        raise DeployRefused(
+            f"--source-dir must be {SOURCE_REPO_PATH} of a git work tree (a "
+            f"rollback worktree is fine); got {path}.")
+    if changes(root, path, run):
+        raise DeployRefused(
+            f"{source_dir} has uncommitted changes; deploy only a committed "
+            "revision (use a separate worktree for rollback).")
+    return Provenance(root, path, revision)
+
+
+def source_changes(source: Provenance, run: Callable[..., Any]) -> str:
+    return changes(source.root, source.path, run)
 
 
 def build_plan(args: argparse.Namespace, environ: Mapping[str, str],
-               run: Callable[..., Any]) -> tuple[Plan, _Secret]:
+               run: Callable[..., Any],
+               wrapper: Path = WRAPPER_PATH) -> tuple[Plan, _Secret]:
     secret = read_secret(environ)
     alarm_email = validate_alarm_email(
         args.alarm_email if args.alarm_email is not None else environ.get(ALARM_ENV))
@@ -323,21 +412,18 @@ def build_plan(args: argparse.Namespace, environ: Mapping[str, str],
     if args.profile is not None and not PROFILE_RE.fullmatch(args.profile):
         raise DeployRefused("--profile has an unsupported value.")
     preserved = parse_preserved(args.preserve_parameter)
+    wrapper_origin = wrapper_provenance(wrapper, run)
 
     source_dir = Path(args.source_dir).resolve()
     if not (source_dir / "template.yaml").is_file():
         raise DeployRefused(f"{source_dir} has no template.yaml.")
     check_samconfig(source_dir / "samconfig.toml")
     check_template(source_dir / "template.yaml")
-    revision = source_revision(source_dir, run)
-    changes = source_changes(source_dir, run)
-    if changes:
-        raise DeployRefused(
-            f"{source_dir} has uncommitted changes; deploy only a committed "
-            "revision (use a separate worktree for rollback).")
+    source_origin = source_provenance(source_dir, run)
 
     inherited = None if args.profile else environ.get("AWS_PROFILE")
-    plan = Plan(source_dir, revision, alarm_email, preserved, args.profile, inherited)
+    plan = Plan(source_dir, wrapper_origin, source_origin, alarm_email, preserved,
+                args.profile, inherited)
     return plan, secret
 
 
@@ -367,8 +453,12 @@ def render_preview(plan: Plan) -> str:
         "=== Cognito email Lambda deploy - operator preview (no secrets) ===",
         f"Stack           : {STACK_NAME}",
         f"Region          : {REGION}",
+        f"Wrapper revision: {plan.wrapper.revision} (clean)",
         f"Source dir      : {plan.source_dir}",
-        f"Source revision : {plan.revision} (clean)",
+        f"Source revision : {plan.source.revision} (clean)",
+        *([] if plan.wrapper.revision == plan.source.revision else [
+            "                  (wrapper and source revisions differ - expected "
+            "only for a rollback worktree)"]),
         f"AWS identity    : {identity}",
         f"ResendApiKey    : supplied ({REDACTED})",
         f"AlarmEmail      : {mask_email(plan.alarm_email)}",
@@ -395,7 +485,8 @@ def render_post_deploy(plan: Plan) -> str:
     return "\n".join([
         "=== REQUIRED post-deploy verification (deploy is NOT verified until all pass) ===",
         "If you answered N at the changeset prompt nothing was deployed; skip this.",
-        f"Source revision deployed: {plan.revision}",
+        f"Source revision deployed: {plan.source.revision}",
+        f"Wrapper revision used   : {plan.wrapper.revision}",
         "1. python scripts/check_email_lambda.py --function-name <FunctionArn>",
         "   must print 'UYUMLU'; 'UYARI' (could not read) is NOT a pass.",
         f"2. aws cloudformation describe-stacks --stack-name {STACK_NAME} "
@@ -439,7 +530,7 @@ def execute(plan: Plan, secret: _Secret, environ: Mapping[str, str], *,
         print("STOP: sam deploy did not complete. Inspect the stack events; if "
               "anything changed, run the post-deploy verification below.", file=out)
     try:
-        changed = bool(source_changes(plan.source_dir, run))
+        changed = bool(source_changes(plan.source, run))
     except DeployRefused:
         changed = True
     print(render_post_deploy(plan), file=out)
@@ -478,13 +569,14 @@ def main(argv: Sequence[str] | None = None, *,
          environ: Mapping[str, str] | None = None,
          run: Callable[..., Any] = subprocess.run,
          stdin_isatty: Callable[[], bool] | None = None,
-         out: TextIO | None = None) -> int:
+         out: TextIO | None = None,
+         wrapper: Path = WRAPPER_PATH) -> int:
     environ = os.environ if environ is None else environ
     stdin_isatty = sys.stdin.isatty if stdin_isatty is None else stdin_isatty
     out = sys.stdout if out is None else out
     args = parse_args(argv)
     try:
-        plan, secret = build_plan(args, environ, run)
+        plan, secret = build_plan(args, environ, run, wrapper)
         if args.dry_run:
             print(render_preview(plan), file=out)
             print("DRY RUN: all guards passed; SAM was not invoked.", file=out)

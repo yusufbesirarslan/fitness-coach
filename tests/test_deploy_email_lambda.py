@@ -4,13 +4,16 @@ Raw `sam deploy` without ResendApiKey deploys '' (every code email silently
 stops) and without AlarmEmail removes the alarm subscription. These tests pin
 the wrapper's guards hermetically: `sam` and `git` are fake runners, no AWS,
 no SAM, no network. The secret is a fake sentinel and is asserted ABSENT from
-every byte the wrapper prints.
+every byte the wrapper prints. The git integrity section at the end runs the
+production integrity helpers against REAL temporary git repositories (local
+`git init` + commits in tmp_path; SAM stays fake).
 
     python -m pytest tests/test_deploy_email_lambda.py -v
 """
 import ast
 import importlib.util
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -29,26 +32,55 @@ ALARM = "ops-alarms@example.com"
 SHA = "a" * 40
 ROLLBACK_SHA = "b" * 40
 SOURCE = Path("infra/cognito-email-sender").resolve()
+REPO = _SCRIPT.resolve().parents[1]
+READ_ONLY_GIT = {"rev-parse", "ls-files", "status"}
 
 
 class FakeRunner:
-    """Records every child process; answers git and sam deterministically."""
+    """Records every child process; answers git and sam deterministically.
 
-    def __init__(self, *, sha=SHA, status_before="", status_after="",
-                 fail=None, raise_on=None):
+    git: a directory under ``.../infra/cognito-email-sender`` or ``.../scripts``
+    belongs to the work tree two/one levels up; the wrapper's tree is REPO.
+    """
+
+    def __init__(self, *, sha=SHA, wrapper_sha=SHA, status_before="", status_after="",
+                 wrapper_status="", wrapper_tracked=True, fail=None, raise_on=None):
         self.calls = []
         self.sha = sha
+        self.wrapper_sha = wrapper_sha
         self.statuses = [status_before, status_after]
+        self.wrapper_status = wrapper_status
+        self.wrapper_tracked = wrapper_tracked
         self.fail = fail or {}
         self.raise_on = raise_on
+
+    @staticmethod
+    def _toplevel(directory):
+        if directory.parts[-2:] == ("infra", "cognito-email-sender"):
+            return directory.parents[1]
+        return directory.parent if directory.name == "scripts" else directory
+
+    def _git(self, argv):
+        directory, args = Path(argv[4]), argv[5:]
+        ok = lambda out: subprocess.CompletedProcess(argv, 0, out, "")  # noqa: E731
+        if args[:2] == ["rev-parse", "--show-toplevel"]:
+            return ok(f"{self._toplevel(directory)}\n")
+        if args == ["rev-parse", "HEAD"]:
+            return ok((self.wrapper_sha if directory == REPO and self.wrapper_sha else self.sha) + "\n")
+        path = args[-1]
+        if args[0] == "ls-files":
+            if path == deploy.WRAPPER_REPO_PATH:
+                return ok(f"H {path}\0" if self.wrapper_tracked else "")
+            return ok("".join(f"H {path}/{name}\0" for name in deploy.CANONICAL_SOURCE_FILES))
+        if path == deploy.WRAPPER_REPO_PATH:
+            return ok(self.wrapper_status)
+        status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        return ok(status)
 
     def __call__(self, argv, **kwargs):
         self.calls.append((list(argv), kwargs))
         if argv[0] == "git":
-            if "rev-parse" in argv:
-                return subprocess.CompletedProcess(argv, 0, self.sha + "\n", "")
-            status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
-            return subprocess.CompletedProcess(argv, 0, status, "")
+            return self._git(list(argv))
         step = argv[1]
         if step == self.raise_on:
             raise subprocess.TimeoutExpired(argv, 1)
@@ -354,6 +386,22 @@ def test_dirty_source_tree_refuses(capsys):
     assert "uncommitted changes" in err
 
 
+def test_dirty_wrapper_refuses_before_sam(capsys):
+    code, out, err, runner = _main(_argv(), runner=FakeRunner(wrapper_status=" M scripts/deploy_email_lambda.py"),
+                                   capsys=capsys)
+    assert code == 2
+    assert runner.sam_steps() == []
+    assert "scripts/deploy_email_lambda.py has uncommitted changes" in err
+    assert "(clean)" not in out
+
+
+def test_untracked_wrapper_refuses_before_sam(capsys):
+    code, _, err, runner = _main(_argv(), runner=FakeRunner(wrapper_tracked=False), capsys=capsys)
+    assert code == 2
+    assert runner.sam_steps() == []
+    assert "not tracked by git" in err
+
+
 def test_source_tree_changed_during_deploy_is_flagged():
     code, out, _, _ = _main(_argv(), runner=FakeRunner(status_after=" M samconfig.toml"))
     assert code == 5
@@ -413,7 +461,9 @@ def test_operator_preview_names_target_alarm_and_allowed_changeset():
     preview = out[:out.index("--> sam deploy")]
     assert "Stack           : axisai-cognito-email-sender" in preview
     assert "Region          : eu-central-1" in preview
+    assert f"Wrapper revision: {SHA} (clean)" in preview
     assert f"Source revision : {SHA} (clean)" in preview
+    assert "revisions differ" not in preview
     assert "AWS identity    : --profile prod-operator" in preview
     assert "AlarmEmail      : o***@example.com" in preview
     assert ALARM not in preview
@@ -446,16 +496,24 @@ def test_post_deploy_checklist_requires_lambda_stack_pool_and_sns_checks():
 
 def test_rollback_worktree_uses_its_own_tree_and_never_selects_a_revision(tmp_path):
     source = _copy_source(tmp_path)
+    rollback_root = source.resolve().parents[1]
     runner = FakeRunner(sha=ROLLBACK_SHA)
     code, out, _, _ = _main(_argv(source=source), runner=runner)
     assert code == 0
+    assert f"Wrapper revision: {SHA} (clean)" in out
     assert f"Source revision : {ROLLBACK_SHA} (clean)" in out
+    assert "wrapper and source revisions differ" in out
+    assert f"Source revision deployed: {ROLLBACK_SHA}" in out
+    assert f"Wrapper revision used   : {SHA}" in out
     for argv, kwargs in runner.calls:
         if argv[0] == "sam":
             assert kwargs["cwd"] == str(source.resolve())
         else:
-            assert argv[:4] == ["git", "--no-optional-locks", "-C", str(source.resolve())]
-            assert argv[4] in ("rev-parse", "status")
+            assert argv[:3] == ["git", "--no-optional-locks", "--literal-pathspecs"]
+            assert argv[3] == "-C"
+            assert argv[4] in {str(source.resolve()), str(rollback_root),
+                               str(REPO / "scripts"), str(REPO)}
+            assert argv[5] in READ_ONLY_GIT
             assert "main" not in argv and "origin/main" not in argv
 
 
@@ -480,3 +538,270 @@ def test_wrapper_never_writes_files():
     names = {node.func.id for node in ast.walk(tree)
              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
     assert "open" not in names
+
+
+# --- wrapper + source git integrity against REAL git ------------------------
+# Local `git init` repositories in tmp_path; the production helpers run real
+# read-only git. No AWS, no SAM (a recording fake answers `sam`), no network.
+
+_GIT_ISOLATION = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+                  "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
+                  "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
+WRAPPER_IN_REPO = Path(deploy.WRAPPER_REPO_PATH)
+SOURCE_IN_REPO = Path(deploy.SOURCE_REPO_PATH)
+
+
+def _git_env():
+    return {**os.environ, **_GIT_ISOLATION}
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args], env=_git_env(), check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _real_git(argv, **kwargs):
+    """subprocess.run with git isolated from the developer's global config."""
+    if argv[0] == "git":
+        kwargs.setdefault("env", _git_env())
+    return subprocess.run(argv, **kwargs)
+
+
+class GitAndFakeSam:
+    """Real git, recorded fake sam: proves where refusal happens."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(list(argv))
+        if argv[0] == "git":
+            return _real_git(argv, **kwargs)
+        return subprocess.CompletedProcess(argv, 0)
+
+    def sam_steps(self):
+        return [argv[1] for argv in self.calls if argv[0] == "sam"]
+
+    def git_steps(self):
+        return [argv[5] for argv in self.calls if argv[0] == "git"]
+
+
+def _make_repo(root, *, commit_wrapper=True, gitignore=".aws-sam/\n__pycache__/\n"):
+    root.mkdir(parents=True)
+    (root / ".gitignore").write_text(gitignore, encoding="utf-8")
+    (root / WRAPPER_IN_REPO).parent.mkdir(parents=True)
+    shutil.copy2(_SCRIPT, root / WRAPPER_IN_REPO)
+    shutil.copytree(SOURCE, root / SOURCE_IN_REPO,
+                    ignore=shutil.ignore_patterns(".aws-sam", "__pycache__"))
+    _git(root, "init", "-q")
+    _git(root, "add", "-A")
+    if not commit_wrapper:
+        _git(root, "rm", "-q", "--cached", str(WRAPPER_IN_REPO))
+    _git(root, "commit", "-q", "-m", "base")
+    return root.resolve()
+
+
+@pytest.fixture
+def sandbox(tmp_path, monkeypatch):
+    """tmp_path that git never searches above (no enclosing repository)."""
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.resolve()))
+    return tmp_path
+
+
+@pytest.fixture
+def repo(sandbox):
+    return _make_repo(sandbox / "repo")
+
+
+def _refusal(fn, *args):
+    with pytest.raises(deploy.DeployRefused) as exc:
+        fn(*args, _real_git)
+    return str(exc.value)
+
+
+# CASE A
+def test_real_git_clean_tracked_wrapper_is_accepted(repo):
+    origin = deploy.wrapper_provenance(repo / WRAPPER_IN_REPO, _real_git)
+    assert origin.revision == _git(repo, "rev-parse", "HEAD")
+    assert (origin.root, origin.path) == (repo, deploy.WRAPPER_REPO_PATH)
+
+
+# CASE B
+@pytest.mark.parametrize("stage", [False, True], ids=["unstaged", "staged"])
+def test_real_git_modified_wrapper_refuses(repo, stage):
+    wrapper = repo / WRAPPER_IN_REPO
+    wrapper.write_text(wrapper.read_text(encoding="utf-8").replace(
+        'if not value.strip():', 'if False:', 1), encoding="utf-8")
+    if stage:
+        _git(repo, "add", str(WRAPPER_IN_REPO))
+    assert "scripts/deploy_email_lambda.py has uncommitted changes" in _refusal(
+        deploy.wrapper_provenance, wrapper)
+
+
+# CASE C
+def test_real_git_untracked_wrapper_refuses(sandbox):
+    root = _make_repo(sandbox / "repo", commit_wrapper=False)
+    assert "not tracked by git" in _refusal(deploy.wrapper_provenance, root / WRAPPER_IN_REPO)
+
+
+def test_real_git_ignored_wrapper_copy_refuses(repo):
+    copy = repo / ".aws-sam" / WRAPPER_IN_REPO
+    copy.parent.mkdir(parents=True)
+    shutil.copy2(repo / WRAPPER_IN_REPO, copy)
+    assert _git(repo, "status", "--porcelain") == ""  # git status alone is silent
+    assert "not tracked by git" in _refusal(deploy.wrapper_provenance, copy)
+
+
+def test_real_git_wrapper_outside_any_work_tree_refuses(sandbox):
+    loose = sandbox / "loose" / WRAPPER_IN_REPO
+    loose.parent.mkdir(parents=True)
+    shutil.copy2(_SCRIPT, loose)
+    assert "not inside a git work tree" in _refusal(deploy.wrapper_provenance, loose)
+
+
+def test_real_git_assume_unchanged_wrapper_refuses(repo):
+    wrapper = repo / WRAPPER_IN_REPO
+    _git(repo, "update-index", "--assume-unchanged", str(WRAPPER_IN_REPO))
+    wrapper.write_text(wrapper.read_text(encoding="utf-8") + "# hidden\n", encoding="utf-8")
+    assert _git(repo, "status", "--porcelain") == ""  # git status alone is fooled
+    assert "assume-unchanged" in _refusal(deploy.wrapper_provenance, wrapper)
+
+
+# CASE D
+def test_real_git_clean_tracked_source_is_accepted(repo):
+    origin = deploy.source_provenance(repo / SOURCE_IN_REPO, _real_git)
+    assert origin.revision == _git(repo, "rev-parse", "HEAD")
+    assert origin.path == deploy.SOURCE_REPO_PATH
+
+
+@pytest.mark.parametrize("edit", ["modified", "staged", "untracked"])
+def test_real_git_dirty_source_refuses(repo, edit):
+    source = repo / SOURCE_IN_REPO
+    if edit == "untracked":
+        (source / "src" / "extra.py").write_text("x = 1\n", encoding="utf-8")
+    else:
+        handler = source / "src" / "handler.py"
+        handler.write_text(handler.read_text(encoding="utf-8") + "# edit\n", encoding="utf-8")
+        if edit == "staged":
+            _git(repo, "add", "-A")
+    assert "has uncommitted changes" in _refusal(deploy.source_provenance, source)
+
+
+# CASE E
+def test_real_git_gitignored_source_copy_refuses(repo):
+    copy = repo / ".aws-sam" / "old" / SOURCE_IN_REPO
+    shutil.copytree(repo / SOURCE_IN_REPO, copy)
+    assert _git(repo, "status", "--porcelain") == ""  # git status alone is silent
+    assert "not tracked by git" in _refusal(deploy.source_provenance, copy)
+
+
+def test_real_git_ignored_source_at_the_canonical_path_refuses(sandbox):
+    root = _make_repo(sandbox / "repo", gitignore="infra/\n__pycache__/\n")
+    assert _git(root, "status", "--porcelain") == ""
+    assert "not tracked by git" in _refusal(deploy.source_provenance, root / SOURCE_IN_REPO)
+
+
+def test_real_git_assume_unchanged_source_refuses(repo):
+    template = repo / SOURCE_IN_REPO / "template.yaml"
+    _git(repo, "update-index", "--assume-unchanged", str(SOURCE_IN_REPO / "template.yaml"))
+    template.write_text(template.read_text(encoding="utf-8") + "# hidden\n", encoding="utf-8")
+    assert "assume-unchanged" in _refusal(deploy.source_provenance, repo / SOURCE_IN_REPO)
+
+
+# Wrapper-level: the whole guarded path with real git and a recording fake SAM.
+
+def _main_real(repo, *extra, source=None, dry_run=False, capsys=None):
+    runner = GitAndFakeSam()
+    out = io.StringIO()
+    argv = _argv(*extra, *(["--dry-run"] if dry_run else []),
+                 source=source or repo / SOURCE_IN_REPO)
+    code = deploy.main(argv, environ=_env(), run=runner, stdin_isatty=lambda: True,
+                       out=out, wrapper=repo / WRAPPER_IN_REPO)
+    err = capsys.readouterr().err if capsys else ""
+    return code, out.getvalue(), err, runner
+
+
+# Acceptance 1
+def test_real_git_clean_wrapper_and_source_reach_sam(repo):
+    code, out, _, runner = _main_real(repo)
+    head = _git(repo, "rev-parse", "HEAD")
+    assert code == 0
+    assert runner.sam_steps() == ["validate", "build", "deploy"]
+    assert f"Wrapper revision: {head} (clean)" in out
+    assert f"Source revision : {head} (clean)" in out
+    assert set(runner.git_steps()) <= READ_ONLY_GIT
+
+
+# Acceptance 2
+def test_real_git_dirty_wrapper_refuses_before_any_sam_call(repo, capsys):
+    wrapper = repo / WRAPPER_IN_REPO
+    wrapper.write_text(wrapper.read_text(encoding="utf-8") + "# edit\n", encoding="utf-8")
+    code, out, err, runner = _main_real(repo, capsys=capsys)
+    assert code == 2
+    assert runner.git_steps()  # the real integrity path ran
+    assert runner.sam_steps() == []
+    assert "scripts/deploy_email_lambda.py has uncommitted changes" in err
+    assert "(clean)" not in out
+
+
+# Acceptance 3
+def test_real_git_dirty_source_refuses_before_any_sam_call(repo, capsys):
+    handler = repo / SOURCE_IN_REPO / "src" / "handler.py"
+    handler.write_text(handler.read_text(encoding="utf-8") + "# edit\n", encoding="utf-8")
+    code, _, err, runner = _main_real(repo, capsys=capsys)
+    assert code == 2
+    assert runner.sam_steps() == []
+    assert "has uncommitted changes" in err
+
+
+# Acceptance 5
+def test_real_git_gitignored_source_copy_refuses_before_any_sam_call(repo, capsys):
+    copy = repo / ".aws-sam" / "old" / SOURCE_IN_REPO
+    shutil.copytree(repo / SOURCE_IN_REPO, copy)
+    code, _, err, runner = _main_real(repo, source=copy, capsys=capsys)
+    assert code == 2
+    assert runner.sam_steps() == []
+    assert "not tracked by git" in err
+
+
+# Acceptance 6 + 7 + 8
+def test_real_git_rollback_current_wrapper_with_prior_worktree_source(repo, sandbox):
+    prior = _git(repo, "rev-parse", "HEAD")
+    handler = repo / SOURCE_IN_REPO / "src" / "handler.py"
+    handler.write_text(handler.read_text(encoding="utf-8") + "# newer\n", encoding="utf-8")
+    wrapper = repo / WRAPPER_IN_REPO
+    wrapper.write_text(wrapper.read_text(encoding="utf-8") + "# newer\n", encoding="utf-8")
+    _git(repo, "commit", "-q", "-am", "newer")
+    current = _git(repo, "rev-parse", "HEAD")
+    worktree = sandbox / "fc-email-rollback"
+    _git(repo, "worktree", "add", "-q", "--detach", str(worktree), prior)
+
+    code, out, _, runner = _main_real(repo, source=worktree / SOURCE_IN_REPO)
+
+    assert current != prior
+    assert code == 0
+    assert runner.sam_steps() == ["validate", "build", "deploy"]
+    assert f"Wrapper revision: {current} (clean)" in out
+    assert f"Source revision : {prior} (clean)" in out
+    assert "wrapper and source revisions differ" in out
+    for argv in runner.calls:
+        assert "main" not in argv and "origin/main" not in argv
+        if argv[0] == "git":
+            assert argv[5] in READ_ONLY_GIT
+    assert _git(repo, "rev-parse", "HEAD") == current  # nothing was selected
+
+
+def test_real_git_script_derives_its_own_path_and_refuses_when_edited(repo):
+    """End to end through Path(__file__): the copied script checks ITSELF."""
+    wrapper = repo / WRAPPER_IN_REPO
+    command = [sys.executable, str(wrapper), "--dry-run", *_argv(source=repo / SOURCE_IN_REPO)]
+    env = {**_git_env(), "RESEND_API_KEY": SENTINEL}
+    clean = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, cwd=repo)
+    assert clean.returncode == 0, clean.stderr
+    assert f"Wrapper revision: {_git(repo, 'rev-parse', 'HEAD')} (clean)" in clean.stdout
+
+    wrapper.write_text(wrapper.read_text(encoding="utf-8") + "# edit\n", encoding="utf-8")
+    dirty = subprocess.run(command, env=env, capture_output=True, text=True, timeout=60, cwd=repo)
+    assert dirty.returncode == 2
+    assert "REFUSED: scripts/deploy_email_lambda.py has uncommitted changes" in dirty.stderr
+    assert SENTINEL not in clean.stdout + clean.stderr + dirty.stdout + dirty.stderr
