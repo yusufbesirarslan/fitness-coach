@@ -26,6 +26,7 @@ import logging
 
 from app.config import (COGNITO_APP_CLIENT_ID, COGNITO_CLIENT_SECRET,
                         COGNITO_REGION, COGNITO_USER_POOL_ID)
+from app.i18n import AVAILABLE_LOCALES
 
 _logger = logging.getLogger(__name__)
 _client = None
@@ -116,22 +117,44 @@ def _maybe_secret(kwargs, username):
     return kwargs
 
 
-def sign_up(username, password, email, name):
+def _code_email_language(kwargs, language):
+    """Kod e-postasının dilini Cognito CustomEmailSender'a taşı (LP-14).
+
+    Yalnızca AVAILABLE_LOCALES'taki bir değer taşınır; dönüştürme YOK — dil,
+    çağıranın zaten doğruladığı hesap dilidir (User.language). Desteklenmeyen
+    ya da eksik dil hiçbir şey eklemez; Lambda kanonik varsayılana düşer.
+    ClientMetadata Lambda olayına `request.clientMetadata` olarak ulaşır
+    (SignUp ve ForgotPassword için; ResendCode için ULAŞMAZ)."""
+    if language in AVAILABLE_LOCALES:
+        kwargs["ClientMetadata"] = {"language": language}
+    return kwargs
+
+
+def sign_up(username, password, email, name, language=None):
     """Cognito'da yeni kullanıcı oluştur; e-postaya doğrulama kodu gönderilir.
 
     `name` Cognito 'name' attribute'una geçer — kullanıcı havuzu bunu ZORUNLU
     attribute yapmış olabilir; eksikse Cognito InvalidParameterException döner.
+
+    `language` (LP-14) hesabın doğrulanmış kayıt dilidir. Desteklenen bir dilse
+    hem SignUp ClientMetadata'sına hem standart `locale` attribute'una aynı
+    değer yazılır. `locale` uygulama için dil OTORİTESİ DEĞİLDİR (otorite
+    User.language); yalnızca ResendCode'un — ClientMetadata taşımayan — kod
+    e-postası kayıt dilini koruyabilsin diye tutulan bir aynadır.
     Döndürür: Cognito 'sub' (UserSub) — yerel hesabı buna bağlarız.
     """
-    kwargs = _maybe_secret({
+    attributes = [
+        {"Name": "email", "Value": email},
+        {"Name": "name", "Value": name},
+    ]
+    if language in AVAILABLE_LOCALES:
+        attributes.append({"Name": "locale", "Value": language})
+    kwargs = _maybe_secret(_code_email_language({
         "ClientId": COGNITO_APP_CLIENT_ID,
         "Username": username,
         "Password": password,
-        "UserAttributes": [
-            {"Name": "email", "Value": email},
-            {"Name": "name", "Value": name},
-        ],
-    }, username)
+        "UserAttributes": attributes,
+    }, language), username)
     try:
         resp = _get_client().sign_up(**kwargs)
     except Exception as e:
@@ -164,17 +187,20 @@ def resend_code(username):
         raise _wrap(e)
 
 
-def forgot_password(username):
+def forgot_password(username, language=None):
     """Şifre sıfırlama kodunu kullanıcının e-postasına gönder (ForgotPassword).
 
     Kodu Cognito üretir ve iletir (CustomEmailSender trigger'ı bağlıysa markalı
     e-posta Lambda→Resend üzerinden gider); uygulama kodu hiç görmez. Kullanıcı
     yoksa/doğrulanmamışsa Cognito hata döner — route katmanı bunları hesap
-    numaralandırmasına (enumeration) karşı JENERİK yanıtla yutar."""
-    kwargs = _maybe_secret({
+    numaralandırmasına (enumeration) karşı JENERİK yanıtla yutar.
+
+    `language` (LP-14): yerel sahibin GÜNCEL User.language'i; yalnızca sahip
+    çözüldüyse verilir ve ClientMetadata ile Lambda'ya taşınır."""
+    kwargs = _maybe_secret(_code_email_language({
         "ClientId": COGNITO_APP_CLIENT_ID,
         "Username": username,
-    }, username)
+    }, language), username)
     try:
         _get_client().forgot_password(**kwargs)
     except Exception as e:

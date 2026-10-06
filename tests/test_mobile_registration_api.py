@@ -42,7 +42,7 @@ def provider(monkeypatch):
     calls = {"sign_up": [], "confirm": [], "resend": []}
     failures = {}
 
-    def sign_up(username, password, email, name):
+    def sign_up(username, password, email, name, language=None):
         calls["sign_up"].append(
             {"username": username, "email": email, "name": name})
         if "sign_up" in failures:
@@ -254,7 +254,7 @@ def test_register_provider_failures_are_typed_and_sanitized(
 
 def test_register_local_commit_race_is_identity_unavailable(
         raw_client, provider, monkeypatch):
-    def racing(username, password, email, name):
+    def racing(username, password, email, name, language=None):
         db.session.add(User(username="racer", email=email, password_hash="x"))
         db.session.commit()
         return f"sub-{username}"
@@ -453,7 +453,7 @@ def test_register_taken_username_and_taken_email_are_indistinguishable(
                             email="orphan@example.com")
     del provider["failures"]["sign_up"]
 
-    def racing(username, password, email, name):
+    def racing(username, password, email, name, language=None):
         db.session.add(User(username="racer", email=email, password_hash="x"))
         db.session.commit()
         return f"sub-{username}"

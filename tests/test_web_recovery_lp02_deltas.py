@@ -37,7 +37,7 @@ def provider(monkeypatch):
     calls = {"forgot": [], "confirm": []}
     failures = {}
 
-    def forgot_password(username):
+    def forgot_password(username, language=None):
         calls["forgot"].append(username)
 
     def confirm_forgot_password(username, code, new_password):

@@ -502,7 +502,7 @@ def test_login_and_reset_limits_pin_client_ip(app):
 def test_forgot_password_stays_ip_keyed_even_when_a_session_exists(
         app, make_user, monkeypatch, enabled_limiter):
     _install_web_login(monkeypatch)
-    monkeypatch.setattr(cognito_service, "forgot_password", lambda identifier: None)
+    monkeypatch.setattr(cognito_service, "forgot_password", lambda identifier, language=None: None)
     make_user("alice")
     make_user("bob")
     alice = app.test_client()

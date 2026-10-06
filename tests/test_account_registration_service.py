@@ -49,7 +49,7 @@ def test_register_creates_pending_local_profile(app, provider):
         referral_code=" REF1 ")
     assert account == RegisteredAccount(username="svcuser", referred=False)
     assert provider["calls"] == [
-        ("sign_up", ("svcuser", "Sifre123", "svc@example.com", "svcuser"))]
+        ("sign_up", ("svcuser", "Sifre123", "svc@example.com", "svcuser", "en"))]
     user = User.query.filter_by(username="svcuser").one()
     assert (user.email, user.cognito_sub, user.language, user.full_name) == (
         "svc@example.com", "sub-svcuser", "en", "svcuser")
@@ -143,7 +143,7 @@ def test_provider_failures_are_classified(app, provider, operation, code,
 
 def test_register_commit_race_is_identity_unavailable_in_persistence(
         app, provider, monkeypatch):
-    def racing(username, password, email, name):
+    def racing(username, password, email, name, language=None):
         db.session.add(User(username="racer", email=email, password_hash="x"))
         db.session.commit()
         return "sub-x"
@@ -159,7 +159,7 @@ def test_register_releases_the_read_transaction_before_the_provider_call(
         app, provider, monkeypatch):
     observed = []
 
-    def sign_up(username, password, email, name):
+    def sign_up(username, password, email, name, language=None):
         observed.append(db.session().in_transaction())
         return "sub-x"
 

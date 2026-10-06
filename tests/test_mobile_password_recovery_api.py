@@ -51,7 +51,7 @@ def provider(monkeypatch):
     calls = {"forgot": [], "confirm": [], "revoke": []}
     failures = {}
 
-    def forgot_password(username):
+    def forgot_password(username, language=None):
         calls["forgot"].append(username)
         if "forgot" in failures:
             raise failures["forgot"]
@@ -248,7 +248,7 @@ FORGOT_STATES = {
 
 def test_forgot_every_account_state_answers_identically(
         raw_client, provider, population, monkeypatch):
-    def forgot_password(username):
+    def forgot_password(username, language=None):
         provider["calls"]["forgot"].append(username)
         for identifier, failure in FORGOT_STATES.items():
             if failure and username in (identifier, identifier.split("@")[0]):
@@ -699,9 +699,9 @@ def test_provider_call_holds_exactly_one_slot_and_releases_it(
     observed = []
     original = getattr(cognito_service, attribute)
 
-    def observing(*args):
+    def observing(*args, **kwargs):
         observed.append(semaphore._value)
-        return original(*args)
+        return original(*args, **kwargs)
 
     monkeypatch.setattr(cognito_service, attribute, observing)
     if failure:

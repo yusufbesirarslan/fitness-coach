@@ -85,6 +85,53 @@ kopya landing sprint'inin (Resend 2) görünümüyle birebirdir.
      sınırlıdır; kapasite reddi veya sağlayıcı hatası sıfırlamayı DÜŞÜRMEZ
      (oturumları bitiren adım yereldir).
 
+## Kod e-postalarının dili (LP-14)
+
+Dil otoritesi **`User.language`**'dir (`tr` | `en`). Kod e-postalarını yalnızca
+Lambda render ettiği için dil olaya iki taşıyıcıyla ulaşır:
+
+| Akış | Backend gönderir | Lambda'nın gördüğü |
+|---|---|---|
+| SignUp | doğrulanmış kayıt dili → `ClientMetadata={"language": x}` **ve** standart `locale` attribute'u `= x` (aynı değer, `User.language` ile birebir) | `clientMetadata.language` + `userAttributes.locale` |
+| ResendCode | hiçbir şey (API sözleşmesi değişmedi) | yalnızca `userAttributes.locale` — Cognito ResendCode için ClientMetadata **iletmez** |
+| ForgotPassword | yerel sahibin GÜNCEL `User.language`'i → `ClientMetadata` (tek `_resolve` sorgusundan; sahip yoksa/belirsizse HİÇBİR şey) | `clientMetadata.language` (+ varsa `locale`) |
+| VerifyUserAttribute / UpdateUserAttribute | — (backend akışı yok) | varsa `locale` |
+
+Lambda'da TEK çözücü (`handler._resolve_language`): izinli
+`clientMetadata.language` → izinli `userAttributes.locale` → `tr`. İzin listesi
+`email_templates.SUPPORTED_LANGUAGES`; eşleşme BİREBİRdir (katlama/kırpma/
+`tr-TR` ayrıştırma yok). Public app client'ta ClientMetadata kimliklendirilmez,
+bu yüzden değer yalnızca iki dilden birini SEÇER — şablona, başlığa veya yola
+asla girmez. Lambda olay-yereldir: DB/VPC/HTTP araması yok. Log satırı yalnızca
+izinli dili ve kaynağını taşır (`lang=en lang_source=locale`).
+
+- **`locale` bir dil otoritesi DEĞİLDİR.** Yalnızca ResendCode'un kayıt dilini
+  koruyabilmesi için yazılan bir aynadır; uygulama onu okumaz.
+- **Dil değişikliği:** `User.language` sonradan değişirse `locale`
+  senkronlanmaz. ForgotPassword güncel `User.language`'i ClientMetadata ile
+  taşıdığından (metadata `locale`'i ezer) doğru dilde gelir. ResendCode yalnızca
+  onaylanmamış hesapta anlamlıdır ve onaylanmamış hesap dil değiştiremez:
+  `User.language`'in kayıt dışındaki üç yazıcısı (`/set-language` girişliyken,
+  `_login_fresh`, `PUT /api/v1/account/language`) kimliği doğrulanmış oturum
+  ister ve Cognito onaylanmamış hesabın girişini reddeder. Dolayısıyla orada
+  kayıt dili kanoniktir (`tests/test_cognito_code_email_language.py` yazıcı
+  kümesini sabitler).
+- **Eski kullanıcılar:** bu değişiklikten önce kayıt olmuş hesaplarda `locale`
+  yoktur → ResendCode (ve metadata'sız her olay) `tr`'ye düşer. Backfill
+  yapılmaz; yeni kayıtlar `locale` taşır.
+- **Hesap numaralandırması:** ForgotPassword'ün herkese açık yanıtı dil/varlık
+  açısından değişmedi; bilinmeyen hesap için dil uydurulmaz.
+- **Ön koşul (AWS, 2026-10-06 salt-okunur doğrulandı):** staging
+  (`eu-central-1_KH1YUFTCK`) ve prod (`eu-central-1_kaX0SORRK`) havuzlarında
+  standart `locale` şemada (String, Mutable) ve backend web client'larının
+  `WriteAttributes`/`ReadAttributes` değeri ayarsız (= tüm standart
+  attribute'lar yazılabilir). Bir client'a `WriteAttributes` listesi eklenirse
+  `locale` DAHİL edilmeli, yoksa SignUp yetkisiz attribute yazımı nedeniyle
+  reddedilir (kayıt kırılır).
+- **Yayın sırası serbesttir:** Lambda'dan önce backend çıkarsa eski Lambda
+  metadata/locale'i yok sayar (TR); backend'den önce Lambda çıkarsa sinyal
+  yoktur (TR). Lambda kodu elle `sam build && sam deploy` ile güncellenir.
+
 ## Hata sözleşmesi — auth ASLA e-posta yüzünden düşmez
 
 - Flask tarafı: `_send_welcome_email` / `_send_password_changed_email` tüm
@@ -124,7 +171,8 @@ ve **SNS onay e-postası tıklanmalıdır**, yoksa abonelik aktifleşmez.
 ## Loglama / PII politikası
 
 - Loglanır: e-posta türü + trigger, MASKELİ alıcı (`y***@example.com`,
-  `email_service.mask_email`), Resend mesaj id'si.
+  `email_service.mask_email`), Resend mesaj id'si; Lambda'da ayrıca İZİNLİ dil
+  ve kaynağı (`lang=`/`lang_source=`) — ham ClientMetadata/attribute ASLA.
 - ASLA loglanmaz: doğrulama/sıfırlama kodları (kodlar yalnızca e-posta
   GÖVDESİNDE — konu satırları loglandığı için konuya da yazılmaz), API
   anahtarları (`_sanitize`), token'lar, şifreler, ham alıcı adresi.
@@ -189,6 +237,7 @@ tüm kod e-postaları markalı olur.
 | `tests/test_password_reset.py` | route'lar: jenerik yanıt, throttle, bildirim maili, e-posta hatası bloklamaz |
 | `tests/test_auth.py` | hoş geldin maili: başarıda gider, hatada verify'ı düşürmez |
 | `tests/test_cognito_email_sender.py` | Lambda: trigger→şablon, asla-yükseltme, log hijyeni |
+| `tests/test_cognito_code_email_language.py` | LP-14 kod e-postası dili: SignUp metadata+locale, ResendCode locale, ForgotPassword sahip dili, çözücü önceliği, enjeksiyon, sorgu sayısı, numaralandırma |
 
 Hepsi hermetiktir: AWS/ağ yok, `aws-encryption-sdk` import edilmez
 (`handler._decrypt_code` lazy + monkeypatch), Resend HTTP'si sahtelenir.

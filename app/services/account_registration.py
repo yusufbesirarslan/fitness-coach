@@ -208,9 +208,13 @@ def register_account(username, email, password, language=None,
         raise RegistrationFailure(
             Outcome.IDENTITY_UNAVAILABLE, Phase.VALIDATION)
 
+    # The SAME validated value becomes User.language below and the provider's
+    # code-email language (SignUp ClientMetadata + the `locale` mirror that
+    # ResendCode relies on, LP-14). No second normalization.
     sub = _call_provider(
         "register", _SIGN_UP_OUTCOMES, cognito_service.sign_up,
-        username=username, password=password, email=email, name=username)
+        username=username, password=password, email=email, name=username,
+        language=language)
 
     # The local row makes the profile/referral data exist immediately. Its
     # password is unusable: sign-in goes through the provider only.

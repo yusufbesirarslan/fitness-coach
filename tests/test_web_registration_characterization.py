@@ -38,7 +38,7 @@ def provider(monkeypatch):
     calls = {"sign_up": [], "confirm": [], "resend": []}
     failures = {}
 
-    def sign_up(username, password, email, name):
+    def sign_up(username, password, email, name, language=None):
         calls["sign_up"].append(
             {"username": username, "email": email, "name": name})
         if "sign_up" in failures:
@@ -217,7 +217,7 @@ def test_register_provider_rejection_surfaces_mapped_message(
 
 
 def test_register_local_commit_race_is_409(client, provider, monkeypatch):
-    def racing(username, password, email, name):
+    def racing(username, password, email, name, language=None):
         db.session.add(User(username="racer", email=email, password_hash="x"))
         db.session.commit()
         return f"sub-{username}"
@@ -233,7 +233,7 @@ def test_register_local_commit_failure_is_503(client, provider, monkeypatch):
     real_commit = db.session.commit
     state = {"armed": False}
 
-    def sign_up(username, password, email, name):
+    def sign_up(username, password, email, name, language=None):
         state["armed"] = True
         return f"sub-{username}"
 
