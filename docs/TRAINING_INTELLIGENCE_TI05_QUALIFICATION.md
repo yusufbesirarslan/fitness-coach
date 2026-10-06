@@ -1,6 +1,6 @@
 # TI-05 — Training Intelligence qualification and release readiness
 
-Date: 2026-10-06. TI-05B current verdict: **QUALIFICATION BLOCKED**. Release recommendation: **HOLD P1**.
+Date: 2026-10-06. TI-05B current verdict: **REPAIR REQUIRED**. Release recommendation: **HOLD P1**.
 
 The original TI-05 finding and evidence below are preserved as history. The appended
 TI-05B record supersedes its privacy verdict; native release gates remain pending.
@@ -409,7 +409,7 @@ gate fails or substitute baseline CI for candidate exact-head required checks.
 
 ## TI-05B — post-repair qualification (2026-10-06)
 
-Current system verdict: **QUALIFICATION BLOCKED**. Recommendation: **HOLD P1**.
+Current system verdict: **REPAIR REQUIRED**. Recommendation: **HOLD P1**.
 No production rollout, AWS operation, deployment, live database mutation, or
 qualification-PR merge was performed. Missing authenticated simulator and physical
 release-candidate flows remain required gates, not accepted product limitations.
@@ -603,3 +603,37 @@ argument unused by TI fixtures. Candidate stays on repaired integrated main
 `0e560f93142434265be5814b345bceedd2654555`; no unrelated reintegration.
 Final PR diffs use merge-base comparison and contain **no production code changes**.
 The native gate still prevents P1 activation irrespective of CI results.
+
+
+### TI05B-RC-01 — new release-tooling blocker; qualification stopped
+
+**REPAIR REQUIRED; HOLD P1.** Privacy blocker TI05-PRIVACY-01 remains CLOSED.
+The canonical mobile release builder (`tool/build_ios_release.dart`, documented
+as the sole live unsigned/IPA release path) does not forward the compile-time
+`AXISAI_TRAINING_INSIGHTS_ENABLED` switch. A runtime `IosReleasePlan.parse` probe
+supplied the switch as `true`; the returned defines contained only native auth
+and API URL, never the insight switch. Raw Dart-define pass-through is rejected.
+The mobile insight switch defaults false, so the supported release builder cannot
+produce a P1-enabled release candidate. Direct simulator debug compile success
+above does not close this release entry-point defect.
+
+Reproduction and portable qualification-only runner live in mobile #57:
+`tool/qualification/ti05b_release_switch_probe.dart`. It deliberately fails with
+StateError after reporting requested ON / forwarded false. No network or production
+operation is used. No XFAIL, workaround, or production edit is added.
+
+Isolate a **new bounded TI-08 release-build-switch repair**: validate and forward
+this one explicit switch (default OFF) through unsigned and IPA builds, preserve
+native auth and redaction, test ON/OFF/invalid values. Do not introduce arbitrary
+Dart-define pass-through, feature changes, deployment, signing, or rollout.
+Resume exact-head automated qualification and native RC gates only after repair.
+
+At discovery, mobile frozen head `1a6ef0094395a7c5c78af4a45c5cb978b5e1d9ff` had all
+three required CI jobs SUCCESS (run 37474145329; full suite 3,500 passed).
+Backend frozen head `4919aa56049cd9c11b7b8557ef810d924cde6dbf` still had pytest
+IN_PROGRESS, with PostgreSQL/schema/locks/image jobs SUCCESS (run 37474147978).
+The blocker evidence commits are new qualification heads and need their own CI;
+previous-head CI must not be substituted. Automated qualification is not complete.
+Stop disposition is a newly discovered production release-tooling defect, rather
+than merely missing device evidence. Authenticated simulator and physical iPhone
+flows also remain pending. No P1 activation is approved; no PR is merged.
