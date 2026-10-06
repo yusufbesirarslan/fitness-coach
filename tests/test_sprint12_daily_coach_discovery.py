@@ -151,6 +151,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/progress/summary",
         "/api/v1/today",
         "/api/v1/training/preferences",
+        # TI-01B owner × catalog notes; no Daily-Coach/diagnostic semantics.
+        "/api/v1/training/exercises/<exercise_id>/note",
         "/api/v1/training/plans",
         "/api/v1/training/plans/current",
         "/api/v1/training/workouts/<workout_reference>",
@@ -203,6 +205,8 @@ _APPROVED_NUTRITION_PLAN_PATHS = {
 
 _APPROVED_TRAINING_PATHS = {
     "/api/v1/training/preferences",
+    # TI-01B owner × catalog notes; no Daily-Coach/diagnostic semantics.
+    "/api/v1/training/exercises/<exercise_id>/note",
     # Mobile Training PR4A publishes exactly ONE native write: the idempotent
     # generate-and-persist command for a user's FIRST plan. It creates only
     # through canonical Training authority, never replaces an existing plan,

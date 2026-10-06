@@ -99,7 +99,7 @@ def test_the_repository_still_has_exactly_one_alembic_head():
     # The single head moves with every added revision. F7 chains its Coach
     # history index onto F1's credential-epoch revision, so the graph remains
     # single-headed and this pin names the new tip.
-    assert [r for r in revisions if r not in parents] == ["e1f2a3b4c5d6"]
+    assert [r for r in revisions if r not in parents] == ["e2f3a4b5c6d7"]
 
 
 def test_the_migration_descends_from_the_merged_comparison_head():

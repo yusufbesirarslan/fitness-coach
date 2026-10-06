@@ -128,6 +128,26 @@ class User(UserMixin, db.Model):
         return f"<User {self.username}>"
 
 
+class ExerciseNote(db.Model):
+    """Durable private catalog note; cleared rows retain their revision."""
+    __tablename__ = "exercise_note"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "exercise_id", name="uq_exercise_note_owner_exercise"),
+        db.CheckConstraint("revision >= 0 AND revision <= 999999999", name="ck_exercise_note_revision"),
+        db.CheckConstraint("text IS NULL OR length(text) <= 500", name="ck_exercise_note_text_length"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey(
+        "user.id", ondelete="CASCADE", name="fk_exercise_note_user"), nullable=False)
+    # Catalog is a reviewed JSON asset, not a SQL table (TI-00 §9).
+    exercise_id = db.Column(db.String(120), nullable=False)
+    text = db.Column(db.String(500), nullable=True)
+    revision = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user = db.relationship("User", backref=db.backref("exercise_notes", passive_deletes=True))
+
+
 class UserSession(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     # Her coach/tracking isteğinde user_id'ye göre filtreleniyor → index zorunlu

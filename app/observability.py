@@ -12,9 +12,30 @@ import os
 import time
 import uuid
 
-from flask import current_app, g, request
+from flask import current_app, g, request, has_request_context
 from flask_login import current_user
 from sqlalchemy import inspect as sa_inspect
+
+
+def _private_note_request():
+    return (has_request_context()
+            and request.path.startswith("/api/v1/training/exercises/")
+            and request.path.endswith("/note"))
+
+
+def _note_safe_event(event, hint):
+    # Sentry may capture JSON bodies or stack locals even with default PII off.
+    # Drop note-request events/traces rather than transmitting private prose.
+    from urllib.parse import urlsplit
+    path = urlsplit(event.get("request", {}).get("url", "")).path
+    if (_private_note_request()
+            or (path.startswith("/api/v1/training/exercises/") and path.endswith("/note"))):
+        return None
+    return event
+
+
+def _note_safe_breadcrumb(crumb, hint):
+    return None if _private_note_request() else crumb
 
 
 def init_sentry(app):
@@ -38,6 +59,9 @@ def init_sentry(app):
         # Performans izini varsayılan KAPALI (maliyet); env ile açılır.
         traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0") or 0),
         send_default_pii=False,  # gizlilik: kullanıcı PII'sini Sentry'ye yollama
+        before_send=_note_safe_event,
+        before_send_transaction=_note_safe_event,
+        before_breadcrumb=_note_safe_breadcrumb,
     )
     app.logger.info("[SENTRY] hata izleme etkin (environment=%s).",
                     os.getenv("SENTRY_ENVIRONMENT", "production"))
