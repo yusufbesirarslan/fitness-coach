@@ -105,7 +105,8 @@ def counts(monkeypatch):
         calls["s3"] += 1
         return b"private-image-bytes"
 
-    def analyze(baseline, current, context, source_quality_cap, provider=None):
+    def analyze(baseline, current, context, source_quality_cap, provider=None, *,
+                language="tr"):
         assert db.session().in_transaction() is False
         calls["bedrock"] += 1
         return "comparable", _analysis()
@@ -353,7 +354,7 @@ def test_limited_source_cap_reaches_the_provider(
     seen = {}
 
     def analyze(baseline_image, current_image, context, source_quality_cap,
-                provider=None):
+                provider=None, *, language="tr"):
         seen["cap"] = source_quality_cap
         seen["context"] = context
         return "limited", _analysis()
@@ -371,7 +372,7 @@ def test_provider_receives_only_normalized_images_not_stored_narratives(
     seen = {}
 
     def analyze(baseline_image, current_image, context, source_quality_cap,
-                provider=None):
+                provider=None, *, language="tr"):
         seen["baseline"] = baseline_image
         seen["current"] = current_image
         seen["context"] = context
