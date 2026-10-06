@@ -6,8 +6,9 @@ resolve_s3 = true
 s3_prefix = "axisai-cognito-email-sender"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-# ResendApiKey BILEREK burada yok (NoEcho gizli deger, git'e girmez):
-#   sam deploy --parameter-overrides ResendApiKey=<key>
+# ResendApiKey BILEREK burada yok (NoEcho gizli deger, git'e girmez).
+# Ham `sam deploy` KULLANMA: kanonik yol scripts/deploy_email_lambda.py
+# (bu dosyanin degerlerini birebir dogrular; kayarsa deploy'u reddeder).
 image_repositories = []
 
 [default.global.parameters]

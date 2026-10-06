@@ -64,9 +64,8 @@ def evaluate(config, entries):
                 f"Paket '{package}/' VENDOR EDİLMEMİŞ — handler._decrypt_code import'ta "
                 "ModuleNotFoundError ile düşer, istisna YUTULUR ve auth e-postaları "
                 "SESSİZCE hiç gitmez (2026-07-13 arızası). Neden: `sam build` "
-                "çalıştırılmadan `sam deploy` yapıldı. Düzeltme: "
-                "cd infra/cognito-email-sender && sam build && sam deploy "
-                "--parameter-overrides ResendApiKey=<key>")
+                "çalıştırılmadan `sam deploy` yapıldı. Düzeltme: korumalı "
+                "scripts/deploy_email_lambda.py ile yeniden deploy et")
 
     for module in REQUIRED_MODULES:
         if module not in entries:
@@ -88,8 +87,9 @@ def evaluate(config, entries):
     if not (env.get("RESEND_API_KEY") or "").strip():
         problems.append(
             "RESEND_API_KEY BOŞ — email_sender 'servis kapalı' moduna düşer ve auth "
-            "e-postaları SESSİZCE hiç gitmez. Neden: `sam deploy` --parameter-overrides "
-            "ResendApiKey=<key> olmadan çalıştırıldı (default '')")
+            "e-postaları SESSİZCE hiç gitmez. Neden: `sam deploy` ResendApiKey "
+            "olmadan çalıştırıldı (default ''). Düzeltme: korumalı "
+            "scripts/deploy_email_lambda.py ile yeniden deploy et")
 
     return problems
 

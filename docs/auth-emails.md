@@ -130,7 +130,8 @@ izinli dili ve kaynağını taşır (`lang=en lang_source=locale`).
   reddedilir (kayıt kırılır).
 - **Yayın sırası serbesttir:** Lambda'dan önce backend çıkarsa eski Lambda
   metadata/locale'i yok sayar (TR); backend'den önce Lambda çıkarsa sinyal
-  yoktur (TR). Lambda kodu elle `sam build && sam deploy` ile güncellenir.
+  yoktur (TR). Lambda kodu elle, YALNIZCA korumalı
+  `scripts/deploy_email_lambda.py` ile güncellenir (ham `sam deploy` değil).
 
 ## Hata sözleşmesi — auth ASLA e-posta yüzünden düşmez
 
@@ -165,7 +166,8 @@ Bu yüzden `infra/cognito-email-sender/template.yaml` şunları tanımlar:
 "başarılı" görünür ve DLQ'ya hiçbir şey düşmez. Yutulan istisna asıl arıza
 modudur; doğru enstrüman bu yüzden log metric filter'dır.
 
-Alarm e-postası `sam deploy --parameter-overrides AlarmEmail=<adres>` ile bağlanır
+Alarm e-postası `scripts/deploy_email_lambda.py --alarm-email <adres>` ile bağlanır
+(sarmalayıcı adressiz deploy'u reddeder — adressiz deploy aboneliği SİLER)
 ve **SNS onay e-postası tıklanmalıdır**, yoksa abonelik aktifleşmez.
 
 ## Loglama / PII politikası
@@ -190,7 +192,8 @@ ve **SNS onay e-postası tıklanmalıdır**, yoksa abonelik aktifleşmez.
 
 1. Flask tarafı mevcut yolla gider: `main`'e push → `deploy.yml` (EC2). EC2
    `.env`'inde `RESEND_API_KEY` dolu olmalı.
-2. Lambda + KMS: `infra/cognito-email-sender/` altında `sam build && sam deploy`.
+2. Lambda + KMS: `scripts/deploy_email_lambda.py` (validate → `sam build
+   --use-container` → onaylı changeset; runbook: `infra/cognito-email-sender/README.md` §1).
 3. Trigger'ı havuza bağlama **manueldir** (havuz IaC'de değil):
    `infra/cognito-email-sender/README.md` runbook'unu izle — özellikle
    `update-user-pool`'un belirtilmeyen alanları SIFIRLADIĞI uyarısını.
@@ -218,7 +221,9 @@ tüm kod e-postaları markalı olur.
 
 - [ ] `main` merge + EC2 deploy yeşil (`gh run watch`)
 - [ ] EC2 `.env`: `RESEND_API_KEY` dolu (hoş geldin/şifren-değişti için)
-- [ ] `sam deploy` — `axisai-cognito-email-sender` stack'i, gerçek `ResendApiKey` ile
+- [ ] `scripts/deploy_email_lambda.py` — `axisai-cognito-email-sender` stack'i, gerçek
+      `RESEND_API_KEY` + abone `--alarm-email` ile; changeset yalnızca
+      `Modify EmailSenderFunction`; ardından README §1 deploy-sonrası doğrulama
 - [ ] Runbook ile `update-user-pool` (describe → alanları koru → trigger ekle → diff doğrula)
 - [ ] App client'ta `PreventUserExistenceErrors=ENABLED` kontrolü
 - [ ] Smoke: kayıt → markalı kod maili → verify → hoş geldin → forgot →
