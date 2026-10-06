@@ -1,6 +1,9 @@
 # TI-05 — Training Intelligence qualification and release readiness
 
-Date: 2026-10-06. Verdict: **REPAIR REQUIRED**. Release recommendation: **HOLD P1**.
+Date: 2026-10-06. TI-05B current verdict: **QUALIFICATION BLOCKED**. Release recommendation: **HOLD P1**.
+
+The original TI-05 finding and evidence below are preserved as history. The appended
+TI-05B record supersedes its privacy verdict; native release gates remain pending.
 
 This record qualifies frozen production sources with local endpoint integration,
 real PostgreSQL, Flutter integration/widget tests, architecture guards, a
@@ -402,3 +405,175 @@ OFF, and re-run the failing gate. Finish native/device qualification afterward.
 Qualification PRs may be reviewed now; any new production repair belongs in a
 bounded TI-06/TI-07 lane. Do not label automated qualification complete while this
 gate fails or substitute baseline CI for candidate exact-head required checks.
+
+
+## TI-05B — post-repair qualification (2026-10-06)
+
+Current system verdict: **QUALIFICATION BLOCKED**. Recommendation: **HOLD P1**.
+No production rollout, AWS operation, deployment, live database mutation, or
+qualification-PR merge was performed. Missing authenticated simulator and physical
+release-candidate flows remain required gates, not accepted product limitations.
+
+### Baselines and reconciliation
+
+| Baseline | Exact SHA |
+| --- | --- |
+| Backend main at discovery / TI-07 merge #403 | `0e560f93142434265be5814b345bceedd2654555` |
+| Mobile main at discovery | `ed4fcb09988c486c4de724e4cf6bb4481911d94e` |
+| TI-06 merge #402 | `b21f0309218479ccb51fd937478ff0e98a42e971` |
+| Original backend #400 qualification head | `a1ac2f8bc6e78732404b172557393cc06b2ef253` |
+| Original mobile #57 qualification head | `2f9f048b053c394c46c6feb48a214d947a27e409` |
+
+The primary checkouts were clean but on unrelated feature branches, not main.
+Remote main was fetched before qualification. Existing qualification worktrees
+were clean and matched their open PR heads. Backend merged main to consume both
+privacy repairs. Mobile merged main because #56/#58 touch workout draft weight
+parsing/serialization, active completion surface, localization, router and app
+composition. This is a correctness dependency, not a rebase for unrelated motion.
+No production files were edited by qualification. PR diffs against the integrated
+main baselines contain only qualification docs, fixtures, tests, and runners.
+Final candidate SHA authority is the exact PR head/check rollup (a document cannot
+embed its own final commit SHA). Freeze the pushed heads; do not move them for
+unrelated main changes.
+
+### Repair closure and integrated privacy
+
+**TI05-PRIVACY-01: CLOSED.** TI-06 and TI-07 are merged and consumed.
+The former strict XFAIL in `tests/qualification/test_ti05_privacy_gate.py` was
+removed. Its ordinary runtime test now uses numeric owner `1987654399`, a
+synthetic username/email/Cognito subject, and a real start → V2 checkpoint →
+completion followed by a deliberately failing native Today workout-state read.
+The exception message contains all four identities. All three log families must
+be observed; every message, original logger argument, and captured record attribute
+is checked for each actual identity value and the public session reference.
+Exact full-message shapes reject replacement correlation fields, hashes, raw
+values, payloads, and unbounded detail. Request `rid` is the sole correlation.
+State detail is exactly `SyntheticOwnerReadError` in this integrated case; TI-07's
+all-category runtime proof retains exception class or `-` for all categories.
+
+Integrated workout privacy gate: **PASS**.
+
+- WORKOUT_SESSION owner identity logged: **NO**.
+- WORKOUT_COMPLETION owner identity logged: **NO**.
+- WORKOUT_STATE owner identity logged: **NO**.
+- Strict privacy XFAIL remaining: **NO**.
+- Privacy qualification passes normally: **YES**.
+
+Privacy gate plus TI-06/TI-07 runtime/source guards: **11 passed, 0 skipped,
+0 failed**, 13.07s; **0 unexpected external network attempts**.
+The broader guarded suite includes the same final gate.
+
+### Final privacy non-vacuity
+
+`tests/qualification/run_ti05b_privacy_mutations.py` operates only on a disposable
+copy without `.git`. Six sequential mutations all caused an assertion failure
+in the final integrated runtime gate: user_id in each of SESSION, COMPLETION,
+STATE; relabelled `owner=`; unlabelled raw numeric identity; and `str(exc)` in place
+of exception class. Each produced **1 failed**; no compile/loading error counted.
+All mutated files were restored byte-for-byte in `finally` and their SHA-256
+values checked. Summary: `docs/evidence/ti05b/privacy-mutations.json`. No production
+mutation remains in either qualification worktree. The existing ten contract,
+completion, authority, lifecycle and copy mutations are also repeated for TI-05B.
+
+### Contract, rollout, execution, and safety
+
+The full contract table above remains the contract audit; both manifest and golden
+payload are byte-identical across repos after integration. Backend constant checks
+and actual strict mobile DTO checks are rerun. Every row remains MATCH, including
+contract 1 / ti_rules_v1, closed states/kinds/missing codes, metrics/units, categorical
+4_plus, tempo/action/observe tokens, numeric maxima, payload/execution/history bounds.
+The frozen endpoint remains GET /api/v1/training/workout-sessions/<session_reference>/training-insight.
+Mobile owns no history query or timezone recomputation.
+
+All four P0/P1 cases and the local switch are requalified by existing actual
+readiness/composition/completion gates: OFF/OFF uses V1 with no insight; ON/OFF
+persists V2 context with no insight; ON/ON enables the optional read; OFF/ON fails
+closed. Backend P1 ON with mobile local switch OFF produces no repository/read/card.
+
+Canonical sequence: dirty checkpoint drained → checkpoint acknowledged → canonical
+completion accepted → completed screen usable → optional insight GET. Insight is
+absent from the terminal barrier. Success, network error, 503, malformed success,
+unsupported contract/ruleset and forever-pending reads leave canonical completion
+successful. **Insight can block completion: NO. Insight failure rolls back
+completion: NO.** Account switch/logout, capability OFF mid-read/loaded,
+covered/retained routes, active/completed background/foreground and process recovery
+retain existing fences. P0 recovers server-first; insight remains non-durable.
+
+V1 start/set/checkpoint/resume/completion and V2 actual RIR/tempo/completion-gap
+serialization/persistence pass. Null is not zero; 4_plus is categorical; explicit
+clear stays cleared. Available, insufficient_data, not_comparable, transport failure,
+malformed success and unsupported contract/ruleset remain typed safe states.
+
+Completion_gap presented as physiological rest: **NO**. short_rest_confound from
+completion_gap: **NO**. Fatigue/recovery/injury inferred: **NO**. e1RM: **NO**.
+Logging interval retains “Between-set logging interval”; the Rest-time mutation
+must fail. Flutter diagnostics/primary selection/recommendation creation: **NO**.
+TrainingPlan mutation, Notes/Pump Check consumption, LLM/provider dependency,
+raw history fetched by mobile: **NO**. Determinism and read-only session/revision/
+plan/note/persisted-insight boundaries are requalified. Metrics retain only bounded
+Event dimensions; no personal/session/exercise/payload dimensions were added.
+
+### Backend validation and real PostgreSQL
+
+Final guarded focused run: **752 passed, 0 skipped, 0 failed**, 87.93s.
+Includes TI-00, TI-01A migrations/context, TI-01B boundary/migrations, TI-03 API/
+facts/diagnostics/architecture, WorkoutSession/Completion/State/session-state,
+mobile APIs/architecture, feature flags/readiness, TI-06, TI-07 and TI-05 gates.
+Command retains `-p tests.qualification.ti05_network_guard`.
+
+Disposable PostgreSQL 16, loopback port 55405, database `ti05b_qualification`:
+**43 passed, 0 skipped, 0 failed**, 20.85s. Includes TI-01A/TI-01B/TI-03,
+mobile/session/completion/concurrency reliability PG suites.
+`test_full_projection_on_postgres_is_exact_isolated_and_two_statements` asserts
+exactly **SELECT, SELECT** (target lookup + bounded history), no writes/N+1.
+56-day horizon, ≤8 sessions/exercise, ≤64 queried rows, ≤32 exercises, ≤20 sets
+and incomplete_coverage behavior remain pinned. Istanbul midnight, Monday/Sunday
+and cross-date evidence remain in the rerun facts/API/PG suites.
+Unexpected TI external calls: **NONE** in both runs. Separate non-TI Cognito
+isolation remains outside this claim. Guard self-check intentionally blocks three
+reserved-target probes and must force exit 1 despite three passed assertions.
+
+### Exact-head CI authority
+
+The old green PR heads are historical, not final repaired-candidate authority.
+After the final qualification-only commit is pushed, accept backend #400 only
+when all five checks are SUCCESS on that exact head: pytest; PostgreSQL concurrency;
+schema-drift guard; authoritative Linux production locks; authoritative image
+revision immutability. Accept mobile #57 only when classify, ubuntu and macos are
+SUCCESS on its exact final head. A policy-classified macos no-op is not native
+simulator flow evidence. Exact SHAs and job results are also recorded in the TI-05B
+final response and PR descriptions. CI pending means automated qualification is
+not complete. Do not merge either PR automatically.
+
+### Native gates and release disposition
+
+Simulator discovered: **iPhone 18 Pro, iOS 27.0, booted**.
+Physical device discovered: **iPhone 13, iOS 26.6.1, Developer Mode enabled**.
+No account/device identifiers are retained here. Authenticated happy and controlled
+insight-failure flows are **NOT RUN** for both. Build/environment/P0/P1/local-switch
+state and physical interaction outcomes are not yet qualified. No existing native
+integration_test/drive harness exists. A controlled backend/test-account setup and
+human physical interactions were requested; no private credentials were requested.
+Widget integration and a simulator compile must never be labelled native RC flow.
+
+Missing required native evidence: login/Today/Plan/start/sets/optional RIR/tempo,
+background/foreground/resume, immediately usable completion, insight/name/evidence/
+action when supplied/Back, controlled failure preserving completion, no duplicate/
+stale card, long-name/large-text/disclosure/action layout and available semantics.
+These must be recorded against the exact build/commit and controlled flags before
+P1 approval. There is no newly discovered production defect in automated evidence.
+
+Rollback remains: FITX_TRAINING_INSIGHTS_ENABLED=false plus
+AXISAI_TRAINING_INSIGHTS_ENABLED=false in the mobile build; keep
+FITX_TRAINING_EXECUTION_CONTEXT_ENABLED=true if P0 is healthy. Emergency both
+server P0/P1 OFF and mobile insight switch OFF for V1 behavior. Do not delete rows,
+notes, checkpoints or destructively roll back schema. Refresh capability and verify
+late responses cannot revive cards.
+
+**HOLD P1** until both native gates pass. After all gates: deploy dark OFF/OFF;
+enable P0 while P1 OFF; observe capture/checkpoint/completion; then controlled
+P0+P1; expand only with observed stability. No percentages or activation are assumed.
+Accepted limitations remain only those in the original product-boundary section:
+no historical/Today/Progress re-entry, Coach handoff, physiological rest, e1RM,
+plan mutation, persistent insight cache; legacy context/prescription may be absent.
+Future feature work belongs in a new scoped lane.
