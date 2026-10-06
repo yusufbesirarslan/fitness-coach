@@ -64,6 +64,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/account/me"),
         ("get", "/api/v1/account/profile"),
         ("put", "/api/v1/account/profile"),
+        ("put", "/api/v1/account/language"),
         ("post", "/api/v1/coach/messages"),
         ("get", "/api/v1/coach/history"),
         ("delete", "/api/v1/account"),
@@ -151,6 +152,7 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         ("/api/v1/auth/password/forgot", ("POST",)),
         ("/api/v1/auth/password/reset", ("POST",)),
         ("/api/v1/account/me", ("GET",)),
+        ("/api/v1/account/language", ("PUT",)),
         # LP-03 native onboarding profile write, and its LP-12 read (the
         # prefill of that write; its own rule). Bearer-only, on this blueprint
         # so both share its gate, envelope, no-store and 429 handler.
