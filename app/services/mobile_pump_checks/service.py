@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 import s3_helper
 from app.extensions import db
+from app.i18n import DEFAULT_LOCALE
 from app.models import PumpCheck
 from app.services.mobile_pump_checks.analysis import (
     ANALYSIS_VERSION,
@@ -166,13 +167,16 @@ def _claim_row(user_id, key, command):
         return existing, False
 
 
-def create_or_replay(user_id, key, command):
+def create_or_replay(user_id, key, command, *, language=DEFAULT_LOCALE):
     """Return the canonical row and whether THIS call inserted it.
 
     Concurrent calls race twice — for the row and for the analysis lease — and
     the two winners are independent. Only `_claim_row` decides `created`; losing
     the lease means another caller finishes the analysis, never that this caller
     did not create the row.
+
+    Language controls new provider attempts only, never persisted-result replay
+    or the command fingerprint. Callers capture it before transaction resets.
     """
     row, created = _claim_row(user_id, key, command)
     row_id = row.id
@@ -209,6 +213,7 @@ def create_or_replay(user_id, key, command):
                 "environment": command.environment,
                 "description": command.description,
             },
+            language=language,
         )
         _finalize_success(row_id, user_id, attempt, analysis)
         return db.session.get(PumpCheck, row_id), created

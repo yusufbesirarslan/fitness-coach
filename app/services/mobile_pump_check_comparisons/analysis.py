@@ -2,9 +2,11 @@
 import json
 import re
 
+from app.i18n import DEFAULT_LOCALE
 from app.services.mobile_pump_checks.analysis import (
     InvalidAnalysis as _InvalidSingleImageAnalysis,
     _plain_text as _single_image_plain_text,
+    content_language_instruction,
 )
 
 ANALYSIS_VERSION = "pump-check-comparison-analysis/v1"
@@ -106,12 +108,12 @@ def parse_analysis(raw, source_quality_cap):
     }
 
 
-def build_prompt(context):
+def build_prompt(context, *, language=DEFAULT_LOCALE):
     safe_context = {"body_region": str(context.get("body_region", ""))[:50]}
     encoded_context = json.dumps(
         safe_context, ensure_ascii=True, sort_keys=True
     ).replace("<", r"\u003c").replace(">", r"\u003e")
-    return (
+    return content_language_instruction(language) + (
         "You are a fitness-coaching image comparison observer. Compare Image A "
         "(baseline) with Image B (current) using cautious observational language. "
         "Return one JSON object with exactly these keys: summary, "
@@ -133,7 +135,8 @@ def build_prompt(context):
 
 
 def analyze_images(
-        baseline, current, context, source_quality_cap, provider=None):
+        baseline, current, context, source_quality_cap, provider=None, *,
+        language=DEFAULT_LOCALE):
     if provider is None:
         from app.services.ai import _bedrock_compare_images
         provider = _bedrock_compare_images
@@ -142,6 +145,6 @@ def analyze_images(
     raw = provider(
         baseline_bytes, baseline_media_type,
         current_bytes, current_media_type,
-        build_prompt(context), max_tokens=1200,
+        build_prompt(context, language=language), max_tokens=1200,
     )
     return parse_analysis(raw, source_quality_cap)

@@ -9,6 +9,7 @@ from app.observability import current_request_id
 from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services import meal_idempotency
 from app.services.mobile_pump_checks import history, service
+from app.services.mobile_pump_checks.analysis import resolve_content_language
 from app.services.validators import validate_uploaded_pump_check_image
 
 
@@ -67,7 +68,9 @@ def create_pump_check():
             request.form.get("description"),
             request.form.get("captured_at"),
         )
-        row, created = service.create_or_replay(g.mobile_user.id, key, command)
+        row, created = service.create_or_replay(
+            g.mobile_user.id, key, command,
+            language=resolve_content_language(g.mobile_user.language))
         return _response(row, 201 if created else 200)
     except service.InvalidCommand:
         return mobile_error(
