@@ -16,13 +16,19 @@ Hoş geldin / şifre-değişti e-postaları bu Lambda'dan GEÇMEZ — onları Fl
 `app/services/email_service.py` üzerinden doğrudan gönderir (bkz.
 `docs/auth-emails.md`).
 
+**Dil (LP-14):** `handler._resolve_language` kod e-postasının dilini olaydan
+seçer — izinli `clientMetadata.language` → izinli `userAttributes.locale` →
+`tr`. Backend SignUp'ta ikisini de, ForgotPassword'de metadata'yı gönderir;
+ResendCode'da Cognito metadata iletmediği için kayıtta yazılan `locale`
+kullanılır. Ayrıntı: `docs/auth-emails.md` → "Kod e-postalarının dili".
+
 ## Dosyalar
 
 | Dosya | Ne |
 |---|---|
 | `template.yaml` | SAM stack: Lambda + KMS anahtarı/alias + Cognito invoke izni |
 | `samconfig.toml` | Deploy varsayılanları (eu-central-1). `ResendApiKey` BİLEREK yok |
-| `src/handler.py` | Trigger yönlendirme + KMS çözümü; ASLA exception yükseltmez |
+| `src/handler.py` | Trigger yönlendirme + KMS çözümü + dil çözücü; ASLA exception yükseltmez |
 | `src/email_sender.py` | urllib Resend göndericisi (özel User-Agent zorunlu — Cloudflare) |
 | `src/email_templates.py` | `app/services/email_templates.py`'nin **bayt-bayt kopyası** |
 | `src/requirements.txt` | `aws-encryption-sdk` (yalnızca Lambda paketi) |

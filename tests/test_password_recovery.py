@@ -31,7 +31,8 @@ def test_forgot_known_and_unknown_are_indistinguishable(client, monkeypatch):
     db.session.add(known)
     db.session.commit()
     calls = []
-    monkeypatch.setattr(cognito_service, "forgot_password", calls.append)
+    monkeypatch.setattr(cognito_service, "forgot_password",
+                        lambda username, language=None: calls.append(username))
 
     known_response = client.post(
         "/forgot-password", json={"identifier": " Alice@Example.com "})
@@ -46,7 +47,7 @@ def test_forgot_known_and_unknown_are_indistinguishable(client, monkeypatch):
 
 
 def test_forgot_provider_error_still_returns_generic_success(client, monkeypatch):
-    def fail(_identifier):
+    def fail(_identifier, language=None):
         raise CognitoServiceError("Kullanıcı bulunamadı", "UserNotFoundException")
 
     monkeypatch.setattr(cognito_service, "forgot_password", fail)

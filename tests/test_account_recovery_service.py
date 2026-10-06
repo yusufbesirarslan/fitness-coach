@@ -29,7 +29,7 @@ def provider(monkeypatch):
     calls = []
     failures = {}
 
-    def forgot_password(username):
+    def forgot_password(username, language=None):
         calls.append(("forgot", (username,)))
         if "forgot" in failures:
             raise failures["forgot"]

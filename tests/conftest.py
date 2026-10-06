@@ -213,7 +213,7 @@ def cognito_registration(monkeypatch):
     monkeypatch.setattr(
         cognito_service,
         "sign_up",
-        lambda username, password, email, name: f"sub-{username}",
+        lambda username, password, email, name, language=None: f"sub-{username}",
     )
     monkeypatch.setattr(
         cognito_service, "confirm_sign_up", lambda username, code: None)

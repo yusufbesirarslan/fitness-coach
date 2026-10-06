@@ -68,6 +68,33 @@ def _decrypt_code(b64_ciphertext):
     return plaintext.decode("utf-8")
 
 
+def _resolve_language(request, attrs):
+    """Kod e-postasının dili (LP-14) — TEK, olay-yerel, deterministik çözücü.
+
+    Öncelik: 1) `clientMetadata.language` 2) `userAttributes.locale`
+    3) `email_templates.DEFAULT_LANGUAGE` ("tr"). İlk ikisi yalnızca
+    `email_templates.SUPPORTED_LANGUAGES` içinde BİREBİR eşleşirse kabul edilir
+    — büyük/küçük harf katlama, kırpma, "tr-TR" ayrıştırma YOK. Public app
+    client'ta ClientMetadata kimliklendirilmez; bu yüzden değer yalnızca izin
+    listesinden bir dili SEÇEBİLİR, şablona/başlığa/yola asla girmez.
+
+    Taşıma: backend SignUp ve ForgotPassword'da ClientMetadata gönderir; Cognito
+    ResendCode için ClientMetadata İLETMEZ, o yüzden kayıtta yazılan `locale`
+    attribute'u (User.language'in aynası) kullanılır. `locale`'i olmayan eski
+    kullanıcılar varsayılana düşer. Veritabanı/HTTP araması YOK.
+
+    Döndürür: (dil, kaynak) — kaynak "metadata" | "locale" | "default"."""
+    metadata = request.get("clientMetadata")
+    candidates = (
+        ("metadata", metadata.get("language") if isinstance(metadata, dict) else None),
+        ("locale", attrs.get("locale")),
+    )
+    for source, value in candidates:
+        if isinstance(value, str) and value in email_templates.SUPPORTED_LANGUAGES:
+            return value, source
+    return email_templates.DEFAULT_LANGUAGE, "default"
+
+
 def _handle(event):
     trigger = event.get("triggerSource", "")
     template = TRIGGER_TEMPLATES.get(trigger)
@@ -89,14 +116,19 @@ def _handle(event):
     code = _decrypt_code(encrypted)
 
     name = (attrs.get("name") or event.get("userName") or "").strip()
+    language, language_source = _resolve_language(request, attrs)
     if template == "verification":
-        subject, html, text = email_templates.verification_code_email(name, code)
+        subject, html, text = email_templates.verification_code_email(
+            name, code, language=language)
     else:
-        subject, html, text = email_templates.reset_code_email(name, code)
+        subject, html, text = email_templates.reset_code_email(
+            name, code, language=language)
 
     message_id = email_sender.send_html_email(email, subject, html, text=text)
-    logger.info("[EMAIL-SENDER] trigger=%s to=%s id=%s",
-                trigger, email_sender.mask_email(email), message_id)
+    # `language` izin listesinden gelir (ham girdi DEĞİL) → loglanması güvenli.
+    logger.info("[EMAIL-SENDER] trigger=%s to=%s id=%s lang=%s lang_source=%s",
+                trigger, email_sender.mask_email(email), message_id,
+                language, language_source)
 
 
 def handler(event, context):

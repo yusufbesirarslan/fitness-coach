@@ -377,7 +377,7 @@ def test_stalled_registration_cannot_recreate_an_identity_deleted_meanwhile(
     sub = "sub-dana_lp11"
     seen = {}
 
-    def sign_up(username, password, email, name):
+    def sign_up(username, password, email, name, language=None):
         p.cognito.live.add(sub)
         issued = mobile_auth.login(username, PASSWORD)
         seen["created"] = User.query.filter_by(cognito_sub=sub).count()

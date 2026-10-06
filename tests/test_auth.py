@@ -233,7 +233,7 @@ def cognito_native(monkeypatch):
     monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
     captured = {"confirmed": set()}
 
-    def fake_sign_up(username, password, email, name):
+    def fake_sign_up(username, password, email, name, language=None):
         captured["sign_up"] = {"username": username, "email": email, "name": name}
         return f"sub-{username}"
 
@@ -463,7 +463,7 @@ def test_register_rate_limit_returns_429_json(client, cognito_native):
 # ---------------------------------------------------------------------------
 
 def test_cognito_register_idp_error_returns_400(client, cognito_native, monkeypatch):
-    def boom(username, password, email, name):
+    def boom(username, password, email, name, language=None):
         raise CognitoServiceError("Bu kullanıcı adı zaten kayıtlı.", "UsernameExistsException")
     monkeypatch.setattr(cognito_service, "sign_up", boom)
     response = _register(client, "dupuser")
@@ -480,7 +480,7 @@ def test_cognito_register_local_commit_failure_returns_clean_error(
     # temiz hata; Cognito orphan loglanır (#7).
     from app.extensions import db
 
-    def racing_sign_up(username, password, email, name):
+    def racing_sign_up(username, password, email, name, language=None):
         # Pre-check geçtikten sonra çağrılır: araya çakışan bir kayıt sıkıştır
         # (aynı e-posta) → bizim INSERT'imiz email unique kısıtını ihlal etsin.
         db.session.add(User(username="araya_giren", email=email, password_hash="x"))
@@ -556,7 +556,7 @@ def _make_orphan(client, monkeypatch, username="yarisan", email="orphan@example.
     """Gerçek orphan üret: sign_up başarılı, yerel commit UNIQUE ihlaliyle düşer."""
     from app.extensions import db
 
-    def racing_sign_up(username, password, email, name):
+    def racing_sign_up(username, password, email, name, language=None):
         db.session.add(User(username="araya_giren", email=email, password_hash="x"))
         db.session.commit()
         return f"sub-{username}"

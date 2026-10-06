@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from flask import current_app
 
 from app.extensions import db
+from app.i18n import AVAILABLE_LOCALES, DEFAULT_LOCALE
 from app.models import User
 from app.observability import current_request_id
 from app.services import (
@@ -163,10 +164,11 @@ def _resolve(identifier):
     """The provider username a submitted identifier names, and its local owner.
 
     Returns `(identity, owner)`. `owner` is the one local account the provider
-    identity belongs to (id, username, email), or None when there is none; it is
-    resolved by `cognito_identity.resolve_local_user` — username or e-mail,
-    compared case-insensitively, because the provider pool is — so the account
-    a reset revokes is the account the provider changed, whatever the casing.
+    identity belongs to (id, username, email, language), or None when there is
+    none; it is resolved by `cognito_identity.resolve_local_user` — username or
+    e-mail, compared case-insensitively, because the provider pool is — so the
+    account a reset revokes is the account the provider changed, whatever the
+    casing. `language` rides on the same statement (LP-14 code e-mails).
 
     `identity` is what the provider is asked about. A username is used as
     submitted (trimmed; the provider folds case itself). An e-mail is replaced
@@ -179,7 +181,7 @@ def _resolve(identifier):
     """
     try:
         owner = cognito_identity.resolve_local_user(
-            identifier, User.id, User.username, User.email)
+            identifier, User.id, User.username, User.email, User.language)
     finally:
         db.session.rollback()
     if "@" not in identifier:
@@ -187,7 +189,7 @@ def _resolve(identifier):
     return (owner.username if owner is not None else identifier.lower()), owner
 
 
-def _call_provider(event, operation, *args):
+def _call_provider(event, operation, *args, **kwargs):
     """Run one provider round-trip inside the shared blocking-capacity slot.
 
     Only the network call is inside the slot — no DB read or write happens
@@ -195,7 +197,7 @@ def _call_provider(event, operation, *args):
     """
     try:
         with blocking_concurrency_slot():
-            return operation(*args)
+            return operation(*args, **kwargs)
     except BlockingConcurrencyLimit as exc:
         _event(event, Outcome.CAPACITY_EXHAUSTED, "warning")
         raise RecoveryFailure(
@@ -214,8 +216,10 @@ def request_password_reset(identifier):
     identifier = _text(identifier)
     if not identifier:
         raise RecoveryFailure(Outcome.FIELDS_REQUIRED, Phase.VALIDATION)
+    language = None
     try:
-        identity, _ = _resolve(identifier)
+        identity, owner = _resolve(identifier)
+        language = _owner_language(owner)
     except cognito_identity.AmbiguousLocalIdentity:
         # Local data cannot say which account this is; the provider can still
         # send the code to the one user it knows. The confirm step refuses to
@@ -224,13 +228,29 @@ def request_password_reset(identifier):
         _event("request", "identity_ambiguous", "error")
         identity = identifier.lower() if "@" in identifier else identifier
     try:
-        _call_provider("request", cognito_service.forgot_password, identity)
+        _call_provider("request", cognito_service.forgot_password, identity,
+                       language=language)
     except cognito_service.CognitoServiceError as exc:
         _event("request", _REQUEST_LOG_OUTCOMES.get(
             exc.code, Outcome.PROVIDER_UNAVAILABLE))
     else:
         _event("request", "requested")
     return ResetRequested(identity=identity)
+
+
+def _owner_language(owner):
+    """The code-email language for a reset request (LP-14).
+
+    Only a resolved local owner has one: its CURRENT `User.language`, read by
+    the same single `_resolve` statement (no second query), with the app's one
+    rule for an unusable stored value (→ `DEFAULT_LOCALE`, as every other
+    account e-mail renders it). Without an owner — unknown, ambiguous or
+    provider-only identifier — nothing is synthesized: `None` sends no
+    ClientMetadata and the public answer is the same either way.
+    """
+    if owner is None:
+        return None
+    return owner.language if owner.language in AVAILABLE_LOCALES else DEFAULT_LOCALE
 
 
 def reset_password(identifier, code, new_password):

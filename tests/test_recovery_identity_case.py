@@ -58,7 +58,7 @@ def cognito(monkeypatch):
                 return sub
         raise CognitoServiceError("x", "UserNotFoundException")
 
-    def forgot_password(identifier):
+    def forgot_password(identifier, language=None):
         state["requested"].append((identifier, sub_for(identifier)))
 
     def confirm_forgot_password(identifier, code, new_password):
@@ -430,7 +430,7 @@ def test_registration_cannot_create_a_case_twin_of_a_provider_account(
     make_user("Alice", email="alice@example.com", cognito_sub="sub-alice")
     cognito["users"]["sub-alice"] = ("Alice", "alice@example.com")
 
-    def sign_up(username, password, email, name):
+    def sign_up(username, password, email, name, language=None):
         for existing, _ in cognito["users"].values():
             if existing.lower() == username.lower():
                 raise CognitoServiceError("x", "UsernameExistsException")

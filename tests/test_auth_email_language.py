@@ -10,7 +10,8 @@ Kapsam:
   - şablon sabitlerinin app.i18n ile eşitliği (Lambda kopyası app/* import edemez)
   - welcome / password-changed gönderimlerinin User.language'i kullanması
   - Lambda kopyasının iki dilde de aynı çıktıyı üretmesi
-  - Lambda'nın (dil sinyali yok) bugünkü varsayılan davranışı
+  - Lambda'nın dil sinyali OLMAYAN (locale'siz eski kullanıcı) olayda varsayılanı
+    (dil taşıma matrisi: tests/test_cognito_code_email_language.py)
 
     python -m pytest tests/test_auth_email_language.py -v
 """
@@ -216,7 +217,7 @@ def sent(monkeypatch):
 @pytest.fixture
 def registration_provider(monkeypatch):
     monkeypatch.setattr(cognito_service, "sign_up",
-                        lambda username, password, email, name: "sub-" + username)
+                        lambda username, password, email, name, language=None: "sub-" + username)
     monkeypatch.setattr(cognito_service, "confirm_sign_up",
                         lambda username, code: None)
 
@@ -321,8 +322,8 @@ def lambda_handler(monkeypatch):
 ])
 def test_lambda_without_a_language_signal_keeps_the_canonical_default(
         lambda_handler, trigger, kind):
-    """Cognito olayı bugün dil taşımıyor (SignUp yalnızca email+name yazar,
-    ClientMetadata gönderilmez). Lambda dil UYDURMAZ: kanonik varsayılanla
+    """Olayda ne ClientMetadata.language ne `locale` var (LP-14 öncesi kayıt
+    olmuş, locale'siz eski kullanıcı). Lambda dil UYDURMAZ: kanonik varsayılanla
     gönderir — LP-14 öncesiyle bayt-bayt aynı."""
     handler, posts = lambda_handler
     event = {"version": "1", "triggerSource": trigger, "userName": "ali",
