@@ -242,12 +242,16 @@ The legacy `completed` field is preserved verbatim for back-compat and equals
 
 Domain conditions return stable states/anomalies; an unexpected read failure
 fails **safe** to `needs_attention`/`blocked` (never a misleading rest/completed)
-and logs only safe operational metadata — `request_id`, `user_id`, anomaly
-category, exception class — via `[WORKOUT_STATE] anomaly …`. No stack traces,
+and logs only safe operational metadata via
+`[WORKOUT_STATE] anomaly rid=<request id> category=<category> detail=<exception class or ->`.
+No owner identity (TI-07): the request id is the only correlation, and
+`_log_anomaly` receives only `category` and `detail` — never `user_id` (no
+hash, token or other substitute either). No stack traces, exception messages,
 SQL, health data or workout payloads are logged or returned to the client.
 
 Anomaly categories: `schedule_unparseable`, `completion_marker_mismatch`,
-`resolution_error`.
+`resolution_error`, plus `session_lifecycle_inconsistent` and
+`session_read_error` when workout sessions are enabled.
 
 ### Why the one broad `except` is scoped, not "exception swallowing" (Finding 4)
 
