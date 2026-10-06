@@ -1,6 +1,6 @@
 # TI-05 — Training Intelligence qualification and release readiness
 
-Date: 2026-10-06. TI-05B current verdict: **REPAIR REQUIRED**. Release recommendation: **HOLD P1**.
+Date: 2026-10-06. TI-05B current verdict: **QUALIFICATION BLOCKED**. Release recommendation: **HOLD P1**.
 
 The original TI-05 finding and evidence below are preserved as history. The appended
 TI-05B record supersedes its privacy verdict; native release gates remain pending.
@@ -637,3 +637,226 @@ previous-head CI must not be substituted. Automated qualification is not complet
 Stop disposition is a newly discovered production release-tooling defect, rather
 than merely missing device evidence. Authenticated simulator and physical iPhone
 flows also remain pending. No P1 activation is approved; no PR is merged.
+
+
+## TI-05B resume — repaired release path requalification (2026-10-06)
+
+**Current verdict: QUALIFICATION BLOCKED. Recommendation: HOLD P1.**
+Both production blockers are CLOSED. Authenticated simulator and physical release
+candidate qualification remain unperformed. No installed RC or live native
+transport evidence exists. This environmental block does not reopen either defect.
+The original privacy failure, TI-06/TI-07 repair, TI05B-RC-01 discovery and TI-08
+repair history above remain authoritative history, not erased failures.
+
+### Baselines and integration
+
+| Authority | SHA |
+| --- | --- |
+| Backend remote main inspected | `01d3a711e2cae14fd6dd9adeedc2290e3474b272` |
+| Mobile remote main / TI-08 merge #60 | `523394f25bb0be5bb5b518e7d59326fef17c7b8a` |
+| TI-06 merge #402 | `b21f0309218479ccb51fd937478ff0e98a42e971` |
+| TI-07 merge #403 | `0e560f93142434265be5814b345bceedd2654555` |
+| Backend tested qualification source | `a7f3b4153a396ac0e0f3dd372f9429e76cd93b15` |
+| Mobile tested integrated qualification source | `ec4da0483be33e5324863b9d07b37004d6fc3903` |
+
+Continue #400 and #57; neither is merged automatically. Backend already integrates
+both privacy repairs. The unrelated backend #404 Cognito-email change still has
+no semantic TI dependency, so no new integration was performed. Mobile merged
+current main because TI-08 is mandatory; account-locale authority #59 was also
+consumed and its auth/composition/lifecycle tests rerun. The probe add/add conflict
+was resolved with the merged TI-08 probe, exactly as main implements it. No
+qualification production edits were made. Final evidence commits only change
+qualification documentation/evidence; final PR head SHAs and exact-head check
+results are available in each PR, with the final response recording those heads.
+Do not substitute earlier-head CI. Freeze evidence heads after push.
+
+### Integrated privacy and blocker closure
+
+TI05-PRIVACY-01: **CLOSED**. TI05B-RC-01: **CLOSED**.
+WORKOUT_SESSION identity-free: **YES**.
+WORKOUT_COMPLETION identity-free: **YES**.
+WORKOUT_STATE identity-free: **YES**.
+Strict privacy XFAIL remaining: **NO** (no xfail marker in TI qualification/tests).
+Synthetic identity runtime gate: **PASS**, normal test in the 820-test run.
+The actual native endpoint lifecycle and induced workout-state exception check
+formatted messages, arguments and captured record attributes for numeric owner,
+username, email, Cognito subject, opaque session ref and replacement identity.
+Exact allowlisted log shapes reject substituted identity labels.
+
+### Canonical release-switch gate
+
+`dart --packages=.dart_tool/package_config.json tool/qualification/ti05b_release_switch_probe.dart`
+**PASS, exit 0**. Both unsigned and IPA modes: unset OFF, false OFF, true ON;
+invalid/empty/whitespace/case-altered values rejected with exit 64 before Flutter.
+The merged probe exercises the CLI → Process.start argument boundary and compiles
+the real rollout owner in a fresh VM. Generic environment passthrough remains
+absent; API diagnostics remain redacted; default OFF remains intact. Server
+capability is still required and capability-off hides loaded/pending results in
+automated tests. The installed RC switch state is **NOT VERIFIED: no RC installed**.
+Probe command capture is not a native build or live transport claim.
+
+### Cross-repository contract re-audit
+
+Both manifests and canonical golden payloads are byte-identical after integration.
+Backend manifest assertion checks current production constants; mobile assertions
+check current closed values and numeric DTO bounds. Current DTO/unit/paired-set
+source was inspected. The full Contract audit table above remains MATCH for
+contract_version=1, ruleset_version=ti_rules_v1, all 3 states, all 11 kinds, all 12
+missing codes, 7 metrics/units, RIR, tempo, action/observe tuples, evidence ≤8,
+missing ≤12, paired sets ≤20, nonnegative numeric bounds (reps 20000, kg 1000,
+logging interval 3600, sets 12800, frequency 56), execution ≤32 exercises/≤20 sets,
+and server-owned history 56 days/≤8 recent sessions/exercise/≤64 rows.
+No contract drift or contract amendment was introduced. The endpoint remains
+GET /api/v1/training/workout-sessions/<session_reference>/training-insight.
+
+### Rollout, compatibility and authority gates
+
+Automated A OFF/OFF: **PASS** V1/no rich context/no insight read or UI.
+B ON/OFF: **PASS** V2 persisted RIR/tempo/context/no insight read or UI.
+C ON/ON/local ON: **PASS automated** full optional path; live RC **NOT RUN**.
+D OFF/ON: **PASS** fail closed/no P1 exposure.
+E backend P1 ON/local OFF: **PASS** no repository/read/UI.
+V1 lifecycle and V2 null/zero/clear/4_plus remain **PASS**.
+
+Terminal ordering: dirty checkpoint drain → acknowledged checkpoint → canonical
+completion accepted → immediately usable completed surface → optional insight read.
+Insight can block completion: **NO**. Insight failure rolls back completion: **NO**.
+Success, transport failure, 503, malformed success, unsupported version/ruleset,
+forever-pending reads remain outside the terminal barrier and success condition.
+Account switch/logout late replies are discarded; navigation departure/retained or
+covered routes cannot resurrect stale results; capability generation invalidates
+pending/loaded results. Active/completed background/foreground and server-first
+process recovery pass automated gates. P1 has no durable insight authority.
+Available, insufficient_data, not_comparable and typed degraded states pass.
+
+Completion gap as physiological rest: **NO**. short_rest_confound derived from
+completion gap: **NO**. Fatigue/recovery/injury inferred: **NO**. e1RM: **NO**.
+Copy remains Between-set logging interval. Flutter diagnostics/primary selection/
+recommendation synthesis: **NO**. TrainingPlan mutation, Exercise Notes consumed,
+Pump Check consumed, LLM/provider dependency, raw history fetch by mobile: **NO**.
+
+### Exact local validation commands and results
+
+Backend interpreter: `/Users/yusuf/develop/fitness-coach/.venv/bin/python`.
+
+```sh
+$PYTHON -m pytest -p tests.qualification.ti05_network_guard -q \
+ tests/test_ti00_v1_checkpoint_characterization.py \
+ tests/test_ti01a_execution_context.py tests/test_ti01a_migration.py \
+ tests/test_ti01b_exercise_notes.py tests/test_ti01b_migration.py \
+ tests/test_ti03_api.py tests/test_ti03_facts.py tests/test_ti03_diagnostics.py \
+ tests/test_ti03_architecture.py tests/test_workout_session.py \
+ tests/test_workout_completion.py tests/test_workout_state.py \
+ tests/test_workout_state_sessions.py tests/test_mobile_workout_sessions_api.py \
+ tests/test_mobile_workout_sessions_architecture.py \
+ tests/test_sprint14_workout_execution_contract.py \
+ tests/test_sprint14_activation_readiness.py tests/test_feature_flags.py \
+ tests/test_ti06_workout_log_privacy.py tests/test_ti07_workout_state_log_privacy.py \
+ tests/test_ti05_qualification.py tests/qualification/test_ti05_privacy_gate.py
+```
+
+**820 passed, 0 skipped, 0 failed**, 52.19s; **0 external attempts**.
+
+Disposable PostgreSQL 16: `ti05b-resume-postgres`, loopback 55405, disposable
+`ti05b_resume` database. FITX_PG_CONCURRENCY_TEST=1; PG_TEST_DATABASE_URL targets
+only that fixture database (credentials omitted here).
+
+```sh
+$PYTHON -m pytest -p tests.qualification.ti05_network_guard -q \
+ tests/test_ti01a_execution_context_pg.py tests/test_ti01b_exercise_notes_pg.py \
+ tests/test_ti03_pg.py tests/test_mobile_workout_sessions_pg.py \
+ tests/test_workout_session_pg.py tests/test_workout_completion_pg.py \
+ tests/test_sprint14_workout_execution_reliability_pg.py
+```
+
+**43 passed, 0 skipped, 0 failed**, 103.22s; **0 external attempts**.
+Lifecycle, completion, ownership/concurrency, projection/query/history bounds pass.
+`test_full_projection_on_postgres_is_exact_isolated_and_two_statements` again
+proves exactly 2 SELECTs (owned target + bounded history), no writes/N+1/persistence.
+Incomplete coverage is explicit. Guard self-check: 3 assertions passed, 3 reserved
+attempts blocked, process exit 1 as required; these are intentional self-check
+attempts, not unexpected TI calls. Initial sandbox PG attempt was discarded.
+
+```sh
+flutter gen-l10n
+flutter test --no-pub test/features/workout test/features/auth test/app \
+ test/architecture test/core/config test/tool \
+ --file-reporter json:/private/tmp/ti05b-resume-mobile-focused.json
+flutter test --no-pub \
+ --file-reporter json:/private/tmp/ti05b-resume-mobile-full.json
+flutter analyze --no-pub
+dart format --output=none --set-exit-if-changed .
+git diff --check
+git status --short
+```
+
+Mobile focused **1,791 passed, 0 skipped, 0 failed**, reporter success, 221.307s.
+Full **3,584 passed, 0 skipped, 0 failed**, reporter success, 128.971s.
+Analysis **No issues found**, 28.4s. Format **628 files, 0 changed**, 7.13s.
+Release-tool tests included in focused/full; canonical CLI matrix separately PASS.
+Sandbox socket-bind attempt discarded; approved local rerun is the evidence.
+
+### Non-vacuity and diff audit
+
+All ten cross-repo mutations **rerun and assertion-detected** in disposable copies:
+P1 without P0, await insight before completion, stale account response, rest label,
+unknown kind, synthesized null action, Notes dependency, plan writer, ignored mobile
+switch, capability-off stale card. Summary: docs/evidence/ti05b-resume/mutations.json.
+New release-switch-drop mutation **detected, exit 255** by the canonical probe:
+docs/evidence/ti05b-resume/release-switch-mutation.json. Source restored byte-for-byte.
+Six previous privacy mutations **reused**: source and detecting gates were verified
+byte-equivalent (316 backend tracked files checked); their summary remains
+in docs/evidence/ti05b/privacy-mutations.json. All 344 current mobile tracked lib
+files match the restored mutation copy. Generated platform symlink rsync warnings
+do not affect tracked sources or successful mutation assertions.
+
+Every PR diff file reviewed against current main's merge base. Backend additions:
+qualification tests, fixtures, runners/network guard, documentation/JSON evidence.
+Mobile additions: qualification widget/contract test, fixtures, documentation.
+TI-08 probe/builder/tests are merged main, not new production edits in #57.
+Backend qualification production code changed: **NO**.
+Mobile qualification production code changed: **NO**. Unexpected files: **NONE**.
+
+### CI and native gate authority
+
+Before this evidence update, backend source head a7f3b4 has all five SUCCESS in
+run 37478835264 (pytest, PostgreSQL concurrency, schema drift, Linux locks,
+image revision immutability). Mobile integrated-source CI run 37494307459 is
+on ec4da04. The final documentation/evidence commits require their own exact-head
+CI; their final outcomes must be read from #400/#57 and recorded in the final
+response. No earlier-head run is substituted for final evidence heads.
+
+Native discovery: simulator **iPhone 18 Pro, iOS 27.0**, booted; paired physical
+**iPhone 13**, available. Historical device OS was 26.6.1; not reverified as a
+current installed-RC OS. No personal account/device identifiers retained.
+Controlled backend URL/test-account configuration: **NOT PROVIDED**.
+Controlled backend P0/P1 state: **NOT VERIFIED**; no global/production flag changed.
+Local signing configuration in qualification checkout: **ABSENT**.
+Controlled canonical RC builder would be `tool/build_ios_release.dart --mode=ipa
+--environment=staging` with mobile switch true and qualified HTTPS API origin.
+It has **NOT RUN**: no qualification environment/signing setup is supplied.
+Artifact/build/version: **NONE**. Installed switch state: **NOT VERIFIED**.
+No substitute direct Flutter build or fake repository is accepted for these gates.
+
+Simulator authentication/happy/degraded flow: **NOT RUN**.
+iPhone authentication/happy/degraded/background/foreground/layout flow: **NOT RUN**.
+AuthenticatedTransport → TrainingInsightRepository → live endpoint: **NOT EXERCISED**.
+Server capability-off behavior in installed RC: **NOT EXERCISED** (automated PASS).
+Accessibility: automated widget semantics/text-scale/disclosure/long-name coverage
+PASS; device large text, VoiceOver/read order and button usability **NOT RUN**.
+This is not accessibility certification. Both native gates remain mandatory.
+
+### Disposition and rollback
+
+No new production defect is found in completed automated qualification.
+**QUALIFICATION BLOCKED; HOLD P1** until environment/signing/authenticated simulator
+and physical-device evidence exist, with final exact-head CI green.
+Accepted v1 limitations remain those above: no Today/Progress/history re-entry,
+Coach handoff, persistent insight authority, physiological rest/e1RM/causal health
+inference or plan mutation; legacy context/prescription may be absent.
+First rollback: server FITX_TRAINING_INSIGHTS_ENABLED=false; mobile
+AXISAI_TRAINING_INSIGHTS_ENABLED=false in next/controlled build. Preferred degraded
+mode: P0 ON/P1 OFF. Emergency: P0 OFF/P1 OFF. Never delete execution context,
+notes or schema. No production activation, publishing, submission or merge occurred.
+Resume from the missing controlled RC/native gates; any newly discovered production
+defect belongs in a separate bounded repair lane. TI-05B remains open.
