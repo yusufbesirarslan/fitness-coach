@@ -1,0 +1,67 @@
+{
+  "training_insight": {
+    "checkpoint_revision": 1,
+    "contract_version": 1,
+    "evidence": [
+      {
+        "current": 26,
+        "metric": "reps",
+        "paired_sets": 3,
+        "previous": 24,
+        "previous_session_ref": "ti05_previous",
+        "unit": "int"
+      },
+      {
+        "current": 60.0,
+        "metric": "weight_kg",
+        "paired_sets": 3,
+        "previous": 60.0,
+        "previous_session_ref": "ti05_previous",
+        "unit": "number"
+      },
+      {
+        "current": "2",
+        "metric": "rir",
+        "paired_sets": 3,
+        "previous": "2",
+        "previous_session_ref": "ti05_previous",
+        "unit": "token"
+      },
+      {
+        "current": 120,
+        "metric": "logging_interval_seconds",
+        "paired_sets": 2,
+        "previous": 120,
+        "previous_session_ref": "ti05_previous",
+        "unit": "int"
+      },
+      {
+        "current": 3,
+        "metric": "set_count",
+        "paired_sets": 0,
+        "previous": 0,
+        "previous_session_ref": null,
+        "unit": "int"
+      },
+      {
+        "current": 1,
+        "metric": "frequency_days",
+        "paired_sets": 0,
+        "previous": 0,
+        "previous_session_ref": null,
+        "unit": "int"
+      }
+    ],
+    "exercise_id": "ex_barbell_back_squat",
+    "kind": "performance_improved",
+    "missing_data": [
+      "missing_tempo",
+      "rest_method_unsupported"
+    ],
+    "recommended_action": null,
+    "ruleset_version": "ti_rules_v1",
+    "session_ref": "ti05_current",
+    "state": "available",
+    "title_key": "training_insight.performance_improved"
+  }
+}
