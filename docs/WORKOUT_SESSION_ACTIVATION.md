@@ -542,11 +542,11 @@ defect.
 
 `WorkoutSessionLifecycle` contains no identity. Since TI-06 neither do the
 lifecycle log lines `[WORKOUT_SESSION] rid=… event=…` and
-`[WORKOUT_COMPLETION] rid=… op=complete_workout entry=… outcome=…` (request id
-is their only correlation). **`[WORKOUT_STATE] anomaly rid=… user_id=…
-category=… detail=…` still carries `user_id`.** Redact it from anything
-committed to this repository. Prefer aggregate counts to
-raw log excerpts. Never commit session public IDs, cookies, tokens or
+`[WORKOUT_COMPLETION] rid=… op=complete_workout entry=… outcome=…`, and since
+TI-07 neither does `[WORKOUT_STATE] anomaly rid=… category=… detail=…` (request
+id is their only correlation). The web request log line still carries `user=`;
+redact it from anything committed to this repository. Prefer aggregate counts
+to raw log excerpts. Never commit session public IDs, cookies, tokens or
 credentials.
 
 ---

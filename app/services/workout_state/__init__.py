@@ -88,7 +88,7 @@ def resolve_workout_state(
     try:
         inputs = load_inputs(user_id, day, plan=plan)
     except Exception as exc:  # noqa: BLE001 — fail safe, never leak to the client
-        _log_anomaly(user_id, ANOMALY_RESOLUTION_ERROR, type(exc).__name__)
+        _log_anomaly(ANOMALY_RESOLUTION_ERROR, type(exc).__name__)
         if strict_reads:
             raise WorkoutStateReadError("workout-state input read failed") from exc
         return _maybe_enrich(
@@ -96,7 +96,7 @@ def resolve_workout_state(
 
     snapshot = resolve(inputs)
     if snapshot.anomaly:
-        _log_anomaly(user_id, snapshot.anomaly, None)
+        _log_anomaly(snapshot.anomaly, None)
     return _maybe_enrich(user_id, day, snapshot, sessions_enabled, strict_reads)
 
 
@@ -121,13 +121,13 @@ def _maybe_enrich(
     try:
         facts = load_session_facts(user_id, day)
     except Exception as exc:  # noqa: BLE001 — never break the read on a session error
-        _log_anomaly(user_id, ANOMALY_SESSION_READ_ERROR, type(exc).__name__)
+        _log_anomaly(ANOMALY_SESSION_READ_ERROR, type(exc).__name__)
         if strict_reads:
             raise WorkoutStateReadError("workout-session read failed") from exc
         facts = ACTIVE_SESSION_FACTS_NONE
     enriched = enrich_with_session(base, facts)
     if enriched.anomaly and enriched.anomaly != base.anomaly:
-        _log_anomaly(user_id, enriched.anomaly, None)
+        _log_anomaly(enriched.anomaly, None)
     return enriched
 
 
@@ -147,15 +147,17 @@ def _safe_snapshot(day: date) -> WorkoutStateSnapshot:
     )
 
 
-def _log_anomaly(user_id: int, category: str, detail: Optional[str]) -> None:
+def _log_anomaly(category: str, detail: Optional[str]) -> None:
     """Emit only safe operational metadata (no health data, no payloads).
 
+    No owner identity: the request id is the only correlation, ``category`` is
+    the closed ``ANOMALY_*`` vocabulary and ``detail`` an exception class name.
     Best-effort: logging must never turn a read into a failure.
     """
     try:
         current_app.logger.warning(
-            "[WORKOUT_STATE] anomaly rid=%s user_id=%s category=%s detail=%s",
-            current_request_id(), user_id, category, detail or "-",
+            "[WORKOUT_STATE] anomaly rid=%s category=%s detail=%s",
+            current_request_id(), category, detail or "-",
         )
     except Exception:  # noqa: BLE001
         pass
