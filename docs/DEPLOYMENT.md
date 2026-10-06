@@ -292,33 +292,45 @@ CloudWatch and S3 retention are deferred operations work. SSM-agent upgrades
 are separate host hygiene work. Plan, authorize, and verify each of those
 changes outside this immutable deploy transaction.
 
-## Open follow-up: runtime AWS identity
+## Runtime AWS identity — resolved
 
-**Status: recorded, not scheduled. Do not perform it inside a Coach change.**
+**Status: resolved by SEC-001 (closed 2026-10-06).** The durable migration and
+retirement record is
+[`SEC001_AWS_RUNTIME_S3_REMEDIATION.md`](../SEC001_AWS_RUNTIME_S3_REMEDIATION.md).
 
-The application runs on long-lived static credentials belonging to the IAM user
-`fitx-s3-user`, supplied through the host `.env`. That is how the Coach ended up
-served entirely by the OpenAI fallback: the user carried `AmazonS3FullAccess`
-and nothing else, so every Bedrock call returned `AccessDenied` while deep
-health reported the provider as enabled. The immediate fix was a least-privilege
-inline policy (`bedrock:InvokeModel` + `bedrock:InvokeModelWithResponseStream`,
-scoped to the configured inference profile and the foundation-model ARNs that
-profile declares). That closes the outage; it does not close the pattern.
+Production runtime capability is granted by EC2 instance-profile attachment:
 
-The intended end state is an EC2 instance profile / runtime role, so that
-runtime capability is granted by attachment rather than by a key that lives in a
-file and cannot be rotated without a deploy.
+```text
+AxisAIProdRuntimeProfile
+  -> AxisAIProdRuntimeRole
+```
 
-Preconditions before static credentials are removed:
+Both `web` and `worker` resolve credentials through the standard AWS SDK
+credential chain, from the instance role via IMDS (`iam-role`, principal
+`AxisAIProdRuntimeRole`). The static environment credentials
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` are absent
+from the production host `.env` and from both containers.
 
-1. **Inventory every capability the current key actually exercises** — S3
-   (avatars, meal photos, pump checks, presigned URLs), Bedrock, CloudWatch
-   metrics when `AI_METRICS_ENABLED`/`RUNTIME_METRICS_ENABLED` are on, and
-   anything the worker container reaches. A missed capability fails at runtime,
-   not at deploy.
-2. **Grant them on the role first and verify from inside the running
-   containers**, both `web` and `worker`, before any key is revoked.
-3. **Then remove the key**, and only then.
+History:
 
-The credential is shared by both containers; treat them as two callers of one
-identity, not one.
+- Production used to run on long-lived static credentials of the IAM user
+  `fitx-s3-user`, supplied through the host `.env`. That is how the Coach once
+  ended up served entirely by the OpenAI fallback: the user carried only
+  `AmazonS3FullAccess`, so every Bedrock call returned `AccessDenied`.
+- The 2026-10-04 cutover removed that static credential path.
+- The legacy access key, the `fitx-s3-user` user, the legacy EC2
+  roles/instance profiles and their orphaned customer policies were retired on
+  2026-10-05 and 2026-10-06. None of them remains available as a fallback.
+
+Deployment contract:
+
+- A normal deploy does **not** create AWS static credentials, does **not**
+  switch back to a legacy instance profile, and does **not** change runtime IAM.
+  It runs under the current runtime profile.
+- Application rollback is revision-based (see above). It runs under the same
+  `AxisAIProdRuntimeRole`, because no legacy identity remains to roll back to.
+- Any change to the runtime IAM architecture is a separate, explicitly
+  authorized infrastructure/security operation, never a step inside a deploy or
+  a feature change. That includes the known CloudWatch permission overlap,
+  SEC-001 R4.
+- Do not add AWS key variables back to the host `.env`.
