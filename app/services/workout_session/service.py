@@ -212,14 +212,14 @@ def start_session(
         return _existing_or_conflict(existing, day, snapshot, native)
 
     if completed_today(user_id, day):
-        _log("start_refused_completed_today", user_id)
+        _log("start_refused_completed_today")
         return SessionResult(SessionOutcome.INVALID_TRANSITION)
 
     # LP-13: serialize with the completion claim write, then decide again.
     lock_completion_day(user_id, day)
     if completed_today(user_id, day):
         db.session.rollback()  # end the transaction: releases the day lock
-        _log("start_refused_completed_today", user_id)
+        _log("start_refused_completed_today")
         return SessionResult(SessionOutcome.INVALID_TRANSITION)
 
     try:
@@ -232,11 +232,11 @@ def start_session(
             if existing is not None:
                 return _existing_or_conflict(existing, day, snapshot, native)
             # Violation but no active row visible now — treat conservatively.
-            _log("start_conflict", user_id)
+            _log("start_conflict")
             return SessionResult(SessionOutcome.CONFLICT)
-        _log("start_integrity_error", user_id)
+        _log("start_integrity_error")
         raise
-    _log("started", user_id)
+    _log("started")
     record_lifecycle_event("started")
     return SessionResult(SessionOutcome.CREATED, session=_build_view(session, day))
 
@@ -285,7 +285,7 @@ def resume_session(user_id: int, public_id: str, *, today: Optional[date] = None
 
     view = _build_view(session, day)
     if not view.resumable:
-        _log("resume_stale", user_id)
+        _log("resume_stale")
         return SessionResult(SessionOutcome.STALE_SESSION_REQUIRES_RESOLUTION, session=view)
 
     # Eligible: an explicit resume may bump last_activity_at (conditional on ACTIVE
@@ -305,7 +305,7 @@ def resume_session(user_id: int, public_id: str, *, today: Optional[date] = None
                 SessionOutcome.ALREADY_ABANDONED,
                 session=_build_view(session, day),
             )
-    _log("resumed", user_id)
+    _log("resumed")
     record_lifecycle_event("resumed")
     return SessionResult(SessionOutcome.RESUMED, session=_build_view(session, day))
 
@@ -362,7 +362,7 @@ def abandon_session(
         return SessionResult(SessionOutcome.ALREADY_ABANDONED, session=view)
 
     session = get_owned_session(user_id, public_id)
-    _log("abandoned", user_id)
+    _log("abandoned")
     record_lifecycle_event("abandoned")
     return SessionResult(SessionOutcome.ABANDONED, session=_build_view(session, day))
 
@@ -420,7 +420,7 @@ def complete_session(
     except SessionCompletionConflict as conflict:
         session = get_owned_session(user_id, public_id)
         view = _build_view(session, day) if session is not None else None
-        _log("complete_conflict", user_id)
+        _log("complete_conflict")
         return SessionResult(
             SessionOutcome.CONFLICT, session=view,
             conflict_reason=getattr(conflict, "reason", "abandoned"))
@@ -431,16 +431,16 @@ def complete_session(
         SessionOutcome.COMPLETED if completion.created
         else SessionOutcome.ALREADY_COMPLETED
     )
-    _log("completed" if completion.created else "already_completed", user_id)
+    _log("completed" if completion.created else "already_completed")
     return SessionResult(outcome, session=view, completion=completion)
 
 
-def _log(event: str, user_id: int) -> None:
-    """Safe, bounded operational log — no PII/workout content. Best-effort."""
+def _log(event: str) -> None:
+    """Safe, bounded operational log — no identity, no workout content.
+    Best-effort. ``rid`` is the only correlation; ``event`` is a fixed literal."""
     try:
         current_app.logger.info(
-            "[WORKOUT_SESSION] rid=%s event=%s user_id=%s",
-            current_request_id(), event, user_id,
+            "[WORKOUT_SESSION] rid=%s event=%s", current_request_id(), event,
         )
     except Exception:  # noqa: BLE001 — logging must never break a transition
         pass
