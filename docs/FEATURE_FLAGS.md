@@ -368,3 +368,14 @@ Qualification: owner isolation, note CAS, account deletion, PostgreSQL races.
 Rollback: set the flag to 0 and retain note schema/data. No note telemetry.
 Merged TI-01A independently owns the execution-context portion of this shared
 TI-00 P0 flag. The lifecycle record now lists both foundations’ prerequisites.
+
+## TI-03 Training Insight
+
+`FITX_TRAINING_INSIGHTS_ENABLED` defaults OFF and requires
+`FITX_TRAINING_EXECUTION_CONTEXT_ENABLED` (P0) and `FITX_WORKOUT_SESSIONS_ENABLED`.
+P1 ON with P0 OFF is an invalid rollout state: the insight route stays absent
+(404) and capabilities report `insights_enabled: false`. It enables only the
+read-only `GET /api/v1/training/workout-sessions/<session_reference>/training-insight`
+projection; no migration, no persisted diagnostics, no write path. Owner:
+@yusufbesirarslan; review by 2026-11-01. Disable P1 to roll back; nothing to
+clean up. See [TI-03](TI_03_TRAINING_INSIGHT.md).

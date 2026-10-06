@@ -154,6 +154,22 @@ ROLLOUT_FLAGS = (
         decision=DECISION_ENABLE,
     ),
     FeatureFlag(
+        key="FITX_TRAINING_INSIGHTS_ENABLED",
+        capability="TI-03 read-only deterministic Training Insight route and P1 capability; never writes.",
+        owner=_OWNER,
+        default=False,
+        depends_on=("FITX_TRAINING_EXECUTION_CONTEXT_ENABLED", "FITX_WORKOUT_SESSIONS_ENABLED"),
+        observability="Fixed TrainingInsight Event counter (generated/insufficient/not_comparable/unavailable/history_row_excluded).",
+        prerequisites=("FITX_TRAINING_EXECUTION_CONTEXT_ENABLED=1 (P1 without P0 is absent)",
+                       "ruleset ti_rules_v1 qualified", "TI-03 PostgreSQL and projection qualification green"),
+        success_signals=("deterministic insight for fixed completed snapshot", "insufficient_data is common, never fabricated"),
+        abort_signals=("unexpected TrainingInsight unavailable rate", "any non-contract token or causal claim"),
+        rollback="Set FITX_TRAINING_INSIGHTS_ENABLED=0; no data to clean up. P0 context and V1/V2 storage are unaffected.",
+        lifecycle=LIFECYCLE_SHIPPED_DARK,
+        review_by="2026-11-01",
+        decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="WEEKLY_PROGRAM_UI_ENABLED",
         capability=(
             "Renders the read-only weekly-program card on the canonical Plan "

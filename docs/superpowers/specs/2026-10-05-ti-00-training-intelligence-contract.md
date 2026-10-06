@@ -675,6 +675,51 @@ for fixed completed snapshot, historical window and ruleset; no persisted
 insight entity needed in P1. Source refs/revision make evidence inspectable;
 UI does not expose database identifiers.
 
+### §16 amendment — TI-03, 2026-10-06 (owner-directed, narrow)
+
+**Exercise ownership.** `training_insight` gains exactly one key, `exercise_id`,
+placed after `kind`: the public catalog identity (`ex_...`) of the canonical
+exercise the primary insight belongs to. Every evidence entry describes that
+exercise. It is `null` only when no exercise can be selected
+(`session_not_completed`, `missing_execution`, `no_completed_sets`). No other
+key, token or metric is added; the metric union is not extended (load-volume
+stays an internal fact, not v1 evidence).
+
+**Deterministic cross-exercise primary selection (frozen, `ti_rules_v1`).**
+Each exercise of the session with ≥1 completed set is assessed independently;
+its canonical position is its order in the final checkpoint (the workout's
+canonical exercise order).
+
+1. An exercise's headline is its highest-priority available kind, using this
+   fixed priority (first = highest): `performance_declined`,
+   `performance_improved`, `execution_quality_context_changed`,
+   `effort_increased`, `effort_decreased`, `volume_increase_context`,
+   `exposure_frequency_context`, `performance_stable`, `effort_stable`,
+   `effort_mixed`. The primary is the exercise with the smallest
+   (kind priority, canonical position): `state=available`.
+2. No exercise has an available kind: the first exercise in canonical order
+   whose comparison is not comparable (mixed performance, plan changed, or
+   differing eligible index sets) gives `state=not_comparable`, `kind=null`.
+3. Otherwise `state=insufficient_data`, `kind=insufficient_comparable_history`,
+   for the first exercise in canonical order, with empty evidence.
+
+`missing_data` is that exercise's codes plus session-level coverage codes, in
+the §14 vocabulary order. The one-lever policy (§15) is evaluated for the
+primary exercise only.
+
+**Evidence value resolution.** The §16 union is read as metric → value type:
+`reps`/int, `weight_kg`/number, `set_count`/int, `frequency_days`/int,
+`rir`/token, `tempo`/token, `logging_interval_seconds`/int, and `unit` carries
+that type tag. The illustrative `tempo_adherence` metric in the example above
+reads `tempo`. Evidence order is the order listed. `reps` is the sum over paired
+sets (the comparator's own quantity). `weight_kg`, `rir` and `tempo` report one
+actually observed pair: the highest paired index where the value differs, else
+the highest paired index. `logging_interval_seconds` is the lower median of
+paired completion gaps. `set_count`/`frequency_days` compare the two complete
+weeks (`previous` = older week); their `paired_sets` is 0 and
+`previous_session_ref` is null. The full TI-03 record is
+[TI_03_TRAINING_INSIGHT.md](../../TI_03_TRAINING_INSIGHT.md).
+
 ## 17. Feature flags and readiness
 
 **FACT:** `app/feature_flags.py:ROLLOUT_FLAGS` is the lifecycle inventory;

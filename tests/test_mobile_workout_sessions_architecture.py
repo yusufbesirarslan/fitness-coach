@@ -56,6 +56,7 @@ ENDPOINTS = (
     "mobile_api.checkpoint_workout_session",
     "mobile_api.abandon_workout_session",
     "mobile_api.complete_workout_session",
+    "mobile_api.read_training_insight",
 )
 FIXED_NOW = datetime(2026, 7, 23, 15, 0, tzinfo=APP_TZ)
 WEEKDAYS = [

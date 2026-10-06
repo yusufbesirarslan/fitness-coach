@@ -160,6 +160,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/workout-sessions",
         "/api/v1/training/workout-sessions/current",
         "/api/v1/training/workout-sessions/<session_reference>",
+        "/api/v1/training/workout-sessions/<session_reference>/training-insight",
         "/api/v1/training/workout-sessions/<session_reference>/resume",
         "/api/v1/training/workout-sessions/<session_reference>/checkpoint",
         "/api/v1/training/workout-sessions/<session_reference>/abandon",
@@ -233,6 +234,9 @@ _APPROVED_TRAINING_PATHS = {
     "/api/v1/training/workout-sessions/<session_reference>/checkpoint",
     "/api/v1/training/workout-sessions/<session_reference>/abandon",
     "/api/v1/training/workout-sessions/<session_reference>/complete",
+    # TI-03 per-session Training Insight: a read projection over one owned
+    # completed session; no Daily-Coach aggregate, no write, no plan authority.
+    "/api/v1/training/workout-sessions/<session_reference>/training-insight",
 }
 
 
