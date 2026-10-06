@@ -90,6 +90,7 @@ def test_no_forbidden_authority_is_reachable(path):
                        "app.services.training_progression", "app.services.training_planning",
                        "app.services.weekly_program", "app.services.progress_",
                        "app.services.menu_extract", "app.services.mobile_training",
+                       "app.services.exercise_notes", "app.blueprints",
                        "openai", "anthropic", "boto3", "botocore", "groq", "requests",
                        "random", "secrets", "uuid", "time", "flask", "flask_login"):
             assert not module.startswith(prefix), (path.name, module)
@@ -134,9 +135,13 @@ def test_the_route_is_a_thin_read_transport():
     assert "request" not in {node.id for node in ast.walk(body) if isinstance(node, ast.Name)}
 
 
-def test_exercise_notes_are_not_a_reachable_authority_even_if_added_later():
-    """TI-01B is separate: if an ExerciseNote model ever lands, no TI-03 module
-    may reference it, and the history query selects no note column."""
+def test_exercise_notes_are_not_a_reachable_authority():
+    """TI-01B (merged) is a separate private authority: no TI-03 module imports
+    the note model or service, and the history query selects no note column."""
+    from app.models import ExerciseNote
+    assert ExerciseNote.__tablename__ == "exercise_note"
+    for path in MODULES:
+        assert "exercise_note" not in path.read_text(encoding="utf-8").lower(), path.name
     from app.services.training_intelligence import queries
     selected = {column.key for column in queries._COLUMNS}
     assert selected == {"public_id", "status", "workout_date", "completed_at", "weekday_slot",

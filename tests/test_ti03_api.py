@@ -205,6 +205,18 @@ def test_legacy_workout_logs_and_markers_are_never_merged(client, owner, flags, 
     assert after["training_insight"]["state"] == "insufficient_data"
 
 
+def test_persistent_exercise_notes_are_never_read(client, owner, flags, as_mobile):
+    from app.models import ExerciseNote
+    ref = improving(owner.id)
+    before = get_insight(client, owner, ref, as_mobile).get_json()
+    db.session.add(ExerciseNote(user_id=owner.id, exercise_id=SQUAT, revision=1,
+                                text="knee hurt, rested too little, private"))
+    db.session.commit()
+    after = get_insight(client, owner, ref, as_mobile)
+    assert after.get_json() == before
+    assert b"knee" not in after.get_data() and b"private" not in after.get_data()
+
+
 def test_pump_check_data_is_ignored(client, owner, flags, as_mobile):
     ref = improving(owner.id)
     before = get_insight(client, owner, ref, as_mobile).get_json()
