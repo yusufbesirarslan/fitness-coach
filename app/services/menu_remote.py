@@ -22,6 +22,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.exceptions import TimeoutError as TransportTimeout
 
 ALLOWED_SCHEMES = {"http", "https"}
 MAX_BYTES = 3_000_000
@@ -138,7 +139,13 @@ def retrieve(url, byte_limit, request_limit, redirect_limit, seconds):
             session.headers.update(OUTBOUND_HEADERS)
             session.cookies.clear()
             session.mount(p.scheme + "://", pinned_adapter(ip))
-            with session.get(current, stream=True, allow_redirects=False, timeout=(min(3, remaining), min(3, remaining)), proxies={}) as resp:
+            # Session.send/get generates Response.next even when redirects are
+            # disabled, consuming/decompressing the redirect body without our
+            # cap. Prepare credentials explicitly, then use one adapter send.
+            prepared = session.prepare_request(requests.Request("GET", current))
+            with session.get_adapter(current).send(prepared, stream=True,
+                    timeout=(min(3, remaining), min(3, remaining)), verify=True,
+                    cert=None, proxies={}) as resp:
                 if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
                     target = urljoin(current, resp.headers["Location"])
                     target_p = validate_url(target)
@@ -216,9 +223,13 @@ def run_worker(payload, seconds):
         except subprocess.TimeoutExpired:
             raise requests.Timeout("MENU_DEADLINE") from None
         if proc.returncode or len(output) > 4 * MAX_BYTES // 3 + 4096:
-            raise ValueError("MENU_FETCH_FAILED")
+            raise requests.ConnectionError("MENU_FETCH_FAILED")
         result = json.loads(output)
         if "error" in result:
+            if result["error"] in {"MENU_FETCH_TIMEOUT", "MENU_DEADLINE"}:
+                raise requests.Timeout("MENU_FETCH_TIMEOUT")
+            if result["error"] == "MENU_FETCH_FAILED":
+                raise requests.ConnectionError("MENU_FETCH_FAILED")
             raise ValueError(result["error"])
         return result
     finally:
@@ -256,11 +267,19 @@ def fetch(url, *, max_bytes=None, max_redirects=MAX_REDIRECTS):
     return resp
 
 
+def _failure_code(exc):
+    if isinstance(exc, (requests.Timeout, TransportTimeout, socket.timeout)):
+        return "MENU_FETCH_TIMEOUT"
+    if isinstance(exc, ValueError) and str(exc).startswith("MENU_"):
+        return str(exc)
+    return "MENU_FETCH_FAILED"
+
+
 if __name__ == "__main__":
     try:
         result = retrieve(**json.loads(sys.stdin.buffer.read(8192)))
     except Exception as exc:
         # Never serialize remote URL, headers, body or raw exception details.
-        code = str(exc) if isinstance(exc, ValueError) and str(exc).startswith("MENU_") else "MENU_FETCH_FAILED"
+        code = _failure_code(exc)
         result = {"error": code}
     sys.stdout.write(json.dumps(result))

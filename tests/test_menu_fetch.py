@@ -31,9 +31,16 @@ def wire(monkeypatch):
         resp.request = request
 
         class Raw(io.BytesIO):
+            def read(self, *args, **kwargs):
+                if status in (301, 302, 303, 307, 308) and headers.get("Location"):
+                    pytest.fail("redirect body must never be read/decompressed")
+                return super().read(*args, **kwargs)
+
             def read1(self, size, decode_content=False):
                 assert decode_content is False
-                return self.read(size)
+                if status in (301, 302, 303, 307, 308) and headers.get("Location"):
+                    pytest.fail("redirect body must never be read/decompressed")
+                return super().read(size)
         resp.raw = Raw(body)
         from email.message import Message
         from types import SimpleNamespace
@@ -93,6 +100,7 @@ def test_credential_isolation(wire, monkeypatch, tmp_path, scheme):
     assert dict(request.headers) == mr.OUTBOUND_HEADERS
     assert not {h.lower() for h in request.headers} & {"authorization", "cookie", "proxy-authorization", "x-amz-security-token"}
     assert "synthetic" not in str(request.headers)
+    assert request.body is None
     assert options["proxies"] == {}
     assert options["verify"] is True
     assert options["timeout"][0] <= 3 and options["timeout"][1] <= 3
@@ -466,3 +474,63 @@ def test_pinned_https_keeps_sni_and_certificate_authority(monkeypatch):
     assert captured[0]['cert_reqs'] == ssl.CERT_REQUIRED
     assert captured[0]['assert_hostname'] is not False
     assert conn.is_verified and not conn.proxy
+
+
+@pytest.mark.parametrize('scheme', ['http', 'https'])
+@pytest.mark.parametrize('status', [301, 302, 303, 307, 308])
+def test_redirect_bodies_never_materialized_or_decompressed(wire, scheme, status):
+    import zlib
+    bomb = zlib.compress(b'x' * (8 * 1024 * 1024))
+    wire[1].append((status, {'Location': f'{scheme}://second.example/',
+                           'Content-Encoding': 'gzip', 'Content-Type': 'application/pdf'}, bomb))
+    assert mf._fetch_page(f'{scheme}://public.example/').status_code == 200
+    assert len(wire[0]) == 2
+
+
+@pytest.mark.parametrize('scheme', ['http', 'https'])
+def test_same_origin_response_cookies_never_forwarded(wire, scheme):
+    wire[1].append((302, {'Location': '/next', 'Set-Cookie': 'synthetic=secret; Path=/'}, b'ignored'))
+    assert mf._fetch_page(f'{scheme}://public.example/').status_code == 200
+    assert len(wire[0]) == 2
+    assert all(dict(request.headers) == mr.OUTBOUND_HEADERS for request, _ in wire[0])
+
+
+@pytest.mark.parametrize('scheme', ['http', 'https'])
+def test_explicit_cookies_rejected_before_fetch(wire, scheme):
+    with pytest.raises(ValueError, match='COOKIES_FORBIDDEN'):
+        mf._safe_requests_get(f'{scheme}://public.example/', timeout=3,
+                              cookies={'synthetic-session': 'synthetic'})
+    assert not wire[0]
+
+
+@pytest.mark.parametrize('scheme', ['http', 'https'])
+def test_wordpress_path_secrets_not_logged(app, wire, caplog, scheme):
+    from app.services.menu_extract import _try_wordpress_api
+    import logging
+    caplog.set_level(logging.INFO)
+    result = _try_wordpress_api(urlparse(f'{scheme}://public.example/synthetic-path-secret'), 'wp-json')
+    assert result == (None, [])
+    assert 'synthetic-path-secret' not in caplog.text
+
+
+@pytest.mark.parametrize('code,expected', [('MENU_FETCH_TIMEOUT', requests.Timeout),
+                                         ('MENU_DEADLINE', requests.Timeout),
+                                         ('MENU_FETCH_FAILED', requests.ConnectionError),
+                                         ('MENU_DESTINATION_BLOCKED', ValueError)])
+def test_sanitized_worker_errors_keep_web_failure_semantics(monkeypatch, code, expected):
+    class Proc:
+        returncode = 0
+        def communicate(self, *args, **kwargs):
+            return json.dumps({'error': code}).encode(), b''
+        def poll(self): return 0
+    monkeypatch.setattr(mr.subprocess, 'Popen', lambda *a, **k: Proc())
+    with pytest.raises(expected): mr.run_worker({}, 3)
+
+
+def test_worker_exception_details_never_serialized():
+    from urllib3.exceptions import ReadTimeoutError
+    for error in [requests.Timeout('synthetic-secret'), socket.timeout('synthetic-secret'),
+                  ReadTimeoutError(None, 'synthetic-secret', 'synthetic-secret')]:
+        assert mr._failure_code(error) == 'MENU_FETCH_TIMEOUT'
+    for error in [requests.ConnectionError('synthetic-secret'), RuntimeError('synthetic-secret')]:
+        assert mr._failure_code(error) == 'MENU_FETCH_FAILED'

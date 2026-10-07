@@ -262,7 +262,7 @@ def _try_wordpress_api(base_parsed, raw_html):
             unique_slugs.append(s)
     slugs_to_try = unique_slugs
 
-    current_app.logger.info(f"[SCRAPER] WordPress detected — trying REST API for slugs: {slugs_to_try}")
+    current_app.logger.info(f"[SCRAPER] WordPress detected — trying {len(slugs_to_try)} REST API candidates")
 
     all_sections = SectionAccumulator()
     best_title = None
@@ -289,7 +289,7 @@ def _try_wordpress_api(base_parsed, raw_html):
             text = bounded_text(soup)
 
             if len(text) > 100 and _content_has_food_items(text):
-                current_app.logger.info(f"[SCRAPER] WP API hit for slug '{slug}': {len(text)} chars with food content")
+                current_app.logger.info(f"[SCRAPER] WP API hit: {len(text)} chars with food content")
                 sections = _extract_page_sections(content_html, soup)
                 all_sections.extend(sections)
                 if not best_title:
@@ -326,15 +326,15 @@ def _try_wordpress_api(base_parsed, raw_html):
                     sub_soup = bounded_soup(sub_html)
                     sub_text = bounded_text(sub_soup)
                     if len(sub_text) > 200 and _content_has_food_items(sub_text):
-                        current_app.logger.info(f"[SCRAPER] WP API sub-page '{link_slug}': {len(sub_text)} chars with food content")
+                        current_app.logger.info(f"[SCRAPER] WP API sub-page: {len(sub_text)} chars with food content")
                         sub_sections = _extract_page_sections(sub_html, sub_soup)
                         all_sections.extend(sub_sections)
                 except Exception as e:
-                    current_app.logger.warning(f"[SCRAPER] WP API sub-page '{link_slug}' failed: {type(e).__name__}")
+                    current_app.logger.warning(f"[SCRAPER] WP API sub-page failed: {type(e).__name__}")
                     continue
 
         except Exception as e:
-            current_app.logger.warning(f"[SCRAPER] WP API attempt for '{slug}' failed: {type(e).__name__}")
+            current_app.logger.warning(f"[SCRAPER] WP API attempt failed: {type(e).__name__}")
             continue
 
     if all_sections:

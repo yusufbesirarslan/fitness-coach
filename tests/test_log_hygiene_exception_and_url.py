@@ -1,4 +1,4 @@
-"""Server logs carry an exception TYPE and a URL's location -- never their payloads.
+"""Server logs carry an exception TYPE and a URL's origin -- never their paths or payloads.
 
 Triage 2026-09-30 #7. The repo convention is `type(e).__name__` only; a handful of
 paths logged the exception object itself, and an S3/provider/requests exception
@@ -31,14 +31,14 @@ def _assert_clean(caplog):
 
 @pytest.mark.parametrize("raw,expected", [
     ("https://menu.example.com/lunch?token=s3cr3t&utm=1#frag",
-     "https://menu.example.com/lunch"),
+     "https://menu.example.com/<path-redacted>"),
     ("https://user:hunter2@menu.example.com:443/a/b?sig=abc",
-     "https://menu.example.com/a/b"),
-    ("http://menu.example.com", "http://menu.example.com"),
+     "https://menu.example.com/<path-redacted>"),
+    ("http://menu.example.com", "http://menu.example.com/<path-redacted>"),
     ("https://drive.google.com/file/d/ID/view?usp=sharing",
-     "https://drive.google.com/file/d/ID/view"),
+     "https://drive.google.com/<path-redacted>"),
 ])
-def test_loggable_url_keeps_location_and_drops_credentials(raw, expected):
+def test_loggable_url_keeps_origin_and_drops_path_and_credentials(raw, expected):
     assert menu_fetch.loggable_url(raw) == expected
 
 

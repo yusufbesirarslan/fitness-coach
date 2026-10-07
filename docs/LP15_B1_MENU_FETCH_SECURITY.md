@@ -38,6 +38,10 @@ TLS SNI and certificate authority; certificate verification stays enabled.
 There is no process-global DNS monkeypatch. No proxy, automatic redirect,
 transport retry or connection reused across origins is permitted.
 
+Request preparation uses a fresh Requests Session, followed by one adapter send.
+This deliberately bypasses Session.send/get: Requests prepares Response.next and
+consumes redirect bodies even with allow_redirects=False. Redirect bodies are
+closed unread, so hidden body materialization/decompression cannot bypass caps.
 Each hop uses a fresh Requests Session with `trust_env=False`, no auth and an
 empty cookie jar. Environment proxies, `.netrc`, environment CA overrides,
 AWS credentials and Cognito tokens cannot configure the session. The worker
@@ -121,7 +125,7 @@ Stable internal categories: MENU_URL_INVALID, MENU_DNS_FAILED,
 MENU_DESTINATION_BLOCKED, MENU_PEER_BLOCKED, MENU_HTTPS_DOWNGRADE,
 MENU_REDIRECT_LIMIT, MENU_WORK_LIMIT, MENU_DEADLINE, MENU_BODY_LIMIT,
 MENU_ENCODING_UNSUPPORTED, MENU_MEDIA_UNSUPPORTED, MENU_PARSE_LIMIT,
-MENU_FETCH_FAILED, MENU_COOKIES_FORBIDDEN and
+MENU_FETCH_FAILED, MENU_FETCH_TIMEOUT, MENU_COOKIES_FORBIDDEN and
 MENU_DRIVE_CONFIRMATION_UNSUPPORTED. They carry no remote exception details.
 Existing web status/product semantics are preserved where applicable; disabled
 media/Drive compatibility returns a sanitized failure. Logs redact userinfo,
