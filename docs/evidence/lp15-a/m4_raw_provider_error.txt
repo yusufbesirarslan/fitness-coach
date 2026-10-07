@@ -1,0 +1,1932 @@
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF                                           [100%]
+=================================== FAILURES ===================================
+________ test_provider_error_sanitization[timeout-/foods/search?q=food] ________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10e9fbdd0>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10e9cea90>
+path = '/foods/search?q=food', failure = 'timeout'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=e63355b524974168
+INFO     app:observability.py:195 request id=e63355b524974168 method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=118.2 user=- ip=127.0.0.1
+____ test_provider_error_sanitization[timeout-/foods/fatsecret/A/servings] _____
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f12bd10>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10f197f50>
+path = '/foods/fatsecret/A/servings', failure = 'timeout'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v4 error_type=Timeout
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v2 error_type=Timeout
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get error_type=Timeout
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=591054940c1746da
+INFO     app:observability.py:195 request id=591054940c1746da method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.1 user=- ip=127.0.0.1
+__ test_provider_error_sanitization[timeout-/foods/barcode?code=012345678905] __
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f28bf50>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10f110810>
+path = '/foods/barcode?code=012345678905', failure = 'timeout'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=faa094bddf544a01
+INFO     app:observability.py:195 request id=faa094bddf544a01 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.9 user=- ip=127.0.0.1
+______ test_provider_error_sanitization[connection-/foods/search?q=food] _______
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f369a90>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10f2c7f90>
+path = '/foods/search?q=food', failure = 'connection'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=fadbfe708e0e4b05
+INFO     app:observability.py:195 request id=fadbfe708e0e4b05 method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=1.0 user=- ip=127.0.0.1
+___ test_provider_error_sanitization[connection-/foods/fatsecret/A/servings] ___
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f539490>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10f5bf650>
+path = '/foods/fatsecret/A/servings', failure = 'connection'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v4 error_type=ConnectionError
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v2 error_type=ConnectionError
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get error_type=ConnectionError
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=87eacabad3094163
+INFO     app:observability.py:195 request id=87eacabad3094163 method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.0 user=- ip=127.0.0.1
+_ test_provider_error_sanitization[connection-/foods/barcode?code=012345678905] _
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f686790>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10f6e13d0>
+path = '/foods/barcode?code=012345678905', failure = 'connection'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=116ed45177104472
+INFO     app:observability.py:195 request id=116ed45177104472 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.5 user=- ip=127.0.0.1
+_________ test_provider_error_sanitization[token-/foods/search?q=food] _________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f629fd0>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10f8a9f90>
+path = '/foods/search?q=food', failure = 'token'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=d000fd0cd3074d22
+INFO     app:observability.py:195 request id=d000fd0cd3074d22 method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=0.9 user=- ip=127.0.0.1
+_____ test_provider_error_sanitization[token-/foods/fatsecret/A/servings] ______
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10fa1ae50>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10fa1b790>
+path = '/foods/fatsecret/A/servings', failure = 'token'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:fatsecret.py:199 fatsecret event=food_servings_token_failed error_type=RuntimeError
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=88fbcfc776b0420e
+INFO     app:observability.py:195 request id=88fbcfc776b0420e method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=0.9 user=- ip=127.0.0.1
+___ test_provider_error_sanitization[token-/foods/barcode?code=012345678905] ___
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10faf6210>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10fb9cf10>
+path = '/foods/barcode?code=012345678905', failure = 'token'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=787d7f9e0fea4a61
+INFO     app:observability.py:195 request id=787d7f9e0fea4a61 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.5 user=- ip=127.0.0.1
+_________ test_provider_error_sanitization[rate-/foods/search?q=food] __________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10fcb3cd0>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10fa5b5d0>
+path = '/foods/search?q=food', failure = 'rate'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=f80fa99149bf42a0
+INFO     app:observability.py:195 request id=f80fa99149bf42a0 method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=0.9 user=- ip=127.0.0.1
+______ test_provider_error_sanitization[rate-/foods/fatsecret/A/servings] ______
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10fdc8b50>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10fe7fc90>
+path = '/foods/fatsecret/A/servings', failure = 'rate'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get.v4
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get.v2
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=2d9d21e84c3f4148
+INFO     app:observability.py:195 request id=2d9d21e84c3f4148 method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.0 user=- ip=127.0.0.1
+___ test_provider_error_sanitization[rate-/foods/barcode?code=012345678905] ____
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10ff97510>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10ffc7190>
+path = '/foods/barcode?code=012345678905', failure = 'rate'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=7983b9281d8d4c07
+INFO     app:observability.py:195 request id=7983b9281d8d4c07 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.4 user=- ip=127.0.0.1
+______ test_provider_error_sanitization[unavailable-/foods/search?q=food] ______
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10f55d710>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10f2fda10>
+path = '/foods/search?q=food', failure = 'unavailable'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=3793c02b7a8149cd
+INFO     app:observability.py:195 request id=3793c02b7a8149cd method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=1.1 user=- ip=127.0.0.1
+__ test_provider_error_sanitization[unavailable-/foods/fatsecret/A/servings] ___
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11017b9d0>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x110209cd0>
+path = '/foods/fatsecret/A/servings', failure = 'unavailable'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get.v4
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get.v2
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=a03eba30b36640c9
+INFO     app:observability.py:195 request id=a03eba30b36640c9 method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=0.9 user=- ip=127.0.0.1
+_ test_provider_error_sanitization[unavailable-/foods/barcode?code=012345678905] _
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1103a9490>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x10e96b390>
+path = '/foods/barcode?code=012345678905', failure = 'unavailable'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=e6525243808349a4
+INFO     app:observability.py:195 request id=e6525243808349a4 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.4 user=- ip=127.0.0.1
+_________ test_provider_error_sanitization[auth-/foods/search?q=food] __________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110559350>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x110549ad0>
+path = '/foods/search?q=food', failure = 'auth'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=b7aeeb2fb3324519
+INFO     app:observability.py:195 request id=b7aeeb2fb3324519 method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=0.9 user=- ip=127.0.0.1
+______ test_provider_error_sanitization[auth-/foods/fatsecret/A/servings] ______
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1106e6a10>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x110711810>
+path = '/foods/fatsecret/A/servings', failure = 'auth'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get.v4
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get.v2
+WARNING  app:fatsecret.py:223 fatsecret event=food_servings_provider_error method=food.get
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=7322ccdcb4cf42fc
+INFO     app:observability.py:195 request id=7322ccdcb4cf42fc method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.0 user=- ip=127.0.0.1
+___ test_provider_error_sanitization[auth-/foods/barcode?code=012345678905] ____
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110831490>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x11081e750>
+path = '/foods/barcode?code=012345678905', failure = 'auth'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=5f58aff859364135
+INFO     app:observability.py:195 request id=5f58aff859364135 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.4 user=- ip=127.0.0.1
+________ test_provider_error_sanitization[http429-/foods/search?q=food] ________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1109fb490>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x11099ef50>
+path = '/foods/search?q=food', failure = 'http429'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=2bf6544fa3c04bb1
+INFO     app:observability.py:195 request id=2bf6544fa3c04bb1 method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=0.9 user=- ip=127.0.0.1
+____ test_provider_error_sanitization[http429-/foods/fatsecret/A/servings] _____
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110b15f50>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x110acc8d0>
+path = '/foods/fatsecret/A/servings', failure = 'http429'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v4 error_type=FoodProviderUnavailable
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v2 error_type=FoodProviderUnavailable
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get error_type=FoodProviderUnavailable
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=c8015780c54f4336
+INFO     app:observability.py:195 request id=c8015780c54f4336 method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.0 user=- ip=127.0.0.1
+__ test_provider_error_sanitization[http429-/foods/barcode?code=012345678905] __
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110c3e4d0>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x110c81550>
+path = '/foods/barcode?code=012345678905', failure = 'http429'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=103d532630f24e62
+INFO     app:observability.py:195 request id=103d532630f24e62 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.4 user=- ip=127.0.0.1
+________ test_provider_error_sanitization[http503-/foods/search?q=food] ________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110e00d90>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x110e5a510>
+path = '/foods/search?q=food', failure = 'http503'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=c8e5468c09a9411d
+INFO     app:observability.py:195 request id=c8e5468c09a9411d method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=1.0 user=- ip=127.0.0.1
+____ test_provider_error_sanitization[http503-/foods/fatsecret/A/servings] _____
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110ee1490>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x110fc8bd0>
+path = '/foods/fatsecret/A/servings', failure = 'http503'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v4 error_type=FoodProviderUnavailable
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v2 error_type=FoodProviderUnavailable
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get error_type=FoodProviderUnavailable
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=632de4e9aff84f56
+INFO     app:observability.py:195 request id=632de4e9aff84f56 method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.0 user=- ip=127.0.0.1
+__ test_provider_error_sanitization[http503-/foods/barcode?code=012345678905] __
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1110bc5d0>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x1110705d0>
+path = '/foods/barcode?code=012345678905', failure = 'http503'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=205d191cb1c54e93
+INFO     app:observability.py:195 request id=205d191cb1c54e93 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.5 user=- ip=127.0.0.1
+_________ test_provider_error_sanitization[json-/foods/search?q=food] __________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111225450>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x11107a2d0>
+path = '/foods/search?q=food', failure = 'json'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=4c63566432b242d4
+INFO     app:observability.py:195 request id=4c63566432b242d4 method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=0.9 user=- ip=127.0.0.1
+______ test_provider_error_sanitization[json-/foods/fatsecret/A/servings] ______
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x11133e790>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x111384f10>
+path = '/foods/fatsecret/A/servings', failure = 'json'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v4 error_type=ValueError
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v2 error_type=ValueError
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get error_type=ValueError
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=af43947c646b4d21
+INFO     app:observability.py:195 request id=af43947c646b4d21 method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.0 user=- ip=127.0.0.1
+___ test_provider_error_sanitization[json-/foods/barcode?code=012345678905] ____
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111505310>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x111513d50>
+path = '/foods/barcode?code=012345678905', failure = 'json'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=04228c0d95fe4213
+INFO     app:observability.py:195 request id=04228c0d95fe4213 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.3 user=- ip=127.0.0.1
+_________ test_provider_error_sanitization[shape-/foods/search?q=food] _________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111669b90>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x1116d3fd0>
+path = '/foods/search?q=food', failure = 'shape'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=e7e613626a50444a
+INFO     app:observability.py:195 request id=e7e613626a50444a method=GET path=/api/v1/nutrition/foods/search status=503 dur_ms=0.9 user=- ip=127.0.0.1
+_____ test_provider_error_sanitization[shape-/foods/fatsecret/A/servings] ______
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1117c23d0>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x11174c8d0>
+path = '/foods/fatsecret/A/servings', failure = 'shape'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v4 error_type=FoodProviderUnavailable
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get.v2 error_type=FoodProviderUnavailable
+WARNING  app:fatsecret.py:216 fatsecret event=food_servings_request_failed method=food.get error_type=FoodProviderUnavailable
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=622bddf3f91e41ac
+INFO     app:observability.py:195 request id=622bddf3f91e41ac method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=1.0 user=- ip=127.0.0.1
+___ test_provider_error_sanitization[shape-/foods/barcode?code=012345678905] ___
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = []
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x111961150>
+caplog = <_pytest.logging.LogCaptureFixture object at 0x1118f9910>
+path = '/foods/barcode?code=012345678905', failure = 'shape'
+
+    @pytest.mark.parametrize("path", READS)
+    @pytest.mark.parametrize("failure", ["timeout", "connection", "token", "rate", "unavailable", "auth",
+                                         "http429", "http503", "json", "shape"])
+    def test_provider_error_sanitization(raw_client, native, upstream, monkeypatch, caplog, path, failure):
+        secret = "UPSTREAM_SECRET https://provider.invalid/?credential=SECRET"
+
+        def fail_token():
+            raise RuntimeError(secret)
+
+        def get(*a, **kw):
+            if failure == "timeout":
+                raise requests.Timeout(secret)
+            if failure == "connection":
+                raise requests.ConnectionError(secret)
+            if failure in {"rate", "unavailable", "auth"}:
+                return Response({"error": {"code": {"rate": 11, "unavailable": 20, "auth": 13}[failure],
+                                           "message": secret}})
+            if failure.startswith("http"):
+                return Response({"foods": {}}, int(failure[4:]))
+            return Response(ValueError(secret) if failure == "json" else [secret])
+
+        monkeypatch.setattr(fatsecret, "_fs_get", get)
+        if failure == "token":
+            monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail_token)
+        response = raw_client.get(PREFIX + path, headers=native[1])
+>       error(response, 503, "FOOD_PROVIDER_UNAVAILABLE", True)
+
+tests/test_lp15_native_food_contract.py:258:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse 109 bytes [503 SERVICE UNAVAILABLE]>
+status = 503, code = 'FOOD_PROVIDER_UNAVAILABLE', retryable = True
+
+    def error(response, status, code, retryable=False):
+        assert response.status_code == status
+        assert set(response.json) == {"error"}
+        envelope = response.json["error"]
+        assert set(envelope) == {"code", "message", "retryable", "request_id"}
+        assert envelope["code"] == code
+        assert envelope["retryable"] is retryable
+>       assert isinstance(envelope["message"], str) and envelope["message"]
+E       AssertionError: assert (True and '')
+E        +  where True = isinstance('', str)
+
+tests/test_lp15_native_food_contract.py:83: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+WARNING  app:fatsecret.py:327 fatsecret event=barcode_lookup_failed
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=2c5069e45c454495
+INFO     app:observability.py:195 request id=2c5069e45c454495 method=GET path=/api/v1/nutrition/foods/barcode status=503 dur_ms=1.7 user=- ip=127.0.0.1
+=========================== short test summary info ============================
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[timeout-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[timeout-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[timeout-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[connection-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[connection-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[connection-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[token-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[token-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[token-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[rate-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[rate-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[rate-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[unavailable-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[unavailable-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[unavailable-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[auth-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[auth-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[auth-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[http429-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[http429-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[http429-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[http503-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[http503-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[http503-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[json-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[json-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[json-/foods/barcode?code=012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[shape-/foods/search?q=food]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[shape-/foods/fatsecret/A/servings]
+FAILED tests/test_lp15_native_food_contract.py::test_provider_error_sanitization[shape-/foods/barcode?code=012345678905]
+30 failed, 60 deselected in 5.92s

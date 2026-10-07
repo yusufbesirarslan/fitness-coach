@@ -1,0 +1,36 @@
+...F                                                                     [100%]
+=================================== FAILURES ===================================
+_ test_bounded_query[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx] _
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [{'method': 'foods.search', 'search_expression': 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'format': 'json', 'max_results': 8}]
+query = 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+
+    @pytest.mark.parametrize("query", ["", " ", "a", "x" * 101])
+    def test_bounded_query(raw_client, native, upstream, query):
+        response = raw_client.get(PREFIX + "/foods/search", query_string={"q": query}, headers=native[1])
+>       error(response, 400, "INVALID_FOOD_QUERY")
+
+tests/test_lp15_native_food_contract.py:159:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [200 OK]>, status = 400
+code = 'INVALID_FOOD_QUERY', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 200 == 400
+E        +  where 200 = <WrapperTestResponse streamed [200 OK]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=3079160f692f4795 method=GET path=/api/v1/nutrition/foods/search status=200 dur_ms=1.0 user=- ip=127.0.0.1
+=========================== short test summary info ============================
+FAILED tests/test_lp15_native_food_contract.py::test_bounded_query[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]
+1 failed, 3 passed, 86 deselected in 3.78s

@@ -178,7 +178,20 @@ def _normalize_servings(results):
     return results
 
 
-def _food_get_raw(food_id):
+class FoodProviderUnavailable(Exception):
+    """Sanitized native discovery failure; never contains upstream detail."""
+
+
+def _native_payload(response):
+    if not 200 <= response.status_code < 300:
+        raise FoodProviderUnavailable from None
+    data = response.json()
+    if not isinstance(data, dict):
+        raise FoodProviderUnavailable from None
+    return data
+
+
+def _food_get_raw(food_id, *, strict=False):
     """Fetch provider food data without applying legacy serving semantics."""
     try:
         token = _get_fatsecret_token()
@@ -186,8 +199,11 @@ def _food_get_raw(food_id):
         current_app.logger.error(
             "fatsecret event=food_servings_token_failed error_type=%s",
             type(error).__name__)
+        if strict:
+            raise FoodProviderUnavailable from None
         return None
 
+    failed = False
     for method in ("food.get.v4", "food.get.v2", "food.get"):
         try:
             resp = _fs_get(FATSECRET_API_URL, params={
@@ -195,20 +211,32 @@ def _food_get_raw(food_id):
                 "food_id": food_id,
                 "format": "json",
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-            data = resp.json()
+            data = _native_payload(resp) if strict else resp.json()
         except Exception as error:
             current_app.logger.warning(
                 "fatsecret event=food_servings_request_failed method=%s "
                 "error_type=%s", method, type(error).__name__)
+            failed = True
             continue
 
         if "error" in data:
             current_app.logger.warning(
                 "fatsecret event=food_servings_provider_error method=%s", method)
+            # 106 is an invalid/missing provider ID. Other codes (including
+            # authentication, rate limit and unavailable) are NOT misses.
+            error = data["error"]
+            if not (isinstance(error, dict) and str(error.get("code")) == "106"):
+                failed = True
             continue
 
         try:
             food = data["food"]
+            if strict and food is None:
+                continue
+            if strict and (not isinstance(food, dict) or (
+                    food.get("food_id") is not None
+                    and str(food["food_id"]) != str(food_id))):
+                raise FoodProviderUnavailable
             servings_raw = food["servings"]["serving"]
             if isinstance(servings_raw, dict):
                 food = dict(food)
@@ -219,11 +247,14 @@ def _food_get_raw(food_id):
                 "fatsecret event=food_servings_ok method=%s serving_count=%d",
                 method, len(servings_raw))
             return food
-        except (KeyError, TypeError):
+        except (KeyError, TypeError, FoodProviderUnavailable):
             current_app.logger.warning(
                 "fatsecret event=food_servings_missing method=%s", method)
+            failed = True
             continue
 
+    if strict and failed:
+        raise FoodProviderUnavailable from None
     return None
 
 
@@ -266,7 +297,7 @@ def _legacy_servings_from_raw(food_id, food):
     return _normalize_servings(results)
 
 
-def _food_find_id_by_barcode_raw(code):
+def _food_find_id_by_barcode_raw(code, *, strict=False):
     """Resolve a barcode to provider identity without logging its value."""
     digits = "".join(ch for ch in (code or "") if ch.isdigit())
     if not digits:
@@ -279,10 +310,23 @@ def _food_find_id_by_barcode_raw(code):
             "barcode": gtin,
             "format": "json",
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-        data = response.json()
+        data = _native_payload(response) if strict else response.json()
+        if strict and "error" in data:
+            raise FoodProviderUnavailable
+        if strict and (not isinstance(data.get("food_id"), dict)
+                       or "value" not in data["food_id"]):
+            raise FoodProviderUnavailable
+        if strict:
+            value = data["food_id"]["value"]
+            if (isinstance(value, bool) or not isinstance(value, (str, int))
+                    or not str(value) or str(value) != str(value).strip()
+                    or len(str(value)) > 128):
+                raise FoodProviderUnavailable
     except Exception:
         # Provider errors may echo query parameters, so log no exception text.
         current_app.logger.warning("fatsecret event=barcode_lookup_failed")
+        if strict:
+            raise FoodProviderUnavailable from None
         return None
     food_id = str((data.get("food_id") or {}).get("value", "0"))
     return food_id if food_id and food_id != "0" else None
@@ -340,11 +384,13 @@ def _food_find_by_barcode(code):
     return {"food_id": fid, "name": name, "brand": brand, "servings": servings}
 
 
-def _food_search_raw(q):
+def _food_search_raw(q, *, strict=False):
     """Fetch search matches without parsing provider description text."""
     try:
         token = _get_fatsecret_token()
     except Exception:
+        if strict:
+            raise FoodProviderUnavailable from None
         return None
 
     try:
@@ -354,8 +400,12 @@ def _food_search_raw(q):
             "format": "json",
             "max_results": 8,
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-        data = resp.json()
+        data = _native_payload(resp) if strict else resp.json()
+        if strict and ("error" in data or not isinstance(data.get("foods"), dict)):
+            raise FoodProviderUnavailable
     except Exception:
+        if strict:
+            raise FoodProviderUnavailable from None
         return None
 
     if "error" in data:
@@ -364,8 +414,13 @@ def _food_search_raw(q):
     foods = data.get("foods", {}).get("food", [])
     if isinstance(foods, dict):
         foods = [foods]
+    if strict and foods is not None and not isinstance(foods, list):
+        raise FoodProviderUnavailable from None
     if not foods:
-        return None
+        return [] if strict else None
+    if strict and (not isinstance(foods, list)
+                   or any(not isinstance(food, dict) for food in foods)):
+        raise FoodProviderUnavailable from None
     return foods
 
 

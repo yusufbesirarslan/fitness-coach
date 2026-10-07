@@ -1,0 +1,81 @@
+[
+  {
+    "mutation": "M1_DISPLAY_NAME_IDENTITY",
+    "selector": "test_duplicate_name_identity",
+    "baseline_exit": 0,
+    "mutation_exit": 1,
+    "caught": true,
+    "restored_byte_exact": true,
+    "files": {
+      "app/services/mobile_food_discovery.py": "9ba55b629c5fea678b360d4e400791e28b2a0b0ba919a3b5ed680c454dd3480f"
+    },
+    "baseline_summary": "1 passed, 89 deselected in 5.20s",
+    "mutation_summary": "1 failed, 89 deselected in 3.62s"
+  },
+  {
+    "mutation": "M2_CROSS_FOOD_SERVING",
+    "selector": "test_cross_food_serving",
+    "baseline_exit": 0,
+    "mutation_exit": 1,
+    "caught": true,
+    "restored_byte_exact": true,
+    "files": {
+      "app/services/provider_food_snapshot.py": "d320d6b2f73a4cd5e54acc7b21e2f721b6651820227fe03d0851a40b6fe35805"
+    },
+    "baseline_summary": "1 passed, 89 deselected in 3.29s",
+    "mutation_summary": "1 failed, 89 deselected in 3.43s"
+  },
+  {
+    "mutation": "M3_UNBOUNDED_QUERY",
+    "selector": "test_bounded_query",
+    "baseline_exit": 0,
+    "mutation_exit": 1,
+    "caught": true,
+    "restored_byte_exact": true,
+    "files": {
+      "app/blueprints/mobile_nutrition.py": "66866429cfe09cf1ecb11acfa0b4902ddc0d284f807988db6b859ab5bb78449b"
+    },
+    "baseline_summary": "4 passed, 86 deselected in 3.84s",
+    "mutation_summary": "1 failed, 3 passed, 86 deselected in 3.78s"
+  },
+  {
+    "mutation": "M4_RAW_PROVIDER_ERROR",
+    "selector": "test_provider_error_sanitization",
+    "baseline_exit": 0,
+    "mutation_exit": 1,
+    "caught": true,
+    "restored_byte_exact": true,
+    "files": {
+      "app/blueprints/mobile_nutrition.py": "66866429cfe09cf1ecb11acfa0b4902ddc0d284f807988db6b859ab5bb78449b"
+    },
+    "baseline_summary": "30 passed, 60 deselected in 5.15s",
+    "mutation_summary": "30 failed, 60 deselected in 5.92s"
+  },
+  {
+    "mutation": "M5_BARCODE_VALIDATION",
+    "selector": "test_barcode",
+    "baseline_exit": 0,
+    "mutation_exit": 1,
+    "caught": true,
+    "restored_byte_exact": true,
+    "files": {
+      "app/services/fatsecret.py": "6b6fda6750506bb302c56830abd09322f4edd784de628fa7139c373c22cf46eb",
+      "app/blueprints/mobile_nutrition.py": "66866429cfe09cf1ecb11acfa0b4902ddc0d284f807988db6b859ab5bb78449b"
+    },
+    "baseline_summary": "11 passed, 79 deselected in 4.94s",
+    "mutation_summary": "9 failed, 2 passed, 79 deselected in 4.12s"
+  },
+  {
+    "mutation": "M6_SERVING_LABEL_IDENTITY",
+    "selector": "test_duplicate_serving_label_identity",
+    "baseline_exit": 0,
+    "mutation_exit": 1,
+    "caught": true,
+    "restored_byte_exact": true,
+    "files": {
+      "app/services/mobile_food_discovery.py": "9ba55b629c5fea678b360d4e400791e28b2a0b0ba919a3b5ed680c454dd3480f"
+    },
+    "baseline_summary": "1 passed, 89 deselected in 3.26s",
+    "mutation_summary": "1 failed, 89 deselected in 3.41s"
+  }
+]

@@ -89,7 +89,7 @@ def provider(monkeypatch):
     """Stub the provider *network* boundary and record every lookup."""
     calls = []
 
-    def fake_food_get_raw(food_id):
+    def fake_food_get_raw(food_id, **kwargs):
         calls.append(str(food_id))
         return _raw_provider_food() if str(food_id) == FOOD_ID else None
 

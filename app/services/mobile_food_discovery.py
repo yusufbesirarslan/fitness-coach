@@ -6,8 +6,29 @@ from app.services import fatsecret
 from app.services.ai_gate import blocking_concurrency_slot
 from app.services.barcode import normalize_barcode
 
+SEARCH_RESULT_LIMIT = 8
+
+
+def _identity(value):
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise fatsecret.FoodProviderUnavailable
+    identity = str(value)
+    if not identity or identity != identity.strip() or len(identity) > 128:
+        raise fatsecret.FoodProviderUnavailable
+    return identity
+
+
+def _text(value):
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise fatsecret.FoodProviderUnavailable
+    return value
+
 
 def _number(value):
+    if isinstance(value, bool):
+        return None
     try:
         parsed = float(value)
     except (TypeError, ValueError):
@@ -28,10 +49,13 @@ def _per_100g(nutrition, grams):
     if grams is None or grams <= 0 or any(
             value is None for value in nutrition.values()):
         return None
-    return {
+    values = {
         key: round(value * 100 / grams, 4)
         for key, value in nutrition.items()
     }
+    if any(not math.isfinite(value) for value in values.values()):
+        raise fatsecret.FoodProviderUnavailable
+    return values
 
 
 def project_food(food_id, raw_food):
@@ -39,17 +63,26 @@ def project_food(food_id, raw_food):
     servings_raw = ((raw_food or {}).get("servings") or {}).get("serving") or []
     if isinstance(servings_raw, dict):
         servings_raw = [servings_raw]
+    if not isinstance(servings_raw, list):
+        raise fatsecret.FoodProviderUnavailable
     projected = []
+    identities = set()
     for raw in servings_raw:
+        if not isinstance(raw, dict):
+            raise fatsecret.FoodProviderUnavailable
+        serving_id = _identity(raw.get("serving_id"))
+        if serving_id in identities:
+            raise fatsecret.FoodProviderUnavailable
+        identities.add(serving_id)
         nutrition = _nutrition(raw)
         grams = _number(raw.get("metric_serving_amount"))
         unit = raw.get("metric_serving_unit")
         metric_mass = None
-        if grams is not None and unit:
-            metric_mass = {"amount": grams, "unit": str(unit)}
+        if grams is not None and grams > 0 and str(unit or "").lower() == "g":
+            metric_mass = {"amount": grams, "unit": "g"}
         projected.append({
-            "serving_id": str(raw.get("serving_id") or ""),
-            "description": str(raw.get("serving_description") or ""),
+            "serving_id": serving_id,
+            "description": _text(raw.get("serving_description")),
             "nutrition": nutrition,
             "metric_mass": metric_mass,
             "nutrition_per_100g": _per_100g(
@@ -57,9 +90,9 @@ def project_food(food_id, raw_food):
         })
     return {
         "provider": "fatsecret",
-        "food_id": str(food_id),
-        "name": str((raw_food or {}).get("food_name") or ""),
-        "brand": str((raw_food or {}).get("brand_name") or ""),
+        "food_id": _identity(food_id),
+        "name": _text((raw_food or {}).get("food_name")),
+        "brand": _text((raw_food or {}).get("brand_name")),
         "servings": projected,
     }
 
@@ -72,53 +105,33 @@ def search(query):
     # mevcut `except Exception` yoluna düşer → FOOD_PROVIDER_UNAVAILABLE 503
     # retryable=True, yani istemci için doğru semantik.
     with blocking_concurrency_slot():
-        foods = fatsecret._food_search_raw(query) or []
+        foods = fatsecret._food_search_raw(query, strict=True)
     return [{
         "provider": "fatsecret",
-        "food_id": str(food.get("food_id") or ""),
-        "name": str(food.get("food_name") or ""),
-        "brand": str(food.get("brand_name") or ""),
-    } for food in foods if food.get("food_id")]
+        "food_id": _identity(food.get("food_id")),
+        "name": _text(food.get("food_name")),
+        "brand": _text(food.get("brand_name")),
+    } for food in foods[:SEARCH_RESULT_LIMIT]]
 
 
 def servings(food_id):
     with blocking_concurrency_slot():
-        raw = fatsecret._food_get_raw(food_id)
+        raw = fatsecret._food_get_raw(food_id, strict=True)
     return project_food(food_id, raw) if raw else None
 
 
-def _cached_food(row):
-    payload = row.payload or {}
-    raw_servings = []
-    for serving in payload.get("servings") or []:
-        macros = serving.get("macros") or {}
-        amount = serving.get("metric_serving_amount")
-        raw_servings.append({
-            "serving_id": serving.get("id"),
-            "serving_description": serving.get("description"),
-            # A cached zero may be legacy fabrication, so it remains unknown.
-            "metric_serving_amount": amount if _number(amount) not in (None, 0) else None,
-            "metric_serving_unit": serving.get("metric_serving_unit"),
-            "calories": macros.get("calories"),
-            "protein": macros.get("protein"),
-            "carbohydrate": macros.get("carbs"),
-            "fat": macros.get("fat"),
-        })
-    return project_food(row.food_id, {
-        "food_name": row.food_name,
-        "brand_name": row.brand,
-        "servings": {"serving": raw_servings},
-    })
-
-
 def barcode_lookup(code):
+    if not isinstance(code, str) or not code.isascii() or not code.isdigit():
+        return None
     normalized = normalize_barcode(code)
     if not normalized:
         return None
     cached = BarcodeFoodCache.query.filter_by(barcode=normalized).first()
-    if cached:
-        return _cached_food(cached)
-    # Slot yalnızca ağ turunu sarar — yukarıdaki cache HIT'i saf DB'dir.
+    if cached and cached.food_id:
+        # Legacy cache payloads may contain synthetic serving identities and
+        # estimated mass. Only the provider food ID crosses the native boundary.
+        return servings(_identity(cached.food_id))
+    # Resolve the food identity first, then use the same serving pipeline.
     with blocking_concurrency_slot():
-        food_id = fatsecret._food_find_id_by_barcode_raw(normalized)
+        food_id = fatsecret._food_find_id_by_barcode_raw(normalized, strict=True)
     return servings(food_id) if food_id else None

@@ -1,0 +1,27 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+____________________ test_duplicate_serving_label_identity _____________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [{'method': 'food.get.v4', 'food_id': 'A', 'format': 'json'}]
+
+    def test_duplicate_serving_label_identity(raw_client, native, upstream):
+        _, headers = native
+        response = raw_client.get(PREFIX + "/foods/fatsecret/A/servings", headers=headers)
+>       assert response.status_code == 200
+E       assert 503 == 200
+E        +  where 503 = <WrapperTestResponse streamed [503 SERVICE UNAVAILABLE]>.status_code
+
+tests/test_lp15_native_food_contract.py:111: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+ERROR    app:mobile_nutrition.py:64 mobile_nutrition event=food_discovery_failed error_type=FoodProviderUnavailable request_id=a7d91c74dc6b43cf
+INFO     app:observability.py:195 request id=a7d91c74dc6b43cf method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=503 dur_ms=95.9 user=- ip=127.0.0.1
+=========================== short test summary info ============================
+FAILED tests/test_lp15_native_food_contract.py::test_duplicate_serving_label_identity
+1 failed, 89 deselected in 3.41s
