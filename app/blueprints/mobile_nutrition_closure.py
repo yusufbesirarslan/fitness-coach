@@ -120,7 +120,8 @@ def nutrition_day_view_native():
 @require_mobile_auth
 def nutrition_plan_read():
     return _run("plan_read_failed", errors.PlanUnavailable,
-                lambda: jsonify(plan.read_plan(g.mobile_user.id, _secret())))
+                lambda: jsonify(plan.read_plan(
+                    g.mobile_user.id, _secret(), g.mobile_user.language)))
 
 
 def _generation_chat(**kwargs):

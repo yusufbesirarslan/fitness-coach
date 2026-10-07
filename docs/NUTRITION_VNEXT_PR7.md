@@ -89,8 +89,9 @@ Nutrients object `N` = `{"energy_kcal": number|null, "protein_g": number|null, "
 `P = {state:"active"|"absent"|"invalid", revision:string|null, saved_at:ISO-8601+03:00|null, food_rating:number(0..10)|null, name:string|null, meals:[PM]|null, totals:N|null}` and
 `PM = {id:string(24), slot:"kahvalti"|"ogle"|"aksam"|"ara_ogun", items:[string]|null, nutrition:N, loggable:bool}`.
 `absent`: all fields null except `state`. `invalid`: `revision` + `saved_at` present, content null (replaceable).
+`generation_options` strings are DISPLAY labels in the authenticated owner's `User.language` (LP14): exactly `"en"` → English, anything else → Turkish — the same partition `build_prompts` uses for the generated plan. No request field, header or query chooses it. The canonical identity stays the Turkish `FOOD_DATABASE` `isim`; the static map lives in `app/services/nutrition_native/generation_labels.py` (validated at import: complete per locale, no label names two foods).
 
-**Generation request** — closed `{proteins:[name], carbs:[name], fats:[name], custom_foods?:[string]}`; names ∈ `generation_options`, 1–10 unique per group; custom foods ≤10, 1–60 chars, no control chars.
+**Generation request** — closed `{proteins:[name], carbs:[name], fats:[name], custom_foods?:[string]}`; names = known catalogue labels of that group in ANY supported locale (current English, current Turkish/canonical, or stale after a language switch), mapped to the canonical name before rating/prompt — unknown strings refused; 1–10 per group, unique AFTER mapping; custom foods ≤10, 1–60 chars, no control chars.
 **Generation response** — `{contract_version:1, target:{value:int,unit:"kcal"}, food_rating:number, proposals:[{plan:D, proposal_token:string}]}` where proposal document
 `D = {name:string|null, meals:[{slot, items:[string]|null, nutrition:N}], totals:N}`.
 
