@@ -25,6 +25,12 @@ cross it. One probe covers the plan-row lock (a Coach mutation), the other the
 owner-row lock (a second create) — the only case a plan-row lock cannot reach,
 because a user with no plan has no row to lock.
 
+CASE B also pins each serial order of a Coach mutation and a replacement
+(``_run_in_order``: one caller returns before the next starts) and grades every
+run — free or ordered — through ONE verdict, ``_assert_coach_race_invariant``.
+The free-running case reaches the replacement-first order only by chance, so
+an outcome that order produces must never be first discovered as a flake.
+
 There is still no ``sleep()`` here. The probes wait on an ``Event`` with a
 timeout, and the two outcomes they separate differ by orders of magnitude: an
 uncontended local write returns in milliseconds, while one blocked on a held
@@ -33,6 +39,7 @@ uncontended local write returns in milliseconds, while one blocked on a held
 import json
 import os
 import threading
+from types import SimpleNamespace
 
 import pytest
 import sqlalchemy as sa
@@ -179,12 +186,41 @@ def _state(app, user_id):
         return state
 
 
+def _attempt(call):
+    """One caller's outcome, in the closed vocabulary every case here asserts on."""
+    from app.services.mobile_training_generation import ExistingPlanRefused
+    from app.services.plan_mutation import (
+        ExerciseNotFound, PlanNotFound, PlanStateConflict,
+    )
+    from app.services.plan_replacement import PlanReplacementConflict
+
+    try:
+        return ("ok", call())
+    except PlanReplacementConflict as error:
+        return ("conflict", error.reason)
+    except ExistingPlanRefused:
+        # The native command's OWN canonical refusal, caught as a
+        # distinct kind: collapsing it into "conflict" would let a
+        # native caller that started refusing for some other reason
+        # keep these assertions green.
+        return ("existing_plan_refused", None)
+    except PlanNotFound:
+        return ("plan_not_found", None)
+    except PlanStateConflict:
+        return ("plan_state_conflict", None)
+    except ExerciseNotFound:
+        # Its own kind, never folded into the two above: a Coach that starts
+        # after a replacement committed reads the NEW plan and finds its target
+        # gone. That refusal is legitimate only where the replacement really
+        # removed the exercise, and CASE B decides that per branch.
+        return ("exercise_not_found", None)
+    except Exception as error:  # pragma: no cover - surfaced by asserts
+        return ("unexpected", type(error).__name__, str(error))
+
+
 def _run(app, calls):
     """Release ``len(calls)`` threads at one barrier and collect their outcomes."""
     from app.extensions import db
-    from app.services.mobile_training_generation import ExistingPlanRefused
-    from app.services.plan_mutation import PlanNotFound, PlanStateConflict
-    from app.services.plan_replacement import PlanReplacementConflict
 
     barrier = threading.Barrier(len(calls))
     outcomes = {}
@@ -193,21 +229,7 @@ def _run(app, calls):
         with app.app_context():
             barrier.wait(timeout=10)
             try:
-                outcomes[index] = ("ok", calls[index]())
-            except PlanReplacementConflict as error:
-                outcomes[index] = ("conflict", error.reason)
-            except ExistingPlanRefused:
-                # The native command's OWN canonical refusal, caught as a
-                # distinct kind: collapsing it into "conflict" would let a
-                # native caller that started refusing for some other reason
-                # keep these assertions green.
-                outcomes[index] = ("existing_plan_refused", None)
-            except PlanNotFound:
-                outcomes[index] = ("plan_not_found", None)
-            except PlanStateConflict:
-                outcomes[index] = ("plan_state_conflict", None)
-            except Exception as error:  # pragma: no cover - surfaced by asserts
-                outcomes[index] = ("unexpected", type(error).__name__, str(error))
+                outcomes[index] = _attempt(calls[index])
             finally:
                 db.session.remove()
 
@@ -218,6 +240,25 @@ def _run(app, calls):
     for thread in threads:
         thread.join(timeout=30)
     assert not any(thread.is_alive() for thread in threads), outcomes
+    return outcomes
+
+
+def _run_in_order(app, calls):
+    """Run ``calls`` one after another, each to its commit, through ``_attempt``.
+
+    The ordering is the point: a call cannot start until the previous one has
+    returned, so the interleaving is fixed by construction rather than by luck
+    or a ``sleep()``.
+    """
+    from app.extensions import db
+
+    outcomes = {}
+    for index, call in enumerate(calls):
+        with app.app_context():
+            try:
+                outcomes[index] = _attempt(call)
+            finally:
+                db.session.remove()
     return outcomes
 
 
@@ -301,11 +342,17 @@ def test_a_coach_mutation_is_never_silently_overwritten(seeded):
 
     outcomes = _run(app, [_replace(user_id, identity, "replacement"),
                           _coach_mutation(user_id, "pg-race-b-0001")])
-    replacement, coach = outcomes[0], outcomes[1]
-    state = _state(app, user_id)
+    _assert_coach_race_invariant(
+        outcomes[0], outcomes[1], _state(app, user_id), identity)
+
+
+def _assert_coach_race_invariant(replacement, coach, state, identity):
+    """CASE B's verdict, shared by the free-running race, the ordered cases and
+    the scope checks below — one rule, so no case can quietly grade itself."""
     # Every assertion below reports the outcomes AND the state they disagree
     # with; a bare "1 != 0" cannot be diagnosed after the fact.
-    outcomes = {"outcomes": outcomes, "state": state, "seed": identity}
+    outcomes = {"outcomes": {0: replacement, 1: coach}, "state": state,
+                "seed": identity}
     assert state["count"] == 1, outcomes
     lineage, version, plan_data = state["active"]
 
@@ -314,9 +361,16 @@ def test_a_coach_mutation_is_never_silently_overwritten(seeded):
         assert lineage == replacement[1].lineage_id, outcomes
         assert lineage != identity[0]
         if coach[0] == "ok":
-            # The Coach ran AFTER, against the new plan, and says so.
-            assert coach[1].plan_version == version == 1, outcomes
-            assert "Machine Press" in plan_data
+            # The Coach ran AFTER, against the new plan; the silent-overwrite
+            # guard below holds it to that.
+            pass
+        elif coach[0] == "exercise_not_found":
+            # The Coach started after the replacement committed and looked for
+            # its target in the NEW plan. That is a truthful refusal only
+            # because the replacement really removed the exercise.
+            assert "Bench Press" not in plan_data, outcomes
+            assert version == 0, outcomes
+            assert "Machine Press" not in plan_data, outcomes
         else:
             # Or it was refused deterministically. It must NOT have claimed a
             # change that no longer exists.
@@ -331,8 +385,98 @@ def test_a_coach_mutation_is_never_silently_overwritten(seeded):
         assert coach[0] == "ok", outcomes
         assert lineage == identity[0]
         assert version == 1
-        assert "Machine Press" in plan_data
         assert "replacement" not in plan_data
+
+    if coach[0] == "ok":
+        # THE silent-overwrite guard, whichever branch ran: a Coach that was
+        # told its change persisted must find it in the final plan, at the
+        # version it was told.
+        assert "Machine Press" in plan_data, outcomes
+        assert coach[1].plan_version == version, outcomes
+
+
+def test_a_coach_that_starts_after_a_replacement_is_refused_truthfully(seeded):
+    """The replacement-first interleaving, pinned rather than hoped for.
+
+    The free-running race above reaches it only when the replacement thread
+    runs away with the whole operation, which is exactly what made it flake:
+    the Coach then reads the NEW plan, where "Bench Press" no longer exists,
+    and the domain refuses with ``ExerciseNotFound``. That refusal is correct —
+    nothing was persisted, and nothing claims otherwise.
+    """
+    from app.extensions import db
+    from app.models import PlanMutationRecord
+
+    app, user_id, identity = seeded
+
+    outcomes = _run_in_order(app, [_replace(user_id, identity, "replacement"),
+                                   _coach_mutation(user_id, "pg-order-b-0001")])
+    replacement, coach = outcomes[0], outcomes[1]
+    state = _state(app, user_id)
+
+    assert replacement[0] == "ok", outcomes
+    assert coach == ("exercise_not_found", None), outcomes
+    lineage, version, plan_data = state["active"]
+    assert lineage == replacement[1].lineage_id
+    assert version == 0
+    assert "replacement" in plan_data
+    assert "Machine Press" not in plan_data
+    # The Coach never claimed success: a refused command consumes no operation
+    # identity, so the journal holds nothing for it.
+    with app.app_context():
+        assert PlanMutationRecord.query.filter_by(user_id=user_id).count() == 0
+        db.session.remove()
+    _assert_coach_race_invariant(replacement, coach, state, identity)
+
+
+def test_a_replacement_that_starts_after_a_coach_mutation_is_refused(seeded):
+    """The Coach-first interleaving, pinned: the Coach's change persists and the
+    replacement, still holding the pre-Coach version, is refused."""
+    app, user_id, identity = seeded
+
+    outcomes = _run_in_order(app, [_coach_mutation(user_id, "pg-order-b-0002"),
+                                   _replace(user_id, identity, "replacement")])
+    coach, replacement = outcomes[0], outcomes[1]
+
+    assert coach[0] == "ok", outcomes
+    assert replacement == ("conflict", "version_mismatch"), outcomes
+    _assert_coach_race_invariant(
+        replacement, coach, _state(app, user_id), identity)
+
+
+def _verdict_state(lineage, version, plan_data):
+    return {"count": 1, "lineages": {lineage},
+            "active": (lineage, version, plan_data)}
+
+
+@pytest.mark.parametrize("replacement, coach, state", [
+    # Coach-first: the original plan still holds "Bench Press", so the Coach
+    # cannot have been refused for a missing exercise.
+    (("conflict", "version_mismatch"), ("exercise_not_found", None),
+     _verdict_state("seed-lineage", 0, PROGRAM)),
+    # Replacement-first, but the replacement KEPT "Bench Press": the refusal
+    # does not match the plan it was made against.
+    (("ok", SimpleNamespace(lineage_id="new-lineage")),
+     ("exercise_not_found", None),
+     _verdict_state("new-lineage", 0, PROGRAM)),
+], ids=["coach_first", "exercise_still_present"])
+def test_exercise_not_found_is_accepted_only_where_the_replacement_removed_it(
+        replacement, coach, state):
+    """``exercise_not_found`` is not a generic "the race was lost" pass."""
+    with pytest.raises(AssertionError):
+        _assert_coach_race_invariant(
+            replacement, coach, state, ("seed-lineage", 0))
+
+
+def test_a_coach_success_missing_from_the_final_plan_is_refused():
+    """The forbidden outcome itself: both callers report success and the final
+    plan is the replacement, without the Coach's change."""
+    replacement = ("ok", SimpleNamespace(lineage_id="new-lineage"))
+    coach = ("ok", SimpleNamespace(plan_version=0))
+    state = _verdict_state("new-lineage", 0, _proposal("replacement"))
+
+    with pytest.raises(AssertionError):
+        _assert_coach_race_invariant(replacement, coach, state, ("seed-lineage", 0))
 
 
 def test_the_comparison_is_made_under_a_lock_the_coach_cannot_cross(
