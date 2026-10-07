@@ -374,3 +374,58 @@ def test_analyze_response_content_logs_are_counts_only(client, profile_session, 
     assert "SYNTHETIC_ANALYZE_SECRET" not in caplog.text
     assert "signature=" not in caplog.text
     assert secret not in caplog.text
+
+
+@pytest.mark.parametrize("mode", ["extract", "extract-nojson", "extract-badjson", "extract-error", "macro-nojson", "macro-badjson", "macro-error", "weights", "weights-error", "fatsecret-error"])
+def test_real_menu_analysis_helpers_do_not_log_response_content(client, profile_session, monkeypatch, caplog, mode):
+    import json
+    import logging
+    from app.services import ai_nutrition, fatsecret
+
+    secret = "https://restaurant.example/menu?signature=SYNTHETIC_HELPER_SECRET"
+    monkeypatch.setattr(menu_bp, "redis_client", None)
+    monkeypatch.setattr(menu_bp, "_get_cached_macros", lambda names, **kw: ({}, names))
+    monkeypatch.setattr(menu_bp, "_cache_macros", lambda *a, **kw: None)
+    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "offline-token")
+    # Keep the real extraction/weight/macro helpers; only provider boundaries are fake.
+    def provider(**kw):
+        if kw.get("feature") == "menu_extract":
+            if mode == "extract-nojson":
+                return secret
+            if mode == "extract-badjson":
+                return "{" + secret
+            if mode == "extract-error":
+                raise RuntimeError(secret)
+            return json.dumps({"categories": {secret: [secret]}})
+        if mode in {"macro-error", "weights-error"}:
+            raise RuntimeError(secret)
+        if mode == "macro-nojson":
+            return secret
+        if mode == "macro-badjson":
+            return "{" + json.dumps(secret) + ": invalid}"
+        if mode == "weights":
+            return json.dumps({secret: secret})  # invalid grams triggers fallback log
+        return json.dumps({secret: CHICKEN})
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", provider)
+    if mode == "fatsecret-error":
+        monkeypatch.setattr(ai_nutrition.ai_cache, "cache_get", lambda *a, **kw: None)
+        def fail(*a, **kw):
+            raise RuntimeError(secret)
+        monkeypatch.setattr(ai_nutrition, "_openai_chat", fail)
+        monkeypatch.setattr(fatsecret, "_fs_get", fail)
+    else:
+        monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}) if mode.startswith("weights") else ({}, {}))
+    with caplog.at_level(logging.DEBUG):
+        response = client.post("/api/menu/analyze", json={"menu_text": secret, "headings": [secret]})
+    assert response.status_code == (422 if mode.startswith("extract-") else 200)
+    expected = {
+        "extract": "LLM returned 1 categories", "extract-nojson": "No valid JSON braces",
+        "extract-badjson": "salvage found nothing", "extract-error": "[EXTRACT] ERROR: RuntimeError",
+        "macro-nojson": "LLM response has no JSON braces", "macro-badjson": "JSON repair failed: JSONDecodeError",
+        "macro-error": "LLM BATCH ERROR: RuntimeError", "weights": "Serving weight fallback: 1 item",
+        "weights-error": "LLM SERVING WEIGHT ERROR: RuntimeError", "fatsecret-error": "FatSecret search failed: RuntimeError",
+    }[mode]
+    assert expected in caplog.text
+    assert "SYNTHETIC_HELPER_SECRET" not in caplog.text
+    assert "signature=" not in caplog.text
+    assert secret not in caplog.text
