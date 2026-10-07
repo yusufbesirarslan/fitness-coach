@@ -11,15 +11,15 @@ Status: **CLOSED** (2026-10-06).
 - **Legacy credential and principal retirement:** completed 2026-10-05 to 2026-10-06. The `fitx-s3-user` access key `AKIA…4XUI` and the `fitx-s3-user` IAM user are deleted. The legacy roles and instance profiles `AxisAI-EC2-Role`, `AxisAI-EC2-Role-` and `fitx-ec2-s3-access` are deleted (§C, R1–R3).
 - **Orphan-policy cleanup:** completed 2026-10-06. The customer-managed policies `AxisAI-EC2-RolePolicy` and `AxisAI-EC2-Role-Policy` are deleted.
 
-Production runtime identity remains `AxisAIProdRuntimeProfile` → `AxisAIProdRuntimeRole`. R4, R5 and R6 are independent follow-ups that do not keep SEC-001 open (§C). This document contains no credentials.
+Production runtime identity remains `AxisAIProdRuntimeProfile` → `AxisAIProdRuntimeRole`. R4, R5 and R6 are independent follow-ups that do not keep SEC-001 open (§C). R4 (CloudWatch least privilege) was later remediated and closed on 2026-10-07, separately from SEC-001 (§A.5). R5 and R6 remain open follow-ups. This document contains no credentials.
 
 This file is the durable record of the migration. It has five parts:
 
 | Part | Sections | Nature |
 | --- | --- | --- |
-| **CURRENT VERIFIED STATE** | §A | Current production truth. §A.1 records the 2026-10-04 cutover; §A.4 records the final state after legacy retirement (2026-10-06). Authoritative. |
+| **CURRENT VERIFIED STATE** | §A | Current production truth. §A.1 records the 2026-10-04 cutover; §A.4 records the final state after legacy retirement (2026-10-06); §A.5 records the runtime role after the R4 CloudWatch least-privilege remediation (closed 2026-10-07). Authoritative. |
 | **CUTOVER EXECUTION** | §B | What the cutover task did, in order (2026-10-04). Historical execution record. |
-| **RESIDUAL RISKS / FOLLOW-UPS** | §C | R1–R3 (done) and R4–R6 (independent follow-ups outside SEC-001). |
+| **RESIDUAL RISKS / FOLLOW-UPS** | §C | R1–R3 (done), R4 (independent follow-up, closed 2026-10-07) and R5–R6 (independent follow-ups outside SEC-001). |
 | **RETIREMENT RECORD** | §D | The old-key deletion gate and the legacy credential/principal/policy retirement that followed it (executed). |
 | **PRE-CUTOVER EVIDENCE** | §0–§13, Appendix, historical verdict | **Historical.** The preparation evidence and plan (2026-10-03) that justified the cutover. Statements there in present tense ("currently", "today", "static env") describe the pre-cutover state. Every IAM object named there other than `AxisAIProdRuntimeRole`/`AxisAIProdRuntimeProfile` has since been deleted. §A supersedes them. |
 
@@ -65,6 +65,8 @@ ROLLBACK:            NOT REQUIRED
 - AWS-managed `AmazonSSMManagedInstanceCore` (host agent);
 - AWS-managed `CloudWatchAgentServerPolicy` (host CloudWatch agent).
 
+> **Historical role composition.** This was the role shape at cutover. On 2026-10-06, R4 detached `CloudWatchAgentServerPolicy` from this role and replaced it with the narrow inline `AxisAIProdHostObservabilityPolicy`. The current shape is in §A.5.
+
 **Unchanged by the cutover:** the production bucket stays `fitx-user-bucket-2026`, with the approved prefixes `avatars/`, `meals/` and `pump-checks/`. KMS is still **NOT REQUIRED** (SSE-S3). The Bedrock configuration is unchanged. The deployed application commit is unchanged. No code change was needed: the application already uses the default credential chain (§7).
 
 ### A.2 Post-cutover validation results
@@ -83,7 +85,7 @@ ROLLBACK:            NOT REQUIRED
 | DB connectivity | **PASS** | `SELECT 1` passed from web and from worker. `database-1-dr` is healthy. |
 | Auth/credential logs | **PASS (0)** | After cutover there were no new `NoCredentialsError`, `PartialCredentialsError`, `AccessDenied`, `ExpiredToken`, `InvalidClientTokenId`, `SignatureDoesNotMatch`, S3/Bedrock/CloudWatch authorization error, `OperationalError` or `Traceback`. |
 
-Negative probes against the effective role (S3 bucket administration and listing, IAM, RDS, Secrets Manager, unapproved Bedrock model) were denied. The one exception is the `FitX/AI` metric-namespace probe, explained in §C, R4.
+Negative probes against the effective role (S3 bucket administration and listing, IAM, RDS, Secrets Manager, unapproved Bedrock model) were denied. The one exception is the `FitX/AI` metric-namespace probe, explained in §C, R4. That exception was historical: since R4 (§A.5), the effective role denies `FitX/AI`.
 
 ### A.3 Presigned URL condition (accepted, carried forward)
 
@@ -129,6 +131,85 @@ No other IAM object changed during the orphan-policy cleanup.
 
 Application rollback is unchanged. It is revision-based (git commit → image → redeploy, `docs/DEPLOYMENT.md`) and runs under the current `AxisAIProdRuntimeRole`/`AxisAIProdRuntimeProfile`. Any recovery that needs a different AWS identity is a new, separately authorized IAM operation. It is not a rollback step.
 
+### A.5 Runtime role after R4 CloudWatch least-privilege remediation (2026-10-06 – 2026-10-07)
+
+> R4 was an independent follow-up, not part of SEC-001. SEC-001 closed on 2026-10-06 without it (§C). This section records the current runtime-role shape. §A.1, §B.1 and §6 still describe the historical state at cutover, when `CloudWatchAgentServerPolicy` was attached.
+
+```text
+R4 STATUS:           R4 CLOUDWATCH LEAST-PRIVILEGE REMEDIATION CLOSED (2026-10-07)
+
+ACCOUNT:             852128326881
+INSTANCE:            i-0c6f5352fc214e68d
+PROFILE -> ROLE:     AxisAIProdRuntimeProfile -> AxisAIProdRuntimeRole
+
+AxisAIProdRuntimeRole (current):
+  INLINE:            AxisAIProdRuntimePolicy            (application; unchanged by R4)
+                     AxisAIProdHostObservabilityPolicy  (host agent; added by R4)
+  MANAGED:           AmazonSSMManagedInstanceCore
+  NOT ATTACHED:      CloudWatchAgentServerPolicy        (detached by R4)
+  PERMISSIONS BOUNDARY: none
+
+PROD REVISION AT CLOSURE: 9e21be55eaa8c20859bbd765c47154781c026153
+```
+
+**Problem.** The AWS-managed `CloudWatchAgentServerPolicy` gave the shared runtime role more observability authority than the host agent or the application needed. It granted `cloudwatch:PutMetricData` for any namespace, broad CloudWatch Logs writes and unused X-Ray permissions. A compromised application or container holding the shared IMDS role credentials could therefore publish arbitrary custom metrics, write into unrelated log groups, change log retention and use X-Ray, even though `AxisAIProdRuntimePolicy` on its own restricts metrics to `FitX/Runtime`.
+
+**Change (R4-01, 2026-10-06).** Two IAM mutations, both on `AxisAIProdRuntimeRole` only:
+
+1. Put the inline `AxisAIProdHostObservabilityPolicy`.
+2. Detached `arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy`.
+
+Nothing else changed:
+
+- no other role's attachments;
+- no AWS-managed policy object;
+- no instance-profile association;
+- no static credentials;
+- no deploy, container restart, agent restart or `.env` change.
+
+**Host-observability policy intent.** It permits only what the host CloudWatch agent was proven to need:
+
+| Permission | Scope |
+| --- | --- |
+| `cloudwatch:PutMetricData` | namespace `CWAgent` only |
+| `logs:CreateLogStream`, `logs:PutLogEvents` | log groups `/axisai/app`, `/axisai/nginx/access` and `/axisai/nginx/error` only |
+| `logs:DescribeLogGroups` | needed by the agent at startup |
+| `ec2:DescribeTags` | needed by the agent at startup |
+
+`FitX/Runtime` is still authorized by the application policy `AxisAIProdRuntimePolicy` (§6), not by the host policy.
+
+**Intentionally denied after R4.** The effective role now denies:
+
+- `cloudwatch:PutMetricData` to `FitX/AI` and to any other namespace except `CWAgent` and `FitX/Runtime`;
+- CloudWatch Logs writes to destinations other than the three AxisAI groups;
+- `logs:CreateLogGroup`, `logs:PutRetentionPolicy` and `logs:DescribeLogStreams`;
+- `ec2:DescribeVolumes`;
+- X-Ray `PutTraceSegments`, `PutTelemetryRecords`, `GetSamplingRules`, `GetSamplingTargets` and `GetSamplingStatisticSummaries`.
+
+The `FitX/AI` deny is intentional because production runs with `AI_METRICS_ENABLED` unset (off). Enabling AI metrics would need a separately authorized policy change.
+
+**Validation record.**
+
+| Layer | Result |
+| --- | --- |
+| **R4-00 discovery** (read-only, 0 mutations) | Found that `CloudWatchAgentServerPolicy` caused the permission overlap. A narrow same-role replacement was viable, and the candidate policy passed both positive and negative simulation. |
+| **R4-01 remediation** (2026-10-06, immediate checks) | `CWAgent` metrics continued, `FitX/Runtime` continued and log ingestion continued. 44/44 effective-permission cases passed. Web healthy, worker healthy, SSM Online. Static AWS credentials absent. 0 new IAM or credential errors. |
+| **R4-02 / final closure** (natural host boot on 2026-10-07, read-only checks) | **Agent startup:** passed, including the `DescribeLogGroups` and `DescribeTags` startup paths. **Logs:** post-boot ingestion passed for `/axisai/app`, `/axisai/nginx/access` and `/axisai/nginx/error`. **Metrics:** `CWAgent` post-boot metrics passed. `FitX/Runtime` resumed in the same minute as the first natural non-health traffic: first post-boot datapoint 2026-10-07T07:03Z, latest at closure 17:55Z, 653 consecutive one-minute `ThreadReserve` datapoints with no gaps. **Permissions:** 44/44 effective-permission simulation passed. 0 new runtime-metric publish errors, 0 new CloudWatch authorization errors and 0 new AWS credential errors. **Health:** web, worker, DB, Redis and SSM healthy; static AWS credentials absent. **Unchanged:** S3 and Bedrock authority. **Closure:** 16/16 criteria passed. |
+
+**CreateLogStream (operational confirmation, not an R4 blocker).** The narrowed policy authorizes `logs:CreateLogStream` on the three AxisAI groups, and the IAM simulation passes. No real post-remediation `CreateLogStream` call has happened yet: the existing containers kept their log streams, and container IDs survive host stop/start. Confirm that a natural `CreateLogStream` succeeds during the next ordinary container recreation or deploy. Do not trigger a deploy for this.
+
+**Accepted operational trade-off.** The host policy deliberately does not allow `logs:CreateLogGroup` or `logs:PutRetentionPolicy`. Creating log groups and owning their retention are operator/FinOps responsibilities, not runtime-agent authority. This is by design, not a defect.
+
+**Adjacent findings, out of R4 scope (separate follow-ups, not fixed here).**
+
+- **A1.** `AmazonSSMManagedInstanceCore` carries broad `ssm:GetParameter(s)` authority.
+- **A2.** An empty `access.log` log group is orphaned.
+- **A3.** `CloudWatchAgentServerPolicy` is still attached to `instanceRole`, `FitX-EC2-Bedrock-Role` and `EC2-CloudWatch-Role`.
+- **A4.** Some Lambda log groups have no retention setting.
+- **A5.** IMDS hop limit 2 means the host and the containers share one identity.
+
+**Rollback (only on a proven regression).** Re-attach `CloudWatchAgentServerPolicy` first, then delete `AxisAIProdHostObservabilityPolicy`. This is a separately authorized IAM operation, never a deploy step.
+
 ## B. CUTOVER EXECUTION (2026-10-04)
 
 ### B.1 Sequence
@@ -150,14 +231,14 @@ Application rollback is unchanged. It is revision-based (git commit → image �
 
 ## C. RESIDUAL RISKS / FOLLOW-UPS
 
-R1–R3 were the SEC-001 identity-remediation residuals. All three are **DONE**. R4–R6 are **independent follow-ups that do not block SEC-001 closure**. SEC-001's objective was to move production off static credentials and retire the legacy identities, and that objective is complete. None of R4–R6 was fixed as part of SEC-001.
+R1–R3 were the SEC-001 identity-remediation residuals. All three are **DONE**. R4–R6 are **independent follow-ups that do not block SEC-001 closure**. SEC-001's objective was to move production off static credentials and retire the legacy identities, and that objective is complete. None of R4–R6 was fixed as part of SEC-001. R4 was later remediated and closed on its own (2026-10-07, §A.5). R5 and R6 remain open.
 
 | ID | Item | State | Record |
 | --- | --- | --- | --- |
 | R1 | Old `fitx-s3-user` access key `AKIA…4XUI` | **DONE.** Legacy access key deleted 2026-10-05 15:41Z. | Deleted after the §D gate passed. The key was Inactive, its last use was before the cutover's container recreation, and the dependency proof passed. |
 | R2 | Old `fitx-s3-user` IAM user | **DONE.** `fitx-s3-user` deleted 2026-10-05 16:41:46Z, after a dependency audit. | The audit found no active authentication method and no resource-policy, application, deployment or rollback dependency. The user's inline policies were deleted and `AmazonS3FullAccess` was detached before `delete-user`. |
 | R3 | Legacy EC2 roles/instance profiles and their customer policies | **DONE.** R3A `AxisAI-EC2-Role` retired; R3B `AxisAI-EC2-Role-` retired; R3C `fitx-ec2-s3-access` retired; orphan customer-managed policies deleted. | R3 was split by risk. Each part had its own inventory, authorization and post-delete production validation (§D.2). |
-| R4 | CloudWatch permission overlap | **Independent follow-up. Does not block SEC-001 closure.** Known least-privilege architecture debt; unchanged by SEC-001. The application role also carries `CloudWatchAgentServerPolicy`, which grants unconditioned `cloudwatch:PutMetricData`. | **Impact:** the effective CloudWatch permission surface is broader than the application-only policy. `AxisAIProdRuntimePolicy` alone restricts metrics to `FitX/Runtime`, but the effective role can also publish to `FitX/AI` and other namespaces, so that one simulated deny does not hold at the role level. This is not a cutover failure: an EC2 instance carries one instance profile, so host-agent and application identity are combined by design (§0.2). **Follow-up:** split host-agent and application identities, or redesign the telemetry path, so application permissions are isolated from `CloudWatchAgentServerPolicy`. That is a separately authorized change to the runtime role. |
+| R4 | CloudWatch permission overlap | **DONE / CLOSED** (2026-10-07). Independent follow-up, never a SEC-001 blocker; fixed separately after SEC-001 closed. | **Resolution (§A.5):** the broad AWS-managed `CloudWatchAgentServerPolicy` was removed from the production runtime role, and the narrow inline `AxisAIProdHostObservabilityPolicy` was installed. The required `CWAgent`, log and `FitX/Runtime` paths still work. Arbitrary metric namespaces and log destinations are now denied. Cold-start validation passed, and 16/16 final closure criteria passed. Still to confirm operationally: a natural `CreateLogStream` at the next ordinary deploy. **Original record (historical):** The application role also carried `CloudWatchAgentServerPolicy`, which grants unconditioned `cloudwatch:PutMetricData`. **Impact:** the effective CloudWatch permission surface is broader than the application-only policy. `AxisAIProdRuntimePolicy` alone restricts metrics to `FitX/Runtime`, but the effective role can also publish to `FitX/AI` and other namespaces, so that one simulated deny does not hold at the role level. This is not a cutover failure: an EC2 instance carries one instance profile, so host-agent and application identity are combined by design (§0.2). **Follow-up:** split host-agent and application identities, or redesign the telemetry path, so application permissions are isolated from `CloudWatchAgentServerPolicy`. That is a separately authorized change to the runtime role. |
 | R5 | Presigned URL TTL | **Independent follow-up. Does not block SEC-001 closure.** Accepted condition (§A.3). | None for the current release. Revisit only if a product contract ever requires a guaranteed 6-hour URL. |
 | R6 | Single-container recreation availability | **Independent follow-up. Does not block SEC-001 closure.** About 6 s of 502/timeout during web recreation (§B.2). | Deployment-architecture follow-up (for example overlapping replacement or a health-gated swap). Outside SEC-001. |
 
@@ -521,7 +602,7 @@ S3 prefixes, re-verified on `origin/main` `d1252df`. Every `upload_image` caller
 }
 ```
 
-**The role also requires two AWS-managed policies, attached unchanged:** `arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore` and `arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy`. One profile per instance; see §0.2. They are host-agent permissions, not application permissions.
+**The role also requires two AWS-managed policies, attached unchanged:** `arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore` and `arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy`. One profile per instance; see §0.2. They are host-agent permissions, not application permissions. *(Historical. Since R4 (2026-10-06), `CloudWatchAgentServerPolicy` is no longer attached. Host-agent CloudWatch authority now comes from the narrow inline `AxisAIProdHostObservabilityPolicy` (§A.5).)*
 
 **Bedrock condition fallback.** The conditioned three-statement form follows AWS global-inference guidance, but it has not run in production. The unconditioned set already works in production on `fitx-s3-user` (`FitxBedrockInvokeSonnet45`, since 2026-09-04): both actions on exactly the profile ARN and the two model ARNs above. If `simulate-custom-policy` or the cutover deep-health probe denies the conditioned form, fall back to that proven set. Never fall back to `Resource: "*"` or `bedrock:*`.
 
@@ -708,7 +789,7 @@ LEGACY ORPHAN CUSTOMER POLICIES: DELETED (AxisAI-EC2-RolePolicy, AxisAI-EC2-Role
 CREDENTIAL / IAM ERRORS AFTER RETIREMENT: 0
 
 PRESIGNED URL CONDITION:         ACCEPTED (R5; independent follow-up, not an SEC-001 blocker)
-CLOUDWATCH PERMISSION OVERLAP:   KNOWN DEBT (R4; independent follow-up, not an SEC-001 blocker)
+CLOUDWATCH PERMISSION OVERLAP:   CLOSED 2026-10-07 (R4; independent follow-up, not an SEC-001 blocker; §A.5)
 SINGLE-CONTAINER AVAILABILITY:   FOLLOW-UP (R6; independent follow-up, not an SEC-001 blocker)
 
 NEXT SEC-001 ACTION:             NONE
