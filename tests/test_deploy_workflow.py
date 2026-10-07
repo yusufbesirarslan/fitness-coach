@@ -2860,6 +2860,7 @@ PRODUCTION_AUTHORITY_SURFACES = (
     "scripts/production_deploy.sh",
     "scripts/check_cognito_pool.py",
     "scripts/check_email_lambda.py",
+    "scripts/deploy_email_lambda.py",
     "Dockerfile",
     "docker-compose.yml",
     ".dockerignore",

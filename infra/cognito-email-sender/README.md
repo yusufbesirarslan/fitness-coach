@@ -27,7 +27,8 @@ kullanılır. Ayrıntı: `docs/auth-emails.md` → "Kod e-postalarının dili".
 | Dosya | Ne |
 |---|---|
 | `template.yaml` | SAM stack: Lambda + KMS anahtarı/alias + Cognito invoke izni |
-| `samconfig.toml` | Deploy varsayılanları (eu-central-1). `ResendApiKey` BİLEREK yok |
+| `samconfig.toml` | Deploy varsayılanları (eu-central-1). `ResendApiKey` BİLEREK yok; sarmalayıcı içeriğini birebir doğrular |
+| `../../scripts/deploy_email_lambda.py` | KANONİK deploy giriş noktası (bölüm 1) |
 | `src/handler.py` | Trigger yönlendirme + KMS çözümü + dil çözücü; ASLA exception yükseltmez |
 | `src/email_sender.py` | urllib Resend göndericisi (özel User-Agent zorunlu — Cloudflare) |
 | `src/email_templates.py` | `app/services/email_templates.py`'nin **bayt-bayt kopyası** |
@@ -40,20 +41,111 @@ değiştir, sonra kopyala — `tests/test_email_templates_sync.py` eşitliği zo
 cp app/services/email_templates.py infra/cognito-email-sender/src/email_templates.py
 ```
 
-## 1) Stack'i deploy et
+## 1) Stack'i deploy et — YALNIZCA korumalı yoldan
+
+Ham `sam deploy` **kanonik yol DEĞİLDİR**: `ResendApiKey` verilmezse parametre
+`''`'a düşer ve TÜM kod e-postaları sessizce durur (NoEcho olduğu için changeset
+bunu sıradan bir `Modify EmailSenderFunction` olarak gösterir); `AlarmEmail`
+verilmezse `HasAlarmEmail` yanlışa döner ve `EmailAlarmSubscription` SİLİNİR.
+Kanonik giriş noktası `scripts/deploy_email_lambda.py`'dir:
 
 ```bash
-cd infra/cognito-email-sender
-sam validate --lint
-sam build            # Windows'ta wheel sorunu görürsen: sam build --use-container
-sam deploy --parameter-overrides \
-    ResendApiKey=<RESEND_API_KEY> \
-    AlarmEmail=<alarm-alacak-adres>
+# Deploy edilecek revizyonun deposunun kökünden (sarmalayıcı + kaynak commit'li ve temiz):
+read -rs RESEND_API_KEY && export RESEND_API_KEY    # ekrana/geçmişe düşmez
+python scripts/deploy_email_lambda.py \
+    --stack-name axisai-cognito-email-sender --region eu-central-1 \
+    --alarm-email <ŞU AN ABONE OLAN alarm adresi> \
+    [--profile <prod-yetkili-profil>] \
+    [--preserve-parameter UserPoolId=<canlı değer> ...]
+unset RESEND_API_KEY
 ```
 
-Çıktılardan `FunctionArn`, `KmsKeyArn` ve `AlarmTopicArn` değerlerini not al.
-(API anahtarını asla commit'leme; her deploy'da `--parameter-overrides` ile ver —
-parametreyi vermezsen boş kalır ve KOD E-POSTALARI HİÇ GİTMEZ.)
+Önce `--dry-run` ile aynı komut tüm kontrolleri koşar ve önizlemeyi basar;
+SAM'i hiç çağırmaz.
+
+Sarmalayıcı SAM'i başlatmadan önce REDDEDER (çıkış 2) eğer:
+
+- `RESEND_API_KEY` yok / boş / yalnızca boşluk / beklenmeyen biçimde
+  (boşluk, tırnak, `<...>` yer tutucu); değer hiçbir mesajda gösterilmez;
+- `AlarmEmail` (`--alarm-email` veya `ALARM_EMAIL`) yok / boş / düz bir e-posta
+  adresi değil;
+- `--stack-name`/`--region` açıkça verilmemiş ya da
+  `axisai-cognito-email-sender`/`eu-central-1` değil;
+- `samconfig.toml` veya `template.yaml` incelenmiş sözleşmeden kaymış
+  (başka stack/bölge, `confirm_changeset` kapalı, eklenmiş
+  `parameter_overrides`, `ResendApiKey`'de `NoEcho: true` yok, parametre kümesi
+  farklı);
+- sarmalayıcının KENDİSİ (`scripts/deploy_email_lambda.py`, çalışan dosya)
+  git'te izlenmiyor ya da yerel değişikliği var (düzenlenmiş bir kopya bir
+  korumayı kapatmış olabilir);
+- `--source-dir` bir git çalışma ağacındaki izlenen
+  `infra/cognito-email-sender` değil (ör. gitignore'lu `.aws-sam/` altına
+  kopya) ya da o alt ağaçta commit'lenmemiş/izlenmeyen değişiklik var;
+- stdin terminal değil (changeset onayını bir insan vermeli).
+
+Sonra sırayla `sam validate --lint` → `sam build --use-container` (Linux
+x86_64 `cryptography` wheel'leri için ZORUNLU) → `sam deploy`; ilk hatada DURUR
+(çıkış 3), deploy denenmez. Her SAM çağrısına `--region eu-central-1` (ve
+varsa `--profile`) açıkça geçer; alt süreç ortamında `AWS_REGION` sabitlenir,
+`RESEND_API_KEY`/`SAM_DEBUG` silinir, `SAM_CLI_TELEMETRY=0`.
+
+**Gizli değer:** yalnızca `RESEND_API_KEY` ortam değişkeninden okunur; asla
+basılmaz, loglanmaz, dosyaya (samconfig dahil) yazılmaz. SAM parametre değerini
+yalnızca argv veya config dosyası üzerinden alır; argv seçildi (diske hiçbir
+şey düşmez) — bu yüzden değer `sam deploy` süreci çalıştığı sürece o sürecin
+argümanlarında (`ps`) yerel kullanıcılara görünür. Paylaşımlı makinede deploy
+etme; `--debug`/`SAM_DEBUG` kullanma (sarmalayıcı ikisini de geçirmez).
+
+**Önceden yakala (salt-okunur, rollback ve doğrulama için gerekli):**
+
+```bash
+aws lambda get-function-configuration --function-name <FunctionArn> --region eu-central-1 \
+  --query '{CodeSha256:CodeSha256,LastModified:LastModified,MemorySize:MemorySize,Timeout:Timeout}'
+aws cloudformation describe-stacks --stack-name axisai-cognito-email-sender \
+  --region eu-central-1 --query 'Stacks[0].[Outputs,Parameters]'
+aws cognito-idp describe-user-pool --user-pool-id eu-central-1_kaX0SORRK \
+  --region eu-central-1 --query 'UserPool.LambdaConfig'
+aws sns list-subscriptions-by-topic --topic-arn <AlarmTopicArn> --region eu-central-1
+```
+
+> ⚠️ `get-function-configuration`'ı ASLA `--query`'siz çalıştırma: `Environment`
+> bloğu `RESEND_API_KEY`'i düz metin basar.
+
+`describe-stacks` `Parameters` çıktısında şablon varsayılanından farklı bir
+değer (`UserPoolId`, `AppBaseUrl`, `EmailFrom*`, `EmailReplyTo`) görürsen onu
+`--preserve-parameter KEY=VALUE` ile aynen ver; verilmeyen parametre şablon
+varsayılanına döner. `--alarm-email` şu an abone olan adresle AYNI olmalı.
+
+**Changeset (insan onayı = asıl güvenlik sınırı).** Sarmalayıcı changeset'i
+AWS'ten okuyamaz; SAM onu gösterip `Deploy this changeset?` diye sorar ve
+sarmalayıcı hemen öncesinde gizli-değersiz bir kontrol listesi basar. `y`
+YALNIZCA changeset tam olarak şuysa:
+
+| İşlem | Kaynak | Tür | Replacement |
+|---|---|---|---|
+| Modify | `EmailSenderFunction` | `AWS::Lambda::Function` | False |
+
+Aşağıdakilerden HERHANGİ biri görünürse `N`: `EmailKmsKey`, `EmailKmsAlias`,
+`CognitoInvokePermission`, `EmailSenderFunctionRole`, `EmailAlarmSubscription`
+(özellikle Remove), `EmailAlarmTopic`, `EmailFailureMetricFilter`,
+`EmailFailureAlarm`, `EmailLambdaErrorsAlarm`, `EmailLambdaThrottlesAlarm`; ya da
+herhangi bir Add/Remove, `Replacement=True`/`Conditional`. Havuzun
+`LambdaConfig`'i (trigger bağlantısı) bu stack'te DEĞİLDİR; deploy onu
+değiştiremez ve değiştirmemelidir. Changeset `ResendApiKey` değerini
+gösteremez — o yalnızca deploy sonrası doğrulanır.
+
+**Deploy sonrası ZORUNLU doğrulama** (hepsi geçmeden deploy doğrulanmış
+sayılmaz; sarmalayıcı bu listeyi sonunda basar):
+
+1. `python scripts/check_email_lambda.py --function-name <FunctionArn>` →
+   `UYUMLU` (`UYARI` = okunamadı, GEÇMEDİ).
+2. `describe-stacks` `Outputs`: `FunctionArn`, `KmsKeyArn`, `AlarmTopicArn`
+   önceki yakalamayla aynı.
+3. `describe-user-pool --query 'UserPool.LambdaConfig'` önceki yakalamayla
+   aynı (`CustomEmailSender.LambdaArn` = `FunctionArn`, `KMSKeyID` = `KmsKeyArn`).
+4. `list-subscriptions-by-topic`: alarm aboneliği var ve
+   `PendingConfirmation` değil.
+5. Bölüm 3'teki smoke test (kod e-postaları; düz kod hiçbir logda yok).
 
 > ### 🔔 `AlarmEmail` ve SNS ONAYI (H5)
 > Stack, e-posta gönderimi sessizce ölürse çalan alarmları tanımlar
@@ -152,8 +244,31 @@ smoke test şart.
 
 ## Rollback
 
-Stack'i silmeye gerek yok — trigger'ı havuzdan ayır, Cognito'nun kendi e-posta
-gönderimi ANINDA geri gelir:
+Fonksiyonun alias/version'ı YOK (trigger nitelenmemiş ARN'i çağırır); "önceki
+sürüme çevirme" diye bir işlem yoktur. **Kod/dil rollback'i = önceki kaynak
+revizyonundan AYNI korumalı deploy:**
+
+```bash
+git worktree add ../fc-email-rollback <önceki-revizyon>   # mevcut ağaca dokunmaz
+read -rs RESEND_API_KEY && export RESEND_API_KEY
+# Önceki revizyonda sarmalayıcı varsa oradan, yoksa güncel ağaçtan --source-dir ile:
+python scripts/deploy_email_lambda.py \
+    --stack-name axisai-cognito-email-sender --region eu-central-1 \
+    --alarm-email <aynı adres> [--profile ...] \
+    --source-dir ../fc-email-rollback/infra/cognito-email-sender
+```
+
+Aynı zorunlu parametreler, aynı changeset kuralı, aynı deploy-sonrası
+doğrulama; ek olarak `CodeSha256` önceden yakalanan değere dönmeli.
+Sarmalayıcı hiçbir revizyon SEÇMEZ (pull/checkout/reset yapmaz) — verilen
+ağacı deploy eder. Sarmalayıcı ve kaynak FARKLI revizyonlardan gelebilir
+(güncel sarmalayıcı + önceki worktree); ikisi de ayrı ayrı izlenen+temiz
+olmalıdır ve önizleme deploy'dan önce İKİ revizyonu da gösterir
+(`Wrapper revision` / `Source revision`).
+
+**Yalnızca ACİL DURUM (dil rollback'i DEĞİL):** Lambda tamamen kırıksa ve
+korumalı yeniden deploy mümkün değilse trigger havuzdan ayrılır; Cognito'nun
+kendi (markasız) e-postası ANINDA geri gelir:
 
 ```bash
 # Yine pool-before.json'daki alanları taşıyarak; --lambda-config'i boş ver:

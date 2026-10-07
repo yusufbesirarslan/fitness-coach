@@ -9,7 +9,8 @@ asla başarısız olmaz), dolayısıyla Cognito trigger'ı BAŞARILI saydı: /re
 200 "doğrulama e-postası gönderildi" döndü, e-posta ise HİÇ gitmedi. Kullanıcı
 UNCONFIRMED'da mahsur kaldı; yeniden kayıt UsernameExists ile reddedildi.
 
-README zaten `sam build && sam deploy` diyor — eksik olan DOKÜMAN değil, bunu
+README o dönem de `sam build && sam deploy` diyordu (bugün kanonik yol
+scripts/deploy_email_lambda.py) — eksik olan DOKÜMAN değil, bunu
 DOĞRULAYAN bir kontroldü. (README'nin kendisi Windows'ta wheel sorununu da
 uyarır: `sam build` sessizce eksik paket üretebilir.) Bu script deploy edilmiş
 ARTIFACT'ı denetler, niyeti değil.
@@ -19,8 +20,8 @@ Kontroller (hepsi gerçekten yaşanmış arızalardan türetilmiştir):
   MemorySize >= 512 MB, Timeout >= 20 sn        → 256MB/5s'te INIT timeout'a
                                                    girip her invoke'a import'u geri
                                                    iten sonsuz-timeout tuzağı
-  RESEND_API_KEY dolu                            → `sam deploy` --parameter-overrides
-                                                   olmadan default '' = SESSİZ no-op
+  RESEND_API_KEY dolu                            → ResendApiKey verilmeden yapılan
+                                                   `sam deploy` = default '' = SESSİZ no-op
 
 Kullanım:
     python scripts/check_email_lambda.py --function-name <ad veya ARN>
@@ -64,9 +65,8 @@ def evaluate(config, entries):
                 f"Paket '{package}/' VENDOR EDİLMEMİŞ — handler._decrypt_code import'ta "
                 "ModuleNotFoundError ile düşer, istisna YUTULUR ve auth e-postaları "
                 "SESSİZCE hiç gitmez (2026-07-13 arızası). Neden: `sam build` "
-                "çalıştırılmadan `sam deploy` yapıldı. Düzeltme: "
-                "cd infra/cognito-email-sender && sam build && sam deploy "
-                "--parameter-overrides ResendApiKey=<key>")
+                "çalıştırılmadan `sam deploy` yapıldı. Düzeltme: korumalı "
+                "scripts/deploy_email_lambda.py ile yeniden deploy et")
 
     for module in REQUIRED_MODULES:
         if module not in entries:
@@ -88,8 +88,9 @@ def evaluate(config, entries):
     if not (env.get("RESEND_API_KEY") or "").strip():
         problems.append(
             "RESEND_API_KEY BOŞ — email_sender 'servis kapalı' moduna düşer ve auth "
-            "e-postaları SESSİZCE hiç gitmez. Neden: `sam deploy` --parameter-overrides "
-            "ResendApiKey=<key> olmadan çalıştırıldı (default '')")
+            "e-postaları SESSİZCE hiç gitmez. Neden: `sam deploy` ResendApiKey "
+            "olmadan çalıştırıldı (default ''). Düzeltme: korumalı "
+            "scripts/deploy_email_lambda.py ile yeniden deploy et")
 
     return problems
 

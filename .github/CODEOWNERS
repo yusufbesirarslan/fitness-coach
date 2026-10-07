@@ -18,6 +18,7 @@
 /scripts/production_deploy.sh @yusufbesirarslan
 /scripts/check_cognito_pool.py @yusufbesirarslan
 /scripts/check_email_lambda.py @yusufbesirarslan
+/scripts/deploy_email_lambda.py @yusufbesirarslan
 
 # Image and runtime composition — what production actually executes
 /Dockerfile @yusufbesirarslan
