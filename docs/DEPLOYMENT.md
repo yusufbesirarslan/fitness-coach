@@ -331,6 +331,8 @@ Deployment contract:
   `AxisAIProdRuntimeRole`, because no legacy identity remains to roll back to.
 - Any change to the runtime IAM architecture is a separate, explicitly
   authorized infrastructure/security operation, never a step inside a deploy or
-  a feature change. That includes the known CloudWatch permission overlap,
-  SEC-001 R4.
+  a feature change. That includes any change to the host-observability
+  policy (`AxisAIProdHostObservabilityPolicy`), which replaced
+  `CloudWatchAgentServerPolicy` on the runtime role in SEC-001 R4 (closed
+  2026-10-07).
 - Do not add AWS key variables back to the host `.env`.
