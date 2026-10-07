@@ -99,7 +99,7 @@ def nutrition_food_servings(food_id):
 @require_mobile_auth
 def nutrition_food_barcode():
     code = request.args.get("code", "").strip()
-    if not code.isdigit() or not normalize_barcode(code):
+    if not code.isascii() or not code.isdigit() or not normalize_barcode(code):
         return mobile_error("INVALID_BARCODE", "Invalid barcode.", 400, False)
     try:
         food = mobile_food_discovery.barcode_lookup(code)

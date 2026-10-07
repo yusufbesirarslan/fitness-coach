@@ -158,7 +158,8 @@ def test_raw_serving_adapter_never_logs_provider_exception_detail(
     monkeypatch.setattr(fatsecret, "_fs_get", fail)
 
     with app.app_context():
-        assert mobile_food_discovery.servings(food_id) is None
+        with pytest.raises(fatsecret.FoodProviderUnavailable):
+            mobile_food_discovery.servings(food_id)
 
     assert provider_detail not in caplog.text
     assert food_id not in caplog.text
@@ -174,7 +175,8 @@ def test_raw_serving_adapter_never_logs_token_failure_detail(
     monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail)
 
     with app.app_context():
-        assert mobile_food_discovery.servings("food-77") is None
+        with pytest.raises(fatsecret.FoodProviderUnavailable):
+            mobile_food_discovery.servings("food-77")
 
     assert provider_detail not in caplog.text
 
@@ -189,7 +191,8 @@ def test_raw_serving_adapter_never_logs_provider_error_payload(
         }))
 
     with app.app_context():
-        assert mobile_food_discovery.servings("food-77") is None
+        with pytest.raises(fatsecret.FoodProviderUnavailable):
+            mobile_food_discovery.servings("food-77")
 
     assert provider_detail not in caplog.text
 

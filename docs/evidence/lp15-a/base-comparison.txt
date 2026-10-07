@@ -1,0 +1,125 @@
+FFFFFFFFFFFFFFFFFFFF                                                     [100%]
+=================================== FAILURES ===================================
+_______ test_decreasing_monotonic_reading_fails_closed_without_mutation ________
+tests/test_production_deploy_script.py:1159: in test_decreasing_monotonic_reading_fails_closed_without_mutation
+    assert result.returncode != 0
+E   AssertionError: assert 0 != 0
+E    +  where 0 = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', 'e9...e-bin/timeout: line 44: mapfile: command not found\ndeployment verified at e90024979091ab281fc25f2f5322f9dbf82cf9f0\n').returncode
+_______ test_candidate_deadline_hang_transitions_to_exactly_one_rollback _______
+tests/test_production_deploy_script.py:1195: in test_candidate_deadline_hang_transitions_to_exactly_one_rollback
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-vzpc_8rf/fake-bin/timeout: lin...oduction-deploy/case-vzpc_8rf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-vzpc_8rf/fake-bin/timeout: lin...oduction-deploy/case-vzpc_8rf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '93...duction-deploy/case-vzpc_8rf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+_____________ test_diagnostic_hang_cannot_consume_rollback_reserve _____________
+tests/test_production_deploy_script.py:1211: in test_diagnostic_hang_cannot_consume_rollback_reserve
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-7ecv4ovk/fake-bin/timeout: lin...oduction-deploy/case-7ecv4ovk/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-7ecv4ovk/fake-bin/timeout: lin...oduction-deploy/case-7ecv4ovk/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '7f...duction-deploy/case-7ecv4ovk/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+_____________ test_rollback_operation_hang_is_bounded_and_reported _____________
+tests/test_production_deploy_script.py:1224: in test_rollback_operation_hang_is_bounded_and_reported
+    assert trace.count("TIMEOUT_HANG phase=rollback operation=docker:build") == 1
+E   AssertionError: assert 0 == 1
+E    +  where 0 = <built-in method count of str object at 0x792b696800>('TIMEOUT_HANG phase=rollback operation=docker:build')
+E    +    where <built-in method count of str object at 0x792b696800> = 'stat -c %u:%F:%a -- /run/lock/axisai-production\nstat -c %d:%i:%u:%F:%a:%h -- /run/lock/axisai-production/production....p/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-xz6txkyh/production/.axisai-build-context.WvdDK6\n'.count
+__________ test_wrong_running_revision_rolls_back_despite_health_200 ___________
+tests/test_production_deploy_script.py:1381: in test_wrong_running_revision_rolls_back_despite_health_200
+    assert f"APP_REVISION={fixture.prev_commit}" in trace
+E   AssertionError: assert 'APP_REVISION=ebab1f78e75b51aa433142f1d0895176dc3b9b4d' in 'stat -c %u:%F:%a -- /run/lock/axisai-production\nstat -c %d:%i:%u:%F:%a:%h -- /run/lock/axisai-production/production....p/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-7d6oa23l/production/.axisai-build-context.hpDk7n\n'
+________ test_rollback_exposes_prev_commit_as_baked_and_health_revision ________
+tests/test_production_deploy_script.py:1410: in test_rollback_exposes_prev_commit_as_baked_and_health_revision
+    assert f"BUILD_REVISION={fixture.prev_commit}" in trace
+E   AssertionError: assert 'BUILD_REVISION=8e95105686470143ded395099efaed32938c1895' in 'stat -c %u:%F:%a -- /run/lock/axisai-production\nstat -c %d:%i:%u:%F:%a:%h -- /run/lock/axisai-production/production....p/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-t87a4r74/production/.axisai-build-context.7zjg5W\n'
+________ test_hung_candidate_health_exhausts_bound_then_rolls_back_once ________
+tests/test_production_deploy_script.py:1450: in test_hung_candidate_health_exhausts_bound_then_rolls_back_once
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-f_8w44jq/fake-bin/timeout: lin...oduction-deploy/case-f_8w44jq/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-f_8w44jq/fake-bin/timeout: lin...oduction-deploy/case-f_8w44jq/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '91...duction-deploy/case-f_8w44jq/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+_______ test_rollback_health_retries_bounded_calls_until_delayed_success _______
+tests/test_production_deploy_script.py:1466: in test_rollback_health_retries_bounded_calls_until_delayed_success
+    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}") == 3
+E   AssertionError: assert 0 == 3
+E    +  where 0 = <built-in method count of str object at 0x792b69d800>('INTERNAL_HEALTH_REVISION=c3ef9f5fa1a37ae8e6cc7b15270b997e30fd5c0a')
+E    +    where <built-in method count of str object at 0x792b69d800> = 'stat -c %u:%F:%a -- /run/lock/axisai-production\nstat -c %d:%i:%u:%F:%a:%h -- /run/lock/axisai-production/production....p/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-xaf528nh/production/.axisai-build-context.7yr11S\n'.count
+_________ test_hung_rollback_health_exhausts_bound_and_reports_failure _________
+tests/test_production_deploy_script.py:1483: in test_hung_rollback_health_exhausts_bound_and_reports_failure
+    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}") == 30
+E   AssertionError: assert 0 == 30
+E    +  where 0 = <built-in method count of str object at 0x792b696800>('INTERNAL_HEALTH_REVISION=cf91a3853fb558ad99ab5d6a5eff59dfd7f8c263')
+E    +    where <built-in method count of str object at 0x792b696800> = 'stat -c %u:%F:%a -- /run/lock/axisai-production\nstat -c %d:%i:%u:%F:%a:%h -- /run/lock/axisai-production/production....p/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-5zq8bowm/production/.axisai-build-context.wAk4dU\n'.count
+______ test_old_rollback_without_health_revision_uses_compatibility_proof ______
+tests/test_production_deploy_script.py:1524: in test_old_rollback_without_health_revision_uses_compatibility_proof
+    assert "rollback compatibility proof accepted" in result.stderr
+E   AssertionError: assert 'rollback compatibility proof accepted' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-kjao5si3/fake-bin/timeout: lin...oduction-deploy/case-kjao5si3/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-kjao5si3/fake-bin/timeout: lin...oduction-deploy/case-kjao5si3/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '08...duction-deploy/case-kjao5si3/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+____________ test_modern_rollback_with_exact_baked_revision_passes _____________
+tests/test_production_deploy_script.py:1591: in test_modern_rollback_with_exact_baked_revision_passes
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-m52pta6l/fake-bin/timeout: lin...oduction-deploy/case-m52pta6l/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-m52pta6l/fake-bin/timeout: lin...oduction-deploy/case-m52pta6l/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '59...duction-deploy/case-m52pta6l/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+______________ test_modern_rollback_without_baked_revision_fails _______________
+tests/test_production_deploy_script.py:1607: in test_modern_rollback_without_baked_revision_fails
+    assert "running web container has no /app/BUILD_REVISION" in result.stderr
+E   AssertionError: assert 'running web container has no /app/BUILD_REVISION' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-xm6lvvpm/fake-bin/timeout: lin...oduction-deploy/case-xm6lvvpm/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-xm6lvvpm/fake-bin/timeout: lin...oduction-deploy/case-xm6lvvpm/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '2a...duction-deploy/case-xm6lvvpm/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+______________ test_legacy_rollback_without_baked_revision_passes ______________
+tests/test_production_deploy_script.py:1638: in test_legacy_rollback_without_baked_revision_passes
+    assert (
+E   AssertionError: assert 'rollback compatibility proof accepted: image has no /app/BUILD_REVISION' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-w7wdczxp/fake-bin/timeout: lin...oduction-deploy/case-w7wdczxp/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-w7wdczxp/fake-bin/timeout: lin...oduction-deploy/case-w7wdczxp/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '9e...duction-deploy/case-w7wdczxp/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+____________ test_legacy_rollback_with_exact_baked_revision_passes _____________
+tests/test_production_deploy_script.py:1665: in test_legacy_rollback_with_exact_baked_revision_passes
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-mmrx2_tf/fake-bin/timeout: lin...oduction-deploy/case-mmrx2_tf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-mmrx2_tf/fake-bin/timeout: lin...oduction-deploy/case-mmrx2_tf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', 'f5...duction-deploy/case-mmrx2_tf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+_ test_legacy_baked_revision_compatibility_is_not_available_to_modern_revisions _
+tests/test_production_deploy_script.py:1699: in test_legacy_baked_revision_compatibility_is_not_available_to_modern_revisions
+    assert "running web container has no /app/BUILD_REVISION" in result.stderr
+E   AssertionError: assert 'running web container has no /app/BUILD_REVISION' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-2g7tywm0/fake-bin/timeout: lin...oduction-deploy/case-2g7tywm0/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-2g7tywm0/fake-bin/timeout: lin...oduction-deploy/case-2g7tywm0/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', 'c6...duction-deploy/case-2g7tywm0/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+_______ test_hardened_rollback_cannot_use_missing_revision_compatibility _______
+tests/test_production_deploy_script.py:1748: in test_hardened_rollback_cannot_use_missing_revision_compatibility
+    assert "deep health revision is missing" in result.stderr
+E   AssertionError: assert 'deep health revision is missing' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-ld0fl0rx/fake-bin/timeout: lin...oduction-deploy/case-ld0fl0rx/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-ld0fl0rx/fake-bin/timeout: lin...oduction-deploy/case-ld0fl0rx/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', 'eb...duction-deploy/case-ld0fl0rx/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+________ test_candidate_compose_failure_rolls_back_exactly_once[build] _________
+tests/test_production_deploy_script.py:1764: in test_candidate_compose_failure_rolls_back_exactly_once
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-_8k52hkg/fake-bin/timeout: lin...oduction-deploy/case-_8k52hkg/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-_8k52hkg/fake-bin/timeout: lin...oduction-deploy/case-_8k52hkg/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', 'fd...duction-deploy/case-_8k52hkg/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+__________ test_candidate_compose_failure_rolls_back_exactly_once[up] __________
+tests/test_production_deploy_script.py:1764: in test_candidate_compose_failure_rolls_back_exactly_once
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-ih1j2fmm/fake-bin/timeout: lin...oduction-deploy/case-ih1j2fmm/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-ih1j2fmm/fake-bin/timeout: lin...oduction-deploy/case-ih1j2fmm/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', 'f4...duction-deploy/case-ih1j2fmm/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+__________ test_candidate_compose_failure_rolls_back_exactly_once[ps] __________
+tests/test_production_deploy_script.py:1764: in test_candidate_compose_failure_rolls_back_exactly_once
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-6r9fooeq/fake-bin/timeout: lin...oduction-deploy/case-6r9fooeq/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-6r9fooeq/fake-bin/timeout: lin...oduction-deploy/case-6r9fooeq/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', 'ef...duction-deploy/case-6r9fooeq/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+__________________ test_prune_failure_rolls_back_exactly_once __________________
+tests/test_production_deploy_script.py:1776: in test_prune_failure_rolls_back_exactly_once
+    assert "rollback verified" in result.stderr
+E   AssertionError: assert 'rollback verified' in '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-n7t6trxf/fake-bin/timeout: lin...oduction-deploy/case-n7t6trxf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n'
+E    +  where '/Users/yusuf/develop/fitness-coach-lp15-a-base/.pytest-basetemp/production-deploy/case-n7t6trxf/fake-bin/timeout: lin...oduction-deploy/case-n7t6trxf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n' = CompletedProcess(args=['/bin/bash', '/Users/yusuf/develop/fitness-coach-lp15-a-base/scripts/production_deploy.sh', '26...duction-deploy/case-n7t6trxf/production/.axisai-build-archive.XXXXXX.tar: File exists\nrollback failed verification\n').stderr
+=========================== short test summary info ============================
+FAILED tests/test_production_deploy_script.py::test_decreasing_monotonic_reading_fails_closed_without_mutation
+FAILED tests/test_production_deploy_script.py::test_candidate_deadline_hang_transitions_to_exactly_one_rollback
+FAILED tests/test_production_deploy_script.py::test_diagnostic_hang_cannot_consume_rollback_reserve
+FAILED tests/test_production_deploy_script.py::test_rollback_operation_hang_is_bounded_and_reported
+FAILED tests/test_production_deploy_script.py::test_wrong_running_revision_rolls_back_despite_health_200
+FAILED tests/test_production_deploy_script.py::test_rollback_exposes_prev_commit_as_baked_and_health_revision
+FAILED tests/test_production_deploy_script.py::test_hung_candidate_health_exhausts_bound_then_rolls_back_once
+FAILED tests/test_production_deploy_script.py::test_rollback_health_retries_bounded_calls_until_delayed_success
+FAILED tests/test_production_deploy_script.py::test_hung_rollback_health_exhausts_bound_and_reports_failure
+FAILED tests/test_production_deploy_script.py::test_old_rollback_without_health_revision_uses_compatibility_proof
+FAILED tests/test_production_deploy_script.py::test_modern_rollback_with_exact_baked_revision_passes
+FAILED tests/test_production_deploy_script.py::test_modern_rollback_without_baked_revision_fails
+FAILED tests/test_production_deploy_script.py::test_legacy_rollback_without_baked_revision_passes
+FAILED tests/test_production_deploy_script.py::test_legacy_rollback_with_exact_baked_revision_passes
+FAILED tests/test_production_deploy_script.py::test_legacy_baked_revision_compatibility_is_not_available_to_modern_revisions
+FAILED tests/test_production_deploy_script.py::test_hardened_rollback_cannot_use_missing_revision_compatibility
+FAILED tests/test_production_deploy_script.py::test_candidate_compose_failure_rolls_back_exactly_once[build]
+FAILED tests/test_production_deploy_script.py::test_candidate_compose_failure_rolls_back_exactly_once[up]
+FAILED tests/test_production_deploy_script.py::test_candidate_compose_failure_rolls_back_exactly_once[ps]
+FAILED tests/test_production_deploy_script.py::test_prune_failure_rolls_back_exactly_once
+20 failed in 37.81s

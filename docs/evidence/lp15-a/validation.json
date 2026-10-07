@@ -1,0 +1,46 @@
+{
+  "base_sha": "e6cd07bcbe569d2779e7fb4da956acc0882f42df",
+  "python": "3.11.16",
+  "system": "Darwin",
+  "focused": {
+    "result": "90 passed in 11.64s",
+    "command": "python -m pytest -q tests/test_lp15_native_food_contract.py"
+  },
+  "related": {
+    "result": "817 passed, 5 warnings in 45.70s",
+    "coverage": [
+      "native nutrition",
+      "food/web characterization",
+      "diary",
+      "daily summary/day view",
+      "plan",
+      "barcode",
+      "auth/feature gate/account boundary",
+      "error envelope"
+    ]
+  },
+  "full": {
+    "command": "python -m pytest -q",
+    "passed": 11142,
+    "failed": 20,
+    "skipped": 95,
+    "deselected": 8,
+    "seconds": 2492.92,
+    "failure_module": "tests/test_production_deploy_script.py",
+    "full_runs": 1
+  },
+  "product_sha256": {
+    "app/blueprints/mobile_nutrition.py": "66866429cfe09cf1ecb11acfa0b4902ddc0d284f807988db6b859ab5bb78449b",
+    "app/services/fatsecret.py": "6b6fda6750506bb302c56830abd09322f4edd784de628fa7139c373c22cf46eb",
+    "app/services/mobile_food_discovery.py": "9ba55b629c5fea678b360d4e400791e28b2a0b0ba919a3b5ed680c454dd3480f"
+  },
+  "mutations": {
+    "caught": 6,
+    "restored_byte_exact": true,
+    "runner_committed": false
+  },
+  "ti09_file_overlap": 0,
+  "aws_called": false,
+  "deployed": false,
+  "merged": false
+}

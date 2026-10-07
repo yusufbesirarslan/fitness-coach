@@ -1,0 +1,33 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________________________ test_duplicate_name_identity _________________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [{'method': 'foods.search', 'search_expression': 'şiş', 'format': 'json', 'max_results': 8}]
+
+    def test_duplicate_name_identity(raw_client, native, upstream):
+        user, headers = native
+        first = raw_client.get(PREFIX + "/foods/search?q=şiş", headers=headers)
+        assert first.status_code == 200
+>       assert first.json == {"foods": [
+            {"provider": "fatsecret", "food_id": identity,
+             "name": "Aynı yemek Çığ Şiş", "brand": "Brand"}
+            for identity in ("A", "B")]}
+E       AssertionError: assert {'foods': [{'...'fatsecret'}]} == {'foods': [{'...d': 'Brand'}]}
+E
+E         Differing items:
+E         {'foods': [{'brand': 'Brand', 'food_id': 'Aynı yemek Çığ Şiş', 'name': 'Aynı yemek Çığ Şiş', 'provider': 'fatsecret'}, {'brand': 'Brand', 'food_id': 'Aynı yemek Çığ Şiş', 'name': 'Aynı yemek Çığ Şiş', 'provider': 'fatsecret'}]} != {'foods': [{'provider': 'fatsecret', 'food_id': 'A', 'name': 'Aynı yemek Çığ Şiş', 'brand': 'Brand'}, {'provider': 'fatsecret', 'food_id': 'B', 'name': 'Aynı yemek Çığ Şiş', 'brand': 'Brand'}]}
+E         Use -v to get more diff
+
+tests/test_lp15_native_food_contract.py:92: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=d22d67f875844dae method=GET path=/api/v1/nutrition/foods/search status=200 dur_ms=98.2 user=- ip=127.0.0.1
+=========================== short test summary info ============================
+FAILED tests/test_lp15_native_food_contract.py::test_duplicate_name_identity
+1 failed, 89 deselected in 3.62s

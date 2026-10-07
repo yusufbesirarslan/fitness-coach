@@ -1,0 +1,270 @@
+FFF.FFFFFF.                                                              [100%]
+=================================== FAILURES ===================================
+______________________ test_barcode_normalization[012345] ______________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [{'method': 'food.find_id_for_barcode', 'barcode': '012345', 'format': 'json'}, {'method': 'food.get.v4', 'food_id': 'A', 'format': 'json'}]
+code = '012345'
+
+    @pytest.mark.parametrize("code", ["012345", "01234567", "012345678905", "0012345678905"])
+    def test_barcode_normalization(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+        assert response.status_code == 200
+>       assert upstream[0]["barcode"] == code.rjust(13, "0")
+E       AssertionError: assert '012345' == '0000000012345'
+E
+E         - 0000000012345
+E         + 012345
+
+tests/test_lp15_native_food_contract.py:191: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=1c8e03e321c545ca method=GET path=/api/v1/nutrition/foods/barcode status=200 dur_ms=126.1 user=- ip=127.0.0.1
+_____________________ test_barcode_normalization[01234567] _____________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [{'method': 'food.find_id_for_barcode', 'barcode': '01234567', 'format': 'json'}, {'method': 'food.get.v4', 'food_id': 'A', 'format': 'json'}]
+code = '01234567'
+
+    @pytest.mark.parametrize("code", ["012345", "01234567", "012345678905", "0012345678905"])
+    def test_barcode_normalization(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+        assert response.status_code == 200
+>       assert upstream[0]["barcode"] == code.rjust(13, "0")
+E       AssertionError: assert '01234567' == '0000001234567'
+E
+E         - 0000001234567
+E         ? -----
+E         + 01234567
+
+tests/test_lp15_native_food_contract.py:191: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=354e92d934dd4655 method=GET path=/api/v1/nutrition/foods/barcode status=200 dur_ms=1.8 user=- ip=127.0.0.1
+___________________ test_barcode_normalization[012345678905] ___________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [{'method': 'food.find_id_for_barcode', 'barcode': '012345678905', 'format': 'json'}, {'method': 'food.get.v4', 'food_id': 'A', 'format': 'json'}]
+code = '012345678905'
+
+    @pytest.mark.parametrize("code", ["012345", "01234567", "012345678905", "0012345678905"])
+    def test_barcode_normalization(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+        assert response.status_code == 200
+>       assert upstream[0]["barcode"] == code.rjust(13, "0")
+E       AssertionError: assert '012345678905' == '0012345678905'
+E
+E         - 0012345678905
+E         ? -
+E         + 012345678905
+
+tests/test_lp15_native_food_contract.py:191: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=e7ce48088d914fc0 method=GET path=/api/v1/nutrition/foods/barcode status=200 dur_ms=1.8 user=- ip=127.0.0.1
+__________________________ test_barcode_validation[] ___________________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [], code = ''
+
+    @pytest.mark.parametrize("code", ["", "1234567", "1" * 14, "12-345678905", "٠١٢٣٤٥٦٧٨٩٠٥", "１２３４５６７８"])
+    def test_barcode_validation(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+>       error(response, 400, "INVALID_BARCODE")
+
+tests/test_lp15_native_food_contract.py:200:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [404 NOT FOUND]>, status = 400
+code = 'INVALID_BARCODE', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 404 == 400
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=795e6958b2c341fa method=GET path=/api/v1/nutrition/foods/barcode status=404 dur_ms=0.9 user=- ip=127.0.0.1
+_______________________ test_barcode_validation[1234567] _______________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [], code = '1234567'
+
+    @pytest.mark.parametrize("code", ["", "1234567", "1" * 14, "12-345678905", "٠١٢٣٤٥٦٧٨٩٠٥", "１２３４５６７８"])
+    def test_barcode_validation(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+>       error(response, 400, "INVALID_BARCODE")
+
+tests/test_lp15_native_food_contract.py:200:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [404 NOT FOUND]>, status = 400
+code = 'INVALID_BARCODE', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 404 == 400
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=1b41a0ecf1d04548 method=GET path=/api/v1/nutrition/foods/barcode status=404 dur_ms=0.9 user=- ip=127.0.0.1
+___________________ test_barcode_validation[11111111111111] ____________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [], code = '11111111111111'
+
+    @pytest.mark.parametrize("code", ["", "1234567", "1" * 14, "12-345678905", "٠١٢٣٤٥٦٧٨٩٠٥", "１２３４５６７８"])
+    def test_barcode_validation(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+>       error(response, 400, "INVALID_BARCODE")
+
+tests/test_lp15_native_food_contract.py:200:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [404 NOT FOUND]>, status = 400
+code = 'INVALID_BARCODE', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 404 == 400
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=c1391a71e3b444de method=GET path=/api/v1/nutrition/foods/barcode status=404 dur_ms=1.0 user=- ip=127.0.0.1
+____________________ test_barcode_validation[12-345678905] _____________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [], code = '12-345678905'
+
+    @pytest.mark.parametrize("code", ["", "1234567", "1" * 14, "12-345678905", "٠١٢٣٤٥٦٧٨٩٠٥", "１２３４５６７８"])
+    def test_barcode_validation(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+>       error(response, 400, "INVALID_BARCODE")
+
+tests/test_lp15_native_food_contract.py:200:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [404 NOT FOUND]>, status = 400
+code = 'INVALID_BARCODE', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 404 == 400
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=e01360cf6cac452f method=GET path=/api/v1/nutrition/foods/barcode status=404 dur_ms=0.9 user=- ip=127.0.0.1
+_ test_barcode_validation[\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669\u0660\u0665] _
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [], code = '٠١٢٣٤٥٦٧٨٩٠٥'
+
+    @pytest.mark.parametrize("code", ["", "1234567", "1" * 14, "12-345678905", "٠١٢٣٤٥٦٧٨٩٠٥", "１２３４５６７８"])
+    def test_barcode_validation(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+>       error(response, 400, "INVALID_BARCODE")
+
+tests/test_lp15_native_food_contract.py:200:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [404 NOT FOUND]>, status = 400
+code = 'INVALID_BARCODE', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 404 == 400
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=ed9dd8bd06d9469e method=GET path=/api/v1/nutrition/foods/barcode status=404 dur_ms=1.3 user=- ip=127.0.0.1
+__ test_barcode_validation[\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18] ___
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [], code = '１２３４５６７８'
+
+    @pytest.mark.parametrize("code", ["", "1234567", "1" * 14, "12-345678905", "٠١٢٣٤٥٦٧٨٩٠٥", "１２３４５６７８"])
+    def test_barcode_validation(raw_client, native, upstream, code):
+        response = raw_client.get(PREFIX + "/foods/barcode", query_string={"code": code}, headers=native[1])
+>       error(response, 400, "INVALID_BARCODE")
+
+tests/test_lp15_native_food_contract.py:200:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [404 NOT FOUND]>, status = 400
+code = 'INVALID_BARCODE', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 404 == 400
+E        +  where 404 = <WrapperTestResponse streamed [404 NOT FOUND]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=395f2d16ac334ae9 method=GET path=/api/v1/nutrition/foods/barcode status=404 dur_ms=1.2 user=- ip=127.0.0.1
+=========================== short test summary info ============================
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_normalization[012345]
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_normalization[01234567]
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_normalization[012345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_validation[] - a...
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_validation[1234567]
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_validation[11111111111111]
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_validation[12-345678905]
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_validation[\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669\u0660\u0665]
+FAILED tests/test_lp15_native_food_contract.py::test_barcode_validation[\uff11\uff12\uff13\uff14\uff15\uff16\uff17\uff18]
+9 failed, 2 passed, 79 deselected in 4.12s

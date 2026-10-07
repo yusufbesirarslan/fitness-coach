@@ -1,0 +1,38 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________________________ test_cross_food_serving ____________________________
+
+raw_client = <FlaskClient <Flask 'app'>>
+native = (<User lp15-owner>, {'Authorization': 'Bearer opaque-test', 'Idempotency-Key': 'lp15-intent-0001'})
+upstream = [{'method': 'food.get.v4', 'food_id': 'B', 'format': 'json'}, {'method': 'food.get.v4', 'food_id': 'A', 'format': 'json'}]
+
+    def test_cross_food_serving(raw_client, native, upstream):
+        _, headers = native
+        other = raw_client.get(PREFIX + "/foods/fatsecret/B/servings", headers=headers)
+        foreign = other.json["food"]["servings"][0]["serving_id"]
+        response = raw_client.post(PREFIX + "/logs", json=command(serving_id=foreign), headers=headers)
+>       error(response, 404, "FOOD_NOT_FOUND")
+
+tests/test_lp15_native_food_contract.py:132:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+response = <WrapperTestResponse streamed [201 CREATED]>, status = 404
+code = 'FOOD_NOT_FOUND', retryable = False
+
+    def error(response, status, code, retryable=False):
+>       assert response.status_code == status
+E       assert 201 == 404
+E        +  where 201 = <WrapperTestResponse streamed [201 CREATED]>.status_code
+
+tests/test_lp15_native_food_contract.py:77: AssertionError
+------------------------------ Captured log setup ------------------------------
+ERROR    app:config.py:449 FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.
+INFO     app:config.py:466 [FLAGS] enabled=MOBILE_AUTH_ENABLED
+INFO     app:auth_contract.py:244 [AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no
+INFO     app:__init__.py:330 [COGNITO] Hosted UI/OIDC disabled; native backend API flow only.
+------------------------------ Captured log call -------------------------------
+INFO     app:observability.py:195 request id=ff6bb3db2f2546bd method=GET path=/api/v1/nutrition/foods/fatsecret/<food_id>/servings status=200 dur_ms=95.9 user=- ip=127.0.0.1
+INFO     app:observability.py:195 request id=b0b3960e84224c0c method=POST path=/api/v1/nutrition/logs status=201 dur_ms=3.0 user=- ip=127.0.0.1
+=========================== short test summary info ============================
+FAILED tests/test_lp15_native_food_contract.py::test_cross_food_serving - ass...
+1 failed, 89 deselected in 3.43s
