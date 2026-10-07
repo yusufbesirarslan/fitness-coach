@@ -130,7 +130,11 @@ MENU_DRIVE_CONFIRMATION_UNSUPPORTED. They carry no remote exception details.
 Existing web status/product semantics are preserved where applicable; disabled
 media/Drive compatibility returns a sanitized failure. Logs redact userinfo,
 query, fragment and path (paths can contain signed credentials); discovered
-URLs and raw network exceptions are not logged.
+URLs and raw exceptions are not logged. Remote menu response content (titles,
+headings, categories, item names, body/framework-state fragments and embedded
+URLs) is never interpolated into server logs, including downstream analysis.
+Operational logs use counts, fixed reason codes and exception types only;
+intentionally retained request URL origins use `loggable_url`.
 
 No new raw HTML, remote file, PDF or header persistence was introduced. Existing
 scan cache still stores bounded extracted results under its new namespace.

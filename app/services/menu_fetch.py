@@ -22,7 +22,7 @@ def _safe_requests_get(url, *, timeout, headers=None, cookies=None,
 
 
 def loggable_url(url):
-    """scheme://host/path only -- no userinfo, query string or fragment.
+    """scheme://host only, with path redacted; no userinfo, query or fragment.
 
     A menu URL is caller-supplied and its query string can carry a token or a
     signed-URL signature; server logs get the location, never the credential
@@ -165,7 +165,7 @@ def _process_google_drive_url(url):
         chunks.append(chunk)
     file_bytes = b"".join(chunks)
 
-    current_app.logger.info(f"[DRIVE] Downloaded {len(file_bytes)} bytes, Content-Type: {content_type}")
+    current_app.logger.info(f"[DRIVE] Downloaded {len(file_bytes)} bytes")
 
     preview_lower = file_bytes[:5000].lower()
     is_drive_confirm = ("text/html" in content_type and

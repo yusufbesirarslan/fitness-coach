@@ -328,3 +328,49 @@ def test_analyze_does_not_reestimate_dense_stated_gram_item(client, profile_sess
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     assert body["categories"]["Burgerler"][0]["macros"]["calories"] == 736
+
+
+@pytest.mark.parametrize("mode", ["empty", "exception", "zero", "impossible", "low", "clamp", "band-low", "scale", "reestimate"])
+def test_analyze_response_content_logs_are_counts_only(client, profile_session, monkeypatch, caplog, mode):
+    import logging
+
+    secret = "https://restaurant.example/menu?signature=SYNTHETIC_ANALYZE_SECRET"
+    monkeypatch.setattr(menu_bp, "redis_client", None)
+    _mock_pipeline(monkeypatch, {secret: [secret]})
+    monkeypatch.setattr(menu_bp, "_get_cached_macros", lambda names, **kw: ({}, names))
+    monkeypatch.setattr(menu_bp, "_cache_macros", lambda *a, **kw: None)
+    if mode == "empty":
+        monkeypatch.setattr(menu_bp, "_extract_categorized_items", lambda *a, **kw: {})
+    elif mode == "exception":
+        def fail(*a, **kw):
+            raise RuntimeError(secret)
+        monkeypatch.setattr(menu_bp, "_extract_categorized_items", fail)
+    elif mode in {"impossible", "low", "clamp", "band-low"}:
+        calories = {"impossible": 9000, "low": 1, "clamp": 1200, "band-low": 200}[mode]
+        macros = {"calories": calories, "protein": 20, "carbs": 20, "fat": 10}
+        if mode == "clamp":
+            macros.update(carbs=150, fat=58)
+        monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret", lambda *a, **kw: ({secret: macros}, {}))
+        if mode in {"clamp", "band-low"}:
+            monkeypatch.setattr(menu_bp, "_primary_dish_type", lambda *a: "pizza")
+    elif mode == "scale":
+        monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}))
+        monkeypatch.setattr(menu_bp, "_estimate_serving_weights_llm", lambda *a, **kw: ({secret: 150}, set()))
+    elif mode == "reestimate":
+        monkeypatch.setattr(menu_bp.nutrition_pipeline, "parse_stated_grams", lambda *a: 220)
+        monkeypatch.setattr(menu_bp, "_estimate_macros_llm", lambda *a, **kw: {secret: CHICKEN} if kw.get("grams_hint") else {})
+
+    with caplog.at_level(logging.INFO):
+        response = client.post("/api/menu/analyze", json={"menu_text": secret, "framework_state": secret})
+    assert response.status_code == (422 if mode in {"empty", "exception"} else 200)
+    expected = {
+        "empty": "No food items extracted", "exception": "Extraction crashed: RuntimeError",
+        "zero": "ZERO-MACRO ITEM", "impossible": "DISCARDED implausible item",
+        "low": "DISCARDED implausibly-low dish", "clamp": "PORTION BAND CLAMP",
+        "band-low": "PORTION BAND LOW", "scale": "Scaled per-100g→serving",
+        "reestimate": "Re-estimated: 1 item",
+    }[mode]
+    assert expected in caplog.text
+    assert "SYNTHETIC_ANALYZE_SECRET" not in caplog.text
+    assert "signature=" not in caplog.text
+    assert secret not in caplog.text
