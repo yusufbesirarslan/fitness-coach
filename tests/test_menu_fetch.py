@@ -1,474 +1,468 @@
-"""Tests for the menu fetch layer (app/services/menu_fetch.py).
-
-SSRF koruması bu dosyanın kalbi: iç-ağ IP'leri (alternatif kodlamalar ve
-IPv4-mapped IPv6 dahil) engellenir, her redirect hop'u yeniden doğrulanır ve
-doğrulanan IP DNS-rebinding'e karşı pinlenir. Google Drive indirme hattı da
-(PDF/metin/görsel dispatch) sahte yanıtlarla test edilir. Ağ YOK.
-
-    python -m pytest tests/test_menu_fetch.py -v
-"""
+"""Offline public-menu security contracts, including preserved web HTTP intake."""
+import base64
+import io
+import json
 import socket
+import time
+from urllib.parse import urlparse
 
 import pytest
 import requests
 
-from app.services import menu_fetch
-from app.services.menu_fetch import (
-    _extract_drive_file_id,
-    _get_drive_direct_url,
-    _is_google_drive_url,
-    _is_safe_public_ip,
-    _pin_getaddrinfo,
-    _resolve_host_safely,
-    _validate_menu_url,
-)
+from app.services import menu_fetch as mf, menu_remote as mr
+from app.services.menu_parse import bounded_soup, bounded_json, bound_sections
+
+PUBLIC = "93.184.216.34"
 
 
-# ---------------------------------------------------------------------------
-# IP güvenlik sınıflandırması
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def wire(monkeypatch):
+    """Real Requests preparation, deterministic adapter/raw response; no network."""
+    seen = []
+    responses = []
+    monkeypatch.setattr(mr, "resolve", lambda host: [PUBLIC])
 
-@pytest.mark.parametrize("ip", ["8.8.8.8", "93.184.216.34", "2001:4860:4860::8888"])
-def test_public_ips_allowed(ip):
-    assert _is_safe_public_ip(ip) is True
+    def send(adapter, request, **kwargs):
+        seen.append((request, kwargs))
+        status, headers, body = responses.pop(0) if responses else (200, {"Content-Type": "text/html"}, b"<p>Adana Kebap Mercimek Corba Izgara Tavuk</p>")
+        resp = requests.Response()
+        resp.status_code = status
+        resp.headers.update(headers)
+        resp.request = request
 
+        class Raw(io.BytesIO):
+            def read1(self, size, decode_content=False):
+                assert decode_content is False
+                return self.read(size)
+        resp.raw = Raw(body)
+        from email.message import Message
+        from types import SimpleNamespace
+        message = Message()
+        for key, value in headers.items():
+            message[key] = value
+        resp.raw._original_response = SimpleNamespace(msg=message)
+        return resp
 
-@pytest.mark.parametrize("ip", [
-    "10.0.0.1", "172.16.5.5", "192.168.1.1",   # RFC1918
-    "127.0.0.1", "::1",                        # loopback
-    "169.254.169.254", "fe80::1",              # link-local (cloud metadata!)
-    "224.0.0.1", "0.0.0.0",                    # multicast / unspecified
-    "::ffff:10.0.0.1",                         # IPv4-mapped IPv6 kaçağı
-    "fc00::1",                                 # IPv6 ULA
-    "100.64.1.1",                              # CGNAT / paylaşımlı adres alanı (S1, RFC 6598)
-    "::ffff:100.64.1.1",                       # CGNAT, IPv4-mapped IPv6 kaçağı
-    "198.18.0.1",                              # benchmark bloğu (RFC 2544)
-    "192.0.2.10",                              # TEST-NET-1
-    "saçma", "",                               # IP bile değil
-])
-def test_internal_and_invalid_ips_blocked(ip):
-    assert _is_safe_public_ip(ip) is False
-
-
-def test_resolve_host_blocks_private_resolution(monkeypatch):
-    monkeypatch.setattr(socket, "getaddrinfo",
-                        lambda host, port, *a, **kw: [(socket.AF_INET, 1, 6, "", ("10.0.0.5", 0))])
-    with pytest.raises(ValueError, match="İç ağ"):
-        _resolve_host_safely("evil.example")
-
-
-def test_resolve_host_returns_public_ips(monkeypatch):
-    monkeypatch.setattr(socket, "getaddrinfo",
-                        lambda host, port, *a, **kw: [(socket.AF_INET, 1, 6, "", ("93.184.216.34", 0))])
-    assert _resolve_host_safely("example.com") == ["93.184.216.34"]
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", send)
+    monkeypatch.setattr(socket.socket, "connect", lambda *a: pytest.fail("real network attempted"))
+    monkeypatch.setattr(mr, "run_worker", lambda payload, seconds: mr.retrieve(**payload))
+    return seen, responses
 
 
-def test_resolve_host_dns_failure(monkeypatch):
-    def boom(host, port, *a, **kw):
-        raise socket.gaierror("NXDOMAIN")
-    monkeypatch.setattr(socket, "getaddrinfo", boom)
-    with pytest.raises(ValueError, match="çözümlenemedi"):
-        _resolve_host_safely("yok.example")
+@pytest.mark.parametrize("url", ["http://restoran.example:80/menu", "https://restoran.example/menu", "https://restoran.example:443/menu"])
+def test_validate_url_allows_standard_ports(wire, url):
+    assert mf._validate_menu_url(url)[2] is None
+    assert mf._fetch_page(url).status_code == 200
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("suffix", ["user:pass@public.example/", "public.example:22/", "public.example:/", "public.example\\@evil/", "public.example/%0a"])
+def test_invalid_authority_before_network(wire, scheme, suffix):
+    url = f"{scheme}://{suffix}"
+    if suffix.endswith("%0a"):
+        # Escaped path bytes are opaque; credentials are still never attached.
+        assert mf._fetch_page(url).status_code == 200
+    else:
+        with pytest.raises(ValueError):
+            mf._fetch_page(url)
+        assert not wire[0]
+
+
+@pytest.mark.parametrize("url", ["file:///menu", "javascript:alert(1)", "data:text/plain,x", "ftp://x/", "gopher://x/", "ws://x/", "wss://x/", "custom://x/", "example.com/menu", "//example.com/menu", "https:///x", "https://x\n/"])
+def test_other_schemes_missing_malformed_rejected(wire, url):
+    assert mf._validate_menu_url(url)[2]
     with pytest.raises(ValueError):
-        _resolve_host_safely("")
+        mf._fetch_page(url)
+    assert not wire[0]
 
 
-def test_pin_getaddrinfo_pins_only_target_host():
-    original = socket.getaddrinfo
-    with _pin_getaddrinfo("pinned.example", "9.9.9.9"):
-        result = socket.getaddrinfo("pinned.example", 443)
-        assert result == [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("9.9.9.9", 443))]
-    assert socket.getaddrinfo is original  # çıkışta restore edilir
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_credential_isolation(wire, monkeypatch, tmp_path, scheme):
+    netrc = tmp_path / "netrc"
+    netrc.write_text("machine public.example login synthetic password synthetic\n")
+    monkeypatch.setenv("NETRC", str(netrc))
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.setenv(key, "http://synthetic:synthetic@127.0.0.1:9999")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "synthetic-aws")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "synthetic-secret")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "synthetic-session")
+    monkeypatch.setenv("COGNITO_TOKEN", "synthetic-cognito")
+    response = mf._safe_requests_get(f"{scheme}://public.example/", timeout=5, headers={"Authorization": "synthetic-inbound", "Cookie": "synthetic-session", "Proxy-Authorization": "synthetic-proxy", "X-Amz-Security-Token": "synthetic-aws"})
+    assert response.status_code == 200
+    request, options = wire[0][0]
+    assert dict(request.headers) == mr.OUTBOUND_HEADERS
+    assert not {h.lower() for h in request.headers} & {"authorization", "cookie", "proxy-authorization", "x-amz-security-token"}
+    assert "synthetic" not in str(request.headers)
+    assert options["proxies"] == {}
+    assert options["verify"] is True
+    assert options["timeout"][0] <= 3 and options["timeout"][1] <= 3
+    assert options["stream"] is True
 
 
-# ---------------------------------------------------------------------------
-# URL doğrulama / temizleme
-# ---------------------------------------------------------------------------
-
-def test_validate_url_blocks_internal_hosts():
-    # localhost gerçekten 127.0.0.1'e çözülür — mock'suz uçtan uca koruma.
-    _, _, err = _validate_menu_url("http://localhost/menu")
-    assert err == "İç ağ adresleri engellendi."
-    # Port yok → host kontrolü çalışır (port 8080 olsaydı önce port kuralına takılırdı,
-    # bkz test_validate_url_blocks_nonstandard_ports).
-    _, _, err = _validate_menu_url("http://127.0.0.1/admin")
-    assert err == "İç ağ adresleri engellendi."
+@pytest.mark.parametrize("start,end", [("http", "http"), ("http", "https"), ("https", "https")])
+def test_redirect_allowed_and_no_response_cookies(wire, start, end):
+    wire[1].append((302, {"Location": f"{end}://second.example/menu", "Set-Cookie": "synthetic=secret"}, b""))
+    assert mf._fetch_page(f"{start}://public.example/").status_code == 200
+    assert len(wire[0]) == 2
+    assert all(dict(r.headers) == mr.OUTBOUND_HEADERS for r, _ in wire[0])
 
 
-def test_validate_url_formats(monkeypatch):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-
-    _, _, err = _validate_menu_url("")
-    assert err == "URL gerekli."
-    _, _, err = _validate_menu_url("!!!")
-    assert err == "Geçersiz URL formatı."
-
-    parsed, clean, err = _validate_menu_url("restoran.example/menu")
-    assert err is None
-    assert clean == "https://restoran.example/menu"  # şema otomatik eklenir
+def test_https_downgrade(wire):
+    wire[1].append((302, {"Location": "http://second.example/"}, b""))
+    with pytest.raises(ValueError, match="MENU_HTTPS_DOWNGRADE"):
+        mf._fetch_page("https://public.example/")
+    assert len(wire[0]) == 1
 
 
-def test_validate_url_strips_tracking_params_and_fragment(monkeypatch):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-    _, clean, err = _validate_menu_url(
-        "https://restoran.example/menu?utm_source=ig&fbclid=x&kategori=ana#bolum")
-    assert err is None
-    assert clean == "https://restoran.example/menu?kategori=ana"
-
-
-@pytest.mark.parametrize("url", [
-    "https://restoran.example:22/menu",      # SSH — iç servis tarama yüzeyi
-    "http://restoran.example:6379/menu",     # Redis
-    "https://restoran.example:99999/menu",   # bozuk port → .port ValueError
-])
-def test_validate_url_blocks_nonstandard_ports(url):
-    # Port kontrolü DNS çözümlemeden ÖNCE — mock gerekmez (S3, SSRF).
-    _, _, err = _validate_menu_url(url)
-    assert err == "Yalnızca 80/443 portlarına izin verilir."
-
-
-@pytest.mark.parametrize("url", [
-    "https://restoran.example/menu",
-    "https://restoran.example:443/menu",
-    "http://restoran.example:80/menu",
-])
-def test_validate_url_allows_standard_ports(monkeypatch, url):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-    _, _, err = _validate_menu_url(url)
-    assert err is None
-
-
-def test_safe_get_redirect_to_nonstandard_port_blocked(monkeypatch):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-    monkeypatch.setattr(requests, "get",
-                        lambda url, **kw: _Resp(302, headers={"Location": "http://evil.example:22/"}))
-    with pytest.raises(ValueError, match="80/443"):
-        menu_fetch._safe_requests_get("https://ilk.example/", timeout=5)
-
-
-# ---------------------------------------------------------------------------
-# _safe_requests_get — hop-hop doğrulama + boyut sınırı
-# ---------------------------------------------------------------------------
-
-class _Resp:
-    def __init__(self, status=200, headers=None, body=b"", cookies=None):
-        self.status_code = status
-        self.headers = headers or {}
-        self._body = body
-        self.cookies = cookies or {}
-        self.closed = False
-
-    def iter_content(self, chunk_size=8192):
-        for i in range(0, len(self._body), chunk_size):
-            yield self._body[i:i + chunk_size]
-
-    def close(self):
-        self.closed = True
-
-    @property
-    def content(self):
-        return getattr(self, "_content", self._body)
-
-    @property
-    def text(self):
-        return self.content.decode("utf-8", errors="replace")
-
-    def json(self):
-        import json as _json
-        return _json.loads(self.content)
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.HTTPError(f"HTTP {self.status_code}")
-
-
-def test_safe_get_validates_every_redirect_hop(monkeypatch):
-    validated_hosts = []
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely",
-                        lambda h: validated_hosts.append(h) or ["93.184.216.34"])
-    responses = iter([
-        _Resp(302, headers={"Location": "https://ikinci.example/menu"}),
-        _Resp(200, body=b"tamam"),
-    ])
-
-    def fake_get(url, **kwargs):
-        assert kwargs["allow_redirects"] is False  # manuel takip şart
-        return next(responses)
-    monkeypatch.setattr(requests, "get", fake_get)
-
-    resp = menu_fetch._safe_requests_get("https://ilk.example/menu", timeout=5)
-    assert resp.status_code == 200
-    assert validated_hosts == ["ilk.example", "ikinci.example"]
-
-
-def test_safe_get_redirect_to_internal_blocked(monkeypatch):
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("address", ["127.0.0.1", "10.0.0.1", "172.16.1.1", "192.168.0.1", "169.254.169.254", "100.100.100.200", "100.64.0.1", "0.0.0.0", "198.18.0.1", "224.0.0.1", "::1", "fc00::1", "fe80::1", "::ffff:127.0.0.1", "64:ff9b::a00:1", "2002:7f00:1::"])
+def test_destination_and_redirect_blocked(wire, monkeypatch, scheme, address):
     def resolve(host):
-        if host == "evil.example":
-            raise ValueError("İç ağ adresleri engellendi.")
-        return ["93.184.216.34"]
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", resolve)
-    monkeypatch.setattr(requests, "get",
-                        lambda url, **kw: _Resp(302, headers={"Location": "http://evil.example/"}))
-    with pytest.raises(ValueError, match="İç ağ"):
-        menu_fetch._safe_requests_get("https://ilk.example/", timeout=5)
-
-
-def test_safe_get_size_cap(monkeypatch):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-    monkeypatch.setattr(requests, "get", lambda url, **kw: _Resp(200, body=b"x" * 1000))
-    with pytest.raises(ValueError, match="boyut limiti"):
-        menu_fetch._safe_requests_get("https://a.example/", timeout=5, max_bytes=500)
-
-
-def test_safe_get_too_many_redirects(monkeypatch):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-    monkeypatch.setattr(requests, "get",
-                        lambda url, **kw: _Resp(301, headers={"Location": "https://a.example/yine"}))
-    with pytest.raises(requests.exceptions.TooManyRedirects):
-        menu_fetch._safe_requests_get("https://a.example/", timeout=5, max_redirects=3)
-
-
-# ---------------------------------------------------------------------------
-# _fetch_page — UA retry + boyut sınırı
-# ---------------------------------------------------------------------------
-
-def test_fetch_page_retries_with_new_user_agent_on_403(monkeypatch):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-    seen_uas = []
-    responses = iter([_Resp(403, body=b"blocked"),
-                      _Resp(200, body=b"<html>" + b"menu " * 200 + b"</html>")])
-
-    def fake_session_get(self, url, **kwargs):
-        seen_uas.append(self.headers["User-Agent"])
-        return next(responses)
-    monkeypatch.setattr(requests.Session, "get", fake_session_get)
-    import time as _time
-    monkeypatch.setattr(_time, "sleep", lambda s: None)
-
-    resp = menu_fetch._fetch_page("https://restoran.example/menu")
-    assert resp.status_code == 200
-    assert seen_uas[0] != seen_uas[1]  # ikinci denemede farklı UA
-
-
-def test_fetch_page_size_cap(monkeypatch):
-    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
-    monkeypatch.setattr(requests.Session, "get",
-                        lambda self, url, **kw: _Resp(200, body=b"x" * (menu_fetch._MAX_FETCH_BYTES + 1)))
-    with pytest.raises(ValueError, match="boyut limiti"):
-        menu_fetch._fetch_page("https://restoran.example/menu")
-
-
-# ---------------------------------------------------------------------------
-# Google Drive URL çözümleme
-# ---------------------------------------------------------------------------
-
-def test_is_google_drive_url():
-    assert _is_google_drive_url("https://drive.google.com/file/d/abc/view") is True
-    assert _is_google_drive_url("https://docs.google.com/document/d/abc") is True
-    assert _is_google_drive_url("https://restoran.example/menu") is False
-    assert _is_google_drive_url("") is False
-
-
-@pytest.mark.parametrize("url,expected", [
-    ("https://drive.google.com/file/d/FILE123/view", "FILE123"),
-    ("https://docs.google.com/document/d/DOC-1_x/edit", "DOC-1_x"),
-    ("https://docs.google.com/spreadsheets/d/SHEET9/edit", "SHEET9"),
-    ("https://drive.google.com/open?id=OPEN42", "OPEN42"),
-    ("https://drive.google.com/uc?export=download&id=UC7", "UC7"),
-    ("https://drive.google.com/something-else", None),
-])
-def test_extract_drive_file_id(url, expected):
-    assert _extract_drive_file_id(url) == expected
-
-
-def test_drive_direct_url_types():
-    url, t = _get_drive_direct_url("https://docs.google.com/document/d/X/edit", "X")
-    assert t == "doc" and "export?format=txt" in url
-    url, t = _get_drive_direct_url("https://docs.google.com/spreadsheets/d/X/edit", "X")
-    assert t == "sheet" and "format=csv" in url
-    url, t = _get_drive_direct_url("https://drive.google.com/file/d/X/view", "X")
-    assert t == "file" and "uc?export=download" in url
-
-
-# ---------------------------------------------------------------------------
-# _process_google_drive_url — içerik tipine göre dispatch
-# ---------------------------------------------------------------------------
-
-MENU_TEXT = "Mercimek Çorbası 45\nAdana Kebap 250\nIzgara Tavuk Salata 180"
-
-
-def _drive(monkeypatch, resp):
-    monkeypatch.setattr(menu_fetch, "_safe_requests_get", lambda url, **kw: resp)
-
-
-def test_drive_requires_file_id(app):
-    result, err = menu_fetch._process_google_drive_url("https://drive.google.com/garip")
-    assert result is None and "kimliği çıkarılamadı" in err
-
-
-def test_drive_restricted_returns_structured_error(app, monkeypatch):
-    _drive(monkeypatch, _Resp(403))
-    result, err = menu_fetch._process_google_drive_url(
-        "https://drive.google.com/file/d/GIZLI/view")
-    assert result is None
-    assert "GOOGLE_DRIVE_LINK_RESTRICTED" in err
-
-
-def test_drive_not_found_and_server_error(app, monkeypatch):
-    _drive(monkeypatch, _Resp(404))
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/YOK/view")
-    assert "bulunamadı" in err
-
-    _drive(monkeypatch, _Resp(500))
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/X/view")
-    assert "HTTP 500" in err
-
-
-def test_drive_oversized_file_rejected(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Length": str(60 * 1024 * 1024)}))
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/BUYUK/view")
-    assert "çok büyük" in err
-
-
-def test_drive_pdf_dispatch(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "application/pdf"},
-                              body=b"%PDF-1.4 fake"))
-    monkeypatch.setattr(menu_fetch, "_extract_text_from_pdf", lambda b: MENU_TEXT)
-    result, err = menu_fetch._process_google_drive_url(
-        "https://drive.google.com/file/d/PDF1/view")
-    assert err is None
-    assert result["menu_source"] == "google_drive"
-    assert "Adana Kebap" in result["body_text"]
-
-
-def test_drive_encrypted_pdf_message(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "application/pdf"},
-                              body=b"%PDF-1.4 fake"))
-
-    def enc(b):
-        raise ValueError("PDF_ENCRYPTED")
-    monkeypatch.setattr(menu_fetch, "_extract_text_from_pdf", enc)
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/S/view")
-    assert "şifre korumalı" in err
-
-
-def test_drive_google_doc_text_dispatch(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "text/plain"},
-                              body=MENU_TEXT.encode()))
-    result, err = menu_fetch._process_google_drive_url(
-        "https://docs.google.com/document/d/DOC1/edit")
-    assert err is None
-    assert result["title"] == "Google Drive Doküman Menü"
-    assert "Mercimek Çorbası" in result["body_text"]
-
-
-def test_drive_image_dispatch_to_ocr(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "image/png"},
-                              body=b"\x89PNG fake"))
-    monkeypatch.setattr(menu_fetch, "_extract_text_from_image", lambda b, ct: MENU_TEXT)
-    result, err = menu_fetch._process_google_drive_url(
-        "https://drive.google.com/file/d/IMG1/view")
-    assert err is None
-    assert result["title"] == "Google Drive Görsel Menü"
-
-
-def test_drive_unsupported_type(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "application/zip"},
-                              body=b"PK\x03\x04"))
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/Z/view")
-    assert "Desteklenmeyen dosya tipi: application/zip" == err
-
-
-def test_drive_timeout_message(app, monkeypatch):
-    def boom(url, **kw):
-        raise requests.exceptions.Timeout()
-    monkeypatch.setattr(menu_fetch, "_safe_requests_get", boom)
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/T/view")
-    assert "zaman aşımı" in err
-
-
-def test_drive_blocked_host_value_error(app, monkeypatch):
-    def boom(url, **kw):
-        raise ValueError("İç ağ adresleri engellendi.")
-    monkeypatch.setattr(menu_fetch, "_safe_requests_get", boom)
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/V/view")
-    assert "çözümlenemedi" in err
-
-
-def test_drive_connection_error_message(app, monkeypatch):
-    def boom(url, **kw):
-        raise requests.exceptions.ConnectionError("reset")
-    monkeypatch.setattr(menu_fetch, "_safe_requests_get", boom)
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/C/view")
-    assert "bağlantı hatası" in err and "ConnectionError" in err
-
-
-def test_drive_streamed_body_exceeds_cap(app, monkeypatch):
-    # Content-Length yok ama akış sırasında 50MB aşılır → indirme kesilir.
-    big = b"x" * (50 * 1024 * 1024 + 8)
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "text/plain"}, body=big))
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/BIG/view")
-    assert "çok büyük" in err
-
-
-def test_drive_virus_scan_confirmation_followed(app, monkeypatch):
-    # İlk yanıt Drive'ın "virus scan" onay HTML'i → uc-download-link takip edilir.
-    confirm_html = (b"<html><body>virus scan warning"
-                    b"<a id='uc-download-link' href='/uc?confirm=t&id=X'>download anyway</a>"
-                    b"</body></html>")
-    first = _Resp(200, headers={"Content-Type": "text/html"}, body=confirm_html)
-    second = _Resp(200, headers={"Content-Type": "text/plain"}, body=MENU_TEXT.encode())
-    calls = iter([first, second])
-    monkeypatch.setattr(menu_fetch, "_safe_requests_get", lambda url, **kw: next(calls))
-    result, err = menu_fetch._process_google_drive_url(
-        "https://drive.google.com/uc?export=download&id=X")
-    assert err is None
-    assert "Adana Kebap" in result["body_text"]
-
-
-def test_drive_pdf_text_too_short(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "application/pdf"},
-                              body=b"%PDF-1.4 fake"))
-    monkeypatch.setattr(menu_fetch, "_extract_text_from_pdf", lambda b: "kısa")
-    result, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/P/view")
-    assert result is None and "çıkarılamadı" in err
-
-
-def test_drive_corrupt_pdf_message(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "application/pdf"},
-                              body=b"%PDF-1.4 fake"))
-    monkeypatch.setattr(menu_fetch, "_extract_text_from_pdf",
-                        lambda b: (_ for _ in ()).throw(ValueError("PDF_CORRUPT")))
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/Q/view")
-    assert "bozuk" in err
-
-
-def test_drive_plain_text_too_short(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "text/plain"}, body=b"az"))
-    result, err = menu_fetch._process_google_drive_url(
-        "https://docs.google.com/document/d/D/edit")
-    assert result is None and "çıkarılamadı" in err
-
-
-def test_drive_image_too_big(app, monkeypatch):
-    big_img = b"\x89PNG" + b"x" * (10 * 1024 * 1024 + 4)
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "image/png"}, body=big_img))
-    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/IMG/view")
-    assert "çok büyük" in err
-
-
-def test_drive_image_ocr_too_short(app, monkeypatch):
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "image/jpeg"}, body=b"\xff\xd8 fake"))
-    monkeypatch.setattr(menu_fetch, "_extract_text_from_image", lambda b, ct: "x")
-    result, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/J/view")
-    assert result is None and "okunamadı" in err
-
-
-def test_drive_html_fallback_extraction(app, monkeypatch):
-    html = (b"<html><head><style>x</style></head><body>"
-            + MENU_TEXT.encode() + b"</body></html>")
-    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "text/html"}, body=html))
-    result, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/H/view")
-    assert err is None
-    assert result["title"] == "Google Drive Menü"
-    assert "Adana Kebap" in result["body_text"]
+        if host == "private.example":
+            if not mr.public_ip(address):
+                raise ValueError("MENU_DESTINATION_BLOCKED")
+        return [PUBLIC]
+    monkeypatch.setattr(mr, "resolve", resolve)
+    with pytest.raises(ValueError, match="DESTINATION"):
+        mf._fetch_page(f"{scheme}://private.example/")
+    assert not wire[0]
+    wire[1].append((302, {"Location": f"{scheme}://private.example/"}, b""))
+    with pytest.raises(ValueError, match="DESTINATION"):
+        mf._fetch_page(f"{scheme}://public.example/")
+    assert len(wire[0]) == 1
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_connected_peer_and_rebinding(monkeypatch, scheme):
+    """Exercise actual urllib3 connection _new_conn; DNS cannot run at connect."""
+    connected = []
+    class Socket:
+        peer = PUBLIC
+        def settimeout(self, value): pass
+        def setsockopt(self, *args): pass
+        def connect(self, address): connected.append(address)
+        def getpeername(self): return (self.peer, 80)
+        def close(self): pass
+    monkeypatch.setattr(socket, "socket", lambda *args: Socket())
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: pytest.fail("DNS re-resolved at connection"))
+    adapter = mr.pinned_adapter(PUBLIC)
+    cls = adapter.poolmanager.pool_classes_by_scheme[scheme].ConnectionCls
+    conn = cls("public.example", port=443 if scheme == "https" else 80, timeout=1)
+    conn._new_conn()
+    assert connected == [(PUBLIC, conn.port)]
+    assert conn.host == "public.example"
+    Socket.peer = "10.0.0.1"
+    with pytest.raises(ValueError, match="MENU_PEER_BLOCKED"):
+        conn._new_conn()
+
+
+def test_dns_all_answers_classified(monkeypatch):
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [(2, 1, 6, "", (PUBLIC, 0)), (2, 1, 6, "", ("10.0.0.1", 0))])
+    with pytest.raises(ValueError):
+        mf._resolve_host_safely("mixed.example")
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("media", ["application/pdf", "image/png", "application/zip", "text/html-evil", "", "application/octet-stream"])
+def test_media_rejected_before_read(wire, scheme, media):
+    wire[1].append((200, {"Content-Type": media}, b"ignored"))
+    with pytest.raises(ValueError, match="MEDIA"):
+        mf._fetch_page(f"{scheme}://public.example/")
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_limits_encoding_pdf_signature_and_redirects(wire, scheme):
+    for headers, body, code in [({"Content-Type": "text/html", "Content-Encoding": "gzip"}, b"bomb", "ENCODING"), ({"Content-Type": "text/html"}, b"%PDF-1.4 fake", "MEDIA"), ({"Content-Type": "text/html"}, b" " * 20 + b"%PDF-1.4 fake", "MEDIA"), ({"Content-Type": "text/html"}, b"x" * (mr.MAX_BYTES + 1), "BODY")]:
+        wire[1].append((200, headers, body))
+        with pytest.raises(ValueError, match=code):
+            mf._fetch_page(f"{scheme}://public.example/")
+    wire[1].extend([(302, {"Location": f"{scheme}://public.example/again"}, b"")] * 6)
+    with pytest.raises(ValueError, match="REDIRECT_LIMIT"):
+        mf._fetch_page(f"{scheme}://public.example/")
+
+
+def test_aggregate_budget(wire):
+    @mr.menu_operation
+    def run():
+        for _ in range(3):
+            wire[1].append((200, {"Content-Type": "text/plain"}, b"x" * 3_000_000))
+            mf._safe_requests_get("http://public.example/", timeout=5)
+    with pytest.raises(ValueError, match="BODY_LIMIT"):
+        run()
+
+
+def test_aggregate_request_count(wire):
+    @mr.menu_operation
+    def run():
+        for _ in range(mr.MAX_REQUESTS + 1):
+            mf._fetch_page("http://public.example/")
+    with pytest.raises(ValueError, match="WORK_LIMIT"):
+        run()
+    assert len(wire[0]) == mr.MAX_REQUESTS
+
+
+def test_deadline_shared(wire, monkeypatch):
+    @mr.menu_operation
+    def run():
+        mr._budget.get().deadline = time.monotonic() - 1
+        mf._fetch_page("http://public.example/")
+    with pytest.raises(requests.Timeout):
+        run()
+    assert not wire[0]
+
+
+def test_worker_environment_and_kill(monkeypatch):
+    class Proc:
+        returncode = None
+        killed = False
+        def communicate(self, *args, **kwargs):
+            if not self.killed:
+                raise __import__('subprocess').TimeoutExpired("worker", .01)
+            return b"", b""
+        def poll(self): return self.returncode
+        def kill(self): self.killed = True; self.returncode = -9
+    proc = Proc()
+    def launch(*args, **kwargs):
+        assert kwargs["env"] == {"LANG": "C.UTF-8"}
+        assert kwargs["close_fds"] is True
+        return proc
+    monkeypatch.setattr(mr.subprocess, "Popen", launch)
+    with pytest.raises(requests.Timeout):
+        mr.run_worker({}, .01)
+    assert proc.killed
+
+
+def test_parser_admission_and_output():
+    for html in ["<div>" * 65 + "x" + "</div>" * 65, "<p>x</p>" * 6001, "<?x>" * 6001, "<!x>" * 6001, "x" * 3_000_001]:
+        with pytest.raises(ValueError, match="PARSE"):
+            bounded_soup(html)
+    for value in ["[" * 65 + "0" + "]" * 65, json.dumps(list(range(6001)))]:
+        with pytest.raises(ValueError): bounded_json(value)
+    assert sum(len(s['text']) + len(s['category']) + 4 for s in bound_sections([{"category": "x" * 1000, "text": "x" * 50000}] * 100)) <= 40000
+
+
+@pytest.mark.parametrize("media,body", [("application/pdf", b"%PDF-1.4"), ("image/png", b"\x89PNG small"), ("image/jpeg", b"x"), ("application/zip", b"PK")])
+def test_drive_disabled_parsers(app, monkeypatch, media, body):
+    from app.services import menu_ocr
+    monkeypatch.setattr(menu_ocr, "_extract_text_from_pdf", lambda *a: pytest.fail("PDF parser reachable"))
+    monkeypatch.setattr(menu_ocr, "_extract_text_from_image", lambda *a: pytest.fail("image parser reachable"))
+    resp = requests.Response(); resp.status_code = 200; resp._content = body; resp._content_consumed = True; resp.headers['Content-Type'] = media
+    monkeypatch.setattr(mf, "_safe_requests_get", lambda *a, **k: resp)
+    result, err = mf._process_google_drive_url("https://drive.google.com/file/d/X/view")
+    assert result is None and err == "MENU_MEDIA_UNSUPPORTED"
+
+
+def test_drive_text_and_html_bounded(app, wire):
+    for media, body in [("text/plain", b"Adana Kebap " * 10000), ("text/html", b"<p>Adana Kebap Mercimek Corba Izgara Tavuk</p>")]:
+        wire[1].append((200, {"Content-Type": media}, body))
+        result, err = mf._process_google_drive_url("https://docs.google.com/document/d/X/edit")
+        assert err is None
+        assert len(result['body_text']) <= 40000
+
+
+def test_drive_confirmation_disabled_and_host_exact(app, wire):
+    wire[1].append((200, {"Content-Type": "text/html"}, b"virus scan <a id='uc-download-link' href='/uc?confirm=x'>download anyway</a>"))
+    result, err = mf._process_google_drive_url("https://drive.google.com/file/d/X/view")
+    assert result is None and err == "MENU_DRIVE_CONFIRMATION_UNSUPPORTED"
+    assert len(wire[0]) == 1
+    assert not mf._is_google_drive_url("https://evil.example/?drive.google.com/file/d/X")
+    assert mf._is_google_drive_url("https://drive.google.com/file/d/X")
+
+
+def test_architecture_guard():
+    import ast
+    from pathlib import Path
+    paths = [Path('app/services/menu_fetch.py'), Path('app/services/menu_extract.py'), Path('app/blueprints/menu.py')]
+    for path in paths:
+        tree = ast.parse(path.read_text())
+        requests_aliases = {alias.asname or alias.name for n in ast.walk(tree) if isinstance(n, ast.Import) for alias in n.names if alias.name == 'requests'}
+        forbidden = {'_extract_text_from_pdf', '_extract_text_from_image', 'getaddrinfo', 'Session', 'urlopen', 'BeautifulSoup'}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute)):
+                name = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+                assert name not in forbidden, (path, name)
+                if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and node.func.value.id in requests_aliases:
+                    assert name not in {'get', 'post', 'request', 'session'}, (path, name)
+            if isinstance(node, ast.ImportFrom):
+                assert not (node.module or '').startswith(('urllib.request', 'httpx', 'aiohttp'))
+    assert 'trust_env = False' in Path('app/services/menu_remote.py').read_text()
+    assert mr.ALLOWED_SCHEMES == {'http', 'https'}
+    assert 'native' not in Path('app/services/menu_remote.py').read_text().lower()
+
+
+def test_loggable_url_redacts_secrets():
+    assert mf.loggable_url("https://u:p@host.example/secret-path?q=secret#token") == "https://host.example/<path-redacted>"
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("size", [63, 64, 65])
+@pytest.mark.parametrize("declared", [None, "1", "999999", "broken"])
+def test_exact_decoded_byte_matrix(wire, scheme, size, declared):
+    headers = {"Content-Type": "text/plain", "Transfer-Encoding": "chunked"}
+    if declared is not None:
+        headers["Content-Length"] = declared
+    wire[1].append((200, headers, b"x" * size))
+    if size > 64 or declared == "999999":
+        with pytest.raises(ValueError, match="BODY_LIMIT"):
+            mf._safe_requests_get(f"{scheme}://public.example/", timeout=5, max_bytes=64)
+    else:
+        assert len(mf._safe_requests_get(f"{scheme}://public.example/", timeout=5, max_bytes=64).content) == size
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+@pytest.mark.parametrize("encoding", ["gzip", "deflate", "br", "gzip, br"])
+def test_all_compression_disabled(wire, scheme, encoding):
+    wire[1].append((200, {"Content-Type": "text/html", "Content-Encoding": encoding}, b"compact-bomb"))
+    with pytest.raises(ValueError, match="ENCODING_UNSUPPORTED"):
+        mf._fetch_page(f"{scheme}://public.example/")
+
+
+@pytest.mark.parametrize("scheme", ["http", "https"])
+def test_redirect_userinfo_before_next_network(wire, scheme):
+    wire[1].append((302, {"Location": f"{scheme}://user:pass@public.example/"}, b""))
+    with pytest.raises(ValueError): mf._fetch_page(f"{scheme}://public.example/")
+    assert len(wire[0]) == 1
+
+
+def compact_pdf(stream, pages=1):
+    import zlib
+    stream = zlib.compress(stream)
+    objects = [b'<< /Type /Catalog /Pages 2 0 R >>',
+               b'<< /Type /Pages /Kids [' + b' '.join(f'{i} 0 R'.encode() for i in range(5, 5 + pages)) + b'] /Count ' + str(pages).encode() + b' >>',
+               b'<< /Length ' + str(len(stream)).encode() + b' /Filter /FlateDecode >>\nstream\n' + stream + b'\nendstream',
+               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>']
+    objects += [b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 3 0 R /Resources << /Font << /F1 4 0 R >> >> >>'] * pages
+    output = io.BytesIO(b'%PDF-1.4\n'); output.seek(0, 2)
+    offsets = []
+    for i, body in enumerate(objects, 1):
+        offsets.append(output.tell()); output.write(f'{i} 0 obj\n'.encode() + body + b'\nendobj\n')
+    xref = output.tell(); output.write(f'xref\n0 {len(objects)+1}\n'.encode() + b'0000000000 65535 f \n')
+    for offset in offsets: output.write(f'{offset:010d} 00000 n \n'.encode())
+    output.write(f'trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF'.encode())
+    return output.getvalue()
+
+
+@pytest.mark.parametrize("pages", [1, 31])
+@pytest.mark.parametrize("media", ["application/pdf", "text/html"])
+def test_original_pdf_blockers_never_parse(app, wire, monkeypatch, pages, media):
+    import pdfplumber
+    from pdfminer.pdfdocument import PDFDocument
+    from app.services import menu_ocr
+    calls = []
+    def forbidden(*a, **k):
+        calls.append(True)
+        pytest.fail("untrusted PDF reached parser or AI")
+    monkeypatch.setattr(pdfplumber, "open", forbidden)
+    monkeypatch.setattr(PDFDocument, "__init__", forbidden)
+    monkeypatch.setattr(menu_ocr, "_extract_text_from_image", forbidden)
+    stream = b'BT /F1 12 Tf 72 720 Td (Adana Kebap Mercimek Corba) Tj ET\n'
+    if pages == 1:
+        stream += b'%' + b'x' * (8 * 1024 * 1024) + b'\n'
+    fixture = compact_pdf(stream, pages)
+    assert len(fixture) < 16000
+    wire[1].append((200, {"Content-Type": media}, fixture))
+    with pytest.raises(ValueError, match="MEDIA_UNSUPPORTED"):
+        mf._fetch_page("http://public.example/menu")
+    wire[1].append((200, {"Content-Type": media}, fixture))
+    result, err = mf._process_google_drive_url("https://drive.google.com/file/d/X/view")
+    assert result is None and err
+    assert calls == []
+
+
+def test_real_worker_blocks_private_without_application_imports():
+    with pytest.raises(ValueError, match="DESTINATION_BLOCKED"):
+        mr.run_worker({"url": "http://127.0.0.1/", "byte_limit": 10, "request_limit": 1, "redirect_limit": 0, "seconds": 3}, 3)
+
+
+def test_real_supervisor_kills_stalled_worker(monkeypatch, tmp_path):
+    script = tmp_path / 'stalled.py'
+    script.write_text('import time\ntime.sleep(60)\n')
+    monkeypatch.setattr(mr, '__file__', str(script))
+    start = time.monotonic()
+    with pytest.raises(requests.Timeout):
+        mr.run_worker({}, .2)
+    assert time.monotonic() - start < 2
+
+
+def test_inbound_flask_secrets_never_forward(client, auth_user, wire):
+    response = client.post('/api/proxy/scan-menu', json={'url': 'http://public.example/menu'}, headers={'Authorization': 'Bearer synthetic-cognito', 'Cookie': 'synthetic-session', 'X-Amz-Security-Token': 'synthetic-aws', 'Proxy-Authorization': 'synthetic-proxy'})
+    assert response.status_code == 200
+    assert wire[0]
+    assert all(dict(request.headers) == mr.OUTBOUND_HEADERS for request, _ in wire[0])
+
+
+@pytest.mark.parametrize('ip', ['8.8.8.8', PUBLIC, '2001:4860:4860::8888', '::ffff:93.184.216.34'])
+def test_public_ips_allowed(ip):
+    assert mf._is_safe_public_ip(ip)
+
+
+@pytest.mark.parametrize('ip', ['::', '127.1.2.3', '::ffff:100.64.1.1', '192.0.2.10', '192.0.0.9', '192.88.99.1', '2001:20::1', '3fff::1', '5f00::1', 'bad', ''])
+def test_special_and_invalid_addresses(ip):
+    assert not mf._is_safe_public_ip(ip)
+
+
+def test_dns_failure_is_sanitized(monkeypatch):
+    def fail(*a, **k): raise socket.gaierror('synthetic-sensitive-details')
+    monkeypatch.setattr(socket, 'getaddrinfo', fail)
+    with pytest.raises(ValueError, match='^MENU_DNS_FAILED$'):
+        mf._resolve_host_safely('public.example')
+
+
+def test_tracking_cleanup_keeps_http_scheme():
+    _, clean, err = mf._validate_menu_url('http://public.example/menu?utm_source=x&kategori=ana#fragment')
+    assert err is None and clean == 'http://public.example/menu?kategori=ana'
+
+
+def test_shared_fetcher_does_not_define_native_intake():
+    from pathlib import Path
+    doc = Path('docs/LP15_B1_MENU_FETCH_SECURITY.md').read_text()
+    assert 'HTTPS-only before calling this shared HTTP/HTTPS fetcher' in doc
+    assert '**not implemented here**' in doc
+
+
+def test_failed_fetch_consumes_aggregate_reservation(wire):
+    @mr.menu_operation
+    def run():
+        for _ in range(3):
+            wire[1].append((200, {'Content-Type': 'application/pdf'}, b'%PDF'))
+            with pytest.raises(ValueError):
+                mf._fetch_page('http://public.example/')
+        with pytest.raises(ValueError, match='WORK_LIMIT'):
+            mf._fetch_page('http://public.example/')
+    run()
+    assert len(wire[0]) == 3
+
+
+@pytest.mark.parametrize('scheme', ['http', 'https'])
+def test_scan_pdf_media_uses_existing_unsupported_status(client, auth_user, wire, scheme):
+    wire[1].append((200, {'Content-Type': 'application/pdf'}, b'%PDF-1.4'))
+    response = client.post('/api/proxy/scan-menu', json={'url': f'{scheme}://public.example/menu'})
+    assert response.status_code == 415
+    assert response.get_json()['error'] == 'MENU_MEDIA_UNSUPPORTED'
+
+
+def test_pinned_https_keeps_sni_and_certificate_authority(monkeypatch):
+    import ssl
+    import urllib3.connection
+    connected = []
+    class Socket:
+        def settimeout(self, timeout): pass
+        def setsockopt(self, *args): pass
+        def connect(self, address): connected.append(address)
+        def getpeername(self): return (PUBLIC, 443)
+        def close(self): pass
+    monkeypatch.setattr(socket, 'socket', lambda *args: Socket())
+    monkeypatch.setattr(socket, 'getaddrinfo', lambda *a, **k: pytest.fail('second DNS lookup'))
+    captured = []
+    def tls(**kwargs):
+        captured.append(kwargs)
+        return kwargs['sock'], True
+    monkeypatch.setattr(urllib3.connection, '_ssl_wrap_socket_and_match_hostname', tls)
+    cls = mr.pinned_adapter(PUBLIC).poolmanager.pool_classes_by_scheme['https'].ConnectionCls
+    conn = cls('public.example', port=443, timeout=1)
+    conn.connect()
+    assert connected == [(PUBLIC, 443)]
+    assert captured[0]['server_hostname'] == 'public.example'
+    assert captured[0]['cert_reqs'] == ssl.CERT_REQUIRED
+    assert captured[0]['assert_hostname'] is not False
+    assert conn.is_verified and not conn.proxy

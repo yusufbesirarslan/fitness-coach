@@ -46,7 +46,7 @@ def test_scan_requires_url(client, auth_user):
 def test_scan_blocks_internal_url(client, auth_user):
     response = client.post("/api/proxy/scan-menu", json={"url": "http://127.0.0.1/admin"})
     assert response.status_code == 400
-    assert "İç ağ" in response.get_json()["error"]
+    assert response.get_json()["error"] == "MENU_DESTINATION_BLOCKED"
 
 
 def test_scan_scrapes_sections_and_headings(client, auth_user, monkeypatch):

@@ -6,6 +6,7 @@ from app.services import nutrition_pipeline
 from flask import current_app
 
 from app.services.menu_fetch import _safe_requests_get
+from app.services.menu_parse import bounded_soup, bounded_json, bounded_text, bound_sections, SectionAccumulator
 
 
 # Para birimi sembol/sözcükleri — fiyat token'larını yemek adlarından ayırt etmek
@@ -50,14 +51,13 @@ def _extract_framework_state(html_text, soup=None):
     parse ettiği ağaç kullanılır — script tag'leri decompose edilmeden
     çağrılmalı). Verilmezse eski davranış: kendi parse'ını yapar."""
     import re
-    from bs4 import BeautifulSoup
 
     if soup is None:
-        soup = BeautifulSoup(html_text, "html.parser")
+        soup = bounded_soup(html_text)
     script_tag = soup.find("script", {"id": "__NEXT_DATA__"})
     if script_tag and script_tag.string:
         try:
-            state = json.loads(script_tag.string)
+            state = bounded_json(script_tag.string)
             return state, "next"
         except (json.JSONDecodeError, ValueError):
             pass
@@ -90,7 +90,7 @@ def _extract_framework_state(html_text, soup=None):
                     break
         if end_idx > start:
             try:
-                state = json.loads(html_text[start:end_idx])
+                state = bounded_json(html_text[start:end_idx])
                 return state, framework
             except (json.JSONDecodeError, ValueError):
                 continue
@@ -124,16 +124,15 @@ def _discover_menu_links(soup, base_parsed):
 
 
 def _extract_page_sections(html_text, soup_clean):
-    from bs4 import BeautifulSoup
     import re as _re
 
-    sections = []
+    sections = SectionAccumulator()
 
     jsonld_scripts = soup_clean.find_all("script", {"type": "application/ld+json"})
     for script in jsonld_scripts:
         if script.string:
             try:
-                ld = json.loads(script.string)
+                ld = bounded_json(script.string)
                 items = ld if isinstance(ld, list) else [ld]
                 for item in items:
                     # B18: JSON-LD listesi string/null da içerebilir → .get()
@@ -155,11 +154,11 @@ def _extract_page_sections(html_text, soup_clean):
                             names = [mi.get("name", "") for mi in menu_items
                                      if isinstance(mi, dict) and mi.get("name")]
                             if names:
-                                sections.append({"category": cat, "text": "\n".join(names)})
-            except (json.JSONDecodeError, TypeError):
+                                sections.append({"category": cat, "text": "\n".join(str(n)[:500] for n in names[:80])})
+            except (ValueError, TypeError):
                 pass
     if sections:
-        return sections
+        return bound_sections(sections)
 
     current_heading = "Genel"
     current_items = []
@@ -171,7 +170,7 @@ def _extract_page_sections(html_text, soup_clean):
     current_seen = set()
 
     for el in soup_clean.find_all(["h1", "h2", "h3", "h4", "h5", "p", "li", "span", "div", "td"]):
-        text = el.get_text(strip=True)
+        text = bounded_text(el, 501)
         if not text or len(text) < 2:
             continue
         if el.name in ("h1", "h2", "h3", "h4", "h5"):
@@ -179,7 +178,7 @@ def _extract_page_sections(html_text, soup_clean):
                 sections.append({"category": current_heading, "text": "\n".join(current_items)})
                 current_items = []
                 current_seen = set()
-            current_heading = text
+            current_heading = text[:256]
         else:
             if 3 < len(text) < 500 and not _is_price_noise(text):
                 key = " ".join(text.casefold().split())
@@ -199,7 +198,7 @@ def _extract_page_sections(html_text, soup_clean):
             items = []
             seen = set()
             for el in container.find_all(["h4", "h3", "h2", "p", "li", "span", "div"]):
-                text = el.get_text(strip=True)
+                text = bounded_text(el, 501)
                 if text and 3 < len(text) < 500 and not _is_price_noise(text):
                     key = " ".join(text.casefold().split())
                     if key not in seen:
@@ -214,7 +213,7 @@ def _extract_page_sections(html_text, soup_clean):
             fallback_items = []
             seen = set()
             for el in container.find_all(["h4", "h3", "h2", "p", "li", "span"]):
-                text = el.get_text(strip=True)
+                text = bounded_text(el, 501)
                 if text and 3 < len(text) < 500 and not _is_price_noise(text):
                     key = " ".join(text.casefold().split())
                     if key not in seen:
@@ -223,7 +222,7 @@ def _extract_page_sections(html_text, soup_clean):
             if fallback_items:
                 sections.append({"category": "Genel", "text": "\n".join(fallback_items)})
 
-    return sections
+    return bound_sections(sections)
 
 
 _FOOD_KEYWORDS = {
@@ -242,7 +241,6 @@ def _content_has_food_items(text, threshold=3):
 
 def _try_wordpress_api(base_parsed, raw_html):
     import requests as http_req
-    from bs4 import BeautifulSoup
 
     is_wp = "wp-content" in raw_html or "wp-json" in raw_html or "wordpress" in raw_html.lower()
     if not is_wp:
@@ -266,7 +264,7 @@ def _try_wordpress_api(base_parsed, raw_html):
 
     current_app.logger.info(f"[SCRAPER] WordPress detected — trying REST API for slugs: {slugs_to_try}")
 
-    all_sections = []
+    all_sections = SectionAccumulator()
     best_title = None
 
     for slug in slugs_to_try:
@@ -276,9 +274,9 @@ def _try_wordpress_api(base_parsed, raw_html):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept": "application/json",
             })
-            if api_resp.status_code != 200:
+            if api_resp.status_code != 200 or api_resp.headers.get("Content-Type", "").split(";", 1)[0] != "application/json":
                 continue
-            pages = api_resp.json()
+            pages = bounded_json(api_resp.text)
             if not pages:
                 continue
 
@@ -287,8 +285,8 @@ def _try_wordpress_api(base_parsed, raw_html):
             if not content_html:
                 continue
 
-            soup = BeautifulSoup(content_html, "html.parser")
-            text = soup.get_text(separator="\n", strip=True)
+            soup = bounded_soup(content_html)
+            text = bounded_text(soup)
 
             if len(text) > 100 and _content_has_food_items(text):
                 current_app.logger.info(f"[SCRAPER] WP API hit for slug '{slug}': {len(text)} chars with food content")
@@ -319,29 +317,29 @@ def _try_wordpress_api(base_parsed, raw_html):
                 try:
                     sub_resp = _safe_requests_get(sub_api, timeout=6, max_bytes=8_000_000, headers={
                         "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-                    if sub_resp.status_code != 200:
+                    if sub_resp.status_code != 200 or sub_resp.headers.get("Content-Type", "").split(";", 1)[0] != "application/json":
                         continue
-                    sub_pages = sub_resp.json()
+                    sub_pages = bounded_json(sub_resp.text)
                     if not sub_pages:
                         continue
                     sub_html = sub_pages[0].get("content", {}).get("rendered", "")
-                    sub_soup = BeautifulSoup(sub_html, "html.parser")
-                    sub_text = sub_soup.get_text(separator="\n", strip=True)
+                    sub_soup = bounded_soup(sub_html)
+                    sub_text = bounded_text(sub_soup)
                     if len(sub_text) > 200 and _content_has_food_items(sub_text):
                         current_app.logger.info(f"[SCRAPER] WP API sub-page '{link_slug}': {len(sub_text)} chars with food content")
                         sub_sections = _extract_page_sections(sub_html, sub_soup)
                         all_sections.extend(sub_sections)
                 except Exception as e:
-                    current_app.logger.warning(f"[SCRAPER] WP API sub-page '{link_slug}' failed: {type(e).__name__}: {e}")
+                    current_app.logger.warning(f"[SCRAPER] WP API sub-page '{link_slug}' failed: {type(e).__name__}")
                     continue
 
         except Exception as e:
-            current_app.logger.warning(f"[SCRAPER] WP API attempt for '{slug}' failed: {type(e).__name__}: {e}")
+            current_app.logger.warning(f"[SCRAPER] WP API attempt for '{slug}' failed: {type(e).__name__}")
             continue
 
     if all_sections:
         current_app.logger.info(f"[SCRAPER] WP API total: {len(all_sections)} sections recovered")
-        return best_title, all_sections
+        return str(best_title or "")[:256], bound_sections(all_sections)
 
     return None, []
 

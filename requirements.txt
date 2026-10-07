@@ -17,6 +17,8 @@ anthropic[bedrock]==0.120.2
 psycopg2-binary==2.9.12
 python-dotenv==1.2.2
 requests==2.34.2
+# Menu transport relies on the qualified raw read1/connection-pool API.
+urllib3==2.8.0
 Brotli==1.2.0
 beautifulsoup4==4.15.0
 # Güvenilmeyen yükleme (PDF/görsel) ayrıştırıcıları — Dependabot (.github/dependabot.yml)
