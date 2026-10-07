@@ -124,12 +124,12 @@ def test_n7_25_ambiguous_write_reported_as_success_is_detected(
 def test_n7_04_plan_failure_as_absent_is_detected(app, native, bearer, make_user, monkeypatch):
     real = plan.read_plan
 
-    def absent_on_failure(user_id, secret):
+    def absent_on_failure(user_id, secret, language):
         try:
-            return real(user_id, secret)
+            return real(user_id, secret, language)
         except Exception:
             return {"contract_version": 1, "plan": plan._absent_payload(),
-                    "generation_options": plan.generation_options()}
+                    "generation_options": plan.generation_options(language)}
     monkeypatch.setattr(plan, "read_plan", absent_on_failure)
     killed(plan_tests.test_plan_storage_failure_is_a_typed_503,
            app, native, bearer, make_user, monkeypatch)

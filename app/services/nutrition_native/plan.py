@@ -8,7 +8,10 @@ Authorities (none of them new):
 * document schema   ``nutrition_plan_schema.validate_nutrition_plan_for_save``;
 * score             ``plan_score.parse_plan_score``;
 * generation        ``nutrition_plan_generation`` (catalogue, rating, prompt,
-                    parse) — the browser route runs the same code;
+                    parse) — the browser route runs the same code; the native
+                    picker labels it per account language via
+                    ``generation_labels`` and maps labels back to the
+                    canonical names before generation;
 * consumed food     ``MealLog`` via ``meal_idempotency.commit_once`` and the
                     ``mobile_log_food.response_meal`` projection.
 
@@ -57,6 +60,7 @@ from app.services.premium import (
 from app.timeutil import day_key, to_app_tz
 
 from . import errors, tokens
+from . import generation_labels as food_labels
 from .preconditions import Precondition
 
 
@@ -175,24 +179,37 @@ def project_plan_row(row, secret):
     return dict(base, state=ACTIVE, food_rating=food_rating, **projected)
 
 
-def generation_options():
-    """The fixed generation catalogue, so a client never hard-codes food names."""
+def _catalogue_groups():
+    """Canonical (Turkish) food names per picker group, in catalogue order."""
     db_ = generation.FOOD_DATABASE
     return {
         "proteins": [f["isim"] for group in db_["protein"].values() for f in group],
         "carbs": [f["isim"] for f in db_["karbonhidrat"]],
         "fats": [f["isim"] for f in db_["yag"]],
-        "max_per_group": MAX_FOODS_PER_GROUP,
-        "max_custom_foods": MAX_CUSTOM_FOODS,
     }
 
 
-def read_plan(user_id, secret):
+def generation_options(language):
+    """The fixed generation catalogue, labelled in the account's ``language``.
+
+    ``language`` is the authenticated owner's stored ``User.language`` — the
+    value the generator's prompt is built from — never a request field. The
+    labels are display text only; ``parse_generation_request`` maps them back
+    to the canonical names before anything else sees them.
+    """
+    options = {group: [food_labels.display_label(name, language) for name in names]
+               for group, names in _catalogue_groups().items()}
+    options["max_per_group"] = MAX_FOODS_PER_GROUP
+    options["max_custom_foods"] = MAX_CUSTOM_FOODS
+    return options
+
+
+def read_plan(user_id, secret, language):
     """The owner's canonical saved plan. Raises on storage failure (→ 503)."""
     row = newest_plan(user_id)
     plan = _absent_payload() if row is None else project_plan_row(row, secret)
     return {"contract_version": CONTRACT_VERSION, "plan": plan,
-            "generation_options": generation_options()}
+            "generation_options": generation_options(language)}
 
 
 # ── native document parsing (save) ─────────────────────────────────────────
@@ -314,28 +331,39 @@ def verify_proposal_token(secret, user_id, token, now=None):
 
 
 def _food_group(value, allowed):
-    if (not isinstance(value, list) or not 1 <= len(value) <= MAX_FOODS_PER_GROUP
-            or len(set(map(str, value))) != len(value)):
+    """Known catalogue labels of ONE group → their canonical names, in order.
+
+    A label of ANY supported locale is accepted (a picker loaded before the
+    account language changed still submits known foods); an unknown string, a
+    food of another group, or two labels naming the same food are refused.
+    """
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_FOODS_PER_GROUP:
         raise errors.InvalidGenerationRequest
+    names = []
     for item in value:
-        if not isinstance(item, str) or item not in allowed:
+        name = food_labels.canonical_food(item)
+        if name is None or name not in allowed:
             raise errors.InvalidGenerationRequest
-    return list(value)
+        names.append(name)
+    if len(set(names)) != len(names):
+        raise errors.InvalidGenerationRequest
+    return names
 
 
 def parse_generation_request(data):
-    """Closed body: catalogue names only, plus a bounded custom-food list."""
+    """Closed body: catalogue labels only, plus a bounded custom-food list.
+
+    The returned ``proteins``/``carbs``/``fats`` are CANONICAL food names —
+    rating, prompt and every later rule never see a display label.
+    """
     if not isinstance(data, dict):
         raise errors.InvalidGenerationRequest
     allowed_keys = {"proteins", "carbs", "fats", "custom_foods"}
     if set(data) - allowed_keys or not {"proteins", "carbs", "fats"} <= set(data):
         raise errors.InvalidGenerationRequest
-    options = generation_options()
-    request = {
-        "proteins": _food_group(data["proteins"], set(options["proteins"])),
-        "carbs": _food_group(data["carbs"], set(options["carbs"])),
-        "fats": _food_group(data["fats"], set(options["fats"])),
-    }
+    groups = _catalogue_groups()
+    request = {group: _food_group(data[group], set(groups[group]))
+               for group in ("proteins", "carbs", "fats")}
     custom = data.get("custom_foods", [])
     if not isinstance(custom, list) or len(custom) > MAX_CUSTOM_FOODS:
         raise errors.InvalidGenerationRequest
