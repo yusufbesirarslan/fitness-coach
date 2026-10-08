@@ -23,6 +23,15 @@ pytest job dominates the CI critical path; its baseline allocation is roughly
 so they cannot establish whether app creation, database setup, browsers or test
 calls dominate. Do not interpret selected-item count as a duration measurement.
 
+Representative local profiling of `test_auth.py` and
+`test_ux4_pr2_foundations_browser.py` passed 106 tests in 245.59 seconds. The
+slowest call was a browser keyboard-focus check (13.63 seconds); the slowest
+setup was also a browser fixture (5.86 seconds). Calls dominate the top-30
+duration list. This sample establishes meaningful browser costs, but does not
+measure the whole suite or isolate app creation from browser startup. An initial
+sandboxed browser run could not launch Chromium; the authorized unsandboxed
+rerun passed. It is not evidence of a test isolation failure.
+
 Shared `app` fixtures create an app, create all SQLite tables, yield a context,
 remove the session and drop all tables for each test. Browser fixtures launch
 Chromium per test; representative browser modules route HTTP through Flask's
@@ -51,13 +60,15 @@ Four Ubuntu runners execute one pytest process each, `fail-fast: false`, with a
 maximum of four concurrent shards. `tests` remains the matrix job ID. Each
 runner uploads a unique JSON artifact containing its exact full selected IDs,
 marker-deselected IDs, collection-skipped modules, assigned IDs, revision,
-exit status and every executed phase report. The default artifact retention is
+exit status and every executed phase report. Artifact names include the workflow
+attempt number, so reruns cannot reuse earlier-attempt evidence or collide with
+prior uploads. The default artifact retention is
 14 days. Session interruptions cannot produce successful execution evidence.
 
 The `pytest-gate` job retains the required status name `pytest`, depends on the
 entire matrix and runs with `always()`. Its first step rejects any matrix result
 except success. Missing/cancelled/skipped/failed shards cannot pass. Downloads
-are scoped to the current workflow run. The verifier requires exactly four
+are scoped to the current workflow run and attempt. The verifier requires exactly four
 distinct, successful, revision-matching execution manifests. It checks identical
 authoritative collections, deselections and collection skips; recomputes the
 partition; checks disjoint exact union parity; and requires a complete successful

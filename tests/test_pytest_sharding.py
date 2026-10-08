@@ -151,6 +151,9 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert "-p scripts.pytest_sharding" in run
     assert "--ci-shard=${{ matrix.shard }}" in run
     assert "--ci-manifest=shard-evidence/shard-${{ matrix.shard }}.json" in run
+    upload = next(s for s in shards["steps"] if s.get("name") == "Upload execution and profiling evidence")
+    assert upload["with"]["name"] == "pytest-shard-${{ github.run_attempt }}-${{ matrix.shard }}"
+    assert upload["with"]["if-no-files-found"] == "error"
     gate = jobs["pytest-gate"]
     assert gate["name"] == "pytest"
     assert gate["needs"] == ["tests"]
@@ -158,6 +161,8 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert gate["steps"][0]["run"] == 'test "$SHARD_RESULT" = success'
     assert gate["steps"][0]["env"]["SHARD_RESULT"] == "${{ needs.tests.result }}"
     assert "--result=\"$SHARD_RESULT\"" in gate["steps"][-1]["run"]
+    download = next(s for s in gate["steps"] if "actions/download-artifact@" in s.get("uses", ""))
+    assert download["with"]["pattern"] == "pytest-shard-${{ github.run_attempt }}-*"
     for job in (shards, gate):
         assert "continue-on-error" not in job
         assert all("continue-on-error" not in step for step in job["steps"])
