@@ -234,6 +234,7 @@ from app.blueprints import mobile_account_deletion  # noqa: E402,F401
 from app.blueprints import mobile_account_language  # noqa: E402,F401
 from app.blueprints import mobile_account_profile  # noqa: E402,F401
 from app.blueprints import mobile_coach  # noqa: E402,F401
+from app.blueprints import mobile_menu  # noqa: E402,F401
 from app.blueprints import mobile_nutrition  # noqa: E402,F401
 from app.blueprints import mobile_nutrition_closure  # noqa: E402,F401
 from app.blueprints import mobile_password_recovery  # noqa: E402,F401

@@ -439,6 +439,8 @@ def test_mobile_nutrition_route_inventory(api_v1_rules):
          frozenset({"PATCH"})),
         ("/api/v1/nutrition/supplements/<supplement_token>",
          frozenset({"DELETE"})),
+        # LP15-C native menu analysis (docs/LP15_C_NATIVE_MENU_ANALYSIS.md).
+        ("/api/v1/nutrition/menu/analyze", frozenset({"POST"})),
     }
 
 
@@ -454,11 +456,16 @@ def test_the_mobile_surface_publishes_no_history_menu_plan_or_water(
     # path, so any other history surface (nutrition or not) still fails here.
     approved = {"/api/v1/coach/history"}
     # NUTR-PR7 made History, the Nutrition Plan and hydration (water) native
-    # by explicit owner decision — admitted by EXACT path only. Menu, drafts
-    # and the diary builder remain deliberately absent.
+    # by explicit owner decision — admitted by EXACT path only. Drafts and
+    # the diary builder remain deliberately absent.
     approved |= {"/api/v1/nutrition/history", "/api/v1/nutrition/hydration",
                  "/api/v1/nutrition/plan", "/api/v1/nutrition/plan/generate",
                  "/api/v1/nutrition/plan/meals/<planned_meal_id>/log"}
+    # LP15-C made menu analysis native by explicit owner decision: ONE
+    # read-only, HTTPS-URL-in analysis transport, admitted by exact path. Menu
+    # scanning/OCR, a second menu path, drafts and the diary builder remain
+    # absent.
+    approved |= {"/api/v1/nutrition/menu/analyze"}
     paths = {rule[0] for rule in api_v1_rules} - approved
     for absent in ("history", "menu", "nutrition-plan", "water", "draft",
                    "diary/builder"):

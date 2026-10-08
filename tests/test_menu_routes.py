@@ -9,7 +9,7 @@ uçları. Ağ ve LLM katmanları mock'lu.
 import pytest
 import requests
 
-from app.blueprints import menu as menu_bp
+from app.services import menu_analysis
 from app.extensions import db
 from app.models import MealLog, UserSession
 from app.services import foodcache
@@ -50,9 +50,9 @@ def test_scan_blocks_internal_url(client, auth_user):
 
 
 def test_scan_scrapes_sections_and_headings(client, auth_user, monkeypatch):
-    monkeypatch.setattr(menu_bp, "_validate_menu_url",
+    monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
-    monkeypatch.setattr(menu_bp, "_fetch_page", lambda url, timeout=10: _Resp())
+    monkeypatch.setattr(menu_analysis, "_fetch_page", lambda url, timeout=10: _Resp())
 
     body = client.post("/api/proxy/scan-menu",
                        json={"url": "https://restoran.example/menu"}).get_json()
@@ -64,7 +64,7 @@ def test_scan_scrapes_sections_and_headings(client, auth_user, monkeypatch):
 
 
 def test_scan_error_mapping(client, auth_user, monkeypatch):
-    monkeypatch.setattr(menu_bp, "_validate_menu_url",
+    monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
 
     def raise_(exc):
@@ -72,50 +72,50 @@ def test_scan_error_mapping(client, auth_user, monkeypatch):
             raise exc
         return _f
 
-    monkeypatch.setattr(menu_bp, "_fetch_page", raise_(requests.exceptions.Timeout()))
+    monkeypatch.setattr(menu_analysis, "_fetch_page", raise_(requests.exceptions.Timeout()))
     assert client.post("/api/proxy/scan-menu",
                        json={"url": "https://x.example"}).status_code == 504
 
-    monkeypatch.setattr(menu_bp, "_fetch_page",
+    monkeypatch.setattr(menu_analysis, "_fetch_page",
                         raise_(requests.exceptions.ConnectionError()))
     assert client.post("/api/proxy/scan-menu",
                        json={"url": "https://x.example"}).status_code == 502
 
-    monkeypatch.setattr(menu_bp, "_fetch_page",
+    monkeypatch.setattr(menu_analysis, "_fetch_page",
                         raise_(ValueError("İç ağ adresleri engellendi.")))
     assert client.post("/api/proxy/scan-menu",
                        json={"url": "https://x.example"}).status_code == 400
 
-    monkeypatch.setattr(menu_bp, "_fetch_page",
+    monkeypatch.setattr(menu_analysis, "_fetch_page",
                         lambda url, timeout=10: _Resp(content_type="application/pdf"))
     assert client.post("/api/proxy/scan-menu",
                        json={"url": "https://x.example"}).status_code == 415
 
 
 def test_scan_unreadable_page_returns_422(client, auth_user, monkeypatch):
-    monkeypatch.setattr(menu_bp, "_validate_menu_url",
+    monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
-    monkeypatch.setattr(menu_bp, "_fetch_page",
+    monkeypatch.setattr(menu_analysis, "_fetch_page",
                         lambda url, timeout=10: _Resp(body="<html><body></body></html>"))
-    monkeypatch.setattr(menu_bp, "_try_wordpress_api", lambda base, html: (None, []))
+    monkeypatch.setattr(menu_analysis, "_try_wordpress_api", lambda base, html: (None, []))
     response = client.post("/api/proxy/scan-menu", json={"url": "https://bos.example"})
     assert response.status_code == 422
 
 
 def test_scan_routes_drive_urls(client, auth_user, monkeypatch):
     result = {"title": "Drive Menü", "body_text": "Kebap", "menu_source": "google_drive"}
-    monkeypatch.setattr(menu_bp, "_process_google_drive_url", lambda url: (result, None))
+    monkeypatch.setattr(menu_analysis, "_process_google_drive_url", lambda url: (result, None))
     body = client.post("/api/proxy/scan-menu",
                        json={"url": "https://drive.google.com/file/d/X/view"}).get_json()
     assert body["menu_source"] == "google_drive"
 
     # Yapısal (JSON) hata → 403, düz metin hata → 422.
-    monkeypatch.setattr(menu_bp, "_process_google_drive_url",
+    monkeypatch.setattr(menu_analysis, "_process_google_drive_url",
                         lambda url: (None, '{"error": "GOOGLE_DRIVE_LINK_RESTRICTED"}'))
     assert client.post("/api/proxy/scan-menu",
                        json={"url": "https://drive.google.com/file/d/X/view"}).status_code == 403
 
-    monkeypatch.setattr(menu_bp, "_process_google_drive_url",
+    monkeypatch.setattr(menu_analysis, "_process_google_drive_url",
                         lambda url: (None, "PDF bozuk"))
     assert client.post("/api/proxy/scan-menu",
                        json={"url": "https://drive.google.com/file/d/X/view"}).status_code == 422
@@ -138,12 +138,12 @@ def profile_session(auth_user):
 
 
 def _mock_pipeline(monkeypatch, categorized, per_serving=None, llm=None):
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: categorized)
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: (per_serving or {}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda items, category_map=None: llm or {})
 
 
@@ -203,7 +203,7 @@ def test_analyze_extraction_failure_returns_parsing_error(client, profile_sessio
     def failing_extract(*args, **kwargs):
         calls.append(1)
         raise RuntimeError("LLM çöktü")
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items", failing_extract)
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items", failing_extract)
 
     response = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT})
     # B9: çıkarım başarısızlığı artık 422 (eskiden 200 idi → client retry/error
@@ -230,12 +230,12 @@ def test_analyze_retries_without_framework_state(client, profile_session, monkey
             return {}
         return {"Ana Yemekler": ["Izgara Tavuk"]}
 
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items", extract)
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items", extract)
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda names, tok, cmap=None: (
                             {"Izgara Tavuk": {"calories": 400, "protein": 45, "carbs": 5, "fat": 20}}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda names, cmap=None, grams_hint=None: {})
 
     response = client.post("/api/menu/analyze",
@@ -248,12 +248,12 @@ def test_analyze_retries_without_framework_state(client, profile_session, monkey
 def test_analyze_serves_cached_items_without_fatsecret(client, profile_session, monkeypatch):
     # Menü hattı PORSİYON-bazlı namespace'ten okur (per-100g koç önbelleğiyle karışmaz).
     foodcache._macro_cache.setdefault("per_serving", {})["Izgara Tavuk"] = CHICKEN
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Ana Yemekler": ["Izgara Tavuk"]})
 
     def boom():
         raise AssertionError("tam önbellek isabetinde FatSecret çağrılmamalı")
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", boom)
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", boom)
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     assert body["success"] is True
@@ -279,10 +279,10 @@ FAJITA_FIXED = {"calories": 430.0, "protein": 32.0, "carbs": 28.0, "fat": 18.0} 
 def test_analyze_reestimates_low_density_stated_gram_item(client, profile_session, monkeypatch):
     # 220g fajita FatSecret'tan 125 kcal geldi (imkânsız düşük); gramaj ipucuyla
     # yeniden tahmin gerçekçi değere yükseltmeli.
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Fajitalar": [FAJITA]})
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: ({FAJITA: FAJITA_LOW}, {}))
 
     seen = {}
@@ -290,7 +290,7 @@ def test_analyze_reestimates_low_density_stated_gram_item(client, profile_sessio
     def fake_llm(items, category_map=None, grams_hint=None):
         seen["grams_hint"] = grams_hint
         return {FAJITA: FAJITA_FIXED}
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm", fake_llm)
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", fake_llm)
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     item = body["categories"]["Fajitalar"][0]
@@ -300,12 +300,12 @@ def test_analyze_reestimates_low_density_stated_gram_item(client, profile_sessio
 
 def test_analyze_keeps_original_when_reestimate_not_better(client, profile_session, monkeypatch):
     # Yeniden tahmin hâlâ imkânsız-düşükse özgün değer korunur (asla kötüleştirme).
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Fajitalar": [FAJITA]})
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: ({FAJITA: FAJITA_LOW}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda items, category_map=None, grams_hint=None: {FAJITA: {"calories": 90.0, "protein": 10, "carbs": 6, "fat": 1}})
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
@@ -316,15 +316,15 @@ def test_analyze_keeps_original_when_reestimate_not_better(client, profile_sessi
 def test_analyze_does_not_reestimate_dense_stated_gram_item(client, profile_session, monkeypatch):
     # Gerçekçi yoğunluktaki gramajlı öğe (160g burger, 736 kcal) yeniden tahmin EDİLMEZ.
     burger = "BBQ & Cheddar Burger (160 GR)"
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Burgerler": [burger]})
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: ({burger: {"calories": 736.0, "protein": 42, "carbs": 34, "fat": 28}}, {}))
 
     def boom(items, category_map=None, grams_hint=None):
         raise AssertionError("yoğunluğu gerçekçi öğe yeniden tahmin edilmemeli")
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm", boom)
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", boom)
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     assert body["categories"]["Burgerler"][0]["macros"]["calories"] == 736
@@ -335,30 +335,30 @@ def test_analyze_response_content_logs_are_counts_only(client, profile_session, 
     import logging
 
     secret = "https://restaurant.example/menu?signature=SYNTHETIC_ANALYZE_SECRET"
-    monkeypatch.setattr(menu_bp, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
     _mock_pipeline(monkeypatch, {secret: [secret]})
-    monkeypatch.setattr(menu_bp, "_get_cached_macros", lambda names, **kw: ({}, names))
-    monkeypatch.setattr(menu_bp, "_cache_macros", lambda *a, **kw: None)
+    monkeypatch.setattr(menu_analysis, "_get_cached_macros", lambda names, **kw: ({}, names))
+    monkeypatch.setattr(menu_analysis, "_cache_macros", lambda *a, **kw: None)
     if mode == "empty":
-        monkeypatch.setattr(menu_bp, "_extract_categorized_items", lambda *a, **kw: {})
+        monkeypatch.setattr(menu_analysis, "_extract_categorized_items", lambda *a, **kw: {})
     elif mode == "exception":
         def fail(*a, **kw):
             raise RuntimeError(secret)
-        monkeypatch.setattr(menu_bp, "_extract_categorized_items", fail)
+        monkeypatch.setattr(menu_analysis, "_extract_categorized_items", fail)
     elif mode in {"impossible", "low", "clamp", "band-low"}:
         calories = {"impossible": 9000, "low": 1, "clamp": 1200, "band-low": 200}[mode]
         macros = {"calories": calories, "protein": 20, "carbs": 20, "fat": 10}
         if mode == "clamp":
             macros.update(carbs=150, fat=58)
-        monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret", lambda *a, **kw: ({secret: macros}, {}))
+        monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", lambda *a, **kw: ({secret: macros}, {}))
         if mode in {"clamp", "band-low"}:
-            monkeypatch.setattr(menu_bp, "_primary_dish_type", lambda *a: "pizza")
+            monkeypatch.setattr(menu_analysis, "_primary_dish_type", lambda *a: "pizza")
     elif mode == "scale":
-        monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}))
-        monkeypatch.setattr(menu_bp, "_estimate_serving_weights_llm", lambda *a, **kw: ({secret: 150}, set()))
+        monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}))
+        monkeypatch.setattr(menu_analysis, "_estimate_serving_weights_llm", lambda *a, **kw: ({secret: 150}, set()))
     elif mode == "reestimate":
-        monkeypatch.setattr(menu_bp.nutrition_pipeline, "parse_stated_grams", lambda *a: 220)
-        monkeypatch.setattr(menu_bp, "_estimate_macros_llm", lambda *a, **kw: {secret: CHICKEN} if kw.get("grams_hint") else {})
+        monkeypatch.setattr(menu_analysis.nutrition_pipeline, "parse_stated_grams", lambda *a: 220)
+        monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", lambda *a, **kw: {secret: CHICKEN} if kw.get("grams_hint") else {})
 
     with caplog.at_level(logging.INFO):
         response = client.post("/api/menu/analyze", json={"menu_text": secret, "framework_state": secret})
@@ -383,10 +383,10 @@ def test_real_menu_analysis_helpers_do_not_log_response_content(client, profile_
     from app.services import ai_nutrition, fatsecret
 
     secret = "https://restaurant.example/menu?signature=SYNTHETIC_HELPER_SECRET"
-    monkeypatch.setattr(menu_bp, "redis_client", None)
-    monkeypatch.setattr(menu_bp, "_get_cached_macros", lambda names, **kw: ({}, names))
-    monkeypatch.setattr(menu_bp, "_cache_macros", lambda *a, **kw: None)
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "offline-token")
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "_get_cached_macros", lambda names, **kw: ({}, names))
+    monkeypatch.setattr(menu_analysis, "_cache_macros", lambda *a, **kw: None)
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "offline-token")
     # Keep the real extraction/weight/macro helpers; only provider boundaries are fake.
     def provider(**kw):
         if kw.get("feature") == "menu_extract":
@@ -414,7 +414,7 @@ def test_real_menu_analysis_helpers_do_not_log_response_content(client, profile_
         monkeypatch.setattr(ai_nutrition, "_openai_chat", fail)
         monkeypatch.setattr(fatsecret, "_fs_get", fail)
     else:
-        monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}) if mode.startswith("weights") else ({}, {}))
+        monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}) if mode.startswith("weights") else ({}, {}))
     with caplog.at_level(logging.DEBUG):
         response = client.post("/api/menu/analyze", json={"menu_text": secret, "headings": [secret]})
     assert response.status_code == (422 if mode.startswith("extract-") else 200)

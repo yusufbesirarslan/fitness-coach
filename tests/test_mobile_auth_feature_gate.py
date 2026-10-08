@@ -81,6 +81,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/nutrition/supplements"),
         ("patch", "/api/v1/nutrition/supplements/abc"),
         ("delete", "/api/v1/nutrition/supplements/abc"),
+        ("post", "/api/v1/nutrition/menu/analyze"),
         ("get", "/api/v1/progress/summary"),
         ("get", "/api/v1/today"),
         ("get", "/api/v1/training/preferences"),
@@ -185,6 +186,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/nutrition/supplements", ("POST",)),
             ("/api/v1/nutrition/supplements/<supplement_token>", ("PATCH",)),
             ("/api/v1/nutrition/supplements/<supplement_token>", ("DELETE",)),
+            # LP15-C native menu analysis (HTTPS URL in, bounded DTO out;
+            # read-only). Admitted by exact path like every nutrition route.
+            ("/api/v1/nutrition/menu/analyze", ("POST",)),
             ("/api/v1/pump-checks", ("POST",)),
             ("/api/v1/pump-checks", ("GET",)),
             ("/api/v1/pump-checks/<pump_check_token>", ("GET",)),

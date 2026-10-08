@@ -139,6 +139,27 @@ def blocking_concurrency_slot(wait_seconds=None):
         _ai_slots.release()
 
 
+@contextmanager
+def blocking_scrape_slot(wait_seconds=None):
+    """Bound one network-bound menu acquisition with the shared scrape gate.
+
+    The context-manager twin of `scrape_concurrency_gate` (same semaphore, same
+    active counter), for a route that runs a scrape phase and then an AI phase:
+    each phase holds only its own permit, never both (INF-5), so the thread
+    reserve arithmetic (`AI + SCRAPE + model excess`) still bounds it.
+    """
+    wait = SCRAPE_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
+    if not _acquire_before_deadline(_scrape_slots, wait):
+        _record_gate_rejection("SCRAPE-GATE")
+        raise BlockingConcurrencyLimit("shared scrape capacity exhausted")
+    _enter("scrape")
+    try:
+        yield
+    finally:
+        _leave("scrape")
+        _scrape_slots.release()
+
+
 def _provider_error_category(exc):
     """Sağlayıcı istisnasını SABİT kümeli bir metrik kategorisine indir.
 

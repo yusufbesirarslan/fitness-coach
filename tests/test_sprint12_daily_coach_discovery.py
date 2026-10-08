@@ -145,6 +145,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/nutrition/history",
         "/api/v1/nutrition/supplements",
         "/api/v1/nutrition/supplements/<supplement_token>",
+        # LP15-C native menu analysis: a transport over the web menu
+        # authorities (menu_analysis), read-only, no Daily-Coach aggregate.
+        "/api/v1/nutrition/menu/analyze",
         "/api/v1/pump-checks",
         "/api/v1/pump-checks/<pump_check_token>",
         "/api/v1/pump-check-comparisons",
