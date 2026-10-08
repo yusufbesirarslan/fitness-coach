@@ -1,0 +1,1575 @@
+{
+  "schema": 1,
+  "source_run": "https://github.com/yusufbesirarslan/fitness-coach/actions/runs/37733904015",
+  "source_revision": "774d6f58cdcde25eb54aacc75a05fa8d32e6cd2a",
+  "files": {
+    "tests/test_account_deletion_architecture.py": {
+      "items": 9,
+      "seconds": 3.33867
+    },
+    "tests/test_account_deletion_resurrection.py": {
+      "items": 22,
+      "seconds": 3.742023
+    },
+    "tests/test_account_profile_architecture.py": {
+      "items": 15,
+      "seconds": 1.438603
+    },
+    "tests/test_account_profile_service.py": {
+      "items": 91,
+      "seconds": 2.228905
+    },
+    "tests/test_account_recovery_architecture.py": {
+      "items": 11,
+      "seconds": 1.663008
+    },
+    "tests/test_account_recovery_service.py": {
+      "items": 60,
+      "seconds": 7.212454
+    },
+    "tests/test_account_registration_architecture.py": {
+      "items": 7,
+      "seconds": 0.907002
+    },
+    "tests/test_account_registration_service.py": {
+      "items": 37,
+      "seconds": 3.137035
+    },
+    "tests/test_adaptive_plan_context.py": {
+      "items": 30,
+      "seconds": 1.851871
+    },
+    "tests/test_ai_cache.py": {
+      "items": 17,
+      "seconds": 0.01007
+    },
+    "tests/test_ai_chat.py": {
+      "items": 9,
+      "seconds": 0.006401
+    },
+    "tests/test_ai_coach.py": {
+      "items": 62,
+      "seconds": 5.062901
+    },
+    "tests/test_ai_gate.py": {
+      "items": 30,
+      "seconds": 2.182002
+    },
+    "tests/test_ai_metrics.py": {
+      "items": 8,
+      "seconds": 0.00551
+    },
+    "tests/test_ai_nutrition_llm.py": {
+      "items": 48,
+      "seconds": 2.927491
+    },
+    "tests/test_ai_pipeline.py": {
+      "items": 18,
+      "seconds": 1.204447
+    },
+    "tests/test_ai_provider_call.py": {
+      "items": 72,
+      "seconds": 2.959028
+    },
+    "tests/test_ai_recovery.py": {
+      "items": 19,
+      "seconds": 0.007425
+    },
+    "tests/test_ai_routing.py": {
+      "items": 19,
+      "seconds": 0.016462
+    },
+    "tests/test_ai_spend_guard.py": {
+      "items": 62,
+      "seconds": 14.291652
+    },
+    "tests/test_ai_stream.py": {
+      "items": 36,
+      "seconds": 3.211513
+    },
+    "tests/test_analytics_engine.py": {
+      "items": 24,
+      "seconds": 2.887518
+    },
+    "tests/test_app_log_shipping.py": {
+      "items": 15,
+      "seconds": 0.074288
+    },
+    "tests/test_app_shell.py": {
+      "items": 8,
+      "seconds": 1.11537
+    },
+    "tests/test_auth.py": {
+      "items": 44,
+      "seconds": 7.2657
+    },
+    "tests/test_auth_audit.py": {
+      "items": 4,
+      "seconds": 0.107073
+    },
+    "tests/test_auth_contract.py": {
+      "items": 44,
+      "seconds": 4.271286
+    },
+    "tests/test_auth_email_language.py": {
+      "items": 110,
+      "seconds": 0.794646
+    },
+    "tests/test_auth_phase6_ui.py": {
+      "items": 8,
+      "seconds": 0.971676
+    },
+    "tests/test_avatar_object_lifecycle.py": {
+      "items": 13,
+      "seconds": 2.214571
+    },
+    "tests/test_barcode.py": {
+      "items": 8,
+      "seconds": 0.322849
+    },
+    "tests/test_barcode_workflow.py": {
+      "items": 7,
+      "seconds": 0.690142
+    },
+    "tests/test_bedrock_comparison_adapter.py": {
+      "items": 5,
+      "seconds": 0.004761
+    },
+    "tests/test_calculations.py": {
+      "items": 17,
+      "seconds": 0.008751
+    },
+    "tests/test_capacity_invariants.py": {
+      "items": 35,
+      "seconds": 1.796354
+    },
+    "tests/test_cascade_delete.py": {
+      "items": 8,
+      "seconds": 1.30434
+    },
+    "tests/test_challenge_routes.py": {
+      "items": 7,
+      "seconds": 0.871235
+    },
+    "tests/test_challenges.py": {
+      "items": 23,
+      "seconds": 3.122409
+    },
+    "tests/test_check_cognito_pool.py": {
+      "items": 17,
+      "seconds": 0.011225
+    },
+    "tests/test_check_email_lambda.py": {
+      "items": 18,
+      "seconds": 0.010646
+    },
+    "tests/test_checkin_integrity.py": {
+      "items": 5,
+      "seconds": 0.704778
+    },
+    "tests/test_checkin_integrity_browser.py": {
+      "items": 3,
+      "seconds": 7.721828
+    },
+    "tests/test_checkin_integrity_migration.py": {
+      "items": 2,
+      "seconds": 0.126269
+    },
+    "tests/test_checkpoint_revision_exhaustion.py": {
+      "items": 9,
+      "seconds": 1.694679
+    },
+    "tests/test_coach_clarification_observability.py": {
+      "items": 19,
+      "seconds": 1.939571
+    },
+    "tests/test_coach_confirmation_lifecycle.py": {
+      "items": 36,
+      "seconds": 5.46864
+    },
+    "tests/test_coach_duplicate_remove_selector.py": {
+      "items": 61,
+      "seconds": 3.844452
+    },
+    "tests/test_coach_entry_convergence.py": {
+      "items": 35,
+      "seconds": 4.469771
+    },
+    "tests/test_coach_live_mutation_payloads.py": {
+      "items": 28,
+      "seconds": 3.665416
+    },
+    "tests/test_coach_message_history_migration.py": {
+      "items": 8,
+      "seconds": 0.235864
+    },
+    "tests/test_coach_mutation_continuation_isolation.py": {
+      "items": 39,
+      "seconds": 1.884547
+    },
+    "tests/test_coach_page_v2.py": {
+      "items": 27,
+      "seconds": 1.45819
+    },
+    "tests/test_coach_plan_clarification_continuity.py": {
+      "items": 47,
+      "seconds": 7.564503
+    },
+    "tests/test_coach_plan_confirmation.py": {
+      "items": 31,
+      "seconds": 4.208221
+    },
+    "tests/test_coach_plan_mutation_grounding.py": {
+      "items": 23,
+      "seconds": 1.558456
+    },
+    "tests/test_coach_plan_policy.py": {
+      "items": 10,
+      "seconds": 0.006738
+    },
+    "tests/test_coach_plan_tool_characterization.py": {
+      "items": 20,
+      "seconds": 1.308
+    },
+    "tests/test_coach_plan_tools.py": {
+      "items": 72,
+      "seconds": 9.167371
+    },
+    "tests/test_coach_plan_tools_architecture.py": {
+      "items": 48,
+      "seconds": 0.203654
+    },
+    "tests/test_coach_progress_handoff.py": {
+      "items": 20,
+      "seconds": 2.434106
+    },
+    "tests/test_coach_progress_handoff_browser.py": {
+      "items": 4,
+      "seconds": 15.692185
+    },
+    "tests/test_coach_provider_truthfulness.py": {
+      "items": 37,
+      "seconds": 3.781388
+    },
+    "tests/test_coach_public_grounding.py": {
+      "items": 18,
+      "seconds": 0.426219
+    },
+    "tests/test_coach_routes.py": {
+      "items": 51,
+      "seconds": 7.910522
+    },
+    "tests/test_coach_tools.py": {
+      "items": 23,
+      "seconds": 2.306503
+    },
+    "tests/test_cognito.py": {
+      "items": 4,
+      "seconds": 0.454206
+    },
+    "tests/test_cognito_auth.py": {
+      "items": 5,
+      "seconds": 1.251578
+    },
+    "tests/test_cognito_code_email_language.py": {
+      "items": 217,
+      "seconds": 4.961817
+    },
+    "tests/test_cognito_email_sender.py": {
+      "items": 18,
+      "seconds": 0.013912
+    },
+    "tests/test_cognito_idp.py": {
+      "items": 33,
+      "seconds": 0.039639
+    },
+    "tests/test_cognito_jwt.py": {
+      "items": 14,
+      "seconds": 0.858803
+    },
+    "tests/test_cognito_service_tokens.py": {
+      "items": 20,
+      "seconds": 0.011665
+    },
+    "tests/test_compose_config.py": {
+      "items": 22,
+      "seconds": 0.045003
+    },
+    "tests/test_concurrency_staleness.py": {
+      "items": 3,
+      "seconds": 0.223895
+    },
+    "tests/test_config_engine_options.py": {
+      "items": 3,
+      "seconds": 0.005561
+    },
+    "tests/test_day_boundary_fixture_hygiene.py": {
+      "items": 4,
+      "seconds": 0.038582
+    },
+    "tests/test_db_init.py": {
+      "items": 9,
+      "seconds": 0.873704
+    },
+    "tests/test_default_rate_limit_identity.py": {
+      "items": 29,
+      "seconds": 4.200983
+    },
+    "tests/test_deleted_identity_migration.py": {
+      "items": 4,
+      "seconds": 0.128521
+    },
+    "tests/test_dependency_boundaries.py": {
+      "items": 27,
+      "seconds": 1.809574
+    },
+    "tests/test_deploy_control.py": {
+      "items": 229,
+      "seconds": 0.389708
+    },
+    "tests/test_deploy_email_lambda.py": {
+      "items": 96,
+      "seconds": 0.934725
+    },
+    "tests/test_deploy_gate.py": {
+      "items": 7,
+      "seconds": 0.006731
+    },
+    "tests/test_deploy_workflow.py": {
+      "items": 77,
+      "seconds": 8.277051
+    },
+    "tests/test_design_system.py": {
+      "items": 4,
+      "seconds": 1.602955
+    },
+    "tests/test_email_sender_template.py": {
+      "items": 9,
+      "seconds": 0.022881
+    },
+    "tests/test_email_service.py": {
+      "items": 14,
+      "seconds": 0.006448
+    },
+    "tests/test_email_templates.py": {
+      "items": 26,
+      "seconds": 0.010101
+    },
+    "tests/test_email_templates_sync.py": {
+      "items": 1,
+      "seconds": 0.00065
+    },
+    "tests/test_env_example.py": {
+      "items": 28,
+      "seconds": 0.016202
+    },
+    "tests/test_extensions.py": {
+      "items": 13,
+      "seconds": 2.567695
+    },
+    "tests/test_f11_error_handler_db_independence.py": {
+      "items": 22,
+      "seconds": 2.742266
+    },
+    "tests/test_f8_toast_text_only_browser.py": {
+      "items": 13,
+      "seconds": 14.636891
+    },
+    "tests/test_fatsecret.py": {
+      "items": 36,
+      "seconds": 0.848595
+    },
+    "tests/test_fatsecret_lookup.py": {
+      "items": 13,
+      "seconds": 0.885303
+    },
+    "tests/test_feature_flag_registry.py": {
+      "items": 74,
+      "seconds": 0.049223
+    },
+    "tests/test_feature_flags.py": {
+      "items": 68,
+      "seconds": 0.300732
+    },
+    "tests/test_feed_indexes.py": {
+      "items": 3,
+      "seconds": 0.202242
+    },
+    "tests/test_feed_moderation.py": {
+      "items": 7,
+      "seconds": 0.714256
+    },
+    "tests/test_feed_moderation_target_validation.py": {
+      "items": 65,
+      "seconds": 9.759179
+    },
+    "tests/test_feed_v2.py": {
+      "items": 11,
+      "seconds": 1.653277
+    },
+    "tests/test_food_discovery_characterization.py": {
+      "items": 27,
+      "seconds": 3.798584
+    },
+    "tests/test_food_relevance.py": {
+      "items": 14,
+      "seconds": 0.007037
+    },
+    "tests/test_food_routes.py": {
+      "items": 14,
+      "seconds": 3.497123
+    },
+    "tests/test_frontend_audit_app.py": {
+      "items": 10,
+      "seconds": 2.926308
+    },
+    "tests/test_frontend_audit_cli.py": {
+      "items": 6,
+      "seconds": 0.009211
+    },
+    "tests/test_frontend_audit_clock.py": {
+      "items": 3,
+      "seconds": 0.001584
+    },
+    "tests/test_frontend_audit_foundation.py": {
+      "items": 4,
+      "seconds": 0.001996
+    },
+    "tests/test_frontend_audit_inventory.py": {
+      "items": 5,
+      "seconds": 0.133892
+    },
+    "tests/test_frontend_audit_runner.py": {
+      "items": 9,
+      "seconds": 0.013911
+    },
+    "tests/test_frontend_audit_schemas.py": {
+      "items": 7,
+      "seconds": 0.010298
+    },
+    "tests/test_gamification.py": {
+      "items": 27,
+      "seconds": 0.786623
+    },
+    "tests/test_gamification_routes.py": {
+      "items": 10,
+      "seconds": 1.363498
+    },
+    "tests/test_gunicorn_config.py": {
+      "items": 5,
+      "seconds": 0.003537
+    },
+    "tests/test_health.py": {
+      "items": 20,
+      "seconds": 1.910771
+    },
+    "tests/test_hooks.py": {
+      "items": 40,
+      "seconds": 5.455126
+    },
+    "tests/test_i18n.py": {
+      "items": 43,
+      "seconds": 4.066372
+    },
+    "tests/test_identity_immutability.py": {
+      "items": 54,
+      "seconds": 4.381935
+    },
+    "tests/test_injury_constraints.py": {
+      "items": 24,
+      "seconds": 0.013492
+    },
+    "tests/test_jobs.py": {
+      "items": 27,
+      "seconds": 2.298264
+    },
+    "tests/test_leaderboard_redis.py": {
+      "items": 14,
+      "seconds": 1.741572
+    },
+    "tests/test_log_hygiene_exception_and_url.py": {
+      "items": 18,
+      "seconds": 0.6145
+    },
+    "tests/test_lp13_completion_proof_fail_closed.py": {
+      "items": 66,
+      "seconds": 13.783382
+    },
+    "tests/test_lp13_no_start_after_completion.py": {
+      "items": 26,
+      "seconds": 3.468351
+    },
+    "tests/test_lp14_nutrition_generation_labels.py": {
+      "items": 53,
+      "seconds": 3.550549
+    },
+    "tests/test_lp15_native_food_contract.py": {
+      "items": 90,
+      "seconds": 12.265457
+    },
+    "tests/test_mcp_gate.py": {
+      "items": 3,
+      "seconds": 3.427704
+    },
+    "tests/test_mcp_tools.py": {
+      "items": 19,
+      "seconds": 0.012265
+    },
+    "tests/test_memory_manager.py": {
+      "items": 28,
+      "seconds": 3.475138
+    },
+    "tests/test_menu_extract_helpers.py": {
+      "items": 21,
+      "seconds": 0.494459
+    },
+    "tests/test_menu_extract_truncation.py": {
+      "items": 10,
+      "seconds": 0.005965
+    },
+    "tests/test_menu_extract_window.py": {
+      "items": 4,
+      "seconds": 0.003709
+    },
+    "tests/test_menu_fetch.py": {
+      "items": 177,
+      "seconds": 5.113455
+    },
+    "tests/test_menu_item_cap_and_cache.py": {
+      "items": 8,
+      "seconds": 0.005255
+    },
+    "tests/test_menu_macro_relevance.py": {
+      "items": 19,
+      "seconds": 0.007386
+    },
+    "tests/test_menu_ocr.py": {
+      "items": 18,
+      "seconds": 2.065339
+    },
+    "tests/test_menu_perf_optimizations.py": {
+      "items": 12,
+      "seconds": 0.94573
+    },
+    "tests/test_menu_routes.py": {
+      "items": 36,
+      "seconds": 4.817392
+    },
+    "tests/test_menu_url_cache.py": {
+      "items": 7,
+      "seconds": 0.499074
+    },
+    "tests/test_migration_graph.py": {
+      "items": 15,
+      "seconds": 0.143345
+    },
+    "tests/test_migration_pump_check_workout_score.py": {
+      "items": 2,
+      "seconds": 0.002007
+    },
+    "tests/test_mobile_account_deletion_api.py": {
+      "items": 42,
+      "seconds": 14.542995
+    },
+    "tests/test_mobile_account_language_api.py": {
+      "items": 35,
+      "seconds": 5.621533
+    },
+    "tests/test_mobile_account_profile_api.py": {
+      "items": 73,
+      "seconds": 10.49657
+    },
+    "tests/test_mobile_account_profile_read_api.py": {
+      "items": 33,
+      "seconds": 3.995161
+    },
+    "tests/test_mobile_auth_api.py": {
+      "items": 24,
+      "seconds": 2.628637
+    },
+    "tests/test_mobile_auth_feature_gate.py": {
+      "items": 11,
+      "seconds": 0.506571
+    },
+    "tests/test_mobile_auth_migration.py": {
+      "items": 5,
+      "seconds": 0.217001
+    },
+    "tests/test_mobile_auth_models.py": {
+      "items": 7,
+      "seconds": 0.796074
+    },
+    "tests/test_mobile_auth_service.py": {
+      "items": 75,
+      "seconds": 8.994142
+    },
+    "tests/test_mobile_coach_api.py": {
+      "items": 64,
+      "seconds": 5.79091
+    },
+    "tests/test_mobile_credentials.py": {
+      "items": 35,
+      "seconds": 0.030614
+    },
+    "tests/test_mobile_diary_mutation_api.py": {
+      "items": 23,
+      "seconds": 2.799237
+    },
+    "tests/test_mobile_diary_mutation_architecture.py": {
+      "items": 5,
+      "seconds": 0.114011
+    },
+    "tests/test_mobile_diary_mutation_parsing.py": {
+      "items": 42,
+      "seconds": 0.025713
+    },
+    "tests/test_mobile_food_discovery.py": {
+      "items": 10,
+      "seconds": 1.013387
+    },
+    "tests/test_mobile_log_food_api.py": {
+      "items": 28,
+      "seconds": 3.089196
+    },
+    "tests/test_mobile_log_food_fingerprint.py": {
+      "items": 6,
+      "seconds": 0.003732
+    },
+    "tests/test_mobile_nutrition_api.py": {
+      "items": 51,
+      "seconds": 5.36433
+    },
+    "tests/test_mobile_nutrition_revision.py": {
+      "items": 35,
+      "seconds": 0.024165
+    },
+    "tests/test_mobile_onboarding_first_plan.py": {
+      "items": 6,
+      "seconds": 0.583422
+    },
+    "tests/test_mobile_password_recovery_api.py": {
+      "items": 88,
+      "seconds": 11.557772
+    },
+    "tests/test_mobile_progress_pr1_convergence_guard.py": {
+      "items": 2,
+      "seconds": 0.32245
+    },
+    "tests/test_mobile_progress_summary_api.py": {
+      "items": 31,
+      "seconds": 3.823553
+    },
+    "tests/test_mobile_progress_summary_architecture.py": {
+      "items": 12,
+      "seconds": 1.723049
+    },
+    "tests/test_mobile_pump_check_api.py": {
+      "items": 12,
+      "seconds": 4.795284
+    },
+    "tests/test_mobile_pump_check_architecture.py": {
+      "items": 4,
+      "seconds": 0.066918
+    },
+    "tests/test_mobile_pump_check_comparison_api.py": {
+      "items": 20,
+      "seconds": 1.661258
+    },
+    "tests/test_mobile_pump_check_comparison_architecture.py": {
+      "items": 11,
+      "seconds": 0.071679
+    },
+    "tests/test_mobile_pump_check_comparison_content_language.py": {
+      "items": 6,
+      "seconds": 0.806778
+    },
+    "tests/test_mobile_pump_check_content_language.py": {
+      "items": 6,
+      "seconds": 0.821401
+    },
+    "tests/test_mobile_pump_check_history_api.py": {
+      "items": 28,
+      "seconds": 3.193851
+    },
+    "tests/test_mobile_pump_check_history_architecture.py": {
+      "items": 26,
+      "seconds": 0.617631
+    },
+    "tests/test_mobile_pump_check_identity.py": {
+      "items": 4,
+      "seconds": 0.002096
+    },
+    "tests/test_mobile_pump_check_read_failure_api.py": {
+      "items": 6,
+      "seconds": 0.452755
+    },
+    "tests/test_mobile_registration_api.py": {
+      "items": 99,
+      "seconds": 14.897647
+    },
+    "tests/test_mobile_today_api.py": {
+      "items": 31,
+      "seconds": 3.434484
+    },
+    "tests/test_mobile_today_architecture.py": {
+      "items": 20,
+      "seconds": 1.138326
+    },
+    "tests/test_mobile_training_api.py": {
+      "items": 28,
+      "seconds": 2.12722
+    },
+    "tests/test_mobile_training_architecture.py": {
+      "items": 13,
+      "seconds": 0.633491
+    },
+    "tests/test_mobile_training_generation_api.py": {
+      "items": 22,
+      "seconds": 1.921671
+    },
+    "tests/test_mobile_training_generation_candidate.py": {
+      "items": 3,
+      "seconds": 0.363384
+    },
+    "tests/test_mobile_training_generation_contract.py": {
+      "items": 28,
+      "seconds": 0.016854
+    },
+    "tests/test_mobile_training_generation_language.py": {
+      "items": 8,
+      "seconds": 0.68519
+    },
+    "tests/test_mobile_training_generation_retry_contract.py": {
+      "items": 15,
+      "seconds": 1.381596
+    },
+    "tests/test_mobile_training_generation_service.py": {
+      "items": 16,
+      "seconds": 2.11088
+    },
+    "tests/test_mobile_workout_sessions_api.py": {
+      "items": 84,
+      "seconds": 19.021718
+    },
+    "tests/test_mobile_workout_sessions_architecture.py": {
+      "items": 25,
+      "seconds": 3.038219
+    },
+    "tests/test_mobile_workout_sessions_pg.py": {
+      "items": 16,
+      "seconds": 0.005143
+    },
+    "tests/test_nav_contract.py": {
+      "items": 12,
+      "seconds": 0.00615
+    },
+    "tests/test_nav_shell_v2.py": {
+      "items": 20,
+      "seconds": 3.250003
+    },
+    "tests/test_notification_routes.py": {
+      "items": 9,
+      "seconds": 1.211011
+    },
+    "tests/test_notifications.py": {
+      "items": 10,
+      "seconds": 4.019927
+    },
+    "tests/test_nutrition_hydration_reliability_browser.py": {
+      "items": 22,
+      "seconds": 66.102999
+    },
+    "tests/test_nutrition_hydration_reliability_non_vacuity.py": {
+      "items": 8,
+      "seconds": 41.290396
+    },
+    "tests/test_nutrition_pipeline.py": {
+      "items": 101,
+      "seconds": 0.047286
+    },
+    "tests/test_nutrition_routes.py": {
+      "items": 87,
+      "seconds": 12.066203
+    },
+    "tests/test_nutrition_targets.py": {
+      "items": 35,
+      "seconds": 5.448912
+    },
+    "tests/test_nutrition_vnext_pr1_plan_domain_browser.py": {
+      "items": 21,
+      "seconds": 26.565892
+    },
+    "tests/test_nutrition_vnext_pr1_plan_domain_contract.py": {
+      "items": 6,
+      "seconds": 0.818819
+    },
+    "tests/test_nutrition_vnext_pr2_freshness_browser.py": {
+      "items": 13,
+      "seconds": 46.922723
+    },
+    "tests/test_nutrition_vnext_pr2_freshness_non_vacuity.py": {
+      "items": 12,
+      "seconds": 73.644024
+    },
+    "tests/test_nutrition_vnext_pr2_navigation_browser.py": {
+      "items": 16,
+      "seconds": 42.325042
+    },
+    "tests/test_nutrition_vnext_pr2_navigation_contract.py": {
+      "items": 7,
+      "seconds": 0.830429
+    },
+    "tests/test_nutrition_vnext_pr2_non_vacuity.py": {
+      "items": 9,
+      "seconds": 7.638949
+    },
+    "tests/test_nutrition_vnext_pr3_daily_browser.py": {
+      "items": 39,
+      "seconds": 87.036052
+    },
+    "tests/test_nutrition_vnext_pr3_daily_contract.py": {
+      "items": 15,
+      "seconds": 3.869743
+    },
+    "tests/test_nutrition_vnext_pr3_daily_non_vacuity.py": {
+      "items": 12,
+      "seconds": 42.871838
+    },
+    "tests/test_nutrition_vnext_pr4_log_food_browser.py": {
+      "items": 32,
+      "seconds": 111.908438
+    },
+    "tests/test_nutrition_vnext_pr4_log_food_contract.py": {
+      "items": 14,
+      "seconds": 1.440878
+    },
+    "tests/test_nutrition_vnext_pr4_log_food_non_vacuity.py": {
+      "items": 10,
+      "seconds": 46.589779
+    },
+    "tests/test_nutrition_vnext_pr5_plan_browser.py": {
+      "items": 39,
+      "seconds": 150.235164
+    },
+    "tests/test_nutrition_vnext_pr5_plan_contract.py": {
+      "items": 21,
+      "seconds": 1.297558
+    },
+    "tests/test_nutrition_vnext_pr5_plan_non_vacuity.py": {
+      "items": 13,
+      "seconds": 81.714222
+    },
+    "tests/test_nutrition_vnext_pr6_browser.py": {
+      "items": 31,
+      "seconds": 64.813128
+    },
+    "tests/test_nutrition_vnext_pr6_coach_handoff.py": {
+      "items": 37,
+      "seconds": 7.98037
+    },
+    "tests/test_nutrition_vnext_pr6_day_view.py": {
+      "items": 73,
+      "seconds": 6.428398
+    },
+    "tests/test_nutrition_vnext_pr6_non_vacuity.py": {
+      "items": 15,
+      "seconds": 19.30704
+    },
+    "tests/test_nutrition_vnext_pr7_native_coach_handoff.py": {
+      "items": 17,
+      "seconds": 2.507951
+    },
+    "tests/test_nutrition_vnext_pr7_native_contract.py": {
+      "items": 45,
+      "seconds": 4.486949
+    },
+    "tests/test_nutrition_vnext_pr7_native_history.py": {
+      "items": 21,
+      "seconds": 2.460016
+    },
+    "tests/test_nutrition_vnext_pr7_native_hydration.py": {
+      "items": 22,
+      "seconds": 2.437356
+    },
+    "tests/test_nutrition_vnext_pr7_native_plan.py": {
+      "items": 47,
+      "seconds": 5.282184
+    },
+    "tests/test_nutrition_vnext_pr7_native_planned_meal.py": {
+      "items": 19,
+      "seconds": 4.562718
+    },
+    "tests/test_nutrition_vnext_pr7_native_supplements.py": {
+      "items": 27,
+      "seconds": 3.062751
+    },
+    "tests/test_nutrition_vnext_pr7_non_vacuity.py": {
+      "items": 25,
+      "seconds": 3.168135
+    },
+    "tests/test_observability.py": {
+      "items": 9,
+      "seconds": 1.086232
+    },
+    "tests/test_ownership.py": {
+      "items": 13,
+      "seconds": 1.201264
+    },
+    "tests/test_password_recovery.py": {
+      "items": 27,
+      "seconds": 3.227724
+    },
+    "tests/test_password_reset.py": {
+      "items": 5,
+      "seconds": 0.584904
+    },
+    "tests/test_plan_confirmation.py": {
+      "items": 9,
+      "seconds": 1.006536
+    },
+    "tests/test_plan_confirmation_parser.py": {
+      "items": 7,
+      "seconds": 0.003927
+    },
+    "tests/test_plan_domain_convergence_contract.py": {
+      "items": 3,
+      "seconds": 0.314412
+    },
+    "tests/test_plan_flag_retirement.py": {
+      "items": 21,
+      "seconds": 1.178238
+    },
+    "tests/test_plan_mutation.py": {
+      "items": 115,
+      "seconds": 6.352419
+    },
+    "tests/test_plan_mutation_architecture.py": {
+      "items": 21,
+      "seconds": 3.053888
+    },
+    "tests/test_plan_mutation_history.py": {
+      "items": 52,
+      "seconds": 8.927086
+    },
+    "tests/test_plan_owner_lock_contract.py": {
+      "items": 4,
+      "seconds": 0.61449
+    },
+    "tests/test_plan_save_validation.py": {
+      "items": 95,
+      "seconds": 19.516457
+    },
+    "tests/test_plan_v2.py": {
+      "items": 56,
+      "seconds": 6.843056
+    },
+    "tests/test_premium_quota.py": {
+      "items": 27,
+      "seconds": 2.111128
+    },
+    "tests/test_prior_performance.py": {
+      "items": 2,
+      "seconds": 0.115214
+    },
+    "tests/test_production_deploy_script.py": {
+      "items": 70,
+      "seconds": 31.715459
+    },
+    "tests/test_profile_routes.py": {
+      "items": 23,
+      "seconds": 2.098951
+    },
+    "tests/test_profile_ui.py": {
+      "items": 7,
+      "seconds": 1.15431
+    },
+    "tests/test_progress_api.py": {
+      "items": 13,
+      "seconds": 1.732755
+    },
+    "tests/test_progress_axis_insight.py": {
+      "items": 73,
+      "seconds": 2.812213
+    },
+    "tests/test_progress_axis_insight_browser.py": {
+      "items": 10,
+      "seconds": 32.860146
+    },
+    "tests/test_progress_canonical_checkins.py": {
+      "items": 9,
+      "seconds": 1.064278
+    },
+    "tests/test_progress_history.py": {
+      "items": 30,
+      "seconds": 7.407999
+    },
+    "tests/test_progress_history_api.py": {
+      "items": 11,
+      "seconds": 0.98309
+    },
+    "tests/test_progress_history_saturation.py": {
+      "items": 5,
+      "seconds": 0.771623
+    },
+    "tests/test_progress_history_ui.py": {
+      "items": 12,
+      "seconds": 0.857557
+    },
+    "tests/test_progress_insights.py": {
+      "items": 43,
+      "seconds": 0.651341
+    },
+    "tests/test_progress_insights_api.py": {
+      "items": 18,
+      "seconds": 2.252886
+    },
+    "tests/test_progress_insights_ui.py": {
+      "items": 20,
+      "seconds": 2.689758
+    },
+    "tests/test_progress_physique.py": {
+      "items": 34,
+      "seconds": 2.288594
+    },
+    "tests/test_progress_physique_api.py": {
+      "items": 17,
+      "seconds": 1.623086
+    },
+    "tests/test_progress_physique_history_browser.py": {
+      "items": 11,
+      "seconds": 50.88596
+    },
+    "tests/test_progress_physique_ui.py": {
+      "items": 24,
+      "seconds": 1.652527
+    },
+    "tests/test_progress_presentation_js.py": {
+      "items": 76,
+      "seconds": 5.884059
+    },
+    "tests/test_progress_pump_check_completion_pg.py": {
+      "items": 4,
+      "seconds": 0.001398
+    },
+    "tests/test_progress_pump_check_completion_proof.py": {
+      "items": 11,
+      "seconds": 1.577374
+    },
+    "tests/test_progress_summary.py": {
+      "items": 40,
+      "seconds": 7.478297
+    },
+    "tests/test_progress_summary_api.py": {
+      "items": 17,
+      "seconds": 2.357886
+    },
+    "tests/test_progress_ui.py": {
+      "items": 21,
+      "seconds": 2.526989
+    },
+    "tests/test_progress_v2_final_browser.py": {
+      "items": 33,
+      "seconds": 83.358618
+    },
+    "tests/test_progress_v2_final_ui.py": {
+      "items": 37,
+      "seconds": 0.164449
+    },
+    "tests/test_prompt_builder.py": {
+      "items": 16,
+      "seconds": 0.005011
+    },
+    "tests/test_pump_check_analysis.py": {
+      "items": 63,
+      "seconds": 0.041521
+    },
+    "tests/test_pump_check_comparison_analysis.py": {
+      "items": 184,
+      "seconds": 0.091431
+    },
+    "tests/test_pump_check_comparison_identity.py": {
+      "items": 7,
+      "seconds": 0.004027
+    },
+    "tests/test_pump_check_comparison_lifecycle.py": {
+      "items": 18,
+      "seconds": 2.220204
+    },
+    "tests/test_pump_check_comparison_migration.py": {
+      "items": 36,
+      "seconds": 0.495805
+    },
+    "tests/test_pump_check_comparison_service.py": {
+      "items": 31,
+      "seconds": 2.484271
+    },
+    "tests/test_pump_check_content_language.py": {
+      "items": 16,
+      "seconds": 0.014197
+    },
+    "tests/test_pump_check_gallery_media.py": {
+      "items": 4,
+      "seconds": 0.655784
+    },
+    "tests/test_pump_check_gallery_ui.py": {
+      "items": 28,
+      "seconds": 0.179763
+    },
+    "tests/test_pump_check_history_characterization.py": {
+      "items": 5,
+      "seconds": 0.426504
+    },
+    "tests/test_pump_check_history_cursor.py": {
+      "items": 29,
+      "seconds": 0.017147
+    },
+    "tests/test_pump_check_history_migration.py": {
+      "items": 10,
+      "seconds": 0.24467
+    },
+    "tests/test_pump_check_history_service.py": {
+      "items": 57,
+      "seconds": 2.828709
+    },
+    "tests/test_pump_check_legacy_characterization.py": {
+      "items": 4,
+      "seconds": 0.491359
+    },
+    "tests/test_pump_check_migration.py": {
+      "items": 4,
+      "seconds": 0.035064
+    },
+    "tests/test_pump_check_object_lifecycle.py": {
+      "items": 12,
+      "seconds": 1.682949
+    },
+    "tests/test_pump_check_sharing.py": {
+      "items": 48,
+      "seconds": 5.845835
+    },
+    "tests/test_pytest_sharding.py": {
+      "items": 25,
+      "seconds": 1.414324
+    },
+    "tests/test_recovery_identity_case.py": {
+      "items": 60,
+      "seconds": 12.891525
+    },
+    "tests/test_redis_compose_security.py": {
+      "items": 7,
+      "seconds": 0.002159
+    },
+    "tests/test_referral.py": {
+      "items": 6,
+      "seconds": 0.667249
+    },
+    "tests/test_remaining_work.py": {
+      "items": 23,
+      "seconds": 6.966917
+    },
+    "tests/test_repost_routes.py": {
+      "items": 14,
+      "seconds": 2.035232
+    },
+    "tests/test_require_auth.py": {
+      "items": 16,
+      "seconds": 1.81663
+    },
+    "tests/test_runtime_metrics.py": {
+      "items": 12,
+      "seconds": 0.222681
+    },
+    "tests/test_s3_helper.py": {
+      "items": 24,
+      "seconds": 0.016916
+    },
+    "tests/test_session_store.py": {
+      "items": 31,
+      "seconds": 3.13486
+    },
+    "tests/test_social_routes.py": {
+      "items": 68,
+      "seconds": 6.56204
+    },
+    "tests/test_sprint11_exercise_authority.py": {
+      "items": 168,
+      "seconds": 0.793231
+    },
+    "tests/test_sprint11_training_generation_output.py": {
+      "items": 131,
+      "seconds": 5.869613
+    },
+    "tests/test_sprint11_training_preference_contract.py": {
+      "items": 84,
+      "seconds": 1.635498
+    },
+    "tests/test_sprint12_daily_coach_discovery.py": {
+      "items": 38,
+      "seconds": 0.128056
+    },
+    "tests/test_sprint12_pr2b_canonical_injury_annotation.py": {
+      "items": 17,
+      "seconds": 0.308907
+    },
+    "tests/test_sprint13_nutrition_closure_discovery.py": {
+      "items": 32,
+      "seconds": 2.26191
+    },
+    "tests/test_sprint13_nutrition_intelligence_closure.py": {
+      "items": 27,
+      "seconds": 1.559099
+    },
+    "tests/test_sprint13_nutrition_write_convergence.py": {
+      "items": 52,
+      "seconds": 5.362142
+    },
+    "tests/test_sprint14_activation_readiness.py": {
+      "items": 33,
+      "seconds": 0.130458
+    },
+    "tests/test_sprint14_workout_execution_contract.py": {
+      "items": 70,
+      "seconds": 18.901794
+    },
+    "tests/test_sprint14_workout_execution_reliability_pg.py": {
+      "items": 8,
+      "seconds": 0.002222
+    },
+    "tests/test_sprint6_migration_golden.py": {
+      "items": 7,
+      "seconds": 0.852036
+    },
+    "tests/test_staging_separation.py": {
+      "items": 83,
+      "seconds": 0.152245
+    },
+    "tests/test_supplements_routes.py": {
+      "items": 8,
+      "seconds": 1.169633
+    },
+    "tests/test_ti00_v1_checkpoint_characterization.py": {
+      "items": 8,
+      "seconds": 0.003168
+    },
+    "tests/test_ti01a_execution_context.py": {
+      "items": 90,
+      "seconds": 3.329863
+    },
+    "tests/test_ti01a_execution_context_pg.py": {
+      "items": 4,
+      "seconds": 0.000868
+    },
+    "tests/test_ti01a_migration.py": {
+      "items": 1,
+      "seconds": 0.006939
+    },
+    "tests/test_ti01b_exercise_notes.py": {
+      "items": 50,
+      "seconds": 11.723279
+    },
+    "tests/test_ti01b_exercise_notes_pg.py": {
+      "items": 6,
+      "seconds": 0.002956
+    },
+    "tests/test_ti01b_migration.py": {
+      "items": 2,
+      "seconds": 0.017383
+    },
+    "tests/test_ti03_api.py": {
+      "items": 31,
+      "seconds": 4.335241
+    },
+    "tests/test_ti03_architecture.py": {
+      "items": 60,
+      "seconds": 0.1044
+    },
+    "tests/test_ti03_diagnostics.py": {
+      "items": 61,
+      "seconds": 0.084391
+    },
+    "tests/test_ti03_facts.py": {
+      "items": 33,
+      "seconds": 0.020799
+    },
+    "tests/test_ti03_pg.py": {
+      "items": 5,
+      "seconds": 0.001412
+    },
+    "tests/test_ti06_workout_log_privacy.py": {
+      "items": 5,
+      "seconds": 0.890185
+    },
+    "tests/test_ti07_workout_state_log_privacy.py": {
+      "items": 5,
+      "seconds": 0.314923
+    },
+    "tests/test_timeutil.py": {
+      "items": 6,
+      "seconds": 0.002142
+    },
+    "tests/test_today_guidance.py": {
+      "items": 23,
+      "seconds": 0.014529
+    },
+    "tests/test_today_pr5_frontend_audit.py": {
+      "items": 5,
+      "seconds": 0.002496
+    },
+    "tests/test_today_v2.py": {
+      "items": 47,
+      "seconds": 3.11437
+    },
+    "tests/test_tracking_routes.py": {
+      "items": 52,
+      "seconds": 10.231757
+    },
+    "tests/test_training_catalog_identity_contract.py": {
+      "items": 47,
+      "seconds": 2.336535
+    },
+    "tests/test_training_execution_boundary.py": {
+      "items": 19,
+      "seconds": 33.82438
+    },
+    "tests/test_training_generation.py": {
+      "items": 26,
+      "seconds": 0.011708
+    },
+    "tests/test_training_history.py": {
+      "items": 17,
+      "seconds": 0.690692
+    },
+    "tests/test_training_page_characterization.py": {
+      "items": 33,
+      "seconds": 7.066673
+    },
+    "tests/test_training_plan_generation_migration.py": {
+      "items": 2,
+      "seconds": 0.062495
+    },
+    "tests/test_training_plan_generation_operation.py": {
+      "items": 3,
+      "seconds": 0.120034
+    },
+    "tests/test_training_plan_replacement_precondition.py": {
+      "items": 46,
+      "seconds": 3.34905
+    },
+    "tests/test_training_planning.py": {
+      "items": 19,
+      "seconds": 1.024121
+    },
+    "tests/test_training_progression.py": {
+      "items": 26,
+      "seconds": 1.233909
+    },
+    "tests/test_training_reliability_web_read_generation.py": {
+      "items": 19,
+      "seconds": 1.466583
+    },
+    "tests/test_training_routes.py": {
+      "items": 42,
+      "seconds": 7.412792
+    },
+    "tests/test_training_ui.py": {
+      "items": 4,
+      "seconds": 0.429531
+    },
+    "tests/test_triage_2026_10_01_fixes.py": {
+      "items": 26,
+      "seconds": 4.95094
+    },
+    "tests/test_triage_2026_10_04_fixes.py": {
+      "items": 5,
+      "seconds": 4.067031
+    },
+    "tests/test_ui_typography_layout.py": {
+      "items": 16,
+      "seconds": 0.343696
+    },
+    "tests/test_ui_visual_refinement.py": {
+      "items": 39,
+      "seconds": 0.028478
+    },
+    "tests/test_ux3_pr3_training_management.py": {
+      "items": 27,
+      "seconds": 5.478449
+    },
+    "tests/test_ux3_pr3_training_management_browser.py": {
+      "items": 18,
+      "seconds": 25.14508
+    },
+    "tests/test_ux3_pr4_nutrition_placement.py": {
+      "items": 23,
+      "seconds": 1.232352
+    },
+    "tests/test_ux3_pr4_nutrition_placement_browser.py": {
+      "items": 2,
+      "seconds": 16.981137
+    },
+    "tests/test_ux3_pr5_supplements_placement.py": {
+      "items": 38,
+      "seconds": 5.783901
+    },
+    "tests/test_ux3_pr5_supplements_placement_browser.py": {
+      "items": 9,
+      "seconds": 27.214518
+    },
+    "tests/test_ux4_pr2_foundation_contract.py": {
+      "items": 69,
+      "seconds": 0.084085
+    },
+    "tests/test_ux4_pr2_foundations_browser.py": {
+      "items": 62,
+      "seconds": 205.012052
+    },
+    "tests/test_ux4_pr3_coach_contract.py": {
+      "items": 52,
+      "seconds": 0.96367
+    },
+    "tests/test_ux4_pr3_coach_destination_browser.py": {
+      "items": 53,
+      "seconds": 58.439854
+    },
+    "tests/test_ux4_pr4_plan_first_run_browser.py": {
+      "items": 44,
+      "seconds": 55.450852
+    },
+    "tests/test_ux4_pr4_plan_first_run_contract.py": {
+      "items": 24,
+      "seconds": 7.45412
+    },
+    "tests/test_ux4_pr5_plan_hierarchy_browser.py": {
+      "items": 55,
+      "seconds": 87.789123
+    },
+    "tests/test_ux4_pr5_plan_hierarchy_contract.py": {
+      "items": 14,
+      "seconds": 1.902888
+    },
+    "tests/test_ux4_pr6_measure_browser.py": {
+      "items": 11,
+      "seconds": 0.003253
+    },
+    "tests/test_ux4_pr6_nutrition_supplements_browser.py": {
+      "items": 10,
+      "seconds": 41.627226
+    },
+    "tests/test_ux4_pr6_nutrition_supplements_contract.py": {
+      "items": 21,
+      "seconds": 2.814365
+    },
+    "tests/test_ux4_pr7_browser.py": {
+      "items": 12,
+      "seconds": 68.68559
+    },
+    "tests/test_ux4_pr8_browser.py": {
+      "items": 65,
+      "seconds": 242.069216
+    },
+    "tests/test_ux4_pr8_consistency_gate.py": {
+      "items": 106,
+      "seconds": 4.089566
+    },
+    "tests/test_validators.py": {
+      "items": 54,
+      "seconds": 0.780614
+    },
+    "tests/test_vision_images.py": {
+      "items": 4,
+      "seconds": 1.023653
+    },
+    "tests/test_wearables.py": {
+      "items": 16,
+      "seconds": 1.381338
+    },
+    "tests/test_web_logout_global_revocation.py": {
+      "items": 14,
+      "seconds": 2.155796
+    },
+    "tests/test_web_meal_correction.py": {
+      "items": 67,
+      "seconds": 7.069666
+    },
+    "tests/test_web_recovery_characterization.py": {
+      "items": 58,
+      "seconds": 6.212702
+    },
+    "tests/test_web_recovery_lp02_deltas.py": {
+      "items": 11,
+      "seconds": 0.795873
+    },
+    "tests/test_web_registration_characterization.py": {
+      "items": 62,
+      "seconds": 14.974574
+    },
+    "tests/test_web_registration_lp01_deltas.py": {
+      "items": 9,
+      "seconds": 0.97835
+    },
+    "tests/test_web_setup_characterization.py": {
+      "items": 52,
+      "seconds": 6.45532
+    },
+    "tests/test_web_setup_lp03_deltas.py": {
+      "items": 25,
+      "seconds": 3.387329
+    },
+    "tests/test_weekly_program.py": {
+      "items": 40,
+      "seconds": 1.56777
+    },
+    "tests/test_weekly_program_route.py": {
+      "items": 33,
+      "seconds": 7.013394
+    },
+    "tests/test_weekly_program_ui.py": {
+      "items": 39,
+      "seconds": 7.874139
+    },
+    "tests/test_weekly_program_ui_flag.py": {
+      "items": 22,
+      "seconds": 1.611301
+    },
+    "tests/test_weekly_program_ui_js.py": {
+      "items": 112,
+      "seconds": 1.440646
+    },
+    "tests/test_worker_healthcheck.py": {
+      "items": 17,
+      "seconds": 0.029499
+    },
+    "tests/test_workout_completion.py": {
+      "items": 29,
+      "seconds": 2.491741
+    },
+    "tests/test_workout_completion_pg.py": {
+      "items": 1,
+      "seconds": 0.000307
+    },
+    "tests/test_workout_convergence.py": {
+      "items": 27,
+      "seconds": 2.512381
+    },
+    "tests/test_workout_session.py": {
+      "items": 72,
+      "seconds": 11.300243
+    },
+    "tests/test_workout_session_pg.py": {
+      "items": 3,
+      "seconds": 0.000538
+    },
+    "tests/test_workout_state.py": {
+      "items": 69,
+      "seconds": 3.083968
+    },
+    "tests/test_workout_state_sessions.py": {
+      "items": 19,
+      "seconds": 0.976872
+    },
+    "tests/test_write_rate_limits.py": {
+      "items": 12,
+      "seconds": 0.938474
+    }
+  }
+}
