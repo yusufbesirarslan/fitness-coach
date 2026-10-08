@@ -47,7 +47,7 @@ KNOWN_SOURCES = frozenset({
     # Sprint 13 PR3 (F8): an accepted shared meal suggestion. It was previously
     # written with no `source`, so the column default stamped it "manual" - a
     # KNOWN value, which meant no reader could even see the provenance was lost.
-    "suggestion",
+    "suggestion", "menu_estimated",
 })
 
 

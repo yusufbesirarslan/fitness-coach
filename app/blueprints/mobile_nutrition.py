@@ -149,6 +149,49 @@ def nutrition_log_food():
     return response
 
 
+@bp.post("/nutrition/menu/log")
+@require_mobile_auth
+def nutrition_menu_log():
+    from app.services.mobile_log_food.menu_confirmation import parse_menu_confirmation
+    from app.services.mobile_menu import InvalidItemProof, ItemProofExpired
+
+    key = meal_idempotency.read_idempotency_key()
+    if key is None:
+        return mobile_error("INVALID_IDEMPOTENCY_KEY",
+                            "A valid Idempotency-Key is required.", 400, False)
+    try:
+        if request.mimetype != "application/json":
+            raise mobile_log_food.InvalidLogFoodCommand()
+        user_id = g.mobile_user.id
+        command = parse_menu_confirmation(
+            request.get_json(silent=True), current_app.config["SECRET_KEY"], user_id)
+        entry, created = mobile_log_food.log_food(user_id, key, command)
+        response = jsonify({"meal": mobile_log_food.response_meal(
+            entry, current_app.config["SECRET_KEY"], user_id)})
+        response.status_code = 201 if created else 200
+        return response
+    except mobile_log_food.InvalidLogFoodCommand:
+        return mobile_error("INVALID_MENU_LOG_COMMAND", "Invalid menu confirmation.", 400, False)
+    except ItemProofExpired:
+        db.session.rollback()
+        return mobile_error("MENU_ITEM_EXPIRED", "Menu confirmation has expired.", 410, False)
+    except InvalidItemProof:
+        return mobile_error("INVALID_MENU_ITEM_PROOF", "Invalid menu confirmation proof.", 400, False)
+    except mobile_log_food.IdempotencyConflict:
+        return mobile_error("IDEMPOTENCY_CONFLICT",
+                            "The Idempotency-Key belongs to a different command.", 409, False)
+    except Exception as error:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        current_app.logger.error(
+            "mobile_nutrition event=menu_log_failed error_type=%s request_id=%s",
+            type(error).__name__, current_request_id())
+        return mobile_error("NUTRITION_TEMPORARILY_UNAVAILABLE",
+                            "Nutrition data is temporarily unavailable.", 503, True)
+
+
 def _mutation_precondition():
     try:
         return mobile_diary_mutation.parse_if_match(

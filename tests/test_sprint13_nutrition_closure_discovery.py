@@ -441,6 +441,7 @@ def test_mobile_nutrition_route_inventory(api_v1_rules):
          frozenset({"DELETE"})),
         # LP15-C native menu analysis (docs/LP15_C_NATIVE_MENU_ANALYSIS.md).
         ("/api/v1/nutrition/menu/analyze", frozenset({"POST"})),
+        ("/api/v1/nutrition/menu/log", frozenset({"POST"})),
     }
 
 
@@ -463,9 +464,10 @@ def test_the_mobile_surface_publishes_no_history_menu_plan_or_water(
                  "/api/v1/nutrition/plan/meals/<planned_meal_id>/log"}
     # LP15-C made menu analysis native by explicit owner decision: ONE
     # read-only, HTTPS-URL-in analysis transport, admitted by exact path. Menu
-    # scanning/OCR, a second menu path, drafts and the diary builder remain
-    # absent.
+    # scanning/OCR, drafts and the diary builder remain absent. LP15-D adds
+    # the explicit local confirmation path through canonical LogFood.
     approved |= {"/api/v1/nutrition/menu/analyze"}
+    approved |= {"/api/v1/nutrition/menu/log"}
     paths = {rule[0] for rule in api_v1_rules} - approved
     for absent in ("history", "menu", "nutrition-plan", "water", "draft",
                    "diary/builder"):

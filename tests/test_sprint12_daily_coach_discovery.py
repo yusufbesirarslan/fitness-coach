@@ -148,6 +148,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # LP15-C native menu analysis: a transport over the web menu
         # authorities (menu_analysis), read-only, no Daily-Coach aggregate.
         "/api/v1/nutrition/menu/analyze",
+        # LP15-D explicit signed confirmation through canonical native LogFood.
+        "/api/v1/nutrition/menu/log",
         "/api/v1/pump-checks",
         "/api/v1/pump-checks/<pump_check_token>",
         "/api/v1/pump-check-comparisons",

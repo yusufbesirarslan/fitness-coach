@@ -65,3 +65,26 @@ class ManualLogFoodCommand:
             raise ValueError("invalid slot")
         if not isinstance(self.nutrition, ManualNutritionSnapshot):
             raise ValueError("validated nutrition is required")
+
+
+@dataclass(frozen=True)
+class MenuConfirmedLogFoodCommand:
+    analysis_id: str
+    candidate_id: str
+    name: str
+    stated_grams: int | None
+    base_nutrition: ManualNutritionSnapshot
+    estimation_source: str
+    confidence: Decimal
+    quantity: Decimal
+    slot: str
+    nutrition: ManualNutritionSnapshot
+    description: str
+    expires_at: int
+
+    def __post_init__(self):
+        _validated_amount("quantity", self.quantity, Decimal("1000"), positive=True)
+        if self.slot not in _SLOTS:
+            raise ValueError("invalid slot")
+        if not isinstance(self.nutrition, ManualNutritionSnapshot):
+            raise ValueError("validated nutrition is required")
