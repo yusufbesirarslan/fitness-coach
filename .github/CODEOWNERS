@@ -27,6 +27,9 @@
 /requirements.txt @yusufbesirarslan
 /gunicorn.conf.py @yusufbesirarslan
 /nginx.conf @yusufbesirarslan
+/deploy/nginx/** @yusufbesirarslan
+/scripts/axisai_switch_web_slot.py @yusufbesirarslan
+/scripts/axisai_nginx_bootstrap.py @yusufbesirarslan
 /starter.py @yusufbesirarslan
 /worker.py @yusufbesirarslan
 

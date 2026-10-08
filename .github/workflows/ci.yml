@@ -223,6 +223,40 @@ jobs:
           FITX_R6_DOCKER_IT: "1"
         run: python -m pytest -v -p no:cacheprovider tests/test_r6_slot_docker_integration.py
 
+  r6-nginx-integration:
+    name: r6 nginx route control plane (real nginx)
+    # R6-02A live proof on a disposable, unprivileged nginx under the job's
+    # temp dir: real route switches between three loopback backends, an
+    # in-flight response drained across the graceful reload, the
+    # behaviour-preserving bootstrap of the exact audited live Certbot site,
+    # and Certbot's own nginx parser (pinned to production's 4.0.0) seeing
+    # identical virtual hosts. The system nginx is stopped and never used.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install nginx, openssl and the Certbot parser
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nginx openssl
+          sudo systemctl stop nginx || true
+          python -m pip install pytest==9.1.1 PyYAML==6.0.3 certbot==4.0.0 certbot-nginx==4.0.0
+      - name: Real nginx switch, graceful drain, bootstrap and Certbot gate
+        env:
+          FITX_R6_NGINX_IT: "1"
+          FITX_R6_NGINX_BIN: /usr/sbin/nginx
+          FITX_R6_CERTBOT_GATE: "1"
+        run: >-
+          python -m pytest -v -p no:cacheprovider --noconftest -o addopts=
+          tests/test_r6_nginx_integration.py tests/test_r6_nginx_route_control.py
+          tests/test_r6_nginx_bootstrap.py tests/test_r6_nginx_slot_contract.py
+
   migration-drift:
     name: schema-drift guard
     runs-on: ubuntu-latest
