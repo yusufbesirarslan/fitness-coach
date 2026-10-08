@@ -75,6 +75,15 @@ def test_verifier_fails_closed(mutation):
     elif mutation == "missing_manifest":
         docs.pop()
     elif mutation == "malformed":
+        for field, bad in (("schema", True), ("exitstatus", False), ("count", "4")):
+            malformed = deepcopy(docs)
+            malformed[0][field] = bad
+            with pytest.raises(ValueError):
+                verify(malformed, "revision")
+        malformed = deepcopy(docs)
+        malformed[0]["reports"][node]["call"]["duration"] = True
+        with pytest.raises(ValueError):
+            verify(malformed, "revision")
         del first["full"]
     elif mutation == "missing_execution":
         del first["reports"][node]

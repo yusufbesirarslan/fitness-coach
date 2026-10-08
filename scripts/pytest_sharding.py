@@ -26,7 +26,9 @@ def load_timings(path=TIMINGS_PATH):
         return {}, None
     raw = path.read_bytes()
     data = json.loads(raw)
-    if data.get("schema") != 1 or not isinstance(data.get("files"), dict) or not data["files"]:
+    if (not isinstance(data, dict) or type(data.get("schema")) is not int
+            or data["schema"] != 1 or not isinstance(data.get("files"), dict)
+            or not data["files"]):
         raise ValueError("malformed file timing profile")
     for file, measurement in data["files"].items():
         if not isinstance(file, str) or not file or not isinstance(measurement, dict):
@@ -79,16 +81,19 @@ def verify(manifests, revision, *, collection_only=False, result="success",
         raise ValueError("missing shard evidence")
     by_shard = {}
     for doc in manifests:
-        if not isinstance(doc, dict) or doc.get("schema") != 1:
+        if (not isinstance(doc, dict) or type(doc.get("schema")) is not int
+                or doc["schema"] != 1):
             raise ValueError("malformed manifest")
         index = doc.get("shard")
         if type(index) is not int or index not in range(SHARDS) or index in by_shard:
             raise ValueError("invalid or duplicate shard")
-        if doc.get("revision") != revision or doc.get("count") != SHARDS:
+        if (doc.get("revision") != revision or type(doc.get("count")) is not int
+                or doc["count"] != SHARDS):
             raise ValueError("wrong revision or shard count")
         if doc["timing_digest"] != timing_digest:
             raise ValueError("wrong partition timing profile")
-        if doc.get("exitstatus") != 0 or doc.get("collection_only") is not collection_only:
+        if (type(doc.get("exitstatus")) is not int or doc["exitstatus"] != 0
+                or doc.get("collection_only") is not collection_only):
             raise ValueError("unsuccessful or wrong-mode evidence")
         for field in ("full", "selected", "deselected", "collection_skips"):
             unique_nodes(doc[field])
@@ -119,7 +124,7 @@ def verify(manifests, revision, *, collection_only=False, result="success",
                     if report["outcome"] not in {"passed", "skipped"}:
                         raise ValueError("test phase failed")
                     duration = report["duration"]
-                    if not isinstance(duration, (int, float)) or not 0 <= duration < float("inf"):
+                    if type(duration) not in (int, float) or not 0 <= duration < float("inf"):
                         raise ValueError("invalid phase duration")
                 if phases["setup"]["outcome"] == "passed" and "call" not in phases:
                     raise ValueError("test call omitted")

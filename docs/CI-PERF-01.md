@@ -116,9 +116,8 @@ in all four processes, so module import skips may appear four times in the logs;
 the gate compares them separately from selected test IDs.
 
 Local workflow/security/sharding guards: **129 passed in 10.57s** initially and
-**129 passed in 9.53s** after measured balancing. Full local
-guards including the installation deadline passed again: **129 in 18.54s**.
-Full local
+**129 passed in 9.53s** after measured balancing. Guards including the installation
+deadline passed again: **129 in 18.54s**. Full local
 collection parity: **11,448 IDs, zero missing, zero duplicates, zero unexpected
 deselections**; all four full manifests independently match unsharded collection.
 Baseline-to-change selected count difference is entirely the 25 new regression
