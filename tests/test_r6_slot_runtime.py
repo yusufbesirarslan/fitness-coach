@@ -547,6 +547,21 @@ def test_rendered_model_drift_is_refused(mutate):
         rt.validate_rendered(doc, "green", REV_A, "fitness-coach_default")
 
 
+def test_render_redacts_merged_env_file_values_even_when_validation_fails(deploy_dir):
+    leaky = _rendered("green", REV_A)
+    leaky["services"]["web"]["environment"].update(SECRET_KEY="never-printed",
+                                                   DATABASE_URL="postgresql://x:pw@h/db")
+    runtime = _runtime(deploy_dir, FakeDocker(rendered=leaky))
+    doc = runtime.render("green", REV_A)
+    assert "never-printed" not in json.dumps(doc) and "pw@h" not in json.dumps(doc)
+    broken = _rendered("green", REV_A)
+    broken["services"]["web"]["environment"].update(SECRET_KEY="never-printed",
+                                                    FITX_SKIP_DB_INIT="1")
+    with pytest.raises(rt.Refused) as refused:
+        _runtime(deploy_dir, FakeDocker(rendered=broken)).render("green", REV_A)
+    assert "never-printed" not in str(refused.value)
+
+
 def test_verify_requires_health_baked_revision_deep_revision_and_host_port(deploy_dir):
     fake = FakeDocker(containers={"green": [_container("green")]})
     result = _runtime(deploy_dir, fake).verify("green", REV_A)
@@ -633,7 +648,11 @@ def test_real_compose_render_passes_the_contract_and_ignores_env_file_values(
     runtime = rt.SlotRuntime(deploy_dir, "fitness-coach")
     doc = runtime.render(slot, REV_A)
     assert doc["name"] == f"axisai-web-{slot}"
-    assert "never-rendered" not in json.dumps(doc)     # env_file not resolved
+    # Whatever the Compose version merges from env_file, nothing beyond the
+    # slot-owned keys ever leaves the helper.
+    assert "never-rendered" not in json.dumps(doc)
+    assert doc["services"]["web"]["environment"] == {
+        "FITX_STARTUP_MODE": "read-only", "APP_REVISION": REV_A}
 
 
 def test_real_compose_render_without_revision_refuses(deploy_dir):

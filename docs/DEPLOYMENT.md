@@ -404,6 +404,10 @@ yet: `production_deploy.sh`, `docker-compose.yml`, nginx and the legacy web on
   `FITX_SKIP_DB_INIT=1` in `.env` would make the app refuse to boot (R6-01A).
   Because every slot boots read-only, R6-03 must run `release-prepare` before
   starting a candidate.
+- The helper validates the rendered model with `docker compose config`. Some
+  Compose versions merge `env_file` into that render even with
+  `--no-env-resolution`. The helper keeps it in memory only and redacts it to
+  `FITX_STARTUP_MODE` and `APP_REVISION`. It never prints the render.
 - Both slots keep `com.docker.compose.service=web`, so the CloudWatch agent's
   `(web|worker)` filter ships them unchanged. Slots also log
   `com.docker.compose.project`, which tells the two slots apart inside the one

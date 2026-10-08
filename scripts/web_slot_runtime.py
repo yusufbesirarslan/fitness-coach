@@ -289,6 +289,21 @@ def validate_rendered(doc, slot, revision, network):
     return True
 
 
+SLOT_OWNED_ENVIRONMENT = ("FITX_STARTUP_MODE", "APP_REVISION")
+
+
+def redact_rendered_environment(doc):
+    """Keep only the slot-owned environment keys (drop merged .env values)."""
+    for service in (doc.get("services") or {}).values():
+        env = service.get("environment")
+        if isinstance(env, dict):
+            service["environment"] = {key: env[key] for key in SLOT_OWNED_ENVIRONMENT
+                                      if key in env}
+        elif env is not None:
+            service["environment"] = {}
+    return doc
+
+
 # ── Host side effects (all injectable) ──────────────────────────────────────
 
 def _run_subprocess(args, timeout, env=None):
@@ -369,13 +384,22 @@ class SlotRuntime:
 
     # observations
     def render(self, slot, revision):
+        # Some Compose versions merge env_file into the rendered `environment`
+        # even with --no-env-resolution, so the raw render may hold .env
+        # secrets. It is parsed in memory only, never printed, and redacted
+        # to the slot-owned keys before anything is returned.
         result = self._compose(slot, revision, "config", "--format", "json",
                                "--no-env-resolution")
         try:
             doc = json.loads(result.stdout)
-        except ValueError as exc:
-            raise Refused("compose config did not return JSON") from exc
-        validate_rendered(doc, slot, revision, self.network)
+        except ValueError:
+            raise Refused("compose config did not return JSON") from None
+        finally:
+            result = None
+        try:
+            validate_rendered(doc, slot, revision, self.network)
+        finally:
+            redact_rendered_environment(doc)
         return doc
 
     def check_shared_network(self):
