@@ -335,7 +335,8 @@ def _run_startup(app, mode):
         init_database(app)
     else:
         verify_schema_ready(app)
-    if app.config["MOBILE_AUTH_ENABLED"]:
+    mobile_auth_enabled = app.config["MOBILE_AUTH_ENABLED"]
+    if mobile_auth_enabled:
         from app.services.mobile_auth import validate_derivation_key_readiness
         with app.app_context():
             validate_derivation_key_readiness()
