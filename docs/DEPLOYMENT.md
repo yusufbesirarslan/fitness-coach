@@ -318,6 +318,23 @@ backfill (all idempotent). It then runs the same read-only proof. It never
 rebuilds the canonical leaderboard sorted sets, because the serving revision is
 reading them. Web slots never migrate concurrently.
 
+**Readiness probes are side-effect free.** A candidate is probed with
+`/health` and `/health?deep=1` before traffic switches to it. The global
+`maybe_weekly_rollover` before_request hook is skipped for the `health`
+endpoint, whatever the query string (`app/hooks.py::request_runs_maintenance`).
+So a probe never takes the `fitx:rollover_check` / `fitx:session_purge`
+throttles, never runs the weekly rollover and never dispatches daily
+maintenance. Every other request keeps the existing throttled maintenance
+contract, so maintenance resumes with the first ordinary request after the
+switch. The remaining hooks are already inert on an anonymous probe: CSRF only
+acts on writes, `update_streak` returns before any query for an anonymous
+user, and locale resolution only reads the session. Two Redis effects remain,
+and neither is application state:
+- Dependency checks are reads (`PING`, `EXISTS`, `GET`).
+- Flask-Limiter's default limit still counts `/health` per client IP, in its
+  own `LIMITER/*` keys with a TTL. These are request-admission counters, and
+  the serving revision's own probes already write them.
+
 **Bounded lock wait.** On PostgreSQL every Alembic run goes through
 `migrations/env.py`: the boot upgrade, `flask db upgrade` and `release-prepare`.
 Each runs on a dedicated NullPool connection started with

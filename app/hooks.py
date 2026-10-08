@@ -2,7 +2,7 @@
 import secrets
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
-from flask import abort, current_app, g, jsonify, render_template, request, session
+from flask import abort, current_app, g, has_request_context, jsonify, render_template, request, session
 from flask_login import current_user
 
 from app.config import _BOOT_TS, CSP_IMG_S3_HOSTS
@@ -269,7 +269,26 @@ def _purge_throttle_passed(now):
     return True
 
 
+# R6-01A: health/readiness probes are not product traffic. A blue/green
+# candidate is probed (/health, /health?deep=1) BEFORE traffic switches to it,
+# while the active revision still serves; request-time side effects on those
+# probes would be candidate-induced shared-state writes. Matched by endpoint,
+# so every query string of /health is covered and no other route is.
+_MAINTENANCE_EXEMPT_ENDPOINTS = frozenset({"health"})
+
+
+def request_runs_maintenance():
+    """May this request run request-time maintenance (rollover/purge throttles,
+    weekly rollover, daily maintenance dispatch)? Outside a request (direct
+    calls) the answer is unchanged: yes."""
+    if not has_request_context():
+        return True
+    return request.endpoint not in _MAINTENANCE_EXEMPT_ENDPOINTS
+
+
 def maybe_weekly_rollover():
+    if not request_runs_maintenance():
+        return
     now = datetime.utcnow()
     if not _rollover_throttle_passed(now):
         return

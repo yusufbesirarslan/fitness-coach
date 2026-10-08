@@ -268,6 +268,10 @@ migration'lar bu yüzden TEKRAR-ÇALIŞTIRILABİLİR olmalı (bkz. cc33dd44ee55:
   migration'lar `lock_timeout` (FITX_MIGRATION_LOCK_TIMEOUT_MS, vars. 5000) ile
   sınırlı. `FITX_STARTUP_MODE=read-only` mutasyonsuz aday boot'udur (şema head'de
   değilse fail-closed); varsayılan boot değişmedi. Ayrıntı: docs/DEPLOYMENT.md.
+  `/health` (her query string) request-time bakımı (rollover/purge throttle,
+  haftalık rollover, günlük bakım dispatch'i) TETİKLEMEZ —
+  `hooks.request_runs_maintenance`; aday readiness probe'u paylaşılan durumu yazmaz.
+  Ürün trafiği bakımı aynen sürdürür (tests/test_r6_readiness_maintenance.py).
 - Sorgular daima current_user.id'ye scope'lanır; ID ile yüklenen kayıtlarda sahiplik kontrolü zorunlu
 - Gün-anlamlı challenge hunileri (`water_logged` gibi) KALICI bir gün-başı
   işaretle dedup edilir — `challenges.record_event` per-day dedup YAPMAZ, dedup

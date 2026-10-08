@@ -263,6 +263,124 @@ def test_read_only_candidate_coexists_with_the_serving_revision(pg_url, monkeypa
         _dispose(active)
 
 
+# ── R6-01A readiness: candidate probes write nothing shared ───────────────
+
+class ThrottlingRedis(SharedRedis):
+    """SharedRedis plus real ``SET NX EX``: an empty throttle key is takeable,
+    so any hook that reaches it on a probe WOULD run maintenance."""
+
+    def __init__(self):
+        super().__init__()
+        self.strings = {}
+
+    def set(self, key, value, nx=False, ex=None):
+        self.commands.append(("set", key))
+        if nx and key in self.strings:
+            return None
+        self.strings[key] = value
+        return True
+
+
+_REDIS_READS = frozenset({"ping", "exists", "get", "ttl", "zscore", "mget"})
+
+
+def _maintenance_state(url):
+    engine = sa.create_engine(url)
+    try:
+        with engine.connect() as connection:
+            weekly = connection.execute(sa.text(
+                "SELECT * FROM weekly_reset_log ORDER BY 1")).all()
+            sessions = connection.execute(sa.text(
+                "SELECT count(*) FROM cognito_session")).scalar()
+            xp = connection.execute(sa.text(
+                'SELECT id, rank_points, weekly_xp FROM "user" ORDER BY id')).all()
+        return weekly, sessions, xp
+    finally:
+        engine.dispose()
+
+
+def test_read_only_candidate_readiness_probes_mutate_nothing(pg_url, monkeypatch):
+    from app import hooks, jobs
+    from app.extensions import db
+    from app.jobs.tasks import run_daily_maintenance
+    from app.models import User
+    from app.services import gamification
+
+    redis = ThrottlingRedis()
+    monkeypatch.setattr(gamification, "redis_client", redis)
+    monkeypatch.setattr("app.extensions.redis_client", redis)
+    dispatched = []
+    monkeypatch.setattr(jobs, "dispatch_background",
+                        lambda func, *a, **k: dispatched.append(func))
+
+    active = _boot_active(monkeypatch)
+    with active.app_context():
+        db.session.add(User(username="r6a-probe", email="r6a-probe@example.invalid",
+                            cognito_sub="sub-r6a-probe"))
+        db.session.commit()
+        gamification.award_xp(User.query.one().id, 30)
+        db.session.commit()
+
+    # Arm maintenance completely: no throttle held in Redis or in process,
+    # and no rollover recorded for this week — a hook that runs now writes.
+    monkeypatch.setattr(gamification, "_last_rollover_check", [None])
+    monkeypatch.setattr(hooks, "_last_rollover_check", [None])
+    monkeypatch.setattr(hooks, "_last_purge_check", [None])
+    engine = sa.create_engine(pg_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(sa.text("DELETE FROM weekly_reset_log"))
+    finally:
+        engine.dispose()
+
+    before = _fingerprint(pg_url)
+    state = _maintenance_state(pg_url)
+    leaderboard = redis.snapshot()
+    commands_before = len(redis.commands)
+    statements = []
+
+    def record(conn, cursor, statement, params, context, executemany):
+        statements.append(statement)
+
+    monkeypatch.setenv("FITX_STARTUP_MODE", "read-only")
+    sa.event.listen(sa.engine.Engine, "before_cursor_execute", record)
+    try:
+        from app import create_app
+        candidate = create_app()
+        candidate.config.update(TESTING=True)
+        client = candidate.test_client()
+        shallow = client.get("/health")
+        deep = client.get("/health?deep=1", environ_base={"REMOTE_ADDR": "127.0.0.1"})
+    finally:
+        sa.event.remove(sa.engine.Engine, "before_cursor_execute", record)
+    try:
+        assert shallow.status_code == 200 and shallow.get_json()["db"] == "ok"
+        body = deep.get_json()
+        assert deep.status_code == 200, body
+        assert body["revision"] and body["redis"] == "ok" and body["login"] == "ok"
+
+        assert [s for s in statements if _WRITE_SQL.match(s)] == []
+        assert _fingerprint(pg_url) == before
+        assert _maintenance_state(pg_url) == state
+        probe_commands = redis.commands[commands_before:]
+        assert [c for c in probe_commands if c[0] not in _REDIS_READS] == []
+        assert "fitx:rollover_check" not in redis.strings
+        assert "fitx:session_purge" not in redis.strings
+        assert redis.snapshot() == leaderboard
+        assert dispatched == []
+
+        # Control (non-vacuity) + contract preserved: the SAME armed state on
+        # an ordinary request does run the existing maintenance mechanism.
+        client.get("/login")
+        assert "fitx:rollover_check" in redis.strings
+        assert "fitx:session_purge" in redis.strings
+        assert dispatched == [run_daily_maintenance]
+        assert len(_maintenance_state(pg_url)[0]) == 1  # this week's rollover
+    finally:
+        _dispose(candidate)
+        _dispose(active)
+
+
 # ── TEST 3 / 5 (PG): behind or broken → fail closed, no mutation ───────────
 
 @pytest.mark.parametrize("case", ["behind", "unknown", "missing"])
