@@ -31,10 +31,14 @@ SUPPLEMENT_REVISION = b"axisai/nutrition-native/supplement-revision/v1"
 CABINET_REVISION = b"axisai/nutrition-native/supplement-cabinet-revision/v1"
 HISTORY_CURSOR = b"axisai/nutrition-native/history-cursor/v1"
 PLANNED_MEAL_COMMAND = "axisai/nutrition-native/planned-meal-log/v1"
+# LP15-C: signed confirmation proof of one analyzed menu candidate (issued by
+# `app/services/mobile_menu.py`; verified and consumed by LP15-D).
+MENU_ITEM_PROOF = b"axisai/mobile-menu-item-proof/v1"
 
 DOMAINS = (
     PLAN_REVISION, PLANNED_MEAL_ID, PLAN_PROPOSAL, HYDRATION_REVISION,
     SUPPLEMENT_ID, SUPPLEMENT_REVISION, CABINET_REVISION, HISTORY_CURSOR,
+    MENU_ITEM_PROOF,
 )
 
 # 144 bits, base64url without padding — the width of every sibling identity.

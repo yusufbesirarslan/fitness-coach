@@ -222,10 +222,15 @@ def test_owner_comes_only_from_the_bearer_credential(
     # Bob: 1500 kcal, 400 eaten — and only Bob's request sees it.
     assert b["menu_analysis"]["day"]["target"]["energy_kcal"] == 1500
     assert b["menu_analysis"]["day"]["remaining"]["energy_kcal"] == 1100
-    # Item references are owner-bound: same menu, different accounts.
-    ids_a = {i["item_id"] for c in a["menu_analysis"]["categories"] for i in c["items"]}
-    ids_b = {i["item_id"] for c in b["menu_analysis"]["categories"] for i in c["items"]}
-    assert ids_a and ids_b and not ids_a & ids_b
+    # Proofs are owner-bound: Alice's tokens verify for Alice, never for Bob.
+    secret = mobile.application.config["SECRET_KEY"]
+    tokens_a = [i["confirmation_token"] for c in a["menu_analysis"]["categories"]
+                for i in c["candidates"] if i["loggable"]]
+    assert tokens_a
+    for token in tokens_a:
+        mobile_menu.read_item_proof(secret, alice.id, token)
+        with pytest.raises(mobile_menu.InvalidItemProof):
+            mobile_menu.read_item_proof(secret, bob.id, token)
 
 
 # == 3/8. HTTPS-only intake, userinfo, malformed ================================
@@ -289,7 +294,7 @@ def test_public_https_menu_is_analyzed_through_the_canonical_boundary(
     assert body["source"] == {"kind": "web_page", "host": "public.example",
                               "title": "Lezzet Duragi"}
     assert [c["name"] for c in body["categories"]] == ["Ana Yemekler", "Tatlilar"]
-    assert body["item_count"] == 4
+    assert (body["candidate_count"], body["loggable_count"]) == (4, 3)
     assert _nutrition_rows() == before
 
 
@@ -298,15 +303,22 @@ def test_dto_shape_is_bounded_and_unknown_nutrition_stays_null(
     body = analyze(mobile, bearer(alice)).get_json()
     assert set(body) == {"menu_analysis"}
     menu = body["menu_analysis"]
-    assert set(menu) == {"contract_version", "source", "day", "categories",
-                         "coach_pick_ids", "item_count"}
+    assert set(menu) == {"contract_version", "analysis_id", "issued_at",
+                         "expires_at", "source", "day", "categories",
+                         "coach_pick_ids", "candidate_count", "loggable_count"}
+    assert menu["expires_at"] - menu["issued_at"] == 1800
     assert set(menu["day"]) == {"target", "consumed", "remaining"}
     for macros in menu["day"].values():
         assert set(macros) == {"energy_kcal", "protein_g", "carbohydrate_g", "fat_g"}
 
-    items = {i["name"]: i for c in menu["categories"] for i in c["items"]}
+    items = {i["name"]: i for c in menu["categories"] for i in c["candidates"]}
     for item in items.values():
-        assert set(item) == {"item_id", "name", "nutrition", "estimate", "fit"}
+        assert set(item) == {"candidate_id", "name", "description", "portion",
+                             "nutrition", "estimated", "estimate", "fit",
+                             "loggable", "confirmation_token"}
+        assert item["estimated"] is True and item["description"] is None
+        assert item["portion"] == {"basis": "serving", "quantity": 1,
+                                   "stated_grams": None}
         assert set(item["nutrition"]) == {"status", "energy_kcal", "protein_g",
                                           "carbohydrate_g", "fat_g"}
         assert set(item["fit"]) == {"score", "flags", "warnings"}
@@ -328,11 +340,13 @@ def test_dto_shape_is_bounded_and_unknown_nutrition_stays_null(
                                     "fat_g": None}
     assert mystery["estimate"] == {"source": None, "confidence": None}
     assert mystery["fit"] == {"score": None, "flags": [], "warnings": []}
+    assert (mystery["loggable"], mystery["confirmation_token"]) == (False, None)
+    assert chicken["loggable"] is True and chicken["confirmation_token"]
 
-    ids = [i["item_id"] for i in items.values()]
+    ids = [i["candidate_id"] for i in items.values()]
     assert len(set(ids)) == len(ids)
     assert set(menu["coach_pick_ids"]) <= set(ids)
-    assert items["Gizemli Tabak"]["item_id"] not in menu["coach_pick_ids"]
+    assert items["Gizemli Tabak"]["candidate_id"] not in menu["coach_pick_ids"]
 
 
 def test_dish_and_category_names_are_bounded_not_rewritten(
@@ -342,9 +356,9 @@ def test_dish_and_category_names_are_bounded_not_rewritten(
     menu = analyze(mobile, bearer(alice)).get_json()["menu_analysis"]
     [category] = menu["categories"]
     assert category["name"] == ("Özel " + "Ç" * 300)[:mobile_menu.MAX_CATEGORY_CHARS]
-    names = [i["name"] for i in category["items"]]
+    names = [i["name"] for i in category["candidates"]]
     assert long_name[:mobile_menu.MAX_NAME_CHARS] in names
-    assert names.count("Izgara Tavuk") == 1  # repeated dish → one item, one id
+    assert names.count("Izgara Tavuk") == 1  # repeated dish → one candidate
 
 
 # == 5. Private / special destinations ===========================================
@@ -889,10 +903,226 @@ def test_menu_analysis_paths_never_write_the_database():
                    for name in native)
 
 
-def test_item_ids_tolerate_any_decoded_model_string():
-    lone = "Kebap \ud800"
-    first = mobile_menu.item_id("secret", 1, "Ana", lone)
-    assert first == mobile_menu.item_id("secret", 1, "Ana", lone)
-    assert first != mobile_menu.item_id("secret", 2, "Ana", lone)
-    assert first != mobile_menu.item_id("secret", 1, "Tatli", lone)
-    assert len(first) == 24
+
+
+# == Confirmation proof (LP15-C amendment) ==========================================
+import base64 as _b64
+
+SECRET = "proof-test-secret"
+NOW = 1_800_000_000
+
+
+def _item(name="Izgara Tavuk", macros=None, source="llm", has_macros=True,
+          category="Ana Yemekler", stated_grams=None, confidence=0.6):
+    macros = {"calories": 330, "protein": 62, "carbs": 0, "fat": 7} if macros is None else macros
+    return {"name": name, "category": category, "macros": macros,
+            "has_macros": has_macros, "macro_source": source if has_macros else "none",
+            "confidence": confidence if has_macros else 0.0, "score": 90,
+            "fit_flags": [], "fit_warnings": [], "stated_grams": stated_grams}
+
+
+def _analysis(*items):
+    zero = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+    categories = {}
+    for item in items:
+        categories.setdefault(item["category"], []).append(item)
+    return {"menu_source": "web_scraper", "categories": categories,
+            "coach_picks": [i for i in items if i["has_macros"]][:3],
+            "remaining": zero, "target": zero, "consumed": zero}
+
+
+def _scan():
+    return {"menu_source": "web_scraper", "title": "T",
+            "source_url": "https://public.example/menu?secret=SYNTHETIC_Q",
+            "body_text": "SYNTHETIC_BODY", "framework_state": "SYNTHETIC_FW"}
+
+
+def _candidates(*items, user_id=1, now=NOW):
+    dto = mobile_menu.project(_scan(), _analysis(*items), secret=SECRET,
+                              user_id=user_id, now=now)["menu_analysis"]
+    return dto, [c for cat in dto["categories"] for c in cat["candidates"]]
+
+
+def _payload(token):
+    body = token.split(".")[0]
+    return json.loads(_b64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+
+
+def _resign(payload, domain=mobile_menu.PROOF_DOMAIN, user_id=1, secret=SECRET):
+    from app.services.nutrition_native import tokens
+    return tokens.sign_payload(secret, domain, user_id, payload)
+
+
+def test_complete_candidate_gets_one_bounded_self_contained_proof():
+    dto, [candidate] = _candidates(_item(stated_grams=220.0))
+    token = candidate["confirmation_token"]
+    assert candidate["loggable"] is True
+    assert len(token) < 600 < mobile_menu.MAX_PROOF_CHARS
+    snapshot = mobile_menu.read_item_proof(SECRET, 1, token, now=NOW)
+    assert snapshot == {
+        "v": 1, "aid": dto["analysis_id"], "cid": candidate["candidate_id"],
+        "iat": NOW, "exp": NOW + 1800, "name": "Izgara Tavuk",
+        "portion": {"basis": "serving", "quantity": 1, "stated_grams": 220},
+        "nutrition": {"energy_kcal": 330, "protein_g": 62, "carbohydrate_g": 0, "fat_g": 7},
+        "estimated": True, "source": "llm", "confidence": 0.6,
+        "loggable": True, "persist_as": "menu_estimated",
+    }
+    assert candidate["portion"] == snapshot["portion"]
+    assert mobile_menu.PROOF_DOMAIN == b"axisai/mobile-menu-item-proof/v1"
+
+
+def test_proof_is_owner_bound_through_the_mac_only():
+    _, [candidate] = _candidates(_item(), user_id=7)
+    token = candidate["confirmation_token"]
+    mobile_menu.read_item_proof(SECRET, 7, token, now=NOW)
+    for other in (8, 70, 0):
+        with pytest.raises(mobile_menu.InvalidItemProof):
+            mobile_menu.read_item_proof(SECRET, other, token, now=NOW)
+    with pytest.raises(mobile_menu.InvalidItemProof):
+        mobile_menu.read_item_proof("another-secret", 7, token, now=NOW)
+
+
+def test_tampered_proofs_fail():
+    _, [candidate] = _candidates(_item())
+    token = candidate["confirmation_token"]
+    body, mac = token.split(".")
+    payload = _payload(token)
+    forged_body = _b64.urlsafe_b64encode(json.dumps(
+        dict(payload, nutrition=dict(payload["nutrition"], energy_kcal=1)),
+        sort_keys=True, separators=(",", ":")).encode()).decode().rstrip("=")
+    flipped = mac[:-2] + ("A" if mac[-2] != "A" else "B") + mac[-1]
+    for bad in (forged_body + "." + mac, body + "." + flipped, body, body + ".",
+                "." + mac, token + ".x", token[:-4], "", None, 7,
+                "a" * (mobile_menu.MAX_PROOF_CHARS + 1)):
+        with pytest.raises(mobile_menu.InvalidItemProof):
+            mobile_menu.read_item_proof(SECRET, 1, bad, now=NOW)
+
+
+def test_wrong_domain_or_version_fails():
+    from app.services.nutrition_native import tokens
+    label = b"axisai/mobile-menu-item-proof/v1"
+    assert mobile_menu.PROOF_DOMAIN == label
+    assert list(tokens.DOMAINS).count(label) == 1
+    _, [candidate] = _candidates(_item())
+    token = candidate["confirmation_token"]
+    tokens.verify_payload(SECRET, label, 1, token, max_length=mobile_menu.MAX_PROOF_CHARS)
+    payload = _payload(token)
+    assert mobile_menu.read_item_proof(SECRET, 1, _resign(payload), now=NOW)
+    for domain in set(tokens.DOMAINS) - {mobile_menu.PROOF_DOMAIN}:
+        with pytest.raises(mobile_menu.InvalidItemProof):
+            mobile_menu.read_item_proof(SECRET, 1, _resign(payload, domain), now=NOW)
+    for change in ({"v": 2}, {"v": "1"}, {"persist_as": "manual"},
+                   {"loggable": False}, {"estimated": False}, {"source": "user"},
+                   {"exp": NOW + 99999}, {"confidence": 2}, {"name": ""},
+                   {"portion": {"basis": "100g", "quantity": 1, "stated_grams": None}},
+                   {"nutrition": {"energy_kcal": None, "protein_g": 1,
+                                  "carbohydrate_g": 1, "fat_g": 1}}):
+        with pytest.raises(mobile_menu.InvalidItemProof):
+            mobile_menu.read_item_proof(SECRET, 1, _resign(dict(payload, **change)), now=NOW)
+    extra = dict(payload, user_id=1)
+    with pytest.raises(mobile_menu.InvalidItemProof):
+        mobile_menu.read_item_proof(SECRET, 1, _resign(extra), now=NOW)
+
+
+def test_proof_lifetime_is_thirty_minutes_with_bounded_future_skew():
+    _, [candidate] = _candidates(_item())
+    token = candidate["confirmation_token"]
+    mobile_menu.read_item_proof(SECRET, 1, token, now=NOW + 1799)
+    with pytest.raises(mobile_menu.ItemProofExpired):
+        mobile_menu.read_item_proof(SECRET, 1, token, now=NOW + 1800)
+    mobile_menu.read_item_proof(SECRET, 1, token, now=NOW - 60)
+    with pytest.raises(mobile_menu.InvalidItemProof):
+        mobile_menu.read_item_proof(SECRET, 1, token, now=NOW - 61)
+
+
+@pytest.mark.parametrize("item", [
+    _item(has_macros=False),
+    _item(macros={"calories": 330, "protein": 62, "carbs": None, "fat": 7}),
+    _item(macros={"calories": 330, "protein": 62, "fat": 7}),
+    _item(macros={"calories": 0, "protein": 0, "carbs": 0, "fat": 0}),
+    _item(macros={"calories": 330, "protein": -1, "carbs": 0, "fat": 7}),
+    _item(macros={"calories": 330, "protein": 62.5, "carbs": 0, "fat": 7}),
+    _item(macros={"calories": True, "protein": 62, "carbs": 0, "fat": 7}),
+    _item(macros={"calories": 200000, "protein": 62, "carbs": 0, "fat": 7}),
+    _item(source="unknown_provider"),
+    _item(name="Ç" * 201),
+])
+def test_unknown_or_incomplete_candidates_get_no_usable_proof(item):
+    _, [candidate] = _candidates(item)
+    assert (candidate["loggable"], candidate["confirmation_token"]) == (False, None)
+
+
+def test_oversized_proof_construction_fails_closed():
+    huge = "\U0001F37D" * 200  # 12 escaped ASCII bytes per character
+    with pytest.raises(mobile_menu.ProofTooLarge):
+        mobile_menu.issue_item_proof(
+            SECRET, 1, analysis_id="a", candidate_id="c", name=huge,
+            portion={"basis": "serving", "quantity": 1, "stated_grams": None},
+            nutrition={"energy_kcal": 1, "protein_g": 1, "carbohydrate_g": 1, "fat_g": 1},
+            source="llm", confidence=0.6, now=NOW)
+    _, [candidate] = _candidates(_item(name=huge))
+    assert (candidate["loggable"], candidate["confirmation_token"]) == (False, None)
+    assert candidate["name"] == huge  # still displayed
+
+
+def test_proof_and_identities_carry_no_owner_db_or_remote_content():
+    dto, candidates = _candidates(_item(), _item(name="Kunefe", category="Tatli"),
+                                  user_id=424242)
+    raw = json.dumps(dto)
+    for leaked in ("424242", "SYNTHETIC_Q", "SYNTHETIC_BODY", "SYNTHETIC_FW",
+                   "secret=", "http", "/menu"):
+        assert leaked not in raw
+    for c in candidates:
+        snapshot = json.dumps(_payload(c["confirmation_token"]))
+        for leaked in ("424242", "public.example", "SYNTHETIC_Q", "SYNTHETIC_BODY",
+                       "SYNTHETIC_FW", "secret=", "http", "Ana Yemekler", "Tatli\""):
+            assert leaked not in snapshot
+    ids = {dto["analysis_id"]} | {c["candidate_id"] for c in candidates}
+    assert len(ids) == 3 and all(len(i) == 16 for i in ids)
+    again, _ = _candidates(_item(), user_id=424242)
+    assert again["analysis_id"] != dto["analysis_id"]  # random, never derived
+
+
+def test_projection_is_pure_no_fetch_provider_or_storage(monkeypatch):
+    monkeypatch.setattr(mr, "run_worker", lambda *a, **k: pytest.fail("fetch"))
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", lambda *a, **k: pytest.fail("model"))
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: pytest.fail("provider"))
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    _, candidates = _candidates(_item(), _item(name="Kebap"))
+    assert all(c["loggable"] for c in candidates)
+
+
+def test_route_issues_proofs_without_extra_calls_or_stored_proof_state(
+        mobile, bearer, alice, wire, provider, monkeypatch, caplog):
+    store = {}
+
+    class Redis:
+        def get(self, key):
+            return store.get(key)
+
+        def setex(self, key, ttl, value):
+            store[key] = value
+    monkeypatch.setattr(menu_analysis, "redis_client", Redis())
+    headers = bearer(alice)
+    before = _nutrition_rows()
+    with caplog.at_level(logging.DEBUG):
+        body = analyze(mobile, headers).get_json()["menu_analysis"]
+
+    # One extraction + one macro batch; two fetches (main + sub-page) — the
+    # same work as before proofs existed.
+    assert [f for f, _ in provider.prompts] == ["menu_extract", "nutrition"]
+    assert wire.urls() == [MENU_URL, SUB_URL]
+    candidates = [c for cat in body["categories"] for c in cat["candidates"]]
+    tokens_ = [c["confirmation_token"] for c in candidates if c["loggable"]]
+    assert len(tokens_) == 3
+    for token in tokens_:
+        snapshot = mobile_menu.read_item_proof(
+            mobile.application.config["SECRET_KEY"], alice.id, token)
+        assert snapshot["aid"] == body["analysis_id"]
+    # Nothing about proofs, candidates or the selection is persisted anywhere.
+    assert _nutrition_rows() == before
+    stored = json.dumps(store)
+    for value in [body["analysis_id"], *tokens_, *(c["candidate_id"] for c in candidates)]:
+        assert value not in stored and value not in caplog.text
+    for value in ("Izgara Tavuk", "Kunefe", "330", "menu_estimated", "confidence"):
+        assert value not in caplog.text

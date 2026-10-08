@@ -22,7 +22,8 @@ resolution, canonical targets and score), both shared with
   * the web per-route ceilings (SCRAPE + AI + BEDROCK), keyed on the Bearer
     owner and checked up front, so a rejected request does no network work;
   * typed native errors (never an auth-shaped answer for a menu fault) and a
-    bounded DTO without the fetched body.
+    bounded DTO without the fetched body, carrying a stateless signed
+    confirmation proof per loggable candidate (consumed by LP15-D, not here).
 
 Read-only: no MealLog / NutritionPlan / CustomMeal write. See
 docs/LP15_C_NATIVE_MENU_ANALYSIS.md.
@@ -130,6 +131,7 @@ def nutrition_menu_analyze():
 
     body = payload["menu_analysis"]
     current_app.logger.info(
-        "mobile_menu event=analyzed request_id=%s categories=%d items=%d",
-        current_request_id(), len(body["categories"]), body["item_count"])
+        "mobile_menu event=analyzed request_id=%s categories=%d candidates=%d "
+        "loggable=%d", current_request_id(), len(body["categories"]),
+        body["candidate_count"], body["loggable_count"])
     return jsonify(payload)

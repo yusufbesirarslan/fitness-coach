@@ -370,8 +370,9 @@ def analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper
     (the top three scored items), `remaining`/`target`/`consumed` (rounded
     ints). An item carries the web fields (`name`, `macros`, `score`,
     `warnings`, `reason`, `confidence`, `macro_source`) plus internal ones
-    the web projection drops: `category`, `has_macros`, `fit_flags` and
-    `fit_warnings` (the canonical locale-free score tokens).
+    the web projection drops: `category`, `stated_grams` (the menu's own
+    declared portion, or None), `has_macros`, `fit_flags` and `fit_warnings`
+    (the canonical locale-free score tokens).
 
     Reads only (`UserSession`, today's `MealLog`); never writes the diary.
     """
@@ -675,6 +676,7 @@ def analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper
             "macro_source": macro_source,
             # Internal (dropped by the web projection).
             "category": cat,
+            "stated_grams": stated_grams_map.get(name),
             "has_macros": has_macros,
             "fit_flags": fit_flags,
             "fit_warnings": fit_warnings,
