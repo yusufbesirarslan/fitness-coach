@@ -167,6 +167,8 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert shards["strategy"] == {"fail-fast": "false", "max-parallel": "4",
                                   "matrix": {"shard": ["0", "1", "2", "3"]}}
     assert shards["runs-on"] == "ubuntu-latest"
+    install = next(s for s in shards["steps"] if s.get("name") == "Install dependencies")
+    assert install["timeout-minutes"] == "10"
     run = next(s["run"] for s in shards["steps"] if s.get("name") == "Run tests")
     assert "-p scripts.pytest_sharding" in run
     assert "--ci-shard=${{ matrix.shard }}" in run

@@ -24,6 +24,8 @@ jobs:
           python-version: "3.11"   # Dockerfile ile aynı taban
           cache: pip
       - name: Install dependencies
+        # Dependency outages fail the required gate instead of hanging a runner.
+        timeout-minutes: 10
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt

@@ -66,7 +66,10 @@ runner, original item ordering is preserved. Timing artifacts provide file sums
 and per-item setup/call/teardown values for later measured balancing.
 
 Four Ubuntu runners execute one pytest process each, `fail-fast: false`, with a
-maximum of four concurrent shards. `tests` remains the matrix job ID. Each
+maximum of four concurrent shards. `tests` remains the matrix job ID. Dependency
+installation has a ten-minute step deadline: an outage fails the shard and the
+required gate; it cannot produce test-success evidence. Test execution itself
+retains the existing deadline behavior. Each
 runner uploads a unique JSON artifact containing its exact full selected IDs,
 marker-deselected IDs, collection-skipped modules, assigned IDs, revision,
 exit status and every executed phase report. Artifact names include the workflow
@@ -114,6 +117,8 @@ the gate compares them separately from selected test IDs.
 
 Local workflow/security/sharding guards: **129 passed in 10.57s** initially and
 **129 passed in 9.53s** after measured balancing. Full local
+guards including the installation deadline passed again: **129 in 18.54s**.
+Full local
 collection parity: **11,448 IDs, zero missing, zero duplicates, zero unexpected
 deselections**; all four full manifests independently match unsharded collection.
 Baseline-to-change selected count difference is entirely the 25 new regression
@@ -134,8 +139,8 @@ is not a valid full-suite count.
 | [37733904015](https://github.com/yusufbesirarslan/fitness-coach/actions/runs/37733904015) | 984.50s | 1,047s | 1,121s | 57.18 | 43–50s |
 | [37735782838](https://github.com/yusufbesirarslan/fitness-coach/actions/runs/37735782838) | 970.68s | 1,035s | 1,097s | 54.70 | 39–46s |
 
-The baseline last-run CI path was 2,493 seconds; the first two sharded paths were
-55.0% and 56.0% shorter. This is a measured cross-run comparison, not a controlled
+The baseline last-run CI path was 2,497 seconds; the first two sharded paths were
+55.1% and 56.1% shorter. This is a measured cross-run comparison, not a controlled
 same-revision sequential benchmark. Baseline pytest allocation was 41.55 minutes
 on the fastest supplied run and 53.97–54.43 on the other two verified runs. The
 sharded allocations are within 0.5–5.9% of those two slower baselines, but
@@ -154,11 +159,23 @@ a browser notification matrix call (26.87s). These are aggregated test phases,
 not separate measurements of `create_app()` or SQLAlchemy internals. Changing
 fixture scopes or caching database setup is not justified by this evidence.
 
-Measured-duration balancing now equalizes historical file-weight sums; actual
-wall time of the new partition remains to be measured. Compare the slowest
-shard, aggregate runner-minutes (including gate and repeated installations and
-collection), full CI critical path and phase profiles. Duration estimates are
-not measured speedups. A separate follow-up could profile browser startup and
+The first measured-duration attempt
+([37737768943](https://github.com/yusufbesirarslan/fitness-coach/actions/runs/37737768943))
+passed three shards but stalled in dependency installation on the fourth. It was
+canceled after over 16 minutes of installation without starting pytest there.
+This is explicitly incomplete execution evidence, not a passing benchmark.
+Pip had completed; the last progress was APT repository update invoked by
+Playwright. The log cannot prove the underlying network or mirror cause.
+The required `pytest` gate still ran after cancellation, observed
+`SHARD_RESULT: cancelled` and failed with exit code 1. The missing shard manifest
+also made that shard's evidence upload fail. This is an observed negative-path
+proof, not merely a workflow-text assertion. An install-step deadline now makes
+this class of stall fail closed sooner. The
+final run results, exact commands and merge verdict are maintained in
+[PR #411's engineering report](https://github.com/yusufbesirarslan/fitness-coach/pull/411).
+Compare the slowest shard, aggregate runner-minutes (including gate and repeated
+installations and collection), full CI critical path and phase profiles.
+Duration estimates are not measured speedups. A separate follow-up could profile browser startup and
 matrix calls in the four largest files while preserving all assertions and
 per-test isolation. Production refactoring and broad fixture caching remain
 outside this task.
