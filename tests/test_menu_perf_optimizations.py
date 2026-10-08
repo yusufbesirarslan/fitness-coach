@@ -17,7 +17,7 @@ import json
 import pytest
 import requests
 
-from app.blueprints import menu as menu_bp
+from app.services import menu_analysis
 from app.extensions import db
 from app.models import UserSession
 from app.services import fatsecret, foodcache
@@ -76,10 +76,10 @@ def profile_session(auth_user):
 
 
 def _mock_macro_pipeline(monkeypatch, per_serving=None, llm=None):
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: (per_serving or {}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda items, category_map=None, grams_hint=None: llm or {})
 
 
@@ -89,14 +89,14 @@ def _mock_macro_pipeline(monkeypatch, per_serving=None, llm=None):
 
 def test_second_analyze_of_same_menu_skips_llm_extraction(client, profile_session, monkeypatch):
     fake = _FakeRedis()
-    monkeypatch.setattr(menu_bp, "redis_client", fake)
+    monkeypatch.setattr(menu_analysis, "redis_client", fake)
     calls = []
 
     def extract(*a, **kw):
         calls.append(1)
         return {"Ana Yemekler": ["Izgara Tavuk"]}
 
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items", extract)
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items", extract)
     _mock_macro_pipeline(monkeypatch, per_serving={"Izgara Tavuk": dict(CHICKEN)})
 
     r1 = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT})
@@ -105,11 +105,11 @@ def test_second_analyze_of_same_menu_skips_llm_extraction(client, profile_sessio
     assert len(calls) == 1  # ikinci istek çıkarımı Redis'ten aldı
     assert r2.get_json()["items"][0]["name"] == "Izgara Tavuk"
     # Önbellek anahtarı doğru namespace'te
-    assert any(k.startswith(menu_bp.MENU_EXTRACT_CACHE_PREFIX) for k in fake.store)
+    assert any(k.startswith(menu_analysis.MENU_EXTRACT_CACHE_PREFIX) for k in fake.store)
 
 
 def test_extraction_cache_key_varies_with_inputs():
-    k = menu_bp._menu_extract_cache_key
+    k = menu_analysis._menu_extract_cache_key
     base = k("menü metni", None, None, "web_scraper")
     assert base != k("başka metin", None, None, "web_scraper")
     assert base != k("menü metni", '{"a":1}', None, "web_scraper")
@@ -120,12 +120,12 @@ def test_extraction_cache_key_varies_with_inputs():
 
 def test_empty_extraction_not_cached(client, profile_session, monkeypatch):
     fake = _FakeRedis()
-    monkeypatch.setattr(menu_bp, "redis_client", fake)
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items", lambda *a, **kw: {})
+    monkeypatch.setattr(menu_analysis, "redis_client", fake)
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items", lambda *a, **kw: {})
 
     r = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT})
     assert r.status_code == 422
-    assert not any(k.startswith(menu_bp.MENU_EXTRACT_CACHE_PREFIX) for k in fake.store)
+    assert not any(k.startswith(menu_analysis.MENU_EXTRACT_CACHE_PREFIX) for k in fake.store)
 
 
 # ---------------------------------------------------------------------------
@@ -133,13 +133,13 @@ def test_empty_extraction_not_cached(client, profile_session, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_items_report_confidence_and_source(client, profile_session, monkeypatch):
-    monkeypatch.setattr(menu_bp, "redis_client", None)
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Ana Yemekler": ["Izgara Tavuk", "Bilinmeyen Yemek", "Gizemli Yemek"]})
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: ({"Izgara Tavuk": dict(CHICKEN)}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda items, category_map=None, grams_hint=None: {
                             "Bilinmeyen Yemek": {"calories": 500.0, "protein": 25.0,
                                                  "carbs": 45.0, "fat": 22.0}})
@@ -157,14 +157,14 @@ def test_items_report_confidence_and_source(client, profile_session, monkeypatch
 
 
 def test_cached_macros_report_cache_source(client, profile_session, monkeypatch):
-    monkeypatch.setattr(menu_bp, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
     foodcache._cache_macros({"Izgara Tavuk": dict(CHICKEN)}, basis="per_serving")
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Ana Yemekler": ["Izgara Tavuk"]})
 
     def boom():
         raise RuntimeError("FatSecret'a gidilmemeli")
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", boom)
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", boom)
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     item = body["items"][0]
@@ -296,8 +296,8 @@ class _Resp:
 
 
 def test_parallel_crawl_merges_sections_in_link_order(client, auth_user, monkeypatch):
-    monkeypatch.setattr(menu_bp, "redis_client", None)
-    monkeypatch.setattr(menu_bp, "_validate_menu_url",
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
 
     def fetch(url, timeout=10):
@@ -305,7 +305,7 @@ def test_parallel_crawl_merges_sections_in_link_order(client, auth_user, monkeyp
             return _Resp(_SUB_HTML[url])
         return _Resp(_MAIN_HTML)
 
-    monkeypatch.setattr(menu_bp, "_fetch_page", fetch)
+    monkeypatch.setattr(menu_analysis, "_fetch_page", fetch)
 
     body = client.post("/api/proxy/scan-menu",
                        json={"url": "https://restoran.example/menu"}).get_json()
@@ -319,8 +319,8 @@ def test_parallel_crawl_merges_sections_in_link_order(client, auth_user, monkeyp
 
 
 def test_parallel_crawl_records_failures_without_dropping_scan(client, auth_user, monkeypatch):
-    monkeypatch.setattr(menu_bp, "redis_client", None)
-    monkeypatch.setattr(menu_bp, "_validate_menu_url",
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
 
     def fetch(url, timeout=10):
@@ -330,7 +330,7 @@ def test_parallel_crawl_records_failures_without_dropping_scan(client, auth_user
             return _Resp(_SUB_HTML[url])
         return _Resp(_MAIN_HTML)
 
-    monkeypatch.setattr(menu_bp, "_fetch_page", fetch)
+    monkeypatch.setattr(menu_analysis, "_fetch_page", fetch)
 
     body = client.post("/api/proxy/scan-menu",
                        json={"url": "https://restoran.example/menu"}).get_json()

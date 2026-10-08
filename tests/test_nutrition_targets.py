@@ -200,18 +200,18 @@ def test_coach_menu_and_barcode_derive_one_target(
     """Behavioural convergence, compared against the canonical fixture rather
     than against each other — three surfaces agreeing on a wrong number would
     still be a failure."""
-    from app.blueprints import menu as menu_bp
+    from app.services import menu_analysis
     from app.services import ai_coach, barcode
 
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Ana Yemekler": ["Izgara Tavuk"]})
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
     monkeypatch.setattr(
-        menu_bp, "_lookup_macros_fatsecret",
+        menu_analysis, "_lookup_macros_fatsecret",
         lambda items, token, cmap=None: (
             {"Izgara Tavuk": {"calories": 330.0, "protein": 62.0,
                               "carbs": 0.0, "fat": 7.0}}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda items, category_map=None: {})
 
     # Nothing eaten, so "remaining" and "target" are the same number and the
@@ -232,7 +232,7 @@ def test_coach_menu_and_barcode_derive_one_target(
 def test_the_consumers_share_the_remaining_budget_interpretation(
         client, cutting_user, monkeypatch):
     """Same day, same 500 kcal eaten, one remaining figure."""
-    from app.blueprints import menu as menu_bp
+    from app.services import menu_analysis
     from app.services import ai_coach, barcode
 
     db.session.add(MealLog(
@@ -240,12 +240,12 @@ def test_the_consumers_share_the_remaining_budget_interpretation(
         kalori=500, protein=25, karb=50, yag=5.5, tarih=day_key()))
     db.session.commit()
 
-    monkeypatch.setattr(menu_bp, "_extract_categorized_items",
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Ana Yemekler": ["Izgara Tavuk"]})
-    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: ({}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda items, category_map=None: {})
 
     expected = {"calories": 1500.0, "protein": 100.0, "carbs": 200.0,
@@ -540,7 +540,7 @@ def test_every_converged_consumer_imports_the_canonical_authority():
     """
     consumers = (
         "app/services/ai_coach.py",
-        "app/blueprints/menu.py",
+        "app/services/menu_analysis.py",
         "app/services/barcode.py",
         "app/services/analytics_engine.py",
         "fitx_mcp/server.py",

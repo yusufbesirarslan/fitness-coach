@@ -8,7 +8,7 @@ no-op'tur ve her tarama fetch eder.
 """
 import requests
 
-from app.blueprints import menu as menu_bp
+from app.services import menu_analysis
 
 MENU_HTML = """<html><head><title>Lezzet Durağı</title></head><body>
 <h2>Çorbalar</h2><li>Mercimek Çorbası</li>
@@ -35,15 +35,15 @@ class _FakeRedis:
 
 def _patch_scan(monkeypatch, redis=None):
     """scan-menu için ağ + doğrulama mock'la; fetch çağrı listesini döndür."""
-    monkeypatch.setattr(menu_bp, "redis_client", redis)
-    monkeypatch.setattr(menu_bp, "_validate_menu_url",
+    monkeypatch.setattr(menu_analysis, "redis_client", redis)
+    monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
     calls = []
 
     def _fetch(url, timeout=10):
         calls.append(url)
         return _Resp()
-    monkeypatch.setattr(menu_bp, "_fetch_page", _fetch)
+    monkeypatch.setattr(menu_analysis, "_fetch_page", _fetch)
     return calls
 
 
@@ -52,17 +52,17 @@ def _patch_scan(monkeypatch, redis=None):
 # ---------------------------------------------------------------------------
 
 def test_cache_key_normalizes_host_case_and_trailing_slash():
-    k = menu_bp._menu_scan_cache_key
+    k = menu_analysis._menu_scan_cache_key
     assert k("https://Restoran.Example/menu") == k("https://restoran.example/menu/")
 
 
 def test_cache_key_normalizes_query_param_order():
-    k = menu_bp._menu_scan_cache_key
+    k = menu_analysis._menu_scan_cache_key
     assert k("https://a.example/m?b=2&a=1") == k("https://a.example/m?a=1&b=2")
 
 
 def test_cache_key_distinguishes_different_paths():
-    k = menu_bp._menu_scan_cache_key
+    k = menu_analysis._menu_scan_cache_key
     assert k("https://a.example/menu") != k("https://a.example/baska")
 
 
@@ -106,16 +106,16 @@ def test_no_redis_disables_cache(client, auth_user, monkeypatch):
 
 def test_failed_scan_not_cached(client, auth_user, monkeypatch):
     fake = _FakeRedis()
-    monkeypatch.setattr(menu_bp, "redis_client", fake)
-    monkeypatch.setattr(menu_bp, "_validate_menu_url",
+    monkeypatch.setattr(menu_analysis, "redis_client", fake)
+    monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
-    monkeypatch.setattr(menu_bp, "_try_wordpress_api", lambda base, html: (None, []))
+    monkeypatch.setattr(menu_analysis, "_try_wordpress_api", lambda base, html: (None, []))
     calls = []
 
     def _fetch(url, timeout=10):
         calls.append(url)
         return _Resp(body="<html><body></body></html>")     # okunamayan → 422
-    monkeypatch.setattr(menu_bp, "_fetch_page", _fetch)
+    monkeypatch.setattr(menu_analysis, "_fetch_page", _fetch)
 
     url = "https://bos.example/menu"
     assert client.post("/api/proxy/scan-menu", json={"url": url}).status_code == 422
