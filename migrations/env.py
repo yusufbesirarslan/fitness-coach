@@ -98,17 +98,28 @@ def run_migrations_online():
     if conf_args.get("process_revision_directives") is None:
         conf_args["process_revision_directives"] = process_revision_directives
 
-    connectable = get_engine()
+    # R6-01A: on PostgreSQL migrations run on a dedicated connection with a
+    # bounded lock_timeout (app/schema_safety.py). A DDL lock that cannot be
+    # granted aborts the whole (transactional) upgrade instead of queueing every
+    # request on that table behind it; request-pool connections are untouched.
+    from app.schema_safety import assert_lock_timeout, migration_connectable
+    connectable, lock_timeout_ms = migration_connectable(get_engine())
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=get_metadata(),
-            **conf_args
-        )
+    try:
+        with connectable.connect() as connection:
+            if lock_timeout_ms is not None:
+                assert_lock_timeout(connection, lock_timeout_ms)
+            context.configure(
+                connection=connection,
+                target_metadata=get_metadata(),
+                **conf_args
+            )
 
-        with context.begin_transaction():
-            context.run_migrations()
+            with context.begin_transaction():
+                context.run_migrations()
+    finally:
+        if lock_timeout_ms is not None:
+            connectable.dispose()
 
 
 if context.is_offline_mode():

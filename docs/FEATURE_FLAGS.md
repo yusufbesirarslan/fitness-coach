@@ -40,6 +40,8 @@ block, and in the `[FLAGS] enabled=…` boot line. The other two are recorded in
 | `FLASK_DEBUG` | 0 | environment — environment identity, not a tuning knob |
 | `FLASK_ENV` | — | environment — environment identity |
 | `FITX_SKIP_DB_INIT` | 0 | environment — boot mode (skips `create_all` + migrations) |
+| `FITX_STARTUP_MODE` | `self-migrating` | environment — boot mode; `read-only` = mutation-free dual-revision candidate (R6-01A, docs/DEPLOYMENT.md). Not boolean; invalid values refuse to boot |
+| `FITX_MIGRATION_LOCK_TIMEOUT_MS` | 5000 | operational — PostgreSQL migration lock_timeout, 100–60000 ms; out of range refuses to migrate |
 | `FATSECRET_ALLOW_INSECURE` | 0 | escape hatch — permits a non-`https://` FatSecret base URL |
 | `FITX_DB_AUTO_UPGRADE` | 1 | escape hatch — `0` disables automatic boot migrations |
 | `FITX_DB_UPGRADE_FAIL_OPEN` | 0 | escape hatch — `1` boots past a failed migration |

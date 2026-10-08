@@ -396,7 +396,37 @@ def rq_requeue_cmd(job_id):
         click.echo(f"Yeniden kuyruğa alınamadı: {job_id} (bulunamadı ya da rq/Redis yok).")
 
 
+def release_prepare_cmd():
+    """R6-01A: run release-time shared-state mutation ONCE, then prove head.
+
+    The single migration authority for a dual-revision release: Alembic upgrade
+    (bounded lock wait), fresh-schema bootstrap, seeds and the referral
+    backfill — then the same read-only readiness proof a read-only web
+    candidate runs. It never rebuilds the canonical leaderboard sets: another
+    revision may be serving from them while this runs.
+
+    Must be run from a process that did no startup DB work itself:
+        FITX_SKIP_DB_INIT=1 flask --app starter release-prepare
+    """
+    from flask import current_app
+
+    from app.db_init import prepare_release
+    from app.schema_safety import (StartupMode, resolve_startup_mode,
+                                   verify_schema_ready)
+
+    mode = resolve_startup_mode()
+    if mode is not StartupMode.SKIP_DB_INIT:
+        raise click.ClickException(
+            f"release-prepare requires FITX_SKIP_DB_INIT=1 (startup mode is "
+            f"{mode.value}); the app factory must not have prepared already.")
+    app = current_app._get_current_object()
+    prepare_release(app)
+    heads = verify_schema_ready(app)
+    click.echo(f"release-prepare: schema at head {','.join(sorted(heads))}")
+
+
 def register_cli(app):
+    app.cli.command("release-prepare")(release_prepare_cmd)
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)
     app.cli.command("cleanup-test-users")(cleanup_test_users)
