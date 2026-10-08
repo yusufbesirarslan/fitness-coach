@@ -48,8 +48,12 @@ def test_loggable_url_never_raises_and_never_echoes_garbage(raw):
     assert out == "<unparsable-url>"
 
 
-def test_menu_blueprint_never_interpolates_a_raw_url_into_a_log_line():
-    source = Path("app/blueprints/menu.py").read_text(encoding="utf-8")
+@pytest.mark.parametrize("path", [
+    "app/blueprints/menu.py", "app/services/menu_analysis.py",
+    "app/blueprints/mobile_menu.py", "app/services/mobile_menu.py",
+])
+def test_menu_blueprint_never_interpolates_a_raw_url_into_a_log_line(path):
+    source = Path(path).read_text(encoding="utf-8")
     offenders = [
         line.strip() for line in source.splitlines()
         if re.search(r"logger\.[a-z]+\(", line)

@@ -280,7 +280,8 @@ def test_drive_confirmation_disabled_and_host_exact(app, wire):
 def test_architecture_guard():
     import ast
     from pathlib import Path
-    paths = [Path('app/services/menu_fetch.py'), Path('app/services/menu_extract.py'), Path('app/blueprints/menu.py')]
+    paths = [Path('app/services/menu_fetch.py'), Path('app/services/menu_extract.py'), Path('app/blueprints/menu.py'),
+             Path('app/services/menu_analysis.py'), Path('app/services/mobile_menu.py'), Path('app/blueprints/mobile_menu.py')]
     for path in paths:
         tree = ast.parse(path.read_text())
         requests_aliases = {alias.asname or alias.name for n in ast.walk(tree) if isinstance(n, ast.Import) for alias in n.names if alias.name == 'requests'}
