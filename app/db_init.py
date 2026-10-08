@@ -16,12 +16,35 @@ def _handle_upgrade_failure(app, message):
 
 
 def init_database(app):
+    """Self-migrating boot (FITX_STARTUP_MODE unset/self-migrating).
+
+    Today's single-container contract, unchanged: release preparation, then a
+    full leaderboard rebuild. A read-only (dual-revision candidate) boot never
+    calls this — see app/schema_safety.py.
+    """
     # Alembic/Flask-Migrate komutları (flask db migrate/upgrade/stamp) app
     # factory'yi import eder; bu sırada create_all çalışırsa autogenerate boş
     # diff görür ve taze DB'lerde migration zinciri anlamsızlaşır. Migration
     # komutlarını çalıştırırken FITX_SKIP_DB_INIT=1 ayarla (bkz. CLAUDE.md).
     if os.environ.get("FITX_SKIP_DB_INIT") == "1":
         return
+    prepare_release(app)
+    with app.app_context():
+        # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
+        # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.
+        # R6-01A: prepare_release'in DIŞINDA — lb_rebuild kanonik anahtarları
+        # silip parça parça doldurur; başka bir revizyon trafik alırken asla
+        # çalışmamalı. Yalnızca bu tek-container boot yolu onu çağırır.
+        lb_rebuild()
+
+
+def prepare_release(app):
+    """Release-time shared-state mutation, exactly once per release.
+
+    Alembic upgrade (bounded lock wait, migrations/env.py), fresh-schema
+    create_all + stamp, reference-data seeds and the referral backfill. Every
+    step is idempotent. It deliberately does NOT rebuild derived Redis state.
+    """
     _migrations_dir = os.path.join(app.root_path, "..", "migrations")
     with app.app_context():
         # ── Alembic zinciri (konsolsuz, kendi kendine yeten) ──
@@ -149,7 +172,3 @@ def init_database(app):
             db.session.rollback()
             app.logger.warning("[DB_INIT] backfill_referral_codes başarısız (boot devam ediyor)",
                                exc_info=True)
-
-        # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
-        # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.
-        lb_rebuild()

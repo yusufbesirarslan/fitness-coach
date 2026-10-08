@@ -319,3 +319,4 @@ jobs:
           tests/test_f12_web_session_refresh_pg.py
           tests/test_account_profile_pg.py
           tests/test_quest_challenge_commit_pg.py
+          tests/test_r6_dual_revision_pg.py

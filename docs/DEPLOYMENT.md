@@ -284,6 +284,84 @@ backward-compatible with the preceding release. For a destructive migration,
 take and verify an RDS snapshot and execute the migration as a separately
 planned operation; do not expect the deploy rollback to restore database state.
 
+### Startup modes and the dual-revision contract (R6-01A)
+
+Status: R6-01A is complete. The dual-revision startup prerequisite is hardened,
+but blue/green deployment is **not yet implemented**. Production still deploys
+through the single-container path above and needs no new environment value.
+
+`FITX_STARTUP_MODE` selects what `create_app()` does to shared state
+(`app/schema_safety.py`, dispatched once in `app/__init__.py::_run_startup`):
+
+| Mode | Set by | Schema / seeds / backfill | Leaderboard rebuild | Schema proof | Security readiness |
+|---|---|---|---|---|---|
+| `self-migrating` (default; unset/empty) | current production web | yes (`prepare_release`) | yes | via upgrade | yes |
+| `read-only` | future R6 candidate slot | **no** | **no** | read-only, must be exactly at head or boot fails | yes |
+| `skip-db-init` (from `FITX_SKIP_DB_INIT=1`) | worker, migration CLI, tests | no | no | no | no |
+
+Any other value, or `FITX_STARTUP_MODE` combined with `FITX_SKIP_DB_INIT=1`,
+refuses to boot. Set the mode per service, never in the shared `.env` (the
+worker would then refuse to start rather than become a migration owner).
+
+The read-only proof compares Alembic's own head set
+(`ScriptDirectory.get_heads()`) with `alembic_version`. It runs in a
+`SET TRANSACTION READ ONLY` transaction and fails closed on a missing or empty
+version table, an unknown revision, a behind or divergent database, or a
+database it cannot read. A database that is *ahead* of the candidate also fails;
+booting an older revision fresh against a newer schema is a later R6 decision.
+
+**Release-time migration authority.** In the R6 flow, release preparation runs
+once, before any candidate boots:
+`FITX_SKIP_DB_INIT=1 flask --app starter release-prepare`. That runs Alembic
+upgrade, fresh-schema bootstrap, quest and challenge seeds, and the referral
+backfill (all idempotent). It then runs the same read-only proof. It never
+rebuilds the canonical leaderboard sorted sets, because the serving revision is
+reading them. Web slots never migrate concurrently.
+
+**Readiness probes are side-effect free.** A candidate is probed with
+`/health` and `/health?deep=1` before traffic switches to it. The global
+`maybe_weekly_rollover` before_request hook is skipped for the `health`
+endpoint, whatever the query string (`app/hooks.py::request_runs_maintenance`).
+So a probe never takes the `fitx:rollover_check` / `fitx:session_purge`
+throttles, never runs the weekly rollover and never dispatches daily
+maintenance. Every other request keeps the existing throttled maintenance
+contract, so maintenance resumes with the first ordinary request after the
+switch. The remaining hooks are already inert on an anonymous probe: CSRF only
+acts on writes, `update_streak` returns before any query for an anonymous
+user, and locale resolution only reads the session. Two Redis effects remain,
+and neither is application state:
+- Dependency checks are reads (connectivity checks, `EXISTS`, `GET`).
+- Flask-Limiter's default limit still counts `/health` per client IP, in its
+  own `LIMITER/*` keys with a TTL. These are request-admission counters, and
+  the serving revision's own probes already write them.
+
+**Bounded lock wait.** On PostgreSQL every Alembic run goes through
+`migrations/env.py`: the boot upgrade, `flask db upgrade` and `release-prepare`.
+Each runs on a dedicated NullPool connection started with
+`lock_timeout = FITX_MIGRATION_LOCK_TIMEOUT_MS`.
+- Default 5000 ms; accepted range 100–60000 ms. Anything else, including 0
+  ("wait forever"), refuses to migrate.
+- Why 5 s: a DDL lock that is waiting stalls every later query on that table.
+  5 s is below today's 7–10 s recreate gap, far above a normal request
+  transaction, and ends in a clean failure the health gate can see.
+- On timeout: Alembic's single transaction rolls back entirely, and the boot or
+  command fails. Retry once the conflicting transaction ends.
+- The setting never reaches the request pool.
+
+**Expand/contract gate.** `python -m scripts.migration_expand_contract` runs in
+CI through `tests/test_migration_expand_contract.py`.
+- The 46 migrations shipped before R6-01A are pinned by revision and content
+  digest. They are exempt from the rules, but they may not be edited.
+- Every new migration must declare `expand_contract = "expand"`, and the gate
+  then rejects drops, renames, type, NOT NULL or default changes, unique or
+  foreign-key or check constraints on existing tables, destructive or
+  non-literal raw SQL, and dynamic dispatch.
+- Alternatively a migration declares `expand_contract = "contract"` together
+  with a written `expand_contract_reason`. That marks the release as not
+  overlap-safe, and future deploy control must not run two revisions across it
+  (`contract_revisions()`).
+- The gate's known static-analysis limits are listed in the module docstring.
+
 The deploy path does not print `.env` contents or AWS credentials, and it does
 not assign feature flags. Host `.env` permission repair and nginx validation are
 separate safeguards within the locked bootstrap, not configuration management.

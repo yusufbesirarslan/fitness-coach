@@ -74,7 +74,8 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - app/hooks.py — CSRF koruması, CSP başlığı + per-request nonce, streak/rollover hook'ları
 - app/extensions.py — db, migrate, login_manager, limiter, redis_client, openai_client
 - app/models.py — tüm SQLAlchemy modelleri
-- app/db_init.py — boot'ta create_all + bekleyen Alembic migration'ları otomatik uygular + idempotent legacy ALTER'lar (FITX_SKIP_DB_INIT=1 ile atlanır)
+- app/db_init.py — boot'ta create_all + bekleyen Alembic migration'ları otomatik uygular + idempotent legacy ALTER'lar (FITX_SKIP_DB_INIT=1 ile atlanır); `prepare_release` = release-time mutasyon (lb_rebuild HARİÇ), `flask release-prepare` CLI'ı
+- app/schema_safety.py — startup modu (FITX_STARTUP_MODE), read-only şema hazırlık kanıtı, migration lock_timeout'u
 - app/cli.py — flask CLI komutları (seed-quests, weekly-reset)
 - app/timeutil.py — TEK gün/saat kaynağı: sabit Europe/Istanbul (app_today/day_key/utc_day_bounds). Tüm gün anahtarları buradan; doğrudan date.today()/utcnow().strftime("%d.%m") KULLANMA
 - app/blueprints/ — auth, profile, nutrition, food, menu, training, tracking, social, gamification, supplements, coach, notifications (Sprint 5 PR1: sosyal bildirim uçları /notifications*; prefix yok), challenges (Sprint 5 PR3: /challenges + /challenges/data + /challenges/<id>/{join,leaderboard}; prefix yok). social ayrıca Feed V2 (Sprint 5 PR2): /feed/data cursor keyset, /feed/repost (repost/quote), /feed/item/* (like/comment/sil), /pump-check/*/comments sayfalama+silme, /feed/{hide,unhide,report} moderasyon. gamification /leaderboard/data artık resetAt (Pazar 23:59 Istanbul → UTC) döner — geri sayım UTC↔Istanbul kayması giderildi (Sprint 5 PR3; docs/LEADERBOARD.md)
@@ -260,6 +261,17 @@ migration'lar bu yüzden TEKRAR-ÇALIŞTIRILABİLİR olmalı (bkz. cc33dd44ee55:
   `FITX_DB_AUTO_UPGRADE=0` ile boot-upgrade'i kapat ve migration'ı ayrı tek seferlik
   `flask db upgrade` adımı olarak çalıştır. Boot'ta migration hatası artık FATAL'dir
   (app/db_init.py; kaçış: FITX_DB_UPGRADE_FAIL_OPEN=1) — health gate rollback yapar.
+  R6-01A (dual-revision ön koşulu; blue/green HENÜZ YOK): yeni her migration
+  `expand_contract = "expand"` (ya da gerekçeli `"contract"`) bildirmek ZORUNDA;
+  `python -m scripts.migration_expand_contract` (CI testi) yıkıcı adımları reddeder,
+  R6 öncesi 46 migration digest ile sabitlenmiştir (düzenlenemez). PostgreSQL'de
+  migration'lar `lock_timeout` (FITX_MIGRATION_LOCK_TIMEOUT_MS, vars. 5000) ile
+  sınırlı. `FITX_STARTUP_MODE=read-only` mutasyonsuz aday boot'udur (şema head'de
+  değilse fail-closed); varsayılan boot değişmedi. Ayrıntı: docs/DEPLOYMENT.md.
+  `/health` (her query string) request-time bakımı (rollover/purge throttle,
+  haftalık rollover, günlük bakım dispatch'i) TETİKLEMEZ —
+  `hooks.request_runs_maintenance`; aday readiness probe'u paylaşılan durumu yazmaz.
+  Ürün trafiği bakımı aynen sürdürür (tests/test_r6_readiness_maintenance.py).
 - Sorgular daima current_user.id'ye scope'lanır; ID ile yüklenen kayıtlarda sahiplik kontrolü zorunlu
 - Gün-anlamlı challenge hunileri (`water_logged` gibi) KALICI bir gün-başı
   işaretle dedup edilir — `challenges.record_event` per-day dedup YAPMAZ, dedup

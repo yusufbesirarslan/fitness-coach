@@ -8,6 +8,7 @@ from app.config import configure_app
 from app.extensions import db, login_manager, limiter, migrate, warn_if_limiter_degraded
 from app.cli import register_cli
 from app.db_init import init_database
+from app.schema_safety import StartupMode, resolve_startup_mode, verify_schema_ready
 
 # Repo root (one level up from this package) — templates/ and static/ live there,
 # matching the original Flask("starter") module-based root path.
@@ -164,6 +165,9 @@ def _install_capacity_sampling(app):
 
 
 def create_app():
+    # Resolved before anything else: an invalid or ambiguous boot mode must
+    # fail before the process does any work at all.
+    startup_mode = resolve_startup_mode()
     app = Flask(
         __name__,
         template_folder=os.path.join(_BASE_DIR, "templates"),
@@ -311,13 +315,31 @@ def create_app():
     app.errorhandler(500)(server_error)
 
     register_cli(app)
-    init_database(app)
-    if (app.config["MOBILE_AUTH_ENABLED"]
-            and os.environ.get("FITX_SKIP_DB_INIT") != "1"):
+    _run_startup(app, startup_mode)
+    return app
+
+
+def _run_startup(app, mode):
+    """The ONE place the startup mode decides what boot does (R6-01A).
+
+    self-migrating: release preparation + leaderboard rebuild (today's boot).
+    read-only:      prove the schema is at head without writing; no seeds,
+                    backfills or derived-state rebuilds.
+    skip-db-init:   worker / CLI tooling / tests — no DB work at all.
+    Both serving modes then run the same read-only security readiness.
+    """
+    app.logger.info("[STARTUP] mode=%s", mode.value)
+    if mode is StartupMode.SKIP_DB_INIT:
+        return
+    if mode is StartupMode.SELF_MIGRATING:
+        init_database(app)
+    else:
+        verify_schema_ready(app)
+    mobile_auth_enabled = app.config["MOBILE_AUTH_ENABLED"]
+    if mobile_auth_enabled:
         from app.services.mobile_auth import validate_derivation_key_readiness
         with app.app_context():
             validate_derivation_key_readiness()
-    return app
 
 
 def register_cognito(app):
