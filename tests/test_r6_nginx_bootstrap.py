@@ -142,6 +142,10 @@ def test_minimal_change_verifier_rejects_extra_edits():
                                    INC, LEGACY_PROXY, b"http://127.0.0.1:5000")
     with pytest.raises(boot.BootError):
         boot.verify_minimal_change(LIVE, new + b"\n# extra\n", INC, LEGACY_PROXY, b"http://127.0.0.1:5000")
+    # a pure deletion adds nothing unexpected: only the removed-lines check catches it
+    with pytest.raises(boot.BootError, match="removed"):
+        boot.verify_minimal_change(LIVE, new.replace(b"    server_tokens off;\n", b"", 1),
+                                   INC, LEGACY_PROXY, b"http://127.0.0.1:5000")
 
 
 def test_template_and_transform_agree_on_the_routing_shape():
