@@ -145,3 +145,19 @@ def test_request_line_is_not_duplicated_under_gunicorn():
 
     assert records["gunicorn"].count("request id=probe") == 1
     assert "request id=probe" not in records["root"]
+
+
+@pytest.mark.parametrize("slot", ["blue", "green"])
+def test_r6_web_slots_keep_the_web_service_identity_the_filter_ships(app_entry, slot):
+    """R6-01B slots are separate Compose projects but MUST stay service `web`;
+    a `web-blue` service would be dropped by this filter without any error."""
+    base = yaml.safe_load(Path("docker-compose.web-slot.yml").read_text(encoding="utf-8"))
+    overlay = yaml.safe_load(
+        Path(f"deploy/compose/web-slot-{slot}.yml").read_text(encoding="utf-8"))
+    assert set(base["services"]) == set(overlay["services"]) == {"web"}
+    labels = base["services"]["web"]["logging"]["options"]["labels"].split(",")
+    assert SERVICE_LABEL in labels
+    line = json.dumps({"log": "x\n", "stream": "stderr", "attrs": {
+        SERVICE_LABEL: "web", "com.docker.compose.project": overlay["name"]},
+        "time": "2026-10-08T07:20:00.519796033Z"}, separators=(",", ":"))
+    assert _admitted(app_entry, line)

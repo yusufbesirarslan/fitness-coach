@@ -268,6 +268,13 @@ migration'lar bu yüzden TEKRAR-ÇALIŞTIRILABİLİR olmalı (bkz. cc33dd44ee55:
   migration'lar `lock_timeout` (FITX_MIGRATION_LOCK_TIMEOUT_MS, vars. 5000) ile
   sınırlı. `FITX_STARTUP_MODE=read-only` mutasyonsuz aday boot'udur (şema head'de
   değilse fail-closed); varsayılan boot değişmedi. Ayrıntı: docs/DEPLOYMENT.md.
+  R6-01B (iki-slot runtime TEMELİ; nginx switch/deploy işlemi HENÜZ YOK):
+  `docker-compose.web-slot.yml` + `deploy/compose/web-slot-{blue,green}.yml`
+  (proje axisai-web-blue/green, servis adı HEP `web` — CW log filtresi buna
+  bağlı; 127.0.0.1:5001/5002→5000; read-only boot literal; mem 640m; stop
+  grace 45s; fitness-coach_default'a EXTERNAL; redis/worker/volume YOK).
+  Yalnızca `scripts/web_slot_runtime.py` ile sür (MemAvailable ≥ 928 MiB +
+  <2 çalışan web kapısı). production_deploy.sh DEĞİŞMEDİ.
   `/health` (her query string) request-time bakımı (rollover/purge throttle,
   haftalık rollover, günlük bakım dispatch'i) TETİKLEMEZ —
   `hooks.request_runs_maintenance`; aday readiness probe'u paylaşılan durumu yazmaz.

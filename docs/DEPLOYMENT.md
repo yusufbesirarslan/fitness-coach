@@ -362,6 +362,119 @@ CI through `tests/test_migration_expand_contract.py`.
   (`contract_revisions()`).
 - The gate's known static-analysis limits are listed in the module docstring.
 
+### Two-slot web runtime foundation (R6-01B)
+
+Status: R6-01B adds the **runtime primitive only**. Nothing deploys through it
+yet: `production_deploy.sh`, `docker-compose.yml`, nginx and the legacy web on
+`127.0.0.1:5000` are unchanged, and no new `.env` value is needed.
+
+| Stage | Scope | State |
+|---|---|---|
+| R6-01A | two revisions can share schema/Redis at startup | done |
+| R6-01B | two web containers can run side by side on one host | this section |
+| R6-02 | nginx traffic switching between slots | **not implemented** |
+| R6-03 | exact-SHA deploy transaction (release-prepare, start, verify, switch, drain, rollback, worker order) | **not implemented** |
+
+**Slot model.** `docker-compose.web-slot.yml` plus one identity overlay
+(`deploy/compose/web-slot-{blue,green}.yml`), driven only by
+`scripts/web_slot_runtime.py`.
+
+| | blue | green |
+|---|---|---|
+| Compose project | `axisai-web-blue` | `axisai-web-green` |
+| service (log identity) | `web` | `web` |
+| host port → container | `127.0.0.1:5001 → 5000` | `127.0.0.1:5002 → 5000` |
+
+- Each slot project contains only `web`. There is no redis, worker, volume,
+  `depends_on` or `container_name` (Compose derives unique names from the
+  project), so slot start, stop and removal cannot touch them.
+- A slot joins the main project's default network (`fitness-coach_default`)
+  as `external`. That is how `redis` resolves. The helper refuses unless that
+  network carries the main project's Compose labels and exactly one healthy
+  main-project redis. It never creates a network or a Redis.
+- `--remove-orphans` only considers containers of the invoking project, so the
+  main project's deploy cannot remove a slot, and a slot cannot remove the
+  worker, Redis or the other slot. The helper never passes `--remove-orphans`,
+  `-v` or `--rmi`.
+- The image is `axisai-web:<40-hex>`, `pull_policy: never`, never built by the
+  slot file. The authority is still the baked `/app/BUILD_REVISION` and the
+  deep-health `revision`, never the tag.
+- `FITX_STARTUP_MODE=read-only` and `APP_REVISION` are set in `environment`,
+  which outranks `env_file`, so `.env` cannot turn a slot self-migrating.
+  `FITX_SKIP_DB_INIT=1` in `.env` would make the app refuse to boot (R6-01A).
+  Because every slot boots read-only, R6-03 must run `release-prepare` before
+  starting a candidate.
+- Both slots keep `com.docker.compose.service=web`, so the CloudWatch agent's
+  `(web|worker)` filter ships them unchanged. Slots also log
+  `com.docker.compose.project`, which tells the two slots apart inside the one
+  `/axisai/app` stream during overlap. The legacy web does not log it.
+
+**Capacity contract** (t3.small, 1905 MiB usable, no swap; R6-00 evidence):
+
+- Per-slot ceiling `mem_limit: 640m`, a literal that is not `.env`-tunable.
+  It is ≥3× the observed 201 MiB web working set and ~1.8× the largest web
+  footprint the 7-day host peak allows.
+- Ceilings alone do not make overlap safe: 2×640 + 512 + 256 MiB > 1905 MiB.
+  Safety is the ceiling **and** an admission gate checked immediately before
+  the candidate starts:
+  `MemAvailable ≥ 640 (candidate ceiling) + 32 (shim/proxy outside the cgroup)
+  + 256 (protected host reserve) = 928 MiB`, and fewer than 2 running `web`
+  containers.
+- The reserve covers the observed 7-day host excursion (633 → 779 MiB used,
+  146 MiB) plus kernel watermarks. It can be raised to 192–768 MiB with
+  `--host-reserve-mib`; empty, zero, negative or garbage values are refused.
+- The worst observed `MemAvailable` (1088 MiB) admits with 160 MiB to spare.
+  Below the threshold, the candidate never starts and nothing else is touched:
+  no cache drop, swap, or worker or Redis stop.
+- R6-03 must keep the two-slot overlap bounded: remove the old slot after the
+  drain. A retained rollback slot counts as the second web container.
+
+**Stop semantics.** `stop_grace_period: 45s` is 30 s gunicorn
+`graceful_timeout` + 5 s bounded shutdown metric flush + 10 s margin. Docker's
+default 10 s SIGKILLs requests that gunicorn would still drain. This does
+**not** make 300 s AI requests survive a stop: R6-03 must first move new
+traffic away from a slot, then wait a bounded drain, then stop it. Gunicorn
+`timeout = 300` and `graceful_timeout = 30` are unchanged.
+
+**Candidate readiness** (`verify`) needs all of the following. Docker
+`healthy` alone is not readiness.
+- the container is `healthy` (`docker inspect` checks, at most 36 × 5 s);
+- the baked `/app/BUILD_REVISION` is the expected SHA;
+- an in-container `/health?deep=1` reports `status: ok` and that `revision`
+  (at most 6 tries);
+- the slot's own loopback port answers `/health` 200;
+- the container's port binding is exactly `127.0.0.1:<slot port>`.
+
+The deep check runs inside the container because a published-port request
+arrives from the Docker gateway, which is not a deep-health trusted source.
+The deep check may make the existing cached, bounded Bedrock probe. There is
+no polling loop.
+
+**`/health` limiter budget.** The default limit (`600 per hour`) is counted per
+client key per endpoint in the shared Redis. Every in-container probe is keyed
+`ip:127.0.0.1`, so all web containers share one `/health` budget. Host-side
+loopback probes arrive from the Docker gateway under a separate key. Worst
+case per hour on the shared key:
+- 2 running web containers × 120 Docker HEALTHCHECKs (30 s interval) = 240;
+- 60 legacy `production_deploy.sh` deep probes (candidate + rollback);
+- 24 slot `verify` deep probes;
+- total 324 of 600, which leaves 46 % headroom.
+
+The 2-container admission cap is what bounds this. A host `.env` that lowers
+`DEFAULT_RATELIMIT` below ~540/h would break the margin.
+
+**Failure model** (no traffic ever moves in R6-01B, so there is no traffic
+rollback):
+- Low memory, an occupied candidate port, a missing or foreign shared network,
+  a missing image or a mis-baked revision: refused before start, active
+  untouched.
+- An existing candidate container that is not a running, matching, healthy or
+  starting candidate: refused, never overwritten. Remove it explicitly.
+- A candidate that is unhealthy or reports the wrong revision fails `verify`.
+  It can then be removed with
+  `remove --slot <s> --expected-revision <sha>`. The revision must match, and
+  only that project is torn down.
+
 The deploy path does not print `.env` contents or AWS credentials, and it does
 not assign feature flags. Host `.env` permission repair and nginx validation are
 separate safeguards within the locked bootstrap, not configuration management.
