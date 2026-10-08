@@ -1,0 +1,539 @@
+{
+ "analyze_extraction_blank_items": {
+  "body": {
+   "categories": {},
+   "error": "OUTPUT_PARSING_FAILED",
+   "items": [],
+   "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
+   "success": false
+  },
+  "status": 422
+ },
+ "analyze_extraction_empty": {
+  "body": {
+   "categories": {},
+   "error": "OUTPUT_PARSING_FAILED",
+   "items": [],
+   "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
+   "success": false
+  },
+  "status": 422
+ },
+ "analyze_full": {
+  "body": {
+   "categories": {
+    "Ana Yemekler": [
+     {
+      "confidence": 0.9,
+      "macro_source": "fatsecret_serving",
+      "macros": {
+       "calories": 330,
+       "carbs": 0,
+       "fat": 7,
+       "protein": 62
+      },
+      "name": "Izgara Tavuk",
+      "reason": "Yüksek protein · Düşük yağ · Kalori bütçesine uygun",
+      "score": 100,
+      "warnings": []
+     },
+     {
+      "confidence": 0.7,
+      "macro_source": "llm_stated_grams",
+      "macros": {
+       "calories": 430,
+       "carbs": 28,
+       "fat": 18,
+       "protein": 32
+      },
+      "name": "Tavuklu Fajita (220 GR)",
+      "reason": "Yüksek protein · Kalori bütçesine uygun",
+      "score": 100,
+      "warnings": []
+     },
+     {
+      "confidence": 0.6,
+      "macro_source": "llm",
+      "macros": {
+       "calories": 650,
+       "carbs": 10,
+       "fat": 48,
+       "protein": 45
+      },
+      "name": "Adana Kebap",
+      "reason": "650 kcal · 45g protein",
+      "score": 0,
+      "warnings": [
+       "Günlük bütçe limitini aşıyor"
+      ]
+     },
+     {
+      "confidence": 0.5,
+      "macro_source": "fatsecret_serving",
+      "macros": {
+       "calories": 1100,
+       "carbs": 132,
+       "fat": 42,
+       "protein": 44
+      },
+      "name": "Margherita Pizza",
+      "reason": "1100 kcal · 44g protein",
+      "score": 0,
+      "warnings": [
+       "Günlük bütçe limitini aşıyor"
+      ]
+     }
+    ],
+    "Corbalar": [
+     {
+      "confidence": 0.6,
+      "macro_source": "llm",
+      "macros": {
+       "calories": 180,
+       "carbs": 26,
+       "fat": 4,
+       "protein": 9
+      },
+      "name": "Mercimek Corbasi",
+      "reason": "Düşük yağ · Kalori bütçesine uygun",
+      "score": 91,
+      "warnings": []
+     }
+    ],
+    "Tatlilar": [
+     {
+      "confidence": 0.7,
+      "macro_source": "fatsecret_scaled",
+      "macros": {
+       "calories": 540,
+       "carbs": 72,
+       "fat": 25,
+       "protein": 11
+      },
+      "name": "Kunefe",
+      "reason": "Kalori bütçesine uygun · Protein oranı düşük",
+      "score": 80,
+      "warnings": []
+     },
+     {
+      "confidence": 0.0,
+      "macro_source": "none",
+      "macros": {
+       "calories": 0,
+       "carbs": 0,
+       "fat": 0,
+       "protein": 0
+      },
+      "name": "Gizemli Tatli",
+      "reason": "Besin değerleri hesaplanamadı",
+      "score": 0,
+      "warnings": []
+     }
+    ]
+   },
+   "coach_picks": [
+    {
+     "confidence": 0.9,
+     "macro_source": "fatsecret_serving",
+     "macros": {
+      "calories": 330,
+      "carbs": 0,
+      "fat": 7,
+      "protein": 62
+     },
+     "name": "Izgara Tavuk",
+     "reason": "Yüksek protein · Düşük yağ · Kalori bütçesine uygun",
+     "score": 100,
+     "warnings": []
+    },
+    {
+     "confidence": 0.7,
+     "macro_source": "llm_stated_grams",
+     "macros": {
+      "calories": 430,
+      "carbs": 28,
+      "fat": 18,
+      "protein": 32
+     },
+     "name": "Tavuklu Fajita (220 GR)",
+     "reason": "Yüksek protein · Kalori bütçesine uygun",
+     "score": 100,
+     "warnings": []
+    },
+    {
+     "confidence": 0.6,
+     "macro_source": "llm",
+     "macros": {
+      "calories": 180,
+      "carbs": 26,
+      "fat": 4,
+      "protein": 9
+     },
+     "name": "Mercimek Corbasi",
+     "reason": "Düşük yağ · Kalori bütçesine uygun",
+     "score": 91,
+     "warnings": []
+    }
+   ],
+   "consumed": {
+    "calories": 500,
+    "carbs": 50,
+    "fat": 15,
+    "protein": 30
+   },
+   "items": [
+    {
+     "confidence": 0.9,
+     "macro_source": "fatsecret_serving",
+     "macros": {
+      "calories": 330,
+      "carbs": 0,
+      "fat": 7,
+      "protein": 62
+     },
+     "name": "Izgara Tavuk",
+     "reason": "Yüksek protein · Düşük yağ · Kalori bütçesine uygun",
+     "score": 100,
+     "warnings": []
+    },
+    {
+     "confidence": 0.7,
+     "macro_source": "llm_stated_grams",
+     "macros": {
+      "calories": 430,
+      "carbs": 28,
+      "fat": 18,
+      "protein": 32
+     },
+     "name": "Tavuklu Fajita (220 GR)",
+     "reason": "Yüksek protein · Kalori bütçesine uygun",
+     "score": 100,
+     "warnings": []
+    },
+    {
+     "confidence": 0.6,
+     "macro_source": "llm",
+     "macros": {
+      "calories": 650,
+      "carbs": 10,
+      "fat": 48,
+      "protein": 45
+     },
+     "name": "Adana Kebap",
+     "reason": "650 kcal · 45g protein",
+     "score": 0,
+     "warnings": [
+      "Günlük bütçe limitini aşıyor"
+     ]
+    },
+    {
+     "confidence": 0.5,
+     "macro_source": "fatsecret_serving",
+     "macros": {
+      "calories": 1100,
+      "carbs": 132,
+      "fat": 42,
+      "protein": 44
+     },
+     "name": "Margherita Pizza",
+     "reason": "1100 kcal · 44g protein",
+     "score": 0,
+     "warnings": [
+      "Günlük bütçe limitini aşıyor"
+     ]
+    },
+    {
+     "confidence": 0.7,
+     "macro_source": "fatsecret_scaled",
+     "macros": {
+      "calories": 540,
+      "carbs": 72,
+      "fat": 25,
+      "protein": 11
+     },
+     "name": "Kunefe",
+     "reason": "Kalori bütçesine uygun · Protein oranı düşük",
+     "score": 80,
+     "warnings": []
+    },
+    {
+     "confidence": 0.0,
+     "macro_source": "none",
+     "macros": {
+      "calories": 0,
+      "carbs": 0,
+      "fat": 0,
+      "protein": 0
+     },
+     "name": "Gizemli Tatli",
+     "reason": "Besin değerleri hesaplanamadı",
+     "score": 0,
+     "warnings": []
+    },
+    {
+     "confidence": 0.6,
+     "macro_source": "llm",
+     "macros": {
+      "calories": 180,
+      "carbs": 26,
+      "fat": 4,
+      "protein": 9
+     },
+     "name": "Mercimek Corbasi",
+     "reason": "Düşük yağ · Kalori bütçesine uygun",
+     "score": 91,
+     "warnings": []
+    }
+   ],
+   "menu_source": "Google Drive",
+   "remaining": {
+    "calories": 1500,
+    "carbs": 175,
+    "fat": 41,
+    "protein": 120
+   },
+   "success": true,
+   "target": {
+    "calories": 2000,
+    "carbs": 225,
+    "fat": 56,
+    "protein": 150
+   }
+  },
+  "status": 200
+ },
+ "analyze_full_extract_calls": [
+  {
+   "fw": "{\"menu\": 1}",
+   "headings": [
+    "Ana Yemekler",
+    "Tatlilar"
+   ],
+   "source": "google_drive"
+  },
+  {
+   "fw": null,
+   "headings": [
+    "Ana Yemekler",
+    "Tatlilar"
+   ],
+   "source": "google_drive"
+  }
+ ],
+ "analyze_no_profile": {
+  "body": {
+   "error": "Profil verileri eksik."
+  },
+  "status": 400
+ },
+ "analyze_short_text": {
+  "body": {
+   "categories": {},
+   "error": "EMPTY_MENU_TEXT",
+   "items": [],
+   "message": "Menü dökümanından anlamlı bir metin çıkarılamadı. Lütfen dosyanın taranabilir ve okunabilir bir menü içerdiğinden emin olun.",
+   "success": false
+  },
+  "status": 400
+ },
+ "scan_bad_scheme": {
+  "body": {
+   "error": "MENU_URL_INVALID"
+  },
+  "status": 400
+ },
+ "scan_cache_hit": {
+  "body": {
+   "body_text": "[Corbalar]\nMercimek Corbasi\nEzogelin Corbasi\n\n[Ana Yemekler]\nAdana Kebap\nIzgara Tavuk\nMargherita Pizza\nEv Burger\n\n[Tatlilar]\nKunefe\nSutlac",
+   "cached": true,
+   "crawl_errors": null,
+   "framework_state": "{\"menu\": {\"items\": [\"Kunefe\"]}}",
+   "framework_type": "nuxt",
+   "headings": [
+    "Corbalar",
+    "Ana Yemekler",
+    "Tatlilar"
+   ],
+   "menu_source": "web_scraper",
+   "source_url": "https://public.example/menu",
+   "sub_pages_crawled": 1,
+   "title": "Lezzet Duragi",
+   "total_sections": 3
+  },
+  "status": 200
+ },
+ "scan_cache_keys": [
+  "menu:scan:v2"
+ ],
+ "scan_cache_store": {
+  "body": {
+   "body_text": "[Corbalar]\nMercimek Corbasi\nEzogelin Corbasi\n\n[Ana Yemekler]\nAdana Kebap\nIzgara Tavuk\nMargherita Pizza\nEv Burger\n\n[Tatlilar]\nKunefe\nSutlac",
+   "crawl_errors": null,
+   "framework_state": "{\"menu\": {\"items\": [\"Kunefe\"]}}",
+   "framework_type": "nuxt",
+   "headings": [
+    "Corbalar",
+    "Ana Yemekler",
+    "Tatlilar"
+   ],
+   "menu_source": "web_scraper",
+   "source_url": "https://public.example/menu",
+   "sub_pages_crawled": 1,
+   "title": "Lezzet Duragi",
+   "total_sections": 3
+  },
+  "status": 200
+ },
+ "scan_connection_failed": {
+  "body": {
+   "error": "Bağlantı hatası: ConnectionError"
+  },
+  "status": 502
+ },
+ "scan_drive_doc": {
+  "body": {
+   "body_text": "Corbalar\nMercimek Corbasi\nAna Yemekler\nAdana Kebap\nIzgara Tavuk",
+   "headings": [],
+   "menu_source": "google_drive",
+   "source_url": "https://docs.google.com/document/d/DOC1/edit",
+   "title": "Google Drive Doküman Menü"
+  },
+  "status": 200
+ },
+ "scan_drive_pdf": {
+  "body": {
+   "error": "MENU_MEDIA_UNSUPPORTED"
+  },
+  "status": 422
+ },
+ "scan_drive_restricted": {
+  "body": {
+   "error": "GOOGLE_DRIVE_LINK_RESTRICTED",
+   "message": "Bu menü dosyası gizli olarak ayarlanmış. Lütfen Drive üzerinden dosya iznini 'Bağlantıya sahip olan herkes görüntüleyebilir' olarak değiştirip tekrar deneyin.",
+   "success": false
+  },
+  "status": 403
+ },
+ "scan_encoding": {
+  "body": {
+   "error": "MENU_ENCODING_UNSUPPORTED"
+  },
+  "status": 415
+ },
+ "scan_image": {
+  "body": {
+   "error": "MENU_MEDIA_UNSUPPORTED"
+  },
+  "status": 415
+ },
+ "scan_missing_url": {
+  "body": {
+   "error": "URL gerekli."
+  },
+  "status": 400
+ },
+ "scan_oversized": {
+  "body": {
+   "error": "MENU_BODY_LIMIT"
+  },
+  "status": 400
+ },
+ "scan_parser_limit": {
+  "body": {
+   "error": "MENU_PARSE_LIMIT"
+  },
+  "status": 422
+ },
+ "scan_pdf": {
+  "body": {
+   "error": "MENU_MEDIA_UNSUPPORTED"
+  },
+  "status": 415
+ },
+ "scan_private_dns": {
+  "body": {
+   "error": "MENU_DESTINATION_BLOCKED"
+  },
+  "status": 400
+ },
+ "scan_redirect_downgrade": {
+  "body": {
+   "error": "MENU_HTTPS_DOWNGRADE"
+  },
+  "status": 400
+ },
+ "scan_redirect_private": {
+  "body": {
+   "error": "MENU_DESTINATION_BLOCKED"
+  },
+  "status": 400
+ },
+ "scan_success_http": {
+  "body": {
+   "body_text": "[Corbalar]\nMercimek Corbasi\nEzogelin Corbasi\n\n[Ana Yemekler]\nAdana Kebap\nIzgara Tavuk\nMargherita Pizza\nEv Burger\n\n[Tatlilar]\nKunefe\nSutlac",
+   "crawl_errors": null,
+   "framework_state": "{\"menu\": {\"items\": [\"Kunefe\"]}}",
+   "framework_type": "nuxt",
+   "headings": [
+    "Corbalar",
+    "Ana Yemekler",
+    "Tatlilar"
+   ],
+   "menu_source": "web_scraper",
+   "source_url": "http://public.example/plain",
+   "sub_pages_crawled": 1,
+   "title": "Lezzet Duragi",
+   "total_sections": 3
+  },
+  "status": 200
+ },
+ "scan_success_https": {
+  "body": {
+   "body_text": "[Corbalar]\nMercimek Corbasi\nEzogelin Corbasi\n\n[Ana Yemekler]\nAdana Kebap\nIzgara Tavuk\nMargherita Pizza\nEv Burger\n\n[Tatlilar]\nKunefe\nSutlac",
+   "crawl_errors": null,
+   "framework_state": "{\"menu\": {\"items\": [\"Kunefe\"]}}",
+   "framework_type": "nuxt",
+   "headings": [
+    "Corbalar",
+    "Ana Yemekler",
+    "Tatlilar"
+   ],
+   "menu_source": "web_scraper",
+   "source_url": "https://public.example/menu?table=4",
+   "sub_pages_crawled": 1,
+   "title": "Lezzet Duragi",
+   "total_sections": 3
+  },
+  "status": 200
+ },
+ "scan_timeout": {
+  "body": {
+   "error": "Zaman aşımı — site yanıt vermedi."
+  },
+  "status": 504
+ },
+ "scan_unknown_host": {
+  "body": {
+   "error": "MENU_DNS_FAILED"
+  },
+  "status": 400
+ },
+ "scan_unreadable": {
+  "body": {
+   "error": "Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyiniz."
+  },
+  "status": 422
+ },
+ "scan_upstream_404": {
+  "body": {
+   "error": "Bağlantı hatası: HTTPError"
+  },
+  "status": 502
+ },
+ "scan_userinfo": {
+  "body": {
+   "error": "MENU_URL_INVALID"
+  },
+  "status": 400
+ }
+}
