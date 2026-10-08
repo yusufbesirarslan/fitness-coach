@@ -8,7 +8,8 @@ from decimal import Decimal
 import hashlib
 import json
 
-from .commands import ManualLogFoodCommand, ProviderBackedLogFoodCommand
+from .commands import (ManualLogFoodCommand, ProviderBackedLogFoodCommand,
+                       MenuConfirmedLogFoodCommand)
 
 
 _DOMAIN = "axisai/mobile-log-food/v1"
@@ -24,6 +25,24 @@ def _canonical_number(value: Decimal) -> str:
 
 
 def _semantic_payload(command):
+    if isinstance(command, MenuConfirmedLogFoodCommand):
+        def nutrition(snapshot):
+            return {key: _canonical_number(getattr(snapshot, key)) for key in
+                    ("energy_kcal", "protein_g", "carbohydrate_g", "fat_g")}
+        return {
+            "domain": "axisai/mobile-log-food/menu-confirm/v1",
+            "kind": "menu_confirmed", "analysis_id": command.analysis_id,
+            "candidate_id": command.candidate_id, "name": command.name,
+            "base_nutrition": nutrition(command.base_nutrition),
+            "portion": {"basis": "serving", "quantity": "1",
+                        "stated_grams": (None if command.stated_grams is None
+                                         else str(command.stated_grams))},
+            "quantity": _canonical_number(command.quantity), "slot": command.slot,
+            "nutrition": nutrition(command.nutrition),
+            "description": command.description, "source": "menu_estimated",
+            "estimated": True, "estimation_source": command.estimation_source,
+            "confidence": _canonical_number(command.confidence),
+        }
     if isinstance(command, ProviderBackedLogFoodCommand):
         return {
             "domain": _DOMAIN,

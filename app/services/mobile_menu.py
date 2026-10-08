@@ -313,8 +313,11 @@ def issue_item_proof(secret, user_id, *, analysis_id, candidate_id, name,
     return token
 
 
-def read_item_proof(secret, user_id, token, now=None):
+def read_item_proof(secret, user_id, token, now=None, *, enforce_expiry=True):
     """The signed snapshot of a genuine, unexpired proof of THIS owner.
+
+    ``enforce_expiry=False`` defers ONLY expiry until canonical replay lookup.
+    Signature, owner, structure, lifetime and future-issued checks still apply.
 
     The format half of the contract, so the issuer is tested against its own
     reader. LP15-D owns the route-level ordering around it (verification,
@@ -325,10 +328,11 @@ def read_item_proof(secret, user_id, token, now=None):
                                         max_length=MAX_PROOF_CHARS)
     except tokens.InvalidSignedToken:
         raise InvalidItemProof() from None
-    if set(payload) != _PROOF_KEYS or payload["v"] != PROOF_VERSION:
+    if set(payload) != _PROOF_KEYS or type(payload["v"]) is not int or payload["v"] != PROOF_VERSION:
         raise InvalidItemProof()
     if (payload["loggable"] is not True or payload["estimated"] is not True
             or payload["persist_as"] != PERSISTED_SOURCE
+            or not isinstance(payload["source"], str)
             or payload["source"] not in ESTIMATE_SOURCES):
         raise InvalidItemProof()
     name, portion, confidence = payload["name"], payload["portion"], payload["confidence"]
@@ -337,7 +341,9 @@ def read_item_proof(secret, user_id, token, now=None):
                        for k in ("aid", "cid"))
             or not isinstance(portion, dict)
             or set(portion) != {"basis", "quantity", "stated_grams"}
-            or portion["basis"] != "serving" or portion["quantity"] != 1
+            or portion["basis"] != "serving"
+            or type(portion["quantity"]) not in (int, float)
+            or portion["quantity"] != 1
             or not (portion["stated_grams"] is None
                     or (isinstance(portion["stated_grams"], int)
                         and not isinstance(portion["stated_grams"], bool)
@@ -361,9 +367,15 @@ def read_item_proof(secret, user_id, token, now=None):
     current = time.time() if now is None else now
     if issued > current + PROOF_CLOCK_SKEW_SECONDS:
         raise InvalidItemProof()
-    if current >= expires:
-        raise ItemProofExpired()
+    if enforce_expiry:
+        enforce_item_proof_expiry(expires, now=current)
     return payload
+
+
+def enforce_item_proof_expiry(expires, now=None):
+    """Expiry gate for an already authenticated snapshot, after replay lookup."""
+    if (time.time() if now is None else now) >= expires:
+        raise ItemProofExpired()
 
 
 def _candidate(secret, user_id, analysis_id, item, now):

@@ -19,6 +19,7 @@ from app.timeutil import day_key
 
 from .commands import (
     ManualLogFoodCommand,
+    MenuConfirmedLogFoodCommand,
     ProviderBackedLogFoodCommand,
 )
 from .fingerprint import semantic_fingerprint
@@ -51,6 +52,10 @@ def log_food(user_id, key, command):
     if existing:
         return existing, False
 
+    if isinstance(command, MenuConfirmedLogFoodCommand):
+        from app.services.mobile_menu import enforce_item_proof_expiry
+        enforce_item_proof_expiry(command.expires_at)
+
     # The preflight SELECT starts an implicit SQLAlchemy transaction. Close that
     # read transaction before any provider network I/O; persistence below opens
     # the short transaction whose race arbiter is the existing unique key.
@@ -62,6 +67,9 @@ def log_food(user_id, key, command):
             command.quantity)
         description, nutrition = snapshot.description, snapshot.nutrition
         source = command.discovery_source
+    elif isinstance(command, MenuConfirmedLogFoodCommand):
+        description, nutrition = command.description, command.nutrition
+        source = "menu_estimated"
     elif isinstance(command, ManualLogFoodCommand):
         description, nutrition = command.description, command.nutrition
         source = "manual"

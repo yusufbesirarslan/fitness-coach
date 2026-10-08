@@ -141,3 +141,83 @@ def test_concurrent_different_commands_never_silently_replay(
         "conflict", "ok"]
     with app.app_context():
         assert MealLog.query.filter_by(user_id=user_id).count() == 1
+
+
+def _menu(app, user_id, *, quantity=1):
+    from app.services import mobile_menu
+    from app.services.mobile_log_food.menu_confirmation import parse_menu_confirmation
+    secret = app.config['SECRET_KEY']
+    token = mobile_menu.issue_item_proof(
+        secret, user_id, analysis_id='pg-analysis', candidate_id='pg-candidate',
+        name='PG Menu Dish', portion={'basis': 'serving', 'quantity': 1, 'stated_grams': None},
+        nutrition={'energy_kcal': 420, 'protein_g': 25, 'carbohydrate_g': 40, 'fat_g': 14},
+        source='llm', confidence=0.5)
+    return parse_menu_confirmation(
+        {'confirmation_token': token, 'quantity': quantity, 'slot': 'ogle', 'confirmed': True},
+        secret, user_id)
+
+
+@pytest.mark.parametrize('case', ['same', 'different', 'manual', 'provider'])
+def test_menu_confirmation_unique_key_races(pg_log_food_app, monkeypatch, case):
+    """Both independent PG sessions pass the empty preflight before INSERT.
+
+    Barrier is at the read boundary, not a timer: every case actually exercises
+    the database uniqueness arbiter and winner fingerprint comparison.
+    """
+    from app.models import MealLog
+    from app.services import meal_idempotency
+    from app.services.mobile_log_food import parse_command, service
+    from app.services.mobile_log_food.commands import ManualNutritionSnapshot
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    app, user_id = pg_log_food_app
+    menu = _menu(app, user_id)
+    if case == 'same':
+        other = _menu(app, user_id, quantity=1.0)
+    elif case == 'different':
+        other = _menu(app, user_id, quantity=2)
+    elif case == 'manual':
+        other = _manual(menu.description)
+    else:
+        other = parse_command({'kind': 'provider_backed', 'provider': 'fatsecret',
+                               'food_id': 'pg-food', 'serving_id': 'pg-serving',
+                               'quantity': 1, 'slot': 'ogle', 'discovery_source': 'search'})
+        monkeypatch.setattr(service, 'resolve_provider_food', lambda *args:
+            SimpleNamespace(description=menu.description, nutrition=ManualNutritionSnapshot(
+                Decimal(420), Decimal(25), Decimal(40), Decimal(14))))
+
+    read_barrier = threading.Barrier(2)
+    real_find = meal_idempotency.find_existing
+    sessions = set()
+    backend_pids = set()
+    guard = threading.Lock()
+
+    def find(user, key):
+        from app.extensions import db
+        entry = real_find(user, key)
+        if entry is None:
+            pid = db.session.execute(sa.text('SELECT pg_backend_pid()')).scalar_one()
+            with guard:
+                sessions.add(id(db.session()))
+                backend_pids.add(pid)
+            read_barrier.wait(timeout=10)
+        return entry
+    monkeypatch.setattr(meal_idempotency, 'find_existing', find)
+    outcomes = _race(app, user_id, [menu, other])
+    assert len(sessions) == len(backend_pids) == 2
+    with app.app_context():
+        row = MealLog.query.one()
+        assert row.user_id == user_id
+        assert row.idempotency_fingerprint in {service.semantic_fingerprint(menu), service.semantic_fingerprint(other)}
+    if case == 'same':
+        assert sorted(outcome[0] for outcome in outcomes.values()) == ['ok', 'ok']
+        assert sum(outcome[1] for outcome in outcomes.values()) == 1
+        assert outcomes[0][2]['id'] == outcomes[1][2]['id']
+        assert outcomes[0][2]['revision'] == outcomes[1][2]['revision']
+        assert outcomes[0][2]['source'] == 'menu_estimated'
+    else:
+        assert sorted(outcome[0] for outcome in outcomes.values()) == ['conflict', 'ok']
+        winner = next(outcome for outcome in outcomes.values() if outcome[0] == 'ok')
+        assert winner[1] is True
+        assert row.idempotency_fingerprint == winner[3]
