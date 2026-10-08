@@ -1,0 +1,6 @@
+# green web slot: project identity + loopback port (must match deploy/nginx/web-slots.conf).
+name: axisai-web-green
+services:
+  web:
+    ports:
+      - "127.0.0.1:5002:5000"

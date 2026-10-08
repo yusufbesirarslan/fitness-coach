@@ -1,0 +1,38 @@
+# AxisAI blue/green web SLOT (R6-01 / P6) -- contract only, not used by deploys yet.
+#
+# Always combined with exactly one deploy/compose/web-slot-<blue|green>.yml:
+#   docker compose -f docker-compose.web-slot.yml -f deploy/compose/web-slot-blue.yml ...
+#
+# Invariants (tests/test_web_slot_compose_contract.py):
+# - The service key stays `web` so com.docker.compose.service=web keeps the
+#   CloudWatch agent's (web|worker) log filter matching.
+# - Each slot is its own Compose project (axisai-web-blue / axisai-web-green),
+#   never `fitness-coach`, so the main project's `up --remove-orphans` cannot
+#   classify a slot container as its orphan (and vice versa).
+# - No container_name: project isolation makes the two slots' names unique.
+# - Only the web service: Redis and the worker stay in the main project and are
+#   reached over the main project's network.
+# - Both slots (and the legacy main-project web) answer to the DNS alias `web`
+#   on fitness-coach_default; nothing resolves that name today and nothing may
+#   start to -- nginx reaches a slot only through its loopback port.
+# - The image is required, never built here: a slot runs an exact revision tag.
+services:
+  web:
+    image: ${AXISAI_WEB_IMAGE:?AXISAI_WEB_IMAGE must name the exact revision image}
+    restart: unless-stopped
+    mem_limit: ${WEB_MEM_LIMIT:-1g}
+    env_file:
+      - .env
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.service"
+    networks:
+      - fitness-coach_default
+
+networks:
+  fitness-coach_default:
+    # Created and owned by the main `fitness-coach` project; `redis` resolves here.
+    external: true

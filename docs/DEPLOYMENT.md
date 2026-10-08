@@ -288,6 +288,14 @@ The deploy path does not print `.env` contents or AWS credentials, and it does
 not assign feature flags. Host `.env` permission repair and nginx validation are
 separate safeguards within the locked bootstrap, not configuration management.
 
+nginx reaches the web through `upstream axisai_web`, whose single backend line
+lives in the root-owned include `/etc/nginx/axisai/active-web-upstream.conf`
+(currently the legacy `127.0.0.1:5000`). The deploy transaction does not read
+or switch it yet. The blue/green slot contract, the root-owned
+`axisai-switch-web-slot` primitive, and the rollback of that one-time nginx
+migration are described in `deploy/nginx/README.md`. Zero-downtime deployment
+is not in place yet.
+
 CloudWatch and S3 retention are deferred operations work. SSM-agent upgrades
 are separate host hygiene work. Plan, authorize, and verify each of those
 changes outside this immutable deploy transaction.
