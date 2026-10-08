@@ -330,7 +330,7 @@ switch. The remaining hooks are already inert on an anonymous probe: CSRF only
 acts on writes, `update_streak` returns before any query for an anonymous
 user, and locale resolution only reads the session. Two Redis effects remain,
 and neither is application state:
-- Dependency checks are reads (`PING`, `EXISTS`, `GET`).
+- Dependency checks are reads (connectivity checks, `EXISTS`, `GET`).
 - Flask-Limiter's default limit still counts `/health` per client IP, in its
   own `LIMITER/*` keys with a TTL. These are request-admission counters, and
   the serving revision's own probes already write them.
