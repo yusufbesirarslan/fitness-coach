@@ -115,7 +115,7 @@ def _extract_pdf_pages_via_vision(pdf_bytes, page_indices):
                 if text:
                     results.append(f"[Sayfa {idx + 1}]\n{text}")
             except Exception as e:
-                current_app.logger.warning(f"[PDF→OCR] Page {idx + 1} render failed: {type(e).__name__}: {e}")
+                current_app.logger.warning(f"[PDF→OCR] Page {idx + 1} render failed: {type(e).__name__}")
                 continue
     finally:
         pdf.close()
@@ -189,5 +189,5 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         current_app.logger.info(f"[VISION OCR] Extracted {len(result)} chars")
         return result
     except Exception as e:
-        current_app.logger.warning(f"[VISION OCR] Failed: {type(e).__name__}: {e}")
+        current_app.logger.warning(f"[VISION OCR] Failed: {type(e).__name__}")
         return ""

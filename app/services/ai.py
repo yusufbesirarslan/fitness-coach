@@ -92,8 +92,8 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
         raise TransientAIError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except APIError as e:
         # Ham sağlayıcı hatası kullanıcıya sızmasın (iç ayrıntı/anahtar metası
-        # içerebilir); detayı logla, kullanıcıya jenerik mesaj dön.
-        logger.warning("OpenAI APIError: %s", e)
+        # içerebilir); yalnızca hata tipini logla, kullanıcıya jenerik mesaj dön.
+        logger.warning("OpenAI APIError: %s", type(e).__name__)
         raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
 
 
@@ -147,7 +147,7 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
     except (anthropic.APITimeoutError, anthropic.APIConnectionError):
         raise TransientAIError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except anthropic.APIError as e:  # APIStatusError bunun alt sınıfıdır — tek except yeter
-        logger.warning("Claude/Bedrock APIError: %s", e)
+        logger.warning("Claude/Bedrock APIError: %s", type(e).__name__)
         raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
 
 
@@ -280,8 +280,8 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
             raise
         except Exception as e:
             fallback_used = True
-            logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
-                           type(e).__name__, e)
+            logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s",
+                           type(e).__name__)
     try:
         logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
         reply = ai_recovery.call_with_recovery(

@@ -273,6 +273,9 @@ def test_no_remote_provider_ai_or_cache(app, raw_client, owner, headers, monkeyp
 
 def test_storage_failure_rolls_back_and_logs_only_metadata(app, raw_client, owner, headers, monkeypatch, caplog):
     from app.services import meal_idempotency
+    from uuid import UUID
+    # Allowed random request IDs can coincidentally contain the macro "420".
+    monkeypatch.setattr('app.observability.uuid.uuid4', lambda: UUID('a' * 32))
     def failed(entry, key):
         db.session.add(entry); db.session.flush()
         raise RuntimeError('RAW_EXCEPTION_SENTINEL DishSensitiveSentinel 420 analysis-sentinel candidate-sentinel')
