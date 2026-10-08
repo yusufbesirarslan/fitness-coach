@@ -11,7 +11,9 @@ untrusted application content until the normal menu review flow.
 Future native QR/menu intake is **not implemented here**. Its API/input boundary
 must validate HTTPS-only before calling this shared HTTP/HTTPS fetcher. Shared
 web compatibility does not authorize native HTTP intake. There is no native menu
-endpoint, LP15-B2 parser or LP15-C implementation in this change.
+endpoint, LP15-B2 parser or LP15-C implementation in this change. (LP15-C
+later added that HTTPS-only native intake on top of this fetcher, unchanged:
+see `docs/LP15_C_NATIVE_MENU_ANALYSIS.md`.)
 
 ## Network authority
 

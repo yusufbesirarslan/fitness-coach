@@ -1,6 +1,7 @@
 """Validated semantic commands for the canonical mobile LogFood boundary."""
 from .commands import (
     ManualLogFoodCommand,
+    MenuConfirmedLogFoodCommand,
     ManualNutritionSnapshot,
     ProviderBackedLogFoodCommand,
 )
@@ -20,6 +21,7 @@ from .service import (
 
 __all__ = [
     "ManualLogFoodCommand",
+    "MenuConfirmedLogFoodCommand",
     "ManualNutritionSnapshot",
     "ProviderBackedLogFoodCommand",
     "semantic_fingerprint",

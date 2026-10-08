@@ -48,8 +48,12 @@ def test_loggable_url_never_raises_and_never_echoes_garbage(raw):
     assert out == "<unparsable-url>"
 
 
-def test_menu_blueprint_never_interpolates_a_raw_url_into_a_log_line():
-    source = Path("app/blueprints/menu.py").read_text(encoding="utf-8")
+@pytest.mark.parametrize("path", [
+    "app/blueprints/menu.py", "app/services/menu_analysis.py",
+    "app/blueprints/mobile_menu.py", "app/services/mobile_menu.py",
+])
+def test_menu_blueprint_never_interpolates_a_raw_url_into_a_log_line(path):
+    source = Path(path).read_text(encoding="utf-8")
     offenders = [
         line.strip() for line in source.splitlines()
         if re.search(r"logger\.[a-z]+\(", line)
@@ -136,7 +140,7 @@ def test_servings_by_name_failure_logs_the_type_only(client, auth_user, monkeypa
 @pytest.mark.parametrize("subpage", [False, True], ids=["main-page", "subpage"])
 def test_remote_menu_response_content_never_logged(client, auth_user, monkeypatch, caplog, subpage):
     """Real route, link discovery and extraction; only offline fetch is replaced."""
-    from app.blueprints import menu as menu_bp
+    from app.services import menu_analysis
 
     marker = "SYNTHETIC_SUBPAGE_SECRET" if subpage else "SYNTHETIC_MAIN_SECRET"
     injected = f"https://restaurant.example/menu?signature={marker}"
@@ -160,8 +164,8 @@ def test_remote_menu_response_content_never_logged(client, auth_user, monkeypatc
         assert url in {main_url, sub_url}
         return Response(main_html if subpage and url == main_url else secret_html)
 
-    monkeypatch.setattr(menu_bp, "redis_client", None)
-    monkeypatch.setattr(menu_bp, "_fetch_page", fetch)
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "_fetch_page", fetch)
     with caplog.at_level(logging.INFO):
         response = client.post("/api/proxy/scan-menu", json={"url": main_url})
 
@@ -181,7 +185,7 @@ def test_remote_menu_response_content_never_logged(client, auth_user, monkeypatc
 
 
 def test_wordpress_response_content_never_logged(client, auth_user, monkeypatch, caplog):
-    from app.blueprints import menu as menu_bp
+    from app.services import menu_analysis
     from app.services import menu_extract
 
     secret = "https://restaurant.example/menu?signature=SYNTHETIC_WP_SECRET"
@@ -194,8 +198,8 @@ def test_wordpress_response_content_never_logged(client, auth_user, monkeypatch,
 
     content = f"<h2>{secret}</h2><p>" + "Izgara Tavuk Burger Pizza " * 15 + "</p>"
     payload = json.dumps([{"title": {"rendered": secret}, "content": {"rendered": content}}])
-    monkeypatch.setattr(menu_bp, "redis_client", None)
-    monkeypatch.setattr(menu_bp, "_fetch_page", lambda *a, **kw: Response("<html><body>wp-content</body></html>", "text/html"))
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "_fetch_page", lambda *a, **kw: Response("<html><body>wp-content</body></html>", "text/html"))
     calls = []
     def fetch(url, **kw):
         calls.append(url)

@@ -105,7 +105,7 @@ so the list order is stable between reads.
 | `id` | string | Opaque entry identity — see below |
 | `slot` | string | `kahvalti` / `ogle` / `aksam` / `ara_ogun` / `unknown` |
 | `description` | string | The display string the server composed when the meal was logged |
-| `source` | string | `manual` / `diary` / `ai_plan` / `search` / `barcode` / `coach` / `suggestion` / `unknown` |
+| `source` | string | `manual` / `diary` / `ai_plan` / `search` / `barcode` / `coach` / `suggestion` / `menu_estimated` / `unknown` |
 | `logged_at` | string \| null | Offset-aware ISO 8601 instant, or `null` when unrecorded |
 | `nutrition` | object | Four nutrients, each a number or `null` |
 
@@ -529,3 +529,6 @@ Supplement cabinet, plus an optional `"handoff": "nutrition-day"` marker on the
 native Coach. Planned-meal logging writes the same `MealLog` ledger with
 `source = "ai_plan"` and returns the LogFood `meal` projection. Full contract,
 error taxonomy, ambiguous-write matrix and PR8 map: `docs/NUTRITION_VNEXT_PR7.md`.
+
+Menu-derived explicit confirmations use the same native LogFood authority;
+see [LP15-D confirmation contract](LP15_D_MENU_CONFIRMATION.md).

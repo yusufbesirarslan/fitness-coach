@@ -241,15 +241,17 @@ def test_n7_14_stale_plan_still_logging_is_detected(app, native, owner, monkeypa
     killed(planned.test_stale_plan_revision_writes_nothing, app, native, owner, None)
 
 
-# ── menu (deferred: guarded by absence) ────────────────────────────────────
+# ── menu (only the reviewed LP15-C path; anything else guarded by absence) ──
 
 
-@pytest.mark.parametrize("path", ["/api/v1/nutrition/menu/analyze",
-                                  "/api/v1/nutrition/menu/scan"])
+@pytest.mark.parametrize("path", ["/api/v1/nutrition/menu/scan",
+                                  "/api/v1/nutrition/menu/analyze/<item_id>/log",
+                                  "/api/v1/nutrition/menu"])
 def test_n7_15_16_any_native_menu_adapter_is_detected(app, path):
-    """Menu analysis is DEFERRED in PR7. A native menu route (which could write
-    MealLog or bypass the browser SSRF stack) cannot ship unreviewed: the exact
-    route inventory refuses it."""
+    """Menu analysis was DEFERRED in PR7; LP15-C admitted exactly ONE reviewed,
+    read-only path (`POST /api/v1/nutrition/menu/analyze`). Any other native
+    menu route (which could write MealLog or bypass the LP15-B1 fetch boundary)
+    cannot ship unreviewed: the exact route inventory refuses it."""
     from app import create_app
     flask_app = create_app()
     rules = {(r.rule, frozenset(r.methods) - {"HEAD", "OPTIONS"})

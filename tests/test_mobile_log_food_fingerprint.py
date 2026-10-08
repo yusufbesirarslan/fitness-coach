@@ -97,3 +97,10 @@ def test_every_manual_semantic_dimension_changes_the_fingerprint():
 def test_provider_and_manual_commands_have_distinct_domain_identity():
     assert semantic_fingerprint(provider_command()) != semantic_fingerprint(
         manual_command())
+
+
+def test_lp15d_preserves_exact_lp15c_manual_and_provider_fingerprints():
+    # Golden digests evaluated using the fingerprint implementation at the
+    # authoritative LP15-C parent dc0656e6206a43f2bbb698880083bc9f44282380.
+    assert semantic_fingerprint(manual_command()) == '4eb5b676f28ebb15adf27a5458477b800d6fb14e10071fe9f0a7ffb186a842d7'
+    assert semantic_fingerprint(provider_command()) == 'dc47199200d9cb98527f7702dba3b51546ba4dc0d61480cca107440fe1b17905'
