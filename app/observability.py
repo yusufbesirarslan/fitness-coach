@@ -9,6 +9,7 @@ kapatır.
 gunicorn/stdout log'larında grep'lenebilir ve log toplayıcılarca ayrıştırılabilir.
 """
 import os
+import re
 import time
 import uuid
 
@@ -38,6 +39,88 @@ def _note_safe_breadcrumb(crumb, hint):
     return None if _private_note_request() else crumb
 
 
+_MENU_ROUTES = frozenset({
+    "/api/v1/nutrition/menu/analyze", "/api/v1/nutrition/menu/log",
+    "/api/menu/analyze", "/api/proxy/scan-menu",
+})
+# These shared helpers also run in workers without a Flask request context.
+_MENU_MODULES = frozenset({
+    "app.services.menu_analysis", "app.services.menu_fetch",
+    "app.services.menu_extract", "app.services.menu_parse",
+    "app.services.menu_remote", "app.services.menu_ocr",
+    "app.services.mobile_menu", "app.services.mobile_log_food.menu_confirmation",
+    "app.services.ai_nutrition", "app.services.fatsecret", "app.services.ai",
+})
+
+
+def _menu_reporting(event, hint):
+    from urllib.parse import urlsplit
+    if has_request_context() and request.path in _MENU_ROUTES:
+        return True
+    if urlsplit(event.get("request", {}).get("url", "")).path in _MENU_ROUTES:
+        return True
+    if event.get("transaction") in _MENU_ROUTES:
+        return True
+    record = hint.get("log_record")
+    if record is not None and record.name in _MENU_MODULES:
+        return True
+    for value in event.get("exception", {}).get("values", []):
+        for frame in value.get("stacktrace", {}).get("frames", []):
+            if frame.get("module") in _MENU_MODULES:
+                return True
+    return False
+
+
+def _reporting_safe_event(event, hint):
+    if _note_safe_event(event, hint) is None:
+        return None
+    if not _menu_reporting(event, hint):
+        return event
+    # Attachments are envelope items, outside the event dictionary.
+    hint["attachments"] = []
+    # Traces contain span descriptions, SQL parameters and provider metadata.
+    if event.get("type") == "transaction":
+        return None
+    # Reconstruct, rather than redact, arbitrary SDK/scope/integration data.
+    safe = {key: event[key] for key in ("event_id", "timestamp", "level", "platform")
+            if key in event}
+    safe["message"] = "menu_failure"
+    safe["tags"] = {"event": "menu_failure"}
+    rid = getattr(g, "request_id", None) if has_request_context() else None
+    if isinstance(rid, str) and re.fullmatch(r"[0-9a-f]{16}", rid):
+        safe["tags"]["request_id"] = rid
+    if has_request_context() and request.url_rule is not None:
+        route = request.url_rule.rule
+        if route in _MENU_ROUTES:
+            safe["request"] = {"url": route, "method": request.method}
+    values = []
+    for value in event.get("exception", {}).get("values", []):
+        kind = value.get("type", "")
+        if isinstance(kind, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", kind):
+            values.append({"type": kind})
+    if values:
+        safe["exception"] = {"values": values}
+        safe["tags"]["error_type"] = values[-1]["type"]
+    # Existing handled-error logs have fixed event names and type-only text.
+    record = hint.get("log_record")
+    if record is not None:
+        match = re.fullmatch(
+            r"mobile_(?:menu|nutrition) event=(acquisition_failed|analysis_failed|menu_log_failed) "
+            r"error_type=([A-Za-z_][A-Za-z0-9_]{0,79}) request_id=[0-9a-f]{16}",
+            record.getMessage())
+        if match:
+            safe["tags"].update(event=match[1], error_type=match[2])
+    return safe
+
+
+def _reporting_safe_breadcrumb(crumb, hint):
+    if _note_safe_breadcrumb(crumb, hint) is None:
+        return None
+    if _menu_reporting({}, hint) or crumb.get("category") in _MENU_MODULES:
+        return None
+    return crumb
+
+
 def init_sentry(app):
     """SENTRY_DSN varsa Sentry'yi Flask entegrasyonuyla kur (yoksa no-op)."""
     dsn = os.getenv("SENTRY_DSN")
@@ -59,9 +142,12 @@ def init_sentry(app):
         # Performans izini varsayılan KAPALI (maliyet); env ile açılır.
         traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0") or 0),
         send_default_pii=False,  # gizlilik: kullanıcı PII'sini Sentry'ye yollama
-        before_send=_note_safe_event,
-        before_send_transaction=_note_safe_event,
-        before_breadcrumb=_note_safe_breadcrumb,
+        include_local_variables=False,
+        max_request_body_size="never",
+        enable_logs=False,
+        before_send=_reporting_safe_event,
+        before_send_transaction=_reporting_safe_event,
+        before_breadcrumb=_reporting_safe_breadcrumb,
     )
     app.logger.info("[SENTRY] hata izleme etkin (environment=%s).",
                     os.getenv("SENTRY_ENVIRONMENT", "production"))
