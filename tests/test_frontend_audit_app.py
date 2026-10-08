@@ -4,6 +4,19 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_process_environment():
+    # create_audit_app() deliberately configures the process for the audit
+    # server (FLASK_DEBUG=1, audit keys) and restores only DATABASE_URL. Inside
+    # the shared pytest process that leaked FLASK_DEBUG into later tests: any
+    # bare Flask() built afterwards turned debug on and propagated exceptions
+    # instead of answering 500 (tests/test_menu_reporting_privacy.py).
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
+
+
 def test_audit_app_restores_database_environment_for_subsequent_apps(tmp_path):
     from scripts.frontend_audit.app import create_audit_app
 
