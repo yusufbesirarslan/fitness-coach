@@ -4,6 +4,8 @@ import json
 import time
 from app.services import nutrition_pipeline
 from concurrent.futures import ThreadPoolExecutor
+from app.services.menu_remote import menu_operation
+from app.services.menu_parse import bounded_soup, bounded_text, bound_sections
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from flask import Blueprint, current_app, jsonify, request
@@ -31,13 +33,15 @@ from app.services.menu_fetch import (
 )
 
 
+# Remote menu response content must never be interpolated into server logs.
+# Use counts, fixed reason codes, exception types and redacted request URLs only.
 bp = Blueprint("menu", __name__)
 
 
 # Menü URL tarama önbelleği: aynı menü tekrar taranınca siteyi yeniden fetch
 # etmeden döndürülür. Menü içeriği kullanıcıdan bağımsız → global (kullanıcıya
 # özgü makro hesabı ayrı /api/menu/analyze adımında). redis_client None ise no-op.
-MENU_SCAN_CACHE_PREFIX = "menu:scan:v1:"
+MENU_SCAN_CACHE_PREFIX = "menu:scan:v2:"
 MENU_SCAN_CACHE_TTL = 6 * 3600  # 6 saat — web menüleri gün içinde nadiren değişir
 
 
@@ -98,9 +102,9 @@ def _menu_scan_cache_key(clean_url):
 @require_auth
 @limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)
 @scrape_concurrency_gate  # INF-5: ağ-bağımlı scrape AYRI semaforda — LLM slotlarını tutmasın
+@menu_operation
 def proxy_scan_menu():
     import requests as http_req
-    from bs4 import BeautifulSoup
     from urllib.parse import urlparse
 
     data = request.get_json(silent=True) or {}
@@ -130,7 +134,7 @@ def proxy_scan_menu():
             cached_raw = redis_client.get(cache_key)
         except Exception as e:
             cached_raw = None
-            current_app.logger.warning(f"[MENU CACHE] read failed: {type(e).__name__}: {e}")
+            current_app.logger.warning(f"[MENU CACHE] read failed: {type(e).__name__}")
         if cached_raw:
             try:
                 cached_result = json.loads(cached_raw)
@@ -144,7 +148,8 @@ def proxy_scan_menu():
         resp = _fetch_page(url)
     except ValueError as e:
         # _resolve_host_safely raises ValueError on a blocked redirect target.
-        return jsonify({"error": str(e)}), 400
+        status = 415 if str(e) in {"MENU_MEDIA_UNSUPPORTED", "MENU_ENCODING_UNSUPPORTED"} else 400
+        return jsonify({"error": str(e)}), status
     except http_req.exceptions.Timeout:
         return jsonify({"error": t("route.menu.timeout")}), 504
     except http_req.exceptions.RequestException as e:
@@ -161,22 +166,21 @@ def proxy_scan_menu():
     # framework_state (script tag'leri henüz decompose edilmeden), link keşfi ve
     # bölüm çıkarımı. Eski akış aynı (3 MB'a varan) HTML'i 2-3 kez baştan parse
     # ediyordu — büyük sayfalarda saniyeler mertebesinde saf CPU israfı.
-    soup = BeautifulSoup(raw_html, "html.parser")
+    try:
+        soup = bounded_soup(raw_html)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 422
     framework_state, fw_type = _extract_framework_state(raw_html, soup=soup)
     sub_links = _discover_menu_links(soup, base_parsed)
-    current_app.logger.info(f"[SCRAPER] Discovered {len(sub_links)} sub-links, crawling {min(len(sub_links), 6)}: {sub_links[:6]}")
+    current_app.logger.info(f"[SCRAPER] Discovered {len(sub_links)} sub-links, crawling {min(len(sub_links), 6)}")
 
     for tag in soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
         tag.decompose()
 
-    title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    title = soup.title.string.strip()[:256] if soup.title and soup.title.string else ""
     sections = _extract_page_sections(raw_html, soup)
 
-    # Alt sayfalar BAĞIMSIZDIR → paralel fetch+parse. Eski akış sayfa başına
-    # 0.5-1.5 s bilinçli uyku + seri fetch yapıyordu (6 sayfada yalnız uykular
-    # 2.5-7.5 s, toplam en kötü ~40 s); paralelde toplam süre ≈ en yavaş tek
-    # sayfa. Bölüm sırası ve crawl_errors, girdi (sub_links) sırasına göre
-    # deterministik birleştirilir — yanıt sözleşmesi değişmez.
+    # At most six subpages share the same fetch/deadline/aggregate budget.
     crawl_errors = []
     targets = sub_links[:6]
     if targets:
@@ -186,24 +190,25 @@ def proxy_scan_menu():
             try:
                 sub_resp = _fetch_page(sub_url, timeout=6)
                 app.logger.info(f"[SCRAPER] Page {idx+2}/{len(targets)+1} — {loggable_url(sub_url)} — HTTP {sub_resp.status_code}")
-                sub_soup = BeautifulSoup(sub_resp.text, "html.parser")
+                sub_soup = bounded_soup(sub_resp.text)
                 for tag in sub_soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
                     tag.decompose()
                 sub_sections = _extract_page_sections(sub_resp.text, sub_soup)
-                app.logger.info(f"[SCRAPER]   → Extracted {len(sub_sections)} section(s): {[s['category'] for s in sub_sections]}")
+                app.logger.info(f"[SCRAPER] Page {idx+2} → Extracted {len(sub_sections)} section(s)")
                 return sub_sections, None
             except Exception as e:
                 status = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
                 app.logger.warning(f"[SCRAPER] Page {idx+2} FAILED — {loggable_url(sub_url)} — Status: {status} — {type(e).__name__}")
                 return [], {"url": sub_url, "error": f"{type(e).__name__}: {status}"}
 
-        with ThreadPoolExecutor(max_workers=min(4, len(targets))) as ex:
-            crawl_results = list(ex.map(_crawl_sub_page, range(len(targets)), targets))
+        # Sequential crawl shares one operation deadline/count/byte authority.
+        crawl_results = [_crawl_sub_page(i, target) for i, target in enumerate(targets)]
         for sub_sections, err in crawl_results:
             sections.extend(sub_sections)
             if err:
                 crawl_errors.append(err)
 
+    sections = bound_sections(sections)
     all_text_parts = []
     for sec in sections:
         all_text_parts.append(f"[{sec['category']}]\n{sec['text']}")
@@ -228,7 +233,7 @@ def proxy_scan_menu():
         # etmekle birebir aynı metni verir, üçüncü tam parse'ı ortadan kaldırır.
         for tag in soup(["noscript", "svg"]):
             tag.decompose()
-        body_text = soup.get_text(separator=" ", strip=True)
+        body_text = bounded_text(soup)
         current_app.logger.info(f"[SCRAPER] Section extraction empty — used full-body fallback: {len(body_text)} chars")
 
     if not body_text or len(body_text.strip()) < 20:
@@ -239,9 +244,9 @@ def proxy_scan_menu():
     body_text = _re.sub(r'(\n\s*){3,}', '\n\n', body_text)
 
     headings = [sec["category"] for sec in sections if sec["category"] != "Genel"]
-    unique_headings = list(dict.fromkeys(headings))[:40]
+    unique_headings = [str(h)[:256] for h in dict.fromkeys(headings)][:40]
 
-    current_app.logger.info(f"[SCRAPER] Total sections: {len(sections)} — Unique categories: {len(unique_headings)} — Categories: {unique_headings}")
+    current_app.logger.info(f"[SCRAPER] Total sections: {len(sections)} — Unique categories: {len(unique_headings)}")
     current_app.logger.info(f"[SCRAPER] Raw body_text length: {len(body_text)} chars")
 
     # Büyük menüler (örn. ~32k karakterlik BigChefs) tek sayfada tüm kategorileri
@@ -276,7 +281,7 @@ def proxy_scan_menu():
             redis_client.setex(cache_key, MENU_SCAN_CACHE_TTL, json.dumps(result, ensure_ascii=False))
             current_app.logger.info(f"[MENU CACHE] STORE — {loggable_url(url)} (ttl={MENU_SCAN_CACHE_TTL}s)")
         except Exception as e:
-            current_app.logger.warning(f"[MENU CACHE] store failed: {type(e).__name__}: {e}")
+            current_app.logger.warning(f"[MENU CACHE] store failed: {type(e).__name__}")
 
     return jsonify(result)
 
@@ -331,7 +336,7 @@ def analyze_menu():
             cached_extract = redis_client.get(extract_cache_key)
         except Exception as e:
             cached_extract = None
-            current_app.logger.warning(f"[EXTRACT CACHE] read failed: {type(e).__name__}: {e}")
+            current_app.logger.warning(f"[EXTRACT CACHE] read failed: {type(e).__name__}")
         if cached_extract:
             try:
                 parsed_extract = json.loads(cached_extract)
@@ -346,7 +351,7 @@ def analyze_menu():
         try:
             categorized = _extract_categorized_items(raw_text, fw_state, headings=headings_hint, menu_source=menu_source)
         except Exception as e:
-            current_app.logger.warning(f"[ANALYZE] Extraction crashed: {type(e).__name__}: {e}")
+            current_app.logger.warning(f"[ANALYZE] Extraction crashed: {type(e).__name__}")
             categorized = {}
 
         # Yeniden deneme yalnızca fw_state İLE denenmişken anlamlıdır: fw_state
@@ -357,7 +362,7 @@ def analyze_menu():
             try:
                 categorized = _extract_categorized_items(raw_text, None, headings=headings_hint, menu_source=menu_source)
             except Exception as e:
-                current_app.logger.warning(f"[ANALYZE] Retry extraction crashed: {type(e).__name__}: {e}")
+                current_app.logger.warning(f"[ANALYZE] Retry extraction crashed: {type(e).__name__}")
                 categorized = {}
 
         if categorized and redis_client:
@@ -366,12 +371,11 @@ def analyze_menu():
                                    json.dumps(categorized, ensure_ascii=False))
                 current_app.logger.info(f"[EXTRACT CACHE] STORE — {len(categorized)} categories (ttl={MENU_EXTRACT_CACHE_TTL}s)")
             except Exception as e:
-                current_app.logger.warning(f"[EXTRACT CACHE] store failed: {type(e).__name__}: {e}")
+                current_app.logger.warning(f"[EXTRACT CACHE] store failed: {type(e).__name__}")
 
     if not categorized:
         current_app.logger.warning(f"[ANALYZE] FAILED: No food items extracted. raw_text length={len(raw_text)}, "
-              f"has_food_keywords={_content_has_food_items(raw_text)}, "
-              f"first 300 chars: {raw_text[:300]}")
+              f"has_food_keywords={_content_has_food_items(raw_text)}")
         return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
                         "message": t("route.menu.parse_failed"),
                         "items": [], "categories": {}}), 422
@@ -429,7 +433,7 @@ def analyze_menu():
             for n in per_serving:
                 source_map[n] = "fatsecret_serving"
         except Exception as e:
-            current_app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}: {e}")
+            current_app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}")
 
     # Kalan iki LLM aşaması BİRBİRİNDEN BAĞIMSIZDIR: (a) per-100g öğelerin porsiyon
     # ağırlığı tahmini, (b) hiçbir kaynaktan çözülemeyen öğelerin makro tahmini.
@@ -494,7 +498,7 @@ def analyze_menu():
         macro_map[name] = scaled
         source_map[name] = ("fatsecret_scaled_fallback" if name in weight_fallbacks
                             else "fatsecret_scaled")
-        current_app.logger.info(f"[MACRO ENGINE] Scaled per-100g→serving: '{name}' × {scale:.1f} → Cal={scaled['calories']}")
+        current_app.logger.info("[MACRO ENGINE] Scaled per-100g→serving: 1 item")
 
     if llm_macros:
         macro_map.update(llm_macros)
@@ -513,14 +517,14 @@ def analyze_menu():
              or nutrition_pipeline.is_low_for_stated_grams(macro_map.get(n), stated_grams_map[n]))
     ]
     if reestimate:
-        current_app.logger.info(f"[MACRO ENGINE] Re-estimating {len(reestimate)} stated-gram low/zero items: {reestimate}")
+        current_app.logger.info(f"[MACRO ENGINE] Re-estimating {len(reestimate)} stated-gram low/zero items")
         grams_hint = {n: stated_grams_map[n] for n in reestimate}
         re_macros = _estimate_macros_llm(reestimate, category_map, grams_hint=grams_hint)
         for n, m in re_macros.items():
             # Yeni değer yalnızca gerçekten daha makulse (pozitif VE artık düşük-yoğunluk
             # değil) uygulanır; aksi halde özgün değer korunur (asla kötüleştirme).
             if m.get("calories", 0) > 0 and not nutrition_pipeline.is_low_for_stated_grams(m, stated_grams_map[n]):
-                current_app.logger.info(f"[MACRO ENGINE] Re-estimated '{n}' ({stated_grams_map[n]:.0f}g): {macro_map.get(n)} → {m}")
+                current_app.logger.info("[MACRO ENGINE] Re-estimated: 1 item")
                 macro_map[n] = m
                 source_map[n] = "llm_stated_grams"
 
@@ -553,12 +557,11 @@ def analyze_menu():
             })
             # Menü-özel: absürt düşük kalorili "yemek" (≈başarısız eşleşme) → ele.
             if valid and nutrition_pipeline.is_implausibly_low_menu_kcal(macros):
-                current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausibly-low dish '{name}': {macros}")
+                current_app.logger.info("[MACRO ENGINE] DISCARDED implausibly-low dish: 1 item")
                 valid = False
                 reasons = ["menu_calories_implausibly_low"]
             if not valid:
-                current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausible item '{name}': "
-                                f"{macros} reasons={reasons}")
+                current_app.logger.info("[MACRO ENGINE] DISCARDED implausible item: 1 item")
                 continue
 
             # Porsiyon bandi — ZORLAYICI (yalniz ust yonde): tur kesinse ve deger
@@ -570,17 +573,17 @@ def analyze_menu():
             dish_type = _primary_dish_type(name, cat)
             clamped, changed = nutrition_pipeline.clamp_to_band(macros, dish_type)
             if changed:
-                current_app.logger.info(f"[MACRO ENGINE] PORTION BAND CLAMP '{name}' ({dish_type}): {macros} → {clamped}")
+                current_app.logger.info("[MACRO ENGINE] PORTION BAND CLAMP: 1 item")
                 macros = clamped
                 # Kaynak değeri bant-üstüydü ve kırpıldı → kaynağın güveni artık
                 # geçerli değil; kırpılmış tahmin düşük-güvenli raporlanır.
                 confidence = min(confidence, 0.5)
             elif nutrition_pipeline.check_portion_band(macros.get("calories", 0), dish_type) == "low":
-                current_app.logger.info(f"[MACRO ENGINE] PORTION BAND LOW '{name}': {macros}")
+                current_app.logger.info("[MACRO ENGINE] PORTION BAND LOW: 1 item")
 
         if not has_macros:
             macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
-            current_app.logger.info(f"[MACRO ENGINE] ZERO-MACRO ITEM: '{name}' — no data from FatSecret or LLM")
+            current_app.logger.info("[MACRO ENGINE] ZERO-MACRO ITEM: 1 item — no data from FatSecret or LLM")
 
         if has_macros:
             score, warnings, reason = _menu_score(macros, remaining)

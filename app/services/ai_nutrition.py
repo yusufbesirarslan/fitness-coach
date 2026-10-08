@@ -297,9 +297,8 @@ def _normalize_food_queries_en(names, category_map=None):
         if result:
             ai_cache.cache_set("food_normalize_batch", cache_payload, result)
         return result
-    except Exception:
-        # M5: bkz. _normalize_food_query_en — graceful degrade korunur, arıza loglanır.
-        _log.warning("[MACRO ENGINE] Toplu besin adı EN normalizasyonu başarısız", exc_info=True)
+    except Exception as e:
+        _log.warning("[MACRO ENGINE] Toplu besin adı EN normalizasyonu başarısız: %s", type(e).__name__)
         return {}
 
 
@@ -490,7 +489,7 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         if start < 0:
-            current_app.logger.info(f"[EXTRACT] ERROR: No valid JSON braces found in LLM response: {raw[:200]}")
+            current_app.logger.info("[EXTRACT] ERROR: No valid JSON braces found in LLM response")
             return {}
         end = raw.rfind("}") + 1
         parsed = None
@@ -508,18 +507,18 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
                     f"[EXTRACT] Truncated JSON salvaged: {len(salvaged)} categories, "
                     f"{sum(len(v) for v in salvaged.values())} items recovered")
                 return salvaged
-            current_app.logger.warning(f"[EXTRACT] JSON parse failed and salvage found nothing — Raw snippet: {raw[start:start+300]}")
+            current_app.logger.warning("[EXTRACT] JSON parse failed and salvage found nothing")
             return {}
         cats = parsed.get("categories", parsed)
         if isinstance(cats, dict):
             result = {k: v for k, v in cats.items() if isinstance(v, list)}
-            current_app.logger.info(f"[EXTRACT] LLM returned {len(result)} categories: {list(result.keys())} — Total items: {sum(len(v) for v in result.values())}")
+            current_app.logger.info(f"[EXTRACT] LLM returned {len(result)} categories — Total items: {sum(len(v) for v in result.values())}")
             return result
         current_app.logger.info(f"[EXTRACT] ERROR: Unexpected parsed structure type: {type(cats).__name__}")
     except json.JSONDecodeError as je:
-        current_app.logger.info(f"[EXTRACT] JSON ERROR: {je}")
+        current_app.logger.info(f"[EXTRACT] JSON ERROR: {type(je).__name__}")
     except Exception as e:
-        current_app.logger.info(f"[EXTRACT] ERROR: {type(e).__name__}: {e}")
+        current_app.logger.info(f"[EXTRACT] ERROR: {type(e).__name__}")
     return {}
 
 
@@ -606,13 +605,11 @@ def _estimate_serving_weights_llm(items, fallback_weights=None, return_fallbacks
                 else:
                     results[name] = fallback_weights.get(name, 150.0)
                     fallbacks.add(name)
-                    current_app.logger.warning(f"[MACRO ENGINE] Serving weight fallback {results[name]:.0f}g for '{name}' (raw={grams}) — düşük güvenli boyutlandırma")
-            current_app.logger.info(f"[MACRO ENGINE] Serving weights resolved: {results}")
+                    current_app.logger.warning("[MACRO ENGINE] Serving weight fallback: 1 item")
+            current_app.logger.info(f"[MACRO ENGINE] Serving weights resolved: {len(results)} items")
             return (results, fallbacks) if return_fallbacks else results
-    except Exception:
-        # M5: tutarlılık için info→warning + exc_info (tasarlanmış fallback yine de
-        # devrede; davranış değişmez).
-        _log.warning("[MACRO ENGINE] LLM SERVING WEIGHT ERROR", exc_info=True)
+    except Exception as e:
+        _log.warning("[MACRO ENGINE] LLM SERVING WEIGHT ERROR: %s", type(e).__name__)
     # Tüm yemekler için fallback (LLM tamamen başarısız) — hepsi düşük güvenli.
     results = {n: fallback_weights.get(n, 150.0) for n in items}
     return (results, set(items)) if return_fallbacks else results
@@ -699,7 +696,7 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         if start < 0:
-            current_app.logger.info(f"[MACRO ENGINE] LLM response has no JSON braces: {raw[:200]}")
+            current_app.logger.info("[MACRO ENGINE] LLM response has no JSON braces")
             return {}
 
         json_str = raw[start:]
@@ -711,7 +708,7 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
                 parsed = json.loads(repaired)
                 current_app.logger.info(f"[MACRO ENGINE] Repaired truncated JSON: {len(json_str)} → {len(repaired)} chars")
             except json.JSONDecodeError as je:
-                current_app.logger.warning(f"[MACRO ENGINE] JSON repair failed: {je} — raw[{start}:{start+200}]: {raw[start:start+200]}")
+                current_app.logger.warning(f"[MACRO ENGINE] JSON repair failed: {type(je).__name__}")
                 return {}
 
         current_app.logger.info(f"[MACRO ENGINE] LLM batch returned {len(parsed)} keys")
@@ -749,10 +746,8 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
                     results[name] = macros
 
         return results
-    except Exception:
-        # traceback.print_exc() stdout'a yazıyordu — log altyapısına (ve Sentry'ye)
-        # ulaşmıyordu. exc_info ile tam izi logger üzerinden ver.
-        current_app.logger.warning("[MACRO ENGINE] LLM BATCH ERROR", exc_info=True)
+    except Exception as e:
+        current_app.logger.warning("[MACRO ENGINE] LLM BATCH ERROR: %s", type(e).__name__)
     return {}
 
 
@@ -767,7 +762,7 @@ _LLM_MACRO_MAX_WORKERS = 4
 def _estimate_macros_llm(items, category_map=None, grams_hint=None):
     if not items:
         return {}
-    current_app.logger.info(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE}): {items[:5]}{'...' if len(items)>5 else ''}")
+    current_app.logger.info(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE})")
     batches = [items[i:i + _LLM_MACRO_BATCH_SIZE]
                for i in range(0, len(items), _LLM_MACRO_BATCH_SIZE)]
     # Worker thread'lerde current_app BAGLI DEGIL (_estimate_macros_llm_batch

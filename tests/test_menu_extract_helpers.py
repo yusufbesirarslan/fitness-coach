@@ -152,6 +152,12 @@ class _WpResp:
     def __init__(self, payload, status=200):
         self._payload = payload
         self.status_code = status
+        self.headers = {"Content-Type": "application/json"}
+
+    @property
+    def text(self):
+        import json
+        return json.dumps(self._payload)
 
     def json(self):
         return self._payload

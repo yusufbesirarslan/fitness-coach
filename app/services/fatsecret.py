@@ -699,7 +699,7 @@ def _fs_search_foods(query, token):
             foods = [foods]
         return foods or []
     except Exception as e:
-        current_app.logger.warning(f"[MACRO ENGINE] FatSecret search failed for '{query}': {type(e).__name__}: {e}")
+        current_app.logger.warning(f"[MACRO ENGINE] FatSecret search failed: {type(e).__name__}")
         return []
 
 
@@ -777,7 +777,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
         try:
             foods = _fs_relevant_candidates(name, english_map.get(name, ""), token, category_map.get(name))
             if not foods:
-                current_app.logger.debug(f"[MACRO ENGINE] FatSecret: '{name}' için alakalı eşleşme yok → LLM yedeği")
+                current_app.logger.debug(f"[MACRO ENGINE] FatSecret: 1 item has no relevant match → LLM fallback")
                 return None
 
             baseline_100g = None
@@ -806,7 +806,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                 # Bu bir yemek degil bilesen → atla; gercek 'Olives' adayi veya LLM
                 # tahmini kazansin. (Yalnizca menu hatti; kocta yag loglamak serbest.)
                 if nutrition_pipeline.is_pure_fat_ingredient(macros):
-                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret saf-yag bileseni atlandi '{name}': {food.get('food_name','?')} {macros}")
+                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret pure-fat ingredient skipped: 1 item")
                     continue
 
                 # Deterministik saglik kontrolu: imkansiz girdiyi (kalori-makro enerji
@@ -820,7 +820,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                     "fat": macros["fat"],
                 })
                 if not valid_fs:
-                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret implausible entry skipped for '{name}': {macros} reasons={_r}")
+                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret implausible entry skipped: 1 item")
                     continue
 
                 if is_serv:
@@ -839,18 +839,18 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                         # (sos eslesmesi). Reddet → oge LLM yedegine duser (gercekci).
                         if (nutrition_pipeline.is_breadbased_zero_carb(macros, dish_type)
                                 or nutrition_pipeline.is_protein_dish_low_protein(name, macros, dish_type)):
-                            current_app.logger.debug(f"[MACRO ENGINE] FatSecret kimlik-hatasi reddedildi '{name}' ({dish_type}): {macros}")
+                            current_app.logger.debug(f"[MACRO ENGINE] FatSecret identity mismatch rejected: 1 item")
                             continue
-                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
+                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving match: 1 item")
                         return ("serving", macros)
                     if status == "skip":
-                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving band-USTU atlandi '{name}' ({dish_type}): {macros}")
+                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving above-band skipped: 1 item")
                         continue
                     # "convert": tam tabak degil → 100g-esdegeri olarak sakla; dongu
                     # surer ki band-ICI daha sonraki bir per-serving aday kazanabilsin.
                     if converted_baseline is None:
                         converted_baseline = conv
-                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving 100g-esdegerine cevrildi '{name}' ({dish_type}, est_g={est_g}): {macros} → {conv}")
+                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving converted to 100g equivalent: 1 item")
                     continue
                 if baseline_100g is None:
                     baseline_100g = macros
@@ -858,12 +858,12 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
             # Gercek 100g yogunlugu, per-serving'den cevrilmis esdegere tercih edilir.
             chosen = baseline_100g or converted_baseline
             if chosen:
-                current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={chosen['calories']}/100g")
+                current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-100g baseline: 1 item")
                 return ("100g", chosen)
             return None
 
         except Exception as e:
-            current_app.logger.warning(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")
+            current_app.logger.warning(f"[MACRO ENGINE] FatSecret lookup failed: {type(e).__name__}")
             return None
 
     # Ogeler arasi sorgular bagimsiz → sinirli havuzla paralel. ex.map girdi
