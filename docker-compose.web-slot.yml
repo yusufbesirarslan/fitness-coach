@@ -1,0 +1,61 @@
+# AxisAI web SLOT runtime (R6-01B) -- NOT used by production_deploy.sh yet.
+#
+# One slot = one Compose project holding ONLY the web service. It is always
+# combined with exactly one identity overlay and driven by
+# scripts/web_slot_runtime.py, which validates every interpolated value first:
+#
+#   docker compose -f docker-compose.web-slot.yml \
+#                  -f deploy/compose/web-slot-<blue|green>.yml ...
+#
+# Invariants (tests/test_r6_slot_runtime.py):
+# - The service key stays `web`, so every slot container still carries
+#   com.docker.compose.service=web and the CloudWatch agent's (web|worker)
+#   include filter keeps shipping its logs. Slots differ by PROJECT
+#   (axisai-web-blue / axisai-web-green), never by service name.
+# - No container_name: Compose derives unique names from the project.
+# - No redis, no worker, no volumes, no depends_on: a slot can never create,
+#   recreate, stop or remove them. It reaches the main project's `redis`
+#   by joining that project's network as EXTERNAL (never created/removed here).
+# - The image is never built or pulled here: it must already exist locally
+#   as axisai-web:<40-hex revision> (pull_policy: never).
+# - FITX_STARTUP_MODE is a literal in `environment`, which outranks env_file,
+#   so a slot can never boot self-migrating because .env says otherwise.
+# - The memory ceiling and stop grace are literals the runtime helper's
+#   admission maths mirror; they are not .env-tunable.
+services:
+  web:
+    image: axisai-web:${AXISAI_WEB_SLOT_REVISION:?AXISAI_WEB_SLOT_REVISION must be the exact 40-hex revision}
+    pull_policy: never
+    restart: unless-stopped
+    # Per-slot ceiling for bounded two-web overlap on a 1905 MiB, swapless
+    # t3.small. Derivation and the matching admission gate live in
+    # scripts/web_slot_runtime.py (SLOT_MEM_LIMIT_MIB).
+    mem_limit: 640m
+    # > gunicorn graceful_timeout (30 s) + the bounded shutdown metric flush
+    # (<= 5 s) + margin. Docker's default 10 s SIGKILLs in-flight requests.
+    stop_grace_period: 45s
+    stop_signal: SIGTERM
+    env_file:
+      - .env
+    environment:
+      FITX_STARTUP_MODE: read-only
+      APP_REVISION: ${AXISAI_WEB_SLOT_REVISION:?AXISAI_WEB_SLOT_REVISION must be the exact 40-hex revision}
+    # Same rotation as the main web. The extra project label puts the slot
+    # identity (axisai-web-blue/green) on every shipped line, so overlapping
+    # slots stay distinguishable inside the single /axisai/app stream.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.service,com.docker.compose.project"
+    networks:
+      - shared
+
+networks:
+  shared:
+    # The main project's default network (production: fitness-coach_default),
+    # validated by the helper to be owned by that project and to carry its
+    # healthy redis. external: Compose never creates or deletes it.
+    name: ${AXISAI_SHARED_NETWORK:?AXISAI_SHARED_NETWORK must name the main project network}
+    external: true

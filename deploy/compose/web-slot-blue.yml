@@ -1,0 +1,6 @@
+# blue web slot: Compose project identity + fixed loopback host port (R6-01B).
+name: axisai-web-blue
+services:
+  web:
+    ports:
+      - "127.0.0.1:5001:5000"

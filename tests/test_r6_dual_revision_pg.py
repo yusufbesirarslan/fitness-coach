@@ -574,3 +574,87 @@ def test_control_the_held_lock_really_blocks_unbounded_ddl(pg_url, monkeypatch):
         blocker.rollback()
         blocker.close()
         blocker_engine.dispose()
+
+
+# ── R6-01B: a read-only candidate serves the authenticated mobile API ──────
+
+def test_read_only_candidate_serves_the_authenticated_mobile_api(pg_url, monkeypatch):
+    """The slot primitive exists to host the native mobile API. A candidate
+    booted exactly as a web slot boots (FITX_STARTUP_MODE=read-only) must serve
+    a real Bearer-authenticated /api/v1 read on the shared schema, report its
+    exact revision on deep health, and leave the schema untouched. Only Cognito
+    is faked; the opaque mobile credential is minted and resolved for real."""
+    import calendar
+    from datetime import timedelta
+    import app.config as app_config
+    from app.extensions import db
+    from app.models import User
+    from app.services import cognito_jwt, cognito_service, gamification, mobile_auth
+
+    candidate_revision = "c" * 40
+    monkeypatch.setattr(gamification, "redis_client", SharedRedis())
+
+    def authenticate(username, password):
+        sub = f"sub-{username}"
+        return {"tokens": {"access_token": f"access|{sub}", "id_token": f"id|{sub}",
+                           "refresh_token": f"refresh|{sub}", "expires_in": 3600},
+                "claims": {"sub": sub}}
+
+    def validate(token, expected_use, leeway_seconds=0):
+        sub = token.split("|", 1)[1]
+        if expected_use == "id":
+            return {"sub": sub, "email": f"{sub}@example.com", "email_verified": True}
+        return {"sub": sub, "exp": calendar.timegm(
+            (datetime.utcnow() + timedelta(hours=1)).timetuple())}
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+    monkeypatch.setattr(cognito_jwt, "validate_token", validate)
+    # Production-shaped provider-token encryption (no TESTING shortcut).
+    from cryptography.fernet import Fernet
+    from app.services import session_store
+    monkeypatch.setattr(session_store, "COGNITO_TOKEN_ENC_KEY",
+                        Fernet.generate_key().decode())
+    monkeypatch.setattr(session_store, "_fernet", None)
+
+    active = _boot_active(monkeypatch)
+    with active.app_context():
+        db.session.add(User(username="r6b-mobile", email="r6b-mobile@example.com",
+                            cognito_sub="sub-r6b-mobile"))
+        db.session.commit()
+    schema_before = _fingerprint(pg_url)
+
+    monkeypatch.setenv("FITX_STARTUP_MODE", "read-only")
+    monkeypatch.setattr(app_config, "load_build_revision", lambda: candidate_revision)
+    from app import create_app
+    candidate = create_app()
+    try:
+        assert candidate.config["MOBILE_AUTH_ENABLED"] is True
+        assert "mobile_api" in candidate.blueprints
+        client = candidate.test_client()
+
+        deep = client.get("/health?deep=1")
+        assert deep.status_code == 200
+        assert deep.get_json()["revision"] == candidate_revision
+
+        assert client.get("/api/v1/account/me").status_code == 401
+        bogus = client.get("/api/v1/account/me",
+                           headers={"Authorization": "Bearer not-a-credential"})
+        assert bogus.status_code == 401
+        assert bogus.get_json()["error"]["code"] == "AUTH_SESSION_EXPIRED"
+
+        with candidate.app_context():
+            issued = mobile_auth.login("r6b-mobile", "Sifre123")
+            user_id = User.query.filter_by(username="r6b-mobile").one().id
+        me = client.get("/api/v1/account/me", headers={
+            "Authorization": f"Bearer {issued.access_credential}"})
+        assert me.status_code == 200, me.get_data(as_text=True)
+        assert me.headers["Cache-Control"].startswith("no-store")
+        assert me.get_json()["user"]["username"] == "r6b-mobile"
+        assert user_id is not None
+
+        schema_after = _fingerprint(pg_url)
+        assert schema_after[:3] == schema_before[:3]       # columns/indexes/constraints
+        assert schema_after[-1] == schema_before[-1]       # alembic head unchanged
+    finally:
+        _dispose(candidate)
+        _dispose(active)
