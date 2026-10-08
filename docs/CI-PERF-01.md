@@ -5,7 +5,9 @@
 Main at `c66c586ccfa84e22c40b050629d09f23ef2a37c4` collects 11,423 selected
 items, with eight marker deselections. This change adds 25 infrastructure
 regression items: plain root collection and all four shard full manifests agree
-on 11,448 exact node IDs. Shard sizes are 2,862 each. Nineteen modules report
+on 11,448 exact node IDs. The initial count-balanced shard sizes were 2,862 each;
+the measured-duration partition selects 2,809 / 3,041 / 2,912 / 2,686 items.
+Nineteen modules report
 collection skips locally; these remain collection skips, not fabricated items.
 
 Verified GitHub step timestamps (seconds):
@@ -49,10 +51,17 @@ Every shard uses the same default repository-root discovery and existing
 `pytest.ini`. It partitions only after pytest's marker selection finishes.
 Explicit narrower discovery paths are rejected.
 
-Without measured file timings, deterministic longest-first packing uses selected
-item count per complete file, lexical file ties, then lowest shard load/index.
-This is a documented fallback, not a claim of equal runtime. New files enter
-automatically. Neither Python's randomized hash nor xdist is used. Within each
+Deterministic longest-first packing uses measured setup + call + teardown seconds
+per complete file from `scripts/pytest_file_timings.json`, with lexical file ties,
+then lowest shard load/index. The reviewed profile records 392 files from the
+first successful sharded CI execution, with its run URL and checkout revision.
+Measured file cost scales by current selected count divided by measured count.
+New files use the profile's mean seconds per selected item; if no profile exists,
+all files use selected item count instead. Malformed profiles fail closed. Every
+manifest records the profile's SHA-256 digest, which must match the verifier's
+checked-out profile. This prevents execution and validation from using different
+weights. New files enter automatically. Neither Python's randomized hash nor
+xdist is used. Within each
 runner, original item ordering is preserved. Timing artifacts provide file sums
 and per-item setup/call/teardown values for later measured balancing.
 
@@ -103,16 +112,53 @@ validate without the verifier's `--collection-only` flag. Full discovery occurs
 in all four processes, so module import skips may appear four times in the logs;
 the gate compares them separately from selected test IDs.
 
-Local workflow/security/sharding guards: **129 passed in 10.57s**. Full local
+Local workflow/security/sharding guards: **129 passed in 10.57s** initially and
+**129 passed in 9.53s** after measured balancing. Full local
 collection parity: **11,448 IDs, zero missing, zero duplicates, zero unexpected
 deselections**; all four full manifests independently match unsharded collection.
 Baseline-to-change selected count difference is entirely the 25 new regression
 items. YAML parses; the four existing safety jobs compare structurally identical
 to main; `git diff --check` passes.
 
-Optimized GitHub timings and full execution parity must be measured before a
-merge-readiness verdict. Compare the slowest shard, aggregate runner-minutes
-(including gate and repeated installations/collection), full CI critical path,
-and the manifests' phase profiles. Repeat on representative CI runs when
-feasible. Duration estimates are not measured speedups. Fixture optimization or
-browser lifecycle changes belong in a separately evidenced follow-up.
+## Initial GitHub measurements
+
+Both initial count-balanced runs passed all shards, the aggregate parity gate
+and all four safety jobs. Both proved 11,448 selected IDs, zero missing/duplicate
+items and zero unexpected deselections. Execution is 11,371 passed plus 77
+runtime skips; the 19 distinct import-skipped modules give the original 96 skips
+after normalization. Summing shard terminal skip counts repeats import skips and
+is not a valid full-suite count.
+
+| Run | Slowest pytest process | Slowest test step | CI critical path | pytest jobs + gate runner-minutes | Shard installs |
+| --- | ---: | ---: | ---: | ---: | --- |
+| [37733904015](https://github.com/yusufbesirarslan/fitness-coach/actions/runs/37733904015) | 984.50s | 1,047s | 1,121s | 57.18 | 43–50s |
+| [37735782838](https://github.com/yusufbesirarslan/fitness-coach/actions/runs/37735782838) | 970.68s | 1,035s | 1,097s | 54.70 | 39–46s |
+
+The baseline last-run CI path was 2,493 seconds; the first two sharded paths were
+55.0% and 56.0% shorter. This is a measured cross-run comparison, not a controlled
+same-revision sequential benchmark. Baseline pytest allocation was 41.55 minutes
+on the fastest supplied run and 53.97–54.43 on the other two verified runs. The
+sharded allocations are within 0.5–5.9% of those two slower baselines, but
+31.6–37.6% above the fastest baseline. Repeated setup/import work and runner
+variation both matter. Latency improvement does not imply lower total cost.
+
+Count balancing gave unequal measured pytest times (449.78–984.50 seconds in
+the first run). Full phase reports total 1,029.65 setup seconds, 1,772.97 call
+seconds and 97.57 teardown seconds. Browser-named modules account for 1,629.48 of
+2,900.18 phase seconds (56.2%); browser helpers in other named files are additional
+cost. The largest files are `test_ux4_pr8_browser.py` (242.07s),
+`test_ux4_pr2_foundations_browser.py` (205.01s),
+`test_nutrition_vnext_pr5_plan_browser.py` (150.24s) and
+`test_nutrition_vnext_pr4_log_food_browser.py` (111.91s). The slowest operation is
+a browser notification matrix call (26.87s). These are aggregated test phases,
+not separate measurements of `create_app()` or SQLAlchemy internals. Changing
+fixture scopes or caching database setup is not justified by this evidence.
+
+Measured-duration balancing now equalizes historical file-weight sums; actual
+wall time of the new partition remains to be measured. Compare the slowest
+shard, aggregate runner-minutes (including gate and repeated installations and
+collection), full CI critical path and phase profiles. Duration estimates are
+not measured speedups. A separate follow-up could profile browser startup and
+matrix calls in the four largest files while preserving all assertions and
+per-test isolation. Production refactoring and broad fixture caching remain
+outside this task.

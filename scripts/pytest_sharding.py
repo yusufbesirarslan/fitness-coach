@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 import json
+import hashlib
+import math
 from pathlib import Path
 import subprocess
 import time
@@ -15,21 +17,48 @@ import time
 import pytest
 
 SHARDS = 4
+TIMINGS_PATH = Path(__file__).with_name("pytest_file_timings.json")
 
 
-def partition(nodeids):
-    """Largest file first, weighted by selected item count; lexical ties.
+def load_timings(path=TIMINGS_PATH):
+    """Read reviewed CI phase timings; malformed evidence fails closed."""
+    if not path.exists():
+        return {}, None
+    raw = path.read_bytes()
+    data = json.loads(raw)
+    if data.get("schema") != 1 or not isinstance(data.get("files"), dict) or not data["files"]:
+        raise ValueError("malformed file timing profile")
+    for file, measurement in data["files"].items():
+        if not isinstance(file, str) or not file or not isinstance(measurement, dict):
+            raise ValueError("malformed file timing entry")
+        count, seconds = measurement.get("items"), measurement.get("seconds")
+        if type(count) is not int or count <= 0 or type(seconds) not in (int, float):
+            raise ValueError("invalid timing count or duration")
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError("invalid timing duration")
+    return data["files"], hashlib.sha256(raw).hexdigest()
 
-    Count is an explicit fallback until CI phase-duration evidence is available.
+
+def partition(nodeids, timings=None):
+    """Largest file first, weighted by measured phase seconds; lexical ties.
+
+    Scale measured cost by current selected count. New files use the profile's
+    mean seconds per item; without a profile use selected item count throughout.
     Retain original item order inside each runner; never split a file.
     """
     files = Counter(node.split("::", 1)[0] for node in nodeids)
+    timings = timings or {}
+    average = (sum(t["seconds"] for t in timings.values()) /
+               sum(t["items"] for t in timings.values())) if timings else 1
+    weights = {file: count * (timings[file]["seconds"] / timings[file]["items"]
+                             if file in timings else average)
+               for file, count in files.items()}
     loads = [0] * SHARDS
     owners = {}
-    for file in sorted(files, key=lambda file: (-files[file], file)):
+    for file in sorted(files, key=lambda file: (-weights[file], file)):
         shard = min(range(SHARDS), key=lambda i: (loads[i], i))
         owners[file] = shard
-        loads[shard] += files[file]
+        loads[shard] += weights[file]
     return [[node for node in nodeids if owners[node.split("::", 1)[0]] == i]
             for i in range(SHARDS)]
 
@@ -42,7 +71,8 @@ def unique_nodes(value):
     return value
 
 
-def verify(manifests, revision, *, collection_only=False, result="success"):
+def verify(manifests, revision, *, collection_only=False, result="success",
+           timings=None, timing_digest=None):
     if result != "success":
         raise ValueError(f"required matrix result is {result!r}, not success")
     if len(manifests) != SHARDS:
@@ -56,6 +86,8 @@ def verify(manifests, revision, *, collection_only=False, result="success"):
             raise ValueError("invalid or duplicate shard")
         if doc.get("revision") != revision or doc.get("count") != SHARDS:
             raise ValueError("wrong revision or shard count")
+        if doc["timing_digest"] != timing_digest:
+            raise ValueError("wrong partition timing profile")
         if doc.get("exitstatus") != 0 or doc.get("collection_only") is not collection_only:
             raise ValueError("unsuccessful or wrong-mode evidence")
         for field in ("full", "selected", "deselected", "collection_skips"):
@@ -64,7 +96,7 @@ def verify(manifests, revision, *, collection_only=False, result="success"):
     first = by_shard[0]
     if not first["full"]:
         raise ValueError("empty authoritative collection")
-    expected = partition(first["full"])
+    expected = partition(first["full"], timings)
     union = []
     for index in range(SHARDS):
         doc = by_shard[index]
@@ -117,11 +149,13 @@ class Evidence:
     def __init__(self, config, index):
         self.config = config
         self.started = time.monotonic()
+        self.timings, timing_digest = load_timings()
         self.doc = dict(schema=1, shard=index, count=SHARDS,
                         revision=subprocess.check_output(
                             ["git", "rev-parse", "HEAD"], text=True).strip(),
                         collection_only=config.option.collectonly,
-                        full=[], selected=[], deselected=[], collection_skips=[], reports={})
+                        timing_digest=timing_digest, full=[], selected=[], deselected=[],
+                        collection_skips=[], reports={})
 
     def pytest_deselected(self, items):
         self.doc["deselected"].extend(item.nodeid for item in items)
@@ -134,7 +168,7 @@ class Evidence:
     def pytest_collection_modifyitems(self, session, config, items):
         yield
         self.doc["full"] = [item.nodeid for item in items]
-        selected = partition(self.doc["full"])[self.doc["shard"]]
+        selected = partition(self.doc["full"], self.timings)[self.doc["shard"]]
         self.doc["selected"] = selected
         selected_set = set(selected)
         items[:] = [item for item in items if item.nodeid in selected_set]
@@ -163,7 +197,9 @@ def main():
     parser.add_argument("--collection-only", action="store_true")
     args = parser.parse_args()
     manifests = [json.loads(path.read_text()) for path in sorted(args.directory.glob("*.json"))]
-    count = verify(manifests, args.revision, collection_only=args.collection_only, result=args.result)
+    timings, timing_digest = load_timings()
+    count = verify(manifests, args.revision, collection_only=args.collection_only,
+                   result=args.result, timings=timings, timing_digest=timing_digest)
     totals = defaultdict(float)
     for doc in manifests:
         for node, phases in doc["reports"].items():

@@ -8,13 +8,13 @@ import sys
 import pytest
 import yaml
 
-from scripts.pytest_sharding import partition, verify
+from scripts.pytest_sharding import load_timings, partition, verify
 
 
 def evidence():
     nodes = [f"test_{i}.py::test_x[{j}]" for i in range(8) for j in range(i + 1)]
     return [dict(schema=1, shard=i, count=4, revision="revision",
-                 exitstatus=0, collection_only=False, full=nodes,
+                 exitstatus=0, collection_only=False, timing_digest=None, full=nodes,
                  selected=selected, deselected=["test_load.py::test_load"],
                  collection_skips=["test_optional.py"],
                  reports={node: {phase: dict(outcome="passed", duration=0.1)
@@ -23,7 +23,7 @@ def evidence():
             for i, selected in enumerate(partition(nodes))]
 
 
-def test_file_partition_is_deterministic_complete_disjoint_and_balanced():
+def test_file_partition_is_deterministic_complete_disjoint_and_balanced(tmp_path):
     docs = evidence()
     assert verify(docs, "revision") == 36
     assert partition(docs[0]["full"]) == partition(docs[0]["full"])
@@ -33,6 +33,26 @@ def test_file_partition_is_deterministic_complete_disjoint_and_balanced():
             file = node.split("::")[0]
             assert owners.setdefault(file, doc["shard"]) == doc["shard"]
     assert max(len(d["selected"]) for d in docs) - min(len(d["selected"]) for d in docs) <= 8
+    profile = {"test_0.py": {"items": 1, "seconds": 100},
+               "test_1.py": {"items": 2, "seconds": 40}}
+    weighted = partition(docs[0]["full"], profile)
+    assert weighted != partition(docs[0]["full"])
+    assert weighted == partition(docs[0]["full"], profile)
+    assert sorted(n for shard in weighted for n in shard) == sorted(docs[0]["full"])
+    assert len({i for i, shard in enumerate(weighted) if "test_0.py::test_x[0]" in shard}) == 1
+    assert load_timings(tmp_path / "absent.json") == ({}, None)
+    path = tmp_path / "profile.json"
+    path.write_text(json.dumps({"schema": 1, "files": profile}))
+    loaded, digest = load_timings(path)
+    assert loaded == profile and len(digest) == 64
+    for bad in ({}, {"schema": 1, "files": {}},
+                {"schema": 1, "files": {"file": {"items": 0, "seconds": 1}}},
+                {"schema": 1, "files": {"file": {"items": 1, "seconds": -1}}}):
+        path.write_text(json.dumps(bad))
+        with pytest.raises(ValueError):
+            load_timings(path)
+    with pytest.raises(ValueError, match="timing profile"):
+        verify(docs, "revision", timing_digest="different")
 
 
 @pytest.mark.parametrize("mutation", [
