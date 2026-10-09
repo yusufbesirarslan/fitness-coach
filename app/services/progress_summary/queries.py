@@ -104,7 +104,7 @@ def fetch_body_facts(user_id: int) -> BodyFacts:
 
     ``current_weight_kg`` follows the fallback ``/progress-page`` already
     established: the canonical profile weight (``User.weight``, kept current by
-    ``tracking._apply_weight_to_profile`` from both ``/checkin`` and
+    ``weekly_checkin.apply_body_weight`` from both ``/checkin`` and
     ``/update-weight``), falling back to the newest check-in row when the profile
     has none yet. That fallback intentionally accepts *any* check-in row, because
     its job is "what does this user weigh", which a sparse ``/update-weight`` row
