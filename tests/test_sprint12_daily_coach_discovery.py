@@ -156,6 +156,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/pump-check-comparisons/<comparison_id>",
         # LP-04 canonical Progress summary read (owner = bearer principal).
         "/api/v1/progress/summary",
+        # LP16-B native weekly check-in over the LP16-A canonical service.
+        "/api/v1/progress/check-ins",
         "/api/v1/today",
         "/api/v1/training/preferences",
         # TI-01B owner × catalog notes; no Daily-Coach/diagnostic semantics.
@@ -190,6 +192,11 @@ _APPROVED_TODAY_PATHS = {
 # review, not by widening the guard: a second Progress read would still fail.
 _APPROVED_PROGRESS_PATHS = {
     "/api/v1/progress/summary",
+    # LP16-B: the native weekly check-in write + bounded history. A transport
+    # of the LP16-A `weekly_checkin` authority (writes) and the Progress
+    # History qualifying read / weight-delta rule (reads) - not a second
+    # Progress domain. Admitted by exact path, by review.
+    "/api/v1/progress/check-ins",
 }
 
 # The only `/api/v1` paths allowed to carry "coach". LP-09 is a transport over

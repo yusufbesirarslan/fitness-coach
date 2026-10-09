@@ -69,6 +69,8 @@ __all__ = [
     "build_progress_history",
     "progress_history_payload",
     "fetch_qualifying_checkins",
+    "historical_body",
+    "previous_daily_row",
 ]
 
 
@@ -100,6 +102,12 @@ def _previous_daily_row(rows, index):
         if app_date_of(candidate.created_at) != day and _positive(candidate.weight):
             return candidate
     return None
+
+
+# The ONE check-in weight/delta rule, published for the native check-in
+# history (LP16-B) so it reuses this definition instead of deriving a second.
+historical_body = _historical_body
+previous_daily_row = _previous_daily_row
 
 
 def _reconstruct_entry(user_id, row, previous, reports) -> HistoryEntry:

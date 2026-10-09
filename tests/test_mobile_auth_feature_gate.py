@@ -84,6 +84,8 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/nutrition/menu/analyze"),
         ("post", "/api/v1/nutrition/menu/log"),
         ("get", "/api/v1/progress/summary"),
+        ("post", "/api/v1/progress/check-ins"),
+        ("get", "/api/v1/progress/check-ins"),
         ("get", "/api/v1/today"),
         ("get", "/api/v1/training/preferences"),
         ("get", "/api/v1/training/plans/current"),
@@ -200,6 +202,10 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # this blueprint so it shares its gate, envelope, no-store and 429
             # handler; the same read model the web Progress page serves.
             ("/api/v1/progress/summary", ("GET",)),
+            # LP16-B native weekly check-in write + bounded history over the
+            # LP16-A canonical service. Bearer-only, same gate/envelope/no-store.
+            ("/api/v1/progress/check-ins", ("POST",)),
+            ("/api/v1/progress/check-ins", ("GET",)),
             # LP-09 native Coach. Bearer-only transport over the web Coach
             # pipeline (same memory, grounding, quota bucket and provider);
             # on this blueprint for its gate, envelope and no-store.

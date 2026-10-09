@@ -91,6 +91,21 @@ def claim_submission(owner_id, idempotency_key, request_fingerprint):
     return SubmissionResult(SubmissionOutcome.REPLAYED, response)
 
 
+def reload_locked_owner(owner):
+    """Re-read ``owner`` inside a FRESH claim, i.e. under the owner lock.
+
+    ``owner`` was loaded before :func:`claim_submission` took the lock, so a
+    concurrent check-in may have committed a different weight since. Staging
+    against that stale snapshot is a lost update: when the new weight equals
+    the stale value the ORM sees no change and emits no ``UPDATE``, and an
+    earlier-serialized check-in's weight stays current (LP16-B PostgreSQL
+    race). Provider-free callers reload here; the web ``/checkin`` path does
+    not (its SQL is pinned byte-identical to 088d04d; recorded debt).
+    """
+    db.session.refresh(owner)
+    return owner
+
+
 def load_context(owner_id):
     """Read what a full check-in is persisted against (latest full, session)."""
     previous = queries.latest_full_checkin(owner_id)
@@ -99,11 +114,15 @@ def load_context(owner_id):
 
 
 def stage_full_checkin(owner, checkin, context, *, coach_feedback=None,
-                       idempotency_key=None, request_fingerprint=None):
+                       idempotency_key=None, request_fingerprint=None,
+                       checked_in_at=None):
     """Stage one full check-in row plus its body-weight effect. No commit.
 
     ``coach_feedback`` is stored as given (empty for provider-free callers);
-    the service never produces it.
+    the service never produces it. ``checked_in_at`` (naive UTC, a server
+    clock reading — never client input) lets a caller that must answer with
+    the timestamp before the commit, i.e. put it in the replay snapshot, own
+    it explicitly; ``None`` keeps the column default (the web path).
     """
     if not isinstance(checkin, FullCheckIn):
         raise TypeError("checkin must be a FullCheckIn")
@@ -127,6 +146,10 @@ def stage_full_checkin(owner, checkin, context, *, coach_feedback=None,
         idempotency_key=idempotency_key,
         request_fingerprint=request_fingerprint,
     )
+    if checked_in_at is not None:
+        if checked_in_at.tzinfo is not None:
+            raise ValueError("checked_in_at must be naive UTC")
+        entry.created_at = checked_in_at
     db.session.add(entry)
     apply_body_weight(owner, checkin.weight, context.session)
     return entry
