@@ -1,0 +1,6 @@
+# R6-02A: root-installed nginx control-plane artifacts and the live-site
+# fixture are byte-exact (sha256-compared on the host); never CRLF-convert them.
+deploy/nginx/** text eol=lf
+scripts/axisai_switch_web_slot.py text eol=lf
+scripts/axisai_nginx_bootstrap.py text eol=lf
+tests/fixtures/r6_nginx/** -text

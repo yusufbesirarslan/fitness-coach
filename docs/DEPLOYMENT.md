@@ -372,7 +372,8 @@ yet: `production_deploy.sh`, `docker-compose.yml`, nginx and the legacy web on
 |---|---|---|
 | R6-01A | two revisions can share schema/Redis at startup | done |
 | R6-01B | two web containers can run side by side on one host | this section |
-| R6-02 | nginx traffic switching between slots | **not implemented** |
+| R6-02A | nginx route control plane (helper, mapping, bootstrap tool) | in repository, **not installed or active in production** |
+| R6-02B | one-time production nginx bootstrap to the named upstream | **not done** |
 | R6-03 | exact-SHA deploy transaction (release-prepare, start, verify, switch, drain, rollback, worker order) | **not implemented** |
 
 **Slot model.** `docker-compose.web-slot.yml` plus one identity overlay
@@ -478,6 +479,39 @@ rollback):
   It can then be removed with
   `remove --slot <s> --expected-revision <sha>`. The revision must match, and
   only that project is torn down.
+
+### nginx route control plane (R6-02A)
+
+Status: repository only. Production nginx still proxies `location /`
+directly to `127.0.0.1:5000`; nothing in `production_deploy.sh` or
+`deploy_control.py` reads or switches routes. The full contract, failure
+model and the R6-02B runbook are in `deploy/nginx/README.md`.
+
+- Route states are symbolic: `legacy` (`127.0.0.1:5000`, the main-project
+  web), `blue` (`:5001`) and `green` (`:5002`), defined in the root-owned
+  mapping `/etc/axisai/web-slots.conf` (`deploy/nginx/web-slots.conf`).
+  `tests/test_r6_nginx_slot_contract.py` fails CI if the mapping drifts from
+  `docker-compose.yml` or the R6-01B slot overlays.
+- nginx reaches the app through `upstream axisai_web`, whose single
+  `server` line is the root-owned include
+  `/etc/nginx/axisai/active-web-upstream.conf`. Exactly one backend is ever
+  in rotation.
+- `sudo axisai-switch-web-slot status` is the one canonical route reader;
+  `sudo axisai-switch-web-slot switch legacy|blue|green` is the one writer.
+  It validates the current config with `nginx -t` before touching anything,
+  renames the include atomically, validates again, and reloads gracefully.
+  A failed validation restores the previous include without reloading; a
+  failed reload restores, validates and reloads the previous include once.
+- Rollback is another switch: R6-03 reads `status` before switching and
+  switches back to that state (including `legacy` on the first cutover) if
+  post-switch verification fails. R6-03 must verify the target slot
+  immediately before switching; the helper does not check application health.
+- The helper is defense-in-depth, not a privilege boundary: the deploy user
+  still has passwordless sudo.
+- `scripts/axisai_nginx_bootstrap.py check|apply` is the deterministic R6-02B
+  migration of the Certbot-managed site. It changes one `proxy_pass` argument
+  and inserts the upstream block, refuses partial or unknown topologies, and
+  restores the exact backup on any failure. It has not been run.
 
 The deploy path does not print `.env` contents or AWS credentials, and it does
 not assign feature flags. Host `.env` permission repair and nginx validation are
