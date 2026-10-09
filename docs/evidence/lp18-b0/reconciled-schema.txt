@@ -1,0 +1,2 @@
+Fresh disposable PostgreSQL migration chain: passed
+Model/migration comparison: No new upgrade operations detected.

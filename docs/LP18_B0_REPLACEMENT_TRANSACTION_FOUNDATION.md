@@ -1,6 +1,8 @@
 # LP18-B0 transaction foundation
 
-Base: 088d04dc6506adf677d6f77da07db8f660f69382. Main equals discovery.
+Discovery base: 088d04dc6506adf677d6f77da07db8f660f69382.
+Public-review base after one conflict-free rebase onto merged PR #419:
+f7203f7360ffd9dca21f2bdfce7e9bbd319be5b6.
 Open backend PRs 400, 383, 342: no canonical writer/schema overlap; 342 owns
 provider adapters. LP16 ownership excluded. No API, AWS, deploy, CI or merge.
 
@@ -168,21 +170,24 @@ Coach confirmation path marks the proposal STALE. No ambiguous double success.
 Proposal review lasts 30 minutes. Future cleanup deletes expired/consumed
 candidate rows after a 24-hour grace, retaining successful confirmation authority
 separately. Successful and refused receipts retain owner/key/frozen intent/result
-for a **90-day maximum legitimate confirmation retry and support horizon**.
-B1 must document that horizon before launch; support procedures must use it too.
+for a **minimum 90-day confirmation replay and support horizon**. Successful
+confirmation receipts guarantee original-result replay for at least 90 days.
+B1 must document this minimum before launch; support procedures must use it too.
 No receipt is deleted within it. Receipt replay does not depend on proposal TTL.
 
 A future bounded batch worker first removes expired proposal contents/rows, then
-receipts older than the horizon, using expiry/created indexes and small batches.
+eligible receipts beyond the minimum horizon, using expiry/created indexes and
+small batches under an explicit cleanup authority.
 It must never revive a proposal or regenerate under its old locator. After the
-horizon, an original old proposal is expired or absent: its confirmation fails
-closed and cannot replace again, even after its receipt is collected. Original
-result replay is guaranteed within the advertised horizon; outside it the
-original result is unavailable, with no canonical write. Reusing an old key for
-a new proposal outside this horizon is a new operation, not a legitimate retry.
-Account deletion erases both tables immediately. Scheduling this cleanup is P2,
-per the task's authorization to defer it at initial launch volume; enabling it
-and publishing the horizon are B1 launch requirements, not indefinite retention.
+minimum horizon, an original old proposal is expired or absent: its confirmation
+fails closed and cannot replace again, even after an authorized cleanup collects
+its receipt. Retained receipts continue replaying their original results after
+day 90; there is no exact day-90 deletion or unavailability guarantee. Once a
+receipt is actually collected, original-result replay is unavailable, with no
+canonical write. An old key used for a new proposal after collection is a new
+operation. Account deletion erases both tables immediately. The bounded cleanup
+worker and its authority remain deferred P2; cleanup is not a B1 launch gate.
+Publishing the minimum replay horizon remains a B1 launch requirement.
 
 ## Qualification
 
@@ -239,7 +244,7 @@ ordering has no return path to transition/day/proposal/plan from XP artifacts.
 The graph concerns the requested training transitions, not administrative
 account destruction or a global claim about every unrelated app writer.
 
-## Final local evidence and handoff
+## Original approved-head local evidence and handoff
 
 - Focused domain/browser/session/Coach/architecture/account-purge checks:
   **433 passed** (`evidence/lp18-b0/focused-tests.txt`).
@@ -263,10 +268,25 @@ account destruction or a global claim about every unrelated app writer.
   M16 consumed-state omission; M17 conflicting owner UPDATE mode. No import error,
   skipped PG, timeout or deadlock is counted as a kill.
 
-P0=0; P1=0; P2=1 (deferred bounded retention worker and advertised replay horizon
-before B1 launch); P3=0. LP16 and mobile runtime untouched. No native replacement
+P0=0; P1=0; P2=1 (deferred bounded retention worker and cleanup authority);
+P3=0. B1 must advertise the minimum 90-day replay horizon before launch.
+LP16 and mobile runtime untouched. No native replacement
 routes added. No AWS, production, deploy, merge, PR or CI. Local branch:
 `lp18/b0-replacement-transaction-foundation`. Main rechecked at the same base.
+
+## Public-review reconciliation
+
+PR #419 merged; B0 rebased exactly once onto `f7203f7360ffd9dca21f2bdfce7e9bbd319be5b6`
+without conflicts. The approved transaction implementation and additive migration
+are unchanged. The CI PostgreSQL list now includes `test_lp18_b0_pg.py`.
+The retention contract above states a minimum, not an exact deletion deadline.
+
+Affected checks after reconciliation: focused **437 passed**; PostgreSQL **64
+passed, zero skipped**; migration/boot/schema tests **109 passed**; architecture
+and CI-selection guards **99 passed** (including the four LP18 architecture tests).
+A fresh PostgreSQL database upgraded through the complete migration chain and
+the schema comparison found no new upgrade operations. Evidence is in
+`docs/evidence/lp18-b0/reconciled-*.txt`. No architecture change or second rebase.
 
 **LP18_B0_STATUS=READY_FOR_REVIEW.** The implementation is local and committed;
 the exact HEAD SHA is returned with the handoff. Next task is LP18-B1 native
