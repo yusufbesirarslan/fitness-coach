@@ -164,6 +164,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/exercises/<exercise_id>/note",
         "/api/v1/training/plans",
         "/api/v1/training/plans/current",
+        # LP18-B1 immutable proposal and explicit B0 confirmation.
+        "/api/v1/training/plans/replacement-proposals",
+        "/api/v1/training/plans/replacement/confirm",
         "/api/v1/training/workouts/<workout_reference>",
         "/api/v1/training/workout-execution-capabilities",
         "/api/v1/training/workout-sessions",
@@ -229,6 +232,9 @@ _APPROVED_TRAINING_PATHS = {
     # not by widening the guard.
     "/api/v1/training/plans",
     "/api/v1/training/plans/current",
+    # LP18-B1 immutable proposal and explicit B0 confirmation.
+    "/api/v1/training/plans/replacement-proposals",
+    "/api/v1/training/plans/replacement/confirm",
     "/api/v1/training/workouts/<workout_reference>",
     # Mobile Training PR5 publishes the six native workout-session write
     # contracts. They are execution writes against the ALREADY canonical
