@@ -16,9 +16,9 @@ from app.models import (DailyActivity, MealLog, User, UserQuestProgress, UserSes
                         WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog,
                         WeeklyWinner, WorkoutLog)
 from app.services.ai_coach import generate_checkin_feedback
-from app.services import account_profile
+from app.services import account_profile, weekly_checkin
 from app.services.ai_gate import ai_concurrency_gate
-from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
+from app.services.calculations import MET_CONFIG, calculate_activity_calories
 from app.services.gamification import complete_quest_for_user, get_level, level_title
 from app.services.gamification import _claim_quest
 from app.services.meal_idempotency import read_idempotency_key
@@ -204,39 +204,6 @@ def progress_redirect():
     return redirect(url_for("tracking.progress_page"))
 
 
-def _apply_weight_to_profile(weight, last_sess):
-    """Kiloyu kanonik profile (current_user.weight) yaz ve profil TAM ise
-    BMR/TDEE/hedef-kaloriyi son oturumda yeniden hesapla. Hem /update-weight
-    hem haftalık /checkin buradan geçer ki iki akış da current_user.weight'i
-    ve türetilmiş kalori hedeflerini güncel tutsun (BUG-1).
-
-    Profil eksikse (current_activity/goal yoksa) calculate_tdee sessizce
-    sedanter varsayıma düşer; bu yanlış değeri kalıcılaştırmamak için türetilmiş
-    hedeflere DOKUNMA, yalnızca kiloyu yaz (L2). (bmr, tdee, target, ready) döner.
-    """
-    current_user.weight = weight
-    profile_ready = all([
-        current_user.height, current_user.age, current_user.gender,
-        current_user.current_activity, current_user.goal,
-    ])
-    if profile_ready:
-        bmr             = calculate_bmr(weight, current_user.height, current_user.age, current_user.gender)
-        tdee            = calculate_tdee(bmr, current_user.current_activity)
-        target_calories = calculate_target(tdee, current_user.goal)
-        if last_sess:
-            last_sess.weight          = weight
-            last_sess.bmr             = bmr
-            last_sess.tdee            = tdee
-            last_sess.target_calories = target_calories
-    else:
-        if last_sess:
-            last_sess.weight = weight
-        bmr             = last_sess.bmr if last_sess else None
-        tdee            = last_sess.tdee if last_sess else None
-        target_calories = last_sess.target_calories if last_sess else None
-    return bmr, tdee, target_calories, profile_ready
-
-
 @bp.route("/checkin", methods=["POST"])
 @require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
@@ -275,31 +242,17 @@ def checkin():
         }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
         # Serialize this user's keyed submissions before the model call. The
         # unique constraint is the durable backstop if a caller bypasses the lock.
-        db.session.query(User.id).filter_by(id=current_user.id).with_for_update().one()
-        existing = WeeklyCheckIn.query.filter_by(
-            user_id=current_user.id, idempotency_key=submission_key).first()
-        if existing:
-            if existing.request_fingerprint != fingerprint:
-                db.session.rollback()
-                return jsonify({"error": t("route.checkin_key_conflict")}), 409
-            response = json.loads(existing.response_snapshot)
-            db.session.rollback()
-            return jsonify(response)
+        claim = weekly_checkin.claim_submission(
+            current_user.id, submission_key, fingerprint)
+        if claim.outcome is weekly_checkin.SubmissionOutcome.CONFLICT:
+            return jsonify({"error": t("route.checkin_key_conflict")}), 409
+        if claim.outcome is weekly_checkin.SubmissionOutcome.REPLAYED:
+            return jsonify(claim.response)
 
-    # Önceki check-in'i al. /update-weight yalnızca weight dolu, diğer metrikleri
-    # NULL "seyrek" satırlar yazar (BUG-5); bunları previous/days_passed hesabına
-    # katma — aksi halde aynı gün kilo güncelleyip check-in yapan kullanıcıda
-    # days_passed=0 çıkıp prev_weight o dakikaki değere sabitlenir. Gerçek
-    # check-in'ler daima yogunluk alanını taşır.
-    previous = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
-        .filter(WeeklyCheckIn.yogunluk.isnot(None))\
-        .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())\
-        .first()
-
-    # Son oturum bilgilerini al
-    last_session = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc(), UserSession.id.desc())\
-        .first()
+    # Önceki tam check-in (seyrek /update-weight satırları hariç — BUG-5) ve
+    # kanonik oturum; ikisi de kanonik servisten okunur.
+    context = weekly_checkin.load_context(current_user.id)
+    previous, last_session = context.previous, context.session
 
     goal = last_session.goal if last_session else "genel sağlık"
 
@@ -311,33 +264,27 @@ def checkin():
         # gece-yarısı yakınında bir gün kayardı (F1.2).
         days_passed = (app_today() - app_date_of(previous.created_at)).days
 
-    # AI koç geri bildirimi
+    # AI koç geri bildirimi — web orkestrasyonu; kanonik kalıcılık servisi
+    # sağlayıcı çağırmaz.
     coach_feedback = generate_checkin_feedback(
         current_user.username, weight, prev_weight, days_passed,
         goal, yogunluk, fatigue, overload, uyku, beslenme, note,
         language=current_user.language
     )
 
-    entry = WeeklyCheckIn(
-        user_id=current_user.id,
-        weight=weight,
-        yogunluk=yogunluk,
-        fatigue=fatigue,
-        progressive_overload=overload,
-        uyku_kalitesi=uyku,
-        beslenme_uyumu=beslenme,
-        note=note,
+    # Satır + kanonik kilo + (profil TAM ise) türetilmiş oturum hedefleri
+    # tek transaction'da sahnelenir (BUG-1); commit servisin.
+    entry = weekly_checkin.stage_full_checkin(
+        current_user._get_current_object(),
+        weekly_checkin.FullCheckIn(
+            weight=weight, intensity=yogunluk, fatigue=fatigue,
+            progressive_overload=overload, sleep_quality=uyku,
+            nutrition_adherence=beslenme, note=note),
+        context,
         coach_feedback=coach_feedback,
         idempotency_key=submission_key,
         request_fingerprint=fingerprint,
     )
-    db.session.add(entry)
-
-    # Haftalık check-in kilosunu kanonik profile taşı ve kalori hedeflerini
-    # yeniden hesapla (BUG-1). Aksi halde yalnızca /update-weight kullanmayan,
-    # her şeyi haftalık check-in ile takip eden kullanıcının current_user.weight'i
-    # kurulum değerinde donar; menü "kalan bütçe" ve protein nudge'ı bayatlar.
-    _apply_weight_to_profile(weight, last_session)
     if submission_key:
         # Quest/challenge writes and the replay response commit with the row.
         quest_result = _claim_quest(current_user.id, "checkin_done")
@@ -345,21 +292,12 @@ def checkin():
                 "coach_feedback": coach_feedback}
         if quest_result:
             resp["quest_awarded"] = quest_result
-        entry.response_snapshot = json.dumps(resp, ensure_ascii=False)
-        try:
-            db.session.commit()
-        except IntegrityError:
-            db.session.rollback()
-            winner = WeeklyCheckIn.query.filter_by(
-                user_id=current_user.id, idempotency_key=submission_key).first()
-            if winner is None:
-                raise
-            if winner.request_fingerprint != fingerprint:
-                return jsonify({"error": t("route.checkin_key_conflict")}), 409
-            return jsonify(json.loads(winner.response_snapshot))
-        return jsonify(resp)
+        result = weekly_checkin.commit_full_checkin(entry, response=resp)
+        if result.outcome is weekly_checkin.SubmissionOutcome.CONFLICT:
+            return jsonify({"error": t("route.checkin_key_conflict")}), 409
+        return jsonify(result.response)
 
-    db.session.commit()
+    weekly_checkin.commit_full_checkin(entry)
 
     # "Haftalık Check-in" görevini ver (günde bir kez; zaten claimliyse None — 1.1).
     quest_result = complete_quest_for_user(current_user.id, "checkin_done")
@@ -412,29 +350,14 @@ def update_weight():
         return jsonify({"error": t(error_key)}), 400
 
 
-    last_sess = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc(), UserSession.id.desc()).first()
-
     # Kiloyu kanonik profile yaz + profil TAM ise BMR/TDEE/hedefi yeniden hesapla
-    # (ortak yardımcı; /checkin ile aynı davranış). Profil eksikse türetilmiş
-    # hedefleri BOZMA — bkz. _apply_weight_to_profile (L2).
-    bmr, tdee, target_calories, profile_ready = _apply_weight_to_profile(weight, last_sess)
-
-    # Gün sınırı Istanbul gününe göre (CLAUDE.md): UTC gece-yarısı kullanmak
-    # Istanbul 00:00–03:00 arası check-in'i bir önceki güne sokar ve "bugünü
-    # güncelle" dalı atlanıp yinelenen satır eklenirdi (F1).
-    today_start, today_end = utc_day_bounds(app_today())
-    today_checkin = WeeklyCheckIn.query.filter(
-        WeeklyCheckIn.user_id == current_user.id,
-        WeeklyCheckIn.created_at >= today_start,
-        WeeklyCheckIn.created_at < today_end,
-    ).first()
-    if today_checkin:
-        today_checkin.weight = weight
-    else:
-        db.session.add(WeeklyCheckIn(user_id=current_user.id, weight=weight))
-
-    db.session.commit()
+    # (ortak kanonik yardımcı; /checkin ile aynı davranış), Istanbul gününün
+    # satırını güncelle ya da seyrek satır ekle, commit et. Legacy yol: bilinen
+    # kusurları (aynı günün TAM check-in kilosunu ezer, kilit almaz) KORUNUR.
+    update = weekly_checkin.record_legacy_weight_update(
+        current_user._get_current_object(), weight)
+    bmr, tdee, target_calories = update.bmr, update.tdee, update.target_calories
+    profile_ready = update.profile_ready
 
     # Kilo güncellemesi de bir check-in sayılır → "Haftalık Check-in" görevini ver
     # (günde bir kez; zaten claimliyse None — 1.1).

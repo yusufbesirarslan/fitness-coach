@@ -140,7 +140,7 @@ blueprint, gate, `no-store`, envelope and 429 handler as the `PUT`.
   (no BMR/TDEE/calories).
 - **Source** — the `User` columns, through
   `account_profile.current_profile(user)`. They are the profile: this
-  service, the weight log (`tracking._apply_weight_to_profile`) and the web
+  service, the weight log (`weekly_checkin.apply_body_weight`) and the web
   profile edit (`/edit-profile`: goal, target weight) all write them. The
   canonical `UserSession` holds a derived copy that can lag them and is not
   read.
