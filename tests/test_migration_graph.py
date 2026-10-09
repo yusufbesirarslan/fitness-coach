@@ -37,7 +37,7 @@ def test_alembic_migrations_have_single_head():
     heads = sorted(set(revisions) - down_revisions)
 
     # LP-11's deleted-identity tombstone follows Check-in's submission key.
-    assert heads == ["e3f4a5b6c7d8"]
+    assert heads == ["b1a8c9d0e1f2"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -64,8 +64,8 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # deleted-identity tombstone table. Sprint 11 PR4 still contributes none
     # of them, which is the claim this test guards.
     # TI-01A adds two nullable columns on workout_session, no catalog table.
-    # LP18-B0 adds dedicated replacement authority only.
-    assert len(revision_files) == 47
+    # LP18-B0 adds replacement authority; B1 adds generation recovery only.
+    assert len(revision_files) == 48
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 

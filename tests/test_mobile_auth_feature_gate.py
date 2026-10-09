@@ -218,6 +218,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # TI-01B private catalog note, independently gated by P0 readiness.
             ("/api/v1/training/exercises/<exercise_id>/note", ("GET", "PUT")),
             ("/api/v1/training/plans", ("POST",)),
+            ("/api/v1/training/plans/replacement-proposals", ("POST",)),
+            ("/api/v1/training/plans/replacement/confirm", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),
             ("/api/v1/training/workouts/<workout_reference>", ("GET",)),
             # Mobile Training session contracts; behind

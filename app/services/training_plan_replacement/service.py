@@ -76,7 +76,7 @@ def intent_fingerprint(proposal):
         separators=(",", ":")))
 
 
-def stage_proposal(user_id, binding, *, plan_data, score):
+def stage_proposal_in_transaction(user_id, binding, *, plan_data, score):
     """Persist immutable server-owned review content, no canonical plan write.
 
     B1 owns validation/projectability and generation idempotency before calling.
@@ -101,10 +101,16 @@ def stage_proposal(user_id, binding, *, plan_data, score):
                    candidate_plan_data=plan_data, candidate_score=float(score),
                    candidate_fingerprint=candidate_fingerprint(plan_data, score),
                    created_at=now, expires_at=now + PROPOSAL_TTL)
+    db.session.add(row)
+    db.session.flush()
+    return row.public_id
+
+
+def stage_proposal(user_id, binding, *, plan_data, score):
+    """Preserve the public commit-owning staging wrapper."""
     try:
-        db.session.add(row)
-        db.session.flush()
-        public_id = row.public_id
+        public_id = stage_proposal_in_transaction(
+            user_id, binding, plan_data=plan_data, score=score)
         db.session.commit()
         return public_id
     except Exception:

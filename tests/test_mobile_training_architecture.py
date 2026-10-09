@@ -173,6 +173,8 @@ def test_all_training_routes_use_the_shared_bearer_decorator(app):
     for endpoint in (
         "mobile_api.training_preferences",
         "mobile_api.create_training_plan",
+        "mobile_api.create_replacement_proposal",
+        "mobile_api.confirm_replacement_proposal",
         "mobile_api.current_training_plan",
         "mobile_api.training_workout",
     ):

@@ -244,6 +244,7 @@ def generate_training_plan_candidate(
     chat_fn,
     language="tr",
     logger=None,
+    *, frozen_features=None,
 ) -> GeneratedTrainingPlanCandidate:
     """Run the canonical generator and return one persistence-ready candidate.
 
@@ -265,7 +266,7 @@ def generate_training_plan_candidate(
         cardio_days=preferences.kardiyo_gun,
         provider_invoked=1,
     )
-    features = build_features(user, last_session, preferences)
+    features = frozen_features if frozen_features is not None else build_features(user, last_session, preferences)
     classification = classify_user(features)
     context = build_program_context(features, preferences, classification)
     exercise_context = ExerciseContext(

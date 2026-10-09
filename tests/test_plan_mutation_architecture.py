@@ -104,6 +104,8 @@ def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
     approved = {
         Path("app/services/plan_replacement.py"),
         Path("app/services/training_plan_replacement/service.py"),
+        # B1 reads the canonical snapshot fingerprint; it never mutates a plan.
+        Path("app/services/training_plan_replacement/generation.py"),
         Path("app/services/coach_plan_tools/executor.py"),
         Path("app/services/coach_plan_tools/parser.py"),
         Path("app/services/coach_plan_tools/results.py"),

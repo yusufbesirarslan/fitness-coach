@@ -1707,3 +1707,41 @@ def _refuse_replacement_authority_update(mapper, connection, target):
     """Authority is immutable; retention deletes, never rebinds, these rows."""
     if any(attr.history.has_changes() for attr in inspect(target).attrs):
         raise ValueError("replacement authority is immutable")
+
+
+class TrainingPlanReplacementGenerationOperation(db.Model):
+    """Replacement generation only; never consumed by first-plan recovery."""
+    __tablename__ = "training_plan_replacement_generation_operation"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    key_digest = db.Column(db.String(64), nullable=False)
+    intent_fingerprint = db.Column(db.String(64), nullable=False)
+    base_lineage_id = db.Column(db.String(64), nullable=False)
+    base_mutation_version = db.Column(db.Integer, nullable=False)
+    base_snapshot_digest = db.Column(db.String(64), nullable=False)
+    generation_context = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(16), nullable=False)
+    attempt_count = db.Column(db.Integer, nullable=False)
+    lease_token = db.Column(db.String(64), nullable=True)
+    lease_expires_at = db.Column(db.DateTime, nullable=True)
+    proposal_public_id = db.Column(db.String(64), nullable=True)
+    proposal_expires_at = db.Column(db.DateTime, nullable=True)
+    review_data = db.Column(db.Text, nullable=True)
+    error_code = db.Column(db.String(64), nullable=True)
+    error_http_status = db.Column(db.Integer, nullable=True)
+    quota_reserved = db.Column(db.Boolean, nullable=False, default=False)
+    quota_week = db.Column(db.String(10), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "key_digest", name="uq_replacement_generation_owner_key"),
+        db.CheckConstraint("status IN ('IN_PROGRESS', 'SUCCEEDED', 'FAILED')", name="ck_replacement_generation_status"),
+        db.CheckConstraint("attempt_count >= 1 AND attempt_count <= 2", name="ck_replacement_generation_attempts"),
+        db.CheckConstraint("base_mutation_version >= 0", name="ck_replacement_generation_version"),
+        db.CheckConstraint("review_data IS NULL OR length(review_data) <= 524288", name="ck_replacement_generation_review"),
+        db.CheckConstraint("generation_context IS NULL OR length(generation_context) <= 32768", name="ck_replacement_generation_context"),
+        db.CheckConstraint("(status = 'IN_PROGRESS' AND lease_token IS NOT NULL AND lease_expires_at IS NOT NULL AND generation_context IS NOT NULL AND completed_at IS NULL AND proposal_public_id IS NULL AND proposal_expires_at IS NULL AND review_data IS NULL AND error_code IS NULL AND error_http_status IS NULL) OR (status = 'SUCCEEDED' AND lease_token IS NULL AND lease_expires_at IS NULL AND generation_context IS NULL AND completed_at IS NOT NULL AND proposal_public_id IS NOT NULL AND proposal_expires_at IS NOT NULL AND review_data IS NOT NULL AND error_code IS NULL AND error_http_status IS NULL) OR (status = 'FAILED' AND lease_token IS NULL AND lease_expires_at IS NULL AND generation_context IS NULL AND completed_at IS NOT NULL AND proposal_public_id IS NULL AND proposal_expires_at IS NULL AND review_data IS NULL AND error_code IS NOT NULL AND error_http_status IS NOT NULL)", name="ck_replacement_generation_result"),
+        db.Index("uq_replacement_generation_active_owner", "user_id", unique=True,
+                 postgresql_where=db.text("status = 'IN_PROGRESS'"), sqlite_where=db.text("status = 'IN_PROGRESS'")),
+    )
