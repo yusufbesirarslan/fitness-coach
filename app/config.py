@@ -83,6 +83,13 @@ COMMENT_WRITE_RATELIMIT = os.getenv("COMMENT_WRITE_RATELIMIT", "120 per hour")
 # contract is what makes a checkpoint safe, not the throttle.
 WORKOUT_CHECKPOINT_RATELIMIT = os.getenv(
     "WORKOUT_CHECKPOINT_RATELIMIT", "60 per minute; 900 per hour")
+# LP16-B: native weekly check-in write is CHEAP (no AI, no provider: one owner
+# lock + one row + the User.weight/session update) and RARE (weekly, repeats
+# allowed). Its own per-user ceiling — never an AI/Bedrock quota — sized to
+# absorb client retries and replays while bounding an abusive client.
+# Correctness never depends on it: Idempotency-Key + the owner lock do.
+CHECKIN_WRITE_RATELIMIT = os.getenv(
+    "CHECKIN_WRITE_RATELIMIT", "10 per minute; 60 per hour")
 # Freemium: AI plan üretiminde sunucu-taraflı haftalık kota (app/services/premium).
 # Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
 AI_PLAN_QUOTA_ENABLED = os.getenv("AI_PLAN_QUOTA_ENABLED", "1") == "1"

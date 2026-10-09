@@ -14,7 +14,7 @@ from .models import (BodyWeightUpdate, CheckInContext, FullCheckIn,
 from .queries import FULL_CHECKIN
 from .service import (apply_body_weight, claim_submission, commit_full_checkin,
                       load_context, record_legacy_weight_update,
-                      stage_full_checkin)
+                      reload_locked_owner, stage_full_checkin)
 
 __all__ = [
     "BodyWeightUpdate",
@@ -28,5 +28,6 @@ __all__ = [
     "commit_full_checkin",
     "load_context",
     "record_legacy_weight_update",
+    "reload_locked_owner",
     "stage_full_checkin",
 ]
