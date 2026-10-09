@@ -177,3 +177,72 @@ def training_workout(workout_reference):
             True,
         )
     return jsonify(payload)
+
+
+@bp.post("/training/plans/replacement-proposals")
+@require_mobile_auth
+def create_replacement_proposal():
+    from app.extensions import db
+    from app.services.training_plan_replacement.generation import generate_proposal
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        key = parse_idempotency_key(request.headers.get('Idempotency-Key'))
+        command = parse_native_request(request.get_json(silent=True))
+        result = generate_proposal(g.mobile_user, command, key,
+            chat_fn=partial(_heavy_chat, feature='training_plan'),
+            provider_guard=_native_generation_provider_guard)
+    except PreferenceContractError as error:
+        return mobile_error(error.public_code, 'The Training preferences are not supported.', error.http_status, error.retryable)
+    except PlanGenerationCommandError as error:
+        return _generation_error(error, retry_after=15 if isinstance(error, GenerationInProgress) else getattr(error, 'retry_after', None))
+    except RateLimitExceeded as error:
+        return mobile_error('TRAINING_PLAN_RATE_LIMITED', 'Too many Training plan generation requests.', 429, False,
+                            retry_after=error.limit.limit.get_expiry())
+    except BlockingConcurrencyLimit:
+        return mobile_error('TRAINING_PLAN_GENERATION_BUSY', 'Training plan generation is temporarily busy.', 503, False)
+    except (SQLAlchemyError, ValueError, mobile_training.PlanUnprojectable):
+        db.session.rollback()
+        return mobile_error('TRAINING_PLAN_PERSISTENCE_UNAVAILABLE', 'Training is temporarily unavailable.', 503, True)
+    response = jsonify({'contract_version': 1, 'proposal_token': result.proposal_token,
+                        'expires_at': mobile_training._utc_iso(result.expires_at), 'candidate': result.review})
+    response.status_code = 201
+    response.headers['Idempotency-Replayed'] = str(result.replayed).lower()
+    return response
+
+
+@bp.post("/training/plans/replacement/confirm")
+@require_mobile_auth
+def confirm_replacement_proposal():
+    import re
+    from app.extensions import db
+    from app.services.training_plan_replacement import service as authority
+    from app.services.mobile_training_generation.errors import InvalidPlanRequest
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        key = parse_idempotency_key(request.headers.get('Idempotency-Key'))
+        body = request.get_json(silent=True)
+        if (not isinstance(body, dict) or set(body) != {'proposal_token', 'confirmed'}
+                or body['confirmed'] is not True or not isinstance(body['proposal_token'], str)
+                or re.fullmatch(r'[A-Za-z0-9_-]{43}', body['proposal_token']) is None):
+            raise InvalidPlanRequest()
+        result = authority.confirm_replacement(g.mobile_user.id, body['proposal_token'], key)
+    except PlanGenerationCommandError as error:
+        return _generation_error(error)
+    except authority.ConfirmationConflict:
+        return mobile_error('TRAINING_PLAN_IDEMPOTENCY_CONFLICT', 'The confirmation key has a different intent.', 409, False)
+    except authority.ProposalUnavailable:
+        return mobile_error('TRAINING_PLAN_PROPOSAL_UNAVAILABLE', 'The Training proposal is unavailable.', 404, False)
+    except authority.ReplacementRefusal as error:
+        codes = {'STALE': 'TRAINING_PLAN_STALE_CURRENT_PLAN',
+                 'ACTIVE_REFUSED': 'TRAINING_PLAN_ACTIVE_SESSION_REFUSED',
+                 'COACH_PENDING_REFUSED': 'TRAINING_PLAN_COACH_PENDING_REFUSED',
+                 'EXPIRED': 'TRAINING_PLAN_PROPOSAL_EXPIRED', 'CONSUMED': 'TRAINING_PLAN_PROPOSAL_CONSUMED'}
+        response = mobile_error(codes[error.reason], 'The Training replacement could not be applied.', 409, False)
+        response.headers['Idempotency-Replayed'] = str(error.result.replayed).lower()
+        return response
+    except SQLAlchemyError:
+        db.session.rollback()
+        return mobile_error('TRAINING_PLAN_PERSISTENCE_UNAVAILABLE', 'Training is temporarily unavailable.', 503, True)
+    response = jsonify({'contract_version': 1, 'outcome': 'applied', 'reread_required': True})
+    response.headers['Idempotency-Replayed'] = str(result.replayed).lower()
+    return response

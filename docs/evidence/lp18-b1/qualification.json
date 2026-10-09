@@ -1,0 +1,22 @@
+{
+  "base_sha": "adb78bf5dd7cbc311441ac8257dd8e07e7e099f4",
+  "migration_revision": "b1a8c9d0e1f2",
+  "b1_focused_checks": 49,
+  "affected_regression_checks": 272,
+  "additional_guard_group_distinct_qualified": 230,
+  "b1_pg_checks": 10,
+  "b0_pg_checks": 21,
+  "pg_skips": 0,
+  "mutations_assertion_qualified": 20,
+  "expand_contract": "PASS",
+  "alembic_heads": [
+    "b1a8c9d0e1f2"
+  ],
+  "audit_preserved_uncommitted": true,
+  "b0_pr_state": "OPEN",
+  "b0_pr_read_only_observed_head": "744c26ecb2e793fca7a95aacc2aa4f937d0aac06",
+  "pr_created": false,
+  "ci_run": false,
+  "deployed": false,
+  "merged": false
+}

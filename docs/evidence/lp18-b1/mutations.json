@@ -1,0 +1,122 @@
+[
+  {
+    "mutant": "M01",
+    "detector": "tests/test_lp18_b1.py::test_generation_replay_conflict_and_no_plan_write",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M02",
+    "detector": "tests/test_lp18_b1.py::test_generation_replay_conflict_and_no_plan_write",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M03",
+    "detector": "tests/test_lp18_b1.py::test_claim_precedes_provider_and_frozen_recovery",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M04",
+    "detector": "tests/test_lp18_b1.py::test_late_attempt_fenced_and_recovery_bounded",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M05",
+    "detector": "tests/test_lp18_b1.py::test_expired_lease_cannot_publish_without_takeover",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M06",
+    "detector": "tests/test_lp18_b1.py::test_late_attempt_fenced_and_recovery_bounded",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M07",
+    "detector": "tests/test_lp18_b1.py::test_claim_precedes_provider_and_frozen_recovery",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M08",
+    "detector": "tests/test_lp18_b1.py::test_claim_precedes_provider_and_frozen_recovery",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M09",
+    "detector": "tests/test_lp18_b1.py::test_candidate_projection_bounds_and_no_execution",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M10",
+    "detector": "tests/test_lp18_b1.py::test_quota_once_recovery_and_failure_refund",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M11",
+    "detector": "tests/test_lp18_b1.py::test_publish_checks_full_binding[lineage_id]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M12",
+    "detector": "tests/test_lp18_b1.py::test_publish_checks_full_binding[mutation_version]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M13",
+    "detector": "tests/test_lp18_b1.py::test_publish_checks_full_binding[plan_data]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M14",
+    "detector": "tests/test_lp18_b1.py::test_publication_rolls_back_atomically[operation]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M15",
+    "detector": "tests/test_lp18_b1.py::test_confirm_strict_schema[body2]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M16",
+    "detector": "tests/test_lp18_b1.py::test_confirm_strict_schema[body3]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M17",
+    "detector": "tests/test_lp18_b1.py::test_stable_review_replay_does_not_resolve_catalog",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M18",
+    "detector": "tests/test_lp18_b1.py::test_canonical_provider_failure_is_durable_refunded",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M19",
+    "detector": "tests/test_lp18_b1.py::test_claim_precedes_provider_and_frozen_recovery",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M20",
+    "detector": "tests/test_lp18_b1.py::test_http_success_confirm_replay_and_zero_provider",
+    "returncode": 1,
+    "killed_by_assertion": true
+  }
+]
