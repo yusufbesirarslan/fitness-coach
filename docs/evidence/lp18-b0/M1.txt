@@ -1,0 +1,3 @@
+detector=tests/test_lp18_b0_pg.py::test_a_start_wins_active_refuses
+exit=1
+assertion_detected=True

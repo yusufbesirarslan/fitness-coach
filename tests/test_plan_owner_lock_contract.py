@@ -91,7 +91,7 @@ def test_every_training_plan_create_writer_takes_the_shared_owner_lock():
 
 
 @pytest.mark.parametrize("module_path, function_name", [
-    ("app/services/plan_replacement.py", "replace_training_plan"),
+    ("app/services/plan_replacement.py", "replace_training_plan_in_transaction"),
     ("app/services/mobile_training_generation/store.py", "commit_plan"),
 ])
 def test_the_absence_check_is_made_after_the_owner_lock(module_path,
@@ -121,6 +121,21 @@ def test_the_absence_check_is_made_after_the_owner_lock(module_path,
     assert min(lock_lines) < min(check_lines), (
         f"{function_name} asks {ABSENCE_CHECK} before taking {LOCK_FUNCTION}"
     )
+
+
+def test_replacement_wrapper_delegates_to_the_commit_free_core():
+    tree = ast.parse((APP / "services/plan_replacement.py").read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    wrapper = _calls(functions["replace_training_plan"])
+    core = _calls(functions["replace_training_plan_in_transaction"])
+    delegated = [line for line, name in wrapper if name == "replace_training_plan_in_transaction"]
+    commits = [line for line, name in wrapper if name == "commit"]
+    assert len(delegated) == len(commits) == 1
+    assert delegated[0] < commits[0]
+    assert "rollback" in {name for _, name in wrapper}
+    assert not {"commit", "rollback"} & {name for _, name in core}
+    # The wrapper must not make its own unprotected absence decision.
+    assert ABSENCE_CHECK not in {name for _, name in wrapper}
 
 
 def test_the_owner_lock_primitive_stays_a_leaf():

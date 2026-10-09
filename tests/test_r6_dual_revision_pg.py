@@ -429,11 +429,36 @@ def test_candidate_fails_closed_on_postgres_without_mutating(pg_url, monkeypatch
 
 # ── TEST 6: migration lock wait is bounded on the real migration path ──────
 
+def _prepare_reversible_lock_fixture(monkeypatch):
+    """Exercise TI-01B's reversible FK DDL without downgrading LP18 receipts.
+
+    Upgrade only to the reversible ancestor, then remove exercise_note via
+    its real downgrade. The production boot retries that pending migration
+    before continuing forward through the expand-only LP18 migration.
+    """
+    import flask_migrate
+    from alembic.script import ScriptDirectory
+    script = ScriptDirectory(os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "migrations"))
+    revision = script.get_revision("e2f3a4b5c6d7")
+    head, _ = _heads()
+    assert revision.revision in {
+        item.revision for item in script.iterate_revisions(head, "base")}
+    tool = _boot_tool(monkeypatch)
+    try:
+        with tool.app_context():
+            flask_migrate.upgrade(revision=revision.revision)
+            flask_migrate.downgrade(revision=revision.down_revision)
+    finally:
+        _dispose(tool)
+    return revision.down_revision
+
+
 def _hold_user_row_exclusive(url):
     """A serving-revision write transaction left open on "user" (ROW EXCLUSIVE).
 
     Creating a table with a FOREIGN KEY to "user" needs SHARE ROW EXCLUSIVE on
-    it, which conflicts — exactly the DDL the head migration runs.
+    it, which conflicts — exactly the DDL the reversible fixture runs.
     """
     engine = sa.create_engine(url)
     connection = engine.connect()
@@ -464,12 +489,8 @@ def test_blocked_migration_aborts_at_the_lock_timeout(pg_url, monkeypatch):
 
     from app.extensions import db
 
-    head, parent = _heads()
-    tool = _boot_tool(monkeypatch)
-    with tool.app_context():
-        flask_migrate.upgrade()
-        flask_migrate.downgrade(revision=parent)
-    _dispose(tool)
+    head, _ = _heads()
+    parent = _prepare_reversible_lock_fixture(monkeypatch)
     assert _versions(pg_url) == [parent]
 
     monkeypatch.setenv("FITX_MIGRATION_LOCK_TIMEOUT_MS", "700")
@@ -552,13 +573,8 @@ def test_migration_connection_carries_the_bound_and_app_pool_does_not(
 def test_control_the_held_lock_really_blocks_unbounded_ddl(pg_url, monkeypatch):
     """Without a lock bound the same DDL simply waits (here cut by a
     statement_timeout so the control itself terminates)."""
-    import flask_migrate
-    head, parent = _heads()
-    tool = _boot_tool(monkeypatch)
-    with tool.app_context():
-        flask_migrate.upgrade()
-        flask_migrate.downgrade(revision=parent)
-    _dispose(tool)
+    parent = _prepare_reversible_lock_fixture(monkeypatch)
+    assert _versions(pg_url) == [parent]
     blocker_engine, blocker, _ = _hold_user_row_exclusive(pg_url)
     engine = sa.create_engine(pg_url)
     try:

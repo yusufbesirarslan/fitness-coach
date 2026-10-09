@@ -1,0 +1,8 @@
+........................................................................ [ 72%]
+...........................                                              [100%]
+=============================== warnings summary ===============================
+tests/test_triage_2026_10_04_fixes.py::test_ci_concurrency_job_collects_every_marked_module
+  <unknown>:68: DeprecationWarning: invalid escape sequence '\)'
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+99 passed, 1 warning in 8.12s

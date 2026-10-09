@@ -31,34 +31,20 @@ what makes "all create writers share one contract" checkable.
 
 LOCK ORDER
 ----------
-One order, repository-wide, and every writer takes a prefix of it:
+Create writers: generation operation (if present) -> User NO KEY UPDATE ->
+TrainingPlan. Targeted mutation: Coach proposal (if present) -> TrainingPlan ->
+journal insert/User KEY SHARE. NO KEY UPDATE remains incompatible with other
+creators but is compatible with FK KEY SHARE; this removes the implicit reverse
+plan -> User conflict. Completion keeps session -> day -> artifacts -> User
+UPDATE; start never takes this owner lock. See LP18-B0's complete lock graph.
 
-1. ``training_plan_generation_operation`` row — native idempotency
-2. ``user`` row — THIS lock, and the AI-quota/XP writers
-3. ``training_plan`` rows — ``plan_mutation``, ``plan_replacement``
-
-``plan_replacement`` takes 2 then 3. ``store.commit_plan`` takes 1, then 2, then
-inserts at 3. ``store.claim`` and ``store.record_failure`` take 1 then 2 (the
-quota reservation and its refund). ``plan_mutation`` and the Coach executor take
-3 alone. Nothing takes 3 before 2 or 2 before 1, so there is no cycle. The
-native advisory lock sits outside this ordering entirely and cannot join a
-cycle: it is ``pg_try_advisory_lock``, which never waits.
-
-Ordering is not merely a convention here, because PostgreSQL enforces part of
-it: ``training_plan.user_id`` references ``user.id``, so an INSERT takes a
-``FOR KEY SHARE`` lock on the owner row, and that conflicts with the ``FOR
-UPDATE`` this module takes. A writer that inserted first and locked the owner
-afterwards would be requesting a lock upgrade, which is the classic way two
-such writers deadlock. Taking the owner lock BEFORE the insert — as both create
-writers do — means the FK's share lock is always already covered by a stronger
-lock the same transaction holds.
 """
 from app.extensions import db
 from app.models import User
 
 
 def lock_plan_owner(user_id):
-    """``SELECT … FOR UPDATE`` the owner row, for its serializing effect alone.
+    """``SELECT … FOR NO KEY UPDATE`` the owner row, for its serializing effect alone.
 
     A COLUMN query, not an entity query. An entity query returns the
     already-identity-mapped ``current_user`` WITHOUT refreshing it, so the lock
@@ -74,4 +60,6 @@ def lock_plan_owner(user_id):
     commits or rolls back, so callers must take it INSIDE the transaction whose
     decision it protects — never in a helper that commits.
     """
-    db.session.query(User.id).filter_by(id=user_id).with_for_update().first()
+    # NO KEY UPDATE serializes all creators but allows journal/session FK
+    # KEY SHARE after a plan/day lock; UPDATE would introduce a reverse edge.
+    db.session.query(User.id).filter_by(id=user_id).with_for_update(key_share=True).first()

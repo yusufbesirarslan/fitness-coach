@@ -1,0 +1,3 @@
+detector=tests/test_lp18_b0_architecture.py::test_lock_order_and_namespace_identity
+exit=1
+assertion_detected=True

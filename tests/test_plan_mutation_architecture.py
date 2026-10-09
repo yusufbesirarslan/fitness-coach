@@ -102,6 +102,8 @@ def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
     Adding a name here is cheap; the point is that it has to be a decision.
     """
     approved = {
+        Path("app/services/plan_replacement.py"),
+        Path("app/services/training_plan_replacement/service.py"),
         Path("app/services/coach_plan_tools/executor.py"),
         Path("app/services/coach_plan_tools/parser.py"),
         Path("app/services/coach_plan_tools/results.py"),

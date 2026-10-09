@@ -1,0 +1,3 @@
+detector=tests/test_lp18_b0.py::test_each_stale_dimension_refuses[lineage_id]
+exit=1
+assertion_detected=True

@@ -1,0 +1,104 @@
+[
+  {
+    "mutant": "M1",
+    "detector": "tests/test_lp18_b0_pg.py::test_a_start_wins_active_refuses",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M2",
+    "detector": "tests/test_lp18_b0_pg.py::test_b_replacement_wins_start_snapshots_new",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M3",
+    "detector": "tests/test_lp18_b0.py::test_any_active_even_previous_day_refuses_and_replays",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M4",
+    "detector": "tests/test_lp18_b0_architecture.py::test_lock_order_and_namespace_identity",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M5",
+    "detector": "tests/test_lp18_b0.py::test_receipt_failure_rolls_back_replacement",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M6",
+    "detector": "tests/test_lp18_b0.py::test_fingerprint_binds_every_frozen_dimension",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M7",
+    "detector": "tests/test_lp18_b0.py::test_different_intent_same_key_conflicts",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M8",
+    "detector": "tests/test_lp18_b0.py::test_success_and_replay_survive_restart_plan_and_proposal_deletion",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M9",
+    "detector": "tests/test_lp18_b0.py::test_each_stale_dimension_refuses[plan_data]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M10",
+    "detector": "tests/test_lp18_b0.py::test_each_stale_dimension_refuses[mutation_version]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M11",
+    "detector": "tests/test_lp18_b0.py::test_each_stale_dimension_refuses[lineage_id]",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M12",
+    "detector": "tests/test_lp18_b0.py::test_pending_coach_refuses_without_resolving",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M13",
+    "detector": "tests/test_lp18_b0_architecture.py::test_lock_order_and_namespace_identity",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M14",
+    "detector": "tests/test_lp18_b0_architecture.py::test_no_provider_dependency_or_io_in_critical_section",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M15",
+    "detector": "tests/test_lp18_b0.py::test_expired_proposal_refuses",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M16",
+    "detector": "tests/test_lp18_b0.py::test_expiry_and_consumption_closed_states",
+    "returncode": 1,
+    "killed_by_assertion": true
+  },
+  {
+    "mutant": "M17",
+    "detector": "tests/test_lp18_b0_architecture.py::test_lock_order_and_namespace_identity",
+    "returncode": 1,
+    "killed_by_assertion": true
+  }
+]

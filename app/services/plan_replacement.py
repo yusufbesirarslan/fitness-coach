@@ -65,7 +65,7 @@ CODE_PLAN_CHANGED = "TRAINING_PLAN_SAVE_PLAN_CHANGED"
 I18N_PRECONDITION_INVALID = "plan.save_precondition_invalid"
 I18N_PLAN_CHANGED = "plan.save_plan_changed"
 
-# ``lineage_id`` is a 32-character token today; the column allows 64. Bound the
+# ``lineage_id`` is a 43-character token today; the column allows 64. Bound the
 # accepted string by the column rather than by today's generator, so a future
 # widening does not silently start rejecting real identities.
 _MAX_LINEAGE_LENGTH = 64
@@ -187,75 +187,91 @@ def replace_training_plan(user_id, expectation, *, plan_data,
     rather than contend.
     """
     try:
-        lock_plan_owner(user_id)
-
-        # Lock the owner's plan rows themselves. ``populate_existing`` is
-        # load-bearing: without it SQLAlchemy hands back identity-mapped
-        # instances holding their pre-lock column values, and the comparison
-        # below would be made against a version another transaction has already
-        # moved (tests/test_concurrency_staleness.py).
-        owned = (TrainingPlan.query.filter_by(user_id=user_id)
-                 .populate_existing().with_for_update().all())
-
-        # WHICH row is active is not this module's decision to make. Reusing the
-        # canonical selector keeps a replacement from ever targeting a row that
-        # every reader considers inactive.
-        current = get_active_plan(user_id)
-        locked_ids = {row.id for row in owned}
-        if current is not None and current.id not in locked_ids:
-            # A row appeared from a writer that does not participate in this
-            # lock. Refusing is the only safe answer: it is not ours to delete.
-            raise PlanReplacementConflict("plan_appeared")
-
-        if expectation.absent:
-            if current is not None:
-                raise PlanReplacementConflict("expected_absent_but_plan_exists")
-            # A create deletes NOTHING. Issuing the destructive statement anyway
-            # (as the unconditional version did) is what let a request that
-            # believed the user had no plan wipe one that had just been created.
-            doomed = ()
-        else:
-            if current is None:
-                raise PlanReplacementConflict("expected_present_but_absent")
-            if current.lineage_id != expectation.lineage_id:
-                raise PlanReplacementConflict("lineage_mismatch")
-            if current.mutation_version != expectation.mutation_version:
-                raise PlanReplacementConflict("version_mismatch")
-            # Exactly the rows observed under the lock — never a blanket
-            # ``WHERE user_id = :me``, which would also delete a row committed by
-            # a non-participating writer after this read.
-            doomed = tuple(locked_ids)
-
-        if doomed:
-            # ``synchronize_session="fetch"`` rather than ``False``: these rows
-            # are in this session's identity map (the locking read put them
-            # there), and a bulk delete that does not tell the session about
-            # them leaves persistent instances behind for rows that no longer
-            # exist — which SQLAlchemy then collides with when the replacement
-            # is flushed onto a reused primary key.
-            (TrainingPlan.query.filter(TrainingPlan.id.in_(doomed))
-             .delete(synchronize_session="fetch"))
-
-        # Replacement semantics are UNCHANGED: no lineage or version is assigned
-        # here, so the column defaults mint a fresh lineage at version 0 exactly
-        # as they always have. This module adds a precondition, not a lineage
-        # redesign.
-        replacement = TrainingPlan(
-            user_id=user_id, plan_data=plan_data, score=score)
-        db.session.add(replacement)
-        # Materialize the new identity BEFORE the commit expires the instance, so
-        # the caller can hand it back without a second read (and without a second
-        # race).
-        db.session.flush()
-        result = ReplacementResult(
-            lineage_id=replacement.lineage_id,
-            mutation_version=replacement.mutation_version,
-        )
+        result = replace_training_plan_in_transaction(
+            user_id, expectation, plan_data=plan_data, score=score)
         db.session.commit()
     except Exception:
-        # Every refusal and every failure leaves the current plan exactly as it
-        # was: the delete and the insert are in this transaction, so a rollback
-        # can never leave the owner with zero plans or a half-written one.
         db.session.rollback()
         raise
+    return result
+
+
+def replace_training_plan_in_transaction(user_id, expectation, *, plan_data,
+                                         score, snapshot_digest=None, before_replace=None):
+    """One replacement implementation; caller owns commit AND rollback.
+
+    Optional exact-byte digest adds the native frozen binding. Browser callers
+    keep their existing two-part precondition and commit-owning wrapper.
+    """
+    lock_plan_owner(user_id)
+
+    # Lock the owner's plan rows themselves. ``populate_existing`` is
+    # load-bearing: without it SQLAlchemy hands back identity-mapped
+    # instances holding their pre-lock column values, and the comparison
+    # below would be made against a version another transaction has already
+    # moved (tests/test_concurrency_staleness.py).
+    owned = (TrainingPlan.query.filter_by(user_id=user_id)
+             .populate_existing().with_for_update().all())
+
+    # WHICH row is active is not this module's decision to make. Reusing the
+    # canonical selector keeps a replacement from ever targeting a row that
+    # every reader considers inactive.
+    current = get_active_plan(user_id)
+    locked_ids = {row.id for row in owned}
+    if current is not None and current.id not in locked_ids:
+        # A row appeared from a writer that does not participate in this
+        # lock. Refusing is the only safe answer: it is not ours to delete.
+        raise PlanReplacementConflict("plan_appeared")
+
+    if expectation.absent:
+        if current is not None:
+            raise PlanReplacementConflict("expected_absent_but_plan_exists")
+        # A create deletes NOTHING. Issuing the destructive statement anyway
+        # (as the unconditional version did) is what let a request that
+        # believed the user had no plan wipe one that had just been created.
+        doomed = ()
+    else:
+        if current is None:
+            raise PlanReplacementConflict("expected_present_but_absent")
+        if current.lineage_id != expectation.lineage_id:
+            raise PlanReplacementConflict("lineage_mismatch")
+        if current.mutation_version != expectation.mutation_version:
+            raise PlanReplacementConflict("version_mismatch")
+        # Exactly the rows observed under the lock — never a blanket
+        # ``WHERE user_id = :me``, which would also delete a row committed by
+        # a non-participating writer after this read.
+        if snapshot_digest is not None:
+            from app.services.plan_mutation.fingerprint import snapshot_fingerprint
+            if snapshot_fingerprint(current.plan_data) != snapshot_digest:
+                raise PlanReplacementConflict("snapshot_mismatch")
+        doomed = tuple(locked_ids)
+
+    if before_replace is not None:
+        before_replace()
+
+    if doomed:
+        # ``synchronize_session="fetch"`` rather than ``False``: these rows
+        # are in this session's identity map (the locking read put them
+        # there), and a bulk delete that does not tell the session about
+        # them leaves persistent instances behind for rows that no longer
+        # exist — which SQLAlchemy then collides with when the replacement
+        # is flushed onto a reused primary key.
+        (TrainingPlan.query.filter(TrainingPlan.id.in_(doomed))
+         .delete(synchronize_session="fetch"))
+
+    # Replacement semantics are UNCHANGED: no lineage or version is assigned
+    # here, so the column defaults mint a fresh lineage at version 0 exactly
+    # as they always have. This module adds a precondition, not a lineage
+    # redesign.
+    replacement = TrainingPlan(
+        user_id=user_id, plan_data=plan_data, score=score)
+    db.session.add(replacement)
+    # Materialize the new identity BEFORE the commit expires the instance, so
+    # the caller can hand it back without a second read (and without a second
+    # race).
+    db.session.flush()
+    result = ReplacementResult(
+        lineage_id=replacement.lineage_id,
+        mutation_version=replacement.mutation_version,
+    )
     return result

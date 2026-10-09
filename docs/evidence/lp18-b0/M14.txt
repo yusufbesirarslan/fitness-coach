@@ -1,0 +1,4 @@
+detector=tests/test_lp18_b0_architecture.py::test_no_provider_dependency_or_io_in_critical_section
+exit=1
+assertion_detected=True
+provider_stub_executable=True
