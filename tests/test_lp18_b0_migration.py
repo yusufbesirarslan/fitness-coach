@@ -29,7 +29,12 @@ def test_upgrade_and_rerun_one_head():
             assert all(f['referred_table']=='user' for f in inspector.get_foreign_keys(name))
         assert len(inspector.get_check_constraints('training_plan_replacement_receipt')) == 2
     config=Config();config.set_main_option('script_location', str(ROOT/'migrations'))
-    assert ScriptDirectory.from_config(config).get_heads()==['e3f4a5b6c7d8']
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    assert len(heads) == 1, f"expected one head, found {heads}"
+    assert m.revision == "e3f4a5b6c7d8"
+    assert m.down_revision == "e2f3a4b5c6d7"
+    assert heads == [m.revision]
     assert m.expand_contract=='expand'
 
 
@@ -48,3 +53,15 @@ def test_damaged_existing_schema_fails_closed():
         conn.execute(sa.text('CREATE TABLE training_plan_replacement_proposal (id INTEGER PRIMARY KEY)'))
         with Operations.context(MigrationContext.configure(conn)):
             with pytest.raises(RuntimeError, match='columns mismatch'):m.upgrade()
+
+
+def test_downgrade_refuses_to_erase_durable_replacement_authority():
+    m = migration()
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(sa.text("CREATE TABLE user (id INTEGER PRIMARY KEY)"))
+        with Operations.context(MigrationContext.configure(conn)):
+            m.upgrade()
+            with pytest.raises(RuntimeError, match="expand-only replacement authority"):
+                m.downgrade()
+        assert set(m.SCHEMA) <= set(sa.inspect(conn).get_table_names())

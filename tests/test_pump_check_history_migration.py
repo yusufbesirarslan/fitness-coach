@@ -96,10 +96,12 @@ def test_the_repository_still_has_exactly_one_alembic_head():
             parents.update(
                 re.findall(r"""["']([0-9a-zA-Z_]+)["']""", down.group(1)))
 
-    # The single head moves with every added revision. F7 chains its Coach
-    # history index onto F1's credential-epoch revision, so the graph remains
-    # single-headed and this pin names the new tip.
-    assert [r for r in revisions if r not in parents] == ["e2f3a4b5c6d7"]
+    heads = sorted(set(revisions) - parents)
+    assert len(heads) == 1, f"expected one head, found {heads}"
+    # This historical index must remain in the integrated migration graph;
+    # the current replacement-authority contract is pinned by LP18's tests.
+    assert "c1d2e3f4a5b6" in revisions
+
 
 
 def test_the_migration_descends_from_the_merged_comparison_head():

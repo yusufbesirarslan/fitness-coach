@@ -289,10 +289,12 @@ def test_the_prerequisite_migrations_named_by_the_runbook_still_exist(revision):
         f"{revision} is no longer named in the flag's own prerequisites")
 
 
-def test_pr5_adds_no_migration_and_the_head_the_runbook_names_is_current():
-    """S14-9: the sprint adds no migration, and the runbook's stated head must
-    be the actual single head — an operator verifies `alembic heads` against
-    this document."""
+def test_activation_prerequisites_remain_in_the_single_head_graph():
+    """Activation adds no migration; later releases may advance the single tip.
+
+    The runbook's session prerequisites must remain ancestors of that tip.
+    LP18's migration tests separately pin the current release contract.
+    """
     import ast as _ast
 
     revisions, downs = {}, set()
@@ -313,7 +315,11 @@ def test_pr5_adds_no_migration_and_the_head_the_runbook_names_is_current():
                 downs.update(value)
 
     heads = sorted(set(revisions) - downs)
-    assert heads == ["e2f3a4b5c6d7"], f"expected one head, found {heads}"
+    assert len(heads) == 1, f"expected one head, found {heads}"
+    from alembic.script import ScriptDirectory
+    script = ScriptDirectory(str(MIGRATIONS_DIR.parent))
+    ancestry = {revision.revision for revision in script.iterate_revisions(heads[0], "base")}
+    assert {"a994f9bed783", "f5a6b7c8d9e0"} <= ancestry
 
 
 # ── The readiness record must stay honest ──────────────────────────────────
