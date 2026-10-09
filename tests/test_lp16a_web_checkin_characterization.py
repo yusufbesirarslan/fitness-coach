@@ -570,3 +570,31 @@ def test_update_weight_validation_errors_write_nothing(client, auth_user):
     assert client.post("/update-weight", json={}).status_code == 400
     assert client.post("/update-weight", json={"weight": "x"}).status_code == 400
     assert _rows(auth_user.id) == []
+
+
+# ---------------------------------------------------------------------------
+# Existing read consumers observe the same persisted state
+# ---------------------------------------------------------------------------
+
+def test_progress_reads_after_web_writes(client, auth_user, feedback):
+    """Progress summary/history and /checkin-history over web-written rows."""
+    _complete_profile(auth_user)
+    assert client.post("/checkin", json={**FULL, "weight": 80}).status_code == 200
+    first = _rows(auth_user.id)[0]
+    first.created_at = datetime.utcnow() - timedelta(days=8)
+    db.session.commit()
+    assert client.post("/checkin", json=FULL).status_code == 200
+    # Same Istanbul day: overwrites today's FULL row weight (pinned defect).
+    assert client.post("/update-weight", json={"weight": 77}).status_code == 200
+
+    body = client.get("/api/progress/summary").get_json()["body"]
+    assert (body["current_weight_kg"], body["weight_delta_kg"],
+            body["target_weight_kg"], body["distance_to_target_kg"]) == (
+        77.0, -3.0, 72.0, 5.0)
+    assert [p["weight_kg"] for p in body["weight_series"]] == [80.0, 77.0]
+
+    history = client.get("/checkin-history").get_json()
+    assert [(row["kilo"], row["yogunluk"]) for row in history] == [(80.0, 4), (77.0, 4)]
+
+    entries = client.get("/api/progress/history").get_json()["entries"]
+    assert len(entries) == 2
