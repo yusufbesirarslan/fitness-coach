@@ -5,6 +5,59 @@ This is the first local B1 design artifact; endpoints are not implemented yet.
 B1 stays local until B0 merges. The reconciled B0 authority takes precedence
 over earlier LP18-A recommendations about locks, refusals and retention.
 
+## Implementation admission audit — BLOCKED
+
+The LP18-B1 implementation request requires PostgreSQL-backed proposal-generation
+idempotency while keeping `MIGRATION_ADDED=no`. At the frozen B0 SHA these
+requirements cannot both be met within the approved storage authorities:
+
+- `TrainingPlanReplacementProposal` stores only an immutable completed candidate,
+  origin binding, locator and review timestamps. It has no generation command key,
+  semantic intent fingerprint, admission state, frozen generation context,
+  attempt counter, failure result or generation-command uniqueness constraint.
+- `stage_proposal` explicitly delegates generation idempotency to B1. It creates
+  and commits a new proposal on every invocation. Its non-null candidate fields
+  cannot represent an operation admitted before provider work.
+- `TrainingPlanReplacementReceipt` represents terminal confirmation only. Its
+  closed status constraint and immutable result semantics cannot represent
+  generation admission or recovery. Generation must not create a receipt.
+- The first-plan `TrainingPlanGenerationOperation` has no command-kind isolation
+  or frozen replacement binding. Its owner/key lookup and active-owner index
+  cover all rows, GENERATED recovery calls `commit_plan`, and SUCCEEDED replay
+  resolves a canonical TrainingPlan. LP18-A explicitly rejects silent reuse of
+  this ledger for replacement. Namespacing a key alone does not isolate those
+  consumers or supply replacement generation recovery semantics.
+- A PostgreSQL advisory lock serializes live workers but does not persist a
+  key-to-intent-to-proposal mapping after release or worker loss. Deriving the
+  proposal locator from a key cannot record a different-intent conflict before
+  candidate persistence or preserve failure/recovery metadata. Process memory,
+  Redis and unrelated owner metadata cannot be the final authority.
+
+Required scope decision: authorize a dedicated replacement-generation operation
+table and an additive migration, or retain the no-migration boundary and hold B1.
+No B0 transaction, transition lock, proposal immutability or receipt semantics
+need redesign. The proposed addition owns only generation admission/recovery:
+owner-scoped key digest uniqueness, LP18/native semantic intent fingerprint,
+frozen origin/context, bounded attempts and terminal failure, and a soft reference
+to the staged B0 proposal. Publication must atomically bind that proposal to the
+generation operation; a crash between staging and command completion must not
+publish a second effective proposal. Account erasure must include the new table.
+Candidate validation/projectability and provider controls remain outside B0
+confirmation locks. Retention for generation replay needs an explicit contract.
+
+PR #421 was checked read-only on 2026-10-09: OPEN, head
+`adb78bf5dd7cbc311441ac8257dd8e07e7e099f4`, no merge timestamp. No rebase,
+push, B1 PR or CI was performed. Runtime/model/migration files remain unchanged.
+This audit stops implementation admission; the complete subsystem review,
+HTTP/PG qualification and required 16 mutations remain outstanding.
+
+The transport tables below are historical design proposals, **not a frozen
+LP18-C contract**. The current B1 request supersedes their receipt exposure:
+confirmation success must omit receipt identity and use a small acknowledgment
+with mandatory canonical reread. Final request names, errors and limits must be
+updated and tested after the generation-storage decision. B0 supplies no
+product-visible pending review slot requiring cancellation; cancel remains local.
+
 ## Transport boundary
 
 Both routes require existing mobile Bearer authentication; the owner comes only
@@ -80,3 +133,15 @@ idempotent replay/conflict, bounded recovery, and zero provider calls in confirm
 Register only exact routes in existing gate/inventory tests. Preserve B0's
 PostgreSQL races and additive migration. No B1 PR, push, merge or deployment is
 authorized before B0 merges.
+
+## Authorized additive implementation — qualification supersedes admission block
+
+The user's LP18-B1 unblock decision explicitly supersedes the earlier
+`MIGRATION_ADDED=no` restriction for one generation-operation authority.
+The historical audit above is preserved unchanged. The implemented contract and
+qualification are recorded in [LP18_B1_IMPLEMENTATION_QUALIFICATION.md](LP18_B1_IMPLEMENTATION_QUALIFICATION.md).
+In particular, confirmation exposes only the applied acknowledgment with
+mandatory reread, and generation has its own durable fenced operation table.
+The historical transport table's receipt exposure is superseded.
+The original stack was qualified before #421 merged. The post-merge reconciliation
+and current review evidence are recorded in `LP18_B1_RECONCILIATION.md`.

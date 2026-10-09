@@ -1,0 +1,50 @@
+{
+  "b0_merge_sha": "a75d06b07017dd1a6ab89be4679c99b534c07871",
+  "main_sha": "a75d06b07017dd1a6ab89be4679c99b534c07871",
+  "old_head": "c3ab69b2c079374c1bd88e13a6101f7c70a662ed",
+  "original_base": "adb78bf5dd7cbc311441ac8257dd8e07e7e099f4",
+  "b1_only_commits": [
+    "f5f36b9",
+    "c3ab69b"
+  ],
+  "replayed_commits": [
+    "5d2c7b1",
+    "276b25f"
+  ],
+  "conflicts": [
+    "tests/test_lp18_b0_migration.py: retain B0 identity/parent checks; expect B1 head"
+  ],
+  "focused_passed": 289,
+  "guards_passed": 273,
+  "migration_checks_in_guards": 109,
+  "pg_distinct_passed": 64,
+  "pg_modules": {
+    "B1": 10,
+    "B0": 21,
+    "LP16-B": 8,
+    "LP16-A": 7,
+    "browser_native_replacement": 18
+  },
+  "pg_skips": 0,
+  "environment_incidents": [
+    "initial psycopg driver unavailable; corrected to installed psycopg2",
+    "migration probe overlapped final PG module: 62 passes plus 3 fixture errors; after probe finished all 18 affected module cases passed"
+  ],
+  "full_chain_scenarios": [
+    "empty database -> B1 head -> rerun",
+    "empty database -> B0 -> B1 head -> rerun"
+  ],
+  "heads": [
+    "b1a8c9d0e1f2"
+  ],
+  "expand_contract": "PASS (48 revisions)",
+  "b0_confirmation_ast_unchanged": true,
+  "first_plan_route_ast_unchanged": true,
+  "lp16_runtime_diff_from_main": [],
+  "mutations_repeated": false,
+  "runtime_conflicts": 0,
+  "P0": 0,
+  "P1": 0,
+  "P2": 1,
+  "P3": 0
+}

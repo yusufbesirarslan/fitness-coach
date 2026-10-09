@@ -1,0 +1,114 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 54f2eb195404, baseline: mevcut şema (tüm modeller)
+INFO  [alembic.runtime.migration] Running upgrade 54f2eb195404 -> df0d08c0cd24, backfill user_daily_nutrition to meal_log
+INFO  [alembic.runtime.migration] Running upgrade df0d08c0cd24 -> 9be792c80008, tarih to ISO date (Istanbul)
+INFO  [alembic.runtime.migration] Running upgrade 9be792c80008 -> a1b2c3d4e5f6, user FK'lerine ON DELETE CASCADE/SET NULL, UserSession index, MealLog CHECK,
+referral_code -> VARCHAR(16)
+INFO  [alembic.runtime.migration] Running upgrade a1b2c3d4e5f6 -> b2c3d4e5f6a7, user tablosuna cognito_sub (Amazon Cognito e-posta ile giriş kimlik bağı)
+INFO  [alembic.runtime.migration] Running upgrade b2c3d4e5f6a7 -> c3d4e5f6a7b8, Eksik user_id indeksleri + MealLog (user_id, tarih) kompoziti.
+INFO  [alembic.runtime.migration] Running upgrade c3d4e5f6a7b8 -> d4e5f6a7b8c9, Eksik sosyal indeksler: message/friendship sender_id & receiver_id.
+INFO  [alembic.runtime.migration] Running upgrade d4e5f6a7b8c9 -> e5f6a7b8c9d0, user tablosuna user_metadata (AI koç hafızası: sakatlıklar, tercihler — JSONB)
+INFO  [alembic.runtime.migration] Running upgrade e5f6a7b8c9d0 -> f6a7b8c9d0e1, drop legacy user_daily_nutrition table
+INFO  [alembic.runtime.migration] Running upgrade f6a7b8c9d0e1 -> a7b8c9d0e1f2, PumpCheck günlük idempotency: date_key kolonu + (user_id, date_key) UNIQUE.
+INFO  [alembic.runtime.migration] Running upgrade a7b8c9d0e1f2 -> b8c9d0e1f2a3, MealLog.tarih: NULL'ları backfill et + NOT NULL yap.
+INFO  [alembic.runtime.migration] Running upgrade b8c9d0e1f2a3 -> c4d5e6f7a8b9, user tablosuna language kolonu (TR/EN dil tercihi)
+INFO  [alembic.runtime.migration] Running upgrade c4d5e6f7a8b9 -> f1a2b3c4d5e6, I-M1: drifted freemium kolonlarını zincire al + tek-seferlik veri düzeltmeleri
+INFO  [alembic.runtime.migration] Running upgrade f1a2b3c4d5e6 -> ab12cd34ef56, Add provider-neutral wearable integration tables.
+INFO  [alembic.runtime.migration] Running upgrade ab12cd34ef56 -> f2a3b4c5d6e7, Pump Check sharing fields and interactions.
+INFO  [alembic.runtime.migration] Running upgrade f2a3b4c5d6e7 -> b1c2d3e4f5a6, Persist workout score on Pump Checks.
+INFO  [alembic.runtime.migration] Running upgrade b1c2d3e4f5a6 -> c5d6e7f8a9b0, daily_activity: günde tek satır — uq_daily_activity kısıdından intensity'yi çıkar (C4)
+INFO  [alembic.runtime.migration] Running upgrade c5d6e7f8a9b0 -> d6e7f8a9b0c1, Allow Cognito users without local password hashes.
+INFO  [alembic.runtime.migration] Running upgrade f6a7b8c9d0e1 -> e7f8a9b0c1d2, Add normalized barcode food cache.
+INFO  [alembic.runtime.migration] Running upgrade e7f8a9b0c1d2, d6e7f8a9b0c1 -> f8a9b0c1d2e3, Merge barcode cache migration with main migration head.
+INFO  [alembic.runtime.migration] Running upgrade f8a9b0c1d2e3 -> aa11bb22cc33, add cognito_session
+INFO  [alembic.runtime.migration] Running upgrade aa11bb22cc33 -> bb22cc33dd44, Install the PostgreSQL activity calorie calculation trigger.
+INFO  [alembic.runtime.migration] Running upgrade bb22cc33dd44 -> cc33dd44ee55, add coach conversation memory (Sprint 4 WS1)
+INFO  [alembic.runtime.migration] Running upgrade cc33dd44ee55 -> dd44ee55ff66, add notifications (Sprint 5 PR1)
+INFO  [alembic.runtime.migration] Running upgrade dd44ee55ff66 -> ee55ff66aa77, add feed v2 (Sprint 5 PR2)
+INFO  [alembic.runtime.migration] Running upgrade ee55ff66aa77 -> ff66aa77bb88, add challenges (Sprint 5 PR3)
+INFO  [alembic.runtime.migration] Running upgrade ff66aa77bb88 -> aa77bb88cc99, add feed composite indexes (Sprint 5 remediation PR1)
+INFO  [alembic.runtime.migration] Running upgrade aa77bb88cc99 -> bb88cc99dd00, Add optional replay keys for canonical meal ledger writes.
+INFO  [alembic.runtime.migration] Running upgrade bb88cc99dd00 -> a994f9bed783, add workout_session (Sprint 7 PR3)
+INFO  [alembic.runtime.migration] Running upgrade a994f9bed783 -> c7d8e9f0a1b2, Add opaque mobile authentication session families and hashed credentials.
+INFO  [alembic.runtime.migration] Running upgrade c7d8e9f0a1b2 -> d8e9f0a1b2c3, Add semantic fingerprint storage for mobile meal-log idempotency.
+INFO  [alembic.runtime.migration] Running upgrade d8e9f0a1b2c3 -> e9f0a1b2c3d4, Add canonical mobile and structured-analysis Pump Check fields.
+INFO  [alembic.runtime.migration] Running upgrade e9f0a1b2c3d4 -> f0a1b2c3d4e5, Add per-day water funnel marker (WaterLog.quest_fired).
+INFO  [alembic.runtime.migration] Running upgrade f0a1b2c3d4e5 -> b3c4d5e6f7a8, add durable plan versioning + mutation journal (Adaptive Coaching S1 PR2)
+INFO  [alembic.runtime.migration] Running upgrade b3c4d5e6f7a8 -> fa1b2c3d4e5f, Add canonical Pump Check comparison result and request-ledger tables.
+INFO  [alembic.runtime.migration] Running upgrade fa1b2c3d4e5f -> c1d2e3f4a5b6, Add the canonical mobile Pump Check history index.
+INFO  [alembic.runtime.migration] Running upgrade c1d2e3f4a5b6 -> c2d3e4f5a6b7, add durable training-plan confirmation proposals (Adaptive Coaching S1 PR4)
+INFO  [alembic.runtime.migration] Running upgrade c2d3e4f5a6b7 -> d3e4f5a6b7c8, add durable native training-plan generation operations
+INFO  [alembic.runtime.migration] Running upgrade d3e4f5a6b7c8 -> e4f5a6b7c8d9, add durable meal-photo cleanup intents
+INFO  [alembic.runtime.migration] Running upgrade e4f5a6b7c8d9 -> f5a6b7c8d9e0, add native workout-session execution state
+INFO  [alembic.runtime.migration] Running upgrade f5a6b7c8d9e0 -> a6b7c8d9e0f1, add the user credential epoch that fences logins across a password change
+INFO  [alembic.runtime.migration] Running upgrade a6b7c8d9e0f1 -> b7c8d9e0f1a2, Add the bounded Coach-message history access path.
+INFO  [alembic.runtime.migration] Running upgrade b7c8d9e0f1a2 -> c8d9e0f1a2b3, Add optional per-user Check-in submission key and replay snapshot.
+INFO  [alembic.runtime.migration] Running upgrade c8d9e0f1a2b3 -> d0e1f2a3b4c5, add the deleted-identity tombstone (LP-11 anti-resurrection record)
+INFO  [alembic.runtime.migration] Running upgrade d0e1f2a3b4c5 -> e1f2a3b4c5d6, TI-01A additive canonical execution context and immutable prescription.
+INFO  [alembic.runtime.migration] Running upgrade e1f2a3b4c5d6 -> e2f3a4b5c6d7, TI-01B private revisioned catalog notes; downgrade erases all note data.
+INFO  [alembic.runtime.migration] Running upgrade e2f3a4b5c6d7 -> e3f4a5b6c7d8, LP18-B0 additive proposal/receipt authority; no existing-table writes.
+INFO  [alembic.runtime.migration] Running upgrade e3f4a5b6c7d8 -> b1a8c9d0e1f2, Expand-only replacement generation operation authority.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 54f2eb195404, baseline: mevcut şema (tüm modeller)
+INFO  [alembic.runtime.migration] Running upgrade 54f2eb195404 -> df0d08c0cd24, backfill user_daily_nutrition to meal_log
+INFO  [alembic.runtime.migration] Running upgrade df0d08c0cd24 -> 9be792c80008, tarih to ISO date (Istanbul)
+INFO  [alembic.runtime.migration] Running upgrade 9be792c80008 -> a1b2c3d4e5f6, user FK'lerine ON DELETE CASCADE/SET NULL, UserSession index, MealLog CHECK,
+referral_code -> VARCHAR(16)
+INFO  [alembic.runtime.migration] Running upgrade a1b2c3d4e5f6 -> b2c3d4e5f6a7, user tablosuna cognito_sub (Amazon Cognito e-posta ile giriş kimlik bağı)
+INFO  [alembic.runtime.migration] Running upgrade b2c3d4e5f6a7 -> c3d4e5f6a7b8, Eksik user_id indeksleri + MealLog (user_id, tarih) kompoziti.
+INFO  [alembic.runtime.migration] Running upgrade c3d4e5f6a7b8 -> d4e5f6a7b8c9, Eksik sosyal indeksler: message/friendship sender_id & receiver_id.
+INFO  [alembic.runtime.migration] Running upgrade d4e5f6a7b8c9 -> e5f6a7b8c9d0, user tablosuna user_metadata (AI koç hafızası: sakatlıklar, tercihler — JSONB)
+INFO  [alembic.runtime.migration] Running upgrade e5f6a7b8c9d0 -> f6a7b8c9d0e1, drop legacy user_daily_nutrition table
+INFO  [alembic.runtime.migration] Running upgrade f6a7b8c9d0e1 -> a7b8c9d0e1f2, PumpCheck günlük idempotency: date_key kolonu + (user_id, date_key) UNIQUE.
+INFO  [alembic.runtime.migration] Running upgrade a7b8c9d0e1f2 -> b8c9d0e1f2a3, MealLog.tarih: NULL'ları backfill et + NOT NULL yap.
+INFO  [alembic.runtime.migration] Running upgrade b8c9d0e1f2a3 -> c4d5e6f7a8b9, user tablosuna language kolonu (TR/EN dil tercihi)
+INFO  [alembic.runtime.migration] Running upgrade c4d5e6f7a8b9 -> f1a2b3c4d5e6, I-M1: drifted freemium kolonlarını zincire al + tek-seferlik veri düzeltmeleri
+INFO  [alembic.runtime.migration] Running upgrade f1a2b3c4d5e6 -> ab12cd34ef56, Add provider-neutral wearable integration tables.
+INFO  [alembic.runtime.migration] Running upgrade ab12cd34ef56 -> f2a3b4c5d6e7, Pump Check sharing fields and interactions.
+INFO  [alembic.runtime.migration] Running upgrade f2a3b4c5d6e7 -> b1c2d3e4f5a6, Persist workout score on Pump Checks.
+INFO  [alembic.runtime.migration] Running upgrade b1c2d3e4f5a6 -> c5d6e7f8a9b0, daily_activity: günde tek satır — uq_daily_activity kısıdından intensity'yi çıkar (C4)
+INFO  [alembic.runtime.migration] Running upgrade c5d6e7f8a9b0 -> d6e7f8a9b0c1, Allow Cognito users without local password hashes.
+INFO  [alembic.runtime.migration] Running upgrade f6a7b8c9d0e1 -> e7f8a9b0c1d2, Add normalized barcode food cache.
+INFO  [alembic.runtime.migration] Running upgrade e7f8a9b0c1d2, d6e7f8a9b0c1 -> f8a9b0c1d2e3, Merge barcode cache migration with main migration head.
+INFO  [alembic.runtime.migration] Running upgrade f8a9b0c1d2e3 -> aa11bb22cc33, add cognito_session
+INFO  [alembic.runtime.migration] Running upgrade aa11bb22cc33 -> bb22cc33dd44, Install the PostgreSQL activity calorie calculation trigger.
+INFO  [alembic.runtime.migration] Running upgrade bb22cc33dd44 -> cc33dd44ee55, add coach conversation memory (Sprint 4 WS1)
+INFO  [alembic.runtime.migration] Running upgrade cc33dd44ee55 -> dd44ee55ff66, add notifications (Sprint 5 PR1)
+INFO  [alembic.runtime.migration] Running upgrade dd44ee55ff66 -> ee55ff66aa77, add feed v2 (Sprint 5 PR2)
+INFO  [alembic.runtime.migration] Running upgrade ee55ff66aa77 -> ff66aa77bb88, add challenges (Sprint 5 PR3)
+INFO  [alembic.runtime.migration] Running upgrade ff66aa77bb88 -> aa77bb88cc99, add feed composite indexes (Sprint 5 remediation PR1)
+INFO  [alembic.runtime.migration] Running upgrade aa77bb88cc99 -> bb88cc99dd00, Add optional replay keys for canonical meal ledger writes.
+INFO  [alembic.runtime.migration] Running upgrade bb88cc99dd00 -> a994f9bed783, add workout_session (Sprint 7 PR3)
+INFO  [alembic.runtime.migration] Running upgrade a994f9bed783 -> c7d8e9f0a1b2, Add opaque mobile authentication session families and hashed credentials.
+INFO  [alembic.runtime.migration] Running upgrade c7d8e9f0a1b2 -> d8e9f0a1b2c3, Add semantic fingerprint storage for mobile meal-log idempotency.
+INFO  [alembic.runtime.migration] Running upgrade d8e9f0a1b2c3 -> e9f0a1b2c3d4, Add canonical mobile and structured-analysis Pump Check fields.
+INFO  [alembic.runtime.migration] Running upgrade e9f0a1b2c3d4 -> f0a1b2c3d4e5, Add per-day water funnel marker (WaterLog.quest_fired).
+INFO  [alembic.runtime.migration] Running upgrade f0a1b2c3d4e5 -> b3c4d5e6f7a8, add durable plan versioning + mutation journal (Adaptive Coaching S1 PR2)
+INFO  [alembic.runtime.migration] Running upgrade b3c4d5e6f7a8 -> fa1b2c3d4e5f, Add canonical Pump Check comparison result and request-ledger tables.
+INFO  [alembic.runtime.migration] Running upgrade fa1b2c3d4e5f -> c1d2e3f4a5b6, Add the canonical mobile Pump Check history index.
+INFO  [alembic.runtime.migration] Running upgrade c1d2e3f4a5b6 -> c2d3e4f5a6b7, add durable training-plan confirmation proposals (Adaptive Coaching S1 PR4)
+INFO  [alembic.runtime.migration] Running upgrade c2d3e4f5a6b7 -> d3e4f5a6b7c8, add durable native training-plan generation operations
+INFO  [alembic.runtime.migration] Running upgrade d3e4f5a6b7c8 -> e4f5a6b7c8d9, add durable meal-photo cleanup intents
+INFO  [alembic.runtime.migration] Running upgrade e4f5a6b7c8d9 -> f5a6b7c8d9e0, add native workout-session execution state
+INFO  [alembic.runtime.migration] Running upgrade f5a6b7c8d9e0 -> a6b7c8d9e0f1, add the user credential epoch that fences logins across a password change
+INFO  [alembic.runtime.migration] Running upgrade a6b7c8d9e0f1 -> b7c8d9e0f1a2, Add the bounded Coach-message history access path.
+INFO  [alembic.runtime.migration] Running upgrade b7c8d9e0f1a2 -> c8d9e0f1a2b3, Add optional per-user Check-in submission key and replay snapshot.
+INFO  [alembic.runtime.migration] Running upgrade c8d9e0f1a2b3 -> d0e1f2a3b4c5, add the deleted-identity tombstone (LP-11 anti-resurrection record)
+INFO  [alembic.runtime.migration] Running upgrade d0e1f2a3b4c5 -> e1f2a3b4c5d6, TI-01A additive canonical execution context and immutable prescription.
+INFO  [alembic.runtime.migration] Running upgrade e1f2a3b4c5d6 -> e2f3a4b5c6d7, TI-01B private revisioned catalog notes; downgrade erases all note data.
+INFO  [alembic.runtime.migration] Running upgrade e2f3a4b5c6d7 -> e3f4a5b6c7d8, LP18-B0 additive proposal/receipt authority; no existing-table writes.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade e3f4a5b6c7d8 -> b1a8c9d0e1f2, Expand-only replacement generation operation authority.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+clean: full Alembic upgrade, rerun, B0/B1 verifiers and model column parity PASS
+e3f4a5b6c7d8: full Alembic upgrade, rerun, B0/B1 verifiers and model column parity PASS
