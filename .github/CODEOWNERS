@@ -16,6 +16,7 @@
 /scripts/deploy_control.py @yusufbesirarslan
 /scripts/deploy_gate.py @yusufbesirarslan
 /scripts/production_deploy.sh @yusufbesirarslan
+/scripts/r6_deploy_transaction.py @yusufbesirarslan
 /scripts/check_cognito_pool.py @yusufbesirarslan
 /scripts/check_email_lambda.py @yusufbesirarslan
 /scripts/deploy_email_lambda.py @yusufbesirarslan

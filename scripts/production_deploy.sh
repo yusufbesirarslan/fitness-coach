@@ -7,6 +7,10 @@ readonly PUBLIC_HEALTH_URL="${3:-}"
 readonly OUTER_LOCK_DIR="/run/lock/axisai-production"
 readonly OUTER_LOCK_PATH="$OUTER_LOCK_DIR/production.lock"
 readonly OUTER_LOCK_CAPABILITY_FD="${AXISAI_OUTER_LOCK_FD:-}"
+# R6-03A: everything after the proofs below is the exact-SHA blue/green
+# transaction in this file's sibling, run from the git-archive context of
+# DEPLOY_SHA (never from the mutable checkout).
+readonly TRANSACTION_ENGINE="scripts/r6_deploy_transaction.py"
 
 require_timeout_value() {
   local name="$1" value="${!1-}"
@@ -24,56 +28,34 @@ require_timeout_value HOST_ROOT_BOOTSTRAP_SECONDS
 require_timeout_value HOST_LOCK_ACQUISITION_SECONDS
 require_timeout_value HOST_AUTHORITY_AND_STALE_PROOF_SECONDS
 require_timeout_value HOST_CLOCK_SETUP_SECONDS
-require_timeout_value HOST_GIT_FETCH_CHECKOUT_SECONDS
-require_timeout_value HOST_CANDIDATE_BUILD_START_SECONDS
-require_timeout_value HOST_CANDIDATE_REVISION_HEALTH_SECONDS
+require_timeout_value HOST_GIT_PREPARATION_SECONDS
+require_timeout_value HOST_RELEASE_FORWARD_SECONDS
 require_timeout_value HOST_DIAGNOSTICS_SECONDS
-require_timeout_value HOST_ROLLBACK_BUILD_START_SECONDS
-require_timeout_value HOST_ROLLBACK_REVISION_HEALTH_SECONDS
+require_timeout_value HOST_RELEASE_ROLLBACK_SECONDS
+require_timeout_value HOST_RETIREMENT_SECONDS
 require_timeout_value HOST_CLEANUP_SECONDS
 
 readonly LOCK_WAIT_SECONDS="$HOST_LOCK_ACQUISITION_SECONDS"
 readonly CLOCK_START_TIMEOUT_SECONDS=2
 readonly CLOCK_STATE_SETUP_TIMEOUT_SECONDS=4
-readonly PREFLIGHT_PHASE_SECONDS="$HOST_GIT_FETCH_CHECKOUT_SECONDS"
-readonly CANDIDATE_PHASE_SECONDS=$((
-  HOST_CANDIDATE_BUILD_START_SECONDS + HOST_CANDIDATE_REVISION_HEALTH_SECONDS
-))
-readonly DIAGNOSTIC_PHASE_SECONDS="$HOST_DIAGNOSTICS_SECONDS"
-readonly ROLLBACK_PHASE_SECONDS=$((
-  HOST_ROLLBACK_BUILD_START_SECONDS + HOST_ROLLBACK_REVISION_HEALTH_SECONDS
-))
-readonly POST_LOCK_BUDGET_SECONDS=$((
-  PREFLIGHT_PHASE_SECONDS + CANDIDATE_PHASE_SECONDS +
-  DIAGNOSTIC_PHASE_SECONDS + ROLLBACK_PHASE_SECONDS
-))
-readonly ROLLBACK_RESET_TIMEOUT_SECONDS=5
+readonly PREFLIGHT_PHASE_SECONDS="$HOST_GIT_PREPARATION_SECONDS"
+readonly FAILURE_TAIL_SECONDS=$((HOST_DIAGNOSTICS_SECONDS + HOST_RELEASE_ROLLBACK_SECONDS))
+readonly SUCCESS_TAIL_SECONDS="$HOST_RETIREMENT_SECONDS"
+if ((FAILURE_TAIL_SECONDS > SUCCESS_TAIL_SECONDS)); then
+  readonly TAIL_SECONDS="$FAILURE_TAIL_SECONDS"
+else
+  readonly TAIL_SECONDS="$SUCCESS_TAIL_SECONDS"
+fi
+# The transaction engine owns its own phase deadlines (forward, then exactly
+# one tail). This outer bound is only the backstop for the engine process.
+readonly TRANSACTION_PHASE_SECONDS=$((HOST_RELEASE_FORWARD_SECONDS + TAIL_SECONDS))
+readonly POST_LOCK_BUDGET_SECONDS=$((PREFLIGHT_PHASE_SECONDS + TRANSACTION_PHASE_SECONDS))
 readonly COMMAND_KILL_GRACE_SECONDS=2
 readonly CLEANUP_TIMEOUT_SECONDS=$((HOST_CLEANUP_SECONDS - COMMAND_KILL_GRACE_SECONDS))
 readonly CLOCK_START_MAX_SECONDS=$((CLOCK_START_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
 readonly CLOCK_STATE_SETUP_MAX_SECONDS=$((CLOCK_STATE_SETUP_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
-readonly ROLLBACK_RESET_MAX_SECONDS=$((ROLLBACK_RESET_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
 readonly CLEANUP_MAX_SECONDS=$((CLEANUP_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
 readonly MONOTONIC_CLOCK_CODE='import time; print(time.monotonic_ns() // 1_000_000_000)'
-readonly INTERNAL_HEALTH_ATTEMPTS=30
-readonly PUBLIC_HEALTH_ATTEMPTS=12
-readonly HEALTH_CONNECT_TIMEOUT_SECONDS=2
-readonly HEALTH_MAX_TIME_SECONDS=5
-readonly HEALTH_RETRY_DELAY_SECONDS=5
-# BuildKit cache accelerates builds and is never read at runtime, so it is the
-# one Docker store a verified deployment may bound. Left unbounded it grew to
-# ~13.8 GB and carried the 24 GB root volume to ~80% used, within 5 points of
-# AxisAI-EC2-Disk-High. The budget keeps the most recently used layers so the
-# candidate and its rollback still build warm, while capping the store: live
-# images (~1.6 GB) plus volumes plus this budget stay far below the alarm.
-readonly BUILD_CACHE_KEEP_BYTES=4294967296
-readonly BUILD_CACHE_PRUNE_TIMEOUT_SECONDS=120
-readonly ABSENT_BUILD_REVISION_MARKER='__axisai_build_revision_absent__'
-# The baked-revision probe reports an absent /app/BUILD_REVISION *in band* and
-# still exits 0, so an unreachable container, a transport error, or an exhausted
-# phase deadline stays a hard failure for every revision instead of being read
-# as the legacy "image predates BUILD_REVISION" case.
-readonly READ_BUILD_REVISION_SH="if [ -f /app/BUILD_REVISION ]; then cat /app/BUILD_REVISION; else echo '$ABSENT_BUILD_REVISION_MARKER'; fi"
 
 clock_now() {
   local destination="$1" reading previous
@@ -113,7 +95,7 @@ enter_phase() {
 run_external() {
   local now remaining status
   clock_now now || return 1
-  remaining=$((CURRENT_PHASE_DEADLINE - now))
+  remaining=$((CURRENT_PHASE_DEADLINE - now - COMMAND_KILL_GRACE_SECONDS))
   if ((remaining <= 0)); then
     echo "$CURRENT_PHASE phase deadline exhausted" >&2
     return 124
@@ -125,22 +107,6 @@ run_external() {
     status="$?"
     return "$status"
   fi
-}
-
-# Caps the BuildKit cache once a release is already verified. This deliberately
-# does not go through run_external: the deploy phase clock exists to bound work
-# the release depends on, and a disk-hygiene step must never inherit a budget
-# that a slow build has already spent. It carries its own bound instead, and it
-# always reports success -- a verified release is not failed, and never rolled
-# back, because housekeeping could not finish.
-prune_build_cache() {
-  if timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-    "${BUILD_CACHE_PRUNE_TIMEOUT_SECONDS}s" \
-    docker builder prune --force --keep-storage "$BUILD_CACHE_KEEP_BYTES" >&2; then
-    return 0
-  fi
-  echo "build cache prune did not complete; deployment remains verified" >&2
-  return 0
 }
 
 # The root wrapper passes descriptor 7 for the exact locked open-file
@@ -184,8 +150,8 @@ if ! flock -n -E 73 7; then
   exit 73
 fi
 
-if [[ "$#" -lt 2 || "$#" -gt 3 ]]; then
-  echo "usage: production_deploy.sh DEPLOY_SHA DEPLOY_DIR [PUBLIC_HEALTH_URL]" >&2
+if [[ "$#" -ne 3 ]]; then
+  echo "usage: production_deploy.sh DEPLOY_SHA DEPLOY_DIR PUBLIC_HEALTH_URL" >&2
   exit 64
 fi
 if [[ ! "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]]; then
@@ -196,56 +162,43 @@ if [[ "$DEPLOY_DIR" != /* || "$DEPLOY_DIR" == *$'\n'* || "$DEPLOY_DIR" == *$'\r'
   echo "DEPLOY_DIR must be one absolute path" >&2
   exit 64
 fi
+if [[ -z "$PUBLIC_HEALTH_URL" ]]; then
+  # The blue/green transaction proves public health and the anonymous mobile
+  # ingress envelope through nginx after the switch; without an origin it has
+  # no post-switch proof, so it refuses before any mutation.
+  echo "PUBLIC_HEALTH_URL is required for the post-switch proof" >&2
+  exit 64
+fi
 
 if ((HOST_ROOT_BOOTSTRAP_SECONDS + HOST_LOCK_ACQUISITION_SECONDS +
       HOST_AUTHORITY_AND_STALE_PROOF_SECONDS + HOST_CLOCK_SETUP_SECONDS +
-      HOST_GIT_FETCH_CHECKOUT_SECONDS + HOST_CANDIDATE_BUILD_START_SECONDS +
-      HOST_CANDIDATE_REVISION_HEALTH_SECONDS + HOST_DIAGNOSTICS_SECONDS +
-      HOST_ROLLBACK_BUILD_START_SECONDS + HOST_ROLLBACK_REVISION_HEALTH_SECONDS +
-      HOST_CLEANUP_SECONDS != HOST_WORST_CASE_SECONDS ||
+      HOST_GIT_PREPARATION_SECONDS + HOST_RELEASE_FORWARD_SECONDS +
+      TAIL_SECONDS + HOST_CLEANUP_SECONDS != HOST_WORST_CASE_SECONDS ||
       SSM_EXECUTION_TIMEOUT_SECONDS - HOST_WORST_CASE_SECONDS != SSM_EXECUTION_MARGIN_SECONDS ||
+      SSM_EXECUTION_MARGIN_SECONDS <= 0 ||
       CLOCK_START_MAX_SECONDS + CLOCK_STATE_SETUP_MAX_SECONDS != HOST_CLOCK_SETUP_SECONDS ||
-      PREFLIGHT_PHASE_SECONDS + CANDIDATE_PHASE_SECONDS +
-      DIAGNOSTIC_PHASE_SECONDS + ROLLBACK_PHASE_SECONDS != POST_LOCK_BUDGET_SECONDS ||
-      ROLLBACK_RESET_MAX_SECONDS +
-        INTERNAL_HEALTH_ATTEMPTS * HEALTH_MAX_TIME_SECONDS +
-        (INTERNAL_HEALTH_ATTEMPTS - 1) * HEALTH_RETRY_DELAY_SECONDS > ROLLBACK_PHASE_SECONDS ||
-      CANDIDATE_PHASE_SECONDS < HOST_CANDIDATE_BUILD_START_SECONDS +
-        HOST_CANDIDATE_REVISION_HEALTH_SECONDS)); then
+      PREFLIGHT_PHASE_SECONDS + TRANSACTION_PHASE_SECONDS != POST_LOCK_BUDGET_SECONDS ||
+      TRANSACTION_PHASE_SECONDS < HOST_RELEASE_FORWARD_SECONDS + FAILURE_TAIL_SECONDS ||
+      TRANSACTION_PHASE_SECONDS < HOST_RELEASE_FORWARD_SECONDS + SUCCESS_TAIL_SECONDS)); then
   echo "invalid host transaction budget" >&2
   exit 70
 fi
 
-OVERRIDE_FILE=""
-HEALTH_BODY=""
 MONOTONIC_STATE_FILE=""
 BUILD_CONTEXT_DIR=""
 BUILD_ARCHIVE=""
-declare -a BUILD_CONTEXT_DIRS=()
-declare -a BUILD_ARCHIVES=()
+WORK_DIR=""
 cleanup() {
-  local -a cleanup_files=()
-  if [[ -n "$OVERRIDE_FILE" ]]; then
-    cleanup_files+=("$OVERRIDE_FILE")
-  fi
-  if [[ -n "$HEALTH_BODY" ]]; then
-    cleanup_files+=("$HEALTH_BODY")
-  fi
-  # The clock state lives in the root-owned runtime directory, which this
-  # unprivileged process cannot unlink from.  Root removes it after the child
-  # terminates; listing it here would make one guaranteed `rm` failure abandon
-  # the checkout files that this process really does own.
-  if ((${#cleanup_files[@]} > 0)); then
+  # One cleanup command shares the entire reserved phase, including kill grace.
+  # rm -r never follows the engine's .env symlinks into the checkout.
+  # Root owns and removes the monotonic state after this child terminates.
+  local -a cleanup_paths=()
+  if [[ -n "$BUILD_ARCHIVE" ]]; then cleanup_paths+=("$BUILD_ARCHIVE"); fi
+  if [[ -n "$BUILD_CONTEXT_DIR" ]]; then cleanup_paths+=("$BUILD_CONTEXT_DIR"); fi
+  if [[ -n "$WORK_DIR" ]]; then cleanup_paths+=("$WORK_DIR"); fi
+  if ((${#cleanup_paths[@]} > 0)); then
     timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-      "${CLEANUP_TIMEOUT_SECONDS}s" rm -f -- "${cleanup_files[@]}" || true
-  fi
-  if ((${#BUILD_ARCHIVES[@]} > 0)); then
-    timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-      "${CLEANUP_TIMEOUT_SECONDS}s" rm -f -- "${BUILD_ARCHIVES[@]}" || true
-  fi
-  if ((${#BUILD_CONTEXT_DIRS[@]} > 0)); then
-    timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-      "${CLEANUP_TIMEOUT_SECONDS}s" rm -r -- "${BUILD_CONTEXT_DIRS[@]}" || true
+      "${CLEANUP_TIMEOUT_SECONDS}s" rm -r -- "${cleanup_paths[@]}" || true
   fi
 }
 trap cleanup EXIT
@@ -274,14 +227,11 @@ if ! clock_now TRANSACTION_EPOCH; then
 fi
 readonly TRANSACTION_EPOCH
 readonly PREFLIGHT_DEADLINE=$((TRANSACTION_EPOCH + PREFLIGHT_PHASE_SECONDS))
-readonly CANDIDATE_CUTOFF=$((PREFLIGHT_DEADLINE + CANDIDATE_PHASE_SECONDS))
-readonly DIAGNOSTIC_CUTOFF=$((CANDIDATE_CUTOFF + DIAGNOSTIC_PHASE_SECONDS))
-readonly ROLLBACK_CUTOFF=$((DIAGNOSTIC_CUTOFF + ROLLBACK_PHASE_SECONDS))
+readonly TRANSACTION_CUTOFF=$((PREFLIGHT_DEADLINE + TRANSACTION_PHASE_SECONDS))
 enter_phase preflight "$PREFLIGHT_DEADLINE"
-echo "host transaction budget: execution=$SSM_EXECUTION_TIMEOUT_SECONDS worst_case=$HOST_WORST_CASE_SECONDS margin=$SSM_EXECUTION_MARGIN_SECONDS lock=$LOCK_WAIT_SECONDS clock=$CLOCK_START_MAX_SECONDS clock_state=$CLOCK_STATE_SETUP_MAX_SECONDS rollback_reset=$ROLLBACK_RESET_MAX_SECONDS preflight=$PREFLIGHT_PHASE_SECONDS candidate=$CANDIDATE_PHASE_SECONDS diagnostics=$DIAGNOSTIC_PHASE_SECONDS rollback=$ROLLBACK_PHASE_SECONDS post_lock=$POST_LOCK_BUDGET_SECONDS timeout_grace=$COMMAND_KILL_GRACE_SECONDS cleanup=$CLEANUP_MAX_SECONDS" >&2
+echo "host transaction budget: execution=$SSM_EXECUTION_TIMEOUT_SECONDS worst_case=$HOST_WORST_CASE_SECONDS margin=$SSM_EXECUTION_MARGIN_SECONDS lock=$LOCK_WAIT_SECONDS clock=$CLOCK_START_MAX_SECONDS clock_state=$CLOCK_STATE_SETUP_MAX_SECONDS preflight=$PREFLIGHT_PHASE_SECONDS forward=$HOST_RELEASE_FORWARD_SECONDS failure_tail=$FAILURE_TAIL_SECONDS success_tail=$SUCCESS_TAIL_SECONDS transaction=$TRANSACTION_PHASE_SECONDS post_lock=$POST_LOCK_BUDGET_SECONDS timeout_grace=$COMMAND_KILL_GRACE_SECONDS cleanup=$CLEANUP_MAX_SECONDS" >&2
 
-if [[ -n "$PUBLIC_HEALTH_URL" ]]; then
-  run_external python3 - "$PUBLIC_HEALTH_URL" <<'PY'
+run_external python3 - "$PUBLIC_HEALTH_URL" <<'PY'
 import sys
 from urllib.parse import urlsplit
 
@@ -298,7 +248,6 @@ valid = (
 if not valid:
     raise SystemExit("PUBLIC_HEALTH_URL must be HTTPS without credentials or controls")
 PY
-fi
 
 cd -- "$DEPLOY_DIR"
 
@@ -323,267 +272,30 @@ if ! run_external git merge-base --is-ancestor "$PREV_COMMIT" "$DEPLOY_SHA"; the
   echo "deployment candidate is older than or divergent from production" >&2
   exit 1
 fi
-PREV_DEPLOY_MARKER="$(run_external git ls-tree --name-only \
-  "$PREV_COMMIT" -- scripts/production_deploy.sh)"
-readonly PREV_DEPLOY_MARKER
-if [[ "$PREV_DEPLOY_MARKER" == "scripts/production_deploy.sh" ]]; then
-  LEGACY_ROLLBACK_ALLOWED=0
-else
-  # The host helper itself is the durable revision-health contract marker.
-  # It enters production with the revision-aware health contract, so only its
-  # immediate predecessor can use the missing-revision compatibility proof.
-  LEGACY_ROLLBACK_ALLOWED=1
-fi
-readonly LEGACY_ROLLBACK_ALLOWED
 
-clock_now CANDIDATE_STARTED_AT
-readonly CANDIDATE_STARTED_AT
-CANDIDATE_PHASE_DEADLINE=$((CANDIDATE_STARTED_AT + CANDIDATE_PHASE_SECONDS))
-if ((CANDIDATE_PHASE_DEADLINE > CANDIDATE_CUTOFF)); then
-  CANDIDATE_PHASE_DEADLINE="$CANDIDATE_CUTOFF"
-fi
-readonly CANDIDATE_PHASE_DEADLINE
-enter_phase candidate "$CANDIDATE_PHASE_DEADLINE"
-OVERRIDE_FILE="$(run_external mktemp "$DEPLOY_DIR/.axisai-compose-override.XXXXXX.yml")"
-HEALTH_BODY="$(run_external mktemp "$DEPLOY_DIR/.axisai-health.XXXXXX.json")"
-readonly OVERRIDE_FILE HEALTH_BODY
-readonly -a COMPOSE_FILES=(-f "$DEPLOY_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
-
-materialize_build_context() {
-  local revision="$1"
-  BUILD_CONTEXT_DIR="$(run_external mktemp -d "$DEPLOY_DIR/.axisai-build-context.XXXXXX")" || return 1
-  BUILD_ARCHIVE="$(run_external mktemp "$DEPLOY_DIR/.axisai-build-archive.XXXXXX.tar")" || return 1
-  BUILD_CONTEXT_DIRS+=("$BUILD_CONTEXT_DIR")
-  BUILD_ARCHIVES+=("$BUILD_ARCHIVE")
-  run_external git archive --format=tar "$revision" -o "$BUILD_ARCHIVE" || return 1
-  run_external tar -xf "$BUILD_ARCHIVE" -C "$BUILD_CONTEXT_DIR" || return 1
-}
-
-write_override() {
-  local revision="$1"
-  local build_context="$2"
-  umask 077
-  printf '%s\n' \
-    'services:' \
-    '  web:' \
-    '    build:' \
-    "      context: '$build_context'" \
-    '      args:' \
-    "        BUILD_REVISION: '$revision'" \
-    '    environment:' \
-    "      APP_REVISION: '$revision'" \
-    '  worker:' \
-    '    build:' \
-    "      context: '$build_context'" \
-    '      args:' \
-    "        BUILD_REVISION: '$revision'" \
-    '    environment:' \
-    "      APP_REVISION: '$revision'" > "$OVERRIDE_FILE" || return 1
-}
-
-probe_internal_health_once() {
-  local expected_revision="$1"
-  local allow_missing_revision="$2"
-  local health_fields health_status has_revision health_revision
-
-  health_fields="$(run_external docker compose "${COMPOSE_FILES[@]}" \
-    exec -T web python3 - <<'PY'
-import json
-import urllib.request
-
-with urllib.request.urlopen(
-    'http://127.0.0.1:5000/health?deep=1', timeout=5
-) as response:
-    if response.status != 200:
-        raise SystemExit(f"deep health returned HTTP {response.status}")
-    payload = json.load(response)
-if not isinstance(payload, dict) or not isinstance(payload.get("status"), str):
-    raise SystemExit("deep health JSON has no string status")
-revision_present = "revision" in payload
-revision = payload.get("revision", "")
-if revision_present and not isinstance(revision, str):
-    raise SystemExit("deep health JSON revision is not a string")
-print(f"{payload['status']}\t{int(revision_present)}\t{revision}")
-PY
-)" || return 1
-  IFS=$'\t' read -r health_status has_revision health_revision <<< "$health_fields"
-  if [[ "$health_status" != "ok" ]]; then
-    echo "deep health status is not ok" >&2
-    return 1
-  fi
-  if [[ "$has_revision" == "1" ]]; then
-    if [[ "$health_revision" != "$expected_revision" ]]; then
-      echo "deep health revision mismatch" >&2
-      return 1
-    fi
-  elif [[ "$allow_missing_revision" == "1" ]]; then
-    echo "rollback compatibility proof accepted: deep health has no revision" >&2
-  else
-    echo "deep health revision is missing" >&2
-    return 1
-  fi
-}
-
-probe_internal_health() {
-  local expected_revision="$1"
-  local allow_missing_revision="$2"
-  local attempt
-
-  for ((attempt = 1; attempt <= INTERNAL_HEALTH_ATTEMPTS; attempt++)); do
-    if probe_internal_health_once "$expected_revision" "$allow_missing_revision"; then
-      echo "deep health verified on attempt $attempt" >&2
-      return 0
-    fi
-    echo "deep health not ready on attempt $attempt/$INTERNAL_HEALTH_ATTEMPTS" >&2
-    if ((attempt < INTERNAL_HEALTH_ATTEMPTS)); then
-      run_external sleep "$HEALTH_RETRY_DELAY_SECONDS" || return 1
-    fi
-  done
-  echo "deep health readiness exhausted after $INTERNAL_HEALTH_ATTEMPTS attempts" >&2
-  return 1
-}
-
-verify_public_health_once() {
-  local health_code
-  health_code="$(run_external curl --silent --show-error \
-    --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" \
-    --max-time "$HEALTH_MAX_TIME_SECONDS" \
-    --output "$HEALTH_BODY" \
-    --write-out '%{http_code}' \
-    "$PUBLIC_HEALTH_URL")" || return 1
-  if [[ "$health_code" != "200" ]]; then
-    echo "public health returned HTTP $health_code" >&2
-    return 1
-  fi
-}
-
-verify_public_health() {
-  local attempt
-
-  for ((attempt = 1; attempt <= PUBLIC_HEALTH_ATTEMPTS; attempt++)); do
-    if verify_public_health_once; then
-      echo "public health verified on attempt $attempt" >&2
-      return 0
-    fi
-    echo "public health not ready on attempt $attempt/$PUBLIC_HEALTH_ATTEMPTS" >&2
-    if ((attempt < PUBLIC_HEALTH_ATTEMPTS)); then
-      run_external sleep "$HEALTH_RETRY_DELAY_SECONDS" || return 1
-    fi
-  done
-  echo "public health readiness exhausted after $PUBLIC_HEALTH_ATTEMPTS attempts" >&2
-  return 1
-}
-
-# Baked-revision identity is exact for candidates and for modern rollbacks.
-# Only the already-established LEGACY_ROLLBACK_ALLOWED contract may accept an
-# image that predates /app/BUILD_REVISION, and even then a file that is present
-# must still match the expected revision exactly.
-verify_running_revision() {
-  local expected_revision="$1"
-  local allow_missing_revision="$2"
-  local running_revision
-
-  running_revision="$(run_external docker compose "${COMPOSE_FILES[@]}" \
-    exec -T web sh -c "$READ_BUILD_REVISION_SH")" || return 1
-  if [[ "$running_revision" == "$ABSENT_BUILD_REVISION_MARKER" ]]; then
-    if [[ "$allow_missing_revision" != "1" ]]; then
-      echo "running web container has no /app/BUILD_REVISION" >&2
-      return 1
-    fi
-    echo "rollback compatibility proof accepted: image has no /app/BUILD_REVISION" >&2
-    return 0
-  fi
-  if [[ "$running_revision" != "$expected_revision" ]]; then
-    echo "running web container revision mismatch" >&2
-    return 1
-  fi
-}
-
-start_and_verify_release() {
-  local revision="$1"
-  local allow_missing_revision="$2"
-  local check_public="$3"
-
-  materialize_build_context "$revision" || return 1
-  write_override "$revision" "$BUILD_CONTEXT_DIR" || return 1
-  run_external docker compose "${COMPOSE_FILES[@]}" build || return 1
-  run_external docker compose "${COMPOSE_FILES[@]}" up -d --remove-orphans || return 1
-  run_external docker compose "${COMPOSE_FILES[@]}" ps || return 1
-  verify_running_revision "$revision" "$allow_missing_revision" || return 1
-  probe_internal_health "$revision" "$allow_missing_revision" || return 1
-  if [[ "$check_public" == "1" && -n "$PUBLIC_HEALTH_URL" ]]; then
-    verify_public_health || return 1
-  fi
-}
-
-rollback_release() {
-  local restored_head rollback_started_at rollback_phase_deadline status
-
-  enter_phase rollback "$ROLLBACK_CUTOFF"
-  echo "rolling back to $PREV_COMMIT" >&2
-  if timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-    "${ROLLBACK_RESET_TIMEOUT_SECONDS}s" git reset --hard "$PREV_COMMIT"; then
-    :
-  else
-    status="$?"
-    echo "bounded exact rollback reset failed" >&2
-    return "$status"
-  fi
-  if ! clock_now rollback_started_at; then
-    echo "exact rollback reset attempted but monotonic verification clock is unavailable" >&2
-    return 1
-  fi
-  rollback_phase_deadline=$((rollback_started_at + ROLLBACK_PHASE_SECONDS))
-  if ((rollback_phase_deadline > ROLLBACK_CUTOFF)); then
-    rollback_phase_deadline="$ROLLBACK_CUTOFF"
-  fi
-  enter_phase rollback "$rollback_phase_deadline"
-  restored_head="$(run_external git rev-parse --verify HEAD^{commit})" || return 1
-  if [[ "$restored_head" != "$PREV_COMMIT" ]]; then
-    echo "rollback checkout revision mismatch" >&2
-    return 1
-  fi
-  start_and_verify_release "$PREV_COMMIT" "$LEGACY_ROLLBACK_ALLOWED" 0 || return 1
-  echo "rollback verified at $PREV_COMMIT" >&2
-}
-
-on_deploy_error() {
-  local failure_status="$?" now diagnostic_deadline
-  trap - ERR
-  set +e
-  if [[ "$failure_status" -eq 0 ]]; then
-    failure_status=1
-  fi
-  if clock_now now; then
-    diagnostic_deadline=$((now + DIAGNOSTIC_PHASE_SECONDS))
-    if ((diagnostic_deadline > DIAGNOSTIC_CUTOFF)); then
-      diagnostic_deadline="$DIAGNOSTIC_CUTOFF"
-    fi
-    enter_phase diagnostics "$diagnostic_deadline"
-    echo "candidate deployment failed; collecting bounded diagnostics" >&2
-    run_external docker compose "${COMPOSE_FILES[@]}" ps >&2
-    run_external docker compose "${COMPOSE_FILES[@]}" logs --tail 100 web worker >&2
-  else
-    echo "candidate deployment failed; diagnostics skipped because bounded clock failed" >&2
-  fi
-  if ! rollback_release; then
-    echo "rollback failed verification" >&2
-  fi
-  exit "$failure_status"
-}
-
-trap on_deploy_error ERR
-echo "checking out exact candidate $DEPLOY_SHA" >&2
-run_external git reset --hard "$DEPLOY_SHA"
-CHECKED_OUT_HEAD="$(run_external git rev-parse --verify HEAD^{commit})"
-readonly CHECKED_OUT_HEAD
-if [[ "$CHECKED_OUT_HEAD" != "$DEPLOY_SHA" ]]; then
-  echo "candidate checkout revision mismatch" >&2
-  false
+# The exact candidate tree, from git objects only: untracked or ignored host
+# files can never enter the image build or the transaction engine. The
+# checkout itself is not touched here; the engine moves it to DEPLOY_SHA only
+# once the new route, public/mobile proof and worker are all accepted.
+BUILD_CONTEXT_DIR="$(run_external mktemp -d "$DEPLOY_DIR/.axisai-build-context.XXXXXX")"
+BUILD_ARCHIVE="$(run_external mktemp "$DEPLOY_DIR/.axisai-build-archive.XXXXXX.tar")"
+WORK_DIR="$(run_external mktemp -d "$DEPLOY_DIR/.axisai-r6-work.XXXXXX")"
+readonly BUILD_CONTEXT_DIR BUILD_ARCHIVE WORK_DIR
+run_external git archive --format=tar "$DEPLOY_SHA" -o "$BUILD_ARCHIVE"
+run_external tar -xf "$BUILD_ARCHIVE" -C "$BUILD_CONTEXT_DIR"
+if [[ ! -f "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" ]]; then
+  echo "candidate has no blue/green transaction engine" >&2
+  exit 1
 fi
 
-start_and_verify_release "$DEPLOY_SHA" 0 1
-run_external docker image prune -f
-trap - ERR
-prune_build_cache
+enter_phase transaction "$TRANSACTION_CUTOFF"
+echo "starting blue/green transaction for $DEPLOY_SHA (previous $PREV_COMMIT)" >&2
+run_external python3 -I -B "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" run \
+  --deploy-sha "$DEPLOY_SHA" \
+  --previous-commit "$PREV_COMMIT" \
+  --deploy-dir "$DEPLOY_DIR" \
+  --context "$BUILD_CONTEXT_DIR" \
+  --work-dir "$WORK_DIR" \
+  --public-health-url "$PUBLIC_HEALTH_URL" \
+  --transaction-epoch "$TRANSACTION_EPOCH"
 echo "deployment verified at $DEPLOY_SHA" >&2

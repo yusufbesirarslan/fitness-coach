@@ -6,7 +6,8 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    # Qualify R6-03A before opening its PR; deploy.yml accepts main only.
+    branches: [main, r6/03a-bluegreen-deploy-transaction]
 
 jobs:
   tests:
@@ -382,3 +383,27 @@ jobs:
           tests/test_account_profile_pg.py
           tests/test_quest_challenge_commit_pg.py
           tests/test_r6_dual_revision_pg.py
+
+  r6-deploy-transaction-mutations:
+    name: r6 deploy transaction critical mutations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install hermetic qualification dependencies
+        run: python -m pip install pytest==9.1.1 PyYAML==6.0.3
+      - name: Kill critical deployment safety mutants
+        run: >-
+          python -B tests/qualification/run_r6_03a_mutations.py
+          --output qualification/r6-03a-mutations.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: r6-03a-mutations
+          path: qualification/r6-03a-mutations.json
+          if-no-files-found: error
