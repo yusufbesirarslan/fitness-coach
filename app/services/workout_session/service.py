@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.observability import current_request_id
 from app.timeutil import app_today
+from app.services.plan_session_transition import lock_plan_session_transition
 
 from .checkpoint import load_snapshot
 from .metrics import record_lifecycle_event
@@ -181,9 +182,10 @@ def start_session(
     partial-index conflict means an active session already exists — the same
     intended workout replays as EXISTING_ACTIVE, a different one is a CONFLICT.
 
-    ``native`` (PR5) is the already server-resolved native workout identity. It
-    is recorded on the row; it is never a second source of the day, the plan or
-    the workout content, all of which stay server-derived exactly as before.
+    The per-owner transition authority is acquired before the refreshed plan
+    snapshot and held until commit/rollback. Native identity is server-resolved
+    earlier but rechecked here after any replacement wait. Start never takes an
+    owner UPDATE lock: completion takes day -> User for XP.
 
     A day that already holds the canonical completion claim cannot start a new
     session: with no ACTIVE session to replay, the start is refused as
@@ -205,24 +207,36 @@ def start_session(
     """
     day = today or app_today()
     now = datetime.utcnow()
-    snapshot = compute_plan_snapshot(user_id, day)
-
-    existing = get_active_session(user_id)
-    if existing is not None:
-        return _existing_or_conflict(existing, day, snapshot, native)
-
-    if completed_today(user_id, day):
-        _log("start_refused_completed_today")
-        return SessionResult(SessionOutcome.INVALID_TRANSITION)
-
-    # LP-13: serialize with the completion claim write, then decide again.
-    lock_completion_day(user_id, day)
-    if completed_today(user_id, day):
-        db.session.rollback()  # end the transaction: releases the day lock
-        _log("start_refused_completed_today")
-        return SessionResult(SessionOutcome.INVALID_TRANSITION)
-
     try:
+        lock_plan_session_transition(user_id)
+        snapshot = compute_plan_snapshot(user_id, day)
+        if native is not None:
+            from app.services.today_facts import get_active_plan
+            from .errors import WorkoutNotStartable
+            plan = get_active_plan(user_id)
+            if (plan is None or plan.lineage_id != native.plan_lineage_id
+                    or plan.mutation_version != native.plan_mutation_version):
+                db.session.rollback()
+                raise WorkoutNotStartable("workout reference is not current")
+
+        existing = get_active_session(user_id)
+        if existing is not None:
+            result = _existing_or_conflict(existing, day, snapshot, native)
+            db.session.rollback()
+            return result
+
+        if completed_today(user_id, day):
+            db.session.rollback()
+            _log("start_refused_completed_today")
+            return SessionResult(SessionOutcome.INVALID_TRANSITION)
+
+        # LP-13: serialize with the completion claim write, then decide again.
+        lock_completion_day(user_id, day)
+        if completed_today(user_id, day):
+            db.session.rollback()  # end the transaction: releases the day lock
+            _log("start_refused_completed_today")
+            return SessionResult(SessionOutcome.INVALID_TRANSITION)
+
         session = insert_active_session(user_id, day, snapshot, now, native)
         db.session.commit()
     except IntegrityError as exc:
@@ -235,6 +249,9 @@ def start_session(
             _log("start_conflict")
             return SessionResult(SessionOutcome.CONFLICT)
         _log("start_integrity_error")
+        raise
+    except Exception:
+        db.session.rollback()
         raise
     _log("started")
     record_lifecycle_event("started")

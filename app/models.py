@@ -3,7 +3,7 @@ import logging
 import secrets
 from datetime import datetime
 from flask_login import UserMixin
-from sqlalchemy import text
+from sqlalchemy import text, event, inspect
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.extensions import db, login_manager
@@ -1649,3 +1649,61 @@ class UserBadge(db.Model):
     )
 
     user = db.relationship("User", backref=db.backref("badges", passive_deletes=True))
+
+
+class TrainingPlanReplacementProposal(db.Model):
+    """Immutable server-staged candidate, independent of current plan lifetime."""
+    __tablename__ = "training_plan_replacement_proposal"
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(64), nullable=False, default=_new_plan_lineage_id)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    base_lineage_id = db.Column(db.String(64), nullable=False)
+    base_mutation_version = db.Column(db.Integer, nullable=False)
+    base_snapshot_digest = db.Column(db.String(64), nullable=False)
+    candidate_plan_data = db.Column(db.Text, nullable=False)
+    candidate_score = db.Column(db.Float, nullable=False)
+    candidate_fingerprint = db.Column(db.String(64), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint("public_id", name="uq_replacement_proposal_public"),
+        db.Index("ix_replacement_proposal_owner_expiry", "user_id", "expires_at"),
+        db.CheckConstraint("base_mutation_version >= 0", name="ck_replacement_proposal_version"),
+        db.CheckConstraint("length(candidate_plan_data) <= 262144", name="ck_replacement_candidate_size"),
+        db.CheckConstraint("expires_at > created_at", name="ck_replacement_proposal_expiry"),
+    )
+
+
+class TrainingPlanReplacementReceipt(db.Model):
+    """Terminal confirm authority. Soft bindings survive deletion of plan/proposal."""
+    __tablename__ = "training_plan_replacement_receipt"
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(64), nullable=False, default=_new_plan_lineage_id)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    key_digest = db.Column(db.String(64), nullable=False)
+    intent_fingerprint = db.Column(db.String(64), nullable=False)
+    proposal_public_id = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(24), nullable=False)
+    result_lineage_id = db.Column(db.String(64))
+    result_mutation_version = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    __table_args__ = (
+        db.UniqueConstraint("public_id", name="uq_replacement_receipt_public"),
+        db.UniqueConstraint("user_id", "key_digest", name="uq_replacement_receipt_owner_key"),
+        db.Index("ix_replacement_receipt_retention", "created_at"),
+        db.Index("uq_replacement_receipt_applied_proposal", "user_id", "proposal_public_id", unique=True,
+                 sqlite_where=text("status = 'APPLIED'"), postgresql_where=text("status = 'APPLIED'")),
+        db.CheckConstraint("status IN ('APPLIED', 'STALE', 'EXPIRED', 'ACTIVE_REFUSED', 'COACH_PENDING_REFUSED', 'CONSUMED')",
+                           name="ck_replacement_receipt_status"),
+        db.CheckConstraint("(status = 'APPLIED' AND result_lineage_id IS NOT NULL AND result_mutation_version IS NOT NULL AND result_mutation_version = 0) OR "
+                           "(status <> 'APPLIED' AND result_lineage_id IS NULL AND result_mutation_version IS NULL)",
+                           name="ck_replacement_receipt_result"),
+    )
+
+
+@event.listens_for(TrainingPlanReplacementProposal, "before_update")
+@event.listens_for(TrainingPlanReplacementReceipt, "before_update")
+def _refuse_replacement_authority_update(mapper, connection, target):
+    """Authority is immutable; retention deletes, never rebinds, these rows."""
+    if any(attr.history.has_changes() for attr in inspect(target).attrs):
+        raise ValueError("replacement authority is immutable")

@@ -102,7 +102,8 @@ def _user_child_models():
         MealLog, MealPhotoCleanup, MobileAuthSession, Notification,
         NutritionPlan, PendingAction,
         PlanMutationRecord, TrainingPlanConfirmationProposal,
-        TrainingPlanGenerationOperation, PumpCheck,
+        TrainingPlanGenerationOperation, TrainingPlanReplacementProposal,
+        TrainingPlanReplacementReceipt, PumpCheck,
         PumpCheckComment, PumpCheckComparison, PumpCheckComparisonRequest,
         PumpCheckLike, Supplement, TrainingPlan,
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
@@ -116,6 +117,7 @@ def _user_child_models():
         # history, so nothing should ever observe entries for a plan that is
         # already gone.
         PlanMutationRecord, TrainingPlanConfirmationProposal,
+        TrainingPlanReplacementReceipt, TrainingPlanReplacementProposal,
         TrainingPlanGenerationOperation, TrainingPlan,
         # MealPhotoCleanup before MealLog: it is bookkeeping ABOUT already
         # deleted ledger rows, so nothing should observe an intent whose

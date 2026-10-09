@@ -218,7 +218,7 @@ def _arbitrated_result(user_id, context, expected_type, expected_fingerprint):
         db.session.rollback()
 
 
-def apply_plan_mutation(user_id, command, context) -> PlanMutationResult:
+def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> PlanMutationResult:
     """Apply one typed mutation to the authenticated user's active plan.
 
     ``user_id`` MUST come from the authenticated server context. It is never read
@@ -244,6 +244,8 @@ def apply_plan_mutation(user_id, command, context) -> PlanMutationResult:
             return replayed
 
         plan = _locked_active_plan(user_id)
+        if expected_binding is not None:
+            _require_binding(plan, expected_binding)
 
         # Second look, now that the plan row is ours. A request that raced us and
         # committed first is visible here, so the common case converges without
@@ -326,7 +328,7 @@ def apply_plan_mutation(user_id, command, context) -> PlanMutationResult:
     return arbitrated
 
 
-def undo_last_change(user_id, context) -> PlanMutationResult:
+def undo_last_change(user_id, context, *, expected_binding=None) -> PlanMutationResult:
     """Reverse the latest reversible change to the caller's own active plan.
 
     The ONE canonical reversal. There is no redo, no ``rollback_to_version`` and
@@ -350,6 +352,8 @@ def undo_last_change(user_id, context) -> PlanMutationResult:
             return replayed
 
         plan = _locked_active_plan(user_id)
+        if expected_binding is not None:
+            _require_binding(plan, expected_binding)
 
         replayed = _existing_result(
             user_id, context, UNDO_COMMAND_TYPE, fingerprint)
@@ -432,3 +436,10 @@ def undo_last_change(user_id, context) -> PlanMutationResult:
         )
 
     return arbitrated
+
+
+def _require_binding(plan, binding):
+    if (plan.lineage_id != binding.lineage_id
+            or plan.mutation_version != binding.mutation_version
+            or snapshot_fingerprint(plan.plan_data) != binding.snapshot_fingerprint):
+        raise PlanStateConflict("confirmed plan binding changed")

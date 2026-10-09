@@ -761,10 +761,13 @@ def _apply_confirmed(user_id, pending):
     key = confirmation_operation_key(pending.public_id)
     command = decode_command(pending.command_type, pending.command_payload)
     if command is UNDO_LAST_CHANGE:
-        result = undo_last_change(user_id, _context(key))
+        result = undo_last_change(
+            user_id, _context(key), expected_binding=_confirmation_binding(pending))
         payload = results.undo_result(result)
     else:
-        result = apply_plan_mutation(user_id, command, _context(key))
+        result = apply_plan_mutation(
+            user_id, command, _context(key),
+            expected_binding=_confirmation_binding(pending))
         payload = results.mutation_result(command, result)
     mark_applied(user_id, pending.public_id)
     return payload
@@ -780,3 +783,11 @@ def build_undo_arguments(arguments):
         raise ToolArgumentError(
             "beklenmeyen alan: " + ", ".join(sorted(arguments)))
     return {}
+
+
+def _confirmation_binding(pending):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        lineage_id=pending.plan_lineage_id,
+        mutation_version=pending.base_mutation_version,
+        snapshot_fingerprint=pending.base_snapshot_fingerprint)

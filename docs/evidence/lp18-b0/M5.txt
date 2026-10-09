@@ -1,0 +1,3 @@
+detector=tests/test_lp18_b0.py::test_receipt_failure_rolls_back_replacement
+exit=1
+assertion_detected=True
