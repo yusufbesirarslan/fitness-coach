@@ -313,10 +313,12 @@ activation.
 
 `FITX_MOBILE_TODAY_GUIDANCE_ENABLED=0` is the default. It requires
 `MOBILE_AUTH_ENABLED=1`; ON without mobile auth has no effect because the
-route is not registered. Enable only after a reviewed native client consumes
+`/api/v1` blueprint is not registered. Enable only after a reviewed native client consumes
 contract version 1 and the LP17-B1 HTTP, auth and query-budget qualification
 is green. Abort on any cross-account fact, unexpected
 `event=guidance_read_failed` lines outside the Istanbul day rollover, or a
-`mobile_api` latency regression. Rollback: set the flag to 0 — the route
-answers as absent and there is no schema or data to clean up. LP17-B1 does not
-authorize activation in any environment.
+`mobile_api` latency regression. Rollback: set the flag to 0 — GET answers
+404 before authentication and never executes the read model. The route stays
+registered, so the shared before-request Bearer processing, rate limiting
+(429), OPTIONS and 405 for other methods still apply. There is no schema or
+data to clean up. LP17-B1 does not authorize activation in any environment.

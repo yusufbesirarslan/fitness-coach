@@ -26,14 +26,18 @@ The route is registered unconditionally (the repository's request-time gating
 pattern), so it is admitted by exact path in the route inventories. That
 leaves residual differences from an unregistered path, shared by every
 request-time-gated `mobile_api` route and none carrying guidance data
-(pinned by `test_flag_off_residuals_under_the_production_limiter`):
+(pinned by `test_flag_off_residuals_under_the_production_limiter`,
+`test_flag_off_wrong_method_is_405_from_the_registered_rule` and
+`test_flag_off_default_limit_answers_429_from_the_limiter`):
 
 - blueprint-wide `Cache-Control: no-store` on the 404;
 - with the limiter on (production), `bind_mobile_request_principal` still runs
   `authenticate_access` for a presented Bearer in `before_request` (an expired
   or mismatched family is revoked there, exactly as on any mobile route), and
   the 600/hour default limit can answer 429 `AUTH_RATE_LIMITED`;
-- OPTIONS answers 200 with `Allow`, and other methods 405;
+- OPTIONS answers 200 with `Allow`, and other methods 405 (a POST, PUT,
+  PATCH or DELETE without a same-origin Origin/Referer gets the shared CSRF
+  hook's 403 first, as an unregistered path does);
 - the request log names the path instead of `<unmatched>`.
 
 Removing them needs conditional route registration or a shared middleware

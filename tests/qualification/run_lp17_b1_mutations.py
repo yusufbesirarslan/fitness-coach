@@ -15,11 +15,11 @@ MUTATIONS = (
     ("rollout_gate_removed", ROUTE,
      "        if not _guidance_enabled():\n            abort(404)",
      "        if False:\n            abort(404)",
-     "test_flag_off_is_an_absent_route_before_authentication"),
+     "test_flag_off_get_is_404_before_authentication"),
     ("rollout_gate_inside_auth", ROUTE,
      "@_rollout_gated\n@require_mobile_auth\n",
      "@require_mobile_auth\n@_rollout_gated\n",
-     "test_flag_off_is_an_absent_route_before_authentication"),
+     "test_flag_off_get_is_404_before_authentication"),
     ("owner_from_query_string", ROUTE,
      "owner_id = g.mobile_user.id",
      'owner_id = int(__import__("flask").request.args.get("user_id", g.mobile_user.id))',
@@ -31,11 +31,13 @@ MUTATIONS = (
     ("flag_default_on", "app/feature_flags.py",
      'key="FITX_MOBILE_TODAY_GUIDANCE_ENABLED",\n'
      '        capability="LP17-B1 read-only Bearer GET /api/v1/today/guidance over the '
-     'LP17 Today Guidance read model; OFF is an absent route.",\n'
+     'LP17 Today Guidance read model; OFF answers GET 404 before auth without '
+     'running the read model (route stays registered).",\n'
      '        owner=_OWNER,\n        default=False,',
      'key="FITX_MOBILE_TODAY_GUIDANCE_ENABLED",\n'
      '        capability="LP17-B1 read-only Bearer GET /api/v1/today/guidance over the '
-     'LP17 Today Guidance read model; OFF is an absent route.",\n'
+     'LP17 Today Guidance read model; OFF answers GET 404 before auth without '
+     'running the read model (route stays registered).",\n'
      '        owner=_OWNER,\n        default=True,',
      "test_flag_is_a_default_off_registry_record_depending_on_native_auth"),
 )

@@ -27,12 +27,15 @@ def _guidance_enabled():
 
 
 def _rollout_gated(view):
-    """While the flag is OFF the route is absent, BEFORE authentication runs.
+    """While the flag is OFF, GET answers 404 BEFORE authentication runs.
 
     Outermost on purpose: with the flag OFF there is no 401 for a missing token
     and no guidance for a valid one - the caller gets the application's own
-    not-found answer, the same one an unregistered path gets. `wraps` copies the
-    inner `_require_mobile_auth` marker so the auth coverage guards still see it.
+    not-found page and the read model never executes. The rule itself stays
+    registered, so the shared `mobile_api` before-request Bearer processing,
+    rate limiting (429), OPTIONS and 405 for other methods still apply, as on
+    every request-time-gated mobile route. `wraps` copies the inner
+    `_require_mobile_auth` marker so the auth coverage guards still see it.
     """
     @wraps(view)
     def wrapper(*args, **kwargs):

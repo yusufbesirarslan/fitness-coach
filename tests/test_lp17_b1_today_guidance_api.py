@@ -28,6 +28,7 @@ from app.services import mobile_auth, mobile_today, nutrition_day_view
 from app.services import today_guidance_projection as projection
 from app.services import today_guidance_read_model as read_model
 from app.timeutil import audit_clock
+from test_default_rate_limit_identity import tight_default_limiter  # noqa: F401
 from test_lp16b_native_checkin_api import athlete, real_bearer  # noqa: F401
 from test_mobile_today_api import FIXED_NOW, complete_workout, save_plan
 
@@ -151,14 +152,14 @@ def _normalized(response):
 
 @pytest.mark.parametrize("headers", [
     None, {"Authorization": "Basic nope"}, {"Authorization": "Bearer valid"}])
-def test_flag_off_is_an_absent_route_before_authentication(
+def test_flag_off_get_is_404_before_authentication(
         app, owner, monkeypatch, headers):
-    """OFF answers before `require_mobile_auth` and never runs the read model.
+    """OFF answers GET before `require_mobile_auth` and never runs the read model.
 
-    With the limiter disabled (the suite default) the answer is the app's own
-    not-found page, byte-identical to an unregistered path except the
-    blueprint-wide `Cache-Control: no-store`. The production-limiter residuals
-    are pinned separately below.
+    With the limiter disabled (the suite default) the GET answer is the app's
+    own not-found page, byte-identical to an unregistered path except the
+    blueprint-wide `Cache-Control: no-store`. The route stays registered; the
+    residuals that follow from that are pinned separately below.
     """
     calls = []
     monkeypatch.setattr(mobile_auth, "authenticate_access",
@@ -166,15 +167,15 @@ def test_flag_off_is_an_absent_route_before_authentication(
     monkeypatch.setattr(read_model, "build_today_guidance",
                         lambda user_id: calls.append("read"))
     response = get(FlaskClient(app, app.response_class), headers)
-    absent = get(FlaskClient(app, app.response_class), headers,
-                 path="/api/v1/today/guidance-unregistered-probe")
+    unregistered = get(FlaskClient(app, app.response_class), headers,
+                       path="/api/v1/today/guidance-unregistered-probe")
 
     assert calls == []
-    assert response.status_code == absent.status_code == 404
-    assert response.mimetype == absent.mimetype
-    assert _normalized(response) == _normalized(absent)
-    assert set(response.headers.keys()) - set(absent.headers.keys()) == {"Cache-Control"}
-    assert set(absent.headers.keys()) <= set(response.headers.keys())
+    assert response.status_code == unregistered.status_code == 404
+    assert response.mimetype == unregistered.mimetype
+    assert _normalized(response) == _normalized(unregistered)
+    assert set(response.headers.keys()) - set(unregistered.headers.keys()) == {"Cache-Control"}
+    assert set(unregistered.headers.keys()) <= set(response.headers.keys())
     assert response.headers["Cache-Control"] == "no-store"
     assert b"contract_version" not in response.data
 
@@ -198,15 +199,75 @@ def test_flag_off_residuals_under_the_production_limiter(app, owner, monkeypatch
     monkeypatch.setattr(limiter, "enabled", True)
     bearer = {"Authorization": "Bearer valid"}
     response = get(FlaskClient(app, app.response_class), bearer)
-    absent = get(FlaskClient(app, app.response_class), bearer,
-                 path="/api/v1/today/guidance-unregistered-probe")
-    assert response.status_code == absent.status_code == 404
-    assert _normalized(response) == _normalized(absent)
+    unregistered = get(FlaskClient(app, app.response_class), bearer,
+                       path="/api/v1/today/guidance-unregistered-probe")
+    assert response.status_code == unregistered.status_code == 404
+    assert _normalized(response) == _normalized(unregistered)
     assert calls == ["auth"]                      # binder only; no read model
     options = FlaskClient(app, app.response_class).open(PATH, method="OPTIONS")
     assert options.status_code == 200 and "GET" in options.headers["Allow"]
     assert FlaskClient(app, app.response_class).open(
         "/api/v1/today/guidance-unregistered-probe", method="OPTIONS").status_code == 404
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_flag_off_wrong_method_is_405_from_the_registered_rule(
+        app, client, owner, monkeypatch, method):
+    """The registered GET rule answers other methods 405 whatever the flag says.
+
+    Routing rejects the method before any view or gate runs, so neither the
+    credential lookup nor the read model executes; an unregistered path
+    answers the same method 404. `client` sends same-origin CSRF headers: on a
+    routing failure the request has no blueprint, so without them the shared
+    CSRF hook answers 403 first - for the unregistered path too.
+    """
+    calls = []
+    monkeypatch.setattr(mobile_auth, "authenticate_access",
+                        lambda raw: calls.append("auth"))
+    monkeypatch.setattr(read_model, "build_today_guidance",
+                        lambda user_id: calls.append("read"))
+    bearer = {"Authorization": "Bearer valid"}
+    probe_path = "/api/v1/today/guidance-unregistered-probe"
+    response = client.open(PATH, method=method, headers=bearer)
+
+    assert response.status_code == 405
+    assert {"GET", "HEAD", "OPTIONS"} <= {
+        allowed.strip() for allowed in response.headers["Allow"].split(",")}
+    assert client.open(probe_path, method=method, headers=bearer).status_code == 404
+    raw = FlaskClient(app, app.response_class)
+    assert raw.open(PATH, method=method, headers=bearer).status_code == 403
+    assert raw.open(probe_path, method=method, headers=bearer).status_code == 403
+    assert calls == []
+    assert b"contract_version" not in response.data
+
+
+def test_flag_off_default_limit_answers_429_from_the_limiter(
+        app, owner, as_mobile, tight_default_limiter, monkeypatch):  # noqa: F811
+    """OFF does not exempt the route from the shared default rate limit.
+
+    `tight_default_limiter` shrinks only the default quota (2 per hour, real
+    Flask-Limiter, real storage) so the third GET trips it; the production
+    600/hour value is pinned by `test_default_rate_limit_identity`. The
+    before-request binder resolves the Bearer for the limiter key on every
+    request, the gate keeps the read model out, and the 429 is the blueprint's
+    `AUTH_RATE_LIMITED` envelope.
+    """
+    headers = as_mobile(owner)
+    stubbed = mobile_auth.authenticate_access
+    calls = []
+    monkeypatch.setattr(mobile_auth, "authenticate_access",
+                        lambda raw: calls.append("auth") or stubbed(raw))
+    monkeypatch.setattr(read_model, "build_today_guidance",
+                        lambda user_id: calls.append("read"))
+    client = FlaskClient(app, app.response_class)
+    responses = [get(client, headers) for _ in range(3)]
+
+    assert [r.status_code for r in responses] == [404, 404, 429]
+    error = _error(responses[2])
+    assert error["code"] == "AUTH_RATE_LIMITED" and error["retryable"] is True
+    assert int(responses[2].headers["Retry-After"]) > 0
+    assert responses[2].headers["Cache-Control"] == "no-store"
+    assert calls == ["auth", "auth", "auth"]      # binder only; no read model
 
 
 # =============================================================================
