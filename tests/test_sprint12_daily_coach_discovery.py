@@ -159,6 +159,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # LP16-B native weekly check-in over the LP16-A canonical service.
         "/api/v1/progress/check-ins",
         "/api/v1/today",
+        # LP17-B1 transport of the LP17 read model (training = build_today).
+        "/api/v1/today/guidance",
         "/api/v1/training/preferences",
         # TI-01B owner × catalog notes; no Daily-Coach/diagnostic semantics.
         "/api/v1/training/exercises/<exercise_id>/note",
@@ -180,12 +182,17 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
     }
 
 
-# The only two `/api/v1` paths allowed to carry "today". Both are canonical
-# reads: the nutrition diary owns the food ledger, `/api/v1/today` projects the
-# workout-state authority. Neither computes a Today of its own.
+# The only `/api/v1` paths allowed to carry "today". All are canonical reads:
+# the nutrition diary owns the food ledger, `/api/v1/today` projects the
+# workout-state authority. None computes a Today of its own. LP17-B1 admits,
+# by review and exact path, the transport of the LP17 Today Guidance read
+# model: its training section IS `mobile_today.build_today`, its other
+# sections are the existing day view and check-in history readers, and it has
+# no cross-domain ranking (`action_priority.state=not_established`).
 _APPROVED_TODAY_PATHS = {
     "/api/v1/nutrition/diary/today",
     "/api/v1/today",
+    "/api/v1/today/guidance",
 }
 
 # The only `/api/v1` path allowed to carry "progress". LP-04 (spec J1) exposes

@@ -308,3 +308,15 @@ PostgreSQL and projection qualification. Rollback: set P1 OFF. TI-03 has no
 schema, no stored diagnostics and no write path, so rollback deletes nothing and
 P0 context and V1/V2 checkpoint storage are unaffected. TI-03 does not authorize
 activation.
+
+## LP17-B1 native Today Guidance
+
+`FITX_MOBILE_TODAY_GUIDANCE_ENABLED=0` is the default. It requires
+`MOBILE_AUTH_ENABLED=1`; ON without mobile auth has no effect because the
+route is not registered. Enable only after a reviewed native client consumes
+contract version 1 and the LP17-B1 HTTP, auth and query-budget qualification
+is green. Abort on any cross-account fact, unexpected
+`event=guidance_read_failed` lines outside the Istanbul day rollover, or a
+`mobile_api` latency regression. Rollback: set the flag to 0 — the route
+answers as absent and there is no schema or data to clean up. LP17-B1 does not
+authorize activation in any environment.

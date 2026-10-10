@@ -381,3 +381,21 @@ read-only `GET /api/v1/training/workout-sessions/<session_reference>/training-in
 projection; no migration, no persisted diagnostics, no write path. Owner:
 @yusufbesirarslan; review by 2026-11-01. Disable P1 to roll back; nothing to
 clean up. See [TI-03](TI_03_TRAINING_INSIGHT.md).
+
+## LP17-B1 native Today Guidance
+
+`FITX_MOBILE_TODAY_GUIDANCE_ENABLED` defaults OFF and depends on
+`MOBILE_AUTH_ENABLED`: with mobile auth OFF the `/api/v1` blueprint is not
+registered at all, so the guidance route is absent in every flag state. With
+mobile auth ON and this flag OFF, `GET /api/v1/today/guidance` answers with the
+app's own 404 page **before** `require_mobile_auth` and never runs the read
+model, so it never returns guidance data. It is not fully indistinguishable
+from an unregistered path: like every request-time-gated `mobile_api` route,
+the pre-limiter principal binder still resolves a presented Bearer, the
+default 600/hour limit can answer 429, OPTIONS/405 reveal the rule, and the
+response carries `Cache-Control: no-store`. ON
+enables only that read-only Bearer projection of the LP17 read model
+(`docs/LP17_TODAY_GUIDANCE.md`); `GET /api/v1/today` is unchanged in every
+state. No migration, no write path, no provider call. Owner:
+@yusufbesirarslan; review by 2026-11-10. Rollback: set the flag to 0; nothing
+to clean up. See [LP17-B1](LP17_B1_NATIVE_TODAY_GUIDANCE_HTTP.md).

@@ -349,12 +349,16 @@ def test_today_adds_no_parallel_ungated_route(app):
     # web routes that happen to end in /today (meal log, activity) are a separate,
     # cookie-authenticated surface and are deliberately left alone.
     # Exactly the Today surfaces the mobile namespace is supposed to have: the
-    # one PR3 adds, plus the pre-existing nutrition diary day. A third would mean
-    # someone opened a competing Today read.
+    # one PR3 adds, plus the pre-existing nutrition diary day, plus (LP17-B1,
+    # by review) the guidance transport whose training section is this
+    # route's own `build_today` (delegation pinned in
+    # tests/test_lp17_b1_today_guidance_api.py). Any other would mean someone
+    # opened a competing Today read.
     mobile_today_rules = {rule for rule in rules
                           if rule.startswith("/api/v1") and "today" in rule}
     assert mobile_today_rules == {
-        "/api/v1/today", "/api/v1/nutrition/diary/today"}
+        "/api/v1/today", "/api/v1/nutrition/diary/today",
+        "/api/v1/today/guidance"}
 
 
 def test_today_endpoint_belongs_to_the_single_mobile_blueprint(app):
