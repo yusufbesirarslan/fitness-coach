@@ -21,6 +21,10 @@ from uuid import UUID, uuid4
 if __package__:
     from .deploy_contract import (
         CONTROLLER_REQUIRED_SECONDS,
+        CONTROLLER_STEP_MINUTES,
+        HOST_PHASE_SECONDS,
+        HOST_WORST_CASE_SECONDS,
+        POLL_HORIZON_SECONDS,
         SSM_EXECUTION_TIMEOUT_SECONDS,
         SSM_HEARTBEAT_FUTURE_SKEW_SECONDS,
         SSM_HEARTBEAT_MAX_AGE_SECONDS,
@@ -29,6 +33,10 @@ if __package__:
 else:
     from deploy_contract import (
         CONTROLLER_REQUIRED_SECONDS,
+        CONTROLLER_STEP_MINUTES,
+        HOST_PHASE_SECONDS,
+        HOST_WORST_CASE_SECONDS,
+        POLL_HORIZON_SECONDS,
         SSM_EXECUTION_TIMEOUT_SECONDS,
         SSM_HEARTBEAT_FUTURE_SKEW_SECONDS,
         SSM_HEARTBEAT_MAX_AGE_SECONDS,
@@ -52,12 +60,11 @@ EMPTY_RESULT_OPERATIONS = (["ssm", "delete-parameter"],)
 DELIVERY_TIMEOUT_SECONDS = 60
 EXECUTION_TIMEOUT_SECONDS = SSM_EXECUTION_TIMEOUT_SECONDS
 AWS_EXPIRY_SECONDS = DELIVERY_TIMEOUT_SECONDS + EXECUTION_TIMEOUT_SECONDS
-POLL_HORIZON_SECONDS = 2100
 POLL_INTERVAL_SECONDS = 10
 INVOCATION_CALL_TIMEOUT_SECONDS = 30
 AWS_CLI_CALL_TIMEOUT_SECONDS = 60
 GIT_CALL_TIMEOUT_SECONDS = 60
-CONTROLLER_BUDGET_SECONDS = 46 * 60
+CONTROLLER_BUDGET_SECONDS = CONTROLLER_STEP_MINUTES * 60
 if CONTROLLER_BUDGET_SECONDS < CONTROLLER_REQUIRED_SECONDS:
     raise RuntimeError("controller timeout budget is below the deploy contract")
 AUTHORIZATION_CALL_TIMEOUT_SECONDS = AWS_CLI_CALL_TIMEOUT_SECONDS
@@ -106,8 +113,13 @@ ROOT_BOOTSTRAP_WORST_CASE_SECONDS = (
     + ROOT_EXTERNAL_CALL_COUNT * ROOT_EXTERNAL_CALL_MAX_SECONDS
     + PRIVILEGE_DROP_MAX_SECONDS
 )
-# The helper inherits the already-held outer lock: 4 + 7 + 1560 + 2 + 7.
-WORKFLOW_HELPER_WORST_CASE_SECONDS = 1580
+# The helper inherits the already-held outer lock, so its share of the host
+# worst case is everything after root bootstrap, lock and authority proof.
+WORKFLOW_HELPER_WORST_CASE_SECONDS = HOST_WORST_CASE_SECONDS - (
+    HOST_PHASE_SECONDS["root_bootstrap"]
+    + HOST_PHASE_SECONDS["lock_acquisition"]
+    + HOST_PHASE_SECONDS["authority_and_stale_proof"]
+)
 
 ROOT_LOCK_WRAPPER_SOURCE = (
     "HARDENED_PATH = " + repr(HARDENED_EXECUTION_PATH)
@@ -582,6 +594,14 @@ class DeployConfig:
             or any(part in {".", ".."} for part in deploy_dir.split("/"))
         ):
             raise ConfigError("DEPLOY_DIR must be one canonical shell-safe absolute path")
+        if public_url is None:
+            # R6-03A: the blue/green transaction proves public /health and the
+            # anonymous mobile ingress envelope through nginx after the route
+            # switch, before the worker or the old backend is touched. Without
+            # an origin there is no post-switch proof, so refuse up front.
+            raise ConfigError(
+                "PUBLIC_HEALTH_URL is required: the blue/green transaction "
+                "proves public health and mobile ingress after the switch")
         validate_public_health_url(public_url)
         return cls(deploy_sha, region, instance_id, deploy_user, deploy_dir, public_url)
 

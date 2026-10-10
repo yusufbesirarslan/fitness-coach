@@ -203,7 +203,7 @@ def test_deploy_checks_out_only_the_ci_approved_sha_with_full_history():
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     )
 
-    assert job["timeout-minutes"] == "65"
+    assert job["timeout-minutes"] == "70"
     assert checkout["with"] == {
         "ref": "${{ env.DEPLOY_SHA }}",
         "fetch-depth": "0",
@@ -666,9 +666,9 @@ def test_production_build_context_excludes_development_and_backups():
     assert {"*.bak", "tests/", ".github/", "*.md",
             "requirements-dev.txt", "requirements-mcp.txt"} <= ignored
     host = _host_script()
-    assert 'git archive --format=tar "$revision"' in host
+    assert 'git archive --format=tar "$DEPLOY_SHA"' in host
     assert 'tar -xf "$BUILD_ARCHIVE" -C "$BUILD_CONTEXT_DIR"' in host
-    assert "build:" in host and "context:" in host
+    assert "--context" in host and "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" in host
 
 
 # BU TEST BİR TRIPWIRE'DIR — GÜVENLİK GARANTİSİ DEĞİL.
@@ -847,9 +847,11 @@ def test_dockerfile_bakes_immutable_build_revision():
 
     assert instructions[final_user_idx][1] == "appuser"
 
-    assert 'git archive --format=tar "$revision"' in host
-    assert "BUILD_REVISION: '$revision'" in host
-    assert "cat /app/BUILD_REVISION" in host
+    assert 'git archive --format=tar "$DEPLOY_SHA"' in host
+    engine = Path("scripts/r6_deploy_transaction.py").read_text(encoding="utf-8")
+    assert 'f"BUILD_REVISION={revision}"' in engine
+    assert '"/app/BUILD_REVISION"' in engine
+    assert '"--network",' in engine and '"none"' in engine
 
 
 def test_deploy_fails_on_live_nginx_csp_header_instead_of_sed_mutation():
@@ -861,12 +863,15 @@ def test_deploy_fails_on_live_nginx_csp_header_instead_of_sed_mutation():
 
 
 def test_deploy_health_gate_and_rollback_are_required():
-    body = _host_script()
+    # Failure behavior and final serving state are exercised in the engine suite.
+    host = _host_script()
+    engine = Path("scripts/r6_deploy_transaction.py").read_text(encoding="utf-8")
+    assert "PREV_COMMIT" in host and "--previous-commit" in host
+    assert 'python3 -I -B "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" run' in host
+    assert "self._rollback()" in engine
+    assert "self.ops.route_switch" in engine and "self._restore_worker" in engine
 
-    assert "http://127.0.0.1:5000/health" in body
-    assert "%{http_code}" in body
-    assert "PREV_COMMIT" in body
-    assert "ROLLBACK" in body
+
 
 
 def test_deploy_warns_when_fatsecret_proxy_not_listening():
@@ -879,15 +884,15 @@ def test_deploy_warns_when_fatsecret_proxy_not_listening():
 
 
 def test_deploy_gate_uses_deep_health():
-    # I2: birincil gate derin sağlığa bakmalı — Redis-down'da login fail-closed
-    # iken deploy "yeşil" geçmesin. (Rollback probe'u sığ kalır: kod geri
-    # dönüşünü ölçer, Redis'i değil.)
-    body = _host_script()
-    assert "docker compose" in body
-    assert "exec -T web python3" in body
-    assert "urllib.request.urlopen" in body
-    assert "http://127.0.0.1:5000/health?deep=1" in body
-    assert "run_external curl" not in body.split("verify_public_health_once", 1)[0]
+    engine = Path("scripts/r6_deploy_transaction.py").read_text(encoding="utf-8")
+    slots = Path("scripts/web_slot_runtime.py").read_text(encoding="utf-8")
+    assert "http://127.0.0.1:5000/health?deep=1" in engine
+    assert "container_deep_health_revision" in engine
+    assert "self.ops.slot_verify" in engine
+    assert "in-container deep health never proved" in slots
+    assert "_deep_probe(cid, revision)" in slots
+
+
 
 
 def test_deploy_is_gated_on_ci_success():
@@ -958,22 +963,22 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "Both boundaries reject a bare timestamp as a typed configuration "
         "error before any AWS call",
         "each boundary re-reads the clock after its own describe response",
-        "Workflow job timeout | 65 minutes",
-        "Controller step timeout | 46 minutes",
+        "Workflow job timeout | 70 minutes",
+        "Controller step timeout | 50 minutes",
         "Delivery timeout | 60 seconds",
-        "Execution timeout | 1,800 seconds",
-        "AWS expiry | 1,860 seconds",
-        "Polling horizon | 2,100 seconds",
+        "Execution timeout | 2,200 seconds",
+        "AWS expiry | 2,260 seconds",
+        "Polling horizon | 2,500 seconds",
         "`/run/lock/axisai-production/production.lock`",
         "inherited descriptor 7",
         "retry after lock contention",
         "`origin/main` differs from `DEPLOY_SHA`",
-        "resets only to `DEPLOY_SHA`",
+        "commits the checkout only to `DEPLOY_SHA`",
         "server-owned `revision` equals the expected SHA",
         "`BUILD_REVISION` set to the exact candidate SHA",
         "the running `web` container's `/app/BUILD_REVISION` equals the expected SHA",
         "exact `PREV_COMMIT`",
-        "Rollback resets exactly to `PREV_COMMIT`",
+        "Rollback restores the previous symbolic route",
         "Code rollback does not roll back database migrations",
         "immediately logs the non-secret command ID",
         "ambiguous SendCommand response cannot authorize an unknown command",
@@ -983,9 +988,9 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "not proof that the host helper process has started",
         "`Success` is the only successful terminal `StatusDetails` value",
         "`Failed`, `DeliveryTimedOut`, `ExecutionTimedOut`, `Undeliverable`, `Cancelled`, and `Terminated` are terminal failures",
-        "optional `PUBLIC_HEALTH_URL` is HTTPS",
+        "required `PUBLIC_HEALTH_URL` is HTTPS",
         "materializes each build context from `git archive`",
-        "probed inside the running `web` container",
+        "probed inside the serving container",
         "protect the `production` environment with required reviewers",
         "CloudWatch and S3 retention are deferred operations work",
         "SSM-agent upgrades are separate host hygiene work",
@@ -2733,6 +2738,8 @@ def _deploy_source_violations(source):
         "print('.env permissions: 600')",
     }
     for line in source.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
         if re.search(r"\.env\b", line) or "$env_file" in line or "${env_file}" in line:
             if line.strip() not in canonical_env_lines:
                 violations.append(".env content output")
@@ -2858,6 +2865,7 @@ PRODUCTION_AUTHORITY_SURFACES = (
     "scripts/deploy_control.py",
     "scripts/deploy_gate.py",
     "scripts/production_deploy.sh",
+    "scripts/r6_deploy_transaction.py",
     "scripts/check_cognito_pool.py",
     "scripts/check_email_lambda.py",
     "scripts/deploy_email_lambda.py",

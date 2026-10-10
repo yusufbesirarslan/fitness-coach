@@ -1,21 +1,28 @@
 # nginx route control plane (R6-02A)
 
 This directory is the repository authority for how nginx selects the ONE web
-backend that receives new traffic. **R6-02A is repository-only.** Production
-nginx still proxies `location /` straight to `127.0.0.1:5000`; nothing here is
-installed or referenced by the live site until the separately approved R6-02B
-bootstrap runs. `production_deploy.sh` and `deploy_control.py` do not use it.
-R6-03 will.
+backend that receives new traffic. Production now has the R6-02 control plane
+installed and active. **R6-02B is COMPLETE as of 2026-10-09.** nginx indirection
+is active and the production route state remains `legacy`.
+
+No production traffic has yet been served by blue or green. After PR #424
+merges, normal deploy engineering uses the symbolic route helper, but R6-03A
+is not production-validated yet. The first real production blue/green cutover
+remains separately controlled by the pending R6-03B.
 
 ## Topology
 
-Today (production, audited read-only 2026-10-08):
+Current production topology (R6-02B complete, 2026-10-09):
 
-    Internet -> nginx :443 location / -> proxy_pass http://127.0.0.1:5000 -> fitness-coach-web-1
+    Internet
+     -> nginx
+     -> proxy_pass http://axisai_web
+     -> /etc/nginx/axisai/active-web-upstream.conf
+     -> server 127.0.0.1:5000
+     -> legacy main-project web
 
-After R6-02B (behaviour-preserving; the include still names :5000):
+The named upstream includes exactly one backend:
 
-    Internet -> nginx :443 location / -> proxy_pass http://axisai_web
     upstream axisai_web { include /etc/nginx/axisai/active-web-upstream.conf; }
     active-web-upstream.conf = exactly one of
         server 127.0.0.1:5000;   legacy  (main-project web, docker-compose.yml)
@@ -182,8 +189,9 @@ a security boundary** against `ubuntu`. R6-02 does not change sudoers or IAM.
 
 ## R6-02B runbook (one-time production bootstrap)
 
-Not executed in R6-02A. Run only after R6-02A is merged, with explicit
-approval, while production is up (it is stopped 23:00-06:00Z).
+Completed in production on 2026-10-09. The original procedure below is retained
+as historical reference; execution requires separate explicit approval while
+production is up (it is stopped 23:00-06:00Z).
 
 1. The deploy checkout must be the exact merged revision:
    `runuser -u ubuntu -- git -C /home/ubuntu/fitness-coach rev-parse HEAD`
@@ -225,7 +233,10 @@ argument and inserts one block, and verifies that nothing else changed.
 `nginx.conf` is the intended shape for a fresh host and is never copied over
 the live site by any deploy.
 
-## Production audit snapshot (read-only, 2026-10-08 18:41Z)
+## Historical pre-R6-02B production audit snapshot (read-only, 2026-10-08 18:41Z)
+
+This snapshot predates the completed 2026-10-09 bootstrap and does not describe
+the current nginx topology.
 
 - host and containers at `9e21be5`; nginx 1.28.3 active, `nginx -t` ok;
   `ExecReload=/usr/sbin/nginx -g 'daemon on; master_process on;' -s reload`.
@@ -235,5 +246,5 @@ the live site by any deploy.
 - Inert R6-01 Stage A files exist and are NOT authoritative: include
   `server 127.0.0.1:5000;\n` (sha256 `63c61cdd…`, same bytes as this
   repository's include), mapping without `legacy` (`3f0e3176…`, differs), old
-  helper (`ed3a0ccc…`, differs). R6-02B replaces the differing ones.
+  helper (`ed3a0ccc…`, differs). R6-02B subsequently replaced the differing ones.
 - `/usr/bin/python3` 3.14.4, certbot 4.0.0 (apt, `certbot_nginx` importable).

@@ -167,10 +167,13 @@ def test_real_pytest_discovery_markers_skips_and_execution(tmp_path):
 
 
 def test_workflow_retains_stable_fail_closed_gate():
-    workflow = yaml.load(Path(".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
+    workflow = yaml.load(Path(".github/workflows/ci.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert workflow["name"] == "CI"
     assert set(workflow["on"]) == {"pull_request", "push"}
-    assert workflow["on"]["push"]["branches"] == ["main"]
+    assert workflow["on"]["push"]["branches"] == [
+        "main", "r6/03a-bluegreen-deploy-transaction"]
+    deploy = yaml.load(Path(".github/workflows/deploy.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert deploy["on"]["workflow_run"]["branches"] == ["main"]
     jobs = workflow["jobs"]
     shards = jobs["tests"]
     assert shards["strategy"] == {"fail-fast": "false", "max-parallel": "4",

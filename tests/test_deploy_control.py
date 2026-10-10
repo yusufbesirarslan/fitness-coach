@@ -247,10 +247,13 @@ def test_config_rejects_non_https_or_credentialed_health_url(url):
         DeployConfig.from_environ({**VALID_ENV, "PUBLIC_HEALTH_URL": url})
 
 
-def test_config_allows_an_empty_optional_health_url():
-    config = DeployConfig.from_environ({**VALID_ENV, "PUBLIC_HEALTH_URL": ""})
-
-    assert config.public_health_url is None
+@pytest.mark.parametrize("environ", [
+    {**VALID_ENV, "PUBLIC_HEALTH_URL": ""},
+    {key: value for key, value in VALID_ENV.items() if key != "PUBLIC_HEALTH_URL"},
+])
+def test_config_requires_the_public_health_origin_for_post_switch_proof(environ):
+    with pytest.raises(ConfigError, match="PUBLIC_HEALTH_URL is required"):
+        DeployConfig.from_environ(environ)
 
 
 def test_validate_candidate_requires_origin_main_to_equal_deploy_sha():
@@ -502,7 +505,7 @@ def test_send_payload_separates_delivery_and_execution_timeout():
     args = calls[1]
     assert args[args.index("--timeout-seconds") + 1] == str(DELIVERY_TIMEOUT_SECONDS) == "60"
     parameters = json.loads(args[args.index("--parameters") + 1])
-    assert parameters["executionTimeout"] == [str(EXECUTION_TIMEOUT_SECONDS)] == ["1800"]
+    assert parameters["executionTimeout"] == [str(EXECUTION_TIMEOUT_SECONDS)] == ["2200"]
     assert args[:2] == ["ssm", "send-command"]
     assert args[args.index("--instance-ids") + 1] == VALID_ENV["EC2_INSTANCE_ID"]
 
@@ -1237,12 +1240,12 @@ def test_send_rejects_heartbeat_that_became_stale_after_preflight():
 
 def test_canonical_host_budget_preserves_literal_220_second_margin():
     assert list(HOST_PHASE_SECONDS.values()) == [
-        10, 60, 80, 10, 70, 620, 160, 30, 440, 80, 20,
+        10, 60, 80, 10, 70, 1200, 30, 500, 400, 20,
     ]
-    assert HOST_WORST_CASE_SECONDS == 1580
+    assert HOST_WORST_CASE_SECONDS == 1980
     assert SSM_EXECUTION_MARGIN_SECONDS == 220
     assert SSM_EXECUTION_TIMEOUT_SECONDS - HOST_WORST_CASE_SECONDS == SSM_EXECUTION_MARGIN_SECONDS
-    assert CONTROLLER_REQUIRED_SECONDS == 2490 < 46 * 60
+    assert CONTROLLER_REQUIRED_SECONDS == 2890 < 50 * 60
 
 
 @pytest.mark.parametrize("ping_status", ["ConnectionLost", "Inactive"])
@@ -1358,7 +1361,7 @@ def test_the_boundary_judges_an_offset_clock_by_its_instant(
 def test_aws_expiry_is_derived_from_delivery_and_execution_timeouts():
     assert AWS_EXPIRY_SECONDS == (
         DELIVERY_TIMEOUT_SECONDS + EXECUTION_TIMEOUT_SECONDS
-    ) == 1860
+    ) == 2260
     assert AWS_EXPIRY_SECONDS < POLL_HORIZON_SECONDS
 
 
@@ -2664,7 +2667,7 @@ def test_pending_is_polled_through_the_complete_horizon(fake_clock):
             fake_clock.monotonic, fake_clock.sleep, lambda message: None,
         )
 
-    assert fake_clock.now == POLL_HORIZON_SECONDS == 2100
+    assert fake_clock.now == POLL_HORIZON_SECONDS == 2500
     assert calls == POLL_HORIZON_SECONDS // 10
 
 
@@ -3056,7 +3059,7 @@ def test_controller_refuses_to_send_without_full_terminal_monitoring_reserve(
         )
 
     assert ["ssm", "send-command"] not in calls
-    assert CONTROLLER_BUDGET_SECONDS == 46 * 60
+    assert CONTROLLER_BUDGET_SECONDS == 50 * 60
     assert SEND_AND_MONITOR_RESERVE_SECONDS > AWS_EXPIRY_SECONDS
 
 

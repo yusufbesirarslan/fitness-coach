@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts import deploy_contract as contract
 from scripts.deploy_contract import HOST_PHASE_SECONDS, host_timeout_environment
 
 
@@ -71,7 +72,8 @@ def bash_executable() -> str:
 
 @pytest.fixture
 def tmp_path() -> Path:
-    temp_root = ROOT / ".pytest-basetemp" / "production-deploy"
+    temp_root = (ROOT / ".pytest-basetemp" / "production-deploy"
+                 if os.name == "nt" else Path(tempfile.gettempdir()) / "axisai-r6-production-deploy-tests")
     temp_root.mkdir(parents=True, exist_ok=True)
     path = Path(tempfile.mkdtemp(prefix="case-", dir=temp_root))
     try:
@@ -105,7 +107,7 @@ class HostFixture:
         self,
         bash_executable: str,
         deploy_sha: str | None = None,
-        public_health_url: str = "",
+        public_health_url: str = "https://fitness.example/health",
         **environment: str,
     ) -> subprocess.CompletedProcess[str]:
         command = self.command(bash_executable, deploy_sha)
@@ -149,40 +151,38 @@ class HostFixture:
         )
 
 
+# Test-only engine probe: shell boundary assertions, never production orchestration.
+ENGINE_PROBE = r"""import argparse,json,os,sys,subprocess
+from pathlib import Path
+def native(v):
+    return v[1]+":"+v[2:] if os.name=="nt" and len(v)>3 and v[0]=="/" and v[2]=="/" else v
+parser=argparse.ArgumentParser()
+parser.add_argument("command",choices=["run"])
+for name in ("deploy-sha","previous-commit","deploy-dir","context","work-dir","public-health-url","transaction-epoch"):
+    parser.add_argument("--"+name,required=True)
+a=parser.parse_args()
+context,deploy,work=(Path(native(v)) for v in (a.context,a.deploy_dir,a.work_dir))
+assert sys.flags.isolated and sys.dont_write_bytecode
+assert context.parent==deploy and work.parent==deploy and context!=work
+assert Path(__file__).resolve().parent.parent==context.resolve()
+assert (context/"release.txt").read_text().strip()=="candidate"
+assert not (context/"untracked-host.txt").exists() and not (context/".env").exists()
+assert subprocess.check_output([os.environ["REAL_GIT"],"-C",str(deploy),"rev-parse","HEAD"],text=True).strip()==a.previous_commit
+assert a.deploy_sha==os.environ["FAKE_CANDIDATE_SHA"]
+with Path(native(os.environ["TRACE_FILE"])).open("a") as f:
+    f.write("ENGINE_PROOF="+json.dumps(vars(a),sort_keys=True)+"\n")
+sys.exit(int(os.environ.get("FAKE_ENGINE_EXIT","0")))
+"""
+
 @pytest.fixture
 def host_fixture(tmp_path: Path):
     def make(
         *,
         flock_exit: int = 0,
-        container_revision: str = "",
-        rollback_container_revision: str = "",
-        baked_revision: str = "",
-        rollback_baked_revision: str = "",
-        baked_revision_missing: bool = False,
-        rollback_baked_revision_missing: bool = False,
-        candidate_revision_probe_exit: int = 0,
-        rollback_revision_probe_exit: int = 0,
-        health_code: int = 200,
-        health_status: str = "ok",
-        health_revision: str = "",
-        candidate_health_failures: int | None = None,
-        candidate_curl_exit: int = 0,
-        public_health_code: int = 200,
-        public_health_failures: int | None = None,
-        public_curl_exit: int = 0,
-        rollback_health_has_revision: bool = True,
-        rollback_health_failures: int = 0,
-        rollback_curl_exit: int = 0,
-        previous_has_hardened_marker: bool = False,
-        fail_candidate_docker_command: str = "",
-        fail_rollback_docker_command: str = "",
-        fail_prune: bool = False,
-        fail_build_cache_prune: bool = False,
         timeout_hang_phase: str = "",
         timeout_hang_command: str = "",
         clock_readings: tuple[int, ...] = (),
         initial_clock_mode: str = "",
-        post_checkout_clock_mode: str = "",
     ) -> HostFixture:
         origin = tmp_path / "origin.git"
         source = tmp_path / "source"
@@ -201,7 +201,6 @@ def host_fixture(tmp_path: Path):
         monotonic_state = tmp_path / "runtime-monotonic-clock"
         monotonic_state.write_text("", encoding="utf-8")
         fake_bin.mkdir()
-        container_root.mkdir()
         trace.write_text("", encoding="utf-8")
         fake_clock.write_text("1000", encoding="utf-8")
         fake_clock_count.write_text("0", encoding="utf-8")
@@ -215,18 +214,17 @@ def host_fixture(tmp_path: Path):
         _run(["git", "-C", str(source), "config", "user.email", "deploy-test@example.com"])
         _run(["git", "-C", str(source), "config", "user.name", "Deploy Test"])
         (source / "release.txt").write_text("previous\n", encoding="utf-8")
-        if previous_has_hardened_marker:
-            marker = source / "scripts" / "production_deploy.sh"
-            marker.parent.mkdir()
-            marker.write_text("# hardened revision-health contract\n", encoding="utf-8")
         _run(["git", "-C", str(source), "add", "."])
         _run(["git", "-C", str(source), "commit", "-m", "previous"])
         prev_commit = _run(["git", "-C", str(source), "rev-parse", "HEAD"])
         _run(["git", "-C", str(source), "remote", "add", "origin", str(origin)])
         _run(["git", "-C", str(source), "push", "-u", "origin", "main"])
         _run(["git", "clone", "--branch", "main", str(origin), str(deploy_dir)])
+        engine = source / "scripts/r6_deploy_transaction.py"
+        engine.parent.mkdir(exist_ok=True)
+        engine.write_text(ENGINE_PROBE, encoding="utf-8", newline="\n")
         (source / "release.txt").write_text("candidate\n", encoding="utf-8")
-        _run(["git", "-C", str(source), "add", "release.txt"])
+        _run(["git", "-C", str(source), "add", "release.txt", "scripts/r6_deploy_transaction.py"])
         _run(["git", "-C", str(source), "commit", "-m", "candidate"])
         candidate_commit = _run(["git", "-C", str(source), "rev-parse", "HEAD"])
         _run(["git", "-C", str(source), "push", "origin", "main"])
@@ -352,195 +350,11 @@ exit "$status"
         )
         _write_executable(
             fake_bin / "docker",
-            r"""#!/usr/bin/env bash
-printf 'docker' >> "$TRACE_FILE"
-printf ' %s' "$@" >> "$TRACE_FILE"
-printf '\n' >> "$TRACE_FILE"
-
-override=''
-previous=''
-for argument in "$@"; do
-  if [[ "$previous" == '-f' ]]; then override="$argument"; fi
-  previous="$argument"
-done
-revision=''
-baked=''
-if [[ -n "$override" && -f "$override" ]]; then
-  revision="$(grep -m1 'APP_REVISION:' "$override" | cut -d "'" -f 2)"
-  baked="$(grep -m1 'BUILD_REVISION:' "$override" | cut -d "'" -f 2)"
-fi
-operation=''
-if [[ " $* " == *' build '* ]]; then operation=build; fi
-if [[ " $* " == *' up -d '* ]]; then operation=up; fi
-if [[ " $* " == *' ps '* ]]; then operation=ps; fi
-if [[ " $* " == *' image prune '* ]]; then operation=prune; fi
-if [[ " $* " == *' builder prune '* ]]; then operation=build_cache_prune; fi
-if [[ "$operation" == prune && "$FAKE_FAIL_PRUNE" == 1 ]]; then exit 41; fi
-if [[ "$operation" == build_cache_prune && "$FAKE_FAIL_BUILD_CACHE_PRUNE" == 1 ]]; then exit 44; fi
-if [[ -n "$FAKE_FAIL_CANDIDATE_DOCKER_COMMAND" && "$revision" == "$FAKE_CANDIDATE_SHA" && "$operation" == "$FAKE_FAIL_CANDIDATE_DOCKER_COMMAND" ]]; then
-  exit 42
-fi
-if [[ -n "$FAKE_FAIL_ROLLBACK_DOCKER_COMMAND" && "$revision" != "$FAKE_CANDIDATE_SHA" && "$operation" == "$FAKE_FAIL_ROLLBACK_DOCKER_COMMAND" ]]; then
-  exit 43
-fi
-if [[ "$operation" == build || "$operation" == up ]]; then
-  printf '%s' "$revision" > "$DOCKER_STATE_FILE"
-  printf 'APP_REVISION=%s\n' "$revision" >> "$TRACE_FILE"
-  printf 'BUILD_REVISION=%s\n' "$baked" >> "$TRACE_FILE"
-fi
-if [[ " $* " == *' exec -T web printenv APP_REVISION '* ]]; then
-  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" && -n "${FAKE_CANDIDATE_CONTAINER_REVISION:-}" ]]; then
-    printf '%s\n' "$FAKE_CANDIDATE_CONTAINER_REVISION"
-  elif [[ "$revision" != "$FAKE_CANDIDATE_SHA" && -n "${FAKE_ROLLBACK_CONTAINER_REVISION:-}" ]]; then
-    printf '%s\n' "$FAKE_ROLLBACK_CONTAINER_REVISION"
-  else
-    printf '%s\n' "$revision"
-  fi
-fi
-if [[ " $* " == *' exec -T web sh -c '* ]]; then
-  probe=''
-  for argument in "$@"; do probe="$argument"; done
-  if [[ "$probe" != *'/app/BUILD_REVISION'* ]]; then
-    echo 'unexpected container probe' >&2
-    exit 66
-  fi
-  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" ]]; then
-    image_dir="$FAKE_CONTAINER_ROOT/candidate"
-    image_missing="$FAKE_CANDIDATE_BAKED_MISSING"
-    probe_exit="$FAKE_CANDIDATE_REVISION_PROBE_EXIT"
-    image_revision="${FAKE_CANDIDATE_BAKED_REVISION:-}"
-  else
-    image_dir="$FAKE_CONTAINER_ROOT/rollback"
-    image_missing="$FAKE_ROLLBACK_BAKED_MISSING"
-    probe_exit="$FAKE_ROLLBACK_REVISION_PROBE_EXIT"
-    image_revision="${FAKE_ROLLBACK_BAKED_REVISION:-}"
-  fi
-  if [[ "$probe_exit" != 0 ]]; then
-    echo 'Error response from daemon: container is not running' >&2
-    exit "$probe_exit"
-  fi
-  if [[ -z "$image_revision" ]]; then
-    image_revision="${baked:-$revision}"
-  fi
-  # The image filesystem is real: an image baked before the revision contract
-  # simply has no BUILD_REVISION file, exactly like a6d6b2e's image.
-  mkdir -p "$image_dir"
-  rm -f "$image_dir/BUILD_REVISION"
-  if [[ "$image_missing" != 1 ]]; then
-    printf '%s\n' "$image_revision" > "$image_dir/BUILD_REVISION"
-  fi
-  # Run the host's own probe snippet, only rebased onto that filesystem, so the
-  # test can never pass by mocking the branch under test away.
-  translated="$(printf '%s' "$probe" | sed "s|/app/|$image_dir/|g")"
-  sh -c "$translated"
-  exit "$?"
-fi
-if [[ " $* " == *' exec -T web python3 - '* ]]; then
-  health_revision="$revision"
-  health_status=ok
-  include_revision=1
-  health_code=200
-  health_exit=0
-  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" ]]; then
-    counter_file="$CANDIDATE_HEALTH_COUNT_FILE"
-    failures="$FAKE_CANDIDATE_HEALTH_FAILURES"
-    health_code="$FAKE_CANDIDATE_HEALTH_CODE"
-    health_status="$FAKE_CANDIDATE_HEALTH_STATUS"
-    [[ -n "$FAKE_CANDIDATE_HEALTH_REVISION" ]] && health_revision="$FAKE_CANDIDATE_HEALTH_REVISION"
-    health_exit="$FAKE_CANDIDATE_CURL_EXIT"
-  else
-    counter_file="$ROLLBACK_HEALTH_COUNT_FILE"
-    failures="$FAKE_ROLLBACK_HEALTH_FAILURES"
-    include_revision="$FAKE_ROLLBACK_HEALTH_HAS_REVISION"
-    health_exit="$FAKE_ROLLBACK_CURL_EXIT"
-  fi
-  attempt=0
-  [[ -f "$counter_file" ]] && attempt="$(cat "$counter_file")"
-  attempt=$((attempt + 1))
-  printf '%s' "$attempt" > "$counter_file"
-  printf 'INTERNAL_HEALTH_REVISION=%s ATTEMPT=%s\n' "$health_revision" "$attempt" >> "$TRACE_FILE"
-  if [[ "$attempt" -gt "$failures" ]]; then
-    health_code=200
-    health_exit=0
-  fi
-  if [[ "$health_exit" != 0 || "$health_code" != 200 ]]; then exit 1; fi
-  printf '%s\t%s\t%s\n' "$health_status" "$include_revision" "$health_revision"
-fi
-exit 0
-""",
+            "#!/usr/bin/env bash\necho forbidden-host-command >> \"$TRACE_FILE\"\nexit 97\n",
         )
         _write_executable(
             fake_bin / "curl",
-            r"""#!/usr/bin/env bash
-printf 'curl' >> "$TRACE_FILE"
-printf ' %s' "$@" >> "$TRACE_FILE"
-printf '\n' >> "$TRACE_FILE"
-output=''
-previous=''
-for argument in "$@"; do
-  if [[ "$previous" == '--output' ]]; then output="$argument"; fi
-  previous="$argument"
-done
-url="${@: -1}"
-revision="$(cat "$DOCKER_STATE_FILE")"
-code=200
-status=ok
-include_revision=1
-exit_code=0
-counter_file=''
-failures=0
-if [[ "$url" == https://* ]]; then
-  counter_file="$PUBLIC_HEALTH_COUNT_FILE"
-  failures="$FAKE_PUBLIC_HEALTH_FAILURES"
-  code="$FAKE_PUBLIC_HEALTH_CODE"
-  exit_code="$FAKE_PUBLIC_CURL_EXIT"
-elif [[ "$revision" == "$FAKE_CANDIDATE_SHA" ]]; then
-  counter_file="$CANDIDATE_HEALTH_COUNT_FILE"
-  failures="$FAKE_CANDIDATE_HEALTH_FAILURES"
-  code="$FAKE_CANDIDATE_HEALTH_CODE"
-  status="$FAKE_CANDIDATE_HEALTH_STATUS"
-  [[ -n "$FAKE_CANDIDATE_HEALTH_REVISION" ]] && revision="$FAKE_CANDIDATE_HEALTH_REVISION"
-  exit_code="$FAKE_CANDIDATE_CURL_EXIT"
-else
-  counter_file="$ROLLBACK_HEALTH_COUNT_FILE"
-  failures="$FAKE_ROLLBACK_HEALTH_FAILURES"
-  include_revision="$FAKE_ROLLBACK_HEALTH_HAS_REVISION"
-  exit_code="$FAKE_ROLLBACK_CURL_EXIT"
-fi
-attempt=0
-[[ -f "$counter_file" ]] && attempt="$(cat "$counter_file")"
-attempt=$((attempt + 1))
-printf '%s' "$attempt" > "$counter_file"
-printf 'CURL_REVISION=%s ATTEMPT=%s\n' "$revision" "$attempt" >> "$TRACE_FILE"
-if [[ "$attempt" -gt "$failures" ]]; then
-  code=200
-  exit_code=0
-fi
-if [[ -n "$output" ]]; then
-  if [[ "$include_revision" == 1 ]]; then
-    printf '{"status":"%s","revision":"%s"}\n' "$status" "$revision" > "$output"
-  else
-    printf '{"status":"%s"}\n' "$status" > "$output"
-  fi
-fi
-printf '%s' "$code"
-exit "$exit_code"
-""",
-        )
-        _write_executable(
-            fake_bin / "sleep",
-            r"""#!/usr/bin/env bash
-printf 'sleep' >> "$TRACE_FILE"
-printf ' %s' "$@" >> "$TRACE_FILE"
-printf '\n' >> "$TRACE_FILE"
-exit 0
-""",
-        )
-        _write_executable(
-            fake_bin / "date",
-            r"""#!/usr/bin/env bash
-cat "$FAKE_CLOCK_FILE"
-""",
+            "#!/usr/bin/env bash\necho forbidden-host-command >> \"$TRACE_FILE\"\nexit 97\n",
         )
         _write_executable(
             fake_bin / "timeout",
@@ -562,6 +376,8 @@ if [[ "$command_name" == docker ]]; then
   if [[ " $* " == *' image prune '* ]]; then operation='docker:prune'; fi
 elif [[ "$command_name" == git ]]; then
   operation="git:${1:-unknown}"
+elif [[ "$command_name" == python3 && "${1:-}" == -I ]]; then
+  operation=transaction_engine
 elif [[ "$command_name" == python3 && "${1:-}" == -c && "${2:-}" == *monotonic_ns* ]]; then
   operation=clock
 fi
@@ -572,13 +388,6 @@ if [[ "$operation" == clock ]]; then
   clock_mode=''
   if [[ "$clock_count" == 1 && -n "$FAKE_INITIAL_CLOCK_MODE" ]]; then
     clock_mode="$FAKE_INITIAL_CLOCK_MODE"
-  elif [[ -n "$FAKE_POST_CHECKOUT_CLOCK_MODE" ]]; then
-    if [[ -f "$FAKE_CLOCK_LATCH_FILE" ]]; then
-      clock_mode="$FAKE_POST_CHECKOUT_CLOCK_MODE"
-    elif [[ "$("$REAL_GIT" -C "$FAKE_DEPLOY_DIR" rev-parse HEAD)" == "$FAKE_CANDIDATE_SHA" ]]; then
-      : > "$FAKE_CLOCK_LATCH_FILE"
-      clock_mode="$FAKE_POST_CHECKOUT_CLOCK_MODE"
-    fi
   fi
   if [[ "$clock_mode" == fail ]]; then
     printf 'CLOCK_FAILURE phase=%s count=%s\n' "${CURRENT_PHASE:-none}" "$clock_count" >> "$TRACE_FILE"
@@ -606,8 +415,6 @@ if [[ "${CURRENT_PHASE:-}" == "$FAKE_TIMEOUT_HANG_PHASE" && "$operation" == "$FA
   exit 124
 fi
 case "$command_name" in
-  curl) source "$FAKE_BIN/curl" "$@" ;;
-  date) source "$FAKE_BIN/date" "$@" ;;
   docker) source "$FAKE_BIN/docker" "$@" ;;
   git) source "$FAKE_BIN/git" "$@" ;;
   python)
@@ -618,7 +425,6 @@ case "$command_name" in
     "$REAL_PYTHON" "$@"
     ;;
   python3) "$REAL_PYTHON" "$@" ;;
-  sleep) source "$FAKE_BIN/sleep" "$@" ;;
   *) "$command_name" "$@" ;;
 esac
 """,
@@ -640,68 +446,25 @@ esac
         environment = os.environ.copy()
         environment.update(
             {
-                "PATH": f"{_bash_path(fake_bin)}:{environment.get('PATH', '')}",
-                "FAKE_BIN": _bash_path(fake_bin),
-                "BASH_ENV": _bash_path(fake_bin / "bash-env"),
-                "TRACE_FILE": _bash_path(trace),
-                "REAL_GIT": Path(real_git).resolve().as_posix(),
-                "REAL_PYTHON": Path(sys.executable).resolve().as_posix(),
-                "FLOCK_EXIT": str(flock_exit),
-                "EXPECTED_OUTER_LOCK_PATH": OUTER_LOCK_PATH,
-                "AXISAI_MONOTONIC_STATE": _bash_path(monotonic_state),
-                "FAKE_OUTER_DIR_METADATA": "0:directory:755",
-                "FAKE_OUTER_FILE_METADATA": "11:22:0:regular empty file:644:1",
-                "FAKE_OUTER_FD_METADATA": "11:22:0:regular empty file:644:1",
-                "DOCKER_STATE_FILE": _bash_path(docker_state),
-                "FAKE_CONTAINER_ROOT": _bash_path(container_root),
-                "FAKE_CANDIDATE_CONTAINER_REVISION": container_revision,
-                "FAKE_ROLLBACK_CONTAINER_REVISION": rollback_container_revision,
-                "FAKE_CANDIDATE_BAKED_REVISION": baked_revision or container_revision,
-                "FAKE_ROLLBACK_BAKED_REVISION": (
-                    rollback_baked_revision or rollback_container_revision
-                ),
-                "FAKE_CANDIDATE_BAKED_MISSING": "1" if baked_revision_missing else "0",
-                "FAKE_ROLLBACK_BAKED_MISSING": (
-                    "1" if rollback_baked_revision_missing else "0"
-                ),
-                "FAKE_CANDIDATE_REVISION_PROBE_EXIT": str(candidate_revision_probe_exit),
-                "FAKE_ROLLBACK_REVISION_PROBE_EXIT": str(rollback_revision_probe_exit),
-                "FAKE_CANDIDATE_SHA": candidate_commit,
-                "FAKE_CANDIDATE_HEALTH_CODE": str(health_code),
-                "FAKE_CANDIDATE_HEALTH_STATUS": health_status,
-                "FAKE_CANDIDATE_HEALTH_REVISION": health_revision,
-                "FAKE_CANDIDATE_HEALTH_FAILURES": str(
-                    candidate_health_failures
-                    if candidate_health_failures is not None
-                    else (0 if health_code == 200 else 999)
-                ),
-                "FAKE_CANDIDATE_CURL_EXIT": str(candidate_curl_exit),
-                "FAKE_PUBLIC_HEALTH_CODE": str(public_health_code),
-                "FAKE_PUBLIC_HEALTH_FAILURES": str(
-                    public_health_failures
-                    if public_health_failures is not None
-                    else (0 if public_health_code == 200 else 999)
-                ),
-                "FAKE_PUBLIC_CURL_EXIT": str(public_curl_exit),
-                "FAKE_ROLLBACK_HEALTH_HAS_REVISION": "1" if rollback_health_has_revision else "0",
-                "FAKE_ROLLBACK_HEALTH_FAILURES": str(rollback_health_failures),
-                "FAKE_ROLLBACK_CURL_EXIT": str(rollback_curl_exit),
-                "CANDIDATE_HEALTH_COUNT_FILE": _bash_path(candidate_health_count),
-                "ROLLBACK_HEALTH_COUNT_FILE": _bash_path(rollback_health_count),
-                "PUBLIC_HEALTH_COUNT_FILE": _bash_path(public_health_count),
-                "FAKE_FAIL_CANDIDATE_DOCKER_COMMAND": fail_candidate_docker_command,
-                "FAKE_FAIL_ROLLBACK_DOCKER_COMMAND": fail_rollback_docker_command,
-                "FAKE_FAIL_PRUNE": "1" if fail_prune else "0",
-                "FAKE_FAIL_BUILD_CACHE_PRUNE": "1" if fail_build_cache_prune else "0",
-                "FAKE_CLOCK_FILE": _bash_path(fake_clock),
-                "FAKE_CLOCK_COUNT_FILE": _bash_path(fake_clock_count),
-                "FAKE_CLOCK_READINGS_FILE": _bash_path(fake_clock_readings),
-                "FAKE_CLOCK_LATCH_FILE": _bash_path(fake_clock_latch),
-                "FAKE_INITIAL_CLOCK_MODE": initial_clock_mode,
-                "FAKE_POST_CHECKOUT_CLOCK_MODE": post_checkout_clock_mode,
-                "FAKE_DEPLOY_DIR": _bash_path(deploy_dir),
-                "FAKE_TIMEOUT_HANG_PHASE": timeout_hang_phase,
-                "FAKE_TIMEOUT_HANG_COMMAND": timeout_hang_command,
+                'PATH': f"{_bash_path(fake_bin)}:{environment.get('PATH', '')}",
+                'FAKE_BIN': _bash_path(fake_bin),
+                'BASH_ENV': _bash_path(fake_bin / "bash-env"),
+                'TRACE_FILE': _bash_path(trace),
+                'REAL_GIT': Path(real_git).resolve().as_posix(),
+                'REAL_PYTHON': Path(sys.executable).resolve().as_posix(),
+                'FLOCK_EXIT': str(flock_exit),
+                'EXPECTED_OUTER_LOCK_PATH': OUTER_LOCK_PATH,
+                'AXISAI_MONOTONIC_STATE': _bash_path(monotonic_state),
+                'FAKE_OUTER_DIR_METADATA': "0:directory:755",
+                'FAKE_OUTER_FILE_METADATA': "11:22:0:regular empty file:644:1",
+                'FAKE_OUTER_FD_METADATA': "11:22:0:regular empty file:644:1",
+                'FAKE_CANDIDATE_SHA': candidate_commit,
+                'FAKE_CLOCK_FILE': _bash_path(fake_clock),
+                'FAKE_CLOCK_COUNT_FILE': _bash_path(fake_clock_count),
+                'FAKE_CLOCK_READINGS_FILE': _bash_path(fake_clock_readings),
+                'FAKE_INITIAL_CLOCK_MODE': initial_clock_mode,
+                'FAKE_TIMEOUT_HANG_PHASE': timeout_hang_phase,
+                'FAKE_TIMEOUT_HANG_COMMAND': timeout_hang_command,
             }
         )
         return HostFixture(
@@ -868,7 +631,7 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd(
         environment["PATH"] = os.environ.get("PATH", "")
         environment["AXISAI_OUTER_LOCK_FD"] = "7"
         result = subprocess.run(
-            fixture.command(bash_executable, "not-a-sha"),
+            fixture.command(bash_executable, "not-a-sha") + ["https://fitness.example/health"],
             text=True, capture_output=True, check=False, env=environment, timeout=30,
             close_fds=False,
             preexec_fn=lambda: os.dup2(caller_fd, 7, inheritable=True),
@@ -930,7 +693,7 @@ def test_real_locked_inherited_ofd_reaches_helper_validation(
         environment["PATH"] = os.environ.get("PATH", "")
         environment["AXISAI_OUTER_LOCK_FD"] = "7"
         result = subprocess.run(
-            fixture.command(bash_executable, "not-a-sha"),
+            fixture.command(bash_executable, "not-a-sha") + ["https://fitness.example/health"],
             text=True, capture_output=True, check=False, env=environment, timeout=30,
             close_fds=False,
             preexec_fn=lambda: os.dup2(inherited_fd, 7, inheritable=True),
@@ -1049,60 +812,25 @@ def test_invalid_sha_fails_after_lock_without_git_or_docker(bash_executable, hos
     assert "docker " not in trace
 
 
-def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture()
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 0, result.stderr
-    assert "worst_case=1580" in result.stderr
-    assert "execution=1800" in result.stderr
-    assert "margin=220" in result.stderr
-    budget = re.search(
-        r"host transaction budget: execution=(\d+) worst_case=(\d+) margin=(\d+) lock=(\d+) clock=(\d+) "
-        r"clock_state=(\d+) rollback_reset=(\d+) "
-        r"preflight=(\d+) candidate=(\d+) diagnostics=(\d+) rollback=(\d+) "
-        r"post_lock=(\d+) timeout_grace=(\d+) cleanup=(\d+)",
-        result.stderr,
-    )
-    assert budget is not None
-    (
-        execution,
-        worst_case,
-        margin,
-        lock,
-        clock,
-        clock_state,
-        rollback_reset,
-        preflight,
-        candidate,
-        diagnostics,
-        rollback,
-        post_lock,
-        grace,
-        cleanup,
-    ) = map(int, budget.groups())
-    assert execution - worst_case == margin == 220
-    assert worst_case == 1580
-    assert preflight + candidate + diagnostics + rollback == post_lock
-    assert clock + clock_state == 10
-    assert lock == 60
-    assert cleanup == 20
-    assert rollback >= rollback_reset + (30 * 5) + (29 * 5)
-    assert candidate >= (30 * 5) + (29 * 5) + (12 * 5) + (11 * 5)
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert "timeout phase=preflight" in trace
-    assert "timeout phase=candidate" in trace
-    assert "monotonic_ns" in trace
-    assert " date +%s" not in trace
-    phase_limits = {"preflight": preflight, "candidate": candidate}
-    phase_grants = re.findall(
-        r"timeout phase=(preflight|candidate) --signal=TERM --kill-after=2s (\d+)s ",
-        trace,
-    )
-    assert phase_grants
-    assert all(int(grant) <= phase_limits[phase] for phase, grant in phase_grants)
+def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(bash_executable, host_fixture):
+    f=host_fixture()
+    result=f.run(bash_executable)
+    assert result.returncode==0, result.stderr
+    line=next(x for x in result.stderr.splitlines() if x.startswith("host transaction budget:"))
+    v={k:int(x) for k,x in re.findall(r"(\w+)=(\d+)",line)}
+    assert v["execution"]==contract.SSM_EXECUTION_TIMEOUT_SECONDS
+    assert v["worst_case"]==contract.HOST_WORST_CASE_SECONDS
+    assert v["execution"]-v["worst_case"]==v["margin"]==contract.SSM_EXECUTION_MARGIN_SECONDS>=220
+    assert v["failure_tail"]==contract.HOST_FAILURE_TAIL_SECONDS
+    assert v["success_tail"]==contract.HOST_SUCCESS_TAIL_SECONDS
+    assert v["transaction"]==v["forward"]+max(v["failure_tail"],v["success_tail"])
+    assert v["post_lock"]==v["preflight"]+v["transaction"]
+    assert v["clock"]+v["clock_state"]==HOST_PHASE_SECONDS["clock_setup"]
+    assert v["cleanup"]==HOST_PHASE_SECONDS["cleanup"]
+    grants=re.findall(r"timeout phase=(preflight|transaction) --signal=TERM --kill-after=2s (\d+)s ",f.trace_text())
+    assert grants and {phase for phase,_ in grants}=={"preflight","transaction"}
+    assert all(int(grant)<=(v["post_lock"] if phase=="transaction" else v[phase]) for phase,grant in grants)
+    assert "monotonic_ns" in f.trace_text() and " date +%s" not in f.trace_text()
 
 
 def test_host_transaction_budget_rejects_noncanonical_execution_timeout(
@@ -1131,25 +859,6 @@ def test_initial_monotonic_clock_failure_is_closed_before_mutation(
     assert "docker " not in trace
 
 
-@pytest.mark.parametrize("clock_mode", ["fail", "hang"])
-def test_post_checkout_clock_failure_still_attempts_one_bounded_exact_reset(
-    bash_executable, host_fixture, clock_mode
-):
-    fixture = host_fixture(post_checkout_clock_mode=clock_mode)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert (
-        f"timeout phase=rollback --signal=TERM --kill-after=2s 5s "
-        f"git reset --hard {fixture.prev_commit}"
-    ) in trace
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
 def test_decreasing_monotonic_reading_fails_closed_without_mutation(
     bash_executable, host_fixture
 ):
@@ -1173,127 +882,37 @@ def test_preflight_hang_times_out_before_candidate_mutation(bash_executable, hos
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert "TIMEOUT_HANG phase=preflight operation=git:fetch" in trace
-    assert "timeout phase=preflight --signal=TERM --kill-after=2s 70s git fetch" in trace
+    assert "timeout phase=preflight --signal=TERM --kill-after=2s 68s git fetch" in trace
     assert "git reset --hard" not in trace
     assert "docker " not in trace
 
 
-def test_candidate_deadline_hang_transitions_to_exactly_one_rollback(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        timeout_hang_phase="candidate",
-        timeout_hang_command="docker:build",
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count("TIMEOUT_HANG phase=candidate operation=docker:build") == 1
-    assert "timeout phase=candidate --signal=TERM --kill-after=2s 780s docker" in trace
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback verified" in result.stderr
-
-
-def test_diagnostic_hang_cannot_consume_rollback_reserve(bash_executable, host_fixture):
-    fixture = host_fixture(
-        fail_candidate_docker_command="build",
-        timeout_hang_phase="diagnostics",
-        timeout_hang_command="docker:ps",
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count("TIMEOUT_HANG phase=diagnostics operation=docker:ps") == 1
-    assert "timeout phase=diagnostics --signal=TERM --kill-after=2s 30s docker" in trace
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback verified" in result.stderr
-
-
-def test_rollback_operation_hang_is_bounded_and_reported(bash_executable, host_fixture):
-    fixture = host_fixture(
-        container_revision="b" * 40,
-        timeout_hang_phase="rollback",
-        timeout_hang_command="docker:build",
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count("TIMEOUT_HANG phase=rollback operation=docker:build") == 1
-    assert "timeout phase=rollback --signal=TERM --kill-after=2s 520s docker" in trace
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, host_fixture):
-    fixture = host_fixture()
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 0, result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.candidate_commit
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert f"git fetch origin main --prune" in trace
-    assert f"git reset --hard {fixture.candidate_commit}" in trace
-    assert f"APP_REVISION={fixture.candidate_commit}" in trace
-    assert f"BUILD_REVISION={fixture.candidate_commit}" in trace
-    assert "exec -T web sh -c" in trace
-    assert "/app/BUILD_REVISION" in trace
-    assert "exec -T web python3 -" in trace
-    assert f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit} ATTEMPT=1" in trace
-    assert f"git archive --format=tar {fixture.candidate_commit}" in trace
-    compose_lines = [line for line in trace.splitlines() if line.startswith("docker compose ")]
-    expected_prefix = f"docker compose -f {_bash_path(fixture.deploy_dir / 'docker-compose.yml')} -f "
-    assert compose_lines
-    assert all(line.startswith(expected_prefix) for line in compose_lines)
-    trace_lines = trace.splitlines()
-    prune_index = trace_lines.index("docker image prune -f")
-    # The cleanup bound is not a free literal: the host derives it from the
-    # canonical cleanup phase budget minus its own kill grace, so cleanup's
-    # total wall time can never exceed the phase the contract reserved for it.
-    grace_match = re.search(
-        r"(?m)^\s*readonly COMMAND_KILL_GRACE_SECONDS=([0-9]+)\s*$",
-        HOST_SCRIPT.read_text(encoding="utf-8"),
-    )
-    assert grace_match is not None
-    grace_seconds = int(grace_match.group(1))
-    expected_cleanup_timeout = HOST_PHASE_SECONDS["cleanup"] - grace_seconds
-    assert expected_cleanup_timeout > 0
-    cleanup_indices = [
-        index
-        for index, line in enumerate(trace_lines)
-        if f" {expected_cleanup_timeout}s rm -f -- " in line
-    ]
-    assert cleanup_indices, trace_lines
-    assert prune_index < cleanup_indices[-1]
-
-    # The safety property itself, read back from what the host actually
-    # published: cleanup's worst-case wall time never exceeds the phase the
-    # canonical contract reserved for it.
-    budget_line = next(
-        line for line in result.stderr.splitlines()
-        if line.startswith("host transaction budget:")
-    )
-    reported_cleanup = int(
-        re.search(r"\bcleanup=([0-9]+)\b", budget_line).group(1)
-    )
-    assert reported_cleanup <= HOST_PHASE_SECONDS["cleanup"]
-    assert reported_cleanup == expected_cleanup_timeout + grace_seconds
-
-
-def test_baked_build_revision_matches_git_archive_revision(bash_executable, host_fixture):
-    fixture = host_fixture()
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 0, result.stderr
-    trace = fixture.trace_text()
-    assert f"git archive --format=tar {fixture.candidate_commit}" in trace
-    assert f"BUILD_REVISION={fixture.candidate_commit}" in trace
-    assert "exec -T web sh -c" in trace
-    assert "/app/BUILD_REVISION" in trace
+def test_success_delegates_exact_archive_without_changing_the_checkout(bash_executable, host_fixture):
+    import json
+    f=host_fixture()
+    (f.deploy_dir/"untracked-host.txt").write_text("host-only")
+    (f.deploy_dir/".env").write_text("HOST_SECRET=local")
+    result=f.run(bash_executable)
+    assert result.returncode==0, result.stderr
+    trace=f.trace_text()
+    proofs=[line for line in trace.splitlines() if line.startswith("ENGINE_PROOF=")]
+    assert len(proofs)==1
+    proof=json.loads(proofs[0].split("=",1)[1])
+    assert proof["deploy_sha"]==f.candidate_commit
+    assert proof["previous_commit"]==f.prev_commit
+    assert proof["public_health_url"]=="https://fitness.example/health"
+    assert proof["transaction_epoch"]=="1000"
+    assert f"git archive --format=tar {f.candidate_commit}" in trace
+    assert "git fetch origin main --prune" in trace
+    assert "git reset" not in trace and "docker " not in trace
+    assert _run(["git","-C",str(f.deploy_dir),"rev-parse","HEAD"])==f.prev_commit
+    assert (f.deploy_dir/"untracked-host.txt").read_text()=="host-only"
+    assert (f.deploy_dir/".env").read_text()=="HOST_SECRET=local"
+    assert not list(f.deploy_dir.glob(".axisai-build-*"))
+    assert not list(f.deploy_dir.glob(".axisai-r6-work.*"))
+    assert f"deployment verified at {f.candidate_commit}" in result.stderr
+    cleanup_timeout=HOST_PHASE_SECONDS["cleanup"]-2
+    assert f"{cleanup_timeout}s rm -r -- " in trace
 
 
 def test_clock_state_mutation_never_touches_the_production_checkout(
@@ -1370,162 +989,6 @@ def test_divergent_production_head_rejects_candidate_before_mutation(
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == host_commit
 
 
-def test_wrong_running_revision_rolls_back_despite_health_200(bash_executable, host_fixture):
-    fixture = host_fixture(container_revision="b" * 40, health_code=200)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert f"git reset --hard {fixture.prev_commit}" in trace
-    assert f"APP_REVISION={fixture.prev_commit}" in trace
-    assert "rollback verified" in result.stderr
-
-
-def test_wrong_deep_health_revision_rolls_back(bash_executable, host_fixture):
-    fixture = host_fixture(health_revision="c" * 40)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-    assert "deep health revision mismatch" in result.stderr
-
-
-def test_wrong_baked_candidate_revision_forces_rollback(bash_executable, host_fixture):
-    fixture = host_fixture(baked_revision="c" * 40)
-    result = fixture.run(bash_executable)
-    assert result.returncode != 0
-    assert f"git reset --hard {fixture.prev_commit}" in fixture.trace_text()
-
-
-def test_rollback_exposes_prev_commit_as_baked_and_health_revision(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(baked_revision="c" * 40)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace_text()
-    assert f"git reset --hard {fixture.prev_commit}" in trace
-    assert f"BUILD_REVISION={fixture.prev_commit}" in trace
-    assert f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}" in trace
-    assert "exec -T web sh -c" in trace
-    assert "/app/BUILD_REVISION" in trace
-
-
-def test_candidate_health_retries_bounded_calls_until_delayed_success(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        health_code=503,
-        candidate_health_failures=2,
-        candidate_curl_exit=28,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 0, result.stderr
-    trace = fixture.trace.read_text(encoding="utf-8")
-    candidate_attempts = [
-        line for line in trace.splitlines()
-        if line.startswith(f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit}")
-    ]
-    assert len(candidate_attempts) == 3
-    assert f"git reset --hard {fixture.prev_commit}" not in trace
-
-
-def test_hung_candidate_health_exhausts_bound_then_rolls_back_once(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        health_code=503,
-        candidate_health_failures=999,
-        candidate_curl_exit=28,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit}") == 30
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback verified" in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_rollback_health_retries_bounded_calls_until_delayed_success(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        container_revision="b" * 40,
-        rollback_health_failures=2,
-        rollback_curl_exit=28,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}") == 3
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback verified" in result.stderr
-
-
-def test_hung_rollback_health_exhausts_bound_and_reports_failure(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        container_revision="b" * 40,
-        rollback_health_failures=999,
-        rollback_curl_exit=28,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}") == 30
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_public_health_retries_bounded_calls_until_delayed_success(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        public_health_code=503,
-        public_health_failures=2,
-        public_curl_exit=28,
-    )
-    result = fixture.run(
-        bash_executable,
-        public_health_url="https://fitness.example/health",
-    )
-
-    assert result.returncode == 0, result.stderr
-    trace = fixture.trace.read_text(encoding="utf-8")
-    public_calls = [
-        line for line in trace.splitlines()
-        if line.startswith("curl ") and "https://fitness.example/health" in line
-    ]
-    assert len(public_calls) == 3
-    assert all("--connect-timeout 2 --max-time 5" in line for line in public_calls)
-    assert f"git reset --hard {fixture.prev_commit}" not in trace
-
-
-def test_old_rollback_without_health_revision_uses_compatibility_proof(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        container_revision="b" * 40,
-        rollback_health_has_revision=False,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "rollback compatibility proof accepted" in result.stderr
-    assert "rollback verified" in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
 # --- baked revision identity contract -------------------------------------
 #
 # The host proves which build is actually running by reading /app/BUILD_REVISION
@@ -1537,374 +1000,6 @@ def test_old_rollback_without_health_revision_uses_compatibility_proof(
 # is wrong, which fails the candidate at the identity check itself.
 
 FORCE_ROLLBACK_BAKED_REVISION = "c" * 40
-
-
-def _absent_revision_marker() -> str:
-    match = re.search(
-        r"(?m)^readonly ABSENT_BUILD_REVISION_MARKER='([^']+)'\s*$",
-        HOST_SCRIPT.read_text(encoding="utf-8"),
-    )
-    assert match is not None, "host script no longer publishes an absence marker"
-    return match.group(1)
-
-
-def test_candidate_with_exact_baked_revision_passes(bash_executable, host_fixture):
-    fixture = host_fixture()
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 0, result.stderr
-    trace = fixture.trace_text()
-    assert "exec -T web sh -c" in trace
-    assert "/app/BUILD_REVISION" in trace
-    assert "running web container revision mismatch" not in result.stderr
-    assert "rollback compatibility proof accepted" not in result.stderr
-    assert f"git reset --hard {fixture.prev_commit}" not in trace
-
-
-def test_candidate_without_baked_revision_fails(bash_executable, host_fixture):
-    fixture = host_fixture(baked_revision_missing=True)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "running web container has no /app/BUILD_REVISION" in result.stderr
-    assert "rollback compatibility proof accepted: image has no" not in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_candidate_with_mismatched_baked_revision_fails(bash_executable, host_fixture):
-    fixture = host_fixture(baked_revision=FORCE_ROLLBACK_BAKED_REVISION)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "running web container revision mismatch" in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_modern_rollback_with_exact_baked_revision_passes(bash_executable, host_fixture):
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        previous_has_hardened_marker=True,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "rollback verified" in result.stderr
-    assert "rollback compatibility proof accepted" not in result.stderr
-    trace = fixture.trace_text()
-    assert f"BUILD_REVISION={fixture.prev_commit}" in trace
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_modern_rollback_without_baked_revision_fails(bash_executable, host_fixture):
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        previous_has_hardened_marker=True,
-        rollback_baked_revision_missing=True,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "running web container has no /app/BUILD_REVISION" in result.stderr
-    assert "rollback compatibility proof accepted: image has no" not in result.stderr
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-
-
-def test_modern_rollback_with_mismatched_baked_revision_fails(bash_executable, host_fixture):
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        previous_has_hardened_marker=True,
-        rollback_baked_revision="d" * 40,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "running web container revision mismatch" in result.stderr
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-
-
-def test_legacy_rollback_without_baked_revision_passes(bash_executable, host_fixture):
-    # The observed a6d6b2e regression: the pre-hardening image starts, is
-    # healthy, and carries no /app/BUILD_REVISION at all.
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        rollback_baked_revision_missing=True,
-        rollback_health_has_revision=False,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert (
-        "rollback compatibility proof accepted: image has no /app/BUILD_REVISION"
-        in result.stderr
-    )
-    assert (
-        "rollback compatibility proof accepted: deep health has no revision"
-        in result.stderr
-    )
-    assert "rollback verified" in result.stderr
-    assert "rollback failed verification" not in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_legacy_rollback_with_exact_baked_revision_passes(bash_executable, host_fixture):
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        rollback_health_has_revision=False,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "rollback compatibility proof accepted: image has no" not in result.stderr
-    # The only mismatch is the candidate's, which is what forced the rollback;
-    # the legacy target itself proved exact baked identity.
-    assert result.stderr.count("running web container revision mismatch") == 1
-    rollback_log = result.stderr.split("rolling back to", 1)[1]
-    assert "running web container revision mismatch" not in rollback_log
-    assert "rollback verified" in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_legacy_rollback_with_wrong_baked_revision_fails(bash_executable, host_fixture):
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        rollback_baked_revision="d" * 40,
-        rollback_health_has_revision=False,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "running web container revision mismatch" in result.stderr
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-
-
-def test_legacy_baked_revision_compatibility_is_not_available_to_modern_revisions(
-    bash_executable, host_fixture
-):
-    # Identical to the accepted legacy case except that the rollback target
-    # already ships scripts/production_deploy.sh, which is the single existing
-    # legacy detector.  No date, SHA, or version widens it.
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        rollback_baked_revision_missing=True,
-        rollback_health_has_revision=False,
-        previous_has_hardened_marker=True,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "rollback compatibility proof accepted" not in result.stderr
-    assert "running web container has no /app/BUILD_REVISION" in result.stderr
-    assert "rollback failed verification" in result.stderr
-
-
-def test_unreachable_container_is_never_read_as_a_legacy_image(
-    bash_executable, host_fixture
-):
-    # The absence signal is in band and the probe still exits 0 whenever the
-    # container answers, so a transport failure or an exhausted phase deadline
-    # cannot masquerade as a pre-hardening image even where legacy rollback is
-    # authorized.
-    fixture = host_fixture(
-        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
-        rollback_health_has_revision=False,
-        rollback_revision_probe_exit=1,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "rollback compatibility proof accepted: image has no" not in result.stderr
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-
-
-def test_absence_marker_is_never_accepted_as_a_revision_identity(
-    bash_executable, host_fixture
-):
-    # A candidate image whose BUILD_REVISION literally contains the marker still
-    # fails: the marker only ever means "absent", it never proves identity.
-    fixture = host_fixture(baked_revision=_absent_revision_marker())
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "running web container has no /app/BUILD_REVISION" in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_hardened_rollback_cannot_use_missing_revision_compatibility(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        container_revision="b" * 40,
-        rollback_health_has_revision=False,
-        previous_has_hardened_marker=True,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    assert "rollback compatibility proof accepted" not in result.stderr
-    assert "deep health revision is missing" in result.stderr
-    assert "rollback failed verification" in result.stderr
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-
-
-@pytest.mark.parametrize("operation", ["build", "up", "ps"])
-def test_candidate_compose_failure_rolls_back_exactly_once(
-    bash_executable, host_fixture, operation
-):
-    fixture = host_fixture(fail_candidate_docker_command=operation)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback verified" in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_prune_failure_rolls_back_exactly_once(bash_executable, host_fixture):
-    fixture = host_fixture(fail_prune=True)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert _trace_command_count(trace, "docker image prune -f") == 1
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "rollback verified" in result.stderr
-
-
-def _build_cache_keep_bytes() -> int:
-    # The budget is read back out of the host script rather than repeated here,
-    # so a change to the cap cannot leave this suite asserting a stale bound.
-    match = re.search(
-        r"(?m)^\s*readonly BUILD_CACHE_KEEP_BYTES=([0-9]+)\s*$",
-        HOST_SCRIPT.read_text(encoding="utf-8"),
-    )
-    assert match is not None
-    return int(match.group(1))
-
-
-def test_verified_deploy_bounds_build_cache_after_image_prune(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture()
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 0, result.stderr
-    trace = fixture.trace.read_text(encoding="utf-8")
-    expected = f"docker builder prune --force --keep-storage {_build_cache_keep_bytes()}"
-    assert _trace_command_count(trace, expected) == 1
-    # Bounding the cache is housekeeping for a release that already shipped, so
-    # it has to follow the candidate it just built -- pruning first would throw
-    # away the layers that build was about to reuse.
-    trace_lines = trace.splitlines()
-    assert trace_lines.index(expected) > trace_lines.index("docker image prune -f")
-    # The cache is capped, never emptied: a deploy that discarded every layer
-    # would make the next rollback build cold exactly when speed matters most.
-    assert "docker builder prune --force --all" not in trace
-    assert _trace_command_count(trace, "docker system prune -f") == 0
-    assert _trace_command_count(trace, "docker volume prune -f") == 0
-
-
-def test_build_cache_prune_failure_leaves_verified_deploy_intact(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(fail_build_cache_prune=True)
-    result = fixture.run(bash_executable)
-
-    # A release whose health checks passed is deployed. Housekeeping that could
-    # not finish is a disk problem, not a bad release, so it must not fail the
-    # run and must not reach the rollback the ERR trap has already released.
-    assert result.returncode == 0, result.stderr
-    trace = fixture.trace.read_text(encoding="utf-8")
-    expected = f"docker builder prune --force --keep-storage {_build_cache_keep_bytes()}"
-    assert _trace_command_count(trace, expected) == 1
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 0
-    assert "rollback verified" not in result.stderr
-    assert "build cache prune did not complete" in result.stderr
-    assert f"deployment verified at {fixture.candidate_commit}" in result.stderr
-    assert (
-        _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"])
-        == fixture.candidate_commit
-    )
-
-
-def test_build_cache_prune_carries_its_own_bound_not_the_phase_budget(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture()
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 0, result.stderr
-    script = HOST_SCRIPT.read_text(encoding="utf-8")
-    grace_match = re.search(
-        r"(?m)^\s*readonly COMMAND_KILL_GRACE_SECONDS=([0-9]+)\s*$", script
-    )
-    timeout_match = re.search(
-        r"(?m)^\s*readonly BUILD_CACHE_PRUNE_TIMEOUT_SECONDS=([0-9]+)\s*$", script
-    )
-    assert grace_match is not None
-    assert timeout_match is not None
-    trace = fixture.trace.read_text(encoding="utf-8")
-    # The deploy phase clock bounds work the release depends on. Housekeeping
-    # must not inherit whatever a slow build left of it, so it is bounded by its
-    # own constant instead of by run_external's remaining budget.
-    assert (
-        f"--signal=TERM --kill-after={grace_match.group(1)}s "
-        f"{timeout_match.group(1)}s docker builder prune" in trace
-    )
-
-
-def test_failed_rollback_revision_is_reported_without_second_attempt(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(
-        container_revision="b" * 40,
-        rollback_container_revision="d" * 40,
-    )
-    result = fixture.run(bash_executable)
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "running web container revision mismatch" in result.stderr
-    assert "rollback failed verification" in result.stderr
-    assert "rollback verified" not in result.stderr
-    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
-
-
-def test_public_health_runs_after_internal_gate_and_failure_rolls_back(
-    bash_executable, host_fixture
-):
-    fixture = host_fixture(public_health_code=503)
-    result = fixture.run(
-        bash_executable,
-        public_health_url="https://fitness.example/health",
-    )
-
-    assert result.returncode != 0
-    trace = fixture.trace.read_text(encoding="utf-8")
-    trace_lines = trace.splitlines()
-    internal_call_index = next(
-        index for index, line in enumerate(trace_lines)
-        if line.startswith(f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit}")
-    )
-    public_call_index = next(
-        index for index, line in enumerate(trace_lines)
-        if line.startswith("curl ") and "https://fitness.example/health" in line
-    )
-    assert internal_call_index < public_call_index
-    public_calls = [
-        line for line in trace_lines
-        if line.startswith("curl ") and "https://fitness.example/health" in line
-    ]
-    assert len(public_calls) == 12
-    assert all("--connect-timeout 2 --max-time 5" in line for line in public_calls)
-    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-    assert "public health readiness exhausted after 12 attempts" in result.stderr
 
 
 # --- authoritative Linux privileged-helper object identity (finding 6) ------
@@ -2040,3 +1135,47 @@ def test_real_materializer_rejects_a_digest_that_does_not_match(tmp_path, reques
     assert completed.stdout.strip() == ""
     # A rejected materialization leaves nothing behind for a later deploy.
     assert not list(Path("/tmp").glob("axisai-deploy-helper.*"))
+
+@pytest.mark.parametrize("status", [1,64,70,71,72,124])
+def test_engine_failure_is_propagated_once_without_shell_rollback(bash_executable,host_fixture,status):
+    f=host_fixture()
+    result=f.run(bash_executable,FAKE_ENGINE_EXIT=str(status))
+    assert result.returncode==status
+    trace=f.trace_text()
+    assert trace.count("ENGINE_PROOF=")==1
+    assert "git reset" not in trace and "docker " not in trace
+    assert "deployment verified" not in result.stderr
+    assert not list(f.deploy_dir.glob(".axisai-build-*"))
+    assert not list(f.deploy_dir.glob(".axisai-r6-work.*"))
+    assert _run(["git","-C",str(f.deploy_dir),"rev-parse","HEAD"])==f.prev_commit
+
+def test_transaction_process_has_a_bounded_outer_timeout(bash_executable,host_fixture):
+    f=host_fixture(timeout_hang_phase="transaction",timeout_hang_command="transaction_engine")
+    result=f.run(bash_executable)
+    assert result.returncode==124
+    trace=f.trace_text()
+    assert trace.count("TIMEOUT_HANG phase=transaction operation=transaction_engine")==1
+    bound=HOST_PHASE_SECONDS["git_preparation"]+HOST_PHASE_SECONDS["release_forward"]+max(contract.HOST_FAILURE_TAIL_SECONDS,contract.HOST_SUCCESS_TAIL_SECONDS)
+    assert f"--kill-after=2s {bound - 2}s python3 -I -B " in trace
+    assert "ENGINE_PROOF=" not in trace and "git reset" not in trace
+    assert "deployment verified" not in result.stderr
+    assert not list(f.deploy_dir.glob(".axisai-build-*"))
+
+@pytest.mark.parametrize("url", ["","http://fitness.example/health",
+    "https://user:password@fitness.example/health",
+    pytest.param("https://fitness.example/health\n", marks=pytest.mark.skipif(
+        os.name == "nt", reason="Git Bash strips terminal LF in Windows argv; verified on Linux"))])
+def test_public_origin_is_required_and_validated_before_git_or_engine(bash_executable,host_fixture,url):
+    f=host_fixture()
+    result=f.run(bash_executable,public_health_url=url)
+    assert result.returncode!=0
+    assert "git " not in f.trace_text() and "ENGINE_PROOF=" not in f.trace_text()
+    assert "docker " not in f.trace_text()
+
+def test_cleanup_total_ceiling_fits_the_reserved_phase(bash_executable,host_fixture):
+    f=host_fixture()
+    result=f.run(bash_executable)
+    assert result.returncode==0, result.stderr
+    grants=re.findall(r"--kill-after=(\d+)s (\d+)s rm -[fr]+ -- ",f.trace_text())
+    assert grants
+    assert sum(int(grace)+int(limit) for grace,limit in grants)<=HOST_PHASE_SECONDS["cleanup"]

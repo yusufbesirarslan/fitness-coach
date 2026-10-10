@@ -107,26 +107,27 @@ The controller uses the following independent bounds.
 
 | Limit | Value |
 |---|---:|
-| Workflow job timeout | 65 minutes |
-| Controller step timeout | 46 minutes |
+| Workflow job timeout | 70 minutes |
+| Controller step timeout | 50 minutes |
 | Delivery timeout | 60 seconds |
-| Execution timeout | 1,800 seconds |
-| AWS expiry | 1,860 seconds |
-| Polling horizon | 2,100 seconds |
+| Execution timeout | 2,200 seconds |
+| AWS expiry | 2,260 seconds |
+| Polling horizon | 2,500 seconds |
 | Poll interval | 10 seconds |
 
-The timeout source of truth is `scripts/deploy_contract.py`. Its 1,580-second
-host worst case consists of root bootstrap (10), lock acquisition (60),
-authority and stale proof (80), clock setup (10), Git fetch/checkout (70),
-candidate build/start (620), candidate revision health (160), diagnostics
-(30), rollback build/start (440), rollback revision health (80), and cleanup
-(20) seconds. The host receives these fixed values from B at privilege drop;
-its 1,800-second SSM execution timeout therefore retains an exact 220-second
-margin.
+The timeout source of truth is the canonical Python time contract. Its
+1,980-second host worst case is root bootstrap (10), lock acquisition (60),
+authority and stale proof (80), clock setup (10), Git preparation (70), forward
+transaction (1,200), the larger of the failure tail (30 diagnostics + 500
+rollback) or success tail (400 drain/retirement/housekeeping), then cleanup (20).
+The 2,200-second execution timeout preserves a 220-second margin. Sequential
+commands inside a host operation share a monotonic deadline, and command
+timeouts reserve their kill grace. Cleanup uses one command for the archive,
+context and work directory; its combined ceiling is 20 seconds.
 
-Before SendCommand, B reserves enough of its 46-minute budget for the bounded
-send, 2,100-second poll horizon, authorization, final invocation read, and
-authority cleanup. The 65-minute job budget also covers identity, checkout,
+Before SendCommand, B reserves enough of its 50-minute budget for the bounded
+send, 2,500-second poll horizon, authorization, final invocation read, and
+authority cleanup. The 70-minute job budget also covers identity, checkout,
 credentials, drift checks, and snapshot initiation without terminating the
 controller first.
 
@@ -134,7 +135,7 @@ After SendCommand, B immediately logs the non-secret command ID, then polls
 detailed invocation output and preserves the raw `StatusDetails` in its logs.
 `GetCommandInvocation` can briefly return `InvocationDoesNotExist` while the
 accepted command becomes visible. Only that structured error code is retried,
-as an explicit "not visible yet" state, within the same 2,100-second monotonic
+as an explicit "not visible yet" state, within the same 2,500-second monotonic
 horizon. Every other AWS error code, unknown error, malformed response, or CLI
 failure remains fail-closed. `Pending`, `Delayed`, and `In Progress` are
 non-terminal SSM lifecycle states. `In Progress` is an SSM control-plane state,
@@ -159,8 +160,8 @@ that operation only. B logs exactly one cleanup outcome: `removed`,
 kind=<timeout|start|exit|invalid-json|not-object>`, never the parameter name or
 value.
 
-The 1,860-second AWS expiry is derived from the 60-second delivery timeout plus
-the 1,800-second execution timeout; the 2,100-second polling horizon retains the
+The 2,260-second AWS expiry is derived from the 60-second delivery timeout plus
+the 2,200-second execution timeout; the 2,500-second polling horizon retains the
 240-second recovery margin from that expiry.
 
 ## Host transaction
@@ -227,68 +228,92 @@ absolute and names a regular, single-link, mode-0600 file owned by C's own
 effective UID, exiting 70 otherwise. A command rejected at the gate therefore
 never creates it at all.
 
-Before it changes the checkout, C fetches `origin/main`, proves the candidate
-and current production commits exist, requires that `origin/main` differs from
-`DEPLOY_SHA` **never** (they must be equal), and rejects a candidate older than
-or divergent from production. It records the current production SHA as exact
-`PREV_COMMIT`, resets only to `DEPLOY_SHA`, then rereads `HEAD`. This revision
-equality check prevents a mutable-main checkout.
+C fetches the exact candidate, proves both commits exist and rejects an older
+or divergent candidate. It requires that `origin/main` differs from `DEPLOY_SHA`
+never, and records the checkout as exact `PREV_COMMIT`. C materializes each
+build context from `git archive` of the candidate, then runs the archived
+transaction engine with isolated Python and bytecode writing disabled. The
+mutable checkout stays at its previous revision throughout validation.
 
-C materializes each build context from `git archive` of the exact revision into
-a private temporary directory. Untracked or ignored host files therefore cannot
-enter an image build. C builds that archive with Docker build argument
-`BUILD_REVISION` set to the exact candidate SHA and may still inject
-`APP_REVISION` as non-authoritative runtime metadata. The image bakes
-`/app/BUILD_REVISION` as a root-owned mode-0444 file. Serving truth is
-`DEPLOY_SHA == checked-out HEAD == BUILD_REVISION == deep-health revision`.
-It requires all of the following before accepting the release:
+The transaction reads authoritative route status through
+`/usr/local/sbin/axisai-switch-web-slot` and compares installed helper and mapping
+bytes with the archive. The candidate is legacy to blue, blue to green, or green
+to blue. Unknown route, control-plane drift, ambiguous legacy containers, or
+missing serving revision refuse the transaction. The serving container's baked
+revision and deep health must agree with the checkout; the server-owned
+`revision` equals the expected SHA. The previous worker must be one healthy
+container with matching baked/runtime revision and an immutable image ID.
+Redis identity and start time are recorded.
 
-Every externally sourced production image is immutable: it names an explicit
-version and pins the content digest. The only third-party Compose image is
-`redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005`
-(the Docker Hub multi-platform index digest); `web` and `worker` build the exact
-local context, and the application base image is likewise digest-pinned in the
-Dockerfile. A mutable tag such as `redis:alpine` is a shipment blocker: it lets
-two deploys of the identical application SHA resolve to different third-party
-bytes.
+Before database mutation, the migration overlap gate refuses contract,
+unclassified, rewritten, removed or unsafe historical delta migrations. The
+image is built only from the archive with `BUILD_REVISION` set to the exact
+candidate SHA. The image proof has no network. The image's root-owned mode-0444
+`/app/BUILD_REVISION` cannot be replaced by appuser. Exact previous worker image
+bytes are pinned for rollback before replacement.
 
-1. the running `web` container's `/app/BUILD_REVISION` equals the expected SHA;
-2. `/health?deep=1`, probed inside the running `web` container, returns HTTP 200
-   and JSON `status: ok`;
-3. deep health's server-owned `revision` equals the expected SHA.
+Release preparation runs exactly once as a bounded one-off container, before
+any candidate starts. Candidate lifecycle and readiness remain owned by
+`scripts/web_slot_runtime.py`; the transaction does not reproduce admission,
+ports, Compose validation or health rules: the running `web` container's
+`/app/BUILD_REVISION` equals the expected SHA, and deep health is probed inside
+the serving container. The candidate's immutable image ID must equal the image
+just built. A leftover same-revision candidate with different image bytes fails.
 
-A revision mismatch, missing revision, failed build/start, health failure, or
-post-start failure enters rollback while the locks remain held. An optional
-`PUBLIC_HEALTH_URL` is HTTPS, has no credentials, and is checked only after the
-internal deep-health gate. Its failure also rolls the candidate back.
+Immediately before switching, the candidate is reverified and the previous
+route is reread. The symbolic root helper performs the nginx switch. Public
+health and the exact anonymous mobile API error envelope must succeed before
+the worker changes. The required `PUBLIC_HEALTH_URL` is HTTPS without
+credentials or controls. Worker replacement uses only the worker service, no
+dependencies, no build and no pull. Its image ID, baked revision, runtime
+revision and health must match the candidate; Redis must not restart. The
+engine commits the checkout only to `DEPLOY_SHA` after these gates pass.
 
-Rollback resets exactly to `PREV_COMMIT`, rereads `HEAD`, rebuilds/restarts with
-that same revision (`BUILD_REVISION=PREV_COMMIT`), and repeats container plus
-deep-health verification against the previous baked revision. A rollback is
-reported verified only after those checks succeed. The only legacy exception is
-the immediate predecessor of the revision-aware helper: a missing
-`/app/BUILD_REVISION` and a missing deep-health revision may each serve as a
-one-time compatibility proof; any present rollback revision must still match
-exactly. That exception is keyed solely to whether the rollback target predates
-`scripts/production_deploy.sh`, never to a SHA, date, or version list. The
-container probe reports an absent `/app/BUILD_REVISION` in band and still
-succeeds whenever the container answers, so an unreachable container, a
-transport error, or an exhausted phase deadline is a hard failure for every
-revision and can never be read as the legacy case.
+Rollback restores the previous symbolic route, re-verifies previous web,
+restores the exact immutable previous worker image when update was attempted,
+then removes only this candidate. A fresh route proof immediately precedes
+removal; route drift or unproven previous web/worker keeps the candidate and
+reports incomplete recovery. Failed release preparation whose one-off container
+cleanup cannot be proved also reports incomplete recovery. Checkout update
+failure attempts exact previous-checkout restoration. Missing-revision legacy
+compatibility is retired: every serving baseline must prove its exact revision.
+
+After commit, the old backend drains for at most 150 seconds, observed every
+two seconds, then receives its 45-second stop grace. The ceiling is the
+90-second coach turn plus one possible 60-second provider-call overshoot;
+nginx's idle timeout does not bound a progressing response. A fresh route proof
+immediately precedes targeted retirement. Drift or retirement failure leaves
+both backends and reports committed residue; it never rolls a committed release
+back. Housekeeping retains current and previous application images and the
+previous worker rollback tag. Failed pruning emits a warning.
+
+Exit 0 means committed and retired; 1 means failed with verified previous
+serving state; 2 means incomplete recovery; 3 means committed with retirement
+residue; 64 means invalid invocation and 70 means invalid time contract.
+
+Every externally sourced production image remains version- and digest-pinned.
+Redis and the application base retain their existing immutable image contract.
+
+R6-03A is repository engineering and qualification only, implemented by PR #424
+and complete after merge; it is not production-validated yet. R6-02B completed
+the production route bootstrap on 2026-10-09. R6-03B remains pending and owns
+the first separately approved production blue/green cutover.
 
 ## Database and operational boundaries
 
-Code rollback does not roll back database migrations. Migrations run at
-application boot, so migrations must follow expand/contract discipline and be
-backward-compatible with the preceding release. For a destructive migration,
+Code rollback does not roll back database migrations. In the blue/green flow,
+migrations run only through release preparation; candidate startup is read-only.
+Migrations must follow expand/contract discipline and remain compatible with the
+still-serving previous release. For a destructive migration,
 take and verify an RDS snapshot and execute the migration as a separately
 planned operation; do not expect the deploy rollback to restore database state.
 
 ### Startup modes and the dual-revision contract (R6-01A)
 
-Status: R6-01A is complete. The dual-revision startup prerequisite is hardened,
-but blue/green deployment is **not yet implemented**. Production still deploys
-through the single-container path above and needs no new environment value.
+Status: R6-01A is complete. The dual-revision startup prerequisite is hardened.
+PR #424 implements the blue/green deploy transaction; repository engineering is
+complete after merge, but production validation remains pending in R6-03B.
+The current production backend is still the legacy web on :5000.
 
 `FITX_STARTUP_MODE` selects what `create_app()` does to shared state
 (`app/schema_safety.py`, dispatched once in `app/__init__.py::_run_startup`):
@@ -364,17 +389,19 @@ CI through `tests/test_migration_expand_contract.py`.
 
 ### Two-slot web runtime foundation (R6-01B)
 
-Status: R6-01B adds the **runtime primitive only**. Nothing deploys through it
-yet: `production_deploy.sh`, `docker-compose.yml`, nginx and the legacy web on
-`127.0.0.1:5000` are unchanged, and no new `.env` value is needed.
+Status: R6-01B is the complete runtime foundation. PR #424 integrates it into
+normal deploy engineering. Production nginx now uses `axisai_web`, whose active
+include still selects the legacy main-project web at `127.0.0.1:5000`. No
+production traffic has yet been served by blue or green.
 
 | Stage | Scope | State |
 |---|---|---|
-| R6-01A | two revisions can share schema/Redis at startup | done |
-| R6-01B | two web containers can run side by side on one host | this section |
-| R6-02A | nginx route control plane (helper, mapping, bootstrap tool) | in repository, **not installed or active in production** |
-| R6-02B | one-time production nginx bootstrap to the named upstream | **not done** |
-| R6-03 | exact-SHA deploy transaction (release-prepare, start, verify, switch, drain, rollback, worker order) | **not implemented** |
+| R6-01A | two revisions can share schema/Redis at startup | complete |
+| R6-01B | two web containers can run side by side on one host | complete runtime foundation |
+| R6-02A | nginx route control plane (helper, mapping, bootstrap tool) | complete; installed in production |
+| R6-02B | one-time production nginx bootstrap to the named upstream | **COMPLETE as of 2026-10-09**; indirection active, route state `legacy` |
+| R6-03A | exact-SHA deploy transaction engineering and qualification | implemented by PR #424; repository engineering complete after merge; not production-validated yet |
+| R6-03B | first approved production blue/green cutover | pending; separately controlled production validation |
 
 **Slot model.** `docker-compose.web-slot.yml` plus one identity overlay
 (`deploy/compose/web-slot-{blue,green}.yml`), driven only by
@@ -482,10 +509,16 @@ rollback):
 
 ### nginx route control plane (R6-02A)
 
-Status: repository only. Production nginx still proxies `location /`
-directly to `127.0.0.1:5000`; nothing in `production_deploy.sh` or
-`deploy_control.py` reads or switches routes. The full contract, failure
-model and the R6-02B runbook are in `deploy/nginx/README.md`.
+Status: R6-02A is complete; the route control plane is installed in production.
+R6-02B is **COMPLETE as of 2026-10-09**: nginx indirection is active, the
+effective app proxy is `proxy_pass http://axisai_web`, and
+`/etc/nginx/axisai/active-web-upstream.conf` selects `server 127.0.0.1:5000;`.
+The production route state remains `legacy`, serving the legacy main-project
+web through the named upstream. PR #424 makes `production_deploy.sh` use the
+symbolic route control plane for normal deploy engineering after merge; the
+first production blue/green cutover remains pending under R6-03B. The full
+contract, failure model and historical R6-02B runbook are in
+`deploy/nginx/README.md`.
 
 - Route states are symbolic: `legacy` (`127.0.0.1:5000`, the main-project
   web), `blue` (`:5001`) and `green` (`:5002`), defined in the root-owned
@@ -511,7 +544,8 @@ model and the R6-02B runbook are in `deploy/nginx/README.md`.
 - `scripts/axisai_nginx_bootstrap.py check|apply` is the deterministic R6-02B
   migration of the Certbot-managed site. It changes one `proxy_pass` argument
   and inserts the upstream block, refuses partial or unknown topologies, and
-  restores the exact backup on any failure. It has not been run.
+  restores the exact backup on any failure. R6-02B completed this bootstrap
+  in production on 2026-10-09.
 
 The deploy path does not print `.env` contents or AWS credentials, and it does
 not assign feature flags. Host `.env` permission repair and nginx validation are
