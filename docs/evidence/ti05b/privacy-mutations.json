@@ -1,0 +1,32 @@
+[
+  {
+    "mutation": "session_user_id",
+    "detected": true,
+    "exit": 1
+  },
+  {
+    "mutation": "completion_user_id",
+    "detected": true,
+    "exit": 1
+  },
+  {
+    "mutation": "state_user_id",
+    "detected": true,
+    "exit": 1
+  },
+  {
+    "mutation": "identity_relabelled_owner",
+    "detected": true,
+    "exit": 1
+  },
+  {
+    "mutation": "raw_unlabelled_identity",
+    "detected": true,
+    "exit": 1
+  },
+  {
+    "mutation": "exception_message",
+    "detected": true,
+    "exit": 1
+  }
+]
