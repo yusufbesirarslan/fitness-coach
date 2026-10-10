@@ -12,7 +12,7 @@ except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalı
 
 from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
 from app.extensions import bedrock_client, openai_client
-from app.services import ai_provider_call, ai_recovery
+from app.services import ai_provider_call, ai_recovery, ai_usage
 from app.services.ai_recovery import TransientAIError
 from app.services.ai_spend_guard import AISpendLimitExceeded
 
@@ -284,11 +284,12 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
                            type(e).__name__)
     try:
         logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
-        reply = ai_recovery.call_with_recovery(
-            lambda: _openai_chat(messages, system_prompt=system_prompt,
-                                 max_tokens=max_tokens, temperature=temperature,
-                                 feature=feature),
-            feature="heavy_chat.openai")
+        with ai_usage.fallback_scope(fallback_used, feature=feature):
+            reply = ai_recovery.call_with_recovery(
+                lambda: _openai_chat(messages, system_prompt=system_prompt,
+                                     max_tokens=max_tokens, temperature=temperature,
+                                     feature=feature),
+                feature="heavy_chat.openai")
         ai_recovery.remember_last_good(lg_key, reply)
         return _completion_from_text(reply, fallback_used=fallback_used)
     except AISpendLimitExceeded:

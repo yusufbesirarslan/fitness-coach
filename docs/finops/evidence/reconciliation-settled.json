@@ -1,0 +1,186 @@
+{
+  "adjustment_cache_read_tokens": 0,
+  "adjustment_cache_write_tokens": 0,
+  "adjustment_input_tokens": 0,
+  "adjustment_output_tokens": 0,
+  "adjustments": [],
+  "app_cache_read_tokens": 0,
+  "app_cache_write_tokens": 0,
+  "app_estimated_list_usd": 0.155043,
+  "app_input_tokens": 37541,
+  "app_output_tokens": 2828,
+  "application_attempts": 12,
+  "application_summary": {
+    "attempts": 29,
+    "attribution": {
+      "expected_null_subject": 17,
+      "invalid_subject_attempts": 0,
+      "null_subject_attempts": 17,
+      "other_feature_attempts": 0,
+      "subject_attributed_attempts": 12,
+      "unexpected_null_subject": 0
+    },
+    "by_feature": {
+      "coach": {
+        "attempts": 4,
+        "estimated_cost_per_known_action": 0.03080475,
+        "estimated_gross_usd": 0.123219,
+        "estimated_input_tokens": 0,
+        "failure_attempts": 0,
+        "fallback_attempts": 0,
+        "fallback_unknown_attempts": 4,
+        "known_logical_actions": 4,
+        "known_provider_tokens": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 34043,
+          "output_tokens": 1406
+        },
+        "logical_actions": 4,
+        "provider_tokens": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 34043,
+          "output_tokens": 1406
+        },
+        "retry_attempts": 0,
+        "uncertain_token_attempts": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "uncorrelated_attempts": 0,
+        "unknown_output_attempts": 0,
+        "unpriced_attempts": 0
+      },
+      "health_probe": {
+        "attempts": 17,
+        "estimated_cost_per_known_action": null,
+        "estimated_gross_usd": 0.000663,
+        "estimated_input_tokens": 0,
+        "failure_attempts": 0,
+        "fallback_attempts": 0,
+        "fallback_unknown_attempts": 17,
+        "known_logical_actions": 17,
+        "known_provider_tokens": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 136,
+          "output_tokens": 17
+        },
+        "logical_actions": 17,
+        "provider_tokens": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 136,
+          "output_tokens": 17
+        },
+        "retry_attempts": 0,
+        "uncertain_token_attempts": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "uncorrelated_attempts": 0,
+        "unknown_output_attempts": 0,
+        "unpriced_attempts": 0
+      },
+      "nutrition": {
+        "attempts": 8,
+        "estimated_cost_per_known_action": 0.004451571428571429,
+        "estimated_gross_usd": 0.031161,
+        "estimated_input_tokens": 0,
+        "failure_attempts": 0,
+        "fallback_attempts": 0,
+        "fallback_unknown_attempts": 8,
+        "known_logical_actions": 7,
+        "known_provider_tokens": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 3362,
+          "output_tokens": 1405
+        },
+        "logical_actions": 7,
+        "provider_tokens": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 3362,
+          "output_tokens": 1405
+        },
+        "retry_attempts": 0,
+        "uncertain_token_attempts": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "input_tokens": 0,
+          "output_tokens": 0
+        },
+        "uncorrelated_attempts": 0,
+        "unknown_output_attempts": 0,
+        "unpriced_attempts": 0
+      }
+    },
+    "economics_basis": "estimated gross list price; partial where usage or prices are missing",
+    "estimated_gross_usd": 0.155043,
+    "interval": {
+      "end": "2026-10-01T00:00:00Z",
+      "end_exclusive": true,
+      "start": "2026-09-24T00:00:00Z"
+    },
+    "outcomes": {
+      "client_disconnect": 0,
+      "provider_error": 0,
+      "success": 29,
+      "timeout": 0
+    },
+    "rejections": {
+      "guard_rejected": 0,
+      "input_budget_rejected": 0
+    },
+    "subjects": {
+      "active_ai_users": 1,
+      "median_estimated_usd": 0.15438,
+      "p95_estimated_usd": 0.15438,
+      "unpriced_attempts": 0,
+      "users_with_complete_economics": 1,
+      "users_with_incomplete_economics": 0
+    }
+  },
+  "attributed_usd": 0.155043,
+  "aws_billed_gross_usd": 0.2156794,
+  "aws_cache_read_tokens": 0,
+  "aws_cache_write_tokens": 0,
+  "aws_input_tokens": 79605,
+  "aws_invocations": 94,
+  "aws_output_tokens": 5440,
+  "billed_attribution_basis": "AWS token-component charges by explicit model/profile class",
+  "cache_read_delta": 0,
+  "cache_read_delta_pct": null,
+  "cache_write_delta": 0,
+  "cache_write_delta_pct": null,
+  "health_probe_attempts": 17,
+  "input_delta": 42064,
+  "input_delta_pct": 52.84090195339489,
+  "interval": {
+    "end": "2026-10-01T00:00:00Z",
+    "end_exclusive": true,
+    "start": "2026-09-24T00:00:00Z"
+  },
+  "output_delta": 2612,
+  "output_delta_pct": 48.01470588235294,
+  "overattributed_usd": 0.0,
+  "token_tolerance": 0,
+  "unattributed_cache_read_tokens": 0,
+  "unattributed_cache_write_tokens": 0,
+  "unattributed_input_tokens": 42064,
+  "unattributed_output_tokens": 2612,
+  "unattributed_usd": 0.0606364,
+  "uncertain_cache_read_attempts": 0,
+  "uncertain_cache_write_attempts": 0,
+  "uncertain_input_attempts": 0,
+  "uncertain_output_attempts": 0,
+  "usd_delta": 0.0606364,
+  "usd_delta_pct": 28.114136074191602,
+  "within_token_tolerance": false
+}

@@ -25,6 +25,7 @@ them in its own contract (web: the historical status/strings, pinned by
 Remote menu response content must never be interpolated into server logs.
 Use counts, fixed reason codes, exception types and redacted request URLs only.
 """
+from app.services import ai_usage
 import hashlib
 import json
 import re
@@ -531,6 +532,7 @@ def analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper
         app = current_app._get_current_object()
 
         # Executor threads: bind the requesting account (spend guard).
+        @ai_usage.bind_request
         @ai_spend_guard.bind_subject
         def _weights_job():
             with app.app_context():
@@ -538,6 +540,7 @@ def analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper
                                                      fallback_weights=fallback_g,
                                                      return_fallbacks=True)
 
+        @ai_usage.bind_request
         @ai_spend_guard.bind_subject
         def _macros_job():
             # Kategori bağlamı LLM'e de geçer: 'Margarita'@Pizzalar kokteyl değil

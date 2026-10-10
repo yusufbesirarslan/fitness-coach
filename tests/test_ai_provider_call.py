@@ -896,3 +896,22 @@ def test_charge_precedes_every_physical_retry():
     src = inspect.getsource(ai_provider_call.Admission.create)
     loop = src[src.index("for attempt"):]
     assert loop.index("ai_spend_guard.charge(") < loop.index("method(**kwargs")
+
+
+# FINOPS-01: qualify the actual recovery/fallback boundary with both providers.
+def test_finops_fallback_attempts_are_independently_flagged(app, providers, usage_events):
+    import anthropic
+    import httpx
+    request = httpx.Request("POST", "https://example.invalid")
+    providers.bedrock.script = [anthropic.APIStatusError(
+        "exception-sensitive@example.invalid", response=httpx.Response(403, request=request), body={})]
+    result = ai._heavy_complete([{"role": "user", "content": SECRET_PROMPT}],
+                                feature="nutrition", max_tokens=100)
+    assert result.text == SECRET_REPLY and result.provider == "openai" and result.fallback_used
+    assert len(providers.bedrock.calls) == len(providers.openai.calls) == 1
+    events = _parsed(usage_events)
+    assert len(events) == 2
+    assert [(e["provider"], e["outcome"], e["fallback"]) for e in events] == [
+        ("bedrock", "provider_error", False), ("openai", "success", True)]
+    assert _spent() == 2
+    assert "exception-sensitive" not in str(events)

@@ -32,6 +32,7 @@ import copy
 import logging
 import random
 import time
+import uuid
 from contextlib import contextmanager
 
 from app.config import BEDROCK_MAX_RETRIES, OPENAI_MAX_RETRIES
@@ -96,9 +97,12 @@ def _outcome_of(exc):
 def _record_rejection(feature, family, model, bound, subject):
     _log.warning("[AI-BUDGET] input_budget_exceeded provider=%s model=%s feature=%s",
                  family, ai_usage.normalize_model(family, model), feature)
-    ai_usage.emit(feature=feature, provider=family, model=model,
-                  outcome="input_budget_rejected", subject_id=subject,
-                  input_bound=bound)
+    try:
+        ai_usage.emit(feature=feature, provider=family, model=model,
+                      outcome="input_budget_rejected", subject_id=subject,
+                      input_bound=bound)
+    except Exception:
+        pass
     try:
         from app.services import runtime_metrics
         runtime_metrics.increment(
@@ -164,6 +168,10 @@ class Admission:
         self.tool_round = tool_round
         self.subject = subject
         self._used = False
+        try:
+            self.admission_id = uuid.uuid4().hex
+        except Exception:
+            self.admission_id = None
 
     @property
     def model(self):
@@ -179,23 +187,37 @@ class Admission:
             raise TypeError(f"non-transport kwargs after admission: {sorted(extra)}")
         return {k: v for k, v in transport.items() if v is not None}
 
-    def _emit(self, outcome, attempt, usage=None, source=None):
-        if usage is None and outcome != "success":
-            # Unknown provider-side cost: record the input upper bound, marked
-            # as an estimate, rather than claiming zero.
-            usage, source = {"input_tokens": self.input_bound}, "estimated"
-        ai_usage.emit(
-            feature=self.feature, provider=self.family, model=self.model,
-            outcome=outcome, attempt=attempt, tool_round=self.tool_round,
-            subject_id=self.subject, usage=usage, usage_source=source,
-            input_bound=self.input_bound, image_units=self.images,
-            output_cap=self._payload.get("max_tokens"))
+    def _emit(self, outcome, attempt, response=None):
+        # Everything that interprets or writes telemetry is non-authoritative.
+        # A malformed usage object or broken sink cannot alter the SDK result.
+        try:
+            usage = None
+            if response is not None:
+                try:
+                    usage = ai_usage.usage_from_response(self.family, response)
+                except Exception:
+                    pass
+            source = "provider" if usage else "estimated"
+            if not usage:
+                usage = {"input_tokens": self.input_bound}
+            ai_usage.emit(
+                feature=self.feature, provider=self.family, model=self.model,
+                outcome=outcome, attempt=attempt, tool_round=self.tool_round,
+                subject_id=self.subject, usage=usage, usage_source=source,
+                input_bound=self.input_bound, image_units=self.images,
+                output_cap=self._payload.get("max_tokens"),
+                admission_id=self.admission_id)
+        except Exception:
+            pass
 
     def _emit_guard_rejection(self):
-        ai_usage.emit(feature=self.feature, provider=self.family, model=self.model,
-                      outcome="guard_rejected", tool_round=self.tool_round,
-                      subject_id=self.subject, input_bound=self.input_bound,
-                      image_units=self.images)
+        try:
+            ai_usage.emit(feature=self.feature, provider=self.family, model=self.model,
+                          outcome="guard_rejected", tool_round=self.tool_round,
+                          subject_id=self.subject, input_bound=self.input_bound,
+                          image_units=self.images, admission_id=self.admission_id)
+        except Exception:
+            pass
 
     def _remaining(self):
         if self._deadline is None:
@@ -231,8 +253,7 @@ class Admission:
                                                    max(1.0, self._remaining()))
                     continue
                 raise
-            usage = ai_usage.usage_from_response(self.family, resp)
-            self._emit("success", attempt, usage, "provider" if usage else None)
+            self._emit("success", attempt, response=resp)
             return resp
         raise RuntimeError("unreachable")  # pragma: no cover
 
@@ -250,8 +271,7 @@ class Admission:
         if holder.final is None:
             self._emit("client_disconnect", 1)
         else:
-            usage = ai_usage.usage_from_response(self.family, holder.final)
-            self._emit("success", 1, usage, "provider" if usage else None)
+            self._emit("success", 1, response=holder.final)
 
 
 class _StreamUsage:

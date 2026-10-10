@@ -20,6 +20,8 @@ never mixed in one event. `estimated_cost_usd` is a convenience derived from a
 dated price table; it is not a bill and not a boundary.
 """
 import json
+import uuid
+from functools import wraps
 import logging
 import sys
 import threading
@@ -27,6 +29,7 @@ import time
 
 from app.services.ai_input_budget import normalize_feature
 
+SCHEMA_VERSION = 2
 PRICING_VERSION = "2026-09-23"
 
 # USD per 1M tokens: (input, output, cache_write, cache_read).
@@ -56,13 +59,34 @@ if not _logger.handlers:
     _logger.addHandler(_handler)
 
 
-def normalize_model(provider, model):
+# Exact runtime identities: future generations must never inherit old prices.
+_BEDROCK_MODELS = {
+    "anthropic.claude-sonnet-4-5-20250929-v1:0": "claude-sonnet-4-5",
+    "anthropic.claude-haiku-4-5-20251001-v1:0": "claude-haiku-4-5",
+}
+
+def _model_identity(provider, model):
     name = str(model or "").lower()
-    if provider == "bedrock" and "claude-sonnet-4-5" in name:
-        return "claude-sonnet-4-5"
-    if provider == "openai" and name.startswith("gpt-4o-mini"):
-        return "gpt-4o-mini"
-    return "other"
+    if provider == "openai":
+        return ("gpt-4o-mini", "direct") if name in (
+            "gpt-4o-mini", "gpt-4o-mini-2024-07-18") else ("other", "unknown")
+    if provider != "bedrock":
+        return "other", "unknown"
+    # Standard model/profile ARNs end in the same code-owned identifier.
+    if name.startswith("arn:aws:bedrock:") and "/" in name:
+        name = name.rsplit("/", 1)[1]
+    profile = "direct"
+    for prefix in ("global", "eu", "us", "au", "jp"):
+        if name.startswith(prefix + "."):
+            profile = "global" if prefix == "global" else "geographic"
+            name = name[len(prefix) + 1:]
+            break
+    model_norm = _BEDROCK_MODELS.get(name)
+    return (model_norm, profile) if model_norm else ("other", "unknown")
+
+
+def normalize_model(provider, model):
+    return _model_identity(provider, model)[0]
 
 
 # ── Request correlation (threads without a request context) ─────────────────
@@ -141,6 +165,8 @@ def estimated_cost_usd(provider, model_norm, usage):
         return None
     parts = (usage.get("input_tokens"), usage.get("output_tokens"),
              usage.get("cache_write_tokens"), usage.get("cache_read_tokens"))
+    if all(count is None for count in parts):
+        return None
     total = 0.0
     for count, price in zip(parts, prices):
         if count:
@@ -150,13 +176,13 @@ def estimated_cost_usd(provider, model_norm, usage):
 
 def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
          subject_id=None, usage=None, usage_source=None, input_bound=None,
-         image_units=0, output_cap=None):
+         image_units=0, output_cap=None, admission_id=None):
     """Write one `[AI-USAGE]` event. Never raises."""
     try:
         feature = normalize_feature(feature)
         provider = provider if provider in ("bedrock", "openai") else "other"
         outcome = outcome if outcome in OUTCOMES else "provider_error"
-        model_norm = normalize_model(provider, model)
+        model_norm, billing_profile = _model_identity(provider, model)
         usage = usage or {}
         event = {
             "event": "ai_usage",
@@ -179,7 +205,8 @@ def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
             "output_cap": output_cap,
         }
         if outcome in PROVIDER_ATTEMPT_OUTCOMES:
-            cost = estimated_cost_usd(provider, model_norm, usage)
+            cost = (estimated_cost_usd(provider, model_norm, usage)
+                    if (provider == "openai" or billing_profile == "global") else None)
             if cost is not None:
                 event["estimated_cost_usd"] = cost
                 event["pricing_version"] = PRICING_VERSION
@@ -191,7 +218,56 @@ def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
                 # The upper bound was beaten: the boundary undercounted. Loud,
                 # searchable, and never silently absorbed.
                 event["bound_violation"] = True
+        # Append fields to preserve legacy ordered-prefix regex consumers.
+        event.update(schema_version=SCHEMA_VERSION, billing_profile=billing_profile,
+                     admission_id=(admission_id if isinstance(admission_id, str)
+                                   and len(admission_id) == 32
+                                   and all(c in "0123456789abcdef" for c in admission_id)
+                                   else None), job_id=current_job_id(),
+                     fallback=bool(getattr(_tls, "fallback", False)
+                                   and provider == "openai"
+                                   and getattr(_tls, "fallback_feature", feature) in (None, feature)))
         _logger.info("[AI-USAGE] %s", json.dumps(event, separators=(",", ":")))
     except Exception:
         pass
 
+
+
+def current_job_id():
+    """RQ's generated UUID only; no arbitrary/custom job names are exported."""
+    try:
+        from rq import get_current_job
+        job = get_current_job()
+        value = getattr(job, "id", None)
+        if isinstance(value, str) and str(uuid.UUID(value)) == value.lower():
+            return value.lower()
+    except Exception:
+        pass
+    return None
+
+
+def bind_request(fn):
+    """Capture server-generated correlation before crossing a thread boundary."""
+    rid = current_request_id()
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with request_scope(rid):
+            return fn(*args, **kwargs)
+    return wrapped
+
+
+class fallback_scope:
+    """Telemetry-only flag at an existing provider fallback decision."""
+    def __init__(self, used, feature=None):
+        self.used = bool(used)
+        self.feature = normalize_feature(feature) if feature is not None else None
+    def __enter__(self):
+        self.previous = getattr(_tls, "fallback", False)
+        self.previous_feature = getattr(_tls, "fallback_feature", None)
+        _tls.fallback = self.used
+        _tls.fallback_feature = self.feature
+        return self
+    def __exit__(self, *exc):
+        _tls.fallback = self.previous
+        _tls.fallback_feature = self.previous_feature
+        return False

@@ -34,7 +34,7 @@ from app.prompts.system import (  # noqa: F401 (re-export)
 from app.observability import current_request_id
 from app.services import provider_failure
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
-from app.services import ai_input_budget, ai_provider_call
+from app.services import ai_input_budget, ai_provider_call, ai_usage
 from app.services import ai_spend_guard
 from app.services.ai_spend_guard import AISpendLimitExceeded
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
@@ -1121,12 +1121,14 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
 
     deadline = _coach_turn_deadline()
     final_text = None
+    telemetry_fallback = False
     if BEDROCK_ENABLED and _anthropic is not None:
         try:
             final_text = _run_coach_conversation_bedrock(
                 user_id, question, context, history, language,
                 deadline=deadline)
         except _BedrockFallback as e:
+            telemetry_fallback = True
             log_provider_fallback(
                 current_app.logger,
                 "[COACH] Bedrock first call failed; trying OpenAI fallback",
@@ -1138,9 +1140,10 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
                 "[COACH] turn budget exhausted before OpenAI fallback")
             final_text = _coach_tool_fallback(language)
         else:
-            final_text = _run_coach_conversation_openai(
-                user_id, question, context, history, language,
-                deadline=deadline)
+            with ai_usage.fallback_scope(telemetry_fallback, feature="coach"):
+                final_text = _run_coach_conversation_openai(
+                    user_id, question, context, history, language,
+                    deadline=deadline)
 
     # C3/B16 kararı response_formatter.finalize_reply'de: yedek/boş yanıt
     # dostça hata metnine çevrilir ve geçmişe yazılMAZ.
