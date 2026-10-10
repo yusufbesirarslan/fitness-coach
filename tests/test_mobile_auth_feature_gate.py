@@ -87,6 +87,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/progress/check-ins"),
         ("get", "/api/v1/progress/check-ins"),
         ("get", "/api/v1/today"),
+        ("get", "/api/v1/today/guidance"),
         ("get", "/api/v1/training/preferences"),
         ("get", "/api/v1/training/plans/current"),
         ("get", "/api/v1/training/workouts/AAAAAAAAAAAAAAAAAAAAAAAA"),
@@ -214,6 +215,11 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # Sprint 12 PR3. Canonical Today read; on this blueprint so it cannot
             # become an ungated parallel mobile surface.
             ("/api/v1/today", ("GET",)),
+            # LP17-B1 Today Guidance read over the LP17 read model; additionally
+            # behind default-OFF FITX_MOBILE_TODAY_GUIDANCE_ENABLED (GET 404
+            # before auth while OFF), but registered unconditionally, so
+            # admitted here.
+            ("/api/v1/today/guidance", ("GET",)),
             ("/api/v1/training/preferences", ("GET",)),
             # TI-01B private catalog note, independently gated by P0 readiness.
             ("/api/v1/training/exercises/<exercise_id>/note", ("GET", "PUT")),
