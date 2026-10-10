@@ -294,9 +294,10 @@ residue; 64 means invalid invocation and 70 means invalid time contract.
 Every externally sourced production image remains version- and digest-pinned.
 Redis and the application base retain their existing immutable image contract.
 
-R6-03A is repository engineering and qualification only. Production approval,
-route bootstrap, slot startup and first deployment belong to separately approved
-R6-03B work.
+R6-03A is repository engineering and qualification only, implemented by PR #424
+and complete after merge; it is not production-validated yet. R6-02B completed
+the production route bootstrap on 2026-10-09. R6-03B remains pending and owns
+the first separately approved production blue/green cutover.
 
 ## Database and operational boundaries
 
@@ -309,9 +310,10 @@ planned operation; do not expect the deploy rollback to restore database state.
 
 ### Startup modes and the dual-revision contract (R6-01A)
 
-Status: R6-01A is complete. The dual-revision startup prerequisite is hardened,
-but blue/green deployment is **not yet implemented**. Production still deploys
-through the single-container path above and needs no new environment value.
+Status: R6-01A is complete. The dual-revision startup prerequisite is hardened.
+PR #424 implements the blue/green deploy transaction; repository engineering is
+complete after merge, but production validation remains pending in R6-03B.
+The current production backend is still the legacy web on :5000.
 
 `FITX_STARTUP_MODE` selects what `create_app()` does to shared state
 (`app/schema_safety.py`, dispatched once in `app/__init__.py::_run_startup`):
@@ -387,17 +389,19 @@ CI through `tests/test_migration_expand_contract.py`.
 
 ### Two-slot web runtime foundation (R6-01B)
 
-Status: R6-01B adds the **runtime primitive only**. Nothing deploys through it
-yet: `production_deploy.sh`, `docker-compose.yml`, nginx and the legacy web on
-`127.0.0.1:5000` are unchanged, and no new `.env` value is needed.
+Status: R6-01B is the complete runtime foundation. PR #424 integrates it into
+normal deploy engineering. Production nginx now uses `axisai_web`, whose active
+include still selects the legacy main-project web at `127.0.0.1:5000`. No
+production traffic has yet been served by blue or green.
 
 | Stage | Scope | State |
 |---|---|---|
-| R6-01A | two revisions can share schema/Redis at startup | done |
-| R6-01B | two web containers can run side by side on one host | this section |
-| R6-02A | nginx route control plane (helper, mapping, bootstrap tool) | in repository, **not installed or active in production** |
-| R6-02B | one-time production nginx bootstrap to the named upstream | **not done** |
-| R6-03A | exact-SHA deploy transaction engineering and qualification | implemented locally; production is outside this work |
+| R6-01A | two revisions can share schema/Redis at startup | complete |
+| R6-01B | two web containers can run side by side on one host | complete runtime foundation |
+| R6-02A | nginx route control plane (helper, mapping, bootstrap tool) | complete; installed in production |
+| R6-02B | one-time production nginx bootstrap to the named upstream | **COMPLETE as of 2026-10-09**; indirection active, route state `legacy` |
+| R6-03A | exact-SHA deploy transaction engineering and qualification | implemented by PR #424; repository engineering complete after merge; not production-validated yet |
+| R6-03B | first approved production blue/green cutover | pending; separately controlled production validation |
 
 **Slot model.** `docker-compose.web-slot.yml` plus one identity overlay
 (`deploy/compose/web-slot-{blue,green}.yml`), driven only by
@@ -505,10 +509,16 @@ rollback):
 
 ### nginx route control plane (R6-02A)
 
-Status: repository only. Production nginx still proxies `location /`
-directly to `127.0.0.1:5000`; nothing in `production_deploy.sh` or
-`deploy_control.py` reads or switches routes. The full contract, failure
-model and the R6-02B runbook are in `deploy/nginx/README.md`.
+Status: R6-02A is complete; the route control plane is installed in production.
+R6-02B is **COMPLETE as of 2026-10-09**: nginx indirection is active, the
+effective app proxy is `proxy_pass http://axisai_web`, and
+`/etc/nginx/axisai/active-web-upstream.conf` selects `server 127.0.0.1:5000;`.
+The production route state remains `legacy`, serving the legacy main-project
+web through the named upstream. PR #424 makes `production_deploy.sh` use the
+symbolic route control plane for normal deploy engineering after merge; the
+first production blue/green cutover remains pending under R6-03B. The full
+contract, failure model and historical R6-02B runbook are in
+`deploy/nginx/README.md`.
 
 - Route states are symbolic: `legacy` (`127.0.0.1:5000`, the main-project
   web), `blue` (`:5001`) and `green` (`:5002`), defined in the root-owned
@@ -534,7 +544,8 @@ model and the R6-02B runbook are in `deploy/nginx/README.md`.
 - `scripts/axisai_nginx_bootstrap.py check|apply` is the deterministic R6-02B
   migration of the Certbot-managed site. It changes one `proxy_pass` argument
   and inserts the upstream block, refuses partial or unknown topologies, and
-  restores the exact backup on any failure. It has not been run.
+  restores the exact backup on any failure. R6-02B completed this bootstrap
+  in production on 2026-10-09.
 
 The deploy path does not print `.env` contents or AWS credentials, and it does
 not assign feature flags. Host `.env` permission repair and nginx validation are
