@@ -58,6 +58,9 @@ def _deferred_summarize(conversation_id):
     işi asıl akışı da yanıt kapanışını da bozamaz."""
     app = current_app._get_current_object()
 
+    from app.services import ai_usage
+
+    @ai_usage.bind_request
     def run():
         with app.app_context():
             try:

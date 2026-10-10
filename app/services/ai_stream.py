@@ -189,6 +189,7 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
         return
     deadline = ai_coach._coach_turn_deadline()
 
+    telemetry_fallback = False
     if ai_coach.BEDROCK_ENABLED and ai_coach._anthropic is not None:
         try:
             yield from _stream_bedrock(
@@ -196,6 +197,7 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
                 deadline=deadline)
             return
         except ai_coach._BedrockFallback as fallback:
+            telemetry_fallback = True
             # Buraya YALNIZCA hiç delta gitmemişken ve hiç araç çalışmamışken
             # gelinir (_stream_bedrock garantisi) → sağlayıcı değişimi güvenli.
             #
@@ -209,9 +211,10 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
                 "trying OpenAI fallback",
                 fallback)
 
-    yield from _stream_openai_fallback(
-        user_id, question, context, history, language,
-        deadline=deadline)
+    with ai_usage.fallback_scope(telemetry_fallback, feature="coach"):
+        yield from _stream_openai_fallback(
+            user_id, question, context, history, language,
+            deadline=deadline)
 
 
 def _stream_bedrock(user_id, question, context, history, language,

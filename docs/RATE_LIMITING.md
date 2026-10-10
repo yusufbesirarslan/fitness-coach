@@ -292,3 +292,9 @@ AI_FAILURE_COOLDOWN_SECONDS=60
 AI_CHAT_QUOTA_ENABLED=1
 FREE_WEEKLY_AI_CHATS=200
 ```
+
+## FINOPS-01 qualification and schema evolution
+
+The authoritative methodology, caller inventory, time boundary, token/cache semantics, safe offline reconciliation and quantified UNATTRIBUTED residuals are in [AI_UNIT_ECONOMICS.md](AI_UNIT_ECONOMICS.md). Current code appends schema_version=2, bounded billing_profile, generated admission_id, validated existing RQ job_id, and a telemetry-only fallback boolean; legacy ordered-prefix queries above remain compatible. Model recognition is exact: newer/unknown Claude versions do not inherit old pricing. Geographic/direct Bedrock classes remain unpriced until their prices are independently verified.
+
+Physical attempts are not product actions. Use existing server request/job correlation; aggregate tool rounds, retries and fallback separately without treating them as new actions. Estimated failure input bounds and unknown output must not enter provider-reported token reconciliation as actual usage. Known-component estimates are incomplete COGS; unknown/priceless users and actions cannot receive zero-cost or complete-cost statistics. No custom metrics or serving-budget changes are introduced.

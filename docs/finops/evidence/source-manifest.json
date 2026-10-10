@@ -1,0 +1,30 @@
+{
+  "base_sha": "2a437ef350b275744ef7c417709a1a01b8d66a2d",
+  "account": "852128326881",
+  "region": "eu-central-1",
+  "log_group": "/axisai/app",
+  "retention_days": 30,
+  "telemetry_start_utc": "2026-09-23T15:58:38.746Z",
+  "introduction_commit": "258f84f11dd009443875ca9e2d2090c49e674271",
+  "first_production_revision": "5636610ffa3b26da6cf0bcbb43c998bd6882b786",
+  "deployment_run": 35885285890,
+  "production_evidence_collected_utc": "2026-10-10",
+  "exports": {
+    "usage-sanitized.jsonl": {
+      "sha256": "e8ef1f77c1d0b6b65798f0b896d92c2a77782fd22d172b01c9b0fc402b388e47",
+      "location": "restricted local evidence; raw identities not committed"
+    },
+    "aligned-aws-metrics.json": {
+      "sha256": "c0bb9e2572264faf9f0deedc7924d646a4fe13b6fe377944897315b95ef31dab",
+      "location": "restricted local evidence; raw identities not committed"
+    },
+    "aligned-aws-billing.json": {
+      "sha256": "323c1908cdd07f286b558ee2b4add6f57deac133b8a8af6dcda1a7bc93798553",
+      "location": "restricted local evidence; raw identities not committed"
+    },
+    "telemetry-window-results.json": {
+      "sha256": "5029ed1618a7b8e8d73016e042897676c0634aa2e09875589eb064316549448c",
+      "location": "restricted local evidence; raw identities not committed"
+    }
+  }
+}

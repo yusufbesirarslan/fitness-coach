@@ -1,0 +1,40 @@
+{
+  "start": "2026-09-24T00:00:00Z",
+  "end": "2026-10-01T00:00:00Z",
+  "input_tokens": 79605,
+  "output_tokens": 5440,
+  "cache_write_tokens": 0,
+  "cache_read_tokens": 0,
+  "invocations": 94,
+  "billed_gross_usd": "0.2156794",
+  "billing_classes": [
+    {
+      "model": "claude-haiku-4-5",
+      "billing_profile": "geographic",
+      "input_tokens": 42064,
+      "output_tokens": 2612,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "input_tokens_gross_usd": "0.0462704",
+      "output_tokens_gross_usd": "0.014366",
+      "cache_write_tokens_gross_usd": "0",
+      "cache_read_tokens_gross_usd": "0"
+    },
+    {
+      "model": "claude-sonnet-4-5",
+      "billing_profile": "global",
+      "input_tokens": 37541,
+      "output_tokens": 2828,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "input_tokens_gross_usd": "0.112623",
+      "output_tokens_gross_usd": "0.04242",
+      "cache_write_tokens_gross_usd": "0",
+      "cache_read_tokens_gross_usd": "0"
+    }
+  ],
+  "legacy_billing_profile": "global",
+  "token_tolerance": 0,
+  "tolerance_reason": "Complete UTC days; integer account token sums and exact 1M-token billing quantities; no percentage allowance conceals missing activity.",
+  "billing_provisional": false
+}
