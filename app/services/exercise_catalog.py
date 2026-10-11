@@ -14,6 +14,7 @@ import unicodedata
 
 CATALOG_PATH = Path(__file__).with_name("training_assets") / "exercises.json"
 ID_PATTERN = re.compile(r"^ex_[a-z0-9_]+$")
+MAX_EXERCISE_ID_LENGTH = 64
 HYPHENS = "‐‑‒–—―−"
 
 EQUIPMENT_VOCABULARY = frozenset({
@@ -74,6 +75,10 @@ class ExerciseAmbiguous(ExerciseResolutionError):
 
 class ExerciseIdentityInvalid(ExerciseResolutionError):
     pass
+
+
+class ExerciseUnknown(ExerciseIdentityInvalid):
+    """A syntactically valid exercise ID that the catalog never assigned."""
 
 
 class ExerciseInactive(ExerciseResolutionError):
@@ -233,6 +238,29 @@ def resolve_exercise(
     exercise = matches[0]
     if not exercise.active:
         raise ExerciseInactive("inactive exercise name")
+    return exercise
+
+
+def resolve_historical_exercise(
+    exercise_id: str,
+    catalog: ExerciseCatalog | None = None,
+) -> ExerciseDefinition:
+    """Resolve an ID for HISTORY reads (ADR 0002 D1a, TD-01 T8).
+
+    A retired (inactive) ID is still a valid historical identity and is
+    returned, never raised. Malformed input raises ``ExerciseIdentityInvalid``;
+    a well-formed ID the catalog never assigned raises ``ExerciseUnknown``.
+    """
+    catalog = catalog or load_exercise_catalog()
+    if (
+        not isinstance(exercise_id, str)
+        or len(exercise_id) > MAX_EXERCISE_ID_LENGTH
+        or not ID_PATTERN.fullmatch(exercise_id)
+    ):
+        raise ExerciseIdentityInvalid("invalid exercise ID")
+    exercise = catalog.by_id.get(exercise_id)
+    if exercise is None:
+        raise ExerciseUnknown("unknown exercise ID")
     return exercise
 
 
