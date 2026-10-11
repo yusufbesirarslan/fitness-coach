@@ -12,6 +12,13 @@ the row, ``User.weight``, the derived session and the single commit:
 3. the server clock is read **after** the owner lock, so per owner the commit
    order and the ``checked_in_at`` order agree: the latest check-in by
    ``created_at, id`` is always the one whose weight ``User.weight`` holds.
+   LP16-R4 (D3): when the client named the week it froze the intent in, a
+   FRESH write whose own ``checked_in_at`` falls in another Istanbul week is
+   refused (``WeekChanged``) before anything is staged. The check reads the
+   very instant that dates the row, so there is no window between "checked"
+   and "written": an old unresolved intent can never become a new week's
+   check-in. REPLAYED returns before this point — a committed intent keeps
+   its original week whenever it is replayed.
 4. ``stage_full_checkin`` — row + body-weight effect, ``coach_feedback`` and
    ``note`` empty (no AI, no note in the launch contract).
 5. ``commit_full_checkin`` — the ONE commit, the replay snapshot included;
@@ -22,10 +29,10 @@ Never written: ``target_weight``, TrainingPlan, NutritionPlan, Coach, Today.
 from __future__ import annotations
 
 from app.services import weekly_checkin
-from app.timeutil import UTC, app_now
+from app.timeutil import UTC, app_date_of, app_now
 
 from .contract import (OVERLOAD_WIRE_TO_STORED, IdempotencyConflict,
-                       checkin_payload, fingerprint)
+                       WeekChanged, checkin_payload, fingerprint, week_start)
 
 _Outcome = weekly_checkin.SubmissionOutcome
 
@@ -51,13 +58,15 @@ def _full_checkin(command):
     )
 
 
-def submit(owner, idempotency_key, command):
+def submit(owner, idempotency_key, command, expected_week_start=None):
     """Write (or replay) one native check-in. Returns ``(body, created)``.
 
     ``created`` is true only for the call whose commit made the row durable;
     every replay — sequential or a race loser — answers the winner's stored
-    body with ``created`` false. Raises ``IdempotencyConflict``; any other
-    failure propagates with nothing durable (the caller rolls back).
+    body with ``created`` false. Raises ``IdempotencyConflict``, or
+    ``WeekChanged`` when ``expected_week_start`` (a Monday) is not the week
+    of this FRESH write's server instant; any other failure propagates with
+    nothing durable (the caller rolls back).
     """
     owner_id = owner.id
     digest = fingerprint(command)
@@ -70,6 +79,9 @@ def submit(owner, idempotency_key, command):
     weekly_checkin.reload_locked_owner(owner)
     context = weekly_checkin.load_context(owner_id)
     checked_in_at = server_checked_in_at()
+    if expected_week_start is not None and \
+            week_start(app_date_of(checked_in_at)) != expected_week_start:
+        raise WeekChanged()
     entry = weekly_checkin.stage_full_checkin(
         owner, _full_checkin(command), context,
         coach_feedback=None,

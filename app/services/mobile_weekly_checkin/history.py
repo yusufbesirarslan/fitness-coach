@@ -33,7 +33,7 @@ from app.services.weekly_checkin import FULL_CHECKIN
 from app.timeutil import APP_TZ, app_date_of, app_today, utc_day_bounds
 
 from .contract import (CONTRACT_VERSION, OVERLOAD_STORED_TO_WIRE, RATING_MAX,
-                       RATING_MIN, analysis_day, iso_checked_in_at)
+                       RATING_MIN, analysis_day, iso_checked_in_at, week_start)
 
 # Visible bound of the launch contract: the last 12 full check-ins.
 HISTORY_LIMIT = 12
@@ -101,7 +101,7 @@ def _items(user_id):
 
 def current_week(user_id, today):
     """Monday–Sunday Istanbul week of ``today`` and whether it has a FULL check-in."""
-    start_day = today - timedelta(days=today.weekday())
+    start_day = week_start(today)
     end_day = start_day + timedelta(days=6)
     week_start_utc, _ = utc_day_bounds(start_day)
     _, week_end_utc = utc_day_bounds(end_day)
