@@ -24,6 +24,10 @@ Progress summary transport alone.
 - Auth: `require_mobile_auth`. Owner = `g.mobile_user.id`, nothing else.
 - Header `Idempotency-Key`: required, `^[A-Za-z0-9._:-]{8,64}$` (the shared
   native key syntax). Missing/invalid → 400 `INVALID_IDEMPOTENCY_KEY`.
+- Header `Check-In-Week-Start` (LP16-R4, optional): the Monday
+  (`YYYY-MM-DD`) of the Europe/Istanbul week the client froze this intent in,
+  i.e. `current_week.start_day` from its last history read. Present but not a
+  strict ISO date that is a Monday → 400 `CHECKIN_INVALID_REQUEST`. See §6a.
 - Body: `Content-Type: application/json`, ≤ 4096 bytes, exactly one JSON
   object with exactly these six keys:
 
@@ -81,6 +85,7 @@ Envelope: `{"error": {"code", "message", "retryable", "request_id"}}`.
 | `CHECKIN_INVALID_VALUE` | 422 | false | well-typed value outside the contract; adds `field` (one of the six) and `reason` (`out_of_range` \| `unsupported_value`) |
 | `INVALID_IDEMPOTENCY_KEY` | 400 | false | missing/invalid key |
 | `IDEMPOTENCY_CONFLICT` | 409 | false | same owner + key, different intent |
+| `CHECKIN_WEEK_CHANGED` | 409 | false | FRESH write whose server instant is not in the `Check-In-Week-Start` week; nothing written (§6a) |
 | `CHECKIN_RATE_LIMITED` | 429 | true | write ceiling hit; `Retry-After` set |
 | `CHECKIN_TEMPORARILY_UNAVAILABLE` | 503 | true | any write or read failure (nothing durable) |
 | (blueprint) `AUTH_*` 401 / `REQUEST_TOO_LARGE` 413 | | | auth boundary / body over `MAX_CONTENT_LENGTH` |
@@ -108,6 +113,9 @@ No raw exception text reaches a body or a log.
 - A response lost after the commit is recovered by retrying the same key → 200
   replay of the committed write.
 - A failed attempt (validation, 503) consumes nothing: the same key works.
+- The week precondition (§6a) never touches replay: a key that committed
+  answers 200 with its original snapshot (original `checked_in_at`, original
+  week) whatever `Check-In-Week-Start` says and whenever it is resent.
 
 ## 5. Write authority
 
@@ -147,6 +155,37 @@ uniqueness.
   several full check-ins per week and per day are valid writes.
 - Progress keeps its rule (latest FULL check-in per Istanbul day is the
   representative point); nothing here deduplicates.
+
+## 6a. Week precondition (LP16-R4, D3)
+
+Problem: a FRESH write is dated at the server's "now". A client that lost the
+response of an uncommitted write and resends the same key after Sunday 24:00
+Istanbul would otherwise create the check-in in the NEW week, turning last
+week's unresolved intent into this week's record.
+
+- The client sends `Check-In-Week-Start: <Monday>` with every attempt of one
+  intent (same key, same body, same header).
+- `submission.submit`: `claim_submission` first (REPLAYED/CONFLICT return or
+  raise exactly as before), then `reload_locked_owner` → `load_context` →
+  `server_checked_in_at()` — and only then, when the header was sent,
+  `week_start(app_date_of(checked_in_at)) != expected` → `WeekChanged`, before
+  anything is staged. The compared instant IS the row's `checked_in_at`, read
+  after the owner lock: no window between the check and the write.
+- 409 `CHECKIN_WEEK_CHANGED`, `retryable: false`; the transport rolls back
+  (releasing the owner lock) and logs `event=write outcome=week_changed`.
+  Nothing durable; the key is not stored. Terminal for that key + body +
+  header: the server week only moves forward.
+- `week_start` is the one Monday–Sunday rule `current_week` also uses, on the
+  Istanbul date (`app_date_of`) — never a UTC date: Monday 00:00 Istanbul is
+  still Sunday 21:00 UTC.
+- Why a header, not a body field: the body stays the closed six-field object,
+  the `native.v1` fingerprint is unchanged (a pre-R4 key keeps replaying), and
+  a client that does not send it (web, older builds) keeps LP16-B behaviour.
+  No contract-version bump: the request gains an optional precondition and the
+  response vocabulary gains one error code.
+- Ownership: keys stay per-owner. Another owner sending the same key text is
+  that owner's own FRESH attempt (or `CHECKIN_WEEK_CHANGED`); it never replays
+  or touches the first owner's row.
 
 ## 7. GET history
 
@@ -218,4 +257,6 @@ lock-across-Bedrock or the web keyed stale-owner race; LP17/18/19.
 |---|---|
 | `tests/test_lp16b_native_checkin_api.py` | contract literals, parser matrix, replay/conflict, cross-transport keys, failure atomicity, no provider, log privacy, rate limit, history/delta/week, isolation (real opaque credentials) |
 | `tests/test_lp16b_native_checkin_architecture.py` | transport imports/ownership, provider-free package, read-only history, primitive order, closed vocabularies, sole `WeeklyCheckIn(...)` constructor, log arguments |
+| `tests/test_lp16r4_week_precondition_api.py` | week precondition: same week unchanged, Istanbul (not UTC) midnight, stale/future week 409 with no effect, lock released, committed key replays its own week across the boundary, conflict precedence, cross-owner, malformed header 400, log privacy |
+| `tests/test_lp16r4_week_precondition_pg.py` | real PostgreSQL: midnight passes while an uncommitted intent holds the lock (it and its queued retry → 409, 0 rows); commit before midnight replays after it (1 row, Sunday); different key queued across midnight → 409; cross-owner (CI PG list) |
 | `tests/test_lp16b_native_checkin_pg.py` | real PostgreSQL: same key/same intent, same key/different intent, two keys (held + stale-equal + free-running), two owners, derived-session fault, lost response replay (CI PG list) |

@@ -91,6 +91,8 @@ def create_check_in():
     try:
         command = mobile_weekly_checkin.parse_request(
             request.get_data(cache=False), is_json=request.is_json)
+        expected_week = mobile_weekly_checkin.parse_week_precondition(
+            request.headers.get(mobile_weekly_checkin.WEEK_PRECONDITION_HEADER))
     except mobile_weekly_checkin.InvalidRequest:
         return mobile_error(
             "CHECKIN_INVALID_REQUEST", "Invalid check-in request.", 400, False)
@@ -98,7 +100,17 @@ def create_check_in():
         return _invalid_value(error)
 
     try:
-        body, created = mobile_weekly_checkin.submit(g.mobile_user, key, command)
+        body, created = mobile_weekly_checkin.submit(
+            g.mobile_user, key, command, expected_week_start=expected_week)
+    except mobile_weekly_checkin.WeekChanged:
+        # Nothing was staged; release the owner lock the claim took.
+        db.session.rollback()
+        current_app.logger.info(
+            "mobile_checkin event=write outcome=week_changed request_id=%s",
+            current_request_id())
+        return mobile_error(
+            "CHECKIN_WEEK_CHANGED",
+            "The check-in week has changed; nothing was saved.", 409, False)
     except mobile_weekly_checkin.IdempotencyConflict:
         current_app.logger.info(
             "mobile_checkin event=write outcome=conflict request_id=%s",

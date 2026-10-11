@@ -24,7 +24,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 
 from app.services.account_profile import BODY_WEIGHT_MAX_KG, BODY_WEIGHT_MIN_KG
@@ -70,6 +72,23 @@ class InvalidValue(Exception):
 
 class IdempotencyConflict(Exception):
     """The Idempotency-Key already belongs to a different intent (409)."""
+
+
+class WeekChanged(Exception):
+    """A FRESH write whose ``Check-In-Week-Start`` is not the server week (409).
+
+    Terminal for that key and body: nothing was written, and because the
+    server week only moves forward the same request can never be written
+    under that key again. A key that already committed never reaches this
+    check; it replays.
+    """
+
+
+# LP16-R4 (D3): the optional week precondition. A header, not a body field,
+# so the body stays the closed six-field object, the ``native.v1``
+# fingerprint is unchanged and a client that does not send it is unaffected.
+WEEK_PRECONDITION_HEADER = "Check-In-Week-Start"
+_ISO_DAY = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
 
 @dataclass(frozen=True)
@@ -160,6 +179,31 @@ def parse_request(raw, *, is_json):
     overload = _overload(data["progressive_overload"])
     return NativeCheckIn(weight_kg=weight, progressive_overload=overload,
                          **ratings)
+
+
+def week_start(day):
+    """The Monday of ``day``'s Monday–Sunday week (the one week rule)."""
+    return day - timedelta(days=day.weekday())
+
+
+def parse_week_precondition(raw):
+    """Header value → the expected week's Monday, ``None`` when absent.
+
+    Present but not a strict ``YYYY-MM-DD`` Monday → ``InvalidRequest`` (400):
+    a malformed precondition is refused, never ignored, so a client that
+    believes it is protected always is.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not _ISO_DAY.match(raw):
+        raise InvalidRequest("week precondition")
+    try:
+        day = date.fromisoformat(raw)
+    except ValueError:
+        raise InvalidRequest("week precondition") from None
+    if day.weekday() != 0:
+        raise InvalidRequest("week precondition")
+    return day
 
 
 def fingerprint(command):

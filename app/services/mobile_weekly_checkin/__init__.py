@@ -23,8 +23,10 @@ See docs/MOBILE_WEEKLY_CHECKIN.md.
 """
 from .contract import (CONTRACT_VERSION, FIELDS, FINGERPRINT_DOMAIN,
                        OVERLOAD_STORED_TO_WIRE, OVERLOAD_WIRE_TO_STORED,
-                       IdempotencyConflict, InvalidRequest, InvalidValue,
-                       NativeCheckIn, fingerprint, parse_request)
+                       WEEK_PRECONDITION_HEADER, IdempotencyConflict,
+                       InvalidRequest, InvalidValue, NativeCheckIn,
+                       WeekChanged, fingerprint, parse_request,
+                       parse_week_precondition, week_start)
 from .history import HISTORY_LIMIT, build_history, current_week
 from .submission import submit
 
@@ -39,9 +41,13 @@ __all__ = [
     "InvalidRequest",
     "InvalidValue",
     "NativeCheckIn",
+    "WEEK_PRECONDITION_HEADER",
+    "WeekChanged",
     "build_history",
     "current_week",
     "fingerprint",
     "parse_request",
+    "parse_week_precondition",
     "submit",
+    "week_start",
 ]
