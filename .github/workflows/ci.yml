@@ -232,6 +232,8 @@ jobs:
     # behaviour-preserving bootstrap of the exact audited live Certbot site,
     # and Certbot's own nginx parser (pinned to production's 4.0.0) seeing
     # identical virtual hosts. The system nginx is stopped and never used.
+    # PRIV-LOG-01: the same harness proves the query-free access log (before/
+    # after on the live site, rate-limit observability, Certbot parser gate).
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -257,6 +259,7 @@ jobs:
           python -m pytest -v -p no:cacheprovider --noconftest -o addopts=
           tests/test_r6_nginx_integration.py tests/test_r6_nginx_route_control.py
           tests/test_r6_nginx_bootstrap.py tests/test_r6_nginx_slot_contract.py
+          tests/test_priv_log_01_nginx_integration.py tests/test_priv_log_01_nginx_access_log.py
 
   migration-drift:
     name: schema-drift guard

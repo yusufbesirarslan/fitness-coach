@@ -233,6 +233,82 @@ argument and inserts one block, and verifies that nothing else changed.
 `nginx.conf` is the intended shape for a fresh host and is never copied over
 the live site by any deploy.
 
+## Access log (PRIV-LOG-01)
+
+**Problem (source evidence, not a confirmed incident).** Neither `nginx.conf`
+nor the audited live site (`tests/fixtures/r6_nginx/fitx.live-2026-10-08.conf`)
+declared an `access_log`, so every server inherited the distribution's
+http-level `access_log /var/log/nginx/access.log;`. Its built-in `combined`
+format logs `$request`: the whole request line, query string included, next to
+the client IP. One mobile food search therefore wrote the search words up to
+three times: `GET /api/v1/nutrition/foods/search?q=…` from the user's IP, the
+backend's hairpin `GET /fatsecret/rest/server.api?…&search_expression=…`, and
+the same request again on the `:3000` FatSecret proxy server. Barcode lookups
+(`?code=`) behaved the same way. The CloudWatch agent ships that file to
+`/axisai/nginx/access`. Flask and Gunicorn were already query-free: the request
+log records the route template and Gunicorn's access log is off.
+
+**Change.** `nginx.conf` defines `log_format axisai_access` plus two maps
+between the `BEGIN/END axisai access log (PRIV-LOG-01)` markers, and the server
+logs with it. The format keeps the `combined` field order for existing parsers,
+but the request line is `$request_method <path without query> $server_protocol`
+and the Referer has its query and fragment removed. It appends `rt`
+(request time), `uct`/`uht`/`urt` (upstream connect, header and response time),
+`us` (upstream status), `ua` (upstream address, so the active slot is visible),
+`lr` (`$limit_req_status`: PASSED/REJECTED/…), `rid` (nginx `$request_id`) and
+`host`. No `$request`, `$request_uri`, `$args`, `$arg_*`, raw `$http_referer`,
+`$remote_user`, cookie or authorization variable appears. The file, the
+CloudWatch group and its retention are unchanged.
+
+`scripts/axisai_nginx_log_privacy.py` is a read-only check. It requires the
+reviewed definitions byte-for-byte (parsed), `off` or `axisai_access` on every
+`access_log` inside a server, and a server-level `access_log` in **every** HTTP
+server, because a server without one silently inherits `combined`. It runs in
+CI against the template and the live fixture, and on the real nginx through
+`nginx -T` (`tests/test_priv_log_01_nginx_*.py`).
+
+**Live rollout (NOT performed by PRIV-LOG-01; needs separate explicit
+approval).** The live site is Certbot-owned and never copied from the repo, so
+this is a hand edit, like the CSP migration:
+
+1. Back up `/etc/nginx/sites-available/fitx` and `.../fatsecret-proxy`
+   (root-only, with sha256).
+2. In `fitx`: paste the marked block from the merged `nginx.conf` at http level,
+   before the first `server {`. Then add
+   `access_log /var/log/nginx/access.log axisai_access;` as the first line of
+   **both** server blocks: the TLS server and Certbot's 80->443 redirect server.
+3. In `fatsecret-proxy`: add `access_log off;` (see `deploy/fatsecret-proxy.md`).
+4. `sudo nginx -t`, then
+   `sudo nginx -T 2>/dev/null | python3 -I scripts/axisai_nginx_log_privacy.py -`
+   must print `result=ok`. `sudo axisai-switch-web-slot status` must be
+   unchanged (the edit keeps the site `migrated`). Then
+   `sudo systemctl reload nginx` and confirm that new lines in
+   `/var/log/nginx/access.log` have no `?`.
+
+Rollback: restore both backups, `nginx -t`, reload. CI proves that Certbot's
+parser sees identical virtual hosts after the edit, so renewals are unaffected.
+
+**Residual risks (not closed by this change).**
+
+- **R1, error log.** nginx appends `request: "<request line>"` to every error-log
+  entry written for a request, and that cannot be configured. Upstream
+  connect/timeout failures (502/504), `limit_req` rejections, oversized bodies
+  and similar errors can still write query text to
+  `/var/log/nginx/error.log` (`/axisai/nginx/error`, 30 d). This is pinned by
+  `test_rate_limiting_still_applies_and_rejections_stay_observable`.
+  Follow-ups are an owner decision: send the backend's FatSecret calls as a POST
+  body (this removes the term from the hairpin's request line in both logs), or
+  mask or shorten retention on `/axisai/nginx/error`.
+- **R2, path segments.** Concrete paths are still logged as before (for example
+  `/api/v1/nutrition/foods/fatsecret/<food_id>/servings`). nginx cannot
+  template routes the way the app log does.
+- **R3, correlation.** `rid` is nginx's own id. The app's 16-hex request id is
+  not echoed in a response header, so correlate by time, path and `ua`.
+- **R4, existing copies.** This source change does not alter what is already
+  stored: the live files, rotated copies on the host and `/axisai/nginx/access`
+  keep query strings until they expire or are purged. Production nginx
+  format, logrotate and log-group retention are unverified (LEGAL-PRIV-01 F-06).
+
 ## Historical pre-R6-02B production audit snapshot (read-only, 2026-10-08 18:41Z)
 
 This snapshot predates the completed 2026-10-09 bootstrap and does not describe

@@ -71,11 +71,52 @@ def _menu_reporting(event, hint):
     return False
 
 
+def _without_query(url):
+    return url.split("?", 1)[0].split("#", 1)[0] if isinstance(url, str) else url
+
+
+def _query_free_http_data(data):
+    # PRIV-LOG-01: the stdlib integration records an outgoing request's query
+    # string (a FatSecret `search_expression`) on its breadcrumb and span.
+    if isinstance(data, dict):
+        data.pop("http.query", None)
+        data.pop("http.fragment", None)
+        if "url" in data:
+            data["url"] = _without_query(data["url"])
+
+
+def _query_free_event(event):
+    """Query strings are user input (food search words, barcodes, people
+    search). The WSGI integration copies QUERY_STRING onto every request-scoped
+    event even with send_default_pii=False; keep only the path, like the
+    request log does."""
+    request_info = event.get("request")
+    if isinstance(request_info, dict):
+        request_info.pop("query_string", None)
+        if "url" in request_info:
+            request_info["url"] = _without_query(request_info["url"])
+        headers = request_info.get("headers")
+        if isinstance(headers, dict):
+            for name in list(headers):
+                if name.lower() == "referer":
+                    headers[name] = _without_query(headers[name])
+    for crumb in (event.get("breadcrumbs") or {}).get("values") or ():
+        if isinstance(crumb, dict):
+            _query_free_http_data(crumb.get("data"))
+    for span in event.get("spans") or ():
+        if isinstance(span, dict):
+            _query_free_http_data(span.get("data"))
+    trace = (event.get("contexts") or {}).get("trace")
+    if isinstance(trace, dict):
+        _query_free_http_data(trace.get("data"))
+    return event
+
+
 def _reporting_safe_event(event, hint):
     if _note_safe_event(event, hint) is None:
         return None
     if not _menu_reporting(event, hint):
-        return event
+        return _query_free_event(event)
     # Attachments are envelope items, outside the event dictionary.
     hint["attachments"] = []
     # Traces contain span descriptions, SQL parameters and provider metadata.
@@ -118,6 +159,7 @@ def _reporting_safe_breadcrumb(crumb, hint):
         return None
     if _menu_reporting({}, hint) or crumb.get("category") in _MENU_MODULES:
         return None
+    _query_free_http_data(crumb.get("data"))
     return crumb
 
 
