@@ -1,5 +1,12 @@
 # Feature flags — inventory and lifecycle
 
+`APPLE_SUBSCRIPTIONS_ENABLED` (MON-02-BE-01) defaults OFF. With mobile auth
+enabled, authenticated subscription routes report `SUBSCRIPTIONS_DISABLED`
+without Apple I/O. Existing `User.is_premium` and quotas remain unchanged.
+Owner: @yusufbesirarslan; review by 2026-11-13. Requires independent review,
+MON-03 sandbox qualification and separate human deployment/payment activation
+approval. Rollback: set 0. See [subscription contract](APPLE_SUBSCRIPTIONS.md).
+
 TD-01 PR2: `FITX_EXERCISE_PERFORMANCE_HISTORY_ENABLED` defaults OFF, shipped_dark,
 owner @yusufbesirarslan, review 2026-11-01. Depends on sessions and mobile auth;
 gates only the separate v1 history/capability GETs. No migration or data change.

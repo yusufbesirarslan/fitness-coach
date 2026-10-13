@@ -135,6 +135,22 @@ def _rollback(key):
 # no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
+        key="APPLE_SUBSCRIPTIONS_ENABLED",
+        capability="MON-02-BE-01 authenticated Apple subscription verification and entitlement, isolated from quota enforcement.",
+        owner=_OWNER,
+        default=False,
+        depends_on=("MOBILE_AUTH_ENABLED",),
+        observability="Existing HTTP SLIs and closed subscription error codes; no signed payload logging.",
+        prerequisites=("Independent backend/security review", "MON-03 Apple sandbox qualification",
+                       "Separate human deployment, migration and payment activation approval"),
+        success_signals=("Verified single-owner subscriptions", "Legacy Free quotas unchanged"),
+        abort_signals=("Cross-account access", "Environment mismatch", "Invalid verification accepted"),
+        rollback="Set APPLE_SUBSCRIPTIONS_ENABLED=0; APIs report SUBSCRIPTIONS_DISABLED and make no Apple requests. Legacy Premium remains unchanged.",
+        lifecycle=LIFECYCLE_SHIPPED_DARK,
+        review_by="2026-11-13",
+        decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="FITX_EXERCISE_PERFORMANCE_HISTORY_ENABLED",
         capability="TD-01 PR2 owner-scoped read-only exercise history and independent v1 capability GETs.",
         owner=_OWNER,

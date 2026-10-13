@@ -350,6 +350,16 @@ def configure_app(app):
     # kimlik bilgisi ömürlerini) zaten yazmıştır, buradaki güncelleme ona
     # DOKUNMAZ (parsed_by ile atlanır).
     app.config.update(_feature_flags.resolve_rollout_flags(os.environ))
+    # Host-injected configuration / mounted secrets, following existing env loading.
+    # Never fetch secrets or create an Apple client during boot.
+    for key in ("APPLE_SUBSCRIPTION_ENVIRONMENT", "APPLE_BUNDLE_ID", "APPLE_ISSUER_ID",
+                "APPLE_KEY_ID", "APPLE_PRIVATE_KEY_PATH", "APPLE_MONTHLY_PRODUCT_ID",
+                "APPLE_ANNUAL_PRODUCT_ID", "APPLE_SUBSCRIPTION_GROUP_ID"):
+        app.config[key] = os.environ.get(key, "")
+    raw_app_id = os.environ.get("APPLE_APP_ID", "")
+    app.config["APPLE_APP_ID"] = int(raw_app_id) if raw_app_id.isascii() and raw_app_id.isdigit() else None
+    app.config["APPLE_ROOT_CERTIFICATE_PATHS"] = tuple(
+        p for p in os.environ.get("APPLE_ROOT_CERTIFICATE_PATHS", "").split(os.pathsep) if p)
     if _gunicorn_logger.handlers:
         app.logger.handlers = _gunicorn_logger.handlers
         # app.logger now writes through gunicorn's own handler. Propagating as

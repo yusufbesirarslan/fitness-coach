@@ -1,5 +1,12 @@
 # Production rollout runbook — feature flag activation
 
+MON-02-BE-01 `APPLE_SUBSCRIPTIONS_ENABLED` remains OFF. No payment activation
+is authorized. Independent review, MON-03 Apple sandbox qualification, lifecycle
+reconciliation and feature enforcement precede separate human activation approval.
+Merge can create a production deployment candidate; startup may apply additive
+migration `c2b9d0e1f2a3` even while the flag is OFF. Deployment and migration need
+their own human gate. Do not treat a dark flag as approval to deploy.
+
 **This is operator-run work.** Every command below is executed by a human on the
 EC2 host or in the GitHub UI. Nothing in this repository activates a flag, and no
 automation in this repository is permitted to.
