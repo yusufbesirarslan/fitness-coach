@@ -78,13 +78,17 @@ uses JWS in supported versions, but this API intentionally accepts an ID only.
 No extra native bridge is evidenced necessary. MON-03 must verify purchase and
 restore behavior on actual selected package versions and Apple sandbox.
 
-## Freshness, outage and persistence
+## Apple signed data timestamps
 
 Both API signed snapshots must be within five minutes of server time; no local
 clock extension. This conservative fail-closed bound needs live MON-03 evidence
 for old purchases, restore and cancelled renewal: Apple documents signing time
 but does not explicitly guarantee both responses are re-signed per lookup.
-No live interoperability is claimed. A verified row grants access only while
+No live interoperability is claimed.
+
+## Bounded entitlement and persistence
+
+A verified row grants access only while
 its paid/grace expiry is future AND last verification age is under 24 hours.
 An outage leaves previously verified state intact within that bound, then
 returns FREE/pending. Lookup never refreshes or extends the validity itself.
