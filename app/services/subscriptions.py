@@ -9,6 +9,7 @@ from flask import current_app
 from app.extensions import db
 from app.models import User, AppleAccountAssociation, AppleSubscription
 from app.services.apple_subscriptions import AppleAdapter, SubscriptionError
+from app.services.ai_gate import blocking_concurrency_slot, BlockingConcurrencyLimit
 
 MAX_VERIFICATION_AGE = timedelta(hours=24)
 
@@ -167,7 +168,14 @@ def verify_purchase(user_id, transaction_id):
         token = association.token
         # Release the read transaction before external I/O; persist re-locks owner.
         db.session.rollback()
-        evidence = AppleAdapter(current_app.config).verify(transaction_id, token)
+        adapter = AppleAdapter(current_app.config)
+        # One shared permit covers API lookups and online signature/OCSP checks.
+        # Release it before acquiring ownership locks or writing verified state.
+        try:
+            with blocking_concurrency_slot():
+                evidence = adapter.verify(transaction_id, token)
+        except BlockingConcurrencyLimit:
+            raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None
         return persist_verified(user_id, evidence, token)
     except SQLAlchemyError:
         db.session.rollback()

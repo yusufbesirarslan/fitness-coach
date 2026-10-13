@@ -78,6 +78,13 @@ uses JWS in supported versions, but this API intentionally accepts an ID only.
 No extra native bridge is evidenced necessary. MON-03 must verify purchase and
 restore behavior on actual selected package versions and Apple sandbox.
 
+Apple verification holds one existing shared blocking capacity permit across both
+API lookups and all signed-data/online OCSP verification. The preliminary read
+transaction ends before admission; the permit is released before ownership
+locks and persistence. Saturation makes no Apple call or ownership write and
+returns the existing retryable `SUBSCRIPTION_TEMPORARILY_UNAVAILABLE` HTTP 503
+with `Retry-After: 30` (a retry delay, not a recovery-time guarantee).
+
 ## Apple signed data timestamps
 
 Both API signed snapshots must be within five minutes of server time; no local

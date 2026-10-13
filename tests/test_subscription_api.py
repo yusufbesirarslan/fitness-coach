@@ -39,6 +39,7 @@ def test_flag_off_does_not_call_apple(app, client, principal, monkeypatch, suffi
     def forbidden(_):
         raise AssertionError("Apple must remain inactive")
     monkeypatch.setattr(s, "AppleAdapter", forbidden)
+    monkeypatch.setattr(s, "blocking_concurrency_slot", forbidden)
     response = getattr(client, method)(PATH + suffix, headers={"Authorization": "Bearer fixture"})
     assert response.status_code == 503
     assert response.json["error"]["code"] == "SUBSCRIPTIONS_DISABLED"
@@ -122,3 +123,107 @@ def test_other_account_context_and_replay_are_isolated(app, client, principal, e
     assert conflict.json["error"]["code"] == "SUBSCRIPTION_OWNERSHIP_CONFLICT"
     assert "subscription-api" not in str(conflict.json)
     assert client.get(PATH + "entitlement", headers=headers).json["entitlement"]["effective_premium"] is False
+
+
+
+def test_shared_saturation_and_recovery(app, client, principal, enabled, monkeypatch):
+    from contextlib import ExitStack
+    from app.services import ai_gate
+    headers = {"Authorization": "Bearer fixture"}
+    token = client.get(PATH + "purchase-context", headers=headers).json["app_account_token"]
+    a, *_ = adapter(token)
+    calls = []
+    for obj, name in [(a.client, "get_transaction_info"), (a.client, "get_all_subscription_statuses")]:
+        original = getattr(obj, name)
+        def track(*args, _fn=original):
+            calls.append("provider")
+            return _fn(*args)
+        monkeypatch.setattr(obj, name, track)
+    monkeypatch.setattr(s, "AppleAdapter", lambda _: a)
+    baseline = ai_gate.capacity_snapshot()
+    with ExitStack() as stack:
+        for _ in range(ai_gate.AI_MAX_CONCURRENCY):
+            stack.enter_context(ai_gate.blocking_concurrency_slot(wait_seconds=0))
+        result = client.post(PATH + "verify", json={"transaction_id": "101"}, headers=headers)
+        assert result.status_code == 503
+        assert result.json["error"]["code"] == "SUBSCRIPTION_TEMPORARILY_UNAVAILABLE"
+        assert result.json["error"]["retryable"] is True
+        assert result.headers["Retry-After"] == "30"
+        assert set(result.json["error"]) == {"code", "message", "retryable", "request_id"}
+        assert calls == []
+        with app.app_context():
+            assert AppleSubscription.query.count() == 0
+            assert db.session.get(User, principal).is_premium is True
+    assert client.post(PATH + "verify", json={"transaction_id": "101"}, headers=headers).status_code == 200
+    assert calls == ["provider", "provider"]
+    assert ai_gate.capacity_snapshot() == baseline
+
+
+@pytest.mark.parametrize("failure", [None, "timeout", "invalid", "provider", "verification", "unexpected"])
+def test_complete_apple_sequence_permit_and_transaction_boundaries(
+        app, client, principal, enabled, monkeypatch, failure):
+    import requests
+    from app.services import ai_gate
+    from appstoreserverlibrary.api_client import APIException
+    from appstoreserverlibrary.signed_data_verifier import VerificationException, VerificationStatus
+    headers = {"Authorization": "Bearer fixture"}
+    token = client.get(PATH + "purchase-context", headers=headers).json["app_account_token"]
+    a, *_ = adapter(token)
+    monkeypatch.setattr(s, "AppleAdapter", lambda _: a)
+    baseline = ai_gate.capacity_snapshot()
+    calls = []
+    errors = {
+        "timeout": requests.Timeout("private provider detail"),
+        "invalid": SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE"),
+        "provider": APIException(500),
+        "verification": VerificationException(VerificationStatus.VERIFICATION_FAILURE),
+        "unexpected": RuntimeError("synthetic unexpected"),
+    }
+    for obj, name in [(a.client, "get_transaction_info"),
+                      (a.verifier, "verify_and_decode_signed_transaction"),
+                      (a.client, "get_all_subscription_statuses"),
+                      (a.verifier, "verify_and_decode_renewal_info")]:
+        original = getattr(obj, name)
+        def guarded(*args, _fn=original, _name=name):
+            assert ai_gate.capacity_snapshot()["ai_active"] == baseline["ai_active"] + 1
+            assert not db.session().in_transaction(), "Apple I/O inside DB transaction"
+            calls.append(_name)
+            if failure and _name == "verify_and_decode_renewal_info":
+                raise errors[failure]
+            return _fn(*args)
+        monkeypatch.setattr(obj, name, guarded)
+    from contextlib import contextmanager
+    original_gate = s.blocking_concurrency_slot
+    acquisitions = []
+    @contextmanager
+    def gate():
+        acquisitions.append("acquire")
+        with original_gate():
+            yield
+    monkeypatch.setattr(s, "blocking_concurrency_slot", gate)
+    original_persist = s.persist_verified
+    def persist(*args):
+        assert ai_gate.capacity_snapshot() == baseline, "permit held across persistence"
+        return original_persist(*args)
+    monkeypatch.setattr(s, "persist_verified", persist)
+    result = client.post(PATH + "verify", json={"transaction_id": "101"}, headers=headers)
+    assert result.status_code == (200 if failure is None else 503 if failure in ("timeout", "provider", "unexpected") else 422)
+    assert "private provider detail" not in result.get_data(as_text=True)
+    assert "synthetic unexpected" not in result.get_data(as_text=True)
+    assert calls == ["get_transaction_info", "verify_and_decode_signed_transaction",
+                     "get_all_subscription_statuses", "verify_and_decode_signed_transaction",
+                     "verify_and_decode_renewal_info"]
+    assert ai_gate.capacity_snapshot() == baseline
+    assert acquisitions == ["acquire"]
+    # Prove the actual semaphore, as well as its counter, recovered completely.
+    held = 0
+    try:
+        while ai_gate._ai_slots.acquire(blocking=False):
+            held += 1
+        assert held == ai_gate.AI_MAX_CONCURRENCY
+    finally:
+        for _ in range(held):
+            ai_gate._ai_slots.release()
+    with app.app_context():
+        assert AppleSubscription.query.count() == (1 if failure is None else 0)
+        assert db.session.get(User, principal).is_premium is True

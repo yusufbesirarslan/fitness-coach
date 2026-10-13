@@ -9,6 +9,7 @@ import pytest
 import sqlalchemy as sa
 
 from subscription_support import evidence
+from test_apple_subscription_migration import UNSAFE_CHECKS
 
 pytestmark = pytest.mark.pg_concurrency
 if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
@@ -116,3 +117,76 @@ def test_postgres_constraints_migration_and_rollback(pg_app):
                                  "original_transaction_id, latest_transaction_id, product_id, subscription_group_id, "
                                  "status, expires_at, revoked_at, grace_expires_at, auto_renew, transaction_signed_at, "
                                  "renewal_signed_at, last_verified_at, created_at, updated_at FROM apple_subscription LIMIT 1"))
+
+
+@pytest.mark.parametrize("domain,predicate", UNSAFE_CHECKS)
+def test_postgres_rejects_unsafe_named_checks(pg_app, domain, predicate):
+    from app.extensions import db
+    from test_apple_subscription_migration import unsafe_schema
+    from alembic.operations import Operations
+    from alembic.migration import MigrationContext
+    app, _ = pg_app
+    with app.app_context(), db.engine.begin() as conn:
+        before = conn.execute(sa.text('SELECT id, is_premium FROM "user" ORDER BY id')).all()
+        conn.execute(sa.text('DROP TABLE apple_subscription'))
+        conn.execute(sa.text('DROP TABLE apple_account_association'))
+        m = unsafe_schema(conn, domain, predicate)
+        with Operations.context(MigrationContext.configure(conn)), pytest.raises(RuntimeError):
+            m.upgrade()
+        assert conn.execute(sa.text('SELECT id, is_premium FROM "user" ORDER BY id')).all() == before
+
+
+def test_postgres_fresh_and_reentrant_migration(pg_app):
+    from app.extensions import db
+    from test_apple_subscription_migration import migration
+    from alembic.operations import Operations
+    from alembic.migration import MigrationContext
+    app, _ = pg_app
+    with app.app_context(), db.engine.begin() as conn:
+        before = conn.execute(sa.text('SELECT id, is_premium FROM "user" ORDER BY id')).all()
+        with Operations.context(MigrationContext.configure(conn)):
+            migration().upgrade()  # real create_all-first predicates
+            migration().upgrade()
+            conn.execute(sa.text('DROP TABLE apple_subscription'))
+            conn.execute(sa.text('DROP TABLE apple_account_association'))
+            migration().upgrade()  # fresh tables
+            migration().upgrade()
+        assert conn.execute(sa.text('SELECT id, is_premium FROM "user" ORDER BY id')).all() == before
+
+
+def test_postgres_apple_io_has_no_transaction_or_owner_locks(pg_app, monkeypatch):
+    from app.extensions import db
+    from app.services import subscriptions, ai_gate
+    from subscription_support import adapter
+    app, owners = pg_app
+    a, *_ = adapter(owners[0][1])
+    app.config["APPLE_SUBSCRIPTIONS_ENABLED"] = True
+    monkeypatch.setattr(subscriptions, "AppleAdapter", lambda _: a)
+    baseline = ai_gate.capacity_snapshot()
+    calls = []
+    with app.app_context():
+        for obj, name in [(a.client, "get_transaction_info"),
+                          (a.client, "get_all_subscription_statuses"),
+                          (a.verifier, "verify_and_decode_signed_transaction"),
+                          (a.verifier, "verify_and_decode_renewal_info")]:
+            original = getattr(obj, name)
+            def check(*args, _fn=original, _name=name):
+                assert not db.session().in_transaction()
+                assert ai_gate.capacity_snapshot()["ai_active"] == baseline["ai_active"] + 1
+                # Actual PG session has no outstanding transaction or row lock.
+                with db.engine.connect() as conn:
+                    assert not conn.execute(sa.text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname=current_database() "
+                        "AND pid <> pg_backend_pid() AND xact_start IS NOT NULL)"
+                    )).scalar()
+                calls.append(_name)
+                return _fn(*args)
+            monkeypatch.setattr(obj, name, check)
+        original_owner = subscriptions._owner
+        def owner(*args):
+            assert ai_gate.capacity_snapshot() == baseline
+            return original_owner(*args)
+        monkeypatch.setattr(subscriptions, "_owner", owner)
+        assert subscriptions.verify_purchase(owners[0][0], "101")["effective_premium"] is True
+    assert len(calls) == 5
+    assert ai_gate.capacity_snapshot() == baseline

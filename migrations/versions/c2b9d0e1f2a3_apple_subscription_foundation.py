@@ -1,4 +1,6 @@
 """Add empty Apple ownership tables; preserve User and legacy Premium state."""
+import re
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -77,6 +79,32 @@ def _create_subscription():
     op.create_index("ix_apple_subscription_owner", "apple_subscription", ["user_id", "environment"], unique=False)
 
 
+def _check_definition_matches(sqltext, expected, dialect):
+    """Accept only the fixed IN predicates and their PostgreSQL deparse forms.
+
+    Keep literal contents intact. No substring matching, cast stripping or
+    arbitrary equivalence inference: unfamiliar definitions fail closed.
+    PostgreSQL reflects IN as = ANY with typed arrays for varchar columns.
+    """
+    def compact(text):
+        parts = re.split(r"('(?:''|[^'])*')", text)
+        return "".join(part if i % 2 else re.sub(r"\s+", "", part)
+                       for i, part in enumerate(parts))
+
+    forms = {str(expected.sqltext)}
+    if dialect == "postgresql":
+        if expected.name == "ck_apple_subscription_environment":
+            forms.add("environment::text = ANY (ARRAY['Sandbox'::character varying, "
+                      "'Production'::character varying]::text[])")
+            forms.add("(environment)::text = ANY ((ARRAY['Sandbox'::character varying, "
+                      "'Production'::character varying])::text[])")
+        elif expected.name == "ck_apple_subscription_status":
+            forms.add("status = ANY (ARRAY[1, 2, 3, 4, 5])")
+    # pg_get_constraintdef includes one outer pair around the whole predicate.
+    forms |= {f"({form})" for form in forms}
+    return isinstance(sqltext, str) and compact(sqltext) in {compact(form) for form in forms}
+
+
 def upgrade():
     bind = op.get_bind()
     for table in _tables():
@@ -103,11 +131,14 @@ def upgrade():
         unique = {tuple(c["column_names"]) for c in inspector.get_unique_constraints(table.name)}
         required = {tuple(c.name for c in constraint.columns) for constraint in table.constraints
                     if isinstance(constraint, sa.UniqueConstraint)}
-        checks = {c["name"] for c in inspector.get_check_constraints(table.name)}
-        required_checks = {c.name for c in table.constraints if isinstance(c, sa.CheckConstraint)}
+        checks = {c["name"]: c.get("sqltext") for c in inspector.get_check_constraints(table.name)}
+        required_checks = [c for c in table.constraints if isinstance(c, sa.CheckConstraint)]
+        if any(not _check_definition_matches(checks.get(c.name), c, bind.dialect.name)
+               for c in required_checks):
+            raise RuntimeError("Apple subscription table has incompatible check constraints")
         foreign = inspector.get_foreign_keys(table.name)
         primary = inspector.get_pk_constraint(table.name)["constrained_columns"]
-        if (not required <= unique or not required_checks <= checks
+        if (not required <= unique
                 or primary != [c.name for c in table.primary_key]
                 or not any(f["constrained_columns"] == ["user_id"] and f["referred_table"] == "user"
                            and f["referred_columns"] == ["id"]
