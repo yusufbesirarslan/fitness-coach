@@ -154,3 +154,72 @@ def test_truncated_dump_is_refused_on_the_host(nginx):
     assert privacy.check(cut, TEMPLATE)[0] == []                     # no completeness claim possible
     with pytest.raises(ValueError, match="host"):
         privacy.check(cut, TEMPLATE, verify_host=True)
+
+
+# --- HF01-R2 I1-I4: an unquoted \' escape still names a capture -----------------------------------
+# nginx unescapes \' in unquoted words, so (?\'NAME\'.+) is the named capture
+# (?'NAME'.+), which overwrites the protected map output for the request.
+
+ESCAPED = {
+    "i1-upper": rb"if ($request_uri ~ ^(?\'AXISAI_LOG_PATH\'.+)$) { }",
+    "i2-lower": rb"if ($request_uri ~ ^(?\'axisai_log_path\'.+)$) { }",
+    "i3-referer": rb"if ($http_referer ~ ^(?\'Axisai_Log_Referer\'.+)$) { }",
+    "i4-include": rb"if ($request_uri ~ ^(?\'AXISAI_LOG_PATH\'.+)$) { }",
+}
+
+
+def escaped_site(ngx, case):
+    directive = ESCAPED[case]
+    if case == "i4-include":
+        snippet = ngx.root / "hf01r2-snippet.conf"
+        snippet.write_bytes(directive + b"\n")
+        directive = f"include {snippet};".encode()
+    return patch_site(MIGRATED).replace(LOCATION, LOCATION + b"        " + directive + b"\n", 1)
+
+
+@pytest.mark.parametrize("case", sorted(ESCAPED))
+def test_escaped_capture_bypass_leaks_on_real_nginx_and_is_rejected(nginx, monkeypatch, case):
+    ngx = nginx
+    ngx.write_include(ngx.ports["legacy"])
+    record = leaks(ngx, escaped_site(ngx, case))
+    canary = REFERER if case == "i3-referer" else QUERY
+    assert canary.encode() in record, "the adversarial configuration must really leak"
+    code, lines, errors = check(ngx)
+    assert code == privacy.EXIT_VIOLATION and lines[0].startswith("result=violation"), (lines, errors)
+    assert any("protected log variables" in e for e in errors), errors
+    # Non-vacuity: reading words raw (5868f42) passed this host-verified dump.
+    monkeypatch.setattr(privacy, "_parse", privacy.sw.parse_nginx)
+    assert check(ngx)[:2] == (privacy.EXIT_OK, [
+        "result=ok servers=2 access_logs=3 warnings=0 provenance=host-verified"])
+
+
+def test_escaped_unrelated_capture_passes_and_does_not_leak(nginx):
+    ngx = nginx
+    ngx.write_include(ngx.ports["legacy"])
+    site = patch_site(MIGRATED).replace(
+        LOCATION, LOCATION + rb"        if ($request_uri ~ ^(?\'hf01_section\'/api/.+)$) { }" + b"\n", 1)
+    record = leaks(ngx, site)
+    assert record and QUERY.encode() not in record and REFERER.encode() not in record
+    assert check(ngx) == (privacy.EXIT_OK, [
+        "result=ok servers=2 access_logs=3 warnings=0 provenance=host-verified"], [])
+
+
+WORDS = [rb"a\'b", rb'a\"b', rb"a\\b", rb"a\tb", rb"a\nb", rb"a\db", rb"(?\'AXISAI_LOG_PATH\'.+)",
+         rb"'a\'b'", rb"'a\db'", rb'"a\"b"', rb'"a\tb"', rb'"a\qb"']
+
+
+def test_checker_reads_each_word_as_nginx_stores_it(nginx):
+    # The response body of `return 200 <word>` is nginx's stored word value.
+    ngx = nginx
+    ngx.write_include(ngx.ports["legacy"])
+    locations = b"".join(b"    location = /hf01r2-word-%d { return 200 %s; }\n" % (i, w)
+                         for i, w in enumerate(WORDS))
+    ngx.write_site(runnable(ngx, patch_site(MIGRATED).replace(LOCATION, locations + LOCATION, 1)))
+    ngx.start()
+    try:
+        for i, word in enumerate(WORDS):
+            status, _headers, body = request(ngx, path=f"/hf01r2-word-{i}")
+            quoted = word[:1] in (b"'", b'"')
+            assert status == 200 and body == privacy._nginx_word(word[1:-1] if quoted else word).encode(), word
+    finally:
+        ngx.stop()

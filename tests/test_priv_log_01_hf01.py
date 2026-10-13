@@ -248,3 +248,72 @@ def test_cli_defaults_to_host_verification_and_reports_provenance_and_warnings(t
     assert privacy.main(["-"], stdin=io.BytesIO(dump), out=lines.append, err=errors.append) == privacy.EXIT_OK
     assert lines == ["result=ok servers=1 access_logs=1 warnings=1 provenance=host-verified"]
     assert errors == ["warning: log_format legacy contains a query-bearing or credential variable"]
+
+
+# --- HF01-R2 I1-I4: escapes are read the way nginx stores each word -------------------------------
+# ngx_conf_read_token unescapes \" \' \\ (and \t \r \n) in UNQUOTED words too,
+# so an unquoted (?\'NAME'...) regex is a named capture. The shared tokenizer
+# keeps unquoted words raw; the checker re-reads every word from its bytes.
+
+ESCAPED_CAPTURES = [
+    (in_location(rb"if ($request_uri ~ ^(?\'AXISAI_LOG_PATH\'.+)$) { }"), {}),
+    (in_location(rb"if ($request_uri ~ ^(?\'axisai_log_path\'.+)$) { }"), {}),
+    (in_location(rb"if ($http_referer ~ ^(?\'Axisai_Log_Referer\'.+)$) { }"), {}),
+    (in_location(b"include /etc/nginx/snippet.conf;"),
+     {"snippet": r"if ($request_uri ~ ^(?\'AXISAI_LOG_PATH\'.+)$) { }"}),
+]
+ESCAPED_IDS = ["i1-upper", "i2-lower", "i3-referer", "i4-include"]
+
+
+@pytest.mark.parametrize("site, files", ESCAPED_CAPTURES, ids=ESCAPED_IDS)
+def test_unquoted_escaped_named_capture_is_rejected(site, files):
+    found = violations(site, **files)
+    assert any("protected log variables" in v for v in found), found
+
+
+@pytest.mark.parametrize("site, files", ESCAPED_CAPTURES, ids=ESCAPED_IDS)
+def test_raw_word_reading_accepted_the_escaped_capture(monkeypatch, site, files):
+    # Non-vacuity: with the tokenizer's raw values (the 5868f42 reading) the
+    # same configuration passes, which is the reproduced bypass.
+    monkeypatch.setattr(privacy, "_parse", privacy.sw.parse_nginx)
+    assert violations(site, **files) == []
+
+
+@pytest.mark.parametrize("directive", [
+    rb"if ($request_uri ~ ^(?\'section\'/[a-z]+)$) { set $sec $section; }",
+    rb"if ($http_referer ~ ^(?\'ref\'.+)$) { }",
+    rb'if ($uri ~ "^/(?<section>[a-z]+)\.html$") { set $sec $section; }',
+    rb"return 200 'it\'s ok';",
+], ids=["escaped-unrelated-capture", "escaped-unrelated-referer", "quoted-regex-escape", "escaped-quote-text"])
+def test_equivalent_safe_escapes_remain_allowed(directive):
+    assert violations(in_location(directive)) == []
+
+
+@pytest.mark.parametrize("raw, stored", [
+    # Each pair was compared with real nginx 1.24.0, 1.28.3 and 1.31.6 (the
+    # response body of ``return 200 <word>``): HF01-R2 evidence package.
+    (rb"a\'b", "a'b"), (rb'a\"b', 'a"b'), (rb"a\\b", "a\\b"),
+    (rb"a\tb", "a\tb"), (rb"a\nb", "a\nb"), (rb"a\rb", "a\rb"),
+    (rb"a\db", "a\\db"), (rb"a\xb", "a\\xb"), (rb"\\\'", "\\'"),
+    (rb"x\;y", "x\\;y"), (rb"x\ y", "x\\ y"),
+    (rb"(?\'AXISAI_LOG_PATH\'.+)", "(?'AXISAI_LOG_PATH'.+)"),
+])
+def test_word_unescape_matches_nginx(raw, stored):
+    assert privacy._nginx_word(raw) == stored
+
+
+def test_quoted_words_keep_backslashes_nginx_keeps():
+    # The tokenizer drops every backslash inside quotes; nginx keeps \d.
+    tree = privacy._parse(b'if ($uri ~ "^/a\\d") { }\n')
+    assert tree[0].args[2].value == "^/a\\d"
+
+
+def test_shared_tokenizer_is_unchanged():
+    # The route-control parser keeps its own reading; only the checker decodes.
+    assert privacy.sw.tokenize(rb"x a\'b;")[1].value == r"a\'b"
+
+
+def test_unquoted_dollar_brace_word_boundary_fails_closed():
+    # nginx keeps "${" inside one word where the tokenizer opens a block.
+    with pytest.raises(privacy.sw.NginxSyntaxError, match="not modelled"):
+        violations(in_location(b"set $x ${host};"))

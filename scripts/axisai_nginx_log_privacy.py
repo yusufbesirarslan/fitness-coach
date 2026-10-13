@@ -30,7 +30,9 @@ of reachability. The distribution HTTP log may remain because all servers
 shadow it. All included directives are checked at their original contexts.
 
 nginx compares variable names, named captures and ``access_log`` format names
-case-insensitively, so all identities here are canonical (ASCII lower case):
+case-insensitively, and reads every word through its escape rules
+(``\\'`` ``\\"`` ``\\\\`` in unquoted words too), so all identities here are the
+nginx-stored values, canonical in ASCII lower case:
 ``$AXISAI_LOG_PATH`` is ``$axisai_log_path`` and ``log_format AXISAI_ACCESS``
 competes with ``axisai_access``. The maps' outputs, builtin inputs and named
 capture dependencies are protected against other writers/captures.
@@ -81,6 +83,51 @@ EXIT_OK, EXIT_VIOLATION, EXIT_USAGE = 0, 1, 2
 def _ident(name: str) -> str:
     """nginx identifier identity: ngx_strncasecmp / ngx_strcasecmp (ASCII)."""
     return name.lower()
+
+
+def _nginx_word(raw: bytes) -> str:
+    """A word's value as ngx_conf_read_token stores it (ngx_conf_file.c), for
+    quoted and unquoted words alike: ``\\"`` ``\\'`` ``\\\\`` drop the
+    backslash, ``\\t`` ``\\r`` ``\\n`` become control characters, and any other
+    backslash is kept together with the byte after it."""
+    out, i = bytearray(), 0
+    while i < len(raw):
+        if raw[i:i + 1] == b"\\" and i + 1 < len(raw):
+            nxt = raw[i + 1:i + 2]
+            if nxt in (b'"', b"'", b"\\"):
+                out += nxt
+                i += 2
+                continue
+            if nxt in (b"t", b"r", b"n"):
+                out += {b"t": b"\t", b"r": b"\r", b"n": b"\n"}[nxt]
+                i += 2
+                continue
+        out += raw[i:i + 1]
+        i += 1
+    return out.decode("utf-8")
+
+
+def _parse(data: bytes):
+    """sw.parse_nginx with every word re-read from its source bytes as nginx
+    stores it. The shared tokenizer (also the route-control parser) keeps
+    unquoted words raw and drops the backslash of every escape in quoted
+    words, so ``(?\\'AXISAI_LOG_PATH\\'.+)`` would hide a named capture.
+    nginx keeps ``${`` inside a word where the tokenizer opens a block: that
+    boundary is not modelled and fails closed."""
+    tokens = sw.tokenize(data)
+    for word, brace in zip(tokens, tokens[1:]):
+        if (not word.quoted and not brace.quoted and brace.value == "{"
+                and word.end == brace.start and word.value.endswith("$")):
+            raise sw.NginxSyntaxError("unquoted ${ continues an nginx word: not modelled")
+
+    def value(tok):
+        raw = data[tok.start + 1:tok.end - 1] if tok.quoted else data[tok.start:tok.end]
+        return sw.Token(_nginx_word(raw), tok.start, tok.end, tok.quoted)
+
+    def rebuild(nodes):
+        return [sw.Directive(value(d.name), [value(a) for a in d.args],
+                             None if d.block is None else rebuild(d.block)) for d in nodes]
+    return rebuild(sw.parse_nginx(data))
 
 
 def _variables(value: str) -> set:
@@ -171,7 +218,7 @@ def _effective_tree(data, verify_host=False):
     """
     sections = list(MARKER.finditer(data))
     if not sections:
-        tree = sw.parse_nginx(data)
+        tree = _parse(data)
         if any(d.name.value == "include" for d, _ in sw._walk(tree)):
             raise ValueError("unresolved include: supply the complete successful nginx -T dump")
         return tree
@@ -217,7 +264,7 @@ def _effective_tree(data, verify_host=False):
                     result.append(sw.Directive(d.name, d.args,
                                                directives(d.block) if d.block is not None else None))
             return result
-        return directives(sw.parse_nginx(files[path]))
+        return directives(_parse(files[path]))
 
     tree = expand(next(iter(files)), ())
     if set(visited) != set(files):
@@ -266,7 +313,7 @@ def _variable_violations(tree, ref_maps):
 def check(data: bytes, reference: bytes, verify_host: bool = False) -> Tuple[List[str], List[str], int, int]:
     """Returns (violations, warnings, servers, access_logs)."""
     tree = _effective_tree(data, verify_host)
-    ref_formats, ref_maps = _definitions(sw.parse_nginx(reference))
+    ref_formats, ref_maps = _definitions(_parse(reference))
     if len(ref_formats) != 1 or len(ref_maps) != len(MAPS):
         raise ValueError("reference nginx.conf lacks the axisai_access definitions")
     violations: List[str] = _variable_violations(tree, ref_maps)
