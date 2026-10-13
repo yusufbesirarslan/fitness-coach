@@ -29,7 +29,8 @@ def test_adapter_authenticates_both_signed_objects():
 @pytest.mark.parametrize("target,field,value", [
     ("tx", "bundleId", "wrong"), ("tx", "environment", Environment.PRODUCTION),
     ("tx", "productId", "unknown"), ("tx", "originalTransactionId", None),
-    ("tx", "appAccountToken", None), ("tx", "appAccountToken", str(uuid4())),
+    ("tx", "appAccountToken", None),
+    ("tx", "appAccountToken", "00000000-0000-4000-8000-000000000001"),
     ("tx", "transactionId", "999"), ("tx", "subscriptionGroupIdentifier", "wrong"),
     ("tx", "signedDate", 1), ("response", "appAppleId", 999),
     ("response", "bundleId", "wrong"), ("response", "environment", Environment.PRODUCTION),
