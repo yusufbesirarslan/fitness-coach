@@ -265,7 +265,32 @@ reviewed definitions byte-for-byte (parsed), `off` or `axisai_access` on every
 `access_log` inside a server, and a server-level `access_log` in **every** HTTP
 server, because a server without one silently inherits `combined`. It runs in
 CI against the template and the live fixture, and on the real nginx through
-`nginx -T` (`tests/test_priv_log_01_nginx_*.py`).
+`nginx -T` (`tests/test_priv_log_01_nginx_*.py`, `tests/test_priv_log_01_hf01*.py`).
+
+The checker follows nginx's own identity rules (PRIV-LOG-01-HF01). Variable
+names, named regex captures and `access_log` format names are
+case-insensitive in nginx, so `$AXISAI_LOG_PATH` is `$axisai_log_path`, and a
+`log_format AXISAI_ACCESS` defined first would win the `axisai_access`
+lookup. Any write or capture of a protected variable in any spelling, and any
+second definition of a protected map or of `axisai_access`, is a violation.
+Include globs follow glob(3): a wildcard never matches a leading-dot file, and
+bracket/escape glob syntax fails closed.
+
+By default it also proves **provenance on the host**. A text dump cannot prove
+itself complete or authentic: a comment can imitate the `# configuration file`
+marker, and a dump cut at a file boundary still reads as consistent. So every
+file section must equal the file on disk, plus the newline `nginx -T` appends,
+and every include glob must match the same files on disk. `--catalog-only`
+skips this for off-host analysis and prints `provenance=catalog-only`. That
+output is **never deployment evidence**.
+
+The one output line is
+`result=ok|violation servers=N access_logs=N warnings=N provenance=host-verified|catalog-only|standalone`.
+Exit 1 is a violation. Exit 2 (`error:`) is unparsable input or unproven
+provenance, and is also a stop. A `warning:` line is informational. Its only
+class is a query-bearing `log_format` that no server can use, because every
+server must log with `axisai_access` or `off`. Review it, but it is not a
+gate. Anything that can change what a server logs is a violation.
 
 **Live rollout (NOT performed by PRIV-LOG-01; needs separate explicit
 approval).** The live site is Certbot-owned and never copied from the repo, so
@@ -295,9 +320,13 @@ this is a hand edit, like the CSP migration:
    and collection path. Review the diff against the backup.
 4. Run `sudo nginx -t` and require success **before reload**. Capture a fresh
    full `sudo nginx -T` with a checked exit status (do not hide failure behind
-   a pipeline), then run
-   `python3 -I scripts/axisai_nginx_log_privacy.py <candidate-dump>` and require
-   exit zero and `result=ok`. It expands HTTP/server/location/nested includes
+   a pipeline), then immediately, on the same host and with no concurrent
+   config edits, run
+   `sudo python3 -I scripts/axisai_nginx_log_privacy.py <candidate-dump>`
+   (default host verification; never `--catalog-only` here) and require exit
+   zero and a line starting `result=ok` and ending `provenance=host-verified`.
+   Any `error:` or `violation:` stops the change. Explain every `warning:`
+   in the evidence. It expands HTTP/server/location/nested includes
    and audits protected map/capture variables. A single site file is not a
    complete effective-configuration proof. Absolute include globs may be
    empty; only a successful complete dump is valid evidence. Relative includes,
@@ -311,8 +340,8 @@ this is a hand edit, like the CSP migration:
    certificate, upstream and worker-start failures. A successful signal alone
    does not prove adoption: old workers may still serve existing connections.
 6. Capture and hash a second successful `nginx -T` after reload; rerun the
-   full privacy checker and compare with the validated candidate. This checks
-   on-disk config; the new-worker evidence and fresh-connection requests below
+   full host-verified privacy checker and compare with the validated candidate.
+   This checks on-disk config; the new-worker evidence and fresh-connection requests below
    establish that it is active. Repeat read-only route status and web-slot
    runtime verification. Require the same route, active slot and revisions,
    and compare public health and authenticated synthetic nutrition responses
@@ -382,6 +411,18 @@ same virtual hosts after the edit.
   template routes the way the app log does.
 - **R3, correlation.** `rid` is nginx's own id. The app's 16-hex request id is
   not echoed in a response header, so correlate by time, path and `ua`.
+- **R5, encoded Referer path.** The Referer map drops the query and fragment at
+  the first literal `?` or `#`. Percent-encoded text in the Referer **path**
+  (for example `/page%3Fq=…`) is kept, as with R2. It is path metadata, not a
+  parsed query string. Full path sanitization is out of scope for HF01.
+- **Checker limits.** The checker reasons about the parsed effective
+  configuration that one `nginx -T` reports on one host. It cannot see the
+  RUNNING master, which adopts disk config only on reload (steps 5–6). It
+  cannot see a config edit made between the dump and the check (TOCTOU), or
+  nginx semantics other than those tested. HF01 tested local Homebrew nginx
+  1.31.6 and CI's distribution nginx. Production 1.28.3 was not run.
+  Embedded Lua/JS/Perl and dynamic modules still fail closed pending a module
+  audit.
 - **R4, existing copies.** This source change does not alter what is already
   stored: the live files, rotated copies on the host and `/axisai/nginx/access`
   keep query strings until they expire or are purged. Production nginx
