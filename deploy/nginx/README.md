@@ -271,22 +271,100 @@ CI against the template and the live fixture, and on the real nginx through
 approval).** The live site is Certbot-owned and never copied from the repo, so
 this is a hand edit, like the CSP migration:
 
-1. Back up `/etc/nginx/sites-available/fitx` and `.../fatsecret-proxy`
-   (root-only, with sha256).
-2. In `fitx`: paste the marked block from the merged `nginx.conf` at http level,
-   before the first `server {`. Then add
-   `access_log /var/log/nginx/access.log axisai_access;` as the first line of
-   **both** server blocks: the TLS server and Certbot's 80->443 redirect server.
-3. In `fatsecret-proxy`: add `access_log off;` (see `deploy/fatsecret-proxy.md`).
-4. `sudo nginx -t`, then
-   `sudo nginx -T 2>/dev/null | python3 -I scripts/axisai_nginx_log_privacy.py -`
-   must print `result=ok`. `sudo axisai-switch-web-slot status` must be
-   unchanged (the edit keeps the site `migrated`). Then
-   `sudo systemctl reload nginx` and confirm that new lines in
-   `/var/log/nginx/access.log` have no `?`.
+1. Take the existing deploy lock for this separately authorized maintenance
+   window. Coordinate with route operators to prevent concurrent switches;
+   the status helper acquires its own route lock, so do not hold that lock
+   externally while invoking it. Use the approved exact merged
+   checkout; record its SHA and checker/reference SHA-256. Record UTC start,
+   master PID and worker PIDs. Record read-only `axisai-switch-web-slot status`
+   and the existing web-slot runtime `verify` output/revisions for the active
+   route; do not run a switch or slot deployment. Keep these as the baseline.
+2. In a root-only evidence directory (`0700`, files `0600`), back up all of
+   `/etc/nginx` including symlinks and hash every regular configuration file,
+   especially `sites-available/fitx`, `fatsecret-proxy` and the route include.
+   Save `sudo nginx -T` stdout and stderr separately, requiring exit zero,
+   plus SHA-256 of the dump. Record enabled-site symlink targets. These are
+   configuration snapshots, not public artifacts; never print secrets or
+   publish raw dumps. Record device/inode and byte offsets of **every enabled
+   access-log destination** (including the loopback proxy), before traffic.
+3. In `fitx`: paste the marked block from the merged `nginx.conf` at http level,
+   before the first `server {`. Add
+   `access_log /var/log/nginx/access.log axisai_access;` to **both** servers
+   (TLS and Certbot HTTP redirect). In `fatsecret-proxy`, add `access_log off;`.
+   Preserve every other directive, TLS/Certbot include, route, auth forwarding
+   and collection path. Review the diff against the backup.
+4. Run `sudo nginx -t` and require success **before reload**. Capture a fresh
+   full `sudo nginx -T` with a checked exit status (do not hide failure behind
+   a pipeline), then run
+   `python3 -I scripts/axisai_nginx_log_privacy.py <candidate-dump>` and require
+   exit zero and `result=ok`. It expands HTTP/server/location/nested includes
+   and audits protected map/capture variables. A single site file is not a
+   complete effective-configuration proof. Absolute include globs may be
+   empty; only a successful complete dump is valid evidence. Relative includes,
+   unresolved contexts and unsupported variable writers fail closed: stop for
+   review rather than remove checks. Confirm read-only route/slot state and
+   include hash still equal the baseline.
+5. Only under the separate deployment authorization, record reload time and
+   run `sudo systemctl reload nginx`, checking its exit status. Require
+   `systemctl is-active nginx`, an unchanged live master PID and a new worker
+   generation. Inspect the journal/error log around the reload for parsing,
+   certificate, upstream and worker-start failures. A successful signal alone
+   does not prove adoption: old workers may still serve existing connections.
+6. Capture and hash a second successful `nginx -T` after reload; rerun the
+   full privacy checker and compare with the validated candidate. This checks
+   on-disk config; the new-worker evidence and fresh-connection requests below
+   establish that it is active. Repeat read-only route status and web-slot
+   runtime verification. Require the same route, active slot and revisions,
+   and compare public health and authenticated synthetic nutrition responses
+   to the authorized baseline. Do not expose authentication headers in evidence.
+7. Use fresh connections with a unique, **synthetic-only** run marker. Send
+   TLS GETs for `/api/v1/nutrition/foods/search?q=<synthetic-marker>` and
+   `/api/v1/nutrition/foods/barcode?code=<synthetic-test-barcode>`, with a
+   synthetic Referer containing a distinct query marker and fragment marker.
+   Use only a disposable authorized test account if authentication is required.
+   Exercise the HTTP redirect with the same synthetic query; verify its status
+   and unchanged Location forwarding. Exercise the TLS
+   `/fatsecret/rest/server.api?method=foods.search&search_expression=<synthetic-marker>&format=json`
+   path and, locally where authorized, the loopback `:3000` proxy path. Verify
+   expected statuses and unchanged request forwarding using the approved
+   provider smoke method, without recording provider credentials. Any provider
+   failure must be distinguished from a route/reload failure. Do not create a
+   burst or intentionally induce production errors for this access-log check.
+8. Inspect only newly generated access records after the saved offsets; handle
+   rotation by inode and inspect both relevant files, rather than silently
+   treating an empty tail as success. Require actual records for TLS search,
+   barcode, redirect and public FatSecret path, matched by time, method, path,
+   status and unique synthetic User-Agent; the proxy declared `off` must emit
+   none. Parse the complete `axisai_access` format: method and query-free path,
+   Referer without query/fragment, status, bytes, timing, upstream status/address,
+   rate-limit status, nginx request id and host must survive. Require **all**
+   synthetic search/barcode/Referer query/fragment markers and credential
+   markers absent from records (including URL-encoded variants). A missing `?`
+   alone is insufficient; percent-encoding or a variable overwrite can hide
+   it. Unexpected formats, destinations or absent expected records fail the
+   verification. Keep synthetic evidence and redact unrelated live records.
+9. Monitor health, 4xx/5xx, upstream failures, latency, rate-limit behavior,
+   worker generation and log format/collection during the approved observation
+   window. Roll back on reload/adoption failure, checker failure, any access-log
+   canary, missing diagnostic fields, route/slot/revision drift, broken TLS or
+   Certbot parsing, or a sustained regression against agreed pre-change health
+   thresholds. Record the operator's final decision and evidence hashes.
 
-Rollback: restore both backups, `nginx -t`, reload. CI proves that Certbot's
-parser sees identical virtual hosts after the edit, so renewals are unaffected.
+Rollback under the same authorization: restore the exact changed configuration
+files and symlinks from the root-only backup, verify their hashes, `nginx -t`,
+then reload and verify worker adoption, route/slot state and baseline behavior.
+The previous access-log query exposure returns on rollback; record it and
+escalate the privacy follow-up. If syntax/reload fails, stop automated changes
+and escalate with the backup location. Never change route selection, retention,
+AWS resources or historical logs as part of this procedure.
+
+These canaries verify **access logs**. They do not close R1: errors caused by
+normal traffic can still carry raw request queries into the nginx error log and
+CloudWatch. The disposable integration test deliberately proves the rate-limit
+error-log exposure; do not reproduce it with real user traffic. R1 remains a
+separate P1 external-beta readiness follow-up; food-search logging privacy and
+APP_PRIVACY_R8 are not fully closed. CI also checks Certbot's parser sees the
+same virtual hosts after the edit.
 
 **Residual risks (not closed by this change).**
 

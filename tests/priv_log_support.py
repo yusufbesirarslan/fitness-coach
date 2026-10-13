@@ -38,3 +38,24 @@ def patch_site(site: bytes, template: bytes = TEMPLATE) -> bytes:
     first = servers[0].start()
     out[first:first] = access_log_block(template) + b"\n"
     return bytes(out)
+
+
+def source_catalog(site):
+    """Explicit test-only catalog for the source fixture's external includes.
+
+    Production checks require actual nginx -T; these TLS options are modeled
+    as empty and the route include is the known fixture legacy endpoint.
+    """
+    files = {
+        "/etc/nginx/axisai/active-web-upstream.conf": b"server 127.0.0.1:5000;\n",
+        "/etc/letsencrypt/options-ssl-nginx.conf": b"ssl_session_timeout 1d;\n",
+    }
+    if site.startswith(b"# configuration file "):
+        dump = site
+    else:
+        dump = (b"# configuration file /etc/nginx/nginx.conf:\nevents {} http { include /etc/nginx/site.conf; }\n"
+                b"# configuration file /etc/nginx/site.conf:\n" + site + b"\n")
+    for path, content in files.items():
+        if path.encode() in site:
+            dump += f"# configuration file {path}:\n".encode() + content
+    return dump

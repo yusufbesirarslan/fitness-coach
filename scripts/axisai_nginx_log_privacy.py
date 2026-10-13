@@ -1,34 +1,31 @@
 #!/usr/bin/python3 -I
 """Read-only check that nginx access logs cannot record query strings (PRIV-LOG-01).
 
-    sudo nginx -T 2>/dev/null | python3 -I scripts/axisai_nginx_log_privacy.py -
-    python3 -I scripts/axisai_nginx_log_privacy.py nginx.conf
+    python3 -I scripts/axisai_nginx_log_privacy.py <successful-complete-nginx-T-dump>
 
-The input is one nginx configuration text: a single site file, or the full
-``nginx -T`` dump (every file concatenated). Nothing is written, reloaded or
-executed. The repository ``nginx.conf`` is the reference for the reviewed
-query-free definitions (``log_format axisai_access`` and the two path/referer
-maps); the input must carry them byte-for-byte in parsed form, so a host edit
-cannot quietly widen the format.
+The deployment input is the stdout of a successful, complete ``nginx -T``.
+File sections form a catalog which is recursively expanded at each include
+site. Absolute canonical paths and absolute globs are supported. Relative,
+missing, cyclic, duplicate or unreachable file sections fail closed; includes
+in a standalone site file also fail closed. Standalone texts without includes
+are accepted for unit/source checks. Never concatenate site files manually.
 
-Rules, all of which must hold:
+The exact reference log format and maps are required once. Every HTTP server
+must declare its own access_log (off or axisai_access), and every descendant
+log must also be off or axisai_access. This conservatively audits all locations,
+including nested/named locations and internal-redirect destinations, regardless
+of reachability. The distribution HTTP log may remain because all servers
+shadow it. All included directives are checked at their original contexts.
 
-1. ``log_format axisai_access`` and the ``$axisai_log_path`` /
-   ``$axisai_log_referer`` maps are present exactly once and equal the reference.
-2. Every ``access_log`` inside a ``server`` block (server, location or ``if``
-   level) is ``off`` or names ``axisai_access``.
-3. Every HTTP ``server`` block declares its own server-level ``access_log``.
-   nginx inherits ``access_log`` only when a level declares none, so a server
-   without one falls back to the distribution's http-level line, whose default
-   ``combined`` format logs ``$request`` (the full request line with the query
-   string). That http-level line is therefore tolerated only because rule 3
-   leaves no server inheriting it.
-4. No ``log_format`` used by rule 2 contains a query-bearing or credential
-   variable (also checked for any other format, as a warning).
+The maps' outputs, builtin inputs and named capture dependencies are protected
+against other writers/captures. Unsupported consumers of these variables,
+embedded Lua/JS/Perl and dynamic module loading fail closed pending a separate
+module audit. Unrelated stock ``set`` directives remain allowed.
 
 Exit codes: 0 ok, 1 violation (details on stderr), 2 usage or unparsable input.
 The one stdout line is ``result=ok|violation servers=N access_logs=N``.
 """
+import fnmatch
 import importlib.util
 import os
 import re
@@ -75,13 +72,111 @@ def _format_text(directive) -> str:
     return "".join(a.value for a in directive.args[1:] if not a.value.startswith("escape="))
 
 
+def _effective_tree(data):
+    """Expand nginx -T's file catalog at each include site, never flatten it.
+
+    Only absolute includes are supported: a dump does not record nginx's
+    conf-prefix for relative paths. Empty absolute globs are valid nginx
+    includes. The catalog must come from a successful, complete nginx -T.
+    No host filesystem reads are used to fill holes in a captured snapshot.
+    """
+    marker = re.compile(rb"^# configuration file ([^\n]+):\r?$", re.MULTILINE)
+    sections = list(marker.finditer(data))
+    if not sections:
+        tree = sw.parse_nginx(data)
+        if any(d.name.value == "include" for d, _ in sw._walk(tree)):
+            raise ValueError("unresolved include: supply the complete successful nginx -T dump")
+        return tree
+    if data[:sections[0].start()].strip():
+        raise ValueError("unexpected text before nginx -T catalog")
+    files = {}
+    for index, match in enumerate(sections):
+        path = match[1].decode()
+        if not path.startswith("/") or os.path.normpath(path) != path or path in files:
+            raise ValueError("ambiguous nginx -T file catalog")
+        end = sections[index + 1].start() if index + 1 < len(sections) else len(data)
+        files[path] = data[match.end():end]
+    visited = set()
+
+    def expand(path, stack):
+        if path in stack or len(stack) > 64:
+            raise ValueError("cyclic or excessive include depth")
+        visited.add(path)
+
+        def directives(nodes):
+            result = []
+            for d in nodes:
+                if d.name.value == "include":
+                    if d.block is not None or len(d.args) != 1:
+                        raise ValueError("ambiguous include directive")
+                    pattern = d.args[0].value
+                    if not pattern.startswith("/") or "$" in pattern or os.path.normpath(pattern) != pattern:
+                        raise ValueError("unsupported include path (absolute canonical paths required)")
+                    # nginx glob does not cross directory separators.
+                    matches = sorted(f for f in files if len(f.split("/")) == len(pattern.split("/"))
+                                     and all(fnmatch.fnmatchcase(a, b) for a, b in
+                                             zip(f.split("/"), pattern.split("/"))))
+                    if not matches and not any(c in pattern for c in "*?["):
+                        raise ValueError("missing included file in nginx -T catalog")
+                    for included in matches:
+                        result.extend(expand(included, stack + (path,)))
+                else:
+                    result.append(sw.Directive(d.name, d.args,
+                                               directives(d.block) if d.block is not None else None))
+            return result
+        return directives(sw.parse_nginx(files[path]))
+
+    tree = expand(next(iter(files)), ())
+    if visited != set(files):
+        raise ValueError("unreachable file sections: include context cannot be established")
+    return tree
+
+
+def _variable_violations(tree, ref_maps):
+    # The map input variables are nginx builtins; named captures are writable
+    # shared variables too. Only the exact reviewed maps may define them.
+    approved = {_signature(d) for d in ref_maps}
+    variable = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
+    map_values = [value for d, _ in sw._walk(ref_maps)
+                  for value in [d.name.value] + [a.value for a in d.args]]
+    captures = {capture for value in map_values for capture in
+                re.findall(r"\(\?(?:<|P<)([A-Za-z_][A-Za-z0-9_]*)>", value)}
+    protected = ({"$" + v for value in map_values for v in variable.findall(value)}
+                 | {"$" + c for c in captures})
+    # These stock directives only read variables. Everything else mentioning
+    # a protected variable is an unsupported writer and fails closed.
+    readers = {"log_format", "proxy_set_header", "add_header", "return", "rewrite",
+               "if", "proxy_pass", "fastcgi_param", "uwsgi_param", "scgi_param"}
+    violations = []
+
+    def visit(nodes):
+        for d in nodes:
+            name = d.name.value
+            if _signature(d) in approved:
+                continue
+            values = [d.name.value] + [a.value for a in d.args]
+            found = {"$" + v for value in values for v in variable.findall(value)} & protected
+            named = {c for value in values for c in
+                     re.findall(r"\(\?(?:<|P<|\')([A-Za-z_][A-Za-z0-9_]*)(?:>|\')", value)} & {v[1:] for v in protected}
+            if named or (found and name not in readers):
+                violations.append(f"unsupported write or capture interference in {name} for protected log variables")
+            # Embedded code / dynamically loaded modules can write variables
+            # without a literal variable argument. They need a separate audit.
+            if name == "load_module" or re.search(r"(?:lua|js|perl)", name):
+                violations.append(f"unsupported dynamic variable writer: {name}")
+            if d.block is not None:
+                visit(d.block)
+    visit(tree)
+    return violations
+
+
 def check(data: bytes, reference: bytes) -> Tuple[List[str], List[str], int, int]:
     """Returns (violations, warnings, servers, access_logs)."""
-    tree = sw.parse_nginx(data)
+    tree = _effective_tree(data)
     ref_formats, ref_maps = _definitions(sw.parse_nginx(reference))
     if len(ref_formats) != 1 or len(ref_maps) != len(MAPS):
         raise ValueError("reference nginx.conf lacks the axisai_access definitions")
-    violations: List[str] = []
+    violations: List[str] = _variable_violations(tree, ref_maps)
     warnings: List[str] = []
 
     formats, maps = _definitions(tree)
@@ -118,6 +213,8 @@ def check(data: bytes, reference: bytes) -> Tuple[List[str], List[str], int, int
                 continue
             if "server" in names and (len(args) < 2 or args[1] != FORMAT):
                 violations.append(f"access_log {' '.join(args)} inside a server does not use {FORMAT}")
+    if not servers:
+        violations.append("no HTTP servers: effective configuration is incomplete")
     return violations, warnings, servers, access_logs
 
 

@@ -159,3 +159,40 @@ def test_certbot_parser_sees_identical_vhosts_after_the_access_log_edit(tmp_path
                            nginx_root=str(root), backup_dir=str(tmp_path / "backup"))
     boot.certbot_gate(patch_site(MIGRATED), bcfg)    # renewals parse the edited site identically
     assert any(ssl_on and HOST in names for names, ssl_on, _a, _f in boot._vhost_signature(str(root)))
+
+
+@pytest.mark.parametrize('writer', ['include-log', 'set-path', 'include-set', 'capture'])
+def test_r1_real_nginx_adversarial_leaks_are_rejected(nginx, writer):
+    """Syntax-valid nginx, actual emitted access records, and the full dump.
+
+    The old checker accepted include-log and set-path; every mutation must
+    now be rejected. Only synthetic verification traffic reaches loopback.
+    """
+    ngx = nginx
+    ngx.write_include(ngx.ports['legacy'])
+    leak = ngx.tmp / 'var' / 'leak.log'
+    snippet = ngx.root / 'unsafe.conf'
+    inner = ngx.root / 'nested.conf'
+    if writer == 'include-log':
+        inner.write_text(f'access_log {leak} combined;\n')
+        snippet.write_text(f'include {inner};\n')
+        directive = f'include {snippet};'
+    elif writer == 'include-set':
+        snippet.write_text('set $axisai_log_path $request_uri;\n')
+        directive = f'include {snippet};'
+    elif writer == 'capture':
+        directive = 'if ($request_uri ~ "(?<axisai_lp>.+)") { set $axisai_log_path $axisai_lp; }'
+    else:
+        directive = 'set $axisai_log_path $request_uri;'
+    site = patch_site(MIGRATED).replace(b'    location / {\n',
+                                      f'    location / {{\n        {directive}\n'.encode(), 1)
+    ngx.write_site(runnable(ngx, site))
+    dump = ngx.dump()  # also proves nginx -t succeeds
+    assert privacy.check(dump, TEMPLATE)[0], writer
+    ngx.start()
+    try:
+        assert request(ngx, path='/api/v1/nutrition/foods/search?q=SYNTHETIC_R1_CANARY')[0] == 200
+    finally:
+        ngx.stop()
+    records = leak.read_bytes() if writer == 'include-log' else access_log(ngx)
+    assert b'SYNTHETIC_R1_CANARY' in records, 'adversarial configuration must actually leak'

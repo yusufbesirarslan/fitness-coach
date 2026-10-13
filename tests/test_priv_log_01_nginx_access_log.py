@@ -27,7 +27,7 @@ import axisai_nginx_bootstrap as boot  # noqa: E402
 import axisai_nginx_log_privacy as privacy  # noqa: E402
 
 from priv_log_support import (  # noqa: E402
-    ACCESS_LOG_LINE, LIVE_FIXTURE, TEMPLATE, access_log_block, patch_site)
+    ACCESS_LOG_LINE, LIVE_FIXTURE, TEMPLATE, access_log_block, patch_site, source_catalog)
 
 sw = boot.sw
 LIVE = LIVE_FIXTURE.read_bytes()
@@ -35,7 +35,7 @@ MIGRATED = boot.transform(LIVE, sw.INCLUDE_PATH, 5000)   # production since R6-0
 
 
 def run_check(data):
-    return privacy.check(data, TEMPLATE)
+    return privacy.check(source_catalog(data), TEMPLATE)
 
 
 def _format_directive(tree):
@@ -222,11 +222,11 @@ def test_cloudwatch_agent_still_ships_the_same_access_log_file():
 
 def test_cli_exit_codes_and_single_result_line(tmp_path):
     lines, errors = [], []
-    assert privacy.main(["-"], stdin=io.BytesIO(patch_site(MIGRATED)), out=lines.append,
+    assert privacy.main(["-"], stdin=io.BytesIO(source_catalog(patch_site(MIGRATED))), out=lines.append,
                         err=errors.append) == privacy.EXIT_OK
     assert lines == ["result=ok servers=2 access_logs=2"] and errors == []
     lines.clear()
-    assert privacy.main(["-"], stdin=io.BytesIO(MIGRATED), out=lines.append,
+    assert privacy.main(["-"], stdin=io.BytesIO(source_catalog(MIGRATED)), out=lines.append,
                         err=errors.append) == privacy.EXIT_VIOLATION
     assert lines == ["result=violation servers=2 access_logs=0"] and errors
     assert privacy.main([], out=lines.append, err=errors.append) == privacy.EXIT_USAGE
@@ -236,7 +236,7 @@ def test_cli_exit_codes_and_single_result_line(tmp_path):
                         err=errors.append) == privacy.EXIT_USAGE
 
 
-def test_cli_runs_isolated_on_the_template():
+def test_cli_fails_closed_on_template_with_unresolved_includes():
     proc = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "axisai_nginx_log_privacy.py"),
                            str(ROOT / "nginx.conf")], capture_output=True, text=True, timeout=30)
-    assert (proc.returncode, proc.stdout) == (0, "result=ok servers=1 access_logs=1\n"), proc.stderr
+    assert proc.returncode == privacy.EXIT_USAGE and "unresolved include" in proc.stderr

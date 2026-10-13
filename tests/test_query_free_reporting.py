@@ -135,3 +135,36 @@ def test_transaction_spans_and_request_have_no_query_text(app, reporting, loopba
     spans = [s for s in transactions[-1].get("spans", []) if s.get("op") == "http.client"]
     assert spans and spans[-1]["data"]["url"].endswith("/fatsecret/rest/server.api")
     _assert_absent(serialized, SEARCH, "search_expression")
+
+
+@pytest.mark.parametrize('headers', [
+    {'rEfErEr': 'https://example.invalid/page?q=SYNTHETIC_REFERER#SYNTHETIC_FRAGMENT', 'X-Diagnostic': 'safe'},
+    [['Referer', 'https://example.invalid/page?q=SYNTHETIC_REFERER'], ['X-Diagnostic', 'safe']],
+    (('REFERER', 'https://example.invalid/page#SYNTHETIC_FRAGMENT'), ('X-Diagnostic', 'safe')),
+    [('referer', 'https://example.invalid/page?q=SYNTHETIC_REFERER'), ['X-Diagnostic', 'safe']],
+    [['Referer', 'https://example.invalid/page?q=SYNTHETIC_REFERER'], ['REFERER', 'https://example.invalid/page#SYNTHETIC_FRAGMENT'], ['X-Diagnostic', 'safe']],
+])
+def test_pair_list_referer_canary_absent_from_actual_sdk_envelope(app, reporting, headers):  # noqa: F811
+    sentry_sdk.capture_event({'message': 'synthetic failure', 'request': {
+        'url': 'https://example.invalid/page', 'method': 'GET', 'headers': headers}})
+    events, serialized = _events(*reporting)
+    assert events and events[-1]['message'] == 'synthetic failure'
+    safe = events[-1]['request']['headers']
+    pairs = safe.items() if isinstance(safe, dict) else safe
+    assert ('X-Diagnostic', 'safe') in [tuple(p) for p in pairs]
+    pairs = safe.items() if isinstance(safe, dict) else safe
+    assert all(value == 'https://example.invalid/page' for name, value in pairs if name.lower() == 'referer')
+    _assert_absent(serialized, 'SYNTHETIC_REFERER', 'SYNTHETIC_FRAGMENT')
+
+
+@pytest.mark.parametrize('headers', [
+    'SYNTHETIC_REFERER', {'Referer': ['SYNTHETIC_REFERER']},
+    [['Referer', {'url': 'SYNTHETIC_REFERER'}], ['X-Diagnostic', 'safe']],
+    [['Referer', 'SYNTHETIC_REFERER', 'extra'], [123, 'SYNTHETIC_REFERER']],
+    {'Referer ': 'SYNTHETIC_REFERER'}, [None, 'SYNTHETIC_REFERER'],
+])
+def test_malformed_header_container_fails_safely_in_envelope(app, reporting, headers):  # noqa: F811
+    sentry_sdk.capture_event({'message': 'synthetic malformed headers', 'request': {'headers': headers}})
+    events, serialized = _events(*reporting)
+    assert events, 'the sanitizer must preserve the safe error event'
+    _assert_absent(serialized, 'SYNTHETIC_REFERER')

@@ -85,6 +85,31 @@ def _query_free_http_data(data):
             data["url"] = _without_query(data["url"])
 
 
+def _query_free_headers(headers):
+    """SDK headers can be mappings or sequences of pairs. Rebuild only
+    well-formed string pairs; discard ambiguous containers/entries rather
+    than allow unredacted values to reach an envelope.
+    """
+    mapping = isinstance(headers, dict)
+    if mapping:
+        pairs = headers.items()
+    elif isinstance(headers, (list, tuple)):
+        pairs = headers
+    else:
+        return {}
+    safe = []
+    for pair in pairs:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            continue
+        name, value = pair
+        if not isinstance(name, str) or not isinstance(value, str):
+            continue
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name):
+            continue
+        safe.append((name, _without_query(value) if name.lower() == "referer" else value))
+    return dict(safe) if mapping else [list(pair) for pair in safe]
+
+
 def _query_free_event(event):
     """Query strings are user input (food search words, barcodes, people
     search). The WSGI integration copies QUERY_STRING onto every request-scoped
@@ -96,10 +121,8 @@ def _query_free_event(event):
         if "url" in request_info:
             request_info["url"] = _without_query(request_info["url"])
         headers = request_info.get("headers")
-        if isinstance(headers, dict):
-            for name in list(headers):
-                if name.lower() == "referer":
-                    headers[name] = _without_query(headers[name])
+        if "headers" in request_info:
+            request_info["headers"] = _query_free_headers(headers)
     for crumb in (event.get("breadcrumbs") or {}).get("values") or ():
         if isinstance(crumb, dict):
             _query_free_http_data(crumb.get("data"))
