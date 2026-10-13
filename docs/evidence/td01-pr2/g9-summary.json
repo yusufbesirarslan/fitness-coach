@@ -1,0 +1,19 @@
+{
+  "base_sha": "71787cb9eadcd4bfbc81975f5ce67c28d7aa4fe2",
+  "query_package_unchanged": true,
+  "host_class": "MacBook Air Mac14,2; Apple M2 8 CPU cores; 8 GiB RAM; Docker Desktop Linux arm64 VM",
+  "container_limits": "No explicit per-container CPU or memory override",
+  "cold_status": "First query after PostgreSQL restart; PostgreSQL shared buffers cold; host/VM OS caches not cleared",
+  "warm_runs_per_fixture": 5,
+  "buffer_ratio_4k_to_1k": 1.2323030907278165,
+  "execution_time_ratio_4k_to_1k": 1.3528880866425992,
+  "result": "PASS",
+  "new_index_or_migration": "none",
+  "thresholds": {
+    "unexpected_session_seq_scan": false,
+    "buffers_over_4000_at_1k": false,
+    "buffer_growth_over_4x": false,
+    "warm_median_over_25ms_at_1k": false,
+    "warm_median_over_50ms_at_4k": false
+  }
+}

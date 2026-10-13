@@ -308,16 +308,110 @@ def _production_modules():
         yield path
 
 
-def test_h_a8_zero_production_callers():
+APPROVED_CONSUMERS = {
+    'app/blueprints/mobile_exercise_history.py': {
+        'functools': {'wraps'}, 'flask': {'abort', 'current_app', 'g', 'jsonify'},
+        'sqlalchemy.exc': {'SQLAlchemyError'},
+        'app.blueprints.mobile_api': {'bp', 'mobile_error'}, 'app.extensions': {'db'},
+        'app.mobile_auth_middleware': {'require_mobile_auth'},
+        'app.observability': {'current_request_id'}, 'app.services': {'runtime_metrics'},
+        'app.services.exercise_catalog': {'CatalogConfigurationError', 'ExerciseIdentityInvalid', 'ExerciseUnknown'},
+        PACKAGE_DOTTED: {'build_exercise_history'},
+        'app.services.mobile_exercise_history': {'CONTRACT_VERSION', 'history_json'},
+    },
+    'app/services/mobile_exercise_history.py': {
+        '__future__': {'annotations'}, 'json': None,
+        'datetime': {'date', 'datetime', 'timezone'}, 'typing': {'TypedDict'},
+        'app.services.exercise_catalog': {'ID_PATTERN'},
+        PACKAGE_DOTTED + '.models': {'HISTORY_DAYS', 'MAX_OCCURRENCES', 'MAX_SCAN_ROWS', 'ExerciseHistory', 'ProjectionInvariantError'},
+        PACKAGE_DOTTED + '.selection': {'check_invariants'},
+        'app.services.workout_session.checkpoint': {'MAX_REVISION', 'MAX_SETS_PER_EXERCISE'},
+    },
+}
+
+
+def approved_consumer_violations(relative, source):
+    """Exact import/call delta, not a blanket exemption for two files."""
+    allowed = APPROVED_CONSUMERS[relative]
+    found = []
+    tree = ast.parse(source)
+    builds = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level or node.module not in allowed or any(
+                    alias.asname or alias.name not in (allowed.get(node.module) or set())
+                    for alias in node.names):
+                found.append('unapproved import')
+        elif isinstance(node, ast.Import):
+            if any(alias.name not in allowed or allowed.get(alias.name) is not None or alias.asname
+                   for alias in node.names):
+                found.append('unapproved import')
+        elif isinstance(node, ast.Call):
+            name = ast.unparse(node.func)
+            if name.startswith('db.session.') and name != 'db.session.rollback':
+                found.append('direct database call')
+            if name.split('.')[-1] in _ALWAYS_WRITE and not (
+                    relative.startswith('app/blueprints/') and name == 'db.session.rollback'):
+                found.append('write/query bypass')
+            if name in {'__import__', 'getattr', 'setattr', 'eval', 'exec', 'globals', 'locals'}:
+                found.append('dynamic bypass')
+            if name == 'build_exercise_history':
+                builds.append(ast.unparse(node))
+        elif isinstance(node, ast.Name) and node.id in {'request', 'WorkoutSession', 'queries', 'load_candidates'}:
+            found.append('direct query/request bypass')
+    expected = ['build_exercise_history(owner_id, exercise_id)'] if relative.startswith('app/blueprints/') else []
+    if builds != expected:
+        found.append('orchestrator call mismatch')
+    # Bare aliases/references cannot introduce a second way to call the authority.
+    refs = [node for node in ast.walk(tree) if isinstance(node, ast.Name) and node.id == 'build_exercise_history']
+    if len(refs) != len(expected):
+        found.append('orchestrator alias')
+    if expected:
+        owner_assignments = [ast.unparse(node.value) for node in ast.walk(tree)
+                             if isinstance(node, ast.Assign) and any(
+                                 isinstance(target, ast.Name) and target.id == 'owner_id'
+                                 for target in node.targets)]
+        if owner_assignments != ['g.mobile_user.id']:
+            found.append('owner binding mismatch')
+        view = next((node for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name == 'read_exercise_history'), None)
+        if view is None or [ast.unparse(d) for d in view.decorator_list] != [
+                "bp.get('/training/exercises/<exercise_id>/performance-history')",
+                '_rollout_gated', 'require_mobile_auth']:
+            found.append('view auth/gate mismatch')
+    return found
+
+
+def test_h_a8_exact_pr2_consumers():
     modules = list(_production_modules())
     assert len(modules) > 200 and any(path.name == "mobile_api.py" for path in modules)
     callers = {}
     for path in modules:
         found = caller_violations(path.read_text(encoding="utf-8"))
-        if found:
+        relative = str(path.relative_to(ROOT))
+        if relative in APPROVED_CONSUMERS:
+            assert approved_consumer_violations(relative, path.read_text()) == [], relative
+        elif found:
             callers[str(path.relative_to(ROOT))] = found
-    assert callers == {}, ("PR1 ships with ZERO production callers; a later approved "
-                           "slice must change this guard explicitly", callers)
+    assert callers == {}, ('TD-01 PR2 admits only the exact transport and DTO consumers', callers)
+    assert all((ROOT / relative).is_file() for relative in APPROVED_CONSUMERS)
+
+
+@pytest.mark.parametrize('relative,snippet', [
+    ('app/blueprints/mobile_exercise_history.py', 'from app.services.exercise_performance_history.queries import load_candidates'),
+    ('app/blueprints/mobile_exercise_history.py', 'from app.services import ai_coach'),
+    ('app/blueprints/mobile_exercise_history.py', 'from app.services import today_guidance_read_model'),
+    ('app/services/mobile_exercise_history.py', 'from app.services.progress_summary import build_progress_summary'),
+    ('app/services/mobile_exercise_history.py', 'from app.services.exercise_performance_history import build_exercise_history as read'),
+    ('app/blueprints/mobile_exercise_history.py', "__import__('app.services.exercise_performance_history')"),
+    ('app/blueprints/mobile_exercise_history.py', 'other = build_exercise_history'),
+    ('app/blueprints/mobile_exercise_history.py', 'db.session.query()'),
+    ('app/blueprints/mobile_exercise_history.py', 'db.session.get(None, 1)'),
+])
+def test_pr2_consumer_delta_is_non_vacuous(relative, snippet):
+    source = (ROOT / relative).read_text()
+    assert approved_consumer_violations(relative, source) == []
+    assert approved_consumer_violations(relative, source + '\n' + snippet)
 
 
 # ── H-A10 ───────────────────────────────────────────────────────────────────

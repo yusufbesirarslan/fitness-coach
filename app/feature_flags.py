@@ -135,6 +135,26 @@ def _rollback(key):
 # no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
+        key="FITX_EXERCISE_PERFORMANCE_HISTORY_ENABLED",
+        capability="TD-01 PR2 owner-scoped read-only exercise history and independent v1 capability GETs.",
+        owner=_OWNER,
+        default=False,
+        depends_on=("FITX_WORKOUT_SESSIONS_ENABLED", "MOBILE_AUTH_ENABLED"),
+        observability="ExercisePerformanceHistory counter with closed Event vocabulary; bounded failure/source-defect logs and request ID only; existing HTTP SLIs.",
+        prerequisites=("TD-01 PR2 exact-head CI, PostgreSQL and G9 qualified",
+                       "independent review and human merge approval",
+                       "separate G7 staging authorization and qualification",
+                       "reviewed selected-exercise consumer and U1/session-linked coverage evidence",
+                       "separate environment enablement and telemetry abort-policy approval"),
+        success_signals=("canonical recorded sets only", "four coverage states preserved", "owner isolation"),
+        abort_signals=("cross-account facts", "no_history with gaps", "legacy history SQL",
+                       "invariant_failed", "catalog_unavailable", "unexpected read_failed rate"),
+        rollback="Set FITX_EXERCISE_PERFORMANCE_HISTORY_ENABLED=0 and reload host configuration; both GETs return 404 before view auth. No data, schema or cache cleanup.",
+        lifecycle=LIFECYCLE_SHIPPED_DARK,
+        review_by="2026-11-01",
+        decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="FITX_TRAINING_EXECUTION_CONTEXT_ENABLED",
         capability="Negotiated native checkpoint V2 and private catalog notes; V1 preservation always runs.",
         owner=_OWNER,

@@ -273,8 +273,14 @@ def _purge_throttle_passed(now):
 # candidate is probed (/health, /health?deep=1) BEFORE traffic switches to it,
 # while the active revision still serves; request-time side effects on those
 # probes would be candidate-induced shared-state writes. Matched by endpoint,
-# so every query string of /health is covered and no other route is.
-_MAINTENANCE_EXEMPT_ENDPOINTS = frozenset({"health"})
+# so every query string of /health is covered. TD-01 PR2 additionally admits
+# exactly its two read-only endpoints; other product routes retain maintenance.
+_MAINTENANCE_EXEMPT_ENDPOINTS = frozenset({
+    "health",
+    # TD-01 PR2 is explicitly read-only, including shared before-request hooks.
+    "mobile_api.exercise_history_capabilities",
+    "mobile_api.read_exercise_history",
+})
 
 
 def request_runs_maintenance():

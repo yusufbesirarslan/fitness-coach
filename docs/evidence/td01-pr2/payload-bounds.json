@@ -1,0 +1,15 @@
+{
+  "bound_bytes": 65536,
+  "maximal_fixtures": {
+    "0": {
+      "bytes": 6724,
+      "sets": 0,
+      "markers": 64
+    },
+    "8": {
+      "bytes": 14536,
+      "sets": 160,
+      "markers": 56
+    }
+  }
+}

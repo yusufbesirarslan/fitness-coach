@@ -92,6 +92,8 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/training/plans/current"),
         ("get", "/api/v1/training/workouts/AAAAAAAAAAAAAAAAAAAAAAAA"),
         ("get", "/api/v1/training/workout-execution-capabilities"),
+        ("get", "/api/v1/training/exercise-history-capabilities"),
+        ("get", "/api/v1/training/exercises/ex_barbell_back_squat/performance-history"),
         ("post", "/api/v1/training/workout-sessions"),
         ("get", "/api/v1/training/workout-sessions/current"),
         ("get", "/api/v1/training/workout-sessions/abc"),
@@ -233,6 +235,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # registered unconditionally, so they belong in this allow-list.
             # TI-00 negotiated execution capabilities, same auth/session gate.
             ("/api/v1/training/workout-execution-capabilities", ("GET",)),
+            ("/api/v1/training/exercise-history-capabilities", ("GET",)),
+            ("/api/v1/training/exercises/<exercise_id>/performance-history", ("GET",)),
             ("/api/v1/training/workout-sessions", ("POST",)),
             ("/api/v1/training/workout-sessions/current", ("GET",)),
             # TI-03 read-only Training Insight; additionally behind P1 readiness.

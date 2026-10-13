@@ -299,6 +299,16 @@ Rollback disables P0 while retaining data. A downgrade deliberately erases notes
 Migration e2f3a4b5c6d7 follows merged TI-01A e1f2a3b4c5d6; the shared P0
 lifecycle record lists both foundations’ prerequisites.
 
+## TD-01 PR2 dark history transport
+
+`FITX_EXERCISE_PERFORMANCE_HISTORY_ENABLED=0` is the default; shipped_dark.
+Both history GETs require this flag AND sessions, with mobile-auth startup gating.
+Independent review, exact-head CI and human squash merge required. G9 local
+qualification is recorded in [PR2](TD01_PR2_EXERCISE_HISTORY_HTTP.md); G7 and
+environment enablement need separate authorization, approved consumer and coverage
+evidence. No staging/production configuration is changed by PR2. Rollback: set
+history flag 0 and reload configuration; no data/schema/cache cleanup.
+
 ## TI-03 P1 rollout addition
 
 `FITX_TRAINING_INSIGHTS_ENABLED=0` is the default. Valid states are OFF/OFF,
