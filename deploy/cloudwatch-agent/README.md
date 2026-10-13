@@ -13,6 +13,11 @@ the live configuration is reviewable and recoverable.
 | `/axisai/nginx/error` | `/var/log/nginx/error.log` | 30 days |
 | `/axisai/app` | web + worker container stdout/stderr | 30 days |
 
+The access log's line format is set by nginx, not by the agent. Since
+PRIV-LOG-01 it is the query-free `axisai_access` format (see
+`deploy/nginx/README.md` "Access log"). That applies once the live site carries
+the edit; lines already shipped keep their old content until retention expires.
+
 ### `/axisai/app` — why a glob and a filter
 
 The previous entry tailed one hard-coded

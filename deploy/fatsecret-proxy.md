@@ -8,6 +8,7 @@ nginx'in bir server bloğudur:
 
 server {
     listen 127.0.0.1:3000;          # YALNIZ loopback — aşağıdaki geçmişe bak
+    access_log off;                 # PRIV-LOG-01 — aşağıdaki "Erişim logu" bölümüne bak
     location / {
         proxy_pass https://platform.fatsecret.com;
         proxy_set_header Host platform.fatsecret.com;
@@ -21,6 +22,20 @@ Zincir: Flask (container) → `FATSECRET_BASE_URL` =
 (`location = /fatsecret/rest/server.api`) → upstream `127.0.0.1:3000`
 (bu blok) → `platform.fatsecret.com`. Bearer token'ı **uygulama** ekler;
 bu blok kimlik bilgisi taşımaz.
+
+## Erişim logu (PRIV-LOG-01)
+
+Backend FatSecret'i `GET .../fatsecret/rest/server.api?method=foods.search&search_expression=<arama>`
+ile çağırır; istek önce public sitenin `location = /fatsecret/rest/server.api`
+bloğundan, sonra bu `:3000` bloğundan geçer. Bu blok `access_log` tanımlamazsa
+http{} seviyesindeki `combined` biçimini miras alır ve arama metnini query
+string'iyle `/var/log/nginx/access.log`'a yazar. Her istek zaten public sitede
+query string'siz `axisai_access` satırı olarak (durum, upstream durumu ve
+süreleriyle) loglandığından bu hop için `access_log off;` seçildi: biçim
+tanımına (`sites-enabled` dosya sırasına) bağımlılık yok, kaybolan teşhis de
+yok. Upstream hataları (FatSecret'e ulaşılamıyor) error log'da kalır; o
+satırlar istek satırını içerir — bkz. deploy/nginx/README.md "Access log"
+kalıntı riskleri.
 
 ## Süpervizyon (I4 kapanışı)
 
