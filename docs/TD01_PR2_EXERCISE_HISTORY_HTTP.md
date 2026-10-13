@@ -181,3 +181,9 @@ submission. Require exact-head CI, independent review and human squash merge.
 G7 staging pending separate authorization. No mobile PR3, RC-01 edit, staging or
 production change, endpoint enablement, deployment or automatic merge.
 G9 PASS alone never establishes release readiness.
+
+The first exact-head CI run exposed the Sprint 13 nutrition discovery guard's
+blanket history-path prohibition. TD-01's two approved paths are now admitted
+by exact match; the prohibition still covers every unapproved path. After that
+inventory correction, the Sprint 13 discovery, PR2 API and PR1 architecture
+modules passed together (**167 passed**). PostgreSQL CI passed on the first run.
