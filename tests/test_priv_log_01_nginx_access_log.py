@@ -191,16 +191,24 @@ def test_extra_server_needs_its_own_access_log_and_off_is_accepted():
     assert run_check(patch_site(MIGRATED) + off)[0] == []
 
 
+def nginx_T(*files):
+    """Real nginx -T framing: marker, exact file bytes, one newline; open order."""
+    return b"".join(b"# configuration file " + path + b":\n" + content + b"\n" for path, content in files)
+
+
 def test_full_nginx_T_style_dump_tolerates_the_distribution_http_line():
-    dump = (b"# configuration file /etc/nginx/nginx.conf:\n"
-            b"events {}\nhttp {\n    access_log /var/log/nginx/access.log;\n"
-            b"    log_format legacy '$remote_addr \"$request\"';\n"
-            b"    include /etc/nginx/sites-enabled/*;\n}\n"
-            b"stream {\n    server {\n        listen 9000;\n    }\n}\n"
-            b"# configuration file /etc/nginx/sites-enabled/default:\n" + patch_site(MIGRATED)
-            + b"# configuration file /etc/nginx/sites-enabled/fatsecret-proxy:\n"
-            b"server {\n    listen 127.0.0.1:3000;\n    access_log off;\n}\n")
-    violations, warnings, servers, access_logs = run_check(dump)
+    dump = nginx_T(
+        (b"/etc/nginx/nginx.conf",
+         b"events {}\nhttp {\n    access_log /var/log/nginx/access.log;\n"
+         b"    log_format legacy '$remote_addr \"$request\"';\n"
+         b"    include /etc/nginx/sites-enabled/*;\n}\n"
+         b"stream {\n    server {\n        listen 9000;\n    }\n}\n"),
+        (b"/etc/nginx/sites-enabled/default", patch_site(MIGRATED)),
+        (b"/etc/nginx/axisai/active-web-upstream.conf", b"server 127.0.0.1:5000;\n"),
+        (b"/etc/letsencrypt/options-ssl-nginx.conf", b"ssl_session_timeout 1d;\n"),
+        (b"/etc/nginx/sites-enabled/fatsecret-proxy",
+         b"server {\n    listen 127.0.0.1:3000;\n    access_log off;\n}\n"))
+    violations, warnings, servers, access_logs = privacy.check(dump, TEMPLATE)
     assert violations == [] and servers == 3 and access_logs == 4
     assert warnings == ["log_format legacy contains a query-bearing or credential variable"]
 
@@ -221,14 +229,15 @@ def test_cloudwatch_agent_still_ships_the_same_access_log_file():
 # --- the CLI ------------------------------------------------------------------------------------------
 
 def test_cli_exit_codes_and_single_result_line(tmp_path):
+    # Off-host synthetic catalogs: host provenance is covered in test_priv_log_01_hf01.py.
     lines, errors = [], []
-    assert privacy.main(["-"], stdin=io.BytesIO(source_catalog(patch_site(MIGRATED))), out=lines.append,
-                        err=errors.append) == privacy.EXIT_OK
-    assert lines == ["result=ok servers=2 access_logs=2"] and errors == []
+    assert privacy.main(["--catalog-only", "-"], stdin=io.BytesIO(source_catalog(patch_site(MIGRATED))),
+                        out=lines.append, err=errors.append) == privacy.EXIT_OK
+    assert lines == ["result=ok servers=2 access_logs=2 warnings=0 provenance=catalog-only"] and errors == []
     lines.clear()
-    assert privacy.main(["-"], stdin=io.BytesIO(source_catalog(MIGRATED)), out=lines.append,
+    assert privacy.main(["--catalog-only", "-"], stdin=io.BytesIO(source_catalog(MIGRATED)), out=lines.append,
                         err=errors.append) == privacy.EXIT_VIOLATION
-    assert lines == ["result=violation servers=2 access_logs=0"] and errors
+    assert lines == ["result=violation servers=2 access_logs=0 warnings=0 provenance=catalog-only"] and errors
     assert privacy.main([], out=lines.append, err=errors.append) == privacy.EXIT_USAGE
     assert privacy.main(["-"], stdin=io.BytesIO(b"server {"), out=lines.append,
                         err=errors.append) == privacy.EXIT_USAGE
