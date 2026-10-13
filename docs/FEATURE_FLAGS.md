@@ -1,5 +1,14 @@
 # Feature flags — inventory and lifecycle
 
+TD-01 PR2: `FITX_EXERCISE_PERFORMANCE_HISTORY_ENABLED` defaults OFF, shipped_dark,
+owner @yusufbesirarslan, review 2026-11-01. Depends on sessions and mobile auth;
+gates only the separate v1 history/capability GETs. No migration or data change.
+Rollback: set 0 and reload configuration; both GETs return 404 before view auth.
+Independent review, exact-head CI, G9, separate G7 and approved consumer/coverage
+evidence precede environment enablement. Abort on cross-account facts, no_history
+with gaps, legacy SQL, invariant/catalog failure or unexpected read failure rate.
+See [PR2 contract and evidence](TD01_PR2_EXERCISE_HISTORY_HTTP.md).
+
 Source of truth: **`app/feature_flags.py`**. This document is the readable
 projection of that registry; `tests/test_feature_flag_registry.py` fails if a
 flag exists in one and not the other.

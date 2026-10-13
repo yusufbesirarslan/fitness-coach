@@ -171,6 +171,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/plans/replacement/confirm",
         "/api/v1/training/workouts/<workout_reference>",
         "/api/v1/training/workout-execution-capabilities",
+        "/api/v1/training/exercise-history-capabilities",
+        "/api/v1/training/exercises/<exercise_id>/performance-history",
         "/api/v1/training/workout-sessions",
         "/api/v1/training/workout-sessions/current",
         "/api/v1/training/workout-sessions/<session_reference>",
@@ -254,6 +256,8 @@ _APPROVED_TRAINING_PATHS = {
     # review, not by widening the guard.
     # TI-00 capability negotiation reports support; no aggregate or write authority.
     "/api/v1/training/workout-execution-capabilities",
+    "/api/v1/training/exercise-history-capabilities",
+    "/api/v1/training/exercises/<exercise_id>/performance-history",
     "/api/v1/training/workout-sessions",
     "/api/v1/training/workout-sessions/current",
     "/api/v1/training/workout-sessions/<session_reference>",

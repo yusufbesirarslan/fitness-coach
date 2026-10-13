@@ -1,0 +1,45 @@
+{
+  "contract_version": 1,
+  "exercise_performance_history": {
+    "exercise_id": "ex_barbell_back_squat",
+    "state": "available",
+    "window": {
+      "start_date": "2026-08-06",
+      "end_date": "2026-10-01",
+      "timezone": "Europe/Istanbul"
+    },
+    "latest_valid_occurrence_ref": {
+      "session_ref": "recorded",
+      "checkpoint_revision": 3
+    },
+    "occurrences": [
+      {
+        "session_ref": "recorded",
+        "checkpoint_revision": 3,
+        "workout_date": "2026-09-30",
+        "completed_at": "2026-09-30T12:00:00Z",
+        "sets": [
+          {
+            "index": 0,
+            "reps": 8,
+            "weight_kg": 60.0
+          },
+          {
+            "index": 2,
+            "reps": null,
+            "weight_kg": 0.0
+          }
+        ]
+      }
+    ],
+    "coverage": {
+      "complete": true,
+      "scanned_sessions": 1,
+      "excluded_cross_date": 0,
+      "excluded_missing_completed_at": 0,
+      "unavailable_sessions": [],
+      "scan_limit_reached": false,
+      "occurrence_limit_reached": false
+    }
+  }
+}

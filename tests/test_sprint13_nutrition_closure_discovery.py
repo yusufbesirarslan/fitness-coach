@@ -454,7 +454,7 @@ def test_the_mobile_surface_publishes_no_history_menu_plan_or_water(
     """
     # LP-09's Coach history is the one approved "history" path: it is the web
     # Coach's conversation window, not a nutrition history. Exempted by exact
-    # path, so any other history surface (nutrition or not) still fails here.
+    # path, so unapproved history surfaces still fail here.
     approved = {"/api/v1/coach/history"}
     # NUTR-PR7 made History, the Nutrition Plan and hydration (water) native
     # by explicit owner decision — admitted by EXACT path only. Drafts and
@@ -468,6 +468,12 @@ def test_the_mobile_surface_publishes_no_history_menu_plan_or_water(
     # the explicit local confirmation path through canonical LogFood.
     approved |= {"/api/v1/nutrition/menu/analyze"}
     approved |= {"/api/v1/nutrition/menu/log"}
+    # TD-01 PR2: owner-approved, read-only selected-exercise history and its
+    # dedicated capability contract. Admit only these exact paths.
+    approved |= {
+        "/api/v1/training/exercise-history-capabilities",
+        "/api/v1/training/exercises/<exercise_id>/performance-history",
+    }
     paths = {rule[0] for rule in api_v1_rules} - approved
     for absent in ("history", "menu", "nutrition-plan", "water", "draft",
                    "diary/builder"):

@@ -22,9 +22,65 @@ from tests.test_mobile_workout_sessions_pg import (
     _ENABLED, _PG_URL, _SKIP_REASON, LINEAGE, VERSION, _completion_kwargs, _plan_document,
     _require_pg,
 )
+from test_lp16b_native_checkin_api import real_bearer  # noqa: F401
 
 pytestmark = [pytest.mark.pg_concurrency,
               pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)]
+
+
+@pytest.mark.parametrize('state', ['available', 'available_with_gaps', 'no_history', 'undetermined'])
+def test_pr2_real_pg_authenticated_transport_four_states(pg, real_bearer, state):
+    from flask.testing import FlaskClient
+    from app.extensions import db
+    from app.models import User
+    from tests.test_td01_pr2_exercise_history_api import (
+        FLAG, CAPABILITY, get_history, assert_read_only_request,
+    )
+    app, (owner, stranger) = pg
+    app.config.update({FLAG: True, 'FITX_WORKOUT_SESSIONS_ENABLED': True})
+    client = FlaskClient(app, app.response_class)
+    with app.app_context():
+        a, b = real_bearer(db.session.get(User, owner)), real_bearer(db.session.get(User, stranger))
+        if state.startswith('available'):
+            persist(owner, candidate('pg-owned', day(-1)))
+        if state in ('undetermined', 'available_with_gaps'):
+            persist(owner, candidate('pg-corrupt', day(-2), checkpoint_data='{x'))
+        baseline, statements = assert_read_only_request(client, a)
+        body = baseline.get_json()['exercise_performance_history']
+        assert body['state'] == state
+        # Auth infrastructure SELECTs are recorded separately from the sole history SELECT.
+        print('PR2 PG auth SELECT count=', len(statements) - 1, 'history SELECT count=1')
+        persist(stranger, candidate('foreign', day(-1)))
+        assert get_history(client, a).data == baseline.data
+        foreign = get_history(client, b).get_json()['exercise_performance_history']
+        assert [o['session_ref'] for o in foreign['occurrences']] == ['foreign']
+        assert foreign['coverage']['scanned_sessions'] == 1
+        assert foreign['coverage']['unavailable_sessions'] == []
+        spoof = dict(a, **{'user_id': str(stranger)})
+        assert get_history(client, spoof, path=f'/api/v1/training/exercises/{SQUAT}/performance-history?user_id={stranger}&limit=999').data == baseline.data
+        assert get_history(client, a, path=CAPABILITY).status_code == 200
+        app.config[FLAG] = False
+        assert get_history(client, a).status_code == 404
+        assert get_history(client, a, path=CAPABILITY).status_code == 404
+
+
+def test_pr2_real_pg_storage_failure_is_retryable_refusal(pg, real_bearer, monkeypatch):
+    from flask.testing import FlaskClient
+    from app.extensions import db
+    from app.models import User
+    from app.services.exercise_performance_history import queries
+    from sqlalchemy.exc import OperationalError
+    from tests.test_td01_pr2_exercise_history_api import FLAG, get_history, _error
+    app, (owner, _) = pg
+    app.config.update({FLAG: True, 'FITX_WORKOUT_SESSIONS_ENABLED': True})
+    with app.app_context():
+        headers = real_bearer(db.session.get(User, owner))
+        def fail(*args):
+            raise OperationalError('synthetic failed read', {}, Exception('synthetic'))
+        monkeypatch.setattr(queries, 'load_candidates', fail)
+        response = get_history(FlaskClient(app, app.response_class), headers)
+        _error(response, 503, 'TRAINING_HISTORY_TEMPORARILY_UNAVAILABLE')
+        assert response.headers['Retry-After'] == '15'
 
 # Differ only in case and in '-'/'_'. Byte order (DESC): a > _ > B > -.
 TIE_IDS = ("Btie", "atie", "-tie", "_tie")
