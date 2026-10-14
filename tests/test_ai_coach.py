@@ -348,10 +348,7 @@ def test_sanitize_client_history():
         "düz string",
     ]
     out = _sanitize_client_history(raw)
-    assert out[0] == {"role": "assistant", "content": "merhaba"}
-    assert out[1]["role"] == "user"
-    assert len(out[1]["content"]) == 400                 # COACH_HISTORY_CHAR_CAP
-    assert len(out) == 2
+    assert out == []  # no provenance for legacy client history
     assert _sanitize_client_history("liste değil") == []
 
 
@@ -362,7 +359,7 @@ def test_sanitize_history_skips_nonstring_text_and_unknown_role():
         {"role": "assistant", "content": "tamam"},    # 'content' alanı da kabul edilir
         "düz string değil dict",                      # dict değil → atla
     ]
-    assert _sanitize_client_history(raw) == [{"role": "assistant", "content": "tamam"}]
+    assert _sanitize_client_history(raw) == []
 
 
 # ---------------------------------------------------------------------------
@@ -895,124 +892,61 @@ def test_checkin_feedback_all_progress_framings(app, monkeypatch, goal, weight, 
 # ---------------------------------------------------------------------------
 
 def test_fetch_coach_context_without_mcp_runtime(auth_user, monkeypatch):
-    queries = importlib.import_module("app.services.coach_context_queries")
-    monkeypatch.setattr(queries, "get_user_fitness_summary", lambda uid: "özet")
-    monkeypatch.setattr(queries, "get_user_workout_history", lambda uid, days: "antrenman")
-    monkeypatch.setattr(queries, "get_user_supplement_stack", lambda uid: "supplement")
-    monkeypatch.setattr(queries, "get_user_nutrition_log", lambda uid, days: "beslenme")
-    monkeypatch.setattr(queries, "get_friend_activities", lambda uid: "arkadaş")
-
     real_import = builtins.__import__
-
     def block_mcp_imports(name, *args, **kwargs):
-        if name == "mcp" or name.startswith("mcp."):
+        if name in ("mcp", "fitx_mcp") or name.startswith(("mcp.", "fitx_mcp.")):
             raise ModuleNotFoundError("production runtime excludes mcp")
-        if name == "fitx_mcp" or name.startswith("fitx_mcp."):
-            raise ModuleNotFoundError("production runtime excludes fitx_mcp")
         return real_import(name, *args, **kwargs)
-
     monkeypatch.setattr(builtins, "__import__", block_mcp_imports)
+    context = ai_coach._fetch_coach_context(auth_user.id, "workout")
+    assert "total_workouts_completed" in context
+    assert "ARKADAŞ" not in context
 
-    context = ai_coach._fetch_coach_context(auth_user.id, "soru")
-
-    assert "[FITNESS ÖZETİ]\nözet" in context
-    assert "[ANTRENMAN GEÇMİŞİ (7 gün)]\nantrenman" in context
-    assert "[SUPPLEMENT STACK]\nsupplement" in context
-    assert "[BESLENME LOGU (3 gün)]\nbeslenme" in context
-    assert "[ARKADAŞ AKTİVİTELERİ]" in context
 
 def test_fetch_coach_context_collects_sections_and_degrades(auth_user, monkeypatch):
-    from app.services import coach_context_queries
+    from app.services import context_builder
+    monkeypatch.setattr(context_builder, "resolve_workout_state", lambda *a: (_ for _ in ()).throw(RuntimeError("db down")))
+    context = ai_coach._fetch_coach_context(auth_user.id, "workout")
+    assert "total_workouts_completed" in context
+    assert "SUPPLEMENT" not in context
 
-    def fail(*args):
-        raise RuntimeError("db down")
-    monkeypatch.setattr(coach_context_queries, "get_user_fitness_summary", lambda uid: "özet verisi")
-    monkeypatch.setattr(coach_context_queries, "get_user_workout_history", fail)
-    monkeypatch.setattr(coach_context_queries, "get_user_supplement_stack", lambda uid: "kreatin")
-    monkeypatch.setattr(coach_context_queries, "get_user_nutrition_log", fail)
-    monkeypatch.setattr(coach_context_queries, "get_friend_activities", fail)
-
-    context = ai_coach._fetch_coach_context(auth_user.id, "soru")
-    assert "[FITNESS ÖZETİ]\nözet verisi" in context
-    assert "[SUPPLEMENT STACK]\nkreatin" in context
-    assert "[ANTRENMAN GEÇMİŞİ" not in context           # hata → bölüm atlandı
-    assert "[PROAKTİF BİLDİRİMLER]" in context            # nudge motoru gerçek DB'den
 
 
 def test_fetch_coach_context_degrades_summary_supplements_and_nudges(auth_user, monkeypatch):
-    from app.services import analytics_engine, coach_context_queries
-
+    from app.services import coach_context_queries
     def fail(*args, **kwargs):
-        raise RuntimeError("db down")
-    # Özet + supplement + nudge motoru patlar; diğerleri çalışır → kısmi bağlam.
-    monkeypatch.setattr(coach_context_queries, "get_user_fitness_summary", fail)
-    monkeypatch.setattr(coach_context_queries, "get_user_workout_history", lambda uid, d: "antrenman")
-    monkeypatch.setattr(coach_context_queries, "get_user_supplement_stack", fail)
-    monkeypatch.setattr(coach_context_queries, "get_user_nutrition_log", lambda uid, d: "log")
-    monkeypatch.setattr(coach_context_queries, "get_friend_activities", lambda uid: "aktivite")
-    monkeypatch.setattr(analytics_engine, "get_nudges", fail)
+        raise AssertionError("automatic raw context queried")
+    for name in ("get_user_fitness_summary", "get_user_workout_history", "get_user_supplement_stack", "get_user_nutrition_log", "get_friend_activities"):
+        monkeypatch.setattr(coach_context_queries, name, fail)
+    assert ai_coach._fetch_coach_context(auth_user.id, "hello") == ""
 
-    context = ai_coach._fetch_coach_context(auth_user.id)
-    assert "[FITNESS ÖZETİ] Veri alınamadı." in context  # özet hatası → düşürülmüş etiket
-    assert "[SUPPLEMENT STACK]" not in context            # supplement hatası → atlandı
-    assert "[PROAKTİF BİLDİRİMLER]" not in context         # nudge hatası → atlandı
-    assert "[ANTRENMAN GEÇMİŞİ (7 gün)]\nantrenman" in context
 
 
 def test_fetch_profile_and_trends_surfaces_memory_checkins_activity(auth_user):
-    # Kalıcı hafıza (manage_user_memory ile yazılan veriler).
-    auth_user.user_metadata = {"injuries": "Menisküs",
-                               "dietary_restrictions": "laktoz intoleransı",
-                               "equipment_available": "dumbbell, bench"}
-    auth_user.target_weight = 82.0
-    auth_user.goal_type = "cut"
-    # Haftalık check-in: düşük uyku / yüksek yorgunluk / duraksamış yüklenme.
-    db.session.add(WeeklyCheckIn(user_id=auth_user.id, weight=85.0, yogunluk=4,
-                                 fatigue=5, uyku_kalitesi=2, beslenme_uyumu=3,
-                                 progressive_overload="hayir", note="dizim ağrıyor"))
-    # Günlük aktivite (son 7 gün içinde).
-    db.session.add(DailyActivity(user_id=auth_user.id, steps=8000,
-                                 calories_burned=350, distance_km=6.0,
-                                 duration_min=60, date_key=app_today().isoformat()))
+    auth_user.user_metadata = {"injuries": "Menisküs THIRD_PARTY", "equipment_available": ["dumbbell"], "preferences": {"friend": "THIRD_PARTY"}}
+    db.session.add(WeeklyCheckIn(user_id=auth_user.id, weight=85, yogunluk=4, fatigue=5, uyku_kalitesi=2, beslenme_uyumu=3, note="THIRD_PARTY"))
     db.session.commit()
+    training = "".join(ai_coach._fetch_profile_and_trends(auth_user.id, "training"))
+    recovery = "".join(ai_coach._fetch_profile_and_trends(auth_user.id, "recovery"))
+    assert "deep squat" in training and "dumbbell" in training
+    assert '"uyku_kalitesi": 2' in recovery or '"uyku_kalitesi": 2.0' in recovery
+    assert "THIRD_PARTY" not in training + recovery
 
-    blob = "\n\n".join(ai_coach._fetch_profile_and_trends(auth_user.id))
-    assert "[KULLANICI PROFİLİ & HAFIZA]" in blob
-    assert "Menisküs" in blob
-    assert "laktoz intoleransı" in blob
-    assert "dumbbell, bench" in blob
-    assert "82.0 kg" in blob
-    assert "[HAFTALIK CHECK-IN TRENDİ" in blob
-    assert "uyku kalitesi 2/5" in blob
-    assert "progresif yüklenme: hayir" in blob
-    assert "[GÜNLÜK AKTİVİTE (7 gün)]" in blob
-    assert "toplam adım: 8000" in blob
 
 
 def test_fetch_profile_and_trends_flags_missing_injuries_and_omits_empty(auth_user):
-    # injuries kaydı yoksa profil bloğu DAİMA gelir ve koç sorması için işaretlenir;
-    # check-in / aktivite verisi olmayan bölümler atlanır (gürültü üretme).
-    blob = "\n\n".join(ai_coach._fetch_profile_and_trends(auth_user.id))
-    assert "[KULLANICI PROFİLİ & HAFIZA]" in blob
-    assert "injuries): KAYIT YOK" in blob
-    assert "[HAFTALIK CHECK-IN TRENDİ" not in blob
-    assert "[GÜNLÜK AKTİVİTE" not in blob
+    data = json.loads(ai_coach._fetch_profile_and_trends(auth_user.id)[0].split("\n", 1)[1])
+    assert data["injuries"] is None
+    assert "recent_ratings" not in data
+
 
 
 def test_fetch_coach_context_includes_profile_section(auth_user, monkeypatch):
-    from app.services import coach_context_queries
-    # MCP bölümlerini sabitle; asıl ilgi profil bloğunun bağlama girmesi.
-    monkeypatch.setattr(coach_context_queries, "get_user_fitness_summary", lambda uid: "özet")
-    monkeypatch.setattr(coach_context_queries, "get_user_workout_history", lambda uid, d: "antrenman")
-    monkeypatch.setattr(coach_context_queries, "get_user_supplement_stack", lambda uid: "supp")
-    monkeypatch.setattr(coach_context_queries, "get_user_nutrition_log", lambda uid, d: "log")
-    monkeypatch.setattr(coach_context_queries, "get_friend_activities", lambda uid: "arkadaş")
     auth_user.user_metadata = {"dietary_restrictions": "vegan"}
     db.session.commit()
+    assert "vegan" in ai_coach._fetch_coach_context(auth_user.id, "ne yiyeyim?")
+    assert "vegan" not in ai_coach._fetch_coach_context(auth_user.id, "workout")
 
-    context = ai_coach._fetch_coach_context(auth_user.id, "ne yiyeyim?")
-    assert "[KULLANICI PROFİLİ & HAFIZA]" in context
-    assert "vegan" in context
 
 
 def test_cleanup_stale_pending_removes_aged_rows(auth_user):

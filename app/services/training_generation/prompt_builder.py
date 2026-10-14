@@ -1,4 +1,4 @@
-from app.services import injury_constraints
+from app.services import injury_constraints, coach_privacy
 from app.services.training_generation.exercise_choices import (
     CompatibleExerciseChoices,
 )
@@ -125,10 +125,10 @@ PROGRAM GENERATION CONTRACT
 - Canonical program style: {style_key} ({preferences.antrenman_tarzi})
 
 USER PROFILE
-- Profile goal (body/composition context): {features.goal}
+- Profile goal (body/composition context): {coach_privacy.token(features.goal, coach_privacy.GOALS)}
 - Program focus (odak_hedef={preferences.odak_hedef}): {focus_directive}
-- Self-reported level: {features.self_reported_level}
-- Current activity: {features.current_activity}
+- Self-reported level: {coach_privacy.token(features.self_reported_level, coach_privacy.LEVELS)}
+- Current activity: {coach_privacy.token(features.current_activity, ("sedentary", "active", "very_active"))}
 - Age: {features.age or 'unknown'}
 - Weight: {features.weight or 'unknown'} kg
 - Weekly frequency tolerance: {preferences.gun_sayisi}

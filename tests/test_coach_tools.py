@@ -74,11 +74,11 @@ def test_manage_user_memory_roundtrip_and_second_update(app, make_user):
     assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "injuries"))["value"] is None
     # update → persist
     ai_coach._tool_manage_user_memory(user.id, "update", "injuries", "Menisküs")
-    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "injuries"))["value"] == "Menisküs"
+    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "injuries"))["value"]["constraints_require_confirmation"] is True
     # İKİNCİ update başka bir anahtara da kalıcı olmalı (flag_modified bug yakalama)
     ai_coach._tool_manage_user_memory(user.id, "update", "fitness_goals", "kas kazanma")
-    mem = json.loads(ai_coach._tool_manage_user_memory(user.id, "get", ""))["memory"]
-    assert mem == {"injuries": "Menisküs", "fitness_goals": "kas kazanma"}
+    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", ""))["status"] == "unsupported"
+    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "fitness_goals"))["value"] == "kas kazanma"
 
 
 def test_manage_user_memory_rejects_unknown_key_and_action(app, make_user):
@@ -94,10 +94,10 @@ def test_manage_user_memory_update_requires_value_and_does_not_wipe(app, make_us
     # value yok → hata, mevcut değer korunur
     out = json.loads(ai_coach._tool_manage_user_memory(user.id, "update", "injuries", None))
     assert out["status"] == "error"
-    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "injuries"))["value"] == "Menisküs"
+    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "injuries"))["value"]["constraints_require_confirmation"] is True
     # boş string de reddedilir
     assert json.loads(ai_coach._tool_manage_user_memory(user.id, "update", "injuries", "   "))["status"] == "error"
-    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "injuries"))["value"] == "Menisküs"
+    assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "injuries"))["value"]["constraints_require_confirmation"] is True
 
 
 # ---------------------------------------------------------------------------

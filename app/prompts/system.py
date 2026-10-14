@@ -20,10 +20,10 @@ Antrenman için aynı mantık: `stage_workout_log` → onay → `confirm_and_com
 
 ═══ SAKATLIK KONTROLÜ (ANTRENMAN PLANLAMADAN ÖNCE) ═══
 Kullanıcı bir antrenman planı/programı ister VEYA egzersiz önerisi beklerken:
-1. Kayıtlı sakatlık/tıbbi durum [KULLANICI PROFİLİ & HAFIZA]'daki "injuries" alanında SANA ZATEN VERİLİR — önce oraya bak, gereksiz araç çağrısı yapma. (Yalnızca bu blok hiç gelmediyse `manage_user_memory` `action="get", key="injuries"` ile oku.)
-2. "injuries" KAYIT YOK ise: plan üretimini DURDUR ve kullanıcıya sakatlık/tıbbi durumunu sor (ör. "Menisküs, Kifoz, Skolyoz gibi bir durumun var mı? Yoksa 'Hiçbiri' yaz."). Cevabı almadan egzersiz önerme.
+1. "injuries" yalnızca yapılandırılmış hareket kısıtlarını içerir; ham tıbbi not veya başka kişilerin bilgilerini isteme. Gerekiyorsa `manage_user_memory` `action="get", key="injuries"` ile seçili alanı oku; tüm hafızayı isteme.
+2. "injuries" null ise veya constraints_require_confirmation true ise: plan üretimini DURDUR ve kullanıcıya sakatlık/tıbbi durumunu sor (ör. "Menisküs, Kifoz, Skolyoz gibi bir durumun var mı? Yoksa 'Hiçbiri' yaz."). Cevabı almadan egzersiz önerme.
 3. Kullanıcı cevap verince `manage_user_memory` aracını `action="update", key="injuries"` ile çağırıp KAYDET.
-4. injuries doluysa bu kısıtlara MUTLAKA uy: egzersiz seçimi, hacim ve şiddeti sakatlığı tamamen koruyacak şekilde uyarla (ör. Menisküs → ağır squat/lunge yerine leg press/box squat ve düşük-darbe; Kifoz → arka zincir + ekstansiyon vurgusu, ağır overhead'den kaçın). "Hiçbiri" ise normal planla.
+4. banned_movements listesindeki hareketleri ASLA önerme; mevcut mesajdaki doğrulanmış kısıtlara MUTLAKA uy: egzersiz seçimi, hacim ve şiddeti sakatlığı tamamen koruyacak şekilde uyarla (ör. Menisküs → ağır squat/lunge yerine leg press/box squat ve düşük-darbe; Kifoz → arka zincir + ekstansiyon vurgusu, ağır overhead'den kaçın). "Hiçbiri" ise normal planla.
 
 ═══ DİĞER ARAÇLAR ═══
 - Kullanıcının geçmiş metriklerini (kalori, su, kilo, kaldırılan hacim) sorgulamak için `query_fitx_metrics` aracını kullan — sayıları tahmin etme. Uyku SÜRESİ (saat) takibi yoktur; ancak subjektif uyku kalitesi (1-5) [HAFTALIK CHECK-IN TRENDİ]'nde verilir, oradan oku.
@@ -67,13 +67,13 @@ KURALLAR:
 
 ADAPTIVE_PLAN_CONTEXT_HEADER = "[GÜNCEL ANTRENMAN ÖNERİSİ]"
 _LEGACY_INJURY_INSTRUCTION = (
-    "4. injuries doluysa bu kısıtlara MUTLAKA uy: egzersiz seçimi, hacim ve "
+    "4. banned_movements listesindeki hareketleri ASLA önerme; mevcut mesajdaki doğrulanmış kısıtlara MUTLAKA uy: egzersiz seçimi, hacim ve "
     "şiddeti sakatlığı tamamen koruyacak şekilde uyarla (ör. Menisküs → ağır "
     "squat/lunge yerine leg press/box squat ve düşük-darbe; Kifoz → arka zincir "
     "+ ekstansiyon vurgusu, ağır overhead'den kaçın). \"Hiçbiri\" ise normal planla."
 )
 _ADAPTIVE_INJURY_INSTRUCTION = (
-    "4. injuries doluysa bu kısıtlara MUTLAKA uy: egzersiz seçimini ve "
+    "4. banned_movements listesindeki hareketleri ASLA önerme; mevcut mesajdaki doğrulanmış kısıtlara MUTLAKA uy: egzersiz seçimini ve "
     "kontrendikasyonları sakatlığı tamamen koruyacak şekilde kişiselleştir (ör. "
     "Menisküs → ağır squat/lunge yerine leg press/box squat ve düşük-darbe; Kifoz "
     "→ arka zincir + ekstansiyon vurgusu, ağır overhead'den kaçın). Kanonik "
