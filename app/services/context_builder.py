@@ -63,18 +63,11 @@ def fetch_coach_context(user_id, question="", language="tr", handoff=None):
     try:
         if selected == "training":
             from app.services.training_history import build_training_history_summary
-            from app.services.workout_state.models import CANONICAL_PRIMARY_STATES
             summary = build_training_history_summary(user_id, weeks=1)
             parts.append(json.dumps({
                 "period_days": 7, "total_workouts_completed": summary.total_sessions,
                 "total_volume": summary.total_volume,
                 "volume_trend": privacy.token(summary.volume_trend, ("up", "flat", "down")),
-            }))
-            state = resolve_workout_state(user_id)
-            parts.append("[GÜNCEL ANTRENMAN DURUMU]\n" + json.dumps({
-                "primary_state": privacy.token(state.primary_state, CANONICAL_PRIMARY_STATES),
-                "completed_today": state.completed_today is True,
-                "is_rest_day": state.is_rest_day is True,
             }))
         elif selected == "nutrition" and handoff != "nutrition-day":
             # Reuse the already closed owned daily-facts projection.
@@ -85,6 +78,16 @@ def fetch_coach_context(user_id, question="", language="tr", handoff=None):
             parts.append(json.dumps(privacy.numeric_fields(
                 {"weight": user.weight, "target_weight": user.target_weight},
                 ("weight", "target_weight"))))
+        if selected in ("chat", "training"):
+            # Generic Coach still needs the owner's canonical current state.
+            # Use the snapshot interface, never its full UI/domain serializer.
+            from app.services.workout_state.models import CANONICAL_PRIMARY_STATES
+            state = resolve_workout_state(user_id)
+            parts.append("[GÜNCEL ANTRENMAN DURUMU]\n" + json.dumps({
+                "primary_state": privacy.token(state.primary_state, CANONICAL_PRIMARY_STATES),
+                "completed_today": state.completed_today is True,
+                "is_rest_day": state.is_rest_day is True,
+            }))
         if handoff in ("progress-insight", "nutrition-day"):
             from app.coach_handoff import coach_handoff_context
             parts.append(coach_handoff_context(handoff, user_id, language))

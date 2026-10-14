@@ -918,7 +918,9 @@ def test_fetch_coach_context_degrades_summary_supplements_and_nudges(auth_user, 
         raise AssertionError("automatic raw context queried")
     for name in ("get_user_fitness_summary", "get_user_workout_history", "get_user_supplement_stack", "get_user_nutrition_log", "get_friend_activities"):
         monkeypatch.setattr(coach_context_queries, name, fail)
-    assert ai_coach._fetch_coach_context(auth_user.id, "hello") == ""
+    context = ai_coach._fetch_coach_context(auth_user.id, "hello")
+    assert json.loads(context.split("\n", 1)[1]) == {
+        "primary_state": "no_plan", "completed_today": False, "is_rest_day": False}
 
 
 

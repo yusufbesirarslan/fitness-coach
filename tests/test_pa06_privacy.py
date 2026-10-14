@@ -363,17 +363,83 @@ def test_m02_checkin_feedback_omits_name_and_freeform_note(app, monkeypatch):
     assert b'82' in captures[0] and CANARY.encode() not in captures[0]
 
 
-def test_m04_mobile_principal_owns_context_even_with_another_web_cookie(app, make_user):
+def test_m04_mobile_principal_owns_context_even_with_another_web_cookie(app, make_user, monkeypatch):
     from flask import g
     from flask_login import login_user
     from app.services.context_builder import fetch_coach_context
+    from app.services import context_builder
     a, b = make_user('cookie_a'), make_user('bearer_b')
+    calls = []
+    def resolve(user_id):
+        calls.append(user_id)
+        return NS(primary_state='rest_day', completed_today=False, is_rest_day=True)
+    monkeypatch.setattr(context_builder, 'resolve_workout_state', resolve)
     with app.test_request_context('/api/v1/coach/messages'):
         login_user(a)
         g.mobile_user = b
-        assert fetch_coach_context(b.id, 'hello') == ''
+        assert json.loads(fetch_coach_context(b.id, 'hello').split('\n', 1)[1]) == {
+            'primary_state': 'rest_day', 'completed_today': False, 'is_rest_day': True}
         with pytest.raises(PermissionError):
             fetch_coach_context(a.id, 'hello')
+        assert calls == [b.id]
+
+
+@pytest.mark.parametrize('question', ['', None, 'hello', 'Review my workout progress'])
+def test_m01_canonical_state_projection_reaches_sdk_without_social(
+        app, make_user, monkeypatch, question):
+    from app.services import context_builder
+    from app.services.workout_state.models import WorkoutStateSnapshot
+    user = make_user('canonical_owner')
+    seed(user)
+    state = WorkoutStateSnapshot(
+        today=app_today(), schedule_state='scheduled', execution_state='in_progress',
+        plan_relationship='matches_scheduled', action='resume', primary_state='in_progress',
+        completed_today=False, is_rest_day=False, stale_previous_workout=False,
+        contract_version=2, anomaly=CANARY, session={'metadata': CANARY},
+        execution_view=NS(notes=CANARY))
+    calls = []
+    def resolve(user_id):
+        calls.append(user_id)
+        return state
+    def forbidden(*args, **kwargs):
+        pytest.fail('unrestricted serialization/social query was called')
+    monkeypatch.setattr(context_builder, 'resolve_workout_state', resolve)
+    monkeypatch.setattr(WorkoutStateSnapshot, 'to_dict', forbidden)
+    for name in ('get_friend_activities', 'get_user_fitness_summary', 'get_user_workout_history'):
+        monkeypatch.setattr(coach_context_queries, name, forbidden)
+    context = context_builder.fetch_coach_context(user.id, question)
+    header = '[GÜNCEL ANTRENMAN DURUMU]\n'
+    assert context.count(header) == 1
+    assert json.loads(context.split(header)[1].split('\n\n')[0]) == {
+        'primary_state': 'in_progress', 'completed_today': False, 'is_rest_day': False}
+    assert calls == [user.id]
+    if coach_privacy.operation(question) == 'chat':
+        assert context.startswith(header) and '\n\n' not in context
+    captures = openai_capture(monkeypatch, [answer()])
+    assert ai_coach._run_coach_conversation_openai(user.id, question or 'hello', context, []) == 'OWN_TRAINING_OK'
+    assert b'in_progress' in captures[0]
+    assert CANARY.encode() not in captures[0] and b'987654321' not in captures[0]
+
+
+def test_m01_default_context_without_plan_uses_canonical_state(app, make_user):
+    from app.services.context_builder import fetch_coach_context
+    user = make_user('no_workout_data')
+    assert json.loads(fetch_coach_context(user.id).split('\n', 1)[1]) == {
+        'primary_state': 'no_plan', 'completed_today': False, 'is_rest_day': False}
+
+
+def test_m01_default_context_missing_owner_or_snapshot_fails_closed(app, make_user, monkeypatch):
+    from app.services import context_builder
+    calls = []
+    def unavailable(user_id):
+        calls.append(user_id)
+        raise RuntimeError('synthetic unavailable state')
+    monkeypatch.setattr(context_builder, 'resolve_workout_state', unavailable)
+    assert context_builder.fetch_coach_context(-1) == ''
+    assert calls == []
+    user = make_user('missing_snapshot')
+    assert context_builder.fetch_coach_context(user.id) == ''
+    assert calls == [user.id]
 
 
 def test_m02_tool_positive_receipt_preserves_closed_prescription():

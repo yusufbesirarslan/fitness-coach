@@ -492,9 +492,13 @@ def test_coach_context_includes_one_canonical_current_snapshot(
     calls = []
 
     class Snapshot:
+        # Coach consumes the resolver's attributes, not the UI serializer.
+        primary_state = "in_progress"
+        completed_today = False
+        is_rest_day = False
+
         def to_dict(self):
-            return {"contract_version": 2, "primary_state": "in_progress",
-                    "action": "resume", "completed_today": False}
+            pytest.fail("Coach must explicitly project the canonical snapshot")
 
     def resolve(user_id):
         calls.append(user_id)
@@ -504,7 +508,7 @@ def test_coach_context_includes_one_canonical_current_snapshot(
     context = context_builder.fetch_coach_context(auth_user.id)
 
     assert "[GÜNCEL ANTRENMAN DURUMU]" in context
-    assert '"primary_state":"in_progress"' in context
+    assert json.loads(context.split("\n", 1)[1])["primary_state"] == "in_progress"
     assert calls == [auth_user.id]
 
 
