@@ -49,6 +49,66 @@ class AppleSubscription(db.Model):
     )
 
 
+# MON-02-BE-03A: dark AI allowance ledger (AI_ALLOWANCE_LEDGER_ENABLED, OFF).
+# Counts and codes only: no prompt, image, answer or health data in any row.
+class AiStarterGrant(db.Model):
+    """At most one effective Starter grant per account (the PK is the claim)."""
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), primary_key=True)
+    policy_version = db.Column(db.String(32), nullable=False)
+    granted_at = db.Column(db.DateTime(timezone=True), nullable=False)
+
+
+class AiAllowanceBucket(db.Model):
+    """One balance per owner x scope x feature x period; never negative."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    scope = db.Column(db.String(16), nullable=False)
+    feature = db.Column(db.String(32), nullable=False)
+    period_key = db.Column(db.String(16), nullable=False)
+    policy_version = db.Column(db.String(32), nullable=False)
+    granted = db.Column(db.Integer, nullable=False)
+    used = db.Column(db.Integer, nullable=False, default=0)
+    reserved = db.Column(db.Integer, nullable=False, default=0)
+    billed_releases = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "scope", "feature", "period_key", name="uq_ai_allowance_bucket"),
+        db.CheckConstraint("scope IN ('STARTER', 'PREMIUM')", name="ck_ai_allowance_bucket_scope"),
+        db.CheckConstraint("granted >= 0", name="ck_ai_allowance_bucket_granted"),
+        db.CheckConstraint("used >= 0", name="ck_ai_allowance_bucket_used"),
+        db.CheckConstraint("reserved >= 0", name="ck_ai_allowance_bucket_reserved"),
+        db.CheckConstraint("billed_releases >= 0", name="ck_ai_allowance_bucket_billed"),
+        db.CheckConstraint("used + reserved <= granted", name="ck_ai_allowance_bucket_within"),
+    )
+
+
+class AiUsageReservation(db.Model):
+    """AUTHORIZE -> RESERVE -> EXECUTE -> FINALIZE record for one logical action.
+
+    ``key_digest`` is SHA-256 of the caller's idempotency key, owner-scoped.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(32), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    bucket_id = db.Column(db.Integer, db.ForeignKey("ai_allowance_bucket.id", ondelete="CASCADE"), nullable=False)
+    feature = db.Column(db.String(32), nullable=False)
+    key_digest = db.Column(db.String(64), nullable=False)
+    state = db.Column(db.String(16), nullable=False)
+    outcome = db.Column(db.String(32))
+    provider_billed = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    finalized_at = db.Column(db.DateTime(timezone=True))
+    __table_args__ = (
+        db.UniqueConstraint("public_id", name="uq_ai_usage_reservation_public"),
+        db.UniqueConstraint("user_id", "key_digest", name="uq_ai_usage_reservation_key"),
+        db.CheckConstraint("state IN ('RESERVED', 'COMMITTED', 'RELEASED', 'EXPIRED')",
+                           name="ck_ai_usage_reservation_state"),
+        db.Index("ix_ai_usage_reservation_open", "user_id", "state", "expires_at"),
+    )
+
+
 class User(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False)

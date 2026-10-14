@@ -1,5 +1,11 @@
 # Production rollout runbook — feature flag activation
 
+MON-02-BE-03A `AI_ALLOWANCE_LEDGER_ENABLED` remains OFF. It stacks on #436 and
+must not merge before it. Startup may apply additive migration `a9c1d2e3f4b5`
+(three empty tables, no backfill) even while the flag is OFF, so deployment and
+migration need their own human gate. Activation additionally needs owner-approved
+allowance quantities (none exist), BE-03B enforcement review and MON-03.
+
 MON-02-BE-01 `APPLE_SUBSCRIPTIONS_ENABLED` remains OFF. No payment activation
 is authorized. Independent review, MON-03 Apple sandbox qualification, lifecycle
 reconciliation and feature enforcement precede separate human activation approval.

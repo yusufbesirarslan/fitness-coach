@@ -112,6 +112,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/subscription/purchase-context",
         "/api/v1/subscription/verify",
         "/api/v1/subscription/entitlement",
+        "/api/v1/ai/allowances",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
         "/api/v1/auth/logout",

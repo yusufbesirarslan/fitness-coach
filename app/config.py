@@ -360,6 +360,9 @@ def configure_app(app):
     app.config["APPLE_APP_ID"] = int(raw_app_id) if raw_app_id.isascii() and raw_app_id.isdigit() else None
     app.config["APPLE_ROOT_CERTIFICATE_PATHS"] = tuple(
         p for p in os.environ.get("APPLE_ROOT_CERTIFICATE_PATHS", "").split(os.pathsep) if p)
+    # MON-02-BE-03A: no production allowance policy and no env channel exist.
+    # Only an explicitly constructed AllowancePolicy configures the ledger.
+    app.config["AI_ALLOWANCE_POLICY"] = None
     if _gunicorn_logger.handlers:
         app.logger.handlers = _gunicorn_logger.handlers
         # app.logger now writes through gunicorn's own handler. Propagating as
