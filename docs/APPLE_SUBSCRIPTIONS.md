@@ -123,7 +123,12 @@ No client chooses an environment. Do not configure Sandbox on a production host.
 Missing configuration does not block boot or CI, but closes all active APIs.
 
 Migration `c2b9d0e1f2a3` is additive, empty, reentrant for create_all-first boot,
-and rejects incompatible pre-existing tables. No User data changes. Downgrade
+and rejects incompatible pre-existing tables. No User data changes.
+On PostgreSQL, both required domain CHECKs must also have authoritative
+`pg_constraint.convalidated=true` on the resolved subscription table. Correct
+predicates declared `NOT VALID` are rejected even with valid existing rows.
+The migration never validates constraints or repairs historical records;
+operational correction requires a separately authorized procedure. Downgrade
 erases the new tables and is not an operational rollback instruction. A merge
 can trigger a production candidate after main CI; boot may apply the migration.
 Do not merge/deploy without separate human gates; flag remains OFF.

@@ -105,6 +105,25 @@ def _check_definition_matches(sqltext, expected, dialect):
     return isinstance(sqltext, str) and compact(sqltext) in {compact(form) for form in forms}
 
 
+def _require_validated_postgres_checks(bind, table, required_checks):
+    """Inspect only; never scan/repair historical rows with VALIDATE CONSTRAINT.
+
+    Resolve the quoted table identity using PostgreSQL's active search path,
+    just as the unqualified inspector/DDL does. Constraint names alone are not
+    unique across tables or schemas. Missing/unknown catalog state fails closed.
+    """
+    relation = bind.dialect.identifier_preparer.format_table(table)
+    try:
+        states = dict(bind.execute(sa.text(
+            "SELECT conname, convalidated FROM pg_catalog.pg_constraint "
+            "WHERE conrelid = pg_catalog.to_regclass(:relation) AND contype = 'c'"
+        ), {"relation": relation}).all())
+    except sa.exc.SQLAlchemyError:
+        raise RuntimeError("Apple subscription table has incompatible check constraints") from None
+    if any(states.get(c.name) is not True for c in required_checks):
+        raise RuntimeError("Apple subscription table has incompatible check constraints")
+
+
 def upgrade():
     bind = op.get_bind()
     for table in _tables():
@@ -136,6 +155,8 @@ def upgrade():
         if any(not _check_definition_matches(checks.get(c.name), c, bind.dialect.name)
                for c in required_checks):
             raise RuntimeError("Apple subscription table has incompatible check constraints")
+        if bind.dialect.name == "postgresql" and required_checks:
+            _require_validated_postgres_checks(bind, table, required_checks)
         foreign = inspector.get_foreign_keys(table.name)
         primary = inspector.get_pk_constraint(table.name)["constrained_columns"]
         if (not required <= unique

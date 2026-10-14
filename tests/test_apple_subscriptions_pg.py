@@ -143,6 +143,7 @@ def test_postgres_fresh_and_reentrant_migration(pg_app):
     from alembic.migration import MigrationContext
     app, _ = pg_app
     with app.app_context(), db.engine.begin() as conn:
+        conn.execute(sa.text('UPDATE "user" SET is_premium = true WHERE id = (SELECT min(id) FROM "user")'))
         before = conn.execute(sa.text('SELECT id, is_premium FROM "user" ORDER BY id')).all()
         with Operations.context(MigrationContext.configure(conn)):
             migration().upgrade()  # real create_all-first predicates
@@ -190,3 +191,152 @@ def test_postgres_apple_io_has_no_transaction_or_owner_locks(pg_app, monkeypatch
         assert subscriptions.verify_purchase(owners[0][0], "101")["effective_premium"] is True
     assert len(calls) == 5
     assert ai_gate.capacity_snapshot() == baseline
+
+
+CHECK_DOMAINS = [
+    ("status", "status IN (1, 2, 3, 4, 5)", 42),
+    ("environment", "environment IN ('Sandbox', 'Production')", "Other"),
+]
+
+
+def _catalog_check_state(conn, domain):
+    return conn.execute(sa.text(
+        "SELECT convalidated FROM pg_catalog.pg_constraint "
+        "WHERE conrelid = 'apple_subscription'::regclass "
+        "AND contype = 'c' AND conname = :name"
+    ), {"name": f"ck_apple_subscription_{domain}"}).scalar_one()
+
+
+def _seed_migration_row(conn, owner):
+    conn.execute(sa.text(
+        "INSERT INTO apple_subscription (id,user_id,environment,original_transaction_id,"
+        "latest_transaction_id,product_id,subscription_group_id,status,expires_at,auto_renew,"
+        "transaction_signed_at,renewal_signed_at,last_verified_at,created_at,updated_at) "
+        "VALUES (1,:owner,'Sandbox','100','101','monthly','group',1,"
+        "now()+interval '1 day',true,now(),now(),now(),now(),now())"
+    ), {"owner": owner})
+
+
+def _replace_not_valid_check(conn, domain, predicate):
+    # Identifiers/predicates come exclusively from the fixed test parameter set.
+    assert (domain, predicate) in [(d, p) for d, p, _ in CHECK_DOMAINS]
+    conn.execute(sa.text(f'ALTER TABLE apple_subscription DROP CONSTRAINT ck_apple_subscription_{domain}'))
+    conn.execute(sa.text(f'ALTER TABLE apple_subscription ADD CONSTRAINT ck_apple_subscription_{domain} '
+                         f'CHECK ({predicate}) NOT VALID'))
+    assert _catalog_check_state(conn, domain) is False
+
+
+def _assert_migration_rejected(conn):
+    from test_apple_subscription_migration import migration
+    from alembic.operations import Operations
+    from alembic.migration import MigrationContext
+    with Operations.context(MigrationContext.configure(conn)), pytest.raises(RuntimeError) as error:
+        migration().upgrade()
+    assert str(error.value) == "Apple subscription table has incompatible check constraints"
+
+
+@pytest.mark.parametrize("domain,predicate,bad_value", CHECK_DOMAINS)
+@pytest.mark.parametrize("invalid_history", [True, False], ids=["invalid-history", "valid-history"])
+def test_postgres_rejects_not_valid_checks_preserving_rows(pg_app, domain, predicate, bad_value, invalid_history):
+    from app.extensions import db
+    app, owners = pg_app
+    with app.app_context(), db.engine.begin() as conn:
+        _seed_migration_row(conn, owners[0][0])
+        conn.execute(sa.text(f'ALTER TABLE apple_subscription DROP CONSTRAINT ck_apple_subscription_{domain}'))
+        if invalid_history:
+            conn.execute(sa.text(f'UPDATE apple_subscription SET {domain} = :value'), {"value": bad_value})
+        conn.execute(sa.text(f'ALTER TABLE apple_subscription ADD CONSTRAINT ck_apple_subscription_{domain} '
+                             f'CHECK ({predicate}) NOT VALID'))
+        assert _catalog_check_state(conn, domain) is False
+        before = conn.execute(sa.text('SELECT * FROM apple_subscription')).all()
+        users = conn.execute(sa.text('SELECT id, is_premium FROM "user" ORDER BY id')).all()
+        _assert_migration_rejected(conn)
+        assert _catalog_check_state(conn, domain) is False  # migration never auto-validates
+        assert conn.execute(sa.text('SELECT * FROM apple_subscription')).all() == before
+        assert conn.execute(sa.text('SELECT id, is_premium FROM "user" ORDER BY id')).all() == users
+
+
+@pytest.mark.parametrize("domain,predicate,_", CHECK_DOMAINS)
+def test_postgres_explicit_fixture_validation_changes_acceptance(pg_app, domain, predicate, _):
+    from app.extensions import db
+    from test_apple_subscription_migration import migration
+    from alembic.operations import Operations
+    from alembic.migration import MigrationContext
+    app, owners = pg_app
+    with app.app_context(), db.engine.begin() as conn:
+        _seed_migration_row(conn, owners[0][0])
+        before = conn.execute(sa.text('SELECT * FROM apple_subscription')).all()
+        _replace_not_valid_check(conn, domain, predicate)
+        _assert_migration_rejected(conn)
+        # Explicit repair is permitted only within this disposable fixture.
+        conn.execute(sa.text(f'ALTER TABLE apple_subscription VALIDATE CONSTRAINT ck_apple_subscription_{domain}'))
+        assert all(_catalog_check_state(conn, d) is True for d, _, _ in CHECK_DOMAINS)
+        with Operations.context(MigrationContext.configure(conn)):
+            migration().upgrade()
+            migration().upgrade()
+        assert conn.execute(sa.text('SELECT * FROM apple_subscription')).all() == before
+
+
+@pytest.mark.parametrize("domain,predicate,_", CHECK_DOMAINS)
+def test_postgres_catalog_uses_resolved_table_identity(pg_app, domain, predicate, _):
+    from app.extensions import db
+    from test_apple_subscription_migration import migration
+    from alembic.operations import Operations
+    from alembic.migration import MigrationContext
+    app, _ = pg_app
+    with app.app_context(), db.engine.begin() as conn:
+        # Same-named, validated constraints on a different table and on a
+        # same-named table in a different schema must not certify this table.
+        conn.execute(sa.text(f'CREATE TABLE unrelated (status INTEGER, environment VARCHAR(10), '
+                             f'CONSTRAINT ck_apple_subscription_{domain} CHECK ({predicate}))'))
+        conn.execute(sa.text('CREATE SCHEMA "check decoy"'))
+        conn.execute(sa.text('CREATE SCHEMA "check target"'))
+        conn.execute(sa.text('CREATE SCHEMA "check empty"'))
+        conn.execute(sa.text('CREATE TABLE "check decoy".apple_subscription '
+                             '(LIKE public.apple_subscription INCLUDING ALL)'))
+        conn.execute(sa.text('ALTER TABLE public.apple_subscription SET SCHEMA "check target"'))
+        # The intended table is in the second searched schema, not current_schema().
+        conn.execute(sa.text('SET LOCAL search_path TO "check empty", "check target", "check decoy", public'))
+        _replace_not_valid_check(conn, domain, predicate)
+        _assert_migration_rejected(conn)
+        conn.execute(sa.text(f'ALTER TABLE apple_subscription VALIDATE CONSTRAINT ck_apple_subscription_{domain}'))
+        with Operations.context(MigrationContext.configure(conn)):
+            migration().upgrade()
+        # Roll back all schema movement/decoys so pg_app cleanup stays in public.
+        conn.rollback()
+
+
+@pytest.mark.parametrize("catalog_result", [
+    [],
+    [("ck_apple_subscription_environment", True), ("ck_apple_subscription_status", None)],
+    "unavailable",
+], ids=["missing", "unknown", "unavailable"])
+def test_postgres_unknown_catalog_state_fails_closed(pg_app, monkeypatch, catalog_result):
+    from app.extensions import db
+    app, _ = pg_app
+    with app.app_context(), db.engine.begin() as conn:
+        execute = conn.execute
+        def unavailable(statement, *args, **kwargs):
+            if "SELECT conname, convalidated FROM pg_catalog.pg_constraint" in str(statement):
+                if catalog_result == "unavailable":
+                    raise sa.exc.SQLAlchemyError("private database detail")
+                class Result:
+                    def all(self):
+                        return catalog_result
+                return Result()
+            return execute(statement, *args, **kwargs)
+        monkeypatch.setattr(conn, "execute", unavailable)
+        _assert_migration_rejected(conn)
+
+
+def test_postgres_unexpected_check_reflection_fails_closed(pg_app, monkeypatch):
+    from app.extensions import db
+    app, _ = pg_app
+    original = sa.engine.reflection.Inspector.get_check_constraints
+    def unexpected(inspector, table_name, *args, **kwargs):
+        checks = original(inspector, table_name, *args, **kwargs)
+        return [dict(c, sqltext="unrecognized reflection") for c in checks]
+    monkeypatch.setattr(sa.engine.reflection.Inspector, "get_check_constraints", unexpected)
+    with app.app_context(), db.engine.begin() as conn:
+        assert all(_catalog_check_state(conn, d) is True for d, _, _ in CHECK_DOMAINS)
+        _assert_migration_rejected(conn)
