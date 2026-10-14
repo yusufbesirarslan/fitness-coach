@@ -107,8 +107,8 @@ The controller uses the following independent bounds.
 
 | Limit | Value |
 |---|---:|
-| Workflow job timeout | 70 minutes |
-| Controller step timeout | 50 minutes |
+| Workflow job timeout | 95 minutes |
+| Controller step timeout | 75 minutes |
 | Delivery timeout | 60 seconds |
 | Execution timeout | 2,200 seconds |
 | AWS expiry | 2,260 seconds |
@@ -125,10 +125,10 @@ commands inside a host operation share a monotonic deadline, and command
 timeouts reserve their kill grace. Cleanup uses one command for the archive,
 context and work directory; its combined ceiling is 20 seconds.
 
-Before SendCommand, B reserves enough of its 50-minute budget for the bounded
+Before SendCommand, B reserves enough of its 75-minute budget for the bounded
 send, 2,500-second poll horizon, authorization, final invocation read, and
-authority cleanup. The 70-minute job budget also covers identity, checkout,
-credentials, drift checks, and snapshot initiation without terminating the
+authority cleanup. The 95-minute job budget also covers identity, checkout,
+credentials, drift checks, and bounded snapshot availability verification without terminating the
 controller first.
 
 After SendCommand, B immediately logs the non-secret command ID, then polls
@@ -599,3 +599,33 @@ Deployment contract:
   `CloudWatchAgentServerPolicy` on the runtime role in SEC-001 R4 (closed
   2026-10-07).
 - Do not add AWS key variables back to the host `.env`.
+
+
+## Mandatory pre-SSM recovery gate (MON-02-OPS-436-R2)
+
+Every deployment runs `scripts/recovery_gate.py` through the controller, before
+SSM submission or delivery authorization. `RDS_INSTANCE_ID`,
+`EXPECTED_RDS_INSTANCE_ARN` and the OIDC `AWS_DEPLOY_ROLE_ARN` must be explicitly
+qualified by an operator. The controller validates the STS account/assumed role,
+DB ARN, immutable resource identity, PostgreSQL engine and encryption; it creates
+one unique candidate-SHA-bound manual snapshot and independently reads it as
+Available. Missing configuration, permissions, API errors, unknown states or a
+20-minute monotonic deadline stop deployment. No PITR fallback, flag-based
+exemption or snapshot deletion exists. Calls are bounded to 60 seconds.
+The controller revalidates current main after recovery and the host retains its
+under-lock staleness proof. A snapshot request accepted is never enough.
+
+The 75-minute controller and 95-minute job retain all host/SSM limits. OIDC
+requests 7,200 seconds; a separately authorized operator must verify role
+maximum session duration and effective RDS permissions before rollout. Snapshot
+failure leaves any created backup for operator disposition. A cancelled runner
+after SSM authorization can leave a bounded host transaction running; never
+start another migration or assume cancellation undoes schema changes.
+
+Available does not prove recoverability or qualified RPO/RTO. Independent
+DATABASE_MIGRATION approval remains an unresolved external release gate: the
+production environment currently gates deployment and release-prepare together.
+Static administrator credentials, manual startup and privileged host access
+remain alternate authorities requiring operator remediation. Source merge,
+production deploy, database migration and payment activation are all withheld
+for this task. PR #436 remains blocked pending review and operator evidence.

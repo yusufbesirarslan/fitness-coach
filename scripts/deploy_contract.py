@@ -58,9 +58,10 @@ SSM_EXECUTION_MARGIN_SECONDS: int = (
 # Pre-send reserve + polling horizon + final invocation read + authority
 # cleanup. The polling horizon keeps the 240-second recovery margin over the
 # AWS expiry (60-second delivery + execution timeout).
+RECOVERY_PREFLIGHT_SECONDS: int = 1200
 POLL_HORIZON_SECONDS: int = 2500
-CONTROLLER_REQUIRED_SECONDS: int = 300 + POLL_HORIZON_SECONDS + 30 + 60
-CONTROLLER_STEP_MINUTES: int = 50
+CONTROLLER_REQUIRED_SECONDS: int = RECOVERY_PREFLIGHT_SECONDS + 300 + POLL_HORIZON_SECONDS + 30 + 60
+CONTROLLER_STEP_MINUTES: int = 75
 
 # ── R6-03A step ceilings inside the phases above ────────────────────────────
 # Each step is bounded by min(its own ceiling, the phase cutoff). Step ceilings
