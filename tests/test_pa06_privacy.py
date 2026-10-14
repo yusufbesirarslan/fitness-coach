@@ -196,7 +196,7 @@ def test_m03_legacy_quarantine_preserves_display_and_new_continuity(app, make_us
     conv.summary = CANARY
     db.session.add(CoachMessage(conversation_id=conv.id, role='assistant', content=CANARY))
     db.session.commit()
-    memory.record_turn(conv, 'OWN_FIRST_PARTY_FACT', 'OWN_CLEAN_REPLY')
+    memory.record_turn(conv, 'OWN_FIRST_PARTY_FACT', 'OWN_CLEAN_REPLY', assistant_memory_eligible=True)
     captures = openai_capture(monkeypatch, [answer()])
     assert ai_pipeline.generate_answer(user.id, 'workout')['answer'] == 'OWN_TRAINING_OK'
     assert b'OWN_FIRST_PARTY_FACT' in captures[0] and b'1260' in captures[0]
@@ -216,7 +216,7 @@ def test_m03_background_summary_excludes_legacy_and_keeps_signed_facts(app, make
     db.session.commit()
     monkeypatch.setattr('app.config.AI_SUMMARY_TRIGGER_TOKENS', 100)
     for i in range(6):
-        memory.record_turn(conv, 'OWN_FIRST_PARTY_FACT ' + 'z' * 600, 'CLEAN_RESPONSE ' + 'x' * 600)
+        memory.record_turn(conv, 'OWN_FIRST_PARTY_FACT ' + 'z' * 600, 'CLEAN_RESPONSE ' + 'x' * 600, assistant_memory_eligible=True)
     captures = openai_capture(monkeypatch, [])  # summary uses ai.openai_client
     summary_bytes = []
     def create(**kwargs):
@@ -236,7 +236,7 @@ def test_m03_background_summary_excludes_legacy_and_keeps_signed_facts(app, make
 def test_m03_provenance_rejects_forged_copied_and_changed_rows(app, make_user):
     a, b = make_user('owner_a'), make_user('owner_b')
     ca, cb = memory.get_or_create_active_conversation(a.id), memory.get_or_create_active_conversation(b.id)
-    rows = memory.record_turn(ca, 'OWN_FACT', 'CLEAN')
+    rows = memory.record_turn(ca, 'OWN_FACT', 'CLEAN', assistant_memory_eligible=True)
     assert memory.build_context_window(ca)
     b.user_metadata = a.user_metadata
     db.session.add(CoachMessage(conversation_id=cb.id, role='user', content='OWN_FACT'))

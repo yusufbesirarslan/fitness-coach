@@ -106,7 +106,8 @@ def recent_messages(user_id, limit=50):
     return conv, list(reversed(rows))
 
 
-def record_turn(conversation, question, answer, usage=None, interrupted=False):
+def record_turn(conversation, question, answer, usage=None, interrupted=False,
+                *, assistant_memory_eligible=False):
     """Bir user+assistant turunu kalıcılaştır. usage: sağlayıcı yanıtındaki
     gerçek token sayıları ({'prompt_tokens': .., 'completion_tokens': ..}).
 
@@ -116,6 +117,8 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False):
     from app.extensions import db
     from app.models import CoachMessage
 
+    # Display persistence is unconditional. Only an explicitly eligible reply
+    # may acquire provenance; the current authenticated user input stays eligible.
     usage = usage or {}
     user_message = CoachMessage(
         conversation_id=conversation.id, role="user", content=question,
@@ -130,7 +133,10 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False):
     db.session.add(assistant_message)
     db.session.flush()
     from app.services.coach_memory_provenance import mark_turn
-    mark_turn(conversation, (user_message, assistant_message))
+    eligible_rows = [user_message]
+    if assistant_memory_eligible is True:
+        eligible_rows.append(assistant_message)
+    mark_turn(conversation, eligible_rows)
     db.session.commit()
     return user_message, assistant_message
 

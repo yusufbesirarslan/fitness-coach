@@ -322,5 +322,6 @@ def test_partial_stream_error_is_recorded_as_interruption(app, monkeypatch):
         "partial_text": "K\u0131smi yan\u0131t",
     }
     assert recorded == [
-        ((conversation, "soru", "K\u0131smi yan\u0131t"), {"interrupted": True})
+        ((conversation, "soru", "K\u0131smi yan\u0131t"),
+         {"interrupted": True, "assistant_memory_eligible": True})
     ]

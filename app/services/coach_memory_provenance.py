@@ -8,12 +8,29 @@ Summary envelopes are signed independently and never rendered as client history.
 import hashlib
 import hmac
 import json
+from functools import wraps
 from flask import current_app
 from app.extensions import db
 from app.models import User
 
 INDEX_KEY = '_pa06_coach_turns_v1'
 INDEX_LIMIT = 200
+
+
+class DisplayOnlyReply(str):
+    """Truthful UI copy containing domain text without a provider projection.
+
+    Persistence and server authorship do not classify this text as AI memory.
+    Keep this marker until the pipeline captures eligibility, before formatting.
+    """
+
+
+def display_only_reply(formatter):
+    """Classify raw confirmation copy at its source, including tool followups."""
+    @wraps(formatter)
+    def wrapped(*args, **kwargs):
+        return DisplayOnlyReply(formatter(*args, **kwargs))
+    return wrapped
 
 
 def _signature(kind, conversation, row_id, role, text):

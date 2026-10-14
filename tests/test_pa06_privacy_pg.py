@@ -52,7 +52,7 @@ def test_pg_legacy_quarantine_and_metadata_preservation(pg_app):
         db.session.add(CoachMessage(conversation_id=conversation.id, role='assistant',
                                     content='FORBIDDEN_LEGACY_SOCIAL'))
         db.session.commit()
-        memory.record_turn(conversation, 'OWN_TRAINING', 'OWN_REPLY')
+        memory.record_turn(conversation, 'OWN_TRAINING', 'OWN_REPLY', assistant_memory_eligible=True)
         assert [m['content'] for m in memory.build_context_window(conversation)] == ['OWN_TRAINING', 'OWN_REPLY']
         assert owner.user_metadata['preferences'] == {'preserved': 'LOCAL_ONLY'}
         assert len(memory.recent_messages(owner.id)[1]) == 3
@@ -73,7 +73,7 @@ def test_pg_parallel_turns_retain_provenance_for_every_committed_pair(pg_app):
             with pg_app.app_context():
                 conv = db.session.get(CoachConversation, conv_id)
                 barrier.wait(timeout=10)
-                memory.record_turn(conv, f'OWN_FACT_{index}', f'OWN_REPLY_{index}')
+                memory.record_turn(conv, f'OWN_FACT_{index}', f'OWN_REPLY_{index}', assistant_memory_eligible=True)
                 db.session.remove()
         except BaseException as error:
             errors.append(error)
@@ -97,7 +97,7 @@ def test_pg_cross_owner_signatures_and_modified_content_fail_closed(pg_app):
     with pg_app.app_context():
         a, b = _owner('pg_pa06_a'), _owner('pg_pa06_b')
         ca, cb = memory.get_or_create_active_conversation(a.id), memory.get_or_create_active_conversation(b.id)
-        rows = memory.record_turn(ca, 'OWN_FACT', 'OWN_REPLY')
+        rows = memory.record_turn(ca, 'OWN_FACT', 'OWN_REPLY', assistant_memory_eligible=True)
         ca.summary = signed_summary(ca, 'OWN_SUMMARY', 0)
         cb.summary = ca.summary
         b.user_metadata = a.user_metadata
@@ -105,3 +105,34 @@ def test_pg_cross_owner_signatures_and_modified_content_fail_closed(pg_app):
         db.session.commit()
         assert memory.build_context_window(cb) == []
         assert all('FORBIDDEN' not in row['content'] for row in memory.build_context_window(ca))
+
+
+def test_pg_display_persistence_requires_explicit_assistant_eligibility(pg_app):
+    from app.services import memory_manager as memory
+    from app.services.coach_memory_provenance import INDEX_KEY, trusted_rows
+    with pg_app.app_context():
+        owner = _owner('pg_pa06_display')
+        conv = memory.get_or_create_active_conversation(owner.id)
+        unsafe = memory.record_turn(conv, 'yes', 'FORBIDDEN_LEGACY_FRIEND_ALICE_9F7A')
+        safe = memory.record_turn(conv, 'hello', 'Canonical workout: 3 sets, 10 reps.',
+                                  assistant_memory_eligible=True)
+        assert trusted_rows(conv, unsafe + safe) == [unsafe[0], *safe]
+        assert str(unsafe[1].id) not in owner.user_metadata[INDEX_KEY]
+        assert memory.recent_messages(owner.id)[1] == [*unsafe, *safe]
+        assert owner.user_metadata['preferences'] == {'preserved': 'LOCAL_ONLY'}
+
+
+def test_pg_eligibility_and_display_rows_share_rollback(pg_app, monkeypatch):
+    from app.extensions import db
+    from app.models import CoachMessage
+    from app.services import memory_manager as memory
+    with pg_app.app_context():
+        owner = _owner('pg_pa06_rollback')
+        conv = memory.get_or_create_active_conversation(owner.id)
+        def fail(*args):
+            raise RuntimeError('synthetic signing failure')
+        monkeypatch.setattr('app.services.coach_memory_provenance.mark_turn', fail)
+        with pytest.raises(RuntimeError, match='synthetic'):
+            memory.record_turn(conv, 'yes', 'display receipt')
+        db.session.rollback()
+        assert CoachMessage.query.filter_by(conversation_id=conv.id).count() == 0
