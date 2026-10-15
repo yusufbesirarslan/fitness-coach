@@ -531,3 +531,11 @@ def test_success_has_bounded_constant_sql_cost_without_exercise_n_plus_one(
         "user_id" in sql and "idempotency_key" in sql
         for sql in operation_lookups
     )
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_consent_for_layer_qualification(app, monkeypatch):
+    # Explicit mock ALLOW for this pre-D1 suite's existing layer contract.
+    # Real denial, grants and races are qualified in test_ai_consent{,_pg}.py.
+    from consent_projection_support import allow_synthetic_authority
+    allow_synthetic_authority(monkeypatch, app)

@@ -249,3 +249,7 @@ from app.blueprints import mobile_exercise_notes  # noqa: E402,F401
 from app.blueprints import mobile_exercise_history  # noqa: E402,F401
 from app.blueprints import mobile_workout_sessions  # noqa: E402,F401
 from app.blueprints import mobile_weekly_checkin  # noqa: E402,F401
+
+# Consent uses the same bearer, no-store and feature-gated API surface.
+from app.blueprints.ai_consent import mobile_consent
+bp.add_url_rule('/ai-consent', view_func=mobile_consent, methods=['GET', 'POST'])

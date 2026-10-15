@@ -374,18 +374,16 @@ def test_response_is_this_requests_turn_even_if_another_turn_lands_meanwhile(
         "other tab", "other answer", "mine", "reply to: mine"]
 
 
-def test_unpersisted_turn_is_returned_without_identity(
+def test_ordinary_history_persists_with_ai_memory_off(
         app, mobile, bearer, provider, alice):
     app.config["AI_MEMORY_ENABLED"] = False
     response = send(mobile, bearer(alice), message="hi")
-
     assert response.status_code == 200
-    assert response.get_json()["messages"] == [
-        {"id": None, "role": "user", "text": "hi", "created_at": None,
-         "interrupted": False},
-        {"id": None, "role": "assistant", "text": "reply to: hi",
-         "created_at": None, "interrupted": False}]
-    assert _rows(alice.id) == []
+    messages = response.get_json()["messages"]
+    assert [(m['role'], m['text']) for m in messages] == [
+        ('user', 'hi'), ('assistant', 'reply to: hi')]
+    assert all(m['id'] and m['created_at'] for m in messages)
+    assert len(_rows(alice.id)) == 2
     assert "Set-Cookie" not in response.headers
 
 
@@ -780,3 +778,11 @@ def test_web_coach_routes_do_not_accept_a_bearer_credential(
             json={"question": "hi"})
         assert response.status_code in (302, 401, 403)
     assert provider.calls == []
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_consent_for_layer_qualification(app, monkeypatch):
+    # Explicit mock ALLOW for this pre-D1 suite's existing layer contract.
+    # Real denial, grants and races are qualified in test_ai_consent{,_pg}.py.
+    from consent_projection_support import allow_synthetic_authority
+    allow_synthetic_authority(monkeypatch, app)

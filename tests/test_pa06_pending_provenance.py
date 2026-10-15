@@ -268,3 +268,11 @@ def test_explicit_projected_canonical_receipt_reaches_sdk(app, make_user, monkey
     payload = json.loads(bodies[0])
     assert {'role': 'assistant', 'content': receipt} in payload['messages']
     assert CANARY.encode() not in bodies[0]
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_consent_for_layer_qualification(app, monkeypatch):
+    # Explicit mock ALLOW for this pre-D1 suite's existing layer contract.
+    # Real denial, grants and races are qualified in test_ai_consent{,_pg}.py.
+    from consent_projection_support import allow_synthetic_authority
+    allow_synthetic_authority(monkeypatch, app)

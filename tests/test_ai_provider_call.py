@@ -45,6 +45,8 @@ SECRET_REPLY = "REPLY-CANARY-91bd"
 
 @pytest.fixture(autouse=True)
 def _guard(monkeypatch):
+    from consent_projection_support import allow_synthetic_authority
+    allow_synthetic_authority(monkeypatch)
     ai_spend_guard._reset_local_for_tests()
     monkeypatch.setattr(ai_spend_guard, "ENABLED", True)
     monkeypatch.setattr(ai_spend_guard, "_get_redis", lambda: None)
@@ -292,10 +294,14 @@ def test_image_count_is_capped_per_feature(providers):
     assert providers.bedrock.calls == []
 
 
-def test_unknown_feature_is_the_bounded_other_bucket(providers):
-    with ai_provider_call.admit(feature="<script>user text", provider="bedrock",
-                                payload=_payload("hi")) as call:
-        assert call.feature == "other"
+def test_unknown_feature_is_not_a_consent_scope(providers):
+    from app.services.ai_consent import ConsentDenied
+    assert ai_input_budget.normalize_feature("<script>user text") == "other"
+    with pytest.raises(ConsentDenied):
+        with ai_provider_call.admit(feature="<script>user text", provider="bedrock",
+                                    payload=_payload("hi")):
+            pytest.fail("unknown purpose must never become a valid consent scope")
+    assert providers.bedrock.calls == []
 
 
 @pytest.mark.parametrize("raw", ["0", "-5", "abc", "1.5"])
