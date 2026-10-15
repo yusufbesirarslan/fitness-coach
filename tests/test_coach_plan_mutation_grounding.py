@@ -417,6 +417,7 @@ def test_confirming_exercise_suggestion_writes_canonical_identity(
     assert len(journal(split_user.id)) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_route_add_without_rx_asks_and_does_not_mutate(
         app, split_user, tools_on, monkeypatch):
     from tests.test_ai_coach import _ScriptedLLM, _llm_msg, _tool_call

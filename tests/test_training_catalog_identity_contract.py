@@ -159,6 +159,7 @@ def retired_catalog(tmp_path, monkeypatch):
 # ── 1. Valid canonical ID ────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_valid_id_persists_catalog_identity_and_name_in_one_completion(
         client, mobile_user, as_mobile, monkeypatch, quota_on):
     calls = _native_provider(monkeypatch, _turkish_week())
@@ -187,6 +188,7 @@ def test_valid_id_persists_catalog_identity_and_name_in_one_completion(
 # ── 2. Translated display text: the original failure class is gone ──────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_turkish_visible_text_beside_valid_ids_succeeds_with_catalog_names(
         client, mobile_user, as_mobile, monkeypatch):
     """The request language is Turkish and every visible provider field is
@@ -220,6 +222,7 @@ def test_translated_text_beside_a_valid_id_cannot_cause_unresolved(monkeypatch):
     assert canonical["program"][0]["egzersizler"][0]["isim"] == "Barbell Back Squat"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_pr_a_translated_name_payload_no_longer_reaches_name_resolution(
         client, mobile_user, as_mobile, monkeypatch):
     """The exact PR A failure shape — a translated ``isim`` the catalog cannot
@@ -255,6 +258,7 @@ def test_any_provider_display_name_is_outside_the_schema(fabricated):
         validate_generated_plan(week, _prefs())
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_fabricated_name_never_persists_even_when_repair_fixes_the_shape(
         client, mobile_user, as_mobile, monkeypatch):
     with_name = _provider_week(exercises=[_provider_exercise("ex_barbell_bench_press")])
@@ -271,6 +275,7 @@ def test_fabricated_name_never_persists_even_when_repair_fixes_the_shape(
     assert _stored_exercises(mobile_user.id)[0]["isim"] == "Barbell Bench Press"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_fabricated_name_that_survives_repair_fails_closed_without_a_plan(
         client, mobile_user, as_mobile, monkeypatch, quota_on):
     with_name = _provider_week()
@@ -290,6 +295,7 @@ def test_fabricated_name_that_survives_repair_fails_closed_without_a_plan(
 # ── 4. Unknown ID ────────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unknown_id_fails_closed_with_refund_and_no_candidate(
         client, mobile_user, as_mobile, monkeypatch, quota_on):
     calls = _native_provider(monkeypatch, _provider_week(
@@ -351,6 +357,7 @@ def test_inactive_id_is_unresolved_and_never_offered(retired_catalog):
     assert caught.value.resolution_category == "inactive_id"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_inactive_id_fails_closed_natively(
         client, mobile_user, as_mobile, monkeypatch, retired_catalog):
     _native_provider(monkeypatch, _provider_week(
@@ -367,6 +374,7 @@ def test_inactive_id_fails_closed_natively(
 # ── 7. Incompatible ID ───────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_real_active_id_outside_the_request_set_fails_closed_without_substitution(
         client, mobile_user, as_mobile, monkeypatch, quota_on):
     calls = _native_provider(monkeypatch, _provider_week(
@@ -459,6 +467,7 @@ def test_cardio_id_outside_the_declared_cardio_type_is_not_offered():
 # ── 9/10. Same-key replay and new-key recovery ───────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_incompatible_failure_replays_without_inference_and_new_key_recovers(
         client, mobile_user, as_mobile, monkeypatch, quota_on):
     calls = _native_provider(
@@ -494,6 +503,7 @@ def test_incompatible_failure_replays_without_inference_and_new_key_recovers(
     ("Goblet Squat", CODE_IDENTITY_INVALID),
     ("ex_barbell_back_squat", CODE_INCOMPATIBLE),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_identity_failure_keeps_the_existing_plan_untouched(
         client, auth_user, monkeypatch, exercise_id, code):
     _session(auth_user)
@@ -517,6 +527,7 @@ def test_browser_identity_failure_keeps_the_existing_plan_untouched(
     assert [(row.id, row.plan_data) for row in rows] == [(existing_id, existing_data)]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_payload_carries_only_catalog_owned_identity(
         client, auth_user, monkeypatch):
     _session(auth_user)
@@ -556,6 +567,7 @@ def providers_down_with_cache(monkeypatch):
     return served
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_cached_new_schema_output_is_fully_revalidated_and_can_succeed(
         client, mobile_user, as_mobile, providers_down_with_cache):
     providers_down_with_cache["payload"] = json.dumps(_turkish_week())
@@ -568,6 +580,7 @@ def test_cached_new_schema_output_is_fully_revalidated_and_can_succeed(
     assert _stored_exercises(mobile_user.id)[0]["isim"] == "Barbell Back Squat"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_cached_legacy_name_only_output_cannot_become_authoritative(
         client, mobile_user, as_mobile, providers_down_with_cache, quota_on):
     providers_down_with_cache["payload"] = json.dumps(_week(exercises=[
@@ -588,6 +601,7 @@ def test_cached_legacy_name_only_output_cannot_become_authoritative(
     ("ex_invented_cached_lift", CODE_IDENTITY_INVALID),
     ("ex_barbell_back_squat", CODE_INCOMPATIBLE),  # valid for gym, cached for ev
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_cached_invalid_identity_is_refused_like_a_live_answer(
         client, mobile_user, as_mobile, providers_down_with_cache, exercise_id, code):
     providers_down_with_cache["payload"] = json.dumps(_provider_week(
@@ -668,6 +682,7 @@ def _choice_lines(prompt):
 
 @pytest.mark.parametrize("ekipman,cardio", [
     ("ev", "yok"), ("minimal", "yok"), ("spor_salonu", "yok"), ("ev", "karisik")])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_prompt_offers_exactly_the_closed_set_as_stable_id_name_pairs(
         client, auth_user, monkeypatch, ekipman, cardio):
     body = {"ekipman": ekipman, "kardiyo_tipi": cardio,
@@ -686,6 +701,7 @@ def test_prompt_offers_exactly_the_closed_set_as_stable_id_name_pairs(
     assert example and example.group(1) in expected
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_prompt_never_asks_the_provider_for_a_name_or_to_translate_ids(
         client, auth_user, monkeypatch):
     captured = _captured_prompt(client, auth_user, monkeypatch)
@@ -741,6 +757,7 @@ def test_one_choice_set_feeds_both_the_prompt_and_validation(monkeypatch):
     ("ex_barbell_back_squat", {"ekipman": "ev"}, "outside_choice_set"),
     ("Kadeh Squat", {}, "malformed_id"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_identity_diagnostic_is_bounded_and_never_logs_the_provider_value(
         client, mobile_user, as_mobile, monkeypatch, caplog, exercise_id, body, category):
     _native_provider(monkeypatch, _provider_week(

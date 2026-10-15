@@ -35,6 +35,7 @@ class _FakeClient:
         self.chat = SimpleNamespace(completions=_Completions())
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_prepends_system_prompt_and_passes_params(monkeypatch):
     fake = _FakeClient(_resp("merhaba"))
     monkeypatch.setattr(ai, "openai_client", fake)
@@ -49,6 +50,7 @@ def test_chat_prepends_system_prompt_and_passes_params(monkeypatch):
     assert call["temperature"] == 0.1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_without_system_prompt(monkeypatch):
     fake = _FakeClient(_resp("ok"))
     monkeypatch.setattr(ai, "openai_client", fake)
@@ -56,6 +58,7 @@ def test_chat_without_system_prompt(monkeypatch):
     assert fake.calls[0]["messages"][0]["role"] == "user"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_warns_when_response_truncated(monkeypatch, caplog):
     monkeypatch.setattr(ai, "openai_client", _FakeClient(_resp("yarım", "length")))
     with caplog.at_level(logging.WARNING):
@@ -70,6 +73,7 @@ def test_chat_warns_when_response_truncated(monkeypatch, caplog):
     ("APIConnectionError", "ulaşılamadı"),
     ("APIError", "AI servisi hatası"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_maps_openai_errors_to_friendly_runtime_errors(monkeypatch, exc_name, expected):
     class _Boom(Exception):
         pass
@@ -81,6 +85,7 @@ def test_chat_maps_openai_errors_to_friendly_runtime_errors(monkeypatch, exc_nam
         _openai_chat([{"role": "user", "content": "x"}])
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_none_content_returns_empty_string(monkeypatch):
     # OpenAI refuse/length durumunda message.content None olabilir; çağıranların
     # çoğu dönüşe .strip() uyguluyor → None değil "" dönmeli (AttributeError yok).
@@ -88,6 +93,7 @@ def test_chat_none_content_returns_empty_string(monkeypatch):
     assert _openai_chat([{"role": "user", "content": "x"}]) == ""
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_empty_choices_returns_empty_string(monkeypatch):
     # İçerik filtresi boş choices döndürebilir → IndexError yerine "" dönmeli.
     monkeypatch.setattr(ai, "openai_client", _FakeClient(SimpleNamespace(choices=[])))

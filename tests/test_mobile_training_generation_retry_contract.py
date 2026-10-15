@@ -72,6 +72,7 @@ def _operations(user_id):
         user_id=user_id).order_by(TrainingPlanGenerationOperation.id).all()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_durable_unavailable_failure_is_not_same_key_retryable_and_new_key_recovers(
         client, mobile_user, as_mobile, monkeypatch, roomy_quota):
     """The P2: this failure used to answer retryable=true while the same key
@@ -136,6 +137,7 @@ def test_durable_unavailable_failure_is_not_same_key_retryable_and_new_key_recov
     assert operations[0].error_code == "TRAINING_PLAN_GENERATION_UNAVAILABLE"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_parse_failure_after_repair_is_durable_and_not_same_key_retryable(
         client, mobile_user, as_mobile, monkeypatch, roomy_quota):
     calls = []
@@ -209,6 +211,7 @@ def test_every_durable_failure_consumes_its_key_and_is_never_retryable(
     assert TrainingPlan.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_legacy_failed_row_recorded_retryable_replays_as_not_retryable(
         client, mobile_user, as_mobile, monkeypatch, native_request):
     """Rows written before this change carry error_retryable=true. They are

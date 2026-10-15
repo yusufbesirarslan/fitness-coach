@@ -90,6 +90,7 @@ def test_saturation_replay_stale_and_exhaustion(
     assert state(row_for(auth_user.id)) == before
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_max_checkpoint_remains_completable(
     client, auth_user, sessions_on, proof_accepted,
 ):

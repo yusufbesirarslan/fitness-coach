@@ -594,6 +594,7 @@ def test_prompt_authority_block_names_the_canonical_contract_header():
     assert prompt_system.ADAPTIVE_PLAN_CONTEXT_HEADER in prompt_system.ADAPTIVE_COACH_SYSTEM_PROMPT
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_prompt_authority_is_flag_driven_on_both_providers(app, monkeypatch):
     """Planlama yetkisi AI_ADAPTIVE_PLAN_CONTEXT'ten gelir, ba\u011flam METN\u0130NDEN de\u011fil:
     kanonik ba\u015fl\u0131\u011f\u0131 taklit eden kullan\u0131c\u0131 verisi bayrak KAPALIyken sistem promptunu

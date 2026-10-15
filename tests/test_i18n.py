@@ -1,6 +1,8 @@
 """i18n (TR/EN) altyapısı testleri: t() fallback, locale çözümü, /set-language,
 kayıtta dil kalıcılığı ve koç sistem promptunun dile göre değişmesi."""
 
+import pytest
+
 import json
 import os
 import re
@@ -401,6 +403,7 @@ def test_premium_features_localized(app, client, make_user, login):
 
 # ── AI plan üretimi: prompt dile göre, JSON anahtarları/kanonik alanlar TR kalır ──
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nutrition_plan_prompt_localized(app, client, make_user, login, monkeypatch):
     """EN kullanıcıda beslenme planı prompt'u İngilizce içerik ister; JSON ANAHTARLARI
     (planlar/kahvalti/...) her dilde TR kalır (frontend kontratı)."""
@@ -427,6 +430,7 @@ def test_nutrition_plan_prompt_localized(app, client, make_user, login, monkeypa
     assert "Türkçe" not in (cap["system"] or "")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nutrition_plan_prompt_turkish_for_tr_user(app, client, make_user, login, monkeypatch):
     from app.extensions import db
     from app.models import UserSession
@@ -446,6 +450,7 @@ def test_nutrition_plan_prompt_turkish_for_tr_user(app, client, make_user, login
     assert "Türkçe yaz" in cap["prompt"] and "ENGLISH" not in cap["prompt"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_training_plan_prompt_localized_keeps_canonical_fields(app, client, make_user, login, monkeypatch):
     """EN antrenman planı: içerik EN istenir AMA 'gun' (gün adı) ve 'tip' alanları
     KANONIK TÜRKÇE kalmalı (getTodayTurkish eşleşmesi + JS tip mantığı)."""
@@ -504,6 +509,7 @@ def test_training_plan_prompt_localized_keeps_canonical_fields(app, client, make
     assert "antrenman/dinlenme/kardiyo" in cap["system"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_no_session_error_localized(app, client, make_user, login):
     """Plan üretim hata mesajları (oturum yok) dile göre döner."""
     make_user("noplanen", language="en")

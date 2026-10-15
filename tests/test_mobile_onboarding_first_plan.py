@@ -101,6 +101,7 @@ def _sessions(user_id):
     return UserSession.query.filter_by(user_id=user_id).all()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_native_onboarding_clears_the_first_plan_prerequisite(
         raw_client, identity_provider, model_provider):
     headers = _signed_in(raw_client)
@@ -147,6 +148,7 @@ def test_native_onboarding_clears_the_first_plan_prerequisite(
         "profile_complete"] is True
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_failed_onboarding_leaves_both_authorities_incomplete(
         raw_client, identity_provider, model_provider):
     headers = _signed_in(raw_client)

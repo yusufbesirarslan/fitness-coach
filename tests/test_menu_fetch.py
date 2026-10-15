@@ -393,6 +393,7 @@ def test_real_supervisor_kills_stalled_worker(monkeypatch, tmp_path):
     assert time.monotonic() - start < 2
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_inbound_flask_secrets_never_forward(client, auth_user, wire):
     response = client.post('/api/proxy/scan-menu', json={'url': 'http://public.example/menu'}, headers={'Authorization': 'Bearer synthetic-cognito', 'Cookie': 'synthetic-session', 'X-Amz-Security-Token': 'synthetic-aws', 'Proxy-Authorization': 'synthetic-proxy'})
     assert response.status_code == 200
@@ -443,6 +444,7 @@ def test_failed_fetch_consumes_aggregate_reservation(wire):
 
 
 @pytest.mark.parametrize('scheme', ['http', 'https'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scan_pdf_media_uses_existing_unsupported_status(client, auth_user, wire, scheme):
     wire[1].append((200, {'Content-Type': 'application/pdf'}, b'%PDF-1.4'))
     response = client.post('/api/proxy/scan-menu', json={'url': f'{scheme}://public.example/menu'})

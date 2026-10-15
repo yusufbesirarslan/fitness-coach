@@ -169,6 +169,7 @@ class _FakeVision:
         self.chat = _Chat()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_vision_ocr_returns_text_and_sends_data_url(app, monkeypatch):
     fake = _FakeVision("  Mercimek Çorbası\nAdana Kebap  ")
     monkeypatch.setattr(menu_ocr, "openai_client", fake)
@@ -178,6 +179,7 @@ def test_vision_ocr_returns_text_and_sends_data_url(app, monkeypatch):
     assert image_part["image_url"]["url"].startswith("data:image/png;base64,")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_vision_ocr_unknown_mime_falls_back_to_jpeg(app, monkeypatch):
     fake = _FakeVision("x")
     monkeypatch.setattr(menu_ocr, "openai_client", fake)
@@ -217,6 +219,7 @@ def test_vision_ocr_empty_choices_returns_empty(app, monkeypatch):
     assert _extract_text_from_image(b"img", "image/png") == ""
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_vision_ocr_compresses_oversized_image(app, monkeypatch):
     fake = _FakeVision("ok")
     monkeypatch.setattr(menu_ocr, "openai_client", fake)

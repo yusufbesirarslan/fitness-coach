@@ -6,6 +6,8 @@ no-op'tur ve her tarama fetch eder.
 
     python -m pytest tests/test_menu_url_cache.py -v
 """
+
+import pytest
 import requests
 
 from app.services import menu_analysis
@@ -70,6 +72,7 @@ def test_cache_key_distinguishes_different_paths():
 # Endpoint davranışı
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_same_url_second_scan_hits_cache(client, auth_user, monkeypatch):
     fake = _FakeRedis()
     calls = _patch_scan(monkeypatch, redis=fake)
@@ -85,6 +88,7 @@ def test_same_url_second_scan_hits_cache(client, auth_user, monkeypatch):
     assert second["title"] == first["title"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_normalized_urls_share_cache_entry(client, auth_user, monkeypatch):
     fake = _FakeRedis()
     calls = _patch_scan(monkeypatch, redis=fake)
@@ -94,6 +98,7 @@ def test_normalized_urls_share_cache_entry(client, auth_user, monkeypatch):
     assert len(calls) == 1                        # host-case + trailing slash → tek anahtar
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_no_redis_disables_cache(client, auth_user, monkeypatch):
     calls = _patch_scan(monkeypatch, redis=None)
     url = "https://restoran.example/menu"
@@ -104,6 +109,7 @@ def test_no_redis_disables_cache(client, auth_user, monkeypatch):
     assert body.get("cached") is not True
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_failed_scan_not_cached(client, auth_user, monkeypatch):
     fake = _FakeRedis()
     monkeypatch.setattr(menu_analysis, "redis_client", fake)

@@ -68,6 +68,7 @@ def test_build_bedrock_system_keeps_context_outside_cached_block(monkeypatch):
 # manage_user_memory
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_manage_user_memory_roundtrip_and_second_update(app, make_user):
     user = make_user("mem")
     # boş başlangıç
@@ -81,12 +82,14 @@ def test_manage_user_memory_roundtrip_and_second_update(app, make_user):
     assert json.loads(ai_coach._tool_manage_user_memory(user.id, "get", "fitness_goals"))["value"] == "kas kazanma"
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_manage_user_memory_rejects_unknown_key_and_action(app, make_user):
     user = make_user("mem2")
     assert json.loads(ai_coach._tool_manage_user_memory(user.id, "update", "evil", "x"))["status"] == "error"
     assert json.loads(ai_coach._tool_manage_user_memory(user.id, "frobnicate", "injuries", "x"))["status"] == "error"
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_manage_user_memory_update_requires_value_and_does_not_wipe(app, make_user):
     """None/boş value ile 'update' KAYITLI veriyi silmemeli (kazara wipe koruması)."""
     user = make_user("mem3")
@@ -271,6 +274,7 @@ def _install_model_slot_probe(monkeypatch):
     return state
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_openai_coach_provider_call_uses_model_slot(app, monkeypatch):
     state = _install_model_slot_probe(monkeypatch)
 
@@ -293,6 +297,7 @@ def test_openai_coach_provider_call_uses_model_slot(app, monkeypatch):
     assert state["providers"] == ["openai"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_coach_provider_call_uses_model_slot(app, monkeypatch):
     state = _install_model_slot_probe(monkeypatch)
 
@@ -323,6 +328,7 @@ def test_router_uses_openai_when_bedrock_disabled(app, monkeypatch):
         assert ai_coach._run_coach_conversation(1, "merhaba", "", client_history=[]) == "OPENAI"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_router_uses_bedrock_when_enabled(app, monkeypatch):
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
     monkeypatch.setattr(ai_coach, "_anthropic", object())
@@ -333,6 +339,7 @@ def test_router_uses_bedrock_when_enabled(app, monkeypatch):
         assert ai_coach._run_coach_conversation(1, "selam", "", client_history=[]) == "MERHABA"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_loop_chains_tool_then_text(app, make_user, monkeypatch):
     user = make_user("loop")
     ai_coach._tool_manage_user_memory(user.id, "update", "injuries", "Hiçbiri")
@@ -350,6 +357,7 @@ def test_bedrock_loop_chains_tool_then_text(app, make_user, monkeypatch):
     assert calls["n"] == 2  # tool_use turu + final metin turu
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_first_call_error_falls_back_to_openai(app, monkeypatch, caplog):
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
     monkeypatch.setattr(ai_coach, "_anthropic", object())
@@ -368,6 +376,7 @@ def test_bedrock_first_call_error_falls_back_to_openai(app, monkeypatch, caplog)
     assert "request_id=" in line
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_empty_response_falls_back_to_openai(app, monkeypatch):
     """Bedrock hiç araç çalışmadan boş (metin bloğu olmayan) bir yanıt verirse,
     yumuşak hata DÖNDÜRMEK yerine OpenAI'ya düşülmeli."""
@@ -379,6 +388,7 @@ def test_bedrock_empty_response_falls_back_to_openai(app, monkeypatch):
         assert ai_coach._run_coach_conversation(1, "x", "", client_history=[]) == "OPENAI"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_strips_leading_assistant_turn(app, monkeypatch):
     """convo Anthropic için 'user' ile başlamalı; baştaki assistant turu atılmalı."""
     captured = {}
@@ -396,6 +406,7 @@ def test_bedrock_strips_leading_assistant_turn(app, monkeypatch):
     assert captured["messages"][0]["role"] == "user"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_no_fallback_after_tool_ran(app, make_user, monkeypatch):
     """Bir araç YAN ETKİ ürettikten sonra hata → sağlayıcı değiştirilmez (aracı tekrar
     çalıştırma riski yok); yumuşak hata döner."""

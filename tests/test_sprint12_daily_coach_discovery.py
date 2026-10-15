@@ -119,6 +119,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # LP-02 native password recovery (pre-auth, no session).
         "/api/v1/auth/password/forgot",
         "/api/v1/auth/password/reset",
+        # D1 authenticated consent status and versioned mutation contract.
+        "/api/v1/ai-consent",
         "/api/v1/account/me",
         "/api/v1/account/language",
         # LP-03 native onboarding profile write + its LP-12 prefill read

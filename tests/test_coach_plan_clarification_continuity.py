@@ -181,6 +181,7 @@ def test_partial_sets_then_bare_reps_writes_4x15(app, split_user, tools_on):
         "4",
     ),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_no_tool_partial_add_continuation_persists_exact_4x15_once(
         app, split_user, tools_on, monkeypatch,
         first_turn, provider_text, missing, followup):
@@ -409,6 +410,7 @@ def test_numeric_continuation_rejects_record_replaced_during_reconstruction(
         "4",
     ),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_disabling_no_tool_recovery_reproduces_original_missing_both_failure(
         app, split_user, tools_on, monkeypatch,
         first_turn, first_reply, followup):
@@ -443,6 +445,7 @@ def test_disabling_no_tool_recovery_reproduces_original_missing_both_failure(
     assert clar_mod.load(split_user.id) is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_incompatible_clarification_cannot_donate_fields_to_no_tool_add(
         app, split_user, tools_on, monkeypatch):
     with app.test_request_context("/ask", method="POST"):
@@ -474,6 +477,7 @@ def test_incompatible_clarification_cannot_donate_fields_to_no_tool_add(
     assert "Hammer Curl" not in names(split_user.id, "Pazartesi")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_concurrent_incompatible_clarification_supersedes_no_tool_recovery(
         app, split_user, tools_on, monkeypatch):
     """A later request wins without letting the earlier reply describe it."""
@@ -514,6 +518,7 @@ def test_concurrent_incompatible_clarification_supersedes_no_tool_recovery(
     assert stored["reps"] is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_no_tool_partial_add_with_ambiguous_workout_asks_for_day(
         app, make_user, tools_on, monkeypatch):
     user = make_user("notoolambiguous")
@@ -544,6 +549,7 @@ def test_no_tool_partial_add_with_ambiguous_workout_asks_for_day(
     "Add Walking Lunges 4x15 to my leg workout.",
     "Add Zzyzx Press with 4 sets to my leg workout.",
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_no_tool_recovery_fails_closed_for_non_add_complete_or_unknown_turn(
         app, split_user, tools_on, monkeypatch, message):
     provider_text = "Provider response stays unchanged."
@@ -724,6 +730,7 @@ def test_replace_without_sets_reps_inherits_prescription(
     _assert_no_english_turkish_weekday(reply)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_route_replace_without_sets_reps_does_not_ask_for_them(
         app, make_user, tools_on, monkeypatch):
     from tests.test_ai_coach import _ScriptedLLM, _llm_msg, _tool_call
@@ -1146,6 +1153,7 @@ def _lifecycle(caplog):
             "reps", 4, None, results.REASON_MISSING_REPS,
         ),
     ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_region_named_partial_add_persists_the_user_owned_half(
         app, split_user, tools_on, monkeypatch, caplog,
         first_turn, missing, stored_sets, stored_reps, reason):
@@ -1176,6 +1184,7 @@ def test_region_named_partial_add_persists_the_user_owned_half(
     assert f"missing_fields={missing}" in lifecycle
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_region_named_exercise_is_not_retargeted_to_another_muscle_group(
         app, split_user, tools_on, monkeypatch):
     """Dropping "Leg" from "Leg Curl" must not ground a biceps exercise."""
@@ -1191,6 +1200,7 @@ def test_region_named_exercise_is_not_retargeted_to_another_muscle_group(
     assert stored["exercise"] == "Lying Leg Curl"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_region_named_reps_first_continuation_persists_exact_4x15_once(
         app, split_user, tools_on, monkeypatch, caplog):
     """The production sequence: 15 reps first, then a bare "4"."""
@@ -1227,6 +1237,7 @@ def test_region_named_reps_first_continuation_persists_exact_4x15_once(
     )["egzersizler"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_genuinely_new_region_named_request_still_supersedes(
         app, split_user, tools_on, monkeypatch, caplog):
     """Keeping the name must not turn a new mutation into a continuation."""

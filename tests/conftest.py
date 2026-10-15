@@ -277,3 +277,26 @@ def plan_expectation(app):
                 "mutation_version": plan.mutation_version}
 
     return _expectation
+
+
+@pytest.fixture
+def synthetic_ai_layer(app, monkeypatch):
+    """Explicit isolation for legacy mocked-provider domain/transport tests.
+
+    This is NOT evidence of consent authorization. Real D1 grant/deny/fencing
+    tests never request this fixture and use the PostgreSQL authority. The
+    patch is undone after each selected test; it grants no account permission.
+    """
+    from consent_projection_support import allow_synthetic_authority
+    allow_synthetic_authority(monkeypatch, app, memory=False)
+
+
+@pytest.fixture
+def synthetic_ai_memory_layer(app, monkeypatch):
+    """Explicit mock ALLOW for optional-memory behavior with fake providers.
+
+    Only memory-specific legacy tests opt in. This does not qualify real
+    permission or change the release's AI Memory default OFF.
+    """
+    from consent_projection_support import allow_synthetic_authority
+    allow_synthetic_authority(monkeypatch, app, memory=True)

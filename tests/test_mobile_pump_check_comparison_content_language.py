@@ -34,6 +34,7 @@ def provider_prompts(monkeypatch):
 
 
 @pytest.mark.parametrize("language,name", [("en", "English"), ("tr", "Turkish"), (None, "Turkish")])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_mixed_historical_sources_preserved_and_current_account_controls_output(
         client, mobile_user, auth_headers, pair, dependencies, provider_prompts,
         monkeypatch, language, name):
@@ -79,6 +80,7 @@ def test_mixed_historical_sources_preserved_and_current_account_controls_output(
     assert client.get(PATH + "/" + body["id"], headers=auth_headers).json == response.json
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_language_switch_preserves_completed_pair_and_new_pair_uses_current_language(
         client, mobile_user, auth_headers, pair, dependencies, provider_prompts, monkeypatch):
     from app.services.mobile_pump_check_comparisons.analysis import analyze_images
@@ -110,6 +112,7 @@ def test_language_switch_preserves_completed_pair_and_new_pair_uses_current_lang
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_timeout_keeps_typed_comparison_error(
         client, mobile_user, auth_headers, pair, dependencies, monkeypatch, language):
     from app.services.mobile_pump_check_comparisons.analysis import analyze_images

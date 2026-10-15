@@ -8,7 +8,7 @@ Never imported by application code; no runtime allow-on-error or test flag.
 from contextlib import nullcontext
 
 
-def allow_synthetic_authority(monkeypatch, app=None):
+def allow_synthetic_authority(monkeypatch, app=None, *, memory=True):
     from app.services import ai_consent as consent
     from app.blueprints import ai_consent as routes
     monkeypatch.setattr(consent, 'BINDINGS', {**consent.BINDINGS, **{
@@ -18,7 +18,9 @@ def allow_synthetic_authority(monkeypatch, app=None):
     monkeypatch.setattr(consent, 'generation', lambda owner: 0)
     monkeypatch.setattr(consent, 'dispatch', lambda *a, **kw: nullcontext())
     monkeypatch.setattr(consent, 'stream_dispatch', lambda *a, **kw: nullcontext())
-    monkeypatch.setattr(consent, 'memory_available', lambda owner: True)
+    if memory:
+        monkeypatch.setattr(consent, 'memory_available', lambda owner: True)
     monkeypatch.setattr(routes, '_CLOSED_ENDPOINTS', frozenset())
-    if app is not None:
+    monkeypatch.setattr(routes, 'require_legacy_ai', lambda *a, **kw: None)
+    if app is not None and memory:
         app.config['AI_MEMORY_ENABLED'] = True

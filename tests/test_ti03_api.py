@@ -463,6 +463,7 @@ def _workout(client, app, user, as_mobile, when, squat_reps, key):
     return ref
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_real_native_lifecycle_produces_a_comparable_insight(
         client, app, owner, flags, as_mobile, completion_proof, monkeypatch):
     from app.services.workout_completion import service as completion_service

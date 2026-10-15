@@ -298,6 +298,7 @@ def test_review_link_carries_only_the_constant(app, gate, make_user, login):  # 
     assert not any(k in json.dumps(hrefs) for k in ('kcal', 'calories', 'water', 'meal', 'plan'))
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_review_opens_coach_without_sending_and_send_uses_the_marker(
         app, gate, make_user, login, monkeypatch):  # noqa: F811
     user = start(app, make_user, login, 'pr6b_review')
@@ -344,6 +345,7 @@ def test_review_opens_coach_without_sending_and_send_uses_the_marker(
     assert seen[-1] == (user.id, 'Another question.', None)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_dismiss_clears_the_one_shot_context(app, gate, make_user, login, monkeypatch):  # noqa: F811
     user = start(app, make_user, login, 'pr6b_dismiss')
     app.config['AI_CHAT_QUOTA_ENABLED'] = False
@@ -368,6 +370,7 @@ def test_dismiss_clears_the_one_shot_context(app, gate, make_user, login, monkey
     assert seen == [None]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_send_failure_keeps_marker_for_explicit_retry(app, gate, make_user, login, monkeypatch):  # noqa: F811
     start(app, make_user, login, 'pr6b_sendfail')
     app.config['AI_CHAT_QUOTA_ENABLED'] = False

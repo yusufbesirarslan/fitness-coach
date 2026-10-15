@@ -759,6 +759,7 @@ def test_a_terminal_session_cannot_be_checkpointed(
 # §55 / S14-3 — browser completion declares its revision
 # ═════════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_session_linked_web_completion_at_the_current_revision_succeeds(
     client, auth_user, sessions_on, proof_accepted
 ):
@@ -938,6 +939,7 @@ def test_the_locked_completion_service_refuses_a_stale_revision_by_itself(
     assert refreshed.checkpoint_revision == 2
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_route_hands_the_declared_revision_to_the_canonical_command(
     client, auth_user, sessions_on, proof_accepted, monkeypatch
 ):
@@ -971,6 +973,7 @@ def test_the_route_hands_the_declared_revision_to_the_canonical_command(
 # §22 / §59 / S14-10 — the legacy path and the dark path are untouched
 # ═════════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_legacy_completion_needs_no_revision_and_fabricates_no_session(
     client, auth_user, proof_accepted
 ):
@@ -991,6 +994,7 @@ def test_legacy_completion_needs_no_revision_and_fabricates_no_session(
     assert PumpCheck.query.filter_by(user_id=auth_user.id).count() == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_flag_on_completion_without_a_session_stays_on_the_legacy_contract(
     client, auth_user, sessions_on, proof_accepted
 ):
@@ -1070,6 +1074,7 @@ def test_a_dark_checkpoint_of_an_OWNED_session_enters_no_execution_logic(
     assert after.checkpoint_data is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_dark_completion_declares_and_requires_no_revision(
     client, auth_user, proof_accepted
 ):

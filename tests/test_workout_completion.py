@@ -324,7 +324,11 @@ def test_route_replay_skips_pump_check_validation(app, client, auth_user, monkey
 
     monkeypatch.setattr(training_bp, "validate_pump_check", _validate)
 
-    first = client.post("/workout/complete", json={"image": "x", "location_type": "salon"})
+    # Only the synthetic initial proof is isolated. The replay below uses
+    # the real D1 gate with the disclosure registry still empty.
+    with monkeypatch.context() as setup:
+        setup.setattr("app.blueprints.ai_consent.require_legacy_ai", lambda: None)
+        first = client.post("/workout/complete", json={"image": "x", "location_type": "salon"})
     assert first.status_code == 200
     assert calls["n"] == 1
     # Replay: preflight returns already_completed BEFORE the Bedrock validation.

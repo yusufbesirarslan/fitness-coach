@@ -225,6 +225,7 @@ def test_refund_does_not_decrement_rollover_reservation(make_user, monkeypatch):
 # Route entegrasyonu
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_second_generation_blocked_with_402(client, quota_on, training_session, monkeypatch):
     _mock_plan(monkeypatch)
     assert client.post("/training-plan", json={}).status_code == 200
@@ -233,6 +234,7 @@ def test_second_generation_blocked_with_402(client, quota_on, training_session, 
     assert blocked.get_json()["premium_required"] is True
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_premium_user_bypasses_route_gate(client, quota_on, training_session, monkeypatch):
     training_session.is_premium = True
     db.session.commit()
@@ -241,6 +243,7 @@ def test_premium_user_bypasses_route_gate(client, quota_on, training_session, mo
         assert client.post("/training-plan", json={}).status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_failed_generation_does_not_consume_quota(client, quota_on, training_session, monkeypatch):
     # Geçersiz LLM çıktısı → 500; hak yanmamalı.
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kw: "bu json değil")
@@ -249,6 +252,7 @@ def test_failed_generation_does_not_consume_quota(client, quota_on, training_ses
     assert client.post("/training-plan", json={}).status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_quota_disabled_allows_repeat(client, training_session, monkeypatch):
     # Varsayılan (kota kapalı): tekrar üretim engellenmez.
     _mock_plan(monkeypatch)
@@ -256,6 +260,7 @@ def test_quota_disabled_allows_repeat(client, training_session, monkeypatch):
     assert client.post("/training-plan", json={}).status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_failed_generation_refunds_pre_call_reservation(
         client, quota_on, training_session, monkeypatch):
     used_during_call = []
@@ -275,6 +280,7 @@ def test_failed_generation_refunds_pre_call_reservation(
     assert premium.remaining_ai_plans(training_session, "training") == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_failed_generation_preserves_response_when_refund_fails(
         client, quota_on, training_session, monkeypatch):
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: "not json")

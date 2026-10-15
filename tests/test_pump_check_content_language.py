@@ -22,6 +22,7 @@ def image_bytes():
 
 
 @pytest.mark.parametrize("kind", ["analysis", "comparison"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_physical_provider_requests_differ_only_in_fixed_prose_language(
         monkeypatch, image_bytes, kind):
     document = single_document() if kind == "analysis" else comparison_document()

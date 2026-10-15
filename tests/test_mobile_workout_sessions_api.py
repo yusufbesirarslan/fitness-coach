@@ -484,6 +484,7 @@ def test_browser_started_session_native_checkpoint_fails_closed_on_plan_drift(
     assert row.checkpoint_data is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_native_started_session_can_be_checkpointed_and_completed_by_web(
     client, owner, as_mobile, workout_ref, browser_completion_proof, login
 ):
@@ -523,6 +524,7 @@ def test_native_started_session_can_be_checkpointed_and_completed_by_web(
     ).count() == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_started_session_can_be_completed_natively(
     client, owner, as_mobile, plan, completion_proof
 ):
@@ -629,6 +631,7 @@ def test_lifecycle_metric_counts_transitions_and_excludes_replays(
     ]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_completion_metric_counts_first_transition_not_replay(
     client, owner, as_mobile, workout_ref, completion_proof, lifecycle_events
 ):
@@ -709,6 +712,7 @@ def test_metric_failure_never_changes_lifecycle_command_results(
             abandoned.status_code] == [201, 200, 200, 200]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_metric_failure_never_changes_completion_result(
     client, owner, as_mobile, workout_ref, completion_proof, monkeypatch
 ):
@@ -729,6 +733,7 @@ def test_metric_failure_never_changes_completion_result(
     assert completed.json["session"]["status"] == "completed"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_runtime_metrics_disabled_keeps_every_execution_outcome_functional(
     client, owner, as_mobile, workout_ref, completion_proof, monkeypatch
 ):
@@ -831,6 +836,7 @@ def test_referenced_read_returns_the_same_active_projection_without_mutation(
             row.checkpoint_revision) == before
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_lost_completion_response_is_resolved_by_referenced_terminal_read(
     client, owner, as_mobile, workout_ref, completion_proof
 ):
@@ -1205,6 +1211,7 @@ def test_checkpoint_enforces_its_per_dimension_bounds(
     assert _session_row(owner).checkpoint_revision == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_terminal_session_accepts_no_further_checkpoint(
     client, owner, as_mobile, workout_ref, completion_proof
 ):
@@ -1311,6 +1318,7 @@ def test_abandon_rejects_a_bounded_reason_that_is_not_a_reason_code(
     assert _session_row(owner).status == "active"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_completed_session_cannot_be_abandoned_afterwards(
     client, owner, as_mobile, workout_ref, completion_proof
 ):
@@ -1328,6 +1336,7 @@ def test_a_completed_session_cannot_be_abandoned_afterwards(
 
 # -- 61. complete -------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_produces_exactly_one_set_of_canonical_side_effects(
     client, owner, as_mobile, workout_ref, completion_proof
 ):
@@ -1355,6 +1364,7 @@ def test_complete_produces_exactly_one_set_of_canonical_side_effects(
     assert completion_proof["validate"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_never_creates_a_pump_check_from_the_mobile_route_itself(
     client, owner, as_mobile, workout_ref, completion_proof
 ):
@@ -1369,6 +1379,7 @@ def test_complete_never_creates_a_pump_check_from_the_mobile_route_itself(
     assert check.user_id == owner.id
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_lost_completion_response_replays_with_no_duplicate_side_effects(
     client, owner, as_mobile, workout_ref, completion_proof
 ):
@@ -1474,6 +1485,7 @@ def _session_columns(user):
     return {c.name: getattr(row, c.name) for c in WorkoutSession.__table__.columns}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_rejected_completion_proof_writes_nothing(
     client, owner, as_mobile, workout_ref, rejected_proof, monkeypatch
 ):
@@ -1539,6 +1551,7 @@ def test_a_rejected_completion_proof_writes_nothing(
     assert already_completed_today(owner.id, date.fromisoformat(FIXED_DAY)) is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_rejected_proof_leaves_the_session_completable_by_a_later_proof(
     client, owner, as_mobile, workout_ref, rejected_proof
 ):
@@ -1567,6 +1580,7 @@ def test_a_rejected_proof_leaves_the_session_completable_by_a_later_proof(
     assert rejected_proof.calls["upload"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_rejected_completion_proof_emits_one_bounded_diagnostic_line(
     client, owner, as_mobile, workout_ref, rejected_proof, caplog
 ):
@@ -1595,6 +1609,7 @@ def test_a_rejected_completion_proof_emits_one_bounded_diagnostic_line(
         assert leak not in logged
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_unusable_completion_image_writes_nothing(
     client, owner, as_mobile, workout_ref, completion_proof, monkeypatch
 ):
@@ -1613,6 +1628,7 @@ def test_an_unusable_completion_image_writes_nothing(
     assert _session_row(owner).status == "active"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_completion_never_leaks_an_internal_failure_to_the_client(
     client, owner, as_mobile, workout_ref, completion_proof, monkeypatch
 ):
@@ -1674,6 +1690,7 @@ def test_the_in_transaction_revision_precondition_refuses_on_its_own(
     assert _session_row(owner).status == "active"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_completion_replay_does_not_even_attempt_a_second_insert(
     client, owner, as_mobile, workout_ref, completion_proof
 ):
@@ -1742,6 +1759,7 @@ def live_workout_ref(app, owner):
         app.config["SECRET_KEY"], owner.id, "live-session-lineage", 2, slot)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_today_observes_the_session_lifecycle_through_the_canonical_authority(
     client, owner, as_mobile, live_workout_ref, completion_proof
 ):
@@ -1823,6 +1841,7 @@ def test_today_reports_an_abandoned_session_as_not_completed(
     assert today["workout"]["completed"] is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_native_completion_never_fans_a_pump_check_out_to_friends(
     client, owner, as_mobile, workout_ref, completion_proof
 ):

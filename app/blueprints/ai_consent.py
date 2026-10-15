@@ -48,14 +48,19 @@ def mobile_consent():
 # AI branch at the provider boundary below.
 _CLOSED_ENDPOINTS = frozenset({
     'coach.chat', 'coach.ask_coach', 'coach.ask_coach_stream',
-    'training.training_plan_generate', 'training.complete_workout',
+    'training.training_plan_generate',
     'menu.analyze_menu', 'menu.proxy_scan_menu',
     'mobile_api.send_coach_message', 'mobile_api.create_training_plan',
     'mobile_api.create_replacement_proposal', 'mobile_api.nutrition_plan_generate_native',
     'mobile_api.nutrition_menu_analyze', 'mobile_api.create_pump_check',
-    'mobile_api.create_pump_check_comparison', 'mobile_api.complete_workout_session',
+    'mobile_api.create_pump_check_comparison',
     'nutrition.nutrition_plan_generate', 'nutrition.review_meals',
 })
+
+
+def require_legacy_ai(code="AI_CONSENT_DISCLOSURE_UNAVAILABLE"):
+    """Fresh unqualified AI work is unavailable; first-party replays may run."""
+    raise consent.ConsentDenied(code)
 
 
 def install(app):
@@ -66,6 +71,13 @@ def install(app):
     @app.before_request
     def closed_legacy_ai():
         if request.method in {'POST', 'PUT'} and request.endpoint in _CLOSED_ENDPOINTS:
+            # Enforce the existing transport size ceiling without consuming
+            # the body or building any AI context.
+            from flask import current_app
+            from werkzeug.exceptions import RequestEntityTooLarge
+            ceiling = current_app.config.get('MAX_CONTENT_LENGTH')
+            if ceiling is not None and request.content_length is not None and request.content_length > ceiling:
+                raise RequestEntityTooLarge()
             def deny():
                 return consent_error_response(consent.ConsentDenied('AI_CONSENT_DISCLOSURE_UNAVAILABLE'))
             if request.endpoint.startswith('mobile_api.'):

@@ -133,7 +133,8 @@ def log_meal():
     if manual_nutrition is None:
         # Deny the AI-only branch before optional upload/storage. Manual and
         # provider-backed diary writes above keep their existing behavior.
-        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+        from app.blueprints.ai_consent import require_legacy_ai
+        require_legacy_ai("AI_CONSENT_PATH_UNAVAILABLE")
 
     # Opsiyonel öğün fotoğrafı: doğrula ve (varsa) S3'e yükle. S3 hatası öğün
     # kaydını bloklamaz (fail-open) — yalnızca foto atlanır.

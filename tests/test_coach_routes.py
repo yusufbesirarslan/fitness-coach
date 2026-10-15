@@ -35,6 +35,7 @@ def fake_reply(monkeypatch):
 # /chat
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_missing_field_rejected(client, auth_user):
     payload = dict(CHAT_PAYLOAD)
     del payload["gender"]
@@ -43,6 +44,7 @@ def test_chat_missing_field_rejected(client, auth_user):
     assert "gender" in response.get_json()["reply"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_non_numeric_rejected(client, auth_user):
     response = client.post("/chat", json={**CHAT_PAYLOAD, "weight": "seksen"})
     assert response.status_code == 400
@@ -51,11 +53,13 @@ def test_chat_non_numeric_rejected(client, auth_user):
 @pytest.mark.parametrize("field,value", [
     ("weight", []), ("height", {}), ("age", [30]),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_non_scalar_numeric_rejected(client, auth_user, field, value):
     response = client.post("/chat", json={**CHAT_PAYLOAD, field: value})
     assert response.status_code == 400
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_rejects_oversized_message_before_calling_the_model(
         client, auth_user, monkeypatch):
     """/chat da /ask ile AYNI girdi tavanını uygular (triage 2026-08-14 #2).
@@ -81,6 +85,7 @@ def test_chat_rejects_oversized_message_before_calling_the_model(
     assert response.get_json()["reply"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_accepts_message_at_the_cap(client, auth_user, fake_reply):
     """Sınır KAPSAYICI: tam tavandaki girdi geçerlidir (off-by-one koruması)."""
     from app.services.moderation import MAX_QUESTION_CHARS
@@ -90,6 +95,7 @@ def test_chat_accepts_message_at_the_cap(client, auth_user, fake_reply):
     assert response.status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_rejects_non_string_message(client, auth_user, monkeypatch):
     """Uzunluk kapısı tip kapısı ister: len(dict) sessizce 0 döner."""
     monkeypatch.setattr(coach_bp, "generate_coach_reply",
@@ -98,6 +104,7 @@ def test_chat_rejects_non_string_message(client, auth_user, monkeypatch):
     assert response.status_code == 400
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_first_session_no_comparison(client, auth_user, fake_reply):
     response = client.post("/chat", json=CHAT_PAYLOAD)
     assert response.status_code == 200
@@ -108,6 +115,7 @@ def test_chat_first_session_no_comparison(client, auth_user, fake_reply):
     assert UserSession.query.filter_by(user_id=auth_user.id).count() == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_second_session_returns_weight_comparison(client, auth_user, fake_reply):
     client.post("/chat", json=CHAT_PAYLOAD)
     response = client.post("/chat", json={**CHAT_PAYLOAD, "weight": 78.5})
@@ -117,6 +125,7 @@ def test_chat_second_session_returns_weight_comparison(client, auth_user, fake_r
     assert comparison["days_passed"] == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_cooldown_returns_429_before_quota_and_model(
         client, auth_user, monkeypatch):
     # triage 2026-09-30 #3: /chat honours the same failure cooldown as /ask,
@@ -131,6 +140,7 @@ def test_chat_cooldown_returns_429_before_quota_and_model(
     assert UserSession.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_quota_exhausted_returns_402_without_model_or_session(
         client, auth_user, monkeypatch):
     monkeypatch.setattr(coach_bp, "reserve_ai_quota",
@@ -143,6 +153,7 @@ def test_chat_quota_exhausted_returns_402_without_model_or_session(
     assert UserSession.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_consumes_shared_weekly_quota_until_blocked(
         client, auth_user, fake_reply):
     # Free users get FREE_WEEKLY_AI_CHATS turns in the SAME bucket /ask uses;
@@ -157,6 +168,7 @@ def test_chat_consumes_shared_weekly_quota_until_blocked(
         premium.FREE_WEEKLY_AI_CHATS
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_quota_gate_can_be_disabled_like_ask(
         client, auth_user, fake_reply, app):
     app.config["AI_CHAT_QUOTA_ENABLED"] = False
@@ -164,6 +176,7 @@ def test_chat_quota_gate_can_be_disabled_like_ask(
         assert client.post("/chat", json=CHAT_PAYLOAD).status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_model_fallback_refunds_quota_and_records_failure(
         client, auth_user, monkeypatch):
     recorded = []
@@ -179,6 +192,7 @@ def test_chat_model_fallback_refunds_quota_and_records_failure(
 
 
 @pytest.mark.parametrize("language", ["tr", "en"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_real_provider_failure_text_refunds_quota_and_records_failure(
         client, auth_user, monkeypatch, language):
     # The REAL provider-failure path: generate_coach_reply swallows the model
@@ -207,6 +221,7 @@ def test_chat_real_provider_failure_text_refunds_quota_and_records_failure(
     assert cleared == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_success_clears_failure_counter_and_keeps_quota_spent(
         client, auth_user, fake_reply, monkeypatch):
     cleared = []
@@ -218,6 +233,7 @@ def test_chat_success_clears_failure_counter_and_keeps_quota_spent(
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_unexpected_error_rolls_back_refunds_and_answers_typed_500(
         client, auth_user, monkeypatch):
     # triage 2026-09-30 #4: a raise from the model layer is no longer a bare
@@ -241,6 +257,7 @@ def test_chat_unexpected_error_rolls_back_refunds_and_answers_typed_500(
     assert UserSession.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_chat_persistence_failure_is_rolled_back_and_refunded(
         client, auth_user, fake_reply, monkeypatch):
     real_commit = db.session.commit
@@ -271,10 +288,12 @@ def test_chat_persistence_failure_is_rolled_back_and_refunded(
 # /ask
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_requires_question(client, auth_user):
     assert client.post("/ask", json={"question": "  "}).status_code == 400
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_passes_context_and_history(client, auth_user, monkeypatch):
     seen = {}
     monkeypatch.setattr(context_builder, "fetch_coach_context",
@@ -299,6 +318,7 @@ def test_ask_passes_context_and_history(client, auth_user, monkeypatch):
     assert seen["prepared_history"] == []        # taze konuşma → boş DB penceresi
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_non_list_history_dropped(client, auth_user, monkeypatch):
     monkeypatch.setattr(context_builder, "fetch_coach_context",
                         lambda uid, q, language="tr": "")
@@ -310,6 +330,7 @@ def test_ask_non_list_history_dropped(client, auth_user, monkeypatch):
     assert seen["history"] is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_ask_defers_inline_summarize_until_after_response(client, auth_user, monkeypatch):
     """Triage 2026-07-19 #4: worker YOKKEN (kuyruk None) satır-içi özetleme /ask
     kritik yolunda ana koç turundan ÖNCE bloklayıcı LLM çağrısı yapıyordu. Artık
@@ -337,6 +358,7 @@ def test_ask_defers_inline_summarize_until_after_response(client, auth_user, mon
     assert events == ["turn", ("summarize", body["conversation_id"])]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_context_failure_degrades_gracefully(client, auth_user, monkeypatch):
     def boom(uid, q, language="tr"):
         raise RuntimeError("psycopg2 yok")
@@ -348,6 +370,7 @@ def test_ask_context_failure_degrades_gracefully(client, auth_user, monkeypatch)
     assert response.get_json()["answer"] == "context=[]"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_conversation_failure_returns_500(client, auth_user, monkeypatch):
     monkeypatch.setattr(context_builder, "fetch_coach_context",
                         lambda uid, q, language="tr": "")
@@ -361,6 +384,7 @@ def test_ask_conversation_failure_returns_500(client, auth_user, monkeypatch):
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_rejects_oversized_question(client, auth_user, monkeypatch):
     # H2: aşırı uzun soru token-maliyeti amplifikasyonu vektörüdür; modele
     # gönderilmeden 400 ile reddedilmeli (sessiz kırpma değil).
@@ -377,6 +401,7 @@ def test_ask_rejects_oversized_question(client, auth_user, monkeypatch):
     assert called["run"] is False  # pahalı döngüye hiç girilmedi
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_quota_exhausted_returns_402(client, auth_user, monkeypatch):
     # M4: haftalık AI sohbet kotası dolduğunda /ask 402 (premium_required) döner
     # ve pahalı koç döngüsü hiç çalışmaz.
@@ -396,6 +421,7 @@ def test_ask_quota_exhausted_returns_402(client, auth_user, monkeypatch):
     assert called["run"] is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_fallback_refunds_reserved_quota(client, auth_user, monkeypatch):
     # Sağlayıcı hata-yedeği metni döndüğünde (finalize_reply bunu bayraklar)
     # rezerve edilen haftalık hak iade edilir.
@@ -419,6 +445,7 @@ def test_ask_fallback_refunds_reserved_quota(client, auth_user, monkeypatch):
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_fallback_preserves_200_when_refund_fails(
         client, auth_user, monkeypatch):
     monkeypatch.setattr(context_builder, "fetch_coach_context",
@@ -480,12 +507,14 @@ def _post_stream(client, question="selam"):
     return resp
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_requires_question(client, auth_user):
     resp = client.post("/ask/stream", json={"question": "  "})
     assert resp.status_code == 400
     resp.close()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_emits_meta_delta_done_frames(client, auth_user, monkeypatch):
     monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
         {"type": "meta", "conversation_id": 7},
@@ -514,6 +543,7 @@ def test_ask_stream_emits_meta_delta_done_frames(client, auth_user, monkeypatch)
     ]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_preserves_turkish_chars(client, auth_user, monkeypatch):
     # _sse ensure_ascii=False: Türkçe karakterler \\uXXXX'e şişmemeli.
     monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
@@ -527,6 +557,7 @@ def test_ask_stream_preserves_turkish_chars(client, auth_user, monkeypatch):
     assert "\\u" not in resp.raw
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_quota_exhausted_returns_402(client, auth_user, monkeypatch):
     called = {"stream": False}
     monkeypatch.setattr(coach_bp, "reserve_ai_quota",
@@ -544,6 +575,7 @@ def test_ask_stream_quota_exhausted_returns_402(client, auth_user, monkeypatch):
     resp.close()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_error_frame_refunds_quota(client, auth_user, monkeypatch):
     monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
         {"type": "meta", "conversation_id": 1},
@@ -559,6 +591,7 @@ def test_ask_stream_error_frame_refunds_quota(client, auth_user, monkeypatch):
 
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_refund_passes_reservation_week(client, auth_user, monkeypatch):
     refunded = []
     monkeypatch.setattr(coach_bp, "reservation_week",
@@ -576,6 +609,7 @@ def test_ask_stream_refund_passes_reservation_week(client, auth_user, monkeypatc
     assert refunded == [(auth_user.id, "2026-W27")]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_partial_stream_error_keeps_quota_and_hides_internal_fields(
         client, auth_user, monkeypatch):
     recorded = []
@@ -598,6 +632,7 @@ def test_ask_stream_partial_stream_error_keeps_quota_and_hides_internal_fields(
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_tool_work_error_keeps_quota_without_failure(
         client, auth_user, monkeypatch):
     recorded = []
@@ -618,6 +653,7 @@ def test_ask_stream_tool_work_error_keeps_quota_without_failure(
 
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_partial_exception_keeps_quota_without_failure(
         client, auth_user, monkeypatch):
     recorded = []
@@ -638,6 +674,7 @@ def test_ask_stream_partial_exception_keeps_quota_without_failure(
     assert "sensitive provider detail" not in resp.raw
     assert recorded == []
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_pre_work_error_refunds_instead_of_keeps_quota(
         client, auth_user, monkeypatch):
     recorded = []
@@ -656,6 +693,7 @@ def test_ask_stream_pre_work_error_refunds_instead_of_keeps_quota(
     assert recorded == [auth_user.id]
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_fallback_done_refunds_quota(client, auth_user, monkeypatch):
     monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
         {"type": "meta", "conversation_id": 1},
@@ -670,6 +708,7 @@ def test_ask_stream_fallback_done_refunds_quota(client, auth_user, monkeypatch):
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_success_consumes_quota(client, auth_user, monkeypatch):
     monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
         {"type": "meta", "conversation_id": 1},
@@ -683,6 +722,7 @@ def test_ask_stream_success_consumes_quota(client, auth_user, monkeypatch):
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_provider_exception_emits_friendly_error(
         client, auth_user, monkeypatch):
     # Hat beklenmedik biçimde patlarsa istemciye sağlayıcı metni ASLA sızmaz;
@@ -707,6 +747,7 @@ def _ok_answer(*a, **k):
     return {"answer": "ok", "conversation_id": 1, "is_error_fallback": False}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_cooldown_returns_429_before_quota(client, auth_user, monkeypatch):
     # Kullanıcı soğumadayken /ask 429+Retry-After döner; pahalı hat HİÇ çalışmaz
     # ve haftalık hak HARCANMAZ (soğuma kotadan önce).
@@ -719,6 +760,7 @@ def test_ask_cooldown_returns_429_before_quota(client, auth_user, monkeypatch):
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_cooldown_returns_429_before_quota(client, auth_user, monkeypatch):
     monkeypatch.setattr(coach_bp.ai_recovery, "ai_cooldown_remaining", lambda uid: 45)
     called = {"stream": False}
@@ -735,6 +777,7 @@ def test_ask_stream_cooldown_returns_429_before_quota(client, auth_user, monkeyp
     resp.close()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_success_clears_failure_streak(client, auth_user, monkeypatch):
     cleared = []
     monkeypatch.setattr(coach_bp.ai_recovery, "clear_ai_failures",
@@ -747,6 +790,7 @@ def test_ask_success_clears_failure_streak(client, auth_user, monkeypatch):
     assert cleared == [auth_user.id]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_error_fallback_records_failure(client, auth_user, monkeypatch):
     recorded = []
     monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
@@ -759,6 +803,7 @@ def test_ask_error_fallback_records_failure(client, auth_user, monkeypatch):
     assert recorded == [auth_user.id]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_exception_records_failure(client, auth_user, monkeypatch):
     recorded = []
     monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
@@ -772,6 +817,7 @@ def test_ask_exception_records_failure(client, auth_user, monkeypatch):
     assert recorded == [auth_user.id]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_error_records_failure(client, auth_user, monkeypatch):
     recorded = []
     monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
@@ -784,6 +830,7 @@ def test_ask_stream_error_records_failure(client, auth_user, monkeypatch):
     assert recorded == [auth_user.id]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_success_clears_failure_streak(client, auth_user, monkeypatch):
     cleared = []
     monkeypatch.setattr(coach_bp.ai_recovery, "clear_ai_failures",
@@ -809,6 +856,7 @@ def enabled_limiter():
         limiter.reset()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_burst_limit_trips_on_sixth(client, auth_user, enabled_limiter, monkeypatch):
     # AI_BURST_RATELIMIT = "5 per minute" → aynı dakikadaki 6. istek 429.
     monkeypatch.setattr(coach_bp.ai_recovery, "ai_cooldown_remaining", lambda uid: 0)

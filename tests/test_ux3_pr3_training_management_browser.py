@@ -112,6 +112,7 @@ def _generate(page):
 # 1. No plan → create → generate → save → the SERVER renders the active plan
 # ══════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_creation_flow_ends_in_a_server_rendered_active_plan(
         app, plan_v2, profile_ready, generator, training_page):
     page, traffic, _, _ = training_page
@@ -145,6 +146,7 @@ def test_creation_flow_ends_in_a_server_rendered_active_plan(
 # 2/3. Regeneration: proposal, cancel, and explicit confirmed replacement
 # ══════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_proposal_never_replaces_the_plan_and_cancelling_changes_nothing(
         app, plan_v2, profile_ready, generator, training_page):
     page, traffic, _, _ = training_page
@@ -167,6 +169,7 @@ def test_a_proposal_never_replaces_the_plan_and_cancelling_changes_nothing(
     assert not any(path == "/training-plan/save" for path, _, _ in traffic)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_replacement_requires_the_confirmation_and_then_shows_canonical_state(
         app, plan_v2, profile_ready, generator, training_page):
     page, traffic, _, _ = training_page
@@ -209,6 +212,7 @@ def test_replacement_requires_the_confirmation_and_then_shows_canonical_state(
     assert saves[0][1]["expected_plan"] == origin_pair
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_dismissing_the_confirmation_writes_nothing(
         app, plan_v2, profile_ready, generator, training_page):
     page, traffic, _, _ = training_page
@@ -232,6 +236,7 @@ def test_dismissing_the_confirmation_writes_nothing(
 # 4. A plan that moved under the page (the Coach-mutation shape)
 # ══════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_plan_changed_elsewhere_refuses_the_replacement_without_writing(
         app, plan_v2, profile_ready, generator, training_page):
     """The page renders against version N; an authorized mutation moves the
@@ -293,6 +298,7 @@ def test_generation_failure_leaves_the_current_plan_untouched(
     assert "Original Focus" in page.content()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_failed_save_never_lets_the_proposal_masquerade_as_active(
         app, plan_v2, profile_ready, generator, training_page, monkeypatch):
     page, traffic, _, _ = training_page
@@ -383,6 +389,7 @@ def test_an_unchanged_plan_never_claims_the_page_is_stale(
 
 @pytest.mark.parametrize("width,height", [
     (320, 720), (390, 844), (768, 1024), (1024, 768), (1366, 900)])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_management_workflow_never_overflows_horizontally(
         app, plan_v2, profile_ready, generator, training_page, width, height):
     page, _, _, _ = training_page
@@ -405,6 +412,7 @@ def test_the_management_workflow_never_overflows_horizontally(
     assert card["width"] <= width, card
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_destructive_dialog_is_keyboard_complete_and_restores_focus(
         app, plan_v2, profile_ready, generator, training_page):
     page, traffic, _, _ = training_page
@@ -431,6 +439,7 @@ def test_the_destructive_dialog_is_keyboard_complete_and_restores_focus(
         "document.activeElement.hasAttribute('data-plan-manage-confirm')")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_english_locale_renders_the_management_workflow(
         app, plan_v2, profile_ready, generator, training_page):
     """TR is the default; EN comes from the user's own `language`, not a query

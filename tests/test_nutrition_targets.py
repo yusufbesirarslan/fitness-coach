@@ -195,6 +195,7 @@ def cutting_user(auth_user):
     return auth_user
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_coach_menu_and_barcode_derive_one_target(
         client, cutting_user, monkeypatch):
     """Behavioural convergence, compared against the canonical fixture rather
@@ -229,6 +230,7 @@ def test_coach_menu_and_barcode_derive_one_target(
         assert menu_target[key] == pytest.approx(expected, abs=0.5), key
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_consumers_share_the_remaining_budget_interpretation(
         client, cutting_user, monkeypatch):
     """Same day, same 500 kcal eaten, one remaining figure."""
@@ -277,6 +279,7 @@ def test_the_coach_still_reports_no_budget_for_an_unconfigured_user(
     assert ai_coach._remaining_macros_for_user(user.id) is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_menu_still_answers_its_profile_data_missing_error(client, auth_user):
     """Absence is translated into the endpoint's *existing* contract, not into
     a new one and not into a fabricated target."""
@@ -414,6 +417,7 @@ def test_the_barcode_goal_classifier_was_not_changed():
 # 6. F3b stays out of it
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_review_route_publishes_absence_but_keeps_its_prompt_fallback(
         client, auth_user, monkeypatch):
     """F3b and F3a, kept apart — with one correction to PR1's framing.

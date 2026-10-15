@@ -182,6 +182,7 @@ def test_n5_refused_save_clearing_the_plan_is_detected(app, auth_user, client, t
     assert_served(page, ['savePlanOption'], "'rejected';\n    renderCurrentPlan({ exists: false });")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_n6_generation_on_plan_open_is_detected(app, auth_user, client, training_page, generator):
     with pytest.raises(AssertionError), pytest.MonkeyPatch.context() as scoped:
         contract.test_no_eager_generation_or_provider_call(

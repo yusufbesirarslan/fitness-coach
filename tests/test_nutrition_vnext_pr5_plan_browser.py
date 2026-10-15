@@ -298,6 +298,7 @@ def test_target_read_failure_is_unavailable_never_zero(app, auth_user, training_
 
 
 @pytest.mark.parametrize('language', ['en', 'tr'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generated_options_are_proposals_and_the_current_plan_is_unchanged(
         app, auth_user, training_page, generator, language):
     page, traffic, errors = start(app, auth_user, training_page, language)
@@ -349,6 +350,7 @@ def test_generation_failure_keeps_the_current_plan(app, auth_user, training_page
 # ── 8–11 · REPLACEMENT ──────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_replace_cancel_writes_nothing(app, auth_user, training_page, generator):
     page, traffic, errors = start(app, auth_user, training_page)
     open_plan(page)
@@ -378,6 +380,7 @@ def test_replace_cancel_writes_nothing(app, auth_user, training_page, generator)
 
 
 @pytest.mark.parametrize('language', ['en', 'tr'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_confirmed_replacement_saves_once_and_plan_and_today_converge(
         app, auth_user, training_page, generator, language):
     page, traffic, errors = start(app, auth_user, training_page, language)
@@ -408,6 +411,7 @@ def test_confirmed_replacement_saves_once_and_plan_and_today_converge(
     assert errors == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_first_plan_needs_no_replacement_confirmation(app, auth_user, training_page, generator):
     page, traffic, _ = start(app, auth_user, training_page, plan=False)
     open_plan(page)
@@ -421,6 +425,7 @@ def test_first_plan_needs_no_replacement_confirmation(app, auth_user, training_p
     assert stored(app, auth_user.id) == [OPTIONS[0]]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_refused_save_keeps_the_current_plan(app, auth_user, training_page, generator):
     """A real server refusal: the option breaks the closed plan schema. The route
     validates before it deletes, so the current plan survives untouched."""
@@ -449,6 +454,7 @@ AMBIGUOUS = ('committed_5xx', 'not_committed_5xx', 'network', 'unconfirmable')
 
 
 @pytest.mark.parametrize('case', AMBIGUOUS)
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ambiguous_save_is_never_resent_and_rereads_once(
         app, auth_user, client, training_page, generator, case):
     page, traffic, errors = start(app, auth_user, training_page)
@@ -512,6 +518,7 @@ def test_ambiguous_save_is_never_resent_and_rereads_once(
 # ── 12 · SINGLE FLIGHT ──────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generate_and_save_are_single_flight(app, auth_user, training_page, generator):
     page, traffic, errors = start(app, auth_user, training_page)
     open_plan(page)
@@ -560,6 +567,7 @@ def test_generate_and_save_are_single_flight(app, auth_user, training_page, gene
 # ── 13–14 · TOPOLOGY ────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_request_topology_per_step(app, auth_user, training_page, generator):
     page, traffic, errors = start(app, auth_user, training_page)
     page.wait_for_timeout(300)
@@ -638,6 +646,7 @@ def test_slow_active_read_is_shared_across_mode_switches(app, auth_user, client,
     assert errors == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_survives_mode_switches(app, auth_user, training_page, generator):
     page, traffic, errors = start(app, auth_user, training_page)
     open_plan(page)
@@ -657,6 +666,7 @@ def test_generation_survives_mode_switches(app, auth_user, training_page, genera
     assert errors == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_stale_active_read_never_overwrites_a_confirmed_save(app, auth_user, client, training_page, generator):
     """An older read of plan A that answers after B was saved and re-read is dropped."""
     page, traffic, errors = start(app, auth_user, training_page)
@@ -684,6 +694,7 @@ def test_a_stale_active_read_never_overwrites_a_confirmed_save(app, auth_user, c
     assert errors == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_old_plan_quick_add_answer_never_marks_the_new_plan_logged(
         app, auth_user, client, training_page, generator):
     page, traffic, errors = start(app, auth_user, training_page)
@@ -723,6 +734,7 @@ def test_old_plan_quick_add_answer_never_marks_the_new_plan_logged(
 MARKUP = '<img src=x onerror="window.__pwned=1">'
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generated_and_persisted_markup_renders_as_text(app, auth_user, training_page, generator):
     generator['plans'] = [dict(option(MARKUP, 450, '<b>Bold</b>'))]
     page, _, errors = start(app, auth_user, training_page)
@@ -748,6 +760,7 @@ def test_generated_and_persisted_markup_renders_as_text(app, auth_user, training
 
 
 @pytest.mark.parametrize('language', ['en', 'tr'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_headings_keyboard_dialog_and_focus(app, auth_user, training_page, generator, language):
     page, _, errors = start(app, auth_user, training_page, language)
     expect(page.locator('h1')).to_have_count(1)
@@ -830,6 +843,7 @@ def assert_control(page, selector, width, height=None):
 
 
 @pytest.mark.parametrize('language', ['en', 'tr'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_layout_holds_from_320_to_1366(app, auth_user, training_page, generator, language):
     generator['plans'] = [option('Uzun isimli ' + LONG_TR[:60], 450, LONG_TR), OPTIONS[1], OPTIONS[2]]
     page, _, errors = start(app, auth_user, training_page, language, size=(320, 700))
@@ -860,6 +874,7 @@ def test_plan_layout_holds_from_320_to_1366(app, auth_user, training_page, gener
     assert errors == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_reduced_motion_and_large_text_keep_states_readable(app, auth_user, training_page, generator):
     page, _, _, _ = training_page
     page.emulate_media(reduced_motion='reduce')

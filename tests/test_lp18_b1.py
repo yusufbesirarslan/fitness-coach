@@ -156,6 +156,7 @@ def test_candidate_projection_bounds_and_no_execution(replacement,provider):
     with pytest.raises(Exception):gen.review_candidate(invalid,8)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_http_success_confirm_replay_and_zero_provider(client,replacement,as_mobile,provider):
     headers=as_mobile(replacement,'generation-key-1')
     first=client.post(GENERATE,json=CANONICAL,headers=headers)
@@ -187,6 +188,7 @@ def test_confirm_strict_schema(client,replacement,as_mobile,body):
 
 
 @pytest.mark.parametrize('body,key,status',[(CANONICAL,None,400),({**CANONICAL,'user_id':1},'generation-key-1',422),({**CANONICAL,'sure':'45'},'generation-key-1',422)])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_strict_schema(client,replacement,as_mobile,provider,body,key,status):
     response=client.post(GENERATE,json=body,headers=as_mobile(replacement,key))
     assert response.status_code==status and not provider and Operation.query.count()==0
@@ -293,6 +295,7 @@ def test_confirm_requires_real_bearer_credential(client,replacement):
     assert response.status_code==401 and response.headers['Cache-Control']=='no-store'
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_real_bearer_happy_path_and_erasure(client,replacement,provider,monkeypatch):
     from account_deletion_support import install_fakes,issue_bearer
     cognito,s3=install_fakes(monkeypatch)

@@ -166,6 +166,7 @@ def _tab_to(page, predicate, limit=40):
 # Payload — same keys, same defaults, disclosure is presentation only
 # ══════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_untouched_first_run_submits_the_exact_existing_payload(first_run):
     page, traffic = first_run
     _open(page)
@@ -292,6 +293,7 @@ def test_collapsed_refinement_is_not_in_the_tab_order_and_the_action_comes_early
     assert page.evaluate("document.querySelectorAll('[tabindex]:not([tabindex=\"-1\"]):not([tabindex=\"0\"])').length") == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_refinement_opens_by_keyboard_and_every_field_is_reachable(first_run):
     page, _ = first_run
     _open(page)
@@ -340,6 +342,7 @@ def test_the_action_cannot_be_pressed_twice_while_generating(first_run):
 
 
 @pytest.mark.parametrize("width", MOBILE)
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_profile_setup_required_is_shown_with_its_link_beside_the_action(
         app, plan_v2, auth_user, generator, training_page, width):
     page, traffic, _, _ = training_page
@@ -361,6 +364,7 @@ def test_profile_setup_required_is_shown_with_its_link_beside_the_action(
 
 
 @pytest.mark.parametrize("width", (390, 1366))
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_action_is_not_pinned_over_the_proposal(first_run, width):
     page, _ = first_run
     _open(page, width)
@@ -380,6 +384,7 @@ def test_the_action_is_not_pinned_over_the_proposal(first_run, width):
 # Network — the same requests in the same order, nothing added
 # ══════════════════════════════════════════════════════════════════════════
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_first_run_network_contract_is_unchanged(app, first_run, profile_ready):
     page, traffic = first_run
     _open(page)
@@ -484,6 +489,7 @@ def _seed_plan(app, user_id):
 
 
 @pytest.mark.parametrize("width", (390, 1366))
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_regeneration_keeps_its_deliberate_entry_and_flat_form(
         app, first_run, profile_ready, width):
     page, traffic = first_run

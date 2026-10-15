@@ -57,7 +57,10 @@ dynamic dispatch (getattr, setattr, exec, eval, __import__, importlib),
 
 Accepted: create_table, add_column of a nullable column (or NOT NULL with a
 server_default), non-unique create_index, alter_column(nullable=True),
-literal additive SQL and data backfills (UPDATE/INSERT).
+literal additive SQL and data backfills (UPDATE/INSERT). Fresh literal Core
+table factories are accepted only for a create(bind) guarded by the same
+bind's inspector.has_table(table.name); other SchemaItem.create calls remain
+review failures.
 
 Known limits (static analysis): a literal UPDATE is assumed to backfill new
 columns — rewriting a column the old revision reads is not detectable here and
@@ -369,9 +372,97 @@ def _check_call(node):
     return []
 
 
+def _guarded_new_table_creates(tree):
+    """Recognize a bounded Core idiom: fresh literal tables, created only absent.
+
+    Do not exempt arbitrary .create(), reflected/extended tables, indexes, or
+    calls hidden in helpers. All other calls still pass the normal visitor.
+    """
+    safe = set()
+    functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    constructors = {"MetaData", "Table", "Column", "Integer", "BigInteger", "JSON",
+                    "DateTime", "String", "ForeignKey", "CheckConstraint", "UniqueConstraint"}
+    for loop in ast.walk(tree):
+        if not isinstance(loop, ast.For) or not isinstance(loop.target, ast.Name):
+            continue
+        if not (isinstance(loop.iter, ast.Call) and isinstance(loop.iter.func, ast.Name)
+                and not loop.iter.args and not loop.iter.keywords):
+            continue
+        helper = functions.get(loop.iter.func.id)
+        if helper is None or helper.args.args or helper.decorator_list:
+            continue
+        # A straight-line factory with local fresh metadata, literal Table
+        # declarations, and one tuple return. No reflection or mutation hooks.
+        body = helper.body
+        if (len(body) < 3 or not isinstance(body[-1], ast.Return)
+                or not isinstance(body[-1].value, ast.Tuple)):
+            continue
+        assignments = [n for n in body[:-1] if isinstance(n, ast.Assign)]
+        expressions = [n for n in body[:-1] if isinstance(n, ast.Expr)]
+        if len(assignments) + len(expressions) != len(body) - 1:
+            continue
+        if any(not isinstance(n, ast.Attribute) or not isinstance(n.value, ast.Name)
+               or n.value.id != "sa" or n.attr not in constructors
+               for n in (c.func for c in ast.walk(helper) if isinstance(c, ast.Call))):
+            continue
+        if any(kw.arg in {None, "autoload_with", "autoload", "extend_existing", "keep_existing", "listeners"}
+               for n in ast.walk(helper) if isinstance(n, ast.Call) for kw in n.keywords):
+            continue
+        values = {n.targets[0].id: n.value for n in assignments
+                  if len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)}
+        if len(values) != len(assignments):
+            continue
+        metadata = {name for name, value in values.items() if isinstance(value, ast.Call)
+                    and _call_name(value.func) == "MetaData" and not value.args and not value.keywords}
+        tables = {name for name, value in values.items() if isinstance(value, ast.Call)
+                  and _call_name(value.func) == "Table" and not value.keywords and len(value.args) >= 2
+                  and isinstance(value.args[0], ast.Constant) and isinstance(value.args[0].value, str)
+                  and isinstance(value.args[1], ast.Name) and value.args[1].id in metadata}
+        if not tables or any(not isinstance(n, ast.Name) or n.id not in tables for n in body[-1].value.elts):
+            continue
+        receiver = loop.target.id
+        # No reassignment of the loop receiver or factory name anywhere.
+        if sum(isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id == receiver
+               for n in ast.walk(loop)) != 1:
+            continue
+        if any(isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and n.id == helper.name
+               for n in ast.walk(tree)):
+            continue
+        for guard in loop.body:
+            if not (isinstance(guard, ast.If) and isinstance(guard.test, ast.UnaryOp)
+                    and isinstance(guard.test.op, ast.Not) and isinstance(guard.test.operand, ast.Call)):
+                continue
+            test = guard.test.operand
+            if (_call_name(test.func) != "has_table" or len(test.args) != 1 or test.keywords
+                    or ast.unparse(test.args[0]) != receiver + ".name"
+                    or not isinstance(test.func, ast.Attribute) or not isinstance(test.func.value, ast.Name)):
+                continue
+            inspector = test.func.value.id
+            definitions = [n for n in loop.body if isinstance(n, ast.Assign)
+                           and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
+                           and n.targets[0].id == inspector]
+            if len(definitions) != 1 or loop.body.index(definitions[0]) >= loop.body.index(guard):
+                continue
+            inspect_call = definitions[0].value
+            if (not isinstance(inspect_call, ast.Call) or ast.unparse(inspect_call.func) != "sa.inspect"
+                    or len(inspect_call.args) != 1 or inspect_call.keywords):
+                continue
+            if len(guard.body) != 2 or not isinstance(guard.body[-1], ast.Continue):
+                continue
+            statement = guard.body[0]
+            call = statement.value if isinstance(statement, ast.Expr) else None
+            if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name) and call.func.value.id == receiver
+                    and call.func.attr == "create" and len(call.args) == 1 and not call.keywords
+                    and ast.unparse(call.args[0]) == ast.unparse(inspect_call.args[0])):
+                safe.add(id(call))
+    return safe
+
+
 class _Scope(ast.NodeVisitor):
-    def __init__(self):
+    def __init__(self, safe_creates=()):
         self.problems = []
+        self.safe_creates = safe_creates
 
     def visit_FunctionDef(self, node):
         if node.name == "downgrade":
@@ -413,7 +504,8 @@ class _Scope(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node):
-        self.problems.extend(_check_call(node))
+        if id(node) not in self.safe_creates:
+            self.problems.extend(_check_call(node))
         first = node.args[0] if node.args else None
         for child in ast.iter_child_nodes(node):
             if (child is first and _call_name(node.func) in _RAW_SQL_CALLS
@@ -460,7 +552,7 @@ def check_source(source, filename="<migration>"):
         return revision, None, [
             'forward migration must declare expand_contract = "expand" or '
             '"contract" as a module-level string literal']
-    scope = _Scope()
+    scope = _Scope(_guarded_new_table_creates(tree))
     scope.visit(tree)
     return revision, EXPAND, scope.problems
 

@@ -200,6 +200,7 @@ def test_add_usage_sums_every_provider_call():
 
 # ── Bedrock akış yolu: tek tur ───────────────────────────────────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_streams_deltas_then_done(app, bedrock_on):
     bedrock_on(_FakeStream(
         ["Bugün ", "1800 ", "kcal aldın."],
@@ -217,6 +218,7 @@ def test_bedrock_streams_deltas_then_done(app, bedrock_on):
     assert done["usage"] == {"prompt_tokens": 11, "completion_tokens": 22}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_empty_chunks_are_skipped(app, bedrock_on):
     # Sağlayıcı bazen boş string delta yollar — istemciye gitmemeli.
     bedrock_on(_FakeStream(
@@ -231,6 +233,7 @@ def test_bedrock_empty_chunks_are_skipped(app, bedrock_on):
 
 # ── Bedrock akış yolu: araç döngüsü ──────────────────────────────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_tool_loop_runs_tool_then_streams_final(app, bedrock_on, monkeypatch):
     calls = []
 
@@ -270,6 +273,7 @@ def test_bedrock_tool_loop_runs_tool_then_streams_final(app, bedrock_on, monkeyp
                for m in second_convo)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_bedrock_releases_model_slot_before_tool_dispatch(
         bedrock_on, monkeypatch):
     monkeypatch.setattr(ai_gate, '_model_slots', threading.BoundedSemaphore(1))
@@ -292,6 +296,7 @@ def test_stream_bedrock_releases_model_slot_before_tool_dispatch(
     assert result[-1]['type'] == 'done'
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_slow_consumer_does_not_retain_model_slot(bedrock_on, monkeypatch):
     provider_finished = threading.Event()
 
@@ -314,6 +319,7 @@ def test_slow_consumer_does_not_retain_model_slot(bedrock_on, monkeypatch):
         gen.close()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_tool_loop_cap_emits_friendly_fallback(app, bedrock_on, monkeypatch):
     # Model sürekli araç isteyip final metne hiç varmazsa döngü tavana dayanır;
     # kullanıcı yanıtsız kalmamalı — dostça yedek metin akıtılır.
@@ -339,6 +345,7 @@ def test_bedrock_tool_loop_cap_emits_friendly_fallback(app, bedrock_on, monkeypa
 
 # ── B-kuralı: sağlayıcı geçişi yalnızca ilk delta/araç ÖNCESİ ────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_bedrock_stops_when_turn_budget_expires(
         app, bedrock_on, monkeypatch):
     monkeypatch.setattr(ai_coach, "_COACH_TOOL_LOOP_CAP", 5)
@@ -371,6 +378,7 @@ def test_stream_bedrock_stops_when_turn_budget_expires(
     assert events[-1]["text"] == ai_coach._COACH_FALLBACKS["en"]["tool"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_timeout_at_turn_deadline_does_not_start_fallback(
         app, bedrock_on, monkeypatch):
     clock = iter([0.0, 0.0, 0.0, 91.0])
@@ -389,6 +397,7 @@ def test_stream_timeout_at_turn_deadline_does_not_start_fallback(
     assert events[-1]["text"] == ai_coach._COACH_FALLBACKS["en"]["tool"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_bedrock_fallback_keeps_remaining_budget_for_openai(
         app, bedrock_on, monkeypatch):
     clock = _ControlledClock(0.0, 80.0, 82.0, 82.5)
@@ -424,6 +433,7 @@ def test_stream_bedrock_fallback_keeps_remaining_budget_for_openai(
     }
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_bedrock_timeout_is_computed_in_producer_after_gate_wait(
         app, bedrock_on, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -443,6 +453,7 @@ def test_stream_bedrock_timeout_is_computed_in_producer_after_gate_wait(
     assert events[-1]["text"] == "answer"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_bedrock_gate_wait_past_deadline_skips_provider(
         app, bedrock_on, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -467,6 +478,7 @@ def test_stream_bedrock_gate_wait_past_deadline_skips_provider(
     }
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_openai_timeout_is_recomputed_after_model_gate_wait(
         app, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -501,6 +513,7 @@ def test_stream_openai_timeout_is_recomputed_after_model_gate_wait(
     }
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_openai_gate_wait_past_deadline_skips_provider(
         app, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -536,6 +549,7 @@ def test_stream_openai_gate_wait_past_deadline_skips_provider(
     }
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_exhausted_fallback_skips_openai_and_emits_localized_done(
         app, bedrock_on, monkeypatch):
     clock = _ControlledClock(0.0, 80.0, 80.0, 89.0, 91.0)
@@ -565,6 +579,7 @@ def test_stream_exhausted_fallback_skips_openai_and_emits_localized_done(
     }
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_error_before_first_delta_falls_back_to_openai(
         app, bedrock_on, monkeypatch):
     # İlk token'dan ÖNCE ve hiç araç çalışmadan patlarsa OpenAI yedeğine düşülür;
@@ -582,6 +597,7 @@ def test_bedrock_error_before_first_delta_falls_back_to_openai(
     assert done["provider"] == "openai"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_error_after_first_delta_emits_error_no_fallback(
         app, bedrock_on, monkeypatch):
     # İlk delta İSTEMCİYE GİTTİKTEN sonra patlarsa sağlayıcı DEĞİŞTİRİLMEZ.
@@ -603,6 +619,7 @@ def test_bedrock_error_after_first_delta_emits_error_no_fallback(
     assert events[-1]["text"] == "X"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_read_only_tool_preamble_still_streams(app, bedrock_on, monkeypatch):
     monkeypatch.setattr(ai_coach, "_dispatch_coach_tool",
                         lambda *a, **k: "araç sonucu")
@@ -624,6 +641,7 @@ def test_read_only_tool_preamble_still_streams(app, bedrock_on, monkeypatch):
         "Öğünlerine bakıyorum...", " Bugün 1800 kcal."]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_error_after_tool_side_effect_no_fallback(
         app, bedrock_on, monkeypatch):
     # Bir araç YAN ETKİ ürettikten sonra ikinci tur patlarsa: hiç delta gitmemiş
@@ -649,6 +667,7 @@ def test_bedrock_error_after_tool_side_effect_no_fallback(
     assert called["openai"] is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_processing_error_after_tool_work_emits_work_aware_error(
         app, bedrock_on, monkeypatch, caplog):
     monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda *a, **k: "ok")
@@ -683,6 +702,7 @@ def test_bedrock_processing_error_after_tool_work_emits_work_aware_error(
     assert "sensitive parsing detail" not in caplog.text
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_empty_answer_no_tools_falls_back(app, bedrock_on, monkeypatch):
     # Metin bloğu yok + hiç araç çalışmadı → soru cevaplanabilirdi, OpenAI'ya düş
     # (bloklayıcı yoldaki B4 mantığının akış eşdeğeri).
@@ -821,6 +841,7 @@ def test_stream_answer_error_event_passthrough_no_record(stream_env, app, monkey
         # Hata çerçevesi hafızaya YAZILMAZ.
         assert CoachMessage.query.filter_by(conversation_id=conv_id).count() == 0
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_answer_processing_error_after_delta_persists_interruption(
         stream_env, app, bedrock_on, monkeypatch, caplog):
     def dispatch_boom(*args, **kwargs):
@@ -976,6 +997,7 @@ def test_stream_answer_drops_trailing_user_from_client_history(app, monkeypatch)
 
 # ── Triage 2026-07-19 #6: istemci kopunca üretici thread durmalı ────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_bedrock_turn_cancels_producer_on_consumer_close():
     """Tüketici generator kapanınca (istemci koptu → GeneratorExit) üretici
     thread Bedrock akışını sürmeye devam ETMEMELİ: faturalanan token üretimi

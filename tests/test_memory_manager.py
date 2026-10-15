@@ -271,6 +271,7 @@ def test_summarize_not_triggered_below_threshold(app, make_user, fake_summarizer
     assert conv.summary is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_summarize_folds_old_messages_and_advances_pointer(app, make_user,
                                                            fake_summarizer):
     user = make_user("mem_user")
@@ -383,6 +384,7 @@ def test_reset_endpoint_only_archives_own_conversation(client, auth_user, make_u
 # Uçtan uca: /ask turları kalıcılaşır (hat entegrasyonu)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_ask_persists_turn_and_next_ask_sees_it(client, auth_user, monkeypatch):
     from app.services import ai_coach, context_builder
 
@@ -408,6 +410,7 @@ def test_ask_persists_turn_and_next_ask_sees_it(client, auth_user, monkeypatch):
     assert CoachMessage.query.count() == 4  # iki tam tur
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_ask_error_fallback_is_not_persisted(client, auth_user, monkeypatch):
     # B16: hata-yedeği metni hafızaya YAZILMAZ (kota iadesiyle tutarlı; bir
     # sonraki turun penceresine girip modeli kirletmez).
@@ -425,10 +428,11 @@ def test_ask_error_fallback_is_not_persisted(client, auth_user, monkeypatch):
     assert CoachMessage.query.count() == 0
 
 
-def test_ask_without_memory_flag_keeps_legacy_behaviour(app, client, auth_user,
+@pytest.mark.usefixtures("synthetic_ai_layer")
+def test_ask_without_memory_keeps_display_history_out_of_ai_context(app, client, auth_user,
                                                         monkeypatch):
-    # AI_MEMORY_ENABLED=0 → kalıcı hafıza tamamen devre dışı (kill switch):
-    # konuşma açılmaz, tur yazılmaz, client history yolu korunur.
+    # D1 separates first-party display history from optional AI Memory.
+    # Memory OFF never substitutes client history for trusted context.
     from app.services import ai_coach, context_builder
 
     app.config["AI_MEMORY_ENABLED"] = False
@@ -441,7 +445,11 @@ def test_ask_without_memory_flag_keeps_legacy_behaviour(app, client, auth_user,
 
     body = client.post("/ask", json={"question": "soru"}).get_json()
 
-    assert body["conversation_id"] is None
-    assert seen["prepared"] is None
-    assert CoachConversation.query.count() == 0
-    assert CoachMessage.query.count() == 0
+    assert body["conversation_id"] is not None
+    assert seen["prepared"] == []
+    assert CoachConversation.query.count() == 1
+    assert CoachMessage.query.count() == 2
+    from app.services.ai_pipeline import _memory_stage
+    conversation, prepared, deferred = _memory_stage(auth_user.id)
+    assert conversation.id == body["conversation_id"]
+    assert prepared == [] and deferred is None

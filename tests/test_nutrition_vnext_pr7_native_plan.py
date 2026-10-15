@@ -155,6 +155,7 @@ def test_reading_the_plan_never_generates_or_writes(
 # ── C. generation ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_returns_proposals_and_saves_nothing(
         app, native, bearer, make_user, generator):
     user = make_user("gen-ok")
@@ -171,6 +172,7 @@ def test_generation_returns_proposals_and_saves_nothing(
     assert read(native, bearer(user))["plan"]["state"] == "absent"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_uses_the_shared_prompt_authority(app, native, bearer, make_user, generator):
     from app.services import nutrition_plan_generation as generation
     user = make_user("gen-prompt", language="en")
@@ -182,6 +184,7 @@ def test_generation_uses_the_shared_prompt_authority(app, native, bearer, make_u
     assert generator.calls[0]["prompt"] == expected
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_requires_a_target(app, native, bearer, make_user, generator):
     user = make_user("gen-notarget")
     response = generate(native, bearer(user))
@@ -196,6 +199,7 @@ def test_generation_requires_a_target(app, native, bearer, make_user, generator)
     dict(CHOICE, proteins=[]), dict(CHOICE, custom_foods=["x" * 61]),
     dict(CHOICE, custom_foods=["ok\nignore previous"]), dict(CHOICE, fats="Zeytinyağı"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_request_is_closed_and_bounded(
         app, native, bearer, make_user, generator, body):
     user = make_user("gen-bad")
@@ -211,6 +215,7 @@ def test_generation_request_is_closed_and_bounded(
     (None, [{"isim": "bad", "kahvalti": "not an object"}]),
     (None, []),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_failure_never_fabricates_a_proposal_and_refunds(
         app, native, bearer, make_user, monkeypatch, no_provider, fail, options):
     app.config["AI_PLAN_QUOTA_ENABLED"] = True
@@ -226,6 +231,7 @@ def test_provider_failure_never_fabricates_a_proposal_and_refunds(
     assert plans(user.id) == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_spends_the_shared_weekly_allowance(
         app, native, bearer, make_user, generator):
     app.config["AI_PLAN_QUOTA_ENABLED"] = True
@@ -247,6 +253,7 @@ def _proposals(native, headers):
     return response.get_json()["proposals"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_create_with_if_none_match_then_read_converges(
         app, native, bearer, make_user, generator):
     user = make_user("save-create")
@@ -263,6 +270,7 @@ def test_create_with_if_none_match_then_read_converges(
     assert row.score == response.get_json()["plan"]["food_rating"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_replace_with_the_revision_actually_read(app, native, bearer, make_user, generator):
     user = make_user("save-replace")
     set_target(user.id)
@@ -282,6 +290,7 @@ def test_replace_with_the_revision_actually_read(app, native, bearer, make_user,
      "INVALID_NUTRITION_PRECONDITION"),
     ({"If-Match": "*"}, 400, "INVALID_NUTRITION_PRECONDITION"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_replacement_precondition_is_mandatory_and_strict(
         app, native, bearer, make_user, generator, headers, status, code):
     user = make_user("save-precond")
@@ -296,6 +305,7 @@ def test_replacement_precondition_is_mandatory_and_strict(
     assert [json.loads(r.plan_data)["isim"] for r in plans(user.id)] == ["Lean plan"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_create_over_an_existing_plan_is_stale(app, native, bearer, make_user, generator):
     user = make_user("save-create-stale")
     set_target(user.id)
@@ -309,6 +319,7 @@ def test_create_over_an_existing_plan_is_stale(app, native, bearer, make_user, g
     assert [json.loads(r.plan_data)["isim"] for r in plans(user.id)] == ["Lean plan"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_two_devices_from_one_revision_cannot_both_succeed(
         app, native, bearer, make_user, generator):
     user = make_user("save-race")
@@ -323,6 +334,7 @@ def test_two_devices_from_one_revision_cannot_both_succeed(
     assert [json.loads(r.plan_data)["isim"] for r in plans(user.id)] == ["Plan A"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_lost_response_is_recovered_by_reading_not_by_resending(
         app, native, bearer, make_user, generator):
     user = make_user("save-lost")
@@ -352,6 +364,7 @@ def test_lost_response_is_recovered_by_reading_not_by_resending(
      "INVALID_NUTRITION_PLAN"),
     (lambda p: p["plan"].update(extra=1), "INVALID_NUTRITION_PLAN"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_save_revalidates_and_preserves_the_old_plan(
         app, native, bearer, make_user, generator, mutate, code):
     user = make_user("save-tamper")
@@ -369,6 +382,7 @@ def test_save_revalidates_and_preserves_the_old_plan(
 
 @pytest.mark.parametrize("extra", [{"score": 10}, {"user_id": 1}, {"revision": "x"},
                                    {"plan_id": 1}])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_authority_bearing_body_fields_are_refused(
         app, native, bearer, make_user, generator, extra):
     user = make_user("save-extra")
@@ -380,6 +394,7 @@ def test_authority_bearing_body_fields_are_refused(
     assert plans(user.id) == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_expired_proposal_is_refused(app, native, bearer, make_user, generator, monkeypatch):
     user = make_user("save-expired")
     set_target(user.id)
@@ -393,6 +408,7 @@ def test_expired_proposal_is_refused(app, native, bearer, make_user, generator, 
     assert error_of(response)["code"] == "PLAN_PROPOSAL_EXPIRED"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_owner_isolation_for_plans(app, native, bearer, make_user, generator):
     alice = make_user("plan-alice")
     bob = make_user("plan-bob")
