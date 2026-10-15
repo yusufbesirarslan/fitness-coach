@@ -66,7 +66,9 @@ def test_mobile_consent_requires_bearer(client):
 def test_closed_ai_route_has_typed_terminal_error_and_keeps_history(client, auth_user, monkeypatch):
     response = client.post('/ask', json={'question': 'SYNTHETIC', 'ai_consent': True})
     assert response.status_code == 403
-    assert response.json['error'] == {'code': 'AI_CONSENT_DISCLOSURE_UNAVAILABLE', 'retryable': False}
+    assert response.json['error']['code'] == 'AI_CONSENT_DISCLOSURE_UNAVAILABLE'
+    assert response.json['error']['retryable'] is False
+    assert set(response.json['error']) == {'code', 'message', 'retryable', 'request_id'}
     assert client.get('/coach/history').status_code == 200
 
 
@@ -115,3 +117,13 @@ def test_mobile_owner_comes_from_bearer_not_cookie(client, make_user, bearer, mo
     assert response.status_code == 200
     assert captured == [b.id]
     assert response.headers['Cache-Control'] == 'no-store'
+
+
+def test_native_denial_preserves_existing_error_envelope(client, make_user, bearer):
+    user = make_user('consent_native_denied')
+    response = client.post('/api/v1/coach/messages', headers=bearer(user),
+                           json={'message': 'SYNTHETIC', 'ai_consent': True})
+    assert response.status_code == 403
+    assert set(response.json['error']) == {'code', 'message', 'retryable', 'request_id'}
+    assert response.json['error']['code'] == 'AI_CONSENT_DISCLOSURE_UNAVAILABLE'
+    assert response.json['error']['retryable'] is False

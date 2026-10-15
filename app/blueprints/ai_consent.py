@@ -4,17 +4,30 @@ from flask_login import current_user
 from app.auth_middleware import require_auth
 from app.mobile_auth_middleware import require_mobile_auth
 from app.services import ai_consent as consent
+from app.observability import current_request_id
 
 bp = Blueprint('ai_consent', __name__)
 
+
+
+def consent_error_response(error):
+    # Preserve the established native error envelope for older clients.
+    response = jsonify(error={
+        'code': error.code,
+        'message': 'AI processing is unavailable. Review sharing permissions before continuing.',
+        'retryable': error.status == 503,
+        'request_id': current_request_id(),
+    })
+    response.status_code = error.status
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 def _respond(owner):
     try:
         result = consent.status(owner) if request.method == 'GET' else consent.mutate(owner, request.get_json(silent=True))
         response = jsonify(result)
     except consent.ConsentDenied as error:
-        response = jsonify(error={'code': error.code, 'retryable': error.status == 503})
-        response.status_code = error.status
+        response = consent_error_response(error)
     response.headers['Cache-Control'] = 'no-store'
     return response
 
@@ -48,18 +61,13 @@ _CLOSED_ENDPOINTS = frozenset({
 def install(app):
     app.register_blueprint(bp)
 
-    @app.errorhandler(consent.ConsentDenied)
-    def refusal(error):
-        response = jsonify(error={'code': error.code, 'retryable': error.status == 503})
-        response.status_code = error.status
-        response.headers['Cache-Control'] = 'no-store'
-        return response
+    app.register_error_handler(consent.ConsentDenied, consent_error_response)
 
     @app.before_request
     def closed_legacy_ai():
         if request.method in {'POST', 'PUT'} and request.endpoint in _CLOSED_ENDPOINTS:
             def deny():
-                return refusal(consent.ConsentDenied('AI_CONSENT_DISCLOSURE_UNAVAILABLE'))
+                return consent_error_response(consent.ConsentDenied('AI_CONSENT_DISCLOSURE_UNAVAILABLE'))
             if request.endpoint.startswith('mobile_api.'):
                 return require_mobile_auth(deny)()
             from app.auth_middleware import require_auth
