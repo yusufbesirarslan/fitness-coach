@@ -50,7 +50,7 @@ Existing minimization/provenance test assertions remain. Their explicit syntheti
 
 ## Migration and #436
 
-D1 adds `d1c0a15e0001` after main's `b1a8c9d0e1f2`. PR #436 at `2ba712531aa9f94043e81716007a57f0c1a281f2` adds sibling `c2b9d0e1f2a3` after that same ancestor. Neither migration was renumbered/reused, and #436/#437 were not modified. Additive DDL was tested in both orders in disposable PostgreSQL schemas: owner preserved, consent/subscription tables empty. This does **not** settle Alembic ancestry. HOLD merge until #436 resolves and an explicit reviewed ancestry reconciliation is prepared. Populated D1 downgrade refuses to erase consent evidence; runtime rollback must retain the tables and deny forwarding.
+D1 adds `d1c0a15e0001` after main's `b1a8c9d0e1f2`. PR #436 at `2ba712531aa9f94043e81716007a57f0c1a281f2` adds sibling `c2b9d0e1f2a3` after that same ancestor. Neither migration was renumbered/reused, and #436/#437 were not modified. Additive DDL was tested in both orders in disposable PostgreSQL schemas: owner preserved, consent/subscription tables empty. This does **not** settle Alembic ancestry. HOLD merge until #436 resolves and an explicit reviewed ancestry reconciliation is prepared. Fresh full-chain PostgreSQL bootstrap and zero schema drift are qualified. Existing create_all-first tables are accepted only after exact columns/types/keys/checks validation; partial or NOT VALID authority constraints are rejected. Populated D1 downgrade refuses to erase consent evidence; runtime rollback must retain the tables and deny forwarding.
 
 ## Activation blockers and targeted independent review
 

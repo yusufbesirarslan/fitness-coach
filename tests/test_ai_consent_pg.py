@@ -369,3 +369,25 @@ def test_actual_heavy_router_fallback_does_not_inherit_recipient_permission(pg_a
         with pytest.raises(consent.ConsentDenied):
             ai._heavy_chat([{'role':'user','content':'SYNTHETIC_TRAINING'}], max_tokens=100, feature='training_plan')
         assert [provider for provider, _ in captured] == ['bedrock']
+
+
+def test_migration_accepts_create_all_boot_but_rejects_partial_schema(pg_app):
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import text
+    source = Path(__file__).parents[1] / 'migrations/versions/d1c0a15e0001_ai_consent_authority.py'
+    spec = importlib.util.spec_from_file_location('d1_create_all_migration', source)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    with pg_app.app_context(), db.engine.begin() as conn:
+        with Operations.context(MigrationContext.configure(conn)):
+            migration.upgrade()  # all current models already created by fixture
+            assert conn.execute(text('SELECT count(*) FROM ai_consent_state')).scalar_one() == 0
+            conn.execute(text('ALTER TABLE ai_consent_event DROP CONSTRAINT ck_ai_consent_action'))
+            with pytest.raises(RuntimeError, match='incompatible checks'):
+                migration.upgrade()
+            conn.execute(text("ALTER TABLE ai_consent_event ADD CONSTRAINT ck_ai_consent_action CHECK (action IN ('affirmative_grant', 'revoke')) NOT VALID"))
+            with pytest.raises(RuntimeError, match='not validated'):
+                migration.upgrade()
