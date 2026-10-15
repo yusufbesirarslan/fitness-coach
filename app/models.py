@@ -1770,6 +1770,7 @@ class AIConsentEvent(db.Model):
     action = db.Column(db.String(24), nullable=False)
     locale = db.Column(db.String(8), nullable=False)
     text_digest = db.Column(db.String(64), nullable=False)
+    contract_digest = db.Column(db.String(64), nullable=False)
     occurred_at = db.Column(db.DateTime, nullable=False)
     __table_args__ = (
         db.UniqueConstraint("owner_id", "request_id", name="uq_ai_consent_request"),

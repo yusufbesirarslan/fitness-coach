@@ -35,6 +35,7 @@ def _tables():
         sa.Column('action', sa.String(24), nullable=False),
         sa.Column('locale', sa.String(8), nullable=False),
         sa.Column('text_digest', sa.String(64), nullable=False),
+        sa.Column('contract_digest', sa.String(64), nullable=False),
         sa.Column('occurred_at', sa.DateTime(), nullable=False),
         sa.UniqueConstraint('owner_id', 'request_id', name='uq_ai_consent_request'),
         sa.UniqueConstraint('owner_id', 'generation', name='uq_ai_consent_event_generation'),

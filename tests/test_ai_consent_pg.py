@@ -51,7 +51,8 @@ def pg_app(monkeypatch):
 
 def command(feature='training_plan', generation=0, action='affirmative_grant', key='grant-0001'):
     return dict(action=action, purpose=consent.BINDINGS[feature][0], version='synthetic-' + feature,
-                locale='en', text_digest='a'*64, expected_generation=generation, request_id=key)
+                locale='en', text_digest='a'*64, contract_digest=consent.contract_digest(consent.POLICIES['synthetic-' + feature]),
+                expected_generation=generation, request_id=key)
 
 
 def invoke(owner=1, feature='training_plan', recipient='openai', sdk=None):
@@ -391,3 +392,23 @@ def test_migration_accepts_create_all_boot_but_rejects_partial_schema(pg_app):
             conn.execute(text("ALTER TABLE ai_consent_event ADD CONSTRAINT ck_ai_consent_action CHECK (action IN ('affirmative_grant', 'revoke')) NOT VALID"))
             with pytest.raises(RuntimeError, match='not validated'):
                 migration.upgrade()
+
+
+def test_editing_same_version_contract_never_expands_existing_grant(pg_app, monkeypatch):
+    captured = []
+    with pg_app.app_context():
+        version = 'synthetic-training_plan'
+        old = consent.POLICIES[version]
+        restricted = consent.Disclosure(old.version, old.purpose, old.categories,
+            (('bedrock', ai.BEDROCK_MODEL),), old.texts)
+        monkeypatch.setattr(consent, 'POLICIES', {version: restricted})
+        stale_action = command()
+        consent.mutate(1, stale_action)
+        monkeypatch.setattr(consent, 'POLICIES', {version: old})
+        with pytest.raises(consent.ConsentDenied):
+            invoke(recipient='openai', sdk=lambda **kw: captured.append(kw))
+        stale_action.update(expected_generation=1, request_id='stale-accept-0002')
+        with pytest.raises(consent.ConsentDenied):
+            consent.mutate(1, stale_action)
+        assert consent.status(1)['scopes']['training.plan']['state'] == 'unavailable'
+        assert captured == []

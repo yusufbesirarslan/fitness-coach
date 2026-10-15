@@ -8,7 +8,7 @@ are unavailable, including synthetic probes (no hidden system bypass).
 import hashlib
 import json
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from datetime import datetime
 from types import MappingProxyType
 
@@ -43,6 +43,14 @@ BINDINGS = MappingProxyType({
     "training_plan": ("training.plan", ("fitness_preferences", "body_metrics", "health_constraints")),
     "nutrition_plan": ("nutrition.plan", ("nutrition_targets", "food_preferences", "personal_free_text")),
 })
+
+
+def contract_digest(policy):
+    # Bind historical grants to the entire semantic contract, not just its
+    # name. Accidentally editing a version's recipient/category tuple denies
+    # existing grants rather than broadening them.
+    encoded = json.dumps(asdict(policy), sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def _tables():
@@ -89,7 +97,7 @@ def _public(state):
                   "version": record.get("version") if isinstance(record, dict) else None}
         for purpose, record in grants.items()
     }, "available_disclosures": [
-        {"version": p.version, "purpose": p.purpose, "categories": list(p.categories),
+        {"version": p.version, "contract_digest": contract_digest(p), "purpose": p.purpose, "categories": list(p.categories),
          "recipients": [list(r) for r in p.recipients], "texts": dict(p.texts)}
         for p in POLICIES.values()
     ]}
@@ -103,9 +111,9 @@ def status(owner):
 def _record_valid(purpose, record):
     if not isinstance(record, dict):
         return False
-    if (set(record) != {"version", "locale", "text_digest", "action", "state", "granted_at", "revoked_at"}
+    if (set(record) != {"version", "locale", "text_digest", "contract_digest", "action", "state", "granted_at", "revoked_at"}
             or not all(isinstance(record.get(k), str) for k in
-                       ("version", "locale", "text_digest", "action", "state", "granted_at"))
+                       ("version", "locale", "text_digest", "contract_digest", "action", "state", "granted_at"))
             or record.get("revoked_at") is not None):
         return False
     try:
@@ -118,11 +126,12 @@ def _record_valid(purpose, record):
     return bool(policy and policy.version == record["version"] and policy.purpose == purpose
                 and record["state"] == "granted"
                 and dict(policy.texts).get(record["locale"]) == record["text_digest"]
+                and record["contract_digest"] == contract_digest(policy)
                 and record["action"] == "affirmative_grant")
 
 
 def mutate(owner, data):
-    required = {"action", "purpose", "version", "locale", "text_digest", "expected_generation", "request_id"}
+    required = {"action", "purpose", "version", "locale", "text_digest", "contract_digest", "expected_generation", "request_id"}
     if (not isinstance(data, dict) or set(data) != required
             or type(data.get("expected_generation")) is not int
             or data["expected_generation"] < 0
@@ -146,14 +155,15 @@ def mutate(owner, data):
         if data["action"] == "affirmative_grant":
             policy = POLICIES.get(data["version"])
             if (not policy or policy.purpose != data["purpose"]
-                    or dict(policy.texts).get(data["locale"]) != data["text_digest"]):
+                    or dict(policy.texts).get(data["locale"]) != data["text_digest"]
+                    or data["contract_digest"] != contract_digest(policy)):
                 raise ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE", 403)
         elif data["purpose"] not in grants:
             raise ConsentDenied("AI_CONSENT_INVALID_REQUEST", 400)
         now = datetime.utcnow()
         record = dict(grants.get(data["purpose"], {}))
         if data["action"] == "affirmative_grant":
-            record = {k: data[k] for k in ("version", "locale", "text_digest", "action")}
+            record = {k: data[k] for k in ("version", "locale", "text_digest", "contract_digest", "action")}
             record.update(state="granted", granted_at=now.isoformat(), revoked_at=None)
         else:
             record.update(state="revoked", revoked_at=now.isoformat())
@@ -167,7 +177,7 @@ def mutate(owner, data):
         conn.execute(insert(events).values(owner_id=owner, request_id=data["request_id"],
             request_digest=digest, generation=generation, purpose=data["purpose"],
             version=record.get("version", ""), action=data["action"],
-            locale=record.get("locale", ""), text_digest=record.get("text_digest", ""), occurred_at=now))
+            locale=record.get("locale", ""), text_digest=record.get("text_digest", ""), contract_digest=record.get("contract_digest", ""), occurred_at=now))
         return _public(dict(state, **values))
 
 
