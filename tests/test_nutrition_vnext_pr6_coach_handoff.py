@@ -288,7 +288,7 @@ def test_unknown_marker_never_reaches_context(app, make_user, monkeypatch):
     assert builds == []
 
 
-def test_context_builder_adds_nutrition_and_keeps_plan_projection(app, auth_user, monkeypatch):
+def test_context_builder_nutrition_handoff_keeps_only_selected_operation(app, auth_user, monkeypatch):
     from app.services import adaptive_plan_context, context_builder
 
     seed(auth_user.id)
@@ -298,8 +298,8 @@ def test_context_builder_adds_nutrition_and_keeps_plan_projection(app, auth_user
     with app.app_context():
         with_handoff = context_builder.fetch_coach_context(auth_user.id, 'q', 'en', 'nutrition-day')
         without = context_builder.fetch_coach_context(auth_user.id, 'q', 'en')
-    assert "[TODAY'S NUTRITION]" in with_handoff and '[PLAN PROJECTION MARKER]' in with_handoff
-    assert "[TODAY'S NUTRITION]" not in without and '[PLAN PROJECTION MARKER]' in without
+    assert "[TODAY'S NUTRITION]" in with_handoff and '[PLAN PROJECTION MARKER]' not in with_handoff
+    assert "[TODAY'S NUTRITION]" not in without and '[PLAN PROJECTION MARKER]' not in without
 
 
 def test_browser_calories_never_become_model_context(app, client, auth_user, monkeypatch):

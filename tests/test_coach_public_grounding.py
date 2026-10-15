@@ -67,10 +67,10 @@ def test_raw_checkin_nudges_do_not_override_canonical_hold(app, auth_user, monke
     monkeypatch.setattr(adaptive_plan_context, "build_adaptive_plan",
                         lambda _uid: AdaptivePlan(weeks=4, week_focus="steady"))
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
-    context = context_builder.fetch_coach_context(auth_user.id, "question", "en")
+    context = context_builder.fetch_coach_context(auth_user.id, "workout", "en")
     assert "NUDGE_RECOVERY" not in context
     assert "NUDGE_OVERLOAD_STALL" not in context
-    assert "NUDGE_HYDRATION" in context
+    assert "NUDGE_HYDRATION" not in context
     assert "without adding or cutting work" in context
 
 

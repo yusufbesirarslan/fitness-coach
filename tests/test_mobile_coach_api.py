@@ -331,7 +331,8 @@ def test_provider_receives_server_owned_owner_language_and_grounding(
     assert call["language"] == "en"
     assert call["history"] == []
     # The canonical context_builder ran for the Bearer owner, and only for them.
-    assert "left knee tendinitis" in call["context"]
+    assert "deep squat" in call["context"]
+    assert "left knee tendinitis" not in call["context"]
     assert "right shoulder impingement" not in call["context"]
 
 

@@ -9,7 +9,7 @@ import json
 import re
 import time
 import s3_helper
-from app.services import nutrition_pipeline, prompt_builder
+from app.services import nutrition_pipeline, prompt_builder, coach_privacy
 from datetime import datetime, timedelta
 from flask import current_app, g, has_app_context, session
 from sqlalchemy.exc import IntegrityError
@@ -505,10 +505,10 @@ def _tool_manage_user_memory(user_id, action, key=None, value=None):
     meta = dict(user.user_metadata or {})
 
     if action == "get":
-        if key:
-            return json.dumps({"status": "ok", "action": "get", "key": key,
-                               "value": meta.get(key)}, ensure_ascii=False)
-        return json.dumps({"status": "ok", "action": "get", "memory": meta}, ensure_ascii=False)
+        if key not in _MEMORY_KEYS:
+            return json.dumps({"status": "unsupported", "action": "get"})
+        return json.dumps({"status": "ok", "action": "get", "key": key,
+                           "value": coach_privacy.memory_value(key, meta.get(key))}, ensure_ascii=False)
 
     if action == "update":
         if key not in _MEMORY_KEYS:
@@ -538,7 +538,7 @@ def _tool_manage_user_memory(user_id, action, key=None, value=None):
             current_app.logger.warning("[MEMORY] commit başarısız: %s: %s", type(e).__name__, e)
             return json.dumps({"status": "error", "message": "Kaydedilemedi, tekrar dene."}, ensure_ascii=False)
         return json.dumps({"status": "ok", "action": "update", "key": key,
-                           "value": value}, ensure_ascii=False)
+                           "value": coach_privacy.memory_value(key, value)}, ensure_ascii=False)
 
     return json.dumps({"status": "error",
                        "message": f"Geçersiz action: '{action}'. 'get' veya 'update' olmalı."},
@@ -1105,7 +1105,7 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
             while history and history[-1]["role"] == "user":
                 history.pop()
         else:
-            history = list(session.get("coach_history", []))
+            history = []  # unproven legacy cookie history is display-only
         history = history[-COACH_HISTORY_LIMIT:]
 
     _begin_coach_turn(question, history=history, user_id=user_id)
@@ -1252,7 +1252,7 @@ def _run_coach_conversation_openai(user_id, question, context, history,
         payloads = []
         for tc in tool_calls:
             result = _dispatch_coach_tool(user_id, tc.function.name, tc.function.arguments)
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": coach_privacy.tool_result(tc.function.name, result)})
             parsed = _tool_payload(result)
             if parsed is not None:
                 payloads.append(parsed)
@@ -1377,7 +1377,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
             for block in resp.content:
                 if getattr(block, "type", None) == "tool_use":
                     out = _dispatch_coach_tool(user_id, block.name, json.dumps(block.input or {}))
-                    tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": out})
+                    tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": coach_privacy.tool_result(block.name, out)})
                     tools_ran += 1
                     parsed = _tool_payload(out)
                     if parsed is not None:
@@ -1417,7 +1417,10 @@ def generate_coach_reply(name, age, gender, weight, height,
     çağrısı + dostça hata yedeği kalır. training_plan/nutrition_plan imza
     uyumluluğu için korunur (istemde kullanılmaz — eski davranışla aynı)."""
     prompt, system_prompt = build_plan_reply_prompt(
-        name, age, gender, weight, height, goal, level, current_activity,
+        "", age, coach_privacy.token(gender, ("male", "female")), weight, height,
+        coach_privacy.token(goal, coach_privacy.GOALS),
+        coach_privacy.token(level, coach_privacy.LEVELS),
+        coach_privacy.token(current_activity, ("sedentary", "active", "very_active")),
         bmr, tdee, target_calories, user_message,
         previous_weight=previous_weight, days_passed=days_passed,
         language=language)
@@ -1440,8 +1443,10 @@ def generate_checkin_feedback(name, weight, prev_weight, days_passed,
     """İstem şablonu app/prompts/progress.py'de (WS4); burada yalnızca sağlayıcı
     çağrısı + dostça hata yedeği kalır."""
     prompt, system_prompt = build_checkin_feedback_prompt(
-        name, weight, prev_weight, days_passed, goal, yogunluk, fatigue,
-        overload, uyku, beslenme, note, language=language)
+        "", weight, prev_weight, days_passed,
+        coach_privacy.token(goal, coach_privacy.GOALS), yogunluk, fatigue,
+        coach_privacy.token(overload, ("evet", "hayir", "kismen")),
+        uyku, beslenme, "", language=language)
     try:
         return _heavy_chat(
             messages=[{"role": "user", "content": prompt}],

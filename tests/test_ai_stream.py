@@ -949,8 +949,7 @@ def test_stream_answer_memory_disabled_uses_client_history(app, monkeypatch):
 
     assert events[0] == {"type": "meta", "conversation_id": None}
     # Hafıza kapalı → sanitize edilmiş client history sağlayıcıya geçer.
-    assert seen["history"] == [{"role": "user", "content": "önceki"},
-                               {"role": "assistant", "content": "yanıt"}]
+    assert seen["history"] == []  # PA06: unproven client history is not reused
 
 
 def test_stream_answer_drops_trailing_user_from_client_history(app, monkeypatch):
@@ -972,7 +971,7 @@ def test_stream_answer_drops_trailing_user_from_client_history(app, monkeypatch)
     with app.test_request_context("/"):
         _drive(1, "yeni soru", client_history=client_history)
 
-    assert seen["history"] == [{"role": "assistant", "content": "önceki yanıt"}]
+    assert seen["history"] == []
 
 
 # ── Triage 2026-07-19 #6: istemci kopunca üretici thread durmalı ────────────

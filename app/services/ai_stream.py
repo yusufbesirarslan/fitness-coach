@@ -227,6 +227,7 @@ def _stream_bedrock(user_id, question, context, history, language,
     sonuç belli olunca akıtılır. Yayınlanan metin parçaları birleşip
     kalıcılaşan yanıtı oluşturur."""
     from app.services import ai_coach, coach_confirmation
+    from app.services.coach_memory_provenance import DisplayOnlyReply
 
     if deadline is None:
         deadline = ai_coach._coach_turn_deadline()
@@ -313,7 +314,8 @@ def _stream_bedrock(user_id, question, context, history, language,
                 provider_text = "".join(buffered)
                 grounded = coach_confirmation.grounded_provider_reply(
                     user_id, language, provider_text)
-                if grounded != provider_text:
+                if (grounded != provider_text
+                        or isinstance(grounded, DisplayOnlyReply)):
                     yield from _emit_text(
                         grounded, provider="server", usage=usage)
                     return
@@ -345,7 +347,7 @@ def _stream_bedrock(user_id, question, context, history, language,
                         user_id, block.name, json.dumps(block.input or {}))
                     tools_ran += 1
                     tool_results.append({"type": "tool_result",
-                                         "tool_use_id": block.id, "content": out})
+                                         "tool_use_id": block.id, "content": ai_coach.coach_privacy.tool_result(block.name, out)})
                     parsed = _tool_payload(out)
                     if parsed is not None:
                         payloads.append(parsed)
@@ -405,6 +407,11 @@ def _stream_openai_fallback(user_id, question, context, history, language,
 
 
 def _emit_text(text, provider, usage=None):
+    from app.services.coach_memory_provenance import DisplayOnlyReply
+    eligibility = ({"assistant_memory_eligible": False}
+                   if isinstance(text, DisplayOnlyReply) else {})
     for chunk in _chunks(text):
-        yield {"type": "delta", "text": chunk}
-    yield {"type": "done", "text": text, "usage": usage, "provider": provider}
+        yield {"type": "delta", "text": chunk,
+               **eligibility}
+    yield {"type": "done", "text": text, "usage": usage, "provider": provider,
+           **eligibility}

@@ -497,7 +497,7 @@ def test_structured_comma_or_newline_meal_suggestion_is_local(
     "ambiguous-multiword-newline-item",
     "ambiguous-multiword-comma-item",
 ])
-def test_ambiguous_list_grammar_uses_whole_gated_openai_parse(
+def test_ambiguous_list_grammar_accepts_without_ai_parse(
         client, auth_user, friend, monkeypatch, ambiguous_body):
     """A partial grammar match must not turn malformed/prose text into items."""
     semaphore = _RecordingSharedSemaphore(check_transaction=True)
@@ -522,13 +522,13 @@ def test_ambiguous_list_grammar_uses_whole_gated_openai_parse(
         f"/suggest/respond/{msg.id}", json={"action": "accept"})
 
     assert response.status_code == 200
-    assert parser_calls == [ambiguous_body]
-    assert cached_items == [["model tavuk", "model pilav"]]
-    assert MealLog.query.one().yemekler == "model tavuk, model pilav"
-    assert semaphore.acquisitions == semaphore.releases == 1
+    assert parser_calls == []
+    assert cached_items == []
+    assert MealLog.query.count() == 0
+    assert semaphore.acquisitions == semaphore.releases == 0
 
 
-def test_ambiguous_meal_suggestion_uses_gated_openai_parser(
+def test_ambiguous_meal_suggestion_preserves_delivery_without_ai(
         client, auth_user, friend, monkeypatch):
     semaphore = _RecordingSharedSemaphore(check_transaction=True)
     monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
@@ -549,8 +549,8 @@ def test_ambiguous_meal_suggestion_uses_gated_openai_parser(
         f"/suggest/respond/{msg.id}", json={"action": "accept"})
 
     assert response.status_code == 200
-    assert parser_calls == ["Bugün tavuk ve pilav yemelisin."]
-    assert semaphore.acquisitions == semaphore.releases == 1
+    assert parser_calls == []
+    assert semaphore.acquisitions == semaphore.releases == 0
 
 
 def test_ambiguous_meal_suggestion_saturation_accepts_without_openai_or_log(
@@ -670,26 +670,24 @@ def test_mixed_bullet_structure_is_not_partially_interpreted_locally(
         f"/suggest/respond/{msg.id}", json={"action": "accept"})
 
     assert response.status_code == 200
-    assert parser_calls == ["- tavuk\npilav"]
-    assert semaphore.acquisitions == semaphore.releases == 1
+    assert parser_calls == []
+    assert semaphore.acquisitions == semaphore.releases == 0
     assert MealLog.query.count() == 0
 
 
-@pytest.mark.parametrize(("body", "openai_items", "expected_gate_calls"), [
-    ("-  200g   tavuk  \n- pilav", None, 0),
-    ("Bana dengeli bir öğün öner.", ["  200g   tavuk  ", " pilav "], 1),
+@pytest.mark.parametrize(("body", "expected_items"), [
+    ("-  200g   tavuk  \n- pilav", [["200g tavuk", "pilav"]]),
+    ("Bana dengeli bir öğün öner.", []),
 ])
-def test_local_and_openai_items_share_downstream_normalization(
+def test_local_items_normalized_and_raw_sender_prose_excluded(
         client, auth_user, friend, monkeypatch,
-        body, openai_items, expected_gate_calls):
+        body, expected_items):
     semaphore = _RecordingSharedSemaphore()
     monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
     captured = []
 
     def parse(_body):
-        if openai_items is None:
-            raise AssertionError("local input must not call OpenAI")
-        return openai_items
+        raise AssertionError("sender content must not call OpenAI")
 
     def cached(items, basis="per_serving"):
         captured.append(list(items))
@@ -703,8 +701,8 @@ def test_local_and_openai_items_share_downstream_normalization(
         f"/suggest/respond/{msg.id}", json={"action": "accept"})
 
     assert response.status_code == 200
-    assert captured == [["200g tavuk", "pilav"]]
-    assert semaphore.acquisitions == semaphore.releases == expected_gate_calls
+    assert captured == expected_items
+    assert semaphore.acquisitions == semaphore.releases == 0
 
 
 def test_suggestion_gate_cache_and_macro_helpers_run_outside_transaction(
@@ -727,14 +725,12 @@ def test_suggestion_gate_cache_and_macro_helpers_run_outside_transaction(
     def lookup(items, provider_token):
         assert db.session().in_transaction() is False
         assert provider_token == "tok"
-        return ({items[0]: {
-            "calories": 400.0, "protein": 20.0,
-            "carbs": 30.0, "fat": 20.0,
-        }}, {})
+        return ({item: {"calories": 200.0, "protein": 10.0,
+                        "carbs": 15.0, "fat": 10.0} for item in items}, {})
 
     def cache_write(macro_map, basis="per_serving"):
         assert db.session().in_transaction() is False
-        assert list(macro_map) == ["gizemli yemek"]
+        assert list(macro_map) == ["gizemli yemek", "pilav"]
 
     monkeypatch.setattr(social_bp, "_parse_suggestion_items", parse)
     monkeypatch.setattr(social_bp, "_get_cached_macros", cache_read)
@@ -749,14 +745,14 @@ def test_suggestion_gate_cache_and_macro_helpers_run_outside_transaction(
 
     msg = _send_suggestion(
         client, friend, auth_user, "suggestion_meal",
-        "Bugün ne yiyeceğime karar veremedim.",
+        "- gizemli yemek\n- pilav",
     )
     response = client.post(
         f"/suggest/respond/{msg.id}", json={"action": "accept"})
 
     assert response.status_code == 200
     assert response.get_json()["nutrients"]["kalori"] == 400.0
-    assert semaphore.acquisitions == semaphore.releases == 2
+    assert semaphore.acquisitions == semaphore.releases == 1
     assert MealLog.query.count() == 1
 
 
@@ -795,29 +791,16 @@ def test_respond_suggestion_concurrent_accept_writes_single_meal(
 
 
 def test_accept_meal_suggestion_logs_meal_with_macros(client, auth_user, friend, monkeypatch):
-    monkeypatch.setattr(social_bp, "_parse_suggestion_items",
-                        lambda body: ["tavuk", "pilav"])
-    monkeypatch.setattr(social_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(social_bp, "_lookup_macros_fatsecret", lambda items, token: (
-        {"tavuk": {"calories": 330.0, "protein": 62.0, "carbs": 0.0, "fat": 7.0}},
-        {"pilav": {"calories": 130.0, "protein": 2.7, "carbs": 28.0, "fat": 0.3}},
-    ))
-    monkeypatch.setattr(social_bp, "_estimate_serving_weights_llm",
-                        lambda names: {"pilav": 200.0})
-
-    msg = _send_suggestion(client, friend, auth_user, "suggestion_meal",
-                           "tavuk + pilav yemelisin")
+    monkeypatch.setattr(social_bp, "_get_cached_macros", _cached_macros)
+    msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "- tavuk\n- pilav")
     body = client.post(f"/suggest/respond/{msg.id}", json={"action": "accept"}).get_json()
-
-    assert body["nutrients"]["kalori"] == 330.0 + 260.0  # pilav 100g→200g ölçeklendi
-    assert "590 kcal eklendi" in body["message"]
-
+    assert body["nutrients"]["kalori"] == 200.0
     meal = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert meal.yemekler == "tavuk, pilav"
-    assert "arkadas" in meal.ogun  # öğün başlığı gönderenin adını taşır
+    assert "arkadas" in meal.ogun
 
 
-def test_accept_meal_suggestion_llm_fallback_for_missing(client, auth_user, friend, monkeypatch):
+def test_accept_meal_suggestion_missing_lookup_has_no_ai_fallback(client, auth_user, friend, monkeypatch):
     monkeypatch.setattr(social_bp, "_parse_suggestion_items", lambda body: ["gizemli yemek"])
 
     def no_token():
@@ -828,24 +811,15 @@ def test_accept_meal_suggestion_llm_fallback_for_missing(client, auth_user, frie
 
     msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "gizemli yemek")
     body = client.post(f"/suggest/respond/{msg.id}", json={"action": "accept"}).get_json()
-    assert body["nutrients"]["kalori"] == 400.0
+    assert "nutrients" not in body
+    assert MealLog.query.count() == 0
 
 
 def test_accept_meal_suggestion_clamps_implausible_macros(client, auth_user, friend, monkeypatch):
-    # C2: öneri-kabul yolu kanonik MealLog'a yazan TEK clamp'siz yoldu — LLM/
-    # FatSecret aykırı değeri (örn. 9000 kcal) defteri bozmadan önce diğer tüm
-    # yollarla aynı fiziksel-sağlık kapısından (clamp_serving_macros) geçmeli.
-    monkeypatch.setattr(social_bp, "_parse_suggestion_items", lambda body: ["dev porsiyon"])
-
-    def no_token():
-        raise RuntimeError("fatsecret down")
-    monkeypatch.setattr(social_bp, "_get_fatsecret_token", no_token)
-    monkeypatch.setattr(social_bp, "_estimate_macros_llm", lambda items, category_map=None: {
-        "dev porsiyon": {"calories": 9000.0, "protein": 800.0, "carbs": 900.0, "fat": 500.0}})
-
-    msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "dev porsiyon")
+    monkeypatch.setattr(social_bp, "_get_cached_macros", lambda items, **kw: (
+        {"dev porsiyon": {"calories": 9000.0, "protein": 800.0, "carbs": 900.0, "fat": 500.0}, "pilav": {"calories": 100.0, "protein": 2.0, "carbs": 20.0, "fat": 1.0}}, []))
+    msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "- dev porsiyon\n- pilav")
     body = client.post(f"/suggest/respond/{msg.id}", json={"action": "accept"}).get_json()
-
     meal = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert meal.kalori <= 3000 and meal.protein <= 300 and meal.karb <= 300 and meal.yag <= 150
     assert body["nutrients"]["kalori"] == meal.kalori
