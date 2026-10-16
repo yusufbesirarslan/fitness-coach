@@ -63,6 +63,8 @@ class UnsupportedFeature(ValueError):
 
 
 def canonical_feature(name):
+    if not isinstance(name, str):
+        raise UnsupportedFeature(type(name).__name__)
     if name in SUPPORTED_FEATURES:
         return name
     extension = EXTENSIONS.get(name)

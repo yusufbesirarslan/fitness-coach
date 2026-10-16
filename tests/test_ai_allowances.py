@@ -494,3 +494,23 @@ def test_success_preserves_provider_billing_evidence_on_replay(app, owner):
     row = AiUsageReservation.query.filter_by(public_id=held.reference).one()
     assert row.provider_billed is True
     assert (bucket(owner, "coach").used, bucket(owner, "coach").reserved) == (1, 0)
+
+
+@pytest.mark.parametrize("malformed", [[], {}, ["coach"], {"feature": "coach"}, None, 1, True])
+def test_malformed_feature_has_typed_refusal_without_writes(app, owner, malformed):
+    enable_ledger(app)
+    before = counts()
+    with pytest.raises(A.AllowanceError) as error:
+        A.reserve(owner, malformed, "valid-key-01")
+    assert code(error) == "AI_ALLOWANCE_FEATURE_UNSUPPORTED"
+    assert counts() == before
+
+
+@pytest.mark.parametrize("malformed", [[], {}, ["success"], {"outcome": "success"}, None, 1, True])
+def test_malformed_outcome_has_typed_refusal_without_writes(app, owner, malformed):
+    enable_ledger(app)
+    before = counts()
+    with pytest.raises(A.AllowanceError) as error:
+        A.finalize(owner, "0" * 32, malformed)
+    assert code(error) == "AI_ALLOWANCE_INVALID_REQUEST"
+    assert counts() == before

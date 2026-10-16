@@ -347,6 +347,7 @@ def finalize(user_id, reference, outcome, *, provider_billed=False, now=None):
     """
     _require_enabled()
     if (not isinstance(reference, str) or not _REFERENCE.fullmatch(reference)
+            or not isinstance(outcome, str)
             or (outcome != OUTCOME_SUCCESS and outcome not in FAILURE_OUTCOMES)
             or type(provider_billed) is not bool
             or (outcome in _NEVER_BILLED and provider_billed)):
