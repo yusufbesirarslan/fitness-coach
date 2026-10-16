@@ -19,6 +19,7 @@
 from flask import current_app
 
 from app.services import context_builder, memory_manager, moderation, response_formatter
+from app.services.coach_memory_provenance import DisplayOnlyReply
 
 
 def _public_reply_fallback(language):
@@ -125,14 +126,16 @@ def _emit_metrics(mode, is_error=False, usage=None):
         pass  # gözlemlenebilirlik asla asıl yolu düşürmez
 
 
-def _record(conversation, question, answer, usage=None, interrupted=False):
+def _record(conversation, question, answer, usage=None, interrupted=False,
+            *, assistant_memory_eligible=False):
     """Turu kalıcılaştır — hata sohbeti/akışı BOZMAZ (yalnızca loglanır).
     Yazılan (user, assistant) satırlarını, yazılamadıysa None döndürür."""
     if conversation is None:
         return None
     try:
         return memory_manager.record_turn(conversation, question, answer,
-                                          usage=usage, interrupted=interrupted)
+                                          usage=usage, interrupted=interrupted,
+                                          assistant_memory_eligible=assistant_memory_eligible)
     except Exception:
         from app.extensions import db
         db.session.rollback()
@@ -167,6 +170,7 @@ def generate_answer(user_id, question, client_history=None, language="tr", hando
             user_id, question, context, client_history,
             language=language, prepared_history=prepared_history)
 
+        assistant_memory_eligible = not isinstance(answer, DisplayOnlyReply)
         answer, is_fallback = response_formatter.finalize_reply(answer, language)
         if (current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False)
                 and moderation.leaks_internal_coach_term(answer)):
@@ -181,7 +185,8 @@ def generate_answer(user_id, question, client_history=None, language="tr", hando
     # (sonraki pencereye girip modeli kirletmesin, kota iadesiyle tutarlı).
     recorded_turn = None
     if not is_fallback:
-        recorded_turn = _record(conversation, question, answer)
+        recorded_turn = _record(conversation, question, answer,
+                                assistant_memory_eligible=assistant_memory_eligible)
     _emit_metrics("blocking", is_error=is_fallback)
 
     return {"answer": answer,
@@ -228,6 +233,7 @@ def stream_answer(user_id, question, client_history=None, language="tr", handoff
 
     from app.services import ai_stream
     parts = []
+    assistant_memory_eligible = True
     hold_for_public_check = bool(current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False))
     finished = False
     terminal_done_yielded = False
@@ -235,6 +241,9 @@ def stream_answer(user_id, question, client_history=None, language="tr", handoff
         for event in ai_stream.stream_coach_answer(
                 user_id, question, context, history, language=language):
             kind = event.get("type")
+            if (event.get("assistant_memory_eligible") is False
+                    or isinstance(event.get("text"), DisplayOnlyReply)):
+                assistant_memory_eligible = False
             if kind == "delta":
                 parts.append(event.get("text") or "")
                 if not hold_for_public_check:
@@ -250,7 +259,8 @@ def stream_answer(user_id, question, client_history=None, language="tr", handoff
                 work_performed = bool(event.get("work_performed") or parts)
                 if partial_text:
                     _record(conversation, question, partial_text,
-                            interrupted=True)
+                            interrupted=True,
+                            assistant_memory_eligible=assistant_memory_eligible)
                 _emit_metrics("stream", is_error=True)
                 yield {"type": "error", "key": event["key"],
                        "work_performed": work_performed,
@@ -271,7 +281,8 @@ def stream_answer(user_id, question, client_history=None, language="tr", handoff
                     yield {"type": "delta", "text": answer}
                 if not is_fallback:
                     _record(conversation, question, answer,
-                            usage=event.get("usage"))
+                            usage=event.get("usage"),
+                            assistant_memory_eligible=assistant_memory_eligible)
                 _emit_metrics("stream", is_error=is_fallback,
                               usage=event.get("usage"))
                 terminal_done_yielded = True
@@ -285,7 +296,8 @@ def stream_answer(user_id, question, client_history=None, language="tr", handoff
         if not finished:
             partial = "".join(parts).strip()
             if partial and not hold_for_public_check:
-                _record(conversation, question, partial, interrupted=True)
+                _record(conversation, question, partial, interrupted=True,
+                        assistant_memory_eligible=assistant_memory_eligible)
                 current_app.logger.info(
                     "[PIPELINE][stream] istemci koptu — kısmi yanıt kaydedildi (%s kr)",
                     len(partial))

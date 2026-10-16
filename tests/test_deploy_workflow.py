@@ -203,7 +203,7 @@ def test_deploy_checks_out_only_the_ci_approved_sha_with_full_history():
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     )
 
-    assert job["timeout-minutes"] == "70"
+    assert job["timeout-minutes"] == "95"
     assert checkout["with"] == {
         "ref": "${{ env.DEPLOY_SHA }}",
         "fetch-depth": "0",
@@ -255,15 +255,13 @@ def test_privileged_workflow_has_no_mutable_executable_dependencies():
 
 
 def test_repository_variables_enter_privileged_shell_only_through_validated_env():
-    snapshot = next(
-        step for step in _workflow_doc()["jobs"]["deploy"]["steps"]
-        if step.get("name") == "Pre-deploy RDS snapshot (non-blocking)"
-    )
-
-    assert snapshot["env"] == {"RDS_INSTANCE_ID": "${{ vars.RDS_INSTANCE_ID }}"}
-    assert "${{ vars.RDS_INSTANCE_ID }}" not in snapshot["run"]
-    assert 'RDS_ID="$RDS_INSTANCE_ID"' in snapshot["run"]
-    assert "^[a-z][a-z0-9-]{0,62}$" in snapshot["run"]
+    deploy = next(step for step in _workflow_doc()["jobs"]["deploy"]["steps"]
+                  if step.get("run") == "python3 scripts/deploy_control.py")
+    assert deploy["env"]["RDS_INSTANCE_ID"] == "${{ vars.RDS_INSTANCE_ID }}"
+    assert deploy["env"]["EXPECTED_RDS_INSTANCE_ARN"] == "${{ vars.EXPECTED_RDS_INSTANCE_ARN }}"
+    assert deploy["env"]["EXPECTED_DEPLOY_ROLE_ARN"] == "${{ secrets.AWS_DEPLOY_ROLE_ARN }}"
+    assert "${{" not in deploy["run"]
+    assert "continue-on-error" not in deploy
 
 
 def test_governance_contract_has_codeowners_for_every_privileged_surface():
@@ -302,6 +300,9 @@ def test_deploy_lifecycle_has_one_controller_entrypoint_and_named_inputs():
     assert len(controller_steps) == 1
     assert controller_steps[0]["env"] == {
         "AWS_REGION": "${{ vars.AWS_REGION || 'eu-central-1' }}",
+        "RDS_INSTANCE_ID": "${{ vars.RDS_INSTANCE_ID }}",
+        "EXPECTED_RDS_INSTANCE_ARN": "${{ vars.EXPECTED_RDS_INSTANCE_ARN }}",
+        "EXPECTED_DEPLOY_ROLE_ARN": "${{ secrets.AWS_DEPLOY_ROLE_ARN }}",
         "EC2_INSTANCE_ID": "${{ secrets.EC2_INSTANCE_ID }}",
         "DEPLOY_USER": "${{ secrets.DEPLOY_USER }}",
         "DEPLOY_DIR": "${{ secrets.DEPLOY_DIR }}",
@@ -386,6 +387,7 @@ STAGING_SSM_LIFECYCLE = frozenset({
 SSM_MENTION_ALLOWED = STAGING_SSM_LIFECYCLE | frozenset({
     Path("scripts/deploy_control.py"),
     Path("tests/test_deploy_control.py"),
+    Path("tests/test_recovery_gate.py"),  # fake-only controller integration
     Path("tests/test_deploy_workflow.py"),
     Path(".github/workflows/deploy.yml"),
     # A config template whose comment describes moving secrets to SSM
@@ -410,6 +412,7 @@ SSM_MENTION_ALLOWED = STAGING_SSM_LIFECYCLE | frozenset({
 SSM_LIFECYCLE_OWNERS = frozenset({
     Path("scripts/deploy_control.py"),      # the one authorised lifecycle
     Path("tests/test_deploy_control.py"),   # its behavioural tests
+    Path("tests/test_recovery_gate.py"),    # fake-only recovery/controller integration
     Path("tests/test_deploy_workflow.py"),  # this file's own patterns
 })
 
@@ -647,8 +650,8 @@ def test_existing_non_deploy_safeguards_remain_without_secret_output():
 
     assert "scripts/check_cognito_pool.py" in workflow
     assert "scripts/check_email_lambda.py" in workflow
-    assert "aws rds create-db-snapshot" in workflow
-    assert workflow.count("continue-on-error: true") == 3
+    assert "create-db-snapshot" in Path("scripts/recovery_gate.py").read_text()
+    assert workflow.count("continue-on-error: true") == 2
     assert "add_header Content-Security-Policy" in controller
     assert "nginx -t" in controller
     assert "127.0.0.1:3000" in controller
@@ -921,11 +924,10 @@ def test_deploy_checks_cognito_pool_config_drift():
 
 
 def test_deploy_takes_pre_deploy_rds_snapshot():
-    # M5: rollback migration'ları geri almaz (A2). Snapshot, kurtarılamaz olayı
-    # kurtarılabilir yapar. RDS_INSTANCE_ID yoksa uyarır, deploy'u bloklamaz.
-    body = _deploy_yaml()
-    assert "aws rds create-db-snapshot" in body
-    assert "RDS_INSTANCE_ID" in body
+    assert "require_recovery(environ, aws, monotonic, sleep, log)" in _controller_source()
+    gate = Path("scripts/recovery_gate.py").read_text()
+    assert "create-db-snapshot" in gate and "describe-db-snapshots" in gate
+    assert "Pre-deploy RDS snapshot (non-blocking)" not in _deploy_yaml()
 
 
 def test_deploy_enforces_env_file_permissions():
@@ -963,8 +965,8 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "Both boundaries reject a bare timestamp as a typed configuration "
         "error before any AWS call",
         "each boundary re-reads the clock after its own describe response",
-        "Workflow job timeout | 70 minutes",
-        "Controller step timeout | 50 minutes",
+        "Workflow job timeout | 95 minutes",
+        "Controller step timeout | 75 minutes",
         "Delivery timeout | 60 seconds",
         "Execution timeout | 2,200 seconds",
         "AWS expiry | 2,260 seconds",
@@ -2863,6 +2865,7 @@ PRODUCTION_AUTHORITY_SURFACES = (
     ".github/workflows/deploy.yml",
     "scripts/deploy_contract.py",
     "scripts/deploy_control.py",
+    "scripts/recovery_gate.py",
     "scripts/deploy_gate.py",
     "scripts/production_deploy.sh",
     "scripts/r6_deploy_transaction.py",
