@@ -974,7 +974,7 @@ def _is_unmarked_suggestion_item(item):
 
 
 def _parse_structured_suggestion_items(body):
-    """Parse only explicit lists; return None when OpenAI must decide semantics."""
+    """Parse explicit lists locally; unsupported prose is never sent to AI."""
     if not isinstance(body, str) or not body.strip():
         return None
 
@@ -1099,15 +1099,9 @@ def respond_suggestion(msg_id):
 def _calculate_meal_suggestion(snapshot):
     items = _parse_structured_suggestion_items(snapshot.body)
     if items is None:
-        try:
-            with blocking_concurrency_slot():
-                items = _normalize_suggestion_items(
-                    _parse_suggestion_items(snapshot.body))
-        except BlockingConcurrencyLimit:
-            current_app.logger.warning(
-                "[SUGGESTION] event=blocking_capacity_exhausted stage=parse msg=%s",
-                snapshot.message_id)
-            return None
+        # Raw sender prose is not authorized by the recipient. Delivery and
+        # acceptance still work; unsupported calculation uses the existing reply.
+        return None
     if not items:
         # Gövde öğelere ayrıştırılamadı: kanonik MealLog defterine SIFIR-makro satırı
         # YAZMA — kalıcı sıfır satırı günlük toplamları, protein nudge'ını ve haftalık
@@ -1133,24 +1127,13 @@ def _calculate_meal_suggestion(snapshot):
                         macro_map.update(per_serving)
                     except Exception as e:
                         current_app.logger.warning(
-                            "[SUGGESTION] FatSecret başarısız, LLM yedeğine "
-                            "düşülüyor: %s", type(e).__name__)
+                            "[SUGGESTION] FatSecret başarısız; hesaplama "
+                            "kullanılamıyor: %s", type(e).__name__)
 
-                    if per_100g_items:
-                        weights = _estimate_serving_weights_llm(
-                            list(per_100g_items.keys()))
-                        for name, base in per_100g_items.items():
-                            scale = weights.get(name, 150.0) / 100.0
-                            macro_map[name] = {
-                                "calories": round(base["calories"] * scale, 1),
-                                "protein": round(base["protein"] * scale, 1),
-                                "carbs": round(base["carbs"] * scale, 1),
-                                "fat": round(base["fat"] * scale, 1),
-                            }
-
-                    missing = [n for n in uncached if n not in macro_map]
-                    if missing:
-                        macro_map.update(_estimate_macros_llm(missing))
+                    # No AI serving-size inference or missing-food fallback.
+                    # A partial meal would misrepresent intake: require all items.
+                    if per_100g_items or any(n not in macro_map for n in uncached):
+                        return None
 
                     _cache_macros(macro_map, basis="per_serving")
             except BlockingConcurrencyLimit:
@@ -1168,22 +1151,7 @@ def _calculate_meal_suggestion(snapshot):
 
     except Exception as e:
         current_app.logger.warning("[SUGGESTION] Makro hattı hatası: %s", type(e).__name__)
-        try:
-            with blocking_concurrency_slot():
-                llm_macros = _estimate_macros_llm(items)
-                for item in items:
-                    m = llm_macros.get(item, {})
-                    total["calories"] += m.get("calories", 0)
-                    total["protein"] += m.get("protein", 0)
-                    total["carbs"] += m.get("carbs", 0)
-                    total["fat"] += m.get("fat", 0)
-        except BlockingConcurrencyLimit:
-            current_app.logger.warning(
-                "[SUGGESTION] event=blocking_capacity_exhausted "
-                "stage=fallback msg=%s", snapshot.message_id)
-            return None
-        except Exception:
-            pass
+        return None
 
     # Parse/lookup/LLM hepsi başarısız olup toplam tümüyle sıfır kaldıysa kanonik
     # deftere SIFIR-makro satırı YAZMA (yukarıdaki ayrıştırma-hatası ile aynı gerekçe).

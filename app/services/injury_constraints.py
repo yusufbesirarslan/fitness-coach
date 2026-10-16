@@ -234,7 +234,7 @@ def build_injury_directive(text):
     matched = _match_conditions(text)
     header = (
         "\n═══ SAKATLIK / SAĞLIK KONTRENDİKASYONLARI (ZORUNLU — KATI UYGULA) ═══\n"
-        f"- Kullanıcının bildirdiği durum(lar): {str(text).strip()[:300]}\n"
+        "- Bildirilen hareket kısıtları: yalnızca aşağıdaki sabit güvenlik kuralları.\n"
         "- Aşağıdaki YASAK hareketleri programa ASLA ekleme; güvenli alternatiflerle "
         "değiştir. Hacim ve şiddeti durumu tamamen koruyacak şekilde uyarla.\n"
     )

@@ -16,6 +16,7 @@ from app.i18n import t
 from app.models import PendingAction
 from app.observability import assign_request_id
 from app.services import coach_plan_tools, plan_confirmation
+from app.services.coach_memory_provenance import display_only_reply
 from app.services.coach_plan_policy import CANCEL, CONFIRM, NONE
 from app.services.coach_plan_tools import results
 from app.services.coach_plan_tools import clarifications as clar_mod
@@ -421,6 +422,7 @@ def _cancel_plan(user_id, language):
     return t("coach.confirm.cancelled", locale=language)
 
 
+@display_only_reply
 def _confirm_log(user_id, pending, language):
     from app.services import ai_coach
     action_type = pending.action_type
@@ -465,6 +467,7 @@ def _cancel_all(user_id, language):
     return t("coach.confirm.cancelled", locale=language)
 
 
+@display_only_reply
 def _format_workout_proposal(payload, language):
     return t(
         "coach.confirm.propose_workout",
@@ -480,6 +483,7 @@ def _day_for_copy(value, language):
         localize_weekday(value or "", language), language)
 
 
+@display_only_reply
 def _format_plan_proposal(pending, language):
     payload = pending.command_payload or {}
     kind = pending.command_type
@@ -513,6 +517,7 @@ def _format_plan_proposal(pending, language):
     return t("coach.confirm.propose_plan", locale=language)
 
 
+@display_only_reply
 def _format_plan_applied(result, language):
     change = result.get("change") or {}
     operation = result.get("operation") or ""
@@ -634,6 +639,7 @@ def _authority_holds(user_id, field, claimed):
     return str(stored.get(field) or "") == str(claimed)
 
 
+@display_only_reply
 def _format_plan_clarification(payload, language, user_id):
     reason = payload.get("reason") or ""
     change = payload.get("change") or {}

@@ -12,14 +12,19 @@ import pytest
 from app.extensions import db
 from app.models import CoachConversation, CoachMessage
 from app.services import memory_manager as mm
+from app.services.coach_memory_provenance import mark_turn, signed_summary, summary_text
 
 
 def _add_msgs(conv, pairs):
     """[(role, content), ...] → CoachMessage satırları (id sırası = ekleme sırası)."""
+    rows = []
     for role, content in pairs:
-        db.session.add(CoachMessage(conversation_id=conv.id, role=role,
-                                    content=content,
-                                    token_estimate=mm.estimate_tokens(content)))
+        row = CoachMessage(conversation_id=conv.id, role=role, content=content,
+                           token_estimate=mm.estimate_tokens(content))
+        db.session.add(row)
+        rows.append(row)
+    db.session.flush()
+    mark_turn(conv, rows)  # these fixtures represent newly recorded, trusted turns
     db.session.commit()
 
 
@@ -144,7 +149,7 @@ def test_window_prepends_summary_note_and_skips_summarized_messages(app, make_us
                      ("user", "yeni")])
     folded = CoachMessage.query.filter_by(conversation_id=conv.id).order_by(
         CoachMessage.id).all()[1]  # ilk iki mesaj özetlendi
-    conv.summary = "Kullanıcı kilo vermek istiyor."
+    conv.summary = signed_summary(conv, "Kullanıcı kilo vermek istiyor.", folded.id)
     conv.summarized_upto_id = folded.id
     db.session.commit()
 
@@ -161,7 +166,7 @@ def test_window_prepends_summary_note_and_skips_summarized_messages(app, make_us
 def test_summary_header_counts_toward_context_budget(app, make_user):
     user = make_user("mem_user")
     conv = mm.get_or_create_active_conversation(user.id)
-    conv.summary = "x" * 80
+    conv.summary = signed_summary(conv, "x" * 80, 0)
     _add_msgs(conv, [("assistant", "recent message")])
 
     window = mm.build_context_window(conv, budget=25)
@@ -172,7 +177,7 @@ def test_summary_header_counts_toward_context_budget(app, make_user):
 def test_summary_merge_stays_within_context_budget(app, make_user):
     user = make_user("mem_user")
     conv = mm.get_or_create_active_conversation(user.id)
-    conv.summary = "abc"
+    conv.summary = signed_summary(conv, "abc", 0)
     _add_msgs(conv, [("user", "hey")])
 
     window = mm.build_context_window(conv, budget=11)
@@ -183,7 +188,7 @@ def test_summary_merge_stays_within_context_budget(app, make_user):
 def test_summary_and_consecutive_history_merge_stay_within_context_budget(app, make_user):
     user = make_user("mem_user")
     conv = mm.get_or_create_active_conversation(user.id)
-    conv.summary = "abc"
+    conv.summary = signed_summary(conv, "abc", 0)
     _add_msgs(conv, [("assistant", "one"), ("assistant", "two"),
                      ("assistant", "tri"), ("assistant", "four")])
 
@@ -195,7 +200,7 @@ def test_summary_and_consecutive_history_merge_stay_within_context_budget(app, m
 def test_negative_context_budget_normalizes_to_zero(app, make_user):
     user = make_user("mem_user")
     conv = mm.get_or_create_active_conversation(user.id)
-    conv.summary = "abc"
+    conv.summary = signed_summary(conv, "abc", 0)
     _add_msgs(conv, [("assistant", "recent")])
 
     negative_window = mm.build_context_window(conv, budget=-1)
@@ -279,8 +284,8 @@ def test_summarize_folds_old_messages_and_advances_pointer(app, make_user,
     assert mm.maybe_summarize(conv) is True
 
     assert len(fake_summarizer) == 1
-    assert conv.summary == "ÖZET: kullanıcı bulk dönemde."       # strip'lenir
-    assert conv.summary_tokens == mm.estimate_tokens(conv.summary)
+    assert summary_text(conv) == "ÖZET: kullanıcı bulk dönemde."       # strip'lenir
+    assert conv.summary_tokens == mm.estimate_tokens(summary_text(conv))
     # En yeni SUMMARY_KEEP_RECENT mesaj ham bırakılır: işaretçi 10-6=4. mesajda.
     assert conv.summarized_upto_id == rows[10 - mm.SUMMARY_KEEP_RECENT - 1].id
     # Mesajlar SİLİNMEZ — yalnızca pencere dışında kalırlar.

@@ -365,6 +365,7 @@ jobs:
           tests/test_mobile_pump_check_comparison_pg.py
           tests/test_mobile_pump_check_history_pg.py
           tests/test_plan_mutation_history_pg.py
+          tests/test_pa06_privacy_pg.py
           tests/test_training_plan_replacement_pg.py
           tests/test_lp18_b0_pg.py
           tests/test_lp18_b1_pg.py

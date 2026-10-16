@@ -26,36 +26,13 @@ def estimate_tokens(text):
 
 
 def sanitize_client_history(raw):
-    """Widget'ın gönderdiği konuşma geçmişini güvenli OpenAI mesajlarına çevir.
+    """Keep the transport signature; unproven client history is display-only.
 
-    Widget formatı: [{"role": "user"|"bot", "text": "..."}]. 'bot' → 'assistant'
-    eşlenir, metin kırpılır, yalnızca düz-metin user/assistant turları geçer
-    (tool/sistem rolleri client'tan KABUL EDİLMEZ). Bozuk girdi sessizce atlanır."""
-    if not isinstance(raw, list):
-        return []
-    out = []
-    for item in raw[-COACH_HISTORY_LIMIT:]:
-        if not isinstance(item, dict):
-            continue
-        role = item.get("role")
-        role = "assistant" if role in ("bot", "assistant") else "user" if role == "user" else None
-        if role is None:
-            continue
-        text = item.get("text") or item.get("content") or ""
-        if not isinstance(text, str):
-            continue
-        text = text.strip()
-        if text:
-            content = text[:COACH_HISTORY_CHAR_CAP]
-            # B15: Anthropic ardışık aynı-rol turlarında 400 verir; iki user (veya
-            # iki assistant) turu arka arkaya gelirse birleştir ki Bedrock çağrısı
-            # 400'lenip sessizce gpt-4o-mini yedeğine düşmesin.
-            if out and out[-1]["role"] == role:
-                merged = f"{out[-1]['content']}\n{content}"[:COACH_HISTORY_CHAR_CAP]
-                out[-1]["content"] = merged
-            else:
-                out.append({"role": role, "content": content})
-    return out
+    Only the server's provenance-checked database window can enter an AI turn.
+    """
+    # Client/cookie history has no server provenance and can replay legacy
+    # automatic social enrichment. Display history is served separately.
+    return []
 
 
 # ── Kalıcı konuşma hafızası (WS1) ────────────────────────────────────────────
@@ -129,7 +106,8 @@ def recent_messages(user_id, limit=50):
     return conv, list(reversed(rows))
 
 
-def record_turn(conversation, question, answer, usage=None, interrupted=False):
+def record_turn(conversation, question, answer, usage=None, interrupted=False,
+                *, assistant_memory_eligible=False):
     """Bir user+assistant turunu kalıcılaştır. usage: sağlayıcı yanıtındaki
     gerçek token sayıları ({'prompt_tokens': .., 'completion_tokens': ..}).
 
@@ -139,6 +117,8 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False):
     from app.extensions import db
     from app.models import CoachMessage
 
+    # Display persistence is unconditional. Only an explicitly eligible reply
+    # may acquire provenance; the current authenticated user input stays eligible.
     usage = usage or {}
     user_message = CoachMessage(
         conversation_id=conversation.id, role="user", content=question,
@@ -151,6 +131,12 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False):
         interrupted=bool(interrupted))
     db.session.add(user_message)
     db.session.add(assistant_message)
+    db.session.flush()
+    from app.services.coach_memory_provenance import mark_turn
+    eligible_rows = [user_message]
+    if assistant_memory_eligible is True:
+        eligible_rows.append(assistant_message)
+    mark_turn(conversation, eligible_rows)
     db.session.commit()
     return user_message, assistant_message
 
@@ -174,12 +160,14 @@ def build_context_window(conversation, budget=None):
         budget = AI_CONTEXT_TOKEN_BUDGET
     budget = _normalize_context_budget(budget)
 
+    from app.services.coach_memory_provenance import summary_text, trusted_rows
+    summary = summary_text(conversation)
     note = None
     used = 0
-    if conversation.summary:
+    if summary:
         # Construct and cap the rendered note before allocating any row budget.
         note = {"role": "user",
-                "content": f"[KONU\u015eMA \u00d6ZET\u0130 \u2014 \u00f6nceki turlar\u0131n \u00f6zeti]\n{conversation.summary}"}
+                "content": f"[KONU\u015eMA \u00d6ZET\u0130 \u2014 \u00f6nceki turlar\u0131n \u00f6zeti]\n{summary}"}
         note["content"] = note["content"][:max(budget, 0) * CHARS_PER_TOKEN]
         used = estimate_tokens(note["content"])
     rows = (CoachMessage.query
@@ -188,6 +176,7 @@ def build_context_window(conversation, budget=None):
             .order_by(CoachMessage.id.desc())
             .limit(HISTORY_FETCH_LIMIT).all())
 
+    rows = trusted_rows(conversation, rows)
     window = []
     for m in rows:  # yeniden eskiye
         cost = m.token_estimate or estimate_tokens(m.content)
@@ -265,11 +254,15 @@ def maybe_summarize(conversation):
     from app.extensions import db
     from app.models import CoachMessage
 
+    from app.services.coach_memory_provenance import candidate_ids
     msgs = (CoachMessage.query
             .filter(CoachMessage.conversation_id == conversation.id,
+                    CoachMessage.id.in_(candidate_ids(conversation)),
                     CoachMessage.id > (conversation.summarized_upto_id or 0))
             .order_by(CoachMessage.id.asc())
             .limit(HISTORY_FETCH_LIMIT * 2).all())
+    from app.services.coach_memory_provenance import trusted_rows, summary_text, signed_summary
+    msgs = trusted_rows(conversation, msgs)
     if len(msgs) <= SUMMARY_KEEP_RECENT:
         return False
     backlog = sum(m.token_estimate or estimate_tokens(m.content) for m in msgs)
@@ -294,7 +287,7 @@ def maybe_summarize(conversation):
     try:
         summary = _openai_chat(
             messages=[{"role": "user",
-                       "content": build_summarize_prompt(conversation.summary,
+                       "content": build_summarize_prompt(summary_text(conversation),
                                                          "\n".join(lines))}],
             system_prompt=SUMMARIZE_SYSTEM,
             max_tokens=500,
@@ -307,8 +300,9 @@ def maybe_summarize(conversation):
     if not summary:
         return False
 
-    conversation.summary = summary[:MAX_SUMMARY_CHARS]
-    conversation.summary_tokens = estimate_tokens(conversation.summary)
+    summary = summary[:MAX_SUMMARY_CHARS]
+    conversation.summary = signed_summary(conversation, summary, upto_id)
+    conversation.summary_tokens = estimate_tokens(summary)
     conversation.summarized_upto_id = upto_id
     try:
         db.session.commit()
