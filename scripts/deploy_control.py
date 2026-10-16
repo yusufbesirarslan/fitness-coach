@@ -44,6 +44,12 @@ else:
     )
 
 
+if __package__:
+    from .recovery_gate import RecoveryError, require_recovery
+else:
+    from recovery_gate import RecoveryError, require_recovery
+
+
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 INSTANCE_RE = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?")
 USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
@@ -697,7 +703,7 @@ def run_aws_json(
         "text": True,
         "timeout": timeout,
     }
-    if args[:2] == ["ssm", "send-command"]:
+    if args[:2] in (["ssm", "send-command"], ["rds", "create-db-snapshot"]):
         run_options["env"] = {
             **os.environ,
             "AWS_MAX_ATTEMPTS": "1",
@@ -1390,6 +1396,8 @@ def run_deploy(
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
     preflight(config, aws, utc_now)
     script = _load_host_script(repo_path)
+    require_recovery(environ, aws, monotonic, sleep, log)
+    validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
     if controller_deadline - monotonic() < SEND_AND_MONITOR_RESERVE_SECONDS:
         raise ConfigError(
             "insufficient controller time for SendCommand and terminal monitoring reserve"
@@ -1463,6 +1471,7 @@ def main(
         InvocationPollingTimeout,
         InvocationProtocolError,
         PreflightError,
+        RecoveryError,
     ) as error:
         log(f"deployment failed: {error}")
         return 1

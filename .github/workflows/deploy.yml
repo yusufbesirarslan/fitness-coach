@@ -61,7 +61,7 @@ jobs:
     needs: candidate
     if: ${{ needs.candidate.outputs.deploy == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 95
     environment: production
     concurrency:
       group: production-deploy
@@ -87,6 +87,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-central-1' }}
+          role-duration-seconds: 7200
           role-session-name: axisai-${{ github.run_id }}
 
       # H4: havuz IaC'de degil (konsol-yonetimli). Uygulamanin kimlik saglayicisi
@@ -116,39 +117,13 @@ jobs:
         run: |
           python3 scripts/check_email_lambda.py
 
-      # M5: rollback KODU geri alir ama boot'ta uygulanan DB migration'larini
-      # GERI ALMAZ (bkz. CLAUDE.md A2). Gercek kullanici verisi varken bu,
-      # kurtarilamaz bir olaya donusebilir. Deploy oncesi ucuz bir snapshot,
-      # kurtarilamaz olayi kurtarilabilir hale getirir. vars.RDS_INSTANCE_ID
-      # tanimli degilse ya da rolde rds:CreateDBSnapshot yoksa: uyar, gecme.
-      - name: Pre-deploy RDS snapshot (non-blocking)
-        continue-on-error: true
-        timeout-minutes: 2
-        env:
-          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
-        run: |
-          RDS_ID="$RDS_INSTANCE_ID"
-          if [ -z "$RDS_ID" ]; then
-            echo "UYARI: vars.RDS_INSTANCE_ID tanimli degil - deploy oncesi snapshot ATLANDI."
-            echo "Yikici bir migration geri alinamaz (A2). Degiskeni tanimlayin ve deploy rolune rds:CreateDBSnapshot verin."
-            exit 0
-          fi
-          if ! [[ "$RDS_ID" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
-            echo "HATA: RDS_INSTANCE_ID gecersiz." >&2
-            exit 1
-          fi
-          SNAP_ID="predeploy-${RDS_ID}-$(date -u +%Y%m%d%H%M%S)"
-          echo "RDS snapshot aliniyor: $SNAP_ID"
-          aws rds create-db-snapshot \
-            --db-instance-identifier "$RDS_ID" \
-            --db-snapshot-identifier "$SNAP_ID" \
-            --query "DBSnapshot.DBSnapshotIdentifier" --output text
-          echo "Snapshot baslatildi (arka planda tamamlanir): $SNAP_ID"
-
       - name: Deploy exact CI-approved revision via AWS SSM
-        timeout-minutes: 50
+        timeout-minutes: 75
         env:
           AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
+          EXPECTED_RDS_INSTANCE_ARN: ${{ vars.EXPECTED_RDS_INSTANCE_ARN }}
+          EXPECTED_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
