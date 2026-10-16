@@ -1,0 +1,214 @@
+{
+  "type": "object",
+  "required": [
+    "contract_version",
+    "policy_state",
+    "access",
+    "subscription",
+    "starter",
+    "features"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "policy_state": {
+      "enum": [
+        "CONFIGURED",
+        "UNCONFIGURED"
+      ]
+    },
+    "access": {
+      "enum": [
+        "PREMIUM",
+        "STARTER",
+        "NONE",
+        "UNCONFIGURED"
+      ]
+    },
+    "subscription": {
+      "type": "object",
+      "required": [
+        "state",
+        "entitlement"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "AVAILABLE",
+            "DISABLED"
+          ]
+        },
+        "entitlement": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "tier",
+                "effective_premium",
+                "status",
+                "expires_at",
+                "verification_pending"
+              ],
+              "properties": {
+                "tier": {
+                  "enum": [
+                    "FREE",
+                    "PREMIUM"
+                  ]
+                },
+                "effective_premium": {
+                  "type": "boolean"
+                },
+                "status": {
+                  "enum": [
+                    "FREE",
+                    "ACTIVE",
+                    "EXPIRED",
+                    "BILLING_RETRY",
+                    "GRACE_PERIOD",
+                    "REVOKED",
+                    "VERIFICATION_PENDING"
+                  ]
+                },
+                "expires_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+                },
+                "verification_pending": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "starter": {
+      "type": "object",
+      "required": [
+        "state",
+        "granted_at"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "GRANTED",
+            "ELIGIBLE",
+            "NOT_ELIGIBLE",
+            "UNCONFIGURED"
+          ]
+        },
+        "granted_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+        }
+      },
+      "additionalProperties": true
+    },
+    "features": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": [
+          "feature",
+          "scope",
+          "state",
+          "limit",
+          "used",
+          "reserved",
+          "remaining",
+          "reset",
+          "resets_at"
+        ],
+        "properties": {
+          "feature": {
+            "enum": [
+              "coach",
+              "training_generation",
+              "nutrition_generation",
+              "pump_check",
+              "qr_menu"
+            ]
+          },
+          "scope": {
+            "enum": [
+              "STARTER",
+              "PREMIUM",
+              null
+            ]
+          },
+          "state": {
+            "enum": [
+              "AVAILABLE",
+              "EXHAUSTED",
+              "NOT_IN_PLAN",
+              "NOT_CONFIGURED"
+            ]
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "used": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "reserved": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "remaining": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "reset": {
+            "enum": [
+              "NEVER",
+              "WEEKLY",
+              "MONTHLY",
+              null
+            ]
+          },
+          "resets_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AxisAI AI allowance read response V1 (commercial policy independent)"
+}

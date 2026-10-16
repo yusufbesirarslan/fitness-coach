@@ -1,5 +1,13 @@
 # Feature flags — inventory and lifecycle
 
+`AI_ALLOWANCE_LEDGER_ENABLED` (MON-02-BE-03A) defaults OFF, shipped_dark,
+owner @yusufbesirarslan, review by 2026-11-13. Depends on `MOBILE_AUTH_ENABLED`
+and reads Premium only through `APPLE_SUBSCRIPTIONS_ENABLED`'s entitlement. OFF:
+`GET /api/v1/ai/allowances` answers 404 before auth and every ledger entry point
+refuses; no existing route consults the ledger in either state. No Starter or
+Premium quantities exist in code or env. Rollback: set 0 (rows retained). See
+[ledger design](AI_ALLOWANCE_LEDGER.md) and [mobile contract](mobile/ai-allowances-v1.md).
+
 `APPLE_SUBSCRIPTIONS_ENABLED` (MON-02-BE-01) defaults OFF. With mobile auth
 enabled, authenticated subscription routes report `SUBSCRIPTIONS_DISABLED`
 without Apple I/O. Existing `User.is_premium` and quotas remain unchanged.

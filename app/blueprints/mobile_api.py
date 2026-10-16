@@ -253,3 +253,4 @@ from app.blueprints import mobile_exercise_history  # noqa: E402,F401
 from app.blueprints import mobile_workout_sessions  # noqa: E402,F401
 from app.blueprints import mobile_weekly_checkin  # noqa: E402,F401
 from app.blueprints import mobile_subscriptions  # noqa: E402,F401
+from app.blueprints import mobile_ai_allowances  # noqa: E402,F401
