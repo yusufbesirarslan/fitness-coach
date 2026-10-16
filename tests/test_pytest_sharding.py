@@ -171,7 +171,7 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert workflow["name"] == "CI"
     assert set(workflow["on"]) == {"pull_request", "push"}
     assert workflow["on"]["push"]["branches"] == [
-        "main", "r6/03a-bluegreen-deploy-transaction"]
+        "main", "r6/03a-bluegreen-deploy-transaction", "feat/privacy-d1-backend-consent"]
     deploy = yaml.load(Path(".github/workflows/deploy.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert deploy["on"]["workflow_run"]["branches"] == ["main"]
     jobs = workflow["jobs"]
