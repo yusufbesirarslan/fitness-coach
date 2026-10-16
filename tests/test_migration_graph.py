@@ -37,7 +37,7 @@ def test_alembic_migrations_have_single_head():
     heads = sorted(set(revisions) - down_revisions)
 
     # LP-11's deleted-identity tombstone follows Check-in's submission key.
-    assert heads == ["b1a8c9d0e1f2"]
+    assert heads == ["c2b9d0e1f2a3"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -65,7 +65,8 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # of them, which is the claim this test guards.
     # TI-01A adds two nullable columns on workout_session, no catalog table.
     # LP18-B0 adds replacement authority; B1 adds generation recovery only.
-    assert len(revision_files) == 48
+    # MON-02-BE-01 adds isolated Apple tables, no exercise catalog schema.
+    assert len(revision_files) == 49
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 

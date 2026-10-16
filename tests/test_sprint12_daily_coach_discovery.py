@@ -109,6 +109,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
     URL map either way and belong in this enumeration.
     """
     assert _mobile_paths(mobile_enabled_app) == {
+        "/api/v1/subscription/purchase-context",
+        "/api/v1/subscription/verify",
+        "/api/v1/subscription/entitlement",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
         "/api/v1/auth/logout",
