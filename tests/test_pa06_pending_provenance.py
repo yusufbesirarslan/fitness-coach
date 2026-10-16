@@ -84,6 +84,7 @@ def assert_quarantined(user_id, receipt):
 @pytest.mark.parametrize('kind', ['meal', 'workout', 'plan'])
 @pytest.mark.parametrize('streaming', [False, True])
 @pytest.mark.parametrize('provider', ['openai', 'bedrock'])
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_legacy_confirmation_never_promotes_raw_copy(
         app, planned_user, tools_on, monkeypatch, kind, streaming, provider):
     user = planned_user
@@ -141,6 +142,7 @@ def test_legacy_confirmation_never_promotes_raw_copy(
 
 
 @pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_canonical_cancellation_receipt_retains_continuity(
         app, make_user, monkeypatch, streaming):
     user = make_user('canonical_owner')
@@ -174,6 +176,7 @@ def test_default_recording_is_display_only(app, make_user):
 
 
 @pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_independent_p1_serialized_sdk_reproduction(app, make_user, monkeypatch, streaming):
     """Original reviewer path: no eligibility assertion before SDK inspection."""
     user = make_user('independent_owner')
@@ -231,6 +234,7 @@ def test_interrupted_display_only_receipt_stays_quarantined(app, make_user, monk
     assert MealLog.query.filter_by(user_id=user.id).count() == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_equal_bedrock_copy_keeps_source_classification(app, make_user, monkeypatch):
     """Text equality must not discard the deterministic formatter's classification."""
     from app.services import coach_confirmation
@@ -250,6 +254,7 @@ def test_equal_bedrock_copy_keeps_source_classification(app, make_user, monkeypa
     assert bodies and CANARY.encode() not in bodies[0]
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_explicit_projected_canonical_receipt_reaches_sdk(app, make_user, monkeypatch):
     from app.services.coach_privacy import tool_result
     user = make_user('projected_owner')
@@ -270,9 +275,8 @@ def test_explicit_projected_canonical_receipt_reaches_sdk(app, make_user, monkey
     assert CANARY.encode() not in bodies[0]
 
 
-@pytest.fixture(autouse=True)
-def _synthetic_consent_for_layer_qualification(app, monkeypatch):
-    # Explicit mock ALLOW for this pre-D1 suite's existing layer contract.
-    # Real denial, grants and races are qualified in test_ai_consent{,_pg}.py.
-    from consent_projection_support import allow_synthetic_authority
-    allow_synthetic_authority(monkeypatch, app)
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+def test_d1_no_implicit_authorization(app, make_user, monkeypatch, recipient):
+    # No ALLOW fixture, including through imported/inherited fixtures.
+    from consent_projection_support import assert_default_deny_at_sdk
+    assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient)

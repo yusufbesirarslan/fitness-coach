@@ -7,7 +7,9 @@ on:
   pull_request:
   push:
     # Qualify R6-03A before opening its PR; deploy.yml accepts main only.
-    branches: [main, r6/03a-bluegreen-deploy-transaction]
+    # D1 remains isolated while sibling migration ancestry is unresolved.
+    # Qualify the branch HEAD even when GitHub cannot build a PR merge ref.
+    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent]
 
 jobs:
   tests:

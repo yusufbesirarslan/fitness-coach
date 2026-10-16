@@ -251,6 +251,7 @@ def test_web_cookie_session_alone_cannot_use_the_native_routes(
     ({"message": "hi", "handoff": "review_progress_insight"},
      "COACH_INVALID_REQUEST"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_invalid_bodies_are_typed_400s_that_spend_nothing(
         mobile, bearer, provider, alice, body, code):
     response = send(mobile, bearer(alice), json=body)
@@ -265,6 +266,7 @@ def test_invalid_bodies_are_typed_400s_that_spend_nothing(
     assert _chat_used(alice.id) == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_message_at_the_product_limit_is_accepted_after_trimming(
         mobile, bearer, provider, alice):
     text = "y" * MAX_QUESTION_CHARS
@@ -280,6 +282,7 @@ def test_message_at_the_product_limit_is_accepted_after_trimming(
     {"data": '{"message": "hi"}', "content_type": "text/plain"},
     {"data": "{not json", "content_type": "application/json"},
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_non_json_bodies_are_rejected_in_the_mobile_envelope(
         mobile, bearer, provider, alice, kwargs):
     response = mobile.post(POST_PATH, headers=bearer(alice), **kwargs)
@@ -291,6 +294,7 @@ def test_non_json_bodies_are_rejected_in_the_mobile_envelope(
 
 
 # -- POST SUCCESS / PERSISTENCE / PROVIDER CONTEXT ------------------------------
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_success_returns_this_turn_and_persists_it_once(
         app, mobile, bearer, provider, alice):
     response = send(mobile, bearer(alice), message="  How much protein?  ")
@@ -321,6 +325,7 @@ def test_success_returns_this_turn_and_persists_it_once(
     assert _chat_used(alice.id) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_receives_server_owned_owner_language_and_grounding(
         mobile, bearer, provider, alice, bob):
     assert send(mobile, bearer(alice), message="Can I squat?").status_code == 200
@@ -336,6 +341,7 @@ def test_provider_receives_server_owned_owner_language_and_grounding(
     assert "right shoulder impingement" not in call["context"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_second_message_sees_the_persisted_history_not_a_client_transcript(
         mobile, bearer, provider, alice):
     headers = bearer(alice)
@@ -355,6 +361,7 @@ def test_second_message_sees_the_persisted_history_not_a_client_transcript(
         ("user", "Split it?"), ("assistant", "Yes, spread it over meals.")]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_response_is_this_requests_turn_even_if_another_turn_lands_meanwhile(
         mobile, bearer, provider, alice):
     """A concurrent same-user turn committing mid-generation must not be
@@ -374,6 +381,7 @@ def test_response_is_this_requests_turn_even_if_another_turn_lands_meanwhile(
         "other tab", "other answer", "mine", "reply to: mine"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ordinary_history_persists_with_ai_memory_off(
         app, mobile, bearer, provider, alice):
     app.config["AI_MEMORY_ENABLED"] = False
@@ -387,6 +395,7 @@ def test_ordinary_history_persists_with_ai_memory_off(
     assert "Set-Cookie" not in response.headers
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_domain_cookie_session_writes_never_reach_a_native_response(
         mobile, bearer, provider, alice):
     from flask import session
@@ -466,6 +475,7 @@ def test_archived_conversation_is_not_the_active_history(
     assert history(mobile, headers).get_json()["messages"] == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_history_matches_the_web_history_for_the_same_owner(
         client, login, mobile, bearer, provider, make_user):
     carol = make_user("carol")
@@ -506,6 +516,7 @@ def test_history_read_failure_is_a_coach_503_not_an_auth_error(
 
 
 # -- ISOLATION -----------------------------------------------------------------
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_two_accounts_are_isolated_in_both_directions(
         mobile, bearer, provider, alice, bob):
     a, b = bearer(alice), bearer(bob)
@@ -533,6 +544,7 @@ def test_two_accounts_are_isolated_in_both_directions(
         ("user", "bob one"), ("assistant", "B1")]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_client_supplied_identifiers_cannot_select_another_conversation(
         mobile, bearer, provider, alice, bob):
     a, b = bearer(alice), bearer(bob)
@@ -573,6 +585,7 @@ def _exhaust_weekly_chats(user):
     db.session.commit()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_402_when_the_shared_weekly_allowance_is_used_up(
         app, mobile, bearer, provider, alice):
     app.config["AI_CHAT_QUOTA_ENABLED"] = True
@@ -591,6 +604,7 @@ def test_402_when_the_shared_weekly_allowance_is_used_up(
     assert _chat_used(alice.id) == premium.FREE_WEEKLY_AI_CHATS
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_premium_owner_is_never_quota_limited(
         app, mobile, bearer, provider, make_user):
     app.config["AI_CHAT_QUOTA_ENABLED"] = True
@@ -600,6 +614,7 @@ def test_premium_owner_is_never_quota_limited(
     assert send(mobile, bearer(vip)).status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_429_cooldown_short_circuits_before_quota_and_provider(
         mobile, bearer, provider, alice, monkeypatch):
     monkeypatch.setattr(ai_recovery, "ai_cooldown_remaining", lambda uid: 42)
@@ -626,6 +641,7 @@ def enabled_limiter():
         limiter.reset()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_429_burst_limit_is_typed_retryable_and_skips_the_provider(
         mobile, bearer, provider, alice, bob, enabled_limiter, monkeypatch):
     monkeypatch.setattr(mobile_coach_bp, "AI_BURST_RATELIMIT", "2 per minute")
@@ -644,6 +660,7 @@ def test_429_burst_limit_is_typed_retryable_and_skips_the_provider(
     assert send(mobile, bearer(bob)).status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_503_when_the_ai_concurrency_gate_is_full(
         mobile, bearer, provider, alice, monkeypatch):
     class Full:
@@ -664,6 +681,7 @@ def test_503_when_the_ai_concurrency_gate_is_full(
 
 
 @pytest.mark.parametrize("language", ["tr", "en"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_503_provider_fallback_is_never_a_fake_reply(
         app, mobile, bearer, provider, make_user, monkeypatch, language):
     app.config["AI_CHAT_QUOTA_ENABLED"] = True
@@ -687,6 +705,7 @@ def test_503_provider_fallback_is_never_a_fake_reply(
     assert failures == [user.id]                # failure streak advanced
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_503_provider_exception_leaks_nothing(
         app, mobile, bearer, provider, alice, monkeypatch):
     app.config["AI_CHAT_QUOTA_ENABLED"] = True
@@ -711,6 +730,7 @@ def test_503_provider_exception_leaks_nothing(
 
 @pytest.mark.parametrize("flag", [
     "plan_changed_this_turn", "proposal_created_this_turn"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_503_after_a_committed_plan_side_effect_is_not_retryable(
         mobile, bearer, provider, alice, monkeypatch, flag):
     monkeypatch.setattr(coach_plan_tools, flag, lambda: True)
@@ -725,6 +745,7 @@ def test_503_after_a_committed_plan_side_effect_is_not_retryable(
     assert _rows(alice.id) == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_success_clears_the_failure_streak(
         mobile, bearer, provider, alice, monkeypatch):
     cleared = []
@@ -780,9 +801,8 @@ def test_web_coach_routes_do_not_accept_a_bearer_credential(
     assert provider.calls == []
 
 
-@pytest.fixture(autouse=True)
-def _synthetic_consent_for_layer_qualification(app, monkeypatch):
-    # Explicit mock ALLOW for this pre-D1 suite's existing layer contract.
-    # Real denial, grants and races are qualified in test_ai_consent{,_pg}.py.
-    from consent_projection_support import allow_synthetic_authority
-    allow_synthetic_authority(monkeypatch, app)
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+def test_d1_no_implicit_authorization(app, make_user, monkeypatch, recipient):
+    # No ALLOW fixture, including through imported/inherited fixtures.
+    from consent_projection_support import assert_default_deny_at_sdk
+    assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient)
