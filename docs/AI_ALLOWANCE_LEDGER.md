@@ -11,7 +11,10 @@ Dark foundation for Free / Starter / Premium AI allowances. Flag
   `GET /api/v1/ai/allowances`, the operator command `flask ai-allowance-sweep`,
   migration `a9c1d2e3f4b5` (three empty tables) and the rollout flag.
 - **No existing route consults the ledger** (AST gate
-  `tests/test_ai_allowances_architecture.py`). `app/services/premium.py`, its
+  `tests/test_ai_allowances_architecture.py`) — except, since BE-03B-01B, the dark
+  native initial Training generation seam
+  (`app/services/mobile_training_generation/allowance.py`, see
+  [mobile/training-allowance-enforcement.md](mobile/training-allowance-enforcement.md)). `app/services/premium.py`, its
   weekly JSON counters, the `is_premium` bypasses, spend guards, model routing and
   inference config are unchanged in every flag state.
 - **No allowance quantities exist in application code or env.**
@@ -168,3 +171,26 @@ point raises `AI_ALLOWANCE_DISABLED`. Tables and rows stay (expand-only).
 Migration downgrade refuses if any ledger table contains rows. Empty disposable
 schemas may be downgraded for qualification. Runtime rollback retains all rows;
 the feature flag does not gate schema migration or release preparation.
+
+## BE-03B-01B extension (dark)
+
+- `reserve_within(user_id, feature, key)` — the same authority as `reserve`
+  (subscription before locks, owner lock, lazy expiry, grant, one conditional
+  bucket UPDATE) but inside the **caller's** transaction: it neither commits nor
+  rolls back, so a caller can commit the hold together with its own durable
+  dispatch authorization. An existing key is refused (`IDEMPOTENCY_CONFLICT`): a
+  dispatch-bound hold is never a replay. The hold starts with billing evidence
+  `UNKNOWN`.
+- `ai_usage_reservation.billing_evidence` (nullable; migration `b1e4f5a6c7d8`):
+  `CONFIRMED_NOT_BILLED`, `CONFIRMED_BILLED` or `UNKNOWN`; NULL = not recorded
+  (BE-03A callers, unchanged). `provider_billed` is NULL exactly for UNKNOWN —
+  never guessed into False or True. The enum is enforced by this service (the
+  expand-only migration gate forbids new CHECKs on existing tables).
+- `finalize(..., billing_evidence=...)` instead of `provider_billed`. A failure
+  with UNKNOWN evidence is not proven unbilled, so it follows the billed rule:
+  released while `billed_releases < max_billed_releases`, otherwise consumed.
+  A hold created with evidence must be settled with explicit evidence. Success,
+  expiry and replay semantics are unchanged; an expired hold still settles as
+  EXPIRED (consumed once).
+- Migration `a9c1d2e3f4b5`'s create_all-first verifier accepts exactly this delta
+  (one extra nullable column, `provider_billed` nullable) and nothing else.

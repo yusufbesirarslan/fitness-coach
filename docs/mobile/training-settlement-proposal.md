@@ -1,5 +1,9 @@
 # Settlement proposal — not activated
 
+> MON-02-BE-03B-01B implements this as a dark, policy-parameterised mechanism:
+> see [training-allowance-enforcement.md](training-allowance-enforcement.md).
+> Nothing below is activated; the founder decisions remain open.
+
 Logical action success and provider billing are independent. Current native completion handling reduces ChatCompletion to text/truncation, discards provider/cache provenance, and normalizes exceptions. `ai_provider_call.Admission._emit` is best-effort usage telemetry, possibly estimated and lossy. Spend admission is permission to attempt, not payment proof. None is a cost receipt.
 
 Evidence vocabulary: CONFIRMED_NOT_BILLED requires proof **no physical dispatch** for the whole logical operation; CONFIRMED_BILLED requires a reliable charge receipt the current adapter does not supply; otherwise UNKNOWN. Dispatch True is neither confirmed billing nor confirmed execution. Historical NULL is uncertainty. Invalid output can cost money. Provider refusal after an earlier internal attempt is not whole-operation zero billing. No fabricated provider_billed value is stored by this correction.
