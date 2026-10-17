@@ -7,7 +7,10 @@ from app.feature_flags import FLAGS_BY_KEY
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "app/services/ai_allowances"
 # BE-03A wires nothing: only its own transport and the operator sweep import it.
-ALLOWED_IMPORTERS = {"app/blueprints/mobile_ai_allowances.py", "app/cli.py"}
+# BE-03B-01B adds exactly one enforcement seam: native initial Training
+# generation. Every other AI route stays unmetered until separately approved.
+ALLOWED_IMPORTERS = {"app/blueprints/mobile_ai_allowances.py", "app/cli.py",
+                     "app/services/mobile_training_generation/allowance.py"}
 
 
 def _python(root):

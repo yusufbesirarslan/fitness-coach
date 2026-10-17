@@ -1,4 +1,22 @@
 """Bounded public failures for the native Training generation command."""
+from app.services.training_generation.preference_contract import (
+    CODE_GENERATION_EXERCISE_AMBIGUOUS,
+    CODE_GENERATION_EXERCISE_IDENTITY_INVALID,
+    CODE_GENERATION_EXERCISE_INCOMPATIBLE,
+    CODE_GENERATION_EXERCISE_UNRESOLVED,
+    CODE_GENERATION_SCHEMA_INVALID,
+    CODE_GENERATION_SEMANTICALLY_INVALID,
+)
+
+# A provider answer that failed canonical validation (stored as 422).
+INVALID_CANDIDATE_CODES = frozenset({
+    CODE_GENERATION_SCHEMA_INVALID,
+    CODE_GENERATION_SEMANTICALLY_INVALID,
+    CODE_GENERATION_EXERCISE_UNRESOLVED,
+    CODE_GENERATION_EXERCISE_AMBIGUOUS,
+    CODE_GENERATION_EXERCISE_IDENTITY_INVALID,
+    CODE_GENERATION_EXERCISE_INCOMPATIBLE,
+})
 
 
 class PlanGenerationCommandError(RuntimeError):
@@ -75,3 +93,17 @@ class StoredGenerationFailure(PlanGenerationCommandError):
         super().__init__("stored training plan generation failure")
         self.public_code = public_code
         self.http_status = http_status
+
+
+class TrainingAllowanceRefused(PlanGenerationCommandError):
+    """An AI allowance refusal before dispatch; no unit was held or used.
+
+    Carries the closed ``ai_allowances`` catalogue code, HTTP status and
+    retryability unchanged, never an internal ledger detail.
+    """
+
+    def __init__(self, public_code, http_status, retryable):
+        super().__init__("training allowance refused")
+        self.public_code = public_code
+        self.http_status = http_status
+        self.retryable = retryable
