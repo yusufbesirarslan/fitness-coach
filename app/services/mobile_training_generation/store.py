@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
@@ -21,35 +21,24 @@ from app.services import premium
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.preference_contract import (
-    CODE_GENERATION_EXERCISE_AMBIGUOUS,
-    CODE_GENERATION_EXERCISE_IDENTITY_INVALID,
-    CODE_GENERATION_EXERCISE_INCOMPATIBLE,
-    CODE_GENERATION_EXERCISE_UNRESOLVED,
-    CODE_GENERATION_SCHEMA_INVALID,
-    CODE_GENERATION_SEMANTICALLY_INVALID,
     CODE_GENERATION_UNAVAILABLE,
 )
 
+from . import allowance
 from .errors import (
+    INVALID_CANDIDATE_CODES as _INVALID_CANDIDATE_CODES,
     ExistingPlanRefused,
     GenerationInProgress,
     GenerationPersistenceUnavailable,
     GenerationQuotaExceeded,
     StoredGenerationFailure,
+    TrainingAllowanceRefused,
 )
 
 
 ABANDON_AFTER = timedelta(minutes=15)
 
 MAX_CANDIDATE_BYTES = 256 * 1024
-_INVALID_CANDIDATE_CODES = frozenset({
-    CODE_GENERATION_SCHEMA_INVALID,
-    CODE_GENERATION_SEMANTICALLY_INVALID,
-    CODE_GENERATION_EXERCISE_UNRESOLVED,
-    CODE_GENERATION_EXERCISE_AMBIGUOUS,
-    CODE_GENERATION_EXERCISE_IDENTITY_INVALID,
-    CODE_GENERATION_EXERCISE_INCOMPATIBLE,
-})
 
 
 def find_by_key(user_id, key):
@@ -98,7 +87,11 @@ def claim(user_id, key, fingerprint):
     )
     db.session.add(operation)
     try:
-        if current_app.config.get("AI_PLAN_QUOTA_ENABLED", True):
+        if allowance.enforcement_enabled():
+            # Metered: the AI allowance ledger is the one quota authority; the
+            # hold is taken at dispatch authorization, never here.
+            operation.allowance_metered = True
+        elif current_app.config.get("AI_PLAN_QUOTA_ENABLED", True):
             week = premium.reserve_ai_quota_in_transaction(
                 user_id, "training", premium.FREE_WEEKLY_AI_PLANS)
             owner = db.session.get(User, user_id)
@@ -146,6 +139,8 @@ def authorize_dispatch(operation_id):
 
     Commit uncertainty BEFORE the network door. A lost commit acknowledgement
     cannot authorize a call: the caller must receive a successful return.
+    A metered operation's AI allowance hold is created in this same commit,
+    stamped with the same instant as the marker (see ``allowance``).
     """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
@@ -154,10 +149,12 @@ def authorize_dispatch(operation_id):
         if (operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS
                 or operation.provider_dispatch_possible is not False):
             raise GenerationInProgress()
+        now = datetime.now(timezone.utc)
+        allowance.bind_for_dispatch(operation, now)
         operation.provider_dispatch_possible = True
-        operation.updated_at = datetime.utcnow()
+        operation.updated_at = now.replace(tzinfo=None)
         db.session.commit()
-    except GenerationInProgress:
+    except (GenerationInProgress, TrainingAllowanceRefused):
         db.session.rollback()
         raise
     except Exception as error:

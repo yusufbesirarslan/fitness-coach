@@ -96,7 +96,11 @@ class AiUsageReservation(db.Model):
     key_digest = db.Column(db.String(64), nullable=False)
     state = db.Column(db.String(16), nullable=False)
     outcome = db.Column(db.String(32))
-    provider_billed = db.Column(db.Boolean, nullable=False, default=False)
+    # NULL only with billing_evidence UNKNOWN (BE-03B-01B): never guessed.
+    provider_billed = db.Column(db.Boolean, nullable=True, default=False)
+    # NULL = not recorded (BE-03A callers); otherwise CONFIRMED_NOT_BILLED,
+    # CONFIRMED_BILLED or UNKNOWN. ``ai_allowances.service`` is the only writer.
+    billing_evidence = db.Column(db.String(24))
     created_at = db.Column(db.DateTime(timezone=True), nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
     finalized_at = db.Column(db.DateTime(timezone=True))
@@ -492,6 +496,9 @@ class TrainingPlanGenerationOperation(db.Model):
         db.Integer, nullable=False, default=1, server_default="1")
     # NULL is historical/unknown; only new claims explicitly prove no dispatch.
     provider_dispatch_possible = db.Column(db.Boolean, nullable=True)
+    # BE-03B-01B: True = claimed with AI allowance enforcement ON (the ledger,
+    # not the legacy weekly quota, authorizes it). NULL = unmetered/historical.
+    allowance_metered = db.Column(db.Boolean, nullable=True)
     candidate_plan_data = db.Column(db.Text)
     candidate_score = db.Column(db.Float)
     # Soft references intentionally survive legacy plan replacement semantics.
@@ -523,6 +530,42 @@ class TrainingPlanGenerationOperation(db.Model):
                 "status IN ('IN_PROGRESS', 'GENERATED')"),
             postgresql_where=text(
                 "status IN ('IN_PROGRESS', 'GENERATED')")),
+    )
+
+
+TRAINING_ALLOWANCE_RESERVED = "RESERVED"
+
+
+class TrainingPlanGenerationAllowance(db.Model):
+    """BE-03B-01B: the one AI allowance hold bound to a metered native generation.
+
+    Inserted in the SAME commit that sets the operation's dispatch marker and
+    creates the ledger hold, so a row exists exactly when a hold does. The PK
+    allows one binding per operation; UNIQUE ``reservation_ref`` (the ledger
+    ``public_id``) allows one operation per hold. RESERVED = settlement not yet
+    observed; later states mirror the ledger's settlement. Codes only.
+    """
+
+    __tablename__ = "training_plan_generation_allowance"
+
+    operation_id = db.Column(
+        db.Integer,
+        db.ForeignKey("training_plan_generation_operation.id", ondelete="CASCADE"),
+        primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    reservation_ref = db.Column(db.String(32), nullable=False)
+    state = db.Column(db.String(16), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "reservation_ref", name="uq_training_plan_generation_allowance_ref"),
+        db.CheckConstraint(
+            "state IN ('RESERVED', 'COMMITTED', 'RELEASED', 'EXPIRED', 'UNOBSERVABLE')",
+            name="ck_training_plan_generation_allowance_state"),
+        db.Index("ix_training_plan_generation_allowance_owner", "user_id", "state"),
     )
 
 

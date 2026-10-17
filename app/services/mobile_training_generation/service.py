@@ -29,7 +29,7 @@ from .errors import (
     IdempotencyConflict,
 )
 from .locking import try_owner_lock
-from . import store
+from . import allowance, store
 
 
 @dataclass(frozen=True)
@@ -59,10 +59,14 @@ def _inspect_durable(user_id, key, fingerprint):
     if operation.request_fingerprint != fingerprint:
         raise IdempotencyConflict()
     if operation.status == TRAINING_PLAN_GENERATION_SUCCEEDED:
-        return operation, GenerationCommandResult(
+        result = GenerationCommandResult(
             plan=store.replay_plan(operation, user_id), replayed=True)
+        allowance.settle(operation.id)  # a lost settlement is finished, never repeated
+        return operation, result
     if operation.status == TRAINING_PLAN_GENERATION_FAILED:
-        raise store.stored_failure(operation)
+        failure = store.stored_failure(operation)
+        allowance.settle(operation.id)
+        raise failure
     if operation.status not in (
             TRAINING_PLAN_GENERATION_IN_PROGRESS,
             TRAINING_PLAN_GENERATION_GENERATED):
@@ -96,6 +100,7 @@ def generate_and_persist(
             raise GenerationInProgress()
 
         store.retire_abandoned(user_id)
+        allowance.settle_pending(user_id)
         operation, result = _inspect_durable(
             user_id, key, request.fingerprint)
         if result is not None:
@@ -109,8 +114,10 @@ def generate_and_persist(
             raise GenerationInProgress()
 
         if operation is not None and operation.status == TRAINING_PLAN_GENERATION_GENERATED:
-            return GenerationCommandResult(
-                plan=store.commit_plan(operation.id, user_id), replayed=False)
+            operation_id = operation.id
+            plan = store.commit_plan(operation_id, user_id)
+            allowance.settle(operation_id)
+            return GenerationCommandResult(plan=plan, replayed=False)
 
         # Freeze inputs before claim/dispatch commits expire ORM objects.
         features = build_features(user, last_session, request.preferences)
@@ -133,7 +140,9 @@ def generate_and_persist(
                     user, last_session, request.preferences, chat_fn,
                     language=language, logger=logger, frozen_features=features)
     except GenerationOutputError as error:
-        raise store.record_failure(operation_id, error) from None
+        failure = store.record_failure(operation_id, error)
+        allowance.settle(operation_id)
+        raise failure from None
     except Exception:
         if not authorized:
             store.abandon_claim(operation_id)
@@ -143,5 +152,8 @@ def generate_and_persist(
         candidate.document, ensure_ascii=False, sort_keys=True,
         separators=(",", ":"), allow_nan=False)
     store.stage_candidate(operation_id, document_json, candidate.overall_score)
-    return GenerationCommandResult(
-        plan=store.commit_plan(operation_id, user_id), replayed=False)
+    plan = store.commit_plan(operation_id, user_id)
+    # Only after the plan and SUCCEEDED receipt committed: never settle success
+    # for a plan that does not exist.
+    allowance.settle(operation_id)
+    return GenerationCommandResult(plan=plan, replayed=False)

@@ -11,6 +11,7 @@ from .errors import (
     InvalidPlanRequest,
     PlanGenerationCommandError,
     StoredGenerationFailure,
+    TrainingAllowanceRefused,
 )
 from .service import GenerationCommandResult, generate_and_persist
 
@@ -27,6 +28,7 @@ __all__ = [
     "NativePlanRequest",
     "PlanGenerationCommandError",
     "StoredGenerationFailure",
+    "TrainingAllowanceRefused",
     "generate_and_persist",
     "parse_idempotency_key",
     "parse_native_request",

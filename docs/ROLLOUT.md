@@ -1,5 +1,12 @@
 # Production rollout runbook — feature flag activation
 
+MON-02-BE-03B-01B `AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED` remains OFF. Startup
+may apply additive migration `b1e4f5a6c7d8` (one new empty table, two nullable
+columns, `ai_usage_reservation.provider_billed` relaxed to NULL; no backfill) even
+while the flag is OFF, so deployment and migration need their own human gate.
+Activation needs the founder settlement decisions, an installed policy, the
+ledger flag and iOS handling of `AI_ALLOWANCE_*` on Training generation.
+
 MON-02-BE-03A `AI_ALLOWANCE_LEDGER_ENABLED` remains OFF. It stacks on #436 and
 must not merge before it. Startup may apply additive migration `a9c1d2e3f4b5`
 (three empty tables, no backfill) even while the flag is OFF, so deployment and

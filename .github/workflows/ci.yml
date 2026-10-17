@@ -8,8 +8,9 @@ on:
   push:
     # Qualify R6-03A before opening its PR; deploy.yml accepts main only.
     # Bind D1 integration qualification directly to the branch HEAD.
+    # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
-    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent]
+    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance]
 
 jobs:
   tests:
@@ -365,6 +366,8 @@ jobs:
           tests/test_mobile_log_food_pg.py
           tests/test_mobile_training_generation_pg.py
           tests/test_mobile_training_dispatch_recovery_pg.py
+          tests/test_mobile_training_allowance_pg.py
+          tests/test_training_allowance_migration_verifier_pg.py
           tests/test_mobile_diary_mutation_pg.py
           tests/test_mobile_pump_check_pg.py
           tests/test_mobile_pump_check_comparison_pg.py

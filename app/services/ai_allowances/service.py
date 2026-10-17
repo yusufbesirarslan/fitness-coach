@@ -46,6 +46,12 @@ FAILURE_OUTCOMES = frozenset({
     "cancelled_before_delivery",  # nothing delivered to the user
 })
 _NEVER_BILLED = frozenset({"refused_before_provider"})
+# Billing evidence is separate from the logical outcome. UNKNOWN is stored as
+# ``provider_billed = NULL``: never guessed into False (free) or True (billed).
+BILLING_CONFIRMED_NOT_BILLED = "CONFIRMED_NOT_BILLED"
+BILLING_CONFIRMED_BILLED = "CONFIRMED_BILLED"
+BILLING_UNKNOWN = "UNKNOWN"
+_BILLED = {BILLING_CONFIRMED_NOT_BILLED: False, BILLING_CONFIRMED_BILLED: True, BILLING_UNKNOWN: None}
 _KEY = re.compile(r"[!-~]{8,128}")
 _REFERENCE = re.compile(r"[0-9a-f]{32}")
 
@@ -287,6 +293,31 @@ def grant_starter(user_id, *, now=None):
     return "GRANTED" if created else "ALREADY_GRANTED"
 
 
+def _by_digest(user_id, digest):
+    return db.session.execute(
+        sa.select(AiUsageReservation).where(
+            AiUsageReservation.user_id == user_id, AiUsageReservation.key_digest == digest)
+        .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+
+
+def _fresh_hold(owner, policy, subscription, feature, digest, now, *, bound):
+    """A new hold under the owner lock (lazy expiry, grant, one conditional UPDATE)."""
+    _expire_owner(owner.id, now)
+    bucket, scope = _authorize(owner, policy, subscription, feature, now)
+    if not _move(bucket.id, now, reserve=1):
+        raise _exhausted(feature, scope, policy, now)
+    row = AiUsageReservation(
+        public_id=secrets.token_hex(16), user_id=owner.id, bucket_id=bucket.id,
+        feature=feature, key_digest=digest, state=RESERVED, outcome=None,
+        # sa.null(): a plain None would let the ORM apply the column default.
+        provider_billed=sa.null() if bound else False,
+        billing_evidence=BILLING_UNKNOWN if bound else None,
+        created_at=now, expires_at=now + RESERVATION_TTL)
+    db.session.add(row)
+    db.session.flush()
+    return Reservation(row.public_id, feature, scope, RESERVED, False, now + RESERVATION_TTL)
+
+
 def reserve(user_id, feature, idempotency_key, *, now=None):
     """Hold one unit for one logical action, or replay the key's earlier hold.
 
@@ -301,10 +332,7 @@ def reserve(user_id, feature, idempotency_key, *, now=None):
     subscription = _subscription(user_id)
     try:
         owner = _lock_owner(user_id)
-        existing = db.session.execute(
-            sa.select(AiUsageReservation).where(
-                AiUsageReservation.user_id == owner.id, AiUsageReservation.key_digest == digest)
-            .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+        existing = _by_digest(owner.id, digest)
         if existing is not None:
             if existing.feature != feature:
                 raise AllowanceError("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
@@ -316,18 +344,12 @@ def reserve(user_id, feature, idempotency_key, *, now=None):
                                  existing.state, True, _utc(existing.expires_at))
             db.session.commit()
             return result
-        _expire_owner(owner.id, now)
-        bucket, scope = _authorize(owner, policy, subscription, feature, now)
-        if not _move(bucket.id, now, reserve=1):
-            db.session.commit()  # keep a fresh grant and any settled expiries
-            raise _exhausted(feature, scope, policy, now)
-        row = AiUsageReservation(
-            public_id=secrets.token_hex(16), user_id=owner.id, bucket_id=bucket.id,
-            feature=feature, key_digest=digest, state=RESERVED, outcome=None,
-            provider_billed=False, created_at=now, expires_at=now + RESERVATION_TTL)
-        db.session.add(row)
-        db.session.flush()
-        result = Reservation(row.public_id, feature, scope, RESERVED, False, now + RESERVATION_TTL)
+        try:
+            result = _fresh_hold(owner, policy, subscription, feature, digest, now, bound=False)
+        except AllowanceError as error:
+            if error.code == "AI_ALLOWANCE_EXHAUSTED":
+                db.session.commit()  # keep a fresh grant and any settled expiries
+            raise
         db.session.commit()
         return result
     except AllowanceError:
@@ -338,19 +360,56 @@ def reserve(user_id, feature, idempotency_key, *, now=None):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def finalize(user_id, reference, outcome, *, provider_billed=False, now=None):
+def reserve_within(user_id, feature, idempotency_key, *, now=None):
+    """``reserve`` for a caller that authorizes provider dispatch in the SAME commit.
+
+    The caller owns the transaction: nothing here commits or rolls back, so the
+    hold and the caller's durable dispatch authorization become visible together
+    or not at all. The caller may hold only rows that precede ``user`` in the
+    repository lock order (its own operation row); this then takes the owner
+    lock, reservations and the bucket, exactly like ``reserve``. The hold starts
+    with billing evidence UNKNOWN because dispatch is possible from its commit.
+    A dispatch-bound hold is never a replay: an existing key is refused.
+    """
+    _require_enabled()
+    feature = _feature(feature)
+    digest = _digest(idempotency_key)
+    policy = _policy()
+    now = _now(now)
+    subscription = _subscription(user_id)
+    try:
+        owner = _lock_owner(user_id)
+        if _by_digest(owner.id, digest) is not None:
+            raise AllowanceError("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
+        return _fresh_hold(owner, policy, subscription, feature, digest, now, bound=True)
+    except SQLAlchemyError:
+        raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
+
+
+def finalize(user_id, reference, outcome, *, provider_billed=False, billing_evidence=None,
+             now=None):
     """Settle a hold exactly once: success consumes, a qualifying failure releases.
 
     A provider-billed failure is recorded on the row (FinOps evidence) and is
     released at most ``max_billed_releases`` times per bucket; beyond that it
     consumes. Repeating the same settlement replays; a different one conflicts.
+
+    ``billing_evidence`` (instead of ``provider_billed``) records the tri-state.
+    UNKNOWN stores ``provider_billed = NULL`` and, because it is not proven
+    unbilled, a failure is subject to the same ``max_billed_releases`` cap as a
+    billed one. A dispatch-bound hold (``reserve_within``) must be settled with
+    explicit evidence so a Boolean default can never overwrite UNKNOWN.
     """
     _require_enabled()
+    if billing_evidence is not None:
+        if billing_evidence not in _BILLED or provider_billed is not False:
+            raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
+        provider_billed = _BILLED[billing_evidence]
     if (not isinstance(reference, str) or not _REFERENCE.fullmatch(reference)
             or not isinstance(outcome, str)
             or (outcome != OUTCOME_SUCCESS and outcome not in FAILURE_OUTCOMES)
-            or type(provider_billed) is not bool
-            or (outcome in _NEVER_BILLED and provider_billed)):
+            or (type(provider_billed) is not bool and billing_evidence != BILLING_UNKNOWN)
+            or (outcome in _NEVER_BILLED and provider_billed is not False)):
         raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
     policy = _policy(required=False)
     now = _now(now)
@@ -370,17 +429,21 @@ def finalize(user_id, reference, outcome, *, provider_billed=False, now=None):
             result = Settlement(row.public_id, row.state, row.outcome, row.state != RELEASED, True)
             db.session.commit()
             return result
+        if row.billing_evidence is not None and billing_evidence is None:
+            raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
         row.provider_billed = provider_billed
+        row.billing_evidence = billing_evidence
         if outcome == OUTCOME_SUCCESS:
             _settle(row, COMMITTED, outcome, consume=True, now=now)
         else:
+            possibly_billed = provider_billed is not False
             bucket = db.session.get(AiAllowanceBucket, row.bucket_id, populate_existing=True)
             scope_policy = policy.scope(bucket.scope) if policy is not None else None
             cap = scope_policy.max_billed_releases if scope_policy is not None else 0
-            if provider_billed and bucket.billed_releases >= cap:
+            if possibly_billed and bucket.billed_releases >= cap:
                 _settle(row, COMMITTED, outcome, consume=True, now=now)
             else:
-                _settle(row, RELEASED, outcome, consume=False, billed=provider_billed, now=now)
+                _settle(row, RELEASED, outcome, consume=False, billed=possibly_billed, now=now)
         result = Settlement(row.public_id, row.state, row.outcome, row.state == COMMITTED, False)
         db.session.commit()
         return result

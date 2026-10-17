@@ -459,15 +459,16 @@ def _assert_chain_head_and_parity():
     from alembic.migration import MigrationContext
     from alembic.autogenerate import compare_metadata
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
-    assert scripts.get_heads() == ['d1c0a15e0001']
-    assert len(list(scripts.walk_revisions())) == 52
+    assert scripts.get_heads() == ['b1e4f5a6c7d8']
+    assert len(list(scripts.walk_revisions())) == 53
+    assert scripts.get_revision('b1e4f5a6c7d8').down_revision == 'd1c0a15e0001'
     assert scripts.get_revision('d1c0a15e0001').down_revision == 'b0d3e4f5a6b7'
     assert scripts.get_revision('b0d3e4f5a6b7').down_revision == 'a9c1d2e3f4b5'
     assert scripts.get_revision('a9c1d2e3f4b5').down_revision == 'c2b9d0e1f2a3'
     assert scripts.get_revision('c2b9d0e1f2a3').down_revision == 'b1a8c9d0e1f2'
     with db.engine.connect() as conn:
         context = MigrationContext.configure(conn, opts={'compare_type': True})
-        assert context.get_current_heads() == ('d1c0a15e0001',)
+        assert context.get_current_heads() == ('b1e4f5a6c7d8',)
         assert compare_metadata(context, db.metadata) == []
         checks = conn.execute(sa.text(
             "SELECT conname, convalidated FROM pg_constraint WHERE conrelid IN "
@@ -497,9 +498,11 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
     import sqlalchemy as sa
     from datetime import datetime, timezone, timedelta
     from ai_allowance_support import premium_row
-    from app.models import (AppleAccountAssociation, AiStarterGrant, AiAllowanceBucket,
-                            AiUsageReservation, TrainingPlan, TrainingPlanGenerationOperation)
+    from app.models import AppleAccountAssociation, AiStarterGrant, AiAllowanceBucket, TrainingPlan
     _chain_upgrade('b0d3e4f5a6b7')
+    # Seed the historical schema through reflected tables, not future ORM columns.
+    operation_table = sa.Table('training_plan_generation_operation', sa.MetaData(), autoload_with=db.engine)
+    reservation_table = sa.Table('ai_usage_reservation', sa.MetaData(), autoload_with=db.engine)
     now = datetime.now(timezone.utc)
     db.session.add_all([User(id=1, username='chain-a', email='chain-a@example.invalid'),
                         User(id=2, username='chain-b', email='chain-b@example.invalid')])
@@ -513,13 +516,13 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
                 period_key='NEVER', policy_version='synthetic-v1', granted=10, used=2,
                 reserved=1, billed_releases=0, created_at=now, updated_at=now),
             TrainingPlan(user_id=uid, plan_data='{"synthetic": true}', score=7),
-            TrainingPlanGenerationOperation(user_id=uid, idempotency_key='synthetic-chain',
-                request_fingerprint='a'*64, status='IN_PROGRESS',
-                provider_dispatch_possible=None if uid == 1 else True),
         ])
     db.session.commit()
     for uid in (1, 2):
-        db.session.add(AiUsageReservation(public_id=str(uid)*32, user_id=uid, bucket_id=uid,
+        db.session.execute(operation_table.insert().values(user_id=uid, idempotency_key='synthetic-chain',
+            request_fingerprint='a'*64, status='IN_PROGRESS', attempt_count=1, quota_reserved=False,
+            created_at=now, updated_at=now, provider_dispatch_possible=None if uid == 1 else True))
+        db.session.execute(reservation_table.insert().values(public_id=str(uid)*32, user_id=uid, bucket_id=uid,
             feature='coach', key_digest=str(uid)*64, state='RESERVED', provider_billed=False,
             created_at=now, expires_at=now + timedelta(minutes=15)))
     db.session.commit()
@@ -537,8 +540,8 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
         names = set(sa.inspect(conn).get_table_names()) - {'alembic_version'}
         assert not names & {'ai_consent_state', 'ai_consent_event'}
         before = snapshot(conn, names)
-    _chain_upgrade()
-    _assert_chain_head_and_parity()
+    # Keep the original D1-only preservation assertion byte-for-byte in scope.
+    _chain_upgrade('d1c0a15e0001')
     with db.engine.connect() as conn:
         # SQLAlchemy type objects compare by identity; canonical repr preserves
         # their actual reflected type/length while comparing every old object.
@@ -570,6 +573,10 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
         assert conn.exec_driver_sql('SELECT count(*) FROM ai_consent_event').scalar_one() == 0
         assert conn.exec_driver_sql('SELECT user_id FROM apple_subscription').scalar_one() == 2
         assert conn.exec_driver_sql('SELECT user_id FROM ai_usage_reservation').scalar_one() == 2
+
+    # Then qualify the additive allowance successor and full current-model parity.
+    _chain_upgrade()
+    _assert_chain_head_and_parity()
 
 
 @pytest.mark.parametrize('table,constraint,predicate', [

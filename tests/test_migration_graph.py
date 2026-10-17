@@ -36,8 +36,10 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # D1 follows the merged Apple, allowance and training dispatch migrations.
-    assert heads == ["d1c0a15e0001"]
+    # LP-11's deleted-identity tombstone follows Check-in's submission key.
+    # MON-02-BE-03A stacks its ledger on the #436 Apple foundation.
+    # D1 consent follows dispatch recovery; BE-03B-01B follows D1.
+    assert heads == ["b1e4f5a6c7d8"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -65,8 +67,11 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # of them, which is the claim this test guards.
     # TI-01A adds two nullable columns on workout_session, no catalog table.
     # LP18-B0 adds replacement authority; B1 adds generation recovery only.
-    # Apple, AI allowance and D1 add isolated tables, no exercise catalog.
-    assert len(revision_files) == 52
+    # MON-02-BE-01 adds isolated Apple tables, no exercise catalog schema.
+    # MON-02-BE-03A adds the AI allowance ledger, no exercise catalog schema.
+    # BE-03B-01A adds a nullable dispatch marker, no catalog schema.
+    # D1 adds consent authority; BE-03B-01B adds its separate allowance binding.
+    assert len(revision_files) == 53
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 
