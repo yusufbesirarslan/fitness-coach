@@ -15,6 +15,7 @@ from app.services.ai_gate import BlockingConcurrencyLimit, blocking_concurrency_
 from app.services.mobile_training_generation import (
     GenerationInProgress,
     PlanGenerationCommandError,
+    TrainingAllowanceRefused,
     generate_and_persist,
     parse_idempotency_key,
     parse_native_request,
@@ -74,6 +75,8 @@ def create_training_plan():
         )
     except PlanGenerationCommandError as error:
         retry_after = 15 if isinstance(error, GenerationInProgress) else None
+        if isinstance(error, TrainingAllowanceRefused) and error.retryable:
+            retry_after = 30
         return _generation_error(error, retry_after=retry_after)
     except RateLimitExceeded as error:
         retry_after = error.limit.limit.get_expiry()

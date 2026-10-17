@@ -1,5 +1,13 @@
 # Feature flags — inventory and lifecycle
 
+`AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED` (MON-02-BE-03B-01B) defaults OFF,
+shipped_dark, review by 2026-11-17. ON meters only native initial Training
+generation through the ledger (hold committed with the dispatch marker; legacy
+weekly quota skipped for metered claims); it needs `AI_ALLOWANCE_LEDGER_ENABLED`
+and an installed policy, otherwise it refuses before dispatch. OFF: the post-#442
+command and the legacy quota, with no ledger call. Rollback: set 0 (bindings
+retained). See [mobile/training-allowance-enforcement.md](mobile/training-allowance-enforcement.md).
+
 `AI_ALLOWANCE_LEDGER_ENABLED` (MON-02-BE-03A) defaults OFF, shipped_dark,
 owner @yusufbesirarslan, review by 2026-11-13. Depends on `MOBILE_AUTH_ENABLED`
 and reads Premium only through `APPLE_SUBSCRIPTIONS_ENABLED`'s entitlement. OFF:

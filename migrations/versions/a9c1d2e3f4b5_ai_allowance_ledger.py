@@ -135,14 +135,24 @@ def _fail(what):
     raise RuntimeError(f"AI allowance ledger table has incompatible {what}")
 
 
+# A create_all-first schema is built from CURRENT models, so it already carries
+# the delta of later expand-only revisions when this one verifies it. Only that
+# exact, documented delta is accepted (b1e4f5a6c7d8 re-verifies it itself).
+_LATER_COLUMNS = {"ai_usage_reservation": {"billing_evidence"}}
+_LATER_NULLABLE = {"ai_usage_reservation": {"provider_billed"}}
+
+
 def _verify(bind, table):
     inspector = sa.inspect(bind)
     columns = {c["name"]: c for c in inspector.get_columns(table.name)}
-    if set(columns) != set(table.c.keys()):
+    extra = set(columns) - set(table.c.keys())
+    if not set(table.c.keys()) <= set(columns) or not extra <= _LATER_COLUMNS.get(table.name, set()):
         _fail("columns")
+    relaxed = _LATER_NULLABLE.get(table.name, set()) if extra else set()
     for column in table.c:
         actual = columns[column.name]
-        if (actual["nullable"] != column.nullable
+        if ((actual["nullable"] != column.nullable
+             and not (column.name in relaxed and actual["nullable"]))
                 or actual["type"]._type_affinity != column.type._type_affinity
                 or (isinstance(column.type, sa.String) and actual["type"].length != column.type.length)
                 or (bind.dialect.name == "postgresql" and isinstance(column.type, sa.DateTime)

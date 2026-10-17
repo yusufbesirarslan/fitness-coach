@@ -122,3 +122,84 @@ def test_downgrade_refuses_populated_ledger_without_losing_rows(tmp_path):
             run(conn, m.downgrade)
         assert all(sa.inspect(conn).has_table(t) for t in TABLES)
         assert conn.execute(sa.text("SELECT count(*) FROM ai_starter_grant")).scalar() == 1
+
+
+@pytest.mark.parametrize("extra,nullable_billed,accepted", [
+    ("billing_evidence VARCHAR(24)", True, True),    # exactly BE-03B-01B's delta
+    ("billing_evidence VARCHAR(24)", False, True),   # delta column, Boolean still NOT NULL
+    ("surprise VARCHAR(24)", True, False),           # any other column fails closed
+    (None, True, False),                             # nullability alone is not the delta
+])
+def test_verifier_accepts_only_the_documented_later_delta(tmp_path, extra, nullable_billed, accepted):
+    """create_all-first boots carry later expand-only columns (BE-03B-01B)."""
+    m = migration()
+    tables = {t.name: t for t in m._tables()}
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'later.db'}")
+    with engine.begin() as conn:
+        base(conn)
+        tables["ai_starter_grant"].create(conn)
+        tables["ai_allowance_bucket"].create(conn)
+        reservation = tables["ai_usage_reservation"]
+        reservation.c.provider_billed.nullable = nullable_billed
+        reservation.create(conn)
+        for name, columns in m._INDEXES.values():
+            conn.execute(sa.text(f"CREATE INDEX {name} ON ai_usage_reservation ({', '.join(columns)})"))
+        if extra:
+            conn.execute(sa.text(f"ALTER TABLE ai_usage_reservation ADD COLUMN {extra}"))
+        if accepted:
+            run(conn, m.upgrade)
+        else:
+            with pytest.raises(RuntimeError):
+                run(conn, m.upgrade)
+
+
+def _revision(name):
+    path = ROOT / "migrations/versions" / name
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_STATES = "'RESERVED', 'COMMITTED', 'RELEASED', 'EXPIRED', 'UNOBSERVABLE'"
+
+
+@pytest.mark.parametrize("damage,refusal", [
+    (None, None),
+    (("CHECK (state IN ({}))".format(_STATES), "CHECK (1 = 1)"), "state check"),
+    (("reservation_ref VARCHAR(32)", "reservation_ref VARCHAR(8)"), "columns"),
+    (("reservation_ref VARCHAR(32)", "reservation_ref CHAR(32)"), "columns"),
+    (("ON training_plan_generation_allowance (user_id, state)",
+      "ON training_plan_generation_allowance (state, user_id)"), "owner index"),
+    (("billing_evidence VARCHAR(24)", "billing_evidence CHAR(24)"), "billing_evidence"),
+])
+def test_b1e4_verifier_on_sqlite_create_all_first(tmp_path, damage, refusal):
+    """R2: the create_all-first SQLite boot passes b1e4 twice; a damaged definition fails closed."""
+    from app.models import (
+        AiAllowanceBucket, AiStarterGrant, AiUsageReservation, TrainingPlanGenerationAllowance,
+        TrainingPlanGenerationOperation)
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'b1e4.db'}")
+    models = (AiStarterGrant, AiAllowanceBucket, AiUsageReservation,
+              TrainingPlanGenerationOperation, TrainingPlanGenerationAllowance)
+    with engine.begin() as conn:
+        base(conn)
+        conn.execute(sa.text("CREATE TABLE training_plan (id INTEGER PRIMARY KEY)"))
+        for model in models:
+            statements = [str(sa.schema.CreateTable(model.__table__).compile(conn))] + [
+                str(sa.schema.CreateIndex(i).compile(conn)) for i in model.__table__.indexes]
+            for statement in statements:
+                if damage and damage[0] in statement:
+                    statement = statement.replace(*damage)
+                conn.execute(sa.text(statement))
+        for name in ("a9c1d2e3f4b5_ai_allowance_ledger.py",
+                     "d3e4f5a6b7c8_add_training_plan_generation_operations.py",
+                     "b0d3e4f5a6b7_training_dispatch_boundary.py"):
+            run(conn, _revision(name).upgrade)
+    head = _revision("b1e4f5a6c7d8_training_allowance_association.py")
+    with engine.begin() as conn:
+        if refusal is None:
+            run(conn, head.upgrade)
+            run(conn, head.upgrade)
+        else:
+            with pytest.raises(RuntimeError, match=refusal):
+                run(conn, head.upgrade)

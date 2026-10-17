@@ -29,6 +29,8 @@ def _assert_shape(connection, *, dispatch_marker=False):
     expected = set(TrainingPlanGenerationOperation.__table__.columns.keys())
     if not dispatch_marker:  # Historical revision predates BE-03B-01A.
         expected.remove("provider_dispatch_possible")
+    if not dispatch_marker:  # ...and BE-03B-01B's metering mode.
+        expected.remove("allowance_metered")
     assert columns == expected
 
     uniques = {
