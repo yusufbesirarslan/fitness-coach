@@ -102,7 +102,8 @@ def _user_child_models():
         MealLog, MealPhotoCleanup, MobileAuthSession, Notification,
         NutritionPlan, PendingAction,
         PlanMutationRecord, TrainingPlanConfirmationProposal,
-        TrainingPlanGenerationOperation, TrainingPlanReplacementGenerationOperation, TrainingPlanReplacementProposal,
+        TrainingPlanGenerationAllowance, TrainingPlanGenerationOperation,
+        TrainingPlanReplacementGenerationOperation, TrainingPlanReplacementProposal,
         TrainingPlanReplacementReceipt, PumpCheck,
         PumpCheckComment, PumpCheckComparison, PumpCheckComparisonRequest,
         PumpCheckLike, Supplement, TrainingPlan,
@@ -120,7 +121,9 @@ def _user_child_models():
         # already gone.
         PlanMutationRecord, TrainingPlanConfirmationProposal,
         TrainingPlanReplacementReceipt, TrainingPlanReplacementProposal,
-        TrainingPlanReplacementGenerationOperation, TrainingPlanGenerationOperation, TrainingPlan,
+        # BE-03B-01B: the allowance binding points at its generation operation.
+        TrainingPlanReplacementGenerationOperation, TrainingPlanGenerationAllowance,
+        TrainingPlanGenerationOperation, TrainingPlan,
         # MealPhotoCleanup before MealLog: it is bookkeeping ABOUT already
         # deleted ledger rows, so nothing should observe an intent whose
         # account is half-gone. Account erasure DELETES pending intents rather

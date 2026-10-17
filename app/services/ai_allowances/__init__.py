@@ -8,13 +8,16 @@ from app.services.ai_allowances.policy import (
     AllowancePolicy, ScopePolicy, SUPPORTED_FEATURES, EXTENSIONS, canonical_feature,
 )
 from app.services.ai_allowances.service import (
+    BILLING_CONFIRMED_BILLED, BILLING_CONFIRMED_NOT_BILLED, BILLING_UNKNOWN,
     FAILURE_OUTCOMES, OUTCOME_SUCCESS, RESERVATION_TTL, Reservation, Settlement,
     allowance_view, expire_abandoned, finalize, grant_starter, purge_retained, reserve,
+    reserve_within,
 )
 
 __all__ = [
     "AllowanceError", "CATALOG", "AllowancePolicy", "ScopePolicy", "SUPPORTED_FEATURES",
     "EXTENSIONS", "canonical_feature", "FAILURE_OUTCOMES", "OUTCOME_SUCCESS",
     "RESERVATION_TTL", "Reservation", "Settlement", "allowance_view", "expire_abandoned",
-    "finalize", "grant_starter", "purge_retained", "reserve",
+    "finalize", "grant_starter", "purge_retained", "reserve", "reserve_within",
+    "BILLING_CONFIRMED_BILLED", "BILLING_CONFIRMED_NOT_BILLED", "BILLING_UNKNOWN",
 ]

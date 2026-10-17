@@ -122,3 +122,32 @@ def test_downgrade_refuses_populated_ledger_without_losing_rows(tmp_path):
             run(conn, m.downgrade)
         assert all(sa.inspect(conn).has_table(t) for t in TABLES)
         assert conn.execute(sa.text("SELECT count(*) FROM ai_starter_grant")).scalar() == 1
+
+
+@pytest.mark.parametrize("extra,nullable_billed,accepted", [
+    ("billing_evidence VARCHAR(24)", True, True),    # exactly BE-03B-01B's delta
+    ("billing_evidence VARCHAR(24)", False, True),   # delta column, Boolean still NOT NULL
+    ("surprise VARCHAR(24)", True, False),           # any other column fails closed
+    (None, True, False),                             # nullability alone is not the delta
+])
+def test_verifier_accepts_only_the_documented_later_delta(tmp_path, extra, nullable_billed, accepted):
+    """create_all-first boots carry later expand-only columns (BE-03B-01B)."""
+    m = migration()
+    tables = {t.name: t for t in m._tables()}
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'later.db'}")
+    with engine.begin() as conn:
+        base(conn)
+        tables["ai_starter_grant"].create(conn)
+        tables["ai_allowance_bucket"].create(conn)
+        reservation = tables["ai_usage_reservation"]
+        reservation.c.provider_billed.nullable = nullable_billed
+        reservation.create(conn)
+        for name, columns in m._INDEXES.values():
+            conn.execute(sa.text(f"CREATE INDEX {name} ON ai_usage_reservation ({', '.join(columns)})"))
+        if extra:
+            conn.execute(sa.text(f"ALTER TABLE ai_usage_reservation ADD COLUMN {extra}"))
+        if accepted:
+            run(conn, m.upgrade)
+        else:
+            with pytest.raises(RuntimeError):
+                run(conn, m.upgrade)
