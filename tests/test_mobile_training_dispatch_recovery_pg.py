@@ -193,3 +193,45 @@ def test_historical_in_progress_is_unknown_not_redispatchable(pg_generation_app)
     outcomes = {}
     _run(app, owners[0], _request(), 'historical-unknown-key', outcomes, 0)
     assert outcomes[0] == ('in_progress',)
+
+
+def test_recovery_observes_candidate_committed_between_key_lookups(pg_generation_app):
+    """The second read must refresh the first read's ORM identity-map object."""
+    import threading
+    from app.extensions import db
+    from app.models import User
+    from app.services.mobile_training_generation import service, store
+    app, owners, monkeypatch = pg_generation_app
+    request = _request()
+    with app.app_context():
+        operation = store.claim(owners[0], 'candidate-between-lookups', request.fingerprint)
+        operation_id = operation.id
+        store.authorize_dispatch(operation_id)
+        db.session.remove()
+    real_find = store.find_by_key
+    lookups = []
+    worker_errors = []
+    def find_and_stage(*args):
+        operation = real_find(*args)
+        lookups.append(1)
+        if len(lookups) == 1:
+            def stage_on_separate_connection():
+                with app.app_context():
+                    try:
+                        store.stage_candidate(operation_id, json.dumps(_document()), 8.5)
+                    except Exception as error:
+                        worker_errors.append(type(error).__name__)
+                    finally:
+                        db.session.remove()
+            worker = threading.Thread(target=stage_on_separate_connection)
+            worker.start()
+            worker.join(timeout=10)
+            assert not worker.is_alive()
+            assert worker_errors == []
+        return operation
+    monkeypatch.setattr(store, 'find_by_key', find_and_stage)
+    monkeypatch.setattr(service, 'generate_training_plan_candidate',
+                        lambda *a, **k: pytest.fail('recovered candidate redispatched'))
+    outcomes = {}
+    _run(app, owners[0], request, 'candidate-between-lookups', outcomes, 0)
+    assert outcomes[0][0] == 'ok', outcomes

@@ -54,7 +54,7 @@ _INVALID_CANDIDATE_CODES = frozenset({
 
 def find_by_key(user_id, key):
     return TrainingPlanGenerationOperation.query.filter_by(
-        user_id=user_id, idempotency_key=key).one_or_none()
+        user_id=user_id, idempotency_key=key).populate_existing().one_or_none()
 
 
 def find_active_for_owner(user_id):
