@@ -83,6 +83,7 @@ def seed(user):
 
 @pytest.mark.parametrize('transport', ['web', 'native', 'web-stream'])
 @pytest.mark.parametrize('language', ['en', 'tr'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m01_owned_training_reaches_sdk_without_social(
         app, client, make_user, login, bearer, monkeypatch, transport, language):
     user = make_user('pa06_owner', profile_complete=True, language=language)
@@ -94,6 +95,8 @@ def test_m01_owned_training_reaches_sdk_without_social(
         monkeypatch.setattr(coach_context_queries, name, forbidden)
     captures = openai_capture(monkeypatch, [answer()])
     headers = bearer(user)  # also register the Cognito fixture's principal
+    from app.services import ai_gate
+    capacity_before = ai_gate.capacity_snapshot()
     if transport == 'native':
         response = client.post('/api/v1/coach/messages', headers=headers,
                                json={'message': 'Review my workout progress'})
@@ -102,8 +105,12 @@ def test_m01_owned_training_reaches_sdk_without_social(
         response = client.post('/ask/stream' if transport == 'web-stream' else '/ask',
                                json={'question': 'Review my workout progress',
                                      'history': [{'role': 'bot', 'text': CANARY}]})
-    assert response.status_code == 200
-    assert b'OWN_TRAINING_OK' in response.data
+    # Flask's test client must close SSE responses to release call_on_close
+    # capacity, just as the WSGI server does after completing a response.
+    with response:
+        assert response.status_code == 200
+        assert b'OWN_TRAINING_OK' in response.data
+    assert ai_gate.capacity_snapshot() == capacity_before
     assert captures and all(CANARY.encode() not in body for body in captures)
     assert b'1260' in captures[0] and b'intermediate' in captures[0]
     assert b'dumbbell' in captures[0] and b'deep squat' in captures[0]
@@ -115,6 +122,7 @@ def test_m01_owned_training_reaches_sdk_without_social(
     'fetch_nutrition_and_stage_log', 'confirm_and_commit_meal_log',
     'stage_workout_log', 'confirm_and_commit_workout_log', 'cancel_pending_log',
     'analyze_gym_photo', 'add_training_plan_exercise'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m02_tool_canaries_absent_in_multiple_openai_rounds(app, make_user, monkeypatch, name):
     user = make_user('tool_owner')
     contaminated = {'status': 'ok', 'value': 1260, 'metric_type': 'volume_lifted', 'unit': 'kg',
@@ -135,6 +143,7 @@ def test_m02_tool_canaries_absent_in_multiple_openai_rounds(app, make_user, monk
 
 
 @pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m02_bedrock_followup_projection(app, make_user, monkeypatch, streaming):
     user = make_user('bedrock_owner')
     captures = []
@@ -166,6 +175,7 @@ def test_m02_bedrock_followup_projection(app, make_user, monkeypatch, streaming)
 
 
 @pytest.mark.parametrize('streaming', [False, True])
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_m02_provider_fallback_cannot_restore_legacy(app, make_user, monkeypatch, streaming):
     user = make_user('fallback_owner')
     captures = openai_capture(monkeypatch, [answer()])
@@ -189,6 +199,7 @@ def test_m02_provider_fallback_cannot_restore_legacy(app, make_user, monkeypatch
     assert all(CANARY.encode() not in body for body in bedrock + captures)
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_m03_legacy_quarantine_preserves_display_and_new_continuity(app, make_user, monkeypatch):
     user = make_user('legacy_owner')
     seed(user)
@@ -206,6 +217,7 @@ def test_m03_legacy_quarantine_preserves_display_and_new_continuity(app, make_us
     assert conv.summary == CANARY  # no deletion or rewriting of historical content
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_m03_background_summary_excludes_legacy_and_keeps_signed_facts(app, make_user, monkeypatch):
     from app.jobs.tasks import summarize_conversation
     user = make_user('summary_owner')
@@ -249,6 +261,7 @@ def test_m03_provenance_rejects_forged_copied_and_changed_rows(app, make_user):
     assert provenance.summary_text(ca) == ''
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m04_accounts_have_separate_provider_context(app, make_user, monkeypatch):
     a, b = make_user('owner_a'), make_user('owner_b')
     seed(a)
@@ -289,6 +302,7 @@ def test_m04_sender_content_never_analyzed(app, monkeypatch, body, lookup):
         assert result is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m02_exact_nutrition_and_recovery_operation_projections(app, make_user, monkeypatch):
     user = make_user('operation_owner')
     seed(user)
@@ -305,6 +319,7 @@ def test_m02_exact_nutrition_and_recovery_operation_projections(app, make_user, 
     assert all(CANARY.encode() not in body for body in captures)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m02_plan_reply_retries_capture_projected_form_fields(app, monkeypatch):
     import httpx
     from openai import APITimeoutError
@@ -328,6 +343,7 @@ def test_m02_plan_reply_retries_capture_projected_form_fields(app, monkeypatch):
     assert b'2800' in captures[-1] and b'intermediate' in captures[-1]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m02_training_repair_keeps_constraints_without_stored_prose(app, make_user, monkeypatch):
     from app.services.training_generation import service
     from app.services.training_generation.models import TrainingPreferences
@@ -351,6 +367,7 @@ def test_m02_training_repair_keeps_constraints_without_stored_prose(app, make_us
     assert b'deep squat' in captures[0] and b'Weekly frequency' in captures[0]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m02_checkin_feedback_omits_name_and_freeform_note(app, monkeypatch):
     captures = []
     def create(**kwargs):
@@ -385,6 +402,7 @@ def test_m04_mobile_principal_owns_context_even_with_another_web_cookie(app, mak
 
 
 @pytest.mark.parametrize('question', ['', None, 'hello', 'Review my workout progress'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_m01_canonical_state_projection_reaches_sdk_without_social(
         app, make_user, monkeypatch, question):
     from app.services import context_builder
@@ -452,3 +470,10 @@ def test_m02_tool_positive_receipt_preserves_closed_prescription():
     assert payload['change']['day'] == 'Pazartesi'
     assert payload['change']['exercise'] == 'Barbell Back Squat'
     assert CANARY not in projected
+
+
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+def test_d1_no_implicit_authorization(app, make_user, monkeypatch, recipient):
+    # No ALLOW fixture, including through imported/inherited fixtures.
+    from consent_projection_support import assert_default_deny_at_sdk
+    assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient)

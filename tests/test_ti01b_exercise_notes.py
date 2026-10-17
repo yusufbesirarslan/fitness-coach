@@ -164,6 +164,7 @@ def test_account_purge_removes_notes(owner, stranger):
 
 @pytest.mark.parametrize('terminal', ['complete', 'abandon'])
 @pytest.mark.parametrize('contract', ['1', '2'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_and_note_authorities_are_independent(client, owner, as_mobile,
         workout_ref, completion_proof, terminal, contract):
     headers = as_mobile(owner)

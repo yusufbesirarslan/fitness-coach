@@ -171,6 +171,7 @@ def test_off_refuses_execution_and_leaves_the_plan_alone(
     assert journal(planned_user.id) == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_policy_block_appears_only_when_the_tools_do(
         app, planned_user, monkeypatch):
     """A prompt must not describe a capability the model cannot reach (§64).
@@ -433,6 +434,7 @@ def _openai_only(monkeypatch):
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_openai_loop_applies_one_change_for_one_intent(
         app, planned_user, tools_on, monkeypatch):
     """The whole turn, through the real provider loop — state, not call counts."""
@@ -457,6 +459,7 @@ def test_the_openai_loop_applies_one_change_for_one_intent(
     assert len(journal(planned_user.id)) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_model_that_repeats_itself_still_changes_the_plan_once(
         app, planned_user, tools_on, monkeypatch):
     """Two identical tool calls inside ONE provider loop (§35)."""
@@ -479,6 +482,7 @@ def test_a_model_that_repeats_itself_still_changes_the_plan_once(
     assert len(journal(planned_user.id)) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
         app, planned_user, tools_on, monkeypatch):
     """The B-rule, with a durable write behind it.
@@ -530,6 +534,7 @@ def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
     assert plan_version(planned_user.id) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_fallback_before_any_tool_ran_applies_the_change_once(
         app, planned_user, tools_on, monkeypatch):
     """Bedrock dies before doing anything; OpenAI completes the same turn.
@@ -569,6 +574,7 @@ def test_a_fallback_before_any_tool_ran_applies_the_change_once(
     assert len(journal(planned_user.id)) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_degraded_turn_without_a_plan_change_keeps_the_old_wording(
         app, planned_user, tools_on, monkeypatch):
     """The plan-saved wording must not leak into ordinary tool failures.
@@ -638,6 +644,7 @@ def test_the_plan_saved_wording_is_still_an_error_fallback(app):
         assert is_coach_error_fallback(text) is True
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_streaming_path_reports_a_saved_plan_change_too(
         app, planned_user, tools_on, monkeypatch):
     """§40 parity: streaming reports the saved APPLY_NOW change, not a retry."""
@@ -1428,6 +1435,7 @@ def test_the_already_present_message_forbids_a_silent_update(
     assert "çağırma" in message                    # do not call another tool
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_asking_twice_in_two_turns_adds_one_slot_through_the_provider_loop(
         app, planned_user, tools_on, monkeypatch):
     """Case P, blocking ``/ask``: two whole turns through the real provider loop.
@@ -1466,6 +1474,7 @@ def test_asking_twice_in_two_turns_adds_one_slot_through_the_provider_loop(
     assert plan_version(planned_user.id) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_streaming_path_refuses_the_duplicate_the_same_way(
         app, planned_user, tools_on, monkeypatch):
     """Case P, ``/ask/stream``. Same domain, same refusal, same state — the

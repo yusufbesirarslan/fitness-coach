@@ -99,6 +99,7 @@ def test_plan_to_nutrition_hierarchy_local_tabs_and_responsive_layout(
     assert errors == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_no_plan_mobile_keeps_today_diary_history_water_and_creation_working(
     app, auth_user, training_page, stub_meal_macro_provider,
 ):

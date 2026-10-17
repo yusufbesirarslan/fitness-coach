@@ -138,6 +138,7 @@ def test_servings_by_name_failure_logs_the_type_only(client, auth_user, monkeypa
 
 
 @pytest.mark.parametrize("subpage", [False, True], ids=["main-page", "subpage"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_remote_menu_response_content_never_logged(client, auth_user, monkeypatch, caplog, subpage):
     """Real route, link discovery and extraction; only offline fetch is replaced."""
     from app.services import menu_analysis
@@ -184,6 +185,7 @@ def test_remote_menu_response_content_never_logged(client, auth_user, monkeypatc
     assert injected not in caplog.text
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_wordpress_response_content_never_logged(client, auth_user, monkeypatch, caplog):
     from app.services import menu_analysis
     from app.services import menu_extract

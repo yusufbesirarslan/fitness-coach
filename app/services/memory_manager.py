@@ -248,6 +248,10 @@ def maybe_summarize(conversation):
     hafif LLM çağrısıyla conversation.summary'ye katla. İstek başında lazy
     çalışır (WS8'de RQ arka-plan işine taşınacak). Hata sohbeti BOZMAZ:
     başarısızlıkta False döner, bir sonraki istekte yeniden denenir."""
+    from app.services.ai_consent import memory_available
+    if not memory_available(conversation.user_id):
+        return False
+
     from flask import current_app
 
     from app.config import AI_SUMMARY_TRIGGER_TOKENS

@@ -167,12 +167,14 @@ def with_session(auth_user):
 # /training-plan (AI üretim)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_requires_existing_session(client, auth_user):
     response = client.post("/training-plan", json={})
     assert response.status_code == 400
     assert "Önce" in response.get_json()["error"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_parses_fenced_json_and_scores(client, with_session, monkeypatch):
     raw = "```json\n" + json.dumps(as_provider_document(PLAN_JSON), ensure_ascii=False) + "\n```"
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: raw)
@@ -183,6 +185,7 @@ def test_plan_parses_fenced_json_and_scores(client, with_session, monkeypatch):
     assert body["score_label"] == "İyi"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_zero_scores_are_schema_invalid(client, with_session, monkeypatch):
     plan = dict(PLAN_JSON, haftalik_ozet={"yogunluk_skoru": 0, "denge_skoru": 0,
                                           "uygunluk_skoru": 0})
@@ -193,11 +196,13 @@ def test_plan_zero_scores_are_schema_invalid(client, with_session, monkeypatch):
     assert response.get_json()["code"] == "TRAINING_PLAN_GENERATION_SCHEMA_INVALID"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_invalid_llm_output_returns_500(client, with_session, monkeypatch):
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: "tabii, işte planın:")
     assert client.post("/training-plan", json={}).status_code == 500
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_prompt_includes_cardio_preferences(client, with_session, monkeypatch):
     captured = {}
     lift = [{"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
@@ -254,6 +259,7 @@ INJURY_PLAN = {
 INJURY_PLAN["program"] = _seven_day_program("Conventional Deadlift", include_safe_leg_press=True)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_persists_posted_injuries(client, with_session, auth_user, monkeypatch):
     from app.models import User
     monkeypatch.setattr(training_bp, "_heavy_chat",
@@ -266,6 +272,7 @@ def test_plan_persists_posted_injuries(client, with_session, auth_user, monkeypa
     assert (user.user_metadata or {}).get("injuries") == "Menisküs"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_prompt_includes_strict_injury_directive(client, with_session, monkeypatch):
     captured = {}
 
@@ -280,6 +287,7 @@ def test_plan_prompt_includes_strict_injury_directive(client, with_session, monk
     assert "Bird Dog" in captured["prompt"]            # güvenli alternatif
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_flags_contraindicated_exercise_that_slips_through(client, with_session, monkeypatch):
     monkeypatch.setattr(training_bp, "_heavy_chat",
                         lambda **kwargs: json.dumps(as_provider_document(INJURY_PLAN), ensure_ascii=False))
@@ -296,6 +304,7 @@ def test_plan_flags_contraindicated_exercise_that_slips_through(client, with_ses
     assert exs[1]["not"] == "kontrollü"               # güvenli egzersiz dokunulmadan kalır
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_without_injuries_is_unconstrained(client, with_session, monkeypatch):
     captured = {}
 
@@ -309,6 +318,7 @@ def test_plan_without_injuries_is_unconstrained(client, with_session, monkeypatc
     assert "KONTRENDİKASYON" not in captured["prompt"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_hicbiri_clears_stored_injuries(client, with_session, auth_user, monkeypatch):
     from app.models import User
     captured = {}
@@ -374,18 +384,21 @@ def workout_ready(client, auth_user, plan_save_token):
     return auth_user
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_requires_plan(client, auth_user):
     response = client.post("/workout/complete", json={})
     assert response.status_code == 400
     assert "planın yok" in response.get_json()["error"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_requires_image(client, workout_ready):
     response = client.post("/workout/complete", json={})
     assert response.status_code == 400
     assert "fotoğraf" in response.get_json()["error"].lower()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_rejected_by_ai_validation(client, workout_ready, monkeypatch):
     monkeypatch.setattr(training_bp, "validate_pump_check",
                         lambda *a: {"valid": False, "reason": "Spor ortamı görünmüyor."})
@@ -395,6 +408,7 @@ def test_complete_rejected_by_ai_validation(client, workout_ready, monkeypatch):
     assert PumpCheck.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_awards_xp_and_records_pump_check(client, workout_ready, monkeypatch):
     monkeypatch.setattr(training_bp, "validate_pump_check",
                         lambda *a: {"valid": True, "fallback": False})
@@ -666,6 +680,7 @@ def test_training_page_renders(client, auth_user):
     assert client.get("/training").status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_prompt_includes_deterministic_classification_and_style(client, with_session, monkeypatch):
     captured = {}
 
@@ -789,6 +804,7 @@ def test_session_routes_are_404_when_flag_off(client, auth_user, method, path):
     assert WorkoutSession.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_ignores_session_id_when_flag_off(
         client, with_session, monkeypatch, plan_save_token):
     _save_program(client, plan_save_token(with_session.id),
@@ -895,6 +911,7 @@ def test_cannot_touch_another_users_session(client, auth_user, make_user, sessio
     assert db.session.get(WorkoutSession, foreign.id).status == WORKOUT_SESSION_ACTIVE
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_complete_with_session_terminalizes_it(client, auth_user, sessions_on, monkeypatch):
     _save_today_workout_plan(auth_user.id)
     public_id = client.post("/workout/session/start", json={}).get_json()["session"]["public_id"]

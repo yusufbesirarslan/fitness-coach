@@ -430,6 +430,7 @@ def test_requeue_failed_false_without_queue(monkeypatch):
 
 # ── Pipeline entegrasyonu: özetleme enqueue_or_run'a bağlı (WS8) ───────────
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_memory_stage_enqueues_summarize(app, make_user, monkeypatch):
     from app.services import ai_pipeline
     user = make_user("jobsu")
@@ -444,6 +445,7 @@ def test_memory_stage_enqueues_summarize(app, make_user, monkeypatch):
     assert deferred is None  # kuyruk varken erteleme gerekmez (iş zaten async)
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_memory_stage_defers_summarize_without_queue(app, make_user, monkeypatch):
     # Triage 2026-07-19 #4: kuyruk YOKKEN özetleme istek yolunda satır-içi
     # KOŞMAZ — yanıt sonrasında çağrılacak ertelenmiş bir callable döner.

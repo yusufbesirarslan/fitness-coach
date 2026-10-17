@@ -150,6 +150,7 @@ def test_heavy_chat_serves_last_good_when_both_providers_fail(monkeypatch, no_sl
     assert ai._heavy_chat(msgs) == "GOOD"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_heavy_chat_scopes_model_slot_to_each_provider_call(monkeypatch):
     """Triage 2026-07-19 #3: model slotu TÜM rutini (retry sleep'leri + Bedrock→
     OpenAI geçişi) sarmamalı — her sağlayıcı create() çağrısı kendi slotunu alıp
@@ -262,6 +263,7 @@ def _fake_bedrock(monkeypatch, *, reply=None, raises=None, capture=None):
                         SimpleNamespace(messages=SimpleNamespace(create=create)))
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_claude_chat_hoists_system_and_clamps_tokens(monkeypatch):
     cap = {}
     resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="merhaba")],
@@ -291,6 +293,7 @@ def test_claude_chat_hoists_system_and_clamps_tokens(monkeypatch):
     assert cap["temperature"] == 0.3
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_claude_chat_omits_system_when_none(monkeypatch):
     cap = {}
     resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")],
@@ -300,30 +303,35 @@ def test_claude_chat_omits_system_when_none(monkeypatch):
     assert "system" not in cap  # boş system gönderilmez
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_claude_chat_no_text_block_returns_empty(monkeypatch):
     resp = SimpleNamespace(content=[SimpleNamespace(type="tool_use")], stop_reason="end_turn")
     _fake_bedrock(monkeypatch, reply=resp)
     assert ai._claude_chat([{"role": "user", "content": "x"}]) == ""
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_claude_chat_maps_rate_limit(monkeypatch):
     _fake_bedrock(monkeypatch, raises=_FakeRateLimit("429"))
     with pytest.raises(RuntimeError, match="yoğun"):
         ai._claude_chat([{"role": "user", "content": "x"}])
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_claude_chat_maps_timeout(monkeypatch):
     _fake_bedrock(monkeypatch, raises=_FakeTimeout("t/o"))
     with pytest.raises(RuntimeError, match="zaman aşımı"):
         ai._claude_chat([{"role": "user", "content": "x"}])
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_claude_chat_maps_api_error(monkeypatch):
     _fake_bedrock(monkeypatch, raises=_FakeAPIError("boom"))
     with pytest.raises(RuntimeError, match="AI servisi hatası"):
         ai._claude_chat([{"role": "user", "content": "x"}])
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_claude_chat_rate_limit_is_transient(monkeypatch):
     # WS9: rate-limit/timeout artık TransientAIError (retry sinyali) — ama hâlâ
     # RuntimeError alt sınıfı, dostça metin sözleşmesi korunur.

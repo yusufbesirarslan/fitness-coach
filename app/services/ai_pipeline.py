@@ -80,8 +80,15 @@ def _memory_stage(user_id):
     yalnızca kuyruk yokken bir callable'dır — çağıran, yanıt üretildikten sonra
     koşturur (triage 2026-07-19 #4). Arızaya dayanıklı: hafıza katmanı çökerse
     (None, None, None) ile eski client-history davranışına düşülür."""
-    if not current_app.config.get("AI_MEMORY_ENABLED", True):
-        return None, None, None
+    from app.services.ai_consent import memory_available
+    if not current_app.config.get("AI_MEMORY_ENABLED", False) or not memory_available(user_id):
+        # Displayable history remains separate from optional AI personalization.
+        try:
+            return memory_manager.get_or_create_active_conversation(user_id), [], None
+        except Exception:
+            from app.extensions import db
+            db.session.rollback()
+            return None, [], None
     try:
         conversation = memory_manager.get_or_create_active_conversation(user_id)
         deferred_summarize = _maybe_enqueue_summarize(conversation)

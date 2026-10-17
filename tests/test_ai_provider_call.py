@@ -224,6 +224,7 @@ def test_images_are_bounded_per_provider_rule():
     {"type": "image", "source": {"type": "url", "url": "https://x/y.png"}},
     {"type": "document", "source": {"type": "base64", "data": "AAAA"}},
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unboundable_parts_are_refused_before_the_provider(block, providers):
     payload = _payload("x")
     payload["messages"][0]["content"] = [block]
@@ -245,6 +246,7 @@ def test_sdk_response_objects_in_the_tool_loop_are_counted():
 
 # ── Budget edges ────────────────────────────────────────────────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_under_cap_is_admitted_and_sent_once(providers):
     with ai_provider_call.admit(feature="other", provider="bedrock",
                                 payload=_payload("hi")) as call:
@@ -252,6 +254,7 @@ def test_under_cap_is_admitted_and_sent_once(providers):
     assert len(providers.bedrock.calls) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_exactly_at_cap_is_admitted_and_one_over_is_refused(providers, monkeypatch):
     payload = _payload("x" * 1000)
     bound, _ = ai_input_budget.input_upper_bound(payload)
@@ -266,6 +269,7 @@ def test_exactly_at_cap_is_admitted_and_one_over_is_refused(providers, monkeypat
 
 
 @pytest.mark.parametrize("max_tokens", [None, 0, -1, "700", 2001])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_missing_or_over_cap_output_is_refused(max_tokens, providers):
     payload = _payload("hi")
     if max_tokens is None:
@@ -278,6 +282,7 @@ def test_missing_or_over_cap_output_is_refused(max_tokens, providers):
     assert providers.bedrock.calls == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_image_count_is_capped_per_feature(providers):
     img = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AA"}}
     payload = _payload("x")
@@ -292,10 +297,14 @@ def test_image_count_is_capped_per_feature(providers):
     assert providers.bedrock.calls == []
 
 
-def test_unknown_feature_is_the_bounded_other_bucket(providers):
-    with ai_provider_call.admit(feature="<script>user text", provider="bedrock",
-                                payload=_payload("hi")) as call:
-        assert call.feature == "other"
+def test_unknown_feature_is_not_a_consent_scope(providers):
+    from app.services.ai_consent import ConsentDenied
+    assert ai_input_budget.normalize_feature("<script>user text") == "other"
+    with pytest.raises(ConsentDenied):
+        with ai_provider_call.admit(feature="<script>user text", provider="bedrock",
+                                    payload=_payload("hi")):
+            pytest.fail("unknown purpose must never become a valid consent scope")
+    assert providers.bedrock.calls == []
 
 
 @pytest.mark.parametrize("raw", ["0", "-5", "abc", "1.5"])
@@ -333,6 +342,7 @@ def _coach_payload(history_pairs, question="GÜNCEL SORU", pad=2000):
                 messages=messages), len(messages) - 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_oldest_history_is_dropped_first_and_the_request_survives(providers, monkeypatch):
     payload, hist = _coach_payload(5)
     full, _ = ai_input_budget.input_upper_bound(payload)
@@ -350,6 +360,7 @@ def test_oldest_history_is_dropped_first_and_the_request_survives(providers, mon
     assert ai_input_budget.input_upper_bound(sent)[0] <= full - 3000
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_openai_history_reduction_keeps_leading_system_messages(providers, monkeypatch):
     messages = [{"role": "system", "content": "SYS"}, {"role": "system", "content": "CTX"}]
     for i in range(3):
@@ -366,6 +377,7 @@ def test_openai_history_reduction_keeps_leading_system_messages(providers, monke
     assert sent[2]["content"].startswith("U1") and sent[-1]["content"] == "Q"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_required_content_that_cannot_fit_is_refused_before_the_provider(
         providers, monkeypatch):
     payload, hist = _coach_payload(3, question="q" * 20_000)
@@ -377,6 +389,7 @@ def test_required_content_that_cannot_fit_is_refused_before_the_provider(
     assert providers.bedrock.calls == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_system_prompt_is_never_trimmed(providers, monkeypatch):
     payload, hist = _coach_payload(0)
     payload["system"] = "S" * 30_000
@@ -390,6 +403,7 @@ def test_system_prompt_is_never_trimmed(providers, monkeypatch):
 
 # ── Refusal: zero calls, zero spend, no permit leak ─────────────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_refusal_consumes_no_spend_budget_and_returns_no_permit(providers, monkeypatch):
     free_before = _slots_free()
     _budget(monkeypatch, "other", 2000)
@@ -425,6 +439,7 @@ def test_heavy_chat_refusal_has_no_openai_fallback_and_no_recovery_retry(
     ("_heavy_chat", "menu_extract", {"max_tokens": 5000}),
     ("_heavy_chat", "coach", {"max_tokens": 700}),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_every_wrapper_feature_is_budgeted(app, providers, monkeypatch, fn, feature, kwargs):
     _budget(monkeypatch, feature, 3000)
     with pytest.raises(AIInputBudgetExceeded):
@@ -432,6 +447,7 @@ def test_every_wrapper_feature_is_budgeted(app, providers, monkeypatch, fn, feat
     assert providers.bedrock.calls == [] and providers.openai.calls == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_direct_vision_helper_invocation_is_budgeted(app, providers, monkeypatch):
     _budget(monkeypatch, "vision", 3000)
     with pytest.raises(AIInputBudgetExceeded):
@@ -441,6 +457,7 @@ def test_direct_vision_helper_invocation_is_budgeted(app, providers, monkeypatch
     assert providers.bedrock.calls == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_parallel_fan_out_batches_are_each_budgeted(app, providers, monkeypatch):
     _budget(monkeypatch, "nutrition", 3000)
 
@@ -457,6 +474,7 @@ def test_parallel_fan_out_batches_are_each_budgeted(app, providers, monkeypatch)
     assert providers.bedrock.calls == [] and providers.openai.calls == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_budget_holds_without_request_context_and_with_redis_down(monkeypatch, providers):
     class DownRedis:
         def pipeline(self, transaction=True):
@@ -493,6 +511,7 @@ def coach_providers(monkeypatch):
     return SimpleNamespace(bedrock=bedrock, openai=openai_fake)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_tool_result_growth_is_rechecked_before_every_round(
         app, coach_providers, make_user, monkeypatch):
     """Round 1 fits; a huge tool result makes round 2 exceed the budget: round
@@ -578,6 +597,7 @@ def test_streaming_path_uses_the_same_budget(app, stream_client, monkeypatch):
     assert events[-1]["type"] == "error" and events[-1]["work_performed"] is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_streaming_success_is_admitted_charged_and_measured(app, stream_client, usage_events):
     events = list(ai_stream.stream_coach_answer(42, "soru", "", []))
     assert events[-1]["type"] == "done"
@@ -587,6 +607,7 @@ def test_streaming_success_is_admitted_charged_and_measured(app, stream_client, 
     assert event["input_tokens"] == 120 and event["tool_round"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_abandoned_stream_is_recorded_as_estimated_not_zero(usage_events):
     payload = _payload("x")
     with ai_provider_call.admit(feature="coach", provider="bedrock-stream",
@@ -601,6 +622,7 @@ def test_abandoned_stream_is_recorded_as_estimated_not_zero(usage_events):
 
 # ── Menu OCR / PDF fan-out ──────────────────────────────────────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_menu_ocr_is_budgeted_and_refusal_is_unreadable(app, monkeypatch):
     from app.services import menu_ocr
     fake = OpenAIFake()
@@ -633,6 +655,7 @@ def test_scanned_pdf_ocr_fan_out_is_capped_by_policy(app, monkeypatch):
 
 # ── TOCTOU ──────────────────────────────────────────────────────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_provider_receives_exactly_the_checked_copy(providers):
     messages = [{"role": "user", "content": "checked"}]
     payload = dict(model="m", max_tokens=100, messages=messages)
@@ -645,6 +668,7 @@ def test_the_provider_receives_exactly_the_checked_copy(providers):
 
 @pytest.mark.parametrize("extra", [{"messages": []}, {"system": "x"}, {"tools": []},
                                    {"max_tokens": 9000}, {"extra_body": {"a": 1}}])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nothing_token_bearing_can_be_added_after_admission(providers, extra):
     with ai_provider_call.admit(feature="other", provider="bedrock",
                                 payload=_payload("hi")) as call:
@@ -653,6 +677,7 @@ def test_nothing_token_bearing_can_be_added_after_admission(providers, extra):
     assert providers.bedrock.calls == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_admission_covers_one_call_only(providers):
     with ai_provider_call.admit(feature="other", provider="bedrock",
                                 payload=_payload("hi")) as call:
@@ -685,6 +710,7 @@ def test_sdk_clients_are_built_without_internal_retries(monkeypatch):
     assert captured["bedrock"]["max_retries"] == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_transient_failure_retry_is_a_separately_charged_attempt(providers, usage_events):
     providers.bedrock.script = [APIConnectionError("reset"), _bedrock_resp()]
     with ai_provider_call.admit(feature="other", provider="bedrock",
@@ -697,6 +723,7 @@ def test_transient_failure_retry_is_a_separately_charged_attempt(providers, usag
 
 
 @pytest.mark.parametrize("provider,expected", [("bedrock", 2), ("openai", 3)])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_retry_count_is_bounded(providers, provider, expected):
     fake = providers.bedrock if provider == "bedrock" else providers.openai
     fake.script = [StatusError(503)] * 10
@@ -726,6 +753,7 @@ def test_real_sdk_timeouts_are_connection_errors_but_never_retried():
 
 @pytest.mark.parametrize("exc", [APITimeoutError("read"), StatusError(400), StatusError(403)]
                          + _sdk_timeouts())
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_timeouts_and_permanent_errors_are_not_retried(providers, exc, usage_events):
     providers.bedrock.script = [exc, _bedrock_resp()]
     with pytest.raises(type(exc)):
@@ -739,6 +767,7 @@ def test_timeouts_and_permanent_errors_are_not_retried(providers, exc, usage_eve
                                 else "provider_error")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_spend_refusal_on_retry_ends_the_call(providers, monkeypatch, usage_events):
     monkeypatch.setattr(ai_spend_guard, "LIMITS", {("global", "heavy", "d"): 1})
     providers.bedrock.script = [StatusError(529), _bedrock_resp()]
@@ -750,6 +779,7 @@ def test_a_spend_refusal_on_retry_ends_the_call(providers, monkeypatch, usage_ev
     assert [e["outcome"] for e in _parsed(usage_events)] == ["provider_error", "guard_rejected"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_recovery_ladder_attempts_are_each_admitted(app, providers):
     # two recovery attempts x (1 + BEDROCK_MAX_RETRIES) physical attempts,
     # then the OpenAI fallback with its own charged attempts: all bounded.
@@ -770,6 +800,7 @@ def test_recovery_ladder_attempts_are_each_admitted(app, providers):
 
 # ── Usage events ────────────────────────────────────────────────────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_success_event_carries_provider_usage_and_no_content(app, providers, usage_events):
     with app.test_request_context("/x"):
         from flask import g
@@ -798,6 +829,7 @@ def test_openai_cached_tokens_are_split_out():
         "cache_write_tokens": 0, "cache_read_tokens": 400}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_rejection_events_are_bounded_and_never_priced(providers, monkeypatch, usage_events):
     _budget(monkeypatch, "other", 1500)
     with pytest.raises(AIInputBudgetExceeded):
@@ -811,6 +843,7 @@ def test_rejection_events_are_bounded_and_never_priced(providers, monkeypatch, u
     assert "estimated_cost_usd" not in event
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bound_violation_is_flagged_loudly(providers, usage_events):
     providers.bedrock.script = [_bedrock_resp(usage=Usage(
         input_tokens=10_000_000, output_tokens=1,
@@ -829,6 +862,7 @@ def test_event_fields_are_from_fixed_vocabularies(usage_events):
     assert event["model"] == "other" and event["outcome"] == "provider_error"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_rejection_metric_has_no_per_user_or_feature_dimension(providers, monkeypatch):
     from app.services import runtime_metrics
     seen = []
@@ -902,6 +936,7 @@ def test_charge_precedes_every_physical_retry():
 
 
 # FINOPS-01: qualify the actual recovery/fallback boundary with both providers.
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_finops_fallback_attempts_are_independently_flagged(app, providers, usage_events):
     import anthropic
     import httpx
@@ -918,3 +953,10 @@ def test_finops_fallback_attempts_are_independently_flagged(app, providers, usag
         ("bedrock", "provider_error", False), ("openai", "success", True)]
     assert _spent() == 2
     assert "exception-sensitive" not in str(events)
+
+
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+def test_d1_no_implicit_authorization(app, make_user, monkeypatch, recipient):
+    # No ALLOW fixture, including through imported/inherited fixtures.
+    from consent_projection_support import assert_default_deny_at_sdk
+    assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient)

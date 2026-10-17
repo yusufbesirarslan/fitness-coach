@@ -32,6 +32,7 @@ def provider_prompts(monkeypatch):
 
 
 @pytest.mark.parametrize("language,name", [("en", "English"), ("tr", "Turkish"), ("invalid", "Turkish")])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_authenticated_account_controls_new_analysis_without_language_query(
         client, mobile_user, headers, dependencies, provider_prompts, monkeypatch,
         language, name):
@@ -74,6 +75,7 @@ def test_authenticated_account_controls_new_analysis_without_language_query(
                       headers=headers).json["pump_check"]["analysis"] == stored
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_account_switch_affects_only_new_analysis_and_preserves_replay(
         client, mobile_user, headers, dependencies, provider_prompts, monkeypatch):
     from app.services.mobile_pump_checks.analysis import analyze_image
@@ -101,6 +103,7 @@ def test_account_switch_affects_only_new_analysis_and_preserves_replay(
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_timeout_keeps_typed_analysis_error(
         client, mobile_user, headers, dependencies, monkeypatch, language):
     from app.services.mobile_pump_checks.analysis import analyze_image

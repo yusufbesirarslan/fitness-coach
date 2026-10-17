@@ -152,7 +152,7 @@ def feature_flag_state(app):
 # ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
 # Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
 # kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
-AI_MEMORY_ENABLED = os.getenv("AI_MEMORY_ENABLED", "1") == "1"
+AI_MEMORY_ENABLED = os.getenv("AI_MEMORY_ENABLED", "0") == "1"
 # Bağlam penceresine girecek geçmiş (özet + mesajlar) için kaba token bütçesi
 # (memory_manager.estimate_tokens, len//4). Model limitini DEĞİL, maliyet/alaka
 # dengesini sınırlar; pencere en yeni mesajlardan geriye bütçe dolana dek kurulur.

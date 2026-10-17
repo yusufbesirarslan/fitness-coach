@@ -12,6 +12,8 @@ Two layers, both scoped to exactly these two log families:
 * source — each ``_log`` helper takes only the bounded labels it emits, its
   format string is pinned, and every call site passes a literal vocabulary.
 """
+
+import pytest
 import ast
 import inspect
 import logging
@@ -57,6 +59,7 @@ def _family_records(caplog):
             if record.getMessage().startswith(("[WORKOUT_SESSION]", "[WORKOUT_COMPLETION]"))]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_real_lifecycle_logs_carry_no_owner_identity(
         client, app, make_user, flags, as_mobile, completion_proof, monkeypatch, caplog):
     owner = make_user(OWNER_NAME, id=OWNER_ID)

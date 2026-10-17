@@ -17,6 +17,7 @@ from app.services import ai_pipeline
     (None, None),
 ])
 @pytest.mark.parametrize("path", ["/ask", "/ask/stream"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_route_forwards_only_allowlisted_kind(client, auth_user, app,
                                                monkeypatch, marker, expected, path):
     app.config["AI_CHAT_QUOTA_ENABLED"] = False

@@ -365,6 +365,7 @@ def test_multiple_failures_never_blank_the_page(app, auth_user, client, training
 # ── FRESHNESS (real writes, canonical re-read) ─────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_log_food_front_door_write_refreshes_canonically(
         app, auth_user, client, training_page, stub_meal_macro_provider):
     seed(app, auth_user.id)

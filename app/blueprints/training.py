@@ -472,6 +472,8 @@ def complete_workout():
     # ── PUMP CHECK GATE ──────────────────────────────────────────────────────
     # Antrenman tamamlanmadan önce ortam fotoğrafı + konum AI ile doğrulanmalı.
     # Doğrulama geçerse fotoğraf S3'e (özel bucket) yüklenir ve kaydı tutulur.
+    from app.blueprints.ai_consent import require_legacy_ai
+    require_legacy_ai()
     image_bytes, img_mime, img_err = validate_pump_check_image(data.get("image"))
     if img_err:
         return jsonify({"error": img_err}), 400

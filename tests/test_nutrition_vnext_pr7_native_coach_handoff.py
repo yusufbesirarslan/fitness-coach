@@ -28,6 +28,7 @@ def _seed(user, kcal=525):
     set_water(user.id, today, 3)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_message_only_native_coach_is_unchanged(mobile, bearer, provider, alice):
     _seed(alice)
     response = send(mobile, bearer(alice), message="Hi")
@@ -36,6 +37,7 @@ def test_message_only_native_coach_is_unchanged(mobile, bearer, provider, alice)
     assert "[NUTRITION CONTEXT]" not in provider.calls[0]["context"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_marker_adds_server_rederived_day_view_context(mobile, bearer, provider, alice):
     _seed(alice)
     response = send(mobile, bearer(alice), json={"message": "Review my day", "handoff": MARKER})
@@ -53,6 +55,7 @@ def test_marker_adds_server_rederived_day_view_context(mobile, bearer, provider,
     assert _chat_used(alice.id) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_latest_canonical_truth_wins_over_any_client_snapshot(mobile, bearer, provider, alice):
     _seed(alice, kcal=525)
     add_meal(alice.id, app_today().isoformat(), kcal=300)
@@ -72,6 +75,7 @@ def test_latest_canonical_truth_wins_over_any_client_snapshot(mobile, bearer, pr
     {"message": "x", "handoff": MARKER, "intake": {"calories": 1}},
     {"message": "x", "handoff": MARKER, "user_id": 2},
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unknown_markers_and_client_facts_are_refused_and_spend_nothing(
         mobile, bearer, provider, alice, body):
     _seed(alice)
@@ -83,6 +87,7 @@ def test_unknown_markers_and_client_facts_are_refused_and_spend_nothing(
     assert _chat_used(alice.id) == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unreadable_intake_does_not_fabricate_context(
         mobile, bearer, provider, alice, monkeypatch):
     from app.services import nutrition_day_view as dv
@@ -94,6 +99,7 @@ def test_unreadable_intake_does_not_fabricate_context(
     assert "[NUTRITION CONTEXT]" not in provider.calls[0]["context"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_handoff_context_is_owner_scoped(mobile, bearer, provider, alice, bob):
     _seed(alice, kcal=777)
     send(mobile, bearer(bob), json={"message": "Review", "handoff": MARKER})
@@ -102,6 +108,7 @@ def test_handoff_context_is_owner_scoped(mobile, bearer, provider, alice, bob):
     assert "no meals logged yet (measured 0)" in context
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_failure_semantics_are_unchanged_with_a_marker(
         mobile, bearer, provider, alice):
     _seed(alice)

@@ -487,6 +487,7 @@ def test_a_bare_confirmation_invite_is_still_suppressed(
 
 # ── Phase 5: the same payload through /ask/stream, adapter included ─────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_partial_add_then_15_writes_4x15(
         app, live_user, tools_on, monkeypatch):
     """End to end: provider adapter → parser → grounding → clarification →
@@ -567,6 +568,7 @@ def _stream(app, user_id, question):
         e.get("text") or "" for e in events if e.get("type") == "delta")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_replace_applies_without_a_prescription(
         app, live_user, tools_on, monkeypatch):
     """C at the adapter boundary: no sets/reps asked for, source rx inherited."""
@@ -584,6 +586,7 @@ def test_ask_stream_replace_applies_without_a_prescription(
     _assert_exactly_one_mutation(live_user.id, before)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_update_applies_on_a_unique_slot(
         app, unique_curl_user, tools_on, monkeypatch):
     """D at the adapter boundary: unique slot, direct 4x10."""
@@ -597,6 +600,7 @@ def test_ask_stream_update_applies_on_a_unique_slot(
     _assert_exactly_one_mutation(unique_curl_user.id, before)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_ambiguous_update_asks_only_the_day(
         app, ambiguous_curl_user, tools_on, monkeypatch):
     """D's ambiguous branch at the adapter boundary: the day question survives
@@ -619,6 +623,7 @@ def test_ask_stream_ambiguous_update_asks_only_the_day(
     _assert_exactly_one_mutation(ambiguous_curl_user.id, before)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_ambiguous_add_question_is_not_replaced(
         app, live_user, tools_on, monkeypatch):
     """The live B/C/D symptom, at the layer that produced it.

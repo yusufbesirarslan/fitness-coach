@@ -48,6 +48,7 @@ def test_handoff_preview_is_compact_across_viewports(app, gate, make_user, login
                 gate.page.screenshot(path=str(Path(shots) / f"coach-{locale}-{width}.png"))
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_first_send_uses_marker_then_normal_entry_has_none(
         app, gate, make_user, login, monkeypatch):  # noqa: F811
     user = make_user("progress_send", profile_complete=True)
@@ -81,6 +82,7 @@ def test_first_send_uses_marker_then_normal_entry_has_none(
     assert gate.page.evaluate("() => window.CW.handoff") is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plain_fallback_failure_keeps_context_until_success(
         app, gate, make_user, login, monkeypatch):  # noqa: F811
     user = make_user("progress_plain", profile_complete=True)
@@ -118,6 +120,7 @@ def test_plain_fallback_failure_keeps_context_until_success(
     assert gate.page.evaluate("() => window.CW.handoff") is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_failed_send_keeps_handoff_for_retry_and_dismiss_clears_it(
         app, gate, make_user, login, monkeypatch):  # noqa: F811
     user = make_user("progress_retry", profile_complete=True)

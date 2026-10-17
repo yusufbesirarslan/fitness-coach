@@ -493,3 +493,29 @@ def test_gate_module_is_runnable_without_the_application():
     """CI and humans can run it before any app import (no env needed)."""
     source = Path(gate.__file__).read_text(encoding="utf-8")
     assert "from app" not in source and "import app" not in source
+
+
+def _d1_core_source():
+    return (Path(__file__).parents[1] / 'migrations/versions/d1c0a15e0001_ai_consent_authority.py').read_text()
+
+
+def test_guarded_fresh_core_tables_are_additive_without_exempting_the_migration():
+    revision, classification, problems = gate.check_source(_d1_core_source())
+    assert (revision, classification, problems) == ('d1c0a15e0001', 'expand', [])
+
+
+@pytest.mark.parametrize('before,after', [
+    ('if not inspector.has_table(table.name):', 'if inspector.has_table(table.name):'),
+    ('table.create(bind)', 'sa.Index("unique_old", sa.Column("id"), unique=True).create(bind)'),
+    ("name='ck_ai_consent_generation'))", "name='ck_ai_consent_generation'), autoload_with=op.get_bind())"),
+    ('table.create(bind)', 'table.create(bind, checkfirst=False)'),
+    ('return state, events', 'return state, existing_table'),
+    ('sa.inspect(bind)', 'fake_inspector(bind)'),
+    ("name='ck_ai_consent_generation'))", "name='ck_ai_consent_generation'), schema='existing')"),
+    ('table.create(bind)', 'table = existing_table\n            table.create(bind)'),
+    ('table.create(bind)', 'table.create(bind)\n            op.drop_column("user", "username")'),
+])
+def test_core_table_proof_does_not_allow_unproven_or_destructive_creates(before, after):
+    source = _d1_core_source()
+    assert before in source
+    assert gate.check_source(source.replace(before, after))[2]

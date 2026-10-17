@@ -651,6 +651,7 @@ def _stream(app, user_id, question):
         e.get("text") or "" for e in events if e.get("type") == "delta")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_has_the_same_three_turn_flow(
         app, dup_user, tools_on, monkeypatch):
     from tests.test_ai_stream import _FakeBedrock

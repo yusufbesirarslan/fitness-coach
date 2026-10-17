@@ -98,6 +98,7 @@ def test_mobile_create_requires_bearer_and_valid_idempotency_key(client):
     ).status_code == 401
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_mobile_ai_capacity_rejection_preserves_error_envelope(
         client, headers, monkeypatch):
     class FullGate:
@@ -115,6 +116,7 @@ def test_mobile_ai_capacity_rejection_preserves_error_envelope(
     assert response.get_json()["error"]["retryable"] is True
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_mobile_create_and_get_share_one_private_canonical_shape(
         client, headers, dependencies):
     created = client.post(PATH, data=_command(), headers=headers)
@@ -139,6 +141,7 @@ def test_mobile_create_and_get_share_one_private_canonical_shape(
     assert dependencies["analysis"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_same_key_same_command_replays_without_duplicate_or_second_analysis(
         client, headers, dependencies):
     first = client.post(PATH, data=_command(), headers=headers)
@@ -152,6 +155,7 @@ def test_same_key_same_command_replays_without_duplicate_or_second_analysis(
     assert dependencies["analysis"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_same_key_different_command_is_conflict(client, headers, dependencies):
     assert client.post(PATH, data=_command("first"), headers=headers).status_code == 201
     conflict = client.post(PATH, data=_command("different"), headers=headers)
@@ -160,6 +164,7 @@ def test_same_key_different_command_is_conflict(client, headers, dependencies):
     assert PumpCheck.query.count() == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_cross_user_and_unknown_ids_have_same_private_not_found(
         client, headers, dependencies, make_user, monkeypatch):
     created = client.post(PATH, data=_command(), headers=headers)
@@ -178,6 +183,7 @@ def test_cross_user_and_unknown_ids_have_same_private_not_found(
     assert dependencies["presign"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_failure_persists_one_failed_row_and_same_key_retries_it(
         client, headers, dependencies, monkeypatch):
     attempts = {"count": 0}
@@ -205,6 +211,7 @@ def test_provider_failure_persists_one_failed_row_and_same_key_retries_it(
     assert attempts["count"] == 2
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stale_analysis_lease_is_reclaimed_with_new_generation(
         client, headers, dependencies):
     first = client.post(PATH, data=_command(), headers=headers)
@@ -233,6 +240,7 @@ def test_analysis_lease_exceeds_provider_and_storage_retry_budget():
     assert service.ANALYSIS_LEASE_SECONDS >= 600
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_row_creator_still_reports_creation_when_a_peer_owns_the_analysis(
         client, headers, dependencies, monkeypatch):
     """Two concurrent requests race twice, and the winners can differ.
@@ -289,6 +297,7 @@ def test_unreconciled_finalization_is_never_classified_as_provider_failure(
             row.id, row.user_id, 1, _analysis())
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_storage_and_invalid_analysis_have_distinct_stable_errors(
         client, headers, dependencies, monkeypatch):
     monkeypatch.setattr(service.s3_helper, "is_enabled", lambda: False)

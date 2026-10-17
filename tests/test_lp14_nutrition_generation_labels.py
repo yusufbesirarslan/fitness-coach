@@ -257,6 +257,7 @@ def _generate(native, headers, body, **kwargs):
     return native.post(GENERATE, headers=headers, json=body, **kwargs)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_english_account_english_chips_generate_from_canonical_names(
         app, native, bearer, make_user, no_provider, monkeypatch):
     provider = _provider(monkeypatch, EN_OPTION)
@@ -274,6 +275,7 @@ def test_english_account_english_chips_generate_from_canonical_names(
         "Oats - 60g", "Eggs - 3 pieces"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_turkish_account_turkish_chips_generate_turkish(
         app, native, bearer, make_user, no_provider, monkeypatch):
     provider = _provider(monkeypatch, TR_OPTION)
@@ -290,6 +292,7 @@ def test_turkish_account_turkish_chips_generate_turkish(
         "Yulaf ezmesi - 60g", "Yumurta - 3 adet"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_food_rating_is_locale_invariant(
         app, native, bearer, make_user, no_provider, monkeypatch):
     _provider(monkeypatch, EN_OPTION)
@@ -306,6 +309,7 @@ def test_food_rating_is_locale_invariant(
     assert en == tr == canonical
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_legacy_canonical_selection_accepted_for_english_account(
         app, native, bearer, make_user, no_provider, monkeypatch):
     provider = _provider(monkeypatch, EN_OPTION)
@@ -320,6 +324,7 @@ def test_legacy_canonical_selection_accepted_for_english_account(
     ("en", "tr", EN_CHOICE),   # loaded English chips, switched to Turkish
     ("tr", "en", TR_CHOICE),   # loaded Turkish chips, switched to English
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stale_picker_selection_survives_a_language_switch(
         app, native, bearer, make_user, no_provider, monkeypatch, first, second, stale):
     provider = _provider(monkeypatch, EN_OPTION if second == "en" else TR_OPTION)
@@ -336,6 +341,7 @@ def test_stale_picker_selection_survives_a_language_switch(
     assert prompt.startswith("You are a nutrition expert") is (second == "en")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unknown_label_is_refused_through_the_route(
         app, native, bearer, make_user, no_provider, monkeypatch):
     provider = _provider(monkeypatch, EN_OPTION)
@@ -365,6 +371,7 @@ def test_request_cannot_choose_the_picker_language(app, native, bearer, make_use
         assert options["proteins"][0] == first
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_request_cannot_choose_the_generation_language(
         app, native, bearer, make_user, no_provider, monkeypatch):
     provider = _provider(monkeypatch, EN_OPTION)

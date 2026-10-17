@@ -167,6 +167,8 @@ _USER_FK_MANUAL_CLEANUP = frozenset({
     ("Message", "sender_id"),
     ("Message", "receiver_id"),
     ("Notification", "actor_id"),
+    ("AIConsentEvent", "owner_id"),
+    ("AIConsentState", "owner_id"),
 })
 
 
@@ -180,7 +182,7 @@ def _purge_user(user):
     bırakmaz. Bu kullanıcının davet ettiği kişilerin referred_by_id'si NULL'a
     çekilir (FK'de SET NULL olsa da burada da açıkça yapılır).
     """
-    from app.models import (CoachConversation, CoachMessage, CustomMeal,
+    from app.models import (AIConsentEvent, AIConsentState, CoachConversation, CoachMessage, CustomMeal,
                             CustomMealItem, Friendship, Message, Notification,
                             PumpCheck, PumpCheckComment, PumpCheckLike, User)
     uid = user.id
@@ -241,6 +243,11 @@ def _purge_user(user):
     FeedItemComment.query.filter(db.or_(*fi_comment_filter)).delete(synchronize_session=False)
     if ref_item_ids:
         FeedItem.query.filter(FeedItem.id.in_(ref_item_ids)).delete(synchronize_session=False)
+
+    # D1 authority/evidence use owner_id, so the user_id loop cannot cover
+    # them. Preserve explicit erasure on local databases without FK actions.
+    for Model in (AIConsentEvent, AIConsentState):
+        Model.query.filter_by(owner_id=uid).delete(synchronize_session=False)
 
     for Model in _USER_CHILD_MODELS:
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)
