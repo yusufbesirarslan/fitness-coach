@@ -438,11 +438,12 @@ def _b0d3_schema(conn):
     _run(conn, _module("b0d3e4f5a6b7_training_dispatch_boundary.py").upgrade)
 
 
-def test_upgrade_from_b0d3_preserves_history_and_downgrade_refuses_evidence(migrate_engine):
+def test_upgrade_from_d1_preserves_history_and_downgrade_refuses_evidence(migrate_engine):
     head = _module("b1e4f5a6c7d8_training_allowance_association.py")
-    assert (head.down_revision, head.expand_contract) == ("b0d3e4f5a6b7", "expand")
+    assert (head.down_revision, head.expand_contract) == ("d1c0a15e0001", "expand")
     with migrate_engine.begin() as conn:
         _b0d3_schema(conn)
+        _run(conn, _module("d1c0a15e0001_ai_consent_authority.py").upgrade)
         conn.exec_driver_sql('INSERT INTO "user" (id) VALUES (1)')
         conn.exec_driver_sql(
             "INSERT INTO training_plan_generation_operation (user_id, idempotency_key, "
@@ -529,3 +530,117 @@ def test_create_all_first_schema_passes_both_verifiers(migrate_engine):
         checks = {c["name"] for c in sa.inspect(conn).get_check_constraints(
             "training_plan_generation_allowance")}
         assert "ck_training_plan_generation_allowance_state" in checks
+
+
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+@pytest.mark.parametrize("registry_present", [False, True])
+def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
+        pg_generation_app, recipient, registry_present):
+    """Real hold/marker + Premium still yields zero physical SDK calls."""
+    from unittest.mock import Mock
+    from ai_allowance_support import enable_subscriptions, premium_row
+    from app.extensions import db
+    from app.services import ai, ai_consent, ai_provider_call, ai_spend_guard, subscriptions
+    from app.services.ai_allowances import AllowancePolicy, ScopePolicy
+    from app.services.mobile_training_generation import store
+    app, owners, monkeypatch = pg_generation_app
+    _metered(app)
+    enable_subscriptions(app, monkeypatch)
+    app.config["AI_ALLOWANCE_POLICY"] = AllowancePolicy(
+        version="synthetic-premium-d1", premium=ScopePolicy(
+            "MONTHLY", {"training_generation": 2}, 0))
+    assert dict(ai_consent.POLICIES) == {}
+    if registry_present:
+        purpose, categories = ai_consent.BINDINGS["training_plan"]
+        policy = ai_consent.Disclosure("synthetic-only", purpose, categories,
+            (("bedrock", ai.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL)), (("en", "a" * 64),))
+        monkeypatch.setattr(ai_consent, "POLICIES", {policy.version: policy})
+    sdk = Mock()
+    with app.app_context():
+        premium_row(owners[0])
+        assert subscriptions.entitlement(owners[0])["effective_premium"] is True
+        operation = store.claim(owners[0], "synthetic-d1-no-grant", _request().fingerprint)
+        operation_id = operation.id
+        db.session.rollback()
+        store.authorize_dispatch(operation_id)
+        assert not db.session().in_transaction()
+        with ai_spend_guard.subject_scope(owners[0]), pytest.raises(ai_consent.ConsentDenied):
+            with ai_provider_call.admit(feature="training_plan", provider=recipient,
+                    payload=dict(model=ai.OPENAI_MODEL if recipient == "openai" else ai.BEDROCK_MODEL,
+                        messages=[{"role": "user", "content": "SYNTHETIC_OWN_FITNESS"}], max_tokens=100),
+                    gate=False, charge=False) as admission:
+                admission.create(sdk)
+        sdk.assert_not_called()
+        state = _state(owners[0])
+        assert state.operations == [("IN_PROGRESS", True)]
+        assert state.bindings == ["RESERVED"]
+        assert state.holds == [("RESERVED", "UNKNOWN", None)]
+        assert state.bucket == (0, 1)
+        assert state.plans == 0
+        # No grant was inferred from the entitlement, hold or marker.
+        from app.models import AIConsentState, AIConsentEvent
+        assert AIConsentState.query.count() == AIConsentEvent.query.count() == 0
+
+
+@pytest.mark.parametrize("start", ["base", "d1c0a15e0001"])
+def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engine, start):
+    """Run real Alembic ancestry, preserving synthetic main-era evidence."""
+    from flask import Flask
+    from flask_migrate import Migrate, upgrade, check
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from app.extensions import db
+    from app.models import User, AIConsentState, AIConsentEvent
+    from ai_allowance_support import premium_row
+    app = Flask("synthetic-post-d1-migrations")
+    app.config.update(SQLALCHEMY_DATABASE_URI=migrate_engine.url.render_as_string(hide_password=False),
+                      SQLALCHEMY_TRACK_MODIFICATIONS=False)
+    db.init_app(app)
+    Migrate(app, db, directory=str(ROOT / "migrations"))
+    cfg = Config()
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    script = ScriptDirectory.from_config(cfg)
+    assert script.get_heads() == ["b1e4f5a6c7d8"]
+    assert len(list(script.walk_revisions())) == 53
+    assert script.get_revision("b1e4f5a6c7d8").down_revision == "d1c0a15e0001"
+    tables = ("user", "apple_subscription", "ai_consent_state", "ai_consent_event",
+              "ai_starter_grant", "ai_allowance_bucket", "ai_usage_reservation",
+              "training_plan_generation_operation")
+    with app.app_context():
+        before = {}
+        if start != "base":
+            upgrade(revision=start)
+            db.session.add(User(id=1, username="synthetic-migration", email="migration@example.invalid"))
+            db.session.commit()
+            premium_row(1)
+            db.session.add(AIConsentState(owner_id=1, generation=2,
+                grants={"synthetic": {"state": "revoked", "evidence": "retain-exactly"}},
+                changed_at=datetime(2026, 1, 1)))
+            db.session.add(AIConsentEvent(owner_id=1, request_id="synthetic-revocation", request_digest="a"*64,
+                generation=2, purpose="synthetic", version="synthetic", action="revoke", locale="en",
+                text_digest="b"*64, contract_digest="c"*64, occurred_at=datetime(2026, 1, 1)))
+            db.session.commit()
+            with db.engine.begin() as conn:
+                conn.exec_driver_sql("INSERT INTO ai_starter_grant VALUES (1, 'synthetic', now())")
+                conn.exec_driver_sql("INSERT INTO ai_allowance_bucket (id,user_id,scope,feature,period_key,policy_version,granted,used,reserved,billed_releases,created_at,updated_at) VALUES (1,1,'STARTER','training_generation','NEVER','synthetic',5,1,1,0,now(),now())")
+                conn.exec_driver_sql("INSERT INTO ai_usage_reservation (public_id,user_id,bucket_id,feature,key_digest,state,provider_billed,created_at,expires_at) VALUES (repeat('a',32),1,1,'training_generation','synthetic','RESERVED',false,now(),now())")
+                conn.exec_driver_sql("INSERT INTO training_plan_generation_operation (user_id,idempotency_key,request_fingerprint,status,attempt_count,quota_reserved,created_at,updated_at,provider_dispatch_possible) VALUES (1,'synthetic','fingerprint','IN_PROGRESS',1,false,now(),now(),true)")
+                for name in tables:
+                    result = conn.exec_driver_sql(f'SELECT * FROM "{name}"')
+                    before[name] = (list(result.keys()), result.all())
+        db.session.remove()
+        upgrade()
+        check()  # model/schema comparison against the actual full chain
+        with db.engine.connect() as conn:
+            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "b1e4f5a6c7d8"
+            for name, (columns, rows) in before.items():
+                projection = ','.join('"' + c + '"' for c in columns)
+                assert conn.exec_driver_sql(f'SELECT {projection} FROM "{name}"').all() == rows
+            assert conn.exec_driver_sql("SELECT count(*) FROM training_plan_generation_allowance").scalar_one() == 0
+            assert conn.exec_driver_sql("SELECT count(*) FROM training_plan_generation_operation WHERE allowance_metered IS NOT NULL").scalar_one() == 0
+            assert conn.exec_driver_sql("SELECT count(*) FROM ai_usage_reservation WHERE billing_evidence IS NOT NULL").scalar_one() == 0
+        # Compatible create_all/main-era table reentry must preserve the same evidence.
+        with db.engine.begin() as conn:
+            _run(conn, _module("b1e4f5a6c7d8_training_allowance_association.py").upgrade)
+        db.session.remove()
+        db.engine.dispose()

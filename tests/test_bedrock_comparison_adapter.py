@@ -26,6 +26,7 @@ def _decoded(block):
     return base64.b64decode(block["source"]["data"])
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_two_image_adapter_labels_and_orders_baseline_before_current(
         monkeypatch):
     fake = FakeBedrockResponse("comparison-json")
@@ -50,6 +51,7 @@ def test_two_image_adapter_labels_and_orders_baseline_before_current(
     assert result == "comparison-json"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_two_image_adapter_reuses_model_token_ceiling_and_temperature(
         monkeypatch):
     fake = FakeBedrockResponse("comparison-json")
@@ -68,6 +70,7 @@ def test_two_image_adapter_reuses_model_token_ceiling_and_temperature(
     assert fake.calls[0]["messages"][0]["role"] == "user"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_existing_single_image_layout_is_unchanged(monkeypatch):
     fake = FakeBedrockResponse("single-json")
     monkeypatch.setattr(ai, "bedrock_client", fake.client)
@@ -83,6 +86,7 @@ def test_existing_single_image_layout_is_unchanged(monkeypatch):
     assert result == "single-json"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_two_image_adapter_preserves_timeout_error_normalization(monkeypatch):
     class FakeRateLimit(Exception):
         pass
@@ -110,6 +114,7 @@ def test_two_image_adapter_preserves_timeout_error_normalization(monkeypatch):
             b"baseline", "image/jpeg", b"current", "image/png", "compare")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_two_image_adapter_does_not_log_provider_error_details(
         monkeypatch, caplog):
     class FakeRateLimit(Exception):

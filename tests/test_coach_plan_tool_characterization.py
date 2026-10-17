@@ -228,6 +228,7 @@ def test_the_turn_deadline_is_absolute_and_monotonic(monkeypatch):
     assert ai_coach._remaining_coach_turn_seconds(deadline) == 0.0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_fallback_is_refused_once_a_tool_has_run(app, make_user,
                                                           monkeypatch):
     """The B-rule: Bedrock→OpenAI only before any tool side effect.

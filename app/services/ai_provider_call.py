@@ -36,7 +36,7 @@ import uuid
 from contextlib import contextmanager
 
 from app.config import BEDROCK_MAX_RETRIES, OPENAI_MAX_RETRIES
-from app.services import ai_input_budget, ai_spend_guard, ai_usage
+from app.services import ai_input_budget, ai_spend_guard, ai_usage, ai_consent
 from app.services.ai_gate import model_concurrency_slot
 
 _log = logging.getLogger(__name__)
@@ -168,6 +168,7 @@ class Admission:
         self.tool_round = tool_round
         self.subject = subject
         self._used = False
+        self.consent_generation = ai_consent.generation(subject)
         try:
             self.admission_id = uuid.uuid4().hex
         except Exception:
@@ -239,7 +240,13 @@ class Admission:
                     raise
             kwargs = copy.deepcopy(self._payload)
             try:
-                resp = method(**kwargs, **transport)
+                # SDK retries are disabled. Every physical attempt has a fresh
+                # durable check after capacity/backoff, under the account fence.
+                with ai_consent.dispatch(self.subject, self.feature, self.provider,
+                                         kwargs, self.consent_generation):
+                    bounded_transport = dict(transport)
+                    bounded_transport["timeout"] = min(float(transport.get("timeout", 30.0)), 30.0)
+                    resp = method(**kwargs, **bounded_transport)
             except Exception as exc:
                 self._emit(_outcome_of(exc), attempt)
                 remaining = self._remaining()
@@ -261,17 +268,19 @@ class Admission:
     def stream(self, method, **transport):
         """Streaming call: exactly one attempt (a stream is not replayable)."""
         transport = self._take(transport)
-        holder = _StreamUsage()
-        try:
-            with method(**copy.deepcopy(self._payload), **transport) as stream:
-                yield _StreamProxy(stream, holder)
-        except BaseException as exc:
-            self._emit(_outcome_of(exc), 1)
-            raise
-        if holder.final is None:
-            self._emit("client_disconnect", 1)
-        else:
-            self._emit("success", 1, response=holder.final)
+        with ai_consent.stream_dispatch(self.subject, self.feature, self.provider,
+                                        self._payload, self.consent_generation):
+            holder = _StreamUsage()
+            try:
+                with method(**copy.deepcopy(self._payload), **transport) as stream:
+                    yield _StreamProxy(stream, holder)
+            except BaseException as exc:
+                self._emit(_outcome_of(exc), 1)
+                raise
+            if holder.final is None:
+                self._emit("client_disconnect", 1)
+            else:
+                self._emit("success", 1, response=holder.final)
 
 
 class _StreamUsage:
@@ -304,6 +313,8 @@ def admit(*, feature, provider, payload, deadline=None, tool_round=None,
     historical path). ``charge=False`` is reserved for the deep-health probe,
     whose payload is a fixed one-word prompt with a one-token output.
     """
+    if feature not in ai_consent.BINDINGS:
+        raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
     feature = ai_input_budget.normalize_feature(feature)
     frozen = copy.deepcopy(payload)
     frozen, bound, images = check_payload(feature, provider, frozen, reduce=reduce)

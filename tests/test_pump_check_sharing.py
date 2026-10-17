@@ -1,3 +1,5 @@
+
+import pytest
 import json
 import re
 from pathlib import Path
@@ -204,6 +206,7 @@ def _seed_plan(user, payload, score):
     db.session.commit()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_persists_score_after_later_training_plan_replacement(client, auth_user, monkeypatch):
     _seed_plan(auth_user, {"v": 1}, 8.0)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -223,6 +226,7 @@ def _ready_for_workout(client, user):
     _seed_plan(user, {"v": 1}, 8.0)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_defaults_to_feed_visibility(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -235,6 +239,7 @@ def test_workout_complete_defaults_to_feed_visibility(client, auth_user, monkeyp
     assert check.shared_friend_ids == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_rejects_friends_visibility_without_recipients(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -249,6 +254,7 @@ def test_workout_complete_rejects_friends_visibility_without_recipients(client, 
     assert PumpCheck.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_rejects_non_list_shared_friend_ids(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -264,6 +270,7 @@ def test_workout_complete_rejects_non_list_shared_friend_ids(client, auth_user, 
     assert PumpCheck.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_rejects_boolean_shared_friend_ids_entries(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -280,6 +287,7 @@ def test_workout_complete_rejects_boolean_shared_friend_ids_entries(client, auth
     assert PumpCheck.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_rejects_float_shared_friend_ids_entries(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -296,6 +304,7 @@ def test_workout_complete_rejects_float_shared_friend_ids_entries(client, auth_u
     assert PumpCheck.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_rejects_string_shared_friend_ids_entries(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -312,6 +321,7 @@ def test_workout_complete_rejects_string_shared_friend_ids_entries(client, auth_
     assert PumpCheck.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_rejects_non_string_visibility(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
@@ -326,6 +336,7 @@ def test_workout_complete_rejects_non_string_visibility(client, auth_user, monke
     assert PumpCheck.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_sends_pump_check_messages_to_selected_friends(client, auth_user, make_user, monkeypatch):
     friend = make_user("friend")
     other = make_user("other")
@@ -354,6 +365,7 @@ def test_workout_complete_sends_pump_check_messages_to_selected_friends(client, 
     assert Message.query.filter_by(receiver_id=other.id, message_type="pump_check").count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_persists_image_key_and_renders_in_feed(client, auth_user, monkeypatch):
     # Task 3 regression: yükleme→feed görsel yolu uçtan uca. Diğer testler image_key'i
     # ELLE set eder; bu test /workout/complete'in S3'ten GERÇEKTEN bir image_key
@@ -384,6 +396,7 @@ def test_workout_complete_persists_image_key_and_renders_in_feed(client, auth_us
     assert feed["items"][0]["imageUrl"] == f"https://s3.test/{check.image_key}"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_workout_complete_friends_upload_persists_image_key_and_dm_renders(client, auth_user, make_user, monkeypatch):
     # Task 3 regression: friends (DM) paylaşımında da image_key kalıcılaşır ve
     # ALICI sohbette non-null imageUrl görür (uçtan uca yükleme→DM).

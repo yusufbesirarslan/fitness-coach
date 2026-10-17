@@ -20,6 +20,8 @@ Three layers:
 * source — ``_log_anomaly`` takes only the two labels it emits, its format
   string is pinned, and every call site passes a closed category.
 """
+
+import pytest
 import ast
 import inspect
 import logging
@@ -174,6 +176,7 @@ def test_every_workout_state_anomaly_is_logged_without_owner_identity(
     assert PumpCheck.query.filter_by(user_id=owner.id).count() == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_lifecycle_and_state_logs_are_identity_free_together(
         client, app, make_user, flags, as_mobile, completion_proof, monkeypatch, caplog):
     """The integrated TI-05 privacy contract: all three workout log families in

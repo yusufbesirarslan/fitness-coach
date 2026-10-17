@@ -160,6 +160,7 @@ def test_post_requires_bearer_and_browser_cookie_cannot_authorize(
          "TRAINING_PLAN_CONFLICTING_PREFERENCES"),
     ],
 )
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_post_rejects_invalid_contract_before_provider(
         client, mobile_user, as_mobile, monkeypatch, body, key, status, code):
     monkeypatch.setattr(
@@ -189,6 +190,7 @@ def test_post_rejects_oversized_body_in_the_mobile_envelope(
     assert response.json["error"]["retryable"] is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_post_success_equals_immediate_get_current(
         client, mobile_user, as_mobile, successful_provider):
     headers = as_mobile(mobile_user, "generation-key-success")
@@ -206,6 +208,7 @@ def test_post_success_equals_immediate_get_current(
     assert "user_id" not in serialized
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_response_loss_retry_is_exact_replay_without_provider(
         client, mobile_user, as_mobile, successful_provider, monkeypatch):
     headers = as_mobile(mobile_user, "generation-key-replay")
@@ -222,6 +225,7 @@ def test_response_loss_retry_is_exact_replay_without_provider(
     assert TrainingPlan.query.count() == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_invalid_identity_native_failure_is_durable_and_new_key_can_recover(
         app, client, mobile_user, as_mobile, monkeypatch):
     """PR A pinned this with an unresolved provider NAME. Under PR B a
@@ -285,6 +289,7 @@ def test_invalid_identity_native_failure_is_durable_and_new_key_can_recover(
         "ex_barbell_back_squat")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_exercise_identity_diagnostic_is_bounded_correlated_and_private(
         client, mobile_user, as_mobile, monkeypatch, caplog):
     """PR A's privacy pin, re-expressed for the ID contract: same event,
@@ -336,6 +341,7 @@ def test_exercise_identity_diagnostic_is_bounded_correlated_and_private(
         assert sentinel not in logged
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_post_existing_plan_refuses_replacement(
         client, mobile_user, as_mobile, successful_provider):
     db.session.add(TrainingPlan(
@@ -351,6 +357,7 @@ def test_post_existing_plan_refuses_replacement(
     assert successful_provider == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_post_fingerprint_conflict_is_409_without_second_provider(
         client, mobile_user, as_mobile, successful_provider, monkeypatch):
     headers = as_mobile(mobile_user, "generation-key-conflict")
@@ -366,6 +373,7 @@ def test_post_fingerprint_conflict_is_409_without_second_provider(
     assert response.json["error"]["code"] == "TRAINING_PLAN_IDEMPOTENCY_CONFLICT"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_unavailable_is_safe_503_and_replays_failure_not_retryable(
         client, mobile_user, as_mobile, monkeypatch):
     calls = []
@@ -389,6 +397,7 @@ def test_provider_unavailable_is_safe_503_and_replays_failure_not_retryable(
     assert calls == ["provider"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_post_is_owner_scoped_even_when_users_share_a_key(
         client, mobile_user, make_user, as_mobile, successful_provider):
     other = make_user("training-generation-other")
@@ -405,6 +414,7 @@ def test_post_is_owner_scoped_even_when_users_share_a_key(
     assert TrainingPlanGenerationOperation.query.count() == 2
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_today_converges_from_no_plan_to_the_canonical_generated_plan(
         client, mobile_user, as_mobile, successful_provider):
     headers = as_mobile(mobile_user)
@@ -423,6 +433,7 @@ def test_today_converges_from_no_plan_to_the_canonical_generated_plan(
     assert after.json["today"]["status"] != "no_plan"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_writes_only_the_plan_and_operation(
         client, mobile_user, as_mobile, successful_provider):
     protected_models = (
@@ -449,6 +460,7 @@ def test_generation_writes_only_the_plan_and_operation(
          "TRAINING_PLAN_PERSISTENCE_UNAVAILABLE", None),
     ],
 )
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_command_contention_and_persistence_failures_use_safe_mobile_envelopes(
         client, mobile_user, as_mobile, monkeypatch, error, code, retry_after):
     monkeypatch.setattr(
@@ -465,6 +477,7 @@ def test_command_contention_and_persistence_failures_use_safe_mobile_envelopes(
     assert response.headers.get("Retry-After") == retry_after
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_provider_capacity_rejection_is_retryable_and_refunds_fresh_claim(
         client, mobile_user, as_mobile, successful_provider, monkeypatch):
     @contextmanager
@@ -489,6 +502,7 @@ def test_provider_capacity_rejection_is_retryable_and_refunds_fresh_claim(
 
 
 @pytest.mark.parametrize("exercise_count", [1, 20])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_success_has_bounded_constant_sql_cost_without_exercise_n_plus_one(
         client, mobile_user, as_mobile, monkeypatch, exercise_count):
     def candidate(user, last_session, preferences, chat_fn, **kwargs):
@@ -534,3 +548,10 @@ def test_success_has_bounded_constant_sql_cost_without_exercise_n_plus_one(
         "user_id" in sql and "idempotency_key" in sql
         for sql in operation_lookups
     )
+
+
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+def test_d1_no_implicit_authorization(app, make_user, monkeypatch, recipient):
+    # No ALLOW fixture, including through imported/inherited fixtures.
+    from consent_projection_support import assert_default_deny_at_sdk
+    assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient)

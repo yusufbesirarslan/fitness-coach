@@ -271,6 +271,7 @@ def _record(name, data, page=None):
 
 @pytest.mark.parametrize("language", ["tr", "en"])
 @pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_state_matrix_is_canonical_and_never_overflows(surface, scenario, language):
     page, _, arrange, errors = surface
     arrange(scenario, language)
@@ -355,6 +356,7 @@ def test_visual_nesting_is_at_most_two_and_surfaces_materially_decline(surface, 
             assert data["surface_count"] <= BASELINE_SURFACES // 3, (scenario, width, data["surfaces"])
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_conflict_proposal_keeps_nesting_at_most_two(surface):
     page, _, arrange, _ = surface
     arrange("session_conflict")
@@ -511,6 +513,7 @@ def test_stale_session_explains_itself_before_recovery_and_offers_no_resume(app,
 
 
 @pytest.mark.parametrize("width", WIDTHS)
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_session_conflict_warns_in_a_real_dialog_and_cancel_keeps_the_plan(
         app, surface, profile_ready, width):
     page, traffic, arrange, _ = surface

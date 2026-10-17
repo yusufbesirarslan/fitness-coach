@@ -243,6 +243,7 @@ def analyze_scenarios(client, user, monkeypatch):
     return out
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_web_menu_endpoints_match_pre_refactor_golden(
         client, auth_user, routed_wire, monkeypatch):
     observed = {}
@@ -254,6 +255,7 @@ def test_web_menu_endpoints_match_pre_refactor_golden(
         assert value == expected[name], name
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_web_scan_cache_matches_pre_refactor_golden(
         client, auth_user, routed_wire, monkeypatch):
     observed = scan_cache_scenarios(client, routed_wire, monkeypatch)

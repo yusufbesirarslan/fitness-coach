@@ -183,6 +183,7 @@ def test_alias_equivalent_warnings_persist_through_canonical_save(monkeypatch):
     assert persisted[0]["not"].count(WARNING_PREFIX) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_alias_equivalent_warnings_persist_into_stored_plan_data(
         client, auth_user, monkeypatch):
     """End-to-end: generate + save cannot store alias-dependent warning text."""
@@ -230,6 +231,7 @@ def test_unknown_exercise_id_fails_closed_before_injury_annotation(monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unresolved_exercise_with_injuries_does_not_persist(
         client, auth_user, monkeypatch):
     _session(auth_user)

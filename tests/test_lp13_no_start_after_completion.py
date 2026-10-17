@@ -379,6 +379,7 @@ def test_different_active_session_is_still_a_conflict_on_completed_day(
 
 # -- 2. native API ------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_native_start_after_completion_is_409_not_startable(
     client, owner, as_mobile, workout_ref, native_proof
 ):
@@ -454,6 +455,7 @@ def test_native_abandon_then_restart_is_201(
 
 # -- 3. browser API -----------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_start_after_completion_is_refused(
     client, owner, plan, login, browser_proof
 ):
@@ -480,6 +482,7 @@ def test_browser_start_after_completion_is_refused(
     assert [r.status for r in _sessions(owner.id)] == [WORKOUT_SESSION_COMPLETED]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_start_after_legacy_session_less_completion_is_refused(
     client, owner, plan, login, browser_proof
 ):
@@ -525,6 +528,7 @@ def test_browser_replay_unchanged(client, owner, plan, login):
 
 # -- cross-transport: one guard, both surfaces --------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_native_completion_blocks_browser_start_and_vice_versa(
     client, owner, as_mobile, workout_ref, native_proof, login
 ):

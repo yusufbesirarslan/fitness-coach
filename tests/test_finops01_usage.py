@@ -44,6 +44,7 @@ def response():
 
 
 @pytest.mark.parametrize("broken", ["emit", "usage_from_response"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_telemetry_failure_keeps_success_payload_timeout_charge_and_response(monkeypatch, broken):
     def run():
         seen = []
@@ -62,6 +63,7 @@ def test_telemetry_failure_keeps_success_payload_timeout_charge_and_response(mon
     assert run() == healthy
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_missing_success_usage_is_explicit_partial_estimate(events):
     with ai_provider_call.admit(feature="nutrition", provider="bedrock",
                                 payload=payload(), gate=False) as call:
@@ -97,6 +99,7 @@ def test_thread_correlation_is_captured_and_restored():
         assert pool.submit(ai_usage.current_request_id).result() is None
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_physical_retry_group_and_explicit_fallback(events):
     class APIConnectionError(Exception):
         pass
@@ -120,6 +123,7 @@ def test_physical_retry_group_and_explicit_fallback(events):
 
 
 @pytest.mark.parametrize("family,retries", [("bedrock", 2), ("openai", 3)])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_exact_event_count_matches_every_physical_error_attempt(events, family, retries):
     class StatusError(Exception):
         status_code = 503
@@ -140,6 +144,7 @@ def test_exact_event_count_matches_every_physical_error_attempt(events, family, 
 
 
 @pytest.mark.parametrize("read_final,expected", [(True, "success"), (False, "client_disconnect")])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_stream_has_one_event_with_exact_outcome(events, read_final, expected):
     class Stream:
         def __enter__(self):
@@ -159,6 +164,7 @@ def test_stream_has_one_event_with_exact_outcome(events, read_final, expected):
 
 
 @pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_sink_failure_preserves_provider_exception_and_retry_charges(monkeypatch, failure):
     class StatusError(Exception):
         status_code = 503
@@ -208,6 +214,7 @@ def test_new_admission_identity_cannot_export_content(events):
 
 
 @pytest.mark.parametrize("reason", ["input", "guard"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_local_refusal_is_one_event_and_zero_physical_attempts(monkeypatch, events, reason):
     sent = []
     if reason == "input":
@@ -226,6 +233,7 @@ def test_local_refusal_is_one_event_and_zero_physical_attempts(monkeypatch, even
     assert "estimated_cost_usd" not in events[0]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_health_probe_is_one_billable_event_without_spend_charge_or_subject(monkeypatch, events):
     from app import extensions
     from app.services import bedrock_health
@@ -245,6 +253,7 @@ def test_health_probe_is_one_billable_event_without_spend_charge_or_subject(monk
     assert ai_spend_guard._local_counts == {}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_second_tool_round_is_a_distinct_admission_of_the_same_action(events):
     with ai_usage.request_scope("0123456789abcdef"), ai_spend_guard.subject_scope(7):
         for round_number in (1, 2):
@@ -258,6 +267,7 @@ def test_second_tool_round_is_a_distinct_admission_of_the_same_action(events):
     assert {e["subject_id"] for e in events} == {7}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_real_nutrition_executor_preserves_request_and_subject(app, monkeypatch, events):
     from app.services import ai_nutrition
     monkeypatch.setattr(ai_nutrition, "_LLM_MACRO_BATCH_SIZE", 1)
@@ -274,6 +284,7 @@ def test_real_nutrition_executor_preserves_request_and_subject(app, monkeypatch,
     assert {e["subject_id"] for e in events} == {7}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_worker_uses_database_owner_and_existing_job_id(app, make_user, monkeypatch, events):
     import rq
     from app.extensions import db
@@ -315,6 +326,7 @@ def test_fallback_flag_does_not_mark_unrelated_tool_capabilities(events):
 @pytest.mark.parametrize("sentinel", ["prompt-sensitive-value", "response-sensitive-value",
     "private.person@example.invalid", "sk-private-access-refresh-token", "tool-user-sensitive-content",
     "exception-user-secret-message"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_sensitive_content_never_reaches_attempt_event(events, sentinel):
     data = payload()
     data["messages"] = [{"role": "user", "content": sentinel},
@@ -328,6 +340,7 @@ def test_sensitive_content_never_reaches_attempt_event(events, sentinel):
     assert sentinel not in json.dumps(events)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_admission_correlation_generation_failure_cannot_block_provider(monkeypatch, events):
     monkeypatch.setattr(ai_provider_call.uuid, "uuid4", lambda: (_ for _ in ()).throw(RuntimeError("rng-failure")))
     answer = response()

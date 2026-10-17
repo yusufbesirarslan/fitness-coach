@@ -772,6 +772,7 @@ def test_meal_log_requires_fields(client, auth_user):
     assert client.post("/meal-log", json={"ogun": "Kahvaltı"}).status_code == 400
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_meal_log_rejects_bad_photo(client, auth_user):
     response = client.post("/meal-log", json={
         "ogun": "Kahvaltı", "yemekler": "muz", "image": "https://evil.example/a.jpg"})
@@ -893,6 +894,7 @@ def test_meal_log_counts_every_meal_toward_weekly_meals_challenge(
     assert row.progress == 4                          # ...challenge: every meal
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypatch):
     captured = {}
 
@@ -911,6 +913,7 @@ def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypa
     assert entry.yemekler == "2 ölçek whey ve muz"  # DB'ye orijinal metin yazılır
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_meal_log_ai_unparseable_returns_error_no_save(client, auth_user, monkeypatch):
     # AI yanıtı parse edilemezse kanonik MealLog defterine sıfır-makro satırı
     # YAZILMAMALI (TRIAGE_FIXES #1) — hata döner, kayıt eklenmez.
@@ -921,6 +924,7 @@ def test_meal_log_ai_unparseable_returns_error_no_save(client, auth_user, monkey
     assert MealLog.query.count() == 0  # bozuk satır defter'e yazılmaz
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):
     monkeypatch.setattr(nutrition_meallog, "_openai_chat",
                         lambda **kw: '{"kalori": "çok", "protein": 30, "karb": 1, "yag": 2}')
@@ -928,6 +932,7 @@ def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):
     assert body["nutrients"]["kalori"] == 0
     assert body["nutrients"]["protein"] == 30.0
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ai_meal_total_sanitized_before_persistence(client, auth_user, monkeypatch):
     monkeypatch.setattr(
         nutrition_meallog,
@@ -955,6 +960,7 @@ def test_ai_meal_total_sanitized_before_persistence(client, auth_user, monkeypat
     } == expected
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ai_meal_total_oversized_numeric_zeroed_before_persistence(
         client, auth_user, monkeypatch):
     monkeypatch.setattr(
@@ -983,6 +989,7 @@ def test_ai_meal_total_oversized_numeric_zeroed_before_persistence(
     } == expected
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ai_meal_total_normalization_logging_omits_meal_content(
         client, auth_user, monkeypatch, caplog):
     captured = {}
@@ -1037,10 +1044,12 @@ def test_meal_history_groups_by_day(client, auth_user):
     assert len(days[0]["meals"]) == 2
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_review_requires_meals(client, auth_user):
     assert client.post("/meal-log/review", json={}).status_code == 400
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_review_returns_ai_text_and_totals(client, auth_user, monkeypatch):
     _log_meal(client, "Kahvaltı", 800)
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2000,
@@ -1051,6 +1060,7 @@ def test_review_returns_ai_text_and_totals(client, auth_user, monkeypatch):
     assert body == {"review": "Gayet dengeli.", "total_calories": 800, "target": 2000}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_review_ai_failure_falls_back(client, auth_user, monkeypatch):
     _log_meal(client, "Kahvaltı", 800)
 
@@ -1069,6 +1079,7 @@ PLAN_REQUEST = {"proteins": ["Tavuk Göğsü"], "carbs": ["Pirinç"], "fats": ["
 PLAN_RESPONSE = {"planlar": [{"isim": "Plan A", "toplam_kalori": 2000}]}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nutrition_plan_requires_session_and_selection(client, auth_user):
     assert client.post("/nutrition-plan", json=PLAN_REQUEST).status_code == 400  # oturum yok
 
@@ -1079,6 +1090,7 @@ def test_nutrition_plan_requires_session_and_selection(client, auth_user):
     assert response.status_code == 400                                            # seçim yok
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nutrition_plan_rejects_session_without_target_calories(client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=None,
                                goal="kas kazanma"))
@@ -1092,6 +1104,7 @@ def test_nutrition_plan_rejects_session_without_target_calories(client, auth_use
     assert response.get_json()["error"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nutrition_plan_scores_selection_and_returns_plans(client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2300,
                                goal="kas kazanma"))
@@ -1108,6 +1121,7 @@ def test_nutrition_plan_scores_selection_and_returns_plans(client, auth_user, mo
     assert body["score_label"] == "İyi"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nutrition_plan_bad_llm_json_returns_500(client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2000, goal="x"))
     db.session.commit()
@@ -1124,6 +1138,7 @@ _IDEMPOTENCY_HEADERS = {
 }
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_meal_log_idempotency_replays_before_second_ai_call(client, auth_user, monkeypatch):
     calls = {"count": 0}
 

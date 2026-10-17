@@ -588,6 +588,7 @@ def providers(monkeypatch):
     return SimpleNamespace(bedrock=bedrock, openai=openai_fake)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_heavy_chat_stops_at_the_ceiling_without_openai_fallback(app, providers):
     with ai_spend_guard.subject_scope(7):
         for _ in range(3):
@@ -598,6 +599,7 @@ def test_heavy_chat_stops_at_the_ceiling_without_openai_fallback(app, providers)
     assert providers.openai.calls == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_light_chat_stops_at_the_ceiling(app, providers):
     with ai_spend_guard.subject_scope(7):
         for _ in range(3):
@@ -607,6 +609,7 @@ def test_light_chat_stops_at_the_ceiling(app, providers):
     assert providers.openai.calls == 3
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_vision_helper_stops_at_the_ceiling(app, providers):
     with ai_spend_guard.subject_scope(7):
         ai._bedrock_validate_image(b"img", "image/jpeg", "p")
@@ -627,6 +630,7 @@ def test_recovery_never_retries_a_refusal():
     assert attempts == [1]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_premium_normal_usage_is_unaffected_by_default_limits(app, providers, monkeypatch):
     monkeypatch.setattr(ai_spend_guard, "LIMITS", _source_default_limits())
     now = [3600.0]
@@ -673,6 +677,7 @@ def test_coach_turn_at_ceiling_makes_no_provider_call_and_no_openai_fallback(
     assert reply == ai_coach._COACH_FALLBACKS["tr"]["error"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_tool_loop_rounds_each_spend_and_the_ceiling_stops_mid_turn(
         app, coach_providers, make_user, monkeypatch):
     user = make_user("looper")
@@ -740,6 +745,7 @@ def stream_providers(monkeypatch):
     return client
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_streaming_turn_is_attributed_to_its_owner_in_the_producer_thread(
         app, stream_providers, monkeypatch):
     fake = _use_redis(monkeypatch)
@@ -790,6 +796,7 @@ def test_macro_fan_out_batches_spend_the_requesting_accounts_budget(app, monkeyp
 
 # ── Routes: localized failure contract, no 500, quota refunded ──────────────
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_at_ceiling_returns_localized_error_frame_and_refunds_quota(
         app, auth_user, client, stream_providers):
     from app.i18n import t
@@ -817,6 +824,7 @@ def test_ask_stream_at_ceiling_returns_localized_error_frame_and_refunds_quota(
     assert quota.get("chat", 0) == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_at_ceiling_returns_the_existing_soft_error(app, auth_user, client, coach_providers):
     for _ in range(3):
         _charge_as(auth_user.id)
@@ -977,6 +985,7 @@ def test_concurrent_light_callers_never_exceed_the_account_ceiling(monkeypatch):
     assert refused
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_premium_is_entitled_but_does_not_bypass_the_light_ceiling(
         app, providers, make_user, monkeypatch):
     from flask_login import login_user

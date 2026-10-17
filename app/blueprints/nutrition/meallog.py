@@ -6,6 +6,7 @@ ve davranış AYNI (aynı `nutrition` blueprint'i, aynı endpoint adları). Orta
 """
 import json
 import s3_helper
+from app.services.ai_consent import ConsentDenied
 from flask import Response, current_app, jsonify, request
 from flask_login import current_user
 from app.auth_middleware import require_auth
@@ -129,6 +130,12 @@ def log_meal():
             response["photo_url"] = _meal_photo_url(existing)
         return jsonify(response)
 
+    if manual_nutrition is None:
+        # Deny the AI-only branch before optional upload/storage. Manual and
+        # provider-backed diary writes above keep their existing behavior.
+        from app.blueprints.ai_consent import require_legacy_ai
+        require_legacy_ai("AI_CONSENT_PATH_UNAVAILABLE")
+
     # Opsiyonel öğün fotoğrafı: doğrula ve (varsa) S3'e yükle. S3 hatası öğün
     # kaydını bloklamaz (fail-open) — yalnızca foto atlanır.
     photo_bytes, photo_mime, photo_err = validate_meal_photo(data.get("image"))
@@ -242,6 +249,8 @@ def log_meal():
             "yag": yag,
         }
         parsed_ok = True
+    except ConsentDenied:
+        raise
     except Exception as e:
         current_app.logger.info("MEAL LOG ERROR: %s", type(e).__name__)
 

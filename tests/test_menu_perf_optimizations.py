@@ -87,6 +87,7 @@ def _mock_macro_pipeline(monkeypatch, per_serving=None, llm=None):
 # Çıkarım önbelleği (menu:extract:v1:*)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_second_analyze_of_same_menu_skips_llm_extraction(client, profile_session, monkeypatch):
     fake = _FakeRedis()
     monkeypatch.setattr(menu_analysis, "redis_client", fake)
@@ -118,6 +119,7 @@ def test_extraction_cache_key_varies_with_inputs():
     assert base == k("menü metni", None, None, "web_scraper")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_empty_extraction_not_cached(client, profile_session, monkeypatch):
     fake = _FakeRedis()
     monkeypatch.setattr(menu_analysis, "redis_client", fake)
@@ -132,6 +134,7 @@ def test_empty_extraction_not_cached(client, profile_session, monkeypatch):
 # Confidence / macro_source alanları
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_items_report_confidence_and_source(client, profile_session, monkeypatch):
     monkeypatch.setattr(menu_analysis, "redis_client", None)
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
@@ -156,6 +159,7 @@ def test_items_report_confidence_and_source(client, profile_session, monkeypatch
     assert items["Gizemli Yemek"]["confidence"] == 0.0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_cached_macros_report_cache_source(client, profile_session, monkeypatch):
     monkeypatch.setattr(menu_analysis, "redis_client", None)
     foodcache._cache_macros({"Izgara Tavuk": dict(CHICKEN)}, basis="per_serving")
@@ -295,6 +299,7 @@ class _Resp:
         self.text = body
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_parallel_crawl_merges_sections_in_link_order(client, auth_user, monkeypatch):
     monkeypatch.setattr(menu_analysis, "redis_client", None)
     monkeypatch.setattr(menu_analysis, "_validate_menu_url",
@@ -318,6 +323,7 @@ def test_parallel_crawl_merges_sections_in_link_order(client, auth_user, monkeyp
     assert body["total_sections"] >= 3
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_parallel_crawl_records_failures_without_dropping_scan(client, auth_user, monkeypatch):
     monkeypatch.setattr(menu_analysis, "redis_client", None)
     monkeypatch.setattr(menu_analysis, "_validate_menu_url",

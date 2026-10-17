@@ -291,6 +291,7 @@ def test_plan_v2_resume_uses_shared_execution_and_hydrates_acknowledged_progress
     expect(page.locator('[data-action="startWorkout"]')).to_be_focused()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plan_v2_start_refresh_checkpoint_and_complete_use_durable_contract(
     app, auth_user, client, sessions_on, proof_accepted, training_page,
 ):
@@ -958,6 +959,7 @@ def _expire_rest(page):
     }''')
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_execution_v1_closure_mobile(
     app, auth_user, client, sessions_on, proof_accepted, training_page,
 ):

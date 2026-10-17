@@ -7,7 +7,10 @@ on:
   pull_request:
   push:
     # Qualify R6-03A before opening its PR; deploy.yml accepts main only.
-    branches: [main, r6/03a-bluegreen-deploy-transaction]
+    # Bind D1 integration qualification directly to the branch HEAD.
+    # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
+    # Independent integration review is still required before source merge.
+    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance]
 
 jobs:
   tests:
@@ -371,6 +374,7 @@ jobs:
           tests/test_mobile_pump_check_history_pg.py
           tests/test_plan_mutation_history_pg.py
           tests/test_pa06_privacy_pg.py
+          tests/test_ai_consent_pg.py
           tests/test_training_plan_replacement_pg.py
           tests/test_lp18_b0_pg.py
           tests/test_lp18_b1_pg.py

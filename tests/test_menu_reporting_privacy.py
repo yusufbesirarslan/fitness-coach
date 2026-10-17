@@ -122,6 +122,7 @@ def assert_clean(envelopes, client, *, event_name=None, forbidden=()):
 
 
 @pytest.mark.parametrize('phase', ['fetch', 'parser', 'provider'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_failure_envelope(app, raw_client, make_user, monkeypatch, reporting, phase):
     from app.services import menu_analysis, mobile_auth
     owner = make_user('report-owner', email=SENTINELS['email'], cognito_sub=SENTINELS['sub'])

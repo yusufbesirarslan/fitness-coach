@@ -61,6 +61,8 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/auth/verify/resend"),
         ("post", "/api/v1/auth/password/forgot"),
         ("post", "/api/v1/auth/password/reset"),
+        ("get", "/api/v1/ai-consent"),
+        ("post", "/api/v1/ai-consent"),
         ("get", "/api/v1/account/me"),
         ("get", "/api/v1/account/profile"),
         ("put", "/api/v1/account/profile"),
@@ -147,6 +149,7 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
 
     assert flask_app.config["MOBILE_AUTH_ENABLED"] is True
     assert _mobile_rules(flask_app) == {
+        ("/api/v1/ai-consent", ("GET", "POST")),
         ("/api/v1/subscription/purchase-context", ("GET",)),
         ("/api/v1/subscription/verify", ("POST",)),
         ("/api/v1/subscription/entitlement", ("GET",)),

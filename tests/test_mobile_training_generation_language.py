@@ -63,6 +63,7 @@ def test_user_model_has_no_preferred_language_attribute():
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_language_is_the_persisted_user_language(
         client, mobile_user, as_mobile, candidate_language, provider_calls,
         language):
@@ -77,6 +78,7 @@ def test_generation_language_is_the_persisted_user_language(
     assert provider_calls[0]["system_prompt"] == build_system_prompt(language)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_english_user_gets_the_english_prompt_path(
         client, mobile_user, as_mobile, provider_calls):
     _set_language(mobile_user, "en")
@@ -91,6 +93,7 @@ def test_english_user_gets_the_english_prompt_path(
     assert "İçerik dili: TÜRKÇE" not in call["messages"][0]["content"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_turkish_user_keeps_the_turkish_prompt_path(
         client, mobile_user, as_mobile, provider_calls):
     _set_language(mobile_user, "tr")
@@ -105,6 +108,7 @@ def test_turkish_user_keeps_the_turkish_prompt_path(
     assert "İçerik dili: ENGLISH" not in call["messages"][0]["content"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_transient_preferred_language_attribute_is_ignored(
         client, mobile_user, as_mobile, candidate_language, provider_calls):
     """The pre-fix bug only passed tests that attached this non-model
@@ -120,6 +124,7 @@ def test_a_transient_preferred_language_attribute_is_ignored(
     assert provider_calls[0]["system_prompt"] == build_system_prompt("en")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_missing_legacy_language_keeps_the_turkish_fallback(
         client, mobile_user, as_mobile, candidate_language, provider_calls):
     _set_language(mobile_user, None)
@@ -142,6 +147,7 @@ def _language_independent(plan):
     }
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_language_never_changes_the_canonical_plan(
         client, make_user, mobile_user, as_mobile, provider_calls):
     """Language reaches only the prompt: for the same provider answer an EN

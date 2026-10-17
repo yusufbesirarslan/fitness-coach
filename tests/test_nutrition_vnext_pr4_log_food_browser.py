@@ -309,6 +309,7 @@ def test_build_meal_opens_the_builder_and_reads_it_once(app, auth_user, training
     expect(page.locator('#nutrition-tab-today')).to_have_attribute('aria-selected', 'true')
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_photo_method_is_retained_and_logs_only_on_confirm(
         app, auth_user, training_page, stub_meal_macro_provider):
     page, traffic, _ = start(app, auth_user, training_page)
@@ -658,6 +659,7 @@ def test_one_confirmed_log_is_exactly_one_write(app, auth_user, training_page, p
     assert meal_logs(app, auth_user.id) == before + 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_second_activation_during_the_write_sends_nothing(app, auth_user, training_page,
                                                             stub_meal_macro_provider):
     """The overlay blocks a second click, not a second Enter on the focused

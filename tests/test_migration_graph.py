@@ -38,7 +38,7 @@ def test_alembic_migrations_have_single_head():
 
     # LP-11's deleted-identity tombstone follows Check-in's submission key.
     # MON-02-BE-03A stacks its ledger on the #436 Apple foundation.
-    # BE-03B-01B binds native Training generation to that ledger.
+    # D1 consent follows dispatch recovery; BE-03B-01B follows D1.
     assert heads == ["b1e4f5a6c7d8"]
 
 
@@ -70,8 +70,8 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # MON-02-BE-01 adds isolated Apple tables, no exercise catalog schema.
     # MON-02-BE-03A adds the AI allowance ledger, no exercise catalog schema.
     # BE-03B-01A adds a nullable dispatch marker, no catalog schema.
-    # BE-03B-01B adds the Training allowance binding, no catalog schema.
-    assert len(revision_files) == 52
+    # D1 adds consent authority; BE-03B-01B adds its separate allowance binding.
+    assert len(revision_files) == 53
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 

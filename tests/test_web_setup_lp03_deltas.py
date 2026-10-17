@@ -154,6 +154,7 @@ def test_c_complete_flag_without_session_is_incomplete_everywhere(
     assert client.get("/setup").status_code == 200     # no redirect loop
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_c_session_without_flag_is_incomplete_everywhere(
         client, raw_client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, goal="kilo verme",

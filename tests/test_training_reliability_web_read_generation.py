@@ -279,6 +279,7 @@ def _rest_day_with_exercises(program):
     return broken
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_basic_supported_preferences_generate_a_valid_plan(
         client, with_session, monkeypatch):  # noqa: F811
     monkeypatch.setattr(
@@ -297,6 +298,7 @@ def test_basic_supported_preferences_generate_a_valid_plan(
             assert exercise["exercise_id"]  # resolved through catalog authority
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_does_not_touch_the_existing_plan(
         client, with_session, monkeypatch):  # noqa: F811
     plan = _persist(with_session.id, {"program": _seven_day_program()})
@@ -311,6 +313,7 @@ def test_generation_does_not_touch_the_existing_plan(
     assert _reread(plan_id) == before
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_prompt_states_the_rest_day_rule_it_is_judged_by(
         client, with_session, monkeypatch):  # noqa: F811
     """The provider was being asked for 'aktif toparlanma' days and then
@@ -333,6 +336,7 @@ def test_prompt_states_the_rest_day_rule_it_is_judged_by(
 # CASE D — the exact provider defect is recovered, or fails closed
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_rest_day_exercise_defect_is_repaired_within_budget(
         client, with_session, monkeypatch):  # noqa: F811
     """First completion reproduces production; the bounded repair recovers."""
@@ -359,6 +363,7 @@ def test_rest_day_exercise_defect_is_repaired_within_budget(
     assert body["exercise_context_token"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_repair_prompt_never_invents_user_preferences(
         client, with_session, monkeypatch):  # noqa: F811
     broken = dict(PLAN_JSON, program=_rest_day_with_exercises(PLAN_JSON["program"]))
@@ -378,6 +383,7 @@ def test_repair_prompt_never_invents_user_preferences(
     assert calls[1].startswith(calls[0])
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unrecoverable_schema_defect_fails_closed_and_keeps_the_plan(
         client, with_session, monkeypatch):  # noqa: F811
     plan = _persist(with_session.id, {"program": _seven_day_program()})
@@ -401,6 +407,7 @@ def test_unrecoverable_schema_defect_fails_closed_and_keeps_the_plan(
     assert _reread(plan_id) == before
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_semantic_violation_is_still_terminal(
         client, with_session, monkeypatch):  # noqa: F811
     """Repair covers provider FORMATTING only. A candidate that contradicts the

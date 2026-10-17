@@ -39,16 +39,19 @@ def _clean_macro_cache():
 # /api/proxy/scan-menu
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scan_requires_url(client, auth_user):
     assert client.post("/api/proxy/scan-menu", json={}).status_code == 400
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scan_blocks_internal_url(client, auth_user):
     response = client.post("/api/proxy/scan-menu", json={"url": "http://127.0.0.1/admin"})
     assert response.status_code == 400
     assert response.get_json()["error"] == "MENU_DESTINATION_BLOCKED"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scan_scrapes_sections_and_headings(client, auth_user, monkeypatch):
     monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
@@ -63,6 +66,7 @@ def test_scan_scrapes_sections_and_headings(client, auth_user, monkeypatch):
     assert body["menu_source"] == "web_scraper"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scan_error_mapping(client, auth_user, monkeypatch):
     monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
@@ -92,6 +96,7 @@ def test_scan_error_mapping(client, auth_user, monkeypatch):
                        json={"url": "https://x.example"}).status_code == 415
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scan_unreadable_page_returns_422(client, auth_user, monkeypatch):
     monkeypatch.setattr(menu_analysis, "_validate_menu_url",
                         lambda url: (requests.utils.urlparse(url), url, None))
@@ -102,6 +107,7 @@ def test_scan_unreadable_page_returns_422(client, auth_user, monkeypatch):
     assert response.status_code == 422
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scan_routes_drive_urls(client, auth_user, monkeypatch):
     result = {"title": "Drive Menü", "body_text": "Kebap", "menu_source": "google_drive"}
     monkeypatch.setattr(menu_analysis, "_process_google_drive_url", lambda url: (result, None))
@@ -147,6 +153,7 @@ def _mock_pipeline(monkeypatch, categorized, per_serving=None, llm=None):
                         lambda items, category_map=None: llm or {})
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_requires_text_and_profile(client, auth_user):
     assert client.post("/api/menu/analyze", json={"menu_text": "kısa"}).status_code == 400
     response = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT})
@@ -154,6 +161,7 @@ def test_analyze_requires_text_and_profile(client, auth_user):
     assert "Profil" in response.get_json()["error"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_scores_items_and_computes_budget(client, profile_session, monkeypatch):
     # Bugün 500 kcal yenmiş — kalan bütçeye yansımalı.
     from app.timeutil import day_key
@@ -175,6 +183,7 @@ def test_analyze_scores_items_and_computes_budget(client, profile_session, monke
     assert body["coach_picks"][0]["name"] == "Izgara Tavuk"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_discards_thermodynamically_impossible_items(client, profile_session, monkeypatch):
     _mock_pipeline(monkeypatch, {"Ana Yemekler": ["Normal Yemek", "İmkansız Yemek"]},
                    per_serving={
@@ -188,6 +197,7 @@ def test_analyze_discards_thermodynamically_impossible_items(client, profile_ses
     assert "İmkansız Yemek" not in names  # yanıttan tamamen elendi
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_zero_macro_items_kept_with_zero_score(client, profile_session, monkeypatch):
     _mock_pipeline(monkeypatch, {"Tatlılar": ["Gizemli Tatlı"]})  # hiçbir kaynak bulamadı
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
@@ -197,6 +207,7 @@ def test_analyze_zero_macro_items_kept_with_zero_score(client, profile_session, 
     assert body["coach_picks"] == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_extraction_failure_returns_parsing_error(client, profile_session, monkeypatch):
     calls = []
 
@@ -219,6 +230,7 @@ def test_analyze_extraction_failure_returns_parsing_error(client, profile_sessio
     assert len(calls) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_retries_without_framework_state(client, profile_session, monkeypatch):
     """fw_state İLE yapılan ilk çıkarım boş dönerse, fw_state'siz İKİNCİ deneme
     yapılır (fw_state bazen çıkarımı zehirler); o da çalışırsa sonuç kullanılır."""
@@ -245,6 +257,7 @@ def test_analyze_retries_without_framework_state(client, profile_session, monkey
     assert calls == ['{"page": 1}', None]  # 1. deneme fw_state ile, 2. deneme fw_state'siz
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_serves_cached_items_without_fatsecret(client, profile_session, monkeypatch):
     # Menü hattı PORSİYON-bazlı namespace'ten okur (per-100g koç önbelleğiyle karışmaz).
     foodcache._macro_cache.setdefault("per_serving", {})["Izgara Tavuk"] = CHICKEN
@@ -260,6 +273,7 @@ def test_analyze_serves_cached_items_without_fatsecret(client, profile_session, 
     assert body["items"][0]["macros"]["calories"] == 330
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_llm_fallback_for_missing_items(client, profile_session, monkeypatch):
     _mock_pipeline(monkeypatch, {"Ana Yemekler": ["Bilinmeyen Yemek"]},
                    per_serving={}, llm={"Bilinmeyen Yemek": CHICKEN})
@@ -276,6 +290,7 @@ FAJITA_LOW = {"calories": 125.0, "protein": 18.0, "carbs": 9.0, "fat": 2.0}     
 FAJITA_FIXED = {"calories": 430.0, "protein": 32.0, "carbs": 28.0, "fat": 18.0}  # gerçekçi
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_reestimates_low_density_stated_gram_item(client, profile_session, monkeypatch):
     # 220g fajita FatSecret'tan 125 kcal geldi (imkânsız düşük); gramaj ipucuyla
     # yeniden tahmin gerçekçi değere yükseltmeli.
@@ -298,6 +313,7 @@ def test_analyze_reestimates_low_density_stated_gram_item(client, profile_sessio
     assert seen["grams_hint"] == {FAJITA: 220.0}     # gramaj otorite ipucu olarak geçti
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_keeps_original_when_reestimate_not_better(client, profile_session, monkeypatch):
     # Yeniden tahmin hâlâ imkânsız-düşükse özgün değer korunur (asla kötüleştirme).
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
@@ -313,6 +329,7 @@ def test_analyze_keeps_original_when_reestimate_not_better(client, profile_sessi
     assert item["macros"]["calories"] == 125        # özgün değer korundu
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_does_not_reestimate_dense_stated_gram_item(client, profile_session, monkeypatch):
     # Gerçekçi yoğunluktaki gramajlı öğe (160g burger, 736 kcal) yeniden tahmin EDİLMEZ.
     burger = "BBQ & Cheddar Burger (160 GR)"
@@ -331,6 +348,7 @@ def test_analyze_does_not_reestimate_dense_stated_gram_item(client, profile_sess
 
 
 @pytest.mark.parametrize("mode", ["empty", "exception", "zero", "impossible", "low", "clamp", "band-low", "scale", "reestimate"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_response_content_logs_are_counts_only(client, profile_session, monkeypatch, caplog, mode):
     import logging
 
@@ -377,6 +395,7 @@ def test_analyze_response_content_logs_are_counts_only(client, profile_session, 
 
 
 @pytest.mark.parametrize("mode", ["extract", "extract-nojson", "extract-badjson", "extract-error", "macro-nojson", "macro-badjson", "macro-error", "weights", "weights-error", "fatsecret-error"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_real_menu_analysis_helpers_do_not_log_response_content(client, profile_session, monkeypatch, caplog, mode):
     import json
     import logging

@@ -125,6 +125,7 @@ def dependencies(monkeypatch):
     return calls
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_create_requires_bearer_json_and_idempotency(
         client, auth_headers, pair, dependencies):
     assert client.post(PATH, json=_command()).status_code == 401
@@ -149,6 +150,7 @@ def test_create_requires_bearer_json_and_idempotency(
     {"baseline_pump_check_id": BASELINE_TOKEN, "current_pump_check_id": 7},
     {"baseline_pump_check_id": "short", "current_pump_check_id": CURRENT_TOKEN},
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_create_rejects_malformed_commands(
         client, auth_headers, pair, dependencies, body):
     response = client.post(PATH, json=body, headers=auth_headers)
@@ -159,6 +161,7 @@ def test_create_rejects_malformed_commands(
     assert dependencies == {"s3": 0, "bedrock": 0}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_create_and_get_share_private_shape(
         client, auth_headers, pair, dependencies):
     created = client.post(PATH, json=_command(), headers=auth_headers)
@@ -184,6 +187,7 @@ def test_create_and_get_share_private_shape(
     assert dependencies["bedrock"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_replay_returns_two_hundred_without_new_analysis(
         client, auth_headers, pair, dependencies):
     first = client.post(PATH, json=_command(), headers=auth_headers)
@@ -196,6 +200,7 @@ def test_replay_returns_two_hundred_without_new_analysis(
     assert dependencies["bedrock"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_converged_second_key_returns_two_hundred(
         client, auth_headers, pair, dependencies):
     client.post(PATH, json=_command(), headers=auth_headers)
@@ -208,6 +213,7 @@ def test_converged_second_key_returns_two_hundred(
     assert dependencies["bedrock"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_reused_key_with_a_different_command_conflicts(
         client, auth_headers, pair, dependencies):
     client.post(PATH, json=_command(), headers=auth_headers)
@@ -220,6 +226,7 @@ def test_reused_key_with_a_different_command_conflicts(
     assert response.get_json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unknown_and_cross_owner_sources_are_the_same_private_404(
         client, auth_headers, stranger, dependencies):
     _make_check(stranger, BASELINE_TOKEN, datetime(2026, 8, 1, 9, 0, 0))
@@ -238,6 +245,7 @@ def test_unknown_and_cross_owner_sources_are_the_same_private_404(
     assert dependencies == {"s3": 0, "bedrock": 0}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_deterministic_incompatibility_is_unretryable_422(
         client, auth_headers, pair, dependencies):
     baseline, _current = pair
@@ -253,6 +261,7 @@ def test_deterministic_incompatibility_is_unretryable_422(
     assert dependencies == {"s3": 0, "bedrock": 0}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unusable_media_is_unretryable_422(
         monkeypatch, client, auth_headers, pair, dependencies):
     from app.services.vision_images import ImagePreparationError
@@ -274,6 +283,7 @@ def test_unusable_media_is_unretryable_422(
     lambda: (_ for _ in ()).throw(
         InvalidComparisonAnalysis("comparison response is invalid")),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_transient_failures_are_retryable_503(
         monkeypatch, client, auth_headers, pair, dependencies, failure):
     monkeypatch.setattr(
@@ -287,6 +297,7 @@ def test_transient_failures_are_retryable_503(
     assert body["retryable"] is True
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unexpired_lease_returns_the_analyzing_representation(
         client, auth_headers, pair, dependencies):
     baseline, current = pair
@@ -313,6 +324,7 @@ def test_unexpired_lease_returns_the_analyzing_representation(
     assert dependencies == {"s3": 0, "bedrock": 0}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_saturated_gate_is_a_retryable_503_with_retry_after(
         monkeypatch, client, auth_headers, pair, dependencies):
     monkeypatch.setattr(ai_gate._ai_slots, "acquire", lambda timeout=0: False)
@@ -326,6 +338,7 @@ def test_saturated_gate_is_a_retryable_503_with_retry_after(
     assert dependencies == {"s3": 0, "bedrock": 0}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_get_is_read_only(
         monkeypatch, client, auth_headers, pair, dependencies):
     created = client.post(PATH, json=_command(), headers=auth_headers)
@@ -343,6 +356,7 @@ def test_get_is_read_only(
     assert dependencies["bedrock"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unknown_malformed_and_cross_owner_comparisons_share_one_404(
         client, auth_headers, monkeypatch, mobile_user, stranger, pair,
         dependencies):

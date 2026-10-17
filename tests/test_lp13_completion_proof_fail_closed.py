@@ -215,6 +215,7 @@ VALIDATOR_UNAVAILABLE = {
     (WEBP, "image/webp"),
     (GIF, "image/gif"),
 ], ids=["jpeg", "png", "webp", "gif"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_receives_the_media_type_the_bytes_actually_are(
     app, bedrock, raw, expected
 ):
@@ -226,6 +227,7 @@ def test_bedrock_receives_the_media_type_the_bytes_actually_are(
     assert bedrock.sent[0].data == raw
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_exact_physical_failure_png_is_sent_as_png_not_jpeg(app, bedrock):
     """The device proof was a sub-1.5 MB PNG. Before the fix it was labelled
     ``image/jpeg`` purely because of its size."""
@@ -237,6 +239,7 @@ def test_the_exact_physical_failure_png_is_sent_as_png_not_jpeg(app, bedrock):
     assert "image/jpeg" not in bedrock.media_types
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_oversized_proof_is_reencoded_and_labelled_as_what_it_became(
     app, bedrock
 ):
@@ -258,6 +261,7 @@ def test_unusable_bytes_are_rejected_without_a_provider_call(app, bedrock, raw):
     assert bedrock.sent == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_explicit_model_rejection_is_a_rejection(app, bedrock):
     bedrock.script.append(verdict(False))
 
@@ -303,6 +307,7 @@ def test_a_spend_ceiling_refusal_is_unverified(app, bedrock, monkeypatch):
     assert (result["valid"], result["fallback"]) == (False, True)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_fallback_never_accompanies_valid(app, bedrock):
     """The invariant the completion boundary relies on, across every outcome."""
     outcomes = []
@@ -360,6 +365,7 @@ def test_the_default_test_environment_cannot_verify_a_proof(app):
     assert (result["valid"], result["fallback"]) == (False, True)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_validation_logs_are_bounded(app, bedrock, caplog):
     bedrock.script.append(bedrock_400())
     with caplog.at_level(logging.INFO):
@@ -457,6 +463,7 @@ def _started(client, headers, workout_ref, key="proof-checkpoint-01"):
     (PNG, "image/png", "image/png"),
     (WEBP, "image/webp", "image/webp"),
 ], ids=["jpeg", "png", "webp"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_verified_proof_completes_exactly_once(
     client, owner, as_mobile, workout_ref, bedrock, armed_store,
     raw, declared, expected
@@ -478,6 +485,7 @@ def test_a_verified_proof_completes_exactly_once(
     assert (check.valid, check.fallback) == (True, False)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_physical_device_png_now_reaches_the_model_as_png(
     client, owner, as_mobile, workout_ref, bedrock, armed_store
 ):
@@ -504,6 +512,7 @@ def test_the_physical_device_png_now_reaches_the_model_as_png(
     assert _side_effects(owner) == NOTHING
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_declaration_that_contradicts_the_bytes_is_refused_before_any_work(
     client, owner, as_mobile, workout_ref, bedrock, armed_store
 ):
@@ -527,6 +536,7 @@ def test_a_declaration_that_contradicts_the_bytes_is_refused_before_any_work(
 
 @pytest.mark.parametrize("raw", [TRUNCATED_PNG, NOT_AN_IMAGE],
                          ids=["truncated_png", "not_an_image"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_unusable_upload_never_completes(
     client, owner, as_mobile, workout_ref, bedrock, armed_store, raw
 ):
@@ -543,6 +553,7 @@ def test_an_unusable_upload_never_completes(
     assert _side_effects(owner) == NOTHING
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_explicit_model_rejection_keeps_the_pr3_contract(
     client, owner, as_mobile, workout_ref, bedrock, armed_store
 ):
@@ -563,6 +574,7 @@ def test_an_explicit_model_rejection_keeps_the_pr3_contract(
 
 
 @pytest.mark.parametrize("step", sorted(UNVERIFIED_STEPS))
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_unverified_proof_never_completes_and_is_retryable(
     client, owner, as_mobile, workout_ref, bedrock, armed_store, monkeypatch, step
 ):
@@ -609,6 +621,7 @@ def test_an_unverified_proof_never_completes_and_is_retryable(
     assert _side_effects(owner) == NOTHING
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_retry_after_a_transient_failure_completes_exactly_once(
     client, owner, as_mobile, workout_ref, bedrock, armed_store
 ):
@@ -643,6 +656,7 @@ def test_a_retry_after_a_transient_failure_completes_exactly_once(
     assert PumpCheck.query.filter_by(user_id=owner.id).one().fallback is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_unverified_completion_emits_one_bounded_diagnostic_line(
     client, owner, as_mobile, workout_ref, bedrock, armed_store, caplog
 ):
@@ -671,6 +685,7 @@ def test_an_unverified_completion_emits_one_bounded_diagnostic_line(
 
 
 @pytest.mark.parametrize("state", sorted(VALIDATOR_UNAVAILABLE))
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_unavailable_validator_never_completes_on_mobile(
     client, owner, as_mobile, workout_ref, bedrock, armed_store, monkeypatch, state
 ):
@@ -711,6 +726,7 @@ def test_an_unavailable_validator_never_completes_on_mobile(
     assert _side_effects(owner) == NOTHING
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_an_unfaked_validator_in_the_default_environment_never_completes(
     client, owner, as_mobile, workout_ref, armed_store
 ):
@@ -728,6 +744,7 @@ def test_an_unfaked_validator_in_the_default_environment_never_completes(
     assert _side_effects(owner) == NOTHING
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_the_route_refuses_a_fallback_even_if_it_claims_valid(
     client, owner, as_mobile, workout_ref, armed_store, monkeypatch
 ):
@@ -791,6 +808,7 @@ def _browser_effects(user_id):
     )
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_bytes_outrank_the_declared_data_url_type(
     client, browser_plan, bedrock, browser_store
 ):
@@ -807,6 +825,7 @@ def test_browser_bytes_outrank_the_declared_data_url_type(
 
 @pytest.mark.parametrize("step", ["bedrock_400", "bedrock_500", "timeout",
                                   "prose_answer"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_unverified_proof_never_completes(
     client, browser_plan, bedrock, browser_store, step
 ):
@@ -826,6 +845,7 @@ def test_browser_unverified_proof_never_completes(
 
 
 @pytest.mark.parametrize("state", sorted(VALIDATOR_UNAVAILABLE))
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_unavailable_validator_never_completes(
     client, browser_plan, bedrock, browser_store, monkeypatch, state
 ):
@@ -843,6 +863,7 @@ def test_browser_unavailable_validator_never_completes(
     assert already_completed_today(browser_plan.id, app_today()) is False
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_explicit_rejection_is_still_a_422(
     client, browser_plan, bedrock, browser_store
 ):

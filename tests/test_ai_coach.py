@@ -420,6 +420,7 @@ def _install_advancing_model_slot(monkeypatch, clock, advance_seconds):
     return deadlines
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_fallback_does_not_reset_exhausted_turn_deadline(
         auth_user, monkeypatch):
     bedrock_calls = []
@@ -453,6 +454,7 @@ def test_bedrock_fallback_does_not_reset_exhausted_turn_deadline(
     assert bedrock_calls[0]["timeout"] == pytest.approx(10.0)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_openai_call_timeout_uses_remaining_turn_budget(auth_user, monkeypatch):
     openai = _ScriptedLLM([_llm_msg("answer")])
     clock = _ControlledClock(0.0, 82.5)
@@ -471,6 +473,7 @@ def test_openai_call_timeout_uses_remaining_turn_budget(auth_user, monkeypatch):
     assert openai.calls[0]["timeout"] == pytest.approx(7.5)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_openai_timeout_is_recomputed_after_model_gate_wait(
         auth_user, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -490,6 +493,7 @@ def test_openai_timeout_is_recomputed_after_model_gate_wait(
     assert deadlines == [40.0]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_openai_gate_wait_past_deadline_skips_provider(
         auth_user, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -509,6 +513,7 @@ def test_openai_gate_wait_past_deadline_skips_provider(
     assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_openai_tool_rounds_share_one_decreasing_deadline(
         auth_user, monkeypatch):
     clock = SimpleNamespace(now=0.0)
@@ -561,6 +566,7 @@ def test_openai_exhausted_deadline_skips_provider_call(auth_user, monkeypatch):
     assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_conversation_plain_answer(auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("Protein hedefin 150g.")])
     monkeypatch.setattr(ai_coach, "openai_client", llm)
@@ -573,6 +579,7 @@ def test_conversation_plain_answer(auth_user, monkeypatch):
     assert sent[-1] == {"role": "user", "content": "protein hedefim?"}
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_conversation_tool_call_roundtrip(auth_user, monkeypatch):
     monkeypatch.setattr(ai_coach, "_coach_search_food",
                         lambda q: [{"name": "Muz", "food_id": "9",
@@ -595,6 +602,7 @@ def test_conversation_tool_call_roundtrip(auth_user, monkeypatch):
     assert json.loads(tool_msg["content"])["status"] == "staged"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_conversation_tool_loop_capped(auth_user, monkeypatch):
     endless = _llm_msg(tool_calls=[_tool_call("cancel_pending_log")])
     llm = _ScriptedLLM([endless] * 5)
@@ -604,6 +612,7 @@ def test_conversation_tool_loop_capped(auth_user, monkeypatch):
     assert len(llm.calls) == 5
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_post_tool_fallback_is_localized(auth_user, monkeypatch):
     # C3: Bedrock döngüsü araç sonrası hatada/boş yanıtta hard-coded Türkçe
     # metin döndürüyordu — EN kullanıcı Türkçe hata görüyordu. Dile göre yedek dönmeli.
@@ -627,6 +636,7 @@ def test_bedrock_post_tool_fallback_is_localized(auth_user, monkeypatch):
     assert "İşlemi" not in answer
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_tool_loop_stops_when_turn_budget_expires(
         auth_user, monkeypatch):
     tool_block = SimpleNamespace(
@@ -661,9 +671,11 @@ def test_bedrock_tool_loop_stops_when_turn_budget_expires(
 
     assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
     assert len(calls) == 1
-    assert calls[0]["timeout"] == pytest.approx(60.0)
+    # D1 bounds each physical attempt to 30s while holding the withdrawal fence.
+    assert calls[0]["timeout"] == pytest.approx(30.0)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_timeout_is_recomputed_after_model_gate_wait(
         auth_user, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -695,6 +707,7 @@ def test_bedrock_timeout_is_recomputed_after_model_gate_wait(
     assert deadlines == [40.0]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_gate_wait_past_deadline_skips_provider(
         auth_user, monkeypatch):
     clock = SimpleNamespace(now=5.0)
@@ -725,6 +738,7 @@ def test_bedrock_gate_wait_past_deadline_skips_provider(
     assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_timeout_at_turn_deadline_does_not_start_fallback(
         auth_user, monkeypatch):
     class _Msgs:
@@ -749,6 +763,7 @@ def test_bedrock_timeout_at_turn_deadline_does_not_start_fallback(
     assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_fallback_text_not_persisted_to_session_history(app, auth_user, monkeypatch):
     # C3: sağlayıcı yedek metni (boş olmayan) cookie-geçmişine yazılıp sonraki
     # turda bağlam olarak modele geri besleniyordu — hata-yedeği gibi bastırılmalı.
@@ -784,6 +799,7 @@ def test_provider_fallback_history_is_unchanged(app, auth_user, monkeypatch):
         assert answer == fallback
         assert session["coach_history"] == original
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_conversation_drops_trailing_user_turns_from_history(auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("tamam")])
     monkeypatch.setattr(ai_coach, "openai_client", llm)
@@ -795,6 +811,7 @@ def test_conversation_drops_trailing_user_turns_from_history(auth_user, monkeypa
     assert len(user_turns) == 1                            # çift ekleme yok
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_conversation_session_fallback_persists_history(app, auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("cevap")])
     monkeypatch.setattr(ai_coach, "openai_client", llm)
@@ -854,6 +871,7 @@ def test_coach_reply_fallback_on_llm_failure(app, monkeypatch):
     assert "tekrar dene" in reply
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_checkin_feedback_progress_framing(app, monkeypatch):
     captured = []
     monkeypatch.setattr(ai_coach, "_heavy_chat",
@@ -864,6 +882,7 @@ def test_checkin_feedback_progress_framing(app, monkeypatch):
     assert "2 kg verdi — kilo verme hedefinde başarılı" in captured[0]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_checkin_feedback_fallback(app, monkeypatch):
     def boom(**kw):
         raise RuntimeError("down")
@@ -879,6 +898,7 @@ def test_checkin_feedback_fallback(app, monkeypatch):
     ("kilo verme", 82, 80, "kilo verme hedefinde istenmeyen"),
     ("kilo verme", 80, 80, "kilo değişmedi — plato olabilir"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_checkin_feedback_all_progress_framings(app, monkeypatch, goal, weight, prev, expect):
     captured = []
     monkeypatch.setattr(ai_coach, "_heavy_chat",

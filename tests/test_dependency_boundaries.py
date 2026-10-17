@@ -679,7 +679,7 @@ def test_mobile_auth_dependency_direction_is_one_way():
     # (mobile_api still imports no models), so it joins the set deliberately.
     assert _service_modules(api) == {
         "app.services.account_profile", "app.services.mobile_auth",
-        "app.services.mobile_credentials"}
+        "app.services.mobile_credentials", "app.services.ai_consent"}
     assert _service_modules(middleware) == {
         "app.services.auth_contract", "app.services.mobile_auth"}
 

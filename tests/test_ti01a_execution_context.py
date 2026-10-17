@@ -254,6 +254,7 @@ def test_binary_rollback_binding_fails_closed(client, auth_user, p0, as_mobile):
     assert project_context(row)['sets'] == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_v2_context_terminalized_at_max(client, auth_user, p0, as_mobile, proof_accepted):
     ref = seed(client, auth_user.id, MAX_REVISION - 1)
     assert write(client, auth_user, as_mobile, ref, MAX_REVISION - 1).status_code == 200
@@ -355,6 +356,7 @@ def test_v2_order_and_all_null_semantic_identity():
     assert parse_v2(ordered, (SQUAT,)).fingerprint == parse_v2(reversed_body, (SQUAT,)).fingerprint
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_native_v2_completion_keeps_combined_state(client, auth_user, p0, as_mobile, completion_proof):
     import io
     ref = seed(client, auth_user.id)

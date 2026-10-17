@@ -7,6 +7,8 @@ NOT NULL FK'yi NULL'lamaya çalışıp patlardı.
 
     python -m pytest tests/test_cascade_delete.py -v
 """
+
+import pytest
 from app.extensions import db
 from app.models import (DailyActivity, MealLog, PumpCheck,
                         PumpCheckComparison, PumpCheckComparisonRequest,
@@ -268,3 +270,24 @@ def test_purge_user_removes_feed_v2_rows_both_directions(app, make_user):
     assert FeedItemComment.query.filter_by(user_id=uid).count() == 0
     assert FeedHide.query.filter_by(user_id=uid).count() == 0
     assert FeedReport.query.filter_by(user_id=uid).count() == 0
+
+
+def test_purge_removes_only_the_deleted_accounts_consent_evidence(app, make_user):
+    from datetime import datetime
+    from app.cli import _purge_user
+    from app.models import AIConsentState, AIConsentEvent
+    owner, other = make_user('consent-erased'), make_user('consent-retained')
+    other_id = other.id
+    for user in (owner, other):
+        db.session.add(AIConsentState(owner_id=user.id, generation=1, grants={}, changed_at=datetime.utcnow()))
+        db.session.add(AIConsentEvent(
+            owner_id=user.id, generation=1, request_id='synthetic-revoke',
+            request_digest='a' * 64, purpose='training.plan', version='synthetic',
+            action='revoke', locale='en', text_digest='a' * 64,
+            contract_digest='b' * 64, occurred_at=datetime.utcnow()))
+    db.session.commit()
+    _purge_user(owner)
+    db.session.commit()
+    assert [row.owner_id for row in AIConsentState.query.all()] == [other_id]
+    assert [row.owner_id for row in AIConsentEvent.query.all()] == [other_id]
+    assert db.session.get(User, other_id) is not None

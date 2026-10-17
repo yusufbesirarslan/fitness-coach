@@ -191,6 +191,7 @@ def test_browser_session_does_not_authorize_the_native_route(
     {"headings": ["x"]}, {"macros": {"calories": 1}}, {"items": []},
     {"menu_source": "google_drive"},
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_any_field_beyond_url_is_refused_before_network(
         mobile, bearer, alice, wire, provider, extra):
     response = analyze(mobile, bearer(alice), {"url": MENU_URL, **extra})
@@ -203,6 +204,7 @@ def test_any_field_beyond_url_is_refused_before_network(
 
 @pytest.mark.parametrize("body", [None, [], "https://public.example/menu", {},
                                   {"url": None}, {"url": 7}, {"url": ["x"]}])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_malformed_bodies_are_refused(mobile, bearer, alice, wire, provider, body):
     response = mobile.post(PATH, headers=bearer(alice),
                            data=json.dumps(body), content_type="application/json")
@@ -211,6 +213,7 @@ def test_malformed_bodies_are_refused(mobile, bearer, alice, wire, provider, bod
     assert wire.seen == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_owner_comes_only_from_the_bearer_credential(
         mobile, bearer, alice, bob, wire, provider):
     a = analyze(mobile, bearer(alice), query_string={"user_id": bob.id}).get_json()
@@ -238,6 +241,7 @@ def test_owner_comes_only_from_the_bearer_credential(
     "http://public.example/menu", "HTTP://public.example/menu",
     "http://user:pw@public.example/menu",
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_plain_http_is_refused_before_the_shared_fetcher(
         mobile, bearer, alice, wire, provider, monkeypatch, url):
     monkeypatch.setattr(mr, "run_worker", lambda *a, **k: pytest.fail("fetch reached"))
@@ -261,6 +265,7 @@ def test_plain_http_is_refused_before_the_shared_fetcher(
     "https://[fe80::1%25eth0]/", "", "   ",
     "https://public.example/" + "a" * 2100,
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_userinfo_and_malformed_urls_are_refused(
         mobile, bearer, alice, wire, provider, monkeypatch, url):
     monkeypatch.setattr(mr, "run_worker", lambda *a, **k: pytest.fail("fetch reached"))
@@ -271,6 +276,7 @@ def test_userinfo_and_malformed_urls_are_refused(
 
 
 # == 4. HTTPS public URL admitted through the real boundary =====================
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_public_https_menu_is_analyzed_through_the_canonical_boundary(
         mobile, bearer, alice, wire, provider):
     before = _nutrition_rows()
@@ -298,6 +304,7 @@ def test_public_https_menu_is_analyzed_through_the_canonical_boundary(
     assert _nutrition_rows() == before
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_dto_shape_is_bounded_and_unknown_nutrition_stays_null(
         mobile, bearer, alice, wire, provider):
     body = analyze(mobile, bearer(alice)).get_json()
@@ -349,6 +356,7 @@ def test_dto_shape_is_bounded_and_unknown_nutrition_stays_null(
     assert items["Gizemli Tabak"]["candidate_id"] not in menu["coach_pick_ids"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_dish_and_category_names_are_bounded_not_rewritten(
         mobile, bearer, alice, wire, provider):
     long_name = "Çıtır Tavuk " + "ş" * 400
@@ -368,6 +376,7 @@ def test_dish_and_category_names_are_bounded_not_rewritten(
     ["::1"], ["fd00::1"], ["fe80::1"], ["::ffff:127.0.0.1"], ["64:ff9b::a00:1"],
     [PUBLIC, "10.0.0.1"],
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_private_and_special_dns_answers_are_blocked(
         mobile, bearer, alice, wire, provider, addresses):
     wire.host("internal.example", *addresses)
@@ -383,6 +392,7 @@ def test_private_and_special_dns_answers_are_blocked(
     "https://127.0.0.1/menu", "https://169.254.169.254/latest/meta-data/",
     "https://[::1]/menu", "https://localhost/menu", "https://10.1.2.3/",
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_literal_private_destinations_blocked_by_the_real_worker(
         mobile, bearer, alice, provider, url):
     # No wire, nothing patched in menu_remote: the real credential-free
@@ -394,6 +404,7 @@ def test_literal_private_destinations_blocked_by_the_real_worker(
 
 
 # == 6/7. Redirect admission =====================================================
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_redirect_to_private_destination_is_blocked(
         mobile, bearer, alice, wire, provider):
     wire.host("internal.example", "10.0.0.7")
@@ -409,6 +420,7 @@ def test_redirect_to_private_destination_is_blocked(
     "http://public.example/menu", "http://other.example/menu",
     "HTTP://public.example:80/x",
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_https_to_http_redirect_is_refused(
         mobile, bearer, alice, wire, provider, location):
     wire.host("other.example", PUBLIC)
@@ -421,6 +433,7 @@ def test_https_to_http_redirect_is_refused(
     assert wire.urls() == [MENU_URL]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_redirect_to_userinfo_target_is_refused_before_next_hop(
         mobile, bearer, alice, wire, provider):
     wire.redirect(MENU_URL, "https://user:pw@public.example/next")
@@ -430,6 +443,7 @@ def test_redirect_to_userinfo_target_is_refused_before_next_hop(
     assert wire.urls() == [MENU_URL]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_https_redirect_chain_is_followed_and_capped(
         mobile, bearer, alice, wire, provider):
     wire.redirect(MENU_URL, "https://public.example/menu2")
@@ -451,6 +465,7 @@ def _http_sub_link_page(wire):
     wire.route("http://public.example/menu/tatlilar", SUB_HTML)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_http_sub_pages_are_never_followed_by_native_intake(
         mobile, bearer, alice, wire, provider):
     _http_sub_link_page(wire)
@@ -458,6 +473,7 @@ def test_http_sub_pages_are_never_followed_by_native_intake(
     assert wire.urls() == [MENU_URL]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_web_scan_keeps_following_http_sub_pages(client, auth_user, wire, provider):
     # The web contract (HTTP compatibility, LP15-B1) is unchanged.
     _http_sub_link_page(wire)
@@ -475,6 +491,7 @@ def test_web_scan_keeps_following_http_sub_pages(client, auth_user, wire, provid
     ({"Content-Type": "application/json"}, b"{}"),
     ({"Content-Type": "text/html", "Content-Encoding": "gzip"}, b"\x1f\x8b"),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unsupported_media_fails_closed_without_parsers(
         mobile, bearer, alice, wire, provider, monkeypatch, headers, body):
     monkeypatch.setattr(menu_ocr, "_extract_text_from_pdf", lambda *a: pytest.fail("PDF parser"))
@@ -487,6 +504,7 @@ def test_unsupported_media_fails_closed_without_parsers(
     assert provider.prompts == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_drive_document_uses_the_same_boundary_and_pdf_stays_disabled(
         mobile, bearer, alice, routed_wire, provider):
     routed_wire.host("docs.google.com", PUBLIC)
@@ -513,6 +531,7 @@ def test_drive_document_uses_the_same_boundary_and_pdf_stays_disabled(
     ("<div>" * 80 + "Kebap" + "</div>" * 80, {}),
     ("<p>" + "<b>x</b>" * 7000 + "</p>", {}),
 ])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_oversized_or_parser_bound_input_fails_closed(
         mobile, bearer, alice, wire, provider, body, headers):
     wire.route(MENU_URL, body, headers=headers)
@@ -523,6 +542,7 @@ def test_oversized_or_parser_bound_input_fails_closed(
     assert provider.prompts == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unreadable_page_is_a_typed_parse_failure(
         mobile, bearer, alice, wire, provider):
     wire.route(MENU_URL, "<html><body><p>hi</p></body></html>")
@@ -532,6 +552,7 @@ def test_unreadable_page_is_a_typed_parse_failure(
     assert provider.prompts == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_nothing_extracted_is_a_typed_parse_failure(
         mobile, bearer, alice, wire, provider):
     provider.categories = {}
@@ -541,6 +562,7 @@ def test_nothing_extracted_is_a_typed_parse_failure(
 
 
 # == Upstream failures ===========================================================
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_timeouts_and_connection_failures_are_typed_and_retryable(
         mobile, bearer, alice, wire, provider, monkeypatch):
     headers = bearer(alice)
@@ -560,6 +582,7 @@ def test_timeouts_and_connection_failures_are_typed_and_retryable(
     assert (_error(response)["code"], _error(response)["retryable"]) == ("MENU_FETCH_FAILED", True)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_upstream_client_error_is_not_retryable(mobile, bearer, alice, wire, provider):
     wire.route(MENU_URL, "gone", status=404)
     response = analyze(mobile, bearer(alice))
@@ -567,12 +590,14 @@ def test_upstream_client_error_is_not_retryable(mobile, bearer, alice, wire, pro
     assert (_error(response)["code"], _error(response)["retryable"]) == ("MENU_FETCH_FAILED", False)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unknown_host_is_a_fetch_failure(mobile, bearer, alice, wire, provider):
     response = analyze(mobile, bearer(alice), {"url": "https://nowhere.example/menu"})
     assert response.status_code == 502
     assert _error(response)["code"] == "MENU_FETCH_FAILED"
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_profile_without_target_is_a_typed_conflict(
         mobile, bearer, make_user, wire, provider):
     user = make_user("notarget")
@@ -591,6 +616,7 @@ SECRET_PAGE = """<html><head><title>SYNTHETIC_TITLE_SECRET</title></head><body>
 
 @pytest.mark.parametrize("mode", ["success", "provider-error", "fetch-blocked",
                                   "sub-page-error", "unexpected"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_logs_carry_no_remote_content_url_secret_or_identity(
         mobile, bearer, alice, wire, provider, caplog, monkeypatch, mode):
     url = "https://public.example/menu/private-path?signature=SYNTHETIC_QUERY_SECRET"
@@ -637,6 +663,7 @@ def test_raw_remote_body_and_internal_fields_never_reach_the_client(
 
 
 # == 13. Zero writes ===============================================================
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analysis_writes_no_diary_plan_or_custom_meal_rows(
         app, mobile, bearer, alice, bob, wire, provider):
     from sqlalchemy import event
@@ -667,6 +694,7 @@ def test_analysis_writes_no_diary_plan_or_custom_meal_rows(
 
 # == 14. Failures never invalidate a valid session =================================
 @pytest.mark.parametrize("failure", ["provider", "fetch", "storage", "acquisition-bug"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_menu_failures_are_not_auth_failures_and_keep_the_session(
         mobile, bearer, alice, wire, provider, monkeypatch, failure):
     headers = bearer(alice)
@@ -703,6 +731,7 @@ def test_menu_failures_are_not_auth_failures_and_keep_the_session(
 
 
 # == Capacity, phases, limits ======================================================
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_scrape_and_ai_phases_never_hold_both_permits(
         mobile, bearer, alice, wire, provider, monkeypatch):
     seen = {"fetch": [], "model": []}
@@ -736,6 +765,7 @@ class _Full:
         raise AssertionError("released a permit that was never acquired")
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_busy_scrape_gate_is_typed_and_does_no_network(
         mobile, bearer, alice, wire, provider, monkeypatch):
     headers = bearer(alice)
@@ -748,6 +778,7 @@ def test_busy_scrape_gate_is_typed_and_does_no_network(
     assert wire.seen == [] and provider.prompts == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_busy_ai_gate_is_typed_and_reaches_no_model(
         mobile, bearer, alice, wire, provider, monkeypatch):
     headers = bearer(alice)  # login itself takes a blocking slot
@@ -772,6 +803,7 @@ def enabled_limiter():
 
 
 @pytest.mark.parametrize("name", ["SCRAPE_RATELIMIT", "AI_RATELIMIT", "BEDROCK_RATELIMIT"])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_rate_limits_are_typed_owner_keyed_and_checked_before_work(
         mobile, bearer, alice, bob, wire, provider, enabled_limiter, monkeypatch, name):
     monkeypatch.setattr(mobile_menu_bp, name, "1 per hour")
@@ -789,6 +821,7 @@ def test_rate_limits_are_typed_owner_keyed_and_checked_before_work(
     assert analyze(mobile, bearer(bob)).status_code == 200
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_invalid_intake_does_not_consume_rate_limit(
         mobile, bearer, alice, wire, provider, enabled_limiter, monkeypatch):
     monkeypatch.setattr(mobile_menu_bp, "BEDROCK_RATELIMIT", "1 per hour")
@@ -810,6 +843,7 @@ class FakeRedis:
         self.store[key] = value
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_native_scan_cache_is_separate_from_the_web_namespace(
         app, mobile, bearer, alice, wire, provider, monkeypatch):
     fake = FakeRedis()
@@ -1092,6 +1126,7 @@ def test_projection_is_pure_no_fetch_provider_or_storage(monkeypatch):
     assert all(c["loggable"] for c in candidates)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_route_issues_proofs_without_extra_calls_or_stored_proof_state(
         mobile, bearer, alice, wire, provider, monkeypatch, caplog):
     store = {}

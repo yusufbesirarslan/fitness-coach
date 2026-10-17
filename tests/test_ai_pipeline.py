@@ -99,10 +99,10 @@ def test_pipeline_stage_order_and_passthrough(app, monkeypatch):
     assert out == {"answer": "cevap", "is_error_fallback": False,
                    "conversation_id": None, "deferred_summarize": None,
                    "recorded_turn": None}
-    # Hafıza kapalıyken prepared_history None kalır → ai_coach eski client-history
-    # yolunu kullanır (davranış Sprint 3 ile birebir aynı).
+    # D1 memory OFF supplies an empty trusted history. It must not fall back
+    # to client-provided history as an alternate personalization channel.
     assert seen == {"user_id": 7, "question": "protein?", "context": "BAĞLAM",
-                    "history": [], "language": "en", "prepared_history": None}
+                    "history": [], "language": "en", "prepared_history": []}
 
 
 def test_generate_answer_finalize_once(app, monkeypatch):
@@ -145,6 +145,7 @@ def test_pipeline_context_failure_degrades_to_empty(app, monkeypatch):
     assert out["answer"] == "context=[]"
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_pipeline_memory_failure_degrades_to_client_history(app, monkeypatch):
     # WS1 dayanıklılık sözleşmesi: hafıza katmanı çökerse sohbet KIRILMAZ —
     # conversation_id None döner, eski client-history yolu devreye girer ve
@@ -259,6 +260,7 @@ def test_blocking_exception_emits_error_metric_before_reraise(app, monkeypatch):
     assert increments == [("AIErrors", {"mode": "blocking"})]
 
 
+@pytest.mark.usefixtures("synthetic_ai_memory_layer")
 def test_stream_defers_inline_summarize_after_answer(app, make_user, monkeypatch):
     """Triage 2026-07-19 #4 (akış ikizi): worker yokken satır-içi özetleme akışın
     İLK token'ından önce koşuyordu. Artık tüm yanıt üretildikten sonra (done

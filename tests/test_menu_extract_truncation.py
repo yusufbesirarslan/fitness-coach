@@ -16,6 +16,8 @@ No real network: _openai_chat / openai_client are monkeypatched.
 
     python -m pytest tests/test_menu_extract_truncation.py -v
 """
+
+import pytest
 import os
 import sys
 
@@ -116,6 +118,7 @@ def test_extractor_intact_json_still_parses(monkeypatch):
 
 # --- finish_reason == "length" warning (öneri #3) ---
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_finish_reason_length_is_logged(monkeypatch, caplog):
     import app.services.ai as ai_mod
 

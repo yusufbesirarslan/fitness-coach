@@ -424,6 +424,7 @@ def test_streaming_proceed_skips_provider(app, auth_user, monkeypatch):
     assert llm.calls == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_route_proceed_returns_success_after_memory_commit(
         client, auth_user, app, monkeypatch):
     """Widget path: POST /ask/stream commits memory before confirm.
@@ -457,6 +458,7 @@ def test_ask_stream_route_proceed_returns_success_after_memory_commit(
     assert _pending_logs(auth_user) == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_streaming_confirmation_proposal_does_not_emit_premature_success(
         app, planned_user, tools_on, monkeypatch):
     from app.observability import assign_request_id
@@ -504,6 +506,7 @@ def test_streaming_confirmation_proposal_does_not_emit_premature_success(
     assert _workout_logs(planned_user) == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_streaming_workout_stage_does_not_claim_logged(
         app, auth_user, monkeypatch):
     from app.observability import assign_request_id
@@ -572,6 +575,7 @@ def test_apply_now_add_without_session_persists_immediately(
     assert "confirm" not in reply.lower()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_rejects_model_confirmation_without_plan_proposal(
         client, auth_user, app, tools_on, monkeypatch):
     """Widget path: no tool call cannot manufacture plan confirmation state."""
@@ -658,6 +662,7 @@ def test_provider_reply_does_not_misclassify_non_requests(
     assert reply == provider_text
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_add_applies_once_with_server_owned_copy(
         client, auth_user, app, tools_on, monkeypatch):
     from tests.test_ai_stream import (
@@ -717,6 +722,7 @@ def test_ask_stream_add_applies_once_with_server_owned_copy(
     assert len(fake.calls) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_flagged_read_tool_preamble_is_suppressed_without_skipping_tool(
         app, auth_user, monkeypatch):
     from app.observability import assign_request_id
@@ -764,6 +770,7 @@ def test_flagged_read_tool_preamble_is_suppressed_without_skipping_tool(
     assert "fitness metrics are ready" in visible.lower()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_streaming_apply_now_does_not_emit_success_before_persist(
         app, planned_user, tools_on, monkeypatch):
     from app.observability import assign_request_id

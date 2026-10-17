@@ -19,7 +19,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "b1e4f5a6c7d8"
-down_revision = "b0d3e4f5a6b7"
+down_revision = "d1c0a15e0001"
 branch_labels = None
 depends_on = None
 expand_contract = "expand"

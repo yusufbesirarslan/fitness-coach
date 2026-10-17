@@ -15,6 +15,8 @@ native Today) and in the training-generation adherence input. The matrix runs
 through the real native HTTP routes; the PostgreSQL races live in
 ``tests/test_progress_pump_check_completion_pg.py``.
 """
+
+import pytest
 from datetime import datetime, timedelta
 
 from app.extensions import db
@@ -105,6 +107,7 @@ def _add_standalone_row(user_id, created_at, key):
 
 
 # -- A: standalone first, canonical completion later ------------------------
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_standalone_then_completion_creates_exactly_one_completion(
         client, owner, as_mobile, workout_ref, completion_proof,
         standalone_dependencies):
@@ -130,6 +133,7 @@ def test_a_standalone_then_completion_creates_exactly_one_completion(
 
 
 # -- B: standalone only ------------------------------------------------------
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_b_standalone_only_is_never_completion(
         client, owner, as_mobile, plan, standalone_dependencies):
     headers = as_mobile(owner)
@@ -143,6 +147,7 @@ def test_b_standalone_only_is_never_completion(
 
 
 # -- C: canonical completion only (unchanged behaviour) ---------------------
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_c_canonical_completion_alone_is_unchanged(
         client, owner, as_mobile, workout_ref, completion_proof):
     headers = as_mobile(owner)
@@ -158,6 +163,7 @@ def test_c_canonical_completion_alone_is_unchanged(
 
 
 # -- D: canonical replay stays idempotent (with a standalone row present) ---
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_d_completion_replay_is_idempotent(
         client, owner, as_mobile, workout_ref, completion_proof,
         standalone_dependencies):
@@ -179,6 +185,7 @@ def test_d_completion_replay_is_idempotent(
 
 
 # -- E: standalone after canonical completion -------------------------------
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_e_standalone_after_completion_does_not_disturb_it(
         client, owner, as_mobile, workout_ref, completion_proof,
         standalone_dependencies):
@@ -223,6 +230,7 @@ def _create_standalone_after_completion(client, headers, user_id):
 
 
 # -- F: previous-day standalone ---------------------------------------------
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_f_previous_day_standalone_does_not_affect_today(
         client, owner, as_mobile, workout_ref, completion_proof):
     headers = as_mobile(owner)
@@ -238,6 +246,7 @@ def test_f_previous_day_standalone_does_not_affect_today(
 
 
 # -- G: account isolation ----------------------------------------------------
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_g_other_accounts_rows_have_no_effect(
         client, owner, stranger, as_mobile, workout_ref, completion_proof):
     headers = as_mobile(owner)

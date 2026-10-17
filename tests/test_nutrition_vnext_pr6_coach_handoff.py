@@ -80,6 +80,7 @@ def test_marker_allowlist_is_exact():
     (None, None),
 ])
 @pytest.mark.parametrize('path', ['/ask', '/ask/stream'])
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_routes_forward_only_the_allowlisted_marker(client, auth_user, app, monkeypatch,
                                                     marker, expected, path):
     app.config['AI_CHAT_QUOTA_ENABLED'] = False
@@ -302,6 +303,7 @@ def test_context_builder_nutrition_handoff_keeps_only_selected_operation(app, au
     assert "[TODAY'S NUTRITION]" not in without and '[PLAN PROJECTION MARKER]' not in without
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_calories_never_become_model_context(app, client, auth_user, monkeypatch):
     """A real /ask turn with forged body facts: the model sees canonical facts only."""
     from app.services import ai_coach

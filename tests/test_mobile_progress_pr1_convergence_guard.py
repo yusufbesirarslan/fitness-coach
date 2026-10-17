@@ -77,6 +77,7 @@ def _create_standalone_on_fixed_day(client, headers):
     db.session.commit()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_standalone_pump_check_does_not_suppress_canonical_completion(
     client, owner, as_mobile, workout_ref, completion_proof,
     standalone_dependencies,
@@ -95,6 +96,7 @@ def test_standalone_pump_check_does_not_suppress_canonical_completion(
     assert completion_proof["validate"] == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_completion_proof_is_not_part_of_native_pump_check_history(
     client, owner, as_mobile, workout_ref, completion_proof,
 ):

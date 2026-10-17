@@ -91,6 +91,7 @@ def _legacy_charges(user_id):
 
 
 # ── Authorization ──────────────────────────────────────────────────────────
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_fresh_success_consumes_exactly_one_unit_and_replay_consumes_none(
         client, mobile_user, as_mobile, metered, provider):
     created = _post(client, as_mobile, mobile_user, "allowance-key-success")
@@ -111,6 +112,7 @@ def test_fresh_success_consumes_exactly_one_unit_and_replay_consumes_none(
     assert len(_ledger(mobile_user.id).holds) == 1 and provider.calls == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 @pytest.mark.parametrize("configure,code,status,retryable", [
     (lambda app: app.config.update(AI_ALLOWANCE_POLICY=None),
      "AI_ALLOWANCE_POLICY_UNCONFIGURED", 503, False),
@@ -131,6 +133,7 @@ def test_refusal_before_dispatch_holds_nothing_and_blocks_nothing(
     assert state.operations == [] and state.plans == 0  # nothing left active
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_exhausted_allowance_refuses_before_inference_and_new_key_is_not_blocked(
         client, mobile_user, as_mobile, metered, provider, app):
     app.config["AI_ALLOWANCE_POLICY"] = fixture_policy(max_billed=0)
@@ -150,6 +153,7 @@ def test_exhausted_allowance_refuses_before_inference_and_new_key_is_not_blocked
     assert len(state.holds) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_temporary_subscription_failure_never_grants_premium(
         client, mobile_user, as_mobile, metered, provider, monkeypatch, app):
     enable_subscriptions(app, monkeypatch)
@@ -165,6 +169,7 @@ def test_temporary_subscription_failure_never_grants_premium(
     assert provider.calls == 0 and _ledger(mobile_user.id).operations == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_premium_is_server_resolved_and_never_falls_back_to_starter(
         client, mobile_user, as_mobile, metered, provider, monkeypatch, app):
     enable_subscriptions(app, monkeypatch)
@@ -187,6 +192,7 @@ def test_premium_is_server_resolved_and_never_falls_back_to_starter(
     assert (bucket.scope, bucket.used, bucket.reserved) == ("PREMIUM", 1, 0)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_legacy_premium_flag_and_client_fields_grant_nothing(
         client, mobile_user, as_mobile, metered, provider, app):
     app.config["AI_ALLOWANCE_POLICY"] = fixture_policy(max_billed=0)
@@ -207,6 +213,7 @@ def test_legacy_premium_flag_and_client_fields_grant_nothing(
 
 
 # ── Settlement ─────────────────────────────────────────────────────────────
+@pytest.mark.usefixtures("synthetic_ai_layer")
 @pytest.mark.parametrize("mode,outcome,http", [
     ("invalid", "invalid_output", 422),
     ("unavailable", "provider_error", 503),
@@ -232,6 +239,7 @@ def test_post_dispatch_failure_is_unknown_billing_settled_by_the_cap(
     assert provider.calls == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_internal_repair_turn_is_one_logical_action(
         client, mobile_user, as_mobile, metered, monkeypatch):
     completions = []
@@ -248,6 +256,7 @@ def test_internal_repair_turn_is_one_logical_action(
     assert state.bucket == (1, 1, 0, 0) and len(state.holds) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_capacity_refusal_never_creates_a_hold(
         client, mobile_user, as_mobile, metered, provider, monkeypatch):
     @contextmanager
@@ -264,6 +273,7 @@ def test_capacity_refusal_never_creates_a_hold(
 
 
 # ── Recovery ───────────────────────────────────────────────────────────────
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_lost_success_settlement_is_finished_by_replay_exactly_once(
         client, mobile_user, as_mobile, metered, provider, monkeypatch, caplog):
     real = ai_allowances.finalize
@@ -294,6 +304,7 @@ def test_lost_success_settlement_is_finished_by_replay_exactly_once(
     assert _ledger(mobile_user.id).bucket == (1, 1, 0, 0) and provider.calls == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_success_settled_after_hold_expiry_is_one_expired_unit_not_a_new_charge(
         client, mobile_user, as_mobile, metered, provider, monkeypatch):
     real_settle = seam.settle
@@ -312,6 +323,7 @@ def test_success_settled_after_hold_expiry_is_one_expired_unit_not_a_new_charge(
     assert state.bucket == (1, 1, 0, 0) and state.plans == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generated_candidate_save_failure_keeps_the_hold_for_save_only_recovery(
         client, mobile_user, as_mobile, metered, provider, monkeypatch):
     real_insert = store._insert_plan
@@ -337,6 +349,7 @@ class _Crash(BaseException):
     """Escapes application handlers, like a worker dying mid-inference."""
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_abandoned_dispatch_retires_as_one_expired_unit_and_late_output_is_fenced(
         app, client, mobile_user, as_mobile, metered, provider, monkeypatch):
     app.config["AI_ALLOWANCE_POLICY"] = fixture_policy(
@@ -378,6 +391,7 @@ def test_abandoned_dispatch_retires_as_one_expired_unit_and_late_output_is_fence
     assert _ledger(mobile_user.id).bucket == (2, 2, 0, 0)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_hold_window_is_stamped_at_the_dispatch_instant_and_ends_at_retirement(
         client, mobile_user, as_mobile, metered, provider):
     assert store.ABANDON_AFTER >= ai_allowances.RESERVATION_TTL  # retirement never precedes expiry
@@ -392,6 +406,7 @@ def test_hold_window_is_stamped_at_the_dispatch_instant_and_ends_at_retirement(
     assert operation.provider_dispatch_possible is True
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 @pytest.mark.parametrize("drift", ["abandon_after_shorter", "reservation_ttl_longer", "hold_after_marker"])
 def test_retirement_before_hold_expiry_refuses_before_dispatch(
         client, mobile_user, as_mobile, metered, provider, monkeypatch, drift):
@@ -416,6 +431,7 @@ def test_retirement_before_hold_expiry_refuses_before_dispatch(
     assert _legacy_charges(mobile_user.id) == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 @pytest.mark.parametrize("claimed_metered", [True, False])
 def test_flag_flip_between_claim_and_dispatch_never_dispatches_under_another_mode(
         app, client, mobile_user, as_mobile, metered, provider, monkeypatch, claimed_metered):
@@ -446,6 +462,7 @@ def test_flag_flip_between_claim_and_dispatch_never_dispatches_under_another_mod
 
 
 # ── OFF parity ─────────────────────────────────────────────────────────────
+@pytest.mark.usefixtures("synthetic_ai_layer")
 @pytest.mark.parametrize("ledger_on", [True, False])
 def test_enforcement_off_is_the_legacy_command_with_no_ledger_activity(
         app, client, mobile_user, as_mobile, provider, monkeypatch, ledger_on):
@@ -466,6 +483,7 @@ def test_enforcement_off_is_the_legacy_command_with_no_ledger_activity(
     assert _legacy_charges(mobile_user.id) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_enforcement_off_legacy_quota_refusal_is_unchanged(
         client, mobile_user, as_mobile, provider, app):
     app.config["AI_PLAN_QUOTA_ENABLED"] = True
@@ -481,6 +499,7 @@ def test_enforcement_off_legacy_quota_refusal_is_unchanged(
 
 
 # ── Isolation and constraints ──────────────────────────────────────────────
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_owners_sharing_a_key_have_independent_operations_and_holds(
         client, mobile_user, as_mobile, metered, provider, make_user, monkeypatch):
     other = make_user("training-allowance-other", profile_complete=True)
@@ -532,6 +551,7 @@ def test_architecture_only_the_seam_reaches_the_ledger():
     assert "logger" in source and "%s" in source  # one fixed, code-only line
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_plan_written_before_save_leaves_the_hold_to_ledger_expiry(
         client, mobile_user, as_mobile, metered, provider, monkeypatch):
     """Founder gate: a never-saved GENERATED candidate is not settled here; the
@@ -559,6 +579,7 @@ def test_browser_plan_written_before_save_leaves_the_hold_to_ledger_expiry(
     assert state.bucket == (1, 1, 0, 0) and provider.calls == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unrepairable_provider_text_is_invalid_output_in_one_hold(
         client, mobile_user, as_mobile, metered, monkeypatch):
     completions = []
@@ -570,3 +591,26 @@ def test_unrepairable_provider_text_is_invalid_output_in_one_hold(
     state = _ledger(mobile_user.id)
     assert state.holds == [("RELEASED", "invalid_output", "UNKNOWN", None)]
     assert state.bucket == (1, 0, 0, 1)  # cap 2: one possibly-billed release
+
+
+@pytest.mark.parametrize("enforced", [False, True])
+def test_empty_d1_registry_blocks_route_before_allowance_or_provider(
+        client, mobile_user, as_mobile, app, monkeypatch, enforced):
+    """Real D1 default deny; deliberately does not request synthetic_ai_layer."""
+    from unittest.mock import Mock
+    from app.services import ai_consent
+    enable_ledger(app)
+    app.config[ENFORCE] = enforced
+    enable_subscriptions(app, monkeypatch)
+    premium_row(mobile_user.id)
+    provider = Mock()
+    monkeypatch.setattr(generation_service, "generate_training_plan_candidate", provider)
+    assert dict(ai_consent.POLICIES) == {}
+    response = _post(client, as_mobile, mobile_user, "d1-default-deny-native")
+    assert response.status_code == 403
+    assert response.json["error"]["code"] == "AI_CONSENT_DISCLOSURE_UNAVAILABLE"
+    provider.assert_not_called()
+    state = _ledger(mobile_user.id)
+    assert state.bucket is None
+    assert state.holds == state.bindings == state.operations == []
+    assert _legacy_charges(mobile_user.id) == 0

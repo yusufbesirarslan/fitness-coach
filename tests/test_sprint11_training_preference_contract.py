@@ -512,6 +512,7 @@ def test_feasible_cardio_allocation_is_supported():
 # ── Provider-call boundary ───────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unknown_style_invokes_zero_provider_calls(client, auth_user, monkeypatch):
     _session(auth_user)
     called = []
@@ -526,6 +527,7 @@ def test_unknown_style_invokes_zero_provider_calls(client, auth_user, monkeypatc
     assert called == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_crossfit_invokes_zero_provider_calls(client, auth_user, monkeypatch):
     _session(auth_user)
     called = []
@@ -541,6 +543,7 @@ def test_crossfit_invokes_zero_provider_calls(client, auth_user, monkeypatch):
     assert called == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_home_powerlifting_invokes_zero_provider_calls(client, auth_user, monkeypatch):
     _session(auth_user)
     called = []
@@ -556,6 +559,7 @@ def test_home_powerlifting_invokes_zero_provider_calls(client, auth_user, monkey
     assert called == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_overfull_week_invokes_zero_provider_calls(client, auth_user, monkeypatch):
     _session(auth_user)
     called = []
@@ -571,6 +575,7 @@ def test_overfull_week_invokes_zero_provider_calls(client, auth_user, monkeypatc
     assert called == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_non_object_json_body_invokes_zero_provider_calls(
         client, auth_user, monkeypatch):
     _session(auth_user)
@@ -588,6 +593,7 @@ def test_non_object_json_body_invokes_zero_provider_calls(
     assert called == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_cardio_days_without_type_invokes_zero_provider_calls(
         client, auth_user, monkeypatch):
     _session(auth_user)
@@ -618,6 +624,7 @@ def test_unsupported_request_does_not_retry(client, auth_user, monkeypatch):
 # ── Supported request preserves canonical semantics ──────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_supported_request_sends_canonical_style_and_focus_to_prompt(
         client, auth_user, monkeypatch):
     _session(auth_user, goal="kilo verme")
@@ -649,6 +656,7 @@ def test_supported_request_sends_canonical_style_and_focus_to_prompt(
     assert "spor_salonu" in prompt
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_supported_powerlifting_reaches_generation(client, auth_user, monkeypatch):
     _session(auth_user)
     captured = {}
@@ -713,6 +721,7 @@ def _captured_supported_prompt(client, auth_user, monkeypatch, **overrides):
     return captured["prompt"]
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_home_prompt_lists_bodyweight_but_not_barbell_exercises(
         client, auth_user, monkeypatch):
     prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="ev")
@@ -720,6 +729,7 @@ def test_home_prompt_lists_bodyweight_but_not_barbell_exercises(
     assert "Barbell Back Squat" not in prompt
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_minimal_prompt_lists_dumbbell_and_band_but_not_machine(
         client, auth_user, monkeypatch):
     # NOTE: "Goblet Squat" is deliberately avoided here — it also appears in
@@ -730,6 +740,7 @@ def test_minimal_prompt_lists_dumbbell_and_band_but_not_machine(
     assert "Lat Pulldown" not in prompt
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_gym_prompt_lists_every_equipment_tier(client, auth_user, monkeypatch):
     prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="spor_salonu")
     assert "Push-Up" in prompt
@@ -738,6 +749,7 @@ def test_gym_prompt_lists_every_equipment_tier(client, auth_user, monkeypatch):
     assert "Lat Pulldown" in prompt
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_prompt_tells_the_provider_cardio_belongs_only_on_kardiyo_days(
         client, auth_user, monkeypatch):
     """The vocabulary block hands the provider cardio names mixed in with
@@ -791,6 +803,7 @@ def test_goals_json_is_consumed_by_prompt_builder():
 # ── Typed API shape ──────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_missing_session_is_typed_and_skips_provider(client, auth_user, monkeypatch):
     called = []
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: called.append(kwargs) or "{}")
@@ -803,6 +816,7 @@ def test_missing_session_is_typed_and_skips_provider(client, auth_user, monkeypa
     assert called == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_malformed_provider_output_is_typed_generation_invalid(
         client, auth_user, monkeypatch):
     _session(auth_user)
@@ -814,6 +828,7 @@ def test_malformed_provider_output_is_typed_generation_invalid(
     assert "error" in body
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_day_count_mismatch_does_not_retry_and_is_semantic(
         client, auth_user, monkeypatch):
     _session(auth_user)
@@ -867,6 +882,7 @@ def test_save_replaces_plan_without_journal_or_typed_generation_command(
     assert "Barbell Deadlift" in rows[0].plan_data
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_rejected_generate_cannot_be_saved_as_success(client, auth_user, monkeypatch):
     _session(auth_user)
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: "{}")

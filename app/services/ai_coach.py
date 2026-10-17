@@ -497,6 +497,9 @@ _MEMORY_VALUE_MAXLEN = 2000  # serileştirilmiş değer üst sınırı (LLM gird
 def _tool_manage_user_memory(user_id, action, key=None, value=None):
     """TOOL: Kullanıcının uzun süreli metadata'sını (sakatlıklar, tercihler) oku/yaz.
     User.user_metadata (JSON) ile eşlenir. user_id ASLA LLM'den gelmez."""
+    from app.services.ai_consent import memory_available
+    if not memory_available(user_id):
+        return json.dumps({"status": "unavailable", "code": "AI_MEMORY_CONSENT_REQUIRED"})
     action = (action or "").strip().lower()
     key = (key or "").strip()
     user = db.session.get(User, user_id)
@@ -1442,6 +1445,13 @@ def generate_checkin_feedback(name, weight, prev_weight, days_passed,
                                uyku, beslenme, note, language="tr"):
     """İstem şablonu app/prompts/progress.py'de (WS4); burada yalnızca sağlayıcı
     çağrısı + dostça hata yedeği kalır."""
+    # This mixed first-party action saves the check-in without AI feedback.
+    # Do not present consent denial as a transient provider failure.
+    from app.services.ai_consent import BINDINGS
+    if "coach" not in BINDINGS:
+        return ("AI feedback is unavailable without an approved sharing permission."
+                if _coach_lang(language) == "en"
+                else "Onaylanmış paylaşım izni olmadan AI geri bildirimi kullanılamaz.")
     prompt, system_prompt = build_checkin_feedback_prompt(
         "", weight, prev_weight, days_passed,
         coach_privacy.token(goal, coach_privacy.GOALS), yogunluk, fatigue,

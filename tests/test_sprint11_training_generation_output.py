@@ -837,6 +837,7 @@ def test_generation_pipeline_rejects_incompatible_equipment(monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_http_typed_exercise_identity_invalid(client, auth_user, monkeypatch):
     """Browser shape of an invalid provider identity (formerly pinned as the
     unresolved-name case): same 500/retryable contract, no plan, no echo."""
@@ -857,6 +858,7 @@ def test_http_typed_exercise_identity_invalid(client, auth_user, monkeypatch):
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_http_typed_exercise_unresolved_for_a_retired_id(
         client, auth_user, monkeypatch, fixture_catalog):
     """UNRESOLVED stays reachable from generation for exactly one reason: a
@@ -877,6 +879,7 @@ def test_http_typed_exercise_unresolved_for_a_retired_id(
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_browser_unresolved_keeps_existing_plan_but_persists_posted_injuries(
         client, auth_user, monkeypatch, fixture_catalog):
     _session(auth_user)
@@ -951,6 +954,7 @@ def test_provider_call_budget_stays_two():
     assert MAX_PROVIDER_COMPLETIONS == 2
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generated_exercise_id_is_accepted_by_save(client, auth_user, monkeypatch):
     """Task 4 closes the Task 3 gap: a generated plan carries exercise_id and
     a signed exercise context, and both survive the round trip into save. This
@@ -976,6 +980,7 @@ def test_generated_exercise_id_is_accepted_by_save(client, auth_user, monkeypatc
 # ── HTTP typed output errors ─────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_malformed_output_is_typed_parse_failed(client, auth_user, monkeypatch):
     _session(auth_user)
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: "sorry I cannot")
@@ -987,6 +992,7 @@ def test_malformed_output_is_typed_parse_failed(client, auth_user, monkeypatch):
     assert "sorry" not in body["error"].lower()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_day_count_mismatch_does_not_retry(client, auth_user, monkeypatch):
     _session(auth_user)
     calls = []
@@ -1002,6 +1008,7 @@ def test_day_count_mismatch_does_not_retry(client, auth_user, monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_truncated_output_is_typed_after_failed_repair(client, auth_user, monkeypatch):
     _session(auth_user)
 
@@ -1105,6 +1112,7 @@ def test_validate_plan_for_save_rejects_schema_errors():
 # ── Full mocked path ─────────────────────────────────────────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generate_then_save_mocked_path(client, auth_user, monkeypatch):
     _session(auth_user)
     monkeypatch.setattr(
@@ -1438,6 +1446,7 @@ def test_minimal_context_allows_dumbbell_and_band_but_not_machines(
 # ── Cardio placement: the equipment gate must not be bypassable by placement ─
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_cardio_exercise_cannot_be_saved_onto_a_training_day(
         client, auth_user, monkeypatch):
     """The full exploit, through the real routes and with nothing forged.
@@ -1506,6 +1515,7 @@ def test_cardio_type_yok_still_refuses_a_cardio_exercise_on_a_cardio_day(
     assert TrainingPlan.query.count() == 0
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generation_fails_closed_when_the_provider_puts_cardio_on_a_training_day(
         client, auth_user, monkeypatch):
     _session(auth_user)
@@ -1730,6 +1740,7 @@ def test_save_route_verifies_context_before_it_validates_or_replaces():
 # ── Generation emits the token; unit callers may opt out ────────────────────
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generate_route_always_returns_a_context_token(
         client, auth_user, monkeypatch):
     _session(auth_user)
@@ -1745,6 +1756,7 @@ def test_generate_route_always_returns_a_context_token(
     assert "ekipman" not in json.dumps(body)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generate_route_binds_the_token_factory_to_the_signed_in_user(
         client, auth_user, app, monkeypatch):
     """Behavioural, not a source grep: a factory closed over a hard-coded id
@@ -1771,6 +1783,7 @@ def test_generation_payload_omits_the_token_without_a_factory(monkeypatch):
     assert "exercise_context_token" not in payload
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_generated_token_matches_the_accepted_equipment_context(
         client, auth_user, app, monkeypatch):
     _session(auth_user)

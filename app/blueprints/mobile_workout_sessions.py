@@ -18,6 +18,7 @@ route and the AI-coach tool already share.
 """
 from functools import wraps
 
+from app.services.ai_consent import ConsentDenied
 from flask import current_app, g, jsonify, make_response, request
 
 from app.blueprints.mobile_api import bp, mobile_error
@@ -315,6 +316,8 @@ def _completion_proof():
     fail-open (the completion proceeds without an image key) because the S3
     object is evidence, not the completion claim itself.
     """
+    from app.blueprints.ai_consent import require_legacy_ai
+    require_legacy_ai()
     image_bytes, media_type, image_error = validate_uploaded_pump_check_image(
         request.files.get("image"))
     if image_error:
@@ -412,6 +415,8 @@ def complete_workout_session(session_reference):
             g.mobile_user.id, session_reference, revision, **proof)
     except sessions.SessionCommandError as error:
         return _failure(error)
+    except ConsentDenied:
+        raise
     except Exception as error:  # noqa: BLE001
         return _unavailable(error, "complete_failed")
     return _ok(result)
