@@ -1,7 +1,7 @@
-"""D1 account consent authority after the merged AI allowance ledger.
+"""D1 account consent authority after the merged Training dispatch boundary.
 
 Revision ID: d1c0a15e0001
-Revises: a9c1d2e3f4b5 (authoritative main at 551f711)
+Revises: b0d3e4f5a6b7 (authoritative main at f803bb4)
 No customer backfill, inferred grants or modifications to #436 migrations.
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 import re
 
 revision = 'd1c0a15e0001'
-down_revision = 'a9c1d2e3f4b5'
+down_revision = 'b0d3e4f5a6b7'
 branch_labels = None
 depends_on = None
 expand_contract = "expand"

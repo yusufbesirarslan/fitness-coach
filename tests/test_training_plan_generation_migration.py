@@ -22,11 +22,15 @@ def _migration():
     return migration
 
 
-def _assert_shape(connection):
+def _assert_shape(connection, *, dispatch_marker=False):
     inspector = sa.inspect(connection)
     columns = {column["name"] for column in inspector.get_columns(
         "training_plan_generation_operation")}
-    assert columns == {column.name for column in TrainingPlanGenerationOperation.__table__.columns}
+    expected = set(TrainingPlanGenerationOperation.__table__.columns.keys())
+    if not dispatch_marker:  # Historical revision predates BE-03B-01A.
+        expected.remove("provider_dispatch_possible")
+    assert columns == expected
+
     uniques = {
         tuple(item["column_names"])
         for item in inspector.get_unique_constraints("training_plan_generation_operation")
@@ -70,4 +74,4 @@ def test_migration_accepts_create_all_first_schema(tmp_path):
         context = MigrationContext.configure(connection)
         with Operations.context(context):
             migration.upgrade()
-        _assert_shape(connection)
+        _assert_shape(connection, dispatch_marker=True)

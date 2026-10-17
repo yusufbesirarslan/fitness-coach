@@ -314,7 +314,7 @@ def test_exact_migration_empty_upgrade_and_safe_downgrade(pg_app):
     spec = importlib.util.spec_from_file_location('d1_migration', source)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
-    assert migration.down_revision == 'a9c1d2e3f4b5'
+    assert migration.down_revision == 'b0d3e4f5a6b7'
     with pg_app.app_context(), db.engine.begin() as conn:
         conn.execute(text('CREATE SCHEMA d1_migration_test'))
         conn.execute(text('SET LOCAL search_path TO d1_migration_test'))
@@ -460,8 +460,9 @@ def _assert_chain_head_and_parity():
     from alembic.autogenerate import compare_metadata
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
     assert scripts.get_heads() == ['d1c0a15e0001']
-    assert len(list(scripts.walk_revisions())) == 51
-    assert scripts.get_revision('d1c0a15e0001').down_revision == 'a9c1d2e3f4b5'
+    assert len(list(scripts.walk_revisions())) == 52
+    assert scripts.get_revision('d1c0a15e0001').down_revision == 'b0d3e4f5a6b7'
+    assert scripts.get_revision('b0d3e4f5a6b7').down_revision == 'a9c1d2e3f4b5'
     assert scripts.get_revision('a9c1d2e3f4b5').down_revision == 'c2b9d0e1f2a3'
     assert scripts.get_revision('c2b9d0e1f2a3').down_revision == 'b1a8c9d0e1f2'
     with db.engine.connect() as conn:
@@ -497,8 +498,8 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
     from datetime import datetime, timezone, timedelta
     from ai_allowance_support import premium_row
     from app.models import (AppleAccountAssociation, AiStarterGrant, AiAllowanceBucket,
-                            AiUsageReservation, TrainingPlan)
-    _chain_upgrade('a9c1d2e3f4b5')
+                            AiUsageReservation, TrainingPlan, TrainingPlanGenerationOperation)
+    _chain_upgrade('b0d3e4f5a6b7')
     now = datetime.now(timezone.utc)
     db.session.add_all([User(id=1, username='chain-a', email='chain-a@example.invalid'),
                         User(id=2, username='chain-b', email='chain-b@example.invalid')])
@@ -512,6 +513,9 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
                 period_key='NEVER', policy_version='synthetic-v1', granted=10, used=2,
                 reserved=1, billed_releases=0, created_at=now, updated_at=now),
             TrainingPlan(user_id=uid, plan_data='{"synthetic": true}', score=7),
+            TrainingPlanGenerationOperation(user_id=uid, idempotency_key='synthetic-chain',
+                request_fingerprint='a'*64, status='IN_PROGRESS',
+                provider_dispatch_possible=None if uid == 1 else True),
         ])
     db.session.commit()
     for uid in (1, 2):

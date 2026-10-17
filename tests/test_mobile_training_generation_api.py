@@ -514,6 +514,9 @@ def test_success_has_bounded_constant_sql_cost_without_exercise_n_plus_one(
         generation_service, "generate_training_plan_candidate", candidate)
     monkeypatch.setattr(
         "app.blueprints.mobile_training._heavy_chat", lambda **kwargs: "unused")
+    # The canonical generator is stubbed here; stub its now-precomputed inputs
+    # too. Real feature preparation is covered by canonical generation tests.
+    monkeypatch.setattr(generation_service, "build_features", lambda *a: None)
     statements = []
 
     def record(conn, cursor, statement, params, context, many):

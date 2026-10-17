@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from sqlalchemy import inspect
+
+from app.extensions import db
+from app.services.ai_spend_guard import subject_scope
+from app.services.training_generation.feature_extractor import build_features
 
 from app.models import (
     TRAINING_PLAN_GENERATION_FAILED,
@@ -80,62 +85,63 @@ def generate_and_persist(
     last_session = _required_session(user)
     # Read before the claim commit expires `user`: no extra row reload.
     language = user.language or "tr"
+    user_id = user.id
 
     _operation, result = _inspect_durable(user.id, key, request.fingerprint)
     if result is not None:
         return result
 
-    with try_owner_lock(user.id) as acquired:
+    with try_owner_lock(user_id) as acquired:
         if not acquired:
             raise GenerationInProgress()
 
+        store.retire_abandoned(user_id)
         operation, result = _inspect_durable(
-            user.id, key, request.fingerprint)
+            user_id, key, request.fingerprint)
         if result is not None:
             return result
 
-        if get_active_plan(user.id) is not None:
+        if get_active_plan(user_id) is not None:
             raise ExistingPlanRefused()
 
-        active = store.find_active_for_owner(user.id)
+        active = store.find_active_for_owner(user_id)
         if active is not None and (operation is None or active.id != operation.id):
             raise GenerationInProgress()
 
         if operation is not None and operation.status == TRAINING_PLAN_GENERATION_GENERATED:
             return GenerationCommandResult(
-                plan=store.commit_plan(operation.id, user.id), replayed=False)
+                plan=store.commit_plan(operation.id, user_id), replayed=False)
 
-        fresh_claim = operation is None
-        if fresh_claim:
-            operation = store.claim(user.id, key, request.fingerprint)
-        else:
-            operation = store.begin_resumed_attempt(operation.id)
+        # Freeze inputs before claim/dispatch commits expire ORM objects.
+        features = build_features(user, last_session, request.preferences)
+        if operation is None:
+            operation = store.claim(user_id, key, request.fingerprint)
+        elif operation.provider_dispatch_possible is not False:
+            raise GenerationInProgress()
+        operation_id = inspect(operation).identity[0]
+        # End any read-only recovery transaction before entering controls.
+        db.session.rollback()
 
-        try:
-            with provider_guard():
+    # No advisory connection or operation/owner transaction spans provider I/O.
+    authorized = False
+    try:
+        with provider_guard():
+            store.authorize_dispatch(operation_id)
+            authorized = True
+            with subject_scope(user_id):
                 candidate = generate_training_plan_candidate(
-                    user,
-                    last_session,
-                    request.preferences,
-                    chat_fn,
-                    language=language,
-                    logger=logger,
-                )
-        except GenerationOutputError as error:
-            raise store.record_failure(operation.id, error) from None
-        except Exception:
-            if fresh_claim:
-                store.abandon_claim(operation.id)
-            raise
+                    user, last_session, request.preferences, chat_fn,
+                    language=language, logger=logger, frozen_features=features)
+    except GenerationOutputError as error:
+        raise store.record_failure(operation_id, error) from None
+    except Exception:
+        if not authorized:
+            store.abandon_claim(operation_id)
+        raise
 
-        document_json = json.dumps(
-            candidate.document,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-        store.stage_candidate(
-            operation.id, document_json, candidate.overall_score)
-        return GenerationCommandResult(
-            plan=store.commit_plan(operation.id, user.id), replayed=False)
+    document_json = json.dumps(
+        candidate.document, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False)
+    store.stage_candidate(operation_id, document_json, candidate.overall_score)
+    return GenerationCommandResult(
+        plan=store.commit_plan(operation_id, user_id), replayed=False)

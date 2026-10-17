@@ -36,7 +36,7 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # D1 follows the merged Apple foundation and AI allowance ledger.
+    # D1 follows the merged Apple, allowance and training dispatch migrations.
     assert heads == ["d1c0a15e0001"]
 
 
@@ -66,7 +66,7 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # TI-01A adds two nullable columns on workout_session, no catalog table.
     # LP18-B0 adds replacement authority; B1 adds generation recovery only.
     # Apple, AI allowance and D1 add isolated tables, no exercise catalog.
-    assert len(revision_files) == 51
+    assert len(revision_files) == 52
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 
