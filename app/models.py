@@ -490,6 +490,8 @@ class TrainingPlanGenerationOperation(db.Model):
     status = db.Column(db.String(20), nullable=False)
     attempt_count = db.Column(
         db.Integer, nullable=False, default=1, server_default="1")
+    # NULL is historical/unknown; only new claims explicitly prove no dispatch.
+    provider_dispatch_possible = db.Column(db.Boolean, nullable=True)
     candidate_plan_data = db.Column(db.Text)
     candidate_score = db.Column(db.Float)
     # Soft references intentionally survive legacy plan replacement semantics.

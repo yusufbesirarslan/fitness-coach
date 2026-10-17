@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
@@ -38,6 +38,8 @@ from .errors import (
     StoredGenerationFailure,
 )
 
+
+ABANDON_AFTER = timedelta(minutes=15)
 
 MAX_CANDIDATE_BYTES = 256 * 1024
 _INVALID_CANDIDATE_CODES = frozenset({
@@ -92,6 +94,7 @@ def claim(user_id, key, fingerprint):
         request_fingerprint=fingerprint,
         status=TRAINING_PLAN_GENERATION_IN_PROGRESS,
         attempt_count=1,
+        provider_dispatch_possible=False,
     )
     db.session.add(operation)
     try:
@@ -121,8 +124,12 @@ def claim(user_id, key, fingerprint):
 def abandon_claim(operation_id):
     """Remove a pre-provider claim when entering provider controls failed."""
     try:
-        operation = db.session.get(TrainingPlanGenerationOperation, operation_id)
-        if operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS:
+        operation = (db.session.query(TrainingPlanGenerationOperation)
+                     .filter_by(id=operation_id).populate_existing()
+                     .with_for_update().one_or_none())
+        if (operation is None
+                or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS
+                or operation.provider_dispatch_possible is not False):
             db.session.rollback()
             return
         if operation.quota_reserved:
@@ -134,19 +141,55 @@ def abandon_claim(operation_id):
         db.session.rollback()
 
 
-def begin_resumed_attempt(operation_id):
+def authorize_dispatch(operation_id):
+    """Only the transaction changing False -> True may invoke generation.
+
+    Commit uncertainty BEFORE the network door. A lost commit acknowledgement
+    cannot authorize a call: the caller must receive a successful return.
+    """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
-                     .filter_by(id=operation_id).with_for_update().one_or_none())
-        if operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS:
-            raise GenerationPersistenceUnavailable()
-        operation.attempt_count += 1
+                     .filter_by(id=operation_id).populate_existing()
+                     .with_for_update().one_or_none())
+        if (operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS
+                or operation.provider_dispatch_possible is not False):
+            raise GenerationInProgress()
+        operation.provider_dispatch_possible = True
         operation.updated_at = datetime.utcnow()
         db.session.commit()
-        return operation
-    except GenerationPersistenceUnavailable:
+    except GenerationInProgress:
         db.session.rollback()
         raise
+    except Exception as error:
+        db.session.rollback()
+        raise GenerationPersistenceUnavailable() from error
+
+
+def retire_abandoned(user_id):
+    """Bound active occupancy; retain dispatch uncertainty and legacy quota.
+
+    Called under the short owner arbitration lock. A late worker is fenced by
+    the terminal status at staging/failure persistence. This is not remote
+    cancellation or proof that an old network request has stopped.
+    """
+    try:
+        operation = (db.session.query(TrainingPlanGenerationOperation)
+                     .filter_by(user_id=user_id, status=TRAINING_PLAN_GENERATION_IN_PROGRESS)
+                     .populate_existing().with_for_update().one_or_none())
+        if operation is not None and operation.updated_at <= datetime.utcnow() - ABANDON_AFTER:
+            operation.status = TRAINING_PLAN_GENERATION_FAILED
+            operation.error_code = "TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN"
+            operation.error_http_status = 503
+            operation.error_retryable = False
+            operation.completed_at = datetime.utcnow()
+            # Never refund an ambiguous dispatch or erase its evidence.
+            if operation.provider_dispatch_possible is False:
+                operation.error_code = "TRAINING_PLAN_GENERATION_NOT_DISPATCHED"
+                if operation.quota_reserved:
+                    premium.refund_ai_quota_in_transaction(
+                        user_id, "training", operation.quota_week)
+                    operation.quota_reserved = False
+            db.session.commit()
     except Exception as error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from error
@@ -161,7 +204,7 @@ def stage_candidate(operation_id, document_json, score):
         if not isinstance(parsed, dict):
             raise ValueError("candidate must be an object")
         operation = (db.session.query(TrainingPlanGenerationOperation)
-                     .filter_by(id=operation_id).with_for_update().one_or_none())
+                     .filter_by(id=operation_id).populate_existing().with_for_update().one_or_none())
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS:
             raise GenerationPersistenceUnavailable()
         operation.candidate_plan_data = document_json
@@ -180,8 +223,8 @@ def stage_candidate(operation_id, document_json, score):
 def record_failure(operation_id, error):
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
-                     .filter_by(id=operation_id).with_for_update().one_or_none())
-        if operation is None:
+                     .filter_by(id=operation_id).populate_existing().with_for_update().one_or_none())
+        if operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS:
             raise GenerationPersistenceUnavailable()
         if operation.quota_reserved:
             premium.refund_ai_quota_in_transaction(
@@ -245,7 +288,7 @@ def commit_plan(operation_id, user_id):
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
                      .filter_by(id=operation_id, user_id=user_id)
-                     .with_for_update().one_or_none())
+                     .populate_existing().with_for_update().one_or_none())
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_GENERATED:
             raise GenerationPersistenceUnavailable()
         lock_plan_owner(user_id)
