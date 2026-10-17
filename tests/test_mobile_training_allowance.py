@@ -378,6 +378,44 @@ def test_abandoned_dispatch_retires_as_one_expired_unit_and_late_output_is_fence
     assert _ledger(mobile_user.id).bucket == (2, 2, 0, 0)
 
 
+def test_hold_window_is_stamped_at_the_dispatch_instant_and_ends_at_retirement(
+        client, mobile_user, as_mobile, metered, provider):
+    assert store.ABANDON_AFTER >= ai_allowances.RESERVATION_TTL  # retirement never precedes expiry
+    assert _post(client, as_mobile, mobile_user, "allowance-key-instant").status_code == 201
+    db.session.expire_all()
+    operation = TrainingPlanGenerationOperation.query.one()
+    hold = AiUsageReservation.query.one()
+    binding = TrainingPlanGenerationAllowance.query.one()
+    dispatched = binding.created_at  # stamped with the marker in the dispatch commit
+    assert hold.created_at.replace(tzinfo=None) == dispatched
+    assert hold.expires_at.replace(tzinfo=None) - dispatched == ai_allowances.RESERVATION_TTL
+    assert operation.provider_dispatch_possible is True
+
+
+@pytest.mark.parametrize("drift", ["abandon_after_shorter", "reservation_ttl_longer", "hold_after_marker"])
+def test_retirement_before_hold_expiry_refuses_before_dispatch(
+        client, mobile_user, as_mobile, metered, provider, monkeypatch, drift):
+    """R2: correct retirement accounting needs ABANDON_AFTER >= RESERVATION_TTL from one instant."""
+    if drift == "abandon_after_shorter":
+        monkeypatch.setattr(store, "ABANDON_AFTER", ai_allowances.RESERVATION_TTL - timedelta(seconds=1))
+    elif drift == "reservation_ttl_longer":
+        monkeypatch.setattr(ai_allowances.service, "RESERVATION_TTL",
+                            store.ABANDON_AFTER + timedelta(seconds=1))
+    else:  # R1 mutant M-C: the hold window opens 1 s after the marker instant
+        real = ai_allowances.reserve_within
+        monkeypatch.setattr(ai_allowances, "reserve_within", lambda user_id, feature, key, now: real(
+            user_id, feature, key, now=now + timedelta(seconds=1)))
+    refused = _post(client, as_mobile, mobile_user, "allowance-key-ttl")
+    assert refused.status_code == 503
+    assert refused.json["error"]["code"] == "AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE"
+    assert refused.json["error"]["retryable"] is True
+    state = _ledger(mobile_user.id)
+    assert provider.calls == 0 and state.holds == [] and state.bindings == []
+    assert state.operations == [] and state.plans == 0
+    assert state.bucket in (None, (1, 0, 0, 0))  # no unit moved (SQLite may keep the lazy grant)
+    assert _legacy_charges(mobile_user.id) == 0
+
+
 @pytest.mark.parametrize("claimed_metered", [True, False])
 def test_flag_flip_between_claim_and_dispatch_never_dispatches_under_another_mode(
         app, client, mobile_user, as_mobile, metered, provider, monkeypatch, claimed_metered):

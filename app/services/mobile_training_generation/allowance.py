@@ -93,6 +93,13 @@ def bind_for_dispatch(operation, now):
         raise _refused(error.code) from None
     if not hold.may_execute:
         raise _refused("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+    from . import store  # store imports this module
+    if hold.expires_at > now + store.ABANDON_AFTER:
+        # Retirement (marker instant + ABANDON_AFTER) must find this hold
+        # already expired, so a retired operation consumes exactly one unit.
+        # ABANDON_AFTER < RESERVATION_TTL, or a hold stamped after the marker,
+        # would let retirement release it instead: refuse before any dispatch.
+        raise _refused("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
     stamp = now.replace(tzinfo=None)
     db.session.add(TrainingPlanGenerationAllowance(
         operation_id=operation.id, user_id=operation.user_id,

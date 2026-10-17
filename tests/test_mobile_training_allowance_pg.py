@@ -173,6 +173,33 @@ def test_metered_crash_boundary_never_strands_duplicates_or_falsely_settles(
             assert len(executions) == max(calls, 1)
 
 
+def test_dispatch_marker_hold_and_binding_share_one_stored_instant(pg_generation_app):
+    """R1 probe kept: retirement accounting relies on this exact instant (naive UTC vs timestamptz)."""
+    from app.extensions import db
+    from app.services import ai_allowances
+    from app.services.mobile_training_generation import store
+    app, owners, _ = pg_generation_app
+    _metered(app)
+    assert store.ABANDON_AFTER >= ai_allowances.RESERVATION_TTL
+    with app.app_context():
+        operation_id = store.claim(owners[0], "same-instant", _request().fingerprint).id
+        store.authorize_dispatch(operation_id)
+        db.session.remove()
+        row = db.session.execute(sa.text(
+            "SELECT o.updated_at, r.created_at AT TIME ZONE 'UTC', r.expires_at AT TIME ZONE 'UTC', "
+            "b.created_at, o.provider_dispatch_possible, o.allowance_metered, r.billing_evidence, "
+            "r.provider_billed, pg_typeof(o.updated_at)::text, pg_typeof(r.expires_at)::text "
+            "FROM training_plan_generation_operation o "
+            "JOIN training_plan_generation_allowance b ON b.operation_id = o.id "
+            "JOIN ai_usage_reservation r ON r.public_id = b.reservation_ref WHERE o.id = :o"),
+            {"o": operation_id}).one()
+    marker, created, expires, bound, dispatched, metered, evidence, billed, naive, aware = row
+    assert marker == created == bound  # microsecond-exact
+    assert expires - marker == ai_allowances.RESERVATION_TTL
+    assert (dispatched, metered, evidence, billed) == (True, True, "UNKNOWN", None)
+    assert (naive, aware) == ("timestamp without time zone", "timestamp with time zone")
+
+
 # ── Races ──────────────────────────────────────────────────────────────────
 def test_concurrent_dispatch_authorizations_create_exactly_one_hold(pg_generation_app):
     from app.extensions import db

@@ -43,6 +43,14 @@ settle → respond`.
 * The mode fixed at claim must still match the flag at dispatch; otherwise the
   claim is abandoned and the command answers retryable
   `AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE` (a legacy reservation is refunded).
+* The hold, the binding and the marker are stamped with ONE instant, and
+  retirement (`store.ABANDON_AFTER`, 15 min) must not come before hold expiry
+  (`ai_allowances.RESERVATION_TTL`, 15 min): then a retired operation's hold is
+  already expired and consumes exactly one unit. Dispatch checks this on the real
+  hold (`expires_at <= marker + ABANDON_AFTER`); drift in either constant, or a hold
+  stamped after the marker, refuses before dispatch with retryable
+  `AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE` (nothing held). Equal durations do not
+  mean the remote provider stops after 15 minutes.
 
 ## Settlement
 
@@ -97,3 +105,17 @@ as unresolved, not success; a 402 is a paywall/upsell state, not a failure to re
 5. Retiring the legacy weekly Training quota (and the `is_premium` bypass) for
    metered claims.
 6. Renewal/rollover cadence and deletion/re-registration eligibility (ledger).
+
+## Accepted, deferred before activation (R1 P3)
+
+* No repository-managed schedule runs `flask ai-allowance-sweep`. Units stay
+  correct without it (an expired hold counts as reserved, then as one consumed
+  unit on the owner's next command or reserve), but the GET view can show
+  `reserved` instead of `used`. Scheduling the sweep is an activation
+  prerequisite (operational qualification), not part of this source change.
+* `ai_allowance_bucket.billed_releases` counts UNKNOWN releases too: it means
+  "released while possibly billed", never confirmed provider billing. FinOps reads
+  billing from `billing_evidence`, not this counter.
+* Account deletion racing an in-flight dispatch transaction can abort on a
+  database deadlock (bounded; abort, never corruption), the same class as
+  `commit_plan` today.
