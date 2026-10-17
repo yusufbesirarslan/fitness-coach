@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import update, select
 
 from app.services import ai_consent as consent, ai_provider_call as calls, ai, ai_spend_guard
@@ -313,7 +314,7 @@ def test_exact_migration_empty_upgrade_and_safe_downgrade(pg_app):
     spec = importlib.util.spec_from_file_location('d1_migration', source)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
-    assert migration.down_revision == 'b1a8c9d0e1f2'
+    assert migration.down_revision == 'a9c1d2e3f4b5'
     with pg_app.app_context(), db.engine.begin() as conn:
         conn.execute(text('CREATE SCHEMA d1_migration_test'))
         conn.execute(text('SET LOCAL search_path TO d1_migration_test'))
@@ -412,3 +413,197 @@ def test_editing_same_version_contract_never_expands_existing_grant(pg_app, monk
             consent.mutate(1, stale_action)
         assert consent.status(1)['scopes']['training.plan']['state'] == 'unavailable'
         assert captured == []
+
+
+@pytest.fixture
+def chain_app():
+    """Own a throwaway database: never stamp models as migration evidence."""
+    from uuid import uuid4
+    from flask import Flask
+    from flask_migrate import Migrate
+    import sqlalchemy as sa
+    url = sa.engine.make_url(os.environ['PG_TEST_DATABASE_URL'])
+    assert url.get_backend_name() == 'postgresql'
+    name = 'd1_chain_' + uuid4().hex
+    admin = sa.create_engine(url, isolation_level='AUTOCOMMIT')
+    with admin.connect() as conn:
+        assert conn.dialect.server_version_info[:1] == (16,)
+        conn.exec_driver_sql(f'CREATE DATABASE "{name}"')
+    app = Flask('d1-chain-synthetic')
+    app.config.update(TESTING=True, SQLALCHEMY_DATABASE_URI=url.set(database=name),
+                      SQLALCHEMY_TRACK_MODIFICATIONS=False)
+    db.init_app(app)
+    Migrate(app, db)
+    try:
+        with app.app_context():
+            try:
+                yield app
+            finally:
+                db.session.remove()
+                db.engine.dispose()
+    finally:
+        with admin.connect() as conn:
+            conn.exec_driver_sql(f'DROP DATABASE "{name}" WITH (FORCE)')
+        admin.dispose()
+
+
+def _chain_upgrade(revision='head'):
+    from pathlib import Path
+    from flask_migrate import upgrade
+    upgrade(directory=str(Path(__file__).parents[1] / 'migrations'), revision=revision)
+
+
+def _assert_chain_head_and_parity():
+    from pathlib import Path
+    from alembic.script import ScriptDirectory
+    from alembic.migration import MigrationContext
+    from alembic.autogenerate import compare_metadata
+    scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
+    assert scripts.get_heads() == ['d1c0a15e0001']
+    assert len(list(scripts.walk_revisions())) == 51
+    assert scripts.get_revision('d1c0a15e0001').down_revision == 'a9c1d2e3f4b5'
+    assert scripts.get_revision('a9c1d2e3f4b5').down_revision == 'c2b9d0e1f2a3'
+    assert scripts.get_revision('c2b9d0e1f2a3').down_revision == 'b1a8c9d0e1f2'
+    with db.engine.connect() as conn:
+        context = MigrationContext.configure(conn, opts={'compare_type': True})
+        assert context.get_current_heads() == ('d1c0a15e0001',)
+        assert compare_metadata(context, db.metadata) == []
+        checks = conn.execute(sa.text(
+            "SELECT conname, convalidated FROM pg_constraint WHERE conrelid IN "
+            "('ai_consent_state'::regclass, 'ai_consent_event'::regclass) AND contype='c'"
+        )).all()
+        assert dict(checks) == {'ck_ai_consent_generation': True,
+                               'ck_ai_consent_event_generation': True,
+                               'ck_ai_consent_action': True}
+
+
+def test_fresh_empty_postgres_complete_chain_has_no_implicit_grants(chain_app):
+    import sqlalchemy as sa
+    with db.engine.connect() as conn:
+        assert sa.inspect(conn).get_table_names() == []
+    _chain_upgrade()
+    _assert_chain_head_and_parity()
+    with db.engine.connect() as conn:
+        for table in ('user', 'apple_account_association', 'apple_subscription',
+                      'ai_starter_grant', 'ai_allowance_bucket', 'ai_usage_reservation',
+                      'ai_consent_state', 'ai_consent_event'):
+            assert conn.exec_driver_sql(f'SELECT count(*) FROM "{table}"').scalar_one() == 0
+    _chain_upgrade()  # Alembic head reentry
+    _assert_chain_head_and_parity()
+
+
+def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
+    import sqlalchemy as sa
+    from datetime import datetime, timezone, timedelta
+    from ai_allowance_support import premium_row
+    from app.models import (AppleAccountAssociation, AiStarterGrant, AiAllowanceBucket,
+                            AiUsageReservation, TrainingPlan)
+    _chain_upgrade('a9c1d2e3f4b5')
+    now = datetime.now(timezone.utc)
+    db.session.add_all([User(id=1, username='chain-a', email='chain-a@example.invalid'),
+                        User(id=2, username='chain-b', email='chain-b@example.invalid')])
+    db.session.commit()
+    for uid in (1, 2):
+        premium_row(uid, original_id=str(900 + uid))
+        db.session.add_all([
+            AppleAccountAssociation(user_id=uid, token=f'00000000-0000-0000-0000-{uid:012d}'),
+            AiStarterGrant(user_id=uid, policy_version='synthetic-v1', granted_at=now),
+            AiAllowanceBucket(id=uid, user_id=uid, scope='STARTER', feature='coach',
+                period_key='NEVER', policy_version='synthetic-v1', granted=10, used=2,
+                reserved=1, billed_releases=0, created_at=now, updated_at=now),
+            TrainingPlan(user_id=uid, plan_data='{"synthetic": true}', score=7),
+        ])
+    db.session.commit()
+    for uid in (1, 2):
+        db.session.add(AiUsageReservation(public_id=str(uid)*32, user_id=uid, bucket_id=uid,
+            feature='coach', key_digest=str(uid)*64, state='RESERVED', provider_billed=False,
+            created_at=now, expires_at=now + timedelta(minutes=15)))
+    db.session.commit()
+    db.session.remove()
+
+    def snapshot(conn, names):
+        inspector = sa.inspect(conn)
+        return {name: (sorted(conn.exec_driver_sql(
+                    f'SELECT row_to_json(t)::text FROM "{name}" t').scalars()),
+                inspector.get_columns(name), inspector.get_foreign_keys(name),
+                inspector.get_unique_constraints(name), inspector.get_check_constraints(name),
+                inspector.get_indexes(name), inspector.get_pk_constraint(name)) for name in names}
+
+    with db.engine.connect() as conn:
+        names = set(sa.inspect(conn).get_table_names()) - {'alembic_version'}
+        assert not names & {'ai_consent_state', 'ai_consent_event'}
+        before = snapshot(conn, names)
+    _chain_upgrade()
+    _assert_chain_head_and_parity()
+    with db.engine.connect() as conn:
+        # SQLAlchemy type objects compare by identity; canonical repr preserves
+        # their actual reflected type/length while comparing every old object.
+        assert repr(snapshot(conn, names)) == repr(before)
+        assert set(sa.inspect(conn).get_table_names()) == names | {
+            'alembic_version', 'ai_consent_state', 'ai_consent_event'}
+        assert conn.exec_driver_sql('SELECT count(*) FROM ai_consent_state').scalar_one() == 0
+        assert conn.exec_driver_sql('SELECT count(*) FROM ai_consent_event').scalar_one() == 0
+    # The create_all-first contract also permits exact migration reentry.
+    from alembic.operations import Operations
+    from alembic.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from pathlib import Path
+    migration = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations')).get_revision('d1c0a15e0001').module
+    with db.engine.begin() as conn, Operations.context(MigrationContext.configure(conn)):
+        migration.upgrade()
+        assert repr(snapshot(conn, names)) == repr(before)
+        conn.execute(sa.insert(AIConsentState), dict(owner_id=1, generation=1, grants={}, changed_at=now))
+        conn.execute(sa.insert(AIConsentEvent), dict(owner_id=1, generation=1, request_id='synthetic',
+            request_digest='a'*64, purpose='synthetic', version='synthetic', action='revoke',
+            locale='en', text_digest='a'*64, contract_digest='b'*64, occurred_at=now))
+        with pytest.raises(RuntimeError, match='refuses to erase'):
+            migration.downgrade()
+        # Foreign keys are enforced; account deletion cascades just its evidence.
+        with pytest.raises(sa.exc.IntegrityError), conn.begin_nested():
+            conn.execute(sa.insert(AIConsentState), dict(owner_id=999, generation=1, grants={}, changed_at=now))
+        conn.execute(sa.delete(User).where(User.id == 1))
+        assert conn.exec_driver_sql('SELECT count(*) FROM ai_consent_state').scalar_one() == 0
+        assert conn.exec_driver_sql('SELECT count(*) FROM ai_consent_event').scalar_one() == 0
+        assert conn.exec_driver_sql('SELECT user_id FROM apple_subscription').scalar_one() == 2
+        assert conn.exec_driver_sql('SELECT user_id FROM ai_usage_reservation').scalar_one() == 2
+
+
+@pytest.mark.parametrize('table,constraint,predicate', [
+    ('ai_consent_state', 'ck_ai_consent_generation', 'generation > 0'),
+    ('ai_consent_event', 'ck_ai_consent_event_generation', 'generation > 0'),
+    ('ai_consent_event', 'ck_ai_consent_action', "action IN ('affirmative_grant', 'revoke')"),
+])
+@pytest.mark.parametrize('damage', ['name_only', 'not_valid'])
+def test_all_d1_checks_reject_unsafe_substitutes(pg_app, table, constraint, predicate, damage):
+    from pathlib import Path
+    from alembic.script import ScriptDirectory
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    migration = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations')).get_revision('d1c0a15e0001').module
+    with pg_app.app_context(), db.engine.begin() as conn:
+        conn.exec_driver_sql(f'ALTER TABLE {table} DROP CONSTRAINT {constraint}')
+        check = '1=1' if damage == 'name_only' else predicate
+        suffix = '' if damage == 'name_only' else ' NOT VALID'
+        conn.exec_driver_sql(f'ALTER TABLE {table} ADD CONSTRAINT {constraint} CHECK ({check}){suffix}')
+        with Operations.context(MigrationContext.configure(conn)), pytest.raises(RuntimeError):
+            migration.upgrade()
+
+
+@pytest.mark.parametrize('recipient', ['openai', 'bedrock'])
+def test_paid_entitlement_and_reserved_allowance_cannot_authorize_sdk(pg_app, monkeypatch, recipient):
+    from ai_allowance_support import (enable_subscriptions, enable_ledger, fixture_policy, premium_row)
+    from app.services import ai_allowances as ledger, subscriptions
+    with pg_app.app_context():
+        enable_subscriptions(pg_app, monkeypatch)
+        enable_ledger(pg_app, fixture_policy(starter=False, premium=True))
+        premium_row(1)
+        assert subscriptions.entitlement(1)['effective_premium'] is True
+        reservation = ledger.reserve(1, 'coach', 'synthetic-integration-key')
+        assert reservation.may_execute is True
+        captured = []
+        for owner in (1, 2):
+            with pytest.raises(consent.ConsentDenied):
+                invoke(owner=owner, recipient=recipient, sdk=lambda **kw: captured.append(kw))
+        assert captured == []
+        assert db.session.query(AIConsentState).count() == db.session.query(AIConsentEvent).count() == 0
+        assert consent.memory_available(1) is False

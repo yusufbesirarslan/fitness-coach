@@ -7,8 +7,8 @@ on:
   pull_request:
   push:
     # Qualify R6-03A before opening its PR; deploy.yml accepts main only.
-    # D1 remains isolated while sibling migration ancestry is unresolved.
-    # Qualify the branch HEAD even when GitHub cannot build a PR merge ref.
+    # Bind D1 integration qualification directly to the branch HEAD.
+    # Independent integration review is still required before source merge.
     branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent]
 
 jobs:
@@ -359,6 +359,8 @@ jobs:
       - name: Run deterministic races
         run: >-
           python -m pytest -m pg_concurrency -q
+          tests/test_apple_subscriptions_pg.py
+          tests/test_ai_allowances_pg.py
           tests/test_mobile_auth_pg.py
           tests/test_mobile_log_food_pg.py
           tests/test_mobile_training_generation_pg.py

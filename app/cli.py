@@ -97,7 +97,7 @@ _DEFAULT_TEST_RE = re.compile(
 # Sıra FK-güvenli: PumpCheckLike/Comment, PumpCheck'ten önce gelir.
 def _user_child_models():
     from app.models import (
-        Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity, ExerciseNote,
+        Activity, AiAllowanceBucket, AiStarterGrant, AiUsageReservation, AppleAccountAssociation, AppleSubscription, CoachConversation, CognitoSession, CustomMeal, DailyActivity, ExerciseNote,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, MealPhotoCleanup, MobileAuthSession, Notification,
         NutritionPlan, PendingAction,
@@ -112,7 +112,9 @@ def _user_child_models():
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog, WorkoutSession,
     )
     return (
-        ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
+        # MON-02-BE-03A: reservations point at buckets; the grant row goes last.
+        AiUsageReservation, AiAllowanceBucket, AiStarterGrant,
+        AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         # PlanMutationRecord before TrainingPlan: the journal describes plan
         # history, so nothing should ever observe entries for a plan that is
         # already gone.
@@ -434,7 +436,24 @@ def release_prepare_cmd():
     click.echo(f"release-prepare: schema at head {','.join(sorted(heads))}")
 
 
+def ai_allowance_sweep_cmd():
+    """MON-02-BE-03A: settle abandoned AI allowance holds and purge old records.
+
+    Refuses while AI_ALLOWANCE_LEDGER_ENABLED is OFF. Safe to repeat.
+
+        flask --app starter ai-allowance-sweep
+    """
+    from app.services import ai_allowances
+    try:
+        expired = ai_allowances.expire_abandoned()
+        settled, periods = ai_allowances.purge_retained()
+    except ai_allowances.AllowanceError as error:
+        raise click.ClickException(error.code) from None
+    click.echo(f"expired={expired} purged_settled={settled} purged_periods={periods}")
+
+
 def register_cli(app):
+    app.cli.command("ai-allowance-sweep")(ai_allowance_sweep_cmd)
     app.cli.command("release-prepare")(release_prepare_cmd)
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)

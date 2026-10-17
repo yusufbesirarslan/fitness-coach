@@ -938,7 +938,7 @@ def test_timing_contract_algebra():
 @pytest.mark.parametrize("old,new", [
     ("SSM_EXECUTION_TIMEOUT_SECONDS: int = 2200", "SSM_EXECUTION_TIMEOUT_SECONDS: int = 2100"),
     ("POLL_HORIZON_SECONDS: int = 2500", "POLL_HORIZON_SECONDS: int = 2400"),
-    ("CONTROLLER_STEP_MINUTES: int = 50", "CONTROLLER_STEP_MINUTES: int = 48"),
+    ("CONTROLLER_STEP_MINUTES: int = 75", "CONTROLLER_STEP_MINUTES: int = 68"),
     ('"release_rollback": 500,', '"release_rollback": 400,'),
     ('"retirement": 400,', '"retirement": 300,'),
     ('"image_build": 600,', '"image_build": 1300,'),

@@ -164,6 +164,9 @@ def logout():
 @bp.errorhandler(429)
 def rate_limited(error):
     retry_after = error.limit.limit.get_expiry()
+    if request.endpoint and request.endpoint.startswith("mobile_api.subscription_"):
+        return mobile_error("SUBSCRIPTION_RATE_LIMITED", "Too many requests.", 429, True,
+                            retry_after=retry_after)
     return mobile_error(
         "AUTH_RATE_LIMITED", "Too many requests.", 429, True,
         retry_after=retry_after)
@@ -255,3 +258,5 @@ from app.blueprints.ai_consent import mobile_consent, consent_error_response
 from app.services.ai_consent import ConsentDenied
 bp.add_url_rule('/ai-consent', view_func=mobile_consent, methods=['GET', 'POST'])
 bp.register_error_handler(ConsentDenied, consent_error_response)
+from app.blueprints import mobile_subscriptions  # noqa: E402,F401
+from app.blueprints import mobile_ai_allowances  # noqa: E402,F401

@@ -150,6 +150,10 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
     assert flask_app.config["MOBILE_AUTH_ENABLED"] is True
     assert _mobile_rules(flask_app) == {
         ("/api/v1/ai-consent", ("GET", "POST")),
+        ("/api/v1/subscription/purchase-context", ("GET",)),
+        ("/api/v1/subscription/verify", ("POST",)),
+        ("/api/v1/subscription/entitlement", ("GET",)),
+        ("/api/v1/ai/allowances", ("GET",)),
         ("/api/v1/auth/login", ("POST",)),
         ("/api/v1/auth/refresh", ("POST",)),
         ("/api/v1/auth/logout", ("POST",)),

@@ -1,5 +1,20 @@
 # Feature flags — inventory and lifecycle
 
+`AI_ALLOWANCE_LEDGER_ENABLED` (MON-02-BE-03A) defaults OFF, shipped_dark,
+owner @yusufbesirarslan, review by 2026-11-13. Depends on `MOBILE_AUTH_ENABLED`
+and reads Premium only through `APPLE_SUBSCRIPTIONS_ENABLED`'s entitlement. OFF:
+`GET /api/v1/ai/allowances` answers 404 before auth and every ledger entry point
+refuses; no existing route consults the ledger in either state. No Starter or
+Premium quantities exist in code or env. Rollback: set 0 (rows retained). See
+[ledger design](AI_ALLOWANCE_LEDGER.md) and [mobile contract](mobile/ai-allowances-v1.md).
+
+`APPLE_SUBSCRIPTIONS_ENABLED` (MON-02-BE-01) defaults OFF. With mobile auth
+enabled, authenticated subscription routes report `SUBSCRIPTIONS_DISABLED`
+without Apple I/O. Existing `User.is_premium` and quotas remain unchanged.
+Owner: @yusufbesirarslan; review by 2026-11-13. Requires independent review,
+MON-03 sandbox qualification and separate human deployment/payment activation
+approval. Rollback: set 0. See [subscription contract](APPLE_SUBSCRIPTIONS.md).
+
 TD-01 PR2: `FITX_EXERCISE_PERFORMANCE_HISTORY_ENABLED` defaults OFF, shipped_dark,
 owner @yusufbesirarslan, review 2026-11-01. Depends on sessions and mobile auth;
 gates only the separate v1 history/capability GETs. No migration or data change.

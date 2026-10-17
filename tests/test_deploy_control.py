@@ -60,6 +60,13 @@ from scripts.deploy_control import (
 )
 
 
+@pytest.fixture(autouse=True)
+def qualified_recovery_for_existing_ssm_unit_tests(monkeypatch):
+    # These tests isolate SSM/host behavior. The real mandatory recovery gate
+    # and controller integration failures are exercised in test_recovery_gate.
+    monkeypatch.setattr(deploy_control, "require_recovery", lambda *args: "qualified-test-snapshot")
+
+
 VALID_ENV = {
     "DEPLOY_SHA": "a" * 40,
     "AWS_REGION": "eu-central-1",
@@ -1245,7 +1252,7 @@ def test_canonical_host_budget_preserves_literal_220_second_margin():
     assert HOST_WORST_CASE_SECONDS == 1980
     assert SSM_EXECUTION_MARGIN_SECONDS == 220
     assert SSM_EXECUTION_TIMEOUT_SECONDS - HOST_WORST_CASE_SECONDS == SSM_EXECUTION_MARGIN_SECONDS
-    assert CONTROLLER_REQUIRED_SECONDS == 2890 < 50 * 60
+    assert CONTROLLER_REQUIRED_SECONDS == 4090 < 75 * 60
 
 
 @pytest.mark.parametrize("ping_status", ["ConnectionLost", "Inactive"])
@@ -2893,6 +2900,7 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
         "git:fetch", "git:cat-file", "git:rev-parse",
         "aws:ec2:describe-instances",
         "aws:ssm:describe-instance-information",
+        "git:fetch", "git:cat-file", "git:rev-parse",
         "aws:ssm:describe-instance-information",
         "aws:ssm:send-command",
         "aws:ssm:put-parameter",
@@ -3059,7 +3067,7 @@ def test_controller_refuses_to_send_without_full_terminal_monitoring_reserve(
         )
 
     assert ["ssm", "send-command"] not in calls
-    assert CONTROLLER_BUDGET_SECONDS == 50 * 60
+    assert CONTROLLER_BUDGET_SECONDS == 75 * 60
     assert SEND_AND_MONITOR_RESERVE_SECONDS > AWS_EXPIRY_SECONDS
 
 
