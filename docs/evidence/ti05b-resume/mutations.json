@@ -1,0 +1,72 @@
+[
+  {
+    "mutation": "p1_without_p0",
+    "detected": true,
+    "exit": 1,
+    "test": "test/features/workout/data/live_training_insight_repository_test.dart",
+    "plain_name": "P1 without P0 is invalid"
+  },
+  {
+    "mutation": "await_insight_before_completion",
+    "detected": true,
+    "exit": 1,
+    "test": "test/features/workout/presentation/training_insight_completion_test.dart",
+    "plain_name": "completion never awaits the insight"
+  },
+  {
+    "mutation": "account_response_after_switch",
+    "detected": true,
+    "exit": 1,
+    "test": "test/features/workout/presentation/state/training_insight_controller_test.dart",
+    "plain_name": "account switch fences"
+  },
+  {
+    "mutation": "logging_interval_as_rest",
+    "detected": true,
+    "exit": 1,
+    "test": "test/features/workout/presentation/training_insight_card_test.dart",
+    "plain_name": "the logging interval is never labelled as rest"
+  },
+  {
+    "mutation": "unknown_kind_accepted",
+    "detected": true,
+    "exit": 1,
+    "test": "test/features/workout/data/training_insight_api_dto_test.dart",
+    "plain_name": "unknown state, kind and title"
+  },
+  {
+    "mutation": "null_action_synthesized",
+    "detected": true,
+    "exit": 1,
+    "test": "test/features/workout/presentation/training_insight_card_test.dart",
+    "plain_name": "a null action renders no action"
+  },
+  {
+    "mutation": "notes_influence_insight",
+    "detected": true,
+    "exit": 1,
+    "test": "tests/test_ti03_api.py::test_persistent_exercise_notes_are_never_read",
+    "plain_name": null
+  },
+  {
+    "mutation": "plan_writer_reachable",
+    "detected": true,
+    "exit": 1,
+    "test": "tests/test_ti03_architecture.py::test_no_forbidden_authority_is_reachable",
+    "plain_name": null
+  },
+  {
+    "mutation": "local_kill_switch_ignored",
+    "detected": true,
+    "exit": 1,
+    "test": "test/app/app_composition_test.dart",
+    "plain_name": "Training Insight composition requires native auth"
+  },
+  {
+    "mutation": "capability_off_stale_card",
+    "detected": true,
+    "exit": 1,
+    "test": "test/features/workout/presentation/training_insight_completion_test.dart",
+    "plain_name": "capability off clears an already rendered insight"
+  }
+]

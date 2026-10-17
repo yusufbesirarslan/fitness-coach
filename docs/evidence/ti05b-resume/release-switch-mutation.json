@@ -1,0 +1,6 @@
+{
+  "mutation": "canonical_release_switch_dropped",
+  "detected": true,
+  "exit": 255,
+  "source_restored": true
+}
