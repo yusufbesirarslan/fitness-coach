@@ -593,12 +593,15 @@ def test_all_d1_checks_reject_unsafe_substitutes(pg_app, table, constraint, pred
 def test_paid_entitlement_and_reserved_allowance_cannot_authorize_sdk(pg_app, monkeypatch, recipient):
     from ai_allowance_support import (enable_subscriptions, enable_ledger, fixture_policy, premium_row)
     from app.services import ai_allowances as ledger, subscriptions
+    from dataclasses import replace
     with pg_app.app_context():
         enable_subscriptions(pg_app, monkeypatch)
-        enable_ledger(pg_app, fixture_policy(starter=False, premium=True))
+        policy = replace(fixture_policy(starter=False, premium=True),
+                         premium=ledger.ScopePolicy('WEEKLY', {'training_generation': 1}, 2))
+        enable_ledger(pg_app, policy)
         premium_row(1)
         assert subscriptions.entitlement(1)['effective_premium'] is True
-        reservation = ledger.reserve(1, 'coach', 'synthetic-integration-key')
+        reservation = ledger.reserve(1, 'training_generation', 'synthetic-integration-key')
         assert reservation.may_execute is True
         captured = []
         for owner in (1, 2):
