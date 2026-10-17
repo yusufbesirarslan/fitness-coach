@@ -151,3 +151,55 @@ def test_verifier_accepts_only_the_documented_later_delta(tmp_path, extra, nulla
         else:
             with pytest.raises(RuntimeError):
                 run(conn, m.upgrade)
+
+
+def _revision(name):
+    path = ROOT / "migrations/versions" / name
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_STATES = "'RESERVED', 'COMMITTED', 'RELEASED', 'EXPIRED', 'UNOBSERVABLE'"
+
+
+@pytest.mark.parametrize("damage,refusal", [
+    (None, None),
+    (("CHECK (state IN ({}))".format(_STATES), "CHECK (1 = 1)"), "state check"),
+    (("reservation_ref VARCHAR(32)", "reservation_ref VARCHAR(8)"), "columns"),
+    (("reservation_ref VARCHAR(32)", "reservation_ref CHAR(32)"), "columns"),
+    (("ON training_plan_generation_allowance (user_id, state)",
+      "ON training_plan_generation_allowance (state, user_id)"), "owner index"),
+    (("billing_evidence VARCHAR(24)", "billing_evidence CHAR(24)"), "billing_evidence"),
+])
+def test_b1e4_verifier_on_sqlite_create_all_first(tmp_path, damage, refusal):
+    """R2: the create_all-first SQLite boot passes b1e4 twice; a damaged definition fails closed."""
+    from app.models import (
+        AiAllowanceBucket, AiStarterGrant, AiUsageReservation, TrainingPlanGenerationAllowance,
+        TrainingPlanGenerationOperation)
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'b1e4.db'}")
+    models = (AiStarterGrant, AiAllowanceBucket, AiUsageReservation,
+              TrainingPlanGenerationOperation, TrainingPlanGenerationAllowance)
+    with engine.begin() as conn:
+        base(conn)
+        conn.execute(sa.text("CREATE TABLE training_plan (id INTEGER PRIMARY KEY)"))
+        for model in models:
+            statements = [str(sa.schema.CreateTable(model.__table__).compile(conn))] + [
+                str(sa.schema.CreateIndex(i).compile(conn)) for i in model.__table__.indexes]
+            for statement in statements:
+                if damage and damage[0] in statement:
+                    statement = statement.replace(*damage)
+                conn.execute(sa.text(statement))
+        for name in ("a9c1d2e3f4b5_ai_allowance_ledger.py",
+                     "d3e4f5a6b7c8_add_training_plan_generation_operations.py",
+                     "b0d3e4f5a6b7_training_dispatch_boundary.py"):
+            run(conn, _revision(name).upgrade)
+    head = _revision("b1e4f5a6c7d8_training_allowance_association.py")
+    with engine.begin() as conn:
+        if refusal is None:
+            run(conn, head.upgrade)
+            run(conn, head.upgrade)
+        else:
+            with pytest.raises(RuntimeError, match=refusal):
+                run(conn, head.upgrade)

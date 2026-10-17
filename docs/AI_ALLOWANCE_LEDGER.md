@@ -193,4 +193,15 @@ the feature flag does not gate schema migration or release preparation.
   expiry and replay semantics are unchanged; an expired hold still settles as
   EXPIRED (consumed once).
 - Migration `a9c1d2e3f4b5`'s create_all-first verifier accepts exactly this delta
-  (one extra nullable column, `provider_billed` nullable) and nothing else.
+  (one extra nullable column, `provider_billed` nullable) and nothing else; it
+  checks the later column by name only. `b1e4f5a6c7d8` is the authority for its
+  definition: exactly `VARCHAR(24)` NULL with no server default (CHAR, other
+  lengths/types, NOT NULL or a default fail closed), and `provider_billed` a
+  `BOOLEAN` with no server default. The same verifier accepts an existing
+  `training_plan_generation_allowance` only with its exact DDL: column types,
+  lengths, nullability and no defaults; the named state CHECK with the exact
+  predicate and `convalidated` (every constraint on the table must be validated);
+  PK, named reference UNIQUE, exactly the two `id` CASCADE foreign keys; and, when
+  present, the owner index on `(user_id, state)` (non-unique, not partial).
+- `billed_releases` counts UNKNOWN releases as well ("released while possibly
+  billed"); it is not confirmed provider billing.
