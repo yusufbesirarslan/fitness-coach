@@ -260,7 +260,7 @@ def test_in_progress_is_retryable_and_the_same_key_proceeds_once_released(
     assert TrainingPlan.query.count() == 1
 
 
-def test_persistence_unavailable_is_retryable_and_the_same_key_resumes_once(
+def test_staging_failure_never_redispatches_the_same_key(
         command_user, native_request, fake_generator, monkeypatch, roomy_quota):
     fake_generator()
     real_stage = store.stage_candidate
@@ -283,14 +283,14 @@ def test_persistence_unavailable_is_retryable_and_the_same_key_resumes_once(
         "IN_PROGRESS", 1, True)
     assert _charged(command_user.id) == 1
 
-    result = _run_command(command_user, native_request, lambda: calls.append(1))
-
-    assert result.replayed is False
-    assert calls == [1, 1]
+    with pytest.raises(GenerationInProgress):
+        _run_command(command_user, native_request, lambda: calls.append(1))
+    assert calls == [1]
     [operation] = _operations(command_user.id)
-    assert (operation.status, operation.attempt_count) == ("SUCCEEDED", 2)
-    assert _charged(command_user.id) == 1  # one charge across both attempts
-    assert TrainingPlan.query.count() == 1
+    assert (operation.status, operation.attempt_count) == ("IN_PROGRESS", 1)
+    assert operation.provider_dispatch_possible is True
+    assert _charged(command_user.id) == 1
+    assert TrainingPlan.query.count() == 0
 
 
 def test_provider_capacity_refusal_is_retryable_and_the_same_key_then_succeeds(
@@ -326,3 +326,29 @@ def test_provider_capacity_refusal_is_retryable_and_the_same_key_then_succeeds(
     [operation] = _operations(command_user.id)
     assert (operation.status, operation.attempt_count) == ("SUCCEEDED", 1)
     assert _charged(command_user.id) == 1
+
+
+def test_unknown_retirement_retains_legacy_quota_and_never_mutates_allowances(
+        command_user, native_request, fake_generator, monkeypatch, roomy_quota):
+    from datetime import datetime, timedelta
+    from app.models import AiUsageReservation, AiAllowanceBucket, AiStarterGrant
+    fake_generator()
+    real_stage = store.stage_candidate
+    monkeypatch.setattr(store, 'stage_candidate', lambda *a, **k: (
+        (_ for _ in ()).throw(GenerationPersistenceUnavailable())))
+    with pytest.raises(GenerationPersistenceUnavailable):
+        _run_command(command_user, native_request, lambda: None)
+    monkeypatch.setattr(store, 'stage_candidate', real_stage)
+    [operation] = _operations(command_user.id)
+    operation.updated_at = datetime.utcnow() - timedelta(minutes=16)
+    db.session.commit()
+    with pytest.raises(StoredGenerationFailure) as failure:
+        _run_command(command_user, native_request, lambda: pytest.fail('redispatch'))
+    assert failure.value.public_code == 'TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN'
+    assert _charged(command_user.id) == 1
+    [operation] = _operations(command_user.id)
+    assert operation.provider_dispatch_possible is True
+    assert operation.quota_reserved is True
+    assert AiUsageReservation.query.count() == 0
+    assert AiAllowanceBucket.query.count() == 0
+    assert AiStarterGrant.query.count() == 0

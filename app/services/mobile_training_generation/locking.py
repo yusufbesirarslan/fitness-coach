@@ -32,7 +32,7 @@ def _local_owner_lock(user_id: int):
 
 @contextmanager
 def try_owner_lock(user_id: int):
-    """Yield whether this worker acquired the owner's nonblocking lock."""
+    """Short admission/recovery arbitration only; release before provider controls."""
     if db.engine.dialect.name != "postgresql":
         with _local_owner_lock(user_id) as acquired:
             yield acquired
