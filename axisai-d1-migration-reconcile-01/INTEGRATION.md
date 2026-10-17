@@ -31,7 +31,7 @@ Only D1's parent and explanatory header change. Its DDL, validation, constraints
 - Name-only tautologies and NOT VALID replacements rejected for all three D1 CHECK constraints.
 - Real paid entitlement plus fresh reserved allowance still denies final SDK dispatch for both recipients and both owners without consent. No provider is called, no consent rows are created, and Memory stays unavailable.
 
-The five accepted R2 modules and shared authorization/fixture-audit helpers are unchanged. Prior independent R2 approval is reused, with regression tests only; it is not repeated as a new independent security review.
+The accepted R2 authorization fixtures, explicit per-test ALLOW markers, assertions and shared fixture-audit helpers are preserved. Four reviewed modules are byte-identical; `test_pa06_privacy.py` only adds response closure and a capacity-restoration assertion to its existing first-party transport test. Hosted integration exposed two unclosed SSE test responses holding permits before the subscription capacity tests; the fix changes no runtime code or authorization seam. Prior independent R2 approval is reused, with regression tests only; it is not repeated as a new independent security review.
 
 The local report at `/Users/yusuf/axisai-d1-migration-reconcile-01/FINAL_REPORT.md` records final SHA, commands, counts, hosted CI binding and handoff. The PR description links exact-head CI after completion.
 

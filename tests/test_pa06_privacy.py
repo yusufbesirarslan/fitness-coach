@@ -95,6 +95,8 @@ def test_m01_owned_training_reaches_sdk_without_social(
         monkeypatch.setattr(coach_context_queries, name, forbidden)
     captures = openai_capture(monkeypatch, [answer()])
     headers = bearer(user)  # also register the Cognito fixture's principal
+    from app.services import ai_gate
+    capacity_before = ai_gate.capacity_snapshot()
     if transport == 'native':
         response = client.post('/api/v1/coach/messages', headers=headers,
                                json={'message': 'Review my workout progress'})
@@ -103,8 +105,12 @@ def test_m01_owned_training_reaches_sdk_without_social(
         response = client.post('/ask/stream' if transport == 'web-stream' else '/ask',
                                json={'question': 'Review my workout progress',
                                      'history': [{'role': 'bot', 'text': CANARY}]})
-    assert response.status_code == 200
-    assert b'OWN_TRAINING_OK' in response.data
+    # Flask's test client must close SSE responses to release call_on_close
+    # capacity, just as the WSGI server does after completing a response.
+    with response:
+        assert response.status_code == 200
+        assert b'OWN_TRAINING_OK' in response.data
+    assert ai_gate.capacity_snapshot() == capacity_before
     assert captures and all(CANARY.encode() not in body for body in captures)
     assert b'1260' in captures[0] and b'intermediate' in captures[0]
     assert b'dumbbell' in captures[0] and b'deep squat' in captures[0]
