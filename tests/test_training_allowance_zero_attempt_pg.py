@@ -18,6 +18,8 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
+from app.services.ai_consent import ConsentDenied
+
 from tests.test_mobile_training_generation_api import _provider_document
 from tests.test_mobile_training_generation_pg import (  # noqa: F401
     pg_generation_app, _request,
@@ -235,9 +237,10 @@ def test_revocation_before_final_gate_releases_the_hold_unbilled(chain, route, m
         chain.monkeypatch.setattr(ai_provider_call, "model_concurrency_slot", slot)
     with chain.app.app_context():
         consent(owner, chain.policy, "affirmative_grant", "grant-" + moment)
-        with pytest.raises(StoredGenerationFailure) as failed:
+        with pytest.raises(ConsentDenied) as failed:
             generate(owner, "a1-late-revoke")
-        assert failed.value.public_code == "TRAINING_PLAN_GENERATION_UNAVAILABLE"
+        assert failed.value.code in {"AI_CONSENT_REQUIRED", "AI_CONSENT_CHANGED"}
+        assert failed.value.status == 403
         state = snap(owner)
         assert state.operations == [("FAILED", True, False)]
         _unbilled(state)
@@ -245,8 +248,10 @@ def test_revocation_before_final_gate_releases_the_hold_unbilled(chain, route, m
 
         # Same-key replay: the stored answer and the ledger settlement replay.
         for _ in range(2):
-            with pytest.raises(StoredGenerationFailure):
+            with pytest.raises(StoredGenerationFailure) as replay:
                 generate(owner, "a1-late-revoke")
+            assert replay.value.public_code == failed.value.code
+            assert replay.value.http_status == 403
         _unbilled(snap(owner))
         assert ai_consent.generation(owner) == 2
 
@@ -264,7 +269,7 @@ def test_refusal_after_an_earlier_physical_attempt_keeps_unknown_and_consumes(ch
         chain.recovery[:] = [revoke]  # a timeout is retried by the recovery ladder
     with chain.app.app_context():
         consent(owner, chain.policy, "affirmative_grant", "grant-before-" + first)
-        with pytest.raises(StoredGenerationFailure):
+        with pytest.raises(ConsentDenied):
             generate(owner, "a1-prior-attempt-" + first)
         state = snap(owner)
         assert chain.calls == {"bedrock": 0, "openai": 1}
@@ -356,7 +361,7 @@ def _deferred_zero_attempt_failure(chain, owner, key):
         raise ai_allowances.AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
     chain.monkeypatch.setattr(ai_allowances, "finalize", unavailable)
     consent(owner, chain.policy, "affirmative_grant", "grant-" + key)
-    with pytest.raises(StoredGenerationFailure):
+    with pytest.raises(ConsentDenied):
         generate(owner, key)
     chain.monkeypatch.setattr(ai_allowances, "finalize", real_finalize)
     state = snap(owner)
@@ -477,7 +482,7 @@ def test_distinct_key_after_refusal_is_a_new_action_with_its_own_hold(chain):
         chain.monkeypatch.setattr(allowance, "preflight_consent", lambda user_id: (
             real(user_id), consent(owner, chain.policy, "revoke", "revoke-distinct")))
         consent(owner, chain.policy, "affirmative_grant", "grant-distinct-1")
-        with pytest.raises(StoredGenerationFailure):
+        with pytest.raises(ConsentDenied):
             generate(owner, "a1-distinct-1")
         chain.monkeypatch.setattr(allowance, "preflight_consent", real)
         with pytest.raises(ai_consent.ConsentDenied):
