@@ -81,6 +81,17 @@ staging, not remote execution: a distinct new key may overlap an old request who
 termination cannot be proven; the new key is a new logical action with its own
 hold.
 
+MON-02-BE-03B-A2 also orders metered retirement against local physical SDK entry
+using D1's existing account fence. An aged operation keeps its operation lock and
+acquires the account row with `NOWAIT` before terminal commit. Both are short
+retirement locks; no new lock spans provider I/O. Active D1 ownership
+refuses retirement temporarily with the existing persistence-unavailable error.
+The 15-minute threshold stays fixed; retirement can be deferred while D1 owns
+the fence. See `training-dispatch-recovery.md` for lock order and rollout limits.
+An SDK timeout can still leave remote inference running after retirement.
+Expiry compensation remains unimplemented pending founder policy; EXPIRED still
+consumes exactly one unit even for a terminal False attempt marker.
+
 ## Zero-attempt settlement (MON-02-BE-03B-A1)
 
 `provider_dispatch_possible` means the operation was **authorized** to call a

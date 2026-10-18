@@ -649,3 +649,349 @@ def test_evidence_migration_refuses_an_incompatible_existing_column(migrate_engi
             f"ALTER TABLE training_plan_generation_operation ADD COLUMN provider_attempt_possible {ddl}")
         with pytest.raises(RuntimeError, match="incompatible"):
             _run(conn, _module(EVIDENCE).upgrade)
+
+
+# ── A2: retirement and physical SDK admission share D1's account fence ─────
+def _a2_retire_in_worker(chain, owner):
+    """A separate worker uses the production owner-arbitration entry order."""
+    from app.extensions import db
+    from app.services.mobile_training_generation import store
+    from app.services.mobile_training_generation.locking import try_owner_lock
+    results = []
+
+    def retire():
+        with chain.app.app_context():
+            try:
+                with try_owner_lock(owner) as acquired:
+                    assert acquired
+                    store.retire_abandoned(owner)
+                results.append("retired")
+            except Exception as error:
+                results.append(error)
+            finally:
+                db.session.remove()
+    worker = threading.Thread(target=retire)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive(), "retirement waited across provider I/O"
+    assert len(results) == 1
+    return results[0]
+
+
+@pytest.mark.parametrize("boundary", ["after_consent", "after_marker", "in_sdk"])
+@pytest.mark.parametrize("sdk_outcome", ["ok", "timeout"])
+def test_a2_active_d1_fence_refuses_retirement_until_sdk_exit(chain, boundary, sdk_outcome):
+    from app.extensions import db
+    from app.services import ai, ai_consent
+    from app.services.mobile_training_generation import store
+    from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
+    owner, other = chain.owners
+    events = []
+    original_sdk = ai.openai_client.chat.completions.create
+
+    def blocked_retirement():
+        result = _a2_retire_in_worker(chain, owner)
+        assert isinstance(result, GenerationPersistenceUnavailable)
+        state = snap(owner)
+        assert state.operations == [("IN_PROGRESS", True, boundary != "after_consent")]
+        assert snap(other).operations == []
+        # The failed retirement left no operation or advisory lock behind.
+        from app.services.mobile_training_generation.locking import try_owner_lock
+        with try_owner_lock(owner) as acquired:
+            assert acquired
+        db.session.rollback()
+        events.append("RETIRE_REFUSED")
+
+    def sdk(**kwargs):
+        events.append("SDK_ENTRY")
+        if boundary == "in_sdk":
+            blocked_retirement()
+        response = original_sdk(**kwargs)
+        events.append("SDK_RETURN")
+        return response
+    chain.monkeypatch.setattr(ai.openai_client.chat.completions, "create", sdk)
+    real_marker = store.mark_attempt_possible
+
+    def marker(op):
+        _age(owner)
+        if boundary == "after_consent":
+            blocked_retirement()
+        real_marker(op)
+        events.append("MARKER_COMMITTED")
+        if boundary == "after_marker":
+            blocked_retirement()
+    chain.monkeypatch.setattr(store, "mark_attempt_possible", marker)
+    real_dispatch = ai_consent.dispatch
+
+    @contextmanager
+    def dispatch(*args, **kwargs):
+        try:
+            with real_dispatch(*args, **kwargs):
+                yield
+        finally:
+            # AFTER D1 releases, BEFORE staging or another recovery attempt.
+            events.append("D1_RELEASED")
+            assert _a2_retire_in_worker(chain, owner) == "retired"
+            events.append("RETIRE_COMMITTED")
+    chain.monkeypatch.setattr(ai_consent, "dispatch", dispatch)
+    if sdk_outcome == "timeout":
+        chain.behaviour[:] = ["timeout"]
+    with chain.app.app_context():
+        consent(owner, chain.policy, "affirmative_grant", "a2-fence-grant")
+        with pytest.raises(GenerationPersistenceUnavailable):
+            generate(owner, "a2-fenced")
+        assert events.index("SDK_ENTRY") < events.index("D1_RELEASED") < events.index("RETIRE_COMMITTED")
+        if boundary != "in_sdk":
+            assert events.index("RETIRE_REFUSED") < events.index("SDK_ENTRY")
+        state = snap(owner)
+        assert state.operations == [("FAILED", True, True)] and state.plans == 0
+        assert chain.calls == {"bedrock": 0, "openai": 1}
+        # Same key is terminal and cannot cause another physical attempt.
+        from app.services.mobile_training_generation.errors import StoredGenerationFailure
+        with pytest.raises(StoredGenerationFailure):
+            generate(owner, "a2-fenced")
+        assert chain.calls["openai"] == 1
+        assert snap(owner).bucket == (1, 0, 0)
+
+
+def test_a2_retirement_before_d1_refuses_sdk_and_new_key_is_independent(chain):
+    from app.services import ai_provider_call
+    from app.services.mobile_training_generation import store
+    from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
+    owner = chain.owners[0]
+
+    @contextmanager
+    def capacity(*args, **kwargs):
+        _age(owner)
+        assert _a2_retire_in_worker(chain, owner) == "retired"
+        yield
+    with chain.app.app_context():
+        consent(owner, chain.policy, "affirmative_grant", "a2-first-grant")
+        with chain.monkeypatch.context() as patch:
+            patch.setattr(ai_provider_call, "model_concurrency_slot", capacity)
+            with pytest.raises(GenerationPersistenceUnavailable):
+                generate(owner, "a2-retire-first")
+        state = snap(owner)
+        assert state.operations == [("FAILED", True, False)] and sum(chain.calls.values()) == 0
+        generate(owner, "a2-explicit-new-key")
+        state = snap(owner)
+        assert state.operations == [("FAILED", True, False), ("SUCCEEDED", True, True)]
+        assert state.bindings == ["EXPIRED", "COMMITTED"]
+        assert state.bucket == (2, 0, 0) and state.plans == 1 and chain.calls["openai"] == 1
+
+
+@pytest.mark.parametrize("boundary", ["before_marker", "after_marker", "in_sdk"])
+def test_a2_worker_crash_releases_fence_and_allows_retirement(chain, boundary):
+    from app.services.mobile_training_generation import store
+    from app.services.mobile_training_generation.errors import StoredGenerationFailure
+    owner = chain.owners[0]
+    real = store.mark_attempt_possible
+
+    def marker(op):
+        _age(owner)
+        if boundary == "before_marker":
+            raise Crash()
+        real(op)
+        if boundary == "after_marker":
+            raise Crash()
+    chain.monkeypatch.setattr(store, "mark_attempt_possible", marker)
+    if boundary == "in_sdk":
+        chain.behaviour[:] = ["crash"]
+    with chain.app.app_context():
+        consent(owner, chain.policy, "affirmative_grant", "a2-crash-grant")
+        with pytest.raises(Crash):
+            generate(owner, "a2-crash")
+        assert _a2_retire_in_worker(chain, owner) == "retired"
+        with pytest.raises(StoredGenerationFailure):
+            generate(owner, "a2-crash")
+        state = snap(owner)
+        assert state.operations == [("FAILED", True, boundary != "before_marker")]
+        assert state.bucket == (1, 0, 0) and state.bindings == ["EXPIRED"]
+        assert chain.calls["openai"] == int(boundary == "in_sdk")
+
+
+def test_a2_retirement_operation_user_reverse_order_does_not_deadlock(chain):
+    """D1 owns user and waits for operation; retirement must not wait for user."""
+    from app.extensions import db
+    from app.services.mobile_training_generation import store
+    from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
+    owner = chain.owners[0]
+    real = store.authorize_dispatch
+
+    def crash(op):
+        real(op)
+        raise Crash()
+    with chain.app.app_context():
+        consent(owner, chain.policy, "affirmative_grant", "a2-reverse-grant")
+        with chain.monkeypatch.context() as patch:
+            patch.setattr(store, "authorize_dispatch", crash)
+            with pytest.raises(Crash):
+                generate(owner, "a2-reverse")
+        _age(owner)
+        engine = db.engine
+        user_locked = threading.Event()
+        finished, failures, workers = [], [], []
+
+        def admission():
+            try:
+                with engine.begin() as conn:
+                    conn.exec_driver_sql("SET LOCAL lock_timeout = '2000ms'")
+                    conn.exec_driver_sql('SELECT id FROM "user" WHERE id=%s FOR UPDATE', (owner,))
+                    user_locked.set()
+                    conn.exec_driver_sql("SELECT id FROM training_plan_generation_operation WHERE user_id=%s FOR UPDATE", (owner,))
+                    finished.append(True)
+            except BaseException as error:
+                failures.append(error)
+
+        def after_operation_lock(conn, cursor, statement, parameters, context, executemany):
+            if ("training_plan_generation_operation" in statement
+                    and "FOR UPDATE" in statement and not workers):
+                worker = threading.Thread(target=admission)
+                workers.append(worker)
+                worker.start()
+                assert user_locked.wait(5)
+        sa.event.listen(engine, "after_cursor_execute", after_operation_lock)
+        try:
+            start = time.monotonic()
+            with pytest.raises(GenerationPersistenceUnavailable):
+                store.retire_abandoned(owner)
+            assert time.monotonic() - start < 1.5
+        finally:
+            sa.event.remove(engine, "after_cursor_execute", after_operation_lock)
+            for worker in workers:
+                worker.join(5)
+        assert workers and not failures and finished == [True]
+        assert all(not worker.is_alive() for worker in workers)
+        assert snap(owner).operations == [("IN_PROGRESS", True, False)]
+        store.retire_abandoned(owner)
+        assert snap(owner).operations == [("FAILED", True, False)]
+
+
+@pytest.mark.parametrize("order", ["sweep_first", "retirement_first"])
+def test_a2_zero_attempt_expiry_orders_retain_existing_consumption(chain, order):
+    from app.services import ai_allowances
+    from app.services.mobile_training_generation import store, allowance
+    owner = chain.owners[0]
+    real = store.authorize_dispatch
+
+    def crash(op):
+        real(op)
+        raise Crash()
+    with chain.app.app_context():
+        consent(owner, chain.policy, "affirmative_grant", "a2-expiry-grant")
+        with chain.monkeypatch.context() as patch:
+            patch.setattr(store, "authorize_dispatch", crash)
+            with pytest.raises(Crash):
+                generate(owner, "a2-zero-expired")
+        _age(owner)
+        actions = (ai_allowances.expire_abandoned, lambda: store.retire_abandoned(owner))
+        for action in actions if order == "sweep_first" else reversed(actions):
+            action()
+        for _ in range(3):
+            allowance.settle_pending(owner)
+            ai_allowances.expire_abandoned()
+        state = snap(owner)
+        assert state.operations == [("FAILED", True, False)]
+        assert state.holds == [("EXPIRED", "expired", "UNKNOWN", None)]
+        assert state.bindings == ["EXPIRED"] and state.bucket == (1, 0, 0)
+        assert sum(chain.calls.values()) == 0
+
+
+@pytest.mark.parametrize("action", ["revoke", "delete"])
+def test_a2_retirement_concurrent_with_revocation_or_deletion(chain, action):
+    from app.extensions import db
+    from app.services.mobile_training_generation import store
+    from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
+    owner, other = chain.owners
+    real = store.mark_attempt_possible
+    workers, outcomes, errors = [], [], []
+
+    def marker(op):
+        _age(owner)
+        real(op)
+    chain.monkeypatch.setattr(store, "mark_attempt_possible", marker)
+
+    def mutate():
+        with chain.app.app_context():
+            try:
+                if action == "revoke":
+                    consent(owner, chain.policy, "revoke", "a2-concurrent-revoke")
+                else:
+                    with db.engine.begin() as conn:
+                        conn.exec_driver_sql("SET LOCAL lock_timeout = '2000ms'")
+                        conn.exec_driver_sql("DELETE FROM user_session WHERE user_id=%s", (owner,))
+                        conn.exec_driver_sql('DELETE FROM "user" WHERE id=%s', (owner,))
+                outcomes.append(action)
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                db.session.remove()
+
+    def in_flight():
+        worker = threading.Thread(target=mutate)
+        workers.append(worker)
+        worker.start()
+        deadline = time.monotonic() + 1.0
+        with db.engine.connect() as conn:
+            while time.monotonic() < deadline:
+                if conn.exec_driver_sql(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() "
+                        "AND wait_event_type='Lock'").scalar():
+                    break
+            else:
+                pytest.fail("mutation did not queue behind D1")
+        assert isinstance(_a2_retire_in_worker(chain, owner), GenerationPersistenceUnavailable)
+        return "ok"
+    chain.behaviour[:] = [in_flight]
+    with chain.app.app_context():
+        consent(owner, chain.policy, "affirmative_grant", "a2-concurrent-grant")
+        try:
+            generate(owner, "a2-concurrent")
+        except GenerationPersistenceUnavailable:
+            assert action == "delete"
+        finally:
+            for worker in workers:
+                worker.join(5)
+        assert outcomes == [action] and not errors
+        assert all(not worker.is_alive() for worker in workers)
+        assert chain.calls == {"bedrock": 0, "openai": 1}
+        assert snap(other).operations == [] and snap(other).holds == []
+        if action == "delete":
+            assert snap(owner).operations == snap(owner).holds == []
+        else:
+            from app.services import ai_consent
+            assert ai_consent.status(owner)["generation"] == 2
+
+
+def test_a2_retirement_fails_closed_on_account_lock_then_recovers(chain):
+    from app.extensions import db
+    from app.services.mobile_training_generation import store
+    from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
+    owner = chain.owners[0]
+    real = store.authorize_dispatch
+
+    def crash(op):
+        real(op)
+        raise Crash()
+    with chain.app.app_context():
+        consent(owner, chain.policy, "affirmative_grant", "a2-busy-grant")
+        with chain.monkeypatch.context() as patch:
+            patch.setattr(store, "authorize_dispatch", crash)
+            with pytest.raises(Crash):
+                generate(owner, "a2-busy")
+        _age(owner)
+        blocker = db.engine.connect()
+        blocker.begin()
+        try:
+            blocker.exec_driver_sql('SELECT id FROM "user" WHERE id=%s FOR UPDATE', (owner,))
+            start = time.monotonic()
+            with pytest.raises(GenerationPersistenceUnavailable):
+                store.retire_abandoned(owner)
+            assert time.monotonic() - start < 1.5
+            assert not db.session().in_transaction()
+        finally:
+            # Models the blocking worker exiting/crashing: transaction releases.
+            blocker.close()
+        assert _a2_retire_in_worker(chain, owner) == "retired"
+        assert snap(owner).operations == [("FAILED", True, False)]
+        assert sum(chain.calls.values()) == 0
