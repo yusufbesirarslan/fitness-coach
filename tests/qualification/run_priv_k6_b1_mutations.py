@@ -38,7 +38,7 @@ MUTATIONS = (
      "        return any(name in body for name in _PHOTO_FIELDS)\n    return False",
      UNIT, "test_k6c_submitted_photo_meets_the_real_d1_gate_and_is_never_discarded"),
     ("photo_path_skips_consent", ROUTE,
-     "    require_legacy_ai()\n    image_bytes", "    image_bytes",
+     "require_legacy_ai()", "None  # mutation: remove both consent checks",
      UNIT, "test_k6c_submitted_photo_meets_the_real_d1_gate_and_is_never_discarded"),
     ("photo_free_requires_consent", ROUTE,
      "            proof = _no_photo_completion()",
@@ -130,8 +130,11 @@ def main():
             continue
         path = ROOT / relative
         original = path.read_text()
-        if original.count(before) != 1:
-            raise RuntimeError(f"mutation must apply exactly once: {name}")
+        # D1 is checked before admission and defensively at the proof helper.
+        # The semantic bypass must remove both, not one redundant check.
+        expected_count = 2 if name == "photo_path_skips_consent" else 1
+        if original.count(before) != expected_count:
+            raise RuntimeError(f"unexpected mutation match count: {name}")
         try:
             path.write_text(original.replace(before, after))
             command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
