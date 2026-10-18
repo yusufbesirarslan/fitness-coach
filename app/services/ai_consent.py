@@ -186,6 +186,40 @@ def generation(owner):
         return _state(conn, owner)["generation"]
 
 
+def _binding_for(owner, feature, recipient):
+    binding = BINDINGS.get(feature)
+    if not binding or recipient not in {"bedrock", "openai"}:
+        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    authenticated = current_subject()
+    if authenticated is not None and authenticated != owner:
+        raise ConsentDenied()
+    return binding
+
+
+def _authorize(state, binding, recipient, model):
+    purpose, categories = binding
+    grants = state["grants"]
+    record = grants.get(purpose) if isinstance(grants, dict) else None
+    if not _record_valid(purpose, record):
+        raise ConsentDenied("AI_CONSENT_REQUIRED")
+    policy = POLICIES[record["version"]]
+    if policy.categories != categories or (recipient, model) not in policy.recipients:
+        raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+
+
+def preflight(owner, feature, recipient, model):
+    """Early refusal before a metered action reserves anything. Authorizes nothing.
+
+    The same purpose/category/recipient/model predicate as ``dispatch``, read
+    under the same account lock at the current generation. A pass only means
+    the final check could pass now: every physical attempt still goes through
+    ``dispatch``, which also fences the generation captured at admission.
+    """
+    binding = _binding_for(owner, feature, recipient)
+    with _transaction(owner) as conn:
+        _authorize(_state(conn, owner), binding, recipient, model)
+
+
 @contextmanager
 def dispatch(owner, feature, recipient, payload, expected_generation):
     """Hold cross-process account lock THROUGH the bounded blocking SDK call.
@@ -194,25 +228,12 @@ def dispatch(owner, feature, recipient, payload, expected_generation):
     later calls. Nothing already transmitted can be recalled. Streams are
     deliberately disabled: the SDK lacks a bounded total-duration handoff.
     """
-    binding = BINDINGS.get(feature)
-    if not binding or recipient not in {"bedrock", "openai"}:
-        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
-    authenticated = current_subject()
-    if authenticated is not None and authenticated != owner:
-        raise ConsentDenied()
+    binding = _binding_for(owner, feature, recipient)
     with _transaction(owner) as conn:
         state = _state(conn, owner)
         if state["generation"] != expected_generation:
             raise ConsentDenied("AI_CONSENT_CHANGED")
-        purpose, categories = binding
-        grants = state["grants"]
-        record = grants.get(purpose) if isinstance(grants, dict) else None
-        if not _record_valid(purpose, record):
-            raise ConsentDenied("AI_CONSENT_REQUIRED")
-        policy = POLICIES[record["version"]]
-        if (policy.categories != categories
-                or (recipient, payload.get("model")) not in policy.recipients):
-            raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+        _authorize(state, binding, recipient, payload.get("model"))
         yield
 
 

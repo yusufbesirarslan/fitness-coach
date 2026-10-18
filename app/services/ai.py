@@ -257,6 +257,17 @@ def _completion_from_text(text, *, fallback_used=False):
     return ChatCompletion(text=text or "", fallback_used=fallback_used)
 
 
+def heavy_primary_route():
+    """(recipient, model) the heavy router sends to first.
+
+    A refusal there (`AISpendLimitExceeded`, consent included) ends the call:
+    the router falls back to OpenAI only after a non-refusal Bedrock failure.
+    """
+    if BEDROCK_ENABLED and anthropic is not None:
+        return "bedrock", BEDROCK_MODEL
+    return "openai", OPENAI_MODEL
+
+
 def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
                     feature="other"):
     """Like `_heavy_chat` but keeps finish/truncation metadata for generation."""
@@ -264,7 +275,7 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
     lg_key = ai_recovery.lastgood_key(
         "heavy_chat", BEDROCK_MODEL, system_prompt or "", messages, max_tokens)
     fallback_used = False
-    if BEDROCK_ENABLED and anthropic is not None:
+    if heavy_primary_route()[0] == "bedrock":
         try:
             reply = ai_recovery.call_with_recovery(
                 lambda: _claude_chat(messages, system_prompt=system_prompt,
