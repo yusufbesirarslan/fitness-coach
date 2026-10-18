@@ -541,3 +541,19 @@ def test_original_bucket_time_provenance_must_be_consistent(expired, sql):
     before = state(expired)
     assert apply(expired) not in ("COMPENSATION_APPLIED", "COMPENSATION_ALREADY_APPLIED")
     assert state(expired) == before
+
+
+def test_counter_contradiction_can_age_out_without_refund(expired):
+    from app.extensions import db
+    from app.services import ai_allowances as A
+    chain, _, _, _ = expired
+    with chain.app.app_context():
+        db.session.execute(sa.text("UPDATE ai_allowance_bucket SET used=0 WHERE feature='training_generation'"))
+        db.session.commit()
+    assert apply(expired) == "COMPENSATION_COUNTER_UNAVAILABLE"
+    before = state(expired)
+    with chain.app.app_context():
+        assert A.purge_retained(now=datetime.now(timezone.utc) + timedelta(days=91)) == (1, 0)
+    after = state(expired)
+    assert after[0] == before[0] and after[1:] == ([], [])
+    assert apply(expired) == "COMPENSATION_EVIDENCE_UNAVAILABLE"

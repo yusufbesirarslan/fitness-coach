@@ -90,6 +90,10 @@ def correct_within(user_id, operation_id, now):
                 receipt.reason) != (op.id, user_id, bucket.id, PROOF, REASON):
             return "COMPENSATION_CONTRADICTORY_RECEIPT"
         return ALREADY_APPLIED
+    if bucket.used < 1:
+        # Contradictory retained counters are not a transient lock failure.
+        # Let normal retention age out this unprovable consumption.
+        return "COMPENSATION_COUNTER_UNAVAILABLE"
     db.session.add(TrainingAllowanceCompensation(
         reservation_id=hold.id, operation_id=op.id, user_id=user_id,
         bucket_id=hold.bucket_id, proof_version=PROOF, reason=REASON, applied_at=now))
