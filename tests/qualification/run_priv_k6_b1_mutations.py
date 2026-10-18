@@ -108,6 +108,9 @@ MUTATIONS = (
      "        return True",
      PG, "test_c7_only_the_day_claim_unique_violation_classifies_as_replay"),
     # Migration.
+    ("verifier_accepts_r2_sequence", MIGRATION,
+     "        _verify_sequence(bind)", "        pass",
+     PG, "test_migration_rejects_incompatible_sequence_without_repair[r2_maxvalue_2_cycle]"),
     ("verifier_accepts_missing_unique", MIGRATION,
      '        _fail("day uniqueness")', "        pass",
      UNIT, "test_sqlite_migration_accepts_create_all_shape_and_refuses_drift"),
