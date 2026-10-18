@@ -6,6 +6,14 @@ Anahtar üretimi, etkin/devre-dışı durumları ve fail-open sözleşmesi
     python -m pytest tests/test_s3_helper.py -v
 """
 import re
+from io import BytesIO
+from PIL import Image
+
+def _image_bytes():
+    output = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(output, "JPEG")
+    return output.getvalue()
+
 
 import pytest
 from botocore.exceptions import ClientError
@@ -52,7 +60,7 @@ def test_disabled_without_bucket(monkeypatch):
     monkeypatch.setattr(s3_helper, "S3_BUCKET_NAME", "")
     assert is_enabled() is False
     with pytest.raises(S3Error, match="yapılandırılmadı"):
-        upload_image(b"img")
+        upload_image(_image_bytes())
 
 
 def test_s3_client_uses_default_credential_provider_chain(monkeypatch):
@@ -81,12 +89,14 @@ def test_build_key_layout_and_unknown_mime():
 
 
 def test_upload_image_puts_encrypted_object(s3_on):
-    key = upload_image(b"resim", content_type="image/jpeg",
+    key = upload_image(_image_bytes(), content_type="image/jpeg",
                        prefix="pump-checks", user_id=7)
     call = s3_on.put_calls[0]
     assert call["Bucket"] == "test-bucket"
     assert call["Key"] == key
-    assert call["Body"] == b"resim"
+    with Image.open(BytesIO(call["Body"])) as image:
+        assert image.size == (8, 8)
+        assert not image.getexif()
     assert call["ServerSideEncryption"] == "AES256"  # özel bucket sözleşmesi
 
 
@@ -95,7 +105,7 @@ def test_upload_image_failures(s3_on, monkeypatch):
         upload_image(b"")
     monkeypatch.setattr(s3_helper, "_client", _FakeS3(fail=True))
     with pytest.raises(S3Error):
-        upload_image(b"resim")
+        upload_image(_image_bytes())
 
 
 def test_presigned_url_roundtrip_and_fail_open(s3_on, monkeypatch):
@@ -126,7 +136,7 @@ def test_presigned_url_ownership_parses_segment_not_substring(s3_on):
 
 def test_s3_logs_never_contain_private_key_bucket_or_owner(caplog, s3_on, monkeypatch):
     private_key = "pump-checks/424242/2026/08/private-secret.jpg"
-    upload_image(b"resim", prefix="pump-checks", user_id=424242)
+    upload_image(_image_bytes(), prefix="pump-checks", user_id=424242)
     generate_presigned_url(private_key, expected_user_id=7)
     monkeypatch.setattr(s3_helper, "_client", _FakeS3(fail=True))
     generate_presigned_url(private_key, expected_user_id=424242)
