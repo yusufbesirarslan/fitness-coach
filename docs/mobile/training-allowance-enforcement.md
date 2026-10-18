@@ -54,9 +54,10 @@ settle → respond`.
 
 ## Settlement
 
-Every dispatch-bound hold carries billing evidence **UNKNOWN** (`provider_billed`
+Every dispatch-bound hold starts with billing evidence **UNKNOWN** (`provider_billed`
 NULL): the adapter gives no charge receipt, and internal repair, transient retries
-and provider fallback stay inside one authorized invocation.
+and provider fallback stay inside one authorized invocation. The one exception is
+a failure with durable proof of zero physical attempts (next section).
 
 | Case | Operation | Ledger | Units |
 | --- | --- | --- | --- |
@@ -65,6 +66,9 @@ and provider fallback stay inside one authorized invocation.
 | Refusal before dispatch | claim deleted | no hold | 0 |
 | Unusable provider output (schema/semantic/exercise, or parse/truncation after the repair turn) | FAILED (stored code) | `invalid_output`, UNKNOWN: released while `billed_releases < max_billed_releases`, else consumed | policy cap |
 | Provider unavailable / timeout | FAILED 503 | `provider_error`, UNKNOWN, same cap rule | policy cap |
+| D1 consent refused before reservation (preflight) | claim deleted, D1 403/503 envelope | no hold | 0 |
+| Refused after the hold, before ANY physical attempt (consent revoked/changed, spend or input refusal, unrecordable evidence) | FAILED 503 (`provider_attempt_possible` False) | `refused_before_provider`, CONFIRMED_NOT_BILLED → RELEASED | 0 |
+| Refused after an earlier possible attempt (retry, recovery, repair, fallback) | FAILED (marker True) | unchanged UNKNOWN rule | policy cap |
 | Output lost before staging / worker died | IN_PROGRESS → 409 → FAILED OUTCOME_UNKNOWN after 15 min | hold already past its TTL (same instant as the marker) → EXPIRED | 1 |
 | Candidate staged, save failed | GENERATED; save-only recovery | held; success settles once (EXPIRED if after TTL) | 1 |
 | GENERATED never saved (a browser plan appeared) | GENERATED | held until the ledger expires it (owner's next reserve or `flask ai-allowance-sweep`) | 1 |
@@ -76,6 +80,53 @@ is reported as EXPIRED, never as a fresh COMMITTED charge. Retirement fences lat
 staging, not remote execution: a distinct new key may overlap an old request whose
 termination cannot be proven; the new key is a new logical action with its own
 hold.
+
+## Zero-attempt settlement (MON-02-BE-03B-A1)
+
+`provider_dispatch_possible` means the operation was **authorized** to call a
+provider; it is not evidence that a call happened. Migration `e7a1c3d5f9b2` adds
+`training_plan_generation_operation.provider_attempt_possible` (nullable):
+
+* the metered dispatch commit sets it **False** (same transaction as the hold,
+  binding and marker);
+* `ai_provider_call.Admission.create`/`stream` run an optional
+  `attempt_observer` **inside** the final D1 `ai_consent.dispatch` fence, after
+  it passed and **before every physical SDK invocation**. For a metered
+  operation the observer is `store.mark_attempt_possible`: a short committed
+  `UPDATE … SET provider_attempt_possible = TRUE WHERE status = 'IN_PROGRESS'
+  AND provider_dispatch_possible AND provider_attempt_possible IS NOT NULL`
+  (`lock_timeout` 2 s, `updated_at` unchanged). If it cannot commit (retired,
+  deleted or unreachable operation) the attempt is refused with
+  `AttemptEvidenceUnavailable`, a spend-type refusal: no SDK call, no retry, no
+  fallback, no last-good;
+* NULL = untracked (unmetered, historical, or dispatched by older code) and keeps
+  the UNKNOWN rule.
+
+So a FAILED operation still False made no physical attempt, ever: True must be
+committed before any SDK call and can only be committed while IN_PROGRESS.
+Settlement derives `(outcome, evidence)` from that terminal row only, so replays
+are deterministic. A refusal after an earlier possible attempt keeps True and
+UNKNOWN. A crash, a lost process or a timeout never produces False after an
+attempt; a crash before the first attempt leaves False, but retirement happens at
+the hold's expiry instant, so that hold settles EXPIRED (consumed once).
+
+Preflight: metered claims call `ai_consent.preflight` (the same grant, purpose,
+category, recipient and model predicate as `dispatch`, for the heavy router's
+first route, `ai.heavy_primary_route()`) after the claim and before the rate
+limit, permit, hold or SDK. A refusal deletes the never-dispatched claim and
+answers with D1's own envelope. It authorizes nothing; the final gate still
+decides every attempt and also fences the consent generation.
+
+Expiry race (bounded): if a proven zero-attempt failure is settled only after its
+hold's TTL (ledger outage, or a crash between the FAILED commit and settlement),
+the ledger reports EXPIRED and the unit stays consumed: an expiry is never
+reversed. The binding records EXPIRED and the warning
+`training_allowance event=zero_attempt_hold_expired` is logged (no identifiers).
+Releasing it would need an explicit ledger contract (founder decision).
+
+Lock order is unchanged. The marker write takes only the operation row, inside
+D1's fence (which holds `user`); no ledger lock is taken there and no
+transaction spans the SDK call.
 
 ## Errors (existing mobile envelope)
 
