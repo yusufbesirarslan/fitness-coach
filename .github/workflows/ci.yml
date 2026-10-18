@@ -10,7 +10,7 @@ on:
     # Bind D1 integration qualification directly to the branch HEAD.
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
-    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance]
+    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation]
 
 jobs:
   tests:
@@ -369,6 +369,7 @@ jobs:
           tests/test_mobile_training_allowance_pg.py
           tests/test_training_allowance_migration_verifier_pg.py
           tests/test_training_allowance_zero_attempt_pg.py
+          tests/test_training_expiry_compensation_pg.py
           tests/test_mobile_diary_mutation_pg.py
           tests/test_mobile_pump_check_pg.py
           tests/test_mobile_pump_check_comparison_pg.py

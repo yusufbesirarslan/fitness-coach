@@ -89,8 +89,9 @@ refuses retirement temporarily with the existing persistence-unavailable error.
 The 15-minute threshold stays fixed; retirement can be deferred while D1 owns
 the fence. See `training-dispatch-recovery.md` for lock order and rollout limits.
 An SDK timeout can still leave remote inference running after retirement.
-Expiry compensation remains unimplemented pending founder policy; EXPIRED still
-consumes exactly one unit even for a terminal False attempt marker.
+EXPIRED still records one historical consumed unit. Founder-approved A2-A1
+adds a separate exactly-once correction for complete terminal FAILED/False
+proof, targeting only the original bucket (see the final section).
 
 ## Zero-attempt settlement (MON-02-BE-03B-A1)
 
@@ -130,10 +131,10 @@ decides every attempt and also fences the consent generation.
 
 Expiry race (bounded): if a proven zero-attempt failure is settled only after its
 hold's TTL (ledger outage, or a crash between the FAILED commit and settlement),
-the ledger reports EXPIRED and the unit stays consumed: an expiry is never
-reversed. The binding records EXPIRED and the warning
-`training_allowance event=zero_attempt_hold_expired` is logged (no identifiers).
-Releasing it would need an explicit ledger contract (founder decision).
+the ledger reports EXPIRED. The binding and original reservation retain that
+history. A2-A1 then atomically inserts its unique receipt and decrements only
+the original bucket's used counter, if all retained authorities qualify.
+Incomplete evidence receives no automatic correction.
 
 Lock order is unchanged. The marker write takes only the operation row, inside
 D1's fence (which holds `user`); no ledger lock is taken there and no
@@ -161,8 +162,9 @@ as unresolved, not success; a 402 is a paywall/upsell state, not a failure to re
 2. UNKNOWN-billing failures (invalid output, provider error/timeout) share the
    per-scope `max_billed_releases` cap; the cap value (0 = always consume) is the
    decision. Unlimited release is not supported.
-3. Abandoned dispatched work and never-saved GENERATED candidates consume one unit
-   (ledger expiry). A release policy would need a ledger change.
+3. Abandoned possibly-attempted work and never-saved GENERATED candidates consume
+   one unit (ledger expiry). Proven terminal zero-attempt expiry now has the
+   founder-approved original-bucket correction; runtime activation remains held.
 4. Provider fallback / last-good success consumes one unit like any success.
 5. Retiring the legacy weekly Training quota (and the `is_premium` bypass) for
    metered claims.
@@ -181,3 +183,13 @@ as unresolved, not success; a 402 is a paywall/upsell state, not a failure to re
 * Account deletion racing an in-flight dispatch transaction can abort on a
   database deadlock (bounded; abort, never corruption), the same class as
   `commit_plan` today.
+
+### Proven zero-attempt expiry compensation
+
+Founder P1-A/P2-C/P3-C/P4-A authorizes a separate original-period accounting
+correction after immutable EXPIRED consumption. Complete terminal FAILED/False
+tracked dispatch evidence is mandatory. Historical NULL remains ineligible.
+Both allowance flags must be ON; defaults stay OFF. Settlement and bounded owner
+catch-up revisit already-EXPIRED bindings. The unique receipt, crash/replay,
+retention and lock contracts are documented in `docs/AI_ALLOWANCE_LEDGER.md`.
+This neither reopens the operation nor authorizes inference or goodwill credits.
