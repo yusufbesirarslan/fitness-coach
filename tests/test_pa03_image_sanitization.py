@@ -257,3 +257,13 @@ def test_s15_transparent_format_normalization(fmt):
 def test_s09_transparent_output_limit_has_no_lossy_fallback():
     with pytest.raises(vision_images.ImagePreparationError, match="image_output_limit"):
         vision_images.prepare_image_for_vision(tagged("PNG", alpha=True), max_bytes=10)
+
+
+def test_s09_animation_detection_does_not_enumerate_entire_gif(monkeypatch):
+    from PIL import GifImagePlugin
+    raw = tagged("GIF")
+    def forbidden(image):
+        pytest.fail("full frame enumeration is not a bounded animation probe")
+    monkeypatch.setattr(GifImagePlugin.GifImageFile, "n_frames", property(forbidden))
+    result = core.sanitize_image(raw)
+    assert_clean(result.data, result.media_type)

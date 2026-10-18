@@ -68,7 +68,13 @@ def _decode_pixels(raw):
         probe.verify()
     with Image.open(io.BytesIO(raw), formats=FORMATS) as source:
         _dimensions(source)
-        if getattr(source, "n_frames", 1) != 1:
+        # Seeking only frame 1 avoids GIF n_frames scanning an attacker-sized
+        # frame sequence just to decide whether animation is supported.
+        try:
+            source.seek(1)
+        except EOFError:
+            source.seek(0)
+        else:
             raise ImageSanitizationError("image_animation_unsupported")
         source.load()  # verify() alone does not validate compressed pixels
         orientation = source.getexif().get(274, 1)
