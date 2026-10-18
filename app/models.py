@@ -499,6 +499,10 @@ class TrainingPlanGenerationOperation(db.Model):
     # BE-03B-01B: True = claimed with AI allowance enforcement ON (the ledger,
     # not the legacy weekly quota, authorizes it). NULL = unmetered/historical.
     allowance_metered = db.Column(db.Boolean, nullable=True)
+    # BE-03B-A1: dispatch AUTHORIZED is not a physical attempt. A metered
+    # dispatch commits False; True is committed after the final consent check
+    # and BEFORE every SDK invocation. NULL = not tracked (unmetered/historical).
+    provider_attempt_possible = db.Column(db.Boolean, nullable=True)
     candidate_plan_data = db.Column(db.Text)
     candidate_score = db.Column(db.Float)
     # Soft references intentionally survive legacy plan replacement semantics.

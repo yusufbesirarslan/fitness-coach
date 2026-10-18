@@ -1,5 +1,11 @@
 # Production rollout runbook — feature flag activation
 
+MON-02-BE-03B-A1 adds additive migration `e7a1c3d5f9b2` (one nullable Boolean
+`training_plan_generation_operation.provider_attempt_possible`, no backfill),
+which startup may apply while every flag stays OFF; it is part of the same human
+migration/deploy gate. Nothing writes it unless Training allowance enforcement is
+ON. Its downgrade refuses once any operation recorded evidence.
+
 MON-02-BE-03B-01B `AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED` remains OFF. Startup
 may apply additive migration `b1e4f5a6c7d8` (one new empty table, two nullable
 columns, `ai_usage_reservation.provider_billed` relaxed to NULL; no backfill) even

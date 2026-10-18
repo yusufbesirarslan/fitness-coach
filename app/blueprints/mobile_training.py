@@ -5,12 +5,14 @@ from functools import partial
 from flask import current_app, g, jsonify, request
 from flask_limiter.errors import RateLimitExceeded
 
+from app.blueprints.ai_consent import consent_error_response
 from app.blueprints.mobile_api import bp, mobile_error
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.services import mobile_training
 from app.services.ai import _heavy_complete as _heavy_chat
+from app.services.ai_consent import ConsentDenied
 from app.services.ai_gate import BlockingConcurrencyLimit, blocking_concurrency_slot
 from app.services.mobile_training_generation import (
     GenerationInProgress,
@@ -87,6 +89,9 @@ def create_training_plan():
             True,
             retry_after=retry_after,
         )
+    except ConsentDenied as error:
+        # Metered preflight (BE-03B-A1): D1's own envelope, never "busy".
+        return consent_error_response(error)
     except BlockingConcurrencyLimit:
         return mobile_error(
             "TRAINING_PLAN_GENERATION_BUSY",

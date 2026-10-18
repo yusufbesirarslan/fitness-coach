@@ -12,7 +12,10 @@ directly). The order is structural, not a convention at each call site:
     4. capacity permit (`ai_gate.model_concurrency_slot`), which charges the
        spend guard for the FIRST attempt (#337 semantics unchanged)
     5. the provider call, made with exactly the checked copy; the only extra
-       argument a caller may add is the transport `timeout`
+       argument a caller may add is the transport `timeout`. Each physical
+       attempt runs inside the final consent check (`ai_consent.dispatch`),
+       after which an optional caller `attempt_observer` runs; if it raises,
+       that attempt is never sent
 
 A payload refused at step 3 never takes a permit, never consumes spend-guard
 budget and never reaches the provider, its fallback, or a retry.
@@ -28,6 +31,7 @@ generating (and billing) on the provider side, so repeating it is the costly
 case; the higher-level recovery ladder (`ai_recovery`) decides that, and each
 of its attempts is a fresh admission.
 """
+import contextvars
 import copy
 import logging
 import random
@@ -45,6 +49,45 @@ _RETRY_BASE_SECONDS = 0.5
 _RETRY_MAX_SECONDS = 4.0
 _RETRYABLE_STATUS = frozenset({408, 409, 429})
 _TRANSPORT_KWARGS = frozenset({"timeout"})
+
+
+class AttemptEvidenceUnavailable(ai_spend_guard.AISpendLimitExceeded):
+    """The caller's pre-attempt evidence could not be recorded: no SDK call.
+
+    A refusal, like a spend ceiling: never retried, never a fallback trigger.
+    """
+
+    def __init__(self):
+        super().__init__("attempt_evidence", "heavy")
+
+
+# MON-02-BE-03B-A1: an optional per-context observer run AFTER the final
+# consent check and BEFORE each physical SDK invocation. It lets a metered
+# caller durably record "a physical attempt may have started" ahead of the
+# call it protects. Unset (every other caller) = no-op.
+_attempt_observer = contextvars.ContextVar("ai_attempt_observer", default=None)
+
+
+@contextmanager
+def attempt_observer(callback):
+    token = _attempt_observer.set(callback)
+    try:
+        yield
+    finally:
+        _attempt_observer.reset(token)
+
+
+def _before_physical_attempt():
+    observer = _attempt_observer.get()
+    if observer is None:
+        return
+    try:
+        observer()
+    except ai_spend_guard.AISpendLimitExceeded:
+        raise
+    except Exception:
+        # Unrecorded evidence never lets the call proceed.
+        raise AttemptEvidenceUnavailable() from None
 
 
 class AIInputBudgetExceeded(ai_spend_guard.AISpendLimitExceeded):
@@ -244,6 +287,7 @@ class Admission:
                 # durable check after capacity/backoff, under the account fence.
                 with ai_consent.dispatch(self.subject, self.feature, self.provider,
                                          kwargs, self.consent_generation):
+                    _before_physical_attempt()
                     bounded_transport = dict(transport)
                     bounded_transport["timeout"] = min(float(transport.get("timeout", 30.0)), 30.0)
                     resp = method(**kwargs, **bounded_transport)
@@ -271,6 +315,7 @@ class Admission:
         with ai_consent.stream_dispatch(self.subject, self.feature, self.provider,
                                         self._payload, self.consent_generation):
             holder = _StreamUsage()
+            _before_physical_attempt()
             try:
                 with method(**copy.deepcopy(self._payload), **transport) as stream:
                     yield _StreamProxy(stream, holder)

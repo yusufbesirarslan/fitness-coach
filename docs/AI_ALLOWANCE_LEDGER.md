@@ -192,6 +192,13 @@ the feature flag does not gate schema migration or release preparation.
   A hold created with evidence must be settled with explicit evidence. Success,
   expiry and replay semantics are unchanged; an expired hold still settles as
   EXPIRED (consumed once).
+- BE-03B-A1 (no ledger change): a dispatch-bound hold whose caller durably
+  proves that no physical provider attempt happened is finalized as
+  `refused_before_provider` with `CONFIRMED_NOT_BILLED` (RELEASED, not counted
+  in `billed_releases`). The ledger accepts that refinement of the hold's
+  initial UNKNOWN; it never reverses an EXPIRED hold. Native Training is the
+  only caller (docs/mobile/training-allowance-enforcement.md, "Zero-attempt
+  settlement").
 - Migration `a9c1d2e3f4b5`'s create_all-first verifier accepts exactly this delta
   (one extra nullable column, `provider_billed` nullable) and nothing else; it
   checks the later column by name only. `b1e4f5a6c7d8` is the authority for its

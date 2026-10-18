@@ -14,8 +14,13 @@ binds exactly one hold to one metered operation:
 * ``settle`` runs only after the operation's terminal commit, in its own short
   transactions, and is idempotent: the ledger replays a repeated settlement.
 
-Every dispatch-bound hold is UNKNOWN billing evidence: the adapter supplies no
-charge receipt. Nothing here logs identifiers, keys, prompts or plan content.
+Every dispatch-bound hold starts as UNKNOWN billing evidence: the adapter
+supplies no charge receipt. BE-03B-A1: the dispatch commit also sets
+``provider_attempt_possible`` False and every physical SDK invocation is
+preceded by a committed True (``store.mark_attempt_possible``). A FAILED
+operation still False therefore made no physical attempt, ever, and settles
+``CONFIRMED_NOT_BILLED`` instead of UNKNOWN. Nothing here logs identifiers,
+keys, prompts or plan content.
 """
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ from app.models import (
     TrainingPlanGenerationAllowance,
     TrainingPlanGenerationOperation,
 )
-from app.services import ai_allowances
+from app.services import ai, ai_allowances, ai_consent
 from app.services.training_generation.preference_contract import (
     CODE_GENERATION_INVALID,
     CODE_GENERATION_PARSE_FAILED,
@@ -105,16 +110,39 @@ def bind_for_dispatch(operation, now):
         operation_id=operation.id, user_id=operation.user_id,
         reservation_ref=hold.reference, state=TRAINING_ALLOWANCE_RESERVED,
         created_at=stamp, updated_at=stamp))
+    # Authorized, not attempted: only a committed pre-attempt write moves this.
+    operation.provider_attempt_possible = False
 
 
-def _outcome(operation):
+def preflight_consent(user_id):
+    """Refuse before any hold when D1 already refuses the first provider route.
+
+    The native command's ``chat_fn`` is the heavy router; a refusal at its first
+    recipient is final (the router never falls back after a refusal), so this is
+    the same D1 decision the final SDK gate would reach now. It authorizes
+    nothing: every physical attempt still passes ``ai_consent.dispatch``.
+    """
+    recipient, model = ai.heavy_primary_route()
+    ai_consent.preflight(user_id, "training_plan", recipient, model)
+
+
+def _settlement(operation):
+    """(outcome, billing evidence) derived only from the terminal operation row."""
     if operation.status == TRAINING_PLAN_GENERATION_SUCCEEDED:
-        return ai_allowances.OUTCOME_SUCCESS
+        return ai_allowances.OUTCOME_SUCCESS, ai_allowances.BILLING_UNKNOWN
+    if operation.provider_attempt_possible is False:
+        # Durable proof of zero physical attempts for the whole operation: True
+        # is committed before every SDK call and only while IN_PROGRESS, so a
+        # terminal False can never change. Invalid output is reachable only via
+        # the router's cached last-good answer (no provider call either).
+        if operation.error_code in _INVALID_OUTPUT_CODES:
+            return "invalid_output", ai_allowances.BILLING_CONFIRMED_NOT_BILLED
+        return "refused_before_provider", ai_allowances.BILLING_CONFIRMED_NOT_BILLED
     if operation.error_code in _INVALID_OUTPUT_CODES:
-        return "invalid_output"
+        return "invalid_output", ai_allowances.BILLING_UNKNOWN
     if operation.error_code == OUTCOME_UNKNOWN_CODE:
-        return "provider_timeout"
-    return "provider_error"
+        return "provider_timeout", ai_allowances.BILLING_UNKNOWN
+    return "provider_error", ai_allowances.BILLING_UNKNOWN
 
 
 def _deferred(code):
@@ -144,17 +172,21 @@ def settle(operation_id):
             db.session.rollback()
             return None if row is None else row[1].state
         operation, binding = row
-        user_id, reference, outcome = operation.user_id, binding.reservation_ref, _outcome(operation)
+        user_id, reference = operation.user_id, binding.reservation_ref
+        outcome, evidence = _settlement(operation)
         db.session.rollback()  # no read transaction across the ledger owner lock
         try:
             observed = ai_allowances.finalize(
-                user_id, reference, outcome,
-                billing_evidence=ai_allowances.BILLING_UNKNOWN).state
+                user_id, reference, outcome, billing_evidence=evidence).state
         except ai_allowances.AllowanceError as error:
             if error.code != "AI_ALLOWANCE_RESERVATION_NOT_FOUND":
                 _deferred(error.code)
                 return None
             observed = UNOBSERVABLE  # the ledger no longer retains this hold
+        if evidence == ai_allowances.BILLING_CONFIRMED_NOT_BILLED and observed == "EXPIRED":
+            # Zero attempts proven, but settlement came after the hold's TTL: the
+            # ledger already consumed it and never reverses an expiry. Recorded.
+            current_app.logger.warning("training_allowance event=zero_attempt_hold_expired")
         binding = _binding(operation_id, lock=True)
         if binding is not None and binding.state == TRAINING_ALLOWANCE_RESERVED:
             binding.state = observed
