@@ -13,7 +13,7 @@ from sqlalchemy import text
 from app.extensions import db
 from app.models import User, TrainingPlan, TrainingPlanReplacementProposal as Proposal
 from app.models import TrainingPlanReplacementGenerationOperation as Operation
-from app.services import premium, mobile_training
+from app.services import premium, mobile_training, ai, ai_consent
 from app.services.today_facts import get_active_plan
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.plan_mutation.fingerprint import snapshot_fingerprint
@@ -203,6 +203,8 @@ def publish(operation_id, token, document, score):
 def generate_proposal(user, request, key, *, chat_fn, provider_guard):
     if not isinstance(request, NativePlanRequest):
         raise TypeError('request must be NativePlanRequest')
+    recipient, model = ai.heavy_primary_route()
+    ai_consent.preflight(user.id, 'training_plan', recipient, model)
     admitted = claim(user, request, key)
     if isinstance(admitted, GenerationResult):
         return admitted
@@ -217,6 +219,11 @@ def generate_proposal(user, request, key, *, chat_fn, provider_guard):
         with provider_guard():
             candidate = generate_training_plan_candidate(None, None, request.preferences, chat_fn,
                         language=frozen['language'], frozen_features=features)
+    except ai_consent.ConsentDenied as error:
+        # A post-preflight revocation is still a typed refusal. Retire/refund
+        # this claimed attempt with its actual code, never provider unavailable.
+        fail(operation_id, token, error.code, error.status)
+        raise
     except GenerationOutputError as error:
         code = error.public_code
         http = 503 if code == 'TRAINING_PLAN_GENERATION_UNAVAILABLE' else 422

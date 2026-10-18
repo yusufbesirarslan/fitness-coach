@@ -206,6 +206,8 @@ def create_replacement_proposal():
     except RateLimitExceeded as error:
         return mobile_error('TRAINING_PLAN_RATE_LIMITED', 'Too many Training plan generation requests.', 429, False,
                             retry_after=error.limit.limit.get_expiry())
+    except ConsentDenied as error:
+        return consent_error_response(error)
     except BlockingConcurrencyLimit:
         return mobile_error('TRAINING_PLAN_GENERATION_BUSY', 'Training plan generation is temporarily busy.', 503, False)
     except (SQLAlchemyError, ValueError, mobile_training.PlanUnprojectable):

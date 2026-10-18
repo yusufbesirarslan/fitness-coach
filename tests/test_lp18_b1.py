@@ -19,7 +19,7 @@ CONFIRM='/api/v1/training/plans/replacement/confirm'
 
 
 @pytest.fixture
-def replacement(mobile_user):
+def replacement(mobile_user, synthetic_ai_layer):
     plan=TrainingPlan(user_id=mobile_user.id,plan_data=json.dumps(_document()),score=8)
     db.session.add(plan);db.session.commit()
     return mobile_user
@@ -325,6 +325,27 @@ def test_provider_busy_is_typed_durable_and_refunded(replacement,app):
         assert error.value.public_code=='TRAINING_PLAN_GENERATION_BUSY' and error.value.http_status==503
     db.session.refresh(replacement)
     assert replacement.user_metadata['ai_plan_quota']['training']==0
+
+
+def test_final_consent_refusal_is_typed_durable_and_refunded(replacement, app, monkeypatch):
+    from app.services.ai_consent import ConsentDenied
+    app.config['AI_PLAN_QUOTA_ENABLED'] = True
+    def denied(*args, **kwargs):
+        raise ConsentDenied('AI_CONSENT_CHANGED')
+    monkeypatch.setattr(gen, 'generate_training_plan_candidate', denied)
+    with pytest.raises(ConsentDenied) as caught:
+        run(replacement)
+    assert caught.value.code == 'AI_CONSENT_CHANGED'
+    row = Operation.query.one()
+    assert row.status == 'FAILED' and row.error_code == 'AI_CONSENT_CHANGED'
+    assert row.error_http_status == 403 and row.quota_reserved is False
+    db.session.refresh(replacement)
+    assert replacement.user_metadata['ai_plan_quota']['training'] == 0
+    assert Proposal.query.count() == 0
+    with pytest.raises(StoredGenerationFailure) as replay:
+        run(replacement)
+    assert replay.value.public_code == 'AI_CONSENT_CHANGED'
+    assert replay.value.http_status == 403
 
 
 def test_generation_replay_survives_sensitive_proposal_cleanup(replacement,provider):
