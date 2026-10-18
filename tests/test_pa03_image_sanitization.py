@@ -267,3 +267,174 @@ def test_s09_animation_detection_does_not_enumerate_entire_gif(monkeypatch):
     monkeypatch.setattr(GifImagePlugin.GifImageFile, "n_frames", property(forbidden))
     result = core.sanitize_image(raw)
     assert_clean(result.data, result.media_type)
+
+
+GRAY16_SAMPLES = [0, 1, 128, 129, 255, 256, 257, 4096, 16384,
+                  32767, 32768, 49152, 65000, 65534, 65535]
+GRAY8_EXPECTED = [0, 0, 0, 1, 1, 1, 1, 16, 64, 127, 128, 191, 253, 255, 255]
+
+
+def grayscale16(values=GRAY16_SAMPLES, size=None, orientation=1, transparency=None):
+    image = Image.new("I;16", size or (len(values), 1))
+    image.putdata(values)
+    exif = Image.Exif()
+    exif[274] = orientation
+    exif[271] = MARKER.decode()
+    exif[34853] = {1: "N", 2: (41.0, 2.0, 3.0)}
+    info = PngImagePlugin.PngInfo()
+    info.add_text("Location", MARKER.decode())
+    info.add_itxt("XML:com.adobe.xmp", MARKER.decode())
+    options = {} if transparency is None else {"transparency": transparency}
+    output = BytesIO()
+    image.save(output, "PNG", exif=exif, pnginfo=info, icc_profile=MARKER, **options)
+    raw = output.getvalue()
+    with Image.open(BytesIO(raw)) as decoded:
+        assert decoded.mode in ("I;16", "I")
+        assert list(decoded.get_flattened_data()) == list(values)
+        assert decoded.getexif().get_ifd(34853)[2]
+    return raw
+
+
+def assert_gray_pixels(data, expected, mode="RGB"):
+    with Image.open(BytesIO(data)) as image:
+        image.load()
+        assert image.mode == mode
+        actual = list(image.get_flattened_data())
+        assert actual == [(v, v, v) for v in expected]
+        return [pixel[0] for pixel in actual]
+
+
+def test_grayscale16_reviewer_reproduction_and_exact_rounding():
+    result = core.sanitize_image(grayscale16([0, 16384, 32768, 65535]))
+    assert_gray_pixels(result.data, [0, 64, 128, 255])
+    result = core.sanitize_image(grayscale16())
+    actual = assert_gray_pixels(result.data, GRAY8_EXPECTED)
+    assert actual == sorted(actual)
+    assert len(set(actual)) >= 9
+    assert_clean(result.data, result.media_type)
+
+
+def test_grayscale16_full_range_gradient():
+    # Independent integer arithmetic checks every possible source sample,
+    # including every rounding boundary; no tolerance or float oracle.
+    raw = grayscale16(range(65536), (256, 256))
+    result = core.sanitize_image(raw)
+    actual = assert_gray_pixels(result.data, [(v * 255 + 32767) // 65535 for v in range(65536)])
+    assert set(actual) == set(range(256))
+    assert actual == sorted(actual)
+    assert actual.count(255) == 129
+    assert_clean(result.data, result.media_type)
+
+
+@pytest.mark.parametrize("orientation,expected,size", [
+    (1, [0, 51, 102, 153, 204, 255], (3, 2)),
+    (2, [102, 51, 0, 255, 204, 153], (3, 2)),
+    (3, [255, 204, 153, 102, 51, 0], (3, 2)),
+    (4, [153, 204, 255, 0, 51, 102], (3, 2)),
+    (5, [0, 153, 51, 204, 102, 255], (2, 3)),
+    (6, [153, 0, 204, 51, 255, 102], (2, 3)),
+    (7, [255, 102, 204, 51, 153, 0], (2, 3)),
+    (8, [102, 255, 51, 204, 0, 153], (2, 3)),
+])
+def test_grayscale16_orientation_and_metadata(orientation, expected, size):
+    raw = grayscale16([0, 13107, 26214, 39321, 52428, 65535], (3, 2), orientation)
+    result = core.sanitize_image(raw)
+    assert (result.width, result.height) == size
+    assert_gray_pixels(result.data, expected)
+    assert_clean(result.data, result.media_type)
+
+
+def test_grayscale16_transparency_before_quantization():
+    result = core.sanitize_image(grayscale16([32767, 32768, 32769], transparency=32768))
+    with Image.open(BytesIO(result.data)) as output:
+        assert list(output.get_flattened_data()) == [(127, 127, 127, 255),
+                                                   (128, 128, 128, 0), (128, 128, 128, 255)]
+    assert_clean(result.data, result.media_type)
+
+
+@pytest.mark.parametrize("mode,values", [
+    ("L", [0, 1, 64, 128, 254, 255]),
+    ("RGB", [(0, 1, 2), (64, 128, 255)]),
+    ("RGBA", [(0, 1, 2, 0), (64, 128, 255, 128)]),
+])
+def test_grayscale16_fix_preserves_8bit_behavior(mode, values):
+    image = Image.new(mode, (len(values), 1))
+    image.putdata(values)
+    raw = BytesIO()
+    image.save(raw, "PNG")
+    result = core.sanitize_image(raw.getvalue())
+    with Image.open(BytesIO(result.data)) as output:
+        assert output.mode == ("RGB" if mode == "L" else mode)
+        assert list(output.get_flattened_data()) == ([(v, v, v) for v in values] if mode == "L" else values)
+
+
+def test_grayscale16_actual_storage_and_vision_sinks(monkeypatch):
+    calls = []
+    class Sink:
+        def put_object(self, **kwargs):
+            calls.append(kwargs)
+    monkeypatch.setattr(s3_helper, "_get_client", lambda: Sink())
+    raw = grayscale16()
+    key = s3_helper.upload_image(raw, "image/jpeg", "pump-checks", 7)
+    assert key.startswith("pump-checks/7/") and key.endswith(".png")
+    assert calls[0]["ContentType"] == "image/png"
+    assert_gray_pixels(calls[0]["Body"], GRAY8_EXPECTED)
+    assert_clean(calls[0]["Body"], "image/png")
+    data, mime = vision_images.prepare_image_for_vision(raw, "image/jpeg")
+    assert mime == "image/png" and len(data) <= 1_500_000
+    assert_gray_pixels(data, GRAY8_EXPECTED)
+    assert_clean(data, mime)
+    data, mime = vision_images.prepare_image_for_vision(grayscale16(range(2048), (2048, 1)))
+    with Image.open(BytesIO(data)) as output:
+        assert output.size == (1600, 1)
+    assert mime == "image/png" and len(data) <= 1_500_000
+
+
+@pytest.mark.parametrize("kind", ["truncated", "tiff-float", "tiff-integer"])
+def test_grayscale16_malformed_or_unsupported_no_transfer(monkeypatch, kind):
+    if kind == "truncated":
+        raw = grayscale16()[:80]
+    else:
+        output = BytesIO()
+        Image.new("F" if kind == "tiff-float" else "I", (4, 1)).save(output, "TIFF")
+        raw = output.getvalue()
+    def forbidden():
+        pytest.fail("invalid image must fail before S3 client acquisition")
+    monkeypatch.setattr(s3_helper, "_get_client", forbidden)
+    with pytest.raises(core.ImageSanitizationError):
+        core.sanitize_image(raw)
+    with pytest.raises(s3_helper.S3Error, match="image_sanitization_failed"):
+        s3_helper.upload_image(raw)
+    seen = []
+    with pytest.raises(vision_images.ImagePreparationError):
+        analyze_image(raw, "image/png", {}, provider=lambda *a, **k: seen.append(a))
+    assert seen == []
+
+
+@pytest.mark.parametrize("mode,value,fmt", [("I", -1, "PNG"), ("I", 65536, "PNG"),
+                                            ("F", 0.5, "PNG"), ("I;16B", 1, "PNG"),
+                                            ("I", 128, "TIFF")])
+def test_grayscale16_unrecognized_sample_domain_fails_closed(mode, value, fmt):
+    with Image.new(mode, (1, 1), value) as image:
+        with pytest.raises(core.ImageSanitizationError, match="image_mode_unsupported"):
+            core._grayscale16(image, fmt)
+
+
+def test_grayscale16_legacy_integer_decoder_representation():
+    with Image.new("I", (len(GRAY16_SAMPLES), 1)) as image:
+        image.putdata(GRAY16_SAMPLES)
+        with core._grayscale16(image, "PNG") as converted:
+            assert list(converted.get_flattened_data()) == [(v, v, v) for v in GRAY8_EXPECTED]
+
+
+def test_grayscale16_resource_limits_preserved(monkeypatch):
+    raw = grayscale16()
+    with pytest.raises(core.ImageResourceError, match="image_output_limit"):
+        core.sanitize_image(raw, max_bytes=10)
+    monkeypatch.setattr(core, "MAX_INPUT_BYTES", len(raw) - 1)
+    with pytest.raises(core.ImageResourceError, match="image_input_limit"):
+        core.sanitize_image(raw)
+    monkeypatch.setattr(core, "MAX_INPUT_BYTES", len(raw))
+    monkeypatch.setattr(core, "MAX_PIXELS", 1)
+    with pytest.raises(core.ImageResourceError, match="image_pixel_limit"):
+        core.sanitize_image(raw)

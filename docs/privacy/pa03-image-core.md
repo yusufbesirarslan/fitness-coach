@@ -20,7 +20,14 @@ orientation, decompression warnings and unsafe global truncated-load mode fail
 closed. MIME declarations are hints only: actual output type determines labels
 and S3 suffixes. Source EXIF/GPS/XMP/ICC/comments/text are never copied.
 Uploaded ICC profiles are omitted without color management; RGB samples are
-treated as sRGB. CMYK/grayscale/palette inputs use Pillow conversion. Wide-gamut
+treated as sRGB. Unsigned 16-bit grayscale PNG (decoded as `I;16`, or `I`
+with samples in 0–65535) is explicitly reduced to 8-bit neutral RGB/RGBA:
+`floor((sample + 128) / 257)`, nearest-integer full-range scaling. This loses
+precision; it does not stretch contrast or claim lossless normalization.
+Grayscale transparency keys are evaluated before quantization. Other integer
+or floating-point grayscale representations fail closed. The affine transform
+uses bounded image buffers; transparency alone uses a fixed 65536-entry table.
+Ordinary 8-bit grayscale, CMYK and palette inputs use Pillow conversion. Wide-gamut
 color fidelity and repeated JPEG quality loss remain compatibility limitations;
 this policy does not claim colorimetric equivalence.
 

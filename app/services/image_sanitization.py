@@ -58,6 +58,33 @@ def _dimensions(image):
         raise ImageResourceError("image_pixel_limit")
 
 
+def _grayscale16(image, source_format):
+    """Reduce unsigned PNG grayscale to 8 bits, rounding v/257 to nearest.
+
+    This is precision loss, not contrast enhancement. Apply transparency in
+    the original sample domain so quantization cannot erase a color key.
+    """
+    if source_format != "PNG" or image.mode not in ("I", "I;16"):
+        raise ImageSanitizationError("image_mode_unsupported")
+    with image.convert("I") as integer:
+        low, high = integer.getextrema()
+        if low < 0 or high > 65535:
+            raise ImageSanitizationError("image_mode_unsupported")
+        # Affine point transform uses no per-pixel Python buffer or LUT.
+        with integer.point(lambda v: (v + 128) / 257) as scaled:
+            with scaled.convert("L") as gray:
+                converted = gray.convert("RGBA" if "transparency" in image.info else "RGB")
+        if "transparency" in image.info:
+            key = image.info["transparency"]
+            if type(key) is not int or not 0 <= key <= 65535:
+                converted.close()
+                raise ImageSanitizationError("image_mode_unsupported")
+            # Fixed 65536-entry table, independent of image dimensions.
+            with integer.point([0 if v == key else 255 for v in range(65536)], "L") as alpha:
+                converted.putalpha(alpha)
+        return converted
+
+
 def _decode_pixels(raw):
     # Do not mutate Pillow's process-global bomb or truncated-file settings.
     # Explicit caps apply even if another legacy helper changed its bomb limit.
@@ -83,10 +110,14 @@ def _decode_pixels(raw):
         fmt = "JPEG" if source.format == "JPEG" else "PNG"
         oriented = ImageOps.exif_transpose(source)
         mode = "RGBA" if "A" in oriented.getbands() or "transparency" in oriented.info else "RGB"
-        converted = oriented.convert(mode)
+        if oriented.mode.startswith("I") or oriented.mode == "F":
+            converted = _grayscale16(oriented, source.format)
+        else:
+            converted = oriented.convert(mode)
         # A new image, rather than copy(), drops info, EXIF and plugin state.
         pixels = Image.new(mode, converted.size)
         pixels.paste(converted)
+        converted.close()
         return pixels, fmt
 
 
