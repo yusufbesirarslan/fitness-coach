@@ -402,6 +402,12 @@ ALTER = "ALTER TABLE workout_completion_day "
 MIGRATION_CASES = {
     "create_all_shape": (_create_all_shape, None),
     "exact_ddl": (_claim_table(), None),
+    "extra_photo_only_check": (_claim_table(extra="CONSTRAINT extra_photo_only CHECK (proof = 'photo')"), "proof check"),
+    "extra_proof_unique": (_claim_table(extra="CONSTRAINT extra_proof_unique UNIQUE (proof)"), "day uniqueness"),
+    "missing_id_default": (_claim_table(id_="INTEGER PRIMARY KEY"), "column defaults"),
+    "extra_unique_index": (_claim_table(after=("CREATE UNIQUE INDEX extra_proof_idx ON workout_completion_day (proof)",)), "unique indexes"),
+    "extra_partial_unique_index": (_claim_table(after=("CREATE UNIQUE INDEX extra_partial_idx ON workout_completion_day (proof) WHERE proof = 'none'",)), "unique indexes"),
+    "extra_expression_unique_index": (_claim_table(after=("CREATE UNIQUE INDEX extra_expression_idx ON workout_completion_day (lower(proof))",)), "unique indexes"),
     "date_key_wider": (_claim_table(date_key="VARCHAR(16) NOT NULL"), "columns"),
     "date_key_char": (_claim_table(date_key="CHAR(10) NOT NULL"), "columns"),
     "proof_text": (_claim_table(proof="TEXT NOT NULL"), "columns"),

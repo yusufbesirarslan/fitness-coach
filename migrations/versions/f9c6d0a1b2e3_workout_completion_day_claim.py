@@ -78,8 +78,9 @@ def _same_type(bind, column, type_, nullable):
 def _identity_default(bind, column):
     """The surrogate key may only carry its own sequence default (PostgreSQL)."""
     default = column.get("default")
-    if default is None:
-        return True
+    if bind.dialect.name == "sqlite":
+        # SQLite INTEGER PRIMARY KEY generates rowids without a default.
+        return default is None
     return (bind.dialect.name == "postgresql"
             and default == f"nextval('{TABLE}_id_seq'::regclass)")
 
@@ -97,9 +98,14 @@ def _verify_claim(bind):
         _fail("column defaults")
     if inspector.get_pk_constraint(TABLE)["constrained_columns"] != ["id"]:
         _fail("primary key")
-    if (DAY_UNIQUE, ("user_id", "date_key")) not in {
+    if {(DAY_UNIQUE, ("user_id", "date_key"))} != {
             (u["name"], tuple(u["column_names"])) for u in inspector.get_unique_constraints(TABLE)}:
         _fail("day uniqueness")
+    # PostgreSQL reflects constraint-backed indexes too. Every other unique
+    # index (including partial/expression indexes) is additional write policy.
+    if any(i.get("unique") and i.get("duplicates_constraint") != DAY_UNIQUE
+           for i in inspector.get_indexes(TABLE)):
+        _fail("unique indexes")
     foreign = {(tuple(f["constrained_columns"]), f["referred_schema"], f["referred_table"],
                 tuple(f["referred_columns"]), f.get("options", {}).get("ondelete"))
                for f in inspector.get_foreign_keys(TABLE)}
@@ -109,7 +115,10 @@ def _verify_claim(bind):
     if bind.dialect.name == "postgresql":
         forms |= set(_PG_PROOF_FORMS)
     forms = {_compact(f) for form in forms for f in (form, f"({form})")}
-    sqltext = {c["name"]: c.get("sqltext") for c in inspector.get_check_constraints(TABLE)}.get(PROOF_CHECK)
+    checks = inspector.get_check_constraints(TABLE)
+    if len(checks) != 1 or checks[0]["name"] != PROOF_CHECK:
+        _fail("proof check")
+    sqltext = checks[0].get("sqltext")
     if not isinstance(sqltext, str) or _compact(sqltext) not in forms:
         _fail("proof check")
     if bind.dialect.name == "postgresql":

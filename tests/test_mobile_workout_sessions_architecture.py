@@ -129,9 +129,8 @@ def test_only_completion_pays_for_a_provider_and_the_cheap_writes_do_not():
     complete_at = source.index("def complete_workout_session(")
     checkpoint_at = source.index("def checkpoint_workout_session(")
 
-    # The vision gate and its concurrency slot are attached to completion only.
-    assert source.index("mobile_ai_concurrency_gate(") < complete_at
-    assert source.index("BEDROCK_RATELIMIT") < complete_at
+    # Admission behavior (including photo-only saturation and quotas) is
+    # exercised through Flask HTTP in the K6 suite, not decorator placement.
     assert "validate_pump_check(" in source
     # Progress persistence gets its own cheap ceiling, never a generation limit.
     assert "WORKOUT_CHECKPOINT_RATELIMIT" in source
@@ -309,7 +308,7 @@ def test_the_completion_route_skips_the_proof_when_the_day_is_already_done():
 
     assert "already_completed_today(" in complete
     assert complete.index("already_completed_today(") < complete.index(
-        "_completion_proof()")
+        "_complete_with_photo(session_reference, revision)")
     assert "replaying" in complete
 
 

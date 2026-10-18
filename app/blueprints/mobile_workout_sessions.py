@@ -21,10 +21,13 @@ from functools import wraps
 
 from app.services.ai_consent import ConsentDenied
 from flask import current_app, g, jsonify, make_response, request
+from werkzeug.exceptions import HTTPException
 
 from app.blueprints.mobile_api import bp, mobile_error
 from app.blueprints.mobile_training import _sessions_enabled
-from app.config import BEDROCK_RATELIMIT, WORKOUT_CHECKPOINT_RATELIMIT
+from app.config import (
+    BEDROCK_RATELIMIT, WORKOUT_CHECKPOINT_RATELIMIT, WORKOUT_COMPLETION_RATELIMIT,
+)
 from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.models import WORKOUT_SESSION_COMPLETED
@@ -323,7 +326,10 @@ def _photo_evidence_submitted():
     photo therefore always meets the photo path's consent gate and validation
     and can never be silently discarded into a photo-free success.
     """
-    if request.files or request.form:
+    # Classify transport BEFORE parsing: malformed multipart can consume the
+    # stream while producing empty files/form collections. Those collections
+    # cannot establish affirmative absence of submitted photo transport.
+    if request.mimetype in {"multipart/form-data", "application/x-www-form-urlencoded"}:
         return True
     if not request.get_data(cache=True):
         return False
@@ -419,12 +425,18 @@ def _completion_proof():
     }
 
 
+@mobile_ai_concurrency_gate(
+    "TRAINING_SESSION_COMPLETION_BUSY", "Workout completion is busy.")
+def _complete_with_photo(session_reference, revision):
+    proof = _completion_proof()
+    return _ok(sessions.complete(
+        g.mobile_user.id, session_reference, revision, **proof))
+
+
 @bp.post("/training/workout-sessions/<session_reference>/complete")
 @require_mobile_auth
 @_flag_gated
-@limiter.limit(BEDROCK_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
-@mobile_ai_concurrency_gate(
-    "TRAINING_SESSION_COMPLETION_BUSY", "Workout completion is busy.")
+@limiter.limit(WORKOUT_COMPLETION_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
 def complete_workout_session(session_reference):
     """The terminal command, routed through the canonical completion authority.
 
@@ -463,12 +475,20 @@ def complete_workout_session(session_reference):
         if replaying or not _photo_evidence_submitted():
             proof = _no_photo_completion()
         else:
-            proof = _completion_proof()
+            # D1 refusal precedes AI admission. Only actual photo work pays
+            # the provider quota and shared blocking-work concurrency budget.
+            from app.blueprints.ai_consent import require_legacy_ai
+            require_legacy_ai()
+            g.completion_photo_admission = True
+            with limiter.limit(
+                    BEDROCK_RATELIMIT, key_func=lambda: str(g.mobile_user.id),
+                    exempt_when=lambda: not getattr(g, "completion_photo_admission", False)):
+                return _complete_with_photo(session_reference, revision)
         result = sessions.complete(
             g.mobile_user.id, session_reference, revision, **proof)
     except sessions.SessionCommandError as error:
         return _failure(error)
-    except ConsentDenied:
+    except (ConsentDenied, HTTPException):
         raise
     except Exception as error:  # noqa: BLE001
         return _unavailable(error, "complete_failed")

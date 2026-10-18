@@ -164,3 +164,20 @@ behavior because they have no claim row.
   IntegrityError classification, and migration verify/negative controls,
   downgrade and the no-backfill full chain.
 * `tests/qualification/run_priv_k6_b1_mutations.py`: 21 semantic mutations.
+
+
+## R1 remediation boundary
+
+Transport classification checks multipart/form-data and form media types before
+any parser/stream access, including empty and malformed multipart. D1 denial
+precedes photo admission. Genuine no-photo work and canonical replays bypass
+AI admission. A dedicated owner completion throttle (30/minute, 300/hour by
+default) applies to all commands; the existing Bedrock quota and shared AI
+semaphore apply only after photo classification, ownership/revision/day
+preflight and consent. Photo limiter hints are exempt unless this request has
+explicitly reached photo admission; exhausting that quota cannot throttle a
+later no-photo command. HTTP parsing errors retain their client status.
+
+Application rollback compatibility remains OPEN. See
+[the required release gate handoff](PRIV_K6_ROLLBACK_RELEASE_GATE_HANDOFF.md).
+Schema downgrade refusal alone does not protect against historical-only images.

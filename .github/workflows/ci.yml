@@ -10,7 +10,7 @@ on:
     # Bind D1 integration qualification directly to the branch HEAD.
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
-    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance]
+    branches: [feat/priv-k6-b1-no-photo-completion, main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance]
 
 jobs:
   tests:
@@ -23,6 +23,11 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record executed source identity
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          git show -s --format='%P' HEAD
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"   # Dockerfile ile aynı taban
@@ -349,6 +354,11 @@ jobs:
         postgresql://postgres:postgres@localhost:5432/fitx_mobile_race
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record executed source identity
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          git show -s --format='%P' HEAD
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"

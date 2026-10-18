@@ -25,9 +25,14 @@ MUTATIONS = (
      "        if replaying or not _photo_evidence_submitted():",
      "        if True:",
      UNIT, "test_k6c_submitted_photo_meets_the_real_d1_gate_and_is_never_discarded"),
-    ("files_only_detection", ROUTE,
-     "    if request.files or request.form:", "    if request.files:",
-     UNIT, "test_k6c_submitted_photo_meets_the_real_d1_gate_and_is_never_discarded"),
+    ("original_multipart_downgrade", ROUTE,
+     '    if request.mimetype in {"multipart/form-data", "application/x-www-form-urlencoded"}:',
+     '    if request.files or request.form:',
+     UNIT, "test_r1_multipart_transport_never_downgrades"),
+    ("original_ai_capacity_dependency", ROUTE,
+     'def complete_workout_session(session_reference):',
+     '@mobile_ai_concurrency_gate("TRAINING_SESSION_COMPLETION_BUSY", "Workout completion is busy.")\ndef complete_workout_session(session_reference):',
+     UNIT, "test_r1_no_photo_and_replay_ignore_real_ai_saturation"),
     ("raw_body_discarded", ROUTE,
      "        return any(name in body for name in _PHOTO_FIELDS)\n    return True",
      "        return any(name in body for name in _PHOTO_FIELDS)\n    return False",
@@ -134,6 +139,11 @@ def main():
             if module == PG:
                 command[3:3] = ["-m", "pg_concurrency"]
             run = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
+            evidence_dir = os.environ.get("PRIV_K6_MUTATION_EVIDENCE_DIR")
+            if evidence_dir:
+                target = Path(evidence_dir)
+                target.mkdir(parents=True, exist_ok=True)
+                (target / f"{name}.log").write_text(run.stdout + run.stderr)
             killed = run.returncode == 1 and " failed" in run.stdout
             results.append({"mutation": name, "test": test, "killed": killed})
             if not killed:

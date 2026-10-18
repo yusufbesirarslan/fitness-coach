@@ -856,3 +856,154 @@ def test_sqlite_downgrade_refuses_populated_claims():
             _run(conn, module.downgrade)
         assert conn.exec_driver_sql(
             "SELECT count(*) FROM workout_completion_day").scalar() == 1
+
+
+@pytest.mark.parametrize('body,content_type', [
+    (b'--x--\r\n', 'multipart/form-data; boundary=x'),
+    (b'', 'multipart/form-data; boundary=x'),
+    (b'\xff\xd8\xff submitted photo bytes', 'multipart/form-data'),
+    (b'--wrong\r\nContent-Disposition: form-data; name="image"; filename="a.jpg"\r\nContent-Type: image/jpeg\r\n\r\n\xff\xd8\xff\r\n--wrong--\r\n', 'multipart/form-data; boundary=expected'),
+    (b'', 'application/x-www-form-urlencoded'),
+])
+def test_r1_multipart_transport_never_downgrades(client, owner, as_mobile, workout_ref,
+                                               body, content_type):
+    headers = as_mobile(owner)
+    ref = _started(client, headers, workout_ref)
+    response = _complete_raw(client, headers, ref, data=body, content_type=content_type)
+    assert response.status_code == 403, response.json
+    assert response.json['error']['code'] == 'AI_CONSENT_DISCLOSURE_UNAVAILABLE'
+    assert _rows(owner.id) == NOTHING
+
+
+@pytest.mark.usefixtures('synthetic_ai_layer')
+@pytest.mark.parametrize('body', [b'', b'--x--\r\n', b'--wrong--\r\n'])
+def test_r1_authorized_unusable_multipart_is_client_error(client, owner, as_mobile,
+                                                        workout_ref, body):
+    headers = as_mobile(owner)
+    ref = _started(client, headers, workout_ref)
+    response = _complete_raw(client, headers, ref, data=body,
+                             content_type='multipart/form-data; boundary=x')
+    assert response.status_code == 400, response.json
+    assert _rows(owner.id) == NOTHING
+
+
+def test_r1_no_photo_and_replay_ignore_real_ai_saturation(client, owner, as_mobile,
+                                                        workout_ref, forbidden, monkeypatch):
+    from app.services import ai_gate
+    from app.blueprints import mobile_workout_sessions as routes
+    original = routes.sessions.complete
+    observed = []
+    def complete(*args, **kwargs):
+        observed.append(ai_gate.capacity_snapshot()['ai_active'])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(routes.sessions, 'complete', complete)
+    headers = as_mobile(owner)
+    ref = _started(client, headers, workout_ref)
+    held = 0
+    model_held = 0
+    try:
+        while ai_gate._ai_slots.acquire(blocking=False):
+            held += 1
+        assert held == ai_gate.AI_MAX_CONCURRENCY
+        while ai_gate._model_slots.acquire(blocking=False):
+            model_held += 1
+        assert model_held == ai_gate.AI_MODEL_MAX_CONCURRENCY
+        first = _complete_raw(client, headers, ref)
+        assert first.status_code == 200, first.json
+        # Even photo-shaped retries never process evidence or need AI slots.
+        replay = _complete_raw(client, headers, ref, data=b'--wrong--',
+                               content_type='multipart/form-data; boundary=x')
+        assert replay.status_code == 200, replay.json
+        assert replay.json['completion']['outcome'] == 'already_completed'
+    finally:
+        for _ in range(model_held):
+            ai_gate._model_slots.release()
+        for _ in range(held):
+            ai_gate._ai_slots.release()
+    assert observed == [0, 0]
+    assert _rows(owner.id) == _completed_photo_free()
+    assert forbidden == []
+
+
+@pytest.mark.usefixtures('synthetic_ai_layer')
+def test_r1_photo_keeps_real_ai_gate_and_releases_slot(client, owner, as_mobile,
+                                                      workout_ref, monkeypatch):
+    from app.services import ai_gate
+    from app.blueprints import mobile_workout_sessions as routes
+    headers = as_mobile(owner)
+    ref = _started(client, headers, workout_ref)
+    seen = []
+    def unusable(*args):
+        seen.append(ai_gate.capacity_snapshot()['ai_active'])
+        return None, None, 'invalid'
+    monkeypatch.setattr(routes, 'validate_uploaded_pump_check_image', unusable)
+    held = 0
+    try:
+        while ai_gate._ai_slots.acquire(blocking=False):
+            held += 1
+        response = _complete_raw(client, headers, ref, data=b'',
+                                 content_type='multipart/form-data; boundary=x')
+        assert response.status_code == 503, response.json
+        assert response.json['error']['code'] == 'TRAINING_SESSION_COMPLETION_BUSY'
+        assert seen == [] and _rows(owner.id) == NOTHING
+    finally:
+        for _ in range(held):
+            ai_gate._ai_slots.release()
+    response = _complete_raw(client, headers, ref, data=b'',
+                             content_type='multipart/form-data; boundary=x')
+    assert response.status_code == 400
+    assert seen == [1]
+    assert ai_gate.capacity_snapshot()['ai_active'] == 0
+    assert _rows(owner.id) == NOTHING
+
+
+@pytest.mark.usefixtures('synthetic_ai_layer')
+def test_r1_exhausted_photo_quota_does_not_limit_no_photo(client, owner, as_mobile,
+                                                        workout_ref, monkeypatch):
+    from app.extensions import limiter
+    from app.blueprints import mobile_workout_sessions as routes
+    monkeypatch.setattr(limiter, 'enabled', True)
+    monkeypatch.setattr(routes, 'BEDROCK_RATELIMIT', '2 per hour')
+    limiter.reset()
+    headers = as_mobile(owner)
+    ref = _started(client, headers, workout_ref)
+    try:
+        for expected in [400, 400, 429]:
+            response = _complete_raw(client, headers, ref, data=b'',
+                                     content_type='multipart/form-data; boundary=x')
+            assert response.status_code == expected, response.json
+        assert _rows(owner.id) == NOTHING
+        response = _complete_raw(client, headers, ref)
+        assert response.status_code == 200, response.json
+        assert response.json['completion']['proof'] == 'none'
+        assert _complete_raw(client, headers, ref).status_code == 200
+        assert _rows(owner.id) == _completed_photo_free()
+    finally:
+        limiter.reset()
+
+
+def test_r1_local_completion_safety_throttle_is_enforced(client, owner, as_mobile,
+                                                       workout_ref, monkeypatch):
+    from app.extensions import limiter
+    monkeypatch.setattr(limiter, 'enabled', True)
+    limiter.reset()
+    headers = as_mobile(owner)
+    ref = _started(client, headers, workout_ref)
+    try:
+        assert _complete_raw(client, headers, ref).status_code == 200
+        for _ in range(29):
+            assert _complete_raw(client, headers, ref).status_code == 200
+        assert _complete_raw(client, headers, ref).status_code == 429
+        assert _rows(owner.id) == _completed_photo_free()
+    finally:
+        limiter.reset()
+
+
+def test_r1_oversized_body_preserves_413(app, client, owner, as_mobile, workout_ref):
+    headers = as_mobile(owner)
+    ref = _started(client, headers, workout_ref)
+    app.config['MAX_CONTENT_LENGTH'] = 256
+    response = _complete_raw(client, headers, ref, data=b'x' * 257,
+                             content_type='application/octet-stream')
+    assert response.status_code == 413
+    assert _rows(owner.id) == NOTHING
