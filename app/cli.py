@@ -110,7 +110,8 @@ def _user_child_models():
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
-        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog, WorkoutSession,
+        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutCompletionDay, WorkoutLog,
+        WorkoutSession,
     )
     return (
         # MON-02-BE-03A: reservations point at buckets; the grant row goes last.
@@ -140,7 +141,8 @@ def _user_child_models():
         # ledger, then comparison, then the sources below.
         PumpCheckComparisonRequest, PumpCheckComparison,
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
-        WaterLog, WorkoutLog, WorkoutSession, DailyActivity, CustomMeal,
+        WaterLog, WorkoutCompletionDay, WorkoutLog, WorkoutSession, DailyActivity,
+        CustomMeal,
         CoachConversation,
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
         WearableWorkoutLog, FeedItemLike, FeedItemComment, FeedItem,

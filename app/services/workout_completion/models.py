@@ -13,6 +13,20 @@ from datetime import date
 from enum import Enum
 from typing import Optional, Tuple
 
+# PRIV-K6-B1 completion evidence vocabulary. Mirrors (and is test-pinned to)
+# ``app.models.WORKOUT_COMPLETION_PROOFS`` — the CHECK constraint values of the
+# canonical ``WorkoutCompletionDay`` claim — without importing the ORM here.
+PROOF_PHOTO = "photo"
+PROOF_NONE = "none"
+COMPLETION_PROOFS = (PROOF_PHOTO, PROOF_NONE)
+
+# Feed wording per evidence kind. A photo-free completion must never claim that
+# a photo was attached.
+DEFAULT_ACTIVITY_TEXT = {
+    PROOF_PHOTO: "Bugünkü antrenmanını tamamladı (foto eklendi)",
+    PROOF_NONE: "Bugünkü antrenmanını tamamladı",
+}
+
 
 class CompletionOutcome(Enum):
     """The deterministic domain outcomes of a confirmed-completion attempt.
@@ -66,6 +80,13 @@ class CompleteWorkoutCommand:
 
     user_id: int
     today: date
+    # What evidences this completion (PRIV-K6-B1). ``PROOF_PHOTO`` (the default,
+    # every pre-K6 caller) writes a PumpCheck beside the day claim and may award
+    # the photo bonus. ``PROOF_NONE`` is a first-party, photo-free completion of
+    # an owned workout session: no PumpCheck, no image key, no photo bonus, no
+    # Pump Check challenge event, no friend share — enforced in __post_init__ so
+    # an inconsistent command cannot even be built.
+    proof: str = PROOF_PHOTO
     # OPTIONAL persisted-session linkage (Sprint 7 PR3). When present, this
     # completion also terminalizes the owned ACTIVE ``WorkoutSession`` (id) as
     # COMPLETED, atomically, inside the single completion transaction. ``None``
@@ -91,11 +112,33 @@ class CompleteWorkoutCommand:
     fallback: bool = False
     base_xp: int = 10
     photo_bonus: int = 25
-    # User-facing feed content for the ``workout_completed`` activity row; the two
-    # entry paths word this differently, so it is passed in rather than derived.
-    activity_text: str = "Bugünkü antrenmanını tamamladı (foto eklendi)"
+    # User-facing feed content for the ``workout_completed`` activity row; the
+    # entry paths word this differently, so it is passed in. ``None`` takes the
+    # truthful default for ``proof`` (DEFAULT_ACTIVITY_TEXT).
+    activity_text: Optional[str] = None
     # A short, bounded label for safe observability (no PII): "route" | "ai_tool".
     entry_path: str = "unknown"
+
+    def __post_init__(self):
+        if self.proof not in COMPLETION_PROOFS:
+            raise ValueError("unknown completion proof")
+        if self.proof != PROOF_NONE:
+            return
+        # A photo-free completion is only ever the completion of an owned,
+        # persisted workout session; it carries no photo-shaped input at all.
+        if self.session_id is None:
+            raise ValueError("a photo-free completion must complete a workout session")
+        if (self.image_key is not None or self.shared_friend_ids
+                or self.visibility != "private" or self.photo_bonus
+                or self.location_type or self.description
+                or self.workout_score is not None):
+            raise ValueError("a photo-free completion carries no photo evidence")
+        if self.activity_text == DEFAULT_ACTIVITY_TEXT[PROOF_PHOTO]:
+            raise ValueError("a photo-free completion cannot claim an attached photo")
+
+    @property
+    def resolved_activity_text(self) -> str:
+        return self.activity_text or DEFAULT_ACTIVITY_TEXT[self.proof]
 
 
 @dataclass(frozen=True)
@@ -107,6 +150,10 @@ class CompletionResult:
     """
 
     outcome: CompletionOutcome
+    # The evidence kind of the completion THIS call created; ``None`` on
+    # ALREADY_COMPLETED (no new completion was written).
+    proof: Optional[str] = None
+    # ``None`` for a photo-free completion: there is no PumpCheck to point at.
     pump_check_id: Optional[int] = None
     new_total: Optional[int] = None
     level: Optional[int] = None

@@ -606,8 +606,9 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["e7a1c3d5f9b2"]
-    assert len(list(script.walk_revisions())) == 54
+    assert script.get_heads() == ["f9c6d0a1b2e3"]
+    assert len(list(script.walk_revisions())) == 55
+    assert script.get_revision("f9c6d0a1b2e3").down_revision == "e7a1c3d5f9b2"
     assert script.get_revision("e7a1c3d5f9b2").down_revision == "b1e4f5a6c7d8"
     assert script.get_revision("b1e4f5a6c7d8").down_revision == "d1c0a15e0001"
     tables = ("user", "apple_subscription", "ai_consent_state", "ai_consent_event",
@@ -639,7 +640,7 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
         upgrade()
         check()  # model/schema comparison against the actual full chain
         with db.engine.connect() as conn:
-            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "e7a1c3d5f9b2"
+            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "f9c6d0a1b2e3"
             for name, (columns, rows) in before.items():
                 projection = ','.join('"' + c + '"' for c in columns)
                 assert conn.exec_driver_sql(f'SELECT {projection} FROM "{name}"').all() == rows

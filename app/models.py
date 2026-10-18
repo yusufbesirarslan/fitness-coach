@@ -1056,6 +1056,49 @@ class PumpCheck(db.Model):
         return f"<PumpCheck {self.user_id} - {self.created_at}>"
 
 
+# PRIV-K6-B1: how a completed day was evidenced. ``photo`` = a validated Pump
+# Check photo was attached (the PumpCheck row exists alongside); ``none`` = a
+# first-party, photo-free completion of an owned workout session.
+WORKOUT_COMPLETION_PROOF_PHOTO = "photo"
+WORKOUT_COMPLETION_PROOF_NONE = "none"
+WORKOUT_COMPLETION_PROOFS = (WORKOUT_COMPLETION_PROOF_PHOTO, WORKOUT_COMPLETION_PROOF_NONE)
+
+
+class WorkoutCompletionDay(db.Model):
+    """The canonical (owner, Istanbul day) workout-completion claim (PRIV-K6-B1).
+
+    Written by ``workout_completion.complete_workout`` — and only there — for
+    EVERY new confirmed completion, photo or photo-free, in the same transaction
+    as the marker/XP/session terminalization. ``uq_workout_completion_day`` is
+    the durable cross-path exact-once claim, so a photo completion and a
+    photo-free completion can never both succeed for one day.
+
+    Historical completions (before this table) are recognised through their
+    ``PumpCheck.date_key`` instead; ``workout_completion.queries.completed_days``
+    reads both and is the one definition of "completed". There is no backfill:
+    a standalone Pump Check (``date_key IS NULL``) never becomes a completion.
+
+    Deliberately carries no photo reference: deleting the Pump Check photo of a
+    photo completion does not erase the fact that the workout was completed.
+    """
+    __tablename__ = "workout_completion_day"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    date_key = db.Column(db.String(10), nullable=False)
+    proof = db.Column(db.String(8), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", name="uq_workout_completion_day"),
+        db.CheckConstraint(
+            "proof IN ('photo', 'none')", name="ck_workout_completion_day_proof"),
+    )
+
+    def __repr__(self):
+        return f"<WorkoutCompletionDay {self.user_id} {self.date_key} {self.proof}>"
+
+
 STATUS_CHECK_SQL = (
     "status IN ('pending', 'analyzing', 'completed', 'failed')"
 )
