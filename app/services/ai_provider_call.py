@@ -39,7 +39,7 @@ import time
 import uuid
 from contextlib import contextmanager
 
-from app.config import BEDROCK_MAX_RETRIES, OPENAI_MAX_RETRIES
+from app.config import BEDROCK_MAX_RETRIES, OPENAI_MAX_RETRIES, BEDROCK_MODEL
 from app.services import ai_input_budget, ai_spend_guard, ai_usage, ai_consent
 from app.services.ai_gate import model_concurrency_slot
 
@@ -49,6 +49,52 @@ _RETRY_BASE_SECONDS = 0.5
 _RETRY_MAX_SECONDS = 4.0
 _RETRYABLE_STATUS = frozenset({408, 409, 429})
 _TRANSPORT_KWARGS = frozenset({"timeout"})
+
+
+# Operational authority is intentionally a no-argument operation, never an
+# admit() option. It cannot carry caller content, identity, tools or a recipient.
+PROBE_MAX_TOKENS = 1
+PROBE_TIMEOUT_SECONDS = 5.0
+
+
+def probe_bedrock_readiness():
+    """One fixed synthetic streaming attempt; no user-consent authority.
+
+    Only bedrock_health calls this operation. No fallback, retry, permit, user
+    subject or spend charge. The existing lazy SDK client has max_retries=0.
+    User calls still go through admit()/dispatch(), including health_probe
+    supplied to admit(): a feature name never confers operational authority.
+    """
+    from app.extensions import bedrock_client
+
+    payload = dict(model=BEDROCK_MODEL, max_tokens=PROBE_MAX_TOKENS,
+                   messages=[{"role": "user", "content": "ping"}])
+    payload, bound, images = check_payload("health_probe", "bedrock-stream", payload)
+    response = None
+    outcome = "provider_error"
+    try:
+        method = bedrock_client.messages.stream
+        with method(**payload, timeout=PROBE_TIMEOUT_SECONDS) as stream:
+            response = stream.get_final_message()
+            if response is None:
+                raise RuntimeError("operational probe has no final message")
+        outcome = "success"
+    except BaseException as exc:
+        outcome = _outcome_of(exc)
+        raise
+    finally:
+        # No account correlation: the probe never processes user data.
+        # Telemetry failure cannot manufacture a failed/successful probe.
+        try:
+            usage = ai_usage.usage_from_response("bedrock", response) if response else None
+            ai_usage.emit(feature="health_probe", provider="bedrock", model=BEDROCK_MODEL,
+                          outcome=outcome, attempt=1, subject_id=None,
+                          usage=usage or {"input_tokens": bound},
+                          usage_source="provider" if usage else "estimated",
+                          input_bound=bound, image_units=images,
+                          output_cap=PROBE_MAX_TOKENS)
+        except Exception:
+            pass
 
 
 class AttemptEvidenceUnavailable(ai_spend_guard.AISpendLimitExceeded):
