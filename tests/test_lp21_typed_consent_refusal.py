@@ -122,13 +122,13 @@ def test_transport_preserves_refusal_after_endpoint_gate(app, client, mobile_use
 @pytest.mark.parametrize('enforced,attempted', [(False, False), (True, False), (True, True)])
 def test_real_first_plan_refusal_terminates_refunds_and_replays(
         app, mobile_user, monkeypatch, synthetic_ai_layer, enforced, attempted):
-    from ai_allowance_support import enable_ledger
+    from ai_allowance_support import enable_ledger, fixture_policy
     from app.services.mobile_training_generation import service
     from app.services.mobile_training_generation.errors import StoredGenerationFailure
     from app.extensions import db
     from app.models import (TrainingPlanGenerationOperation, TrainingPlan,
                             AiUsageReservation, AiAllowanceBucket)
-    enable_ledger(app)
+    enable_ledger(app, fixture_policy(max_billed=0))
     app.config['AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED'] = enforced
     app.config['AI_PLAN_QUOTA_ENABLED'] = True
     error = deny('AI_CONSENT_CHANGED')
