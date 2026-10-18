@@ -117,3 +117,52 @@ def test_transport_preserves_refusal_after_endpoint_gate(app, client, mobile_use
     assert response.status_code == 403, response.get_json()
     assert response.get_json()['error']['code'] == error.code
     assert response.get_json()['error']['retryable'] is False
+
+
+@pytest.mark.parametrize('enforced,attempted', [(False, False), (True, False), (True, True)])
+def test_real_first_plan_refusal_terminates_refunds_and_replays(
+        app, mobile_user, monkeypatch, synthetic_ai_layer, enforced, attempted):
+    from ai_allowance_support import enable_ledger
+    from app.services.mobile_training_generation import service
+    from app.services.mobile_training_generation.errors import StoredGenerationFailure
+    from app.extensions import db
+    from app.models import (TrainingPlanGenerationOperation, TrainingPlan,
+                            AiUsageReservation, AiAllowanceBucket)
+    enable_ledger(app)
+    app.config['AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED'] = enforced
+    app.config['AI_PLAN_QUOTA_ENABLED'] = True
+    error = deny('AI_CONSENT_CHANGED')
+    def refuse(*args, **kwargs):
+        if attempted:
+            from app.services import ai_provider_call
+            ai_provider_call._before_physical_attempt()
+        raise error
+    generate = Mock(side_effect=refuse)
+    monkeypatch.setattr(service, 'generate_training_plan_candidate', generate)
+    request = parse_native_request(CANONICAL)
+    uid = mobile_user.id
+    with pytest.raises(ai_consent.ConsentDenied) as caught:
+        service.generate_and_persist(mobile_user, request, 'consent-first-key',
+                                     chat_fn=Mock(), provider_guard=nullcontext)
+    assert caught.value is error
+    row = TrainingPlanGenerationOperation.query.one()
+    assert row.status == 'FAILED' and row.error_code == error.code
+    assert row.error_http_status == 403 and row.quota_reserved is False
+    assert row.provider_attempt_possible is (attempted if enforced else None)
+    db.session.refresh(mobile_user)
+    assert ((mobile_user.user_metadata or {}).get('ai_plan_quota') or {}).get('training', 0) == 0
+    assert TrainingPlan.query.count() == 0
+    if enforced:
+        hold = AiUsageReservation.query.one()
+        assert hold.state == ('COMMITTED' if attempted else 'RELEASED')
+        assert hold.billing_evidence == ('UNKNOWN' if attempted else 'CONFIRMED_NOT_BILLED')
+        bucket = AiAllowanceBucket.query.filter_by(user_id=uid, feature='training_generation').one()
+        assert bucket.used == int(attempted) and bucket.reserved == 0
+    else:
+        assert AiUsageReservation.query.count() == 0
+    with pytest.raises(StoredGenerationFailure) as replay:
+        service.generate_and_persist(mobile_user, request, 'consent-first-key',
+                                     chat_fn=Mock(), provider_guard=nullcontext)
+    assert replay.value.public_code == error.code and replay.value.http_status == 403
+    assert generate.call_count == 1
+    assert TrainingPlanGenerationOperation.query.filter_by(user_id=uid).count() == 1

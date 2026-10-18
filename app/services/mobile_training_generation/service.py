@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from types import SimpleNamespace
 from sqlalchemy import inspect
 
 from app.extensions import db
 from app.services.ai_spend_guard import subject_scope
+from app.services.ai_consent import ConsentDenied
 from app.services.training_generation.feature_extractor import build_features
 
 from app.models import (
@@ -142,6 +144,17 @@ def generate_and_persist(
                 candidate = generate_training_plan_candidate(
                     user, last_session, request.preferences, chat_fn,
                     language=language, logger=logger, frozen_features=features)
+    except ConsentDenied as error:
+        if authorized:
+            # Preserve the D1 code while using the existing terminal/refund
+            # authority. Attempt evidence still decides metered settlement.
+            store.record_failure(operation_id, SimpleNamespace(
+                public_code=error.code, http_status=error.status,
+                retryable=error.status >= 500))
+            allowance.settle(operation_id)
+        else:
+            store.abandon_claim(operation_id)
+        raise
     except GenerationOutputError as error:
         failure = store.record_failure(operation_id, error)
         allowance.settle(operation_id)
