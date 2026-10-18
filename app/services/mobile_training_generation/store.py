@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 
+import sqlalchemy as sa
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
@@ -17,7 +19,7 @@ from app.models import (
     TrainingPlanGenerationOperation,
     User,
 )
-from app.services import premium
+from app.services import ai_provider_call, premium
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.preference_contract import (
@@ -140,7 +142,8 @@ def authorize_dispatch(operation_id):
     Commit uncertainty BEFORE the network door. A lost commit acknowledgement
     cannot authorize a call: the caller must receive a successful return.
     A metered operation's AI allowance hold is created in this same commit,
-    stamped with the same instant as the marker (see ``allowance``).
+    stamped with the same instant as the marker (see ``allowance``), with
+    ``provider_attempt_possible`` False. Returns whether it is metered.
     """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
@@ -151,15 +154,54 @@ def authorize_dispatch(operation_id):
             raise GenerationInProgress()
         now = datetime.now(timezone.utc)
         allowance.bind_for_dispatch(operation, now)
+        metered = operation.allowance_metered is True
         operation.provider_dispatch_possible = True
         operation.updated_at = now.replace(tzinfo=None)
         db.session.commit()
+        return metered
     except (GenerationInProgress, TrainingAllowanceRefused):
         db.session.rollback()
         raise
     except Exception as error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from error
+
+
+def mark_attempt_possible(operation_id):
+    """Commit "a physical provider attempt may start" BEFORE that SDK call.
+
+    Runs after the final consent check passed and before every physical
+    invocation (``ai_provider_call.attempt_observer``). Only an IN_PROGRESS,
+    dispatched, tracked operation can record it; a retired, deleted or
+    unreachable one refuses the attempt rather than send it unrecorded. The
+    marker only moves False -> True and leaves ``updated_at`` (retirement
+    timing) untouched. Short own transaction; no ledger lock.
+    """
+    operation = TrainingPlanGenerationOperation
+    try:
+        if db.engine.dialect.name == "postgresql":
+            db.session.execute(sa.text("SET LOCAL lock_timeout = '2000ms'"))
+        marked = db.session.execute(
+            sa.update(operation)
+            .where(operation.id == operation_id,
+                   operation.status == TRAINING_PLAN_GENERATION_IN_PROGRESS,
+                   operation.provider_dispatch_possible.is_(True),
+                   operation.provider_attempt_possible.is_not(None))
+            .values(provider_attempt_possible=True, updated_at=operation.updated_at)
+            .execution_options(synchronize_session=False)).rowcount
+        if marked != 1:
+            raise GenerationPersistenceUnavailable()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise ai_provider_call.AttemptEvidenceUnavailable() from None
+
+
+def attempt_evidence(operation_id, tracked):
+    """Scope generation so every physical attempt is recorded first (metered only)."""
+    if not tracked:
+        return nullcontext()
+    return ai_provider_call.attempt_observer(lambda: mark_attempt_possible(operation_id))
 
 
 def retire_abandoned(user_id):

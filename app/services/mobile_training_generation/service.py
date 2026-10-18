@@ -132,10 +132,13 @@ def generate_and_persist(
     # No advisory connection or operation/owner transaction spans provider I/O.
     authorized = False
     try:
+        if allowance.enforcement_enabled():
+            # D1 refusal before any hold, permit or SDK call (not authority).
+            allowance.preflight_consent(user_id)
         with provider_guard():
-            store.authorize_dispatch(operation_id)
+            metered = store.authorize_dispatch(operation_id)
             authorized = True
-            with subject_scope(user_id):
+            with subject_scope(user_id), store.attempt_evidence(operation_id, metered):
                 candidate = generate_training_plan_candidate(
                     user, last_session, request.preferences, chat_fn,
                     language=language, logger=logger, frozen_features=features)

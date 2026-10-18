@@ -31,6 +31,8 @@ def _assert_shape(connection, *, dispatch_marker=False):
         expected.remove("provider_dispatch_possible")
     if not dispatch_marker:  # ...and BE-03B-01B's metering mode.
         expected.remove("allowance_metered")
+    if not dispatch_marker:  # ...and BE-03B-A1's physical-attempt evidence.
+        expected.remove("provider_attempt_possible")
     assert columns == expected
 
     uniques = {

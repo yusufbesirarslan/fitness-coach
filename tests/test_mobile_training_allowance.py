@@ -19,7 +19,7 @@ from app.models import (
     AiAllowanceBucket, AiUsageReservation, TrainingPlan, TrainingPlanGenerationAllowance,
     TrainingPlanGenerationOperation, User,
 )
-from app.services import ai_allowances, premium
+from app.services import ai_allowances, ai_provider_call, premium
 from app.services.ai_allowances import AllowancePolicy, ScopePolicy
 from app.services.ai_gate import BlockingConcurrencyLimit
 from app.services.mobile_training_generation import allowance as seam
@@ -50,6 +50,9 @@ def provider(monkeypatch):
 
     def candidate(user, last_session, preferences, chat_fn, **kwargs):
         state.calls += 1
+        # A synthetic PHYSICAL attempt: through the pre-SDK evidence door, as
+        # every real call is (ai_provider_call.Admission.create).
+        ai_provider_call._before_physical_attempt()
         if state.mode == "unavailable":
             raise GenerationUnavailableError("provider endpoint detail")
         if state.mode == "invalid":
@@ -583,8 +586,11 @@ def test_browser_plan_written_before_save_leaves_the_hold_to_ledger_expiry(
 def test_unrepairable_provider_text_is_invalid_output_in_one_hold(
         client, mobile_user, as_mobile, metered, monkeypatch):
     completions = []
-    monkeypatch.setattr("app.blueprints.mobile_training._heavy_chat",
-                        lambda **kwargs: completions.append(1) or "not json")
+    def physical(**kwargs):  # through the pre-SDK evidence door, like a real call
+        ai_provider_call._before_physical_attempt()
+        completions.append(1)
+        return "not json"
+    monkeypatch.setattr("app.blueprints.mobile_training._heavy_chat", physical)
     response = _post(client, as_mobile, mobile_user, "allowance-key-parse")
     assert response.json["error"]["code"] == "TRAINING_PLAN_GENERATION_PARSE_FAILED"
     assert len(completions) == 2  # initial + repair, one logical action

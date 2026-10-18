@@ -368,6 +368,7 @@ jobs:
           tests/test_mobile_training_dispatch_recovery_pg.py
           tests/test_mobile_training_allowance_pg.py
           tests/test_training_allowance_migration_verifier_pg.py
+          tests/test_training_allowance_zero_attempt_pg.py
           tests/test_mobile_diary_mutation_pg.py
           tests/test_mobile_pump_check_pg.py
           tests/test_mobile_pump_check_comparison_pg.py

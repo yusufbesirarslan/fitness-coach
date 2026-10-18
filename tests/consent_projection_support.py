@@ -16,6 +16,7 @@ def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
         ('coach', 'summary', 'nutrition', 'menu_extract', 'menu_ocr', 'vision', 'health_probe', 'other')
     }})
     monkeypatch.setattr(consent, 'generation', lambda owner: 0)
+    monkeypatch.setattr(consent, 'preflight', lambda *a, **kw: None)
     monkeypatch.setattr(consent, 'dispatch', lambda *a, **kw: nullcontext())
     monkeypatch.setattr(consent, 'stream_dispatch', lambda *a, **kw: nullcontext())
     if memory:
