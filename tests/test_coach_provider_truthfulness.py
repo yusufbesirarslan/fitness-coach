@@ -198,7 +198,8 @@ def test_the_probe_is_a_streaming_call_capped_at_one_token():
     probe would go green on a policy that still broke every conversation."""
     from app.services import bedrock_health
 
-    source = inspect.getsource(bedrock_health._probe_once)
+    from app.services import ai_provider_call
+    source = inspect.getsource(ai_provider_call.probe_bedrock_readiness)
 
     assert "messages.stream" in source
     assert "messages.create" not in source
