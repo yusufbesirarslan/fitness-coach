@@ -40,7 +40,7 @@ def test_alembic_migrations_have_single_head():
     # MON-02-BE-03A stacks its ledger on the #436 Apple foundation.
     # D1 consent follows dispatch recovery; BE-03B-01B follows D1.
     # BE-03B-A1's physical-attempt evidence follows BE-03B-01B.
-    assert heads == ["e7a1c3d5f9b2"]
+    assert heads == ["f8b2d4e6a0c3"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -73,7 +73,7 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # BE-03B-01A adds a nullable dispatch marker, no catalog schema.
     # D1 adds consent authority; BE-03B-01B adds its separate allowance binding.
     # BE-03B-A1 adds one nullable attempt-evidence column, no catalog schema.
-    assert len(revision_files) == 54
+    assert len(revision_files) == 55
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 

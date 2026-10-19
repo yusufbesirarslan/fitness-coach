@@ -20,4 +20,7 @@ __all__ = [
     "RESERVATION_TTL", "Reservation", "Settlement", "allowance_view", "expire_abandoned",
     "finalize", "grant_starter", "purge_retained", "reserve", "reserve_within",
     "BILLING_CONFIRMED_BILLED", "BILLING_CONFIRMED_NOT_BILLED", "BILLING_UNKNOWN",
+    "compensate_training_expiry",
 ]
+
+from app.services.ai_allowances.training_compensation import compensate as compensate_training_expiry

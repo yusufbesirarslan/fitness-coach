@@ -149,12 +149,22 @@ def _unbilled(state, holds=1):
 def _age(user_id, minutes=16):
     """Move the operation and its hold past ABANDON_AFTER / RESERVATION_TTL."""
     from app.extensions import db
-    from app.models import AiUsageReservation, TrainingPlanGenerationOperation
+    from app.models import (AiUsageReservation, TrainingPlanGenerationOperation,
+                            TrainingPlanGenerationAllowance, AiAllowanceBucket, AiStarterGrant)
     from app.services import ai_allowances
     aged = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    for bucket in AiAllowanceBucket.query.filter_by(user_id=user_id):
+        bucket.created_at = min(ai_allowances.service._utc(bucket.created_at), aged)
+    grant = db.session.get(AiStarterGrant, user_id)
+    if grant is not None:
+        grant.granted_at = min(ai_allowances.service._utc(grant.granted_at), aged)
     for operation in TrainingPlanGenerationOperation.query.filter_by(user_id=user_id):
+        operation.created_at = aged.replace(tzinfo=None)
         operation.updated_at = aged.replace(tzinfo=None)
+    for binding in TrainingPlanGenerationAllowance.query.filter_by(user_id=user_id):
+        binding.created_at = aged.replace(tzinfo=None)
     for hold in AiUsageReservation.query.filter_by(user_id=user_id):
+        hold.created_at = aged
         hold.expires_at = aged + ai_allowances.RESERVATION_TTL
     db.session.commit()
 
@@ -312,10 +322,10 @@ def test_crash_boundaries_never_produce_a_false_zero_attempt_release(chain, boun
         assert state.codes == ["TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN"]
         # The hold expired with the retirement instant: consumed exactly once.
         assert state.holds[0][0] == "EXPIRED" and state.bindings == ["EXPIRED"]
-        assert state.bucket == (1, 0, 0)
+        assert state.bucket == (int(attempted), 0, 0)
         assert chain.calls["openai"] == (1 if boundary == "in_sdk" else 0)  # never redispatched
-        expired_proof = "zero_attempt_hold_expired" in caplog.text
-        assert expired_proof is (not attempted)
+        from app.models import TrainingAllowanceCompensation
+        assert TrainingAllowanceCompensation.query.count() == int(not attempted)
 
 
 # ── 11/12: lost settlement acknowledgement and concurrent replay ──────────
@@ -442,7 +452,7 @@ def test_revocation_waiting_on_an_in_flight_attempt_is_ordered_after_it(chain):
 
 
 # ── 14: expiry racing a proven zero-attempt disposition ───────────────────
-def test_expiry_before_settlement_consumes_conservatively_and_is_recorded(chain, caplog):
+def test_expiry_before_settlement_corrects_proven_zero_attempt_consumption(chain, caplog):
     from app.services.mobile_training_generation import allowance
     owner = chain.owners[0]
     with chain.app.app_context():
@@ -451,8 +461,9 @@ def test_expiry_before_settlement_consumes_conservatively_and_is_recorded(chain,
         assert allowance.settle(operation_id) == "EXPIRED"
         state = snap(owner)
         assert state.holds[0][0] == "EXPIRED" and state.bindings == ["EXPIRED"]
-        assert state.bucket == (1, 0, 0)  # an expiry is never reversed
-        assert "event=zero_attempt_hold_expired" in caplog.text
+        assert state.bucket == (0, 0, 0)  # expiry retained; separate correction
+        from app.models import TrainingAllowanceCompensation
+        assert TrainingAllowanceCompensation.query.count() == 1
 
 
 def test_released_zero_attempt_hold_is_not_reconsumed_by_the_sweep(chain):
@@ -777,7 +788,7 @@ def test_a2_retirement_before_d1_refuses_sdk_and_new_key_is_independent(chain):
         state = snap(owner)
         assert state.operations == [("FAILED", True, False), ("SUCCEEDED", True, True)]
         assert state.bindings == ["EXPIRED", "COMMITTED"]
-        assert state.bucket == (2, 0, 0) and state.plans == 1 and chain.calls["openai"] == 1
+        assert state.bucket == (1, 0, 0) and state.plans == 1 and chain.calls["openai"] == 1
 
 
 @pytest.mark.parametrize("boundary", ["before_marker", "after_marker", "in_sdk"])
@@ -806,7 +817,7 @@ def test_a2_worker_crash_releases_fence_and_allows_retirement(chain, boundary):
             generate(owner, "a2-crash")
         state = snap(owner)
         assert state.operations == [("FAILED", True, boundary != "before_marker")]
-        assert state.bucket == (1, 0, 0) and state.bindings == ["EXPIRED"]
+        assert state.bucket == (int(boundary != "before_marker"), 0, 0) and state.bindings == ["EXPIRED"]
         assert chain.calls["openai"] == int(boundary == "in_sdk")
 
 
@@ -868,7 +879,7 @@ def test_a2_retirement_operation_user_reverse_order_does_not_deadlock(chain):
 
 
 @pytest.mark.parametrize("order", ["sweep_first", "retirement_first"])
-def test_a2_zero_attempt_expiry_orders_retain_existing_consumption(chain, order):
+def test_a2_zero_attempt_expiry_orders_compensate_original_consumption(chain, order):
     from app.services import ai_allowances
     from app.services.mobile_training_generation import store, allowance
     owner = chain.owners[0]
@@ -893,7 +904,7 @@ def test_a2_zero_attempt_expiry_orders_retain_existing_consumption(chain, order)
         state = snap(owner)
         assert state.operations == [("FAILED", True, False)]
         assert state.holds == [("EXPIRED", "expired", "UNKNOWN", None)]
-        assert state.bindings == ["EXPIRED"] and state.bucket == (1, 0, 0)
+        assert state.bindings == ["EXPIRED"] and state.bucket == (0, 0, 0)
         assert sum(chain.calls.values()) == 0
 
 

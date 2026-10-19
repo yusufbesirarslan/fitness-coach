@@ -34,6 +34,7 @@ from app.models import (
     TRAINING_ALLOWANCE_RESERVED,
     TRAINING_PLAN_GENERATION_FAILED,
     TRAINING_PLAN_GENERATION_SUCCEEDED,
+    TrainingAllowanceCompensation,
     TrainingPlanGenerationAllowance,
     TrainingPlanGenerationOperation,
 )
@@ -149,6 +150,23 @@ def _deferred(code):
     current_app.logger.warning("training_allowance event=settlement_deferred code=%s", code)
 
 
+def _correct_expiry(user_id, operation_id):
+    if not enforcement_enabled():
+        return "EXPIRED"
+    code = ai_allowances.compensate_training_expiry(user_id, operation_id)
+    current_app.logger.info("training_allowance event=expiry_compensation code=%s", code)
+    if code == "COMPENSATION_EVIDENCE_UNAVAILABLE":
+        # The existing retention contract cannot recreate an absent hold.
+        # Stop scanning this historical binding once that fact is observed.
+        binding = _binding(operation_id, lock=True)
+        if binding is not None and binding.user_id == user_id and binding.state == "EXPIRED":
+            binding.state = UNOBSERVABLE
+            binding.updated_at = datetime.utcnow()
+        db.session.commit()
+        return UNOBSERVABLE
+    return "EXPIRED"
+
+
 def settle(operation_id):
     """Settle one terminal metered operation once; never raises.
 
@@ -157,7 +175,8 @@ def settle(operation_id):
     what the ledger reports. Losing either step is safe: a repeat replays the
     ledger's stored settlement for the same outcome and never moves a unit
     twice. A hold that already expired is reported as EXPIRED (consumed once),
-    never as a fresh COMMITTED charge.
+    never as a fresh COMMITTED charge. Proven zero-attempt expiry receives a
+    separate atomic original-bucket correction; the binding stays EXPIRED.
     """
     if not _ledger_enabled():
         return None
@@ -169,8 +188,12 @@ def settle(operation_id):
                .populate_existing().one_or_none())
         if (row is None or row[1].state != TRAINING_ALLOWANCE_RESERVED
                 or row[0].status not in _TERMINAL or row[1].user_id != row[0].user_id):
+            owner = None if row is None else row[0].user_id
+            state = None if row is None else row[1].state
             db.session.rollback()
-            return None if row is None else row[1].state
+            if owner is not None and state == "EXPIRED":
+                state = _correct_expiry(owner, operation_id)
+            return state
         operation, binding = row
         user_id, reference = operation.user_id, binding.reservation_ref
         outcome, evidence = _settlement(operation)
@@ -183,15 +206,13 @@ def settle(operation_id):
                 _deferred(error.code)
                 return None
             observed = UNOBSERVABLE  # the ledger no longer retains this hold
-        if evidence == ai_allowances.BILLING_CONFIRMED_NOT_BILLED and observed == "EXPIRED":
-            # Zero attempts proven, but settlement came after the hold's TTL: the
-            # ledger already consumed it and never reverses an expiry. Recorded.
-            current_app.logger.warning("training_allowance event=zero_attempt_hold_expired")
         binding = _binding(operation_id, lock=True)
         if binding is not None and binding.state == TRAINING_ALLOWANCE_RESERVED:
             binding.state = observed
             binding.updated_at = datetime.utcnow()
         db.session.commit()
+        if observed == "EXPIRED":
+            observed = _correct_expiry(user_id, operation_id)
         return observed
     except Exception as error:
         db.session.rollback()
@@ -200,19 +221,31 @@ def settle(operation_id):
 
 
 def settle_pending(user_id):
-    """Bounded catch-up for this owner's terminal operations still holding."""
+    """At most three owner-scoped settlements/corrections per Training command."""
     if not _ledger_enabled():
         return
     try:
-        pending = [operation_id for (operation_id,) in (
-            db.session.query(TrainingPlanGenerationAllowance.operation_id)
-            .join(TrainingPlanGenerationOperation,
-                  TrainingPlanGenerationOperation.id == TrainingPlanGenerationAllowance.operation_id)
-            .filter(TrainingPlanGenerationAllowance.user_id == user_id,
-                    TrainingPlanGenerationAllowance.state == TRAINING_ALLOWANCE_RESERVED,
-                    TrainingPlanGenerationOperation.status.in_(_TERMINAL))
-            .order_by(TrainingPlanGenerationAllowance.operation_id)
-            .limit(_SETTLE_PER_COMMAND).all())]
+        candidates = db.session.query(TrainingPlanGenerationAllowance.operation_id).join(
+            TrainingPlanGenerationOperation,
+            TrainingPlanGenerationOperation.id == TrainingPlanGenerationAllowance.operation_id)
+        state_filter = TrainingPlanGenerationAllowance.state == TRAINING_ALLOWANCE_RESERVED
+        if enforcement_enabled():
+            state_filter = state_filter | (
+                (TrainingPlanGenerationAllowance.state == "EXPIRED")
+                & TrainingPlanGenerationOperation.provider_attempt_possible.is_(False)
+                & TrainingPlanGenerationOperation.allowance_metered.is_(True)
+                & TrainingPlanGenerationOperation.provider_dispatch_possible.is_(True)
+                & (TrainingPlanGenerationOperation.status == "FAILED")
+                & ~db.session.query(TrainingAllowanceCompensation.reservation_id).filter(
+                    TrainingAllowanceCompensation.operation_id ==
+                    TrainingPlanGenerationAllowance.operation_id).exists())
+        pending = [operation_id for (operation_id,) in candidates.filter(
+            TrainingPlanGenerationAllowance.user_id == user_id, state_filter,
+            TrainingPlanGenerationOperation.user_id == user_id,
+            TrainingPlanGenerationOperation.status.in_(_TERMINAL))
+            .order_by(TrainingPlanGenerationAllowance.updated_at,
+                      TrainingPlanGenerationAllowance.operation_id)
+            .limit(_SETTLE_PER_COMMAND).all()]
         db.session.rollback()
     except Exception as error:
         db.session.rollback()
@@ -220,3 +253,13 @@ def settle_pending(user_id):
         return
     for operation_id in pending:
         settle(operation_id)
+        # Rotate unverifiable retained cases so one cannot starve later work.
+        # Never write the new reconciliation metadata in enforcement-OFF mode.
+        if enforcement_enabled():
+            try:
+                binding = _binding(operation_id, lock=True)
+                if binding is not None:
+                    binding.updated_at = datetime.utcnow()
+                db.session.commit()
+            except Exception:
+                db.session.rollback()

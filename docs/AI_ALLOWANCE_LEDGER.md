@@ -108,9 +108,12 @@ never consumes extra visible units.
 **Locking:** account writers first lock `user`, serializing all grant, reserve,
 finalize and expiry work for that account. Replay/finalize/expiry then lock
 reservation rows before updating buckets; fresh reserve updates a bucket before
-inserting its reservation. Retention deletes terminal reservations before empty
-old Premium buckets, without an owner lock. The ledger never takes a plan or operation lock, so it
-cannot form a cycle with the repo-wide order (operation row → user → plan rows).
+inserting its reservation. Retention claims at most 500 candidates with a durable finite keyset cursor,
+committing that short transaction before financial locks. It then locks owner →
+operation NOWAIT → binding → reservation → original bucket for correction and
+cleanup. Deferred candidates remain eligible for subsequent scan cycles; a
+crashed claim is retried on a later cycle. Empty Premium bucket cleanup is also
+capped at 500. NOWAIT avoids a blocking inversion with operation → owner paths.
 Callers must not hold a ledger transaction across provider I/O.
 
 **Idempotency** — keys are 8–128 printable ASCII chars, owner-scoped and stored
@@ -212,3 +215,62 @@ the feature flag does not gate schema migration or release preparation.
   present, the owner index on `(user_id, state)` (non-unique, not partial).
 - `billed_releases` counts UNKNOWN releases as well ("released while possibly
   billed"); it is not confirmed provider billing.
+
+## Founder-approved zero-attempt expiry correction (MON-02-BE-03B-A2-A1)
+
+The expiry transition above remains immutable. When both allowance flags are ON,
+terminal FAILED metered Training with exact False attempt evidence and complete
+same-owner dispatch/binding/reservation/bucket provenance can receive one separate
+correction. `training_allowance_compensation` uniquely identifies the expired
+reservation and operation. Its insertion and a conditional original-bucket
+`used - 1` commit together. Reserved, granted, billed releases, expiry outcome,
+UNKNOWN evidence and terminal operation remain unchanged. NULL/True, missing
+or contradictory authorities, and non-FAILED operations never qualify.
+
+The target is exclusively the reservation's stored bucket, with its stored
+scope, period and policy version. The bucket/grant must predate the reservation,
+and Premium period must match the original reservation time. Current entitlement and current policy are
+never consulted. A historical Premium correction creates no current-period
+allowance. Starter restoration changes only its existing lifetime balance.
+
+`allowance.settle()` revisits EXPIRED bindings, including previously settled
+ones. `settle_pending(owner)` selects at most three candidates, excludes applied
+receipts, and rotates incomplete cases by binding update time. Missing retained
+reservations mark bindings UNOBSERVABLE, stopping repeated scans. These run at
+existing authenticated Training command reconciliation opportunities. No new
+endpoint, scheduler or provider request is introduced. Dormant owners depend on
+an explicitly operated sweep or a future separately approved periodic job;
+production scheduling and activation remain separate gates.
+
+Retention now selects at most 500 terminal reservations per invocation. Each
+owner is locked before a NOWAIT operation lock, then binding, reservation and
+bucket. Eligible corrections run before deletion, in the same transaction.
+Transient lock/DB failures retain evidence for retry. An applied receipt and its
+original reservation remain for the full existing 90-day window from application;
+a later cleanup removes both via reservation cascade. Old unreferenced Premium
+buckets can then be removed. Definitively incomplete evidence may age out without
+refund. Evidence already purged is never reconstructed. User erasure cascades
+all records; explicit application erasure also lists the receipt first.
+
+The compensation lock order is owner -> operation NOWAIT -> binding -> reservation
+-> bucket. Owner acquisition has a two-second PostgreSQL lock timeout. NOWAIT
+prevents a blocking reverse edge against operation -> owner dispatch/retirement.
+No compensation transaction spans provider I/O. Lost acknowledgments replay the
+receipt without another movement; precommit failures roll back both facts.
+Migration `f8b2d4e6a0c3` is additive, verifies create-all-first DDL, performs no
+backfill, and refuses downgrade with retained correction evidence.
+
+
+Retention callers cannot shorten the 90-day original-evidence horizon or the
+independent 90-day audit horizon from compensation application. Negative or
+non-timedelta retention is rejected before SQL; zero is valid with the same
+floor. A longer caller horizon extends retention. Exact day 90 remains retained;
+ordinary deletion is strictly after the applicable deadline. Owner erasure
+remains a separate authorized path. The singleton ai_allowance_purge_progress
+stores only finite cycle bounds, with no financial meaning or foreign key.
+Repeated successful invocations traverse a finite cycle despite a locked prefix;
+new IDs enter the next cycle. A crash after a claim cannot abandon evidence.
+No wall-clock completion is promised without actually operated compatible
+sweeps; dormant-owner scheduling remains a runtime activation gate. No scheduler
+is installed. Revision f8b2d4e6a0c3 is unmerged and now creates this progress table
+alongside receipts; its parent and 55-revision single-head graph are unchanged.
