@@ -113,6 +113,17 @@ class AiUsageReservation(db.Model):
     )
 
 
+class AiAllowancePurgeProgress(db.Model):
+    """Singleton traversal state, never financial or deletion authority."""
+    id = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    after_id = db.Column(db.Integer, nullable=False)
+    through_id = db.Column(db.Integer, nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("id = 1", name="ck_ai_allowance_purge_singleton"),
+        db.CheckConstraint("after_id >= 0 AND through_id >= after_id", name="ck_ai_allowance_purge_progress"),
+    )
+
+
 class TrainingAllowanceCompensation(db.Model):
     """One original expiry correction; bounded by reservation audit retention.
 
