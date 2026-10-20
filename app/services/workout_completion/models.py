@@ -68,6 +68,24 @@ class SessionCompletionConflict(Exception):
         self.reason = reason
 
 
+class CompletionFenceRefused(Exception):
+    """The database completion-authority fence refused this completion's commit
+    (PRIV-K6 rollback gate). The transaction was rolled back whole: no claim,
+    PumpCheck, marker, XP, quest, activity or session transition was written.
+
+    ``reason`` and ``retryable`` come from the closed vocabulary in
+    ``app.services.completion_fence.REFUSALS``. ``retryable`` is True only when
+    the same request can succeed later unchanged (the floor is about to be
+    raised, or a lost race that re-resolves to ALREADY_COMPLETED); a permanent
+    refusal must never be advertised as retryable.
+    """
+
+    def __init__(self, reason: str, *, retryable: bool):
+        super().__init__(reason)
+        self.reason = reason
+        self.retryable = retryable
+
+
 @dataclass(frozen=True)
 class CompleteWorkoutCommand:
     """Everything the canonical mutation needs — already validated by the caller.

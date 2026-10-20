@@ -739,7 +739,8 @@ def _tool_analyze_gym_photo(user_id, s3_key):
     # challenge TEK atomik transaction. Bu araç yalnızca görsel analiz + yanıttan
     # sorumlu; rakip tamamlanma semantiği TUTMAZ. Kanıt-yalnızca kayıtçılar
     # (commit_workout_log, fitx_mcp) bu yolu ASLA çağırmaz.
-    from app.services.workout_completion import CompleteWorkoutCommand, complete_workout
+    from app.services.workout_completion import (
+        CompleteWorkoutCommand, CompletionFenceRefused, complete_workout)
     try:
         outcome = complete_workout(CompleteWorkoutCommand(
             user_id=user_id,
@@ -757,6 +758,15 @@ def _tool_analyze_gym_photo(user_id, s3_key):
             activity_text="Pump Check doğrulandı (AI koç)",
             entry_path="ai_tool",
         ))
+    except CompletionFenceRefused as refusal:
+        # PRIV-K6 rollback gate: rolled back whole, nothing awarded. Only a
+        # retryable refusal may invite the user to try again.
+        return json.dumps({"status": "error", "awarded": False,
+                           "retryable": refusal.retryable,
+                           "message": ("Antrenman tamamlama birazdan açılacak, kısa süre sonra tekrar dene."
+                                       if refusal.retryable else
+                                       "Antrenman tamamlama şu an kullanılamıyor.")},
+                          ensure_ascii=False)
     except Exception as e:
         current_app.logger.warning("[ANALYZE PHOTO] tamamlanma başarısız: %s: %s", type(e).__name__, e)
         return json.dumps({"status": "error", "message": "Ödül kaydedilemedi, tekrar dene."},

@@ -35,6 +35,12 @@ RUN case "$BUILD_REVISION" in \
     esac && test "${#BUILD_REVISION}" -eq 40 && \
     printf '%s\n' "$BUILD_REVISION" > /app/BUILD_REVISION && \
     chown root:root /app/BUILD_REVISION && chmod 0444 /app/BUILD_REVISION
+# PRIV-K6 rollback gate (Layer B): the completion capability manifest. The
+# release engine reads it from the EXACT image ID and trusts it only when it is
+# byte-equal to the reviewed source manifest of the baked revision. Same
+# root:root 0444 handling as BUILD_REVISION.
+RUN install -o root -g root -m 0444 /app/release/completion-capabilities \
+    /app/COMPLETION_CAPABILITIES
 # /app dizini appuser'a ait kalırsa (0755, appuser sahipliğinde) appuser BUILD_REVISION'ı
 # unlink edip yeniden oluşturabilir — POSIX'te silme/yeniden adlandırma izni dosyanın
 # kendi modundan değil, İÇİNDE BULUNDUĞU dizinin yazma bitinden gelir. Dizini root'a

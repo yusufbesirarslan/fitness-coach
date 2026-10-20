@@ -23,6 +23,7 @@ from .models import (
     PROOF_NONE,
     PROOF_PHOTO,
     CompleteWorkoutCommand,
+    CompletionFenceRefused,
     CompletionOutcome,
     CompletionResult,
     SessionCompletionConflict,
@@ -38,6 +39,7 @@ __all__ = [
     "CompletionResult",
     "CompletionOutcome",
     "SessionCompletionConflict",
+    "CompletionFenceRefused",
     "PROOF_PHOTO",
     "PROOF_NONE",
 ]

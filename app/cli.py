@@ -457,7 +457,60 @@ def ai_allowance_sweep_cmd():
     click.echo(f"expired={expired} purged_settled={settled} purged_periods={periods}")
 
 
+COMPLETION_FLOOR_PREFIX = "completion-floor: "
+
+
+def _completion_floor_emit(payload, failed=False):
+    """ONE machine-readable line (release tooling parses exactly this prefix)."""
+    import json
+    click.echo(COMPLETION_FLOOR_PREFIX + json.dumps(payload, sort_keys=True))
+    if failed:
+        raise SystemExit(1)
+
+
+@click.group("completion-floor")
+def completion_floor_cmd():
+    """PRIV-K6 completion capability floor (read or raise; never lower).
+
+        FITX_SKIP_DB_INIT=1 flask --app starter completion-floor status
+        FITX_SKIP_DB_INIT=1 flask --app starter completion-floor raise --revision <sha>
+    """
+
+
+@completion_floor_cmd.command("status")
+def completion_floor_status_cmd():
+    """Read-only: floor, fence verification, whether any claim exists."""
+    from app.services import completion_fence
+    try:
+        with db.engine.connect() as connection:
+            status = completion_fence.floor_status(connection)
+    except completion_fence.FloorError as exc:
+        _completion_floor_emit({"result": "error", "reason": exc.reason}, failed=True)
+    except Exception as exc:  # noqa: BLE001 - unknown is reported, never "absent"
+        _completion_floor_emit({"result": "error", "reason": type(exc).__name__},
+                               failed=True)
+    _completion_floor_emit({"result": "ok", **status})
+
+
+@completion_floor_cmd.command("raise")
+@click.option("--revision", required=True, help="40-hex release revision raising it.")
+def completion_floor_raise_cmd(revision):
+    """Raise the floor under the exclusive floor lock (idempotent)."""
+    from app.services import completion_fence
+    try:
+        with db.engine.connect() as connection:
+            outcome = completion_fence.raise_floor(connection, revision)
+    except completion_fence.FloorError as exc:
+        _completion_floor_emit({"result": "refused", "reason": exc.reason}, failed=True)
+    except Exception as exc:  # noqa: BLE001 - lock timeout, refusal, outage
+        refusal = completion_fence.refusal_of(exc)
+        _completion_floor_emit({"result": "error", "reason": (
+            refusal.reason if refusal else type(exc).__name__)}, failed=True)
+    _completion_floor_emit(outcome)
+
+
 def register_cli(app):
+    app.cli.add_command(completion_floor_cmd)
     app.cli.command("ai-allowance-sweep")(ai_allowance_sweep_cmd)
     app.cli.command("release-prepare")(release_prepare_cmd)
     app.cli.command("seed-quests")(seed_quests)

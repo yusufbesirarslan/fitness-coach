@@ -419,9 +419,12 @@ def complete_session(
     """
     from app.services.workout_completion import (
         CompleteWorkoutCommand,
+        CompletionFenceRefused,
         SessionCompletionConflict,
         complete_workout,
     )
+
+    from .errors import CompletionActivationPending, CompletionWriterIncompatible
 
     day = today or app_today()
     session_id, error = resolve_for_completion(user_id, public_id, day)
@@ -441,6 +444,10 @@ def complete_session(
         return SessionResult(
             SessionOutcome.CONFLICT, session=view,
             conflict_reason=getattr(conflict, "reason", "abandoned"))
+    except CompletionFenceRefused as refusal:
+        _log("complete_fence_refused")
+        raise (CompletionActivationPending if refusal.retryable
+               else CompletionWriterIncompatible)(refusal.reason) from refusal
 
     session = get_owned_session(user_id, public_id)
     view = _build_view(session, day) if session is not None else None

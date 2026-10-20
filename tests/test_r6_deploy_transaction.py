@@ -72,6 +72,15 @@ class World:
     faults: dict = field(default_factory=dict)
     counter: int = 0
     events: list = field(default_factory=list)
+    # PRIV-K6 Layer B: image id -> baked manifest; "candidate"/"previous" ->
+    # source manifest and migration revisions; the database floor status.
+    manifests: dict = field(default_factory=dict)
+    source_manifests: dict = field(default_factory=dict)
+    source_revisions: dict = field(default_factory=dict)
+    floor: dict = field(default_factory=lambda: {
+        "result": "ok", "capability": "workout_completion_claims_v1",
+        "floor": "absent", "fence": "absent", "claims_present": False,
+        "raised_by_revision": None})
 
     def fault(self, name, *, consume=True):
         value = self.faults.get(name)
@@ -362,6 +371,32 @@ class FakeOps:
         body = {"error": {"code": "AUTH_SESSION_EXPIRED", "message": "x",
                           "retryable": False, "request_id": "r"}}
         return (401, json.dumps(body).encode()) if healthy else (502, b"")
+
+    def image_capability_manifest(self, image_id, timeout):
+        self._rec("image_capability_manifest", image_id, timeout=timeout)
+        return self.w.manifests.get(image_id)
+
+    def source_capability_manifest(self, which, timeout):
+        self._rec("source_capability_manifest", which, timeout=timeout)
+        return self.w.source_manifests.get(which)
+
+    def source_migration_revisions(self, which, timeout):
+        self._rec("source_migration_revisions", which, timeout=timeout)
+        return frozenset(self.w.source_revisions.get(which, ()))
+
+    def completion_floor(self, image_id, revision, action, timeout):
+        self._rec("completion_floor", action, image_id, timeout=timeout)
+        self._fail(f"floor_{action}")
+        if self.w.fault("floor_malformed"):
+            return {"result": "ok"}
+        if action == "raise":
+            if self.w.floor["fence"] != "verified":
+                raise tx.OpError("completion-floor raise refused (exit 1): fence_not_verified")
+            outcome = "already_raised" if self.w.floor["floor"] == "raised" else "raised"
+            if outcome == "raised":
+                self.w.floor.update(floor="raised", raised_by_revision=revision)
+            return {"result": outcome, "raised_by_revision": self.w.floor["raised_by_revision"]}
+        return dict(self.w.floor)
 
     def diagnostics(self, timeout):
         self._rec("diagnostics", timeout=timeout)
@@ -940,7 +975,7 @@ def test_timing_contract_algebra():
     ("POLL_HORIZON_SECONDS: int = 2500", "POLL_HORIZON_SECONDS: int = 2400"),
     ("CONTROLLER_STEP_MINUTES: int = 75", "CONTROLLER_STEP_MINUTES: int = 68"),
     ('"release_rollback": 500,', '"release_rollback": 400,'),
-    ('"retirement": 400,', '"retirement": 300,'),
+    ('"retirement": 460,', '"retirement": 300,'),
     ('"image_build": 600,', '"image_build": 1300,'),
 ])
 def test_contract_refuses_invalid_timing_algebra(old, new):

@@ -56,9 +56,12 @@ from app.services.gamification import (
     log_activity,
 )
 
+from app.services.completion_fence import refusal_of as fence_refusal_of
+
 from .models import (
     PROOF_PHOTO,
     CompleteWorkoutCommand,
+    CompletionFenceRefused,
     CompletionOutcome,
     CompletionResult,
     SessionCompletionConflict,
@@ -257,8 +260,16 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
             return CompletionResult(outcome=CompletionOutcome.ALREADY_COMPLETED)
         _log(command.entry_path, "integrity_error")
         raise
-    except Exception:
+    except Exception as exc:
         db.session.rollback()
+        # PRIV-K6 rollback gate: the database fence refuses at COMMIT (custom
+        # SQLSTATE class AX). Typed, never "already completed" and never a
+        # generic integrity error, so entry paths can say whether a retry helps.
+        refusal = fence_refusal_of(exc)
+        if refusal is not None:
+            _log(command.entry_path, f"fence_refused_{refusal.reason}")
+            raise CompletionFenceRefused(
+                refusal.reason, retryable=refusal.retryable) from exc
         _log(command.entry_path, "rollback")
         raise
 
