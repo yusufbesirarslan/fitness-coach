@@ -567,11 +567,11 @@ def test_every_provider_sdk_call_site_is_guarded():
             offenders.append(rel)
     assert offenders == []
     health = (root / "services" / "bedrock_health.py").read_text(encoding="utf-8")
-    assert "charge=False" in health
+    assert "ai_provider_call.probe_bedrock_readiness()" in health
     uncharged = [p.relative_to(root.parent).as_posix() for p in root.rglob("*.py")
                  if "charge=False" in p.read_text(encoding="utf-8")
                  and p.name != "ai_provider_call.py"]
-    assert uncharged == ["app/services/bedrock_health.py"]
+    assert uncharged == []
 
 
 # ── No provider call after refusal: chat helpers ────────────────────────────
