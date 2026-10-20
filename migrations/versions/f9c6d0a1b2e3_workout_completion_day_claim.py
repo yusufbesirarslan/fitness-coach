@@ -90,6 +90,7 @@ def _verify_sequence(bind):
 
     The reflected default is checked separately. Its regclass dependency must
     resolve to the same sequence that is auto-owned by this exact ID column.
+    Table and sequence must be permanent: crash recovery resets UNLOGGED ones.
     Check nextval privileges for the verifying role only. Runtime counters and
     grants to a different application role remain separate qualification.
     """
@@ -99,6 +100,7 @@ def _verify_sequence(bind):
                q.relnamespace = t.relnamespace AS same_namespace,
                q.relowner = t.relowner AS same_owner,
                a.attidentity = '' AS serial_column,
+               t.relpersistence = 'p' AND q.relpersistence = 'p' AS crash_safe,
                pg_catalog.pg_get_serial_sequence(:relation, 'id')::pg_catalog.regclass
                    = q.oid AS associated_sequence,
                (pg_catalog.has_sequence_privilege(q.oid, 'USAGE') OR
@@ -128,7 +130,7 @@ def _verify_sequence(bind):
           AND q.relname = :sequence
     """), {"relation": TABLE, "sequence": f"{TABLE}_id_seq"}).all()
     if len(sequence) != 1 or tuple(sequence[0]) != (
-            True, 1, 1, 2147483647, False, True, True, True, True, True, True):
+            True, 1, 1, 2147483647, False, True, True, True, True, True, True, True):
         _fail("id sequence")
 
 

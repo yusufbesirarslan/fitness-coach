@@ -42,13 +42,17 @@ Photo and photo-free completions therefore cannot both succeed for one day:
   `pg_attrdef`/`pg_depend` to its actual sequence OID. That object must be the
   table's own auto-dependent SERIAL sequence in the same namespace and with
   the same owner: INTEGER, increment 1, minimum 1, maximum 2147483647, NO CYCLE.
+  Table and sequence must both be permanent (`relpersistence = 'p'`): crash
+  recovery or standby promotion empties an UNLOGGED claim table or rewinds an
+  UNLOGGED sequence.
   The verifying role must have USAGE or UPDATE on it. START, CACHE and current
   counter state are not normalized or reset. This establishes the expected
   generator structure, not future insert success: exhaustion, manual IDs or
   counter rewinds, later DDL/grant changes and a distinct application role's
   privileges require separate operational qualification. Identity columns and
   custom generators are outside this migration/model's SERIAL contract.
-  Anything else fails closed without modifying the table.
+  Anything else verified here fails closed without modifying the table.
+  User triggers and rules on the claim table are not inspected.
 * downgrade refuses while any claim exists.
 * Purge: `WorkoutCompletionDay` is in `app/cli.py::_user_child_models`.
 
@@ -173,7 +177,7 @@ behavior because they have no claim row.
   re-check negative control, start versus completion, forced rollback, real
   IntegrityError classification, and migration verify/negative controls,
   downgrade and the no-backfill full chain.
-* `tests/qualification/run_priv_k6_b1_mutations.py`: 21 semantic mutations.
+* `tests/qualification/run_priv_k6_b1_mutations.py`: 25 semantic mutations.
 
 
 ## R1 remediation boundary

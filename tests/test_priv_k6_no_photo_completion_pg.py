@@ -563,6 +563,11 @@ SEQUENCE_DRIFT = {
         "SET LOCAL search_path = public, pg_catalog",
         "ALTER TABLE workout_completion_day ALTER COLUMN id SET DEFAULT nextval('workout_completion_day_id_seq'::regclass)"),
     "r2_maxvalue_2_cycle": ("ALTER SEQUENCE workout_completion_day_id_seq MAXVALUE 2 CYCLE",),
+    "unlogged_sequence": ("ALTER SEQUENCE workout_completion_day_id_seq SET UNLOGGED",),
+    "unlogged_table": ("ALTER TABLE workout_completion_day SET UNLOGGED",),
+    "unlogged_table_logged_sequence": (
+        "ALTER TABLE workout_completion_day SET UNLOGGED",
+        "ALTER SEQUENCE workout_completion_day_id_seq SET LOGGED"),
     "bounded_no_cycle": ("ALTER SEQUENCE workout_completion_day_id_seq MAXVALUE 2",),
     "cycle_full_range": ("ALTER SEQUENCE workout_completion_day_id_seq CYCLE",),
     "increment": ("ALTER SEQUENCE workout_completion_day_id_seq INCREMENT 2",),
