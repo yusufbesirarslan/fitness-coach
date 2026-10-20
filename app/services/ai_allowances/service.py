@@ -146,9 +146,9 @@ def _subscription(user_id):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def _lock_owner(user_id):
+def _lock_owner(user_id, *, nowait=False):
     owner = db.session.execute(
-        sa.select(User).where(User.id == user_id).with_for_update()
+        sa.select(User).where(User.id == user_id).with_for_update(nowait=nowait)
         .execution_options(populate_existing=True)).scalar_one_or_none()
     if owner is None:
         raise AllowanceError("AI_ALLOWANCE_ACCOUNT_UNAVAILABLE")
@@ -480,22 +480,102 @@ def expire_abandoned(*, now=None, limit=500):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def purge_retained(*, now=None, retention=TERMINAL_RETENTION):
-    """Bounded retention: settled holds and past Premium periods older than it.
+def _claim_purge_candidates(cutoff, audit_cutoff, limit):
+    """Commit traversal progress BEFORE taking any financial authority locks.
 
-    Starter buckets and grants are lifetime balances and are kept until the
-    account is deleted (FK cascade).
+    A finite high-water cycle revisits every deferred ID. A crash after claim
+    delays its batch until the next cycle; it never marks evidence completed.
+    Concurrent workers serialize only this short claim, not owner processing.
+    """
+    from app.models import AiAllowancePurgeProgress, TrainingAllowanceCompensation
+    progress = AiAllowancePurgeProgress
+    if db.engine.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+        db.session.execute(sa.text("SET LOCAL lock_timeout = '2000ms'"))
+    else:
+        from sqlalchemy.dialects.sqlite import insert
+    db.session.execute(insert(progress).values(id=1, after_id=0, through_id=0)
+                       .on_conflict_do_nothing(index_elements=["id"]))
+    cursor = db.session.execute(sa.select(progress).where(progress.id == 1)
+        .with_for_update(nowait=True).execution_options(populate_existing=True)).scalar_one()
+    reservation = AiUsageReservation
+    def page():
+        return db.session.execute(sa.select(reservation.id, reservation.user_id).where(
+            reservation.id > cursor.after_id, reservation.id <= cursor.through_id,
+            reservation.state != RESERVED, reservation.finalized_at < cutoff,
+            ~sa.exists().where(
+                TrainingAllowanceCompensation.reservation_id == reservation.id,
+                TrainingAllowanceCompensation.applied_at >= audit_cutoff))
+            .order_by(reservation.id).limit(limit)).all()
+    candidates = page() if cursor.after_id < cursor.through_id else []
+    if not candidates:
+        cursor.after_id = 0
+        cursor.through_id = db.session.execute(sa.select(sa.func.coalesce(
+            sa.func.max(reservation.id), 0))).scalar_one()
+        candidates = page()
+    cursor.after_id = candidates[-1].id if candidates else cursor.through_id
+    db.session.commit()
+    return candidates
+
+
+def purge_retained(*, now=None, retention=TERMINAL_RETENTION, limit=500):
+    """Bounded retained-evidence cleanup, with pre-purge correction arbitration.
+
+    At most 500 reservations per call. A newly applied receipt retains its
+    original reservation for a full audit window from correction. Busy owners
+    or operation locks defer deletion; absent/contradictory proof never refunds.
+    Durable finite keyset cycles revisit deferred candidates after restart.
+    At most 500 empty Premium buckets are removed; no scheduler is installed.
     """
     _require_enabled()
-    cutoff = _now(now) - retention
+    from app.models import TrainingAllowanceCompensation, TrainingPlanGenerationAllowance
+    from . import training_compensation as compensation
+    now = _now(now)
+    if not isinstance(retention, timedelta) or retention < timedelta(0):
+        raise ValueError("retention must be a nonnegative timedelta")
+    # Caller cleanup horizons cannot shorten original proof eligibility or the
+    # independent audit lifetime that starts when a correction is committed.
+    cutoff = now - max(retention, TERMINAL_RETENTION)
+    audit_cutoff = min(now - TERMINAL_RETENTION, now - retention)
     reservation = AiUsageReservation
     try:
-        settled = db.session.execute(sa.delete(reservation).where(
-            reservation.state != RESERVED, reservation.finalized_at < cutoff)
-            .execution_options(synchronize_session=False)).rowcount
-        periods = db.session.execute(sa.delete(AiAllowanceBucket).where(
+        batch_limit = min(max(limit, 0), 500)
+        candidates = (_claim_purge_candidates(cutoff, audit_cutoff, batch_limit)
+                      if batch_limit else [])
+        settled = 0
+        for reservation_id, user_id in candidates:
+            try:
+                if db.engine.dialect.name == "postgresql":
+                    db.session.execute(sa.text("SET LOCAL lock_timeout = '2000ms'"))
+                _lock_owner(user_id, nowait=True)
+                # Discover only; correct_within takes operation NOWAIT before
+                # binding/reservation. Never invert those locks during purge.
+                operation_id = db.session.execute(sa.select(
+                    TrainingPlanGenerationAllowance.operation_id).join(reservation,
+                    TrainingPlanGenerationAllowance.reservation_ref == reservation.public_id)
+                    .where(reservation.id == reservation_id)).scalar_one_or_none()
+                if operation_id is not None and compensation.enabled():
+                    compensation.correct_within(user_id, operation_id, now)
+                row = db.session.execute(sa.select(reservation).where(
+                    reservation.id == reservation_id, reservation.user_id == user_id)
+                    .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+                receipt = db.session.get(TrainingAllowanceCompensation, reservation_id,
+                                         populate_existing=True)
+                if (row is not None and row.state != RESERVED and _utc(row.finalized_at) < cutoff
+                        and (receipt is None or _utc(receipt.applied_at) < audit_cutoff)):
+                    db.session.delete(row)
+                    settled += 1
+                db.session.commit()
+            except (AllowanceError, SQLAlchemyError):
+                db.session.rollback()  # retry evidence later, never erase a failed correction
+        if db.engine.dialect.name == "postgresql":
+            db.session.execute(sa.text("SET LOCAL lock_timeout = '2000ms'"))
+        old_buckets = sa.select(AiAllowanceBucket.id).where(
             AiAllowanceBucket.scope == P.SCOPE_PREMIUM, AiAllowanceBucket.updated_at < cutoff,
-            ~sa.exists().where(reservation.bucket_id == AiAllowanceBucket.id))
+            ~sa.exists().where(reservation.bucket_id == AiAllowanceBucket.id)
+        ).order_by(AiAllowanceBucket.id).limit(batch_limit)
+        periods = db.session.execute(sa.delete(AiAllowanceBucket).where(
+            AiAllowanceBucket.id.in_(old_buckets))
             .execution_options(synchronize_session=False)).rowcount
         db.session.commit()
         return settled, periods

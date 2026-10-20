@@ -526,7 +526,7 @@ def test_full_chain_upgrade_preserves_pump_checks_and_backfills_nothing(migrate_
     db.init_app(app)
     Migrate(app, db, directory=str(ROOT / "migrations"))
     with app.app_context():
-        upgrade(revision="e7a1c3d5f9b2")
+        upgrade(revision="f8b2d4e6a0c3")
         db.session.add(User(id=1, username="k6-chain", email="k6-chain@example.invalid"))
         db.session.commit()
         with db.engine.begin() as conn:

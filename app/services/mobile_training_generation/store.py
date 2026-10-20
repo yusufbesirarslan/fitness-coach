@@ -208,14 +208,26 @@ def retire_abandoned(user_id):
     """Bound active occupancy; retain dispatch uncertainty and legacy quota.
 
     Called under the short owner arbitration lock. A late worker is fenced by
-    the terminal status at staging/failure persistence. This is not remote
-    cancellation or proof that an old network request has stopped.
+    the terminal status at staging/failure persistence. Metered retirement
+    also orders against D1's existing account fence, which spans each SDK call.
+    Contention refuses retirement for now; it never waits across provider I/O.
+    This is not remote cancellation or proof that a timed-out request stopped.
     """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
                      .filter_by(user_id=user_id, status=TRAINING_PLAN_GENERATION_IN_PROGRESS)
                      .populate_existing().with_for_update().one_or_none())
         if operation is not None and operation.updated_at <= datetime.utcnow() - ABANDON_AFTER:
+            if operation.allowance_metered is True:
+                # D1 owns user -> operation during attempt admission. Never
+                # WAIT for its user fence while holding operation: NOWAIT
+                # aborts and releases operation if D1/revoke/deletion owns user.
+                # These locks span only retirement, never provider I/O.
+                owner = db.session.execute(
+                    sa.select(User.id).where(User.id == user_id)
+                    .with_for_update(nowait=True)).scalar_one_or_none()
+                if owner is None:
+                    raise GenerationPersistenceUnavailable()
             operation.status = TRAINING_PLAN_GENERATION_FAILED
             operation.error_code = "TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN"
             operation.error_http_status = 503

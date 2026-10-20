@@ -29,7 +29,7 @@ Photo and photo-free completions therefore cannot both succeed for one day:
   is what refuses a historical-only claim, because no unique constraint spans
   `pump_check` and `workout_completion_day`.
 
-## 3. Migration `f9c6d0a1b2e3` (down `e7a1c3d5f9b2`, expand)
+## 3. Migration `f9c6d0a1b2e3` (down `f8b2d4e6a0c3`, expand)
 
 * creates `workout_completion_day (id PK, user_id FK user CASCADE NOT NULL,
   date_key VARCHAR(10) NOT NULL, proof VARCHAR(8) NOT NULL CHECK proof IN
