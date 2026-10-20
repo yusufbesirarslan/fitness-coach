@@ -24,6 +24,7 @@ from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services import ai, meal_idempotency
+from app.services.ai_consent import ConsentDenied
 from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services.nutrition_day_view import (
     build_nutrition_day_view,
@@ -61,6 +62,8 @@ def _failure(event, error, unavailable):
 def _run(event, unavailable, operation):
     try:
         return operation()
+    except ConsentDenied:
+        raise
     except errors.NativeNutritionError as error:
         try:
             db.session.rollback()

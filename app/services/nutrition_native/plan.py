@@ -33,7 +33,7 @@ from datetime import datetime
 
 from app.extensions import db
 from app.models import MealLog, UserSession
-from app.services import meal_idempotency
+from app.services import meal_idempotency, ai, ai_consent
 from app.services import nutrition_plan_generation as generation
 from app.services.mobile_log_food import response_meal
 from app.services.nutrition_pipeline import clamp_serving_macros
@@ -404,6 +404,8 @@ def generate_proposals(user, secret, request, chat_fn, quota_enabled, logger=Non
     target, goal = _generation_target(user.id)
     # Close the read transaction before the quota write and the provider call.
     db.session.rollback()
+    recipient, model = ai.heavy_primary_route()
+    ai_consent.preflight(user.id, 'nutrition_plan', recipient, model)
     if quota_enabled and not reserve_ai_quota(user, "nutrition", FREE_WEEKLY_AI_PLANS):
         raise errors.GenerationQuotaExceeded
     try:
@@ -433,6 +435,8 @@ def generate_proposals(user, secret, request, chat_fn, quota_enabled, logger=Non
             logger.error(
                 "nutrition_native event=plan_generation_failed error_type=%s",
                 type(error).__name__)
+        if isinstance(error, ai_consent.ConsentDenied):
+            raise
         raise errors.GenerationFailed from None
     rating = generation.food_rating(
         request["proteins"] + request["carbs"] + request["fats"])

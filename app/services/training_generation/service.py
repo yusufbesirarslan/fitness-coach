@@ -5,6 +5,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
 from app.observability import current_request_id
+from app.services.ai_consent import ConsentDenied
 from app.services.exercise_catalog import ExerciseContext, load_exercise_catalog
 from app.services.training_generation.capability import require_supported
 from app.services.training_generation.classifier_service import classify_user
@@ -152,6 +153,8 @@ class _CompletionBudget:
         )
         try:
             raw = self.chat_fn(**kwargs)
+        except ConsentDenied:
+            raise
         except GenerationOutputError:
             raise
         except Exception as exc:
