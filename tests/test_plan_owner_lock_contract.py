@@ -93,6 +93,7 @@ def test_every_training_plan_create_writer_takes_the_shared_owner_lock():
 @pytest.mark.parametrize("module_path, function_name", [
     ("app/services/plan_replacement.py", "replace_training_plan_in_transaction"),
     ("app/services/mobile_training_generation/store.py", "commit_plan"),
+    ("app/services/mobile_training_generation/store.py", "commit_general_plan"),
 ])
 def test_the_absence_check_is_made_after_the_owner_lock(module_path,
                                                         function_name):

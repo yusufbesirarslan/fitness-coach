@@ -372,3 +372,78 @@ def commit_plan(operation_id, user_id):
     except Exception as error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from error
+
+
+class GeneralKeyRaced(RuntimeError):
+    """The general receipt INSERT lost to another row; re-read the key."""
+
+
+def _generation_live(user_id):
+    """An AI first-plan operation that may be running right now.
+
+    Older IN_PROGRESS/GENERATED rows are abandoned work: ``retire_abandoned``
+    would retire the first kind, and the AI route that could commit the second
+    is closed by D1 on main. Neither may strand the owner without a plan.
+    """
+    active = find_active_for_owner(user_id)
+    return (active is not None
+            and active.updated_at > datetime.utcnow() - ABANDON_AFTER)
+
+
+def commit_general_plan(user_id, key, fingerprint, document_json):
+    """Persist one deterministic first plan and its receipt atomically, or refuse.
+
+    The non-AI general plan's receipt is an ordinary row of this ledger, born
+    SUCCEEDED in the SAME transaction as the plan. Its markers are the truth
+    about that work: ``provider_dispatch_possible`` False (there is no
+    provider), ``allowance_metered``/``provider_attempt_possible`` NULL
+    (unmetered, untracked), no quota reserved. No AI generation can end
+    SUCCEEDED with dispatch False — ``authorize_dispatch`` commits False ->
+    True before any candidate exists — so the row cannot pass for AI work.
+    It is never IN_PROGRESS/GENERATED, so it never takes the active-owner slot
+    and never meets abandonment, allowance settlement or quota refunds.
+
+    Lock order is ``commit_plan``'s: the receipt INSERT first (its
+    ``uq_training_plan_generation_user_key`` arbitrates a same-key race), then
+    the OWNER row, and the absence check under that lock, then the plan.
+    Every refusal rolls the receipt back with everything else, so a refused
+    request consumes no key.
+    """
+    if not isinstance(document_json, str) or len(document_json.encode("utf-8")) > MAX_CANDIDATE_BYTES:
+        raise GenerationPersistenceUnavailable()
+    try:
+        now = datetime.utcnow()
+        operation = TrainingPlanGenerationOperation(
+            user_id=user_id,
+            idempotency_key=key,
+            request_fingerprint=fingerprint,
+            status=TRAINING_PLAN_GENERATION_SUCCEEDED,
+            attempt_count=1,
+            provider_dispatch_possible=False,
+            quota_reserved=False,
+            created_at=now,
+            updated_at=now,
+        )
+        db.session.add(operation)
+        db.session.flush()
+        lock_plan_owner(user_id)
+        if get_active_plan(user_id) is not None:
+            raise ExistingPlanRefused()
+        if _generation_live(user_id):
+            raise GenerationInProgress()
+        plan = _insert_plan(user_id=user_id, plan_data=document_json, score=None)
+        db.session.flush()
+        operation.training_plan_id = plan.id
+        operation.plan_lineage_id = plan.lineage_id
+        operation.completed_at = now
+        db.session.commit()
+        return plan
+    except (ExistingPlanRefused, GenerationInProgress):
+        db.session.rollback()
+        raise
+    except IntegrityError as error:
+        db.session.rollback()
+        raise GeneralKeyRaced() from error
+    except Exception as error:
+        db.session.rollback()
+        raise GenerationPersistenceUnavailable() from error
