@@ -23,6 +23,10 @@ from app.services.mobile_training_generation import (
     parse_native_request,
 )
 from app.services.training_generation.preference_contract import PreferenceContractError
+from app.services.training_plan_origin import (
+    InvalidOriginExpansion,
+    origin_requested,
+)
 
 
 def _sessions_enabled():
@@ -125,10 +129,21 @@ def training_preferences():
 @require_mobile_auth
 def current_training_plan():
     try:
+        # LP21 per-request origin opt-in; absent keeps the legacy contract.
+        include_origin = origin_requested(request.args)
+    except InvalidOriginExpansion:
+        return mobile_error(
+            "TRAINING_READ_INVALID_REQUEST",
+            "Invalid Training read request.",
+            400,
+            False,
+        )
+    try:
         payload = mobile_training.build_current_plan(
             g.mobile_user.id,
             current_app.config["SECRET_KEY"],
             sessions_enabled=_sessions_enabled(),
+            include_origin=include_origin,
         )
     except mobile_training.PlanUnprojectable:
         return mobile_error(

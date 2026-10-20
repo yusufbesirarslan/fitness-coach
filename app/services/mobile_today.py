@@ -45,6 +45,7 @@ from datetime import timezone
 from flask import current_app
 
 from app.services.today_facts import get_active_plan
+from app.services.training_plan_origin import resolve_plan_origin
 from app.services.workout_state import resolve_workout_state
 from app.services.workout_state.serialization import (
     PlanSerializationError, serialize_today_plan)
@@ -65,13 +66,17 @@ class TodayUnavailable(RuntimeError):
     """
 
 
-def build_today(user_id: int) -> dict:
+def build_today(user_id: int, *, include_origin: bool = False) -> dict:
     """Project the authenticated user's canonical Today state.
 
     `user_id` is the authenticated principal, supplied by the route from
     `g.mobile_user.id`. This function accepts no date, no timezone and no owner
     override - there is no parameter through which one user could read another's
     Today, and no parameter through which a client clock could move the day.
+
+    `include_origin` is the LP21 per-request opt-in: only then does
+    `today.plan` carry `origin` (and the one ledger read it costs). Without it
+    the pre-LP21 contract is returned exactly.
 
     Raises `TodayUnavailable` if a canonical authority cannot be read.
     """
@@ -80,6 +85,8 @@ def build_today(user_id: int) -> dict:
             day = app_today()
             plan = get_active_plan(user_id)
             plan_data = _plan_content(plan)
+            origin = (resolve_plan_origin(plan, user_id)
+                      if include_origin and plan is not None else None)
             snapshot = resolve_workout_state(
                 user_id,
                 today=day,
@@ -87,7 +94,10 @@ def build_today(user_id: int) -> dict:
                 sessions_enabled=_sessions_enabled(),
                 strict_reads=True,
             )
-            return _project(day, plan, plan_data, snapshot)
+            payload = _project(day, plan, plan_data, snapshot)
+            if include_origin:
+                payload["today"]["plan"]["origin"] = origin
+            return payload
     except Exception as error:  # noqa: BLE001 - every fault fails closed
         raise TodayUnavailable("canonical Today read failed") from error
 

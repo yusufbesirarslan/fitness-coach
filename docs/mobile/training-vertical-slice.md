@@ -404,6 +404,12 @@ No plan is exactly `{ "plan": null }`; a plan is exactly:
 }
 ```
 
+With `?include_origin=1` (LP21 opt-in) the same object carries exactly one more
+key, `origin`, at the cost of one owner-scoped ledger read; without it the shape
+above is unchanged and that read is never issued. Any other `include_origin`
+value is HTTP 400 `TRAINING_READ_INVALID_REQUEST`, `retryable:false`. See
+docs/LP21_NONAI_GENERAL_PLAN.md "Read-side origin".
+
 `score` is null or a finite canonical 1–10 value. `current_workout_ref` is null
 unless the canonical Istanbul day is a scheduled workout/cardio day according to
 `resolve_workout_state`. `days` has exactly seven canonical weekday slots in

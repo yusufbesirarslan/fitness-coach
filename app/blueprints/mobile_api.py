@@ -248,6 +248,7 @@ from app.blueprints import mobile_registration  # noqa: E402,F401
 from app.blueprints import mobile_today  # noqa: E402,F401
 from app.blueprints import mobile_today_guidance  # noqa: E402,F401
 from app.blueprints import mobile_training  # noqa: E402,F401
+from app.blueprints import mobile_training_general  # noqa: E402,F401
 from app.blueprints import mobile_exercise_notes  # noqa: E402,F401
 from app.blueprints import mobile_exercise_history  # noqa: E402,F401
 from app.blueprints import mobile_workout_sessions  # noqa: E402,F401

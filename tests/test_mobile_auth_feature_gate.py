@@ -233,6 +233,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # TI-01B private catalog note, independently gated by P0 readiness.
             ("/api/v1/training/exercises/<exercise_id>/note", ("GET", "PUT")),
             ("/api/v1/training/plans", ("POST",)),
+            # LP21 non-AI general first plan; no provider, no D1 gate.
+            ("/api/v1/training/plans/general", ("POST",)),
             ("/api/v1/training/plans/replacement-proposals", ("POST",)),
             ("/api/v1/training/plans/replacement/confirm", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),
