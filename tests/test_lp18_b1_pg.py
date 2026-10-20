@@ -19,7 +19,10 @@ if os.environ.get('FITX_PG_CONCURRENCY_TEST')!='1':pytest.skip('requires disposa
 
 
 @pytest.fixture
-def pg():
+def pg(monkeypatch):
+    # These races use injected synthetic providers. Isolate the early snapshot
+    # explicitly; real authority/default-deny fencing lives in test_ai_consent_pg.
+    monkeypatch.setattr(gen.ai_consent, 'preflight', lambda *args: None)
     url=os.environ['PG_TEST_DATABASE_URL'];assert url.startswith('postgresql')
     app=Flask('lp18-b1-pg');app.config.update(TESTING=True,SQLALCHEMY_DATABASE_URI=url,SQLALCHEMY_TRACK_MODIFICATIONS=False,AI_PLAN_QUOTA_ENABLED=True)
     db.init_app(app)
@@ -31,6 +34,27 @@ def pg():
         db.session.add(TrainingPlan(user_id=uid,plan_data=json.dumps(_document()),score=8));db.session.commit()
     yield app,uid
     with app.app_context():db.session.remove();db.drop_all();db.engine.dispose()
+
+
+def test_refusal_precedes_retirement_and_quota(pg, monkeypatch):
+    from app.services.ai_consent import ConsentDenied
+    app, uid = pg
+    with app.app_context():
+        user = db.session.get(User, uid)
+        gen.claim(user, parse_native_request(CANONICAL), 'generation-key-1')
+        row = Operation.query.one()
+        expire(row)
+        before = (row.id, row.status, row.attempt_count, row.key_digest)
+        def denied(*args):
+            raise ConsentDenied()
+        monkeypatch.setattr(gen.ai_consent, 'preflight', denied)
+        with pytest.raises(ConsentDenied):
+            run(user, 'generation-key-2')
+        db.session.expire_all()
+        row = Operation.query.one()
+        assert (row.id, row.status, row.attempt_count, row.key_digest) == before
+        assert db.session.get(User, uid).user_metadata['ai_plan_quota']['training'] == 1
+        assert Proposal.query.count() == 0
 
 
 def worker(app,uid,call,output,name):
