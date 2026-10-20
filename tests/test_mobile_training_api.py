@@ -266,7 +266,11 @@ def test_current_plan_projects_bounded_native_days_and_canonical_exercises(
         "score",
         "current_workout_ref",
         "days",
+        "origin",
     }
+    # A browser-saved row has no ledger receipt: its origin is not established.
+    assert plan["origin"] == {
+        "kind": "unknown", "template": None, "personalized": None}
     assert plan["plan_lineage"] == "training-lineage-a"
     assert plan["mutation_version"] == 4
     assert plan["created_at"] == "2026-07-01T08:30:00Z"

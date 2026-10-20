@@ -311,3 +311,37 @@ def test_owners_are_independent_under_the_same_key(pg_general_app):
     for user_id in user_ids:
         plans, receipts = _rows(app, user_id)
         assert len(plans) == 1 and len(receipts) == 1
+
+
+def test_plan_origin_is_read_from_the_ledger_on_postgresql(pg_general_app):
+    """The read-side origin query on real PostgreSQL: general, then replaced."""
+    from app.extensions import db
+    from app.models import TrainingPlan
+    from app.services.plan_replacement import PlanExpectation, replace_training_plan
+    from app.services.training_plan_origin import resolve_plan_origin
+
+    app, (user_id, other_id) = pg_general_app
+    outcomes = {}
+    _general(app, user_id, "pg-general-origin", outcomes, 0)
+    assert outcomes[0][:2] == ("ok", False)
+
+    with app.app_context():
+        try:
+            plan = TrainingPlan.query.filter_by(user_id=user_id).one()
+            assert resolve_plan_origin(plan, user_id) == {
+                "kind": "general_template", "template": BODY["template"],
+                "personalized": False}
+            # Owner scope is in the statement: another owner never matches.
+            assert resolve_plan_origin(plan, other_id)["kind"] == "unknown"
+            lineage, version = plan.lineage_id, plan.mutation_version
+        finally:
+            db.session.remove()
+        try:
+            replace_training_plan(
+                user_id, PlanExpectation(False, lineage, version),
+                plan_data='{"program": []}', score=None)
+            replacement = TrainingPlan.query.filter_by(user_id=user_id).one()
+            assert replacement.lineage_id != lineage
+            assert resolve_plan_origin(replacement, user_id)["kind"] == "unknown"
+        finally:
+            db.session.remove()

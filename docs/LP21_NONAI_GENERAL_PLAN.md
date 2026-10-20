@@ -154,16 +154,77 @@ PR #116 does not know this route. The mobile owner must do the following:
 5. Show success only from the 201 body or a canonical re-read, then navigate to
    Today/Plan.
 6. Label the plan as general / not personalized, using `origin` from the 201.
-   **Gap (P2):** `GET /training/plans/current` does not yet carry `origin`, so
-   after a reinstall or on another device the label cannot be recovered from
-   the server. The receipt already makes it derivable: lineage → receipt with
-   `is_general_receipt`. Adding it is a separate, additive projection change.
+   After a reinstall or on another device, read the label from
+   `plan.origin` on `GET /training/plans/current` or `today.plan.origin` on
+   `GET /today` (see "Read-side origin" below). Render the general label only
+   for `kind: "general_template"`. Treat `unknown`, and any `kind` you do not
+   recognize, as "no label". Never treat it as AI or as personalized.
 7. Treat `estimated_calories: 0` on a general plan as "not estimated" and do
    not render "0 kcal". `score` is `null`.
 
+## Read-side origin
+
+`GET /training/plans/current` publishes `plan.origin`. `GET /today` publishes
+`today.plan.origin`; it is `null` when there is no plan. The 201 body's `plan`
+carries the same field, so it stays exactly the current-plan `plan`. Both
+reads use one resolver, `app/services/training_plan_origin.py`, so they cannot
+label one plan differently.
+
+| `kind` | `template` | `personalized` | When |
+|---|---|---|---|
+| `general_template` | `general_full_body_v1` | `false` | See the receipt conditions below |
+| `unknown` | `null` | `null` | Anything else |
+
+A plan is `general_template` only when all of the following hold:
+
+* exactly one ledger row is bound to the plan's lineage;
+* that row belongs to the same owner;
+* it names this plan row (`training_plan_id`);
+* `is_general_receipt` holds for it.
+
+`unknown` covers several cases:
+
+* AI first plans;
+* browser-saved plans;
+* replacement results (a replacement mints a new lineage, so a general plan
+  that is replaced becomes `unknown`);
+* plans that predate receipts;
+* contradictory ledger evidence.
+
+`unknown` claims nothing. It is not "AI", and plan content is never used to
+guess the origin: a receipt-less row holding the exact template document is
+`unknown`.
+
+**Creation, not edits.** Origin describes how the lineage was created. Journal
+edits keep the lineage and therefore keep the origin, so a general plan with
+`mutation_version > 0` is still `general_template`. `personalized: false`
+describes the template, not later edits. A client that needs to know about
+edits reads `mutation_version`.
+
+**Template id.** A receipt stores only the request fingerprint, not the
+template. `GENERAL_TEMPLATE_ID` is therefore pinned to the one template the
+command accepts. A second template must version this projection before it
+ships, and a test pins the two ids together.
+
+**Cost and failure.**
+
+* The resolver issues one owner-scoped `SELECT … LIMIT 2` when a plan exists,
+  and none without one. Current-plan stays within its 5-statement guard.
+  `/today` stays at 3 SELECTs without a plan and becomes 4 with one. Today
+  Guidance pays the same +1 (docs/LP17_B1_NATIVE_TODAY_GUIDANCE_HTTP.md).
+* The resolver performs no writes and makes no provider call.
+* A failed ledger read is never downgraded to `unknown`. It fails closed as
+  `503 TRAINING_READ_UNAVAILABLE` (current plan) or
+  `503 TODAY_TEMPORARILY_UNAVAILABLE` (Today).
+* The module imports only `app.models`, enforced by an AST test. Today
+  therefore reaches neither the AI ledger store nor the general-plan package.
+
+Tests live in `tests/test_lp21_general_training_plan.py` under the "read-side
+origin" section, and the PostgreSQL check is in
+`tests/test_lp21_general_training_plan_pg.py`.
+
 ## Not done here
 
-* Read-side `origin` on current-plan/Today reads (see above).
 * An explicit persisted `template_version`. Today it is bound only through the
   template id in the request fingerprint, because a dedicated column needs a
   migration and K6 #446 also re-parents onto head `f8b2d4e6a0c3`.

@@ -19,7 +19,6 @@ from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.services import mobile_training
 from app.services.general_training_plan import (
-    TEMPLATE_ID,
     create_general_plan,
     parse_general_request,
 )
@@ -28,10 +27,10 @@ from app.services.mobile_training_generation import (
     PlanGenerationCommandError,
     parse_idempotency_key,
 )
+from app.services.training_plan_origin import general_origin
 
 
 GENERAL_PLAN_WRITE_RATELIMIT = "10 per minute; 60 per hour"
-ORIGIN = {"kind": "general_template", "template": TEMPLATE_ID, "personalized": False}
 
 
 def _owner_key():
@@ -89,7 +88,7 @@ def create_general_training_plan():
             True,
         )
 
-    response = jsonify({"contract_version": 1, "origin": ORIGIN, **payload})
+    response = jsonify({"contract_version": 1, "origin": general_origin(), **payload})
     response.status_code = 201
     response.headers["Idempotency-Replayed"] = str(result.replayed).lower()
     return response

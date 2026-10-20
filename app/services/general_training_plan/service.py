@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from app.models import TRAINING_PLAN_GENERATION_SUCCEEDED, TrainingPlan
+from app.models import TrainingPlan
 from app.services.exercise_catalog import ExerciseContext
 from app.services.mobile_training_generation import store
 from app.services.mobile_training_generation.errors import (
@@ -20,6 +20,7 @@ from app.services.mobile_training_generation.errors import (
 )
 from app.services.training_generation.output_errors import GenerationOutputError
 from app.services.training_generation.service import validate_plan_for_save
+from app.services.training_plan_origin import is_general_receipt
 
 from .contract import GeneralPlanRequest
 from .errors import GeneralPlanSuperseded, GeneralPlanUnavailable
@@ -30,14 +31,6 @@ from .template import build_program
 class GeneralPlanResult:
     plan: TrainingPlan
     replayed: bool
-
-
-def is_general_receipt(operation) -> bool:
-    """The only ledger state a general create writes; no AI path reaches it."""
-    return (operation.status == TRAINING_PLAN_GENERATION_SUCCEEDED
-            and operation.provider_dispatch_possible is False
-            and operation.allowance_metered is None
-            and operation.quota_reserved is False)
 
 
 def canonical_document(request: GeneralPlanRequest, language) -> str:

@@ -20,6 +20,7 @@ rather than line-number-based:
 import ast
 import inspect
 import json
+import re
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -433,8 +434,15 @@ def test_today_costs_a_constant_bounded_number_of_queries(
     statements = _statements_for(client, user, monkeypatch)
 
     assert len(statements) <= 5, statements
-    plan_reads = [s for s in statements if "FROM training_plan" in s]
+    # Exact table names: the LP21 origin read hits the generation ledger, whose
+    # name also starts with "training_plan". One ledger read with a plan, none
+    # without one (no plan, no lineage, no origin to establish).
+    plan_reads = [s for s in statements
+                  if re.search(r"\bFROM training_plan\b(?!_)", s)]
     assert len(plan_reads) <= 1, f"the active plan is loaded twice: {plan_reads}"
+    ledger_reads = [s for s in statements
+                    if re.search(r"\bFROM training_plan_generation_operation\b", s)]
+    assert len(ledger_reads) == (1 if with_plan else 0), ledger_reads
 
 
 # ---------------------------------------------------------------------------

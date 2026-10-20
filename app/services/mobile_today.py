@@ -45,6 +45,7 @@ from datetime import timezone
 from flask import current_app
 
 from app.services.today_facts import get_active_plan
+from app.services.training_plan_origin import resolve_plan_origin
 from app.services.workout_state import resolve_workout_state
 from app.services.workout_state.serialization import (
     PlanSerializationError, serialize_today_plan)
@@ -80,6 +81,8 @@ def build_today(user_id: int) -> dict:
             day = app_today()
             plan = get_active_plan(user_id)
             plan_data = _plan_content(plan)
+            origin = (resolve_plan_origin(plan, user_id)
+                      if plan is not None else None)
             snapshot = resolve_workout_state(
                 user_id,
                 today=day,
@@ -87,7 +90,7 @@ def build_today(user_id: int) -> dict:
                 sessions_enabled=_sessions_enabled(),
                 strict_reads=True,
             )
-            return _project(day, plan, plan_data, snapshot)
+            return _project(day, plan, plan_data, origin, snapshot)
     except Exception as error:  # noqa: BLE001 - every fault fails closed
         raise TodayUnavailable("canonical Today read failed") from error
 
@@ -119,7 +122,7 @@ def _sessions_enabled() -> bool:
         return False
 
 
-def _project(day, plan, plan_data, snapshot) -> dict:
+def _project(day, plan, plan_data, origin, snapshot) -> dict:
     """Serialize already-resolved canonical facts. Pure: no reads, no decisions."""
     state = snapshot.to_dict()
     return {
@@ -142,7 +145,7 @@ def _project(day, plan, plan_data, snapshot) -> dict:
                 # contract; `None` otherwise. Never an invented identity.
                 "session": state.get("session"),
             },
-            "plan": _plan(plan),
+            "plan": _plan(plan, origin),
             "daily_context": _daily_context(plan, day),
             # The canonical workout-state contract exactly as `GET /workout/status`
             # publishes it. Carried verbatim so a mobile client and the web client
@@ -184,11 +187,16 @@ def _summary(plan_data, day):
     }
 
 
-def _plan(plan):
-    """Plan availability. `exists` is the canonical active-plan selector's answer."""
+def _plan(plan, origin):
+    """Plan availability. `exists` is the canonical active-plan selector's answer.
+
+    `origin` is `training_plan_origin`'s answer for the same row (LP21), so
+    Today and `GET /training/plans/current` cannot label one plan differently;
+    `None` with no plan, never a fabricated origin.
+    """
     if plan is None:
-        return {"exists": False, "created_at": None}
-    return {"exists": True, "created_at": _iso(plan.created_at)}
+        return {"exists": False, "created_at": None, "origin": None}
+    return {"exists": True, "created_at": _iso(plan.created_at), "origin": origin}
 
 
 def _daily_context(plan, day):

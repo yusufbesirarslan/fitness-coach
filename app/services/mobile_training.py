@@ -31,6 +31,7 @@ from app.services.training_generation.response_validator import (
     WEEKDAYS,
     validate_plan_structure,
 )
+from app.services.training_plan_origin import resolve_plan_origin
 from app.services.workout_state import WorkoutStateReadError, resolve_workout_state
 from app.services.workout_state.models import SCHEDULE_SCHEDULED
 from app.services.workout_state.snapshot import coherent_read_snapshot
@@ -121,6 +122,9 @@ def project_current_plan(
             candidate = projected["days"][day.weekday()]
             current_ref = candidate["workout_ref"]
         projected["current_workout_ref"] = current_ref
+        # How this lineage was created, from the ledger (LP21). A failed read
+        # raises below; it is never downgraded to an ``unknown`` origin.
+        projected["origin"] = resolve_plan_origin(plan, user_id)
         return {"plan": projected}
     except PlanUnprojectable:
         raise

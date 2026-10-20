@@ -597,3 +597,204 @@ def test_replay_refuses_a_plan_row_whose_lineage_no_longer_matches(
 
     assert response.status_code == 409
     assert response.json["error"]["code"] == "TRAINING_PLAN_GENERAL_SUPERSEDED"
+
+
+# -- read-side origin (current plan + Today) ------------------------------------
+
+GENERAL_ORIGIN = {
+    "kind": "general_template", "template": TEMPLATE_ID, "personalized": False}
+UNKNOWN_ORIGIN = {"kind": "unknown", "template": None, "personalized": None}
+
+
+def _origin_reads(client, user, as_mobile, when=MONDAY):
+    with audit_clock(when):
+        current = client.get(CURRENT_PATH, headers=as_mobile(user))
+        today = client.get(TODAY_PATH, headers=as_mobile(user))
+    return current, today
+
+
+def _assert_origin(client, user, as_mobile, expected):
+    current, today = _origin_reads(client, user, as_mobile)
+    assert current.status_code == 200, current.json
+    assert today.status_code == 200, today.json
+    assert current.json["plan"]["origin"] == expected
+    assert today.json["today"]["plan"]["origin"] == expected
+    assert today.json["today"]["plan"]["exists"] is True
+
+
+def _legacy_plan(user_id):
+    """A browser-style row: the SAME template content, but no ledger receipt."""
+    plan = TrainingPlan(
+        user_id=user_id,
+        plan_data=canonical_document(parse_general_request(BODY), "tr"),
+        score=None)
+    db.session.add(plan)
+    db.session.commit()
+    return plan
+
+
+def _receipt(user_id, plan, key, **overrides):
+    fields = dict(
+        user_id=user_id, idempotency_key=key, request_fingerprint="0" * 64,
+        status="SUCCEEDED", provider_dispatch_possible=False,
+        quota_reserved=False, training_plan_id=plan.id,
+        plan_lineage_id=plan.lineage_id)
+    fields.update(overrides)
+    db.session.add(TrainingPlanGenerationOperation(**fields))
+    db.session.commit()
+
+
+def test_current_plan_and_today_carry_the_origin_the_201_announced(
+        client, owner, as_mobile, no_ai):
+    created = _post(client, as_mobile(owner, "general-key-0101")).json
+
+    assert created["origin"] == GENERAL_ORIGIN
+    # The 201's plan is exactly the current-plan "plan", origin included.
+    assert created["plan"]["origin"] == GENERAL_ORIGIN
+    current, today = _origin_reads(client, owner, as_mobile)
+    assert current.json == {"plan": created["plan"]}
+    plan = today.json["today"]["plan"]
+    assert set(plan) == {"exists", "created_at", "origin"}
+    assert plan["origin"] == GENERAL_ORIGIN
+    # Reinstall / another device: a replay of the key recovers it too.
+    replay = _post(client, as_mobile(owner, "general-key-0101"))
+    assert replay.json["plan"]["origin"] == GENERAL_ORIGIN
+    assert no_ai == []
+
+
+def test_origin_names_the_lineage_so_journal_edits_keep_it(
+        client, owner, as_mobile):
+    assert _post(client, as_mobile(owner, "general-key-0102")).status_code == 201
+    plan = TrainingPlan.query.filter_by(user_id=owner.id).one()
+    plan.mutation_version = 3
+    db.session.commit()
+
+    current, _today = _origin_reads(client, owner, as_mobile)
+    assert current.json["plan"]["mutation_version"] == 3
+    assert current.json["plan"]["origin"] == GENERAL_ORIGIN
+
+
+def test_a_plan_without_a_receipt_is_unknown_even_with_template_content(
+        client, owner, as_mobile):
+    # Origin comes from ledger evidence, never from what the plan looks like.
+    _legacy_plan(owner.id)
+    _assert_origin(client, owner, as_mobile, UNKNOWN_ORIGIN)
+
+
+@pytest.mark.parametrize("scenario", [
+    "ai_first_plan", "historical_unknown_dispatch", "metered", "quota_reserved",
+    "failed", "names_another_row", "two_receipts_on_one_lineage",
+])
+def test_unestablished_or_contradictory_ledger_evidence_is_unknown(
+        client, owner, as_mobile, scenario):
+    plan = _legacy_plan(owner.id)
+    if scenario == "ai_first_plan":
+        _receipt(owner.id, plan, "origin-key-01", provider_dispatch_possible=True)
+    elif scenario == "historical_unknown_dispatch":
+        _receipt(owner.id, plan, "origin-key-01", provider_dispatch_possible=None)
+    elif scenario == "metered":
+        _receipt(owner.id, plan, "origin-key-01", allowance_metered=True)
+    elif scenario == "quota_reserved":
+        _receipt(owner.id, plan, "origin-key-01", quota_reserved=True)
+    elif scenario == "failed":
+        _receipt(owner.id, plan, "origin-key-01", status="FAILED")
+    elif scenario == "names_another_row":
+        _receipt(owner.id, plan, "origin-key-01", training_plan_id=plan.id + 999)
+    else:
+        _receipt(owner.id, plan, "origin-key-01")
+        _receipt(owner.id, plan, "origin-key-02")
+
+    _assert_origin(client, owner, as_mobile, UNKNOWN_ORIGIN)
+
+
+def test_another_owners_receipt_cannot_label_my_plan(
+        client, owner, stranger, as_mobile):
+    plan = _legacy_plan(owner.id)
+    _receipt(stranger.id, plan, "origin-key-03")
+
+    _assert_origin(client, owner, as_mobile, UNKNOWN_ORIGIN)
+    _current, today = _origin_reads(client, stranger, as_mobile)
+    assert today.json["today"]["plan"] == {
+        "exists": False, "created_at": None, "origin": None}
+
+
+def test_replacing_a_general_plan_drops_the_general_origin(
+        client, owner, as_mobile):
+    from app.services.plan_replacement import PlanExpectation, replace_training_plan
+
+    created = _post(client, as_mobile(owner, "general-key-0104")).json["plan"]
+    replace_training_plan(
+        owner.id,
+        PlanExpectation(False, created["plan_lineage"], created["mutation_version"]),
+        plan_data=canonical_document(parse_general_request(BODY), "tr"), score=None)
+
+    receipt = TrainingPlanGenerationOperation.query.filter_by(user_id=owner.id).one()
+    assert is_general_receipt(receipt)  # history is kept, it just names the old lineage
+    current, _today = _origin_reads(client, owner, as_mobile)
+    assert current.json["plan"]["plan_lineage"] != created["plan_lineage"]
+    assert current.json["plan"]["origin"] == UNKNOWN_ORIGIN
+    _assert_origin(client, owner, as_mobile, UNKNOWN_ORIGIN)
+
+
+def test_no_plan_has_no_origin_and_issues_no_ledger_read(
+        client, owner, as_mobile, monkeypatch):
+    from app.services import mobile_today
+
+    def _never(*args, **kwargs):
+        raise AssertionError("origin resolved without a plan")
+
+    monkeypatch.setattr(mobile_today, "resolve_plan_origin", _never)
+    monkeypatch.setattr(mobile_training, "resolve_plan_origin", _never)
+    current, today = _origin_reads(client, owner, as_mobile)
+
+    assert current.status_code == 200 and current.json == {"plan": None}
+    assert today.status_code == 200
+    assert today.json["today"]["plan"] == {
+        "exists": False, "created_at": None, "origin": None}
+
+
+def test_an_origin_read_failure_fails_closed_never_unknown(
+        client, owner, as_mobile, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    from app.services import training_plan_origin
+
+    assert _post(client, as_mobile(owner, "general-key-0105")).status_code == 201
+
+    class _Unreadable:
+        class query:  # noqa: N801 - stands in for the model's query attribute
+            @staticmethod
+            def filter_by(**kwargs):
+                raise OperationalError("SELECT", {}, Exception("ledger down"))
+
+    monkeypatch.setattr(
+        training_plan_origin, "TrainingPlanGenerationOperation", _Unreadable)
+    current, today = _origin_reads(client, owner, as_mobile)
+
+    assert current.status_code == 503
+    assert current.json["error"]["code"] == "TRAINING_READ_UNAVAILABLE"
+    assert current.json["error"]["retryable"] is True
+    assert today.status_code == 503
+    assert today.json["error"]["code"] == "TODAY_TEMPORARILY_UNAVAILABLE"
+
+
+def test_origin_module_is_a_neutral_read_only_projection():
+    from app.services import general_training_plan, training_plan_origin
+
+    path = APP_ROOT / "services" / "training_plan_origin.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    imported = {node.module for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)}
+    imported |= {alias.name for node in ast.walk(tree)
+                 if isinstance(node, ast.Import) for alias in node.names}
+    # Only the model: no AI ledger store, no provider, no general-plan package.
+    assert imported == {"__future__", "app.models"}
+    source = path.read_text(encoding="utf-8")
+    for write in ("session.add", "session.flush", "session.commit", ".update(",
+                  ".delete("):
+        assert write not in source
+    # A failed read must propagate to the callers' fail-closed handlers.
+    assert not any(isinstance(node, ast.ExceptHandler) for node in ast.walk(tree))
+    # One template exists; a second must version the projection first.
+    assert training_plan_origin.GENERAL_TEMPLATE_ID == TEMPLATE_ID
+    assert general_template.TEMPLATE_ID == TEMPLATE_ID
+    assert general_training_plan.is_general_receipt is training_plan_origin.is_general_receipt
