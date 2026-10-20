@@ -29,7 +29,7 @@ Photo and photo-free completions therefore cannot both succeed for one day:
   is what refuses a historical-only claim, because no unique constraint spans
   `pump_check` and `workout_completion_day`.
 
-## 3. Migration `f9c6d0a1b2e3` (down `e7a1c3d5f9b2`, expand)
+## 3. Migration `f9c6d0a1b2e3` (down `f8b2d4e6a0c3`, expand)
 
 * creates `workout_completion_day (id PK, user_id FK user CASCADE NOT NULL,
   date_key VARCHAR(10) NOT NULL, proof VARCHAR(8) NOT NULL CHECK proof IN
@@ -38,7 +38,21 @@ Photo and photo-free completions therefore cannot both succeed for one day:
 * create_all-first / re-entry: verify-or-create. An existing table is accepted
   only with exactly this DDL. That means column types, nullability and
   defaults, the PK, the day UNIQUE, the CASCADE FK, the CHECK predicate, and
-  `convalidated` on PG. Anything else fails closed without modifying the table.
+  `convalidated` on PG. PostgreSQL additionally resolves the ID default through
+  `pg_attrdef`/`pg_depend` to its actual sequence OID. That object must be the
+  table's own auto-dependent SERIAL sequence in the same namespace and with
+  the same owner: INTEGER, increment 1, minimum 1, maximum 2147483647, NO CYCLE.
+  Table and sequence must both be permanent (`relpersistence = 'p'`): crash
+  recovery or standby promotion empties an UNLOGGED claim table or rewinds an
+  UNLOGGED sequence.
+  The verifying role must have USAGE or UPDATE on it. START, CACHE and current
+  counter state are not normalized or reset. This establishes the expected
+  generator structure, not future insert success: exhaustion, manual IDs or
+  counter rewinds, later DDL/grant changes and a distinct application role's
+  privileges require separate operational qualification. Identity columns and
+  custom generators are outside this migration/model's SERIAL contract.
+  Anything else verified here fails closed without modifying the table.
+  User triggers and rules on the claim table are not inspected.
 * downgrade refuses while any claim exists.
 * Purge: `WorkoutCompletionDay` is in `app/cli.py::_user_child_models`.
 
@@ -163,7 +177,7 @@ behavior because they have no claim row.
   re-check negative control, start versus completion, forced rollback, real
   IntegrityError classification, and migration verify/negative controls,
   downgrade and the no-backfill full chain.
-* `tests/qualification/run_priv_k6_b1_mutations.py`: 21 semantic mutations.
+* `tests/qualification/run_priv_k6_b1_mutations.py`: 25 semantic mutations.
 
 
 ## R1 remediation boundary
@@ -181,3 +195,10 @@ later no-photo command. HTTP parsing errors retain their client status.
 Application rollback compatibility remains OPEN. See
 [the required release gate handoff](PRIV_K6_ROLLBACK_RELEASE_GATE_HANDOFF.md).
 Schema downgrade refusal alone does not protect against historical-only images.
+
+R2 sequence verification also rejects a default dependency on a custom function
+(e.g. a search-path shadow of `nextval(regclass)`); PostgreSQL's built-in
+`nextval` is pinned and has no such `pg_depend` entry. Catalog authority:
+[pg_sequence](https://www.postgresql.org/docs/16/catalog-pg-sequence.html),
+[pg_depend](https://www.postgresql.org/docs/16/catalog-pg-depend.html), and
+[sequence functions](https://www.postgresql.org/docs/16/functions-sequence.html).

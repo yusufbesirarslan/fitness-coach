@@ -1,5 +1,10 @@
 # Production rollout runbook — feature flag activation
 
+MON-02-BE-03B-A2-A1 adds expand-only `f8b2d4e6a0c3` after A1 (55 revisions).
+It records original-period zero-attempt expiry corrections without enabling either
+allowance flag. Source review, migration/worker compatibility and runtime activation
+remain separate gates; no recurring scheduler is added. See AI_ALLOWANCE_LEDGER.md.
+
 MON-02-BE-03B-A1 adds additive migration `e7a1c3d5f9b2` (one nullable Boolean
 `training_plan_generation_operation.provider_attempt_possible`, no backfill),
 which startup may apply while every flag stays OFF; it is part of the same human

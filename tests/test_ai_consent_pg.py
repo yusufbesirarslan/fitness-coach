@@ -460,8 +460,9 @@ def _assert_chain_head_and_parity():
     from alembic.autogenerate import compare_metadata
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
     assert scripts.get_heads() == ['f9c6d0a1b2e3']
-    assert len(list(scripts.walk_revisions())) == 55
-    assert scripts.get_revision('f9c6d0a1b2e3').down_revision == 'e7a1c3d5f9b2'
+    assert len(list(scripts.walk_revisions())) == 56
+    assert scripts.get_revision('f9c6d0a1b2e3').down_revision == 'f8b2d4e6a0c3'
+    assert scripts.get_revision('f8b2d4e6a0c3').down_revision == 'e7a1c3d5f9b2'
     assert scripts.get_revision('e7a1c3d5f9b2').down_revision == 'b1e4f5a6c7d8'
     assert scripts.get_revision('b1e4f5a6c7d8').down_revision == 'd1c0a15e0001'
     assert scripts.get_revision('d1c0a15e0001').down_revision == 'b0d3e4f5a6b7'

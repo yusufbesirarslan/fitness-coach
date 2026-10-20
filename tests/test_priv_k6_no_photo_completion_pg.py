@@ -526,7 +526,7 @@ def test_full_chain_upgrade_preserves_pump_checks_and_backfills_nothing(migrate_
     db.init_app(app)
     Migrate(app, db, directory=str(ROOT / "migrations"))
     with app.app_context():
-        upgrade(revision="e7a1c3d5f9b2")
+        upgrade(revision="f8b2d4e6a0c3")
         db.session.add(User(id=1, username="k6-chain", email="k6-chain@example.invalid"))
         db.session.commit()
         with db.engine.begin() as conn:
@@ -555,3 +555,166 @@ def test_full_chain_upgrade_preserves_pump_checks_and_backfills_nothing(migrate_
         assert completed_days(1, days) == {date(2026, 10, 17), date(2026, 9, 1)}
         db.session.remove()
         db.engine.dispose()
+
+
+# R2 P2: the default text alone cannot establish a usable SERIAL generator.
+SEQUENCE_DRIFT = {
+    "shadowed_nextval": (
+        "CREATE FUNCTION public.nextval(regclass) RETURNS bigint LANGUAGE SQL AS 'SELECT 1::bigint'",
+        "SET LOCAL search_path = public, pg_catalog",
+        "ALTER TABLE workout_completion_day ALTER COLUMN id SET DEFAULT nextval('workout_completion_day_id_seq'::regclass)"),
+    "r2_maxvalue_2_cycle": ("ALTER SEQUENCE workout_completion_day_id_seq MAXVALUE 2 CYCLE",),
+    "unlogged_sequence": ("ALTER SEQUENCE workout_completion_day_id_seq SET UNLOGGED",),
+    "unlogged_table": ("ALTER TABLE workout_completion_day SET UNLOGGED",),
+    "unlogged_table_logged_sequence": (
+        "ALTER TABLE workout_completion_day SET UNLOGGED",
+        "ALTER SEQUENCE workout_completion_day_id_seq SET LOGGED"),
+    "bounded_no_cycle": ("ALTER SEQUENCE workout_completion_day_id_seq MAXVALUE 2",),
+    "cycle_full_range": ("ALTER SEQUENCE workout_completion_day_id_seq CYCLE",),
+    "increment": ("ALTER SEQUENCE workout_completion_day_id_seq INCREMENT 2",),
+    "descending": ("ALTER SEQUENCE workout_completion_day_id_seq INCREMENT -1",),
+    "minimum": ("ALTER SEQUENCE workout_completion_day_id_seq MINVALUE 0",),
+    "bigint_overflow": ("ALTER SEQUENCE workout_completion_day_id_seq AS BIGINT NO MAXVALUE",),
+    "unowned": ("ALTER SEQUENCE workout_completion_day_id_seq OWNED BY NONE",),
+    "wrong_column": ("ALTER SEQUENCE workout_completion_day_id_seq OWNED BY workout_completion_day.user_id",),
+    "wrong_table": ('ALTER SEQUENCE workout_completion_day_id_seq OWNED BY "user".id',),
+    "default_not_owned_sequence": (
+        "ALTER SEQUENCE workout_completion_day_id_seq RENAME TO retained_id_seq",
+        "CREATE SEQUENCE workout_completion_day_id_seq AS INTEGER",
+        "ALTER TABLE workout_completion_day ALTER COLUMN id SET DEFAULT nextval('workout_completion_day_id_seq'::regclass)"),
+    "invalid_object": (
+        "DROP SEQUENCE workout_completion_day_id_seq CASCADE",
+        "CREATE TABLE workout_completion_day_id_seq (id INTEGER)",
+        "ALTER TABLE workout_completion_day ALTER COLUMN id SET DEFAULT nextval('workout_completion_day_id_seq'::regclass)"),
+    "missing_object": ("DROP SEQUENCE workout_completion_day_id_seq CASCADE",),
+    "different_default": (
+        "CREATE SEQUENCE unrelated_sequence AS INTEGER",
+        "ALTER TABLE workout_completion_day ALTER COLUMN id SET DEFAULT nextval('unrelated_sequence'::regclass)"),
+    "wrong_namespace": (
+        "DROP SCHEMA IF EXISTS other_sequence_namespace CASCADE",
+        "CREATE SCHEMA other_sequence_namespace",
+        "ALTER SEQUENCE workout_completion_day_id_seq OWNED BY NONE",
+        "ALTER SEQUENCE workout_completion_day_id_seq SET SCHEMA other_sequence_namespace"),
+}
+
+
+def _sequence_snapshot(conn):
+    # Include state as evidence that verification never calls nextval/setval.
+    return (
+        conn.exec_driver_sql("SELECT * FROM pg_sequences ORDER BY schemaname, sequencename").all(),
+        conn.exec_driver_sql(
+            "SELECT classid, objid, objsubid, refclassid, refobjid, refobjsubid, deptype "
+            "FROM pg_depend ORDER BY 1, 2, 3, 4, 5, 6, 7").all(),
+        conn.exec_driver_sql("SELECT * FROM workout_completion_day ORDER BY id").all(),
+        _definition(conn),
+    )
+
+
+@pytest.mark.parametrize("case", sorted(SEQUENCE_DRIFT))
+def test_migration_rejects_incompatible_sequence_without_repair(migrate_engine, case):
+    module = _module(MIGRATION)
+    with migrate_engine.begin() as conn:
+        _user_table(conn)
+        _claim_table()(conn)
+        for ddl in SEQUENCE_DRIFT[case]:
+            conn.exec_driver_sql(ddl)
+        before = _sequence_snapshot(conn)
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="id sequence|column defaults"):
+                _run(conn, module.upgrade)
+        assert _sequence_snapshot(conn) == before
+        if case == "wrong_namespace":
+            conn.exec_driver_sql("DROP SCHEMA other_sequence_namespace CASCADE")
+
+
+@pytest.mark.parametrize("creator", ["migration", "create_all"])
+def test_valid_sequence_generates_ids_and_populated_reentry_preserves_state(migrate_engine, creator):
+    module = _module(MIGRATION)
+    with migrate_engine.begin() as conn:
+        _user_table(conn)
+        if creator == "migration":
+            _run(conn, module.upgrade)
+        else:
+            _create_all_shape(conn)
+        _run(conn, module.upgrade)
+        conn.exec_driver_sql('INSERT INTO "user" (id) VALUES (1)')
+        # Legitimate cached/shifted state is allowed; neither START nor CACHE
+        # defines the type/bounds/cycling contract. Only disposable fixtures mutate it.
+        conn.exec_driver_sql("ALTER SEQUENCE workout_completion_day_id_seq START 100 CACHE 5")
+        ids = []
+        for day in (17, 18, 19):
+            ids.append(conn.exec_driver_sql(
+                "INSERT INTO workout_completion_day (user_id,date_key,proof,created_at) "
+                f"VALUES (1,'2026-10-{day}','none',now()) RETURNING id").scalar_one())
+        assert ids == [1, 2, 3]
+        before = _sequence_snapshot(conn)
+        _run(conn, module.upgrade)
+        _run(conn, module.upgrade)
+        assert _sequence_snapshot(conn) == before
+        assert conn.exec_driver_sql(
+            "INSERT INTO workout_completion_day (user_id,date_key,proof,created_at) "
+            "VALUES (1,'2026-10-20','photo',now()) RETURNING id").scalar_one() == 4
+        conn.exec_driver_sql('DELETE FROM "user" WHERE id=1')
+        assert conn.exec_driver_sql("SELECT count(*) FROM workout_completion_day").scalar_one() == 0
+
+
+@needs_pg
+def test_canonical_no_photo_service_uses_migration_created_sequence_and_replays_once():
+    _require_pg()
+    from app.extensions import db
+    from app.models import WorkoutCompletionDay
+    flask_app, user_id, reference = _make_pg_app()
+    try:
+        with flask_app.app_context():
+            # The application fixture creates other models. Recreate only the
+            # empty claim table via the actual migration, then use the service.
+            with db.engine.begin() as conn:
+                WorkoutCompletionDay.__table__.drop(conn)
+                _run(conn, _module(MIGRATION).upgrade)
+                _run(conn, _module(MIGRATION).upgrade)
+        session_ref = _started(flask_app, user_id, reference)
+        with flask_app.app_context():
+            assert _complete_no_photo(user_id, session_ref) == (200, False, "created")
+            assert _complete_no_photo(user_id, session_ref) == (200, True, "already_completed")
+        rows = _rows(flask_app, user_id)
+        assert len(rows["claims"]) == 1 and rows["claims"][0][1] == "none"
+        assert rows["pump_checks"] == 0 and rows["xp"] == 10
+        assert rows["markers"] == rows["activities"] == 1
+        assert rows["sessions"] == ["completed"]
+    finally:
+        _teardown(flask_app)
+
+
+def test_sequence_privileges_for_verifying_application_role(migrate_engine):
+    """Use a disposable non-superuser; SELECT alone does not permit nextval."""
+    module = _module(MIGRATION)
+    with migrate_engine.begin() as conn:
+        # Transactional role creation is rolled back if an assertion fails.
+        conn.exec_driver_sql('CREATE ROLE k6_sequence_synthetic NOLOGIN')
+        _user_table(conn)
+        _run(conn, module.upgrade)
+        conn.exec_driver_sql('INSERT INTO "user" (id) VALUES (1)')
+        conn.exec_driver_sql('GRANT USAGE ON SCHEMA public TO k6_sequence_synthetic')
+        conn.exec_driver_sql('GRANT SELECT, INSERT ON workout_completion_day TO k6_sequence_synthetic')
+        conn.exec_driver_sql('GRANT SELECT ON SEQUENCE workout_completion_day_id_seq TO k6_sequence_synthetic')
+        conn.exec_driver_sql('SET LOCAL ROLE k6_sequence_synthetic')
+        with pytest.raises(RuntimeError, match="id sequence"):
+            _run(conn, module.upgrade)
+        with conn.begin_nested():
+            with pytest.raises(sa.exc.ProgrammingError) as caught:
+                conn.exec_driver_sql(
+                    "INSERT INTO workout_completion_day (user_id,date_key,proof,created_at) "
+                    "VALUES (1,'2026-10-17','none',now())")
+            assert caught.value.orig.pgcode == '42501'
+            # Recover the failed SQL statement's transaction via SAVEPOINT.
+            conn.get_nested_transaction().rollback()
+        conn.exec_driver_sql('RESET ROLE')
+        conn.exec_driver_sql('GRANT USAGE ON SEQUENCE workout_completion_day_id_seq TO k6_sequence_synthetic')
+        conn.exec_driver_sql('SET LOCAL ROLE k6_sequence_synthetic')
+        _run(conn, module.upgrade)
+        assert conn.exec_driver_sql(
+            "INSERT INTO workout_completion_day (user_id,date_key,proof,created_at) "
+            "VALUES (1,'2026-10-17','none',now()) RETURNING id").scalar_one() == 1
+        conn.exec_driver_sql('RESET ROLE')
+        conn.exec_driver_sql('DROP OWNED BY k6_sequence_synthetic')
+        conn.exec_driver_sql('DROP ROLE k6_sequence_synthetic')

@@ -820,7 +820,7 @@ def _run(connection, fn):
 def test_sqlite_migration_accepts_create_all_shape_and_refuses_drift():
     module = _migration_module()
     assert module.expand_contract == "expand"
-    assert module.down_revision == "e7a1c3d5f9b2"
+    assert module.down_revision == "f8b2d4e6a0c3"
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:

@@ -33,8 +33,28 @@ arbitrates the marker. Final persistence keeps operation → User NO KEY UPDATE 
 plan ordering, shared with browser persistence. Rows are refreshed under locks
 so expired/terminal state cannot be overwritten from an ORM identity map.
 
-IN_PROGRESS occupancy is bounded to 15 minutes from its last durable transition,
-lazily reconciled by the next owner command under short arbitration. It becomes
+MON-02-BE-03B-A2 tightens retirement for **metered** operations only. When the
+locked read finds an aged operation, retirement also takes that owner's
+`user FOR UPDATE NOWAIT` before committing FAILED. D1 already owns that account
+fence throughout each blocking physical SDK call, including the scheduling gap
+after A1's attempt marker commits. Retirement cannot commit FAILED in that gap.
+If retirement wins first, the later attempt marker refuses and no SDK call starts.
+Neither the operation lock nor owner advisory lock is extended across SDK I/O.
+
+NOWAIT is essential: waiting for D1 while owning operation would invert D1's
+user → operation admission order. Contention immediately rolls back and releases
+operation, returning the existing persistence-unavailable response. A later
+command can retry retirement after the fence is free. The 15-minute eligibility
+interval is unchanged, but active D1 ownership can defer terminal retirement
+beyond it, even if the worker is paused. This trades immediate occupancy recovery
+for strict SDK-entry ordering; it does not impose a hard process or remote
+execution deadline. The guarantee requires all retirement-capable workers to run
+A2 (drain older workers at a separately approved rollout). Unmetered/OFF behavior
+is unchanged.
+
+IN_PROGRESS becomes eligible for retirement 15 minutes from its last durable
+transition, lazily reconciled by the next owner command under short arbitration
+(metered D1 contention can defer it as described above). It becomes
 FAILED / TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN (503, retryable=false) if marker
 True or NULL. Evidence and the existing legacy quota reservation survive. A
 False marker can instead retire as TRAINING_PLAN_GENERATION_NOT_DISPATCHED and

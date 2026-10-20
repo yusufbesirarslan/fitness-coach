@@ -113,6 +113,41 @@ class AiUsageReservation(db.Model):
     )
 
 
+class AiAllowancePurgeProgress(db.Model):
+    """Singleton traversal state, never financial or deletion authority."""
+    id = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    after_id = db.Column(db.Integer, nullable=False)
+    through_id = db.Column(db.Integer, nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("id = 1", name="ck_ai_allowance_purge_singleton"),
+        db.CheckConstraint("after_id >= 0 AND through_id >= after_id", name="ck_ai_allowance_purge_progress"),
+    )
+
+
+class TrainingAllowanceCompensation(db.Model):
+    """One original expiry correction; bounded by reservation audit retention.
+
+    No payloads or customer-credit balance. Reservation deletion removes this
+    receipt only after its own retention window; owner deletion cascades both.
+    """
+    __tablename__ = "training_allowance_compensation"
+    reservation_id = db.Column(db.Integer, db.ForeignKey(
+        "ai_usage_reservation.id", ondelete="CASCADE"), primary_key=True)
+    operation_id = db.Column(db.Integer, db.ForeignKey(
+        "training_plan_generation_operation.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    bucket_id = db.Column(db.Integer, db.ForeignKey(
+        "ai_allowance_bucket.id", ondelete="CASCADE"), nullable=False)
+    proof_version = db.Column(db.String(32), nullable=False)
+    reason = db.Column(db.String(32), nullable=False)
+    applied_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint("operation_id", name="uq_training_compensation_operation"),
+        db.CheckConstraint("proof_version = 'TRACKED_TRAINING_V1'", name="ck_training_compensation_proof"),
+        db.CheckConstraint("reason = 'EXPIRED_ZERO_ATTEMPTS'", name="ck_training_compensation_reason"),
+    )
+
+
 class User(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False)

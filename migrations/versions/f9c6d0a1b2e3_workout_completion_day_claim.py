@@ -22,7 +22,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "f9c6d0a1b2e3"
-down_revision = "e7a1c3d5f9b2"
+down_revision = "f8b2d4e6a0c3"
 branch_labels = None
 depends_on = None
 expand_contract = "expand"
@@ -85,6 +85,55 @@ def _identity_default(bind, column):
             and default == f"nextval('{TABLE}_id_seq'::regclass)")
 
 
+def _verify_sequence(bind):
+    """Verify SERIAL catalog authority, without consuming or resetting a value.
+
+    The reflected default is checked separately. Its regclass dependency must
+    resolve to the same sequence that is auto-owned by this exact ID column.
+    Table and sequence must be permanent: crash recovery resets UNLOGGED ones.
+    Check nextval privileges for the verifying role only. Runtime counters and
+    grants to a different application role remain separate qualification.
+    """
+    sequence = bind.execute(sa.text("""
+        SELECT s.seqtypid = 'pg_catalog.int4'::pg_catalog.regtype AS integer_type,
+               s.seqincrement, s.seqmin, s.seqmax, s.seqcycle,
+               q.relnamespace = t.relnamespace AS same_namespace,
+               q.relowner = t.relowner AS same_owner,
+               a.attidentity = '' AS serial_column,
+               t.relpersistence = 'p' AND q.relpersistence = 'p' AS crash_safe,
+               pg_catalog.pg_get_serial_sequence(:relation, 'id')::pg_catalog.regclass
+                   = q.oid AS associated_sequence,
+               (pg_catalog.has_sequence_privilege(q.oid, 'USAGE') OR
+                pg_catalog.has_sequence_privilege(q.oid, 'UPDATE')) AS usable_by_current_role,
+               NOT EXISTS (
+                   SELECT 1 FROM pg_catalog.pg_depend custom_function
+                   WHERE custom_function.classid = 'pg_catalog.pg_attrdef'::pg_catalog.regclass
+                     AND custom_function.objid = d.oid
+                     AND custom_function.refclassid = 'pg_catalog.pg_proc'::pg_catalog.regclass
+               ) AS builtin_default
+        FROM pg_catalog.pg_class t
+        JOIN pg_catalog.pg_attribute a ON a.attrelid = t.oid
+             AND a.attname = 'id' AND NOT a.attisdropped
+        JOIN pg_catalog.pg_attrdef d ON d.adrelid = t.oid AND d.adnum = a.attnum
+        JOIN pg_catalog.pg_depend dep ON dep.classid = 'pg_catalog.pg_attrdef'::pg_catalog.regclass
+             AND dep.objid = d.oid AND dep.objsubid = 0
+             AND dep.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+             AND dep.refobjsubid = 0 AND dep.deptype = 'n'
+        JOIN pg_catalog.pg_class q ON q.oid = dep.refobjid AND q.relkind = 'S'
+        JOIN pg_catalog.pg_sequence s ON s.seqrelid = q.oid
+        JOIN pg_catalog.pg_depend owned ON owned.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+             AND owned.objid = q.oid AND owned.objsubid = 0
+             AND owned.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+             AND owned.refobjid = t.oid AND owned.refobjsubid = a.attnum
+             AND owned.deptype = 'a'
+        WHERE t.oid = pg_catalog.to_regclass(:relation)
+          AND q.relname = :sequence
+    """), {"relation": TABLE, "sequence": f"{TABLE}_id_seq"}).all()
+    if len(sequence) != 1 or tuple(sequence[0]) != (
+            True, 1, 1, 2147483647, False, True, True, True, True, True, True, True):
+        _fail("id sequence")
+
+
 def _verify_claim(bind):
     """A create_all-first or reentrant schema already has the table; accept only this DDL."""
     inspector = sa.inspect(bind)
@@ -96,6 +145,8 @@ def _verify_claim(bind):
     if not _identity_default(bind, columns["id"]) or any(
             columns[c.name].get("default") is not None for c in expected if c.name != "id"):
         _fail("column defaults")
+    if bind.dialect.name == "postgresql":
+        _verify_sequence(bind)
     if inspector.get_pk_constraint(TABLE)["constrained_columns"] != ["id"]:
         _fail("primary key")
     if {(DAY_UNIQUE, ("user_id", "date_key"))} != {
