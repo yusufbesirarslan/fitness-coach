@@ -60,10 +60,11 @@ The route uses the existing authoritative mobile boundary,
   no timezone, no owner override. There is no parameter through which one user
   could read another's Today, and none through which a client clock could move
   the day;
-- the route reads no query string, no body, no form and no header beyond the
-  auth boundary. `?user_id=`, `?owner_id=`, `?date=`, `?today=`,
-  `X-User-Id:`, `X-Date:` are all inert — the response is byte-identical with or
-  without them;
+- the route reads no body, no form and no header beyond the auth boundary, and
+  no query value except the LP21 `include_origin` opt-in (it selects a
+  response shape, never an owner or a day). `?user_id=`, `?owner_id=`,
+  `?date=`, `?today=`, `X-User-Id:`, `X-Date:` are all inert — the response is
+  byte-identical with or without them;
 - a browser cookie is never consulted; a valid Flask-Login session alone gets
   `401` in the shared mobile envelope, never an HTML redirect;
 - the route is registered on the single `mobile_api` blueprint, so it inherits
@@ -208,6 +209,7 @@ Istanbul day; `tests/test_mobile_today_api.py` pins exactly that boundary.
 | Proven complete | `200` | `status: completed`, `completed: true` |
 | Plan unreadable | `200` | `status: needs_attention`, `schedule_state: schedule_unavailable`, `action: blocked`, `summary: null` |
 | Canonical read failed | `503` | `TODAY_TEMPORARILY_UNAVAILABLE`, `retryable: true` |
+| `include_origin` present but not exactly `1` (LP21) | `400` | `TODAY_INVALID_REQUEST`, `retryable: false` |
 
 The composition runs with `strict_reads=True` inside one coherent snapshot, so
 an infrastructure fault raises `TodayUnavailable` and the route answers a typed
@@ -236,7 +238,9 @@ Per request: **4 bounded `SELECT`s** — the authenticated principal, the active
 plan, the execution-evidence log rows, today's `PumpCheck` — and the count is
 the same whether or not the user has a plan. The plan row is loaded once and
 passed into the resolver rather than re-queried. No N+1, no write, no flush, no
-commit, no lock, no HTTP call.
+commit, no lock, no HTTP call. With `?include_origin=1` and a plan there is
+exactly one more: the owner-scoped plan-origin ledger read (LP21); without
+the opt-in it is never issued.
 
 **Provider calls: exactly 0.** No AI/LLM module is imported or reachable, and
 `tests/test_mobile_today_architecture.py` runs a real request with every

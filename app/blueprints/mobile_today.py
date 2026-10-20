@@ -27,9 +27,9 @@ def today():
     """The canonical Today state of the authenticated mobile user.
 
     The user comes from the verified Bearer credential (`g.mobile_user`) and from
-    nowhere else: this route reads no query parameter, no body and no header
-    beyond the auth boundary, so there is no owner to tamper with and no client
-    clock that could move the day.
+    nowhere else: this route reads no body, no header beyond the auth boundary
+    and no query parameter except the LP21 `include_origin` shape opt-in, so
+    there is no owner to tamper with and no client clock that could move the day.
     """
     try:
         # The ONE query value read here: the LP21 origin opt-in. It selects a
