@@ -36,14 +36,14 @@ OWNER_NAME = "ti06privacyowner"
 SESSION_EVENTS = (
     "start_refused_completed_today", "start_conflict", "start_integrity_error",
     "started", "resume_stale", "resumed", "abandoned", "complete_conflict",
-    "completed", "already_completed",
+    "completed", "already_completed", "complete_fence_refused",
 )
 COMPLETION_OUTCOMES = (
     "session_abandoned_conflict", "session_revision_conflict",
     "already_completed_preflight_session_reconciled", "already_completed_preflight",
     "already_completed_race", "integrity_error", "rollback", "created",
     # PRIV-K6-B1: the locked re-check and the photo-free create.
-    "already_completed_locked", "created_no_photo",
+    "already_completed_locked", "created_no_photo", "fence_refused",
 )
 ENTRY_PATHS = ("route", "ai_tool", "mobile_route", "session_service", "unknown")
 RID = r"(?:[0-9a-f]{16}|-)"

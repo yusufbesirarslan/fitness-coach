@@ -267,7 +267,7 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         # generic integrity error, so entry paths can say whether a retry helps.
         refusal = fence_refusal_of(exc)
         if refusal is not None:
-            _log(command.entry_path, f"fence_refused_{refusal.reason}")
+            _log(command.entry_path, "fence_refused")
             raise CompletionFenceRefused(
                 refusal.reason, retryable=refusal.retryable) from exc
         _log(command.entry_path, "rollback")
