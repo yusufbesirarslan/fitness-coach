@@ -81,7 +81,10 @@ Application side:
   | AI coach tool | `status=error`, `retryable` | `status=error`, `retryable` false |
 
 * CLI: `flask completion-floor status|raise --revision <sha>`. Each prints one
-  `completion-floor: {json}` line.
+  `completion-floor: {json}` line, exactly what r6 parses (pinned end to end on
+  PG16). `status` is a READ ONLY transaction bounded by lock and statement
+  timeouts: a blocked, unreachable or unprivileged probe is an error (unknown,
+  treated as raised), never `absent`.
 
 ## Layer B: release admission (`scripts/r6_deploy_transaction.py`)
 
@@ -121,7 +124,11 @@ fence was off, treat it as a data-integrity incident.
 * **Pre-2026-06-15 images.** They write neither a dated PumpCheck nor the
   marker, and Layer A cannot tell their undated PumpCheck from a legitimate
   standalone one. Layer B refuses them (no manifest). A manual restore of such
-  an image could still grant completion XP: residual P2, PRODUCTION_UNVERIFIED.
+  an image could still grant completion XP. No supported path reaches one: the
+  pipeline is forward-only, automatic rollback restores only the immediately
+  previous image, and housekeeping keeps current/previous only. It takes host
+  root and a deliberate build of a months-old checkout. Residual P3 (manual
+  only), PRODUCTION_UNVERIFIED.
 * **Marker binding is owner-level, not day-level.** A writer that performs a
   real claim can write extra markers in that same transaction. That is a
   correctness property of claim-writing (K6-family) code and cannot produce a
@@ -139,7 +146,13 @@ fence was off, treat it as a data-integrity incident.
 Tests:
 
 * `tests/test_completion_fence_pg.py`: PG16 integrity, concurrency,
-  adversarial schema and tooling.
+  adversarial schema and tooling (F1–F5: CLI line → r6 parser, tampered fence,
+  missing privilege, lock timeout, unreachable database).
 * `tests/test_completion_fence.py`: contract and mapping.
-* `tests/test_r6_completion_capability.py`: Layer B.
+* `tests/test_r6_completion_capability.py`: Layer B, including every injected
+  fault on slot and legacy topologies: after activation no path restores an
+  incapable previous web or worker; with a capable previous, or before
+  activation, rollback is unchanged.
+* `tests/qualification/fence_everywhere_plugin.py`: runs existing PG suites with
+  the reviewed fence installed (`FITX_FENCE_EVERYWHERE=dormant|raised`).
 * Mutation controls: `tests/qualification/run_priv_k6_rollback_gate_mutations.py`.

@@ -10,7 +10,8 @@ on:
     # Bind D1 integration qualification directly to the branch HEAD.
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
-    branches: [feat/priv-k6-b1-no-photo-completion, main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation]
+    # Qualify the K6 rollback gate (stacked on #446) at exact HEAD as well.
+    branches: [feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation]
 
 jobs:
   tests:
