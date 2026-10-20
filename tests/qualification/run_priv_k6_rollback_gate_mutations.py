@@ -80,7 +80,8 @@ MUTANTS = [
      "        RAISE EXCEPTION 'completion evidence without a claim in this transaction (writer below capability floor)'\n"
      "            USING ERRCODE = 'AXF02';\n    END IF;\n    RETURN NULL;\nEND\n\"\"\",\n    \"completion_fence_marker\"",
      "        NULL;\n    END IF;\n    RETURN NULL;\nEND\n\"\"\",\n    \"completion_fence_marker\"",
-     f"{A}::test_a3_legacy_writer_refused_after_photo_claim_and_gallery_delete"),
+     # a7 writes ONLY a dated PumpCheck: the legacy writer's marker would mask it.
+     f"{A}::test_a7_claim_for_another_day_never_authorizes_a_dated_pump_check"),
     ("A2-transaction-identity", "A", FENCE,
      "            WHERE b.claim_txid = pg_catalog.pg_current_xact_id()::text::bigint\n"
      "              AND c.user_id = NEW.user_id AND c.date_key = NEW.date_key) THEN",
