@@ -32,6 +32,7 @@ CAPABILITY = "workout_completion_claims_v1"
 FENCE_REVISION = "d7e3a9c1f5b8"
 FLOOR_LOCK_KEY = -3391128469959823719
 RAISE_LOCK_TIMEOUT_MS = 5000
+STATUS_TIMEOUT_MS = 10000
 
 _MIGRATION = (Path(__file__).resolve().parents[3] / "migrations" / "versions"
               / f"{FENCE_REVISION}_completion_authority_fence.py")
@@ -103,12 +104,19 @@ def _fence_state(connection):
     return "verified"
 
 
-def floor_status(connection) -> dict:
-    """Read-only probe. Runs in its own READ ONLY transaction on ``connection``."""
+def floor_status(connection, timeout_ms: int = STATUS_TIMEOUT_MS) -> dict:
+    """Read-only probe. Runs in its own READ ONLY transaction on ``connection``.
+
+    Bounded: a lock wait or a slow catalog read raises (a timeout is UNKNOWN,
+    which callers treat as raised), it never reports ``absent``."""
     if connection.dialect.name != "postgresql":
         raise FloorError("unsupported_dialect", connection.dialect.name)
+    if not isinstance(timeout_ms, int) or not 0 < timeout_ms <= 60000:
+        raise FloorError("invalid_timeout")
     with connection.begin():
         connection.execute(text("SET TRANSACTION READ ONLY"))
+        connection.execute(text(f"SET LOCAL lock_timeout = '{timeout_ms}ms'"))
+        connection.execute(text(f"SET LOCAL statement_timeout = '{timeout_ms}ms'"))
         fence = _fence_state(connection)
         floor_table = connection.execute(text(
             "SELECT pg_catalog.to_regclass('public.completion_capability_floor')")).scalar()

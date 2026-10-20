@@ -3,6 +3,7 @@ import re
 from collections import Counter
 
 import click
+from flask.cli import AppGroup
 
 from app.extensions import db
 from app.models import DailyQuest
@@ -468,7 +469,10 @@ def _completion_floor_emit(payload, failed=False):
         raise SystemExit(1)
 
 
-@click.group("completion-floor")
+# AppGroup like every other command here: the subcommands get the application
+# context on every invocation path (the `flask` executable and `app.cli` alike),
+# so the release-tooling contract can be exercised in-process.
+@click.group("completion-floor", cls=AppGroup)
 def completion_floor_cmd():
     """PRIV-K6 completion capability floor (read or raise; never lower).
 

@@ -364,3 +364,67 @@ def test_manifest_grammar_and_floor_status_parsing_fail_closed():
                    {"claims_present": 0}, {"capability": "other"}):
         assert tx.parse_floor_status({**good, **mutate}) is None
     assert tx.Transaction._floor_requires_capability(None) is True
+
+
+# ── exhaustive failure injection: no path restores an incapable image ──────
+
+FAULTS = ("boot", "deep", "misbake", "bad_rollback_tag", "worker_restore",
+          "worker_unhealthy", "worker_wrong_app_revision", "worker_wrong_baked",
+          "redis_restart", "ss", "legacy_remove", "legacy_deep", "public", "ingress",
+          "ingress_retryable", "checkout", "checkout_restore", "parity",
+          "route_status", "housekeeping")
+TOPOLOGIES = {"slot": lambda **f: slot_world("blue", **f),
+              "legacy": lambda **f: first_cutover_world(**f)}
+
+
+def _restores(world):
+    """(route restores to the previous backend after the candidate took the
+    route, worker restores to the previous image)."""
+    switched = [i for i, c in enumerate(world.calls)
+                if c[:2] in (("route_switch", "green"), ("route_switch", "blue"))
+                and c[1] != world_previous_slot(world)]
+    routed_back = bool(switched) and any(
+        c[0] == "route_switch" and c[1] in ("legacy", world_previous_slot(world))
+        for c in world.calls[switched[0] + 1:])
+    worker_back = any(c[:2] == ("worker_up", "previous") for c in world.calls)
+    return routed_back, worker_back
+
+
+def world_previous_slot(world):
+    return world.previous_slot
+
+
+@pytest.mark.parametrize("topology", sorted(TOPOLOGIES))
+@pytest.mark.parametrize("fault", FAULTS)
+def test_every_injected_failure_after_activation_never_restores_an_incapable_image(
+        topology, fault):
+    world = raised(capable_candidate(TOPOLOGIES[topology](**{fault: True})))
+    world.previous_slot = "blue" if topology == "slot" else "legacy"
+    code, _ = go(world)
+    routed_back, worker_back = _restores(world)
+    assert not routed_back, (fault, code, names(world))
+    assert not worker_back, (fault, code, names(world))
+    assert world.floor["floor"] == "raised"
+    if any("ROLLBACK_BELOW_FLOOR" in e for e in world.events):
+        assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+
+
+@pytest.mark.parametrize("topology", sorted(TOPOLOGIES))
+@pytest.mark.parametrize("fault", FAULTS)
+def test_every_injected_failure_with_a_capable_previous_rolls_back_normally(topology, fault):
+    world = raised(capable_previous(capable_candidate(TOPOLOGIES[topology](**{fault: True}))))
+    code, _ = go(world)
+    assert not events(world, "rollback-refused-below-floor"), (fault, code)
+    assert not any("ROLLBACK_BELOW_FLOOR" in e for e in world.events)
+
+
+@pytest.mark.parametrize("topology", sorted(TOPOLOGIES))
+@pytest.mark.parametrize("fault", FAULTS)
+def test_every_injected_failure_before_activation_keeps_the_zero_outage_rollback(
+        topology, fault):
+    """Floor proven absent and no claim: the pre-K6 previous stays restorable,
+    so the gate adds no false-positive block to the first K6 release."""
+    world = capable_candidate(TOPOLOGIES[topology](**{fault: True}))
+    code, _ = go(world)
+    assert not events(world, "rollback-refused-below-floor"), (fault, code)
+    assert floor_calls(world, "raise") == [] or code in (tx.EXIT_OK, tx.EXIT_COMMITTED_RESIDUE)

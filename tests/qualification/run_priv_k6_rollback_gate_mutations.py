@@ -1,9 +1,9 @@
 """PRIV-K6 rollback gate mutation qualification; worktree sources are never edited.
 
-Each mutant removes ONE load-bearing rule (Layer A database fence or Layer B
-release admission) in a sandbox copy of the repository and names the test that
+Each mutant removes ONE load-bearing rule (Layer A database fence, Layer B
+release admission or the application/tooling contract) in a sandbox copy of the repository and names the test that
 must fail for the intended reason. A collection/import/syntax failure never
-counts as a kill. Layer A mutants need a disposable PostgreSQL 16 database
+counts as a kill. Mutants whose test is PostgreSQL need a disposable PG 16 database
 (``PG_TEST_DATABASE_URL`` + ``FITX_PG_CONCURRENCY_TEST=1``); without one they are
 reported as ``skipped``, never as killed.
 
@@ -25,8 +25,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TX = "scripts/r6_deploy_transaction.py"
 FENCE = "migrations/versions/d7e3a9c1f5b8_completion_authority_fence.py"
+APP = "app/services/completion_fence/__init__.py"
+CLI = "app/cli.py"
 B = "tests/test_r6_completion_capability.py"
 A = "tests/test_completion_fence_pg.py"
+C = "tests/test_completion_fence.py"
 
 # (name, layer, file, old, new, test node)
 MUTANTS = [
@@ -63,6 +66,11 @@ MUTANTS = [
      "            self._admit_before_switch()\n",
      "",
      f"{B}::test_floor_raised_between_admission_and_switch_refuses_an_incapable_candidate"),
+    ("B9-post-prepare-fence-verification", "B", TX,
+     "        if CAPABILITY in self.candidate_capabilities and (\n"
+     "                floor is None or floor[\"fence\"] != \"verified\"):\n",
+     "        if False:\n",
+     f"{B}::test_capable_candidate_whose_fence_does_not_verify_never_takes_traffic"),
     # ── Layer A: database fence (PostgreSQL) ──
     ("A1-evidence-check", "A", FENCE,
      "        RAISE EXCEPTION 'completion evidence without a claim in this transaction (writer below capability floor)'\n"
@@ -100,7 +108,61 @@ MUTANTS = [
      "    IF TG_OP = 'UPDATE' OR pg_catalog.pg_trigger_depth() < 2 THEN",
      "    IF TG_OP = 'UPDATE' THEN",
      f"{A}::test_d4_bindings_cannot_be_forged_or_rewritten"),
+    ("A9a-claims-present-keeps-pump-check-fence", "A", FENCE,
+     "       AND NOT EXISTS (SELECT 1 FROM public.workout_completion_day) THEN\n"
+     "        RETURN NULL;\n    END IF;\n    IF NOT EXISTS (\n"
+     "            SELECT 1 FROM public.completion_claim_transaction b\n"
+     "            JOIN public.workout_completion_day c ON c.id = b.claim_id\n"
+     "            WHERE b.claim_txid = pg_catalog.pg_current_xact_id()::text::bigint\n"
+     "              AND c.user_id = NEW.user_id AND c.date_key = NEW.date_key) THEN",
+     "       AND true THEN\n"
+     "        RETURN NULL;\n    END IF;\n    IF NOT EXISTS (\n"
+     "            SELECT 1 FROM public.completion_claim_transaction b\n"
+     "            JOIN public.workout_completion_day c ON c.id = b.claim_id\n"
+     "            WHERE b.claim_txid = pg_catalog.pg_current_xact_id()::text::bigint\n"
+     "              AND c.user_id = NEW.user_id AND c.date_key = NEW.date_key) THEN",
+     f"{A}::test_d3_floor_table_recreated_by_ddl_with_claims_present_stays_enforced"),
+    ("A9b-claims-present-keeps-marker-fence", "A", FENCE,
+     "       AND NOT EXISTS (SELECT 1 FROM public.workout_completion_day) THEN\n"
+     "        RETURN NULL;\n    END IF;\n    IF NOT EXISTS (\n"
+     "            SELECT 1 FROM public.completion_claim_transaction b\n"
+     "            JOIN public.workout_completion_day c ON c.id = b.claim_id\n"
+     "            WHERE b.claim_txid = pg_catalog.pg_current_xact_id()::text::bigint\n"
+     "              AND c.user_id = NEW.user_id) THEN",
+     "       AND true THEN\n"
+     "        RETURN NULL;\n    END IF;\n    IF NOT EXISTS (\n"
+     "            SELECT 1 FROM public.completion_claim_transaction b\n"
+     "            JOIN public.workout_completion_day c ON c.id = b.claim_id\n"
+     "            WHERE b.claim_txid = pg_catalog.pg_current_xact_id()::text::bigint\n"
+     "              AND c.user_id = NEW.user_id) THEN",
+     f"{A}::test_d3_floor_table_recreated_by_ddl_with_claims_present_stays_enforced"),
+    ("A10-read-committed-only", "A", FENCE,
+     "    IF pg_catalog.current_setting('transaction_isolation') <> 'read committed' THEN",
+     "    IF false THEN",
+     f"{A}::test_a16_repeatable_read_and_serializable_writers_are_refused"),
+    ("A11-marker-owner-binding", "A", FENCE,
+     "            WHERE b.claim_txid = pg_catalog.pg_current_xact_id()::text::bigint\n"
+     "              AND c.user_id = NEW.user_id) THEN",
+     "            WHERE b.claim_txid = pg_catalog.pg_current_xact_id()::text::bigint) THEN",
+     f"{A}::test_a6b_another_owners_claim_never_authorizes_a_marker_alone"),
+    ("A12-claim-retention", "A", FENCE,
+     "    IF EXISTS (SELECT 1 FROM public.\"user\" u WHERE u.id = OLD.user_id) THEN",
+     "    IF false THEN",
+     f"{A}::test_a17_account_deletion_cascades_claims_and_nothing_else_deletes_them"),
+    # ── application contract ──
+    ("C1-permanent-refusal-advertised-retryable", "C", APP,
+     '    "AXF02": FenceRefusal("AXF02", "writer_below_floor", False),\n',
+     '    "AXF02": FenceRefusal("AXF02", "writer_below_floor", True),\n',
+     f"{C}::test_every_sqlstate_the_fence_raises_is_classified_and_nothing_else"),
+    ("C2-cli-without-app-context", "C", CLI,
+     '@click.group("completion-floor", cls=AppGroup)\n',
+     '@click.group("completion-floor")\n',
+     f"{A}::test_f1_cli_status_and_raise_lines_are_what_the_release_engine_parses"),
 ]
+
+
+def _needs_pg(node):
+    return node.startswith(A)
 
 
 def _sandbox(temp):
@@ -121,7 +183,7 @@ def run_test(sandbox, node):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--layer", choices=("A", "B", "all"), default="all")
+    parser.add_argument("--layer", choices=("A", "B", "C", "all"), default="all")
     args = parser.parse_args()
     pg = (os.environ.get("FITX_PG_CONCURRENCY_TEST") == "1"
           and os.environ.get("PG_TEST_DATABASE_URL", "").startswith("postgresql"))
@@ -130,12 +192,12 @@ def main():
     records = []
     with tempfile.TemporaryDirectory(prefix="priv-k6-gate-mutants-") as temp:
         sandbox = _sandbox(temp)
-        for node in sorted({m[5] for m in selected if m[1] == "B" or pg}):
+        for node in sorted({m[5] for m in selected if not _needs_pg(m[5]) or pg}):
             baseline = run_test(sandbox, node)
             if baseline.returncode:
                 raise RuntimeError(f"baseline {node} failed:\n{baseline.stdout}\n{baseline.stderr}")
         for name, layer, rel, old, new, node in selected:
-            if layer == "A" and not pg:
+            if _needs_pg(node) and not pg:
                 records.append({"name": name, "layer": layer, "test": node,
                                 "killed": False, "skipped": True})
                 print(f"{name}: SKIPPED (no disposable PostgreSQL)", flush=True)

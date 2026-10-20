@@ -323,6 +323,25 @@ def test_a6_another_owners_claim_never_authorizes(world):
     assert _sql("SELECT count(*) FROM workout_completion_day")[0][0] == 0
 
 
+def test_a6b_another_owners_claim_never_authorizes_a_marker_alone(world):
+    """The marker check binds the claim to the marker's OWNER (no PumpCheck in
+    the transaction, so the dated-PumpCheck check cannot mask it)."""
+    app, uid, _ = world
+    other = _second_user(app, "fence_marker_other")
+    _raise_floor()
+
+    def marker_only():
+        engine = _engine()
+        try:
+            with engine.begin() as conn:
+                conn.execute(sa.text(CLAIM), {"u": other, "d": _today(), "p": "none"})
+                conn.execute(sa.text(LOG), {"u": uid, "n": MARKER})
+        finally:
+            engine.dispose()
+    assert _code(marker_only) == "AXF02"
+    assert _sql("SELECT count(*) FROM workout_log")[0][0] == 0
+
+
 def test_a7_claim_for_another_day_never_authorizes_a_dated_pump_check(world):
     app, uid, _ = world
     _raise_floor()
@@ -360,12 +379,18 @@ def test_a9_standalone_pump_checks_and_ordinary_logs_are_unaffected(world):
 
 def test_a10_historical_completion_stays_recognized_and_blocks_k6(world, base):
     app, uid, reference = world
+    ref = k6._started(app, uid, reference)                          # K6 session first
     assert _base_complete(app, base, uid) == ("ok", "created")      # before the floor
     _raise_floor()
     _sql("UPDATE pump_check SET visibility = 'friends' WHERE user_id = :u", u=uid)
-    ref = k6._started(app, uid, reference)
+    # Under the raised floor K6 re-checks the union under the day lock: the
+    # historical day is complete, so neither path writes a claim or evidence.
     outcome = _k6_no_photo(app, uid, ref)
     assert outcome[0] == "ok" and outcome[3] == "already_completed"
+    assert _k6_photo(app, uid) == ("ok", "already")
+    from app.services.workout_session import WorkoutNotStartable
+    with pytest.raises(WorkoutNotStartable):                        # LP-13 invariant
+        k6._started(app, uid, reference)
     rows = _rows(app, uid)
     assert rows["claims"] == [] and rows["markers"] == 1 and rows["xp"] == 35
 
@@ -569,6 +594,7 @@ def test_c2_raise_waits_for_an_in_flight_historical_commit(world, base):
     the floor: the raise waits for it, and no historical commit is still in
     flight when the floor becomes visible."""
     app, uid, reference = world
+    ref = k6._started(app, uid, reference)                          # before the day closes
     _slow_commit_trigger("workout_log", f"WHEN (NEW.exercise_name = '{MARKER}')")
     try:
         results = {}
@@ -588,7 +614,6 @@ def test_c2_raise_waits_for_an_in_flight_historical_commit(world, base):
     assert results["historical"] == ("ok", "created")
     assert results["raise_wait"] >= 1.0, results
     assert results["in_flight"] == 0, results
-    ref = k6._started(app, uid, reference)
     assert _k6_no_photo(app, uid, ref)[3] == "already_completed"
     assert _rows(app, uid)["xp"] == 35
 
@@ -780,6 +805,9 @@ def test_d3_floor_table_recreated_by_ddl_with_claims_present_stays_enforced(worl
          "raised_at timestamptz NOT NULL, raised_by_revision varchar(40) NOT NULL)")
     other = _second_user(app, "fence_recreated")
     assert _base_complete(app, base, other) == ("refused", "AXF02")
+    # Each evidence kind on its own: both checks hold while any claim exists.
+    assert _code(lambda: _sql(PUMP, u=other, d=_today())) == "AXF02"
+    assert _code(lambda: _sql(LOG, u=other, n=MARKER)) == "AXF02"
     assert _status()["fence"] == "invalid"
 
 
@@ -915,8 +943,8 @@ def test_d9_the_full_alembic_chain_installs_exactly_the_reviewed_fence(migrate_e
         downgrade(revision="f9c6d0a1b2e3")                           # empty: drops cleanly
         with db.engine.connect() as conn:
             assert not sa.inspect(conn).has_table("completion_capability_floor")
-            assert conn.exec_driver_sql("SELECT count(*) FROM pg_proc WHERE proname "
-                                        "LIKE 'completion\\_fence\\_%'").scalar() == 0
+            assert conn.execute(sa.text("SELECT count(*) FROM pg_proc WHERE proname "
+                                        "LIKE 'completion\\_fence\\_%'")).scalar() == 0
         upgrade()
         db.session.remove()
         db.engine.dispose()
@@ -962,3 +990,115 @@ def test_every_refusal_code_is_a_known_fence_code(world, base):
     all members of the closed vocabulary classified by the application."""
     from app.services.completion_fence import REFUSALS
     assert set(REFUSALS) == CODES
+
+
+# ── F: release tooling contract (CLI line -> r6 parser) and fail-closed probes ──
+
+def _r6_module():
+    sys.path.insert(0, str(HERE.parent / "scripts"))
+    try:
+        import r6_deploy_transaction
+    finally:
+        sys.path.pop(0)
+    return r6_deploy_transaction
+
+
+def _cli(app, *args):
+    """Run ``flask completion-floor ...``; return (exit code, the ONE payload)."""
+    import json
+    result = app.test_cli_runner().invoke(args=["completion-floor", *args])
+    r6 = _r6_module()
+    lines = [line[len(r6.CAPABILITY_FLOOR_PREFIX):] for line in result.output.splitlines()
+             if line.startswith(r6.CAPABILITY_FLOOR_PREFIX)]
+    assert len(lines) == 1, result.output
+    return result.exit_code, json.loads(lines[0])
+
+
+def test_f1_cli_status_and_raise_lines_are_what_the_release_engine_parses(world):
+    app, _, _ = world
+    r6 = _r6_module()
+    code, payload = _cli(app, "status")
+    assert code == 0
+    assert r6.parse_floor_status(payload) == {
+        "floor": "absent", "fence": "verified", "claims_present": False}
+    code, payload = _cli(app, "raise", "--revision", REV)
+    assert (code, payload) == (0, {"result": "raised", "raised_by_revision": REV})
+    code, payload = _cli(app, "raise", "--revision", "e" * 40)
+    assert (code, payload) == (0, {"result": "already_raised", "raised_by_revision": REV})
+    code, payload = _cli(app, "status")
+    assert code == 0 and r6.parse_floor_status(payload)["floor"] == "raised"
+    code, payload = _cli(app, "raise", "--revision", "nope")
+    assert code == 1 and payload == {"reason": "invalid_revision", "result": "refused"}
+    assert r6.parse_floor_status(payload) is None
+
+
+def test_f2_cli_reports_a_tampered_fence_as_invalid_and_raise_refuses(world):
+    app, _, _ = world
+    r6 = _r6_module()
+    _sql("ALTER TABLE public.workout_log DISABLE TRIGGER completion_fence_marker")
+    code, payload = _cli(app, "status")
+    assert code == 0 and r6.parse_floor_status(payload)["fence"] == "invalid"
+    code, payload = _cli(app, "raise", "--revision", REV)
+    assert code == 1 and payload["reason"] == "fence_not_verified"
+    assert _sql("SELECT count(*) FROM completion_capability_floor")[0][0] == 0
+
+
+def test_f3_insufficient_privileges_are_unknown_never_absent(world):
+    from app.services import completion_fence
+    role = "fence_probe_synthetic"
+    _sql(f"DROP ROLE IF EXISTS {role}")
+    _sql(f"CREATE ROLE {role} NOLOGIN")
+    engine = _engine()
+    try:
+        with engine.connect() as conn:
+            conn.exec_driver_sql(f"SET ROLE {role}")
+            conn.commit()
+            with pytest.raises(sa.exc.ProgrammingError) as caught:
+                completion_fence.floor_status(conn)
+            assert caught.value.orig.pgcode == "42501"           # insufficient_privilege
+            conn.rollback()
+            with pytest.raises(Exception) as raised:
+                completion_fence.raise_floor(conn, REV)
+            assert not isinstance(raised.value, AssertionError)
+            conn.rollback()
+            conn.exec_driver_sql("RESET ROLE")
+            conn.commit()
+    finally:
+        engine.dispose()
+        _sql(f"DROP ROLE IF EXISTS {role}")
+    assert _sql("SELECT count(*) FROM completion_capability_floor")[0][0] == 0
+
+
+def test_f4_a_blocked_probe_times_out_as_unknown_never_absent(world):
+    from app.services import completion_fence
+    holder = _engine()
+    probe = _engine()
+    try:
+        with holder.connect() as held:
+            held.exec_driver_sql(
+                "LOCK TABLE public.completion_capability_floor IN ACCESS EXCLUSIVE MODE")
+            started = time.monotonic()
+            with probe.connect() as conn:
+                with pytest.raises(sa.exc.OperationalError) as caught:
+                    completion_fence.floor_status(conn, timeout_ms=300)
+            assert caught.value.orig.pgcode in {"55P03", "57014"}  # lock / statement timeout
+            assert time.monotonic() - started < 5
+            held.rollback()
+    finally:
+        holder.dispose()
+        probe.dispose()
+
+
+def test_f5_cli_with_an_unreachable_database_reports_error_not_absent(world, monkeypatch):
+    import os
+    from app import create_app
+    r6 = _r6_module()
+    monkeypatch.setitem(os.environ, "DATABASE_URL",
+                        "postgresql://postgres@127.0.0.1:9/fitx_unreachable?connect_timeout=2")
+    monkeypatch.setitem(os.environ, "FITX_SKIP_DB_INIT", "1")
+    unreachable = create_app()
+    code, payload = _cli(unreachable, "status")
+    assert code == 1 and payload["result"] == "error"
+    assert r6.parse_floor_status(payload) is None
+    code, payload = _cli(unreachable, "raise", "--revision", REV)
+    assert code == 1 and payload["result"] == "error"

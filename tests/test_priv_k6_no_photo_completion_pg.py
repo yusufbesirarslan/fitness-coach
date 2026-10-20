@@ -662,16 +662,19 @@ def test_valid_sequence_generates_ids_and_populated_reentry_preserves_state(migr
 def test_canonical_no_photo_service_uses_migration_created_sequence_and_replays_once():
     _require_pg()
     from app.extensions import db
-    from app.models import WorkoutCompletionDay
+    from app.models import CompletionClaimTransaction, WorkoutCompletionDay
     flask_app, user_id, reference = _make_pg_app()
     try:
         with flask_app.app_context():
             # The application fixture creates other models. Recreate only the
             # empty claim table via the actual migration, then use the service.
+            # The rollback gate's binding table references the claim table.
             with db.engine.begin() as conn:
+                CompletionClaimTransaction.__table__.drop(conn)
                 WorkoutCompletionDay.__table__.drop(conn)
                 _run(conn, _module(MIGRATION).upgrade)
                 _run(conn, _module(MIGRATION).upgrade)
+                CompletionClaimTransaction.__table__.create(conn)
         session_ref = _started(flask_app, user_id, reference)
         with flask_app.app_context():
             assert _complete_no_photo(user_id, session_ref) == (200, False, "created")
