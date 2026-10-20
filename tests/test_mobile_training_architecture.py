@@ -352,6 +352,16 @@ def test_training_reads_have_a_constant_bounded_query_cost(
     # Exact table names: the LP21 origin read hits the generation ledger, whose
     # name starts with "training_plan" too and must not pass for a plan load.
     assert sum(bool(_PLAN_TABLE.search(item)) for item in plan_statements) == 1
-    assert sum(bool(_LEDGER_TABLE.search(item)) for item in plan_statements) == 1
+    # No origin opt-in, no ledger read (LP21).
+    assert not any(_LEDGER_TABLE.search(item) for item in plan_statements)
     assert sum(bool(_PLAN_TABLE.search(item)) for item in workout_statements) == 1
     assert not any(_LEDGER_TABLE.search(item) for item in workout_statements)
+
+    # The LP21 opt-in costs exactly one more statement: the ledger read.
+    _, origin_statements = _statements_for(
+        client, "/api/v1/training/plans/current?include_origin=1", headers,
+        freeze=True,
+    )
+    assert len(origin_statements) == len(plan_statements) + 1, origin_statements
+    assert sum(bool(_LEDGER_TABLE.search(item)) for item in origin_statements) == 1
+    assert sum(bool(_PLAN_TABLE.search(item)) for item in origin_statements) == 1

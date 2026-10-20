@@ -345,3 +345,19 @@ def test_plan_origin_is_read_from_the_ledger_on_postgresql(pg_general_app):
             assert resolve_plan_origin(replacement, user_id)["kind"] == "unknown"
         finally:
             db.session.remove()
+        try:
+            # An authoritative AI first-plan receipt on the other owner's plan.
+            from app.models import TrainingPlanGenerationOperation
+            replace_training_plan(
+                other_id, PlanExpectation(absent=True),
+                plan_data='{"program": []}', score=7)
+            ai_plan = TrainingPlan.query.filter_by(user_id=other_id).one()
+            db.session.add(TrainingPlanGenerationOperation(
+                user_id=other_id, idempotency_key="pg-ai-origin",
+                request_fingerprint="1" * 64, status="SUCCEEDED",
+                provider_dispatch_possible=True, quota_reserved=False,
+                training_plan_id=ai_plan.id, plan_lineage_id=ai_plan.lineage_id))
+            db.session.commit()
+            assert resolve_plan_origin(ai_plan, other_id)["kind"] == "ai_generated"
+        finally:
+            db.session.remove()

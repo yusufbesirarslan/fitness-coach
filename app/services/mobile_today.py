@@ -66,13 +66,17 @@ class TodayUnavailable(RuntimeError):
     """
 
 
-def build_today(user_id: int) -> dict:
+def build_today(user_id: int, *, include_origin: bool = False) -> dict:
     """Project the authenticated user's canonical Today state.
 
     `user_id` is the authenticated principal, supplied by the route from
     `g.mobile_user.id`. This function accepts no date, no timezone and no owner
     override - there is no parameter through which one user could read another's
     Today, and no parameter through which a client clock could move the day.
+
+    `include_origin` is the LP21 per-request opt-in: only then does
+    `today.plan` carry `origin` (and the one ledger read it costs). Without it
+    the pre-LP21 contract is returned exactly.
 
     Raises `TodayUnavailable` if a canonical authority cannot be read.
     """
@@ -82,7 +86,7 @@ def build_today(user_id: int) -> dict:
             plan = get_active_plan(user_id)
             plan_data = _plan_content(plan)
             origin = (resolve_plan_origin(plan, user_id)
-                      if plan is not None else None)
+                      if include_origin and plan is not None else None)
             snapshot = resolve_workout_state(
                 user_id,
                 today=day,
@@ -90,7 +94,10 @@ def build_today(user_id: int) -> dict:
                 sessions_enabled=_sessions_enabled(),
                 strict_reads=True,
             )
-            return _project(day, plan, plan_data, origin, snapshot)
+            payload = _project(day, plan, plan_data, snapshot)
+            if include_origin:
+                payload["today"]["plan"]["origin"] = origin
+            return payload
     except Exception as error:  # noqa: BLE001 - every fault fails closed
         raise TodayUnavailable("canonical Today read failed") from error
 
@@ -122,7 +129,7 @@ def _sessions_enabled() -> bool:
         return False
 
 
-def _project(day, plan, plan_data, origin, snapshot) -> dict:
+def _project(day, plan, plan_data, snapshot) -> dict:
     """Serialize already-resolved canonical facts. Pure: no reads, no decisions."""
     state = snapshot.to_dict()
     return {
@@ -145,7 +152,7 @@ def _project(day, plan, plan_data, origin, snapshot) -> dict:
                 # contract; `None` otherwise. Never an invented identity.
                 "session": state.get("session"),
             },
-            "plan": _plan(plan, origin),
+            "plan": _plan(plan),
             "daily_context": _daily_context(plan, day),
             # The canonical workout-state contract exactly as `GET /workout/status`
             # publishes it. Carried verbatim so a mobile client and the web client
@@ -187,16 +194,11 @@ def _summary(plan_data, day):
     }
 
 
-def _plan(plan, origin):
-    """Plan availability. `exists` is the canonical active-plan selector's answer.
-
-    `origin` is `training_plan_origin`'s answer for the same row (LP21), so
-    Today and `GET /training/plans/current` cannot label one plan differently;
-    `None` with no plan, never a fabricated origin.
-    """
+def _plan(plan):
+    """Plan availability. `exists` is the canonical active-plan selector's answer."""
     if plan is None:
-        return {"exists": False, "created_at": None, "origin": None}
-    return {"exists": True, "created_at": _iso(plan.created_at), "origin": origin}
+        return {"exists": False, "created_at": None}
+    return {"exists": True, "created_at": _iso(plan.created_at)}
 
 
 def _daily_context(plan, day):

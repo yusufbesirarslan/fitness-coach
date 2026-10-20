@@ -279,7 +279,7 @@ def test_no_plan_is_truthful_and_never_a_rest_day(
     assert payload["workout"]["is_rest_day"] is False
     assert payload["workout"]["completed"] is False
     assert payload["workout"]["summary"] is None
-    assert payload["plan"] == {"exists": False, "created_at": None, "origin": None}
+    assert payload["plan"] == {"exists": False, "created_at": None}
 
 
 def test_no_plan_never_fabricates_lineage_or_mutation_version(

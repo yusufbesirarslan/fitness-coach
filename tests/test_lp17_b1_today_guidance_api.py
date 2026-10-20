@@ -664,11 +664,8 @@ def _legacy_weightless_history(user_id, count):
 # its own 3 fixed reads): Today 3 + Nutrition 4 + check-in 2 = 9 in every normal
 # state, independent of history size; a failed secondary source issues none;
 # the adversarial history adds at most HISTORY_LIMIT (12) bounded lookups.
-# With a plan, Today adds the one LP21 plan-origin ledger read.
-_PLAN_ORIGIN_READ = 1
-_BUDGETS = {"empty": 9, "plan": 9 + _PLAN_ORIGIN_READ, "nutrition": 9,
-            "checkins_30": 9, "secondary_failure": 3 + _PLAN_ORIGIN_READ,
-            "adversarial_history": 21 + _PLAN_ORIGIN_READ}
+_BUDGETS = {"empty": 9, "plan": 9, "nutrition": 9, "checkins_30": 9,
+            "secondary_failure": 3, "adversarial_history": 21}
 
 
 @pytest.mark.parametrize("scenario", sorted(_BUDGETS))
@@ -696,8 +693,7 @@ def test_adversarial_history_cost_does_not_grow_with_rows(
         client, guidance_on, owner, as_mobile, rows):
     _legacy_weightless_history(owner.id, rows)
     selects, _size = _measure(client, as_mobile(owner))
-    # No plan here, so no origin read: exactly 9 + HISTORY_LIMIT.
-    assert selects == _BUDGETS["adversarial_history"] - _PLAN_ORIGIN_READ
+    assert selects == _BUDGETS["adversarial_history"]
 
 
 def test_real_bearer_worst_case_budget(client, guidance_on, athlete, real_bearer):

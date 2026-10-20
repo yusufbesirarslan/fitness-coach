@@ -86,7 +86,10 @@ def preference_contract() -> dict:
     }
 
 
-def build_current_plan(user_id: int, secret, *, sessions_enabled: bool = False) -> dict:
+def build_current_plan(
+    user_id: int, secret, *, sessions_enabled: bool = False,
+    include_origin: bool = False,
+) -> dict:
     """Project the authenticated owner's current plan inside one read snapshot."""
     try:
         with coherent_read_snapshot():
@@ -94,7 +97,8 @@ def build_current_plan(user_id: int, secret, *, sessions_enabled: bool = False) 
             if plan is None:
                 return {"plan": None}
             return project_current_plan(
-                plan, user_id, secret, sessions_enabled=sessions_enabled)
+                plan, user_id, secret, sessions_enabled=sessions_enabled,
+                include_origin=include_origin)
     except PlanUnprojectable:
         raise
     except WorkoutStateReadError as error:
@@ -104,7 +108,8 @@ def build_current_plan(user_id: int, secret, *, sessions_enabled: bool = False) 
 
 
 def project_current_plan(
-    plan, user_id: int, secret, *, sessions_enabled: bool = False
+    plan, user_id: int, secret, *, sessions_enabled: bool = False,
+    include_origin: bool = False,
 ) -> dict:
     """Project a known canonical row through the same current-plan authority."""
     try:
@@ -122,9 +127,11 @@ def project_current_plan(
             candidate = projected["days"][day.weekday()]
             current_ref = candidate["workout_ref"]
         projected["current_workout_ref"] = current_ref
-        # How this lineage was created, from the ledger (LP21). A failed read
-        # raises below; it is never downgraded to an ``unknown`` origin.
-        projected["origin"] = resolve_plan_origin(plan, user_id)
+        if include_origin:
+            # LP21 opt-in only: the legacy shape (and its strict mobile DTOs)
+            # never sees this key or pays this read. A failed read raises
+            # below; it is never downgraded to an ``unknown`` origin.
+            projected["origin"] = resolve_plan_origin(plan, user_id)
         return {"plan": projected}
     except PlanUnprojectable:
         raise

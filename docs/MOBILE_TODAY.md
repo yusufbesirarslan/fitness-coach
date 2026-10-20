@@ -95,11 +95,7 @@ so a later sprint can add a sibling block without renaming anything.
       },
       "session": null
     },
-    "plan": {
-      "exists": true,
-      "created_at": "2026-07-01T08:00:00Z",
-      "origin": { "kind": "unknown", "template": null, "personalized": null }
-    },
+    "plan": { "exists": true, "created_at": "2026-07-01T08:00:00Z" },
     "daily_context": {
       "plan_lineage": "IFFkovLw3diUtHjuNdYMRzCa2Imf8dcZmVTQtxT1hMc",
       "mutation_version": 0,
@@ -129,7 +125,7 @@ so a later sprint can add a sibling block without renaming anything.
 | `today.workout.session` | `object` | **nullable** | `snapshot.session` | The persisted workout session, present only when `FITX_WORKOUT_SESSIONS_ENABLED` is on (default OFF ⇒ always `null`). Carries the opaque `public_id`, `status`, `resumable`, `relationship`, `stale_reason`, `workout_date`. Never an invented identity. | flag-conditional |
 | `today.plan.exists` | `boolean` | never | `get_active_plan(...) is not None` | Whether an active training plan exists at all. | stable |
 | `today.plan.created_at` | `string` ISO-8601 UTC `...Z` | **nullable** | `TrainingPlan.created_at` | When the active plan was created. `null` iff `exists` is `false`. | stable |
-| `today.plan.origin` | `object` | **nullable** | `training_plan_origin.resolve_plan_origin` (LP21) | How the plan's lineage was created; the same object `GET /training/plans/current` publishes as `plan.origin`. `null` iff `exists` is `false`. See docs/LP21_NONAI_GENERAL_PLAN.md "Read-side origin". | additive: new `kind` members possible |
+| `today.plan.origin` | `object` | **nullable** | `training_plan_origin.resolve_plan_origin` (LP21) | **Present only with `?include_origin=1`.** Without it the key is absent and the object is exactly `{exists, created_at}`. When present it is the same object current-plan publishes as `plan.origin`, and `null` iff `exists` is `false`. See docs/LP21_NONAI_GENERAL_PLAN.md "Read-side origin". | opt-in |
 | `today.daily_context.plan_lineage` | `string` | **nullable** | `TrainingPlan.lineage_id` | Opaque, non-guessable, server-generated lineage token (`secrets.token_urlsafe(32)`). Not a database key, not derived from user data. `null` iff no plan. | stable |
 | `today.daily_context.mutation_version` | `integer` | **nullable** | `TrainingPlan.mutation_version` | The server-authoritative history position of that lineage. Moves when the plan is mutated. `null` iff no plan. | stable |
 | `today.daily_context.canonical_local_date` | `string` `YYYY-MM-DD` | never | `app_today()` | Always equal to `today.date`, restated inside the identity tuple so a cached context is self-describing. | stable |
@@ -236,12 +232,10 @@ enforces it.
 
 ## Cost
 
-Per request: **4 bounded `SELECT`s** without a plan. They read the
-authenticated principal, the active plan, the execution-evidence log rows and
-today's `PumpCheck`. With a plan there is **one more**: the owner-scoped
-plan-origin ledger read (LP21, `training_plan_origin`, `LIMIT 2`). The plan row
-is loaded once and passed into the resolver and the origin read; it is never
-re-queried. No N+1, no write, no flush, no
+Per request: **4 bounded `SELECT`s** — the authenticated principal, the active
+plan, the execution-evidence log rows, today's `PumpCheck` — and the count is
+the same whether or not the user has a plan. The plan row is loaded once and
+passed into the resolver rather than re-queried. No N+1, no write, no flush, no
 commit, no lock, no HTTP call.
 
 **Provider calls: exactly 0.** No AI/LLM module is imported or reachable, and

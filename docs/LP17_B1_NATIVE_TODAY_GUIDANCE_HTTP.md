@@ -78,17 +78,14 @@ retryable; the client rereads.
 
 | Scenario | SELECTs (stubbed credential) | Payload |
 |---|---|---|
-| empty user / populated Nutrition / 12–30 check-ins | 9 | ~1.1–1.6 KiB |
-| active plan | 10 (+1 LP21 plan-origin ledger read) | ~1.1–1.6 KiB |
-| secondary readers failed (with a plan) | 4 | ~0.9 KiB |
-| adversarial legacy history (no in-window positive weight), 13–40 rows, with a plan | 22 (10 + 12 bounded prior-day lookups) | ~1.6 KiB |
-| 4,000-character plan focus and nutrition plan name (one-off measurement, not pinned) | 10 | ~2.0 KiB (canonical bounds) |
+| empty user / active plan / populated Nutrition / 12–30 check-ins | 9 | ~1.1–1.6 KiB |
+| secondary readers failed | 3 | ~0.9 KiB |
+| adversarial legacy history (no in-window positive weight), 13–40 rows | 21 (9 + 12 bounded prior-day lookups) | ~1.6 KiB |
+| 4,000-character plan focus and nutrition plan name (one-off measurement, not pinned) | 9 | ~2.0 KiB (canonical bounds) |
 
 The real Bearer pipeline adds 3 fixed reads. Each normal read also issues four
 SAVEPOINT/RELEASE pairs from the day view. Cost is constant in history size
-(no N+1); `/api/v1/today` alone is 3 SELECTs, plus 1 owner-scoped ledger read
-for the plan's `origin` (LP21) when a plan exists. Guidance does not publish
-`origin`; it pays that one read because it composes `build_today` unchanged. A cheaper latest-only check-in
+(no N+1); `/api/v1/today` alone is 3 SELECTs. A cheaper latest-only check-in
 reader would remove the adversarial lookups but belongs to the check-in owner.
 
 ## Compatibility

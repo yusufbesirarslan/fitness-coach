@@ -538,9 +538,7 @@ def test_success_has_bounded_constant_sql_cost_without_exercise_n_plus_one(
     # cost, not a per-exercise one -- both parametrisations below measure 21 --
     # so this bound still fails on a genuine N+1, which would make the
     # 20-exercise case cost far more than the 1-exercise case.
-    # 22, not 21: the 201 projects through ``project_current_plan``, whose
-    # LP21 ``plan.origin`` adds one owner-scoped ledger read (constant too).
-    assert len(statements) <= 22, statements
+    assert len(statements) <= 21, statements
     operation_lookups = [
         sql for sql in statements
         if "FROM training_plan_generation_operation" in sql

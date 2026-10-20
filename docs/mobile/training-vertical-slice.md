@@ -399,16 +399,14 @@ No plan is exactly `{ "plan": null }`; a plan is exactly:
     "created_at": "2026-07-01T08:30:00Z",
     "score": 8.5,
     "current_workout_ref": "24-char-opaque-token",
-    "days": [],
-    "origin": {"kind": "unknown", "template": null, "personalized": null}
+    "days": []
   }
 }
 ```
 
-`origin` (LP21, additive) says how the plan's lineage was created, from server
-ledger evidence only: `general_template` (the non-AI general plan; `template`
-names it, `personalized` is `false`) or `unknown` (`template` and
-`personalized` null). See docs/LP21_NONAI_GENERAL_PLAN.md "Read-side origin".
+With `?include_origin=1` (LP21 opt-in) the same object carries exactly one more
+key, `origin`; without it the shape above is unchanged. See
+docs/LP21_NONAI_GENERAL_PLAN.md "Read-side origin".
 
 `score` is null or a finite canonical 1–10 value. `current_workout_ref` is null
 unless the canonical Istanbul day is a scheduled workout/cardio day according to

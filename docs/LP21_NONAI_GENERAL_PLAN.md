@@ -154,52 +154,85 @@ PR #116 does not know this route. The mobile owner must do the following:
 5. Show success only from the 201 body or a canonical re-read, then navigate to
    Today/Plan.
 6. Label the plan as general / not personalized, using `origin` from the 201.
-   After a reinstall or on another device, read the label from
-   `plan.origin` on `GET /training/plans/current` or `today.plan.origin` on
-   `GET /today` (see "Read-side origin" below). Render the general label only
-   for `kind: "general_template"`. Treat `unknown`, and any `kind` you do not
-   recognize, as "no label". Never treat it as AI or as personalized.
+   After a reinstall or on another device, request `?include_origin=1` and
+   read `plan.origin` (current plan) or `today.plan.origin` (Today). See
+   "Read-side origin" below. Render the general label only for
+   `kind: "general_template"`. Treat `unknown`, and any `kind` you do not
+   recognize, as "no label".
 7. Treat `estimated_calories: 0` on a general plan as "not estimated" and do
    not render "0 kcal". `score` is `null`.
 
-## Read-side origin
+## Read-side origin (per-request opt-in)
 
-`GET /training/plans/current` publishes `plan.origin`. `GET /today` publishes
-`today.plan.origin`; it is `null` when there is no plan. The 201 body's `plan`
-carries the same field, so it stays exactly the current-plan `plan`. Both
-reads use one resolver, `app/services/training_plan_origin.py`, so they cannot
-label one plan differently.
+Shipped mobile DTOs parse Today's `plan` and the current-plan object with
+`exactKeys`: any key they do not know is a `FormatException`, and the screen
+becomes "unavailable". So origin is never added globally. A client asks for it
+on each request:
 
-| `kind` | `template` | `personalized` | When |
+```
+GET /api/v1/training/plans/current?include_origin=1   -> plan.origin
+GET /api/v1/today?include_origin=1                    -> today.plan.origin
+```
+
+How the parameter is handled:
+
+| `include_origin` | Response | Ledger reads |
+|---|---|---|
+| absent | the pre-LP21 contract, byte-for-byte; no `origin` key anywhere | 0 |
+| exactly `1` | the same objects plus exactly one key, `origin` | 1 when a plan exists, else 0 |
+| anything else (`0`, `true`, empty, repeated) | `400 TRAINING_READ_INVALID_REQUEST` / `400 TODAY_INVALID_REQUEST`, `retryable: false` | 0 |
+
+Other query values stay ignored, as before.
+
+The rest of each request is unchanged:
+
+* Bearer auth and owner scoping;
+* `Cache-Control: no-store`;
+* plan identity (`plan_lineage`, `mutation_version`, `daily_context`);
+* Today Guidance, which composes `build_today` without the opt-in and so pays
+  no extra read.
+
+With no plan, current-plan stays `{"plan": null}`, and the opted-in Today
+carries `"origin": null`. The general create `201` keeps its own contract: a
+top-level `origin`, and a `plan` that is the legacy current-plan object.
+
+### Kinds
+
+| `kind` | `template` | `personalized` | Evidence |
 |---|---|---|---|
-| `general_template` | `general_full_body_v1` | `false` | See the receipt conditions below |
-| `unknown` | `null` | `null` | Anything else |
+| `general_template` | `general_full_body_v1` | `false` | a general receipt (`is_general_receipt`) |
+| `ai_generated` | `null` | `true` | a native AI first-plan receipt: `SUCCEEDED` with `provider_dispatch_possible` `true` |
+| `unknown` | `null` | `null` | anything else |
 
-A plan is `general_template` only when all of the following hold:
+A kind other than `unknown` requires all of the following:
 
-* exactly one ledger row is bound to the plan's lineage;
+* exactly one `training_plan_generation_operation` row is bound to the plan's
+  lineage;
 * that row belongs to the same owner;
-* it names this plan row (`training_plan_id`);
-* `is_general_receipt` holds for it.
+* it names this plan row (`training_plan_id`).
+
+The rows of the two known kinds are disjoint: dispatch is `false` for a
+general receipt and `true` for an AI one.
 
 `unknown` covers several cases:
 
-* AI first plans;
 * browser-saved plans;
-* replacement results (a replacement mints a new lineage, so a general plan
-  that is replaced becomes `unknown`);
+* replacement results (a replacement mints a new lineage, so a replaced
+  general plan becomes `unknown`);
+* historical AI rows whose dispatch marker is NULL;
 * plans that predate receipts;
-* contradictory ledger evidence.
+* contradictory evidence.
 
-`unknown` claims nothing. It is not "AI", and plan content is never used to
-guess the origin: a receipt-less row holding the exact template document is
-`unknown`.
+`unknown` claims nothing. A missing general receipt is never read as "AI", and
+plan content is never used to guess the origin: a receipt-less row holding the
+exact template document is `unknown`. Clients must treat any `kind` they do
+not recognize as `unknown`.
 
 **Creation, not edits.** Origin describes how the lineage was created. Journal
-edits keep the lineage and therefore keep the origin, so a general plan with
-`mutation_version > 0` is still `general_template`. `personalized: false`
-describes the template, not later edits. A client that needs to know about
-edits reads `mutation_version`.
+edits and undo keep the lineage, so a general plan with `mutation_version > 0`
+is still `general_template`. `personalized` describes how the plan was
+created, not whether its content has changed since; a client that needs to
+know about edits reads `mutation_version`.
 
 **Template id.** A receipt stores only the request fingerprint, not the
 template. `GENERAL_TEMPLATE_ID` is therefore pinned to the one template the
@@ -208,20 +241,26 @@ ships, and a test pins the two ids together.
 
 **Cost and failure.**
 
-* The resolver issues one owner-scoped `SELECT … LIMIT 2` when a plan exists,
-  and none without one. Current-plan stays within its 5-statement guard.
-  `/today` stays at 3 SELECTs without a plan and becomes 4 with one. Today
-  Guidance pays the same +1 (docs/LP17_B1_NATIVE_TODAY_GUIDANCE_HTTP.md).
-* The resolver performs no writes and makes no provider call.
+* The resolver issues one owner-scoped `SELECT … LIMIT 2`. It runs only on an
+  opted-in read that has a plan.
+* It performs no writes and makes no provider call.
 * A failed ledger read is never downgraded to `unknown`. It fails closed as
-  `503 TRAINING_READ_UNAVAILABLE` (current plan) or
-  `503 TODAY_TEMPORARILY_UNAVAILABLE` (Today).
-* The module imports only `app.models`, enforced by an AST test. Today
-  therefore reaches neither the AI ledger store nor the general-plan package.
+  `503 TRAINING_READ_UNAVAILABLE` or `503 TODAY_TEMPORARILY_UNAVAILABLE`.
+* The module imports only `app.models`, enforced by an AST test.
 
-Tests live in `tests/test_lp21_general_training_plan.py` under the "read-side
-origin" section, and the PostgreSQL check is in
+### Mobile integration order
+
+Ship a DTO that accepts the optional `origin` (with the kind allow-list
+above) before any build sends `include_origin=1`. Builds that never send it
+are unaffected by this change.
+
+Tests live in `tests/test_lp21_general_training_plan.py` under "read-side
+origin", and the PostgreSQL check is in
 `tests/test_lp21_general_training_plan_pg.py`.
+
+Follow-up, not done: an AI *replacement* result (an LP18-B1 confirm whose
+`APPLIED` receipt binds `result_lineage_id`) is reported `unknown`.
+Recognizing it means reading a second authority.
 
 ## Not done here
 

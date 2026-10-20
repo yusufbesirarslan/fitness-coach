@@ -10,13 +10,15 @@ projection and serializes. It decides nothing about workouts, rest days,
 completion or dates - see app/services/mobile_today.py for why each of those is
 delegated.
 """
-from flask import current_app, g, jsonify
+from flask import current_app, g, jsonify, request
 
 from app.blueprints.mobile_api import bp, mobile_error
 from app.extensions import db
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services import mobile_today
+from app.services.training_plan_origin import (
+    InvalidOriginExpansion, origin_requested)
 
 
 @bp.get("/today")
@@ -30,7 +32,15 @@ def today():
     clock that could move the day.
     """
     try:
-        return jsonify(mobile_today.build_today(g.mobile_user.id))
+        # The ONE query value read here: the LP21 origin opt-in. It selects a
+        # response shape, never an owner or a day.
+        include_origin = origin_requested(request.args)
+    except InvalidOriginExpansion:
+        return mobile_error(
+            "TODAY_INVALID_REQUEST", "Invalid Today request.", 400, False)
+    try:
+        return jsonify(mobile_today.build_today(
+            g.mobile_user.id, include_origin=include_origin))
     except mobile_today.TodayUnavailable as error:
         # Fail closed with a Today-shaped error rather than falling through to the
         # blueprint's auth-flavoured handler: a storage fault is not an
