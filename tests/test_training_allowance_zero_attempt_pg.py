@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
+from app import config as app_config
 from app.services.ai_consent import ConsentDenied
 
 from tests.test_mobile_training_generation_api import _provider_document
@@ -93,7 +94,7 @@ def chain(pg_generation_app):
 def disclose(monkeypatch, recipients=None, purpose_feature="training_plan"):
     from app.services import ai, ai_consent
     purpose, categories = ai_consent.BINDINGS[purpose_feature]
-    recipients = recipients or (("bedrock", ai.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL))
+    recipients = recipients or (("bedrock", app_config.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL))
     policy = ai_consent.Disclosure("synthetic-a1-" + purpose_feature, purpose, categories,
                                    tuple(recipients), (("en", "a" * 64),))
     monkeypatch.setattr(ai_consent, "POLICIES", {policy.version: policy})

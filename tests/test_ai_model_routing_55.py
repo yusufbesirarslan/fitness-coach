@@ -605,26 +605,3 @@ def test_cache_tokens_are_priced_disjointly_for_sonnet55():
     assert ai_usage.estimated_cost_usd("bedrock", "claude-sonnet-5-5", usage, "global") \
         == pytest.approx(100 * 2e-6 + 20 * 10e-6 + 30 * 2.5e-6 + 40 * 0.1e-6, abs=5e-7)
 
-
-# ── live qualification harness never runs by accident ───────────────────────
-
-def test_qualification_harness_defaults_to_dry_run_and_refuses_unconfirmed_live(
-        monkeypatch, capsys):
-    from scripts import ai_routing55_qualification as harness
-    for key in ("AI_MODEL_ROUTING", "BEDROCK_ENABLED", "BEDROCK_SONNET55_MODEL",
-                "BEDROCK_HAIKU55_MODEL"):
-        monkeypatch.setenv(key, "")
-    monkeypatch.setattr(app_config, "AI_MODEL_ROUTING", "claude55")
-    monkeypatch.setattr(app_config, "BEDROCK_ENABLED", True)
-    monkeypatch.setattr(app_config, "BEDROCK_SONNET55_MODEL", SONNET55)
-    monkeypatch.setattr(app_config, "BEDROCK_HAIKU55_MODEL", HAIKU55)
-    monkeypatch.delenv("AWS_PROFILE", raising=False)
-    monkeypatch.setattr("anthropic.AnthropicBedrock",
-                        lambda *a, **k: pytest.fail("no client in a refused run"))
-    assert harness.main([]) == 0
-    plan = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert plan["live"] is False and plan["worst_case_usd"] <= 0.50
-    assert harness.main(["--live"]) == 2
-    refused = json.loads(capsys.readouterr().out.strip().splitlines()[-1])["refused"]
-    assert "--confirm-synthetic-staging is required" in refused
-    assert "AWS_PROFILE must be axisai-staging" in refused

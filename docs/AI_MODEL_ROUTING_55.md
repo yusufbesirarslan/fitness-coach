@@ -172,7 +172,9 @@ Not done, blocking activation:
    (RPM, TPM, daily tokens) in eu-central-1. The founder's quota confirmation
    does not say which model or profile; the operator role cannot read Service
    Quotas.
-2. Live comparison: `python -m scripts.ai_routing55_qualification` (dry run by
+2. Live comparison: the operator harness `ai_routing55_qualification.py`, kept
+   outside this repository (the repo forbids direct SDK sends in any production
+   Python), run with `PYTHONPATH=<checkout>` (dry run by
    default; `--live --confirm-synthetic-staging` refuses outside
    `axisai-staging`/eu-central-1; 14 calls, worst case $0.18). It records
    pass/fail, tokens, latency, stop reason and cost per fixture for Sonnet 4.5

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
+from app import config as app_config
 from tests.test_mobile_training_generation_pg import (  # noqa: F401
     pg_generation_app, _request, _document,
 )
@@ -559,7 +560,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
     if registry_present:
         purpose, categories = ai_consent.BINDINGS["training_plan"]
         policy = ai_consent.Disclosure("synthetic-only", purpose, categories,
-            (("bedrock", ai.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL)), (("en", "a" * 64),))
+            (("bedrock", app_config.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL)), (("en", "a" * 64),))
         monkeypatch.setattr(ai_consent, "POLICIES", {policy.version: policy})
     sdk = Mock()
     with app.app_context():
@@ -572,7 +573,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
         assert not db.session().in_transaction()
         with ai_spend_guard.subject_scope(owners[0]), pytest.raises(ai_consent.ConsentDenied):
             with ai_provider_call.admit(feature="training_plan", provider=recipient,
-                    payload=dict(model=ai.OPENAI_MODEL if recipient == "openai" else ai.BEDROCK_MODEL,
+                    payload=dict(model=ai.OPENAI_MODEL if recipient == "openai" else app_config.BEDROCK_MODEL,
                         messages=[{"role": "user", "content": "SYNTHETIC_OWN_FITNESS"}], max_tokens=100),
                     gate=False, charge=False) as admission:
                 admission.create(sdk)
