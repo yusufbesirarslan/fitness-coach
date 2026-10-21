@@ -270,3 +270,29 @@ def test_disabled_configuration_closes_intake(app, client, monkeypatch, signer):
 
 def test_bearer_routes_unchanged_by_intake(client):
     assert client.get("/api/v1/subscription/entitlement").status_code == 401
+
+
+def test_notification_rate_limit_is_dedicated_per_ip_and_route(app, client, monkeypatch):
+    """Unrelated traffic from the same IP never consumes Apple's budget, and the
+    600/h default does not apply; the dedicated per-IP limit still does."""
+    from app import config
+    from app.extensions import limiter
+    app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_NOTIFICATIONS_ENABLED=True)
+    limiter.enabled = True
+    limiter.reset()
+    try:
+        monkeypatch.setattr(config, "APPLE_NOTIFICATION_RATELIMIT", "1000 per minute")
+        for _ in range(20):
+            client.get("/api/v1/subscription/entitlement")  # other routes, same IP
+        codes = {client.post(PATH, json={}).status_code for _ in range(601)}
+        assert codes == {400}  # past the 600/h default: never 429
+        monkeypatch.setattr(config, "APPLE_NOTIFICATION_RATELIMIT", "5 per minute")
+        assert {client.post(PATH, json={}).status_code for _ in range(5)} == {400}
+        limited = client.post(PATH, json={})
+        assert limited.status_code == 429
+        assert limited.json["error"]["code"] == "SUBSCRIPTION_RATE_LIMITED"
+        other_ip = client.post(PATH, json={}, environ_base={"REMOTE_ADDR": "198.51.100.7"})
+        assert other_ip.status_code == 400
+    finally:
+        limiter.reset()
+        limiter.enabled = False

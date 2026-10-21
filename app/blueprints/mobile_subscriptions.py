@@ -4,8 +4,9 @@ from functools import wraps
 from flask import abort, current_app, g, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
+from app import config
 from app.blueprints.mobile_api import bp, mobile_error
-from app.extensions import limiter
+from app.extensions import _ip_limiter_key, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.services import subscriptions
 from app.services.apple_subscriptions import SubscriptionError
@@ -65,8 +66,11 @@ def subscription_entitlement():
 
 
 # MON-02-BE-02: App Store Server Notifications V2 intake. Not Bearer-authenticated:
-# authenticity is the Apple signature. OFF answers 404 before any work.
+# authenticity is the Apple signature. OFF answers 404 before any work. Own per-IP
+# limit instead of the default (429 makes Apple retry; reconciliation backstops).
 @bp.post("/subscription/apple-notifications")
+@limiter.limit(lambda: config.APPLE_NOTIFICATION_RATELIMIT, key_func=_ip_limiter_key,
+               override_defaults=True, error_message="SUBSCRIPTION_RATE_LIMITED")
 def subscription_apple_notifications():
     from app.services import apple_reconciliation
     if (current_app.config.get("APPLE_NOTIFICATIONS_ENABLED") is not True

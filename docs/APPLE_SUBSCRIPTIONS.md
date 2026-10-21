@@ -150,10 +150,14 @@ maximum), then claims due requests one at a time (`FOR UPDATE SKIP LOCKED`,
 ownership row, else the association matching the signed hint, else
 `UNMATCHED_ACCOUNT`. A fresh Get All Subscription Statuses lookup goes through
 the BE-01 validation and `persist_verified`. Outcomes: `APPLIED`, `SUPERSEDED`
-(a newer lookup already stored), terminal evidence/ownership/account/revocation
-codes, or retries (`STALE_SNAPSHOT`, `OUT_OF_ORDER`, Apple/OCSP outage) with
-backoff 1 min doubling to 1 h and `RETRY_EXHAUSTED` after 8 attempts. An outage
-stops the pass. Completion compares the request generation, so a hint arriving
+(a newer lookup already stored), terminal codes for evidence that is invalid in
+itself (signature, identity, group, grace), ownership, account or revocation, or
+retries (`STALE_SNAPSHOT`, `OUT_OF_ORDER`, `APPLE_NOT_FOUND` = any Apple 404,
+`SUBSCRIPTION_INVALID_STATE` storage race, Apple/OCSP outage) with backoff 1 min
+doubling to 1 h and `RETRY_EXHAUSTED` after 8 attempts. Client verify still
+answers a 404 as 422 `SUBSCRIPTION_INVALID_EVIDENCE`. An outage stops the pass;
+claims take the fewest-attempts request first, so retries only use capacity that
+fresh requests leave. Completion compares the request generation, so a hint arriving
 mid-lookup triggers another lookup instead of being lost; a lease-fenced finish
 lets an expired worker change nothing. Only success removes a request: terminal
 or exhausted outcomes quarantine it for 24 h (the sweep skips subscriptions with
@@ -164,11 +168,37 @@ off) request; requests older than 60 days are dropped.
 
 Known fail-closed limits (owner/MON-03): status 5 without a signed revocation
 date can never be exited by repurchase; the status-lookup path still requires
-App Apple ID to match in Sandbox (BE-01), unverified against live Sandbox; Apple
-deliveries share the default per-IP rate limit (429 makes Apple retry later); a
-transient fault classified terminal (e.g. a one-off Apple 404 or
-`SUBSCRIPTION_INVALID_STATE`) quarantines an active row for 24 h, so it can lapse
-to `VERIFICATION_PENDING` until a notification or client verify.
+App Apple ID to match in Sandbox (BE-01), unverified against live Sandbox; eight
+consecutive failed lookups (about 8 h on an hourly schedule) or permanently
+invalid evidence quarantine the row for 24 h, so an active row then lapses to
+`VERIFICATION_PENDING` at its 24 h bound until a notification, client verify or
+the next cycle succeeds. Failure never extends `last_verified_at`.
+
+The intake route has its own per-IP limit, `APPLE_NOTIFICATION_RATELIMIT`
+(default `120 per minute; 3600 per hour`), instead of the 600/h default. Flask-Limiter
+counts per route, so other traffic from a shared IP cannot consume it; host nginx
+`perip` (30 r/s, burst 60) is the only shared per-IP layer. A 429 makes Apple
+retry later. No Apple IP allow-list is assumed.
+
+Reconciliation schedule (required before activation; nothing is installed):
+run `flask apple-subscription-reconcile --limit L --sweep-limit 2L` hourly, with
+L >= max(25, ceil(N / 10)) for N verified non-revoked subscriptions in the
+environment. Rows are enqueued at 12 h, so the whole population can come due at
+once (worst case) and must be looked up within the remaining 12 h; N / 10 leaves
+two passes of margin plus room for retries. A test simulates 72 hourly passes:
+40 subscribers verified at the same instant and 5 permanently failing rows; at
+L = 4 every healthy row stays under 24 h, and at L = 2 the bound is broken.
+L <= 200 per process (at least 37 min worst case at the 11 s status transport bound,
+plus OCSP; overlapping passes are safe under leases and SKIP LOCKED). For
+N > 2000, run concurrent workers (SKIP LOCKED is safe) or raise the cadence.
+Alert on `RETRY_EXHAUSTED`, and on a pass that ends with `processed = L` while
+due requests remain.
+
+Receipt retention (provisional V1 policy, owner decision): each pass purges at
+most 1000 receipts older than 180 days in its environment. This is safe because
+a receipt only deduplicates hints; a redelivery after purge costs one fresh
+lookup. Purge uses a sequential scan (no `received_at` index); add an index in
+a later migration if the table grows large.
 
 Lifecycle comes from Apple's authenticated status: purchase, renewal,
 cancellation (access to verified expiry), expiration, billing retry (no access),
@@ -204,8 +234,8 @@ Do not merge/deploy without separate human gates; flag remains OFF.
 
 ## Next tasks and qualification limits
 
-- BE-02 (implemented, dark): see above. Open: retention of receipts, worker
-  schedule, App Store Connect URLs, refund-reversal and account-transfer policy,
+- BE-02 (implemented, dark): see above. Open: owner confirmation of 180-day
+  retention, installing the hourly schedule, App Store Connect URLs, refund-reversal and account-transfer policy,
   CONSUMPTION_REQUEST answers (not sent).
 - BE-03: integrate effective entitlement into existing quota enforcement with
   approved allowances. Until then this API does not bypass any existing quota.

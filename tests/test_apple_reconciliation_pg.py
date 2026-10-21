@@ -187,6 +187,56 @@ def test_worker_and_client_verify_converge_monotonically(pg_app, monkeypatch):
         assert AppleSubscriptionReconciliation.query.count() == 0
 
 
+def test_r3_skip_locked_claims_fewest_attempts_first(pg_app):
+    """A held retrying row is skipped; a free one with fewer attempts wins over a
+    longer-overdue retry, so a repeatedly failing row never starves fresh work."""
+    from app.extensions import db
+    from app.models import AppleSubscriptionReconciliation as Request
+    from app.services import apple_reconciliation as r
+    app, _ = pg_app
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        for original, attempts, due in (("1", 3, now - timedelta(hours=2)), ("2", 5, now - timedelta(hours=3)),
+                                        ("3", 0, now)):
+            db.session.add(Request(environment="Sandbox", original_transaction_id=original, generation=1,
+                                   attempts=attempts, next_attempt_at=due, created_at=now, updated_at=now))
+        db.session.commit()
+    holder = sa.create_engine(os.environ["PG_TEST_DATABASE_URL"])
+    try:
+        with holder.connect() as conn, conn.begin():
+            conn.execute(sa.text("SELECT 1 FROM apple_subscription_reconciliation "
+                                 "WHERE original_transaction_id = '3' FOR UPDATE"))
+            with app.app_context():
+                assert r._claim("Sandbox", datetime.now(timezone.utc))[0] == "1"  # 3 held: skipped
+        with app.app_context():
+            assert r._claim("Sandbox", datetime.now(timezone.utc))[0] == "3"
+            assert r._claim("Sandbox", datetime.now(timezone.utc))[0] == "2"
+    finally:
+        holder.dispose()
+
+
+def test_r3_receipt_purge_is_bounded_and_concurrency_safe(pg_app):
+    from app.extensions import db
+    from app.models import AppleNotificationReceipt
+    from app.services import apple_reconciliation as r
+    app, _ = pg_app
+    now = datetime.now(timezone.utc)
+    old = now - r.RECEIPT_RETENTION - timedelta(days=1)
+    with app.app_context():
+        for at in [old] * 5 + [now]:
+            db.session.add(AppleNotificationReceipt(
+                notification_uuid=str(uuid4()), environment="Sandbox", notification_type="DID_RENEW",
+                disposition="ENQUEUED", signed_at=at, received_at=at))
+        db.session.commit()
+        assert r.purge_receipts("Sandbox", now, limit=2) == 2
+    results, _ = _race(app, lambda: r.purge_receipts("Sandbox", now), lambda: r.purge_receipts("Sandbox", now),
+                       "DELETE FROM apple_notification_receipt", expect_block=False)
+    # Overlapping passes never fail and never delete a row twice.
+    assert all(isinstance(v, int) for v in results.values()) and sum(results.values()) == 3, results
+    with app.app_context():
+        assert [x.received_at > old for x in AppleNotificationReceipt.query] == [True]
+
+
 def test_postgres_fresh_reentrant_and_unsafe_migration(pg_app):
     from app.extensions import db
     from test_apple_lifecycle_migration import migration, TABLES

@@ -6,6 +6,7 @@ Concurrency and rollback durability are proved in test_apple_reconciliation_pg.
 """
 import logging
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace as NS
 from uuid import uuid4
 
 import pytest
@@ -309,18 +310,19 @@ def test_apple_outage_backs_off_and_stops_the_pass(world, failure):
         assert Request.query.filter_by(original_transaction_id="100").one().attempts == 1
 
 
-def test_retries_are_bounded(world):
+@pytest.mark.parametrize("failure", [requests.ConnectionError(), APIException(404, 4040006)])
+def test_retries_are_bounded(world, failure):
     app, owners, apple = world
     uid, token = owners[0]
     with app.app_context():
         _owned(uid, token, apple)
         _request()
-        apple.fail = requests.ConnectionError()
+        apple.fail = failure
         outcomes = []
         for _ in range(r.MAX_ATTEMPTS + 2):
             Request.query.update({Request.next_attempt_at: datetime.now(timezone.utc) - timedelta(seconds=1)})
             db.session.commit()
-            outcomes.append(next(k for k in r.run() if k not in ("enqueued", "processed")))
+            outcomes.append(next(k for k in r.run() if k not in ("enqueued", "purged", "processed")))
             if outcomes[-1] == r.EXHAUSTED:
                 break
         assert outcomes[-1] == r.EXHAUSTED and len(outcomes) == r.MAX_ATTEMPTS
@@ -382,8 +384,8 @@ def test_failing_rows_cost_one_lookup_per_quarantine_and_never_starve_refresh(wo
         original, poisoned = apple.a.client.get_all_subscription_statuses, []
         def poison(original_id):
             if original_id == "300":
-                poisoned.append(original_id)
-                raise APIException(404)
+                poisoned.append(original_id)  # permanently invalid: identity mismatch
+                return NS(bundleId="other.bundle", appAppleId=123, environment=None, data=[])
             return original(original_id)
         apple.a.client.get_all_subscription_statuses = poison
         first = r.run(sweep_limit=1)
@@ -441,7 +443,7 @@ def test_defect_during_processing_is_a_bounded_retry(world, monkeypatch, caplog)
         monkeypatch.setattr(s, "persist_verified", broken)
         with caplog.at_level(logging.WARNING):
             result = r.run()
-        assert result == {"enqueued": 0, "processed": 1, "RETRY": 1}
+        assert result == {"enqueued": 0, "purged": 0, "processed": 1, "RETRY": 1}
         pending = Request.query.filter_by(original_transaction_id="100").one()
         assert pending.lease_until is None and pending.last_outcome == "RETRY"
         assert "event=process_failed error=RuntimeError" in caplog.text
@@ -544,7 +546,187 @@ def test_cli_reports_closed_counts(world):
         _request(token=owners[0][1])
     result = app.test_cli_runner().invoke(args=["apple-subscription-reconcile", "--limit", "5"])
     assert result.exit_code == 0, result.output
-    assert result.output.strip() == "APPLIED=1 enqueued=0 processed=1"
+    assert result.output.strip() == "APPLIED=1 enqueued=0 processed=1 purged=0"
     app.config["APPLE_SUBSCRIPTIONS_ENABLED"] = False
     refused = app.test_cli_runner().invoke(args=["apple-subscription-reconcile"])
     assert refused.exit_code != 0 and "SUBSCRIPTIONS_DISABLED" in refused.output
+
+
+# ── R3: paying-user reliability ──────────────────────────────────────────────
+
+def _clone(base, original, **changes):
+    values = {c.name: getattr(base, c.name) for c in AppleSubscription.__table__.columns if c.name != "id"}
+    values.update(original_transaction_id=original, **changes)
+    db.session.add(AppleSubscription(**values))
+
+
+def _due(original="100"):
+    Request.query.filter_by(original_transaction_id=original).update(
+        {Request.next_attempt_at: datetime.now(timezone.utc) - timedelta(seconds=1)})
+    db.session.commit()
+
+
+@pytest.mark.parametrize("not_found", [APIException(404, 4040006), APIException(404, 4040005), APIException(404)])
+def test_transient_404_recovers_before_the_24h_boundary(world, not_found):
+    """Paid, fresh; Apple 404s once at refresh time; Apple recovers next pass."""
+    app, owners, apple = world
+    uid, token = owners[0]
+    with app.app_context():
+        _owned(uid, token, apple)
+        verified = datetime.now(timezone.utc) - timedelta(hours=13)
+        _row().last_verified_at = verified
+        db.session.commit()
+        apple.fail = not_found
+        assert r.run()["APPLE_NOT_FOUND"] == 1
+        pending = Request.query.one()  # a bounded retry, not a 24 h quarantine
+        assert pending.attempts == 1
+        assert s.utc(pending.next_attempt_at) < datetime.now(timezone.utc) + r.BACKOFF_CAP
+        assert s.utc(_row().last_verified_at) == verified  # failure never extends validity
+        apple.fail = None
+        _due()
+        assert r.run()["APPLIED"] == 1 and Request.query.count() == 0
+        boundary = verified + s.MAX_VERIFICATION_AGE + timedelta(minutes=1)
+        assert s.entitlement_view(_row(), boundary)["effective_premium"] is True
+
+
+def test_transient_invalid_state_is_a_retry_and_does_not_stop_the_pass(world, monkeypatch):
+    app, owners, apple = world
+    uid, token = owners[0]
+    with app.app_context():
+        _owned(uid, token, apple)
+        _request(); _request(original="200")
+        def racing(*_):
+            raise SubscriptionError("SUBSCRIPTION_INVALID_STATE", 503)
+        monkeypatch.setattr(s, "persist_verified", racing)
+        result = r.run()
+        assert result["SUBSCRIPTION_INVALID_STATE"] == 1 and result[r.UNMATCHED] == 1
+        assert Request.query.filter_by(original_transaction_id="100").one().attempts == 1
+
+
+def test_permanent_invalid_evidence_is_quarantined(world):
+    from appstoreserverlibrary.signed_data_verifier import VerificationException, VerificationStatus
+    app, owners, apple = world
+    uid, token = owners[0]
+    with app.app_context():
+        _owned(uid, token, apple)
+        def forged(_):
+            raise VerificationException(VerificationStatus.VERIFICATION_FAILURE)
+        apple.a.verifier.verify_and_decode_renewal_info = forged
+        _request()
+        assert r.run()["SUBSCRIPTION_INVALID_EVIDENCE"] == 1
+        _quarantined()
+        assert apple.calls == 1
+
+
+def test_entitlement_near_24h_fails_closed_then_recovers(world):
+    app, owners, apple = world
+    uid, token = owners[0]
+    with app.app_context():
+        _owned(uid, token, apple)
+        verified = datetime.now(timezone.utc) - (s.MAX_VERIFICATION_AGE - timedelta(minutes=10))
+        _row().last_verified_at = verified
+        db.session.commit()
+        apple.fail = APIException(404, 4040006)
+        r.run()
+        assert _ent(uid)["effective_premium"] is True  # still inside the bound
+        later = verified + s.MAX_VERIFICATION_AGE
+        view = s.entitlement_view(_row(), later)  # Apple never recovered in time
+        assert (view["effective_premium"], view["status"]) == (False, "VERIFICATION_PENDING")
+        assert s.utc(_row().last_verified_at) == verified
+        apple.fail = None
+        _due()
+        assert r.run()["APPLIED"] == 1
+        assert s.entitlement_view(_row(), later)["effective_premium"] is True
+
+
+def test_retrying_subscription_never_starves_fresh_refresh(world):
+    """A row whose lookups fail as an outage is claimed after fresh requests."""
+    app, owners, apple = world
+    uid, token = owners[0]
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        _owned(uid, token, apple)
+        _clone(_row(), "300", last_verified_at=now - timedelta(hours=20))
+        _row_100 = AppleSubscription.query.filter_by(original_transaction_id="100").one()
+        _row_100.last_verified_at = now - timedelta(hours=13)
+        db.session.commit()
+        original = apple.a.client.get_all_subscription_statuses
+        def poison(original_id):
+            if original_id == "300":
+                raise APIException(500)
+            return original(original_id)
+        apple.a.client.get_all_subscription_statuses = poison
+        _request(original="300"); r.run(sweep_limit=0)  # 300 has failed once already
+        _due("300")
+        result = r.run(sweep_limit=1)  # 100 becomes due after 300
+        assert result["APPLIED"] == 1 and result["SUBSCRIPTION_TEMPORARILY_UNAVAILABLE"] == 1
+        healthy = AppleSubscription.query.filter_by(original_transaction_id="100").one()
+        assert datetime.now(timezone.utc) - s.utc(healthy.last_verified_at) < timedelta(minutes=1)
+
+
+def _simulate(apple, hours, limit, sweep_limit, poisoned):
+    """Hourly passes; time advances by shifting every stored instant back one hour."""
+    original = apple.a.client.get_all_subscription_statuses
+    def per_subscription(original_id):
+        if original_id in poisoned:
+            raise APIException(404, 4040006)
+        apple.item.originalTransactionId = apple.tx.originalTransactionId = original_id
+        apple.renewal.originalTransactionId = original_id
+        return original(original_id)
+    apple.a.client.get_all_subscription_statuses = per_subscription
+    hour, worst = timedelta(hours=1), timedelta(0)
+    for _ in range(hours):
+        for row in AppleSubscription.query:
+            for name in ("last_verified_at", "transaction_signed_at", "renewal_signed_at"):
+                setattr(row, name, s.utc(getattr(row, name)) - hour)
+        for q in Request.query:
+            q.next_attempt_at, q.created_at = s.utc(q.next_attempt_at) - hour, s.utc(q.created_at) - hour
+        db.session.commit()
+        r.run(limit=limit, sweep_limit=sweep_limit)
+        now = datetime.now(timezone.utc)
+        ages = {row.original_transaction_id: now - s.utc(row.last_verified_at)
+                for row in AppleSubscription.query}
+        poisoned_ages = [ages.pop(original) for original in poisoned]
+        worst = max(worst, max(ages.values()))
+    return worst, min(poisoned_ages)
+
+
+@pytest.mark.parametrize("limit,safe", [(4, True), (2, False)])
+def test_hourly_capacity_keeps_every_healthy_subscriber_inside_24h(world, limit, safe):
+    """40 subscribers verified at the same instant (worst-case herd) plus five
+    subscriptions Apple keeps rejecting. limit >= N/10 per hourly pass keeps every
+    healthy row verified; an undersized limit visibly does not."""
+    app, owners, apple = world
+    uid, token = owners[0]
+    with app.app_context():
+        apple.state(expires=timedelta(days=365))
+        _owned(uid, token, apple)
+        base = _row()
+        for i in range(39):
+            _clone(base, str(400 + i))
+        poisoned = {str(995 + i) for i in range(5)}
+        for original in poisoned:
+            _clone(base, original)
+        db.session.commit()
+        worst, poisoned_age = _simulate(apple, 72, limit, 2 * limit, poisoned)
+        assert (worst < s.MAX_VERIFICATION_AGE) is safe
+        if safe:
+            assert poisoned_age > s.MAX_VERIFICATION_AGE  # failing rows lapse, fail closed
+
+
+def test_receipts_are_purged_after_retention_in_bounded_batches(world):
+    from app.models import AppleNotificationReceipt
+    app, _, _ = world
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        for i, age in enumerate([r.RECEIPT_RETENTION + timedelta(days=1)] * 3 + [timedelta(days=179)]):
+            db.session.add(AppleNotificationReceipt(
+                notification_uuid=str(uuid4()), environment="Sandbox", notification_type="DID_RENEW",
+                disposition="ENQUEUED", signed_at=now - age, received_at=now - age))
+        db.session.add(AppleNotificationReceipt(
+            notification_uuid=str(uuid4()), environment="Production", notification_type="DID_RENEW",
+            disposition="ENQUEUED", signed_at=now - timedelta(days=400), received_at=now - timedelta(days=400)))
+        db.session.commit()
+        assert r.purge_receipts("Sandbox", now, limit=2) == 2
+        assert r.run()["purged"] == 1
+        assert sorted(x.environment for x in AppleNotificationReceipt.query) == ["Production", "Sandbox"]

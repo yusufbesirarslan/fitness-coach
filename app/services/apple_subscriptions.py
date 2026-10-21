@@ -234,7 +234,9 @@ class AppleAdapter:
             raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE") from None
         except APIException as error:
             if error.http_status_code == 404:
-                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE") from None
+                # Not proof of invalidity: Apple documents retryable 404s. Client
+                # verify still answers INVALID_EVIDENCE; reconciliation retries it.
+                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE", reason="APPLE_NOT_FOUND") from None
             raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None
         except requests.RequestException:
             raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None

@@ -13,11 +13,15 @@ lease and spends an attempt before any Apple I/O, so a crash is retried after
 the lease and bounded by ``MAX_ATTEMPTS``. Completion compares the request
 generation, so a notification arriving mid-lookup is never dropped.
 
-Only success removes a request. A terminal or exhausted outcome QUARANTINES it
+Only success removes a request. Transient faults (outages, stale or contradictory
+snapshots, Apple 404s, storage races) get ``MAX_ATTEMPTS`` backed-off lookups;
+only evidence that is invalid in itself (signature, identity, group, ownership,
+account, revocation) is terminal. A terminal or exhausted outcome QUARANTINES it
 (next lookup after ``QUARANTINE``): the sweep skips subscriptions that already
 have a request, so a failing row costs at most one lookup per quarantine period
-and can never crowd healthy refreshes out of the bounded sweep. A request older
-than ``RECOVERY_WINDOW`` is dropped instead.
+and can never crowd healthy refreshes out of the bounded sweep. Claims take the
+fewest-attempts request first, so retries only use capacity fresh requests leave.
+A request older than ``RECOVERY_WINDOW`` is dropped instead.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -41,6 +45,10 @@ REFRESH_AFTER = timedelta(hours=12)
 # Apple's billing retry lasts up to 60 days; older lapsed rows are not polled.
 RECOVERY_WINDOW = timedelta(days=60)
 QUARANTINE = timedelta(hours=24)
+# Provisional V1 policy (owner decision pending). A receipt only deduplicates
+# hints, so a redelivery after purge costs at most one more fresh lookup.
+RECEIPT_RETENTION = timedelta(days=180)
+PURGE_LIMIT = 1000
 DEFAULT_LIMIT = 25
 DEFAULT_SWEEP_LIMIT = 50
 
@@ -51,7 +59,9 @@ RETRY = "RETRY"
 EXHAUSTED = "RETRY_EXHAUSTED"
 UNMATCHED = "UNMATCHED_ACCOUNT"
 _TERMINAL = {"SUBSCRIPTION_INVALID_EVIDENCE", "SUBSCRIPTION_OWNERSHIP_CONFLICT",
-             "SUBSCRIPTION_ACCOUNT_UNAVAILABLE", "SUBSCRIPTION_INVALID_STATE"}
+             "SUBSCRIPTION_ACCOUNT_UNAVAILABLE"}
+# A previously verified subscription that Apple briefly cannot find is not proof.
+_RETRYABLE_REASONS = {"APPLE_NOT_FOUND"}
 
 
 class ReconciliationDisabled(Exception):
@@ -169,11 +179,24 @@ def enqueue_stale(environment, now, limit):
     return len(rows)
 
 
+def purge_receipts(environment, now, limit=PURGE_LIMIT):
+    """Bounded receipt retention; never touches access or requests."""
+    stale = sa.select(AppleNotificationReceipt.notification_uuid).where(
+        AppleNotificationReceipt.environment == environment,
+        AppleNotificationReceipt.received_at < now - RECEIPT_RETENTION).limit(limit)
+    purged = db.session.execute(sa.delete(AppleNotificationReceipt).where(
+        AppleNotificationReceipt.notification_uuid.in_(stale))
+        .execution_options(synchronize_session=False)).rowcount
+    db.session.commit()
+    return purged
+
+
 def _claim(environment, now):
     row = db.session.execute(sa.select(Request).where(
         Request.environment == environment, Request.next_attempt_at <= now,
         sa.or_(Request.lease_until.is_(None), Request.lease_until <= now))
-        .order_by(Request.next_attempt_at, Request.original_transaction_id).limit(1)
+        # Fewest attempts first: a repeatedly failing row cannot starve fresh refreshes.
+        .order_by(Request.attempts, Request.next_attempt_at, Request.original_transaction_id).limit(1)
         .with_for_update(skip_locked=True).execution_options(populate_existing=True)).scalar_one_or_none()
     if row is None:
         db.session.rollback()
@@ -240,7 +263,8 @@ def _process(adapter, environment, claim):
     except SubscriptionError as error:
         if error.reason == "SUPERSEDED":
             return SUPERSEDED, None, False
-        if error.code in _TERMINAL or error.reason == "REVOCATION_TERMINAL":
+        if (error.code in _TERMINAL and error.reason not in _RETRYABLE_REASONS) \
+                or error.reason == "REVOCATION_TERMINAL":
             return error.reason or error.code, None, False
         outage = error.code == "SUBSCRIPTION_TEMPORARILY_UNAVAILABLE"
         if attempts >= MAX_ATTEMPTS:
@@ -257,7 +281,8 @@ def run(limit=DEFAULT_LIMIT, sweep_limit=DEFAULT_SWEEP_LIMIT):
         raise ReconciliationDisabled(error.code) from None
     environment = adapter.environment
     try:
-        counts = {"enqueued": enqueue_stale(environment, _now(), sweep_limit), "processed": 0}
+        counts = {"enqueued": enqueue_stale(environment, _now(), sweep_limit),
+                  "purged": purge_receipts(environment, _now()), "processed": 0}
     except (SQLAlchemyError, SubscriptionError):
         db.session.rollback()
         raise ReconciliationUnavailable("STORAGE_UNAVAILABLE") from None
