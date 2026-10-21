@@ -65,16 +65,22 @@ def subscription_entitlement():
     return jsonify({"contract_version": 1, "entitlement": subscriptions.entitlement(g.mobile_user.id)})
 
 
+def _notifications_off():
+    return (current_app.config.get("APPLE_NOTIFICATIONS_ENABLED") is not True
+            or current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True)
+
+
 # MON-02-BE-02: App Store Server Notifications V2 intake. Not Bearer-authenticated:
-# authenticity is the Apple signature. OFF answers 404 before any work. Own per-IP
-# limit instead of the default (429 makes Apple retry; reconciliation backstops).
+# authenticity is the Apple signature. OFF answers 404 before any work (no limiter
+# counting either). Own per-IP limit instead of the default (429 makes Apple
+# retry; reconciliation backstops).
 @bp.post("/subscription/apple-notifications")
 @limiter.limit(lambda: config.APPLE_NOTIFICATION_RATELIMIT, key_func=_ip_limiter_key,
-               override_defaults=True, error_message="SUBSCRIPTION_RATE_LIMITED")
+               override_defaults=True, exempt_when=_notifications_off,
+               error_message="SUBSCRIPTION_RATE_LIMITED")
 def subscription_apple_notifications():
     from app.services import apple_reconciliation
-    if (current_app.config.get("APPLE_NOTIFICATIONS_ENABLED") is not True
-            or current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True):
+    if _notifications_off():
         abort(404)
     request.max_content_length = 65536
     try:

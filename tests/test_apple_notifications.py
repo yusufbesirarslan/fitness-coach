@@ -296,3 +296,19 @@ def test_notification_rate_limit_is_dedicated_per_ip_and_route(app, client, monk
     finally:
         limiter.reset()
         limiter.enabled = False
+
+
+@pytest.mark.parametrize("flags", [{"APPLE_NOTIFICATIONS_ENABLED": False}, {"APPLE_SUBSCRIPTIONS_ENABLED": False}])
+def test_off_route_is_404_and_never_rate_limited(app, client, monkeypatch, flags):
+    from app import config
+    from app.extensions import limiter
+    app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_NOTIFICATIONS_ENABLED=True)
+    app.config.update(flags)
+    monkeypatch.setattr(config, "APPLE_NOTIFICATION_RATELIMIT", "2 per minute")
+    limiter.enabled = True
+    limiter.reset()
+    try:
+        assert {client.post(PATH, json={}).status_code for _ in range(5)} == {404}
+    finally:
+        limiter.reset()
+        limiter.enabled = False

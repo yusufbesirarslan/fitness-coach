@@ -156,8 +156,9 @@ retries (`STALE_SNAPSHOT`, `OUT_OF_ORDER`, `APPLE_NOT_FOUND` = any Apple 404,
 `SUBSCRIPTION_INVALID_STATE` storage race, Apple/OCSP outage) with backoff 1 min
 doubling to 1 h and `RETRY_EXHAUSTED` after 8 attempts. Client verify still
 answers a 404 as 422 `SUBSCRIPTION_INVALID_EVIDENCE`. An outage stops the pass;
-claims take the fewest-attempts request first, so retries only use capacity that
-fresh requests leave. Completion compares the request generation, so a hint arriving
+claims take the fewest-attempts request first, so a backing-off retry never runs
+ahead of a fresh request (a row leaving quarantine competes as fresh: at most one
+claim per row per day). A failed receipt purge is logged and never blocks refreshes. Completion compares the request generation, so a hint arriving
 mid-lookup triggers another lookup instead of being lost; a lease-fenced finish
 lets an expired worker change nothing. Only success removes a request: terminal
 or exhausted outcomes quarantine it for 24 h (the sweep skips subscriptions with
@@ -178,18 +179,23 @@ The intake route has its own per-IP limit, `APPLE_NOTIFICATION_RATELIMIT`
 (default `120 per minute; 3600 per hour`), instead of the 600/h default. Flask-Limiter
 counts per route, so other traffic from a shared IP cannot consume it; host nginx
 `perip` (30 r/s, burst 60) is the only shared per-IP layer. A 429 makes Apple
-retry later. No Apple IP allow-list is assumed.
+retry later. While either flag is OFF the limit is not evaluated (always 404).
+Every Apple 404 is retried the same way, including codes that mean app/account
+misconfiguration; this is bounded and fails closed, so alert on a spike of
+`APPLE_NOT_FOUND`. No Apple IP allow-list is assumed.
 
 Reconciliation schedule (required before activation; nothing is installed):
 run `flask apple-subscription-reconcile --limit L --sweep-limit 2L` hourly, with
-L >= max(25, ceil(N / 10)) for N verified non-revoked subscriptions in the
-environment. Rows are enqueued at 12 h, so the whole population can come due at
+L >= max(25, ceil(N / 10)), where N counts the environment's non-revoked
+subscriptions whose expiry is within the 60-day recovery window (the rows the sweep
+polls, lapsed ones included). Rows are enqueued at 12 h, so the whole population can come due at
 once (worst case) and must be looked up within the remaining 12 h; N / 10 leaves
 two passes of margin plus room for retries. A test simulates 72 hourly passes:
 40 subscribers verified at the same instant and 5 permanently failing rows; at
 L = 4 every healthy row stays under 24 h, and at L = 2 the bound is broken.
-L <= 200 per process (at least 37 min worst case at the 11 s status transport bound,
-plus OCSP; overlapping passes are safe under leases and SKIP LOCKED). For
+L <= 200 per process. Duration is an estimate, not a bound: each status call has
+a 3 s connect and 8 s per-read timeout, plus OCSP, so 200 slow lookups can take
+about 37 min or more; overlapping passes are safe under leases and SKIP LOCKED. For
 N > 2000, run concurrent workers (SKIP LOCKED is safe) or raise the cadence.
 Alert on `RETRY_EXHAUSTED`, and on a pass that ends with `processed = L` while
 due requests remain.

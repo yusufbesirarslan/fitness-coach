@@ -281,11 +281,15 @@ def run(limit=DEFAULT_LIMIT, sweep_limit=DEFAULT_SWEEP_LIMIT):
         raise ReconciliationDisabled(error.code) from None
     environment = adapter.environment
     try:
-        counts = {"enqueued": enqueue_stale(environment, _now(), sweep_limit),
-                  "purged": purge_receipts(environment, _now()), "processed": 0}
+        counts = {"enqueued": enqueue_stale(environment, _now(), sweep_limit), "purged": 0, "processed": 0}
     except (SQLAlchemyError, SubscriptionError):
         db.session.rollback()
         raise ReconciliationUnavailable("STORAGE_UNAVAILABLE") from None
+    try:
+        counts["purged"] = purge_receipts(environment, _now())
+    except SQLAlchemyError:
+        db.session.rollback()  # retention never blocks the refreshes that keep access correct
+        current_app.logger.warning("apple_reconciliation event=purge_failed")
     for _ in range(limit):
         try:
             claim = _claim(environment, _now())

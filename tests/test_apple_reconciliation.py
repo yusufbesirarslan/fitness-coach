@@ -422,6 +422,19 @@ def test_quarantine_ends_after_recovery_window(world):
         assert r.run()[r.UNMATCHED] == 1 and Request.query.count() == 0
 
 
+def test_purge_failure_never_blocks_refresh(world, monkeypatch, caplog):
+    import sqlalchemy as sa
+    app, owners, apple = world
+    def broken(*_):
+        raise sa.exc.OperationalError("delete", {}, Exception("synthetic"))
+    monkeypatch.setattr(r, "purge_receipts", broken)
+    with app.app_context(), caplog.at_level(logging.WARNING):
+        _request(token=owners[0][1])
+        result = r.run()
+        assert result["APPLIED"] == 1 and result["purged"] == 0
+        assert "event=purge_failed" in caplog.text
+
+
 def test_storage_failure_in_sweep_is_reported_not_raised_raw(world, monkeypatch):
     import sqlalchemy as sa
     app, _, _ = world
