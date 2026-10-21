@@ -65,8 +65,10 @@ from .checkpoint import (
 )
 from .errors import (
     ActiveSessionExists,
+    CompletionActivationPending,
     CompletionProofUnverified,
     CompletionRejected,
+    CompletionWriterIncompatible,
     IdempotencyConflict,
     InvalidIdempotencyKey,
     InvalidRevision,
@@ -159,7 +161,9 @@ __all__ = [
     "RevisionConflict",
     "RevisionExhausted",
     "IdempotencyConflict",
+    "CompletionActivationPending",
     "CompletionProofUnverified",
+    "CompletionWriterIncompatible",
     "CompletionRejected",
     "SessionPersistenceUnavailable",
     "get_current_session",

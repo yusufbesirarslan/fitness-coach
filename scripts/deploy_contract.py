@@ -34,7 +34,7 @@ HOST_PHASE_SECONDS = MappingProxyType({
     "release_forward": 1200,
     "diagnostics": 30,
     "release_rollback": 500,
-    "retirement": 400,
+    "retirement": 460,
     "cleanup": 20,
 })
 HOST_PRE_TRANSACTION_PHASES = (
@@ -72,6 +72,9 @@ RELEASE_FORWARD_STEP_SECONDS = MappingProxyType({
     "migration_gate": 30,      # static delta classification, before any DB I/O
     "image_build": 600,        # git-archive context -> axisai-web:<sha>
     "image_proof": 30,         # docker run --network none cat BUILD_REVISION
+    # PRIV-K6 Layer B: capability manifests from the exact images + reviewed
+    # sources, and the completion-floor status probe (also re-read pre-switch).
+    "capability_admission": 150,
     "release_prepare": 150,    # exactly once, before any candidate boots
     "candidate_start": 180,    # web_slot_runtime.py start (admission inside)
     "candidate_verify": 240,   # web_slot_runtime.py verify
@@ -100,6 +103,10 @@ RETIREMENT_STEP_SECONDS = MappingProxyType({
     "drain": OLD_BACKEND_DRAIN_MAX_SECONDS + 10,
     "backend_retirement": 100,   # docker stop --time 45 + rm / slot remove
     "housekeeping": 140,         # image cleanup + bounded BuildKit prune
+    # PRIV-K6 Layer B: floor status + idempotent raise after proven retirement.
+    # The retirement phase grew 400 -> 460 for it; the failure tail (530) still
+    # bounds the worst case, so HOST_WORST_CASE_SECONDS is unchanged.
+    "capability_activation": 60,
 })
 
 if SSM_EXECUTION_MARGIN_SECONDS < 220:

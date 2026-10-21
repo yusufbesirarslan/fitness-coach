@@ -8,19 +8,25 @@ validation, provider I/O and response shaping.
 
 Guarantees:
 
-* **Atomic** — PumpCheck, the completion marker, quest progress, XP and the
-  activity row commit together or not at all. A failure in any *required* write
-  rolls the whole thing back (no half-completed day).
+* **Atomic** — the day claim (``WorkoutCompletionDay``), the PumpCheck of a
+  photo completion, the completion marker, quest progress, XP and the activity
+  row commit together or not at all. A failure in any *required* write rolls
+  the whole thing back (no half-completed day).
 * **Idempotent / replay-safe** — a read-only preflight short-circuits obvious
-  replays; the ``uq_pump_check_day`` unique constraint is the durable,
-  concurrency-safe claim. The race-loser and the sequential replay both return
-  ``ALREADY_COMPLETED`` (a normal outcome, never an HTTP 500).
+  replays; a re-check under the (owner, day) lock and the
+  ``uq_workout_completion_day`` / historical ``uq_pump_check_day`` unique
+  constraints are the durable, concurrency-safe claim. The race-loser and the
+  sequential replay both return ``ALREADY_COMPLETED`` (a normal outcome, never
+  an HTTP 500).
+* **Photo is optional evidence (PRIV-K6-B1)** — a ``PROOF_NONE`` command claims
+  the day with no PumpCheck, no image, no photo bonus, no Pump Check challenge
+  event and no friend share. It is the same completion, not a failed Pump Check.
 * **No network in the transaction** — remote work happens in the entry path
   before the command is built.
 
 Side-effect classification (see docs/WORKOUT_STATE.md):
-  - required & atomic: PumpCheck, marker WorkoutLog, quest, XP, activity, friend
-    share-messages;
+  - required & atomic: day claim, PumpCheck (photo only), marker WorkoutLog,
+    quest, XP, activity, friend share-messages (photo only);
   - best-effort in-tx (savepoint-isolated, swallowed on failure): challenge
     progress + challenge-completion badge/notification/feed via ``record_event``;
   - response enrichment (not a DB mutation): presigned image URL, Redis
@@ -38,6 +44,7 @@ from app.models import (
     WORKOUT_COMPLETION_MARKER,
     WORKOUT_SESSION_ABANDONED,
     PumpCheck,
+    WorkoutCompletionDay,
     WorkoutLog,
 )
 from app.observability import current_request_id
@@ -49,15 +56,19 @@ from app.services.gamification import (
     log_activity,
 )
 
+from app.services.completion_fence import refusal_of as fence_refusal_of
+
 from .models import (
+    PROOF_PHOTO,
     CompleteWorkoutCommand,
+    CompletionFenceRefused,
     CompletionOutcome,
     CompletionResult,
     SessionCompletionConflict,
 )
 from .queries import (
     already_completed_today,
-    is_pump_check_day_violation,
+    is_completion_day_violation,
     lock_completion_day,
     lock_session_for_completion,
     mark_session_completed,
@@ -78,13 +89,15 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
 
     Session linkage (Sprint 7 PR3, ``command.session_id``): the linked session is
     locked FIRST (fixed lock order), then — atomically in the same transaction as
-    the PumpCheck/marker/XP — terminalized ACTIVE→COMPLETED. Every path that ends
+    the day claim/marker/XP — terminalized ACTIVE→COMPLETED. Every path that ends
     with the day completed also terminalizes the owned matching ACTIVE session
-    (fresh create, preflight replay, and the ``uq_pump_check_day`` race-loser),
-    so a matching session is never left permanently ACTIVE and COMPLETED is never
-    written without PumpCheck authority. ``session_id is None`` is the unchanged
-    legacy path.
+    (fresh create, preflight replay, locked re-check, and the unique-claim
+    race-loser), so a matching session is never left permanently ACTIVE and
+    COMPLETED is never written without a completion claim. ``session_id is
+    None`` is the unchanged legacy path (photo completions only — a
+    ``PROOF_NONE`` command cannot be built without a session).
     """
+    is_photo = command.proof == PROOF_PHOTO
     now = datetime.utcnow()
 
     # FIXED lock order: lock the session row BEFORE any completion artifact, on
@@ -98,6 +111,15 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
             _log(command.entry_path, "session_abandoned_conflict")
             raise SessionCompletionConflict(
                 "cannot complete an abandoned workout session", reason="abandoned"
+            )
+        # A photo-free completion IS the completion of an owned, persisted
+        # session; without a lockable owned row there is nothing to complete.
+        if session is None and not is_photo:
+            db.session.rollback()
+            _log(command.entry_path, "session_abandoned_conflict")
+            raise SessionCompletionConflict(
+                "a photo-free completion needs its owned workout session",
+                reason="abandoned",
             )
         # PR5 optimistic precondition, evaluated while the row is locked so a
         # checkpoint cannot slip in between the check and the completion. It
@@ -137,6 +159,14 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
             _log(command.entry_path, "already_completed_preflight")
         return CompletionResult(outcome=CompletionOutcome.ALREADY_COMPLETED)
 
+    claim = WorkoutCompletionDay(
+        user_id=command.user_id,
+        date_key=command.today.isoformat(),
+        proof=command.proof,
+    )
+    # Photo evidence only when a photo was actually submitted and validated by
+    # the entry path. A photo-free completion writes NO PumpCheck: no gallery
+    # item, no feed object, no image key, no fabricated analysis.
     pump_check = PumpCheck(
         user_id=command.user_id,
         image_key=command.image_key,
@@ -148,7 +178,7 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         date_key=command.today.isoformat(),
         visibility=command.visibility,
         shared_friend_ids=list(command.shared_friend_ids),
-    )
+    ) if is_photo else None
     try:
         # LP-13: the claim is written ONLY under the (owner, day) boundary that
         # start_session also takes before it re-checks the claim and inserts, so
@@ -159,19 +189,37 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         # replay short-circuit, so replays stay lock-free; the lock is held only
         # for this local transaction, never across provider I/O.
         lock_completion_day(command.user_id, command.today)
-        db.session.add(pump_check)
-        # Flush now so a concurrent uq_pump_check_day conflict surfaces here (and
-        # is handled identically to a commit-time conflict), and so pump_check.id
-        # / created_at are available for the friend-message payload.
+        # PRIV-K6-B1 locked re-check. The preflight above is an optimization; the
+        # day may have been claimed by a writer that committed while we waited
+        # for the lock (or by a historical PumpCheck the claim table cannot
+        # see). Under PostgreSQL READ COMMITTED this statement runs on a fresh
+        # snapshot taken after the lock was granted, so every completion writer
+        # that holds the same lock is already visible here.
+        if already_completed_today(command.user_id, command.today):
+            if mark_session_completed(session, now):
+                db.session.commit()
+            else:
+                db.session.rollback()
+            _log(command.entry_path, "already_completed_locked")
+            return CompletionResult(outcome=CompletionOutcome.ALREADY_COMPLETED)
+        db.session.add(claim)
+        if pump_check is not None:
+            db.session.add(pump_check)
+        # Flush now so a concurrent uq_workout_completion_day / uq_pump_check_day
+        # conflict surfaces here (and is handled identically to a commit-time
+        # conflict), and so pump_check.id / created_at are available for the
+        # friend-message payload.
         db.session.flush()
 
-        # Best-effort challenge funnel — savepoint-isolated + self-swallowing, so
-        # a challenge failure can never block the completion (existing contract).
-        _record_pump_check_created(command.user_id)
-        _fan_out_friend_messages(command, pump_check)
+        if pump_check is not None:
+            # Best-effort challenge funnel — savepoint-isolated + self-swallowing,
+            # so a challenge failure can never block the completion (existing
+            # contract). Pump Check challenges count real Pump Checks only.
+            _record_pump_check_created(command.user_id)
+            _fan_out_friend_messages(command, pump_check)
 
-        # Completion marker: paired with the PumpCheck in the same transaction so
-        # a marker without a PumpCheck can never be produced by this writer.
+        # Completion marker: paired with the day claim in the same transaction so
+        # a marker without a completion claim can never be produced by this writer.
         db.session.add(
             WorkoutLog(
                 user_id=command.user_id,
@@ -186,9 +234,12 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         # Quest + XP + activity — all commit-free helpers (verified); this service
         # owns the single commit so every side effect is atomic with completion.
         quest_result = _claim_quest(command.user_id, WORKOUT_LOGGED_QUEST)
-        total_grant = command.base_xp + command.photo_bonus
+        # The photo bonus rewards an attached, validated photo — never a
+        # photo-free completion (also refused when building the command).
+        total_grant = command.base_xp + (command.photo_bonus if is_photo else 0)
         new_total = award_xp(command.user_id, total_grant)
-        log_activity(command.user_id, "workout_completed", command.activity_text)
+        log_activity(
+            command.user_id, "workout_completed", command.resolved_activity_text)
 
         # Terminalize the linked session ACTIVE→COMPLETED in the SAME transaction,
         # before the single commit — one atomic unit with all completion artifacts.
@@ -199,8 +250,8 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         db.session.rollback()
         # Only a verified daily-completion unique violation is a replay; any other
         # integrity failure is a real error and must not masquerade as "done".
-        if is_pump_check_day_violation(exc):
-            # Race-loser reconciliation: the winner wrote the day's PumpCheck, so
+        if is_completion_day_violation(exc):
+            # Race-loser reconciliation: the winner wrote the day's claim, so
             # the rollback also undid our session terminalization. Re-lock and
             # terminalize the owned matching ACTIVE session in a fresh transaction
             # (no duplicate artifacts) — it must never be left permanently ACTIVE.
@@ -209,19 +260,31 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
             return CompletionResult(outcome=CompletionOutcome.ALREADY_COMPLETED)
         _log(command.entry_path, "integrity_error")
         raise
-    except Exception:
+    except Exception as exc:
         db.session.rollback()
+        # PRIV-K6 rollback gate: the database fence refuses at COMMIT (custom
+        # SQLSTATE class AX). Typed, never "already completed" and never a
+        # generic integrity error, so entry paths can say whether a retry helps.
+        refusal = fence_refusal_of(exc)
+        if refusal is not None:
+            _log(command.entry_path, "fence_refused")
+            raise CompletionFenceRefused(
+                refusal.reason, retryable=refusal.retryable) from exc
         _log(command.entry_path, "rollback")
         raise
 
     level = get_level(new_total)
-    _log(command.entry_path, "created")
+    if is_photo:
+        _log(command.entry_path, "created")
+    else:
+        _log(command.entry_path, "created_no_photo")
     if session_completed:
         from app.services.workout_session.metrics import record_lifecycle_event
         record_lifecycle_event("completed")
     return CompletionResult(
         outcome=CompletionOutcome.CREATED,
-        pump_check_id=pump_check.id,
+        proof=command.proof,
+        pump_check_id=pump_check.id if pump_check is not None else None,
         new_total=new_total,
         level=level,
         title=level_title(level),
@@ -231,7 +294,7 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
 
 
 def _reconcile_session_after_race(command: CompleteWorkoutCommand, now: datetime) -> None:
-    """After a ``uq_pump_check_day`` race loss (transaction rolled back), the day
+    """After a daily-claim race loss (transaction rolled back), the day
     is completed by the winner but our linked session is still ACTIVE. Re-lock it
     (fixed lock order preserved: session row first) and terminalize ACTIVE→
     COMPLETED, committing a fresh, artifact-free transaction. A session that a

@@ -58,6 +58,18 @@ from werkzeug.datastructures import Headers  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _release_disposable_pg_engines(request):
+    """Outlive function fixtures, retaining real pooling during each PG race."""
+    if (os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1"
+            or request.node.get_closest_marker("pg_concurrency") is None):
+        yield
+        return
+    from tests.pg_engine_lifecycle import disposable_pg_engine_scope
+    with disposable_pg_engine_scope():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ai_spend_guard_local_counters():
     # The production guard uses Redis windows. Hermetic tests intentionally
     # have no Redis, so process-local windows must not leak between test cases.

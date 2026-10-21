@@ -170,6 +170,29 @@ class CompletionProofUnverified(SessionCommandError):
     retryable = True
 
 
+class CompletionActivationPending(SessionCommandError):
+    """The database completion fence refused the commit, retryably (PRIV-K6
+    rollback gate): the capability floor is about to be raised, or a lost race
+    that a retry resolves to ``already_completed``. Rolled back whole; the
+    session stays ACTIVE. Same retryable wire envelope as any transient
+    persistence failure; the class keeps the cause explicit server-side."""
+
+    public_code = "TRAINING_SESSION_UNAVAILABLE"
+    http_status = 503
+    retryable = True
+
+
+class CompletionWriterIncompatible(SessionCommandError):
+    """The database completion fence refused the commit PERMANENTLY for this
+    server build (writer below the capability floor, unsupported isolation, a
+    fence-authority violation). Retrying the same request cannot succeed until
+    the release is fixed, so it is never advertised as retryable."""
+
+    public_code = "TRAINING_COMPLETION_UNAVAILABLE"
+    http_status = 503
+    retryable = False
+
+
 class SessionPersistenceUnavailable(SessionCommandError):
     public_code = "TRAINING_SESSION_UNAVAILABLE"
     http_status = 503

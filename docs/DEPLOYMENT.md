@@ -291,6 +291,40 @@ Exit 0 means committed and retired; 1 means failed with verified previous
 serving state; 2 means incomplete recovery; 3 means committed with retirement
 residue; 64 means invalid invocation and 70 means invalid time contract.
 
+### Completion capability floor (PRIV-K6 rollback gate)
+
+The database, not this engine, is the completion-safety boundary: migration
+`d7e3a9c1f5b8` fences every historical-only completion writer at COMMIT once
+the floor row `workout_completion_claims_v1` exists (see
+`docs/PRIV_K6_COMPLETION_FENCE.md`). The engine adds release admission on top:
+
+* Before any database mutation it reads `/app/COMPLETION_CAPABILITIES` from the
+  exact candidate image ID and trusts it only when it is byte-equal to the
+  reviewed `release/completion-capabilities` of the archived revision AND that
+  tree carries the fence migration. Mismatch, malformed text or a missing
+  implementation refuses the release. The previous web and worker images are
+  qualified the same way against `git show PREV:release/...`; both must carry
+  the capability, or neither counts.
+* `flask completion-floor status` runs in a one-off container of the candidate
+  image ID (read-only transaction; floor, fence verification, one EXISTS on the
+  claim table, no row content). Unknown counts as raised.
+* A candidate without the capability is refused unless the floor is PROVEN
+  absent with no claim. The floor is re-read after release-prepare and before
+  the switch; a capable candidate's fence must then verify exactly.
+* Automatic rollback never routes back to, or restarts, a previous web/worker
+  below a floor that requires the capability: the candidate keeps serving, the
+  exit is 2 with `ROLLBACK_BELOW_FLOOR`, and recovery is fix forward.
+* After commit, drain and PROVEN retirement of the old backend (exit-0 path
+  only), a capable release raises the floor with `flask completion-floor raise
+  --revision DEPLOY_SHA` (exclusive floor lock, idempotent). Failure is exit 3
+  with `capability-activation-incomplete`; K6 completions stay retryably
+  refused and a re-run is safe. The floor is never lowered by any tool.
+
+Retirement grew to 460 seconds for activation; the failure tail (530) still
+bounds the host worst case, which is unchanged at 1980 seconds. Manual route,
+slot or compose restores bypass this layer by construction; the database fence
+still refuses their completion writes. Nothing here is production-validated.
+
 Every externally sourced production image remains version- and digest-pinned.
 Redis and the application base retain their existing immutable image contract.
 

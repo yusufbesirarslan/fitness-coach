@@ -56,6 +56,7 @@ from app.services.vision_images import detect_image_media_type
 from app.services.weekly_program import build_weekly_program, weekly_program_payload
 from app.services.workout_completion import (
     CompleteWorkoutCommand,
+    CompletionFenceRefused,
     SessionCompletionConflict,
     already_completed_today,
     complete_workout as run_completion,
@@ -547,6 +548,16 @@ def complete_workout():
         # The linked session was abandoned, or its progress moved on — either
         # way a deterministic conflict, rolled back with no artifacts.
         return _completion_conflict(conflict)
+    except CompletionFenceRefused as refusal:
+        # PRIV-K6 rollback gate: the database fence refused the commit and
+        # rolled it back whole. 503 either way; only a retryable refusal says so.
+        response = jsonify({"error": t("route.generic_error_retry"),
+                            "code": "completion_unavailable",
+                            "retryable": refusal.retryable})
+        response.status_code = 503
+        if refusal.retryable:
+            response.headers["Retry-After"] = "15"
+        return response
     except Exception as e:
         # Servis beklenmeyen hatada rollback edip yeniden fırlatır (uq_pump_check_day
         # DIŞINDAKİ IntegrityError dahil). Kanonik dostça 500; iç hata istemciye sızmaz.

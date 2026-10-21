@@ -10,7 +10,8 @@ on:
     # Bind D1 integration qualification directly to the branch HEAD.
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
-    branches: [main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation]
+    # Qualify the K6 rollback gate (stacked on #446) at exact HEAD as well.
+    branches: [feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation]
 
 jobs:
   tests:
@@ -23,6 +24,11 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record executed source identity
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          git show -s --format='%P' HEAD
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"   # Dockerfile ile aynı taban
@@ -349,6 +355,11 @@ jobs:
         postgresql://postgres:postgres@localhost:5432/fitx_mobile_race
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record executed source identity
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          git show -s --format='%P' HEAD
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -386,6 +397,8 @@ jobs:
           tests/test_mobile_workout_sessions_pg.py
           tests/test_ti01b_exercise_notes_pg.py
           tests/test_workout_completion_pg.py
+          tests/test_priv_k6_no_photo_completion_pg.py
+          tests/test_completion_fence_pg.py
           tests/test_workout_session_pg.py
           tests/test_nutrition_vnext_pr7_pg.py
           tests/test_account_deletion_pg.py
@@ -404,6 +417,40 @@ jobs:
           tests/test_account_profile_pg.py
           tests/test_quest_challenge_commit_pg.py
           tests/test_r6_dual_revision_pg.py
+      - name: Completion fence everywhere (activated floor)
+        # PRIV-K6 rollback gate: the completion suites again, on a schema with
+        # the REVIEWED fence installed and the floor raised. Every canonical
+        # writer path must pass. Deselected: the two tests that deliberately
+        # write evidence without a claim (a legacy dated PumpCheck) or recreate
+        # the claim table by DDL -- the fence refuses both by design.
+        env:
+          FITX_FENCE_EVERYWHERE: raised
+        run: >-
+          python -m pytest -m pg_concurrency -q
+          -p tests.qualification.fence_everywhere_plugin
+          --deselect tests/test_priv_k6_no_photo_completion_pg.py::test_k6h_locked_recheck_refuses_a_day_claimed_while_waiting_for_the_lock
+          --deselect tests/test_priv_k6_no_photo_completion_pg.py::test_canonical_no_photo_service_uses_migration_created_sequence_and_replays_once
+          tests/test_workout_completion_pg.py
+          tests/test_priv_k6_no_photo_completion_pg.py
+          tests/test_workout_session_pg.py
+          tests/test_mobile_workout_sessions_pg.py
+          tests/test_sprint14_workout_execution_reliability_pg.py
+          tests/test_progress_pump_check_completion_pg.py
+          tests/test_account_deletion_pg.py
+          tests/test_mobile_pump_check_pg.py
+          tests/test_ti01a_execution_context_pg.py
+          tests/test_ti03_pg.py
+          tests/test_exercise_performance_history_pg.py
+      - name: Kill PRIV-K6 rollback gate mutants
+        run: >-
+          python -B tests/qualification/run_priv_k6_rollback_gate_mutations.py
+          --output qualification/priv-k6-rollback-gate-mutations.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: priv-k6-rollback-gate-mutations
+          path: qualification/priv-k6-rollback-gate-mutations.json
+          if-no-files-found: error
 
   r6-deploy-transaction-mutations:
     name: r6 deploy transaction critical mutations

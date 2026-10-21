@@ -6,9 +6,10 @@ Transport only. Every route here does the same four things and nothing more:
    disabled surface is indistinguishable from an absent one);
 2. read the request contract from headers/body and hand it to
    ``app.services.mobile_workout_sessions``;
-3. perform the one piece of work a service must never do -- the completion
-   proof's provider validation and object-store upload, which are network I/O
-   and therefore belong OUTSIDE the completion transaction;
+3. perform the one piece of work a service must never do -- the OPTIONAL
+   completion photo's provider validation and object-store upload, which are
+   network I/O and therefore belong OUTSIDE the completion transaction (a
+   photo-free completion, PRIV-K6-B1, does none of it);
 4. translate the typed command result into the ``/api/v1`` envelope.
 
 No route here writes a session, a checkpoint, a PumpCheck, a WorkoutLog or XP.
@@ -20,10 +21,13 @@ from functools import wraps
 
 from app.services.ai_consent import ConsentDenied
 from flask import current_app, g, jsonify, make_response, request
+from werkzeug.exceptions import HTTPException
 
 from app.blueprints.mobile_api import bp, mobile_error
 from app.blueprints.mobile_training import _sessions_enabled
-from app.config import BEDROCK_RATELIMIT, WORKOUT_CHECKPOINT_RATELIMIT
+from app.config import (
+    BEDROCK_RATELIMIT, WORKOUT_CHECKPOINT_RATELIMIT, WORKOUT_COMPLETION_RATELIMIT,
+)
 from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.models import WORKOUT_SESSION_COMPLETED
@@ -40,7 +44,7 @@ from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services.menu_extract import validate_pump_check
 from app.services.pump_checks import latest_training_plan_score
 from app.services.validators import validate_uploaded_pump_check_image
-from app.services.workout_completion import already_completed_today
+from app.services.workout_completion import PROOF_NONE, already_completed_today
 from app.timeutil import app_today
 import s3_helper
 
@@ -57,8 +61,12 @@ _RESOLUTION_HEADER = "Session-Resolution"
 # the paths that do use it; this transport simply never asks for it.
 _NATIVE_VISIBILITY = "private"
 _NATIVE_ACTIVITY_TEXT = "Bugünkü antrenmanını tamamladı (foto eklendi)"
+_NATIVE_NO_PHOTO_ACTIVITY_TEXT = "Bugünkü antrenmanını tamamladı"
 _BASE_XP = 10
 _PHOTO_BONUS = 25
+# JSON keys that belong to the optional completion photo; naming any of them
+# makes the request a photo completion (see _photo_evidence_submitted).
+_PHOTO_FIELDS = ("image", "location_type", "description")
 
 
 def _disabled():
@@ -307,6 +315,46 @@ def abandon_workout_session(session_reference):
     return _ok(result)
 
 
+def _photo_evidence_submitted():
+    """True unless the request affirmatively carries NO photo (PRIV-K6-B1).
+
+    Photo-free means an empty body, or a JSON object with none of the photo
+    fields. Anything else is the photo transport and is validated as one: any
+    multipart/form body (the photo contract's own encoding -- even with a
+    missing, empty, misnamed or unusable file), a JSON body naming a photo
+    field, or any other non-empty body that cannot be read as JSON. A submitted
+    photo therefore always meets the photo path's consent gate and validation
+    and can never be silently discarded into a photo-free success.
+    """
+    # Classify transport BEFORE parsing: malformed multipart can consume the
+    # stream while producing empty files/form collections. Those collections
+    # cannot establish affirmative absence of submitted photo transport.
+    if request.mimetype in {"multipart/form-data", "application/x-www-form-urlencoded"}:
+        return True
+    if not request.get_data(cache=True):
+        return False
+    body = request.get_json(silent=True)
+    if isinstance(body, dict):
+        return any(name in body for name in _PHOTO_FIELDS)
+    return True
+
+
+def _no_photo_completion():
+    """Completion kwargs for a first-party, photo-free completion (PRIV-K6-B1).
+
+    No consent check (no provider is contacted), no image validation, no
+    object-store write, no PumpCheck, no photo bonus. The canonical service
+    still enforces ownership, the locked checkpoint revision and exact-once.
+    """
+    return {
+        "proof": PROOF_NONE,
+        "base_xp": _BASE_XP,
+        "photo_bonus": 0,
+        "activity_text": _NATIVE_NO_PHOTO_ACTIVITY_TEXT,
+        "entry_path": "mobile_route",
+    }
+
+
 def _completion_proof():
     """Validate and store the Pump Check proof for a native completion.
 
@@ -377,12 +425,18 @@ def _completion_proof():
     }
 
 
+@mobile_ai_concurrency_gate(
+    "TRAINING_SESSION_COMPLETION_BUSY", "Workout completion is busy.")
+def _complete_with_photo(session_reference, revision):
+    proof = _completion_proof()
+    return _ok(sessions.complete(
+        g.mobile_user.id, session_reference, revision, **proof))
+
+
 @bp.post("/training/workout-sessions/<session_reference>/complete")
 @require_mobile_auth
 @_flag_gated
-@limiter.limit(BEDROCK_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
-@mobile_ai_concurrency_gate(
-    "TRAINING_SESSION_COMPLETION_BUSY", "Workout completion is busy.")
+@limiter.limit(WORKOUT_COMPLETION_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
 def complete_workout_session(session_reference):
     """The terminal command, routed through the canonical completion authority.
 
@@ -395,6 +449,12 @@ def complete_workout_session(session_reference):
     work is skipped entirely and the canonical service reconciles the session
     and reports ``already_completed`` with no second PumpCheck, marker, XP,
     quest claim or activity row.
+
+    The photo is OPTIONAL evidence (PRIV-K6-B1). A request with no photo input
+    at all completes through the same canonical transaction with no consent
+    check, no provider, no upload and no PumpCheck. A request that submits a
+    photo keeps the photo path unchanged: D1 fail-closed consent first, then
+    validation -- a submitted photo is never discarded into a photo-free success.
     """
     try:
         # Validated and then deliberately UNUSED. The published contract
@@ -410,12 +470,25 @@ def complete_workout_session(session_reference):
             row.status == WORKOUT_SESSION_COMPLETED
             or already_completed_today(g.mobile_user.id, app_today())
         )
-        proof = {} if replaying else _completion_proof()
+        # A replay never processes a submitted photo and never builds a photo
+        # command: with no photo there is nothing that could become a PumpCheck.
+        if replaying or not _photo_evidence_submitted():
+            proof = _no_photo_completion()
+        else:
+            # D1 refusal precedes AI admission. Only actual photo work pays
+            # the provider quota and shared blocking-work concurrency budget.
+            from app.blueprints.ai_consent import require_legacy_ai
+            require_legacy_ai()
+            g.completion_photo_admission = True
+            with limiter.limit(
+                    BEDROCK_RATELIMIT, key_func=lambda: str(g.mobile_user.id),
+                    exempt_when=lambda: not getattr(g, "completion_photo_admission", False)):
+                return _complete_with_photo(session_reference, revision)
         result = sessions.complete(
             g.mobile_user.id, session_reference, revision, **proof)
     except sessions.SessionCommandError as error:
         return _failure(error)
-    except ConsentDenied:
+    except (ConsentDenied, HTTPException):
         raise
     except Exception as error:  # noqa: BLE001
         return _unavailable(error, "complete_failed")

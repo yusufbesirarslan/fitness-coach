@@ -1091,6 +1091,97 @@ class PumpCheck(db.Model):
         return f"<PumpCheck {self.user_id} - {self.created_at}>"
 
 
+# PRIV-K6-B1: how a completed day was evidenced. ``photo`` = a validated Pump
+# Check photo was attached (the PumpCheck row exists alongside); ``none`` = a
+# first-party, photo-free completion of an owned workout session.
+WORKOUT_COMPLETION_PROOF_PHOTO = "photo"
+WORKOUT_COMPLETION_PROOF_NONE = "none"
+WORKOUT_COMPLETION_PROOFS = (WORKOUT_COMPLETION_PROOF_PHOTO, WORKOUT_COMPLETION_PROOF_NONE)
+
+
+class WorkoutCompletionDay(db.Model):
+    """The canonical (owner, Istanbul day) workout-completion claim (PRIV-K6-B1).
+
+    Written by ``workout_completion.complete_workout`` — and only there — for
+    EVERY new confirmed completion, photo or photo-free, in the same transaction
+    as the marker/XP/session terminalization. ``uq_workout_completion_day`` is
+    the durable cross-path exact-once claim, so a photo completion and a
+    photo-free completion can never both succeed for one day.
+
+    Historical completions (before this table) are recognised through their
+    ``PumpCheck.date_key`` instead; ``workout_completion.queries.completed_days``
+    reads both and is the one definition of "completed". There is no backfill:
+    a standalone Pump Check (``date_key IS NULL``) never becomes a completion.
+
+    Deliberately carries no photo reference: deleting the Pump Check photo of a
+    photo completion does not erase the fact that the workout was completed.
+    """
+    __tablename__ = "workout_completion_day"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    date_key = db.Column(db.String(10), nullable=False)
+    proof = db.Column(db.String(8), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", name="uq_workout_completion_day"),
+        db.CheckConstraint(
+            "proof IN ('photo', 'none')", name="ck_workout_completion_day_proof"),
+    )
+
+    def __repr__(self):
+        return f"<WorkoutCompletionDay {self.user_id} {self.date_key} {self.proof}>"
+
+
+class CompletionCapabilityFloor(db.Model):
+    """The durable, monotonic completion capability floor (PRIV-K6 rollback gate).
+
+    One row per raised capability; ``workout_completion_claims_v1`` means every
+    completion writer must perform the canonical ``WorkoutCompletionDay`` claim.
+    Application code never writes it: the row is inserted once, under the
+    exclusive floor lock, by ``flask completion-floor raise``, and PostgreSQL
+    triggers (migration ``d7e3a9c1f5b8``) refuse every UPDATE, DELETE, TRUNCATE
+    and unlocked INSERT. Feature flags, restarts and rollbacks do not touch it.
+    """
+    __tablename__ = "completion_capability_floor"
+
+    capability = db.Column(db.String(64), primary_key=True)
+    raised_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    raised_by_revision = db.Column(db.String(40), nullable=False)
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "capability IN ('workout_completion_claims_v1')",
+            name="ck_completion_capability_floor_capability"),
+        db.CheckConstraint(
+            "raised_by_revision ~ '^[0-9a-f]{40}$'",
+            name="ck_completion_capability_floor_revision",
+        ).ddl_if(dialect="postgresql"),
+    )
+
+
+class CompletionClaimTransaction(db.Model):
+    """Binds a ``WorkoutCompletionDay`` claim to the top-level transaction that
+    inserted it (``pg_current_xact_id()``), so the completion fence can tell a
+    claim made by THIS transaction from an earlier one.
+
+    Written and removed only by PostgreSQL triggers (migration ``d7e3a9c1f5b8``):
+    the claim's AFTER INSERT trigger inserts it, the FK cascade removes it. A
+    direct INSERT/UPDATE/DELETE is refused. No application code constructs it.
+    """
+    __tablename__ = "completion_claim_transaction"
+
+    claim_id = db.Column(
+        db.Integer, db.ForeignKey("workout_completion_day.id", ondelete="CASCADE"),
+        primary_key=True, autoincrement=False)
+    claim_txid = db.Column(db.BigInteger, nullable=False)
+
+    __table_args__ = (
+        db.Index("ix_completion_claim_transaction_claim_txid", "claim_txid"),
+    )
+
+
 STATUS_CHECK_SQL = (
     "status IN ('pending', 'analyzing', 'completed', 'failed')"
 )

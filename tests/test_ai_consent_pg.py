@@ -459,8 +459,11 @@ def _assert_chain_head_and_parity():
     from alembic.migration import MigrationContext
     from alembic.autogenerate import compare_metadata
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
-    assert scripts.get_heads() == ['f8b2d4e6a0c3']
-    assert len(list(scripts.walk_revisions())) == 55
+    assert scripts.get_heads() == ['d7e3a9c1f5b8']
+    assert len(list(scripts.walk_revisions())) == 57
+    assert scripts.get_revision('d7e3a9c1f5b8').down_revision == 'f9c6d0a1b2e3'
+    assert scripts.get_revision('f9c6d0a1b2e3').down_revision == 'f8b2d4e6a0c3'
+    assert scripts.get_revision('f8b2d4e6a0c3').down_revision == 'e7a1c3d5f9b2'
     assert scripts.get_revision('e7a1c3d5f9b2').down_revision == 'b1e4f5a6c7d8'
     assert scripts.get_revision('b1e4f5a6c7d8').down_revision == 'd1c0a15e0001'
     assert scripts.get_revision('d1c0a15e0001').down_revision == 'b0d3e4f5a6b7'
@@ -469,7 +472,7 @@ def _assert_chain_head_and_parity():
     assert scripts.get_revision('c2b9d0e1f2a3').down_revision == 'b1a8c9d0e1f2'
     with db.engine.connect() as conn:
         context = MigrationContext.configure(conn, opts={'compare_type': True})
-        assert context.get_current_heads() == ('f8b2d4e6a0c3',)
+        assert context.get_current_heads() == ('d7e3a9c1f5b8',)
         assert compare_metadata(context, db.metadata) == []
         checks = conn.execute(sa.text(
             "SELECT conname, convalidated FROM pg_constraint WHERE conrelid IN "

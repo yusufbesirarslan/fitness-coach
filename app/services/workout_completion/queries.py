@@ -13,11 +13,18 @@ Two responsibilities, both deliberately tiny and side-effect free:
   and only so it is mapped to the deterministic ``ALREADY_COMPLETED`` replay
   outcome. Any other integrity failure must surface as an internal error.
 
-Completion identity is the **canonical completion claim** itself: a
-``PumpCheck`` whose ``date_key`` is the Istanbul ISO day (``app.timeutil``).
-``date_key`` is written ONLY by :func:`service.complete_workout` and is exactly
-the column the ``uq_pump_check_day`` constraint claims, so the preflight, the
-read-model (``workout_state``) and the durable claim can never disagree about
+Completion identity is the **canonical completion claim** itself (PRIV-K6-B1):
+
+* a ``WorkoutCompletionDay`` row — written by :func:`service.complete_workout`
+  for EVERY new completion, photo or photo-free; ``uq_workout_completion_day``
+  is the durable cross-path claim; or
+* a historical ``PumpCheck`` whose ``date_key`` is the Istanbul ISO day
+  (``app.timeutil``) — the only claim that existed before K6. ``date_key`` is
+  still written ONLY by :func:`service.complete_workout`, for photo completions,
+  and ``uq_pump_check_day`` still guards it.
+
+:func:`completed_days` reads both in ONE statement, so the preflight, the
+read-model (``workout_state``) and the durable claims can never disagree about
 what "completed today" means.
 
 A ``PumpCheck`` with ``date_key IS NULL`` is **not** completion evidence. The
@@ -32,18 +39,21 @@ import hashlib
 from datetime import date, datetime
 from typing import Iterable, Optional, Set
 
-from sqlalchemy import text
+from sqlalchemy import select, text, union
 
 from app.extensions import db
 from app.models import (
     WORKOUT_SESSION_ACTIVE,
     WORKOUT_SESSION_COMPLETED,
     PumpCheck,
+    WorkoutCompletionDay,
     WorkoutSession,
 )
 
-# The daily-completion unique constraint (app/models.py PumpCheck.__table_args__).
+# The historical daily-completion unique constraint (PumpCheck.__table_args__).
 PUMP_CHECK_DAY_CONSTRAINT = "uq_pump_check_day"
+# The canonical K6 claim (WorkoutCompletionDay.__table_args__).
+COMPLETION_DAY_CONSTRAINT = "uq_workout_completion_day"
 
 # Namespace for the (owner, Istanbul day) advisory lock below, so its 64-bit key
 # can never coincide with another advisory-lock user in the same database
@@ -52,25 +62,34 @@ _COMPLETION_DAY_LOCK_DOMAIN = b"fitx:workout-completion-day-lock:v1\0"
 
 
 def completion_proof_clause():
-    """The ONE predicate that makes a ``PumpCheck`` completion evidence.
+    """The ONE predicate that makes a ``PumpCheck`` (historical) completion
+    evidence.
 
-    Every completion-state reader must go through this (or the helpers below)
-    rather than re-deriving "completed" from row existence or ``created_at``.
+    Every completion-state reader must go through :func:`completed_days` (or the
+    helpers below) rather than re-deriving "completed" from PumpCheck row
+    existence or ``created_at``.
     """
     return PumpCheck.date_key.isnot(None)
 
 
 def completed_days(user_id: int, days: Iterable[date]) -> Set[date]:
-    """The subset of Istanbul ``days`` on which ``user_id`` holds the canonical
-    completion claim. One bounded, read-only query; no flush/commit."""
+    """The subset of Istanbul ``days`` on which ``user_id`` holds a canonical
+    completion claim — a ``WorkoutCompletionDay`` row or a historical
+    ``PumpCheck.date_key``. One bounded, read-only statement (a UNION, so read
+    paths with pinned statement budgets keep them); no flush/commit."""
     keys = {day.isoformat(): day for day in days}
     if not keys:
         return set()
-    rows = db.session.query(PumpCheck.date_key).filter(
+    claimed = select(WorkoutCompletionDay.date_key).where(
+        WorkoutCompletionDay.user_id == user_id,
+        WorkoutCompletionDay.date_key.in_(tuple(keys)),
+    )
+    historical = select(PumpCheck.date_key).where(
         PumpCheck.user_id == user_id,
         completion_proof_clause(),
         PumpCheck.date_key.in_(tuple(keys)),
-    ).all()
+    )
+    rows = db.session.execute(union(claimed, historical)).all()
     return {keys[date_key] for (date_key,) in rows}
 
 
@@ -100,7 +119,8 @@ def lock_completion_day(user_id: int, day: date) -> None:
     new ACTIVE session on an already-completed day:
 
     * :func:`service.complete_workout` takes it before it writes the day's
-      canonical claim (the ``PumpCheck`` with ``date_key``);
+      canonical claim (the ``WorkoutCompletionDay`` row, plus the ``PumpCheck``
+      with ``date_key`` for a photo completion);
     * ``workout_session.start_session`` takes it before it re-checks that claim
       and inserts a session.
 
@@ -128,39 +148,61 @@ def lock_completion_day(user_id: int, day: date) -> None:
     )
 
 
+def _constraint_identity(exc):
+    """``(constraint_name, message_text)`` of an ``IntegrityError``.
+
+    PostgreSQL (psycopg2/psycopg) names the constraint authoritatively in
+    ``exc.orig.diag.constraint_name``; SQLite only names the offending columns in
+    its message (``UNIQUE constraint failed: pump_check.user_id,
+    pump_check.date_key``)."""
+    orig = getattr(exc, "orig", None)
+    diag = getattr(orig, "diag", None)
+    return getattr(diag, "constraint_name", None), str(orig if orig is not None else exc)
+
+
 def is_pump_check_day_violation(exc) -> bool:
     """Return True only for a verified ``uq_pump_check_day`` unique violation.
 
     Correction #1: never classify an *arbitrary* ``IntegrityError`` as an
     already-completed replay. A foreign-key, NOT NULL, or unrelated-unique
-    failure is a real internal error and must be re-raised. We inspect the
-    driver's constraint identity safely:
-
-    * PostgreSQL (psycopg2/psycopg): ``exc.orig.diag.constraint_name``.
-    * SQLite: the message names the offending columns
-      (``UNIQUE constraint failed: pump_check.user_id, pump_check.date_key``);
-      only ``uq_pump_check_day`` involves ``pump_check.date_key``.
+    failure is a real internal error and must be re-raised. Only
+    ``uq_pump_check_day`` involves ``pump_check.date_key``.
 
     Anything we cannot positively identify returns ``False`` (fail closed — treat
     as a real error rather than silently swallowing it as "already done").
     """
-    orig = getattr(exc, "orig", None)
-
-    # PostgreSQL: authoritative constraint name.
-    diag = getattr(orig, "diag", None)
-    constraint_name = getattr(diag, "constraint_name", None)
+    constraint_name, message = _constraint_identity(exc)
     if constraint_name:
         return constraint_name == PUMP_CHECK_DAY_CONSTRAINT
+    return PUMP_CHECK_DAY_CONSTRAINT in message or "pump_check.date_key" in message
 
-    # SQLite / generic: match the constraint name or the date_key column token.
-    text = str(orig if orig is not None else exc)
-    return PUMP_CHECK_DAY_CONSTRAINT in text or "pump_check.date_key" in text
+
+def is_completion_day_violation(exc) -> bool:
+    """True only for a verified daily-completion claim violation (PRIV-K6-B1):
+    ``uq_workout_completion_day`` or the historical ``uq_pump_check_day``.
+
+    The SQLite token ``workout_completion_day.date_key`` belongs only to
+    ``uq_workout_completion_day`` (its other columns are the PK, ``user_id``,
+    ``proof`` and ``created_at``; the ``proof`` CHECK names the constraint, not
+    the column). Same fail-closed rule as :func:`is_pump_check_day_violation`:
+    a CHECK, NOT NULL, FK or unrelated-unique failure is never a replay.
+    """
+    if is_pump_check_day_violation(exc):
+        return True
+    constraint_name, message = _constraint_identity(exc)
+    if constraint_name:
+        return constraint_name == COMPLETION_DAY_CONSTRAINT
+    return (
+        COMPLETION_DAY_CONSTRAINT in message
+        or "UNIQUE constraint failed: workout_completion_day.user_id, "
+           "workout_completion_day.date_key" in message
+    )
 
 
 # ── Session terminalization (Sprint 7 PR3) ───────────────────────────────────
 # The completion authority owns the ACTIVE→COMPLETED transition of a linked
 # session, inside its single transaction, so a session is never left ACTIVE after
-# its day is completed and COMPLETED is never written without PumpCheck authority.
+# its day is completed and COMPLETED is never written without a completion claim.
 # The completion authority imports ONLY the WorkoutSession ORM model here — never
 # the ``workout_session`` service package — keeping the dependency arrow one-way.
 

@@ -1246,8 +1246,10 @@ def test_send_rejects_heartbeat_that_became_stale_after_preflight():
 
 
 def test_canonical_host_budget_preserves_literal_220_second_margin():
+    # PRIV-K6 Layer B grew retirement 400 -> 460 for floor activation; the
+    # failure tail (30 + 500) still bounds the worst case, so it is unchanged.
     assert list(HOST_PHASE_SECONDS.values()) == [
-        10, 60, 80, 10, 70, 1200, 30, 500, 400, 20,
+        10, 60, 80, 10, 70, 1200, 30, 500, 460, 20,
     ]
     assert HOST_WORST_CASE_SECONDS == 1980
     assert SSM_EXECUTION_MARGIN_SECONDS == 220
