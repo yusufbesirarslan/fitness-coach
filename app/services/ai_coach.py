@@ -17,7 +17,6 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import (AI_COACH_TURN_TIMEOUT_SECONDS, BEDROCK_ENABLED,
                         BEDROCK_CALL_TIMEOUT_SECONDS, BEDROCK_MAX_TOKENS,
-                        BEDROCK_MODEL,
                         BEDROCK_PROMPT_CACHE, OPENAI_MODEL)
 from app.extensions import bedrock_client, db, openai_client
 from app.models import (WORKOUT_COMPLETION_MARKER, MealLog, PendingAction,
@@ -34,7 +33,7 @@ from app.prompts.system import (  # noqa: F401 (re-export)
 from app.observability import current_request_id
 from app.services import provider_failure
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
-from app.services import ai_input_budget, ai_provider_call, ai_usage
+from app.services import ai_input_budget, ai_model_policy, ai_provider_call, ai_usage
 from app.services import ai_spend_guard
 from app.services.ai_spend_guard import AISpendLimitExceeded
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
@@ -1080,9 +1079,10 @@ def log_provider_fallback(logger, prefix, fallback):
     """
     try:
         logger.warning(
-            "%s provider=bedrock fallback_provider=openai "
+            "%s provider=bedrock fallback_provider=%s "
             "exception=%s category=%s request_id=%s",
             prefix,
+            "bedrock_light" if ai_model_policy.claude55() else "openai",
             getattr(fallback, "exception_class", "none"),
             getattr(fallback, "category", provider_failure.UNKNOWN),
             current_request_id(),
@@ -1154,7 +1154,7 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
             final_text = _coach_tool_fallback(language)
         else:
             with ai_usage.fallback_scope(telemetry_fallback, feature="coach"):
-                final_text = _run_coach_conversation_openai(
+                final_text = _run_coach_conversation_light(
                     user_id, question, context, history, language,
                     deadline=deadline)
 
@@ -1183,6 +1183,27 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
         ]
         session["coach_history"] = new_history[-COACH_HISTORY_LIMIT:]
     return final_text
+
+
+def _run_coach_conversation_light(user_id, question, context, history,
+                                  language="tr", deadline=None):
+    """The coach fallback loop under the active routing.
+
+    legacy: the OpenAI function-calling loop. claude55: the same Anthropic tool
+    loop on Haiku 5.5 (no OpenAI recipient). A Haiku failure ends the turn with
+    the soft error; there is no third model.
+    """
+    family, light_model = ai_model_policy.light_route()
+    if family != "bedrock":
+        return _run_coach_conversation_openai(
+            user_id, question, context, history, language, deadline=deadline)
+    try:
+        return _run_coach_conversation_bedrock(
+            user_id, question, context, history, language,
+            deadline=deadline, model=light_model)
+    except _BedrockFallback:
+        current_app.logger.warning("[COACH] light-model fallback failed before work")
+        return _coach_tool_fallback(language, "error")
 
 
 @ai_spend_guard.owner_argument
@@ -1326,7 +1347,7 @@ def _first_text_block(resp):
 
 @ai_spend_guard.owner_argument
 def _run_coach_conversation_bedrock(user_id, question, context, history,
-                                    language="tr", deadline=None):
+                                    language="tr", deadline=None, model=None):
     """Bedrock (Anthropic Messages API) araç-kullanım döngüsü. stop_reason=='tool_use'
     olduğu sürece araçları çalıştırır, tool_result'ları geri besler ve modelin final
     metnine (stop_reason=='end_turn') ulaşana dek zincirler (güvenli üst sınır).
@@ -1340,6 +1361,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
     tools = _anthropic_tools_for_call(user_id)
     convo = prompt_builder.build_anthropic_messages(history, question)
     max_tokens = min(700, BEDROCK_MAX_TOKENS)
+    model = model or ai_model_policy.heavy_model()
     # Everything before the current question is droppable history.
     history_len = max(0, len(convo) - 1)
 
@@ -1355,7 +1377,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            payload = dict(model=BEDROCK_MODEL, max_tokens=max_tokens,
+            payload = dict(model=model, max_tokens=max_tokens,
                            system=system, messages=convo, tools=tools)
             with ai_provider_call.admit(
                     feature="coach", provider="bedrock", payload=payload,
@@ -1370,6 +1392,10 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                     bedrock_client.messages.create,
                     timeout=min(BEDROCK_CALL_TIMEOUT_SECONDS, remaining))
 
+            if getattr(resp, "stop_reason", None) == "refusal":
+                # A decline is an answer: no other model is asked the same turn.
+                current_app.logger.warning("[COACH][Bedrock] model refusal")
+                return _coach_tool_fallback(language, "error")
             if getattr(resp, "stop_reason", None) != "tool_use":
                 text = _first_text_block(resp)
                 if text:

@@ -57,7 +57,7 @@ def test_physical_provider_requests_differ_only_in_fixed_prose_language(
         payload["messages"][0]["content"][0]["text"] = prompt[len(instruction):]
         assert payload["max_tokens"] == min(1200, ai.BEDROCK_MAX_TOKENS)
         assert payload["temperature"] == 0.0
-        assert payload["model"] == ai.BEDROCK_MODEL
+        assert payload["model"] == ai.ai_model_policy.heavy_model()
     # Includes every image byte/block, label, schema instruction, and SDK option.
     assert en == tr
 

@@ -36,6 +36,14 @@ anything over 1568 px on the long edge, measured at <= 1,568 tokens for a
 2,833 + 5,667 x tiles with at most 8 tiles after its own resize (high/auto
 detail), 2,833 at low detail.
 
+Claude 5.5 models read images at high resolution (up to 2576 px on the long
+edge, ~4,784 tokens per image), so the 1,600 ceiling is NOT an upper bound for
+them on its own. Under claude55 routing the call sites downscale every image to
+the envelope Sonnet 4.5 already applied (<= 1568 px long edge and <= 1.15 MP,
+~1,533 tokens at the documented w*h/750); an image this module can decode and
+see inside that envelope keeps the 1,600 ceiling, any other image sent to a 5.5
+model is counted at the 4,784 maximum.
+
 The bound over-estimates ordinary text (Turkish prose ~2x, a coach turn 2.09x)
 — that is the price of never undercounting, and the budgets below are set in
 these bound units against the production payloads they were measured on.
@@ -65,6 +73,9 @@ PROVIDERS = ("bedrock", "openai")
 
 BASE_OVERHEAD_TOKENS = 1024
 ANTHROPIC_IMAGE_TOKENS = 1600
+ANTHROPIC_HIGH_RES_IMAGE_TOKENS = 4784
+STANDARD_IMAGE_MAX_EDGE = 1568
+STANDARD_IMAGE_MAX_PIXELS = 1_150_000
 OPENAI_IMAGE_TOKENS_LOW = 2833
 OPENAI_IMAGE_TOKENS_HIGH = 2833 + 8 * 5667  # 48,169
 
@@ -156,7 +167,31 @@ def _plain(obj):
     return obj
 
 
-def _strip_images(obj, counts):
+def within_standard_envelope(width, height):
+    return (max(width, height) <= STANDARD_IMAGE_MAX_EDGE
+            and width * height <= STANDARD_IMAGE_MAX_PIXELS)
+
+
+def _standard_resolution(source):
+    """True only when the inline image is decodable and inside the envelope."""
+    try:
+        import base64
+        import io
+        from PIL import Image
+        with Image.open(io.BytesIO(base64.b64decode(source.get("data") or "",
+                                                    validate=True))) as image:
+            width, height = image.size
+        return within_standard_envelope(width, height)
+    except Exception:
+        return False
+
+
+def _high_res_model(payload):
+    from app.services.ai_model_policy import SPECS
+    return isinstance(payload, dict) and payload.get("model") in SPECS
+
+
+def _strip_images(obj, counts, high_res=False):
     obj = _plain(obj)
     if isinstance(obj, dict):
         kind = obj.get("type")
@@ -166,7 +201,10 @@ def _strip_images(obj, counts):
                 # A URL/file image is fetched and sized by the provider; we
                 # cannot see it, so we cannot bound it.
                 raise UnboundablePayload("non-inline image source")
-            counts["anthropic"] += 1
+            if high_res and not _standard_resolution(source):
+                counts["anthropic_high_res"] += 1
+            else:
+                counts["anthropic"] += 1
             return {"type": "image"}
         if kind == "image_url":
             detail = ((obj.get("image_url") or {}).get("detail") or "auto")
@@ -174,9 +212,9 @@ def _strip_images(obj, counts):
             return {"type": "image_url"}
         if kind in ("document", "file", "input_file", "input_audio"):
             raise UnboundablePayload(f"unsupported content block {kind!r}")
-        return {k: _strip_images(v, counts) for k, v in obj.items()}
+        return {k: _strip_images(v, counts, high_res) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [_strip_images(v, counts) for v in obj]
+        return [_strip_images(v, counts, high_res) for v in obj]
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
     # Anything else is serialized by its str(): still counted, never dropped.
@@ -185,12 +223,13 @@ def _strip_images(obj, counts):
 
 def input_upper_bound(payload):
     """Return (upper-bound input tokens, image count) for a provider payload."""
-    counts = {"anthropic": 0, "openai_low": 0, "openai_high": 0}
-    stripped = _strip_images(payload, counts)
+    counts = {"anthropic": 0, "anthropic_high_res": 0, "openai_low": 0, "openai_high": 0}
+    stripped = _strip_images(payload, counts, _high_res_model(payload))
     text_bytes = len(json.dumps(stripped, ensure_ascii=False).encode("utf-8"))
-    images = counts["anthropic"] + counts["openai_low"] + counts["openai_high"]
+    images = sum(counts.values())
     bound = (text_bytes + BASE_OVERHEAD_TOKENS
              + counts["anthropic"] * ANTHROPIC_IMAGE_TOKENS
+             + counts["anthropic_high_res"] * ANTHROPIC_HIGH_RES_IMAGE_TOKENS
              + counts["openai_low"] * OPENAI_IMAGE_TOKENS_LOW
              + counts["openai_high"] * OPENAI_IMAGE_TOKENS_HIGH)
     return bound, images

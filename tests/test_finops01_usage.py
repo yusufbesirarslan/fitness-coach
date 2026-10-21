@@ -86,7 +86,7 @@ def test_billing_profile_never_silently_prices_another_class(events, model, prof
     event = events[0]
     assert event["billing_profile"] == profile
     assert ("estimated_cost_usd" in event) == priced
-    assert event["schema_version"] == 2
+    assert event["schema_version"] == 3
 
 
 def test_thread_correlation_is_captured_and_restored():

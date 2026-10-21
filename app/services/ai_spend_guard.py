@@ -20,7 +20,9 @@ This module is the emergency boundary, not a product quota:
   `ai_gate.model_concurrency_slot()` (menu OCR: charged without the permit),
   so a rejected call never reaches the provider — including tool-loop rounds,
   recovery retries, provider-attempt retries and fan-out batches.
-- Two classes: `heavy` (Bedrock/Sonnet) and `light` (OpenAI gpt-4o-mini).
+- Two classes: `heavy` (Sonnet) and `light` (legacy: OpenAI gpt-4o-mini;
+  claude55: Bedrock Haiku 5.5). Under claude55 the class comes from the exact
+  model id (`ai_model_policy`, via `class_scope`), not from the gate label.
   Per-account daily ceilings bound one account; global hourly/daily ceilings
   bound the sum over all accounts (multi-account abuse, runaway loops, bugs).
 - Admission is race-safe across threads, processes and hosts: the Redis
@@ -124,6 +126,25 @@ def feature_scope(feature):
             del _tls.feature
         else:
             _tls.feature = previous
+
+
+@contextmanager
+def class_scope(spend_class):
+    """Charge calls in this scope to an explicit class instead of the gate label.
+
+    `ai_model_policy` sets it from the exact model id under claude55 routing,
+    where Haiku and Sonnet share the "bedrock" label. None (legacy routing)
+    keeps the label-derived class.
+    """
+    previous = getattr(_tls, "spend_class", _UNSET)
+    _tls.spend_class = spend_class
+    try:
+        yield
+    finally:
+        if previous is _UNSET:
+            del _tls.spend_class
+        else:
+            _tls.spend_class = previous
 
 
 @contextmanager
@@ -316,7 +337,7 @@ def charge(provider, feature=None):
     """Admit one provider call or raise AISpendLimitExceeded. Call BEFORE the call."""
     if not ENABLED:
         return
-    cls = provider_class(provider)
+    cls = getattr(_tls, "spend_class", None) or provider_class(provider)
     subject = current_subject()
     if feature is None:
         feature = getattr(_tls, "feature", None)
