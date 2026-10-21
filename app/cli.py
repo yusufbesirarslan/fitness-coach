@@ -471,7 +471,8 @@ def apple_subscription_reconcile_cmd(limit, sweep_limit):
     from app.services import apple_reconciliation
     try:
         counts = apple_reconciliation.run(limit=limit, sweep_limit=sweep_limit)
-    except apple_reconciliation.ReconciliationDisabled as error:
+    except (apple_reconciliation.ReconciliationDisabled,
+            apple_reconciliation.ReconciliationUnavailable) as error:
         raise click.ClickException(str(error)) from None
     click.echo(" ".join(f"{key}={counts[key]}" for key in sorted(counts)))
 

@@ -154,7 +154,17 @@ the BE-01 validation and `persist_verified`. Outcomes: `APPLIED`, `SUPERSEDED`
 codes, or retries (`STALE_SNAPSHOT`, `OUT_OF_ORDER`, Apple/OCSP outage) with
 backoff 1 min doubling to 1 h and `RETRY_EXHAUSTED` after 8 attempts. An outage
 stops the pass. Completion compares the request generation, so a hint arriving
-mid-lookup triggers another lookup instead of being lost.
+mid-lookup triggers another lookup instead of being lost; a lease-fenced finish
+lets an expired worker change nothing. Only success removes a request: terminal
+or exhausted outcomes quarantine it for 24 h (the sweep skips subscriptions with
+a request, so a failing row costs one lookup per day and cannot crowd out healthy
+refreshes); a new authentic notification re-arms a quarantined (never a backing
+off) request; requests older than 60 days are dropped.
+
+Known fail-closed limits (owner/MON-03): status 5 without a signed revocation
+date can never be exited by repurchase; the status-lookup path still requires
+App Apple ID to match in Sandbox (BE-01), unverified against live Sandbox; Apple
+deliveries share the default per-IP rate limit (429 makes Apple retry later).
 
 Lifecycle comes from Apple's authenticated status: purchase, renewal,
 cancellation (access to verified expiry), expiration, billing retry (no access),

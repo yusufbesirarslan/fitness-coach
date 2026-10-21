@@ -4,6 +4,7 @@ The real AppleAdapter status/identity/freshness logic runs over a fake Apple
 transport (subscription_support.adapter); signatures are covered elsewhere.
 Concurrency and rollback durability are proved in test_apple_reconciliation_pg.
 """
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -83,6 +84,14 @@ def _row():
     return AppleSubscription.query.one()
 
 
+def _quarantined(original="100"):
+    """Terminal/exhausted: kept, not retried before the quarantine period."""
+    q = Request.query.filter_by(original_transaction_id=original).one()
+    assert q.attempts == 0 and q.lease_until is None
+    assert s.utc(q.next_attempt_at) > datetime.now(timezone.utc) + r.QUARANTINE - timedelta(minutes=1)
+    return q
+
+
 def _ent(uid):
     return s.entitlement(uid)
 
@@ -103,7 +112,8 @@ def test_unmatched_target_is_terminal_and_writes_nothing(world, hint):
     with app.app_context():
         _request(token=hint)
         assert r.run()[r.UNMATCHED] == 1
-        assert apple.calls == 0 and AppleSubscription.query.count() == 0 and Request.query.count() == 0
+        assert apple.calls == 0 and AppleSubscription.query.count() == 0
+        _quarantined()
 
 
 def test_renewal_extends_and_cancellation_keeps_access_to_expiry(world):
@@ -148,7 +158,8 @@ def test_grace_requires_signed_grace_evidence(world):
         apple.state(status=4, expires=-timedelta(hours=1), isInBillingRetryPeriod=True)
         _request()
         assert r.run()["SUBSCRIPTION_INVALID_EVIDENCE"] == 1
-        assert _row().status == 1 and Request.query.count() == 0
+        assert _row().status == 1
+        _quarantined()
 
 
 def test_refund_revokes_and_only_controlled_repurchase_restores(world):
@@ -164,7 +175,8 @@ def test_refund_revokes_and_only_controlled_repurchase_restores(world):
         apple.state(status=1, revocationDate=None)
         _request()
         assert r.run()["REVOCATION_TERMINAL"] == 1
-        assert _row().status == 5 and Request.query.count() == 0
+        assert _row().status == 5
+        _quarantined()
         # A different transaction bought BEFORE the revocation is not a repurchase.
         apple.state(status=1, revocationDate=None, transactionId="103",
                     purchaseDate=ms(revoked - timedelta(minutes=1)))
@@ -309,10 +321,15 @@ def test_retries_are_bounded(world):
             Request.query.update({Request.next_attempt_at: datetime.now(timezone.utc) - timedelta(seconds=1)})
             db.session.commit()
             outcomes.append(next(k for k in r.run() if k not in ("enqueued", "processed")))
-            if not Request.query.count():
+            if outcomes[-1] == r.EXHAUSTED:
                 break
         assert outcomes[-1] == r.EXHAUSTED and len(outcomes) == r.MAX_ATTEMPTS
         assert apple.calls == r.MAX_ATTEMPTS
+        _quarantined()
+        # The sweep cannot hand it a fresh budget: no lookup until quarantine ends.
+        _row().last_verified_at = datetime.now(timezone.utc) - timedelta(hours=20)
+        db.session.commit()
+        assert r.run()["processed"] == 0 and apple.calls == r.MAX_ATTEMPTS
 
 
 def test_unverifiable_state_expires_into_pending_not_premium(world):
@@ -342,21 +359,93 @@ def test_interrupted_worker_resumes_after_lease(world, monkeypatch):
         Request.query.update({Request.lease_until: datetime.now(timezone.utc) - timedelta(seconds=1)})
         db.session.commit()
         assert r.run()["APPLIED"] == 1 and Request.query.count() == 0
+        # The stale worker wakes up and finishes: fenced, it changes nothing.
+        _request()
+        live = r._claim("Sandbox", datetime.now(timezone.utc))
+        r._finish("Sandbox", claim, r.APPLIED)
+        q = Request.query.one()
+        assert s.utc(q.lease_until) == s.utc(live[4]) and q.attempts == 1
 
 
-def test_defect_during_processing_is_a_bounded_retry(world, monkeypatch):
+def test_failing_rows_cost_one_lookup_per_quarantine_and_never_starve_refresh(world):
+    app, owners, apple = world
+    uid, token = owners[0]
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        _owned(uid, token, apple)
+        base = _row()
+        values = {c.name: getattr(base, c.name) for c in AppleSubscription.__table__.columns if c.name != "id"}
+        values.update(original_transaction_id="300", last_verified_at=now - timedelta(days=2))
+        db.session.add(AppleSubscription(**values))  # Apple keeps rejecting this one
+        base.last_verified_at = now - timedelta(hours=13)
+        db.session.commit()
+        original, poisoned = apple.a.client.get_all_subscription_statuses, []
+        def poison(original_id):
+            if original_id == "300":
+                poisoned.append(original_id)
+                raise APIException(404)
+            return original(original_id)
+        apple.a.client.get_all_subscription_statuses = poison
+        first = r.run(sweep_limit=1)
+        assert first["SUBSCRIPTION_INVALID_EVIDENCE"] == 1
+        _quarantined("300")
+        for _ in range(4):
+            r.run(sweep_limit=1)
+        assert len(poisoned) == 1  # quarantined: one lookup, not one per pass
+        healthy = AppleSubscription.query.filter_by(original_transaction_id="100").one()
+        assert datetime.now(timezone.utc) - s.utc(healthy.last_verified_at) < timedelta(minutes=1)
+
+
+def test_new_notification_rearms_quarantine_but_not_backoff(world):
+    app, owners, apple = world
+    with app.app_context():
+        _request(token="00000000-0000-4000-8000-000000000009")
+        r.run()
+        _quarantined()
+        _request(token=owners[0][1])  # a new authentic hint for the same subscription
+        assert r.run()["APPLIED"] == 1 and Request.query.count() == 0
+        apple.fail = requests.Timeout()
+        _request(); r.run()
+        retry_at = Request.query.one().next_attempt_at
+        _request()
+        assert Request.query.one().next_attempt_at == retry_at  # backoff kept
+
+
+def test_quarantine_ends_after_recovery_window(world):
+    app, _, apple = world
+    with app.app_context():
+        _request()
+        Request.query.update({Request.created_at: datetime.now(timezone.utc) - r.RECOVERY_WINDOW - timedelta(days=1)})
+        db.session.commit()
+        assert r.run()[r.UNMATCHED] == 1 and Request.query.count() == 0
+
+
+def test_storage_failure_in_sweep_is_reported_not_raised_raw(world, monkeypatch):
+    import sqlalchemy as sa
+    app, _, _ = world
+    def broken(*_):
+        raise sa.exc.OperationalError("select", {}, Exception("synthetic"))
+    monkeypatch.setattr(r, "enqueue_stale", broken)
+    with app.app_context(), pytest.raises(r.ReconciliationUnavailable):
+        r.run()
+
+
+def test_defect_during_processing_is_a_bounded_retry(world, monkeypatch, caplog):
     app, owners, apple = world
     uid, token = owners[0]
     with app.app_context():
         _owned(uid, token, apple)
         _request(); _request(original="200")
         def broken(*_):
-            raise RuntimeError("synthetic defect")
+            raise RuntimeError("synthetic defect secret-detail")
         monkeypatch.setattr(s, "persist_verified", broken)
-        result = r.run()
+        with caplog.at_level(logging.WARNING):
+            result = r.run()
         assert result == {"enqueued": 0, "processed": 1, "RETRY": 1}
         pending = Request.query.filter_by(original_transaction_id="100").one()
         assert pending.lease_until is None and pending.last_outcome == "RETRY"
+        assert "event=process_failed error=RuntimeError" in caplog.text
+        assert "secret-detail" not in caplog.text
 
 
 def test_hint_during_lookup_is_not_lost(world):

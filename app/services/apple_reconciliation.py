@@ -12,6 +12,12 @@ Requests are coalesced per (environment, original transaction). A claim takes a
 lease and spends an attempt before any Apple I/O, so a crash is retried after
 the lease and bounded by ``MAX_ATTEMPTS``. Completion compares the request
 generation, so a notification arriving mid-lookup is never dropped.
+
+Only success removes a request. A terminal or exhausted outcome QUARANTINES it
+(next lookup after ``QUARANTINE``): the sweep skips subscriptions that already
+have a request, so a failing row costs at most one lookup per quarantine period
+and can never crowd healthy refreshes out of the bounded sweep. A request older
+than ``RECOVERY_WINDOW`` is dropped instead.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -34,6 +40,7 @@ LEASE = timedelta(minutes=5)
 REFRESH_AFTER = timedelta(hours=12)
 # Apple's billing retry lasts up to 60 days; older lapsed rows are not polled.
 RECOVERY_WINDOW = timedelta(days=60)
+QUARANTINE = timedelta(hours=24)
 DEFAULT_LIMIT = 25
 DEFAULT_SWEEP_LIMIT = 50
 
@@ -51,8 +58,16 @@ class ReconciliationDisabled(Exception):
     pass
 
 
+class ReconciliationUnavailable(Exception):
+    pass
+
+
 def _now():
     return datetime.now(timezone.utc)
+
+
+def s_utc(value):
+    return subscriptions.utc(value)
 
 
 def _log(event, outcome):
@@ -75,7 +90,9 @@ def _locked_request(environment, original_id):
 def request_reconciliation(environment, original_id, token, now):
     """Coalesce into one pending request; caller owns the transaction.
 
-    An existing schedule (backoff) is kept so new hints cannot bypass it.
+    A retry backoff is kept so new hints cannot bypass it; a request that is
+    not backing off (fresh or quarantined) is due now: each new authentic,
+    deduplicated notification buys at most one lookup.
     """
     row = _locked_request(environment, original_id)
     if row is None:
@@ -93,6 +110,8 @@ def request_reconciliation(environment, original_id, token, now):
     row.generation += 1
     if token:
         row.account_token = token
+    if row.attempts == 0 and s_utc(row.next_attempt_at) > now:
+        row.next_attempt_at = now
     row.updated_at = now
 
 
@@ -102,6 +121,7 @@ def accept_notification(signed_payload):
     Apple sees success only after the receipt and request commit together.
     """
     adapter = _adapter()
+    db.session.rollback()  # never hold a transaction across signature/OCSP I/O
     try:
         with blocking_concurrency_slot():
             note = adapter.notification(signed_payload)
@@ -161,7 +181,7 @@ def _claim(environment, now):
     row.attempts += 1
     row.lease_until = now + LEASE
     row.updated_at = now
-    claim = (row.original_transaction_id, row.generation, row.attempts, row.account_token)
+    claim = (row.original_transaction_id, row.generation, row.attempts, row.account_token, row.lease_until)
     db.session.commit()
     return claim
 
@@ -182,23 +202,27 @@ def _owner(environment, original_id, hint):
     return owner
 
 
-def _finish(environment, original_id, generation, outcome, retry_at=None):
+def _finish(environment, claim, outcome, retry_at=None):
+    original_id, generation, _attempts, _hint, lease = claim
     now = _now()
     row = _locked_request(environment, original_id)
-    if row is not None:
+    # Fencing: a worker whose lease expired and was re-claimed changes nothing.
+    if row is not None and s_utc(row.lease_until) == s_utc(lease):
         row.lease_until, row.last_outcome, row.updated_at = None, outcome, now
         if retry_at is not None:
             row.next_attempt_at = retry_at
-        elif row.generation == generation:
-            db.session.delete(row)
-        else:
+        elif row.generation != generation:
             # A newer hint arrived during the lookup: look again, fresh budget.
             row.attempts, row.next_attempt_at = 0, now
+        elif outcome in (APPLIED, SUPERSEDED) or now - s_utc(row.created_at) > RECOVERY_WINDOW:
+            db.session.delete(row)
+        else:
+            row.attempts, row.next_attempt_at = 0, now + QUARANTINE
     db.session.commit()
 
 
 def _process(adapter, environment, claim):
-    original_id, generation, attempts, hint = claim
+    original_id, _generation, attempts, hint, _lease = claim
     owner = _owner(environment, original_id, hint)
     if owner is None:
         return UNMATCHED, None, False
@@ -230,19 +254,34 @@ def run(limit=DEFAULT_LIMIT, sweep_limit=DEFAULT_SWEEP_LIMIT):
     except SubscriptionError as error:
         raise ReconciliationDisabled(error.code) from None
     environment = adapter.environment
-    counts = {"enqueued": enqueue_stale(environment, _now(), sweep_limit), "processed": 0}
+    try:
+        counts = {"enqueued": enqueue_stale(environment, _now(), sweep_limit), "processed": 0}
+    except (SQLAlchemyError, SubscriptionError):
+        db.session.rollback()
+        raise ReconciliationUnavailable("STORAGE_UNAVAILABLE") from None
     for _ in range(limit):
-        claim = _claim(environment, _now())
+        try:
+            claim = _claim(environment, _now())
+        except SQLAlchemyError:
+            db.session.rollback()
+            raise ReconciliationUnavailable("STORAGE_UNAVAILABLE") from None
         if claim is None:
             break
         try:
             outcome, retry_at, outage = _process(adapter, environment, claim)
-        except Exception:  # noqa: BLE001 - storage fault or defect: bounded retry, stop the pass
+        except Exception as error:  # noqa: BLE001 - storage fault or defect: bounded retry, stop the pass
             db.session.rollback()
+            # Exception class name only: never its message or arguments.
+            current_app.logger.warning("apple_reconciliation event=process_failed error=%s",
+                                       type(error).__name__)
             outcome, retry_at, outage = RETRY, _now() + BACKOFF_BASE, True
             if claim[2] >= MAX_ATTEMPTS:
                 outcome, retry_at = EXHAUSTED, None
-        _finish(environment, claim[0], claim[1], outcome, retry_at)
+        try:
+            _finish(environment, claim, outcome, retry_at)
+        except SQLAlchemyError:
+            db.session.rollback()  # the lease expires; the attempt was already counted
+            raise ReconciliationUnavailable("STORAGE_UNAVAILABLE") from None
         _log("reconcile", outcome)
         counts["processed"] += 1
         counts[outcome] = counts.get(outcome, 0) + 1
