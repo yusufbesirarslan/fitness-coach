@@ -1,7 +1,7 @@
-"""Dark, bearer-only subscription foundation; no legacy Premium mutations."""
+"""Dark subscription routes: Bearer-owned verification plus Apple-signed notification intake."""
 from functools import wraps
 
-from flask import current_app, g, jsonify, request
+from flask import abort, current_app, g, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.blueprints.mobile_api import bp, mobile_error
@@ -62,3 +62,26 @@ def subscription_verify():
 @_ready
 def subscription_entitlement():
     return jsonify({"contract_version": 1, "entitlement": subscriptions.entitlement(g.mobile_user.id)})
+
+
+# MON-02-BE-02: App Store Server Notifications V2 intake. Not Bearer-authenticated:
+# authenticity is the Apple signature. OFF answers 404 before any work.
+@bp.post("/subscription/apple-notifications")
+def subscription_apple_notifications():
+    from app.services import apple_reconciliation
+    if (current_app.config.get("APPLE_NOTIFICATIONS_ENABLED") is not True
+            or current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True):
+        abort(404)
+    request.max_content_length = 65536
+    try:
+        body = request.get_json(silent=True)
+    except RequestEntityTooLarge:
+        return _failure(SubscriptionError("SUBSCRIPTION_INVALID_REQUEST", 413))
+    payload = body.get("signedPayload") if isinstance(body, dict) else None
+    if not isinstance(payload, str) or not payload.isascii() or not payload:
+        return _failure(SubscriptionError("SUBSCRIPTION_INVALID_REQUEST", 400))
+    try:
+        apple_reconciliation.accept_notification(payload)
+    except SubscriptionError as error:
+        return _failure(error)
+    return jsonify({})

@@ -372,6 +372,7 @@ jobs:
         run: >-
           python -m pytest -m pg_concurrency -q
           tests/test_apple_subscriptions_pg.py
+          tests/test_apple_reconciliation_pg.py
           tests/test_ai_allowances_pg.py
           tests/test_mobile_auth_pg.py
           tests/test_mobile_log_food_pg.py

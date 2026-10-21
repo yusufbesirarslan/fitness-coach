@@ -49,6 +49,42 @@ class AppleSubscription(db.Model):
     )
 
 
+# MON-02-BE-02: App Store Server Notifications V2 are authenticated hints. The
+# receipt deduplicates by verified notificationUUID; no signed payload is kept.
+class AppleNotificationReceipt(db.Model):
+    notification_uuid = db.Column(db.String(36), primary_key=True)
+    environment = db.Column(db.String(10), nullable=False)
+    notification_type = db.Column(db.String(40), nullable=False)
+    subtype = db.Column(db.String(40))
+    original_transaction_id = db.Column(db.String(64))
+    disposition = db.Column(db.String(32), nullable=False)
+    signed_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    received_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("environment IN ('Sandbox', 'Production')",
+                           name="ck_apple_notification_environment"),
+    )
+
+
+class AppleSubscriptionReconciliation(db.Model):
+    """One coalesced, leased request for a fresh authoritative status lookup."""
+    environment = db.Column(db.String(10), primary_key=True)
+    original_transaction_id = db.Column(db.String(64), primary_key=True)
+    account_token = db.Column(db.String(36))  # signed hint; ownership rows win
+    generation = db.Column(db.Integer, nullable=False)
+    attempts = db.Column(db.Integer, nullable=False)
+    next_attempt_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    lease_until = db.Column(db.DateTime(timezone=True))
+    last_outcome = db.Column(db.String(40))
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("environment IN ('Sandbox', 'Production')",
+                           name="ck_apple_reconciliation_environment"),
+        db.Index("ix_apple_reconciliation_due", "environment", "next_attempt_at"),
+    )
+
+
 # MON-02-BE-03A: dark AI allowance ledger (AI_ALLOWANCE_LEDGER_ENABLED, OFF).
 # Counts and codes only: no prompt, image, answer or health data in any row.
 class AiStarterGrant(db.Model):

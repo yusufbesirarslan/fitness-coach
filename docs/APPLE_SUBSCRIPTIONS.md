@@ -1,4 +1,4 @@
-# MON-02-BE-01 Apple subscription foundation
+# MON-02-BE-01/BE-02 Apple subscription foundation and lifecycle
 
 Dark backend foundation only. `APPLE_SUBSCRIPTIONS_ENABLED=0` is the default;
 monthly and annual configured products yield one Premium tier. No legacy
@@ -93,13 +93,21 @@ for old purchases, restore and cancelled renewal: Apple documents signing time
 but does not explicitly guarantee both responses are re-signed per lookup.
 No live interoperability is claimed.
 
+BE-02 investigation: the bound is unchanged and still applies to every status
+lookup, including reconciliation. It never applies to notifications, because a
+notification's embedded snapshot is never authority: delayed Apple retries (days)
+and resends stay valid hints and only trigger a fresh lookup. If Apple turns out
+not to re-sign status snapshots per request for restored/older transactions, both
+verify and reconciliation fail closed as `STALE_SNAPSHOT` (bounded retries, no
+access granted or extended). Any relaxation needs MON-03 evidence and a separate,
+versioned decision; it is not made here.
+
 ## Bounded entitlement and persistence
 
 A verified row grants access only while
 its paid/grace expiry is future AND last verification age is under 24 hours.
 An outage leaves previously verified state intact within that bound, then
 returns FREE/pending. Lookup never refreshes or extends the validity itself.
-Notifications and ongoing reconciliation are absent.
 
 `apple_account_association`: User FK/PK, unique random UUID token.
 `apple_subscription`: User FK, environment, original/latest transaction,
@@ -112,6 +120,52 @@ No signed payloads are stored or logged. User deletion cascades both tables;
 a newly registered account cannot claim an old signed account token. Support
 recovery/transfers are deferred, not automatic.
 
+## BE-02 notifications, lifecycle and reconciliation
+
+`POST /api/v1/subscription/apple-notifications` (App Store Server Notifications
+V2, `{"signedPayload": "<JWS>"}`, ≤ 64 KiB) exists only when
+`APPLE_NOTIFICATIONS_ENABLED` and `APPLE_SUBSCRIPTIONS_ENABLED` are ON; otherwise
+404 before any work. No Bearer: authenticity is the official
+`verify_and_decode_notification` (online checks) plus verification of the inner
+signed transaction and renewal, exact bundle/environment, App Apple ID (library
+in Production; any value present in Sandbox must match), version 2.0, canonical
+UUID, closed type/subtype names and no future signing beyond five minutes, all
+inside the shared blocking capacity permit. Answers: 200 `{}` (recorded,
+duplicate or authentic-but-irrelevant: TEST/summary, other product/group, Family
+Sharing); 400/413 malformed; 422 `SUBSCRIPTION_INVALID_EVIDENCE` unauthenticated or
+cross-identity; 503 temporary/unconfigured (Apple retries). Logs carry closed
+codes only.
+
+A notification never changes access. One commit records an
+`apple_notification_receipt` (PK = verified notificationUUID: durable dedup; type,
+subtype, original transaction ID, disposition, timestamps; no payload or token)
+and coalesces an `apple_subscription_reconciliation` request per (environment,
+original transaction) with the signed account token as a hint only.
+
+`flask apple-subscription-reconcile [--limit 25] [--sweep-limit 50]` (not
+scheduled anywhere) runs one bounded pass: it enqueues subscriptions last
+verified over 12 h ago (not revoked, expiry within 60 days: Apple's billing retry
+maximum), then claims due requests one at a time (`FOR UPDATE SKIP LOCKED`,
+5-minute lease, attempt counted before any Apple I/O). The owner is our
+ownership row, else the association matching the signed hint, else
+`UNMATCHED_ACCOUNT`. A fresh Get All Subscription Statuses lookup goes through
+the BE-01 validation and `persist_verified`. Outcomes: `APPLIED`, `SUPERSEDED`
+(a newer lookup already stored), terminal evidence/ownership/account/revocation
+codes, or retries (`STALE_SNAPSHOT`, `OUT_OF_ORDER`, Apple/OCSP outage) with
+backoff 1 min doubling to 1 h and `RETRY_EXHAUSTED` after 8 attempts. An outage
+stops the pass. Completion compares the request generation, so a hint arriving
+mid-lookup triggers another lookup instead of being lost.
+
+Lifecycle comes from Apple's authenticated status: purchase, renewal,
+cancellation (access to verified expiry), expiration, billing retry (no access),
+grace (status 4 with signed grace expiry), refund/revocation, and product
+changes within the configured group. Revocation stays terminal for its own
+transaction (including a refund reversal: fail closed, owner decision). The only
+exit is a controlled repurchase: a different Apple transaction, purchased after
+the stored revocation, signed for this owner's token. A replacement purchase
+signed for another AxisAI account conflicts and changes nothing. Deleted
+accounts are unmatched. Account transfer and support recovery remain deferred.
+
 ## Configuration and deployment gates
 
 Host-injected nonsecret values and mounted secret/root paths follow existing
@@ -122,7 +176,8 @@ credentials; Production config verifies and serves Production records only.
 No client chooses an environment. Do not configure Sandbox on a production host.
 Missing configuration does not block boot or CI, but closes all active APIs.
 
-Migration `c2b9d0e1f2a3` is additive, empty, reentrant for create_all-first boot,
+Migration `a4d6f8b0c2e1` (BE-02) adds the two empty tables above, expand-only and
+reentrant with the same fail-closed adoption rule. Migration `c2b9d0e1f2a3` is additive, empty, reentrant for create_all-first boot,
 and rejects incompatible pre-existing tables. No User data changes.
 On PostgreSQL, both required domain CHECKs must also have authoritative
 `pg_constraint.convalidated=true` on the resolved subscription table. Correct
@@ -135,9 +190,9 @@ Do not merge/deploy without separate human gates; flag remains OFF.
 
 ## Next tasks and qualification limits
 
-- BE-02: notifications V2 signature/identity validation, authoritative renewal,
-  refund/revocation reconciliation, missed-notification recovery, repurchase
-  after terminal revocation, deleted-account controlled recovery policy.
+- BE-02 (implemented, dark): see above. Open: retention of receipts, worker
+  schedule, App Store Connect URLs, refund-reversal and account-transfer policy,
+  CONSUMPTION_REQUEST answers (not sent).
 - BE-03: integrate effective entitlement into existing quota enforcement with
   approved allowances. Until then this API does not bypass any existing quota.
 - IOS-01: selected StoreKit 2 dependencies, UUID binding, purchase/restore,
