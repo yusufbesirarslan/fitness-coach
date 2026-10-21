@@ -113,7 +113,7 @@ def test_unmatched_target_is_terminal_and_writes_nothing(world, hint):
         _request(token=hint)
         assert r.run()[r.UNMATCHED] == 1
         assert apple.calls == 0 and AppleSubscription.query.count() == 0
-        _quarantined()
+        assert _quarantined().account_token is None
 
 
 def test_renewal_extends_and_cancellation_keeps_access_to_expiry(world):

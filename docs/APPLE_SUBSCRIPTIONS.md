@@ -157,14 +157,18 @@ stops the pass. Completion compares the request generation, so a hint arriving
 mid-lookup triggers another lookup instead of being lost; a lease-fenced finish
 lets an expired worker change nothing. Only success removes a request: terminal
 or exhausted outcomes quarantine it for 24 h (the sweep skips subscriptions with
-a request, so a failing row costs one lookup per day and cannot crowd out healthy
-refreshes); a new authentic notification re-arms a quarantined (never a backing
+a request, so a failing row cannot crowd out healthy refreshes; it costs one
+lookup per day if terminal, at most 8 per quarantine cycle if retryable; an
+unmatched request drops its token hint); a new authentic notification re-arms a quarantined (never a backing
 off) request; requests older than 60 days are dropped.
 
 Known fail-closed limits (owner/MON-03): status 5 without a signed revocation
 date can never be exited by repurchase; the status-lookup path still requires
 App Apple ID to match in Sandbox (BE-01), unverified against live Sandbox; Apple
-deliveries share the default per-IP rate limit (429 makes Apple retry later).
+deliveries share the default per-IP rate limit (429 makes Apple retry later); a
+transient fault classified terminal (e.g. a one-off Apple 404 or
+`SUBSCRIPTION_INVALID_STATE`) quarantines an active row for 24 h, so it can lapse
+to `VERIFICATION_PENDING` until a notification or client verify.
 
 Lifecycle comes from Apple's authenticated status: purchase, renewal,
 cancellation (access to verified expiry), expiration, billing retry (no access),

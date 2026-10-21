@@ -218,6 +218,8 @@ def _finish(environment, claim, outcome, retry_at=None):
             db.session.delete(row)
         else:
             row.attempts, row.next_attempt_at = 0, now + QUARANTINE
+            if outcome == UNMATCHED:
+                row.account_token = None  # a hint that matched nobody is not kept
     db.session.commit()
 
 
