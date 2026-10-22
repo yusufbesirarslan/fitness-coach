@@ -336,7 +336,8 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
                 feature="heavy_chat.openai")
         ai_recovery.remember_last_good(lg_key, reply)
         return _completion_from_text(reply, fallback_used=fallback_used)
-    except AISpendLimitExceeded:
+    except (AISpendLimitExceeded, ModelRefusal):
+        # Explicit refusals are terminal, even when a last-good answer exists.
         raise
     except Exception:
         cached = ai_recovery.recall_last_good(lg_key)

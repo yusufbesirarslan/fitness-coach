@@ -310,6 +310,70 @@ def test_refusal_is_an_answer_never_a_fallback(monkeypatch, events):
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer", "claude55")
+def test_haiku_fallback_refusal_never_returns_populated_last_good(monkeypatch, events):
+    recovery = ai.ai_recovery
+    messages = [{"role": "user", "content": "x"}]
+    key = recovery.lastgood_key("heavy_chat", SONNET55, "", messages, 500)
+    stored = {}
+    monkeypatch.setattr(recovery, "_get_redis", lambda: SimpleNamespace(
+        setex=lambda k, ttl, value: stored.__setitem__(k, value),
+        get=lambda k: stored.get(k)))
+    recovery.remember_last_good(key, "previous answer")
+    assert recovery.recall_last_good(key) == "previous answer"
+    reads = []
+    real_recall = recovery.recall_last_good
+
+    def recall(k):
+        reads.append(k)
+        return real_recall(k)
+
+    monkeypatch.setattr(recovery, "recall_last_good", recall)
+    calls = _bedrock(monkeypatch, _reply("", stop="refusal", category="general_harms"),
+                     raises={SONNET55: _FakeAPIError("down")})
+    _no_openai(monkeypatch)
+    with pytest.raises(ai.ModelRefusal):
+        ai._heavy_complete(messages, max_tokens=500, feature="coach")
+    assert [c["model"] for c in calls] == [SONNET55, HAIKU55]
+    assert reads == []
+    assert stored[key] == "previous answer"
+    assert events[-1]["stop_reason"] == "refusal"
+    assert events[-1]["fallback"] is True
+
+
+@pytest.mark.parametrize("cache_hit", [False, True])
+@pytest.mark.usefixtures("synthetic_ai_layer", "claude55")
+def test_transient_fallback_failure_keeps_retry_and_last_good_recovery(monkeypatch, cache_hit):
+    recovery = ai.ai_recovery
+    monkeypatch.setattr(recovery, "AI_RECOVERY_ENABLED", True)
+    monkeypatch.setattr(recovery, "AI_RETRY_ATTEMPTS", 2)
+    monkeypatch.setattr(recovery, "_sleep", lambda _: None)
+    reads = []
+
+    def recall(key):
+        reads.append(key)
+        return "previous answer" if cache_hit else None
+
+    monkeypatch.setattr(recovery, "recall_last_good", recall)
+    calls = _bedrock(monkeypatch, raises={
+        SONNET55: _FakeAPIError("down"),
+        HAIKU55: _FakeAnthropic.APITimeoutError("timeout")})
+    _no_openai(monkeypatch)
+    if cache_hit:
+        result = ai._heavy_complete([{"role": "user", "content": "x"}],
+                                    max_tokens=500, feature="coach")
+        assert result.text == "previous answer"
+        assert result.provider == "cache"
+        assert result.finish_reason == "last_good"
+        assert result.fallback_used is True
+    else:
+        with pytest.raises(ai.TransientAIError):
+            ai._heavy_complete([{"role": "user", "content": "x"}],
+                               max_tokens=500, feature="coach")
+    assert [c["model"] for c in calls] == [SONNET55, HAIKU55, HAIKU55]
+    assert len(reads) == 1
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer", "claude55")
 def test_unknown_refusal_category_is_not_exported_verbatim(monkeypatch, events):
     _bedrock(monkeypatch, _reply("", stop="refusal", category="user@example.invalid"))
     with pytest.raises(ai.ModelRefusal):

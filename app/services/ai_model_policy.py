@@ -3,8 +3,9 @@
 Two routings, chosen by the server only (``AI_MODEL_ROUTING``):
 
 - ``legacy`` (default): Sonnet 4.5 on Bedrock for heavy work, OpenAI
-  gpt-4o-mini for light work. Nothing in this module touches a legacy payload,
-  so legacy behaviour is the pre-migration behaviour.
+  gpt-4o-mini for light work. Legacy payloads and sampling are preserved;
+  terminal Bedrock refusals, additive usage schema 3 and fail-closed routing
+  configuration are intentional behavioral changes (see docs/AI_MODEL_ROUTING_55.md).
 - ``claude55``: Sonnet 5.5 heavy, Haiku 5.5 light, both on Bedrock. OpenAI is
   not a recipient. Every payload is checked against an exact model-id registry
   and adapted to the 5.5 request surface before it is admitted.

@@ -1,8 +1,13 @@
 # AI model routing: Sonnet 5.5 + Haiku 5.5 on Bedrock (MON-AI-ROUTING-5.5-MIGRATION-01)
 
 Status: **implemented dark**. `AI_MODEL_ROUTING` defaults to `legacy`, so a
-merge and deploy of this change serves exactly what `0c84616` serves. Nothing
-here was activated anywhere, and no live Bedrock call was made.
+legacy routing keeps the `0c84616` model destinations, payloads and sampling.
+Complete behavioral identity is not claimed: explicit Bedrock refusals are
+terminal (including light fallback, without last-good recovery), usage events
+use additive schema 3 in both routings, and routing/model configuration fails
+closed when invalid. Ordinary transient-error retry and last-good recovery
+remain available. Nothing here was activated anywhere, and no live Bedrock
+call was made.
 
 ## 1. Baseline (main `0c84616`)
 
