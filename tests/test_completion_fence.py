@@ -169,6 +169,39 @@ def test_any_edit_to_the_reviewed_fence_fails_the_gate(tmp_path):
     assert MIGRATION_PATH.name in mec.scan(versions_dir=versions)["violations"]
 
 
+@pytest.mark.parametrize("table,factory", [
+    ("completion_capability_floor", "_floor_columns"),
+    ("completion_claim_transaction", "_binding_columns"),
+])
+@pytest.mark.parametrize("catalog", ["pg16", "pg18", "unvalidated", "unexpected",
+                                     "missing", "duplicate", "wrong-definition"])
+def test_not_null_catalog_normalization_is_exact(monkeypatch, table, factory, catalog):
+    migration = _migration()
+    columns = getattr(migration, factory)()
+    states = {f"custom_nn_{c.name}": ("n", True, f"NOT NULL {c.name}")
+              for c in columns if isinstance(c, sa.Column) and not c.nullable}
+    first = next(iter(states))
+    if catalog == "pg16":
+        states = {}
+    elif catalog == "unvalidated":
+        states[first] = ("n", False, states[first][2])
+    elif catalog == "unexpected":
+        states["unexpected"] = ("n", True, "NOT NULL unexpected")
+    elif catalog == "missing":
+        states.pop(first)
+    elif catalog == "duplicate":
+        states["duplicate"] = states[first]
+    elif catalog == "wrong-definition":
+        states[first] = ("n", True, states[first][2] + " NO INHERIT")
+    others = {"pk": ("p", True, "PRIMARY KEY"), "unknown": ("x", True, "EXCLUDE")}
+    monkeypatch.setattr(migration, "_pg_constraints", lambda *args: {**states, **others})
+    if catalog in {"pg16", "pg18"}:
+        assert migration._pg_table_constraints(None, table, columns) == others
+    else:
+        with pytest.raises(RuntimeError, match="NOT NULL constraints"):
+            migration._pg_table_constraints(None, table, columns)
+
+
 # ── typed refusal: service and entry paths ──────────────────────────────────
 
 @pytest.mark.parametrize("code,reason,retryable", [
