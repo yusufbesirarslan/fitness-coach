@@ -130,14 +130,21 @@ def persist_verified(user_id, evidence, expected_token):
                     raise SubscriptionError("SUBSCRIPTION_INVALID_STATE", 503) from None
         if row.user_id != user_id:
             raise SubscriptionError("SUBSCRIPTION_OWNERSHIP_CONFLICT", 409)
-        if (utc(row.transaction_signed_at) > evidence.transaction_signed_at
-                or utc(row.renewal_signed_at) > evidence.renewal_signed_at):
-            raise SubscriptionError("SUBSCRIPTION_VERIFICATION_PENDING", 503)
-        # Revocation is terminal in this foundation. Reconciliation may later
-        # establish a new paid period; client replay cannot clear it here.
+        newer_tx = utc(row.transaction_signed_at) > evidence.transaction_signed_at
+        newer_renewal = utc(row.renewal_signed_at) > evidence.renewal_signed_at
+        if newer_tx or newer_renewal:
+            # Both parts newer: a later lookup already won. One part: contradictory order.
+            raise SubscriptionError("SUBSCRIPTION_VERIFICATION_PENDING", 503,
+                                    "SUPERSEDED" if newer_tx and newer_renewal else "OUT_OF_ORDER")
+        # A revoked transaction never regains access. Only a controlled repurchase
+        # clears it: a different Apple transaction, purchased after the stored
+        # revocation, under this owner's token (checked above and by the adapter).
         if row.revoked_at or row.status == 5:
-            if not evidence.revoked_at and evidence.status != 5:
-                raise SubscriptionError("SUBSCRIPTION_VERIFICATION_PENDING", 503)
+            if not evidence.revoked_at and evidence.status != 5 and not (
+                    row.revoked_at and evidence.purchased_at
+                    and evidence.transaction_id != row.latest_transaction_id
+                    and evidence.purchased_at > utc(row.revoked_at)):
+                raise SubscriptionError("SUBSCRIPTION_VERIFICATION_PENDING", 503, "REVOCATION_TERMINAL")
         for key, value in _fields(evidence).items():
             setattr(row, key, value)
         db.session.commit()

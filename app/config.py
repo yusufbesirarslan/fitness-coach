@@ -59,6 +59,10 @@ else:
 DEFAULT_RATELIMIT = os.getenv("DEFAULT_RATELIMIT", "600 per hour")
 AUTH_WRITE_RATELIMIT = os.getenv(
     "AUTH_WRITE_RATELIMIT", "120 per minute; 600 per hour")
+# MON-02-BE-02: Apple delivers every notification from a few Apple egress IPs, so
+# the 600/h per-IP default would cap legitimate volume. Still per IP and per route.
+APPLE_NOTIFICATION_RATELIMIT = os.getenv(
+    "APPLE_NOTIFICATION_RATELIMIT", "120 per minute; 3600 per hour")
 AI_RATELIMIT = "30 per hour"           # OpenAI text/vision generation
 SCRAPE_RATELIMIT = "20 per hour"       # menu scraper (outbound fetch + AI; also SSRF surface)
 FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSecret miss)

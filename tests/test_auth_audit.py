@@ -28,7 +28,11 @@ MOBILE_PUBLIC_ENDPOINTS = {
     "mobile_api.register", "mobile_api.verify", "mobile_api.verify_resend",
     # LP-02 pre-auth password recovery: public by design (the caller cannot
     # sign in), never issue a credential. docs/MOBILE_PASSWORD_RECOVERY.md.
-    "mobile_api.password_forgot", "mobile_api.password_reset"}
+    "mobile_api.password_forgot", "mobile_api.password_reset",
+    # MON-02-BE-02 Apple server-to-server notifications: the caller is Apple, the
+    # authority is the verified JWS; it never reads or grants account access.
+    # Default OFF (404). docs/APPLE_SUBSCRIPTIONS.md.
+    "mobile_api.subscription_apple_notifications"}
 
 
 def test_every_non_public_route_uses_require_auth(app):

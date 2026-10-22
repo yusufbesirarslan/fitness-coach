@@ -458,6 +458,25 @@ def ai_allowance_sweep_cmd():
     click.echo(f"expired={expired} purged_settled={settled} purged_periods={periods}")
 
 
+@click.option("--limit", default=25, show_default=True, type=click.IntRange(1, 200))
+@click.option("--sweep-limit", default=50, show_default=True, type=click.IntRange(0, 500))
+def apple_subscription_reconcile_cmd(limit, sweep_limit):
+    """MON-02-BE-02: one bounded pass of authoritative Apple reconciliation.
+
+    Refuses while APPLE_SUBSCRIPTIONS_ENABLED is OFF or Apple configuration is
+    incomplete. Safe to repeat or run concurrently; not scheduled anywhere.
+
+        flask --app starter apple-subscription-reconcile
+    """
+    from app.services import apple_reconciliation
+    try:
+        counts = apple_reconciliation.run(limit=limit, sweep_limit=sweep_limit)
+    except (apple_reconciliation.ReconciliationDisabled,
+            apple_reconciliation.ReconciliationUnavailable) as error:
+        raise click.ClickException(str(error)) from None
+    click.echo(" ".join(f"{key}={counts[key]}" for key in sorted(counts)))
+
+
 COMPLETION_FLOOR_PREFIX = "completion-floor: "
 
 
@@ -516,6 +535,7 @@ def completion_floor_raise_cmd(revision):
 def register_cli(app):
     app.cli.add_command(completion_floor_cmd)
     app.cli.command("ai-allowance-sweep")(ai_allowance_sweep_cmd)
+    app.cli.command("apple-subscription-reconcile")(apple_subscription_reconcile_cmd)
     app.cli.command("release-prepare")(release_prepare_cmd)
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)
