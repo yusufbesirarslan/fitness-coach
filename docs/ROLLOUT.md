@@ -24,6 +24,13 @@ must not merge before it. Startup may apply additive migration `a9c1d2e3f4b5`
 migration need their own human gate. Activation additionally needs owner-approved
 allowance quantities (none exist), BE-03B enforcement review and MON-03.
 
+MON-02-BE-02 `APPLE_NOTIFICATIONS_ENABLED` remains OFF (404 before any work). It
+needs `APPLE_SUBSCRIPTIONS_ENABLED`. Startup may apply expand-only `a4d6f8b0c2e1`
+(two empty tables, 58 revisions) while every flag is OFF; it shares the human
+migration/deploy gate. `flask apple-subscription-reconcile` is not scheduled
+anywhere; a schedule, the App Store Connect notification URL and MON-03 sandbox
+qualification are separate approvals. Rollback: set 0; receipts are retained.
+
 MON-02-BE-01 `APPLE_SUBSCRIPTIONS_ENABLED` remains OFF. No payment activation
 is authorized. Independent review, MON-03 Apple sandbox qualification, lifecycle
 reconciliation and feature enforcement precede separate human activation approval.

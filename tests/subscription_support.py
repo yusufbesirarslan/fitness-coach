@@ -14,7 +14,7 @@ def evidence(token, **changes):
                   product_id="monthly.fixture", group_id="group.fixture", account_token=token,
                   status=1, expires_at=now + timedelta(days=1), revoked_at=None,
                   grace_expires_at=None, auto_renew=True, transaction_signed_at=now,
-                  renewal_signed_at=now)
+                  renewal_signed_at=now, purchased_at=now - timedelta(seconds=1))
     values.update(changes)
     return Evidence(**values)
 
@@ -29,7 +29,7 @@ def adapter(token=None):
             subscriptionGroupIdentifier=a.group, type=Type.AUTO_RENEWABLE_SUBSCRIPTION,
             inAppOwnershipType=InAppOwnershipType.PURCHASED, originalTransactionId="100",
             transactionId="101", appAccountToken=token, signedDate=now,
-            expiresDate=now + 86400000, revocationDate=None)
+            expiresDate=now + 86400000, revocationDate=None, purchaseDate=now - 1000)
     renewal = NS(originalTransactionId="100", environment=Environment.SANDBOX,
                  productId=tx.productId, autoRenewProductId=tx.productId,
                  autoRenewStatus=1, signedDate=now, gracePeriodExpiresDate=None,
