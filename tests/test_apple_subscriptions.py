@@ -45,6 +45,38 @@ def test_untrusted_or_inconsistent_evidence_rejected(target, field, value):
         a.verify("101", token)
 
 
+@pytest.mark.parametrize("environment,app_id,accepted", [
+    ("Sandbox", None, True), ("Sandbox", 123, True),
+    ("Sandbox", 999, False), ("Sandbox", "123", False),
+    ("Production", None, False), ("Production", 123, True),
+    ("Production", 999, False), ("Production", "123", False),
+])
+@pytest.mark.parametrize("operation", ["verify", "status"])
+def test_status_envelope_app_id_is_optional_only_in_sandbox(
+        environment, app_id, accepted, operation):
+    a, token, tx, renewal, _, response = adapter()
+    a.environment = environment
+    tx.environment = renewal.environment = response.environment = Environment(environment)
+    response.appAppleId = app_id
+    lookup = lambda: getattr(a, operation)("101" if operation == "verify" else "100", token)
+    if accepted:
+        assert lookup().environment == environment
+    else:
+        with pytest.raises(SubscriptionError, match="SUBSCRIPTION_INVALID_EVIDENCE"):
+            lookup()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("bundleId", "other.bundle"), ("environment", Environment.PRODUCTION),
+])
+def test_missing_sandbox_app_id_cannot_bypass_other_envelope_identity(field, value):
+    a, token, _, _, _, response = adapter()
+    response.appAppleId = None
+    setattr(response, field, value)
+    with pytest.raises(SubscriptionError, match="SUBSCRIPTION_INVALID_EVIDENCE"):
+        a.status("100", token)
+
+
 @pytest.mark.parametrize("failure", [requests.Timeout(), APIException(429), APIException(500), APIException(404)])
 def test_apple_failures_are_closed(failure):
     a, token, *_ = adapter()
