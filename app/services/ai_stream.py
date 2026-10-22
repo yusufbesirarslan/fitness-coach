@@ -26,9 +26,10 @@ import threading
 
 from flask import current_app
 
-from app.config import BEDROCK_MAX_TOKENS, BEDROCK_MODEL
+from app.config import BEDROCK_MAX_TOKENS
 from app.services import prompt_builder
-from app.services import ai_input_budget, ai_provider_call, ai_spend_guard, ai_usage
+from app.services import (ai_input_budget, ai_model_policy, ai_provider_call,
+                          ai_spend_guard, ai_usage)
 
 # Akış yokken metni sahte-akıtırken kullanılan parça boyutu (karakter).
 CHUNK_CHARS = 48
@@ -251,7 +252,7 @@ def _stream_bedrock(user_id, question, context, history, language,
                                   provider="bedrock", usage=usage)
             return
         call_kwargs = {
-            "model": BEDROCK_MODEL,
+            "model": ai_model_policy.heavy_model(),
             "max_tokens": max_tokens,
             "system": system,
             "messages": convo,
@@ -310,6 +311,11 @@ def _stream_bedrock(user_id, question, context, history, language,
         try:
             usage = _add_usage(usage, _usage_of(final))
 
+            if getattr(final, "stop_reason", None) == "refusal":
+                # A decline is an answer: never a fallback to another model.
+                current_app.logger.warning("[COACH][stream] model refusal")
+                yield _bedrock_work_error(parts, tools_ran)
+                return
             if getattr(final, "stop_reason", None) != "tool_use":
                 provider_text = "".join(buffered)
                 grounded = coach_confirmation.grounded_provider_reply(
@@ -391,7 +397,7 @@ def _stream_openai_fallback(user_id, question, context, history, language,
         return
 
     try:
-        text = ai_coach._run_coach_conversation_openai(
+        text = ai_coach._run_coach_conversation_light(
             user_id, question, context, history, language,
             deadline=deadline)
     except Exception:
@@ -403,7 +409,8 @@ def _stream_openai_fallback(user_id, question, context, history, language,
         yield _bedrock_work_error([], 0)
         return
 
-    yield from _emit_text(text or "", provider="openai", usage=None)
+    yield from _emit_text(text or "", provider=ai_model_policy.light_route()[0],
+                          usage=None)
 
 
 def _emit_text(text, provider, usage=None):

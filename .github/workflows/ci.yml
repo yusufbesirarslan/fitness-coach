@@ -41,6 +41,8 @@ jobs:
           pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
       - name: Run tests
+        env:
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         # conftest.py tüm env'i hermetik kurar (in-memory SQLite, sahte anahtarlar,
         # REDIS_URL boş) → ek servise gerek yok.
         run: >-
@@ -74,15 +76,19 @@ jobs:
         run: python -m pip install pytest==9.1.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: pytest-shard-${{ github.run_attempt }}-*
+          # Retained successful shards can belong to earlier run attempts.
+          pattern: pytest-shard-*-*
           path: shard-evidence
-          merge-multiple: true
+          merge-multiple: false
       - name: Prove exact collection and execution parity
         env:
           SHARD_RESULT: ${{ needs.tests.result }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >-
           python -m scripts.pytest_sharding shard-evidence
           --revision="$GITHUB_SHA" --result="$SHARD_RESULT"
+          --run-id="$GITHUB_RUN_ID" --run-attempt="$GITHUB_RUN_ATTEMPT"
+          --head-sha="$CI_HEAD_SHA"
 
   linux-production-locks:
     name: authoritative Linux production locks

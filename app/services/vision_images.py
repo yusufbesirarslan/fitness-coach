@@ -43,6 +43,34 @@ def prepare_image_for_vision(image_bytes: bytes, media_type: str = "image/jpeg",
     raise ImagePreparationError("prepared image exceeds byte ceiling")
 
 
+def fit_standard_envelope(image_bytes: bytes, media_type: str = "image/jpeg") -> tuple[bytes, str]:
+    """Return an image no larger than the Sonnet 4.5 vision envelope.
+
+    Claude 5.5 models read images at up to 2576 px (~3x the image tokens).
+    Downscaling to the envelope Sonnet 4.5 applied server-side (<= 1568 px
+    long edge, <= 1.15 MP) keeps the image tokens -- and what the model sees --
+    at the pre-migration level. An image already inside it is returned as is.
+    """
+    from app.services.ai_input_budget import (STANDARD_IMAGE_MAX_EDGE,
+                                              STANDARD_IMAGE_MAX_PIXELS,
+                                              within_standard_envelope)
+    media_type = _safe_media_type(media_type)
+    image = _open_bounded_image(image_bytes)
+    width, height = image.size
+    if within_standard_envelope(width, height):
+        return image_bytes, media_type
+    scale = min(STANDARD_IMAGE_MAX_EDGE / max(width, height),
+                (STANDARD_IMAGE_MAX_PIXELS / (width * height)) ** 0.5)
+    image = _rgb_and_resize(image, max(1, int(max(width, height) * scale)))
+    while not within_standard_envelope(image.width, image.height):
+        image = _rgb_and_resize(image, max(image.size) - 1)
+    for quality in JPEG_QUALITIES:
+        encoded = _encode_jpeg(image, quality)
+        if len(encoded) <= MAX_IMAGE_BYTES:
+            return encoded, "image/jpeg"
+    raise ImagePreparationError("prepared image exceeds byte ceiling")
+
+
 def _safe_media_type(media_type):
     if not isinstance(media_type, str):
         return "image/jpeg"
