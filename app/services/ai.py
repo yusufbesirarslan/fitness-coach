@@ -12,7 +12,7 @@ except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalı
 
 from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
 from app.extensions import bedrock_client, openai_client
-from app.services import ai_provider_call, ai_recovery, ai_usage
+from app.services import ai_consent, ai_provider_call, ai_recovery, ai_usage
 from app.services.ai_recovery import TransientAIError
 from app.services.ai_spend_guard import AISpendLimitExceeded
 
@@ -272,7 +272,9 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
                     feature="other"):
     """Like `_heavy_chat` but keeps finish/truncation metadata for generation."""
     _completion_tls.last = None
-    lg_key = ai_recovery.lastgood_key(
+    # A fenced operation's result must come from ITS authorized attempts: no
+    # last-good read or write (the cache key carries no owner/generation).
+    lg_key = None if ai_consent.current_operation() is not None else ai_recovery.lastgood_key(
         "heavy_chat", BEDROCK_MODEL, system_prompt or "", messages, max_tokens)
     fallback_used = False
     if heavy_primary_route()[0] == "bedrock":

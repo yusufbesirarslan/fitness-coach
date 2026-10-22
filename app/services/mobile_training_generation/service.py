@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from sqlalchemy import inspect
 
 from app.extensions import db
+from app.services import ai, ai_consent
 from app.services.ai_spend_guard import subject_scope
 from app.services.ai_consent import ConsentDenied
 from app.services.training_generation.feature_extractor import build_features
@@ -103,6 +104,9 @@ def generate_and_persist(
 
         store.retire_abandoned(user_id)
         allowance.settle_pending(user_id)
+        refused = store.refuse_stale_generated(user_id)
+        if refused is not None:
+            allowance.settle(refused)
         operation, result = _inspect_durable(
             user_id, key, request.fingerprint)
         if result is not None:
@@ -116,9 +120,12 @@ def generate_and_persist(
             raise GenerationInProgress()
 
         if operation is not None and operation.status == TRAINING_PLAN_GENERATION_GENERATED:
+            # Recovery commits only under the candidate's ORIGINAL authority.
             operation_id = operation.id
-            plan = store.commit_plan(operation_id, user_id)
-            allowance.settle(operation_id)
+            try:
+                plan = store.commit_plan(operation_id, user_id)
+            finally:
+                allowance.settle(operation_id)
             return GenerationCommandResult(plan=plan, replayed=False)
 
         # Freeze inputs before claim/dispatch commits expire ORM objects.
@@ -140,7 +147,12 @@ def generate_and_persist(
         with provider_guard():
             metered = store.authorize_dispatch(operation_id)
             authorized = True
-            with subject_scope(user_id), store.attempt_evidence(operation_id, metered):
+            # ONE immutable authority for every admission of this operation
+            # (retry, fallback, repair), its staging and its canonical write.
+            recipient, model = ai.heavy_primary_route()
+            authority = ai_consent.begin_operation(user_id, "training_plan", recipient, model)
+            with (subject_scope(user_id), store.attempt_evidence(operation_id, metered),
+                  ai_consent.operation_scope(authority)):
                 candidate = generate_training_plan_candidate(
                     user, last_session, request.preferences, chat_fn,
                     language=language, logger=logger, frozen_features=features)
@@ -167,8 +179,14 @@ def generate_and_persist(
     document_json = json.dumps(
         candidate.document, ensure_ascii=False, sort_keys=True,
         separators=(",", ":"), allow_nan=False)
-    store.stage_candidate(operation_id, document_json, candidate.overall_score)
-    plan = store.commit_plan(operation_id, user_id)
+    try:
+        store.stage_candidate(operation_id, document_json, candidate.overall_score, authority)
+        plan = store.commit_plan(operation_id, user_id)
+    except ConsentDenied:
+        # Withdrawn before the write: no plan, terminal refusal recorded by the
+        # store; settlement reads the true attempt evidence.
+        allowance.settle(operation_id)
+        raise
     # Only after the plan and SUCCEEDED receipt committed: never settle success
     # for a plan that does not exist.
     allowance.settle(operation_id)

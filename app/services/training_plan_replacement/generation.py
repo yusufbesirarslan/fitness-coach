@@ -79,8 +79,12 @@ def _result(row, replayed):
                             row.proposal_expires_at, replayed)
 
 
-def claim(user, request, key):
-    """Commit identity and quota before any provider call; refresh on every lock."""
+def claim(user, request, key, authority):
+    """Commit identity and quota before any provider call; refresh on every lock.
+
+    A new operation freezes ``authority`` (D1) into its context; lease recovery
+    keeps the ORIGINAL frozen authority, never the caller's newer capture.
+    """
     uid = user.id
     parse_idempotency_key(key)
     digest = _digest('axisai/replacement-generation-key/v1', key)
@@ -117,7 +121,8 @@ def claim(user, request, key):
             last_session = _required_session(user)
             language = user.language or 'tr'
             features = asdict(build_features(user, last_session, request.preferences))
-            context = json.dumps({'features': features, 'language': language}, ensure_ascii=False, allow_nan=False)
+            context = json.dumps({'features': features, 'language': language,
+                                  'consent': authority.to_context()}, ensure_ascii=False, allow_nan=False)
             if len(context) > 32768:
                 raise GenerationPersistenceUnavailable()
             plan = get_active_plan(uid)
@@ -170,7 +175,17 @@ def fail(operation_id, token, code, http, *, refund=True):
     return StoredGenerationFailure(code, http)
 
 
+def _frozen_authority(row):
+    return ai_consent.OperationAuthority.from_context(
+        row.user_id, json.loads(row.generation_context).get('consent'))
+
+
 def publish(operation_id, token, document, score):
+    """Fenced proposal publication: operation -> owner -> plan, one commit.
+
+    The operation's frozen D1 authority is checked under the owner lock that
+    revoke also takes; a refusal publishes nothing and terminalizes the lease.
+    """
     # Validation/projection and serialization run BEFORE any publication locks.
     review = review_candidate(document, score)
     raw = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
@@ -178,7 +193,9 @@ def publish(operation_id, token, document, score):
         raise mobile_training.PlanUnprojectable('candidate exceeds storage bound')
     try:
         row = _owned_attempt(operation_id, token)
+        authority = _frozen_authority(row)
         lock_plan_owner(row.user_id)
+        ai_consent.fence(authority)
         plan = (TrainingPlan.query.filter_by(user_id=row.user_id).order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
                 .populate_existing().with_for_update().first())
         binding = BaseBinding(row.base_lineage_id, row.base_mutation_version, row.base_snapshot_digest)
@@ -186,7 +203,8 @@ def publish(operation_id, token, document, score):
             _finish(row, 'FAILED', 'TRAINING_PLAN_STALE_CURRENT_PLAN', 409)
             db.session.commit()
             raise StoredGenerationFailure('TRAINING_PLAN_STALE_CURRENT_PLAN', 409)
-        token = stage_proposal_in_transaction(row.user_id, binding, plan_data=raw, score=score)
+        token = stage_proposal_in_transaction(row.user_id, binding,
+                                              plan_data=ai_consent.bind_candidate(authority, raw), score=score)
         proposal = Proposal.query.filter_by(public_id=token).one()
         row.proposal_public_id = token
         row.proposal_expires_at = proposal.expires_at
@@ -195,6 +213,13 @@ def publish(operation_id, token, document, score):
         result = GenerationResult(proposal.public_id, review, proposal.expires_at, False)
         db.session.commit()
         return result
+    except ai_consent.ConsentDenied as denied:
+        db.session.rollback()
+        try:
+            fail(operation_id, token, denied.code, denied.status)
+        except Exception:
+            pass  # lease lost/storage down: the output is withheld either way
+        raise
     except Exception:
         db.session.rollback()
         raise
@@ -204,19 +229,25 @@ def generate_proposal(user, request, key, *, chat_fn, provider_guard):
     if not isinstance(request, NativePlanRequest):
         raise TypeError('request must be NativePlanRequest')
     recipient, model = ai.heavy_primary_route()
-    ai_consent.preflight(user.id, 'training_plan', recipient, model)
-    admitted = claim(user, request, key)
+    authority = ai_consent.begin_operation(user.id, 'training_plan', recipient, model)
+    admitted = claim(user, request, key, authority)
     if isinstance(admitted, GenerationResult):
         return admitted
     operation_id, token, context = admitted
     frozen = json.loads(context)
+    try:
+        authority = ai_consent.OperationAuthority.from_context(user.id, frozen.get('consent'))
+    except ai_consent.ConsentDenied as error:
+        # Legacy/corrupt lease context: never re-dispatch without its authority.
+        fail(operation_id, token, error.code, error.status)
+        raise
     fields = frozen['features']
     fields['performance_history'] = PerformanceHistory(**fields['performance_history'])
     features = UserTrainingFeatures(**fields)
     # No implicit expired ORM load may start a transaction before provider I/O.
     db.session.rollback()
     try:
-        with provider_guard():
+        with provider_guard(), ai_consent.operation_scope(authority):
             candidate = generate_training_plan_candidate(None, None, request.preferences, chat_fn,
                         language=frozen['language'], frozen_features=features)
     except ai_consent.ConsentDenied as error:

@@ -299,21 +299,37 @@ def document_digest(document):
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def issue_proposal_token(secret, user_id, document, score, now=None):
+def issue_proposal_token(secret, user_id, document, score, authority, now=None):
+    """Owner-bound, expiring proposal proof carrying its D1 operation authority.
+
+    ``g``/``v`` are the generation and policy version the proposal was
+    generated and published under (LP21); the save fences on them.
+    """
     issued = int(time.time() if now is None else now)
     return tokens.sign_payload(secret, tokens.PLAN_PROPOSAL, user_id, {
-        "d": document_digest(document), "s": score, "t": issued})
+        "d": document_digest(document), "s": score, "t": issued,
+        "g": authority.generation, "v": authority.version})
 
 
 def verify_proposal_token(secret, user_id, token, now=None):
-    """``(digest, score)`` of a genuine, unexpired proposal of THIS owner."""
+    """``(digest, score, authority)`` of a genuine, unexpired proposal of THIS owner.
+
+    A token without D1 provenance (issued before LP21) is not a proposal any
+    more: it proves ownership and integrity, never authorization.
+    """
     try:
         payload = tokens.verify_payload(
             secret, tokens.PLAN_PROPOSAL, user_id, token)
     except tokens.InvalidSignedToken:
         raise errors.InvalidProposal from None
-    if set(payload) != {"d", "s", "t"}:
+    if set(payload) != {"d", "s", "t", "g", "v"}:
         raise errors.InvalidProposal
+    try:
+        authority = ai_consent.OperationAuthority.from_context(user_id, {
+            "owner": user_id, "feature": "nutrition_plan",
+            "generation": payload["g"], "version": payload["v"]})
+    except ai_consent.ConsentDenied:
+        raise errors.InvalidProposal from None
     digest, score, issued = payload["d"], payload["s"], payload["t"]
     if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
         raise errors.InvalidProposal
@@ -324,7 +340,7 @@ def verify_proposal_token(secret, user_id, token, now=None):
         raise errors.InvalidProposal
     if current - issued > PROPOSAL_TTL_SECONDS:
         raise errors.ProposalExpired
-    return digest, score
+    return digest, score, authority
 
 
 # ── generation ─────────────────────────────────────────────────────────────
@@ -405,13 +421,14 @@ def generate_proposals(user, secret, request, chat_fn, quota_enabled, logger=Non
     # Close the read transaction before the quota write and the provider call.
     db.session.rollback()
     recipient, model = ai.heavy_primary_route()
-    ai_consent.preflight(user.id, 'nutrition_plan', recipient, model)
+    authority = ai_consent.begin_operation(user.id, 'nutrition_plan', recipient, model)
     if quota_enabled and not reserve_ai_quota(user, "nutrition", FREE_WEEKLY_AI_PLANS):
         raise errors.GenerationQuotaExceeded
     try:
-        options = generation.generate_plan_options(
-            chat_fn, user.language or "tr", target, goal, request["proteins"],
-            request["carbs"], request["fats"], request["custom_foods"])
+        with ai_consent.operation_scope(authority):
+            options = generation.generate_plan_options(
+                chat_fn, user.language or "tr", target, goal, request["proteins"],
+                request["carbs"], request["fats"], request["custom_foods"])
         documents = []
         if isinstance(options, list):
             for option in options:
@@ -421,6 +438,10 @@ def generate_proposals(user, secret, request, chat_fn, quota_enabled, logger=Non
                     continue
         if not documents:
             raise errors.GenerationFailed
+        # Publication decision, serialized against revoke on the account lock:
+        # a withdrawal acknowledged first withholds every proposal.
+        db.session.rollback()
+        ai_consent.authorize_operation(authority)
     except Exception as error:
         try:
             db.session.rollback()
@@ -448,7 +469,7 @@ def generate_proposals(user, secret, request, chat_fn, quota_enabled, logger=Non
         "proposals": [
             {"plan": native_document(document),
              "proposal_token": issue_proposal_token(
-                 secret, user.id, document, rating, now=issued)}
+                 secret, user.id, document, rating, authority, now=issued)}
             for document in documents
         ],
     }
@@ -479,7 +500,7 @@ def save_plan(user_id, secret, precondition, body, now=None):
         raise TypeError("precondition must be a Precondition")
     if not isinstance(body, dict) or set(body) != {"plan", "proposal_token"}:
         raise errors.InvalidPlan
-    digest, score = verify_proposal_token(
+    digest, score, authority = verify_proposal_token(
         secret, user_id, body["proposal_token"], now=now)
     try:
         score = parse_plan_score(score)
@@ -489,7 +510,8 @@ def save_plan(user_id, secret, precondition, body, now=None):
     if document_digest(document) != digest:
         raise errors.InvalidProposal
     row = replace_nutrition_plan(
-        user_id, document, score, _replacement_check(secret, precondition))
+        user_id, document, score, _replacement_check(secret, precondition),
+        authority=authority)
     return {"contract_version": CONTRACT_VERSION,
             "plan": project_plan_row(row, secret)}
 

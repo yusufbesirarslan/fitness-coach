@@ -17,6 +17,12 @@ def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
     }})
     monkeypatch.setattr(consent, 'generation', lambda owner: 0)
     monkeypatch.setattr(consent, 'preflight', lambda *a, **kw: None)
+    # LP21 operation fencing: the same ALLOW at operation capture, publication
+    # and canonical-write fences. The provenance codec stays real.
+    monkeypatch.setattr(consent, 'begin_operation', lambda owner, feature, *a, **kw:
+                        consent.OperationAuthority(owner, feature, 1, 'synthetic-layer-test'))
+    monkeypatch.setattr(consent, 'authorize_operation', lambda *a, **kw: None)
+    monkeypatch.setattr(consent, 'fence', lambda *a, **kw: None)
     monkeypatch.setattr(consent, 'dispatch', lambda *a, **kw: nullcontext())
     monkeypatch.setattr(consent, 'stream_dispatch', lambda *a, **kw: nullcontext())
     if memory:

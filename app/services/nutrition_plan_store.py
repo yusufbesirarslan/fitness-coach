@@ -26,6 +26,7 @@ import json
 
 from app.extensions import db
 from app.models import NutritionPlan
+from app.services import ai_consent
 from app.services.plan_owner_lock import lock_plan_owner
 
 
@@ -46,14 +47,23 @@ def newest_plan(user_id):
     return newest_plan_query(user_id).first()
 
 
-def replace_nutrition_plan(user_id, document, score, check=UNCONDITIONAL):
+def replace_nutrition_plan(user_id, document, score, check=UNCONDITIONAL, *, authority):
     """Replace the owner's saved plan with an already-validated document.
 
     ``check`` is ``UNCONDITIONAL`` or a callable receiving the CURRENT newest
     row (or ``None``) read under the lock; it raises to refuse. Nothing is
     deleted before it returns. Returns the committed new row.
+
+    A saved plan is an AI result: ``authority`` is the D1 operation authority
+    it was generated under (LP21), fenced under the owner lock in THIS
+    transaction. ``None`` (a client-authored document) is refused.
     """
     lock_plan_owner(user_id)
+    try:
+        ai_consent.fence(authority)
+    except Exception:
+        db.session.rollback()
+        raise
     current = (newest_plan_query(user_id)
                .populate_existing().with_for_update().first())
     if check is not UNCONDITIONAL:
