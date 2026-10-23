@@ -214,6 +214,6 @@ def enforce_request(user):
     if request.method in {"POST", "PUT", "PATCH"} and endpoint in {
         "profile.setup", "profile.edit_profile", "tracking.checkin",
         "tracking.update_weight", "mobile_api.put_account_profile",
-        "mobile_api.create_check_in",
+        "mobile_api.create_check_in", "coach.chat",
     }:
         require_capability(user, "automated_weight_targets")

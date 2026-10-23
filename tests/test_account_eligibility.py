@@ -235,6 +235,19 @@ def test_web_registration_contact_controls_stay_in_inert_template(app, client):
     assert not soup.select_one("#eligible-contact-stage input")
 
 
+@pytest.mark.parametrize("age", [17, 30])
+def test_legacy_coach_adult_math_keeps_age_guard_after_ai_activation(
+        app, make_user, age):
+    user = record_user(make_user, age)
+    with app.test_request_context("/chat", method="POST", json={}):
+        request.url_rule = SimpleNamespace(endpoint="coach.chat")
+        if age < 18:
+            with pytest.raises(policy.EligibilityDenied):
+                policy.enforce_request(user)
+        else:
+            policy.enforce_request(user)  # Not an AI grant; D1 still applies.
+
+
 @pytest.mark.parametrize("age", [None, 17, 30])
 def test_restricted_and_signed_cohorts_keep_real_account_erasure(
         app, make_user, monkeypatch, age):
