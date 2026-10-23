@@ -25,10 +25,13 @@ def _noisy_png_bytes(size):
     return buffer.getvalue()
 
 
-def test_small_valid_image_passes_through_without_reencoding():
+def test_small_valid_image_is_freshly_encoded():
     raw = _jpeg_bytes((32, 32), quality=90)
     prepared, media_type = prepare_image_for_vision(raw, "image/jpeg")
-    assert prepared is raw
+    assert prepared is not raw
+    with Image.open(BytesIO(prepared)) as image:
+        image.load()
+        assert not image.getexif()
     assert media_type == "image/jpeg"
 
 

@@ -171,7 +171,7 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert workflow["name"] == "CI"
     assert set(workflow["on"]) == {"pull_request", "push"}
     assert workflow["on"]["push"]["branches"] == [
-        "feat/priv-k6-b1-no-photo-completion", "feat/priv-k6-rollback-gate", "main",
+        "feat/priv-k6-b1-no-photo-completion", "feat/priv-k6-rollback-gate", "main", "privacy/pa03-be-core-01",
         "r6/03a-bluegreen-deploy-transaction", "feat/privacy-d1-backend-consent",
         "feat/mon-02-be-03b-01b-training-allowance",
         "fix/mon-02-be-03b-a2-a1-expiry-compensation", "fix/priv-k6-pg18-migration", "fix/mon-02-be-02-pg18-compatibility"]

@@ -261,17 +261,22 @@ def upload_image(image_bytes, content_type="image/jpeg", prefix="uploads", user_
     Hata durumunda S3Error yükseltir (çağıran taraf yakalayıp fail-open olur)."""
     if not image_bytes:
         raise S3Error("Yüklenecek görsel verisi boş.")
-    key = _build_key(prefix, content_type, user_id)
+    from app.services.image_sanitization import sanitize_image, ImageSanitizationError
+    try:
+        sanitized = sanitize_image(image_bytes)
+    except ImageSanitizationError:
+        raise S3Error("image_sanitization_failed") from None
+    key = _build_key(prefix, sanitized.media_type, user_id)
     try:
         client = _get_client()
         client.put_object(
             Bucket=S3_BUCKET_NAME,
             Key=key,
-            Body=image_bytes,
-            ContentType=content_type or "application/octet-stream",
+            Body=sanitized.data,
+            ContentType=sanitized.media_type,
             ServerSideEncryption="AES256",
         )
-        logger.info("[S3] event=upload_succeeded bytes=%d", len(image_bytes))
+        logger.info("[S3] event=upload_succeeded bytes=%d", len(sanitized.data))
         return key
     except (BotoCoreError, ClientError) as e:
         logger.warning("[S3] event=upload_failed error_type=%s", type(e).__name__)
