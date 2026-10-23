@@ -599,6 +599,7 @@
   "setup.basics_sub": "Koçun sana doğru plan verebilmesi için bunlar gerekli.",
   "setup.weight": "Kilo (kg)",
   "setup.height": "Boy (cm)",
+  "setup.adults_only": "AxisAI, 18 yaş ve üzerindeki yetişkinler içindir.",
   "setup.age": "Yaş",
   "setup.gender": "Cinsiyet",
   "setup.male": "Erkek",

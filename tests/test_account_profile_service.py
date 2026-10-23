@@ -133,14 +133,13 @@ def test_height_must_be_positive_but_has_no_invented_range(value):
 
 
 @pytest.mark.parametrize(("value", "reason"), [
-    (0, "range"), (-3, "range"), (30.0, "type"), (30.5, "type"),
+    (0, "range"), (-3, "range"), (1, "range"), (17, "range"), (30.0, "type"), (30.5, "type"),
     ("30", "type"), (True, "type"), (None, "type")])
-def test_age_must_be_a_positive_whole_number(value, reason):
+def test_age_must_be_a_whole_number_at_least_eighteen(value, reason):
     with pytest.raises(ProfileRejected) as caught:
         _profile(age=value)
     assert (caught.value.field, caught.value.reason) == ("age", reason)
-    # No product-policy bound exists for age either.
-    assert _profile(age=1).age == 1
+    assert _profile(age=18).age == 18
     assert _profile(age=150).age == 150
 
 
