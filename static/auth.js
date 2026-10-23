@@ -131,7 +131,59 @@
     else text.textContent = "Strong password";
   };
 
+  var eligibilityTicket = null;
+  var eligibilityRevision = 0;
+  window.resetEligibility = function () {
+    eligibilityRevision += 1;
+    eligibilityTicket = null;
+    var contact = qs("eligible-contact-stage");
+    if (contact) contact.replaceChildren();
+  };
+  window.checkEligibility = async function (el) {
+    window.resetEligibility();
+    var revision = eligibilityRevision;
+    var ageText = normalizedValue("eligibility-age");
+    var age = Number(ageText);
+    var country = normalizedValue("eligibility-country");
+    if (!ageText || !Number.isInteger(age) || age <= 0 || !country) {
+      showNotice("error", tr("eligibility.required"));
+      return;
+    }
+    setButtonLoading(el, true, tr("eligibility.continue"));
+    try {
+      var response = await fetch("/eligibility", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ age: age, country: country })
+      });
+      var data = await response.json();
+      if (revision !== eligibilityRevision) return;
+      var result = data && data.eligibility;
+      var caps = result && result.capabilities;
+      if (!response.ok || !result || result.status !== "screen_passed" ||
+          result.country !== country || result.reason !== null || age < 13 ||
+          result.age_band !== (age < 18 ? "13_17" : "18_plus") ||
+          !caps || typeof caps.body_photos !== "boolean" ||
+          typeof caps.automated_weight_targets !== "boolean" || caps.social !== false ||
+          (age < 18 && (caps.body_photos || caps.automated_weight_targets)) ||
+          typeof result.registration_token !== "string" || !result.registration_token ||
+          result.registration_token.length > 1024) {
+        showNotice("error", tr(result && result.status === "ineligible" ?
+          "eligibility.denied" : "eligibility.pending"));
+        return;
+      }
+      eligibilityTicket = result.registration_token;
+      var template = qs("eligible-contact-template");
+      qs("eligible-contact-stage").replaceChildren(template.content.cloneNode(true));
+      qs("username").focus();
+    } catch (_) { showNotice("error", tr("common.conn_error_retry")); }
+    finally { setButtonLoading(el, false); }
+  };
+
   window.register = async function (el) {
+    if (qs("eligibility-stage") && !eligibilityTicket) {
+      showNotice("error", tr("eligibility.required"));
+      return;
+    }
     var username = normalizedValue("username");
     var email = normalizedValue("email");
     var passwordInput = qs("password");
@@ -151,12 +203,12 @@
       var response = await fetch("/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(Object.assign({
           username: username,
           email: email,
           password: password,
           language: window.LOCALE
-        })
+        }, eligibilityTicket ? { eligibility_token: eligibilityTicket } : {}))
       });
       var data = await response.json();
       if (response.ok) {
@@ -167,6 +219,7 @@
           : "/login";
         window.setTimeout(function () { window.location.href = dest; }, 900);
       } else {
+        if (data.code === "AUTH_ELIGIBILITY_REQUIRED") window.resetEligibility();
         showNotice("error", data.error);
       }
     } catch (err) {

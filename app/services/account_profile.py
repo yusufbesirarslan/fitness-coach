@@ -291,6 +291,8 @@ def complete_onboarding(user, profile):
     they are: the row keeps its place in history and nothing a user already
     saw is erased.
     """
+    from app.services.account_eligibility import require_capability
+    require_capability(user, "automated_weight_targets")
     if not isinstance(profile, OnboardingProfile):
         raise TypeError("profile must be an OnboardingProfile")
 

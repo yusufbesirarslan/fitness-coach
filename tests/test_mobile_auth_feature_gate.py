@@ -162,6 +162,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         # LP-01 native registration/verification. Pre-auth, on this blueprint
         # so they share its gate, envelope, no-store and 429 handler.
         ("/api/v1/auth/register", ("POST",)),
+        ("/api/v1/auth/eligibility", ("POST",)),
+        ("/api/v1/account/eligibility", ("GET", "POST")),
         ("/api/v1/auth/verify", ("POST",)),
         ("/api/v1/auth/verify/resend", ("POST",)),
         # LP-02 native password recovery. Pre-auth, same blueprint, gate,

@@ -55,6 +55,7 @@ MAX_CODE_CHARS = 64
 CAPACITY_RETRY_AFTER_SECONDS = 15
 
 _FAILURES = {
+    Outcome.ELIGIBILITY_REQUIRED: ("AUTH_ELIGIBILITY_REQUIRED", 422, False),
     Outcome.FIELDS_REQUIRED: ("AUTH_INVALID_REQUEST", 400, False),
     Outcome.INPUT_REJECTED: ("AUTH_INVALID_REQUEST", 400, False),
     Outcome.USERNAME_INVALID: ("AUTH_USERNAME_INVALID", 400, False),
@@ -139,7 +140,8 @@ def register():
         return _unavailable()
     try:
         account = account_registration.register_account(
-            username, email, password, language=language)
+            username, email, password, language=language,
+            eligibility_token=data.get("eligibility_token"))
     except RegistrationFailure as failure:
         return _failure_response(failure)
     response = jsonify({"registration": {
