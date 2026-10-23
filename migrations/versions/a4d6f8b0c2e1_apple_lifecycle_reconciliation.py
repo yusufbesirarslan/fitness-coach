@@ -90,10 +90,19 @@ def _verify(bind, table, columns, primary, check, index):
     valid = valid and indexes == ([(index[0], index[1], False)] if index else [])
     if valid and bind.dialect.name == "postgresql":
         states = bind.execute(sa.text(
-            "SELECT contype, convalidated FROM pg_catalog.pg_constraint "
+            "SELECT contype, convalidated, pg_catalog.pg_get_constraintdef(oid) "
+            "FROM pg_catalog.pg_constraint "
             "WHERE conrelid = pg_catalog.to_regclass(:relation)"),
             {"relation": bind.dialect.identifier_preparer.format_table(sa.table(table))}).all()
-        valid = sorted(t for t, _ in states) == ["c", "p"] and all(v is True for _, v in states)
+        # PG18 catalogs NOT NULL constraints; PG16 exposes only column
+        # nullability (already checked above). Normalize only the complete,
+        # validated set for the required columns, independent of names.
+        not_null = [(v, text) for t, v, text in states if t == "n"]
+        required = [(True, f"NOT NULL {c.name}") for c in expected
+                    if not c.nullable or c.primary_key]
+        valid = (not not_null or sorted(not_null) == sorted(required))
+        valid = valid and sorted(t for t, _, _ in states if t != "n") == ["c", "p"]
+        valid = valid and all(v is True for _, v, _ in states)
     if not valid:
         raise RuntimeError("incompatible Apple reconciliation schema")
 

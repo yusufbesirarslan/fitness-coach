@@ -174,7 +174,7 @@ def test_workflow_retains_stable_fail_closed_gate():
         "feat/priv-k6-b1-no-photo-completion", "feat/priv-k6-rollback-gate", "main",
         "r6/03a-bluegreen-deploy-transaction", "feat/privacy-d1-backend-consent",
         "feat/mon-02-be-03b-01b-training-allowance",
-        "fix/mon-02-be-03b-a2-a1-expiry-compensation", "fix/priv-k6-pg18-migration"]
+        "fix/mon-02-be-03b-a2-a1-expiry-compensation", "fix/priv-k6-pg18-migration", "fix/mon-02-be-02-pg18-compatibility"]
     deploy = yaml.load(Path(".github/workflows/deploy.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert deploy["on"]["workflow_run"]["branches"] == ["main"]
     jobs = workflow["jobs"]

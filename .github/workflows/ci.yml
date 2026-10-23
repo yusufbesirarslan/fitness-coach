@@ -11,7 +11,7 @@ on:
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
     # Qualify the K6 rollback gate (stacked on #446) at exact HEAD as well.
-    branches: [feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation, fix/priv-k6-pg18-migration]
+    branches: [feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation, fix/priv-k6-pg18-migration, fix/mon-02-be-02-pg18-compatibility]
 
 jobs:
   tests:
@@ -370,9 +370,11 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
-      - name: Verify completion fence migrations, schema guards and writers
+      - name: Verify completion fence and Apple lifecycle migration compatibility
         run: >-
           python -m pytest -m pg_concurrency -q
+          tests/test_apple_lifecycle_migration_pg.py
+          tests/test_apple_reconciliation_pg.py
           tests/test_completion_fence_pg.py
           tests/test_priv_k6_no_photo_completion_pg.py
           tests/test_workout_completion_pg.py
@@ -418,6 +420,7 @@ jobs:
           python -m pytest -m pg_concurrency -q
           tests/test_apple_subscriptions_pg.py
           tests/test_apple_reconciliation_pg.py
+          tests/test_apple_lifecycle_migration_pg.py
           tests/test_ai_allowances_pg.py
           tests/test_mobile_auth_pg.py
           tests/test_mobile_log_food_pg.py
