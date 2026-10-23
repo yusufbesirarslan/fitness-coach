@@ -787,8 +787,12 @@ def _apply_confirmed(user_id, pending):
         db.session.rollback()
         if denied.status < 500:
             # Definitive: this proposal can never be applied; do not leave it
-            # blocking every new proposal as PENDING.
-            mark_stale(user_id, public_id)
+            # blocking every new proposal as PENDING. Best effort: the typed
+            # refusal is what the turn reports either way.
+            try:
+                mark_stale(user_id, public_id)
+            except Exception:
+                db.session.rollback()
         raise
 
 
