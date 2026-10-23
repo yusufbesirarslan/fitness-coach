@@ -44,6 +44,9 @@ from tests.test_mobile_training_generation_api import (  # noqa: F401 - fixtures
     mobile_user,
 )
 from tests.test_mobile_training_generation_service import (  # noqa: F401 - fixtures
+
+# LP21: command-layer tests with fake providers; real D1 fencing lives in test_lp21_d1_operation_fencing_pg.py.
+pytestmark = pytest.mark.usefixtures('synthetic_operation_authority')
     _run as _run_command,
     command_user,
     fake_generator,

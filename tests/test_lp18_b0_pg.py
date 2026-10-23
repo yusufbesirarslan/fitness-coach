@@ -27,6 +27,7 @@ from app.services.plan_mutation.commands import UpdateExercisePrescriptionComman
 from app.services.plan_mutation.context import MutationContext
 from app.services.plan_mutation.fingerprint import snapshot_fingerprint
 from test_lp18_b0 import DAY, plan_text, coach_proposal
+from consent_projection_support import allow_operation_fences, bound_candidate
 
 pytestmark=pytest.mark.pg_concurrency
 if os.environ.get('FITX_PG_CONCURRENCY_TEST') != '1':
@@ -34,7 +35,10 @@ if os.environ.get('FITX_PG_CONCURRENCY_TEST') != '1':
 
 
 @pytest.fixture
-def pg():
+def pg(monkeypatch):
+    # LP21: lock-order qualification of LP18 writers; real D1 fencing of the
+    # same writers lives in tests/test_lp21_d1_operation_fencing_pg.py.
+    allow_operation_fences(monkeypatch)
     url=os.environ.get('PG_TEST_DATABASE_URL','')
     assert url.startswith('postgresql'), 'required PG database missing'
     app=Flask('lp18-b0-pg')
@@ -49,7 +53,7 @@ def pg():
         plan=TrainingPlan(user_id=uid,plan_data=plan_text('Old'),score=8)
         db.session.add(plan);db.session.commit()
         binding=s.BaseBinding(plan.lineage_id,0,snapshot_fingerprint(plan.plan_data))
-        token=s.stage_proposal(uid,binding,plan_data=plan_text('New'),score=9)
+        token=s.stage_proposal(uid,binding,plan_data=bound_candidate(uid,plan_text('New')),score=9)
     yield app, uid, token, binding
     with app.app_context():
         db.session.remove();db.drop_all();db.engine.dispose()
@@ -224,7 +228,7 @@ def test_new_coach_proposal_old_snapshot_after_replacement_is_stale(pg,monkeypat
     _,uid,token,binding=pg
     with pg[0].app_context():
         candidate=plan_text('Old')+' '
-        token=s.stage_proposal(uid,binding,plan_data=candidate,score=9)
+        token=s.stage_proposal(uid,binding,plan_data=bound_candidate(uid,candidate),score=9)
     from app.services.plan_confirmation import service as cp
     from app.services.coach_plan_tools.executor import _apply_confirmed
     # Capture old server preview before replacement; insert pending after its

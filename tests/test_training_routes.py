@@ -341,6 +341,7 @@ def test_plan_hicbiri_clears_stored_injuries(client, with_session, auth_user, mo
 # Plan kaydet / aktif plan
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_save_plan_replaces_previous(client, auth_user, plan_save_token):
     assert client.post("/training-plan/save", json={}).status_code == 400
 
@@ -358,6 +359,7 @@ def test_save_plan_replaces_previous(client, auth_user, plan_save_token):
     assert json.loads(plans[0].plan_data) == _expect_saved_document(second)
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_active_plan_roundtrip(client, auth_user, plan_save_token):
     assert client.get("/training-plan/active").get_json() == {"exists": False}
     program = _seven_day_program()

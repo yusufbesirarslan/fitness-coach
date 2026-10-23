@@ -398,13 +398,13 @@ def _canonical(value):
 
 
 def bind_candidate(authority, document_text):
+    """The staged text: the EXACT document bytes plus their operation authority."""
     if not isinstance(authority, OperationAuthority):
         raise ConsentDenied("AI_CONSENT_CHANGED")
-    document = json.loads(document_text)
-    if not isinstance(document, dict) or _canonical(document) != document_text:
-        raise ValueError("candidate document must be canonical JSON")
+    if not isinstance(document_text, str) or not isinstance(json.loads(document_text), dict):
+        raise ValueError("candidate document must be a JSON object")
     return _canonical({"domain": _CANDIDATE_DOMAIN, "authority": authority.to_context(),
-                       "document": document})
+                       "document": document_text})
 
 
 def unbind_candidate(owner, stored):
@@ -416,10 +416,9 @@ def unbind_candidate(owner, stored):
     if (not isinstance(envelope, dict)
             or set(envelope) != {"domain", "authority", "document"}
             or envelope["domain"] != _CANDIDATE_DOMAIN
-            or not isinstance(envelope["document"], dict)):
+            or not isinstance(envelope["document"], str)):
         raise ConsentDenied("AI_CONSENT_CHANGED")
-    return (OperationAuthority.from_context(owner, envelope["authority"]),
-            _canonical(envelope["document"]))
+    return OperationAuthority.from_context(owner, envelope["authority"]), envelope["document"]
 
 
 def memory_available(owner):

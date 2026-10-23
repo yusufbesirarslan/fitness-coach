@@ -30,6 +30,9 @@ from app.services.plan_replacement import (
     replace_training_plan,
 )
 from tests.test_training_routes import (  # noqa: F401 - fixture import
+
+# LP21: characterizes the browser save path; production closes the alias (D1).
+pytestmark = pytest.mark.usefixtures('legacy_browser_plan_saves')
     _seven_day_program,
     plan_save_token,
 )
@@ -166,7 +169,7 @@ class TestReplacementAuthority:
         result = replace_training_plan(
             user.id, PlanExpectation(absent=False, lineage_id=before,
                                      mutation_version=0),
-            plan_data=PLAN_B, score=9.0)
+            plan_data=PLAN_B, score=9.0, authority=None)
 
         rows = _rows(user.id)
         assert len(rows) == 1
@@ -189,7 +192,7 @@ class TestReplacementAuthority:
                     user.id,
                     PlanExpectation(absent=False, lineage_id=seeded.lineage_id,
                                     mutation_version=2),
-                    plan_data=PLAN_B, score=9.0)
+                    plan_data=PLAN_B, score=9.0, authority=None)
 
         assert raised.value.reason == "version_mismatch"
         assert deletes == []
@@ -206,7 +209,7 @@ class TestReplacementAuthority:
                     user.id,
                     PlanExpectation(absent=False, lineage_id="a-different-plan",
                                     mutation_version=0),
-                    plan_data=PLAN_B, score=9.0)
+                    plan_data=PLAN_B, score=9.0, authority=None)
 
         assert raised.value.reason == "lineage_mismatch"
         assert deletes == []
@@ -224,7 +227,7 @@ class TestReplacementAuthority:
                 user.id,
                 PlanExpectation(absent=False, lineage_id="some-other-lineage",
                                 mutation_version=0),
-                plan_data=PLAN_B, score=9.0)
+                plan_data=PLAN_B, score=9.0, authority=None)
         assert raised.value.reason == "lineage_mismatch"
 
     def test_expecting_a_plan_that_no_longer_exists_refuses(
@@ -235,7 +238,7 @@ class TestReplacementAuthority:
                 user.id,
                 PlanExpectation(absent=False, lineage_id="gone",
                                 mutation_version=0),
-                plan_data=PLAN_B, score=9.0)
+                plan_data=PLAN_B, score=9.0, authority=None)
         assert raised.value.reason == "expected_present_but_absent"
 
     def test_creation_succeeds_and_issues_no_destructive_statement(
@@ -252,7 +255,7 @@ class TestReplacementAuthority:
         with delete_spy() as deletes:
             result = replace_training_plan(
                 user.id, PlanExpectation(absent=True),
-                plan_data=PLAN_A, score=5.0)
+                plan_data=PLAN_A, score=5.0, authority=None)
 
         assert deletes == []
         rows = _rows(user.id)
@@ -269,7 +272,7 @@ class TestReplacementAuthority:
             with pytest.raises(PlanReplacementConflict) as raised:
                 replace_training_plan(
                     user.id, PlanExpectation(absent=True),
-                    plan_data=PLAN_B, score=9.0)
+                    plan_data=PLAN_B, score=9.0, authority=None)
 
         assert raised.value.reason == "expected_absent_but_plan_exists"
         assert deletes == []
@@ -299,7 +302,7 @@ class TestReplacementAuthority:
                     user.id,
                     PlanExpectation(absent=False, lineage_id=seeded.lineage_id,
                                     mutation_version=0),
-                    plan_data=PLAN_B, score=9.0)
+                    plan_data=PLAN_B, score=9.0, authority=None)
 
         assert raised.value.reason == "plan_appeared"
         assert deletes == []
@@ -323,7 +326,7 @@ class TestReplacementAuthority:
                     attacker.id,
                     PlanExpectation(absent=False, lineage_id=target.lineage_id,
                                     mutation_version=0),
-                    plan_data=PLAN_B, score=9.0)
+                    plan_data=PLAN_B, score=9.0, authority=None)
 
         assert raised.value.reason == "expected_present_but_absent"
         assert deletes == []
@@ -352,7 +355,7 @@ class TestReplacementAuthority:
                 user.id,
                 PlanExpectation(absent=False, lineage_id=lineage,
                                 mutation_version=0),
-                plan_data=PLAN_B, score=9.0)
+                plan_data=PLAN_B, score=9.0, authority=None)
 
         monkeypatch.undo()
         rows = _rows(user.id)
@@ -399,7 +402,7 @@ class TestCoachMutationInteraction:
         with delete_spy() as deletes:
             with pytest.raises(PlanReplacementConflict) as raised:
                 replace_training_plan(user.id, stale, plan_data=PLAN_B,
-                                      score=9.0)
+                                      score=9.0, authority=None)
 
         assert raised.value.reason == "version_mismatch"
         assert deletes == []
@@ -426,7 +429,7 @@ class TestCoachMutationInteraction:
             user.id,
             PlanExpectation(absent=False, lineage_id=seeded.lineage_id,
                             mutation_version=0),
-            plan_data=PLAN_B, score=9.0)
+            plan_data=PLAN_B, score=9.0, authority=None)
 
         with pytest.raises(UndoUnavailable):
             undo_last_change(user.id, MutationContext(

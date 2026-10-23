@@ -104,9 +104,6 @@ def generate_and_persist(
 
         store.retire_abandoned(user_id)
         allowance.settle_pending(user_id)
-        refused = store.refuse_stale_generated(user_id)
-        if refused is not None:
-            allowance.settle(refused)
         operation, result = _inspect_durable(
             user_id, key, request.fingerprint)
         if result is not None:
@@ -116,6 +113,14 @@ def generate_and_persist(
             raise ExistingPlanRefused()
 
         active = store.find_active_for_owner(user_id)
+        if (active is not None and active.status == TRAINING_PLAN_GENERATION_GENERATED
+                and (operation is None or active.id != operation.id)):
+            # Withdrawn GENERATED work can never commit: end it instead of
+            # letting it block this owner forever (LP21 no stranded operation).
+            refused = store.refuse_stale_generated(user_id)
+            if refused is not None:
+                allowance.settle(refused)
+                active = None
         if active is not None and (operation is None or active.id != operation.id):
             raise GenerationInProgress()
 

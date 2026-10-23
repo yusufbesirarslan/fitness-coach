@@ -31,6 +31,9 @@ from app.services.training_generation.output_errors import (
     SchemaInvalidError,
 )
 
+# LP21: command-layer tests with fake providers; real D1 fencing lives in test_lp21_d1_operation_fencing_pg.py.
+pytestmark = pytest.mark.usefixtures('synthetic_operation_authority')
+
 
 CANONICAL = {
     "gun_sayisi": 3,

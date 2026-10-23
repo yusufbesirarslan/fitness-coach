@@ -147,6 +147,7 @@ DELETE = '    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL
 SCORE = '    score = data.get("score")\n'
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_n4_delete_before_validation_is_detected(app, client, auth_user, monkeypatch):
     source = contract.PLAN_ROUTES.replace('\r\n', '\n')
     assert source.count(DELETE) == 1 and source.count(SCORE) == 1

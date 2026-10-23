@@ -13,6 +13,7 @@ from app.services.mobile_training_generation.contract import parse_native_reques
 from app.services.mobile_training_generation.errors import GenerationInProgress, IdempotencyConflict, StoredGenerationFailure
 from app.services.training_generation.output_errors import GenerationUnavailableError
 from test_mobile_training_generation_api import CANONICAL, _document, mobile_user, as_mobile
+from consent_projection_support import synthetic_authority
 
 GENERATE='/api/v1/training/plans/replacement-proposals'
 CONFIRM='/api/v1/training/plans/replacement/confirm'
@@ -73,7 +74,7 @@ def test_generation_replay_conflict_and_no_plan_write(replacement,provider):
 
 
 def test_claim_precedes_provider_and_frozen_recovery(replacement,provider):
-    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     row=Operation.query.one(); frozen=row.generation_context
     assert row.status=='IN_PROGRESS' and Proposal.query.count()==0 and not provider
     with pytest.raises(GenerationInProgress):run(replacement)
@@ -86,15 +87,15 @@ def test_claim_precedes_provider_and_frozen_recovery(replacement,provider):
 
 
 def test_late_attempt_fenced_and_recovery_bounded(replacement):
-    first=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    first=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     expire(Operation.query.one())
-    second=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    second=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     with pytest.raises(GenerationInProgress):gen.publish(first[0],first[1],_document(),8)
     with pytest.raises(GenerationInProgress):gen.fail(first[0],first[1],'TRAINING_PLAN_GENERATION_UNAVAILABLE',503)
     assert Proposal.query.count()==0 and Operation.query.one().lease_token==second[1]
     expire(Operation.query.one())
     try:
-        gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+        gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
         error=None
     except Exception as caught:error=caught
     assert isinstance(error,StoredGenerationFailure)
@@ -105,7 +106,7 @@ def test_late_attempt_fenced_and_recovery_bounded(replacement):
 
 @pytest.mark.parametrize('dimension',['lineage_id','mutation_version','plan_data'])
 def test_publish_checks_full_binding(replacement,dimension):
-    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     plan=TrainingPlan.query.one()
     setattr(plan,dimension,{'lineage_id':'other-lineage','mutation_version':1,'plan_data':plan.plan_data+' '}[dimension]);db.session.commit()
     with pytest.raises(StoredGenerationFailure) as e:gen.publish(*admitted[:2],_document(),8)
@@ -115,7 +116,7 @@ def test_publish_checks_full_binding(replacement,dimension):
 
 @pytest.mark.parametrize('fault',['proposal','operation','commit'])
 def test_publication_rolls_back_atomically(replacement,monkeypatch,fault):
-    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     def fail(*args):raise RuntimeError('injected persistence fault')
     target={'proposal':Proposal,'operation':Operation}.get(fault)
     listener='before_insert' if fault=='proposal' else 'before_update'
@@ -134,11 +135,11 @@ def test_publication_rolls_back_atomically(replacement,monkeypatch,fault):
 
 def test_quota_once_recovery_and_failure_refund(replacement,app,monkeypatch):
     app.config['AI_PLAN_QUOTA_ENABLED']=True
-    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     row=Operation.query.one()
     assert row.quota_reserved and replacement.user_metadata['ai_plan_quota']['training']==1
     expire(row)
-    second=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    second=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     assert replacement.user_metadata['ai_plan_quota']['training']==1
     gen.fail(*second[:2],'TRAINING_PLAN_GENERATION_UNAVAILABLE',503)
     db.session.refresh(replacement)
@@ -203,14 +204,14 @@ def test_cross_owner_proposal_indistinguishable(client,replacement,as_mobile,pro
 
 
 def test_expired_lease_cannot_publish_without_takeover(replacement):
-    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     expire(Operation.query.one())
     with pytest.raises(GenerationInProgress):gen.publish(*admitted[:2],_document(),8)
     assert Proposal.query.count()==0
 
 
 def test_superseded_expired_key_is_terminal(replacement,provider):
-    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1')
+    admitted=gen.claim(replacement,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(replacement.id))
     expire(Operation.query.one())
     result=run(replacement,'generation-key-2')
     with pytest.raises(StoredGenerationFailure) as error:run(replacement)

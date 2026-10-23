@@ -25,6 +25,9 @@ from sqlalchemy import event
 from app.extensions import db
 from app.models import NutritionPlan, TrainingPlan
 from tests.test_training_routes import (  # noqa: F401 - fixture import
+
+# LP21: characterizes the browser save path; production closes the alias (D1).
+pytestmark = pytest.mark.usefixtures('legacy_browser_plan_saves')
     _seven_day_program,
     plan_save_token,
 )

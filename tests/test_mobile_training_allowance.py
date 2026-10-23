@@ -353,6 +353,7 @@ class _Crash(BaseException):
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
+@pytest.mark.usefixtures("synthetic_operation_authority")
 def test_abandoned_dispatch_retires_as_one_expired_unit_and_late_output_is_fenced(
         app, client, mobile_user, as_mobile, metered, provider, monkeypatch):
     app.config["AI_ALLOWANCE_POLICY"] = fixture_policy(

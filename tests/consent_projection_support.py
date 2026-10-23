@@ -17,12 +17,7 @@ def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
     }})
     monkeypatch.setattr(consent, 'generation', lambda owner: 0)
     monkeypatch.setattr(consent, 'preflight', lambda *a, **kw: None)
-    # LP21 operation fencing: the same ALLOW at operation capture, publication
-    # and canonical-write fences. The provenance codec stays real.
-    monkeypatch.setattr(consent, 'begin_operation', lambda owner, feature, *a, **kw:
-                        consent.OperationAuthority(owner, feature, 1, 'synthetic-layer-test'))
-    monkeypatch.setattr(consent, 'authorize_operation', lambda *a, **kw: None)
-    monkeypatch.setattr(consent, 'fence', lambda *a, **kw: None)
+    allow_operation_fences(monkeypatch)
     monkeypatch.setattr(consent, 'dispatch', lambda *a, **kw: nullcontext())
     monkeypatch.setattr(consent, 'stream_dispatch', lambda *a, **kw: nullcontext())
     if memory:
@@ -32,6 +27,32 @@ def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
     if app is not None and memory:
         monkeypatch.setitem(app.config, 'AI_MEMORY_ENABLED', True)
 
+
+
+def allow_operation_fences(monkeypatch):
+    """LP21 operation fencing: ALLOW at operation capture, publication and the
+    canonical-write fence. The provenance codec and dispatch stay real."""
+    from app.services import ai_consent as consent
+    monkeypatch.setattr(consent, 'begin_operation', lambda owner, feature, *a, **kw:
+                        consent.OperationAuthority(owner, feature, 1, 'synthetic-layer-test'))
+    monkeypatch.setattr(consent, 'authorize_operation', lambda *a, **kw: None)
+    monkeypatch.setattr(consent, 'fence', lambda *a, **kw: None)
+
+
+def open_browser_plan_saves(monkeypatch):
+    """Lift only the two LP21 browser plan-save closures; ``None`` provenance
+    passes the writer fence, any real authority is still fenced for real."""
+    from app.services import ai_consent as consent
+    from app.blueprints import ai_consent as routes
+    aliases = {'training.save_training_plan', 'nutrition.save_nutrition_plan'}
+    monkeypatch.setattr(routes, '_CLOSED_ENDPOINTS', routes._CLOSED_ENDPOINTS - aliases)
+    real = consent.fence
+
+    def fence(authority):
+        if authority is None:
+            return None
+        return real(authority)
+    monkeypatch.setattr(consent, 'fence', fence)
 
 
 def assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient):
@@ -67,3 +88,15 @@ def assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient):
                     admission.create(sdk)
     sdk.assert_not_called()
     assert AIConsentState.query.count() == AIConsentEvent.query.count() == 0
+
+
+def synthetic_authority(owner, feature='training_plan'):
+    """The ALLOW-layer operation authority ``allow_operation_fences`` issues."""
+    from app.services import ai_consent as consent
+    return consent.OperationAuthority(owner, feature, 1, 'synthetic-layer-test')
+
+
+def bound_candidate(owner, document_text, feature='training_plan'):
+    """A staged AI candidate as production stages it (LP21 provenance envelope)."""
+    from app.services import ai_consent as consent
+    return consent.bind_candidate(synthetic_authority(owner, feature), document_text)

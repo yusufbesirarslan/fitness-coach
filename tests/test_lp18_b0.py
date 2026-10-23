@@ -10,6 +10,11 @@ from app.models import (User, TrainingPlan, WorkoutSession,
 from app.services.training_plan_replacement import service as s
 from app.services.plan_mutation.fingerprint import snapshot_fingerprint
 from app.services.workout_session import start_session
+from consent_projection_support import bound_candidate
+
+# LP21: these qualify receipt/binding semantics; real D1 fencing of the same
+# writer lives in tests/test_lp21_d1_operation_fencing_pg.py.
+pytestmark = pytest.mark.usefixtures("synthetic_operation_authority")
 
 DAY = date(2026, 10, 5)
 
@@ -30,7 +35,7 @@ def foundation(app):
         db.session.add(plan); db.session.commit()
         uid = owner.id
         binding = s.BaseBinding(plan.lineage_id, plan.mutation_version, snapshot_fingerprint(plan.plan_data))
-        token = s.stage_proposal(uid, binding, plan_data=plan_text('New'), score=9)
+        token = s.stage_proposal(uid, binding, plan_data=bound_candidate(uid, plan_text('New')), score=9)
         yield uid, token, binding
 
 
@@ -54,7 +59,7 @@ def test_success_and_replay_survive_restart_plan_and_proposal_deletion(foundatio
     assert result.lineage_id != binding.lineage_id
     from app.services.plan_replacement import replace_training_plan, PlanExpectation
     later = replace_training_plan(uid, PlanExpectation(False, result.lineage_id, 0),
-                                  plan_data=plan_text('Later'), score=8)
+                                  plan_data=plan_text('Later'), score=8, authority=None)
     Proposal.query.filter_by(user_id=uid).delete(); db.session.commit(); db.session.remove()
     replay = s.confirm_replacement(uid, token, 'confirm-key-1')
     assert replay.replayed and replay.lineage_id == result.lineage_id
@@ -169,7 +174,7 @@ def test_browser_still_replaces_with_active(foundation):
     start_session(uid, today=DAY)
     from app.services.plan_replacement import replace_training_plan, PlanExpectation
     result = replace_training_plan(uid, PlanExpectation(False, binding.lineage_id, 0),
-                                  plan_data=plan_text('Browser'), score=8)
+                                  plan_data=plan_text('Browser'), score=8, authority=None)
     assert result.lineage_id != binding.lineage_id
     assert WorkoutSession.query.one().status == 'active'
     assert Receipt.query.count() == 0
