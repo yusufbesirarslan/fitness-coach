@@ -10,14 +10,21 @@ try:
 except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalır
     anthropic = None
 
-from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
+from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, OPENAI_MODEL
 from app.extensions import bedrock_client, openai_client
-from app.services import ai_provider_call, ai_recovery, ai_usage
+from app.services import ai_model_policy, ai_provider_call, ai_recovery, ai_usage
 from app.services.ai_recovery import TransientAIError
 from app.services.ai_spend_guard import AISpendLimitExceeded
 
 logger = logging.getLogger(__name__)
 _completion_tls = threading.local()
+
+
+class ModelRefusal(RuntimeError):
+    """The model declined (stop_reason "refusal"). Not transient, never a fallback trigger."""
+
+
+_REFUSAL_TEXT = "AI servisi bu isteği yanıtlayamadı. Lütfen isteğini farklı ifade et."
 
 
 @dataclass(frozen=True)
@@ -48,7 +55,15 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
     `messages` Anthropic ile uyumlu [{"role","content"}] listesidir; system_prompt
     varsa başa bir system mesajı olarak eklenir. Hata durumunda kullanıcı-dostu bir
     RuntimeError fırlatır; çağıranlar bunu kendi try/except fallback'leriyle yakalar.
+
+    Hafif yolun TEK girişidir (tarihsel adıyla): AI_MODEL_ROUTING=claude55 iken
+    aynı çağrı Bedrock Haiku 5.5'e gider ve OpenAI'ya hiçbir istek çıkmaz.
     """
+    family, light_model = ai_model_policy.light_route()
+    if family == "bedrock":
+        return _claude_chat(messages, system_prompt=system_prompt,
+                            max_tokens=max_tokens, temperature=temperature,
+                            feature=feature, model=light_model)
     full_messages = []
     if system_prompt:
         full_messages.append({"role": "system", "content": system_prompt})
@@ -98,8 +113,10 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
 
 
 def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
-                 feature="other"):
-    """Ağır görev LLM çağrısı (Claude Sonnet 4.5 — Amazon Bedrock, Messages API).
+                 feature="other", model=None):
+    """Bedrock Claude çağrısı (Messages API). ``model`` verilmezse ağır model
+    (legacy: Sonnet 4.5, claude55: Sonnet 5.5); hafif yol Haiku 5.5'i geçirir.
+    5.5 istek yüzeyi (sampling yok, thinking/effort) admit() içinde uygulanır.
 
     `_openai_chat` ile AYNI imzayı taşır; OpenAI-stili argümanları Anthropic'e çevirir:
       • system_prompt ve messages içindeki her {"role":"system"} üst düzey `system=`
@@ -118,8 +135,9 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
             convo.append(m)
     system = "\n\n".join(p for p in sys_parts if p)
     capped = min(max_tokens, BEDROCK_MAX_TOKENS)
+    model = model or ai_model_policy.heavy_model()
     try:
-        kwargs = dict(model=BEDROCK_MODEL, max_tokens=capped,
+        kwargs = dict(model=model, max_tokens=capped,
                       messages=convo, temperature=temperature)
         if system:
             kwargs["system"] = system
@@ -127,6 +145,11 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
                                     payload=kwargs) as call:
             resp = call.create(bedrock_client.messages.create)
         finish_reason = getattr(resp, "stop_reason", None)
+        if finish_reason == "refusal":
+            # A decline is an answer, not a transport failure: no retry, no
+            # fallback to another model (ai_usage records the category).
+            logger.warning("[AI] model refusal feature=%s", ai_usage.normalize_feature(feature))
+            raise ModelRefusal(_REFUSAL_TEXT)
         truncated = finish_reason == "max_tokens"
         if truncated:
             logger.warning("Claude yanıtı max_tokens=%s sınırında kesildi (stop_reason=max_tokens)", capped)
@@ -155,6 +178,12 @@ def _image_block(image_bytes, media_type):
     import base64
     if media_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
         media_type = "image/jpeg"
+    if ai_model_policy.claude55():
+        from app.services.vision_images import ImagePreparationError, fit_standard_envelope
+        try:
+            image_bytes, media_type = fit_standard_envelope(image_bytes, media_type)
+        except ImagePreparationError:
+            raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.") from None
     return {
         "type": "image",
         "source": {
@@ -167,17 +196,14 @@ def _image_block(image_bytes, media_type):
 
 def _bedrock_image_message(content, max_tokens, temperature, feature="vision"):
     try:
-        payload = dict(model=BEDROCK_MODEL,
+        payload = dict(model=ai_model_policy.heavy_model(),
                        max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
                        messages=[{"role": "user", "content": content}],
                        temperature=temperature)
         with ai_provider_call.admit(feature=feature, provider="bedrock",
                                     payload=payload) as call:
             resp = call.create(bedrock_client.messages.create)
-        for block in resp.content:
-            if getattr(block, "type", None) == "text":
-                return block.text
-        return ""
+        return _vision_text(resp, feature)
     except AISpendLimitExceeded:
         raise
     except anthropic.RateLimitError:
@@ -213,26 +239,19 @@ def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, tem
     Yalnızca BEDROCK_ENABLED ve anthropic paketi mevcutken çağrılmalı (çağıran kontrol
     eder). Hata durumunda _claude_chat ile aynı Türkçe RuntimeError'ları fırlatır;
     çağıranlar fail-open/fallback için yakalar."""
-    import base64
-    if media_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
-        media_type = "image/jpeg"
-    b64 = base64.b64encode(image_bytes).decode("utf-8")
     content = [
         {"type": "text", "text": prompt},
-        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+        _image_block(image_bytes, media_type),
     ]
     try:
-        payload = dict(model=BEDROCK_MODEL,
+        payload = dict(model=ai_model_policy.heavy_model(),
                        max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
                        messages=[{"role": "user", "content": content}],
                        temperature=temperature)
         with ai_provider_call.admit(feature=feature, provider="bedrock",
                                     payload=payload) as call:
             resp = call.create(bedrock_client.messages.create)
-        for block in resp.content:
-            if getattr(block, "type", None) == "text":
-                return block.text
-        return ""
+        return _vision_text(resp, feature)
     except AISpendLimitExceeded:
         raise
     except anthropic.RateLimitError:
@@ -242,6 +261,16 @@ def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, tem
     except anthropic.APIError as e:
         logger.warning("Bedrock görsel doğrulama APIError: %s", e)
         raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
+
+
+def _vision_text(resp, feature):
+    if getattr(resp, "stop_reason", None) == "refusal":
+        logger.warning("[AI] model refusal feature=%s", ai_usage.normalize_feature(feature))
+        raise ModelRefusal(_REFUSAL_TEXT)
+    for block in resp.content:
+        if getattr(block, "type", None) == "text":
+            return block.text
+    return ""
 
 
 def _completion_from_text(text, *, fallback_used=False):
@@ -257,14 +286,26 @@ def _completion_from_text(text, *, fallback_used=False):
     return ChatCompletion(text=text or "", fallback_used=fallback_used)
 
 
+def heavy_primary_route():
+    """(recipient, model) the heavy router sends to first.
+
+    A refusal there (`AISpendLimitExceeded`, consent included) ends the call:
+    the router falls back to OpenAI only after a non-refusal Bedrock failure.
+    """
+    if BEDROCK_ENABLED and anthropic is not None:
+        return "bedrock", ai_model_policy.heavy_model()
+    return ai_model_policy.light_route()
+
+
 def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0.7,
                     feature="other"):
     """Like `_heavy_chat` but keeps finish/truncation metadata for generation."""
     _completion_tls.last = None
     lg_key = ai_recovery.lastgood_key(
-        "heavy_chat", BEDROCK_MODEL, system_prompt or "", messages, max_tokens)
+        "heavy_chat", ai_model_policy.heavy_model(), system_prompt or "", messages,
+        max_tokens)
     fallback_used = False
-    if BEDROCK_ENABLED and anthropic is not None:
+    if heavy_primary_route()[0] == "bedrock":
         try:
             reply = ai_recovery.call_with_recovery(
                 lambda: _claude_chat(messages, system_prompt=system_prompt,
@@ -274,16 +315,19 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
             logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
             ai_recovery.remember_last_good(lg_key, reply)
             return _completion_from_text(reply, fallback_used=False)
-        except AISpendLimitExceeded:
-            # A spend ceiling is not a provider failure: falling back to OpenAI
-            # would keep spending after the boundary said stop.
+        except (AISpendLimitExceeded, ModelRefusal):
+            # A spend ceiling is not a provider failure: falling back to the
+            # light model would keep spending after the boundary said stop.
+            # A refusal is an answer; another model is not asked the same thing.
             raise
         except Exception as e:
             fallback_used = True
-            logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s",
+            logger.warning("Bedrock/Claude çağrısı başarısız, %s düşülüyor: %s",
+                           "hafif modele" if ai_model_policy.claude55() else "OpenAI'ya",
                            type(e).__name__)
     try:
-        logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
+        logger.info("[AI] sağlayıcı: hafif yol (%s)",
+                    ai_usage.normalize_model(*ai_model_policy.light_route()))
         with ai_usage.fallback_scope(fallback_used, feature=feature):
             reply = ai_recovery.call_with_recovery(
                 lambda: _openai_chat(messages, system_prompt=system_prompt,
@@ -292,7 +336,8 @@ def _heavy_complete(messages, system_prompt=None, max_tokens=1024, temperature=0
                 feature="heavy_chat.openai")
         ai_recovery.remember_last_good(lg_key, reply)
         return _completion_from_text(reply, fallback_used=fallback_used)
-    except AISpendLimitExceeded:
+    except (AISpendLimitExceeded, ModelRefusal):
+        # Explicit refusals are terminal, even when a last-good answer exists.
         raise
     except Exception:
         cached = ai_recovery.recall_last_good(lg_key)

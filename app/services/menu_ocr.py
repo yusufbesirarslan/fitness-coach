@@ -124,6 +124,44 @@ def _extract_pdf_pages_via_vision(pdf_bytes, page_indices):
 
 
 
+_OCR_INSTRUCTION = (
+    "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
+    "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
+    "Sadece menüde yazanları aynen oku."
+)
+
+
+def _extract_text_with_claude(image_bytes, mime, vision_system, model, ai_provider_call):
+    """claude55 routing: the same OCR request on Haiku 5.5 (Anthropic image block)."""
+    from app.extensions import bedrock_client
+    from app.services.ai import _image_block
+    payload = dict(
+        model=model,
+        max_tokens=4000,
+        temperature=0.0,
+        system=vision_system,
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": _OCR_INSTRUCTION},
+            _image_block(image_bytes, mime),
+        ]}],
+    )
+    with ai_provider_call.admit(feature="menu_ocr", provider="bedrock",
+                                payload=payload, gate=False) as call:
+        resp = call.create(bedrock_client.messages.create)
+    if getattr(resp, "stop_reason", None) == "refusal":
+        current_app.logger.warning("[VISION OCR] model refusal")
+        return ""
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        current_app.logger.warning("[VISION OCR] output truncated at max_tokens")
+    result = ""
+    for block in getattr(resp, "content", None) or []:
+        if getattr(block, "type", None) == "text":
+            result = (block.text or "").strip()
+            break
+    current_app.logger.info(f"[VISION OCR] Extracted {len(result)} chars")
+    return result
+
+
 def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
     import base64
 
@@ -158,7 +196,11 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         # and a refusal lands in the except below ("menu unreadable") without
         # reaching the provider. A scanned PDF pays per page, up to
         # MENU_OCR_MAX_PAGES pages.
-        from app.services import ai_provider_call
+        from app.services import ai_model_policy, ai_provider_call
+        family, light_model = ai_model_policy.light_route()
+        if family == "bedrock":
+            return _extract_text_with_claude(
+                image_bytes, mime, vision_system, light_model, ai_provider_call)
         payload = dict(
             model=OPENAI_MODEL,
             # L5: çıktı 4000 token ile sınırlı (uzun menülerin tam OCR'ı için

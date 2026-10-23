@@ -1,6 +1,7 @@
 """Architecture and side-effect guards for native Training reads."""
 import ast
 import json
+import re
 from itertools import product
 from datetime import datetime
 from pathlib import Path
@@ -322,6 +323,10 @@ def _statements_for(client, path, headers, *, freeze=False):
     return response, statements
 
 
+_PLAN_TABLE = re.compile(r"\bFROM training_plan\b(?!_)")
+_LEDGER_TABLE = re.compile(r"\bFROM training_plan_generation_operation\b")
+
+
 @pytest.mark.parametrize("exercise_count", [1, 20])
 def test_training_reads_have_a_constant_bounded_query_cost(
     client, make_user, monkeypatch, exercise_count
@@ -344,5 +349,19 @@ def test_training_reads_have_a_constant_bounded_query_cost(
     assert preference_statements == []
     assert len(plan_statements) <= 5, plan_statements
     assert len(workout_statements) <= 1, workout_statements
-    assert sum("FROM training_plan" in item for item in plan_statements) == 1
-    assert sum("FROM training_plan" in item for item in workout_statements) == 1
+    # Exact table names: the LP21 origin read hits the generation ledger, whose
+    # name starts with "training_plan" too and must not pass for a plan load.
+    assert sum(bool(_PLAN_TABLE.search(item)) for item in plan_statements) == 1
+    # No origin opt-in, no ledger read (LP21).
+    assert not any(_LEDGER_TABLE.search(item) for item in plan_statements)
+    assert sum(bool(_PLAN_TABLE.search(item)) for item in workout_statements) == 1
+    assert not any(_LEDGER_TABLE.search(item) for item in workout_statements)
+
+    # The LP21 opt-in costs exactly one more statement: the ledger read.
+    _, origin_statements = _statements_for(
+        client, "/api/v1/training/plans/current?include_origin=1", headers,
+        freeze=True,
+    )
+    assert len(origin_statements) == len(plan_statements) + 1, origin_statements
+    assert sum(bool(_LEDGER_TABLE.search(item)) for item in origin_statements) == 1
+    assert sum(bool(_PLAN_TABLE.search(item)) for item in origin_statements) == 1

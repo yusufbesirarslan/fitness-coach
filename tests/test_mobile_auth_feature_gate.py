@@ -153,6 +153,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         ("/api/v1/subscription/purchase-context", ("GET",)),
         ("/api/v1/subscription/verify", ("POST",)),
         ("/api/v1/subscription/entitlement", ("GET",)),
+        # MON-02-BE-02: Apple-signed intake, own flag (404 when OFF).
+        ("/api/v1/subscription/apple-notifications", ("POST",)),
         ("/api/v1/ai/allowances", ("GET",)),
         ("/api/v1/auth/login", ("POST",)),
         ("/api/v1/auth/refresh", ("POST",)),
@@ -233,6 +235,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # TI-01B private catalog note, independently gated by P0 readiness.
             ("/api/v1/training/exercises/<exercise_id>/note", ("GET", "PUT")),
             ("/api/v1/training/plans", ("POST",)),
+            # LP21 non-AI general first plan; no provider, no D1 gate.
+            ("/api/v1/training/plans/general", ("POST",)),
             ("/api/v1/training/plans/replacement-proposals", ("POST",)),
             ("/api/v1/training/plans/replacement/confirm", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),

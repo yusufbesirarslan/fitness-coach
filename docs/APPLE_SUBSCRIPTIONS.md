@@ -1,4 +1,4 @@
-# MON-02-BE-01 Apple subscription foundation
+# MON-02-BE-01/BE-02 Apple subscription foundation and lifecycle
 
 Dark backend foundation only. `APPLE_SUBSCRIPTIONS_ENABLED=0` is the default;
 monthly and annual configured products yield one Premium tier. No legacy
@@ -93,13 +93,21 @@ for old purchases, restore and cancelled renewal: Apple documents signing time
 but does not explicitly guarantee both responses are re-signed per lookup.
 No live interoperability is claimed.
 
+BE-02 investigation: the bound is unchanged and still applies to every status
+lookup, including reconciliation. It never applies to notifications, because a
+notification's embedded snapshot is never authority: delayed Apple retries (days)
+and resends stay valid hints and only trigger a fresh lookup. If Apple turns out
+not to re-sign status snapshots per request for restored/older transactions, both
+verify and reconciliation fail closed as `STALE_SNAPSHOT` (bounded retries, no
+access granted or extended). Any relaxation needs MON-03 evidence and a separate,
+versioned decision; it is not made here.
+
 ## Bounded entitlement and persistence
 
 A verified row grants access only while
 its paid/grace expiry is future AND last verification age is under 24 hours.
 An outage leaves previously verified state intact within that bound, then
 returns FREE/pending. Lookup never refreshes or extends the validity itself.
-Notifications and ongoing reconciliation are absent.
 
 `apple_account_association`: User FK/PK, unique random UUID token.
 `apple_subscription`: User FK, environment, original/latest transaction,
@@ -112,6 +120,102 @@ No signed payloads are stored or logged. User deletion cascades both tables;
 a newly registered account cannot claim an old signed account token. Support
 recovery/transfers are deferred, not automatic.
 
+## BE-02 notifications, lifecycle and reconciliation
+
+`POST /api/v1/subscription/apple-notifications` (App Store Server Notifications
+V2, `{"signedPayload": "<JWS>"}`, ≤ 64 KiB) exists only when
+`APPLE_NOTIFICATIONS_ENABLED` and `APPLE_SUBSCRIPTIONS_ENABLED` are ON; otherwise
+404 before any work. No Bearer: authenticity is the official
+`verify_and_decode_notification` (online checks) plus verification of the inner
+signed transaction and renewal, exact bundle/environment, App Apple ID (library
+in Production; any value present in Sandbox must match), version 2.0, canonical
+UUID, closed type/subtype names and no future signing beyond five minutes, all
+inside the shared blocking capacity permit. Answers: 200 `{}` (recorded,
+duplicate or authentic-but-irrelevant: TEST/summary, other product/group, Family
+Sharing); 400/413 malformed; 422 `SUBSCRIPTION_INVALID_EVIDENCE` unauthenticated or
+cross-identity; 503 temporary/unconfigured (Apple retries). Logs carry closed
+codes only.
+
+A notification never changes access. One commit records an
+`apple_notification_receipt` (PK = verified notificationUUID: durable dedup; type,
+subtype, original transaction ID, disposition, timestamps; no payload or token)
+and coalesces an `apple_subscription_reconciliation` request per (environment,
+original transaction) with the signed account token as a hint only.
+
+`flask apple-subscription-reconcile [--limit 25] [--sweep-limit 50]` (not
+scheduled anywhere) runs one bounded pass: it enqueues subscriptions last
+verified over 12 h ago (not revoked, expiry within 60 days: Apple's billing retry
+maximum), then claims due requests one at a time (`FOR UPDATE SKIP LOCKED`,
+5-minute lease, attempt counted before any Apple I/O). The owner is our
+ownership row, else the association matching the signed hint, else
+`UNMATCHED_ACCOUNT`. A fresh Get All Subscription Statuses lookup goes through
+the BE-01 validation and `persist_verified`. Outcomes: `APPLIED`, `SUPERSEDED`
+(a newer lookup already stored), terminal codes for evidence that is invalid in
+itself (signature, identity, group, grace), ownership, account or revocation, or
+retries (`STALE_SNAPSHOT`, `OUT_OF_ORDER`, `APPLE_NOT_FOUND` = any Apple 404,
+`SUBSCRIPTION_INVALID_STATE` storage race, Apple/OCSP outage) with backoff 1 min
+doubling to 1 h and `RETRY_EXHAUSTED` after 8 attempts. Client verify still
+answers a 404 as 422 `SUBSCRIPTION_INVALID_EVIDENCE`. An outage stops the pass;
+claims take the fewest-attempts request first, so a backing-off retry never runs
+ahead of a fresh request (a row leaving quarantine competes as fresh: at most one
+claim per row per day). A failed receipt purge is logged and never blocks refreshes. Completion compares the request generation, so a hint arriving
+mid-lookup triggers another lookup instead of being lost; a lease-fenced finish
+lets an expired worker change nothing. Only success removes a request: terminal
+or exhausted outcomes quarantine it for 24 h (the sweep skips subscriptions with
+a request, so a failing row cannot crowd out healthy refreshes; it costs one
+lookup per day if terminal, at most 8 per quarantine cycle if retryable; an
+unmatched request drops its token hint); a new authentic notification re-arms a quarantined (never a backing
+off) request; requests older than 60 days are dropped.
+
+Known fail-closed limits (owner/MON-03): status 5 without a signed revocation
+date can never be exited by repurchase; the status-lookup path still requires
+App Apple ID to match in Sandbox (BE-01), unverified against live Sandbox; eight
+consecutive failed lookups (about 8 h on an hourly schedule) or permanently
+invalid evidence quarantine the row for 24 h, so an active row then lapses to
+`VERIFICATION_PENDING` at its 24 h bound until a notification, client verify or
+the next cycle succeeds. Failure never extends `last_verified_at`.
+
+The intake route has its own per-IP limit, `APPLE_NOTIFICATION_RATELIMIT`
+(default `120 per minute; 3600 per hour`), instead of the 600/h default. Flask-Limiter
+counts per route, so other traffic from a shared IP cannot consume it; host nginx
+`perip` (30 r/s, burst 60) is the only shared per-IP layer. A 429 makes Apple
+retry later. While either flag is OFF the limit is not evaluated (always 404).
+Every Apple 404 is retried the same way, including codes that mean app/account
+misconfiguration; this is bounded and fails closed, so alert on a spike of
+`APPLE_NOT_FOUND`. No Apple IP allow-list is assumed.
+
+Reconciliation schedule (required before activation; nothing is installed):
+run `flask apple-subscription-reconcile --limit L --sweep-limit 2L` hourly, with
+L >= max(25, ceil(N / 10)), where N counts the environment's non-revoked
+subscriptions whose expiry is within the 60-day recovery window (the rows the sweep
+polls, lapsed ones included). Rows are enqueued at 12 h, so the whole population can come due at
+once (worst case) and must be looked up within the remaining 12 h; N / 10 leaves
+two passes of margin plus room for retries. A test simulates 72 hourly passes:
+40 subscribers verified at the same instant and 5 permanently failing rows; at
+L = 4 every healthy row stays under 24 h, and at L = 2 the bound is broken.
+L <= 200 per process. Duration is an estimate, not a bound: each status call has
+a 3 s connect and 8 s per-read timeout, plus OCSP, so 200 slow lookups can take
+about 37 min or more; overlapping passes are safe under leases and SKIP LOCKED. For
+N > 2000, run concurrent workers (SKIP LOCKED is safe) or raise the cadence.
+Alert on `RETRY_EXHAUSTED`, and on a pass that ends with `processed = L` while
+due requests remain.
+
+Receipt retention (provisional V1 policy, owner decision): each pass purges at
+most 1000 receipts older than 180 days in its environment. This is safe because
+a receipt only deduplicates hints; a redelivery after purge costs one fresh
+lookup. Purge uses a sequential scan (no `received_at` index); add an index in
+a later migration if the table grows large.
+
+Lifecycle comes from Apple's authenticated status: purchase, renewal,
+cancellation (access to verified expiry), expiration, billing retry (no access),
+grace (status 4 with signed grace expiry), refund/revocation, and product
+changes within the configured group. Revocation stays terminal for its own
+transaction (including a refund reversal: fail closed, owner decision). The only
+exit is a controlled repurchase: a different Apple transaction, purchased after
+the stored revocation, signed for this owner's token. A replacement purchase
+signed for another AxisAI account conflicts and changes nothing. Deleted
+accounts are unmatched. Account transfer and support recovery remain deferred.
+
 ## Configuration and deployment gates
 
 Host-injected nonsecret values and mounted secret/root paths follow existing
@@ -122,7 +226,8 @@ credentials; Production config verifies and serves Production records only.
 No client chooses an environment. Do not configure Sandbox on a production host.
 Missing configuration does not block boot or CI, but closes all active APIs.
 
-Migration `c2b9d0e1f2a3` is additive, empty, reentrant for create_all-first boot,
+Migration `a4d6f8b0c2e1` (BE-02) adds the two empty tables above, expand-only and
+reentrant with the same fail-closed adoption rule. Migration `c2b9d0e1f2a3` is additive, empty, reentrant for create_all-first boot,
 and rejects incompatible pre-existing tables. No User data changes.
 On PostgreSQL, both required domain CHECKs must also have authoritative
 `pg_constraint.convalidated=true` on the resolved subscription table. Correct
@@ -135,9 +240,9 @@ Do not merge/deploy without separate human gates; flag remains OFF.
 
 ## Next tasks and qualification limits
 
-- BE-02: notifications V2 signature/identity validation, authoritative renewal,
-  refund/revocation reconciliation, missed-notification recovery, repurchase
-  after terminal revocation, deleted-account controlled recovery policy.
+- BE-02 (implemented, dark): see above. Open: owner confirmation of 180-day
+  retention, installing the hourly schedule, App Store Connect URLs, refund-reversal and account-transfer policy,
+  CONSUMPTION_REQUEST answers (not sent).
 - BE-03: integrate effective entitlement into existing quota enforcement with
   approved allowances. Until then this API does not bypass any existing quota.
 - IOS-01: selected StoreKit 2 dependencies, UUID binding, purchase/restore,

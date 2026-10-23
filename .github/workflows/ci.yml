@@ -10,7 +10,8 @@ on:
     # Bind D1 integration qualification directly to the branch HEAD.
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
-    branches: [main, privacy/pa03-be-core-01, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance]
+    # Qualify the K6 rollback gate (stacked on #446) at exact HEAD as well.
+    branches: [feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, privacy/pa03-be-core-01, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation, fix/priv-k6-pg18-migration, fix/mon-02-be-02-pg18-compatibility]
 
 jobs:
   tests:
@@ -23,6 +24,11 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record executed source identity
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          git show -s --format='%P' HEAD
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"   # Dockerfile ile aynı taban
@@ -35,6 +41,8 @@ jobs:
           pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
       - name: Run tests
+        env:
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         # conftest.py tüm env'i hermetik kurar (in-memory SQLite, sahte anahtarlar,
         # REDIS_URL boş) → ek servise gerek yok.
         run: >-
@@ -68,15 +76,19 @@ jobs:
         run: python -m pip install pytest==9.1.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: pytest-shard-${{ github.run_attempt }}-*
+          # Retained successful shards can belong to earlier run attempts.
+          pattern: pytest-shard-*-*
           path: shard-evidence
-          merge-multiple: true
+          merge-multiple: false
       - name: Prove exact collection and execution parity
         env:
           SHARD_RESULT: ${{ needs.tests.result }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >-
           python -m scripts.pytest_sharding shard-evidence
           --revision="$GITHUB_SHA" --result="$SHARD_RESULT"
+          --run-id="$GITHUB_RUN_ID" --run-attempt="$GITHUB_RUN_ATTEMPT"
+          --head-sha="$CI_HEAD_SHA"
 
   linux-production-locks:
     name: authoritative Linux production locks
@@ -326,6 +338,47 @@ jobs:
         # değişikliği migration'sız gelirse CI kırmızı olur.
         run: flask --app starter db check
 
+  completion-fence-pg18:
+    name: PostgreSQL 18 completion fence
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.6
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fitx_fence_pg18
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      FITX_PG_CONCURRENCY_TEST: "1"
+      PG_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fitx_fence_pg18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record executed source and PostgreSQL versions
+        run: |
+          git rev-parse HEAD
+          psql "$PG_TEST_DATABASE_URL" -c 'SELECT version()'
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Verify completion fence and Apple lifecycle migration compatibility
+        run: >-
+          python -m pytest -m pg_concurrency -q
+          tests/test_apple_lifecycle_migration_pg.py
+          tests/test_apple_reconciliation_pg.py
+          tests/test_completion_fence_pg.py
+          tests/test_priv_k6_no_photo_completion_pg.py
+          tests/test_workout_completion_pg.py
+
   mobile-pg-concurrency:
     name: PostgreSQL concurrency
     runs-on: ubuntu-latest
@@ -349,6 +402,11 @@ jobs:
         postgresql://postgres:postgres@localhost:5432/fitx_mobile_race
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record executed source identity
+        run: |
+          git rev-parse HEAD
+          git rev-parse 'HEAD^{tree}'
+          git show -s --format='%P' HEAD
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -361,6 +419,8 @@ jobs:
         run: >-
           python -m pytest -m pg_concurrency -q
           tests/test_apple_subscriptions_pg.py
+          tests/test_apple_reconciliation_pg.py
+          tests/test_apple_lifecycle_migration_pg.py
           tests/test_ai_allowances_pg.py
           tests/test_mobile_auth_pg.py
           tests/test_mobile_log_food_pg.py
@@ -368,6 +428,8 @@ jobs:
           tests/test_mobile_training_dispatch_recovery_pg.py
           tests/test_mobile_training_allowance_pg.py
           tests/test_training_allowance_migration_verifier_pg.py
+          tests/test_training_allowance_zero_attempt_pg.py
+          tests/test_training_expiry_compensation_pg.py
           tests/test_mobile_diary_mutation_pg.py
           tests/test_mobile_pump_check_pg.py
           tests/test_mobile_pump_check_comparison_pg.py
@@ -376,6 +438,7 @@ jobs:
           tests/test_pa06_privacy_pg.py
           tests/test_ai_consent_pg.py
           tests/test_training_plan_replacement_pg.py
+          tests/test_lp21_general_training_plan_pg.py
           tests/test_lp18_b0_pg.py
           tests/test_lp18_b1_pg.py
           tests/test_plan_confirmation_pg.py
@@ -383,6 +446,8 @@ jobs:
           tests/test_mobile_workout_sessions_pg.py
           tests/test_ti01b_exercise_notes_pg.py
           tests/test_workout_completion_pg.py
+          tests/test_priv_k6_no_photo_completion_pg.py
+          tests/test_completion_fence_pg.py
           tests/test_workout_session_pg.py
           tests/test_nutrition_vnext_pr7_pg.py
           tests/test_account_deletion_pg.py
@@ -401,6 +466,40 @@ jobs:
           tests/test_account_profile_pg.py
           tests/test_quest_challenge_commit_pg.py
           tests/test_r6_dual_revision_pg.py
+      - name: Completion fence everywhere (activated floor)
+        # PRIV-K6 rollback gate: the completion suites again, on a schema with
+        # the REVIEWED fence installed and the floor raised. Every canonical
+        # writer path must pass. Deselected: the two tests that deliberately
+        # write evidence without a claim (a legacy dated PumpCheck) or recreate
+        # the claim table by DDL -- the fence refuses both by design.
+        env:
+          FITX_FENCE_EVERYWHERE: raised
+        run: >-
+          python -m pytest -m pg_concurrency -q
+          -p tests.qualification.fence_everywhere_plugin
+          --deselect tests/test_priv_k6_no_photo_completion_pg.py::test_k6h_locked_recheck_refuses_a_day_claimed_while_waiting_for_the_lock
+          --deselect tests/test_priv_k6_no_photo_completion_pg.py::test_canonical_no_photo_service_uses_migration_created_sequence_and_replays_once
+          tests/test_workout_completion_pg.py
+          tests/test_priv_k6_no_photo_completion_pg.py
+          tests/test_workout_session_pg.py
+          tests/test_mobile_workout_sessions_pg.py
+          tests/test_sprint14_workout_execution_reliability_pg.py
+          tests/test_progress_pump_check_completion_pg.py
+          tests/test_account_deletion_pg.py
+          tests/test_mobile_pump_check_pg.py
+          tests/test_ti01a_execution_context_pg.py
+          tests/test_ti03_pg.py
+          tests/test_exercise_performance_history_pg.py
+      - name: Kill PRIV-K6 rollback gate mutants
+        run: >-
+          python -B tests/qualification/run_priv_k6_rollback_gate_mutations.py
+          --output qualification/priv-k6-rollback-gate-mutations.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() }}
+        with:
+          name: priv-k6-rollback-gate-mutations
+          path: qualification/priv-k6-rollback-gate-mutations.json
+          if-no-files-found: error
 
   r6-deploy-transaction-mutations:
     name: r6 deploy transaction critical mutations

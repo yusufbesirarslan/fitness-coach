@@ -6,17 +6,17 @@ Billing is the financial authority; provider-reported tokens are the usage autho
 
 The only paid SDK door is `app/services/ai_provider_call.admit()`. The ordering remains final payload → hard input/output budget → capacity permit → spend charge → physical SDK attempt → event. SDK retries are disabled; explicit door retries charge and emit separately. A physical attempt is an SDK invocation, including a failed invocation; a guard/input refusal is an event but **not** a provider attempt. `health_probe` bypasses the application spend charge, not AWS billing.
 
-Every physical attempt normally emits one `[AI-USAGE]` record. Extraction/emission failures cannot affect serving; consequently a failing log sink can lose an event. Exactly-once delivery to CloudWatch is not guaranteed. Duplicate schema-2 exports can be detected using (admission_id, attempt); the offline helper refuses overlap rather than silently deduplicating. Legacy duplicates cannot reliably be detected.
+Every physical attempt normally emits one `[AI-USAGE]` record. Extraction/emission failures cannot affect serving; consequently a failing log sink can lose an event. Exactly-once delivery to CloudWatch is not guaranteed. Duplicate schema-2/3 exports can be detected using (admission_id, attempt); the offline helper refuses overlap rather than silently deduplicating. Historical schema-1 duplicates cannot reliably be detected.
 
-Legacy event = implicit schema 1 (no schema_version). Current code = schema 2. Existing ordered keys and price fields retain their prefix order; new fields are appended:
+Historical event = implicit schema 1 (no schema_version). Current code emits additive schema 3 in both `legacy` and `claude55` routing. Schema 3 retains schema-2 identities and adds `stop_reason`, `refusal_category` and `routing`. Existing ordered keys and price fields retain their prefix order; new fields are appended:
 
 | Field | Authority and finite semantics |
 |---|---|
-| schema_version | Integer 2; absent means legacy 1 |
+| schema_version | Integer 3; 2 identifies prior identity-bearing exports; absent means historical 1 |
 | admission_id | Generated UUID hex, 32 lowercase hexadecimal characters; identifies one admitted payload across retries, not a product action |
 | job_id | Existing current RQ job UUID only; arbitrary custom job names are excluded |
 | billing_profile | global, geographic, direct, unknown; derived from exact code-owned runtime model identities |
-| fallback | Boolean; set only at existing OpenAI fallback decisions, for the matching feature |
+| fallback | Boolean; set at existing light fallback decisions (OpenAI in legacy, Haiku in claude55), for the matching feature |
 
 No environment field is added. Production web/worker identity can be derived from the known EC2 log-stream prefix and Docker service/project labels in `/axisai/app`. This establishes the source of those events, not of all account billing. Other environments, CI, operators and AWS callers remain unproven sources of the residual. Never derive environment from request headers, hostnames or caller input.
 

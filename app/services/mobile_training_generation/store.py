@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 
+import sqlalchemy as sa
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
@@ -17,7 +19,7 @@ from app.models import (
     TrainingPlanGenerationOperation,
     User,
 )
-from app.services import premium
+from app.services import ai_provider_call, premium
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.preference_contract import (
@@ -140,7 +142,8 @@ def authorize_dispatch(operation_id):
     Commit uncertainty BEFORE the network door. A lost commit acknowledgement
     cannot authorize a call: the caller must receive a successful return.
     A metered operation's AI allowance hold is created in this same commit,
-    stamped with the same instant as the marker (see ``allowance``).
+    stamped with the same instant as the marker (see ``allowance``), with
+    ``provider_attempt_possible`` False. Returns whether it is metered.
     """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
@@ -151,9 +154,11 @@ def authorize_dispatch(operation_id):
             raise GenerationInProgress()
         now = datetime.now(timezone.utc)
         allowance.bind_for_dispatch(operation, now)
+        metered = operation.allowance_metered is True
         operation.provider_dispatch_possible = True
         operation.updated_at = now.replace(tzinfo=None)
         db.session.commit()
+        return metered
     except (GenerationInProgress, TrainingAllowanceRefused):
         db.session.rollback()
         raise
@@ -162,18 +167,67 @@ def authorize_dispatch(operation_id):
         raise GenerationPersistenceUnavailable() from error
 
 
+def mark_attempt_possible(operation_id):
+    """Commit "a physical provider attempt may start" BEFORE that SDK call.
+
+    Runs after the final consent check passed and before every physical
+    invocation (``ai_provider_call.attempt_observer``). Only an IN_PROGRESS,
+    dispatched, tracked operation can record it; a retired, deleted or
+    unreachable one refuses the attempt rather than send it unrecorded. The
+    marker only moves False -> True and leaves ``updated_at`` (retirement
+    timing) untouched. Short own transaction; no ledger lock.
+    """
+    operation = TrainingPlanGenerationOperation
+    try:
+        if db.engine.dialect.name == "postgresql":
+            db.session.execute(sa.text("SET LOCAL lock_timeout = '2000ms'"))
+        marked = db.session.execute(
+            sa.update(operation)
+            .where(operation.id == operation_id,
+                   operation.status == TRAINING_PLAN_GENERATION_IN_PROGRESS,
+                   operation.provider_dispatch_possible.is_(True),
+                   operation.provider_attempt_possible.is_not(None))
+            .values(provider_attempt_possible=True, updated_at=operation.updated_at)
+            .execution_options(synchronize_session=False)).rowcount
+        if marked != 1:
+            raise GenerationPersistenceUnavailable()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise ai_provider_call.AttemptEvidenceUnavailable() from None
+
+
+def attempt_evidence(operation_id, tracked):
+    """Scope generation so every physical attempt is recorded first (metered only)."""
+    if not tracked:
+        return nullcontext()
+    return ai_provider_call.attempt_observer(lambda: mark_attempt_possible(operation_id))
+
+
 def retire_abandoned(user_id):
     """Bound active occupancy; retain dispatch uncertainty and legacy quota.
 
     Called under the short owner arbitration lock. A late worker is fenced by
-    the terminal status at staging/failure persistence. This is not remote
-    cancellation or proof that an old network request has stopped.
+    the terminal status at staging/failure persistence. Metered retirement
+    also orders against D1's existing account fence, which spans each SDK call.
+    Contention refuses retirement for now; it never waits across provider I/O.
+    This is not remote cancellation or proof that a timed-out request stopped.
     """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
                      .filter_by(user_id=user_id, status=TRAINING_PLAN_GENERATION_IN_PROGRESS)
                      .populate_existing().with_for_update().one_or_none())
         if operation is not None and operation.updated_at <= datetime.utcnow() - ABANDON_AFTER:
+            if operation.allowance_metered is True:
+                # D1 owns user -> operation during attempt admission. Never
+                # WAIT for its user fence while holding operation: NOWAIT
+                # aborts and releases operation if D1/revoke/deletion owns user.
+                # These locks span only retirement, never provider I/O.
+                owner = db.session.execute(
+                    sa.select(User.id).where(User.id == user_id)
+                    .with_for_update(nowait=True)).scalar_one_or_none()
+                if owner is None:
+                    raise GenerationPersistenceUnavailable()
             operation.status = TRAINING_PLAN_GENERATION_FAILED
             operation.error_code = "TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN"
             operation.error_http_status = 503
@@ -315,6 +369,81 @@ def commit_plan(operation_id, user_id):
     except GenerationPersistenceUnavailable:
         db.session.rollback()
         raise
+    except Exception as error:
+        db.session.rollback()
+        raise GenerationPersistenceUnavailable() from error
+
+
+class GeneralKeyRaced(RuntimeError):
+    """The general receipt INSERT lost to another row; re-read the key."""
+
+
+def _generation_live(user_id):
+    """An AI first-plan operation that may be running right now.
+
+    Older IN_PROGRESS/GENERATED rows are abandoned work: ``retire_abandoned``
+    would retire the first kind, and the AI route that could commit the second
+    is closed by D1 on main. Neither may strand the owner without a plan.
+    """
+    active = find_active_for_owner(user_id)
+    return (active is not None
+            and active.updated_at > datetime.utcnow() - ABANDON_AFTER)
+
+
+def commit_general_plan(user_id, key, fingerprint, document_json):
+    """Persist one deterministic first plan and its receipt atomically, or refuse.
+
+    The non-AI general plan's receipt is an ordinary row of this ledger, born
+    SUCCEEDED in the SAME transaction as the plan. Its markers are the truth
+    about that work: ``provider_dispatch_possible`` False (there is no
+    provider), ``allowance_metered``/``provider_attempt_possible`` NULL
+    (unmetered, untracked), no quota reserved. No AI generation can end
+    SUCCEEDED with dispatch False — ``authorize_dispatch`` commits False ->
+    True before any candidate exists — so the row cannot pass for AI work.
+    It is never IN_PROGRESS/GENERATED, so it never takes the active-owner slot
+    and never meets abandonment, allowance settlement or quota refunds.
+
+    Lock order is ``commit_plan``'s: the receipt INSERT first (its
+    ``uq_training_plan_generation_user_key`` arbitrates a same-key race), then
+    the OWNER row, and the absence check under that lock, then the plan.
+    Every refusal rolls the receipt back with everything else, so a refused
+    request consumes no key.
+    """
+    if not isinstance(document_json, str) or len(document_json.encode("utf-8")) > MAX_CANDIDATE_BYTES:
+        raise GenerationPersistenceUnavailable()
+    try:
+        now = datetime.utcnow()
+        operation = TrainingPlanGenerationOperation(
+            user_id=user_id,
+            idempotency_key=key,
+            request_fingerprint=fingerprint,
+            status=TRAINING_PLAN_GENERATION_SUCCEEDED,
+            attempt_count=1,
+            provider_dispatch_possible=False,
+            quota_reserved=False,
+            created_at=now,
+            updated_at=now,
+        )
+        db.session.add(operation)
+        db.session.flush()
+        lock_plan_owner(user_id)
+        if get_active_plan(user_id) is not None:
+            raise ExistingPlanRefused()
+        if _generation_live(user_id):
+            raise GenerationInProgress()
+        plan = _insert_plan(user_id=user_id, plan_data=document_json, score=None)
+        db.session.flush()
+        operation.training_plan_id = plan.id
+        operation.plan_lineage_id = plan.lineage_id
+        operation.completed_at = now
+        db.session.commit()
+        return plan
+    except (ExistingPlanRefused, GenerationInProgress):
+        db.session.rollback()
+        raise
+    except IntegrityError as error:
+        db.session.rollback()
+        raise GeneralKeyRaced() from error
     except Exception as error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from error

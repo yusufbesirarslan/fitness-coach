@@ -8,7 +8,7 @@ import sys
 import pytest
 import yaml
 
-from scripts.pytest_sharding import load_timings, partition, verify
+from scripts.pytest_sharding import load_artifacts, load_timings, partition, verify
 
 
 def evidence():
@@ -171,8 +171,10 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert workflow["name"] == "CI"
     assert set(workflow["on"]) == {"pull_request", "push"}
     assert workflow["on"]["push"]["branches"] == [
-        "main", "privacy/pa03-be-core-01", "r6/03a-bluegreen-deploy-transaction", "feat/privacy-d1-backend-consent",
-        "feat/mon-02-be-03b-01b-training-allowance"]
+        "feat/priv-k6-b1-no-photo-completion", "feat/priv-k6-rollback-gate", "main", "privacy/pa03-be-core-01",
+        "r6/03a-bluegreen-deploy-transaction", "feat/privacy-d1-backend-consent",
+        "feat/mon-02-be-03b-01b-training-allowance",
+        "fix/mon-02-be-03b-a2-a1-expiry-compensation", "fix/priv-k6-pg18-migration", "fix/mon-02-be-02-pg18-compatibility"]
     deploy = yaml.load(Path(".github/workflows/deploy.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert deploy["on"]["workflow_run"]["branches"] == ["main"]
     jobs = workflow["jobs"]
@@ -197,7 +199,120 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert gate["steps"][0]["env"]["SHARD_RESULT"] == "${{ needs.tests.result }}"
     assert "--result=\"$SHARD_RESULT\"" in gate["steps"][-1]["run"]
     download = next(s for s in gate["steps"] if "actions/download-artifact@" in s.get("uses", ""))
-    assert download["with"]["pattern"] == "pytest-shard-${{ github.run_attempt }}-*"
+    assert download["with"] == {"pattern": "pytest-shard-*-*", "path": "shard-evidence",
+                                "merge-multiple": "false"}
+    assert download["uses"] == "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
+    assert next(s for s in shards["steps"] if s.get("name") == "Run tests")["env"]["CI_HEAD_SHA"] == "${{ github.event.pull_request.head.sha || github.sha }}"
+    assert gate["steps"][-1]["env"]["CI_HEAD_SHA"] == "${{ github.event.pull_request.head.sha || github.sha }}"
+    for argument in ('--run-id="$GITHUB_RUN_ID"', '--run-attempt="$GITHUB_RUN_ATTEMPT"',
+                     '--head-sha="$CI_HEAD_SHA"', '--revision="$GITHUB_SHA"'):
+        assert argument in gate["steps"][-1]["run"]
     for job in (shards, gate):
         assert "continue-on-error" not in job
         assert all("continue-on-error" not in step for step in job["steps"])
+
+
+def write_artifact(directory, doc, attempt=1):
+    doc = dict(doc, run_id="123", run_attempt=str(attempt), head_sha="head", tree="tree")
+    artifact = directory / f"pytest-shard-{attempt}-{doc['shard']}"
+    artifact.mkdir()
+    path = artifact / f"shard-{doc['shard']}.json"
+    path.write_text(json.dumps(doc))
+    return path
+
+
+def selected_artifacts(directory, attempt="2"):
+    return load_artifacts(directory, run_id="123", run_attempt=attempt,
+                          head_sha="head", revision="revision", tree="tree")
+
+
+@pytest.mark.parametrize("attempts", [(1, 1, 1, 1), (1, 1, 2, 1), (2, 2, 2, 2),
+                                     (9, 9, 10, 9)])
+def test_artifact_selection_complete_and_mixed_attempts(tmp_path, attempts):
+    docs = evidence()
+    for doc, attempt in zip(docs, attempts):
+        write_artifact(tmp_path, doc, attempt)
+    if attempts[2] > 1:
+        failed = dict(docs[2], exitstatus=1)
+        write_artifact(tmp_path, failed, 1)
+    selected = selected_artifacts(tmp_path, str(max(attempts)))
+    assert [doc["run_attempt"] for doc in selected] == list(map(str, attempts))
+    assert verify(selected, "revision") == 36
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing", "duplicate", "extra_file", "wrong_filename", "flat", "malformed_name",
+    "leading_zero", "invalid_shard", "future_attempt", "symlink", "bad_json",
+    "duplicate_json_key", "wrong_run", "wrong_attempt", "wrong_head", "wrong_tree",
+    "wrong_revision", "wrong_shard", "newer_failed", "newer_invalid", "wrong_profile",
+    "missing_execution",
+])
+def test_artifact_selection_rejects_invalid_evidence(tmp_path, mutation):
+    docs = evidence()
+    paths = [write_artifact(tmp_path, doc) for doc in docs]
+    path = paths[2]
+    doc = json.loads(path.read_text())
+    if mutation == "missing":
+        path.unlink()
+        path.parent.rmdir()
+    elif mutation in {"duplicate", "extra_file"}:
+        (path.parent / "copy.json").write_text(path.read_text())
+    elif mutation == "wrong_filename":
+        path.rename(path.parent / "shard-0.json")
+    elif mutation == "flat":
+        path.rename(tmp_path / path.name)
+    elif mutation in {"malformed_name", "leading_zero", "invalid_shard", "future_attempt"}:
+        names = {"malformed_name": "pytest-shard-invalid-2", "leading_zero": "pytest-shard-1-02",
+                 "invalid_shard": "pytest-shard-1-4", "future_attempt": "pytest-shard-3-2"}
+        path.parent.rename(tmp_path / names[mutation])
+    elif mutation == "symlink":
+        original = path.read_text()
+        path.unlink()
+        target = tmp_path / "outside.json"
+        target.write_text(original)
+        path.symlink_to(target)
+    elif mutation == "bad_json":
+        path.write_text("{")
+    elif mutation == "duplicate_json_key":
+        path.write_text(path.read_text()[:-1] + ', "shard": 2}')
+    elif mutation.startswith("wrong_") and mutation != "wrong_profile":
+        field = {"wrong_run": "run_id", "wrong_attempt": "run_attempt", "wrong_head": "head_sha",
+                 "wrong_tree": "tree", "wrong_revision": "revision", "wrong_shard": "shard"}[mutation]
+        doc[field] = 0 if field == "shard" else "other"
+        path.write_text(json.dumps(doc))
+    elif mutation in {"newer_failed", "newer_invalid"}:
+        newer = dict(docs[2], exitstatus=1) if mutation == "newer_failed" else dict(docs[2], schema=2)
+        write_artifact(tmp_path, newer, 2)
+    elif mutation == "wrong_profile":
+        doc["timing_digest"] = "other"
+        path.write_text(json.dumps(doc))
+    elif mutation == "missing_execution":
+        doc["reports"] = {}
+        path.write_text(json.dumps(doc))
+    with pytest.raises((ValueError, KeyError, TypeError)):
+        verify(selected_artifacts(tmp_path), "revision")
+
+
+def test_artifact_loader_cli_checks_provenance_and_parity(tmp_path):
+    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+    timings, digest = load_timings()
+    docs = evidence()
+    parts = partition(docs[0]["full"], timings)
+    for i, doc in enumerate(docs):
+        doc.update(revision=revision, timing_digest=digest, selected=parts[i])
+        doc["reports"] = {node: {phase: dict(outcome="passed", duration=0.1)
+                                  for phase in ("setup", "call", "teardown")}
+                          for node in parts[i]}
+        path = write_artifact(tmp_path, doc, 2 if i == 2 else 1)
+        saved = json.loads(path.read_text())
+        saved["tree"] = tree
+        path.write_text(json.dumps(saved))
+    command = [sys.executable, "-m", "scripts.pytest_sharding", str(tmp_path),
+               "--revision", revision, "--result", "success", "--run-id", "123",
+               "--run-attempt", "2", "--head-sha", "head"]
+    process = subprocess.run(command, capture_output=True, text=True)
+    assert process.returncode == 0, process.stdout + process.stderr
+    assert "Exact parity: 36 selected; 0 missing; 0 duplicates" in process.stdout
+    command[-1] = "mismatched-head"
+    assert subprocess.run(command, capture_output=True).returncode != 0

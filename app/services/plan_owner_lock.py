@@ -11,12 +11,14 @@ idiom for serializing a per-user singleton decision
 
 This module exists because there is more than one create writer, and a
 per-owner boundary is only a boundary if every one of them stands behind the
-SAME object. There are exactly two:
+SAME object. There are exactly three, in two modules:
 
 * ``plan_replacement.replace_training_plan`` — the browser's
   ``POST /training-plan/save``;
 * ``mobile_training_generation.store.commit_plan`` — the native
-  generate-and-persist command.
+  generate-and-persist command;
+* ``mobile_training_generation.store.commit_general_plan`` — the native
+  non-AI general plan (LP21), same lock order as ``commit_plan``.
 
 The native command already serialized itself against other native commands
 (``mobile_training_generation.locking``, a PostgreSQL advisory lock) and locked

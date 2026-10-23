@@ -70,11 +70,16 @@ def project_completion(completion) -> Optional[dict]:
     ``None`` when the command produced no completion result. On a replay the
     canonical result carries no reward fields, and this reports exactly that
     rather than fabricating a second award.
+
+    ``proof`` (additive, PRIV-K6-B1) is ``"photo"`` or ``"none"`` for the
+    completion this call created and ``null`` on a replay. No photo-shaped
+    object (PumpCheck id, image URL, analysis) is ever part of this shape.
     """
     if completion is None:
         return None
     return {
         "outcome": completion.outcome.value,
+        "proof": completion.proof,
         "xp_awarded": completion.xp_awarded,
         "new_total": completion.new_total,
         "level": completion.level,

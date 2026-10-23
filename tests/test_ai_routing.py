@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app import config as app_config
 from app.services import ai, ai_recovery
 from app.services.ai_recovery import TransientAIError
 
@@ -269,7 +270,7 @@ def test_claude_chat_hoists_system_and_clamps_tokens(monkeypatch):
     resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="merhaba")],
                            stop_reason="end_turn")
     _fake_bedrock(monkeypatch, reply=resp, capture=cap)
-    monkeypatch.setattr(ai, "BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    monkeypatch.setattr(app_config, "BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
     monkeypatch.setattr(ai, "BEDROCK_MAX_TOKENS", 8000)
     # This test is about the 8000 clamp, not the per-feature output budget
     # (which refuses, rather than clamps, anything above it).

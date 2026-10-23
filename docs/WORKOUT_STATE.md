@@ -1013,3 +1013,16 @@ final cross-transport PostgreSQL race proof (S14-8): PR2 introduced no new
 lock-dependent semantic, so it added no PG module and made no CI
 `pg_concurrency` change — `advance_checkpoint` and the locked revision check are
 already covered by `tests/test_mobile_workout_sessions_pg.py`.
+
+## PRIV-K6-B1 — photo is optional completion evidence
+
+Supersedes the "PumpCheck is the one completion proof" wording above for new
+completions. The completed-day claim is now `WorkoutCompletionDay`
+(`uq_workout_completion_day`), written by `complete_workout` for every new
+completion — photo or photo-free — and `completed_days` reads it together with
+historical `PumpCheck.date_key` claims in one `UNION` statement. A photo-free
+native completion (`proof="none"`) writes the claim, marker, base XP, quest and
+activity with no PumpCheck, no photo bonus, no Pump Check challenge event and no
+consent/provider/S3 work; the completed-day state is re-checked under the
+(owner, day) advisory lock before any claim is written. Full record and native
+API contract: `docs/PRIV_K6_NO_PHOTO_COMPLETION.md`.

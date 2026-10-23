@@ -915,7 +915,8 @@ def test_every_module_touching_an_sdk_entry_point_uses_the_door():
         tree = ast.parse(text)
         touches = any(isinstance(n, ast.Attribute) and _attr_tail(n)[-2:] in _SDK_ENTRY_POINTS
                       for n in ast.walk(tree))
-        if touches and "ai_provider_call.admit(" not in text:
+        if (touches and path.name != "ai_provider_call.py"
+                and "ai_provider_call.admit(" not in text):
             offenders.append(path.relative_to(root).as_posix())
     assert offenders == []
 

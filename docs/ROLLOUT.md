@@ -1,5 +1,16 @@
 # Production rollout runbook — feature flag activation
 
+MON-02-BE-03B-A2-A1 adds expand-only `f8b2d4e6a0c3` after A1 (55 revisions).
+It records original-period zero-attempt expiry corrections without enabling either
+allowance flag. Source review, migration/worker compatibility and runtime activation
+remain separate gates; no recurring scheduler is added. See AI_ALLOWANCE_LEDGER.md.
+
+MON-02-BE-03B-A1 adds additive migration `e7a1c3d5f9b2` (one nullable Boolean
+`training_plan_generation_operation.provider_attempt_possible`, no backfill),
+which startup may apply while every flag stays OFF; it is part of the same human
+migration/deploy gate. Nothing writes it unless Training allowance enforcement is
+ON. Its downgrade refuses once any operation recorded evidence.
+
 MON-02-BE-03B-01B `AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED` remains OFF. Startup
 may apply additive migration `b1e4f5a6c7d8` (one new empty table, two nullable
 columns, `ai_usage_reservation.provider_billed` relaxed to NULL; no backfill) even
@@ -12,6 +23,13 @@ must not merge before it. Startup may apply additive migration `a9c1d2e3f4b5`
 (three empty tables, no backfill) even while the flag is OFF, so deployment and
 migration need their own human gate. Activation additionally needs owner-approved
 allowance quantities (none exist), BE-03B enforcement review and MON-03.
+
+MON-02-BE-02 `APPLE_NOTIFICATIONS_ENABLED` remains OFF (404 before any work). It
+needs `APPLE_SUBSCRIPTIONS_ENABLED`. Startup may apply expand-only `a4d6f8b0c2e1`
+(two empty tables, 58 revisions) while every flag is OFF; it shares the human
+migration/deploy gate. `flask apple-subscription-reconcile` is not scheduled
+anywhere; a schedule, the App Store Connect notification URL and MON-03 sandbox
+qualification are separate approvals. Rollback: set 0; receipts are retained.
 
 MON-02-BE-01 `APPLE_SUBSCRIPTIONS_ENABLED` remains OFF. No payment activation
 is authorized. Independent review, MON-03 Apple sandbox qualification, lifecycle

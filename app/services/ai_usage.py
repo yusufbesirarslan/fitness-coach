@@ -29,16 +29,41 @@ import time
 
 from app.services.ai_input_budget import normalize_feature
 
-SCHEMA_VERSION = 2
-PRICING_VERSION = "2026-09-23"
+SCHEMA_VERSION = 3
+PRICING_VERSION = "2026-10-21"
 
-# USD per 1M tokens: (input, output, cache_write, cache_read).
-# Bedrock: Sonnet 4.5 via the GLOBAL cross-region profile (the production
-# model id); the regional profile costs 10% more. OpenAI: gpt-4o-mini list.
+# USD per 1M tokens: (input, output, cache_write_5m, cache_read), keyed by
+# (pricing model, billing profile). A pair that is not listed is UNPRICED: the
+# event carries no estimated_cost_usd rather than another class's price.
+# Bedrock rows: the eu-central-1 AmazonBedrockFoundationModels price list,
+# publication 2026-10-12T08:40:08Z (re-read 2026-10-21). "geographic" is the
+# list's non-global "Standard" row (EU geo profile from eu-central-1).
+# Sonnet 4.5 geographic is left unpriced as before (production uses global).
+# cache_write is the 5-minute TTL price; 1-hour writes cost more (Sonnet 5.5
+# $4.00, Haiku 5.5 $0.20 global) and are not used by any call site.
+# OpenAI: gpt-4o-mini list (2026-09-23).
 _PRICES = {
-    "bedrock:claude-sonnet-4-5": (3.00, 15.00, 3.75, 0.30),
-    "openai:gpt-4o-mini": (0.15, 0.60, 0.15, 0.075),
+    ("bedrock:claude-sonnet-4-5", "global"): (3.00, 15.00, 3.75, 0.30),
+    ("bedrock:claude-sonnet-5-5", "global"): (2.00, 10.00, 2.50, 0.10),
+    ("bedrock:claude-sonnet-5-5", "geographic"): (2.20, 11.00, 2.75, 0.11),
+    ("bedrock:claude-haiku-5-5", "global"): (0.10, 0.50, 0.125, 0.01),
+    ("bedrock:claude-haiku-5-5", "geographic"): (0.11, 0.55, 0.1375, 0.011),
+    ("openai:gpt-4o-mini", "direct"): (0.15, 0.60, 0.15, 0.075),
 }
+# Haiku 5.5 bills a prompt over 100K tokens (input + cache read + cache write)
+# on a separate long-context rate card. No call site's input budget reaches it;
+# if one ever did, the event stays unpriced instead of using the short rate.
+_LONG_CONTEXT_THRESHOLD = {"bedrock:claude-haiku-5-5": 100_000}
+
+# Response stop reasons and refusal categories are fixed vocabularies; any
+# other value is exported as "other", never verbatim.
+_STOP_REASONS = frozenset({
+    "end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal",
+    "stop", "length", "tool_calls", "content_filter",
+})
+_REFUSAL_CATEGORIES = frozenset({
+    "cyber", "bio", "frontier_llm", "reasoning_extraction", "general_harms",
+})
 
 OUTCOMES = (
     "success",
@@ -63,6 +88,8 @@ if not _logger.handlers:
 _BEDROCK_MODELS = {
     "anthropic.claude-sonnet-4-5-20250929-v1:0": "claude-sonnet-4-5",
     "anthropic.claude-haiku-4-5-20251001-v1:0": "claude-haiku-4-5",
+    "anthropic.claude-sonnet-5-5": "claude-sonnet-5-5",
+    "anthropic.claude-haiku-5-5": "claude-haiku-5-5",
 }
 
 def _model_identity(provider, model):
@@ -159,14 +186,44 @@ def usage_from_response(provider, resp):
     }
 
 
-def estimated_cost_usd(provider, model_norm, usage):
-    prices = _PRICES.get(f"{provider}:{model_norm}")
+def stop_from_response(provider, resp):
+    """``(stop_reason, refusal_category)`` from a response, both allowlisted."""
+    try:
+        if provider == "bedrock":
+            reason = getattr(resp, "stop_reason", None)
+            details = getattr(resp, "stop_details", None)
+            category = getattr(details, "category", None) if reason == "refusal" else None
+        else:
+            choices = getattr(resp, "choices", None) or []
+            reason = getattr(choices[0], "finish_reason", None) if choices else None
+            category = None
+        if reason is None:
+            return None, None
+        reason = reason if reason in _STOP_REASONS else "other"
+        if category is not None:
+            category = category if category in _REFUSAL_CATEGORIES else "other"
+        return reason, category
+    except Exception:
+        return None, None
+
+
+def estimated_cost_usd(provider, model_norm, usage, profile=None):
+    pricing_model = f"{provider}:{model_norm}"
+    if profile is None:
+        profile = "direct" if provider == "openai" else "global"
+    prices = _PRICES.get((pricing_model, profile))
     if prices is None or not usage:
         return None
     parts = (usage.get("input_tokens"), usage.get("output_tokens"),
              usage.get("cache_write_tokens"), usage.get("cache_read_tokens"))
     if all(count is None for count in parts):
         return None
+    threshold = _LONG_CONTEXT_THRESHOLD.get(pricing_model)
+    if threshold is not None:
+        prompt = sum(usage.get(k) or 0 for k in
+                     ("input_tokens", "cache_write_tokens", "cache_read_tokens"))
+        if prompt > threshold:
+            return None
     total = 0.0
     for count, price in zip(parts, prices):
         if count:
@@ -176,7 +233,7 @@ def estimated_cost_usd(provider, model_norm, usage):
 
 def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
          subject_id=None, usage=None, usage_source=None, input_bound=None,
-         image_units=0, output_cap=None, admission_id=None):
+         image_units=0, output_cap=None, admission_id=None, stop=None):
     """Write one `[AI-USAGE]` event. Never raises."""
     try:
         feature = normalize_feature(feature)
@@ -205,8 +262,7 @@ def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
             "output_cap": output_cap,
         }
         if outcome in PROVIDER_ATTEMPT_OUTCOMES:
-            cost = (estimated_cost_usd(provider, model_norm, usage)
-                    if (provider == "openai" or billing_profile == "global") else None)
+            cost = estimated_cost_usd(provider, model_norm, usage, billing_profile)
             if cost is not None:
                 event["estimated_cost_usd"] = cost
                 event["pricing_version"] = PRICING_VERSION
@@ -225,12 +281,24 @@ def emit(*, feature, provider, model, outcome, attempt=None, tool_round=None,
                                    and all(c in "0123456789abcdef" for c in admission_id)
                                    else None), job_id=current_job_id(),
                      fallback=bool(getattr(_tls, "fallback", False)
-                                   and provider == "openai"
+                                   and (provider == "openai" or model_norm == "claude-haiku-5-5")
                                    and getattr(_tls, "fallback_feature", feature) in (None, feature)))
+        stop_reason, refusal_category = stop if stop else (None, None)
+        event.update(stop_reason=stop_reason, refusal_category=refusal_category,
+                     routing=_routing())
         _logger.info("[AI-USAGE] %s", json.dumps(event, separators=(",", ":")))
     except Exception:
         pass
 
+
+
+def _routing():
+    try:
+        from app.services.ai_model_policy import routing
+        value = routing()
+        return value if value in ("legacy", "claude55") else "other"
+    except Exception:
+        return None
 
 
 def current_job_id():

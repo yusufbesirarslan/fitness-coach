@@ -173,6 +173,18 @@ HISTORICAL_BASELINE = {
         "6c2a6dc1d14133725a0bb78dddcf5786b6d07d2f67978291738c3c5a48901897",
 }
 
+# Forward migrations whose DDL the static rules cannot prove overlap-safe but
+# which were reviewed line by line as EXPAND: they change nothing the serving
+# revision does until a separately authorized step. Pinned by revision AND
+# normalized content digest, so any edit (including to downgrade) is a
+# violation that needs a fresh review. Keep this map tiny.
+REVIEWED_DDL = {
+    # PRIV-K6 rollback gate Layer A: completion-authority fence triggers. Dormant
+    # (historical writers unaffected) until `flask completion-floor raise`.
+    "d7e3a9c1f5b8":
+        "8f30fb09d35779af8c34a5bca1ed9fb6345bc23473f2eb235a50bcad0fede4c5",
+}
+
 EXPAND = "expand"
 CONTRACT = "contract"
 
@@ -573,6 +585,14 @@ def scan(versions_dir=VERSIONS_DIR, baseline=None):
                     "historical (pre-R6) migration was modified; shipped history "
                     "is immutable — add a new migration instead"]
             classes[revision] = "historical"
+            continue
+        if isinstance(revision, str) and revision in REVIEWED_DDL:
+            if (normalized_digest(raw) != REVIEWED_DDL[revision]
+                    or _module_literal(tree, "expand_contract") != EXPAND):
+                violations[path.name] = [
+                    "reviewed-DDL migration changed after review (or is not "
+                    "declared expand); its pinned digest must be re-reviewed"]
+            classes[revision] = EXPAND
             continue
         revision, classification, problems = check_source(source, str(path))
         if problems:

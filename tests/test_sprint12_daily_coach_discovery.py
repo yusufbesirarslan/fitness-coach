@@ -112,6 +112,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/subscription/purchase-context",
         "/api/v1/subscription/verify",
         "/api/v1/subscription/entitlement",
+        "/api/v1/subscription/apple-notifications",
         "/api/v1/ai/allowances",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
@@ -172,6 +173,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/exercises/<exercise_id>/note",
         "/api/v1/training/plans",
         "/api/v1/training/plans/current",
+        # LP21 deterministic non-AI first plan through the same create authority.
+        "/api/v1/training/plans/general",
         # LP18-B1 immutable proposal and explicit B0 confirmation.
         "/api/v1/training/plans/replacement-proposals",
         "/api/v1/training/plans/replacement/confirm",
@@ -247,6 +250,10 @@ _APPROVED_TRAINING_PATHS = {
     # not by widening the guard.
     "/api/v1/training/plans",
     "/api/v1/training/plans/current",
+    # LP21: the non-AI general FIRST plan. Same create authority as PR4A
+    # (``store`` ledger, owner lock, never replaces), deterministic template,
+    # no Daily-Coach aggregate. Admitted here by review, not by widening.
+    "/api/v1/training/plans/general",
     # LP18-B1 immutable proposal and explicit B0 confirmation.
     "/api/v1/training/plans/replacement-proposals",
     "/api/v1/training/plans/replacement/confirm",

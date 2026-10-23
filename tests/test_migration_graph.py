@@ -39,7 +39,12 @@ def test_alembic_migrations_have_single_head():
     # LP-11's deleted-identity tombstone follows Check-in's submission key.
     # MON-02-BE-03A stacks its ledger on the #436 Apple foundation.
     # D1 consent follows dispatch recovery; BE-03B-01B follows D1.
-    assert heads == ["b1e4f5a6c7d8"]
+    # BE-03B-A1's physical-attempt evidence follows BE-03B-01B.
+    # BE-03B-A2-A1's expiry compensation follows BE-03B-A1.
+    # PRIV-K6-B1 adds the completion-day claim on top of BE-03B-A2-A1.
+    # The K6 rollback gate's completion-authority fence follows the claim.
+    # MON-02-BE-02's empty Apple notification/reconciliation tables follow the fence.
+    assert heads == ["a4d6f8b0c2e1"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -71,7 +76,12 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # MON-02-BE-03A adds the AI allowance ledger, no exercise catalog schema.
     # BE-03B-01A adds a nullable dispatch marker, no catalog schema.
     # D1 adds consent authority; BE-03B-01B adds its separate allowance binding.
-    assert len(revision_files) == 53
+    # BE-03B-A1 adds one nullable attempt-evidence column, no catalog schema.
+    # BE-03B-A2-A1 adds expiry-compensation tables, no catalog schema.
+    # PRIV-K6-B1 adds the workout-completion day claim, no catalog schema.
+    # The K6 rollback gate adds the completion fence, no catalog schema.
+    # MON-02-BE-02 adds Apple notification/reconciliation tables, no catalog schema.
+    assert len(revision_files) == 58
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 

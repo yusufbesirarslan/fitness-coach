@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
+from app import config as app_config
 from tests.test_mobile_training_generation_pg import (  # noqa: F401
     pg_generation_app, _request, _document,
 )
@@ -28,8 +29,12 @@ class Crash(BaseException):
     """Escapes application handlers, like abrupt worker death."""
 
 
-def _metered(app, units=1, cap=2):
+def _metered(app, monkeypatch, units=1, cap=2):
     from ai_allowance_support import fixture_policy
+    from app.services import ai_consent
+    # Accounting isolation only: the real D1 preflight/final gate is qualified in
+    # tests/test_training_allowance_zero_attempt_pg.py. Never a production bypass.
+    monkeypatch.setattr(ai_consent, "preflight", lambda *a, **k: None)
     app.config.update(
         AI_ALLOWANCE_LEDGER_ENABLED=True,
         AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED=True,
@@ -90,11 +95,13 @@ def test_metered_crash_boundary_never_strands_duplicates_or_falsely_settles(
     from app.services.mobile_training_generation import allowance, service, store
     from app.services.mobile_training_generation.errors import GenerationInProgress
     app, owners, monkeypatch = pg_generation_app
-    _metered(app)
+    _metered(app, monkeypatch)
     operation, bindings, holds, bucket, calls, then = CASES[boundary]
     executions = []
 
     def candidate(*args, **kwargs):
+        from app.services import ai_provider_call
+        ai_provider_call._before_physical_attempt()  # like every real SDK call
         executions.append(1)
         if boundary == "in_provider":
             raise Crash()
@@ -153,7 +160,7 @@ def test_metered_crash_boundary_never_strands_duplicates_or_falsely_settles(
         assert len(executions) == calls
 
         monkeypatch.undo()
-        _metered(app)
+        _metered(app, monkeypatch)
         monkeypatch.setattr(service, "generate_training_plan_candidate", lambda *a, **k: (
             executions.append(1) or SimpleNamespace(document=_document(), overall_score=8.5)))
         if then == "in_progress":
@@ -178,8 +185,8 @@ def test_dispatch_marker_hold_and_binding_share_one_stored_instant(pg_generation
     from app.extensions import db
     from app.services import ai_allowances
     from app.services.mobile_training_generation import store
-    app, owners, _ = pg_generation_app
-    _metered(app)
+    app, owners, monkeypatch = pg_generation_app
+    _metered(app, monkeypatch)
     assert store.ABANDON_AFTER >= ai_allowances.RESERVATION_TTL
     with app.app_context():
         operation_id = store.claim(owners[0], "same-instant", _request().fingerprint).id
@@ -206,7 +213,7 @@ def test_concurrent_dispatch_authorizations_create_exactly_one_hold(pg_generatio
     from app.services.mobile_training_generation import store
     from app.services.mobile_training_generation.errors import GenerationInProgress
     app, owners, monkeypatch = pg_generation_app
-    _metered(app, units=2)
+    _metered(app, monkeypatch, units=2)
     with app.app_context():
         operation_id = store.claim(owners[0], "contested-dispatch", _request().fingerprint).id
         db.session.remove()
@@ -237,8 +244,8 @@ def test_concurrent_dispatch_authorizations_create_exactly_one_hold(pg_generatio
 def test_concurrent_holds_for_one_owner_cannot_overspend(pg_generation_app):
     from app.extensions import db
     from app.services import ai_allowances
-    app, owners, _ = pg_generation_app
-    _metered(app, units=1)
+    app, owners, monkeypatch = pg_generation_app
+    _metered(app, monkeypatch, units=1)
     barrier, outcomes = threading.Barrier(2), []
 
     def hold(index):
@@ -267,8 +274,8 @@ def test_refused_reservation_rolls_back_the_lazy_grant_on_postgresql(pg_generati
     from app.extensions import db
     from app.models import AiAllowanceBucket, AiStarterGrant, AiUsageReservation
     from app.services import ai_allowances
-    app, owners, _ = pg_generation_app
-    _metered(app)
+    app, owners, monkeypatch = pg_generation_app
+    _metered(app, monkeypatch)
     with app.app_context():
         ai_allowances.reserve_within(owners[0], "training_generation", "pg-rollback-0001")
         db.session.rollback()
@@ -281,7 +288,7 @@ def test_no_lock_or_transaction_spans_provider_io_while_metered(pg_generation_ap
     from app.services.mobile_training_generation import service
     from app.services.mobile_training_generation.locking import _advisory_key
     app, owners, monkeypatch = pg_generation_app
-    _metered(app)
+    _metered(app, monkeypatch)
     probed = []
 
     def candidate(*args, **kwargs):
@@ -313,7 +320,7 @@ def test_distinct_key_after_retirement_overlaps_but_late_output_is_fenced(pg_gen
     from app.services.mobile_training_generation import service
     from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
     app, owners, monkeypatch = pg_generation_app
-    _metered(app, units=2)
+    _metered(app, monkeypatch, units=2)
     entered, release, results, executions = threading.Event(), threading.Event(), [], []
 
     def candidate(*args, **kwargs):
@@ -361,7 +368,7 @@ def test_account_deletion_during_inference_leaves_no_allowance_rows(pg_generatio
     from app.services.mobile_training_generation import service
     from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
     app, owners, monkeypatch = pg_generation_app
-    _metered(app)
+    _metered(app, monkeypatch)
     entered, release, results = threading.Event(), threading.Event(), []
 
     def candidate(*args, **kwargs):
@@ -544,7 +551,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
     from app.services.ai_allowances import AllowancePolicy, ScopePolicy
     from app.services.mobile_training_generation import store
     app, owners, monkeypatch = pg_generation_app
-    _metered(app)
+    _metered(app, monkeypatch)
     enable_subscriptions(app, monkeypatch)
     app.config["AI_ALLOWANCE_POLICY"] = AllowancePolicy(
         version="synthetic-premium-d1", premium=ScopePolicy(
@@ -553,7 +560,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
     if registry_present:
         purpose, categories = ai_consent.BINDINGS["training_plan"]
         policy = ai_consent.Disclosure("synthetic-only", purpose, categories,
-            (("bedrock", ai.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL)), (("en", "a" * 64),))
+            (("bedrock", app_config.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL)), (("en", "a" * 64),))
         monkeypatch.setattr(ai_consent, "POLICIES", {policy.version: policy})
     sdk = Mock()
     with app.app_context():
@@ -566,7 +573,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
         assert not db.session().in_transaction()
         with ai_spend_guard.subject_scope(owners[0]), pytest.raises(ai_consent.ConsentDenied):
             with ai_provider_call.admit(feature="training_plan", provider=recipient,
-                    payload=dict(model=ai.OPENAI_MODEL if recipient == "openai" else ai.BEDROCK_MODEL,
+                    payload=dict(model=ai.OPENAI_MODEL if recipient == "openai" else app_config.BEDROCK_MODEL,
                         messages=[{"role": "user", "content": "SYNTHETIC_OWN_FITNESS"}], max_tokens=100),
                     gate=False, charge=False) as admission:
                 admission.create(sdk)
@@ -582,7 +589,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
         assert AIConsentState.query.count() == AIConsentEvent.query.count() == 0
 
 
-@pytest.mark.parametrize("start", ["base", "d1c0a15e0001"])
+@pytest.mark.parametrize("start", ["base", "d1c0a15e0001", "e7a1c3d5f9b2"])
 def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engine, start):
     """Run real Alembic ancestry, preserving synthetic main-era evidence."""
     from flask import Flask
@@ -600,8 +607,13 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["b1e4f5a6c7d8"]
-    assert len(list(script.walk_revisions())) == 53
+    assert script.get_heads() == ["a4d6f8b0c2e1"]
+    assert len(list(script.walk_revisions())) == 58
+    assert script.get_revision("a4d6f8b0c2e1").down_revision == "d7e3a9c1f5b8"
+    assert script.get_revision("d7e3a9c1f5b8").down_revision == "f9c6d0a1b2e3"
+    assert script.get_revision("f9c6d0a1b2e3").down_revision == "f8b2d4e6a0c3"
+    assert script.get_revision("f8b2d4e6a0c3").down_revision == "e7a1c3d5f9b2"
+    assert script.get_revision("e7a1c3d5f9b2").down_revision == "b1e4f5a6c7d8"
     assert script.get_revision("b1e4f5a6c7d8").down_revision == "d1c0a15e0001"
     tables = ("user", "apple_subscription", "ai_consent_state", "ai_consent_event",
               "ai_starter_grant", "ai_allowance_bucket", "ai_usage_reservation",
@@ -632,15 +644,17 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
         upgrade()
         check()  # model/schema comparison against the actual full chain
         with db.engine.connect() as conn:
-            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "b1e4f5a6c7d8"
+            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "a4d6f8b0c2e1"
             for name, (columns, rows) in before.items():
                 projection = ','.join('"' + c + '"' for c in columns)
                 assert conn.exec_driver_sql(f'SELECT {projection} FROM "{name}"').all() == rows
             assert conn.exec_driver_sql("SELECT count(*) FROM training_plan_generation_allowance").scalar_one() == 0
             assert conn.exec_driver_sql("SELECT count(*) FROM training_plan_generation_operation WHERE allowance_metered IS NOT NULL").scalar_one() == 0
             assert conn.exec_driver_sql("SELECT count(*) FROM ai_usage_reservation WHERE billing_evidence IS NOT NULL").scalar_one() == 0
+            assert conn.exec_driver_sql("SELECT count(*) FROM training_plan_generation_operation WHERE provider_attempt_possible IS NOT NULL").scalar_one() == 0
         # Compatible create_all/main-era table reentry must preserve the same evidence.
         with db.engine.begin() as conn:
             _run(conn, _module("b1e4f5a6c7d8_training_allowance_association.py").upgrade)
+            _run(conn, _module("e7a1c3d5f9b2_training_attempt_evidence.py").upgrade)
         db.session.remove()
         db.engine.dispose()

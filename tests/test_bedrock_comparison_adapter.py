@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app import config as app_config
+
 from app.services import ai
 
 
@@ -56,7 +58,7 @@ def test_two_image_adapter_reuses_model_token_ceiling_and_temperature(
         monkeypatch):
     fake = FakeBedrockResponse("comparison-json")
     monkeypatch.setattr(ai, "bedrock_client", fake.client)
-    monkeypatch.setattr(ai, "BEDROCK_MODEL", "test-model")
+    monkeypatch.setattr(app_config, "BEDROCK_MODEL", "test-model")
     monkeypatch.setattr(ai, "BEDROCK_MAX_TOKENS", 800)
 
     ai._bedrock_compare_images(

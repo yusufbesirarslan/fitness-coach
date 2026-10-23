@@ -60,10 +60,11 @@ The route uses the existing authoritative mobile boundary,
   no timezone, no owner override. There is no parameter through which one user
   could read another's Today, and none through which a client clock could move
   the day;
-- the route reads no query string, no body, no form and no header beyond the
-  auth boundary. `?user_id=`, `?owner_id=`, `?date=`, `?today=`,
-  `X-User-Id:`, `X-Date:` are all inert — the response is byte-identical with or
-  without them;
+- the route reads no body, no form and no header beyond the auth boundary, and
+  no query value except the LP21 `include_origin` opt-in (it selects a
+  response shape, never an owner or a day). `?user_id=`, `?owner_id=`,
+  `?date=`, `?today=`, `X-User-Id:`, `X-Date:` are all inert — the response is
+  byte-identical with or without them;
 - a browser cookie is never consulted; a valid Flask-Login session alone gets
   `401` in the shared mobile envelope, never an HTML redirect;
 - the route is registered on the single `mobile_api` blueprint, so it inherits
@@ -125,6 +126,7 @@ so a later sprint can add a sibling block without renaming anything.
 | `today.workout.session` | `object` | **nullable** | `snapshot.session` | The persisted workout session, present only when `FITX_WORKOUT_SESSIONS_ENABLED` is on (default OFF ⇒ always `null`). Carries the opaque `public_id`, `status`, `resumable`, `relationship`, `stale_reason`, `workout_date`. Never an invented identity. | flag-conditional |
 | `today.plan.exists` | `boolean` | never | `get_active_plan(...) is not None` | Whether an active training plan exists at all. | stable |
 | `today.plan.created_at` | `string` ISO-8601 UTC `...Z` | **nullable** | `TrainingPlan.created_at` | When the active plan was created. `null` iff `exists` is `false`. | stable |
+| `today.plan.origin` | `object` | **nullable** | `training_plan_origin.resolve_plan_origin` (LP21) | **Present only with `?include_origin=1`.** Without it the key is absent and the object is exactly `{exists, created_at}`. When present it is the same object current-plan publishes as `plan.origin`, and `null` iff `exists` is `false`. See docs/LP21_NONAI_GENERAL_PLAN.md "Read-side origin". | opt-in |
 | `today.daily_context.plan_lineage` | `string` | **nullable** | `TrainingPlan.lineage_id` | Opaque, non-guessable, server-generated lineage token (`secrets.token_urlsafe(32)`). Not a database key, not derived from user data. `null` iff no plan. | stable |
 | `today.daily_context.mutation_version` | `integer` | **nullable** | `TrainingPlan.mutation_version` | The server-authoritative history position of that lineage. Moves when the plan is mutated. `null` iff no plan. | stable |
 | `today.daily_context.canonical_local_date` | `string` `YYYY-MM-DD` | never | `app_today()` | Always equal to `today.date`, restated inside the identity tuple so a cached context is self-describing. | stable |
@@ -207,6 +209,7 @@ Istanbul day; `tests/test_mobile_today_api.py` pins exactly that boundary.
 | Proven complete | `200` | `status: completed`, `completed: true` |
 | Plan unreadable | `200` | `status: needs_attention`, `schedule_state: schedule_unavailable`, `action: blocked`, `summary: null` |
 | Canonical read failed | `503` | `TODAY_TEMPORARILY_UNAVAILABLE`, `retryable: true` |
+| `include_origin` present but not exactly `1` (LP21) | `400` | `TODAY_INVALID_REQUEST`, `retryable: false` |
 
 The composition runs with `strict_reads=True` inside one coherent snapshot, so
 an infrastructure fault raises `TodayUnavailable` and the route answers a typed
@@ -235,7 +238,9 @@ Per request: **4 bounded `SELECT`s** — the authenticated principal, the active
 plan, the execution-evidence log rows, today's `PumpCheck` — and the count is
 the same whether or not the user has a plan. The plan row is loaded once and
 passed into the resolver rather than re-queried. No N+1, no write, no flush, no
-commit, no lock, no HTTP call.
+commit, no lock, no HTTP call. With `?include_origin=1` and a plan there is
+exactly one more: the owner-scoped plan-origin ledger read (LP21); without
+the opt-in it is never issued.
 
 **Provider calls: exactly 0.** No AI/LLM module is imported or reachable, and
 `tests/test_mobile_today_architecture.py` runs a real request with every

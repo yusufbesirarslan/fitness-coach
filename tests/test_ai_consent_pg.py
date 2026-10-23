@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import update, select
 
+from app import config as app_config
 from app.services import ai_consent as consent, ai_provider_call as calls, ai, ai_spend_guard
 from app.extensions import db
 from app.models import User, AIConsentState, AIConsentEvent
@@ -33,7 +34,7 @@ def pg_app(monkeypatch):
     for feature, (purpose, categories) in consent.BINDINGS.items():
         version = 'synthetic-' + feature
         policies[version] = consent.Disclosure(version, purpose, categories,
-            (('bedrock', ai.BEDROCK_MODEL), ('openai', ai.OPENAI_MODEL)), (('en', 'a' * 64),))
+            (('bedrock', app_config.BEDROCK_MODEL), ('openai', ai.OPENAI_MODEL)), (('en', 'a' * 64),))
     monkeypatch.setattr(consent, 'POLICIES', policies)
     monkeypatch.setattr(calls, 'model_concurrency_slot', lambda *a, **k: nullcontext())
     monkeypatch.setattr(ai_spend_guard, 'charge', lambda *a, **k: None)
@@ -57,7 +58,7 @@ def command(feature='training_plan', generation=0, action='affirmative_grant', k
 
 
 def invoke(owner=1, feature='training_plan', recipient='openai', sdk=None):
-    payload = dict(model=ai.OPENAI_MODEL if recipient == 'openai' else ai.BEDROCK_MODEL,
+    payload = dict(model=ai.OPENAI_MODEL if recipient == 'openai' else app_config.BEDROCK_MODEL,
                    messages=[{'role': 'user', 'content': 'SYNTHETIC_OWN_FITNESS'}], max_tokens=100)
     with ai_spend_guard.subject_scope(owner):
         with calls.admit(feature=feature, provider=recipient, payload=payload, gate=False, charge=False) as call:
@@ -78,7 +79,7 @@ def test_frozen_final_sdk_capture_positive_and_revoked_negative(pg_app, recipien
     captured = []
     with pg_app.app_context():
         consent.mutate(1, command())
-        payload = dict(model=ai.OPENAI_MODEL if recipient == 'openai' else ai.BEDROCK_MODEL,
+        payload = dict(model=ai.OPENAI_MODEL if recipient == 'openai' else app_config.BEDROCK_MODEL,
                        messages=[{'role': 'user', 'content': 'OWN_SYNTHETIC'}], max_tokens=100)
         with ai_spend_guard.subject_scope(1):
             with calls.admit(feature='training_plan', provider=recipient, payload=payload, gate=False, charge=False) as call:
@@ -128,7 +129,7 @@ def test_recipient_transition_and_unknown_model_denied(pg_app, monkeypatch):
         version = 'synthetic-training_plan'
         old = consent.POLICIES[version]
         monkeypatch.setattr(consent, 'POLICIES', {version: consent.Disclosure(old.version, old.purpose, old.categories,
-                        (('bedrock', ai.BEDROCK_MODEL),), old.texts)})
+                        (('bedrock', app_config.BEDROCK_MODEL),), old.texts)})
         consent.mutate(1, command())
         invoke(recipient='bedrock', sdk=lambda **kw: captured.append('bedrock'))
         with pytest.raises(consent.ConsentDenied):
@@ -274,7 +275,7 @@ def test_streaming_remains_disabled_with_grant(pg_app):
         consent.mutate(1, command())
         with pytest.raises(consent.ConsentDenied):
             with calls.admit(feature='training_plan', provider='bedrock', payload=dict(
-                model=ai.BEDROCK_MODEL, messages=[{'role':'user','content':'synthetic'}], max_tokens=100), gate=False, charge=False) as call:
+                model=app_config.BEDROCK_MODEL, messages=[{'role':'user','content':'synthetic'}], max_tokens=100), gate=False, charge=False) as call:
                 with call.stream(lambda **kw: captured.append(kw)):
                     pytest.fail('stream must be closed')
         assert captured == []
@@ -366,7 +367,7 @@ def test_actual_heavy_router_fallback_does_not_inherit_recipient_permission(pg_a
         version = 'synthetic-training_plan'
         old = consent.POLICIES[version]
         monkeypatch.setattr(consent, 'POLICIES', {version: consent.Disclosure(old.version, old.purpose,
-            old.categories, (('bedrock', ai.BEDROCK_MODEL),), old.texts)})
+            old.categories, (('bedrock', app_config.BEDROCK_MODEL),), old.texts)})
         consent.mutate(1, command())
         with pytest.raises(consent.ConsentDenied):
             ai._heavy_chat([{'role':'user','content':'SYNTHETIC_TRAINING'}], max_tokens=100, feature='training_plan')
@@ -401,7 +402,7 @@ def test_editing_same_version_contract_never_expands_existing_grant(pg_app, monk
         version = 'synthetic-training_plan'
         old = consent.POLICIES[version]
         restricted = consent.Disclosure(old.version, old.purpose, old.categories,
-            (('bedrock', ai.BEDROCK_MODEL),), old.texts)
+            (('bedrock', app_config.BEDROCK_MODEL),), old.texts)
         monkeypatch.setattr(consent, 'POLICIES', {version: restricted})
         stale_action = command()
         consent.mutate(1, stale_action)
@@ -459,8 +460,13 @@ def _assert_chain_head_and_parity():
     from alembic.migration import MigrationContext
     from alembic.autogenerate import compare_metadata
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
-    assert scripts.get_heads() == ['b1e4f5a6c7d8']
-    assert len(list(scripts.walk_revisions())) == 53
+    assert scripts.get_heads() == ['a4d6f8b0c2e1']
+    assert len(list(scripts.walk_revisions())) == 58
+    assert scripts.get_revision('a4d6f8b0c2e1').down_revision == 'd7e3a9c1f5b8'
+    assert scripts.get_revision('d7e3a9c1f5b8').down_revision == 'f9c6d0a1b2e3'
+    assert scripts.get_revision('f9c6d0a1b2e3').down_revision == 'f8b2d4e6a0c3'
+    assert scripts.get_revision('f8b2d4e6a0c3').down_revision == 'e7a1c3d5f9b2'
+    assert scripts.get_revision('e7a1c3d5f9b2').down_revision == 'b1e4f5a6c7d8'
     assert scripts.get_revision('b1e4f5a6c7d8').down_revision == 'd1c0a15e0001'
     assert scripts.get_revision('d1c0a15e0001').down_revision == 'b0d3e4f5a6b7'
     assert scripts.get_revision('b0d3e4f5a6b7').down_revision == 'a9c1d2e3f4b5'
@@ -468,7 +474,7 @@ def _assert_chain_head_and_parity():
     assert scripts.get_revision('c2b9d0e1f2a3').down_revision == 'b1a8c9d0e1f2'
     with db.engine.connect() as conn:
         context = MigrationContext.configure(conn, opts={'compare_type': True})
-        assert context.get_current_heads() == ('b1e4f5a6c7d8',)
+        assert context.get_current_heads() == ('a4d6f8b0c2e1',)
         assert compare_metadata(context, db.metadata) == []
         checks = conn.execute(sa.text(
             "SELECT conname, convalidated FROM pg_constraint WHERE conrelid IN "

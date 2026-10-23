@@ -3,6 +3,7 @@ import re
 from collections import Counter
 
 import click
+from flask.cli import AppGroup
 
 from app.extensions import db
 from app.models import DailyQuest
@@ -102,7 +103,7 @@ def _user_child_models():
         MealLog, MealPhotoCleanup, MobileAuthSession, Notification,
         NutritionPlan, PendingAction,
         PlanMutationRecord, TrainingPlanConfirmationProposal,
-        TrainingPlanGenerationAllowance, TrainingPlanGenerationOperation,
+        TrainingAllowanceCompensation, TrainingPlanGenerationAllowance, TrainingPlanGenerationOperation,
         TrainingPlanReplacementGenerationOperation, TrainingPlanReplacementProposal,
         TrainingPlanReplacementReceipt, PumpCheck,
         PumpCheckComment, PumpCheckComparison, PumpCheckComparisonRequest,
@@ -110,11 +111,12 @@ def _user_child_models():
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
-        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog, WorkoutSession,
+        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutCompletionDay, WorkoutLog,
+        WorkoutSession,
     )
     return (
         # MON-02-BE-03A: reservations point at buckets; the grant row goes last.
-        AiUsageReservation, AiAllowanceBucket, AiStarterGrant,
+        TrainingAllowanceCompensation, AiUsageReservation, AiAllowanceBucket, AiStarterGrant,
         AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         # PlanMutationRecord before TrainingPlan: the journal describes plan
         # history, so nothing should ever observe entries for a plan that is
@@ -140,7 +142,8 @@ def _user_child_models():
         # ledger, then comparison, then the sources below.
         PumpCheckComparisonRequest, PumpCheckComparison,
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
-        WaterLog, WorkoutLog, WorkoutSession, DailyActivity, CustomMeal,
+        WaterLog, WorkoutCompletionDay, WorkoutLog, WorkoutSession, DailyActivity,
+        CustomMeal,
         CoachConversation,
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
         WearableWorkoutLog, FeedItemLike, FeedItemComment, FeedItem,
@@ -455,8 +458,84 @@ def ai_allowance_sweep_cmd():
     click.echo(f"expired={expired} purged_settled={settled} purged_periods={periods}")
 
 
+@click.option("--limit", default=25, show_default=True, type=click.IntRange(1, 200))
+@click.option("--sweep-limit", default=50, show_default=True, type=click.IntRange(0, 500))
+def apple_subscription_reconcile_cmd(limit, sweep_limit):
+    """MON-02-BE-02: one bounded pass of authoritative Apple reconciliation.
+
+    Refuses while APPLE_SUBSCRIPTIONS_ENABLED is OFF or Apple configuration is
+    incomplete. Safe to repeat or run concurrently; not scheduled anywhere.
+
+        flask --app starter apple-subscription-reconcile
+    """
+    from app.services import apple_reconciliation
+    try:
+        counts = apple_reconciliation.run(limit=limit, sweep_limit=sweep_limit)
+    except (apple_reconciliation.ReconciliationDisabled,
+            apple_reconciliation.ReconciliationUnavailable) as error:
+        raise click.ClickException(str(error)) from None
+    click.echo(" ".join(f"{key}={counts[key]}" for key in sorted(counts)))
+
+
+COMPLETION_FLOOR_PREFIX = "completion-floor: "
+
+
+def _completion_floor_emit(payload, failed=False):
+    """ONE machine-readable line (release tooling parses exactly this prefix)."""
+    import json
+    click.echo(COMPLETION_FLOOR_PREFIX + json.dumps(payload, sort_keys=True))
+    if failed:
+        raise SystemExit(1)
+
+
+# AppGroup like every other command here: the subcommands get the application
+# context on every invocation path (the `flask` executable and `app.cli` alike),
+# so the release-tooling contract can be exercised in-process.
+@click.group("completion-floor", cls=AppGroup)
+def completion_floor_cmd():
+    """PRIV-K6 completion capability floor (read or raise; never lower).
+
+        FITX_SKIP_DB_INIT=1 flask --app starter completion-floor status
+        FITX_SKIP_DB_INIT=1 flask --app starter completion-floor raise --revision <sha>
+    """
+
+
+@completion_floor_cmd.command("status")
+def completion_floor_status_cmd():
+    """Read-only: floor, fence verification, whether any claim exists."""
+    from app.services import completion_fence
+    try:
+        with db.engine.connect() as connection:
+            status = completion_fence.floor_status(connection)
+    except completion_fence.FloorError as exc:
+        _completion_floor_emit({"result": "error", "reason": exc.reason}, failed=True)
+    except Exception as exc:  # noqa: BLE001 - unknown is reported, never "absent"
+        _completion_floor_emit({"result": "error", "reason": type(exc).__name__},
+                               failed=True)
+    _completion_floor_emit({"result": "ok", **status})
+
+
+@completion_floor_cmd.command("raise")
+@click.option("--revision", required=True, help="40-hex release revision raising it.")
+def completion_floor_raise_cmd(revision):
+    """Raise the floor under the exclusive floor lock (idempotent)."""
+    from app.services import completion_fence
+    try:
+        with db.engine.connect() as connection:
+            outcome = completion_fence.raise_floor(connection, revision)
+    except completion_fence.FloorError as exc:
+        _completion_floor_emit({"result": "refused", "reason": exc.reason}, failed=True)
+    except Exception as exc:  # noqa: BLE001 - lock timeout, refusal, outage
+        refusal = completion_fence.refusal_of(exc)
+        _completion_floor_emit({"result": "error", "reason": (
+            refusal.reason if refusal else type(exc).__name__)}, failed=True)
+    _completion_floor_emit(outcome)
+
+
 def register_cli(app):
+    app.cli.add_command(completion_floor_cmd)
     app.cli.command("ai-allowance-sweep")(ai_allowance_sweep_cmd)
+    app.cli.command("apple-subscription-reconcile")(apple_subscription_reconcile_cmd)
     app.cli.command("release-prepare")(release_prepare_cmd)
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)

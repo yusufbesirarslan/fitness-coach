@@ -674,3 +674,58 @@ def test_read_only_candidate_serves_the_authenticated_mobile_api(pg_url, monkeyp
     finally:
         _dispose(candidate)
         _dispose(active)
+
+
+# Disposable test connection ownership (including replacement pools).
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_scope_closes_retained_and_reopened_pools_even_on_failure(fail):
+    from tests.pg_engine_lifecycle import disposable_pg_engine_scope
+    url = os.environ["PG_TEST_DATABASE_URL"]
+    observer = sa.create_engine(url, poolclass=sa.pool.NullPool)
+    engines = []  # deliberately retain references, as application registries do
+    pids = []
+    try:
+        with observer.connect() as probe:
+            try:
+                with disposable_pg_engine_scope():
+                    for _ in range(3):
+                        engine = sa.create_engine(url)
+                        engines.append(engine)
+                        with engine.connect() as connection:
+                            old_pid = connection.exec_driver_sql(
+                                "SELECT pg_backend_pid()").scalar_one()
+                        engine.dispose()
+                        # Reproduce dispose-before-DROP: reconnecting creates a
+                        # replacement pool. Closing this Connection retains it.
+                        with engine.connect() as connection:
+                            pid = connection.exec_driver_sql(
+                                "SELECT pg_backend_pid()").scalar_one()
+                            assert pid != old_pid
+                            pids.append(pid)
+                        assert engine.pool.checkedin() == 1
+                    assert probe.execute(sa.text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE pid = ANY(:pids)"
+                    ), {"pids": pids}).scalar_one() == 3
+                    probe.rollback()
+                    if fail:
+                        raise RuntimeError("synthetic fixture failure")
+            except RuntimeError as exc:
+                assert fail and str(exc) == "synthetic fixture failure"
+            assert all(engine.pool.checkedin() == 0 for engine in engines)
+            # Closing the client socket precedes the backend processing EOF.
+            # Poll the observed condition with a deadline, never a fixed sleep;
+            # end each transaction so PostgreSQL cannot reuse a stats snapshot.
+            deadline = time.monotonic() + 5
+            while True:
+                remaining = probe.execute(sa.text(
+                    "SELECT count(*) FROM pg_stat_activity WHERE pid = ANY(:pids)"
+                ), {"pids": pids}).scalar_one()
+                probe.rollback()
+                if remaining == 0:
+                    break
+                assert time.monotonic() < deadline, (pids, remaining)
+    finally:
+        for engine in engines:
+            engine.dispose()
+        observer.dispose()

@@ -13,12 +13,17 @@ Public contract:
     paths to skip expensive provider work on obvious replays.
   * :func:`lock_completion_day` — the (owner, Istanbul day) serialization point
     the completion claim write shares with ``workout_session.start_session``.
+  * ``PROOF_PHOTO`` / ``PROOF_NONE`` — the completion evidence kinds
+    (PRIV-K6-B1): a photo is optional evidence, never the completion itself.
 
 Layering mirrors ``workout_state``: ``queries`` (impure reads) + ``service``
 (the mutation) + ``models`` (framework-free value objects).
 """
 from .models import (
+    PROOF_NONE,
+    PROOF_PHOTO,
     CompleteWorkoutCommand,
+    CompletionFenceRefused,
     CompletionOutcome,
     CompletionResult,
     SessionCompletionConflict,
@@ -34,4 +39,7 @@ __all__ = [
     "CompletionResult",
     "CompletionOutcome",
     "SessionCompletionConflict",
+    "CompletionFenceRefused",
+    "PROOF_PHOTO",
+    "PROOF_NONE",
 ]

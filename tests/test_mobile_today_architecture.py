@@ -20,6 +20,7 @@ rather than line-number-based:
 import ast
 import inspect
 import json
+import re
 from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -166,13 +167,21 @@ def test_route_accepts_no_client_supplied_owner_or_day():
     """
     route_source = _code_only(ROUTE_PATH)
     assert "g.mobile_user.id" in route_source
-    for forbidden in ("request.args", "request.get_json", "request.form",
+    for forbidden in ("request.get_json", "request.form",
                       "request.headers", "request.values", "user_id="):
         assert forbidden not in route_source, f"client input reached the route: {forbidden}"
+    # LP21: the ONE admitted query read is the origin opt-in, handed whole to
+    # its strict parser (absent / exactly "1" / refused). It selects a response
+    # shape, never an owner or a day.
+    assert route_source.count("request.args") == 1
+    assert "origin_requested(request.args)" in route_source
 
-    # ...and the projection takes the owner positionally, with no other knobs.
+    # ...and the projection takes the owner positionally; the only other knob
+    # is the keyword-only shape opt-in, off by default.
     signature = inspect.signature(mobile_today.build_today)
-    assert list(signature.parameters) == ["user_id"]
+    assert list(signature.parameters) == ["user_id", "include_origin"]
+    knob = signature.parameters["include_origin"]
+    assert knob.kind is inspect.Parameter.KEYWORD_ONLY and knob.default is False
 
 
 def test_route_is_thin_and_holds_no_domain_branching():
@@ -433,8 +442,15 @@ def test_today_costs_a_constant_bounded_number_of_queries(
     statements = _statements_for(client, user, monkeypatch)
 
     assert len(statements) <= 5, statements
-    plan_reads = [s for s in statements if "FROM training_plan" in s]
+    # Exact table names: the LP21 origin read hits the generation ledger, whose
+    # name also starts with "training_plan". Without the opt-in Today never
+    # reads the ledger at all.
+    plan_reads = [s for s in statements
+                  if re.search(r"\bFROM training_plan\b(?!_)", s)]
     assert len(plan_reads) <= 1, f"the active plan is loaded twice: {plan_reads}"
+    ledger_reads = [s for s in statements
+                    if re.search(r"\bFROM training_plan_generation_operation\b", s)]
+    assert ledger_reads == [], ledger_reads
 
 
 # ---------------------------------------------------------------------------

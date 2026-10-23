@@ -4,7 +4,7 @@ import io
 from PIL import Image
 
 from app.services.image_sanitization import (
-    ImageResourceError, ImageSanitizationError, sanitize_image,
+    FORMATS, ImageResourceError, ImageSanitizationError, sanitize_image,
     encode_pixels, verify_output,
 )
 
@@ -59,6 +59,86 @@ def prepare_image_for_vision(image_bytes: bytes, media_type: str = "image/jpeg",
         raise
     except Exception:
         raise ImagePreparationError("image_encoding_failed") from None
+
+
+def fit_standard_envelope(image_bytes: bytes, media_type: str = "image/jpeg") -> tuple[bytes, str]:
+    """Return an image no larger than the Sonnet 4.5 vision envelope.
+
+    Claude 5.5 models read images at up to 2576 px (~3x the image tokens).
+    Downscaling to the envelope Sonnet 4.5 applied server-side (<= 1568 px
+    long edge, <= 1.15 MP) keeps the image tokens -- and what the model sees --
+    at the pre-migration level. An image already inside it is returned as is.
+    A larger one is re-encoded only from sanitized pixels (PA03), never by a
+    raw save of the decoded input.
+    """
+    from app.services.ai_input_budget import (STANDARD_IMAGE_MAX_EDGE,
+                                              STANDARD_IMAGE_MAX_PIXELS,
+                                              within_standard_envelope)
+    media_type = _safe_media_type(media_type)
+    width, height = _image_size(image_bytes)
+    if within_standard_envelope(width, height):
+        return image_bytes, media_type
+    scale = min(STANDARD_IMAGE_MAX_EDGE / max(width, height),
+                (STANDARD_IMAGE_MAX_PIXELS / (width * height)) ** 0.5)
+    edge = max(1, int(max(width, height) * scale))
+    try:
+        result = sanitize_image(image_bytes, max_dimension=edge)
+        with Image.open(io.BytesIO(result.data)) as image:
+            image.load()
+            pixels = Image.new(image.mode, image.size)
+            pixels.paste(image)
+        try:
+            while not within_standard_envelope(pixels.width, pixels.height):
+                edge = max(pixels.size) - 1
+                pixels.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+            if pixels.mode == "RGBA":
+                # Transparency is never silently flattened to fit the JPEG policy.
+                encoded = encode_pixels(pixels, format="PNG", max_bytes=MAX_IMAGE_BYTES)
+                verify_output(encoded, "image/png", pixels.size)
+                return encoded, "image/png"
+            for quality in JPEG_QUALITIES:
+                try:
+                    encoded = _encode_jpeg(pixels, quality)
+                except ImageResourceError:
+                    continue
+                verify_output(encoded, "image/jpeg", pixels.size)
+                return encoded, "image/jpeg"
+        finally:
+            pixels.close()
+        raise ImagePreparationError("image_output_limit")
+    except ImageResourceError:
+        raise ImageTooLargeError("image_resource_limit") from None
+    except ImageSanitizationError:
+        raise ImagePreparationError("image_sanitization_failed") from None
+    except ImagePreparationError:
+        raise
+    except Exception:
+        raise ImagePreparationError("image_encoding_failed") from None
+
+
+def _safe_media_type(media_type):
+    if not isinstance(media_type, str):
+        return "image/jpeg"
+    media_type = media_type.split(";", 1)[0].strip().lower()
+    if media_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        return "image/jpeg"
+    return media_type
+
+
+def _image_size(image_bytes):
+    """Header-only size probe; no pixels are decoded and no global is mutated."""
+    if not isinstance(image_bytes, bytes) or not image_bytes:
+        raise ImagePreparationError("image_input_invalid")
+    try:
+        with Image.open(io.BytesIO(image_bytes), formats=FORMATS) as image:
+            width, height = image.size
+    except Image.DecompressionBombError:
+        raise ImageTooLargeError("image_resource_limit") from None
+    except Exception:
+        raise ImagePreparationError("image_sanitization_failed") from None
+    if min(width, height) <= 0 or width * height > MAX_IMAGE_PIXELS:
+        raise ImageTooLargeError("image_resource_limit")
+    return width, height
 
 
 def _encode_jpeg(image, quality):

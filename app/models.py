@@ -49,6 +49,42 @@ class AppleSubscription(db.Model):
     )
 
 
+# MON-02-BE-02: App Store Server Notifications V2 are authenticated hints. The
+# receipt deduplicates by verified notificationUUID; no signed payload is kept.
+class AppleNotificationReceipt(db.Model):
+    notification_uuid = db.Column(db.String(36), primary_key=True)
+    environment = db.Column(db.String(10), nullable=False)
+    notification_type = db.Column(db.String(40), nullable=False)
+    subtype = db.Column(db.String(40))
+    original_transaction_id = db.Column(db.String(64))
+    disposition = db.Column(db.String(32), nullable=False)
+    signed_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    received_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("environment IN ('Sandbox', 'Production')",
+                           name="ck_apple_notification_environment"),
+    )
+
+
+class AppleSubscriptionReconciliation(db.Model):
+    """One coalesced, leased request for a fresh authoritative status lookup."""
+    environment = db.Column(db.String(10), primary_key=True)
+    original_transaction_id = db.Column(db.String(64), primary_key=True)
+    account_token = db.Column(db.String(36))  # signed hint; ownership rows win
+    generation = db.Column(db.Integer, nullable=False)
+    attempts = db.Column(db.Integer, nullable=False)
+    next_attempt_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    lease_until = db.Column(db.DateTime(timezone=True))
+    last_outcome = db.Column(db.String(40))
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("environment IN ('Sandbox', 'Production')",
+                           name="ck_apple_reconciliation_environment"),
+        db.Index("ix_apple_reconciliation_due", "environment", "next_attempt_at"),
+    )
+
+
 # MON-02-BE-03A: dark AI allowance ledger (AI_ALLOWANCE_LEDGER_ENABLED, OFF).
 # Counts and codes only: no prompt, image, answer or health data in any row.
 class AiStarterGrant(db.Model):
@@ -110,6 +146,41 @@ class AiUsageReservation(db.Model):
         db.CheckConstraint("state IN ('RESERVED', 'COMMITTED', 'RELEASED', 'EXPIRED')",
                            name="ck_ai_usage_reservation_state"),
         db.Index("ix_ai_usage_reservation_open", "user_id", "state", "expires_at"),
+    )
+
+
+class AiAllowancePurgeProgress(db.Model):
+    """Singleton traversal state, never financial or deletion authority."""
+    id = db.Column(db.Integer, primary_key=True, autoincrement=False)
+    after_id = db.Column(db.Integer, nullable=False)
+    through_id = db.Column(db.Integer, nullable=False)
+    __table_args__ = (
+        db.CheckConstraint("id = 1", name="ck_ai_allowance_purge_singleton"),
+        db.CheckConstraint("after_id >= 0 AND through_id >= after_id", name="ck_ai_allowance_purge_progress"),
+    )
+
+
+class TrainingAllowanceCompensation(db.Model):
+    """One original expiry correction; bounded by reservation audit retention.
+
+    No payloads or customer-credit balance. Reservation deletion removes this
+    receipt only after its own retention window; owner deletion cascades both.
+    """
+    __tablename__ = "training_allowance_compensation"
+    reservation_id = db.Column(db.Integer, db.ForeignKey(
+        "ai_usage_reservation.id", ondelete="CASCADE"), primary_key=True)
+    operation_id = db.Column(db.Integer, db.ForeignKey(
+        "training_plan_generation_operation.id", ondelete="CASCADE"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    bucket_id = db.Column(db.Integer, db.ForeignKey(
+        "ai_allowance_bucket.id", ondelete="CASCADE"), nullable=False)
+    proof_version = db.Column(db.String(32), nullable=False)
+    reason = db.Column(db.String(32), nullable=False)
+    applied_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint("operation_id", name="uq_training_compensation_operation"),
+        db.CheckConstraint("proof_version = 'TRACKED_TRAINING_V1'", name="ck_training_compensation_proof"),
+        db.CheckConstraint("reason = 'EXPIRED_ZERO_ATTEMPTS'", name="ck_training_compensation_reason"),
     )
 
 
@@ -499,6 +570,10 @@ class TrainingPlanGenerationOperation(db.Model):
     # BE-03B-01B: True = claimed with AI allowance enforcement ON (the ledger,
     # not the legacy weekly quota, authorizes it). NULL = unmetered/historical.
     allowance_metered = db.Column(db.Boolean, nullable=True)
+    # BE-03B-A1: dispatch AUTHORIZED is not a physical attempt. A metered
+    # dispatch commits False; True is committed after the final consent check
+    # and BEFORE every SDK invocation. NULL = not tracked (unmetered/historical).
+    provider_attempt_possible = db.Column(db.Boolean, nullable=True)
     candidate_plan_data = db.Column(db.Text)
     candidate_score = db.Column(db.Float)
     # Soft references intentionally survive legacy plan replacement semantics.
@@ -1050,6 +1125,97 @@ class PumpCheck(db.Model):
 
     def __repr__(self):
         return f"<PumpCheck {self.user_id} - {self.created_at}>"
+
+
+# PRIV-K6-B1: how a completed day was evidenced. ``photo`` = a validated Pump
+# Check photo was attached (the PumpCheck row exists alongside); ``none`` = a
+# first-party, photo-free completion of an owned workout session.
+WORKOUT_COMPLETION_PROOF_PHOTO = "photo"
+WORKOUT_COMPLETION_PROOF_NONE = "none"
+WORKOUT_COMPLETION_PROOFS = (WORKOUT_COMPLETION_PROOF_PHOTO, WORKOUT_COMPLETION_PROOF_NONE)
+
+
+class WorkoutCompletionDay(db.Model):
+    """The canonical (owner, Istanbul day) workout-completion claim (PRIV-K6-B1).
+
+    Written by ``workout_completion.complete_workout`` — and only there — for
+    EVERY new confirmed completion, photo or photo-free, in the same transaction
+    as the marker/XP/session terminalization. ``uq_workout_completion_day`` is
+    the durable cross-path exact-once claim, so a photo completion and a
+    photo-free completion can never both succeed for one day.
+
+    Historical completions (before this table) are recognised through their
+    ``PumpCheck.date_key`` instead; ``workout_completion.queries.completed_days``
+    reads both and is the one definition of "completed". There is no backfill:
+    a standalone Pump Check (``date_key IS NULL``) never becomes a completion.
+
+    Deliberately carries no photo reference: deleting the Pump Check photo of a
+    photo completion does not erase the fact that the workout was completed.
+    """
+    __tablename__ = "workout_completion_day"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    date_key = db.Column(db.String(10), nullable=False)
+    proof = db.Column(db.String(8), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", name="uq_workout_completion_day"),
+        db.CheckConstraint(
+            "proof IN ('photo', 'none')", name="ck_workout_completion_day_proof"),
+    )
+
+    def __repr__(self):
+        return f"<WorkoutCompletionDay {self.user_id} {self.date_key} {self.proof}>"
+
+
+class CompletionCapabilityFloor(db.Model):
+    """The durable, monotonic completion capability floor (PRIV-K6 rollback gate).
+
+    One row per raised capability; ``workout_completion_claims_v1`` means every
+    completion writer must perform the canonical ``WorkoutCompletionDay`` claim.
+    Application code never writes it: the row is inserted once, under the
+    exclusive floor lock, by ``flask completion-floor raise``, and PostgreSQL
+    triggers (migration ``d7e3a9c1f5b8``) refuse every UPDATE, DELETE, TRUNCATE
+    and unlocked INSERT. Feature flags, restarts and rollbacks do not touch it.
+    """
+    __tablename__ = "completion_capability_floor"
+
+    capability = db.Column(db.String(64), primary_key=True)
+    raised_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    raised_by_revision = db.Column(db.String(40), nullable=False)
+
+    __table_args__ = (
+        db.CheckConstraint(
+            "capability IN ('workout_completion_claims_v1')",
+            name="ck_completion_capability_floor_capability"),
+        db.CheckConstraint(
+            "raised_by_revision ~ '^[0-9a-f]{40}$'",
+            name="ck_completion_capability_floor_revision",
+        ).ddl_if(dialect="postgresql"),
+    )
+
+
+class CompletionClaimTransaction(db.Model):
+    """Binds a ``WorkoutCompletionDay`` claim to the top-level transaction that
+    inserted it (``pg_current_xact_id()``), so the completion fence can tell a
+    claim made by THIS transaction from an earlier one.
+
+    Written and removed only by PostgreSQL triggers (migration ``d7e3a9c1f5b8``):
+    the claim's AFTER INSERT trigger inserts it, the FK cascade removes it. A
+    direct INSERT/UPDATE/DELETE is refused. No application code constructs it.
+    """
+    __tablename__ = "completion_claim_transaction"
+
+    claim_id = db.Column(
+        db.Integer, db.ForeignKey("workout_completion_day.id", ondelete="CASCADE"),
+        primary_key=True, autoincrement=False)
+    claim_txid = db.Column(db.BigInteger, nullable=False)
+
+    __table_args__ = (
+        db.Index("ix_completion_claim_transaction_claim_txid", "claim_txid"),
+    )
 
 
 STATUS_CHECK_SQL = (

@@ -59,6 +59,10 @@ else:
 DEFAULT_RATELIMIT = os.getenv("DEFAULT_RATELIMIT", "600 per hour")
 AUTH_WRITE_RATELIMIT = os.getenv(
     "AUTH_WRITE_RATELIMIT", "120 per minute; 600 per hour")
+# MON-02-BE-02: Apple delivers every notification from a few Apple egress IPs, so
+# the 600/h per-IP default would cap legitimate volume. Still per IP and per route.
+APPLE_NOTIFICATION_RATELIMIT = os.getenv(
+    "APPLE_NOTIFICATION_RATELIMIT", "120 per minute; 3600 per hour")
 AI_RATELIMIT = "30 per hour"           # OpenAI text/vision generation
 SCRAPE_RATELIMIT = "20 per hour"       # menu scraper (outbound fetch + AI; also SSRF surface)
 FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSecret miss)
@@ -83,6 +87,9 @@ COMMENT_WRITE_RATELIMIT = os.getenv("COMMENT_WRITE_RATELIMIT", "120 per hour")
 # contract is what makes a checkpoint safe, not the throttle.
 WORKOUT_CHECKPOINT_RATELIMIT = os.getenv(
     "WORKOUT_CHECKPOINT_RATELIMIT", "60 per minute; 900 per hour")
+# Local completion admission is independent of provider quotas.
+WORKOUT_COMPLETION_RATELIMIT = os.getenv(
+    "WORKOUT_COMPLETION_RATELIMIT", "30 per minute; 300 per hour")
 # LP16-B: native weekly check-in write is CHEAP (no AI, no provider: one owner
 # lock + one row + the User.weight/session update) and RARE (weekly, repeats
 # allowed). Its own per-user ceiling — never an AI/Bedrock quota — sized to
@@ -119,6 +126,15 @@ BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; pro
 # tanımları önbelleğe alınır; deploy bölgesinde (eu-central-1) doğrulanana kadar
 # KARANLIK gönder (varsayılan kapalı). Yalnızca tool-use koç döngüsünü etkiler.
 BEDROCK_PROMPT_CACHE = os.getenv("BEDROCK_PROMPT_CACHE", "0") == "1"
+# ── Model routing (MON-AI-ROUTING-5.5) ──
+# "legacy" (default): the routing above, byte-for-byte (Sonnet 4.5 heavy,
+# OpenAI gpt-4o-mini light). "claude55": Sonnet 5.5 heavy + Haiku 5.5 light,
+# both on Bedrock, no OpenAI recipient. The two profile ids have NO default:
+# the destination (eu. geo vs global.) is an explicit operator decision, and
+# app.services.ai_model_policy refuses any id it does not register exactly.
+AI_MODEL_ROUTING = os.getenv("AI_MODEL_ROUTING", "legacy").strip()
+BEDROCK_SONNET55_MODEL = os.getenv("BEDROCK_SONNET55_MODEL", "").strip()
+BEDROCK_HAIKU55_MODEL = os.getenv("BEDROCK_HAIKU55_MODEL", "").strip()
 # ── Ürün rollout bayraklarının TEK envanteri ──
 # Sekiz rollout bayrağının değeri ARTIK burada modül-yükü sabitleriyle değil,
 # app/feature_flags.py kayıt defterinden çözülür (configure_app içinde, bkz.
@@ -434,6 +450,11 @@ def configure_app(app):
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED
+    # A typo in the routing switch or profile ids must stop the boot, not
+    # silently serve another model. Legacy routing checks nothing new.
+    from app.services.ai_model_policy import validate_routing_config
+    validate_routing_config()
+    app.config["AI_MODEL_ROUTING"] = AI_MODEL_ROUTING
     _secret_key = os.environ.get("SECRET_KEY")
     if not _secret_key:
         # Allow boot without SECRET_KEY only in explicit debug mode, and generate

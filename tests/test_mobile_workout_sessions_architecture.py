@@ -129,9 +129,8 @@ def test_only_completion_pays_for_a_provider_and_the_cheap_writes_do_not():
     complete_at = source.index("def complete_workout_session(")
     checkpoint_at = source.index("def checkpoint_workout_session(")
 
-    # The vision gate and its concurrency slot are attached to completion only.
-    assert source.index("mobile_ai_concurrency_gate(") < complete_at
-    assert source.index("BEDROCK_RATELIMIT") < complete_at
+    # Admission behavior (including photo-only saturation and quotas) is
+    # exercised through Flask HTTP in the K6 suite, not decorator placement.
     assert "validate_pump_check(" in source
     # Progress persistence gets its own cheap ceiling, never a generation limit.
     assert "WORKOUT_CHECKPOINT_RATELIMIT" in source
@@ -309,7 +308,7 @@ def test_the_completion_route_skips_the_proof_when_the_day_is_already_done():
 
     assert "already_completed_today(" in complete
     assert complete.index("already_completed_today(") < complete.index(
-        "_completion_proof()")
+        "_complete_with_photo(session_reference, revision)")
     assert "replaying" in complete
 
 
@@ -427,7 +426,7 @@ def test_the_migration_only_adds_columns_and_keeps_one_alembic_head():
     # The head moves with every added revision; f5a6b7c8d9e0 must still
     # exist (asserted above) but is no longer the tip. F7 chains its Coach
     # history index onto F1's credential-epoch revision.
-    assert revisions - parents == {"b1e4f5a6c7d8"}, sorted(revisions - parents)
+    assert revisions - parents == {"a4d6f8b0c2e1"}, sorted(revisions - parents)
 
 
 # 13/14. Untouched neighbours.

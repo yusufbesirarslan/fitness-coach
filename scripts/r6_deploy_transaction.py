@@ -116,6 +116,24 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 _PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 
+# PRIV-K6 rollback gate, Layer B (release admission). Layer A -- the database
+# completion-authority fence (migration d7e3a9c1f5b8) -- holds completion
+# safety whatever this file does; this layer keeps the pipeline from SERVING,
+# restoring or activating an image below the durable completion capability
+# floor (availability and read correctness), and raises the floor only after
+# the old backend is proven retired.
+CAPABILITY = "workout_completion_claims_v1"
+# Each capability names the migration that implements it. A declaration in a
+# tree that lacks its implementation is refused, never trusted.
+CAPABILITY_IMPLEMENTATION = {CAPABILITY: "d7e3a9c1f5b8"}
+CAPABILITY_SOURCE = "release/completion-capabilities"
+CAPABILITY_IMAGE_PATH = "/app/COMPLETION_CAPABILITIES"
+CAPABILITY_FLOOR_PREFIX = "completion-floor: "
+CAPABILITY_FLOOR_SERVICE = "completion-floor"
+CAPABILITY_PROBE_SECONDS = 60
+_FLOOR_STATES = {"raised", "absent"}
+_FENCE_STATES = {"verified", "absent", "invalid"}
+
 EXIT_OK = 0
 EXIT_ROLLED_BACK = 1
 EXIT_ROLLBACK_INCOMPLETE = 2
@@ -243,6 +261,30 @@ def classify_migration_delta(previous_dir, candidate_dir, expand_contract):
 
 
 # â”€â”€ Host operations (all side effects live here) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def parse_capability_manifest(text):
+    """Strict grammar: one known token per line, newline-terminated, no blank
+    line, no duplicate. Returns a frozenset, or None when it is malformed."""
+    if not isinstance(text, str) or not text.endswith("\n"):
+        return None
+    tokens = text[:-1].split("\n")
+    if (not tokens or any(t not in CAPABILITY_IMPLEMENTATION for t in tokens)
+            or len(set(tokens)) != len(tokens)):
+        return None
+    return frozenset(tokens)
+
+
+def parse_floor_status(payload):
+    """The validated ``completion-floor status`` answer, or None (unknown)."""
+    if not isinstance(payload, dict) or payload.get("result") != "ok":
+        return None
+    if (payload.get("capability") != CAPABILITY
+            or payload.get("floor") not in _FLOOR_STATES
+            or payload.get("fence") not in _FENCE_STATES
+            or not isinstance(payload.get("claims_present"), bool)):
+        return None
+    return {key: payload[key] for key in ("floor", "fence", "claims_present")}
+
 
 def _bounded_run(argv, timeout, env=None, cwd=None):
     """One external command in its own process group, hard-bounded.
@@ -648,6 +690,98 @@ class HostOps:
                      container_id)
         self._docker(timeout, "rm", container_id)
 
+    # completion capability (PRIV-K6 rollback gate Layer B)
+    def image_capability_manifest(self, image_id, timeout):
+        """The manifest baked into the EXACT image ID (never a tag), or None
+        when the image has none or it cannot be read: no capability."""
+        if not _IMAGE_ID.fullmatch(image_id or ""):
+            raise OpError("capability manifest needs an immutable image ID")
+        rc, out, _ = self._command(
+            ["docker", "run", "--rm", "--pull", "never", "--network", "none",
+             "--entrypoint", "cat", image_id, CAPABILITY_IMAGE_PATH],
+            timeout, self.environ)
+        return out if rc == 0 else None
+
+    def source_capability_manifest(self, which, timeout):
+        """The reviewed manifest in the source tree of the candidate archive or
+        of the previous commit, or None when that tree has none."""
+        if which == "candidate":
+            path = self.context / CAPABILITY_SOURCE
+            try:
+                if path.is_symlink() or not path.is_file():
+                    return None
+                return path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise OpError(f"candidate capability manifest unreadable: {exc}") from exc
+        rc, out, _ = self._command(
+            ["git", "-C", str(self.deploy_dir), "show",
+             f"{self.previous_commit}:{CAPABILITY_SOURCE}"], timeout, self.environ)
+        return out if rc == 0 else None
+
+    def source_migration_revisions(self, which, timeout):
+        directory = (self.context / "migrations" / "versions" if which == "candidate"
+                     else self.work / "previous" / "migrations" / "versions")
+        expand_contract = _load_sibling("migration_expand_contract")
+        try:
+            return frozenset(_revisions_with_digests(directory, expand_contract))
+        except (OSError, SyntaxError, ValueError, UnicodeError) as exc:
+            raise OpError(f"{which} migrations unreadable: {exc}") from exc
+
+    @_host_operation
+    def completion_floor(self, image_id, revision, action, timeout):
+        """``flask completion-floor status|raise`` once, in a one-off container
+        of the EXACT candidate image ID; returns its one machine line."""
+        if action not in ("status", "raise") or not _IMAGE_ID.fullmatch(image_id or ""):
+            raise OpError("invalid completion-floor invocation")
+        entrypoint = ["flask", "--app", "starter", "completion-floor", action]
+        if action == "raise":
+            entrypoint += ["--revision", revision]
+        override = self.work / f"completion-floor-{action}.yml"
+        override.write_text(
+            "services:\n"
+            f"  {CAPABILITY_FLOOR_SERVICE}:\n"
+            f"    image: '{image_id}'\n"
+            "    pull_policy: never\n"
+            "    env_file: [.env]\n"
+            "    environment:\n"
+            "      FITX_SKIP_DB_INIT: '1'\n"
+            f"      APP_REVISION: '{revision}'\n"
+            f"    entrypoint: {json.dumps(entrypoint)}\n"
+            f"    mem_limit: {RELEASE_PREPARE_MEMORY}\n"
+            "    logging:\n"
+            "      driver: json-file\n"
+            "      options: {max-size: '10m', max-file: '3'}\n",
+            encoding="utf-8")
+        name = f"axisai-completion-floor-{action}-{revision[:12]}"
+        if timeout <= 15 + COMMAND_KILL_GRACE_SECONDS:
+            raise OpError("completion-floor has no cleanup reserve")
+        try:
+            rc, out, err = self._command(
+                ["docker", "compose", "--project-directory", str(self.deploy_dir),
+                 "-p", self.main, "-f", str(self.context / "docker-compose.yml"),
+                 "-f", str(override), "run", "--rm", "--no-deps", "-T", "--name", name,
+                 CAPABILITY_FLOOR_SERVICE], timeout - 15, self.environ)
+        except OpError:
+            # A killed CLI can leave the one-off container running; best effort.
+            try:
+                self._command(["docker", "rm", "-f", name], 12, self.environ)
+            except OpError:
+                pass
+            raise
+        lines = [line[len(CAPABILITY_FLOOR_PREFIX):] for line in out.splitlines()
+                 if line.startswith(CAPABILITY_FLOOR_PREFIX)]
+        if len(lines) != 1:
+            raise OpError(f"completion-floor {action} output unproven (exit {rc}): "
+                          f"{err.strip()[-200:]}")
+        try:
+            payload = json.loads(lines[0])
+        except ValueError as exc:
+            raise OpError(f"completion-floor {action} output unreadable") from exc
+        if rc != 0 or not isinstance(payload, dict):
+            reason = payload.get("reason") if isinstance(payload, dict) else None
+            raise OpError(f"completion-floor {action} refused (exit {rc}): {reason}")
+        return payload
+
     # observation only
     def http_get(self, url, timeout):
         return self._http_get(url, timeout)
@@ -742,6 +876,9 @@ class Transaction:
         self.redis_baseline = None
         self.candidate_image_id = None
         self.worker_rollback_tag = None
+        self.previous_web_image_id = None
+        self.candidate_capabilities = frozenset()
+        self.previous_capabilities = frozenset()
         self.delta = {}
         # mutation ledger (what rollback must undo)
         self.release_prepared = False
@@ -781,8 +918,10 @@ class Transaction:
             self._baseline()
             self._migration_gate()
             self._build_and_prove_image()
+            self._admit_capability()
             self._release_prepare()
             self._start_candidate()
+            self._admit_before_switch()
             self._pre_switch()
             self._switch()
             self._post_switch()
@@ -841,6 +980,7 @@ class Transaction:
                 raise StepFailed("legacy deep-health revision differs from its "
                                  "baked BUILD_REVISION")
             self.legacy_web = web
+            self.previous_web_image_id = web.image_id
         else:
             if legacy:
                 raise StepFailed(f"route is {route.state} but a main-project web "
@@ -852,8 +992,16 @@ class Transaction:
             revision = slot[0]["app_revision"]
             if not _SHA.fullmatch(revision or ""):
                 raise StepFailed("active slot revision is not 40-hex")
-            self._call(deadline, "active slot verify", self.ops.slot_verify,
-                       route.state, revision)
+            proof = self._call(deadline, "active slot verify", self.ops.slot_verify,
+                               route.state, revision)
+            identity = (proof.get("container") or {}).get("id") if isinstance(
+                proof, dict) else None
+            serving = (self._call(deadline, "active slot image", self.ops.container,
+                                  identity) if isinstance(identity, str) and identity
+                       else None)
+            # Unknown identity is not an error here; it only means the previous
+            # web cannot be PROVEN capable, so it is never restored below a floor.
+            self.previous_web_image_id = serving.image_id if serving else None
         if not _SHA.fullmatch(revision or ""):
             raise StepFailed("serving revision is not a 40-hex BUILD_REVISION")
         if revision != self.previous_commit:
@@ -911,6 +1059,147 @@ class Transaction:
             raise StepFailed("worker rollback image is not the exact previous image")
         self._call(deadline, "context .env link", self.ops.link_context_env)
         self._event("image-proven", image=self.candidate_image_id)
+
+    # ── completion capability (Layer B) ──
+    def _trusted_capabilities(self, which, image_id, deadline):
+        """Capabilities of the EXACT image, trusted only as far as the reviewed
+        source tree of the revision that image is proven to bake.
+
+        The baked manifest is a declaration. It counts only when it is byte-equal
+        to the manifest in that revision's source tree (the approved, CI-gated
+        commit) and that tree carries the implementing migration. Returns
+        ``(capabilities, problem)``; any problem means NO capability."""
+        if not isinstance(image_id, str) or not _IMAGE_ID.fullmatch(image_id):
+            return frozenset(), "no immutable image ID"
+        baked = self._call(deadline, f"{which} image capability manifest",
+                           self.ops.image_capability_manifest, image_id)
+        source = self._call(deadline, f"{which} source capability manifest",
+                            self.ops.source_capability_manifest, which)
+        if baked is None and source is None:
+            return frozenset(), None
+        if baked != source:
+            return frozenset(), "image manifest differs from its revision's source"
+        tokens = parse_capability_manifest(source)
+        if tokens is None:
+            return frozenset(), "malformed capability manifest"
+        revisions = self._call(deadline, f"{which} migration revisions",
+                               self.ops.source_migration_revisions, which)
+        missing = sorted(t for t in tokens if CAPABILITY_IMPLEMENTATION[t] not in revisions)
+        if missing:
+            return frozenset(), f"declared without its implementation: {missing}"
+        return tokens, None
+
+    def _read_floor(self, deadline):
+        """The validated floor status, or None (unknown, which is never 'absent')."""
+        try:
+            payload = self.ops.completion_floor(
+                self.candidate_image_id, self.deploy_sha, "status",
+                min(CAPABILITY_PROBE_SECONDS, self._time_left(deadline)))
+        except (OpError, StepFailed) as exc:
+            self.log(f"completion floor status unproven: {exc}")
+            return None
+        status = parse_floor_status(payload)
+        if status is None:
+            self.log("completion floor status malformed")
+        return status
+
+    @staticmethod
+    def _floor_requires_capability(floor):
+        """Only a PROVEN absent floor with no claim and no tampered fence lets a
+        writer without the capability serve. Unknown counts as raised."""
+        return (floor is None or floor["floor"] != "absent"
+                or floor["claims_present"] or floor["fence"] == "invalid")
+
+    @staticmethod
+    def _floor_label(floor):
+        if floor is None:
+            return "unknown"
+        return (f"{floor['floor']}/fence-{floor['fence']}/"
+                f"claims-{'yes' if floor['claims_present'] else 'no'}")
+
+    def _admit_capability(self):
+        """Before ANY database mutation: qualify candidate and previous images,
+        read the floor, refuse a candidate that the floor would fence."""
+        deadline = self._step_deadline("capability_admission")
+        capabilities, problem = self._trusted_capabilities(
+            "candidate", self.candidate_image_id, deadline)
+        if problem:
+            raise StepFailed(f"candidate capability declaration refused: {problem}")
+        self.candidate_capabilities = capabilities
+        web, web_problem = self._trusted_capabilities(
+            "previous", self.previous_web_image_id, deadline)
+        if self.previous_worker.image_id == self.previous_web_image_id:
+            worker, worker_problem = web, web_problem
+        else:
+            worker, worker_problem = self._trusted_capabilities(
+                "previous", self.previous_worker.image_id, deadline)
+        for role, found in (("web", web_problem), ("worker", worker_problem)):
+            if found:
+                self._event("previous-capability-unproven", role=role, reason=found)
+        # A rollback restores web AND worker together: both must carry it.
+        self.previous_capabilities = web & worker
+        floor = self._read_floor(deadline)
+        self._event("capability-admission",
+                    candidate=",".join(sorted(capabilities)) or "none",
+                    previous=",".join(sorted(self.previous_capabilities)) or "none",
+                    floor=self._floor_label(floor))
+        if self._floor_requires_capability(floor) and CAPABILITY not in capabilities:
+            raise StepFailed("candidate image is below the completion capability floor "
+                             f"({self._floor_label(floor)}); refused before any database "
+                             "mutation")
+
+    def _admit_before_switch(self):
+        """Re-read the floor after release-prepare and before traffic (ahead of
+        the immediate re-verify/route re-read, so that pair stays adjacent to
+        the switch). A capable candidate's own release-prepare installed the
+        fence, so it must now verify exactly."""
+        floor = self._read_floor(self._step_deadline("capability_admission"))
+        if (self._floor_requires_capability(floor)
+                and CAPABILITY not in self.candidate_capabilities):
+            raise StepFailed("candidate image is below the completion capability floor "
+                             f"before the switch ({self._floor_label(floor)})")
+        if CAPABILITY in self.candidate_capabilities and (
+                floor is None or floor["fence"] != "verified"):
+            raise StepFailed("completion fence is not verified after release-prepare "
+                             f"({self._floor_label(floor)})")
+
+    def _rollback_target_admissible(self, deadline):
+        floor = self._read_floor(deadline)
+        if not self._floor_requires_capability(floor):
+            return True
+        if CAPABILITY in self.previous_capabilities:
+            return True
+        self._event("rollback-refused-below-floor", floor=self._floor_label(floor),
+                    previous=self.previous_revision, keep=self.target_slot)
+        return False
+
+    def _activate_capability(self, deadline):
+        """Success tail only, after the old backend is PROVEN retired: raise the
+        floor (idempotent). Failure leaves K6 completions retryably refused and a
+        safe re-run, never a lowered floor."""
+        floor = self._read_floor(deadline)
+        if floor is None or floor["fence"] != "verified":
+            self._event("capability-activation-incomplete",
+                        reason=f"fence not verified ({self._floor_label(floor)})")
+            return EXIT_COMMITTED_RESIDUE
+        if floor["floor"] == "raised":
+            self._event("capability-floor-present", capability=CAPABILITY)
+            return EXIT_OK
+        try:
+            outcome = self.ops.completion_floor(
+                self.candidate_image_id, self.deploy_sha, "raise",
+                min(CAPABILITY_PROBE_SECONDS, self._time_left(deadline)))
+        except (OpError, StepFailed) as exc:
+            self._event("capability-activation-incomplete", reason=str(exc))
+            return EXIT_COMMITTED_RESIDUE
+        if (not isinstance(outcome, dict)
+                or outcome.get("result") not in ("raised", "already_raised")
+                or not _SHA.fullmatch(str(outcome.get("raised_by_revision")))):
+            self._event("capability-activation-incomplete", reason="unproven raise")
+            return EXIT_COMMITTED_RESIDUE
+        self._event("capability-activated", capability=CAPABILITY,
+                    raised_by=outcome["raised_by_revision"])
+        return EXIT_OK
 
     def _release_prepare(self):
         self.release_prepared = True
@@ -1060,6 +1349,16 @@ class Transaction:
         manual = (["release-prepare container cleanup unproven"]
                   if self.release_prepare_cleanup_unproven else [])
 
+        # Layer B: never route back to, or restart, a writer the durable floor
+        # fences. The candidate keeps serving; recovery is fix forward.
+        if (self.route_switch_attempted or self.worker_attempted) and \
+                not self._rollback_target_admissible(
+                    self.budget.deadline(steps["route_restore"])):
+            manual.append("ROLLBACK_BELOW_FLOOR: the previous web/worker is below the "
+                          "completion capability floor; candidate kept, fix forward")
+            self._event("rollback-incomplete", manual="; ".join(manual))
+            return EXIT_ROLLBACK_INCOMPLETE
+
         route_ok = True
         if self.previous_route is not None and (
                 self.route_switch_attempted or self.candidate_started):
@@ -1191,6 +1490,11 @@ class Transaction:
             self._event("retirement-incomplete", backend=self.previous_route,
                         reason=str(exc))
             status = EXIT_COMMITTED_RESIDUE
+        # Only once the old backend is proven gone: no historical-only writer of
+        # this host remains, so raising the floor costs no availability.
+        if status == EXIT_OK and CAPABILITY in self.candidate_capabilities:
+            status = self._activate_capability(
+                self.budget.deadline(steps["capability_activation"]))
         hk_deadline = self.budget.deadline(steps["housekeeping"])
 
         def timeout_for():

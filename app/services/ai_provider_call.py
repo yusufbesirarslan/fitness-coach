@@ -12,7 +12,10 @@ directly). The order is structural, not a convention at each call site:
     4. capacity permit (`ai_gate.model_concurrency_slot`), which charges the
        spend guard for the FIRST attempt (#337 semantics unchanged)
     5. the provider call, made with exactly the checked copy; the only extra
-       argument a caller may add is the transport `timeout`
+       argument a caller may add is the transport `timeout`. Each physical
+       attempt runs inside the final consent check (`ai_consent.dispatch`),
+       after which an optional caller `attempt_observer` runs; if it raises,
+       that attempt is never sent
 
 A payload refused at step 3 never takes a permit, never consumes spend-guard
 budget and never reaches the provider, its fallback, or a retry.
@@ -28,6 +31,7 @@ generating (and billing) on the provider side, so repeating it is the costly
 case; the higher-level recovery ladder (`ai_recovery`) decides that, and each
 of its attempts is a fresh admission.
 """
+import contextvars
 import copy
 import logging
 import random
@@ -36,7 +40,8 @@ import uuid
 from contextlib import contextmanager
 
 from app.config import BEDROCK_MAX_RETRIES, OPENAI_MAX_RETRIES
-from app.services import ai_input_budget, ai_spend_guard, ai_usage, ai_consent
+from app.services import (ai_input_budget, ai_model_policy, ai_spend_guard,
+                          ai_usage, ai_consent)
 from app.services.ai_gate import model_concurrency_slot
 
 _log = logging.getLogger(__name__)
@@ -45,6 +50,94 @@ _RETRY_BASE_SECONDS = 0.5
 _RETRY_MAX_SECONDS = 4.0
 _RETRYABLE_STATUS = frozenset({408, 409, 429})
 _TRANSPORT_KWARGS = frozenset({"timeout"})
+
+
+# Operational authority is intentionally a no-argument operation, never an
+# admit() option. It cannot carry caller content, identity, tools or a recipient.
+PROBE_MAX_TOKENS = 1
+PROBE_TIMEOUT_SECONDS = 5.0
+
+
+def probe_bedrock_readiness():
+    """One fixed synthetic streaming attempt; no user-consent authority.
+
+    Only bedrock_health calls this operation. No fallback, retry, permit, user
+    subject or spend charge. The existing lazy SDK client has max_retries=0.
+    User calls still go through admit()/dispatch(), including health_probe
+    supplied to admit(): a feature name never confers operational authority.
+    """
+    from app.extensions import bedrock_client
+
+    model = ai_model_policy.heavy_model()
+    payload = dict(model=model, max_tokens=PROBE_MAX_TOKENS,
+                   messages=[{"role": "user", "content": "ping"}])
+    payload, _cls = ai_model_policy.prepare("health_probe", "bedrock", payload)
+    payload, bound, images = check_payload("health_probe", "bedrock-stream", payload)
+    response = None
+    outcome = "provider_error"
+    try:
+        method = bedrock_client.messages.stream
+        with method(**payload, timeout=PROBE_TIMEOUT_SECONDS) as stream:
+            response = stream.get_final_message()
+            if response is None:
+                raise RuntimeError("operational probe has no final message")
+        outcome = "success"
+    except BaseException as exc:
+        outcome = _outcome_of(exc)
+        raise
+    finally:
+        # No account correlation: the probe never processes user data.
+        # Telemetry failure cannot manufacture a failed/successful probe.
+        try:
+            usage = ai_usage.usage_from_response("bedrock", response) if response else None
+            ai_usage.emit(feature="health_probe", provider="bedrock", model=model,
+                          outcome=outcome, attempt=1, subject_id=None,
+                          usage=usage or {"input_tokens": bound},
+                          usage_source="provider" if usage else "estimated",
+                          input_bound=bound, image_units=images,
+                          output_cap=PROBE_MAX_TOKENS,
+                          stop=ai_usage.stop_from_response("bedrock", response))
+        except Exception:
+            pass
+
+
+class AttemptEvidenceUnavailable(ai_spend_guard.AISpendLimitExceeded):
+    """The caller's pre-attempt evidence could not be recorded: no SDK call.
+
+    A refusal, like a spend ceiling: never retried, never a fallback trigger.
+    """
+
+    def __init__(self):
+        super().__init__("attempt_evidence", "heavy")
+
+
+# MON-02-BE-03B-A1: an optional per-context observer run AFTER the final
+# consent check and BEFORE each physical SDK invocation. It lets a metered
+# caller durably record "a physical attempt may have started" ahead of the
+# call it protects. Unset (every other caller) = no-op.
+_attempt_observer = contextvars.ContextVar("ai_attempt_observer", default=None)
+
+
+@contextmanager
+def attempt_observer(callback):
+    token = _attempt_observer.set(callback)
+    try:
+        yield
+    finally:
+        _attempt_observer.reset(token)
+
+
+def _before_physical_attempt():
+    observer = _attempt_observer.get()
+    if observer is None:
+        return
+    try:
+        observer()
+    except ai_spend_guard.AISpendLimitExceeded:
+        raise
+    except Exception:
+        # Unrecorded evidence never lets the call proceed.
+        raise AttemptEvidenceUnavailable() from None
 
 
 class AIInputBudgetExceeded(ai_spend_guard.AISpendLimitExceeded):
@@ -112,7 +205,7 @@ def _record_rejection(feature, family, model, bound, subject):
         pass
 
 
-def check_payload(feature, provider, payload, reduce=None):
+def check_payload(feature, provider, payload, reduce=None, spend_class=None):
     """Validate (and if needed deterministically reduce) a FROZEN payload.
 
     Returns ``(payload, bound, images)``; raises AIInputBudgetExceeded.
@@ -120,6 +213,7 @@ def check_payload(feature, provider, payload, reduce=None):
     is the one production caller.
     """
     family = _provider_family(provider)
+    cls = spend_class or ai_spend_guard.provider_class(family)
     feature = ai_input_budget.normalize_feature(feature)
     budget = ai_input_budget.INPUT_BUDGETS[feature]
     subject = ai_spend_guard.current_subject()
@@ -131,13 +225,13 @@ def check_payload(feature, provider, payload, reduce=None):
         # Output is half the per-call cost; an uncapped or over-cap request is
         # a code defect, refused before anything is spent.
         _record_rejection(feature, family, model, None, subject)
-        raise AIInputBudgetExceeded(feature, ai_spend_guard.provider_class(family))
+        raise AIInputBudgetExceeded(feature, cls)
 
     try:
         bound, images = ai_input_budget.input_upper_bound(payload)
     except ai_input_budget.UnboundablePayload:
         _record_rejection(feature, family, model, None, subject)
-        raise AIInputBudgetExceeded(feature, ai_spend_guard.provider_class(family))
+        raise AIInputBudgetExceeded(feature, cls)
 
     while bound > budget and reduce is not None:
         reduced = reduce(payload)
@@ -148,7 +242,7 @@ def check_payload(feature, provider, payload, reduce=None):
 
     if bound > budget or images > ai_input_budget.IMAGE_LIMITS[feature]:
         _record_rejection(feature, family, model, bound, subject)
-        raise AIInputBudgetExceeded(feature, ai_spend_guard.provider_class(family))
+        raise AIInputBudgetExceeded(feature, cls)
     return payload, bound, images
 
 
@@ -156,7 +250,7 @@ class Admission:
     """One admitted logical provider call. Single use."""
 
     def __init__(self, *, feature, provider, payload, bound, images, charge,
-                 deadline, tool_round, subject):
+                 deadline, tool_round, subject, spend_class=None):
         self.feature = feature
         self.provider = provider
         self.family = _provider_family(provider)
@@ -167,6 +261,7 @@ class Admission:
         self._deadline = deadline
         self.tool_round = tool_round
         self.subject = subject
+        self.spend_class = spend_class
         self._used = False
         self.consent_generation = ai_consent.generation(subject)
         try:
@@ -207,7 +302,9 @@ class Admission:
                 subject_id=self.subject, usage=usage, usage_source=source,
                 input_bound=self.input_bound, image_units=self.images,
                 output_cap=self._payload.get("max_tokens"),
-                admission_id=self.admission_id)
+                admission_id=self.admission_id,
+                stop=(ai_usage.stop_from_response(self.family, response)
+                      if response is not None else None))
         except Exception:
             pass
 
@@ -244,6 +341,7 @@ class Admission:
                 # durable check after capacity/backoff, under the account fence.
                 with ai_consent.dispatch(self.subject, self.feature, self.provider,
                                          kwargs, self.consent_generation):
+                    _before_physical_attempt()
                     bounded_transport = dict(transport)
                     bounded_transport["timeout"] = min(float(transport.get("timeout", 30.0)), 30.0)
                     resp = method(**kwargs, **bounded_transport)
@@ -271,6 +369,7 @@ class Admission:
         with ai_consent.stream_dispatch(self.subject, self.feature, self.provider,
                                         self._payload, self.consent_generation):
             holder = _StreamUsage()
+            _before_physical_attempt()
             try:
                 with method(**copy.deepcopy(self._payload), **transport) as stream:
                     yield _StreamProxy(stream, holder)
@@ -317,26 +416,33 @@ def admit(*, feature, provider, payload, deadline=None, tool_round=None,
         raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
     feature = ai_input_budget.normalize_feature(feature)
     frozen = copy.deepcopy(payload)
-    frozen, bound, images = check_payload(feature, provider, frozen, reduce=reduce)
+    # The routing policy adapts the frozen copy BEFORE the budget check, so
+    # what is counted, consented and sent is one payload. Under claude55 an
+    # unregistered model id or a 5.5-incompatible shape stops here.
+    frozen, spend_class = ai_model_policy.prepare(
+        feature, _provider_family(provider), frozen)
+    frozen, bound, images = check_payload(feature, provider, frozen, reduce=reduce,
+                                          spend_class=spend_class)
     subject = ai_spend_guard.current_subject()
     admission = Admission(
         feature=feature, provider=provider, payload=frozen, bound=bound,
         images=images, charge=charge, deadline=deadline, tool_round=tool_round,
-        subject=subject)
-    if gate:
-        try:
-            with ai_spend_guard.feature_scope(feature):
-                with model_concurrency_slot(provider, deadline=deadline):
-                    yield admission
-        except ai_spend_guard.AISpendLimitExceeded as exc:
-            if not admission._used and not isinstance(exc, AIInputBudgetExceeded):
+        subject=subject, spend_class=spend_class)
+    with ai_spend_guard.class_scope(spend_class):
+        if gate:
+            try:
+                with ai_spend_guard.feature_scope(feature):
+                    with model_concurrency_slot(provider, deadline=deadline):
+                        yield admission
+            except ai_spend_guard.AISpendLimitExceeded as exc:
+                if not admission._used and not isinstance(exc, AIInputBudgetExceeded):
+                    admission._emit_guard_rejection()
+                raise
+            return
+        if charge:
+            try:
+                ai_spend_guard.charge(provider, feature=feature)
+            except ai_spend_guard.AISpendLimitExceeded:
                 admission._emit_guard_rejection()
-            raise
-        return
-    if charge:
-        try:
-            ai_spend_guard.charge(provider, feature=feature)
-        except ai_spend_guard.AISpendLimitExceeded:
-            admission._emit_guard_rejection()
-            raise
-    yield admission
+                raise
+        yield admission

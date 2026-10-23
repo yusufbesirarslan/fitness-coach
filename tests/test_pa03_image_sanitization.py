@@ -13,8 +13,8 @@ from app.services.mobile_pump_checks.analysis import analyze_image
 MARKER = b"SYNTHETIC_PRIVATE_DEVICE_LOCATION_424242"
 
 
-def tagged(fmt="JPEG", orientation=6, alpha=False):
-    image = Image.new("RGBA" if alpha else "RGB", (24, 16), "red")
+def tagged(fmt="JPEG", orientation=6, alpha=False, size=(24, 16)):
+    image = Image.new("RGBA" if alpha else "RGB", size, "red")
     image.paste((0, 0, 255, 0) if alpha else "blue", (0, 0, 12, 8))
     exif = Image.Exif()
     exif[274] = orientation
@@ -438,3 +438,65 @@ def test_grayscale16_resource_limits_preserved(monkeypatch):
     monkeypatch.setattr(core, "MAX_PIXELS", 1)
     with pytest.raises(core.ImageResourceError, match="image_pixel_limit"):
         core.sanitize_image(raw)
+
+
+# Claude 5.5 standard-envelope downscale (#456) composed with the PA03 core.
+ENVELOPE_SOURCE = (2400, 1800)  # outside 1568 px / 1.15 MP in both measures
+
+
+@pytest.mark.parametrize("fmt,mime", [("JPEG", "image/jpeg"), ("PNG", "image/jpeg"),
+                                       ("WEBP", "image/jpeg")])
+def test_envelope_downscale_emits_only_sanitized_oriented_pixels(fmt, mime):
+    from app.services.ai_input_budget import within_standard_envelope
+    raw = tagged(fmt, orientation=6, size=ENVELOPE_SOURCE)
+    with Image.open(BytesIO(raw)) as source:
+        assert source.getexif().get_ifd(34853)[2]  # fixture truly has GPS IFD
+    data, media_type = vision_images.fit_standard_envelope(raw, "image/png")
+    assert media_type == mime
+    assert_clean(data, mime)
+    with Image.open(BytesIO(data)) as image:
+        width, height = image.size
+    assert within_standard_envelope(width, height)
+    assert height > width  # orientation 6 applied before encoding
+
+
+def test_envelope_downscale_keeps_transparency_without_metadata():
+    from app.services.ai_input_budget import within_standard_envelope
+    data, media_type = vision_images.fit_standard_envelope(
+        tagged("PNG", alpha=True, size=ENVELOPE_SOURCE), "image/png")
+    assert media_type == "image/png"
+    assert_clean(data, media_type)
+    with Image.open(BytesIO(data)) as image:
+        assert image.mode == "RGBA"
+        assert image.getchannel("A").getextrema()[0] == 0
+        assert within_standard_envelope(*image.size)
+
+
+@pytest.mark.parametrize("raw", [MARKER, tagged(size=ENVELOPE_SOURCE)[:4096], b""])
+def test_envelope_failed_input_has_no_raw_fallback(raw):
+    with pytest.raises(vision_images.ImagePreparationError) as caught:
+        vision_images.fit_standard_envelope(raw, "image/jpeg")
+    assert MARKER.decode() not in "".join(traceback.format_exception(caught.value))
+
+
+def test_envelope_output_verification_failure_prevents_release(monkeypatch):
+    def reject(*args):
+        raise core.ImageSanitizationError("image_output_metadata")
+    monkeypatch.setattr(vision_images, "verify_output", reject)
+    with pytest.raises(vision_images.ImagePreparationError, match="image_sanitization_failed"):
+        vision_images.fit_standard_envelope(tagged(size=ENVELOPE_SOURCE), "image/jpeg")
+
+
+def test_claude55_image_block_payload_after_preparation_is_clean(monkeypatch):
+    import base64
+    from app.services import ai
+    from app.services.ai_input_budget import within_standard_envelope
+    monkeypatch.setattr(ai.ai_model_policy, "claude55", lambda: True)
+    prepared, mime = vision_images.prepare_image_for_vision(
+        tagged(size=ENVELOPE_SOURCE), "image/jpeg")
+    assert_clean(prepared, mime)
+    block = ai._image_block(prepared, mime)
+    data = base64.b64decode(block["source"]["data"])
+    assert_clean(data, block["source"]["media_type"])
+    with Image.open(BytesIO(data)) as image:
+        assert within_standard_envelope(*image.size)
