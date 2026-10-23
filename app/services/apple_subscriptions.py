@@ -134,9 +134,13 @@ class AppleAdapter:
 
     def _status(self, original_id, token):
         response = self.client.get_all_subscription_statuses(original_id)
-        # App ID is present in the authenticated HTTPS API envelope, not
-        # JWSTransaction. SignedDataVerifier validates signed bundle/environment.
-        if (response.bundleId != self.bundle or response.appAppleId != self.app_id
+        # App Apple ID may be omitted in Sandbox. If provided it must match;
+        # Production always requires the configured ID. Bundle/environment and
+        # every signed transaction/renewal check remain mandatory in both.
+        app_id_matches = response.appAppleId == self.app_id
+        if self.environment == "Sandbox" and response.appAppleId is None:
+            app_id_matches = True
+        if (response.bundleId != self.bundle or not app_id_matches
                 or response.environment != Environment(self.environment)):
             raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
         matches = []

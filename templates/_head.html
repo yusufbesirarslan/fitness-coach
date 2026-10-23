@@ -1,5 +1,5 @@
 {# Tüm sayfalarda ortak <head> parçası: charset/viewport, favicon, fontlar
-   (preconnect + birleşik ağırlık seti), Google Analytics ve funnel olay yardımcı
+   (preconnect + birleşik ağırlık seti) ve kapalı analytics uyumluluk
    script'i. Her sayfa kendi <title> ve sayfaya özel CSS'ini bu include'dan SONRA
    ekler. Yeni satır-içi <script> için CSP nonce'u gerekir (app/hooks.py). #}
 <meta charset="UTF-8">
@@ -36,12 +36,7 @@
 <link rel="stylesheet" href="/static/tokens.css?v={{ _v }}">
 <link rel="stylesheet" href="/static/components.css?v={{ _v }}">
 
-<!-- Google Analytics (site geneli — funnel olayları static/analytics.js'te) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y"></script>
-<script nonce="{{ csp_nonce }}">
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-YXSGLN7C7Y');
-</script>
+{# Optional backend-web measurement is disabled (PRIV-LAUNCH-02).
+   Landing consent does not authorize this separate account surface. Keep the
+   local compatibility API so existing product actions remain safe. #}
 <script src="/static/analytics.js?v={{ _v }}" defer></script>
