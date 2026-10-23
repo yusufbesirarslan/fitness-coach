@@ -235,6 +235,21 @@ def test_web_registration_contact_controls_stay_in_inert_template(app, client):
     assert not soup.select_one("#eligible-contact-stage input")
 
 
+@pytest.mark.parametrize("path", ["/api/v1/pump-checks",
+    "/api/v1/pump-checks/fixture", "/api/v1/pump-check-comparisons/fixture"])
+def test_teen_body_analysis_reads_are_not_a_creation_guard_bypass(app, bearer, path):
+    client, headers, _ = bearer
+    response = client.get(path, headers=headers)
+    assert response.status_code == 403
+    assert response.json["error"]["code"] == "ELIGIBILITY_FEATURE_UNAVAILABLE"
+
+
+def test_legacy_physique_projection_is_unavailable_to_unknown_cohort(app, client, auth_user):
+    response = client.get("/api/progress/physique")
+    assert response.status_code == 403
+    assert response.json["code"] == "ELIGIBILITY_FEATURE_UNAVAILABLE"
+
+
 @pytest.mark.parametrize("age", [17, 30])
 def test_legacy_coach_adult_math_keeps_age_guard_after_ai_activation(
         app, make_user, age):

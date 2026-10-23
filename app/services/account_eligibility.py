@@ -192,6 +192,8 @@ def enforce_request(user):
         require_capability(user, "social")
     if endpoint in {
         "mobile_api.create_pump_check", "mobile_api.create_pump_check_comparison",
+        "mobile_api.list_pump_checks", "mobile_api.get_pump_check",
+        "mobile_api.get_pump_check_comparison", "tracking.progress_physique_read",
         "training.complete_workout",
     }:
         require_capability(user, "body_photos")
