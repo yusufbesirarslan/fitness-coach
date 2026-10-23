@@ -35,6 +35,24 @@
             <div class="auth-alert auth-alert-error" id="error-msg" role="alert" aria-live="polite"></div>
             <div class="auth-alert auth-alert-success" id="success-msg" role="status" aria-live="polite"></div>
 
+            {% if config.ACCOUNT_ELIGIBILITY_ENABLED %}
+            <div class="auth-form" id="eligibility-stage">
+                <h2>{{ t('eligibility.title') }}</h2>
+                <p>{{ t('eligibility.note') }}</p>
+                <label for="eligibility-age">{{ t('eligibility.age') }}</label>
+                <input id="eligibility-age" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" data-action-input="resetEligibility">
+                <label for="eligibility-country">{{ t('eligibility.country') }}</label>
+                <select id="eligibility-country" data-action-change="resetEligibility">
+                    <option value="">{{ t('eligibility.choose') }}</option>
+                    <option value="TR">Türkiye</option><option value="US">United States</option>
+                    <option value="GB">United Kingdom</option><option value="CA">Canada</option>
+                    <option value="AU">Australia</option>
+                </select>
+                <button type="button" class="auth-btn" data-action="checkEligibility">{{ t('eligibility.continue') }}</button>
+                <a class="auth-link" href="https://www.axisaiapp.com/privacy">{{ t('eligibility.privacy') }}</a>
+            </div>
+            <div id="eligible-contact-stage"></div>
+            <template id="eligible-contact-template">
             <div class="auth-form">
                 <div class="auth-field">
                     <label for="username">{{ t('form.username') }}</label>
@@ -75,6 +93,49 @@
                     <a class="auth-link" href="/login">{{ t('register.login_link') }}</a>
                 </div>
             </div>
+            </template>
+            {% else %}
+            <div class="auth-form">
+                <div class="auth-field">
+                    <label for="username">{{ t('form.username') }}</label>
+                    <input type="text" id="username" name="username" placeholder="{{ t('register.username_ph') }}"
+                           autocomplete="username" autocapitalize="none" spellcheck="false"
+                           data-action-keydown="registerOnEnter">
+                </div>
+                <div class="auth-field">
+                    <label for="email">{{ t('form.email') }}</label>
+                    <input type="email" id="email" name="email" placeholder="{{ t('register.email_ph') }}"
+                           autocomplete="email" data-action-keydown="registerOnEnter">
+                </div>
+                <div class="auth-field">
+                    <label for="password">{{ t('form.password') }}</label>
+                    <div class="auth-input-wrap">
+                        <input type="password" id="password" name="password" placeholder="{{ t('register.password_ph') }}"
+                               autocomplete="new-password" aria-describedby="password-help password-strength-text"
+                               data-action-input="updatePasswordStrength" data-action-keydown="registerOnEnter">
+                        <button type="button" class="password-toggle" data-action="togglePassword"
+                                data-target="password" aria-label="{{ t('form.password') }}" aria-pressed="false">Show</button>
+                    </div>
+                    <div class="password-meter" id="password-strength" data-score="0" aria-hidden="true">
+                        <div class="password-track"><div class="password-fill"></div></div>
+                    </div>
+                    <p class="password-hint" id="password-help">{{ t('register.password_ph') }}</p>
+                    <p class="password-hint" id="password-strength-text" aria-live="polite"></p>
+                </div>
+
+                <button type="button" class="auth-btn" id="register-submit" data-action="register">{{ t('register.submit') }}</button>
+
+                {% if cognito_enabled %}
+                <div class="auth-divider"><span>{{ t('auth.or') }}</span></div>
+                <a class="auth-btn auth-btn-secondary" href="/login/cognito">{{ t('auth.cognito_continue') }}</a>
+                {% endif %}
+
+                <div class="auth-row">
+                    <span>{{ t('register.have_account') }}</span>
+                    <a class="auth-link" href="/login">{{ t('register.login_link') }}</a>
+                </div>
+            </div>
+            {% endif %}
         </section>
     </main>
 </div>

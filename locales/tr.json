@@ -1589,5 +1589,16 @@
   "coach.dish_error": "Hata",
   "coach.dish_add_failed": "Kayıt başarısız.",
   "coach.v2.context": "Antrenman, beslenme ve ilerlemen hakkında konuş.",
-  "coach.v2.view_plan": "Planı aç"
+  "coach.v2.view_plan": "Planı aç",
+  "eligibility.title": "Yaş ve ülke",
+  "eligibility.age": "Tam yıl olarak yaş",
+  "eligibility.country": "İkamet ettiğiniz ülke",
+  "eligibility.choose": "Ülkenizi seçin",
+  "eligibility.continue": "Devam et",
+  "eligibility.required": "Hesap oluşturmadan önce yaşınızı ve ülkenizi gözden geçirin.",
+  "eligibility.pending": "Yaşınız ve ülkeniz için uygunluk incelemesi gerekiyor. Hesap kaydı henüz kullanılamıyor.",
+  "eligibility.denied": "Bu yaş veya ülke için hesap kaydı kullanılamıyor.",
+  "eligibility.note": "Bu, yaş beyanıdır; sağlık bilgisi işleme veya yapay zekâ ile paylaşma izni değildir.",
+  "eligibility.privacy": "Gizlilik Politikası",
+  "eligibility.feature_unavailable": "Bu özellik bu hesap için kullanılamıyor."
 }

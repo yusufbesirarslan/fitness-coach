@@ -78,6 +78,8 @@ def require_auth(view):
         session_store.touch(sid)
         auth_contract.record_outcome(
             auth_contract.WEB, auth_contract.OUTCOME_OK)
+        from app.services.account_eligibility import enforce_request
+        enforce_request(resolved)
         return view(*args, **kwargs)
     wrapped._require_auth = True
     return wrapped

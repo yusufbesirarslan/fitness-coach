@@ -212,7 +212,7 @@ def account_projection(user):
     token (`lose_weight` / `build_muscle`), or null when the stored value is
     not a canonical goal; the stored Turkish literal never reaches the wire.
     """
-    return {"user": {
+    payload = {"user": {
         "username": user.username,
         "display_name": user.full_name or user.username,
         "profile_complete": account_profile.onboarding_state(user).complete,
@@ -220,6 +220,10 @@ def account_projection(user):
         "goal": account_profile.goal_token(user.goal),
         "goal_type": user.goal_type,
     }}
+    from app.services import account_eligibility
+    if account_eligibility.enabled():
+        payload["user"]["eligibility"] = account_eligibility.projection(user)
+    return payload
 
 
 @bp.get("/account/me")
@@ -236,6 +240,7 @@ def me():
 from app.blueprints import mobile_account_deletion  # noqa: E402,F401
 from app.blueprints import mobile_account_language  # noqa: E402,F401
 from app.blueprints import mobile_account_profile  # noqa: E402,F401
+from app.blueprints import mobile_eligibility  # noqa: E402,F401
 from app.blueprints import mobile_coach  # noqa: E402,F401
 from app.blueprints import mobile_menu  # noqa: E402,F401
 from app.blueprints import mobile_nutrition  # noqa: E402,F401

@@ -61,6 +61,7 @@ class Outcome:
     """Closed failure vocabulary. Transport adapters map these, nothing else."""
 
     FIELDS_REQUIRED = "fields_required"
+    ELIGIBILITY_REQUIRED = "eligibility_required"
     USERNAME_INVALID = "username_invalid"
     EMAIL_INVALID = "email_invalid"
     PASSWORD_INVALID = "password_invalid"
@@ -166,7 +167,7 @@ def _call_provider(event, table, operation, **kwargs):
 
 
 def register_account(username, email, password, language=None,
-                     referral_code=None):
+                     referral_code=None, eligibility_token=None):
     """Create a pending account at the provider and its local profile row.
 
     `username` is used exactly as submitted (the validator rejects whitespace);
@@ -176,6 +177,11 @@ def register_account(username, email, password, language=None,
     in until `confirm_account` succeeds — the provider refuses login for an
     unconfirmed user and this function issues no session.
     """
+    from app.services import account_eligibility
+    try:
+        eligibility_record = account_eligibility.registration_record(eligibility_token)
+    except account_eligibility.EligibilityDenied:
+        raise RegistrationFailure(Outcome.ELIGIBILITY_REQUIRED, Phase.VALIDATION) from None
     username = username if isinstance(username, str) else ""
     email = _text(email).lower()
     password = password if isinstance(password, str) else ""
@@ -220,9 +226,11 @@ def register_account(username, email, password, language=None,
     # password is unusable: sign-in goes through the provider only.
     user = User(username=username, email=email, cognito_sub=sub or None,
                 full_name=username, language=language)
-    referral_code = _text(referral_code)
+    # Private v1 eligibility mode has no social/referral discovery surface.
+    referral_code = "" if eligibility_record is not None else _text(referral_code)
     if referral_code:
         user.user_metadata = {PENDING_REFERRAL_KEY: referral_code}
+    account_eligibility.attach(user, eligibility_record)
     ensure_referral_code(user)
     db.session.add(user)
     try:

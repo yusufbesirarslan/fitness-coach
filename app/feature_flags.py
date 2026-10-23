@@ -135,6 +135,20 @@ def _rollback(key):
 # no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
+        key="ACCOUNT_ELIGIBILITY_ENABLED",
+        capability="PRIV-LAUNCH age/country declaration before registration and backend teen feature restrictions; not health or AI consent.",
+        owner=_OWNER, default=False, depends_on=(),
+        observability="Closed eligibility response codes only; never tickets, age or country payloads.",
+        prerequisites=("Paired mobile eligibility client and existing-account review UX",
+                       "Five-market legal/age-assurance and teen health authorisation qualification",
+                       "Neutral teen onboarding and existing D1/StoreKit composition"),
+        success_signals=("No contact/provider work before a valid declaration ticket",
+                         "No teen/unknown body analysis or automatic weight target",),
+        abort_signals=("Any minority self-promotion", "Any sensitive payload logged"),
+        rollback="Stop release qualification if disabled; OFF restores legacy registration and must not be used to claim a qualified 13+ release.",
+        lifecycle=LIFECYCLE_BLOCKED, review_by="2026-10-29", decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="APPLE_SUBSCRIPTIONS_ENABLED",
         capability="MON-02-BE-01 authenticated Apple subscription verification and entitlement, isolated from quota enforcement.",
         owner=_OWNER,
