@@ -27,7 +27,7 @@ from app.services.plan_mutation.commands import UpdateExercisePrescriptionComman
 from app.services.plan_mutation.context import MutationContext
 from app.services.plan_mutation.fingerprint import snapshot_fingerprint
 from test_lp18_b0 import DAY, plan_text, coach_proposal
-from consent_projection_support import allow_operation_fences, bound_candidate
+from consent_projection_support import allow_operation_fences, bound_candidate, synthetic_authority
 
 pytestmark=pytest.mark.pg_concurrency
 if os.environ.get('FITX_PG_CONCURRENCY_TEST') != '1':
@@ -255,7 +255,7 @@ def test_g_first_plan_operation_user_plan_order_has_no_cycle(pg,monkeypatch):
     from app.services.mobile_training_generation import store, ExistingPlanRefused
     with pg[0].app_context():
         operation=store.claim(uid,'generate-key-1','fingerprint')
-        store.stage_candidate(operation.id,plan_text('First'),8);oid=operation.id
+        store.stage_candidate(operation.id,plan_text('First'),8,synthetic_authority(uid));oid=operation.id
     def first_plan():
         try:return store.commit_plan(oid,uid)
         except ExistingPlanRefused:return 'existing-refused'
@@ -269,7 +269,7 @@ def test_g_first_plan_owner_wins_replacement_waits(pg,monkeypatch):
     from app.services.mobile_training_generation import store, ExistingPlanRefused
     with pg[0].app_context():
         operation=store.claim(uid,'generate-key-1','fingerprint')
-        store.stage_candidate(operation.id,plan_text('First'),8);oid=operation.id
+        store.stage_candidate(operation.id,plan_text('First'),8,synthetic_authority(uid));oid=operation.id
     def first_plan():
         try:return store.commit_plan(oid,uid)
         except ExistingPlanRefused:return 'existing-refused'
@@ -318,7 +318,7 @@ def test_absent_base_first_plan_commit_never_enters_a_cycle(pg,monkeypatch,nativ
     with pg[0].app_context():
         TrainingPlan.query.filter_by(user_id=uid).delete();db.session.commit()
         operation=store.claim(uid,'generate-key-1','fingerprint')
-        store.stage_candidate(operation.id,plan_text('First'),8);oid=operation.id
+        store.stage_candidate(operation.id,plan_text('First'),8,synthetic_authority(uid));oid=operation.id
     create=lambda:store.commit_plan(oid,uid).lineage_id
     if native_first:
         out=force(pg,monkeypatch,store,'get_active_plan',create,confirm(uid,token))

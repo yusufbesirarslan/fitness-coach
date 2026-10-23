@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from consent_projection_support import synthetic_authority
+
 from app.blueprints import ai_consent as consent_routes
 from app.extensions import db
 from app.models import (
@@ -833,6 +835,7 @@ def test_another_owners_receipt_cannot_label_a_plan(owner, stranger):
     assert resolve_plan_origin(plan, stranger.id) == UNKNOWN_ORIGIN
 
 
+@pytest.mark.usefixtures("synthetic_operation_authority")
 def test_replacing_a_general_plan_drops_the_general_origin(
         client, owner, as_mobile):
     from app.services.plan_replacement import PlanExpectation, replace_training_plan
@@ -841,7 +844,8 @@ def test_replacing_a_general_plan_drops_the_general_origin(
     replace_training_plan(
         owner.id,
         PlanExpectation(False, created["plan_lineage"], created["mutation_version"]),
-        plan_data=canonical_document(parse_general_request(BODY), "tr"), score=None)
+        plan_data=canonical_document(parse_general_request(BODY), "tr"), score=None,
+        authority=synthetic_authority(owner.id))
 
     receipt = TrainingPlanGenerationOperation.query.filter_by(user_id=owner.id).one()
     assert is_general_receipt(receipt)  # history is kept; it names the old lineage

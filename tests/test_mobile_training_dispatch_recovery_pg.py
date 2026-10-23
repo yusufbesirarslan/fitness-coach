@@ -6,11 +6,22 @@ from types import SimpleNamespace
 
 import pytest
 
+from consent_projection_support import synthetic_authority
+
 from tests.test_mobile_training_generation_pg import (  # noqa: F401
     pg_generation_app, _request, _document, _run,
 )
 
 pytestmark = pytest.mark.pg_concurrency
+
+
+@pytest.fixture(autouse=True)
+def _lp21_synthetic_operation_authority(monkeypatch):
+    # LP21: these races use injected synthetic providers/writers; ALLOW at the
+    # operation-fencing decision points only. Real D1 operation fencing of the
+    # same writers is qualified in tests/test_lp21_d1_operation_fencing_pg.py.
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
 
 
 class Crash(BaseException):
@@ -168,7 +179,7 @@ def test_staging_failure_and_abandonment_fence_late_worker(pg_generation_app):
         assert failure.value.public_code == 'TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN'
         assert failure.value.retryable is False
         with pytest.raises(GenerationPersistenceUnavailable):
-            real_stage(old_id, json.dumps(_document()), 8.5)
+            real_stage(old_id, json.dumps(_document()), 8.5, synthetic_authority(owners[0]))
         # A genuinely new attempt is separately admitted, never same-key recovery.
         command('explicit-new-attempt')
         assert executions == [1, 1]
@@ -218,7 +229,8 @@ def test_recovery_observes_candidate_committed_between_key_lookups(pg_generation
             def stage_on_separate_connection():
                 with app.app_context():
                     try:
-                        store.stage_candidate(operation_id, json.dumps(_document()), 8.5)
+                        store.stage_candidate(operation_id, json.dumps(_document()), 8.5,
+                                              synthetic_authority(owners[0]))
                     except Exception as error:
                         worker_errors.append(type(error).__name__)
                     finally:

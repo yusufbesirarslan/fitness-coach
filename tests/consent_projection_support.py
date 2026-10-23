@@ -48,10 +48,10 @@ def open_browser_plan_saves(monkeypatch):
     monkeypatch.setattr(routes, '_CLOSED_ENDPOINTS', routes._CLOSED_ENDPOINTS - aliases)
     real = consent.fence
 
-    def fence(authority):
+    def fence(authority, owner):
         if authority is None:
             return None
-        return real(authority)
+        return real(authority, owner)
     monkeypatch.setattr(consent, 'fence', fence)
 
 

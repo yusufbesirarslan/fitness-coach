@@ -31,6 +31,8 @@ from app.services.training_generation.output_errors import (
     SchemaInvalidError,
 )
 
+from consent_projection_support import bound_candidate  # noqa: E402
+
 # LP21: command-layer tests with fake providers; real D1 fencing lives in test_lp21_d1_operation_fencing_pg.py.
 pytestmark = pytest.mark.usefixtures('synthetic_operation_authority')
 
@@ -172,7 +174,7 @@ def test_generated_state_persists_without_regeneration_after_crash(
         idempotency_key="native-generation-key",
         request_fingerprint=native_request.fingerprint,
         status="GENERATED",
-        candidate_plan_data=json.dumps(CANDIDATE_DOCUMENT),
+        candidate_plan_data=bound_candidate(command_user.id, json.dumps(CANDIDATE_DOCUMENT)),
         candidate_score=7.5,
     )
     db.session.add(operation)

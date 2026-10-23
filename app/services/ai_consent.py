@@ -328,12 +328,15 @@ def _check_operation(state, authority):
         raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
 
 
-def _operation_binding(authority):
+def _operation_binding(authority, owner=None):
     if not isinstance(authority, OperationAuthority):
         # No server-held AI provenance (e.g. a client-authored document).
         raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
     if authority.feature not in BINDINGS:
         raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    if owner is not None and (type(owner) is not int or owner != authority.owner):
+        # One account's authority never writes another account's state.
+        raise ConsentDenied()
     principal = current_subject()
     if principal is not None and principal != authority.owner:
         raise ConsentDenied()
@@ -352,8 +355,8 @@ def authorize_operation(authority):
         _check_operation(_state(conn, authority.owner), authority)
 
 
-def fence(authority):
-    """Transaction-local fence for a publication/canonical write.
+def fence(authority, owner):
+    """Transaction-local fence for ``owner``'s publication/canonical write.
 
     Runs on the CALLER's ``db.session`` transaction, at the caller's place in
     the repository lock order: it takes the owner row ``FOR NO KEY UPDATE``
@@ -364,8 +367,11 @@ def fence(authority):
     commits either entirely before the decision (the write is refused) or
     entirely after the write. Never opens D1's separate connection, which would
     wait on the caller's own lock. The caller rolls back on denial.
+    ``owner`` is the account being written; it must be the authority's.
     """
-    _operation_binding(authority)
+    if type(owner) is not int:
+        raise ConsentDenied()
+    _operation_binding(authority, owner)
     if not has_app_context():
         raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
     try:

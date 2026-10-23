@@ -75,7 +75,10 @@ def _finish(row, status, code=None, http=None):
 
 
 def _result(row, replayed):
-    return GenerationResult(row.proposal_public_id, json.loads(row.review_data),
+    # review_data carries the publishing operation's D1 authority (LP21); a
+    # pre-LP21 row has none and is stale.
+    _authority, review = ai_consent.unbind_candidate(row.user_id, row.review_data)
+    return GenerationResult(row.proposal_public_id, json.loads(review),
                             row.proposal_expires_at, replayed)
 
 
@@ -195,7 +198,7 @@ def publish(operation_id, token, document, score):
         row = _owned_attempt(operation_id, token)
         authority = _frozen_authority(row)
         lock_plan_owner(row.user_id)
-        ai_consent.fence(authority)
+        ai_consent.fence(authority, row.user_id)
         plan = (TrainingPlan.query.filter_by(user_id=row.user_id).order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
                 .populate_existing().with_for_update().first())
         binding = BaseBinding(row.base_lineage_id, row.base_mutation_version, row.base_snapshot_digest)
@@ -208,7 +211,8 @@ def publish(operation_id, token, document, score):
         proposal = Proposal.query.filter_by(public_id=token).one()
         row.proposal_public_id = token
         row.proposal_expires_at = proposal.expires_at
-        row.review_data = json.dumps(review, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+        row.review_data = ai_consent.bind_candidate(
+            authority, json.dumps(review, ensure_ascii=False, separators=(',', ':'), allow_nan=False))
         _finish(row, 'SUCCEEDED')
         result = GenerationResult(proposal.public_id, review, proposal.expires_at, False)
         db.session.commit()
@@ -225,6 +229,21 @@ def publish(operation_id, token, document, score):
         raise
 
 
+def _authorize_replay(uid, result):
+    """A replayed proposal is re-published under ITS original authority (D1).
+
+    The authority travels with the operation's stored review, so a replay
+    still works after the proposal itself is cleaned up; a newer grant
+    (revoke -> regrant) never revives the old operation's result.
+    """
+    row = Operation.query.filter_by(user_id=uid, proposal_public_id=result.proposal_token).one_or_none()
+    stored = row.review_data if row is not None else None
+    # D1's separate connection must not wait on anything this session holds.
+    db.session.rollback()
+    authority, _review = ai_consent.unbind_candidate(uid, stored)
+    ai_consent.authorize_operation(authority)
+
+
 def generate_proposal(user, request, key, *, chat_fn, provider_guard):
     if not isinstance(request, NativePlanRequest):
         raise TypeError('request must be NativePlanRequest')
@@ -232,6 +251,7 @@ def generate_proposal(user, request, key, *, chat_fn, provider_guard):
     authority = ai_consent.begin_operation(user.id, 'training_plan', recipient, model)
     admitted = claim(user, request, key, authority)
     if isinstance(admitted, GenerationResult):
+        _authorize_replay(user.id, admitted)
         return admitted
     operation_id, token, context = admitted
     frozen = json.loads(context)

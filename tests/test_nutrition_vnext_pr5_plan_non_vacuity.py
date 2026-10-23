@@ -143,7 +143,8 @@ def test_n3_success_before_the_answer_is_detected(app, auth_user, client, traini
 
 
 # NUTR-PR7: the destructive step is the shared replacement boundary call.
-DELETE = '    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL)\n'
+DELETE = ('    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL,\n'
+          '                           authority=None)\n')
 SCORE = '    score = data.get("score")\n'
 
 
