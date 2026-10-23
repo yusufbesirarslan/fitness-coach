@@ -377,9 +377,11 @@ def test_active_plan_roundtrip(client, auth_user, plan_save_token):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def workout_ready(client, auth_user, plan_save_token):
+def workout_ready(client, auth_user, plan_save_token, legacy_browser_plan_saves):
+    # LP21: seeds the plan through the (production-closed) browser save alias.
     _save_program(client, plan_save_token(auth_user.id),
                   user_id=auth_user.id)
+    assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 1
     db.session.add(DailyQuest(title="Log a Workout", points_reward=50,
                               quest_type="workout_logged"))
     db.session.commit()
