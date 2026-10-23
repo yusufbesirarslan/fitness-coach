@@ -33,10 +33,9 @@ knows both spellings. Unknown values fail closed; nothing falls back.
 Numbers
 -------
 Body weight (and target weight) reuse the backend's existing canonical range,
-the one the weight log already enforces (`BODY_WEIGHT_MIN_KG`..`MAX`). There
-is no canonical backend range for height or age, and LP-03 does not invent
-one: they must be finite and positive (age a whole number), which is the
-structural minimum that keeps the BMR formula and the stored row meaningful.
+the one the weight log already enforces (`BODY_WEIGHT_MIN_KG`..`MAX`). Height
+must be finite and positive. Age must be a whole number of at least 18, matching the existing adult-only Terms. This is self-declared age, not
+identity or age verification; no maximum is invented here.
 
 Reading
 -------
@@ -64,6 +63,7 @@ from app.services.calculations import (
 # (`tracking._parse_weight`) enforces the same range from this constant.
 BODY_WEIGHT_MIN_KG = 20.0
 BODY_WEIGHT_MAX_KG = 500.0
+MINIMUM_AGE = 18
 
 GOAL_LOSE_WEIGHT = "lose_weight"
 GOAL_BUILD_MUSCLE = "build_muscle"
@@ -139,10 +139,10 @@ def _positive(field, value):
     return value
 
 
-def _whole_positive(field, value):
+def _adult_age(field, value):
     if isinstance(value, bool) or not isinstance(value, int):
         raise ProfileRejected(field, REASON_TYPE)
-    if value <= 0:
+    if value < MINIMUM_AGE:
         raise ProfileRejected(field, REASON_RANGE)
     return value
 
@@ -178,7 +178,7 @@ class OnboardingProfile:
         set_ = object.__setattr__
         set_(self, WEIGHT, _body_weight(WEIGHT, self.weight))
         set_(self, HEIGHT, _positive(HEIGHT, self.height))
-        set_(self, AGE, _whole_positive(AGE, self.age))
+        set_(self, AGE, _adult_age(AGE, self.age))
         _token(GENDER, self.gender, GENDERS)
         _token(GOAL, self.goal, GOALS)
         _token(FITNESS_LEVEL, self.fitness_level, FITNESS_LEVELS)
