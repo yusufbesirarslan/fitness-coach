@@ -28,6 +28,20 @@ def build_system_prompt(language: str = "tr") -> str:
     )
 
 
+# MINERVA-DEMO-R4: the "odak" field is the title a member reads on the plan
+# card. Without a naming rule the model copied the few-shot's programming
+# notes ("FULL BODY A: squat pattern, horizontal push, ...") word for word.
+# These rules name the title only; they say nothing about exercise choice,
+# volume or frequency.
+_NAMING_RULES_TR = """13. "odak" kullanıcının plan kartında okuduğu BAŞLIKTIR: "<bölünme> <harf> — <çalışan vücut bölgeleri>" biçiminde, en fazla 45 karakter. Örnek: "Tüm Vücut A — Squat, göğüs ve sırt", "Tüm Vücut B — Tek taraflı bacak, omuz ve sırt". Bölgeler o günün egzersizlerinin GERÇEKTEN çalıştırdığı bölgelerdir; egzersizlerde olmayan bir hedef yazma.
+14. Bölünme adları Türkçe olsun (Tüm Vücut, Üst Vücut, Alt Vücut, İtiş, Çekiş, Bacak); "Full Body", "Push", "Pull" yazma. Başlıkta hareket kalıbı terimi kullanma: "yatay/dikey itme/çekme", "kalça menteşesi", "kalça dominant", "glute odak", tek başına "tek bacak" YOK. STYLE FEW-SHOT REFERENCE içindeki "FULL BODY A: squat pattern, horizontal push, ..." satırları programlama notudur, başlık değildir.
+15. tip="dinlenme" günü "odak": etiket öneki olmadan kısa, doğal bir öneri (ör. "Hafif yürüyüş ve kalça-sırt mobilitesi") ya da "Tam dinlenme". "sure_dk": aktif toparlanma için önerilen dakika (en fazla 45); tam dinlenmede 0."""
+
+_NAMING_RULES_EN = """13. "odak" is the title a member reads on the plan card: "<split> <letter> — <body regions trained>", at most 45 characters. Example: "Full Body A — Squat, chest and back", "Full Body B — Single-leg, shoulders and back". The regions are the ones that day's exercises actually train; do not name a goal the exercises do not serve.
+14. Do not put movement-pattern terms in the title ("horizontal/vertical push/pull", "hip hinge", "glute focus"). The "FULL BODY A: squat pattern, horizontal push, ..." lines in STYLE FEW-SHOT REFERENCE are programming notes, not titles.
+15. For tip="dinlenme", "odak" is a short, natural suggestion with no label prefix (e.g. "Easy walk and hip and upper-back mobility") or "Full rest". "sure_dk": the suggested minutes for active recovery (at most 45); 0 for full rest."""
+
+
 # The JSON FORMAT example names one real ID. It is taken from the request's
 # own choice set, so the example itself can never show an ID the server will
 # refuse for this request (e.g. a dumbbell lift to a bodyweight-only user).
@@ -109,6 +123,12 @@ def build_training_prompt(
         f"{choice_lines}\n"
     )
     example_id = _example_exercise_id(exercise_choices)
+    if language == "en":
+        naming_rules = _NAMING_RULES_EN
+        example_focus = "Full Body A — Squat, chest and back"
+    else:
+        naming_rules = _NAMING_RULES_TR
+        example_focus = "Tüm Vücut A — Squat, göğüs ve sırt"
     return f"""
 PROGRAM GENERATION CONTRACT
 - LLM sınıflandırma yapmayacak; sınıflandırma deterministik olarak önceden yapıldı.
@@ -158,7 +178,8 @@ PROGRAM RULES
 10. set bir tamsayı olsun; sure_dk ve tahmini_kalori tamsayı olsun.
 11. Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) SADECE tip="kardiyo" günlerine yazılsın; tip="antrenman" gününe kardiyo egzersizi koyma.
 12. tip="dinlenme" günü HİÇBİR egzersiz içermez: "egzersizler": [] olmalı. Aktif toparlanma önerisini o günün "odak" alanına yaz; yürüyüş/esneme/mobilite dahil hiçbir hareketi dinlenme gününün egzersiz listesine ekleme.
+{naming_rules}
 
 JSON FORMAT
-{{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"exercise_id":"{example_id}","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}
+{{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"{example_focus}","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"exercise_id":"{example_id}","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}
 """.strip()
