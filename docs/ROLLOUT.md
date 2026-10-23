@@ -1,5 +1,18 @@
 # Production rollout runbook — feature flag activation
 
+PRIV-LAUNCH `ACCOUNT_ELIGIBILITY_ENABLED` stays strict default OFF (only `1`
+enables). **OFF is not a qualified launch workaround**: it preserves legacy
+registration behaviour, while the paired mobile client refuses registration
+without an available eligibility preview. Do not activate merely because the
+source PRs or CI pass. Before a separately authorised activation, qualify the
+paired registration/review flows, neutral teen onboarding, age assurance and
+required guardian/health authority; preserve TR13–17, CA13 and AU13–14 holds.
+Complete the existing D1/Coach operation-fencing and StoreKit lanes with their
+owners and qualify key-loss/review recovery. No migration, deployment or flag
+activation is part of this source change. Reverting to OFF requires restricting
+the affected signup/product surface; it is not a privacy-safe launch rollback.
+See [eligibility contract and remaining prerequisites](PRIV_LAUNCH_ELIGIBILITY.md).
+
 MON-02-BE-03B-A2-A1 adds expand-only `f8b2d4e6a0c3` after A1 (55 revisions).
 It records original-period zero-attempt expiry corrections without enabling either
 allowance flag. Source review, migration/worker compatibility and runtime activation

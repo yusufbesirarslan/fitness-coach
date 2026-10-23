@@ -46,6 +46,7 @@ def apply_body_weight(owner, weight, session):
     make ``calculate_tdee`` silently assume sedentary, so then only the weight
     moves and the derived targets stay as stored (L2). No commit.
     """
+    account_profile.require_weight_target_eligibility(owner)
     if session is not None and session.user_id != owner.id:
         raise ValueError("session does not belong to owner")
     owner.weight = weight

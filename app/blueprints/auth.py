@@ -241,7 +241,8 @@ def register():
     try:
         account = account_registration.register_account(
             data.get("username"), data.get("email"), data.get("password"),
-            language=chosen_lang, referral_code=ref_code)
+            language=chosen_lang, referral_code=ref_code,
+            eligibility_token=data.get("eligibility_token"))
     except RegistrationFailure as failure:
         return _registration_failure_response(
             failure, required_key="auth.all_fields_required")
@@ -265,6 +266,9 @@ def _registration_failure_response(failure, required_key):
     shared blocking slot, and a full slot is a retryable 503, never a crash.
     """
     outcome = failure.outcome
+    if outcome == RegistrationOutcome.ELIGIBILITY_REQUIRED:
+        return jsonify({"error": t("eligibility.required"),
+                        "code": "AUTH_ELIGIBILITY_REQUIRED"}), 422
     if outcome == RegistrationOutcome.CAPACITY_EXHAUSTED:
         response = jsonify({"error": t("auth.service_busy")})
         response.status_code = 503
