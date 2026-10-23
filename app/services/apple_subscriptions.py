@@ -1,4 +1,9 @@
-"""Apple trust boundary. Client transaction IDs are lookup inputs, never proof."""
+"""Apple trust boundary. Client transaction IDs are lookup inputs, never proof.
+
+Notifications are authenticated hints only: they name a subscription to
+reconcile, and only a fresh authenticated status lookup changes access.
+"""
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,8 +18,9 @@ from appstoreserverlibrary.signed_data_verifier import SignedDataVerifier, Verif
 
 
 class SubscriptionError(Exception):
-    def __init__(self, code, status=422):
-        self.code, self.status = code, status
+    # ``reason`` is internal classification for reconciliation; never a response field.
+    def __init__(self, code, status=422, reason=None):
+        self.code, self.status, self.reason = code, status, reason
         super().__init__(code)
 
 
@@ -42,6 +48,24 @@ class Evidence:
     auto_renew: bool
     transaction_signed_at: datetime
     renewal_signed_at: datetime
+    purchased_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class Notification:
+    """Verified notification identity. ``original_id`` set means: reconcile it."""
+    uuid: str
+    environment: str
+    type: str
+    subtype: str | None
+    signed_at: datetime
+    original_id: str | None
+    account_token: str | None
+    disposition: str
+
+
+_NOTIFICATION_NAME = re.compile(r"[A-Z0-9_]{1,40}")
+MAX_CLOCK_SKEW_SECONDS = 300
 
 
 class BoundedAppleClient(AppStoreServerAPIClient):
@@ -93,57 +117,130 @@ class AppleAdapter:
         return tx
 
     def verify(self, transaction_id, token):
-        try:
+        def lookup():
             submitted = self._transaction(
                 self.client.get_transaction_info(transaction_id).signedTransactionInfo, token)
             if submitted.transactionId != transaction_id:
                 raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            response = self.client.get_all_subscription_statuses(submitted.originalTransactionId)
-            # App ID is present in the authenticated HTTPS API envelope, not
-            # JWSTransaction. SignedDataVerifier validates signed bundle/environment.
-            if (response.bundleId != self.bundle or response.appAppleId != self.app_id
-                    or response.environment != Environment(self.environment)):
+            return self._status(submitted.originalTransactionId, token)
+        return self._guard(lookup)
+
+    def status(self, original_id, token):
+        """Reconciliation: a fresh authoritative lookup for a known original ID."""
+        if type(original_id) is not str or not original_id.isascii() or not original_id.isdigit() \
+                or not 1 <= len(original_id) <= 64:
+            raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+        return self._guard(lambda: self._status(original_id, token))
+
+    def _status(self, original_id, token):
+        response = self.client.get_all_subscription_statuses(original_id)
+        # App Apple ID may be omitted in Sandbox. If provided it must match;
+        # Production always requires the configured ID. Bundle/environment and
+        # every signed transaction/renewal check remain mandatory in both.
+        app_id_matches = response.appAppleId == self.app_id
+        if self.environment == "Sandbox" and response.appAppleId is None:
+            app_id_matches = True
+        if (response.bundleId != self.bundle or not app_id_matches
+                or response.environment != Environment(self.environment)):
+            raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+        matches = []
+        for group in response.data or []:
+            for item in group.lastTransactions or []:
+                if item.originalTransactionId != original_id:
+                    continue
+                tx = self._transaction(item.signedTransactionInfo, token)
+                renewal = self.verifier.verify_and_decode_renewal_info(item.signedRenewalInfo)
+                if (group.subscriptionGroupIdentifier != self.group
+                        or tx.originalTransactionId != original_id
+                        or renewal.originalTransactionId != tx.originalTransactionId
+                        or renewal.environment != Environment(self.environment)
+                        or renewal.productId != tx.productId
+                        or item.status not in (1, 2, 3, 4, 5)
+                        or renewal.autoRenewStatus not in (0, 1)
+                        or (renewal.autoRenewProductId is not None
+                            and renewal.autoRenewProductId not in self.products)):
+                    raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+                now = datetime.now(timezone.utc)
+                tx_date, renewal_date = milliseconds(tx.signedDate), milliseconds(renewal.signedDate)
+                # Don't bless stale signed snapshots as a fresh status lookup.
+                if any(abs((now - d).total_seconds()) > 300 for d in (tx_date, renewal_date)):
+                    raise SubscriptionError("SUBSCRIPTION_VERIFICATION_PENDING", 503, "STALE_SNAPSHOT")
+                grace = milliseconds(renewal.gracePeriodExpiresDate) if renewal.gracePeriodExpiresDate else None
+                if item.status == 4 and (not grace or renewal.isInBillingRetryPeriod is not True):
+                    raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+                matches.append(Evidence(
+                    self.environment, tx.originalTransactionId, tx.transactionId, tx.productId,
+                    self.group, str(UUID(tx.appAccountToken)), int(item.status),
+                    milliseconds(tx.expiresDate), milliseconds(tx.revocationDate) if tx.revocationDate else None,
+                    grace, renewal.autoRenewStatus == 1, tx_date, renewal_date,
+                    milliseconds(tx.purchaseDate)))
+        if len(matches) != 1:
+            raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+        return matches[0]
+
+    def notification(self, signed_payload):
+        """Authenticate an App Store Server Notification V2 and name its subscription.
+
+        Signature/identity failures are INVALID. An authentic notification that
+        concerns nothing this deployment sells is IGNORED, so Apple stops retrying.
+        """
+        def decode():
+            payload = self.verifier.verify_and_decode_notification(signed_payload)
+            uuid = str(UUID(payload.notificationUUID))
+            signed_at = milliseconds(payload.signedDate)
+            kind, subtype = payload.rawNotificationType, payload.rawSubtype
+            if (payload.version != "2.0" or uuid != payload.notificationUUID.lower()
+                    or type(kind) is not str or not _NOTIFICATION_NAME.fullmatch(kind)
+                    or (subtype is not None and (type(subtype) is not str
+                                                 or not _NOTIFICATION_NAME.fullmatch(subtype)))
+                    or (signed_at - datetime.now(timezone.utc)).total_seconds() > MAX_CLOCK_SKEW_SECONDS):
                 raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            matches = []
-            for group in response.data or []:
-                for item in group.lastTransactions or []:
-                    if item.originalTransactionId != submitted.originalTransactionId:
-                        continue
-                    tx = self._transaction(item.signedTransactionInfo, token)
-                    renewal = self.verifier.verify_and_decode_renewal_info(item.signedRenewalInfo)
-                    if (group.subscriptionGroupIdentifier != self.group
-                            or tx.originalTransactionId != submitted.originalTransactionId
-                            or renewal.originalTransactionId != tx.originalTransactionId
-                            or renewal.environment != Environment(self.environment)
-                            or renewal.productId != tx.productId
-                            or item.status not in (1, 2, 3, 4, 5)
-                            or renewal.autoRenewStatus not in (0, 1)
-                            or (renewal.autoRenewProductId is not None
-                                and renewal.autoRenewProductId not in self.products)):
-                        raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-                    now = datetime.now(timezone.utc)
-                    tx_date, renewal_date = milliseconds(tx.signedDate), milliseconds(renewal.signedDate)
-                    # Don't bless stale signed snapshots as a fresh status lookup.
-                    if any(abs((now - d).total_seconds()) > 300 for d in (tx_date, renewal_date)):
-                        raise SubscriptionError("SUBSCRIPTION_VERIFICATION_PENDING", 503)
-                    grace = milliseconds(renewal.gracePeriodExpiresDate) if renewal.gracePeriodExpiresDate else None
-                    if item.status == 4 and (not grace or renewal.isInBillingRetryPeriod is not True):
-                        raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-                    matches.append(Evidence(
-                        self.environment, tx.originalTransactionId, tx.transactionId, tx.productId,
-                        self.group, str(UUID(tx.appAccountToken)), int(item.status),
-                        milliseconds(tx.expiresDate), milliseconds(tx.revocationDate) if tx.revocationDate else None,
-                        grace, renewal.autoRenewStatus == 1, tx_date, renewal_date))
-            if len(matches) != 1:
+            data = payload.data
+
+            def result(disposition, original_id=None, token=None):
+                return Notification(uuid, self.environment, kind, subtype, signed_at,
+                                    original_id, token, disposition)
+            if data is None or not data.signedTransactionInfo:
+                # TEST, summaries and app-level events carry no subscription.
+                return result("IGNORED_NO_TRANSACTION")
+            # The verifier compares App Apple ID in Production only; Sandbox omits it.
+            if data.appAppleId is not None and data.appAppleId != self.app_id:
                 raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            return matches[0]
+            tx = self.verifier.verify_and_decode_signed_transaction(data.signedTransactionInfo)
+            original = tx.originalTransactionId
+            if (tx.bundleId != self.bundle or tx.environment != Environment(self.environment)
+                    or type(original) is not str or not original.isascii() or not original.isdigit()
+                    or not 1 <= len(original) <= 64):
+                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+            if data.signedRenewalInfo:
+                renewal = self.verifier.verify_and_decode_renewal_info(data.signedRenewalInfo)
+                if (renewal.originalTransactionId != original
+                        or renewal.environment != Environment(self.environment)):
+                    raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+            if (tx.type != Type.AUTO_RENEWABLE_SUBSCRIPTION or tx.productId not in self.products
+                    or tx.subscriptionGroupIdentifier != self.group):
+                return result("IGNORED_PRODUCT")
+            if tx.inAppOwnershipType != InAppOwnershipType.PURCHASED:
+                return result("IGNORED_OWNERSHIP")
+            try:
+                token = str(UUID(tx.appAccountToken))
+            except (ValueError, TypeError, AttributeError):
+                token = None  # Only an existing ownership row can then be reconciled.
+            return result("ENQUEUED", original, token)
+        return self._guard(decode)
+
+    def _guard(self, operation):
+        try:
+            return operation()
         except VerificationException as error:
             if error.status == VerificationStatus.RETRYABLE_VERIFICATION_FAILURE:
                 raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None
             raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE") from None
         except APIException as error:
             if error.http_status_code == 404:
-                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE") from None
+                # Not proof of invalidity: Apple documents retryable 404s. Client
+                # verify still answers INVALID_EVIDENCE; reconciliation retries it.
+                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE", reason="APPLE_NOT_FOUND") from None
             raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None
         except requests.RequestException:
             raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None

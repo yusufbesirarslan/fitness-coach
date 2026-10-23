@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
+from app import config as app_config
 from tests.test_mobile_training_generation_pg import (  # noqa: F401
     pg_generation_app, _request, _document,
 )
@@ -559,7 +560,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
     if registry_present:
         purpose, categories = ai_consent.BINDINGS["training_plan"]
         policy = ai_consent.Disclosure("synthetic-only", purpose, categories,
-            (("bedrock", ai.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL)), (("en", "a" * 64),))
+            (("bedrock", app_config.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL)), (("en", "a" * 64),))
         monkeypatch.setattr(ai_consent, "POLICIES", {policy.version: policy})
     sdk = Mock()
     with app.app_context():
@@ -572,7 +573,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
         assert not db.session().in_transaction()
         with ai_spend_guard.subject_scope(owners[0]), pytest.raises(ai_consent.ConsentDenied):
             with ai_provider_call.admit(feature="training_plan", provider=recipient,
-                    payload=dict(model=ai.OPENAI_MODEL if recipient == "openai" else ai.BEDROCK_MODEL,
+                    payload=dict(model=ai.OPENAI_MODEL if recipient == "openai" else app_config.BEDROCK_MODEL,
                         messages=[{"role": "user", "content": "SYNTHETIC_OWN_FITNESS"}], max_tokens=100),
                     gate=False, charge=False) as admission:
                 admission.create(sdk)
@@ -606,8 +607,9 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["d7e3a9c1f5b8"]
-    assert len(list(script.walk_revisions())) == 57
+    assert script.get_heads() == ["a4d6f8b0c2e1"]
+    assert len(list(script.walk_revisions())) == 58
+    assert script.get_revision("a4d6f8b0c2e1").down_revision == "d7e3a9c1f5b8"
     assert script.get_revision("d7e3a9c1f5b8").down_revision == "f9c6d0a1b2e3"
     assert script.get_revision("f9c6d0a1b2e3").down_revision == "f8b2d4e6a0c3"
     assert script.get_revision("f8b2d4e6a0c3").down_revision == "e7a1c3d5f9b2"
@@ -642,7 +644,7 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
         upgrade()
         check()  # model/schema comparison against the actual full chain
         with db.engine.connect() as conn:
-            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "d7e3a9c1f5b8"
+            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "a4d6f8b0c2e1"
             for name, (columns, rows) in before.items():
                 projection = ','.join('"' + c + '"' for c in columns)
                 assert conn.exec_driver_sql(f'SELECT {projection} FROM "{name}"').all() == rows

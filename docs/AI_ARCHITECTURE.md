@@ -81,6 +81,12 @@ flag is on. Full design: [ADAPTIVE_COACHING.md](ADAPTIVE_COACHING.md) §§19-30.
   (`BEDROCK_ENABLED=1`). Credentials come from the EC2 IAM instance profile — no
   keys in code or `.env`.
 - **Fallback / light path:** OpenAI `gpt-4o-mini`.
+- **Opt-in claude55 routing (`AI_MODEL_ROUTING=claude55`, default `legacy`):**
+  Sonnet 5.5 heavy + Haiku 5.5 light, both on Bedrock; OpenAI is not a
+  recipient and the heavy→light fallback (same B-rule) goes to Haiku 5.5.
+  `app/services/ai_model_policy.py` owns the exact-id registry, the 5.5 request
+  surface (no sampling, thinking off, per-task effort, no prefill / forced tool)
+  and the spend class. See [AI_MODEL_ROUTING_55.md](AI_MODEL_ROUTING_55.md).
 - **Provider-switch rule (B-rule):** Bedrock→OpenAI only *before* the first delta
   reaches the client *and* before any tool side effect. See [STREAMING.md](STREAMING.md).
   Since PR3 this also guards a durable plan write: once a plan tool has run the

@@ -10,7 +10,9 @@ from collections import Counter, defaultdict
 import json
 import hashlib
 import math
+import os
 from pathlib import Path
+import re
 import subprocess
 import time
 
@@ -156,6 +158,11 @@ class Evidence:
         self.started = time.monotonic()
         self.timings, timing_digest = load_timings()
         self.doc = dict(schema=1, shard=index, count=SHARDS,
+                        run_id=os.environ.get("GITHUB_RUN_ID"),
+                        run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT"),
+                        head_sha=os.environ.get("CI_HEAD_SHA"),
+                        tree=subprocess.check_output(
+                            ["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
                         revision=subprocess.check_output(
                             ["git", "rev-parse", "HEAD"], text=True).strip(),
                         collection_only=config.option.collectonly,
@@ -194,14 +201,71 @@ class Evidence:
         path.write_text(json.dumps(self.doc, indent=2) + "\n")
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+def load_artifacts(directory, *, run_id, run_attempt, head_sha, revision, tree):
+    """Select the newest evidence per shard from this run, never flatten or fall back.
+
+    The download action is scoped to the current run (no token/run-id override).
+    Canonical artifact directories preserve attempt identity; manifests bind it
+    to the executed checkout and PR HEAD. verify() still proves test parity.
+    """
+    if (not re.fullmatch(r"[1-9][0-9]*", run_id)
+            or not re.fullmatch(r"[1-9][0-9]*", run_attempt)):
+        raise ValueError("invalid run identity")
+    latest = {}
+    identities = set()
+    for artifact in sorted(directory.iterdir()):
+        match = re.fullmatch(r"pytest-shard-([1-9][0-9]*)-([0-9]+)", artifact.name)
+        if not match or artifact.is_symlink() or not artifact.is_dir():
+            raise ValueError(f"invalid artifact directory: {artifact.name}")
+        attempt, shard = map(int, match.groups())
+        identity = (attempt, shard)
+        if (identity in identities or str(shard) != match[2]
+                or shard not in range(SHARDS) or attempt > int(run_attempt)):
+            raise ValueError("invalid or duplicate artifact identity")
+        identities.add(identity)
+        path = artifact / f"shard-{shard}.json"
+        if list(artifact.iterdir()) != [path] or path.is_symlink() or not path.is_file():
+            raise ValueError("missing, duplicate, or unexpected manifest")
+        doc = json.loads(path.read_text(), object_pairs_hook=_unique_object)
+        if (not isinstance(doc, dict) or type(doc.get("shard")) is not int
+                or doc["shard"] != shard or doc.get("run_id") != run_id
+                or doc.get("run_attempt") != str(attempt)
+                or doc.get("head_sha") != head_sha or doc.get("revision") != revision
+                or doc.get("tree") != tree):
+            raise ValueError("mismatched artifact provenance")
+        if shard not in latest or attempt > latest[shard][0]:
+            latest[shard] = (attempt, doc, artifact.name)
+    if set(latest) != set(range(SHARDS)):
+        raise ValueError("missing shard evidence")
+    for shard, (attempt, _, name) in sorted(latest.items()):
+        print(f"Selected {name}: run={run_id} attempt={attempt} shard={shard} "
+              f"head={head_sha} revision={revision} tree={tree}")
+    return [latest[shard][1] for shard in range(SHARDS)]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--result", required=True)
+    parser.add_argument("--run-id", required=True)
+    parser.add_argument("--run-attempt", required=True)
+    parser.add_argument("--head-sha", required=True)
     parser.add_argument("--collection-only", action="store_true")
     args = parser.parse_args()
-    manifests = [json.loads(path.read_text()) for path in sorted(args.directory.glob("*.json"))]
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip()
+    manifests = load_artifacts(args.directory, run_id=args.run_id,
+                              run_attempt=args.run_attempt, head_sha=args.head_sha,
+                              revision=args.revision, tree=tree)
     timings, timing_digest = load_timings()
     count = verify(manifests, args.revision, collection_only=args.collection_only,
                    result=args.result, timings=timings, timing_digest=timing_digest)

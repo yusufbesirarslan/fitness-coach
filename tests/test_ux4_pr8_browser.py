@@ -155,7 +155,7 @@ STATIC_CEILING = {"today": 11, "plan": 13, "coach": 12, "nutrition": 14,
                   "notifications": 11}
 # Third-party origins each surface may ask for. Coach (and Nutrition, which
 # hosts the Menu Scan widget) pin marked + DOMPurify from jsDelivr with SRI.
-EXTERNAL = {"fonts.googleapis.com stylesheet", "www.googletagmanager.com script"}
+EXTERNAL = {"fonts.googleapis.com stylesheet"}
 EXTERNAL_WIDGET = EXTERNAL | {"cdn.jsdelivr.net script"}
 
 

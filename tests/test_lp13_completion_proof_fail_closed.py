@@ -212,8 +212,8 @@ VALIDATOR_UNAVAILABLE = {
 @pytest.mark.parametrize("raw, expected", [
     (JPEG, "image/jpeg"),
     (PNG, "image/png"),
-    (WEBP, "image/webp"),
-    (GIF, "image/gif"),
+    (WEBP, "image/png"),
+    (GIF, "image/png"),
 ], ids=["jpeg", "png", "webp", "gif"])
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_bedrock_receives_the_media_type_the_bytes_actually_are(
@@ -223,8 +223,12 @@ def test_bedrock_receives_the_media_type_the_bytes_actually_are(
 
     assert result == {"valid": True, "fallback": False, "reason": MODEL_REASON}
     assert bedrock.media_types == [expected]
-    # Small images are passed through untouched -- same bytes, true label.
-    assert bedrock.sent[0].data == raw
+    # Every successful preparation encodes fresh bytes and derives its MIME.
+    sent = bedrock.sent[0].data
+    assert sent is not raw
+    assert detect_image_media_type(sent) == expected
+    with Image.open(BytesIO(sent)) as image:
+        assert not image.getexif()
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -461,7 +465,7 @@ def _started(client, headers, workout_ref, key="proof-checkpoint-01"):
 @pytest.mark.parametrize("raw, declared, expected", [
     (JPEG, "image/jpeg", "image/jpeg"),
     (PNG, "image/png", "image/png"),
-    (WEBP, "image/webp", "image/webp"),
+    (WEBP, "image/webp", "image/png"),
 ], ids=["jpeg", "png", "webp"])
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_a_verified_proof_completes_exactly_once(
@@ -477,7 +481,7 @@ def test_a_verified_proof_completes_exactly_once(
     assert response.json["completion"]["outcome"] == "created"
     assert response.json["session"]["status"] == "completed"
     assert bedrock.media_types == [expected]
-    assert armed_store == [expected]
+    assert armed_store == [declared]  # sink mock sees ingress MIME; real S3 helper derives output MIME
     effects = _side_effects(owner)
     assert effects["pump_checks"] == 1 and effects["markers"] == 1
     assert effects["xp"] > 0 and effects["completed_today"] is True
@@ -904,10 +908,11 @@ def test_validate_pump_check_is_called_only_by_the_two_completion_routes():
     assert "validate_pump_check" not in menu
 
 
-def test_shared_vision_preparation_default_is_unchanged(app):
-    """Menu OCR and Pump Check analysis share ``prepare_image_for_vision``; this
-    PR only ADDS ``detect_image_media_type`` beside it."""
+def test_shared_vision_preparation_default_is_derived_from_sanitized_bytes(app):
     prepared, media_type = vision_images.prepare_image_for_vision(PNG, "image/png")
-    assert (prepared, media_type) == (PNG, "image/png")
+    assert prepared is not PNG
+    assert detect_image_media_type(prepared) == media_type == "image/png"
+    with Image.open(BytesIO(prepared)) as image:
+        assert not image.getexif()
     prepared, media_type = vision_images.prepare_image_for_vision(PNG)
-    assert media_type == "image/jpeg"  # caller-declared default, as before
+    assert detect_image_media_type(prepared) == media_type == "image/png"
