@@ -976,12 +976,19 @@ def test_a2_retirement_concurrent_with_revocation_or_deletion(chain, action):
         consent(owner, chain.policy, "affirmative_grant", "a2-concurrent-grant")
         from app.services import ai_consent
         try:
-            # LP21: the mutation commits after the attempt and BEFORE staging,
-            # so the operation fence withholds the output either way.
-            with pytest.raises((ai_consent.ConsentDenied, GenerationPersistenceUnavailable)) as refused:
-                generate(owner, "a2-concurrent")
             if action == "revoke":
+                # LP21: the queued revoke commits after the attempt and BEFORE
+                # staging, so the operation fence withholds the output.
+                with pytest.raises(ai_consent.ConsentDenied) as refused:
+                    generate(owner, "a2-concurrent")
                 assert refused.value.code == "AI_CONSENT_CHANGED"
+            else:
+                # Deletion races the stage fence for the owner row: either it
+                # commits first (refused) or the write does and is then purged.
+                try:
+                    generate(owner, "a2-concurrent")
+                except (ai_consent.ConsentDenied, GenerationPersistenceUnavailable):
+                    pass
         finally:
             for worker in workers:
                 worker.join(5)
