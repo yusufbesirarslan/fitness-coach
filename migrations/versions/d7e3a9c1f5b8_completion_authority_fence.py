@@ -402,6 +402,19 @@ def _pg_constraints(bind, table):
     return {name: (kind, valid, text) for name, kind, valid, text in rows}
 
 
+def _pg_table_constraints(bind, table, columns):
+    constraints = _pg_constraints(bind, table)
+    # PG18 catalogs NOT NULL constraints; PG16 reports nullability only through
+    # the columns already checked by _verify_columns(). Normalize ONLY the
+    # complete, validated set for those required columns, independent of names.
+    not_null = [(valid, text) for kind, valid, text in constraints.values() if kind == "n"]
+    expected = [(True, f"NOT NULL {c.name}") for c in columns
+                if isinstance(c, sa.Column) and not c.nullable]
+    if not_null and sorted(not_null) != sorted(expected):
+        _fail(f"{table} NOT NULL constraints")
+    return {name: state for name, state in constraints.items() if state[0] != "n"}
+
+
 def _verify_floor_table(bind):
     inspector = _verify_columns(bind, FLOOR, _floor_columns())
     if inspector.get_pk_constraint(FLOOR)["constrained_columns"] != ["capability"]:
@@ -412,7 +425,7 @@ def _verify_floor_table(bind):
         _fail("floor indexes")
     if bind.dialect.name != "postgresql":
         return
-    constraints = _pg_constraints(bind, FLOOR)
+    constraints = _pg_table_constraints(bind, FLOOR, _floor_columns())
     checks = {name: text for name, (kind, valid, text) in constraints.items() if kind == "c"}
     if checks != _PG_CHECKS or not all(valid for kind, valid, _ in constraints.values()):
         _fail("floor checks")
@@ -436,7 +449,7 @@ def _verify_binding_table(bind):
             (BINDING_TXID_INDEX, ("claim_txid",), False)]:
         _fail("binding index")
     if bind.dialect.name == "postgresql":
-        constraints = _pg_constraints(bind, BINDING)
+        constraints = _pg_table_constraints(bind, BINDING, _binding_columns())
         if (sorted(kind for kind, _, _ in constraints.values()) != ["f", "p"]
                 or not all(valid for _, valid, _ in constraints.values())):
             _fail("binding constraints")

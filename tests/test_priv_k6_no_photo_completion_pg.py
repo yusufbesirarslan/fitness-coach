@@ -477,11 +477,16 @@ def test_migration_creates_the_exact_table_on_an_empty_schema(migrate_engine):
     with migrate_engine.begin() as conn:
         _run(conn, module.upgrade)  # created table verifies as its own DDL
         columns, constraints = _definition(conn)
+        expected_not_null = ({f"workout_completion_day_{c}_not_null": f"NOT NULL {c}"
+                              for c in ("id", "user_id", "date_key", "proof", "created_at")}
+                             if conn.dialect.server_version_info >= (18,) else {})
     assert [(c[0], c[3]) for c in columns] == [
         ("created_at", "NO"), ("date_key", "NO"), ("id", "NO"),
         ("proof", "NO"), ("user_id", "NO")]
     assert all(validated for _, _, validated in constraints)
-    assert {name for name, _, _ in constraints} == {
+    assert {name: definition for name, definition, _ in constraints
+            if definition.startswith("NOT NULL ")} == expected_not_null
+    assert {name for name, _, _ in constraints} == set(expected_not_null) | {
         "ck_workout_completion_day_proof", "uq_workout_completion_day",
         "workout_completion_day_pkey", "workout_completion_day_user_id_fkey"}
 
