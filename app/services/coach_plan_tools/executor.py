@@ -773,14 +773,23 @@ def _apply_confirmed(user_id, pending):
     """
     if ai_consent.current_operation() is None:
         return _apply_confirmed_now(user_id, pending)
+    if find_by_key(user_id, confirmation_operation_key(pending.public_id)) is not None:
+        # Already committed (crash before mark_applied): reconcile through the
+        # journal replay, which writes no plan and needs no new authority.
+        return _apply_confirmed_now(user_id, pending)
+    public_id = pending.public_id
     try:
         authority = ai_consent.OperationAuthority.from_context(
             user_id, (pending.command_payload or {}).get(ai_consent.PAYLOAD_AUTHORITY_KEY))
-    except ai_consent.ConsentDenied:
+        with ai_consent.operation_scope(authority):
+            return _apply_confirmed_now(user_id, pending)
+    except ai_consent.ConsentDenied as denied:
         db.session.rollback()
+        if denied.status < 500:
+            # Definitive: this proposal can never be applied; do not leave it
+            # blocking every new proposal as PENDING.
+            mark_stale(user_id, public_id)
         raise
-    with ai_consent.operation_scope(authority):
-        return _apply_confirmed_now(user_id, pending)
 
 
 def _apply_confirmed_now(user_id, pending):

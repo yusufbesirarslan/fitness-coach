@@ -1222,6 +1222,8 @@ def test_coach_confirmation_applies_under_the_proposing_authority(coach, regrant
                 _confirm_under(owner, public_id, confirming)
             assert refused.value.code == "AI_CONSENT_CHANGED"
             assert current_plan(owner) == before and _journal(owner) == 0
+            from app.models import TrainingPlanConfirmationProposal as Pending
+            assert Pending.query.filter_by(public_id=public_id).one().status == "stale"
         else:
             assert _confirm_under(owner, public_id, confirming)["status"] == "applied"
             assert current_plan(owner) == (before[0], before[1] + 1)
@@ -1250,3 +1252,26 @@ def test_writer_refuses_another_purposes_authority_and_restores_lock_timeout(coa
         ai_consent.fence(coach.coach_authority, owner)
         assert db.session.execute(sa.text("SHOW lock_timeout")).scalar_one() == "1234ms"
         db.session.rollback()
+
+
+def test_coach_committed_confirmation_reconciles_without_new_authority(coach):
+    """Crash after the mutation committed, before mark_applied: the journal
+    replay reconciles even when the proposing authority is gone."""
+    from app.services.coach_plan_tools import executor
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        before = current_plan(owner)
+        public_id = _pending(coach, owner, coach.coach_authority)
+        real_mark = executor.mark_applied
+        coach.monkeypatch.setattr(executor, "mark_applied", lambda *a: (_ for _ in ()).throw(Crash()))
+        with pytest.raises(Crash):
+            _confirm_under(owner, public_id, coach.coach_authority)
+        coach.monkeypatch.setattr(executor, "mark_applied", real_mark)
+        after = current_plan(owner)
+        assert after == (before[0], before[1] + 1) and _journal(owner) == 1
+        regrant(owner, coach.coach_policy, "coach-reconcile")
+        from app.services import ai_consent
+        fresh = ai_consent.begin_operation(owner, "coach", "openai", _openai_model())
+        result = _confirm_under(owner, public_id, fresh)
+        assert result["status"] in ("applied", "replayed")
+        assert current_plan(owner) == after and _journal(owner) == 1

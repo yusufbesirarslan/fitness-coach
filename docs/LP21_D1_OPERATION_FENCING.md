@@ -56,7 +56,7 @@ first-party/non-AI caller is byte-identical:
 |---|---|
 | `plan_mutation.apply_plan_mutation` / `undo_last_change` (Coach plan tools, confirmed proposals) | `fence_active(user_id)` before `_locked_active_plan` (owner → plan; a Coach confirm is proposal → owner → plan, the same prefix `confirm_replacement` already takes). Replays of committed journal rows are not fenced (completed actions reconcile). |
 | `plan_confirmation.create_or_reuse_pending` | `fence_active(user_id)` before the pending insert; the proposing authority is stored under `ai_consent.PAYLOAD_AUTHORITY_KEY` in the server-written `command_payload`. |
-| `coach_plan_tools.executor._apply_confirmed` | Inside an operation, the confirmed command is applied under the PROPOSING authority (revoke → regrant between proposal and "yes" refuses); a pending row without one is stale. |
+| `coach_plan_tools.executor._apply_confirmed` | Inside an operation, the confirmed command is applied under the PROPOSING authority (revoke → regrant between proposal and "yes" refuses and marks the pending row STALE, so it never blocks new proposals); a pending row without one is stale. A proposal whose mutation already committed (crash before `mark_applied`) reconciles through the journal replay first, with no new write. |
 | `memory_manager.record_turn` | `fence_active(conversation.user_id)` FIRST (owner before any conversation row). |
 | `ai_pipeline._record` | Re-raises `ConsentDenied` (never swallowed by the best-effort catch). |
 | `ai_pipeline.generate_answer` | A non-fallback reply that was not persisted (memory off/unavailable) calls `authorize_active()` before it is returned. |
@@ -80,6 +80,12 @@ first-party/non-AI caller is byte-identical:
    edited here.
 4. Streaming stays closed (`stream_dispatch` denies); `stream_answer` is not
    qualified for publication fencing.
+
+Fence wait: the owner-row lock is bounded by `FENCE_LOCK_TIMEOUT` (35 s, above
+one bounded 30 s SDK attempt a same-owner `dispatch` may hold) and the caller's
+own `lock_timeout` is restored. While waiting, a writer keeps the locks it
+already holds (operation, proposal, plan-session advisory) for at most that
+long; timeout is a 503 authority-unavailable refusal.
 
 Lock graph: every fence re-takes the owner row in the mode the writer already
 holds (`lock_plan_owner`) or takes it at the writer's existing owner-lock
