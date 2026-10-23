@@ -55,7 +55,8 @@ first-party/non-AI caller is byte-identical:
 | Writer | Fence |
 |---|---|
 | `plan_mutation.apply_plan_mutation` / `undo_last_change` (Coach plan tools, confirmed proposals) | `fence_active(user_id)` before `_locked_active_plan` (owner → plan; a Coach confirm is proposal → owner → plan, the same prefix `confirm_replacement` already takes). Replays of committed journal rows are not fenced (completed actions reconcile). |
-| `plan_confirmation.create_or_reuse_pending` | `fence_active(user_id)` before the pending insert. |
+| `plan_confirmation.create_or_reuse_pending` | `fence_active(user_id)` before the pending insert; the proposing authority is stored under `ai_consent.PAYLOAD_AUTHORITY_KEY` in the server-written `command_payload`. |
+| `coach_plan_tools.executor._apply_confirmed` | Inside an operation, the confirmed command is applied under the PROPOSING authority (revoke → regrant between proposal and "yes" refuses); a pending row without one is stale. |
 | `memory_manager.record_turn` | `fence_active(conversation.user_id)` FIRST (owner before any conversation row). |
 | `ai_pipeline._record` | Re-raises `ConsentDenied` (never swallowed by the best-effort catch). |
 | `ai_pipeline.generate_answer` | A non-fallback reply that was not persisted (memory off/unavailable) calls `authorize_active()` before it is returned. |
@@ -106,6 +107,23 @@ consent state read takes no lock. No new lock edge; revoke (`mutate`, owner
 - Pre-existing command/lock-order suites that use fake providers opt into
   `synthetic_operation_authority` / `allow_operation_fences` (ALLOW at the
   three operation decision points only; dispatch and the codec stay real).
+
+## Open before any activation (not engineering-closable here)
+
+- **Publication record (R1 §5):** Nutrition proposals and replacement replay
+  are authorized under the account lock (`authorize_operation`) and then sent;
+  no durable publication decision is recorded and Nutrition has no operation
+  ledger. Security must accept this check-then-send residual, or a ledger is
+  added, before Nutrition generation or replay is opened.
+- **Operation identity:** `OperationAuthority` carries owner, purpose,
+  generation and policy version, not an operation id/intent fingerprint (R1 §1).
+  The conservative account generation makes it fail closed; Security to accept.
+- **Typed Coach refusals:** see interface item 3.
+- Accepted P3s: weekly-quota refund after a possible attempt on the
+  replacement/Nutrition ledgers (pre-existing semantics, not billing
+  evidence); a stale-GENERATED retirement racing its own worker returns 503
+  instead of the D1 code (nothing written); R03 session-loss variant not
+  modelled.
 
 ## Not claimed
 
