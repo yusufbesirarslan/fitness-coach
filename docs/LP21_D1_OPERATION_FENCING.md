@@ -88,8 +88,11 @@ already holds (operation, proposal, plan-session advisory) for at most that
 long; timeout is a 503 authority-unavailable refusal.
 
 Lock graph: every fence re-takes the owner row in the mode the writer already
-holds (`lock_plan_owner`) or takes it at the writer's existing owner-lock
-position (`stage_candidate`: operation → owner, the `commit_plan` prefix). The
+holds (`lock_plan_owner`), or, in `stage_candidate`, is taken BEFORE the
+operation row (owner → operation: the order account deletion's cascade and
+D1 `dispatch` + `mark_attempt_possible` take; operation → owner there
+deadlocked against a concurrent account deletion, caught by CI 40035026375).
+`commit_plan` keeps its pre-existing operation → owner order. The
 consent state read takes no lock. No new lock edge; revoke (`mutate`, owner
 `FOR UPDATE`) serializes against every fenced write.
 

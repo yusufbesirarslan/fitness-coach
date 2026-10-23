@@ -256,9 +256,13 @@ def consent_failure(error):
 def stage_candidate(operation_id, document_json, score, authority):
     """Stage provider output under its operation authority, or withhold it.
 
-    Lock order operation -> owner (``commit_plan``'s). A refused fence never
-    stores the output: the operation ends FAILED with the D1 code, attempt
-    evidence untouched, and the caller settles.
+    Lock order owner -> operation: the fence decides first, then the
+    operation row is locked. That is the order account deletion (owner row,
+    then its cascade into operation rows) and D1 ``dispatch`` +
+    ``mark_attempt_possible`` already take, so a concurrent deletion cannot
+    deadlock against staging. A refused fence never stores the output: the
+    operation ends FAILED with the D1 code, attempt evidence untouched, and
+    the caller settles.
     """
     if not isinstance(document_json, str) or len(document_json.encode("utf-8")) > MAX_CANDIDATE_BYTES:
         raise GenerationPersistenceUnavailable()
@@ -267,11 +271,13 @@ def stage_candidate(operation_id, document_json, score, authority):
         parsed = json.loads(document_json)
         if not isinstance(parsed, dict):
             raise ValueError("candidate must be an object")
+        ai_consent.fence(authority, getattr(authority, "owner", None), "training_plan")
         operation = (db.session.query(TrainingPlanGenerationOperation)
                      .filter_by(id=operation_id).populate_existing().with_for_update().one_or_none())
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS:
             raise GenerationPersistenceUnavailable()
-        ai_consent.fence(authority, operation.user_id, "training_plan")
+        if operation.user_id != authority.owner:
+            raise ai_consent.ConsentDenied()
         operation.candidate_plan_data = ai_consent.bind_candidate(authority, document_json)
         operation.candidate_score = score
         operation.status = TRAINING_PLAN_GENERATION_GENERATED
