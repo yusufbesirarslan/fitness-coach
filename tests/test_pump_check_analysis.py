@@ -1,4 +1,12 @@
 import json
+from io import BytesIO
+from PIL import Image
+
+def _image_bytes():
+    output = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(output, "JPEG")
+    return output.getvalue()
+
 
 import pytest
 
@@ -186,13 +194,15 @@ def test_analysis_adapter_passes_only_bounded_context_and_validates_output():
         return json.dumps(_valid())
 
     result = analyze_image(
-        b"image-bytes",
+        _image_bytes(),
         "image/jpeg",
         {"body_region": "upper_body", "environment": "gym", "description": "data"},
         provider=provider,
     )
     assert result == _valid()
-    assert seen["image_bytes"] == b"image-bytes"
+    with Image.open(BytesIO(seen["image_bytes"])) as image:
+        assert image.size == (8, 8)
+        assert not image.getexif()
     assert seen["media_type"] == "image/jpeg"
     assert seen["max_tokens"] == 1200
     assert "user_id" not in seen["prompt"]
@@ -217,7 +227,7 @@ def test_canonical_pr1_normalizes_before_single_image_provider(monkeypatch):
 def test_analysis_adapter_never_returns_raw_invalid_provider_output():
     with pytest.raises(InvalidAnalysis):
         analyze_image(
-            b"image",
+            _image_bytes(),
             "image/jpeg",
             {"body_region": "full_body", "environment": "home", "description": ""},
             provider=lambda *args, **kwargs: '{"summary":"raw"}',
