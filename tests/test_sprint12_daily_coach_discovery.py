@@ -117,6 +117,10 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
         "/api/v1/auth/logout",
+        # PRIV-LAUNCH: contact-free declaration only, no credentials. Shared
+        # eligibility authority; existing-account review is authenticated.
+        "/api/v1/auth/eligibility",
+        "/api/v1/account/eligibility",
         # LP-01 native registration/verification (pre-auth, no session).
         "/api/v1/auth/register",
         "/api/v1/auth/verify",

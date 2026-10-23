@@ -278,6 +278,16 @@ def _lock_owner(user_id):
     db.session.query(User.id).filter_by(id=user_id).with_for_update().first()
 
 
+def require_weight_target_eligibility(user):
+    """Require the canonical negative boundary before adult target work.
+
+    Shared by onboarding and Weekly Check-in through their existing profile
+    dependency. No transaction, transport handling, readiness or consent grant.
+    """
+    from app.services.account_eligibility import require_capability
+    require_capability(user, "automated_weight_targets")
+
+
 def complete_onboarding(user, profile):
     """Persist `profile` for `user` and make the account onboarded, atomically.
 
@@ -291,8 +301,7 @@ def complete_onboarding(user, profile):
     they are: the row keeps its place in history and nothing a user already
     saw is erased.
     """
-    from app.services.account_eligibility import require_capability
-    require_capability(user, "automated_weight_targets")
+    require_weight_target_eligibility(user)
     if not isinstance(profile, OnboardingProfile):
         raise TypeError("profile must be an OnboardingProfile")
 

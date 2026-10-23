@@ -170,6 +170,39 @@ def test_preauth_contract_no_credentials_or_storage(app):
     assert User.query.count() == 0
 
 
+@pytest.mark.parametrize("path", ["/api/v1/account/eligibility", "/account/eligibility"])
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_existing_account_contract_authenticates_before_body_or_review(
+        app, monkeypatch, path, method):
+    monkeypatch.setattr(policy, "review_existing", lambda *_: pytest.fail("review before auth"))
+    monkeypatch.setattr(app.request_class, "get_json",
+                        lambda *_a, **_k: pytest.fail("body before auth"))
+    response = app.test_client().open(path, method=method,
+        data=b"untrusted", content_type="application/json")
+    assert response.status_code == (401 if path.startswith("/api/") else 302)
+    if path.startswith("/api/"):
+        assert response.json["error"]["code"] == "AUTH_SESSION_EXPIRED"
+
+
+def test_native_existing_account_review_uses_authenticated_owner(app, bearer, make_user):
+    client, headers, user = bearer
+    other = make_user("untouched_owner")
+    response = client.get("/api/v1/account/eligibility", headers=headers)
+    assert response.status_code == 200
+    assert response.json == {"eligibility": policy.projection(user)}
+    assert response.headers["Cache-Control"] == "no-store"
+    response = client.post("/api/v1/account/eligibility", headers=headers,
+                           json={"eligibility_token": ticket()})
+    assert response.status_code == 200
+    assert response.json == {"eligibility": policy.projection(user)}
+    response = client.post("/api/v1/account/eligibility", headers=headers,
+                           json={"eligibility_token": ticket(30)})
+    assert response.status_code == 409
+    assert response.json["error"]["code"] == "ELIGIBILITY_REVIEW_REQUIRED"
+    assert policy.projection(user)["age_band"] == "13_17"
+    assert policy.projection(other)["status"] == "review_required"
+
+
 def test_native_registration_and_web_cannot_bypass_canonical_ticket(app, monkeypatch):
     from app.blueprints import auth, mobile_registration
     from app.services import cognito_service
