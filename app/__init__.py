@@ -293,6 +293,8 @@ def create_app():
     app.before_request(generate_csp_nonce)
     app.before_request(_csrf_protect)
     app.before_request(bind_mobile_request_principal)
+    from app.blueprints.account_eligibility import install as install_eligibility
+    install_eligibility(app)
     from app.blueprints.ai_consent import install as install_ai_consent
     install_ai_consent(app)
     limiter.init_app(app)

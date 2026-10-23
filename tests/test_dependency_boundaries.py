@@ -677,11 +677,17 @@ def test_mobile_auth_dependency_direction_is_one_way():
     # LP-03: account/me projects onboarding readiness from the ONE canonical
     # rule in app.services.account_profile, which owns its own ORM access
     # (mobile_api still imports no models), so it joins the set deliberately.
+    # PRIV-LAUNCH: account/me projects the shared canonical cohort and the
+    # middleware enforces its negative feature boundary after authentication.
+    # Admit that exact policy dependency in each set; neither caller gains ORM
+    # or provider access, and mobile_auth still cannot import its callers.
     assert _service_modules(api) == {
         "app.services.account_profile", "app.services.mobile_auth",
-        "app.services.mobile_credentials", "app.services.ai_consent"}
+        "app.services.mobile_credentials", "app.services.ai_consent",
+        "app.services.account_eligibility"}
     assert _service_modules(middleware) == {
-        "app.services.auth_contract", "app.services.mobile_auth"}
+        "app.services.auth_contract", "app.services.mobile_auth",
+        "app.services.account_eligibility"}
 
     # The service owns both of the things its callers may not touch.
     assert {n for n in service if n.startswith("app.models")}

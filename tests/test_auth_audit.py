@@ -35,9 +35,22 @@ MOBILE_PUBLIC_ENDPOINTS = {
     "mobile_api.subscription_apple_notifications"}
 
 
+# PRIV-LAUNCH: only the contact-free declaration preview is public. Pin the
+# path and methods as well as the endpoint so another route cannot inherit
+# this exception. Existing-account review/update remains authenticated.
+PUBLIC_ELIGIBILITY_CONTRACTS = {
+    "mobile_api.eligibility_preview": ("/api/v1/auth/eligibility", {"POST"}),
+    "account_eligibility.web_preview": ("/eligibility", {"POST"}),
+}
+
+
 def test_every_non_public_route_uses_require_auth(app):
     missing = []
     for rule in app.url_map.iter_rules():
+        if rule.endpoint in PUBLIC_ELIGIBILITY_CONTRACTS:
+            path, methods = PUBLIC_ELIGIBILITY_CONTRACTS[rule.endpoint]
+            assert (rule.rule, rule.methods - {"HEAD", "OPTIONS"}) == (path, methods)
+            continue
         if rule.endpoint in (
                 PUBLIC_ENDPOINTS | TEARDOWN_ENDPOINTS | MOBILE_PUBLIC_ENDPOINTS):
             continue
@@ -48,6 +61,24 @@ def test_every_non_public_route_uses_require_auth(app):
         if not required:
             missing.append((rule.endpoint, rule.rule))
     assert missing == []
+
+
+def test_eligibility_contract_keeps_existing_account_routes_authenticated(app):
+    expected = {
+        **PUBLIC_ELIGIBILITY_CONTRACTS,
+        "mobile_api.account_eligibility": ("/api/v1/account/eligibility", {"GET", "POST"}),
+        "account_eligibility.web_existing": ("/account/eligibility", {"GET", "POST"}),
+    }
+    actual = {}
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint in expected:
+            assert rule.endpoint not in actual
+            actual[rule.endpoint] = (rule.rule, rule.methods - {"HEAD", "OPTIONS"})
+            if rule.endpoint not in PUBLIC_ELIGIBILITY_CONTRACTS:
+                marker = ("_require_mobile_auth" if rule.endpoint.startswith("mobile_api.")
+                          else "_require_auth")
+                assert getattr(app.view_functions[rule.endpoint], marker, False)
+    assert actual == expected
 
 
 def test_runtime_auth_does_not_use_password_hash():

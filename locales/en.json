@@ -1589,5 +1589,16 @@
   "coach.dish_error": "Error",
   "coach.dish_add_failed": "The entry could not be saved.",
   "coach.v2.context": "Talk through your training, nutrition and progress.",
-  "coach.v2.view_plan": "Open plan"
+  "coach.v2.view_plan": "Open plan",
+  "eligibility.title": "Age and country",
+  "eligibility.age": "Age in whole years",
+  "eligibility.country": "Country of residence",
+  "eligibility.choose": "Choose your country",
+  "eligibility.continue": "Continue",
+  "eligibility.required": "Review your age and country before creating an account.",
+  "eligibility.pending": "Eligibility review is needed for your age and country. Account registration is not available yet.",
+  "eligibility.denied": "Account registration is not available for this age or country.",
+  "eligibility.note": "This is an age declaration, not permission to process health information or share it with AI.",
+  "eligibility.privacy": "Privacy Policy",
+  "eligibility.feature_unavailable": "This feature is not available for this account."
 }

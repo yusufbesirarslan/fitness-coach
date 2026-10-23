@@ -13,6 +13,7 @@ _MOBILE_PREAUTH_ENDPOINTS = frozenset({
     "mobile_api.refresh",
     "mobile_api.logout",
     "mobile_api.register",
+    "mobile_api.eligibility_preview",
     "mobile_api.verify",
     "mobile_api.verify_resend",
     "mobile_api.password_forgot",
@@ -99,6 +100,8 @@ def require_mobile_auth(view):
             raise error
         auth_contract.record_outcome(
             auth_contract.MOBILE, auth_contract.OUTCOME_OK)
+        from app.services.account_eligibility import enforce_request
+        enforce_request(g.mobile_user)
         return view(*args, **kwargs)
     wrapped._require_mobile_auth = True
     return wrapped
@@ -107,6 +110,7 @@ def require_mobile_auth(view):
 def _safe_message(code):
     return {
         "AUTH_INVALID_REQUEST": "Invalid request.",
+        "AUTH_ELIGIBILITY_REQUIRED": "Review age and country eligibility before continuing.",
         "AUTH_INVALID_CREDENTIALS": "Invalid credentials.",
         "AUTH_RATE_LIMITED": "Too many requests.",
         "AUTH_SESSION_EXPIRED": "Mobile session expired.",

@@ -1,5 +1,16 @@
 # Feature flags — inventory and lifecycle
 
+`ACCOUNT_ELIGIBILITY_ENABLED` (PRIV-LAUNCH) is strict default OFF: only the
+literal `1` enables it. ON requires the shared pre-contact declaration ticket
+for registration and enforces canonical cohort capability restrictions. OFF
+preserves legacy compatibility; **OFF is not a qualified launch workaround**.
+The paired mobile client refuses signup when the preview is unavailable.
+No migration is added. Independent source/integration review and hosted CI
+do not authorise activation: neutral teen onboarding, signed-in review,
+market-specific age/guardian/health qualification, D1/Coach and StoreKit
+prerequisites remain. See [eligibility contract](PRIV_LAUNCH_ELIGIBILITY.md)
+and [rollout gates](ROLLOUT.md). Existing market holds remain unchanged.
+
 `AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED` (MON-02-BE-03B-01B) defaults OFF,
 shipped_dark, review by 2026-11-17. ON meters only native initial Training
 generation through the ledger (hold committed with the dispatch marker; legacy
