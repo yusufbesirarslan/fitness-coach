@@ -44,6 +44,41 @@ leaves the operation stale for good. A new user action is a new operation.
 | Nutrition | `begin_operation` before the quota; generation in `operation_scope`; `authorize_operation` before any token is issued; the signed proposal token carries `g`/`v` (pre-LP21 tokens are no longer proposals); `replace_nutrition_plan` fences in the save transaction. |
 | Browser aliases | `training.save_training_plan` / `nutrition.save_nutrition_plan` joined D1 `_CLOSED_ENDPOINTS` (their generators were already closed); the shared writers also refuse `authority=None`. |
 | Last-good cache | `ai_recovery.remember_last_good` / `recall_last_good` are no-ops inside an operation (`ai.py` unchanged). |
+| Replacement replay | The publishing authority is bound into the SUCCEEDED row's `review_data` (same envelope; `ck_replacement_generation_result` forbids `generation_context` there), so a replay still works after the proposal is privacy-cleaned and is refused after any consent mutation. Pre-LP21 rows are stale. |
+
+## Coach boundaries (for the #463 / #137 integration owner)
+
+Coach has NO binding here and stays in `_CLOSED_ENDPOINTS`. The shared writers
+it will reach are fenced **only inside an `operation_scope`**, so every
+first-party/non-AI caller is byte-identical:
+
+| Writer | Fence |
+|---|---|
+| `plan_mutation.apply_plan_mutation` / `undo_last_change` (Coach plan tools, confirmed proposals) | `fence_active(user_id)` before `_locked_active_plan` (owner → plan; a Coach confirm is proposal → owner → plan, the same prefix `confirm_replacement` already takes). Replays of committed journal rows are not fenced (completed actions reconcile). |
+| `plan_confirmation.create_or_reuse_pending` | `fence_active(user_id)` before the pending insert. |
+| `memory_manager.record_turn` | `fence_active(conversation.user_id)` FIRST (owner before any conversation row). |
+| `ai_pipeline._record` | Re-raises `ConsentDenied` (never swallowed by the best-effort catch). |
+| `ai_pipeline.generate_answer` | A non-fallback reply that was not persisted (memory off/unavailable) calls `authorize_active()` before it is returned. |
+| `coach_plan_tools.execute_plan_tool` | Propagates `ConsentDenied`; every other failure is still a bounded tool result. |
+
+### Interface the integration owner composes (no parallel authority)
+
+1. Add the ONE reviewed Coach binding to `ai_consent.BINDINGS` (and its
+   approved disclosure to `POLICIES`) — Legal-gated, not done here.
+2. Per explicit user turn: `authority = ai_consent.begin_operation(owner,
+   "coach", recipient, model)` with `(recipient, model) =
+   ai.heavy_primary_route()`, BEFORE allowance reservation and context build;
+   then run the whole turn (provider loop, tools, `_record`, publication) in
+   `with ai_consent.operation_scope(authority):`.
+3. Map `ConsentDenied` to `consent_error_response` in the Coach routes, and
+   in `ai_coach`'s provider loops re-raise `ConsentDenied` before the generic
+   `except AISpendLimitExceeded` soft fallback. Today that catch turns a
+   refusal into the canned fallback text: fail-closed (no AI content
+   persisted or published) but not a typed refusal. `ai_coach.py` is a
+   PA03-BE-02 file and the loop belongs to the integration, so it is not
+   edited here.
+4. Streaming stays closed (`stream_dispatch` denies); `stream_answer` is not
+   qualified for publication fencing.
 
 Lock graph: every fence re-takes the owner row in the mode the writer already
 holds (`lock_plan_owner`) or takes it at the writer's existing owner-lock
@@ -62,7 +97,12 @@ consent state read takes no lock. No new lock edge; revoke (`mutate`, owner
   regranted recovery admission dispatches; without the write fence a revoked
   save lands).
 - `tests/test_lp21_d1_operation_fencing.py` — codec, owner/None refusals,
-  last-good guard, empty `POLICIES`.
+  last-good guard, empty `POLICIES`, active-scope no-ops, `_record` /
+  executor refusal propagation, unpersisted-reply publication fence.
+- Coach boundaries are qualified in the PG suite with a synthetic, test-only
+  `coach` binding: stale turn/tool/pending writes refused with nothing
+  written; revoke-first and write-first for turns and plan tools; cross-account
+  refusal; unscoped writes unchanged.
 - Pre-existing command/lock-order suites that use fake providers opt into
   `synthetic_operation_authority` / `allow_operation_fences` (ALLOW at the
   three operation decision points only; dispatch and the codec stay real).

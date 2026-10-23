@@ -211,7 +211,7 @@ def replace_training_plan_in_transaction(user_id, expectation, *, plan_data,
     browser alias passes ``None``) is refused, never written.
     """
     lock_plan_owner(user_id)
-    ai_consent.fence(authority, user_id)
+    ai_consent.fence(authority, user_id, "training_plan")
 
     # Lock the owner's plan rows themselves. ``populate_existing`` is
     # load-bearing: without it SQLAlchemy hands back identity-mapped

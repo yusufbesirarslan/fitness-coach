@@ -197,8 +197,14 @@ def publish(operation_id, token, document, score):
     try:
         row = _owned_attempt(operation_id, token)
         authority = _frozen_authority(row)
+        # Bounds apply to what is stored: the authority envelopes (LP21).
+        bound_plan = ai_consent.bind_candidate(authority, raw)
+        bound_review = ai_consent.bind_candidate(authority, json.dumps(
+            review, ensure_ascii=False, separators=(',', ':'), allow_nan=False))
+        if len(bound_plan.encode('utf-8')) > 262144 or len(bound_review.encode('utf-8')) > 524288:
+            raise mobile_training.PlanUnprojectable('candidate exceeds storage bound')
         lock_plan_owner(row.user_id)
-        ai_consent.fence(authority, row.user_id)
+        ai_consent.fence(authority, row.user_id, 'training_plan')
         plan = (TrainingPlan.query.filter_by(user_id=row.user_id).order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
                 .populate_existing().with_for_update().first())
         binding = BaseBinding(row.base_lineage_id, row.base_mutation_version, row.base_snapshot_digest)
@@ -207,12 +213,11 @@ def publish(operation_id, token, document, score):
             db.session.commit()
             raise StoredGenerationFailure('TRAINING_PLAN_STALE_CURRENT_PLAN', 409)
         token = stage_proposal_in_transaction(row.user_id, binding,
-                                              plan_data=ai_consent.bind_candidate(authority, raw), score=score)
+                                              plan_data=bound_plan, score=score)
         proposal = Proposal.query.filter_by(public_id=token).one()
         row.proposal_public_id = token
         row.proposal_expires_at = proposal.expires_at
-        row.review_data = ai_consent.bind_candidate(
-            authority, json.dumps(review, ensure_ascii=False, separators=(',', ':'), allow_nan=False))
+        row.review_data = bound_review
         _finish(row, 'SUCCEEDED')
         result = GenerationResult(proposal.public_id, review, proposal.expires_at, False)
         db.session.commit()

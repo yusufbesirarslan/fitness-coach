@@ -60,7 +60,7 @@ def replace_nutrition_plan(user_id, document, score, check=UNCONDITIONAL, *, aut
     """
     lock_plan_owner(user_id)
     try:
-        ai_consent.fence(authority, user_id)
+        ai_consent.fence(authority, user_id, "nutrition_plan")
     except Exception:
         db.session.rollback()
         raise

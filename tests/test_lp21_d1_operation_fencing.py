@@ -204,3 +204,10 @@ def test_coach_plan_tool_propagates_a_fence_refusal(app, monkeypatch):
         monkeypatch.setattr(executor, "_execute_mutation",
                             lambda *a: (_ for _ in ()).throw(RuntimeError("other")))
         assert executor.execute_plan_tool(7, name, {})["status"] == "error"  # unchanged
+
+
+def test_fence_refuses_another_purposes_authority_before_any_read(app):
+    with app.app_context():
+        with pytest.raises(ConsentDenied) as refused:
+            ai_consent.fence(_authority(feature="nutrition_plan"), 7, "training_plan")
+        assert refused.value.code == "AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE"

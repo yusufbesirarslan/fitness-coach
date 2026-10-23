@@ -109,16 +109,25 @@ def create_or_reuse_pending(
     # publication of its result; fenced under the owner lock, then the insert.
     from app.services import ai_consent
     try:
-        ai_consent.fence_active(user_id)
+        operation = ai_consent.fence_active(user_id)
     except ai_consent.ConsentDenied:
         db.session.rollback()
         raise
+    command_payload = dict(command_payload)
+    if operation is not None:
+        # The proposal remembers the operation that PROPOSED it: confirmation
+        # in a later turn applies it under that authority, never a newer one.
+        command_payload[ai_consent.PAYLOAD_AUTHORITY_KEY] = operation.to_context()
 
     existing = get_pending(user_id)
     if existing is not None:
         if _same_intent(existing, lineage_id, mutation_version,
                         snapshot_fingerprint, command_fingerprint):
+            if operation is not None:
+                db.session.rollback()  # release the fence's owner lock
             return existing, True
+        if operation is not None:
+            db.session.rollback()
         raise PendingConfirmationConflict("a pending plan confirmation exists")
 
     row = TrainingPlanConfirmationProposal(

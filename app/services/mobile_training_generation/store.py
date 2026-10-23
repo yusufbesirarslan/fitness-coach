@@ -271,7 +271,7 @@ def stage_candidate(operation_id, document_json, score, authority):
                      .filter_by(id=operation_id).populate_existing().with_for_update().one_or_none())
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS:
             raise GenerationPersistenceUnavailable()
-        ai_consent.fence(authority, operation.user_id)
+        ai_consent.fence(authority, operation.user_id, "training_plan")
         operation.candidate_plan_data = ai_consent.bind_candidate(authority, document_json)
         operation.candidate_score = score
         operation.status = TRAINING_PLAN_GENERATION_GENERATED
@@ -372,7 +372,7 @@ def commit_plan(operation_id, user_id):
         lock_plan_owner(user_id)
         authority, document_json = ai_consent.unbind_candidate(
             user_id, operation.candidate_plan_data)
-        ai_consent.fence(authority, user_id)
+        ai_consent.fence(authority, user_id, "training_plan")
         if get_active_plan(user_id) is not None:
             raise ExistingPlanRefused()
         plan = _insert_plan(
@@ -461,7 +461,7 @@ def refuse_stale_generated(user_id):
         lock_plan_owner(user_id)
         authority, _document = ai_consent.unbind_candidate(
             user_id, operation.candidate_plan_data)
-        ai_consent.fence(authority, user_id)
+        ai_consent.fence(authority, user_id, "training_plan")
         db.session.rollback()
         return None
     except ai_consent.ConsentDenied as denied:

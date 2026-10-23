@@ -765,7 +765,25 @@ def _cancel_pending(user_id):
 
 
 def _apply_confirmed(user_id, pending):
-    """Apply or replay the stored command, then mark the proposal APPLIED."""
+    """Apply or replay the stored command, then mark the proposal APPLIED.
+
+    Inside an AI operation the command is applied under the authority that
+    PROPOSED it (D1 LP21): revoke -> regrant between proposal and "yes" never
+    revives it, and a proposal without that authority is stale.
+    """
+    if ai_consent.current_operation() is None:
+        return _apply_confirmed_now(user_id, pending)
+    try:
+        authority = ai_consent.OperationAuthority.from_context(
+            user_id, (pending.command_payload or {}).get(ai_consent.PAYLOAD_AUTHORITY_KEY))
+    except ai_consent.ConsentDenied:
+        db.session.rollback()
+        raise
+    with ai_consent.operation_scope(authority):
+        return _apply_confirmed_now(user_id, pending)
+
+
+def _apply_confirmed_now(user_id, pending):
     key = confirmation_operation_key(pending.public_id)
     command = decode_command(pending.command_type, pending.command_payload)
     if command is UNDO_LAST_CHANGE:

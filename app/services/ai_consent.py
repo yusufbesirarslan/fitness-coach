@@ -355,7 +355,16 @@ def authorize_operation(authority):
         _check_operation(_state(conn, authority.owner), authority)
 
 
-def fence(authority, owner):
+# Bounded wait for the owner row inside a writer's transaction: longer than
+# one bounded SDK attempt (30 s) that a same-owner ``dispatch`` may hold, never
+# unbounded. Restored afterwards so the caller's own statements are unaffected.
+FENCE_LOCK_TIMEOUT = "35000ms"
+# Reserved key carrying the proposing operation's authority in a server-written
+# Coach pending-confirmation payload (read by keyed access only).
+PAYLOAD_AUTHORITY_KEY = "_d1_operation_authority"
+
+
+def fence(authority, owner, feature=None):
     """Transaction-local fence for ``owner``'s publication/canonical write.
 
     Runs on the CALLER's ``db.session`` transaction, at the caller's place in
@@ -368,10 +377,14 @@ def fence(authority, owner):
     entirely after the write. Never opens D1's separate connection, which would
     wait on the caller's own lock. The caller rolls back on denial.
     ``owner`` is the account being written; it must be the authority's.
+    ``feature``, when given, is the only purpose whose result this writer
+    accepts (a Nutrition authority never writes a Training plan).
     """
     if type(owner) is not int:
         raise ConsentDenied()
     _operation_binding(authority, owner)
+    if feature is not None and authority.feature != feature:
+        raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
     if not has_app_context():
         raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
     try:
@@ -382,8 +395,14 @@ def fence(authority, owner):
             # A snapshot older than the lock could miss a committed revoke.
             raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
         _, _, users = _tables()
-        if conn.execute(select(users.c.id).where(users.c.id == authority.owner)
-                        .with_for_update(key_share=True)).scalar_one_or_none() is None:
+        previous = conn.execute(text("SELECT current_setting('lock_timeout')")).scalar_one()
+        conn.execute(text("SELECT set_config('lock_timeout', :value, true)"),
+                     {"value": FENCE_LOCK_TIMEOUT})
+        owned = conn.execute(select(users.c.id).where(users.c.id == authority.owner)
+                             .with_for_update(key_share=True)).scalar_one_or_none()
+        conn.execute(text("SELECT set_config('lock_timeout', :value, true)"),
+                     {"value": previous})
+        if owned is None:
             raise ConsentDenied()
         state = _state(conn, authority.owner)
     except SQLAlchemyError:

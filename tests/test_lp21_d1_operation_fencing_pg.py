@@ -700,8 +700,8 @@ def test_r07_first_plan_commit_wins_then_reconciles_after_revoke(rig):
     real_fence = ai_consent.fence
     arrived, go = threading.Event(), threading.Event()
 
-    def fence(authority, owner_id):
-        real_fence(authority, owner_id)
+    def fence(authority, owner_id, feature=None):
+        real_fence(authority, owner_id, feature)
         if staged.is_set() and not arrived.is_set():
             arrived.set()
             assert go.wait(WAIT)
@@ -817,7 +817,7 @@ def test_r07_control_without_the_write_fence_a_revoked_save_lands(rig):
     with rig.app.app_context():
         consent(owner, rig.nutrition, "affirmative_grant", "grant-r07-control")
         made = nutrition_proposals(rig, owner)["proposals"][0]
-    rig.monkeypatch.setattr(ai_consent, "fence", lambda authority, owner_id: None)
+    rig.monkeypatch.setattr(ai_consent, "fence", lambda *args: None)
     writer = revoke_first(rig, owner, rig.nutrition, 1, lambda: nutrition_save(owner, made),
                           nutrition_plan_store, "lock_plan_owner")
     assert writer.error is None
@@ -1176,3 +1176,77 @@ def test_coach_operation_never_fences_another_accounts_writes(coach):
 def _openai_model():
     from app.services import ai
     return ai.OPENAI_MODEL
+
+
+def _pending(coach, owner, authority):
+    """Stage a Coach pending confirmation as the executor does."""
+    from app.services import ai_consent
+    from app.services.coach_plan_tools.proposals import encode_command
+    from app.services.plan_confirmation import create_or_reuse_pending
+    from app.services.plan_mutation.commands import UpdateExercisePrescriptionCommand
+    from app.services.plan_mutation.fingerprint import snapshot_fingerprint
+    from app.models import TrainingPlan
+    plan = TrainingPlan.query.filter_by(user_id=owner).one()
+    kind, payload, fingerprint = encode_command(
+        UpdateExercisePrescriptionCommand("Pazartesi", "Old", sets=4))
+    scope = ai_consent.operation_scope(authority) if authority else nullcontext()
+    with scope:
+        row, _reused = create_or_reuse_pending(
+            owner, lineage_id=plan.lineage_id, mutation_version=plan.mutation_version,
+            snapshot_fingerprint=snapshot_fingerprint(plan.plan_data), command_type=kind,
+            command_payload=payload, command_fingerprint=fingerprint, reason_codes=(),
+            summary="synthetic")
+    return row.public_id
+
+
+def _confirm_under(owner, public_id, authority):
+    from app.services import ai_consent
+    from app.services.coach_plan_tools import executor
+    from app.services.plan_confirmation import lock_proposal
+    with ai_consent.operation_scope(authority):
+        return executor._apply_confirmed(owner, lock_proposal(owner, public_id))
+
+
+@pytest.mark.parametrize("regranted", [False, True])
+def test_coach_confirmation_applies_under_the_proposing_authority(coach, regranted):
+    from app.services import ai_consent
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        before = current_plan(owner)
+        public_id = _pending(coach, owner, coach.coach_authority)
+        if regranted:  # revoke -> regrant between the proposal and the "yes"
+            regrant(owner, coach.coach_policy, "coach-confirm")
+        confirming = ai_consent.begin_operation(owner, "coach", "openai", _openai_model())
+        if regranted:
+            with pytest.raises(ConsentDenied) as refused:
+                _confirm_under(owner, public_id, confirming)
+            assert refused.value.code == "AI_CONSENT_CHANGED"
+            assert current_plan(owner) == before and _journal(owner) == 0
+        else:
+            assert _confirm_under(owner, public_id, confirming)["status"] == "applied"
+            assert current_plan(owner) == (before[0], before[1] + 1)
+
+
+def test_coach_pending_without_proposing_authority_is_stale_inside_an_operation(coach):
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        before = current_plan(owner)
+        public_id = _pending(coach, owner, None)  # staged outside any operation
+        with pytest.raises(ConsentDenied):
+            _confirm_under(owner, public_id, coach.coach_authority)
+        assert current_plan(owner) == before
+
+
+def test_writer_refuses_another_purposes_authority_and_restores_lock_timeout(coach):
+    from app.extensions import db
+    from app.services import ai_consent
+    from app.services.nutrition_plan_store import replace_nutrition_plan, UNCONDITIONAL
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        with pytest.raises(ConsentDenied) as refused:
+            replace_nutrition_plan(owner, OPTION, 7.0, UNCONDITIONAL, authority=coach.coach_authority)
+        assert refused.value.code == "AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE"
+        db.session.execute(sa.text("SET LOCAL lock_timeout = '1234ms'"))
+        ai_consent.fence(coach.coach_authority, owner)
+        assert db.session.execute(sa.text("SHOW lock_timeout")).scalar_one() == "1234ms"
+        db.session.rollback()
