@@ -145,3 +145,62 @@ def test_last_good_cache_is_never_read_or_written_inside_an_operation(monkeypatc
 def test_browser_plan_save_aliases_are_closed():
     from app.blueprints import ai_consent as routes
     assert {"training.save_training_plan", "nutrition.save_nutrition_plan"} <= routes._CLOSED_ENDPOINTS
+
+
+def test_active_fences_are_no_ops_outside_an_operation(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ai_consent, "fence", lambda *a: calls.append(("fence", a)))
+    monkeypatch.setattr(ai_consent, "authorize_operation", lambda *a: calls.append(("auth", a)))
+    assert ai_consent.fence_active(7) is None and ai_consent.authorize_active() is None
+    assert calls == []
+    with ai_consent.operation_scope(_authority()):
+        assert ai_consent.fence_active(7) == _authority()
+        assert ai_consent.authorize_active() == _authority()
+    assert calls == [("fence", (_authority(), 7)), ("auth", (_authority(),))]
+
+
+def test_pipeline_record_never_swallows_a_fence_refusal(app, monkeypatch):
+    from types import SimpleNamespace
+    from app.services import ai_pipeline, memory_manager
+
+    def refuse(*a, **k):
+        raise ConsentDenied("AI_CONSENT_CHANGED")
+    with app.app_context():
+        monkeypatch.setattr(memory_manager, "record_turn", refuse)
+        with pytest.raises(ConsentDenied):
+            ai_pipeline._record(SimpleNamespace(id=1), "q", "a")
+        monkeypatch.setattr(memory_manager, "record_turn",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db")))
+        assert ai_pipeline._record(SimpleNamespace(id=1), "q", "a") is None  # unchanged
+
+
+@pytest.mark.parametrize("operation", [False, True])
+def test_unpersisted_coach_reply_is_publication_fenced(app, monkeypatch, operation):
+    from app.services import ai_coach, ai_pipeline
+    monkeypatch.setattr(ai_pipeline, "_memory_stage", lambda user_id: (None, [], None))
+    monkeypatch.setattr(ai_pipeline, "_context_stage", lambda *a, **k: "")
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation", lambda *a, **k: "synthetic reply")
+    monkeypatch.setattr(ai_consent, "authorize_operation",
+                        lambda authority: (_ for _ in ()).throw(ConsentDenied("AI_CONSENT_CHANGED")))
+    with app.test_request_context():
+        if not operation:
+            assert ai_pipeline.generate_answer(7, "question")["answer"]
+            return
+        with ai_consent.operation_scope(_authority()), pytest.raises(ConsentDenied):
+            ai_pipeline.generate_answer(7, "question")
+
+
+def test_coach_plan_tool_propagates_a_fence_refusal(app, monkeypatch):
+    from app.services.coach_plan_tools import executor, grounding
+    monkeypatch.setattr(executor, "plan_mutation_tools_enabled", lambda: True)
+    monkeypatch.setattr(executor, "get_pending", lambda user_id: None)
+    monkeypatch.setattr(grounding, "supersede_stale_clarification", lambda *a: None)
+    name = sorted(executor.PLAN_MUTATION_TOOL_NAMES)[0]
+    with app.test_request_context():
+        monkeypatch.setattr(executor, "_execute_mutation",
+                            lambda *a: (_ for _ in ()).throw(ConsentDenied("AI_CONSENT_CHANGED")))
+        with pytest.raises(ConsentDenied):
+            executor.execute_plan_tool(7, name, {})
+        monkeypatch.setattr(executor, "_execute_mutation",
+                            lambda *a: (_ for _ in ()).throw(RuntimeError("other")))
+        assert executor.execute_plan_tool(7, name, {})["status"] == "error"  # unchanged

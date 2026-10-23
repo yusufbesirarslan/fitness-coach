@@ -996,3 +996,183 @@ def test_provenance_less_shared_writes_are_refused_and_change_nothing(rig):
         with pytest.raises(ConsentDenied):
             replace_nutrition_plan(owner, OPTION, 7.0, UNCONDITIONAL, authority=None)
         assert current_plan(owner) == before and nutrition_rows(owner) == []
+
+
+# ── Coach boundaries (#463 handoff): tool/domain writes, conversation turns ─
+# A synthetic, test-only Coach binding: the shipping BINDINGS/POLICIES stay
+# closed. Each writer below is fenced only inside an ``operation_scope``; the
+# Coach integration owner enters that scope with ``begin_operation``.
+
+COACH_CATEGORIES = ("coach_messages",)
+
+
+@pytest.fixture
+def coach(rig):
+    from types import MappingProxyType
+    from app.extensions import db
+    from app.models import CoachConversation
+    from app.services import ai_consent
+    rig.monkeypatch.setattr(ai_consent, "BINDINGS", MappingProxyType(
+        dict(ai_consent.BINDINGS, coach=("coach.chat", COACH_CATEGORIES))))
+    rig.policies = disclose(rig.monkeypatch)
+    rig.coach_policy = rig.policies["coach"]
+    rig.training = rig.policies["training_plan"]
+    owner = rig.owners[0]
+    rig.with_coach_plan = lambda user: _seed_coach_plan(rig, user)
+    rig.with_coach_plan(owner)
+    with rig.app.app_context():
+        conversation = CoachConversation(user_id=owner)
+        db.session.add(conversation)
+        db.session.commit()
+        rig.conversation_id = conversation.id
+        consent(owner, rig.coach_policy, "affirmative_grant", "grant-coach")
+        rig.coach_authority = ai_consent.begin_operation(
+            owner, "coach", "openai", _openai_model())
+    return rig
+
+
+def _seed_coach_plan(rig, owner):
+    """A plan the mutation domain accepts (the LP18 mutation fixture)."""
+    from app.extensions import db
+    from app.models import TrainingPlan
+    from test_lp18_b0 import plan_text
+    with rig.app.app_context():
+        db.session.add(TrainingPlan(user_id=owner, plan_data=plan_text("Old"), score=8))
+        db.session.commit()
+
+
+def _turn(rig, authority, text="reply"):
+    from app.extensions import db
+    from app.models import CoachConversation
+    from app.services import ai_consent, ai_pipeline
+    conversation = db.session.get(CoachConversation, rig.conversation_id)
+    with ai_consent.operation_scope(authority):
+        return ai_pipeline._record(conversation, "question", text)
+
+
+def _mutate(authority, owner, key="coach-mutation-1"):
+    from app.services import ai_consent
+    from app.services.plan_mutation import apply_plan_mutation
+    from app.services.plan_mutation.commands import UpdateExercisePrescriptionCommand
+    from app.services.plan_mutation.context import MutationContext
+    with ai_consent.operation_scope(authority):
+        return apply_plan_mutation(owner, UpdateExercisePrescriptionCommand(
+            "Pazartesi", "Old", sets=4), MutationContext(key))
+
+
+def _messages(rig):
+    from app.extensions import db
+    from app.models import CoachMessage
+    db.session.remove()
+    return CoachMessage.query.filter_by(conversation_id=rig.conversation_id).count()
+
+
+def _journal(owner):
+    from app.models import PlanMutationRecord
+    return PlanMutationRecord.query.filter_by(user_id=owner).count()
+
+
+def test_coach_turn_persists_only_under_its_original_authority(coach):
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        assert _turn(coach, coach.coach_authority) is not None and _messages(coach) == 2
+        regrant(owner, coach.coach_policy, "coach-turn")
+        with pytest.raises(ConsentDenied) as refused:  # never swallowed by _record
+            _turn(coach, coach.coach_authority, "late reply")
+        assert refused.value.code == "AI_CONSENT_CHANGED" and _messages(coach) == 2
+
+
+def test_coach_turn_outside_an_operation_is_unchanged(coach):
+    from app.extensions import db
+    from app.models import CoachConversation
+    from app.services import ai_pipeline
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        consent(owner, coach.coach_policy, "revoke", "revoke-coach-unscoped")
+        conversation = db.session.get(CoachConversation, coach.conversation_id)
+        assert ai_pipeline._record(conversation, "q", "first-party text") is not None
+        assert _messages(coach) == 2
+
+
+def test_coach_turn_revoke_wins_the_owner_lock(coach):
+    from app.services import ai_consent
+    owner = coach.owners[0]
+    writer = revoke_first(coach, owner, coach.coach_policy, 1,
+                          lambda: _turn(coach, coach.coach_authority), ai_consent, "fence")
+    assert isinstance(writer.error, ConsentDenied) and writer.error.code == "AI_CONSENT_CHANGED"
+    with coach.app.app_context():
+        assert _messages(coach) == 0
+
+
+def test_coach_turn_written_first_then_revoked(coach):
+    owner = coach.owners[0]
+    writer = write_first(coach, owner, coach.coach_policy, 1,
+                         lambda: _turn(coach, coach.coach_authority) is not None)
+    assert writer.error is None and writer.result is True
+    with coach.app.app_context():
+        assert _messages(coach) == 2
+
+
+def test_coach_plan_tool_write_is_fenced_and_leaves_the_plan_untouched(coach):
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        before = current_plan(owner)
+        regrant(owner, coach.coach_policy, "coach-tool")
+        with pytest.raises(ConsentDenied):
+            _mutate(coach.coach_authority, owner)
+        assert current_plan(owner) == before and _journal(owner) == 0
+
+
+def test_coach_plan_tool_revoke_wins_and_write_wins(coach):
+    from app.services import ai_consent
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        before = current_plan(owner)
+    writer = revoke_first(coach, owner, coach.coach_policy, 1,
+                          lambda: _mutate(coach.coach_authority, owner), ai_consent, "fence")
+    assert isinstance(writer.error, ConsentDenied)
+    with coach.app.app_context():
+        assert current_plan(owner) == before and _journal(owner) == 0
+        consent(owner, coach.coach_policy, "affirmative_grant", "regrant-coach-tool")
+        fresh = ai_consent.begin_operation(owner, "coach", "openai",
+                                           _openai_model())
+    writer = write_first(coach, owner, coach.coach_policy, 3,
+                         lambda: _mutate(fresh, owner, "coach-mutation-2").outcome)
+    assert writer.error is None and writer.result == "applied", writer.error
+    with coach.app.app_context():
+        assert current_plan(owner) == (before[0], before[1] + 1) and _journal(owner) == 1
+
+
+def test_coach_pending_proposal_staging_is_fenced(coach):
+    from app.services import ai_consent
+    from app.services.plan_confirmation import create_or_reuse_pending
+    from app.models import TrainingPlanConfirmationProposal
+    owner = coach.owners[0]
+    with coach.app.app_context():
+        lineage, version = current_plan(owner)
+        regrant(owner, coach.coach_policy, "coach-pending")
+        with ai_consent.operation_scope(coach.coach_authority), pytest.raises(ConsentDenied):
+            create_or_reuse_pending(
+                owner, lineage_id=lineage, mutation_version=version,
+                snapshot_fingerprint="f" * 64, command_type="update_exercise_prescription",
+                command_payload={}, command_fingerprint="c" * 64, reason_codes=(),
+                summary="synthetic")
+        assert TrainingPlanConfirmationProposal.query.filter_by(user_id=owner).count() == 0
+
+
+def test_coach_operation_never_fences_another_accounts_writes(coach):
+    from app.services import ai_consent
+    a, b = coach.owners
+    coach.with_coach_plan(b)
+    with coach.app.app_context():
+        before = current_plan(b)
+        with pytest.raises(ConsentDenied):
+            _mutate(coach.coach_authority, b)
+        assert current_plan(b) == before
+        with ai_consent.operation_scope(coach.coach_authority), pytest.raises(ConsentDenied):
+            ai_consent.fence_active(b)
+
+
+def _openai_model():
+    from app.services import ai
+    return ai.OPENAI_MODEL

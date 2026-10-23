@@ -391,6 +391,29 @@ def fence(authority, owner):
     _check_operation(state, authority)
 
 
+def fence_active(owner):
+    """``fence`` the ACTIVE operation, if any; outside one, nothing changes.
+
+    For shared writers that also serve first-party/non-AI callers (Coach plan
+    tools, pending confirmations, conversation turns): every write made inside
+    an ``operation_scope`` is an AI result and is fenced in the caller's
+    transaction; a write made outside one is untouched. Call it BEFORE the
+    writer's own row locks, where ``lock_plan_owner`` would sit.
+    """
+    operation = _OPERATION.get()
+    if operation is not None:
+        fence(operation, owner)
+    return operation
+
+
+def authorize_active():
+    """``authorize_operation`` for the active operation, if any (publication)."""
+    operation = _OPERATION.get()
+    if operation is not None:
+        authorize_operation(operation)
+    return operation
+
+
 # Internal staged AI candidates (first-plan GENERATED row, replacement
 # proposal) carry the authority they were produced under, in the SAME text
 # column, so recovery and confirmation fence on the original generation

@@ -105,6 +105,15 @@ def create_or_reuse_pending(
     if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
         raise ValueError("user_id is required")
 
+    # D1 (LP21): staging an AI-requested proposal inside an operation is a
+    # publication of its result; fenced under the owner lock, then the insert.
+    from app.services import ai_consent
+    try:
+        ai_consent.fence_active(user_id)
+    except ai_consent.ConsentDenied:
+        db.session.rollback()
+        raise
+
     existing = get_pending(user_id)
     if existing is not None:
         if _same_intent(existing, lineage_id, mutation_version,
