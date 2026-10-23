@@ -1,0 +1,88 @@
+{
+  "contract_version": 1,
+  "ruleset_version": "ti_rules_v1",
+  "states": [
+    "available",
+    "insufficient_data",
+    "not_comparable"
+  ],
+  "kinds": [
+    "performance_declined",
+    "performance_improved",
+    "execution_quality_context_changed",
+    "effort_increased",
+    "effort_decreased",
+    "volume_increase_context",
+    "exposure_frequency_context",
+    "performance_stable",
+    "effort_stable",
+    "effort_mixed",
+    "insufficient_comparable_history"
+  ],
+  "missing_codes": [
+    "missing_prescription",
+    "missing_execution",
+    "missing_rir",
+    "missing_tempo",
+    "rest_method_unsupported",
+    "insufficient_pairs",
+    "plan_changed",
+    "mixed_performance",
+    "incomplete_coverage",
+    "session_not_completed",
+    "history_unavailable",
+    "no_completed_sets"
+  ],
+  "metric_units": {
+    "reps": "int",
+    "weight_kg": "number",
+    "rir": "token",
+    "tempo": "token",
+    "logging_interval_seconds": "int",
+    "set_count": "int",
+    "frequency_days": "int"
+  },
+  "metric_maximum": {
+    "reps": 20000,
+    "weight_kg": 1000.0,
+    "logging_interval_seconds": 3600,
+    "set_count": 12800,
+    "frequency_days": 56
+  },
+  "rir": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4_plus"
+  ],
+  "tempo": [
+    "as_prescribed",
+    "faster",
+    "slower",
+    "lost_control"
+  ],
+  "actions": [
+    [
+      "tempo",
+      "follow_prescribed_tempo"
+    ],
+    [
+      "effort",
+      "aim_prescribed_effort"
+    ],
+    [
+      "current_approach",
+      "hold_current_approach"
+    ]
+  ],
+  "observe": "next_comparable_session",
+  "max_evidence": 8,
+  "max_missing": 12,
+  "max_paired_sets": 20,
+  "history_days": 56,
+  "max_recent_sessions": 8,
+  "max_history_rows": 64,
+  "max_exercises": 32,
+  "max_sets": 20
+}
