@@ -1,4 +1,4 @@
-"""PRIV-K6 rollback gate, Layer A, on real PostgreSQL 16: the completion fence.
+"""PRIV-K6 rollback gate, Layer A, on real PostgreSQL 16/18: the completion fence.
 
 The fence is installed by the reviewed migration's own ``upgrade()`` (on the
 create_all schema, i.e. the fresh-boot adoption path) and, separately, by the
@@ -933,6 +933,7 @@ def test_d9_the_full_alembic_chain_installs_exactly_the_reviewed_fence(migrate_e
     root = Path(__file__).resolve().parents[1]
     Migrate(app, db, directory=str(root / "migrations"))
     with app.app_context():
+        upgrade(revision="b1a8c9d0e1f2")                           # recovered staging revision
         upgrade()
         check()
         with db.engine.connect() as conn:
@@ -949,6 +950,88 @@ def test_d9_the_full_alembic_chain_installs_exactly_the_reviewed_fence(migrate_e
         upgrade()
         db.session.remove()
         db.engine.dispose()
+
+
+@pytest.fixture
+def fence_tables(migrate_engine):
+    """Only the real floor/binding DDL, independent of fence installation."""
+    migration = _module(MIGRATION)
+    with migrate_engine.begin() as conn:
+        conn.exec_driver_sql("CREATE TABLE workout_completion_day (id INTEGER PRIMARY KEY)")
+        _run(conn, lambda: migration._create_tables(conn))
+    return migrate_engine, migration
+
+
+@pytest.mark.parametrize("table,columns,verifier", [
+    ("completion_capability_floor", {"capability", "raised_at", "raised_by_revision"},
+     "_verify_floor_table"),
+    ("completion_claim_transaction", {"claim_id", "claim_txid"}, "_verify_binding_table"),
+])
+def test_d10_valid_constraint_catalog_and_existing_table_adoption(
+        fence_tables, table, columns, verifier):
+    engine, migration = fence_tables
+    with engine.begin() as conn:
+        not_null = [(valid, definition) for kind, valid, definition in
+                    migration._pg_constraints(conn, table).values() if kind == "n"]
+        if conn.dialect.server_version_info >= (18,):
+            assert sorted(not_null) == sorted((True, f"NOT NULL {c}") for c in columns)
+        else:
+            assert not not_null
+        getattr(migration, verifier)(conn)
+        _run(conn, lambda: migration._create_tables(conn))           # existing-schema path
+
+
+@pytest.mark.parametrize("table,alteration", [
+    ("completion_capability_floor", "ALTER COLUMN raised_at DROP NOT NULL"),
+    ("completion_capability_floor", "DROP CONSTRAINT completion_capability_floor_pkey"),
+    ("completion_capability_floor", "ADD CONSTRAINT extra UNIQUE (raised_at)"),
+    ("completion_capability_floor", "ADD CONSTRAINT extra CHECK (true)"),
+    ("completion_capability_floor", "DROP CONSTRAINT ck_completion_capability_floor_revision, "
+     "ADD CONSTRAINT ck_completion_capability_floor_revision "
+     "CHECK (raised_by_revision ~ '^[0-9a-f]{40}$') NOT VALID"),
+    ("completion_capability_floor", "DROP CONSTRAINT ck_completion_capability_floor_revision, "
+     "ADD CONSTRAINT ck_completion_capability_floor_revision CHECK (true)"),
+    ("completion_claim_transaction", "ALTER COLUMN claim_txid DROP NOT NULL"),
+    ("completion_claim_transaction", "DROP CONSTRAINT completion_claim_transaction_pkey"),
+    ("completion_claim_transaction", "ADD CONSTRAINT extra UNIQUE (claim_txid)"),
+    ("completion_claim_transaction", "ADD CONSTRAINT extra CHECK (true)"),
+    ("completion_claim_transaction", "DROP CONSTRAINT completion_claim_transaction_claim_id_fkey, "
+     "ADD FOREIGN KEY (claim_id) REFERENCES workout_completion_day(id)"),
+    ("completion_claim_transaction", "DROP CONSTRAINT completion_claim_transaction_claim_id_fkey, "
+     "ADD FOREIGN KEY (claim_id) REFERENCES workout_completion_day(id) ON DELETE CASCADE NOT VALID"),
+    ("completion_claim_transaction", "ADD CONSTRAINT extra FOREIGN KEY (claim_id) "
+     "REFERENCES workout_completion_day(id) ON DELETE CASCADE"),
+])
+def test_d11_incompatible_constraints_still_fail_closed(fence_tables, table, alteration):
+    engine, migration = fence_tables
+    verifier = (migration._verify_floor_table if table == migration.FLOOR
+                else migration._verify_binding_table)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(f"ALTER TABLE public.{table} {alteration}")
+        before = migration._pg_constraints(conn, table)
+        with pytest.raises(RuntimeError, match="completion authority fence"):
+            verifier(conn)
+        with pytest.raises(RuntimeError, match="completion authority fence"):
+            _run(conn, lambda: migration._create_tables(conn))
+        assert migration._pg_constraints(conn, table) == before      # no repairs
+
+
+@pytest.mark.parametrize("table,column", [
+    ("completion_capability_floor", "raised_at"),
+    ("completion_claim_transaction", "claim_txid"),
+])
+def test_d12_pg18_unvalidated_not_null_is_not_ignored(fence_tables, table, column):
+    engine, migration = fence_tables
+    with engine.begin() as conn:
+        if conn.dialect.server_version_info < (18,):
+            pytest.skip("NOT NULL catalog constraints require PostgreSQL 18")
+        conn.exec_driver_sql(f"ALTER TABLE public.{table} ALTER COLUMN {column} DROP NOT NULL")
+        conn.exec_driver_sql(
+            f"ALTER TABLE public.{table} ADD CONSTRAINT unvalidated NOT NULL {column} NOT VALID")
+        assert any(kind == "n" and not valid for kind, valid, _ in
+                   migration._pg_constraints(conn, table).values())
+        with pytest.raises(RuntimeError, match="completion authority fence"):
+            _run(conn, lambda: migration._create_tables(conn))
 
 
 def test_e1_floor_status_and_raise_tooling(world):

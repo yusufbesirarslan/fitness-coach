@@ -182,7 +182,7 @@ REVIEWED_DDL = {
     # PRIV-K6 rollback gate Layer A: completion-authority fence triggers. Dormant
     # (historical writers unaffected) until `flask completion-floor raise`.
     "d7e3a9c1f5b8":
-        "dc80225f2bfcd560c2e93d181c3190da4676ed0f3cdc569f7fbce57365e3775d",
+        "8f30fb09d35779af8c34a5bca1ed9fb6345bc23473f2eb235a50bcad0fede4c5",
 }
 
 EXPAND = "expand"
