@@ -233,3 +233,20 @@ def test_web_registration_contact_controls_stay_in_inert_template(app, client):
     assert soup.select_one("#eligibility-age") and soup.select_one("#eligibility-country")
     assert soup.select_one("template#eligible-contact-template #email")
     assert not soup.select_one("#eligible-contact-stage input")
+
+
+@pytest.mark.parametrize("age", [None, 17, 30])
+def test_restricted_and_signed_cohorts_keep_real_account_erasure(
+        app, make_user, monkeypatch, age):
+    from account_deletion_support import install_fakes, issue_bearer
+    cognito, _ = install_fakes(monkeypatch)
+    user = make_user("eligibility_erasure")
+    if age is not None:
+        policy.attach(user, policy.registration_record(ticket(age)))
+        db.session.commit()
+    user_id = user.id
+    headers = issue_bearer(cognito, user)
+    response = app.test_client().delete("/api/v1/account", headers=headers)
+    assert response.status_code == 204
+    assert db.session.get(User, user_id) is None
+    assert user.cognito_sub in cognito.deleted_subs
