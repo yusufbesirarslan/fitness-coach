@@ -5,6 +5,7 @@ requires reviewed source with the exact disclosure digest, recipient/model set
 and purpose/category projection. Existing callers without a qualified binding
 are unavailable, including synthetic probes (no hidden system bypass).
 """
+import contextvars
 import hashlib
 import json
 from contextlib import contextmanager
@@ -235,6 +236,237 @@ def dispatch(owner, feature, recipient, payload, expected_generation):
             raise ConsentDenied("AI_CONSENT_CHANGED")
         _authorize(state, binding, recipient, payload.get("model"))
         yield
+
+
+# ── LP21 operation fencing ─────────────────────────────────────────────────
+# An Admission's generation fences ONE physical call. A logical operation
+# (first plan, replacement proposal, Nutrition proposal) spans several
+# admissions, a durable candidate and a later canonical write. Its authority is
+# captured ONCE here and never re-derived: the account generation is
+# conservative, so ANY consent mutation after capture (revoke -> regrant is
+# g+2) leaves the operation stale for good.
+
+@dataclass(frozen=True)
+class OperationAuthority:
+    owner: int
+    feature: str
+    generation: int
+    version: str
+
+    def to_context(self):
+        return {"owner": self.owner, "feature": self.feature,
+                "generation": self.generation, "version": self.version}
+
+    @classmethod
+    def from_context(cls, owner, value):
+        """The durable form back, for THIS owner only. Missing/corrupt -> stale."""
+        if (not isinstance(value, dict)
+                or set(value) != {"owner", "feature", "generation", "version"}
+                or type(value["owner"]) is not int or value["owner"] != owner
+                or value["feature"] not in BINDINGS
+                or type(value["generation"]) is not int or value["generation"] <= 0
+                or not isinstance(value["version"], str) or not value["version"]):
+            raise ConsentDenied("AI_CONSENT_CHANGED")
+        return cls(owner, value["feature"], value["generation"], value["version"])
+
+
+_OPERATION = contextvars.ContextVar("ai_consent_operation", default=None)
+
+
+def begin_operation(owner, feature, recipient, model):
+    """Authorize a NEW logical operation and capture its immutable authority.
+
+    The ``preflight`` predicate, plus the generation and policy version it was
+    decided at. Recovery of existing work never calls this: it reuses the
+    authority stored with that work.
+    """
+    binding = _binding_for(owner, feature, recipient)
+    with _transaction(owner) as conn:
+        state = _state(conn, owner)
+        _authorize(state, binding, recipient, model)
+        return OperationAuthority(owner, feature, state["generation"],
+                                  state["grants"][binding[0]]["version"])
+
+
+@contextmanager
+def operation_scope(authority):
+    """Every provider admission inside uses ``authority``'s generation."""
+    if not isinstance(authority, OperationAuthority):
+        raise ConsentDenied("AI_CONSENT_CHANGED")
+    token = _OPERATION.set(authority)
+    try:
+        yield authority
+    finally:
+        _OPERATION.reset(token)
+
+
+def current_operation():
+    return _OPERATION.get()
+
+
+def admission_generation(owner, feature):
+    """The generation a new Admission fences on: the operation's, never a newer one."""
+    operation = _OPERATION.get()
+    if operation is None:
+        return generation(owner)
+    if operation.owner != owner:
+        raise ConsentDenied()
+    if operation.feature != feature:
+        raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+    return operation.generation
+
+
+def _check_operation(state, authority):
+    if state["generation"] != authority.generation:
+        raise ConsentDenied("AI_CONSENT_CHANGED")
+    purpose, categories = BINDINGS[authority.feature]
+    grants = state["grants"]
+    record = grants.get(purpose) if isinstance(grants, dict) else None
+    if not _record_valid(purpose, record) or record["version"] != authority.version:
+        raise ConsentDenied("AI_CONSENT_REQUIRED")
+    if POLICIES[record["version"]].categories != categories:
+        raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+
+
+def _operation_binding(authority, owner=None):
+    if not isinstance(authority, OperationAuthority):
+        # No server-held AI provenance (e.g. a client-authored document).
+        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    if authority.feature not in BINDINGS:
+        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    if owner is not None and (type(owner) is not int or owner != authority.owner):
+        # One account's authority never writes another account's state.
+        raise ConsentDenied()
+    principal = current_subject()
+    if principal is not None and principal != authority.owner:
+        raise ConsentDenied()
+
+
+def authorize_operation(authority):
+    """Publication decision with no domain transaction to join (Nutrition review).
+
+    Same account lock as ``mutate``: a revoke acknowledged before this returns
+    withholds the result; one acknowledged after it is ordered after a release
+    that cannot be recalled. Never call while the request session holds the
+    owner row (that is ``fence``'s job).
+    """
+    _operation_binding(authority)
+    with _transaction(authority.owner) as conn:
+        _check_operation(_state(conn, authority.owner), authority)
+
+
+# Bounded wait for the owner row inside a writer's transaction: longer than
+# one bounded SDK attempt (30 s) that a same-owner ``dispatch`` may hold, never
+# unbounded. Restored afterwards so the caller's own statements are unaffected.
+FENCE_LOCK_TIMEOUT = "35000ms"
+# Reserved key carrying the proposing operation's authority in a server-written
+# Coach pending-confirmation payload (read by keyed access only).
+PAYLOAD_AUTHORITY_KEY = "_d1_operation_authority"
+
+
+def fence(authority, owner, feature=None):
+    """Transaction-local fence for ``owner``'s publication/canonical write.
+
+    Runs on the CALLER's ``db.session`` transaction, at the caller's place in
+    the repository lock order: it takes the owner row ``FOR NO KEY UPDATE``
+    (``plan_owner_lock``'s mode, conflicting with ``mutate``'s ``FOR UPDATE``;
+    a no-op re-lock when the caller already holds it), then reads the committed
+    consent state in that same READ COMMITTED transaction. The caller must
+    perform its write and commit while still holding that lock, so a revoke
+    commits either entirely before the decision (the write is refused) or
+    entirely after the write. Never opens D1's separate connection, which would
+    wait on the caller's own lock. The caller rolls back on denial.
+    ``owner`` is the account being written; it must be the authority's.
+    ``feature``, when given, is the only purpose whose result this writer
+    accepts (a Nutrition authority never writes a Training plan).
+    """
+    if type(owner) is not int:
+        raise ConsentDenied()
+    _operation_binding(authority, owner)
+    if feature is not None and authority.feature != feature:
+        raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+    if not has_app_context():
+        raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
+    try:
+        conn = db.session.connection()
+        if conn.dialect.name != "postgresql":
+            raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
+        if conn.execute(text("SELECT current_setting('transaction_isolation')")).scalar_one() != "read committed":
+            # A snapshot older than the lock could miss a committed revoke.
+            raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
+        _, _, users = _tables()
+        previous = conn.execute(text("SELECT current_setting('lock_timeout')")).scalar_one()
+        conn.execute(text("SELECT set_config('lock_timeout', :value, true)"),
+                     {"value": FENCE_LOCK_TIMEOUT})
+        owned = conn.execute(select(users.c.id).where(users.c.id == authority.owner)
+                             .with_for_update(key_share=True)).scalar_one_or_none()
+        conn.execute(text("SELECT set_config('lock_timeout', :value, true)"),
+                     {"value": previous})
+        if owned is None:
+            raise ConsentDenied()
+        state = _state(conn, authority.owner)
+    except SQLAlchemyError:
+        raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503) from None
+    _check_operation(state, authority)
+
+
+def fence_active(owner):
+    """``fence`` the ACTIVE operation, if any; outside one, nothing changes.
+
+    For shared writers that also serve first-party/non-AI callers (Coach plan
+    tools, pending confirmations, conversation turns): every write made inside
+    an ``operation_scope`` is an AI result and is fenced in the caller's
+    transaction; a write made outside one is untouched. Call it BEFORE the
+    writer's own row locks, where ``lock_plan_owner`` would sit.
+    """
+    operation = _OPERATION.get()
+    if operation is not None:
+        fence(operation, owner)
+    return operation
+
+
+def authorize_active():
+    """``authorize_operation`` for the active operation, if any (publication)."""
+    operation = _OPERATION.get()
+    if operation is not None:
+        authorize_operation(operation)
+    return operation
+
+
+# Internal staged AI candidates (first-plan GENERATED row, replacement
+# proposal) carry the authority they were produced under, in the SAME text
+# column, so recovery and confirmation fence on the original generation
+# without a schema change. Never projected to a client.
+_CANDIDATE_DOMAIN = "axisai/d1-operation-candidate/v1"
+
+
+def _canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"), allow_nan=False)
+
+
+def bind_candidate(authority, document_text):
+    """The staged text: the EXACT document bytes plus their operation authority."""
+    if not isinstance(authority, OperationAuthority):
+        raise ConsentDenied("AI_CONSENT_CHANGED")
+    if not isinstance(document_text, str) or not isinstance(json.loads(document_text), dict):
+        raise ValueError("candidate document must be a JSON object")
+    return _canonical({"domain": _CANDIDATE_DOMAIN, "authority": authority.to_context(),
+                       "document": document_text})
+
+
+def unbind_candidate(owner, stored):
+    """``(authority, document_text)``; legacy/foreign/corrupt material is stale."""
+    try:
+        envelope = json.loads(stored)
+    except (TypeError, ValueError):
+        raise ConsentDenied("AI_CONSENT_CHANGED") from None
+    if (not isinstance(envelope, dict)
+            or set(envelope) != {"domain", "authority", "document"}
+            or envelope["domain"] != _CANDIDATE_DOMAIN
+            or not isinstance(envelope["document"], str)):
+        raise ConsentDenied("AI_CONSENT_CHANGED")
+    return OperationAuthority.from_context(owner, envelope["authority"]), envelope["document"]
 
 
 def memory_available(owner):

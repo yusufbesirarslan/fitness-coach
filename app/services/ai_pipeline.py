@@ -18,7 +18,7 @@
 # iade kararı route'ta kalır (is_error_fallback bayrağıyla).
 from flask import current_app
 
-from app.services import context_builder, memory_manager, moderation, response_formatter
+from app.services import ai_consent, context_builder, memory_manager, moderation, response_formatter
 from app.services.coach_memory_provenance import DisplayOnlyReply
 
 
@@ -143,6 +143,12 @@ def _record(conversation, question, answer, usage=None, interrupted=False,
         return memory_manager.record_turn(conversation, question, answer,
                                           usage=usage, interrupted=interrupted,
                                           assistant_memory_eligible=assistant_memory_eligible)
+    except ai_consent.ConsentDenied:
+        # A fence refusal is a decision, not a persistence fault: never
+        # swallowed, so the reply is not published (LP21).
+        from app.extensions import db
+        db.session.rollback()
+        raise
     except Exception:
         from app.extensions import db
         db.session.rollback()
@@ -194,6 +200,10 @@ def generate_answer(user_id, question, client_history=None, language="tr", hando
     if not is_fallback:
         recorded_turn = _record(conversation, question, answer,
                                 assistant_memory_eligible=assistant_memory_eligible)
+        if recorded_turn is None:
+            # Not persisted (memory off/unavailable): the publication decision
+            # itself is fenced for an operation's reply (LP21).
+            ai_consent.authorize_active()
     _emit_metrics("blocking", is_error=is_fallback)
 
     return {"answer": answer,

@@ -100,6 +100,11 @@ class PlanMutationResult:
         return self.outcome == OUTCOME_APPLIED
 
 
+def _fence_active_operation(user_id):
+    from app.services import ai_consent
+    ai_consent.fence_active(user_id)
+
+
 def _locked_active_plan(user_id):
     """The caller's own canonical active plan, row-locked and freshly read.
 
@@ -243,6 +248,9 @@ def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> 
             db.session.rollback()
             return replayed
 
+        # D1 (LP21): a change requested inside an AI operation is fenced
+        # under the owner lock BEFORE the plan row (owner -> plan order).
+        _fence_active_operation(user_id)
         plan = _locked_active_plan(user_id)
         if expected_binding is not None:
             _require_binding(plan, expected_binding)
@@ -351,6 +359,9 @@ def undo_last_change(user_id, context, *, expected_binding=None) -> PlanMutation
             db.session.rollback()
             return replayed
 
+        # D1 (LP21): a change requested inside an AI operation is fenced
+        # under the owner lock BEFORE the plan row (owner -> plan order).
+        _fence_active_operation(user_id)
         plan = _locked_active_plan(user_id)
         if expected_binding is not None:
             _require_binding(plan, expected_binding)

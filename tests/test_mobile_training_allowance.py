@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+
+from consent_projection_support import synthetic_authority
 from sqlalchemy.exc import IntegrityError
 
 from ai_allowance_support import enable_ledger, enable_subscriptions, fixture_policy, premium_row
@@ -353,6 +355,7 @@ class _Crash(BaseException):
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
+@pytest.mark.usefixtures("synthetic_operation_authority")
 def test_abandoned_dispatch_retires_as_one_expired_unit_and_late_output_is_fenced(
         app, client, mobile_user, as_mobile, metered, provider, monkeypatch):
     app.config["AI_ALLOWANCE_POLICY"] = fixture_policy(
@@ -390,7 +393,8 @@ def test_abandoned_dispatch_retires_as_one_expired_unit_and_late_output_is_fence
     assert [b[0] for b in state.bindings] == ["EXPIRED", "COMMITTED"]
     assert state.bucket == (2, 2, 0, 0) and state.plans == 1  # one expired + one success
     with pytest.raises(store.GenerationPersistenceUnavailable):
-        store.stage_candidate(operation_id, json.dumps(_document()), 8.0)  # late worker
+        store.stage_candidate(operation_id, json.dumps(_document()), 8.0,  # late worker
+                              synthetic_authority(mobile_user.id))
     assert _ledger(mobile_user.id).bucket == (2, 2, 0, 0)
 
 

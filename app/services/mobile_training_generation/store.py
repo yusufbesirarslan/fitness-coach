@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import sqlalchemy as sa
 from flask import current_app
@@ -19,7 +20,7 @@ from app.models import (
     TrainingPlanGenerationOperation,
     User,
 )
-from app.services import ai_provider_call, premium
+from app.services import ai_consent, ai_provider_call, premium
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.preference_contract import (
@@ -246,7 +247,23 @@ def retire_abandoned(user_id):
         raise GenerationPersistenceUnavailable() from error
 
 
-def stage_candidate(operation_id, document_json, score):
+def consent_failure(error):
+    """A D1 refusal as the #450 terminal failure record (code + status kept)."""
+    return SimpleNamespace(public_code=error.code, http_status=error.status,
+                           retryable=error.status >= 500)
+
+
+def stage_candidate(operation_id, document_json, score, authority):
+    """Stage provider output under its operation authority, or withhold it.
+
+    Lock order owner -> operation: the fence decides first, then the
+    operation row is locked. That is the order account deletion (owner row,
+    then its cascade into operation rows) and D1 ``dispatch`` +
+    ``mark_attempt_possible`` already take, so a concurrent deletion cannot
+    deadlock against staging. A refused fence never stores the output: the
+    operation ends FAILED with the D1 code, attempt evidence untouched, and
+    the caller settles.
+    """
     if not isinstance(document_json, str) or len(document_json.encode("utf-8")) > MAX_CANDIDATE_BYTES:
         raise GenerationPersistenceUnavailable()
     try:
@@ -254,15 +271,25 @@ def stage_candidate(operation_id, document_json, score):
         parsed = json.loads(document_json)
         if not isinstance(parsed, dict):
             raise ValueError("candidate must be an object")
+        ai_consent.fence(authority, getattr(authority, "owner", None), "training_plan")
         operation = (db.session.query(TrainingPlanGenerationOperation)
                      .filter_by(id=operation_id).populate_existing().with_for_update().one_or_none())
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_IN_PROGRESS:
             raise GenerationPersistenceUnavailable()
-        operation.candidate_plan_data = document_json
+        if operation.user_id != authority.owner:
+            raise ai_consent.ConsentDenied()
+        operation.candidate_plan_data = ai_consent.bind_candidate(authority, document_json)
         operation.candidate_score = score
         operation.status = TRAINING_PLAN_GENERATION_GENERATED
         operation.updated_at = datetime.utcnow()
         db.session.commit()
+    except ai_consent.ConsentDenied as denied:
+        db.session.rollback()
+        try:
+            record_failure(operation_id, consent_failure(denied))
+        except GenerationPersistenceUnavailable:
+            pass  # still IN_PROGRESS: retirement terminalizes it; output is withheld either way
+        raise
     except GenerationPersistenceUnavailable:
         db.session.rollback()
         raise
@@ -335,6 +362,12 @@ def commit_plan(operation_id, user_id):
     owner row, which conflicts with the browser's ``FOR UPDATE``), but blocking
     the insert after the decision has been made only delays a write already
     committed to. The check has to be the thing that waits.
+
+    D1 (LP21 operation fencing): under that SAME owner lock, the staged
+    candidate's own operation authority is fenced before anything is written.
+    ``GENERATED`` is not permission — recovery after process loss commits only
+    at the original generation. A definitive refusal terminalizes the operation
+    (FAILED, candidate discarded); an authority outage keeps it recoverable.
     """
     try:
         operation = (db.session.query(TrainingPlanGenerationOperation)
@@ -343,11 +376,14 @@ def commit_plan(operation_id, user_id):
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_GENERATED:
             raise GenerationPersistenceUnavailable()
         lock_plan_owner(user_id)
+        authority, document_json = ai_consent.unbind_candidate(
+            user_id, operation.candidate_plan_data)
+        ai_consent.fence(authority, user_id, "training_plan")
         if get_active_plan(user_id) is not None:
             raise ExistingPlanRefused()
         plan = _insert_plan(
             user_id=user_id,
-            plan_data=operation.candidate_plan_data,
+            plan_data=document_json,
             score=operation.candidate_score,
         )
         db.session.flush()
@@ -363,12 +399,82 @@ def commit_plan(operation_id, user_id):
         operation.completed_at = datetime.utcnow()
         db.session.commit()
         return plan
+    except ai_consent.ConsentDenied as denied:
+        db.session.rollback()
+        if denied.status < 500:
+            _terminalize_generated(operation_id, user_id, denied)
+        raise
     except ExistingPlanRefused:
         db.session.rollback()
         raise
     except GenerationPersistenceUnavailable:
         db.session.rollback()
         raise
+    except Exception as error:
+        db.session.rollback()
+        raise GenerationPersistenceUnavailable() from error
+
+
+def _terminalize_generated(operation_id, user_id, denied):
+    """GENERATED -> FAILED with the D1 code; the AI candidate is discarded.
+
+    Same fields/refund rule as ``record_failure``. Attempt evidence is never
+    touched, so metered settlement still reads the true attempt markers.
+    Returns whether this call terminalized it.
+    """
+    try:
+        operation = (db.session.query(TrainingPlanGenerationOperation)
+                     .filter_by(id=operation_id, user_id=user_id)
+                     .populate_existing().with_for_update().one_or_none())
+        if operation is None or operation.status != TRAINING_PLAN_GENERATION_GENERATED:
+            db.session.rollback()
+            return False
+        if operation.quota_reserved:
+            premium.refund_ai_quota_in_transaction(
+                operation.user_id, "training", operation.quota_week)
+        operation.status = TRAINING_PLAN_GENERATION_FAILED
+        operation.candidate_plan_data = None
+        operation.candidate_score = None
+        operation.quota_reserved = False
+        operation.error_code = str(denied.code)[:64]
+        operation.error_http_status = denied.status
+        operation.error_retryable = False
+        operation.updated_at = operation.completed_at = datetime.utcnow()
+        db.session.commit()
+        return True
+    except Exception:
+        db.session.rollback()
+        return False
+
+
+def refuse_stale_generated(user_id):
+    """End this owner's GENERATED work that can never be committed.
+
+    Called under the owner arbitration lock before the active-operation check,
+    so withdrawn work does not strand the owner. Returns the refused operation
+    id (the caller settles it) or ``None``. Still-authorized work and authority
+    outages are left alone: ``commit_plan`` fences again at the write.
+    """
+    operation_id = None
+    try:
+        operation = (db.session.query(TrainingPlanGenerationOperation)
+                     .filter_by(user_id=user_id, status=TRAINING_PLAN_GENERATION_GENERATED)
+                     .populate_existing().with_for_update().one_or_none())
+        if operation is None:
+            db.session.rollback()
+            return None
+        operation_id = operation.id
+        lock_plan_owner(user_id)
+        authority, _document = ai_consent.unbind_candidate(
+            user_id, operation.candidate_plan_data)
+        ai_consent.fence(authority, user_id, "training_plan")
+        db.session.rollback()
+        return None
+    except ai_consent.ConsentDenied as denied:
+        db.session.rollback()
+        if denied.status >= 500 or operation_id is None:
+            return None
+        return operation_id if _terminalize_generated(operation_id, user_id, denied) else None
     except Exception as error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from error

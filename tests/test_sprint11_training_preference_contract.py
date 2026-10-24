@@ -849,6 +849,7 @@ def test_day_count_mismatch_does_not_retry_and_is_semantic(
 # ── Persistence / Adaptive Coaching unchanged ────────────────────────────────
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_save_replaces_plan_without_journal_or_typed_generation_command(
         client, auth_user, plan_save_token):
     token = plan_save_token(auth_user.id)

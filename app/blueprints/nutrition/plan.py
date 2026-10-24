@@ -64,7 +64,10 @@ def save_nutrition_plan():
     # Eski planı sil, yenisini kaydet — the ONE replacement boundary, shared
     # with the native transport (NUTR-PR7). Browser semantics are unchanged:
     # unconditional replacement (the accepted PR5 cross-tab residual).
-    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL)
+    # A client-held document carries no server-held AI provenance: D1 closes
+    # this alias and the shared store refuses it (LP21 operation fencing).
+    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL,
+                           authority=None)
 
     return jsonify({"message": t("route.plan_saved")})
 

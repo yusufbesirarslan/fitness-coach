@@ -263,7 +263,10 @@ class Admission:
         self.subject = subject
         self.spend_class = spend_class
         self._used = False
-        self.consent_generation = ai_consent.generation(subject)
+        # Inside a logical operation (retry ladder, provider fallback, repair)
+        # every admission fences on the operation's ORIGINAL generation; a
+        # newer grant never re-authorizes old work.
+        self.consent_generation = ai_consent.admission_generation(subject, feature)
         try:
             self.admission_id = uuid.uuid4().hex
         except Exception:

@@ -114,10 +114,23 @@ def lastgood_key(feature, *parts):
     return f"ai:lastgood:{feature}:v1:{digest}"
 
 
+def _inside_operation():
+    """D1 (LP21): inside a fenced logical operation the result must come from
+    ITS authorized attempts. The cache key carries no owner/generation, so no
+    last-good read or write happens there. Undecidable -> treated as fenced."""
+    try:
+        from app.services import ai_consent
+        return ai_consent.current_operation() is not None
+    except Exception:
+        return True
+
+
 def remember_last_good(key, value):
     """Başarılı yanıtı son-iyi olarak sakla (SETEX). Boş/str-olmayan değer, Redis
     yok veya hata → sessiz no-op."""
     if not key or not isinstance(value, str) or not value.strip():
+        return
+    if _inside_operation():
         return
     r = _get_redis()
     if r is None:
@@ -130,7 +143,7 @@ def remember_last_good(key, value):
 
 def recall_last_good(key):
     """Son-iyi yanıtı oku. Yok / Redis yok / hata → None."""
-    if not key:
+    if not key or _inside_operation():
         return None
     r = _get_redis()
     if r is None:

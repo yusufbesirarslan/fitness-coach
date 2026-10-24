@@ -14,6 +14,8 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
+from consent_projection_support import synthetic_authority
+
 
 pytestmark = pytest.mark.pg_concurrency
 
@@ -22,6 +24,15 @@ if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
         "set FITX_PG_CONCURRENCY_TEST=1 with a disposable PG_TEST_DATABASE_URL",
         allow_module_level=True,
     )
+
+@pytest.fixture(autouse=True)
+def _lp21_synthetic_operation_authority(monkeypatch):
+    # LP21: these races use injected synthetic providers/writers; ALLOW at the
+    # operation-fencing decision points only. Real D1 operation fencing of the
+    # same writers is qualified in tests/test_lp21_d1_operation_fencing_pg.py.
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
+
 
 BODY = {"template": "general_full_body_v1", "gun_sayisi": 3, "ekipman": "ev"}
 
@@ -110,7 +121,8 @@ def _browser_create(app, user_id, outcomes, index):
             try:
                 replace_training_plan(
                     user_id, PlanExpectation(absent=True),
-                    plan_data='{"program": []}', score=8)
+                    plan_data='{"program": []}', score=8,
+                    authority=synthetic_authority(user_id))
                 outcomes[index] = ("browser_ok",)
             except Exception as error:
                 outcomes[index] = ("browser_refused", type(error).__name__)
@@ -339,7 +351,8 @@ def test_plan_origin_is_read_from_the_ledger_on_postgresql(pg_general_app):
         try:
             replace_training_plan(
                 user_id, PlanExpectation(False, lineage, version),
-                plan_data='{"program": []}', score=None)
+                plan_data='{"program": []}', score=None,
+                authority=synthetic_authority(user_id))
             replacement = TrainingPlan.query.filter_by(user_id=user_id).one()
             assert replacement.lineage_id != lineage
             assert resolve_plan_origin(replacement, user_id)["kind"] == "unknown"
@@ -350,7 +363,8 @@ def test_plan_origin_is_read_from_the_ledger_on_postgresql(pg_general_app):
             from app.models import TrainingPlanGenerationOperation
             replace_training_plan(
                 other_id, PlanExpectation(absent=True),
-                plan_data='{"program": []}', score=7)
+                plan_data='{"program": []}', score=7,
+                authority=synthetic_authority(other_id))
             ai_plan = TrainingPlan.query.filter_by(user_id=other_id).one()
             db.session.add(TrainingPlanGenerationOperation(
                 user_id=other_id, idempotency_key="pg-ai-origin",

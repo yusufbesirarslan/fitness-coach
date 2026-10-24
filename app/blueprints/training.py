@@ -356,6 +356,9 @@ def save_training_plan():
             expectation,
             plan_data=json.dumps(validated_document, ensure_ascii=False),
             score=score,
+            # A client-held document carries no server-held AI provenance: D1
+            # closes this alias and the shared writer refuses it (LP21).
+            authority=None,
         )
     except PlanReplacementConflict as exc:
         # Bounded reason, no lineage value, no user id, no payload.

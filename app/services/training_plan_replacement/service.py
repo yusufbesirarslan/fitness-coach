@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from app.extensions import db
+from app.services import ai_consent
 from app.models import (TrainingPlanReplacementProposal as Proposal,
                         TrainingPlanReplacementReceipt as Receipt,
                         TrainingPlanConfirmationProposal as CoachProposal,
@@ -182,6 +183,10 @@ def confirm_replacement(user_id, proposal_public_id, idempotency_key):
                 raise ProposalUnavailable("proposal unavailable")
             replacement = None
             if status is None:
+                # The candidate is an AI result: its ORIGINAL operation
+                # authority is fenced inside the replacement transaction.
+                authority, plan_data = ai_consent.unbind_candidate(
+                    user_id, proposal.candidate_plan_data)
                 # Lock before User/plan. READ COMMITTED waits refresh a Coach
                 # winner. New pending rows after this read may bind old plan;
                 # canonical Coach mutation rechecks full binding under plan lock.
@@ -195,8 +200,8 @@ def confirm_replacement(user_id, proposal_public_id, idempotency_key):
                     replacement = replace_training_plan_in_transaction(
                         user_id, PlanExpectation(False, proposal.base_lineage_id,
                                                  proposal.base_mutation_version),
-                        plan_data=proposal.candidate_plan_data, score=proposal.candidate_score,
-                        snapshot_digest=proposal.base_snapshot_digest,
+                        plan_data=plan_data, score=proposal.candidate_score,
+                        authority=authority, snapshot_digest=proposal.base_snapshot_digest,
                         before_replace=final_guard)
                     status = "APPLIED"
                 except PlanReplacementConflict:
