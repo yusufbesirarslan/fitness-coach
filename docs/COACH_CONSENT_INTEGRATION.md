@@ -1,6 +1,8 @@
 # Coach D1 integration — incomplete, default closed
 
-Backend base `b22c5cd9600303a7e1ece79e910674b629b11eec`.
+Backend main base `2e0bdb53a0804e9bcc4c91aa5cc925cfbd5774cf`.
+Composed dependency: D1 #464 `c6050c703174432e322f3a824e908eeca59543b4`,
+not a claim that #464 has merged to main.
 This PR is a prerequisite component, not a functioning Coach integration or
 permission to activate. No published disclosure, Coach binding, endpoint
 opening, provider call, migration, model-routing or feature-flag change.
@@ -22,9 +24,10 @@ without accepting any runtime or client-defined disclosure content.
 
 ## Remaining shared source work
 
-1. D1 operation-fencing owner finishes and qualifies immutable operation
-   authority, same-transaction writes and real HTTP publication ordering.
-   Local checkpoint `6adb17a` is neither merged nor accepted evidence.
+1. D1 operation-fencing owner has supplied the versioned operation interface
+   in #464, with real-PG writer tests. Its documented check-then-send HTTP
+   residual still does not satisfy acknowledged-withdrawal publication ordering.
+   Local checkpoint `6adb17a` is historical, not merged qualification.
 2. Integrate one bounded Coach binding into D1 and the shared pipeline after
    reviewing exact context and tool-result categories. Reuse that owner's
    operation token. Do not write a parallel generation authority here.
@@ -41,6 +44,29 @@ without accepting any runtime or client-defined disclosure content.
    fence refusal in the pipeline's best-effort `_record` catch.
 6. Remove only the qualified blocking Coach endpoint(s) from the early closure;
    streaming, optional Memory and all unrelated AI paths remain closed.
+
+## Native admission composed, endpoint still closed
+
+`mobile_coach.send_coach_message` now captures the owner's `begin_operation`
+once using the server's `heavy_primary_route()` before allowance reservation
+or context construction. The whole native turn uses `operation_scope`, including
+the shared pipeline, tools, persistence and payload projection. This reuses D1's
+original generation; no new permission registry or operation authority exists.
+
+Terminal `ConsentDenied` reaching the route returns `consent_error_response`
+without adding a provider failure/cooldown. The established provider-door
+`attempt_observer` records only whether an attempt might have been transmitted.
+A zero-attempt failure can refund the weekly allowance; a possible attempt
+cannot. This in-request billing observation is not durable operation recovery.
+
+The provider loops in `ai_coach.py` still need their owner's typed exception
+propagation: a swallowed denial cannot be recovered by this route. Coach meal
+and workout tool writes, deferred work and the HTTP transport handoff also
+need the D1 owner's remaining qualification. Empty policies, absent Coach
+binding and every early route closure remain unchanged. Cohort screening does
+not replace independent health-processing authority. New route tests use
+explicit synthetic layer isolation and qualify composition only, not consent
+approval, real-PG ordering or live Coach readiness.
 
 ## Internal EN/TR copy draft — NOT APPROVED, NOT PUBLISHABLE
 

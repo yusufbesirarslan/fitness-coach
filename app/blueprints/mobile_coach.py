@@ -31,12 +31,15 @@ from flask import after_this_request, current_app, g, jsonify, request, session
 from flask_limiter.errors import RateLimitExceeded
 
 from app.blueprints.mobile_api import bp, mobile_error
+from app.blueprints.ai_consent import consent_error_response
 from app.coach_handoff import REVIEW_NUTRITION_DAY, handoff_marker
 from app.config import AI_BURST_RATELIMIT, AI_RATELIMIT
 from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
-from app.services import ai_recovery, coach_plan_tools, mobile_coach
+from app.services import (
+    ai, ai_consent, ai_provider_call, ai_recovery, coach_plan_tools, mobile_coach,
+)
 from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services.ai_pipeline import generate_answer
 from app.services.moderation import validate_question
@@ -150,6 +153,22 @@ def send_coach_message():
             "The Coach is recovering from repeated failures.", 429, True,
             retry_after=remaining)
 
+    # Capture the existing D1 authority ONCE, before allowance or protected
+    # context. All subsequent admissions/writers inherit this generation.
+    # The early endpoint closure stays in place until the remaining authority
+    # and publication seams are qualified; this does not open Coach.
+    try:
+        authority = ai_consent.begin_operation(
+            user_id, "coach", *ai.heavy_primary_route())
+        with ai_consent.operation_scope(authority):
+            return _send_authorized_turn(user, question, handoff)
+    except ai_consent.ConsentDenied as error:
+        db.session.rollback()
+        return consent_error_response(error)
+
+
+def _send_authorized_turn(user, question, handoff):
+    user_id = user.id
     quota_enabled = current_app.config.get("AI_CHAT_QUOTA_ENABLED", True)
     if quota_enabled and not reserve_ai_quota(
             user, "chat", FREE_WEEKLY_AI_CHATS):
@@ -158,10 +177,26 @@ def send_coach_message():
             "The weekly Coach allowance is used up.", 402, False)
 
     result = None
+    attempt_possible = False
+
+    def before_attempt():
+        # Existing provider-door observer, after D1 and before the physical
+        # SDK call. Conservative billing evidence only, never an authority.
+        nonlocal attempt_possible
+        attempt_possible = True
+
     try:
         handoff_kw = {"handoff": handoff} if handoff else {}
-        result = generate_answer(
-            user_id, question, [], language=user.language, **handoff_kw)
+        with ai_provider_call.attempt_observer(before_attempt):
+            result = generate_answer(
+                user_id, question, [], language=user.language, **handoff_kw)
+    except ai_consent.ConsentDenied:
+        db.session.rollback()
+        if quota_enabled and not attempt_possible:
+            _refund_quota(user)
+        # Terminal D1 refusal is not a provider failure, cooldown or a retry.
+        # An attempt possibly sent can be billable, even without a reply.
+        raise
     except Exception as error:
         db.session.rollback()
         # A type name and a request id only - never the message, the prompt,
@@ -170,7 +205,7 @@ def send_coach_message():
             "mobile_coach event=reply_failed error_type=%s request_id=%s",
             type(error).__name__, current_request_id())
         ai_recovery.record_ai_failure(user_id)
-        if quota_enabled:
+        if quota_enabled and not attempt_possible:
             _refund_quota(user)
         return mobile_error(
             "COACH_UNAVAILABLE", "The Coach is temporarily unavailable.",
@@ -179,10 +214,10 @@ def send_coach_message():
     if result["is_error_fallback"]:
         # Web `/ask` answers 200 with the friendly fallback sentence and
         # `is_error_fallback: true`. Native gets no fake reply: the same
-        # bookkeeping (failure streak, quota refund, turn NOT persisted), then a
-        # typed error.
+        # failure streak and no persisted turn, then a typed error. Only a
+        # proven zero-attempt failure returns the allowance.
         ai_recovery.record_ai_failure(user_id)
-        if quota_enabled:
+        if quota_enabled and not attempt_possible:
             db.session.rollback()
             _refund_quota(user)
         current_app.logger.warning(
