@@ -28,6 +28,9 @@ import pytest
 
 from test_nutrition_vnext_pr2_navigation_contract import Elements, render
 
+# LP21: characterizes the browser save path; production closes the alias (D1).
+pytestmark = pytest.mark.usefixtures('legacy_browser_plan_saves')
+
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = (ROOT / 'static' / 'nutrition.js').read_text(encoding='utf-8').replace('\r\n', '\n')
 TEMPLATE = (ROOT / 'templates' / 'nutrition.html').read_text(encoding='utf-8').replace('\r\n', '\n')

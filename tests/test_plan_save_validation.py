@@ -29,6 +29,9 @@ from tests.test_training_routes import (  # noqa: F401 - fixture import
     plan_save_token,
 )
 
+# LP21: characterizes the browser save path; production closes the alias (D1).
+pytestmark = pytest.mark.usefixtures('legacy_browser_plan_saves')
+
 
 # ── canonical payloads, as the real clients emit them ────────────────────────
 

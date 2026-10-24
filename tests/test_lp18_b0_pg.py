@@ -27,6 +27,7 @@ from app.services.plan_mutation.commands import UpdateExercisePrescriptionComman
 from app.services.plan_mutation.context import MutationContext
 from app.services.plan_mutation.fingerprint import snapshot_fingerprint
 from test_lp18_b0 import DAY, plan_text, coach_proposal
+from consent_projection_support import allow_operation_fences, bound_candidate, synthetic_authority
 
 pytestmark=pytest.mark.pg_concurrency
 if os.environ.get('FITX_PG_CONCURRENCY_TEST') != '1':
@@ -34,7 +35,10 @@ if os.environ.get('FITX_PG_CONCURRENCY_TEST') != '1':
 
 
 @pytest.fixture
-def pg():
+def pg(monkeypatch):
+    # LP21: lock-order qualification of LP18 writers; real D1 fencing of the
+    # same writers lives in tests/test_lp21_d1_operation_fencing_pg.py.
+    allow_operation_fences(monkeypatch)
     url=os.environ.get('PG_TEST_DATABASE_URL','')
     assert url.startswith('postgresql'), 'required PG database missing'
     app=Flask('lp18-b0-pg')
@@ -49,7 +53,7 @@ def pg():
         plan=TrainingPlan(user_id=uid,plan_data=plan_text('Old'),score=8)
         db.session.add(plan);db.session.commit()
         binding=s.BaseBinding(plan.lineage_id,0,snapshot_fingerprint(plan.plan_data))
-        token=s.stage_proposal(uid,binding,plan_data=plan_text('New'),score=9)
+        token=s.stage_proposal(uid,binding,plan_data=bound_candidate(uid,plan_text('New')),score=9)
     yield app, uid, token, binding
     with app.app_context():
         db.session.remove();db.drop_all();db.engine.dispose()
@@ -224,7 +228,7 @@ def test_new_coach_proposal_old_snapshot_after_replacement_is_stale(pg,monkeypat
     _,uid,token,binding=pg
     with pg[0].app_context():
         candidate=plan_text('Old')+' '
-        token=s.stage_proposal(uid,binding,plan_data=candidate,score=9)
+        token=s.stage_proposal(uid,binding,plan_data=bound_candidate(uid,candidate),score=9)
     from app.services.plan_confirmation import service as cp
     from app.services.coach_plan_tools.executor import _apply_confirmed
     # Capture old server preview before replacement; insert pending after its
@@ -251,7 +255,7 @@ def test_g_first_plan_operation_user_plan_order_has_no_cycle(pg,monkeypatch):
     from app.services.mobile_training_generation import store, ExistingPlanRefused
     with pg[0].app_context():
         operation=store.claim(uid,'generate-key-1','fingerprint')
-        store.stage_candidate(operation.id,plan_text('First'),8);oid=operation.id
+        store.stage_candidate(operation.id,plan_text('First'),8,synthetic_authority(uid));oid=operation.id
     def first_plan():
         try:return store.commit_plan(oid,uid)
         except ExistingPlanRefused:return 'existing-refused'
@@ -265,7 +269,7 @@ def test_g_first_plan_owner_wins_replacement_waits(pg,monkeypatch):
     from app.services.mobile_training_generation import store, ExistingPlanRefused
     with pg[0].app_context():
         operation=store.claim(uid,'generate-key-1','fingerprint')
-        store.stage_candidate(operation.id,plan_text('First'),8);oid=operation.id
+        store.stage_candidate(operation.id,plan_text('First'),8,synthetic_authority(uid));oid=operation.id
     def first_plan():
         try:return store.commit_plan(oid,uid)
         except ExistingPlanRefused:return 'existing-refused'
@@ -314,7 +318,7 @@ def test_absent_base_first_plan_commit_never_enters_a_cycle(pg,monkeypatch,nativ
     with pg[0].app_context():
         TrainingPlan.query.filter_by(user_id=uid).delete();db.session.commit()
         operation=store.claim(uid,'generate-key-1','fingerprint')
-        store.stage_candidate(operation.id,plan_text('First'),8);oid=operation.id
+        store.stage_candidate(operation.id,plan_text('First'),8,synthetic_authority(uid));oid=operation.id
     create=lambda:store.commit_plan(oid,uid).lineage_id
     if native_first:
         out=force(pg,monkeypatch,store,'get_active_plan',create,confirm(uid,token))

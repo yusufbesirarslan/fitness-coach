@@ -50,6 +50,9 @@ from tests.test_mobile_training_generation_service import (  # noqa: F401 - fixt
     native_request,
 )
 
+# LP21: command-layer tests with fake providers; real D1 fencing lives in test_lp21_d1_operation_fencing_pg.py.
+pytestmark = pytest.mark.usefixtures('synthetic_operation_authority')
+
 
 def _charged(user_id):
     """The raw weekly training reservations held for this owner."""

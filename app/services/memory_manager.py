@@ -119,6 +119,15 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False,
 
     # Display persistence is unconditional. Only an explicitly eligible reply
     # may acquire provenance; the current authenticated user input stays eligible.
+    # D1 (LP21): a turn persisted inside an AI operation is its published
+    # result; fenced FIRST (owner lock before any conversation row), so a
+    # revoke acknowledged earlier keeps the reply out of the conversation.
+    from app.services import ai_consent
+    try:
+        ai_consent.fence_active(conversation.user_id)
+    except ai_consent.ConsentDenied:
+        db.session.rollback()
+        raise
     usage = usage or {}
     user_message = CoachMessage(
         conversation_id=conversation.id, role="user", content=question,

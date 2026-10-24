@@ -22,6 +22,15 @@ from tests.test_mobile_training_generation_pg import (  # noqa: F401
 
 pytestmark = pytest.mark.pg_concurrency
 
+@pytest.fixture(autouse=True)
+def _lp21_synthetic_operation_authority(monkeypatch):
+    # LP21: these races use injected synthetic providers/writers; ALLOW at the
+    # operation-fencing decision points only. Real D1 operation fencing of the
+    # same writers is qualified in tests/test_lp21_d1_operation_fencing_pg.py.
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
+
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -35,6 +44,9 @@ def _metered(app, monkeypatch, units=1, cap=2):
     # Accounting isolation only: the real D1 preflight/final gate is qualified in
     # tests/test_training_allowance_zero_attempt_pg.py. Never a production bypass.
     monkeypatch.setattr(ai_consent, "preflight", lambda *a, **k: None)
+    # Re-applied here because some tests ``monkeypatch.undo()`` mid-test.
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
     app.config.update(
         AI_ALLOWANCE_LEDGER_ENABLED=True,
         AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED=True,

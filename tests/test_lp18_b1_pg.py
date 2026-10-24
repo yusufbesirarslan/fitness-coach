@@ -13,6 +13,7 @@ from app.services.mobile_training_generation.contract import parse_native_reques
 from app.services.mobile_training_generation.errors import GenerationInProgress, IdempotencyConflict
 from test_mobile_training_generation_api import CANONICAL, _document
 from test_lp18_b1 import run, expire
+from consent_projection_support import allow_operation_fences, synthetic_authority
 
 pytestmark=pytest.mark.pg_concurrency
 if os.environ.get('FITX_PG_CONCURRENCY_TEST')!='1':pytest.skip('requires disposable PostgreSQL',allow_module_level=True)
@@ -22,7 +23,7 @@ if os.environ.get('FITX_PG_CONCURRENCY_TEST')!='1':pytest.skip('requires disposa
 def pg(monkeypatch):
     # These races use injected synthetic providers. Isolate the early snapshot
     # explicitly; real authority/default-deny fencing lives in test_ai_consent_pg.
-    monkeypatch.setattr(gen.ai_consent, 'preflight', lambda *args: None)
+    allow_operation_fences(monkeypatch)
     url=os.environ['PG_TEST_DATABASE_URL'];assert url.startswith('postgresql')
     app=Flask('lp18-b1-pg');app.config.update(TESTING=True,SQLALCHEMY_DATABASE_URI=url,SQLALCHEMY_TRACK_MODIFICATIONS=False,AI_PLAN_QUOTA_ENABLED=True)
     db.init_app(app)
@@ -41,13 +42,13 @@ def test_refusal_precedes_retirement_and_quota(pg, monkeypatch):
     app, uid = pg
     with app.app_context():
         user = db.session.get(User, uid)
-        gen.claim(user, parse_native_request(CANONICAL), 'generation-key-1')
+        gen.claim(user, parse_native_request(CANONICAL), 'generation-key-1', synthetic_authority(user.id))
         row = Operation.query.one()
         expire(row)
         before = (row.id, row.status, row.attempt_count, row.key_digest)
         def denied(*args):
             raise ConsentDenied()
-        monkeypatch.setattr(gen.ai_consent, 'preflight', denied)
+        monkeypatch.setattr(gen.ai_consent, 'begin_operation', denied)
         with pytest.raises(ConsentDenied):
             run(user, 'generation-key-2')
         db.session.expire_all()
@@ -95,7 +96,7 @@ def test_missing_row_claim_race_serializes_without_double_reservation(pg,monkeyp
     app,uid=pg;barrier=threading.Barrier(2);out={}
     def claim(user):
         barrier.wait(8)
-        return gen.claim(user,parse_native_request(CANONICAL),'generation-key-1')
+        return gen.claim(user,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(user.id))
     threads=[threading.Thread(target=worker,args=(app,uid,claim,out,str(i))) for i in range(2)]
     for t in threads:t.start()
     for t in threads:t.join(12)
@@ -131,12 +132,12 @@ def test_lease_takeover_late_provider_cannot_overwrite(pg,monkeypatch):
 def test_cross_owner_keys_are_isolated(pg):
     app,uid=pg
     with app.app_context():
-        owner=db.session.get(User,uid);first=gen.claim(owner,parse_native_request(CANONICAL),'generation-key-1')
+        owner=db.session.get(User,uid);first=gen.claim(owner,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(owner.id))
         other=User(username='second-pg',email='second-pg@example.invalid',cognito_sub='second-pg',profile_complete=True)
         db.session.add(other);db.session.flush()
         db.session.add(UserSession(user_id=other.id,goal='fit',fitness_level='beginner',current_activity='active',tdee=2400))
         db.session.add(TrainingPlan(user_id=other.id,plan_data=json.dumps(_document()),score=8));db.session.commit()
-        second=gen.claim(other,parse_native_request(CANONICAL),'generation-key-1')
+        second=gen.claim(other,parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(other.id))
         assert first[0]!=second[0] and Operation.query.count()==2
         result=gen.publish(*first[:2],_document(),8)
         with pytest.raises(confirm.ProposalUnavailable):confirm.confirm_replacement(other.id,result.proposal_token,'confirm-key-1')
@@ -147,7 +148,7 @@ def test_pg_proposal_finalization_rollback(pg,monkeypatch,fault):
     from sqlalchemy import event
     app,uid=pg
     with app.app_context():
-        admitted=gen.claim(db.session.get(User,uid),parse_native_request(CANONICAL),'generation-key-1')
+        admitted=gen.claim(db.session.get(User,uid),parse_native_request(CANONICAL),'generation-key-1',synthetic_authority(uid))
         def injected(*args):raise RuntimeError('persistence failure')
         target=Proposal if fault=='proposal' else Operation if fault=='operation' else db.session()
         hook='before_insert' if fault=='proposal' else 'before_update' if fault=='operation' else 'before_commit'

@@ -251,6 +251,9 @@ def confirm_replacement_proposal():
                 or re.fullmatch(r'[A-Za-z0-9_-]{43}', body['proposal_token']) is None):
             raise InvalidPlanRequest()
         result = authority.confirm_replacement(g.mobile_user.id, body['proposal_token'], key)
+    except ConsentDenied as error:
+        # LP21: the proposal's original operation authority is gone.
+        return consent_error_response(error)
     except PlanGenerationCommandError as error:
         return _generation_error(error)
     except authority.ConfirmationConflict:

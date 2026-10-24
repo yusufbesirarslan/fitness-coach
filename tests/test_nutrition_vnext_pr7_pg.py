@@ -21,6 +21,8 @@ import threading
 import pytest
 import sqlalchemy as sa
 
+from consent_projection_support import synthetic_authority
+
 
 pytestmark = pytest.mark.pg_concurrency
 
@@ -29,6 +31,15 @@ if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
         "set FITX_PG_CONCURRENCY_TEST=1 with a disposable PG_TEST_DATABASE_URL",
         allow_module_level=True,
     )
+
+@pytest.fixture(autouse=True)
+def _lp21_synthetic_operation_authority(monkeypatch):
+    # LP21: these races use injected synthetic providers/writers; ALLOW at the
+    # operation-fencing decision points only. Real D1 operation fencing of the
+    # same writers is qualified in tests/test_lp21_d1_operation_fencing_pg.py.
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
+
 
 SECRET = "disposable-pg-nutrition-pr7"
 DOC_A = {"isim": "Plan A", "ogle": {"yemekler": ["Rice - 100g"], "kalori": 500,
@@ -124,7 +135,9 @@ def _proposal_body(app, user_id, document):
 
     with app.app_context():
         return {"plan": plan.native_document(document),
-                "proposal_token": plan.issue_proposal_token(SECRET, user_id, document, 7.0)}
+                "proposal_token": plan.issue_proposal_token(
+                    SECRET, user_id, document, 7.0,
+                    synthetic_authority(user_id, 'nutrition_plan'))}
 
 
 def _plans(app, user_id):

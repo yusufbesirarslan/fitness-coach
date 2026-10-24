@@ -70,6 +70,7 @@ def _seed_legacy_plan(user_id, document):
         user_id=user_id, plan_data=json.dumps(document), score=8.0))
     db.session.commit()
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_save_plan_replaces_previous(client, auth_user):
     first = {"ogle": {"yemekler": ["Tavuk - 150g"], "kalori": 380}}
     second = {"ogle": {"yemekler": ["Somon - 150g"], "kalori": 420}}
@@ -84,6 +85,7 @@ def test_save_plan_replaces_previous(client, auth_user):
     assert json.loads(plans[0].plan_data) == second
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_active_plan_roundtrip(client, auth_user):
     plan = {"isim": "Plan A", "ogle": {"yemekler": ["Tavuk - 150g"], "kalori": 380}}
     assert client.get("/nutrition-plan/active").get_json() == {"exists": False}
@@ -92,6 +94,7 @@ def test_active_plan_roundtrip(client, auth_user):
     assert body["exists"] is True and body["plan"] == plan
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_quick_add_meal(client, auth_user):
     assert client.post("/api/quick-add-meal",
                        json={"meal_key": "brunch"}).status_code == 400   # geçersiz anahtar
@@ -112,6 +115,7 @@ def test_quick_add_meal(client, auth_user):
     assert entry.ogun == "Öğle"
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_quick_add_meal_handles_malformed_plan(client, auth_user):
     # A4: LLM planı sayısal-olmayan makro / liste-olmayan yemekler içerebilir →
     # 500 yerine güvenli değerlerle eklenmeli. F2'den beri bu belge save
@@ -130,6 +134,7 @@ def test_quick_add_meal_handles_malformed_plan(client, auth_user):
     assert entry.yemekler == "Tek string yemek"  # str → tek elemanlı listeye indirildi
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
     # A4: boş öğün ({}) 0-makro satır yazmamalı — eski `if not meal` davranışı korunur.
     # Legacy satır olarak yazılır: aksi halde plan HİÇ kaydedilmediği için 404
@@ -141,6 +146,7 @@ def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
     assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_quick_add_meal_floors_negative_macros(client, auth_user):
     plan = {"ogle": {"yemekler": ["Hatalı plan"], "kalori": -50,
                      "protein": -5, "karb": -2, "yag": -1}}
@@ -1158,6 +1164,7 @@ def test_meal_log_idempotency_replays_before_second_ai_call(client, auth_user, m
     assert calls["count"] == 1
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_quick_add_meal_idempotency_writes_one_row(client, auth_user):
     plan = {"ogle": {"yemekler": ["Tavuk"], "kalori": 380,
                      "protein": 48, "karb": 28, "yag": 5}}

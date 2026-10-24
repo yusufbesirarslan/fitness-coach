@@ -75,6 +75,9 @@ from app.services.training_generation.service import (
 from app.services.training_generation import service as training_service
 from app.services.ai import ChatCompletion
 
+# LP21: characterizes the browser save path; production closes the alias (D1).
+pytestmark = pytest.mark.usefixtures('legacy_browser_plan_saves')
+
 
 def _exercise(name="Goblet Squat", sets=3):
     return {

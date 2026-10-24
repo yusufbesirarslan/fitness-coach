@@ -17,6 +17,15 @@ if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
     )
 
 
+@pytest.fixture(autouse=True)
+def _lp21_synthetic_operation_authority(monkeypatch):
+    # LP21: these races use injected synthetic providers/writers; ALLOW at the
+    # operation-fencing decision points only. Real D1 operation fencing of the
+    # same writers is qualified in tests/test_lp21_d1_operation_fencing_pg.py.
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
+
+
 @pytest.fixture
 def pg_generation_app(monkeypatch):
     url = os.environ.get("PG_TEST_DATABASE_URL", "")
@@ -315,8 +324,10 @@ def test_generated_crash_recovery_persists_without_provider(pg_generation_app):
     with app.app_context():
         operation = store.claim(
             user_ids[0], "pg-generation-key-6", request.fingerprint)
+        from consent_projection_support import synthetic_authority
         store.stage_candidate(
-            operation.id, json.dumps(_document(), ensure_ascii=False), 8.5)
+            operation.id, json.dumps(_document(), ensure_ascii=False), 8.5,
+            synthetic_authority(user_ids[0]))
         operation_id = operation.id
         db.session.remove()
 

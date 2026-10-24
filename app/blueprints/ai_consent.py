@@ -46,6 +46,10 @@ def mobile_consent():
 # Deny BEFORE upload, quota, enqueue or model context building. Manual/history
 # endpoints are deliberately absent. Mixed first-party actions gate only their
 # AI branch at the provider boundary below.
+# LP21: the browser plan-save aliases persist the closed browser generators'
+# output from a CLIENT-held document. No server-held AI provenance can travel
+# with it, so a withdrawn operation's result could become canonical there;
+# the shared writers also refuse them (no ``OperationAuthority``).
 _CLOSED_ENDPOINTS = frozenset({
     'coach.chat', 'coach.ask_coach', 'coach.ask_coach_stream',
     'training.training_plan_generate',
@@ -55,6 +59,7 @@ _CLOSED_ENDPOINTS = frozenset({
     'mobile_api.nutrition_menu_analyze', 'mobile_api.create_pump_check',
     'mobile_api.create_pump_check_comparison',
     'nutrition.nutrition_plan_generate', 'nutrition.review_meals',
+    'training.save_training_plan', 'nutrition.save_nutrition_plan',
 })
 
 

@@ -38,8 +38,9 @@ def test_replacement_preflight_denies_before_claim_or_provider(monkeypatch):
     claim = Mock(side_effect=AssertionError('claim would retire/quota'))
     provider = Mock(side_effect=AssertionError('provider reached'))
     error = deny()
+    # LP21: the operation capture carries preflight's predicate.
     preflight = Mock(side_effect=error)
-    monkeypatch.setattr(replacement.ai_consent, 'preflight', preflight)
+    monkeypatch.setattr(replacement.ai_consent, 'begin_operation', preflight)
     monkeypatch.setattr(replacement.ai, 'heavy_primary_route', lambda: ('bedrock', 'synthetic'))
     monkeypatch.setattr(replacement, 'claim', claim)
     with pytest.raises(ai_consent.ConsentDenied) as caught:
@@ -54,9 +55,11 @@ def test_replacement_preflight_denies_before_claim_or_provider(monkeypatch):
 def test_replacement_final_refusal_keeps_typed_failure(app, monkeypatch):
     # Isolate the post-claim refusal boundary from the frozen-input decoder.
     import json
-    monkeypatch.setattr(replacement.ai_consent, 'preflight', lambda *args: None)
+    authority = ai_consent.OperationAuthority(7, 'training_plan', 3, 'synthetic-v')
+    monkeypatch.setattr(replacement.ai_consent, 'begin_operation', lambda *args: authority)
     monkeypatch.setattr(replacement, 'claim', lambda *args: (17, 'lease', json.dumps({
-        'language': 'en', 'features': {'performance_history': {}}})))
+        'language': 'en', 'features': {'performance_history': {}},
+        'consent': authority.to_context()})))
     monkeypatch.setattr(replacement, 'PerformanceHistory', lambda **kwargs: object())
     monkeypatch.setattr(replacement, 'UserTrainingFeatures', lambda **kwargs: object())
     error = deny('AI_CONSENT_CHANGED')
@@ -73,7 +76,7 @@ def test_replacement_final_refusal_keeps_typed_failure(app, monkeypatch):
 @pytest.mark.parametrize('quota_enabled', [False, True])
 def test_nutrition_preflight_denies_before_quota_or_provider(app, monkeypatch, quota_enabled):
     monkeypatch.setattr(nutrition, '_generation_target', lambda uid: (2000, 'general'))
-    monkeypatch.setattr(nutrition.ai_consent, 'preflight', Mock(side_effect=deny()))
+    monkeypatch.setattr(nutrition.ai_consent, 'begin_operation', Mock(side_effect=deny()))
     reserve = Mock(side_effect=AssertionError('quota reached'))
     chat = Mock(side_effect=AssertionError('provider reached'))
     monkeypatch.setattr(nutrition, 'reserve_ai_quota', reserve)
@@ -86,7 +89,8 @@ def test_nutrition_preflight_denies_before_quota_or_provider(app, monkeypatch, q
 @pytest.mark.parametrize('quota_enabled', [False, True])
 def test_nutrition_final_refusal_preserved_and_quota_refunded(app, monkeypatch, quota_enabled):
     monkeypatch.setattr(nutrition, '_generation_target', lambda uid: (2000, 'general'))
-    monkeypatch.setattr(nutrition.ai_consent, 'preflight', lambda *args: None)
+    monkeypatch.setattr(nutrition.ai_consent, 'begin_operation', lambda *args:
+                        ai_consent.OperationAuthority(7, 'nutrition_plan', 3, 'synthetic-v'))
     reserve, refund = Mock(return_value=True), Mock()
     monkeypatch.setattr(nutrition, 'reserve_ai_quota', reserve)
     monkeypatch.setattr(nutrition, 'refund_ai_quota', refund)

@@ -438,14 +438,26 @@ def test_revocation_waiting_on_an_in_flight_attempt_is_ordered_after_it(chain):
         chain.in_flight_thread = thread
         return "ok"
     chain.behaviour[:] = [in_flight]
+    from app.services.mobile_training_generation import store
+    real_stage = store.stage_candidate
+
+    def stage_after_revoke(*args, **kwargs):
+        # LP21: the revoke is ordered after the attempt AND acknowledged before
+        # the result is staged, so the operation fence withholds the output.
+        chain.in_flight_thread.join(timeout=10)
+        return real_stage(*args, **kwargs)
+    chain.monkeypatch.setattr(store, "stage_candidate", stage_after_revoke)
     with chain.app.app_context():
         consent(owner, chain.policy, "affirmative_grant", "grant-in-flight")
-        generate(owner, "a1-in-flight")
-        chain.in_flight_thread.join(timeout=10)
+        with pytest.raises(ai_consent.ConsentDenied) as refused:
+            generate(owner, "a1-in-flight")
+        assert refused.value.code == "AI_CONSENT_CHANGED"
         assert revoked == [2]
         state = snap(owner)
-        assert state.operations == [("SUCCEEDED", True, True)] and state.plans == 1
-        assert state.holds == [("COMMITTED", "success", "UNKNOWN", None)] and state.bucket == (1, 0, 0)
+        assert state.operations == [("FAILED", True, True)] and state.plans == 0
+        # The physical attempt happened: never re-labelled as nothing sent.
+        assert [(h[0], h[2]) for h in state.holds] == [("COMMITTED", "UNKNOWN")]
+        assert state.bucket == (1, 0, 0)
         assert chain.calls == {"bedrock": 0, "openai": 1}
         # The acknowledged revoke precedes every later attempt: without the plan,
         # a new key is refused before any hold.
@@ -962,10 +974,21 @@ def test_a2_retirement_concurrent_with_revocation_or_deletion(chain, action):
     chain.behaviour[:] = [in_flight]
     with chain.app.app_context():
         consent(owner, chain.policy, "affirmative_grant", "a2-concurrent-grant")
+        from app.services import ai_consent
         try:
-            generate(owner, "a2-concurrent")
-        except GenerationPersistenceUnavailable:
-            assert action == "delete"
+            if action == "revoke":
+                # LP21: the queued revoke commits after the attempt and BEFORE
+                # staging, so the operation fence withholds the output.
+                with pytest.raises(ai_consent.ConsentDenied) as refused:
+                    generate(owner, "a2-concurrent")
+                assert refused.value.code == "AI_CONSENT_CHANGED"
+            else:
+                # Deletion races the stage fence for the owner row: either it
+                # commits first (refused) or the write does and is then purged.
+                try:
+                    generate(owner, "a2-concurrent")
+                except (ai_consent.ConsentDenied, GenerationPersistenceUnavailable):
+                    pass
         finally:
             for worker in workers:
                 worker.join(5)

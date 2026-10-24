@@ -29,6 +29,7 @@ from flask import current_app, g
 
 from app.extensions import db
 from app.observability import current_request_id
+from app.services import ai_consent
 from app.services.coach_plan_policy import (
     APPLY_NOW,
     CANCEL,
@@ -395,11 +396,14 @@ def execute_plan_tool(user_id, name, arguments):
     Never raises: a Coach tool result is a message to the model, and an
     exception escaping here would abort a turn in which a mutation may already
     have been committed. Every failure becomes a code from the bounded
-    vocabulary instead.
+    vocabulary instead. The one exception is a D1 ``ConsentDenied`` from an
+    operation fence (LP21): the operation is withdrawn, so the turn ends.
     """
     _mark_plan_tool_attempted(name)
-    payload = _execute(user_id, name, arguments)
-    _settle_transaction()
+    try:
+        payload = _execute(user_id, name, arguments)
+    finally:
+        _settle_transaction()
     _mark_plan_changed(payload)
     _mark_proposal_created(payload)
     _log(name, _outcome_of(payload))
@@ -486,6 +490,10 @@ def _execute(user_id, name, arguments):
         # Mapped by exception CLASS, never by message: no domain wording, no
         # SQL and no snapshot reaches the model (brief §27).
         return results.error_result(results.error_code_for(e))
+    except ai_consent.ConsentDenied:
+        # D1 (LP21): a fence refusal ends the turn; it is never a tool result
+        # the model could talk around.
+        raise
     except Exception as exc:
         # The exception CLASS, not the exception. A traceback is not deliberately
         # audit material, but it carries the exception's own message, and an
@@ -757,7 +765,38 @@ def _cancel_pending(user_id):
 
 
 def _apply_confirmed(user_id, pending):
-    """Apply or replay the stored command, then mark the proposal APPLIED."""
+    """Apply or replay the stored command, then mark the proposal APPLIED.
+
+    Inside an AI operation the command is applied under the authority that
+    PROPOSED it (D1 LP21): revoke -> regrant between proposal and "yes" never
+    revives it, and a proposal without that authority is stale.
+    """
+    if ai_consent.current_operation() is None:
+        return _apply_confirmed_now(user_id, pending)
+    if find_by_key(user_id, confirmation_operation_key(pending.public_id)) is not None:
+        # Already committed (crash before mark_applied): reconcile through the
+        # journal replay, which writes no plan and needs no new authority.
+        return _apply_confirmed_now(user_id, pending)
+    public_id = pending.public_id
+    try:
+        authority = ai_consent.OperationAuthority.from_context(
+            user_id, (pending.command_payload or {}).get(ai_consent.PAYLOAD_AUTHORITY_KEY))
+        with ai_consent.operation_scope(authority):
+            return _apply_confirmed_now(user_id, pending)
+    except ai_consent.ConsentDenied as denied:
+        db.session.rollback()
+        if denied.status < 500:
+            # Definitive: this proposal can never be applied; do not leave it
+            # blocking every new proposal as PENDING. Best effort: the typed
+            # refusal is what the turn reports either way.
+            try:
+                mark_stale(user_id, public_id)
+            except Exception:
+                db.session.rollback()
+        raise
+
+
+def _apply_confirmed_now(user_id, pending):
     key = confirmation_operation_key(pending.public_id)
     command = decode_command(pending.command_type, pending.command_payload)
     if command is UNDO_LAST_CHANGE:

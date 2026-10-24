@@ -143,10 +143,12 @@ def test_n3_success_before_the_answer_is_detected(app, auth_user, client, traini
 
 
 # NUTR-PR7: the destructive step is the shared replacement boundary call.
-DELETE = '    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL)\n'
+DELETE = ('    replace_nutrition_plan(current_user.id, plan, score, UNCONDITIONAL,\n'
+          '                           authority=None)\n')
 SCORE = '    score = data.get("score")\n'
 
 
+@pytest.mark.usefixtures("legacy_browser_plan_saves")
 def test_n4_delete_before_validation_is_detected(app, client, auth_user, monkeypatch):
     source = contract.PLAN_ROUTES.replace('\r\n', '\n')
     assert source.count(DELETE) == 1 and source.count(SCORE) == 1

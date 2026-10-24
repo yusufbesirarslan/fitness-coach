@@ -312,3 +312,30 @@ def synthetic_ai_memory_layer(app, monkeypatch):
     """
     from consent_projection_support import allow_synthetic_authority
     allow_synthetic_authority(monkeypatch, app, memory=True)
+
+
+@pytest.fixture
+def synthetic_operation_authority(app, monkeypatch):
+    """Explicit ALLOW at the LP21 operation-fencing decision points only.
+
+    For pre-existing first-plan/replacement/Nutrition command tests whose fake
+    ``chat_fn`` never reaches the provider door: operation capture,
+    publication and canonical-write fences answer ALLOW at generation 1. Every
+    other D1 surface (closed endpoints, dispatch, registry) stays real. Real
+    fencing is qualified only by ``tests/test_lp21_d1_operation_fencing_pg.py``.
+    """
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
+
+
+@pytest.fixture
+def legacy_browser_plan_saves(app, monkeypatch):
+    """Re-open ONLY the two D1-closed browser plan-save aliases (LP21).
+
+    For the pre-existing save-path characterization suites (score, schema,
+    precondition, markup, lock order). The shared writers still refuse a real
+    stale authority; only the provenance-less ``None`` the aliases pass is
+    allowed here. Production keeps both aliases closed.
+    """
+    from consent_projection_support import open_browser_plan_saves
+    open_browser_plan_saves(monkeypatch)

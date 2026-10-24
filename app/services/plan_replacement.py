@@ -51,6 +51,7 @@ from dataclasses import dataclass
 
 from app.extensions import db
 from app.models import TrainingPlan
+from app.services import ai_consent
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.today_facts import get_active_plan
 
@@ -172,7 +173,7 @@ def parse_expectation(payload) -> PlanExpectation:
 
 
 def replace_training_plan(user_id, expectation, *, plan_data,
-                          score) -> ReplacementResult:
+                          score, authority) -> ReplacementResult:
     """Install ``plan_data`` as the owner's plan iff ``expectation`` still holds.
 
     ``user_id`` MUST come from the authenticated server context. The expectation
@@ -188,7 +189,8 @@ def replace_training_plan(user_id, expectation, *, plan_data,
     """
     try:
         result = replace_training_plan_in_transaction(
-            user_id, expectation, plan_data=plan_data, score=score)
+            user_id, expectation, plan_data=plan_data, score=score,
+            authority=authority)
         db.session.commit()
     except Exception:
         db.session.rollback()
@@ -197,13 +199,19 @@ def replace_training_plan(user_id, expectation, *, plan_data,
 
 
 def replace_training_plan_in_transaction(user_id, expectation, *, plan_data,
-                                         score, snapshot_digest=None, before_replace=None):
+                                         score, authority, snapshot_digest=None, before_replace=None):
     """One replacement implementation; caller owns commit AND rollback.
 
     Optional exact-byte digest adds the native frozen binding. Browser callers
     keep their existing two-part precondition and commit-owning wrapper.
+
+    Every plan written here is an AI result, so ``authority`` (D1 LP21) is the
+    operation authority it was produced under, fenced under the owner lock
+    before any read or write. A caller without server-held provenance (the
+    browser alias passes ``None``) is refused, never written.
     """
     lock_plan_owner(user_id)
+    ai_consent.fence(authority, user_id, "training_plan")
 
     # Lock the owner's plan rows themselves. ``populate_existing`` is
     # load-bearing: without it SQLAlchemy hands back identity-mapped

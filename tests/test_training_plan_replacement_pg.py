@@ -44,6 +44,8 @@ from types import SimpleNamespace
 import pytest
 import sqlalchemy as sa
 
+from consent_projection_support import synthetic_authority
+
 
 pytestmark = pytest.mark.pg_concurrency
 
@@ -58,6 +60,15 @@ if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
 # other caller can cross it. It only has to be long enough that "did not return"
 # means "is blocked" rather than "was slow" — see the module docstring.
 LOCK_PROBE_SECONDS = 3.0
+
+
+@pytest.fixture(autouse=True)
+def _lp21_synthetic_operation_authority(monkeypatch):
+    # LP21: these races use injected synthetic providers/writers; ALLOW at the
+    # operation-fencing decision points only. Real D1 operation fencing of the
+    # same writers is qualified in tests/test_lp21_d1_operation_fencing_pg.py.
+    from consent_projection_support import allow_operation_fences
+    allow_operation_fences(monkeypatch)
 
 
 PROGRAM = (
@@ -273,7 +284,8 @@ def _replace(user_id, identity, marker):
                              mutation_version=identity[1])
     )
     return lambda: replace_training_plan(
-        user_id, expectation, plan_data=_proposal(marker), score=9)
+        user_id, expectation, plan_data=_proposal(marker), score=9,
+        authority=synthetic_authority(user_id))
 
 
 def _coach_mutation(user_id, key):
@@ -705,7 +717,8 @@ def test_a_stale_lineage_refuses_against_real_postgres(seeded):
                 user_id,
                 PlanExpectation(absent=False, lineage_id="a-retired-lineage",
                                 mutation_version=identity[1]),
-                plan_data=_proposal("stale"), score=9)
+                plan_data=_proposal("stale"), score=9,
+                authority=synthetic_authority(user_id))
         assert raised.value.reason == "lineage_mismatch"
 
     state = _state(app, user_id)
@@ -727,7 +740,8 @@ def test_a_stale_version_refuses_against_real_postgres(seeded):
                 user_id,
                 PlanExpectation(absent=False, lineage_id=identity[0],
                                 mutation_version=identity[1] + 1),
-                plan_data=_proposal("stale"), score=9)
+                plan_data=_proposal("stale"), score=9,
+                authority=synthetic_authority(user_id))
         assert raised.value.reason == "version_mismatch"
 
     state = _state(app, user_id)
@@ -760,7 +774,8 @@ def test_a_failure_after_the_delete_leaves_the_plan_intact(seeded):
                     user_id,
                     PlanExpectation(absent=False, lineage_id=identity[0],
                                     mutation_version=identity[1]),
-                    plan_data=_proposal("doomed"), score=9)
+                    plan_data=_proposal("doomed"), score=9,
+                    authority=synthetic_authority(user_id))
         finally:
             db.session.commit = original_commit
         db.session.remove()
@@ -807,7 +822,8 @@ def _staged_native_operation(app, user_id, key, marker="native"):
 
     with app.app_context():
         operation = store.claim(user_id, key, "fingerprint-" + key)
-        store.stage_candidate(operation.id, _proposal(marker), 8.5)
+        store.stage_candidate(operation.id, _proposal(marker), 8.5,
+                              synthetic_authority(user_id))
         operation_id = operation.id
         db.session.remove()
     return operation_id

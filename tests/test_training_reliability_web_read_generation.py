@@ -43,6 +43,10 @@ from tests.test_training_routes import (  # canonical fixtures/helpers, one defi
     with_session,  # noqa: F401 - re-exported pytest fixture
 )
 
+# LP21: characterizes the browser save path; production closes the alias (D1).
+pytestmark = pytest.mark.usefixtures('legacy_browser_plan_saves')
+
+
 WEEKDAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
 
 
