@@ -664,6 +664,7 @@ def coach_providers(monkeypatch):
     return SimpleNamespace(bedrock=bedrock, openai=openai_fake)
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_coach_turn_at_ceiling_makes_no_provider_call_and_no_openai_fallback(
         app, coach_providers, make_user):
     user = make_user("spender")

@@ -532,6 +532,7 @@ def test_tool_result_growth_is_rechecked_before_every_round(
     assert _spent() == 1                                     # the refused round spent nothing
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_oversized_coach_question_never_reaches_either_provider(
         app, coach_providers, make_user, monkeypatch):
     user = make_user("bigq")
