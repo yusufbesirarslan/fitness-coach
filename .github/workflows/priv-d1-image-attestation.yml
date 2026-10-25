@@ -1,0 +1,59 @@
+name: PRIV D1 image evidence only
+on:
+  push:
+    branches: [attest/priv-d1-image-evidence-10]
+permissions:
+  contents: read
+jobs:
+  image-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: e6af3067cec6ad623e16c57bae0141aa9d6ad91d
+          path: source
+          persist-credentials: false
+      - name: Record immutable source and builder identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir evidence
+          test "$(git -C source rev-parse HEAD)" = e6af3067cec6ad623e16c57bae0141aa9d6ad91d
+          git -C source rev-parse HEAD 'HEAD^{tree}' > evidence/source-identity.txt
+          git -C control rev-parse HEAD > evidence/controller-identity.txt
+          docker version > evidence/docker-version.txt
+          docker buildx version > evidence/buildx-version.txt
+          docker buildx create --name attestation10 --driver docker-container --use
+          df -h > evidence/disk-before.txt
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          paths=['Dockerfile','requirements.txt','gunicorn.conf.py','app/__init__.py','app/consent_publication.py','starter.py']
+          pathlib.Path('evidence/source-files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path('source',p).read_bytes()).hexdigest() for p in paths},indent=2)+'\n')
+          PY
+      - name: Build exact target OCI archive with provenance and no push
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/amd64 --build-arg BUILD_REVISION=e6af3067cec6ad623e16c57bae0141aa9d6ad91d --provenance=mode=max --metadata-file evidence/build-metadata.json --output type=oci,dest=evidence/target-image.oci.tar --tag axisai-attestation10:target ./source 2>&1 | tee evidence/build.log
+          docker buildx build --platform linux/amd64 --build-arg BUILD_REVISION=e6af3067cec6ad623e16c57bae0141aa9d6ad91d --provenance=false --load --tag axisai-attestation10:target ./source 2>&1 | tee evidence/load.log
+          docker image inspect axisai-attestation10:target > evidence/image-inspect.json
+      - name: Inspect installed image offline and exercise eight HTTP1 threads
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_id=$(docker image inspect --format '{{.Id}}' axisai-attestation10:target)
+          docker run --rm --pull never --network none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m --cap-drop ALL --security-opt no-new-privileges --mount type=bind,src="$PWD/control/scripts",dst=/attest,readonly --entrypoint python "$image_id" /attest/image_attestation10.py > evidence/installed-runtime.json
+          python3 control/scripts/verify_image_oci10.py evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ always() }}
+        with:
+          name: priv-d1-image-evidence-10
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
