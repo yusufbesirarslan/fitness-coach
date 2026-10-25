@@ -41,7 +41,7 @@ def main():
         'gunicorn': importlib.metadata.version('gunicorn'),
         'packages': sorted((d.metadata['Name'], d.version) for d in importlib.metadata.distributions()),
         'files': {p: hashlib.sha256(Path('/app', p).read_bytes()).hexdigest() for p in
-                  ['Dockerfile', 'requirements.txt', 'gunicorn.conf.py', 'app/__init__.py', 'app/consent_publication.py', 'starter.py']},
+                  ['requirements.txt', 'gunicorn.conf.py', 'app/__init__.py', 'app/consent_publication.py', 'starter.py']},
         'worker_class': cfg.worker_class.__module__ + '.' + cfg.worker_class.__name__,
         'configuration': {k: getattr(cfg, k) for k in
                           ['workers', 'threads', 'bind', 'timeout', 'graceful_timeout', 'certfile', 'keyfile']},

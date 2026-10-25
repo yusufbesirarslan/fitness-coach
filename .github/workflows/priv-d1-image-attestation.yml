@@ -32,8 +32,9 @@ jobs:
           df -h > evidence/disk-before.txt
           python3 - <<'PY'
           import hashlib,json,pathlib
-          paths=['Dockerfile','requirements.txt','gunicorn.conf.py','app/__init__.py','app/consent_publication.py','starter.py']
+          paths=['requirements.txt','gunicorn.conf.py','app/__init__.py','app/consent_publication.py','starter.py']
           pathlib.Path('evidence/source-files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path('source',p).read_bytes()).hexdigest() for p in paths},indent=2)+'\n')
+          pathlib.Path('evidence/build-input-files.json').write_text(json.dumps({p:hashlib.sha256(pathlib.Path('source',p).read_bytes()).hexdigest() for p in ['Dockerfile','.dockerignore','requirements.txt']},indent=2)+'\n')
           PY
       - name: Build exact target OCI archive with provenance and no push
         shell: bash
