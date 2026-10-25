@@ -11,6 +11,8 @@ from contextlib import nullcontext
 def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
     from app.services import ai_consent as consent
     from app.blueprints import ai_consent as routes
+    from app import consent_publication
+    monkeypatch.setattr(consent_publication, "protect_response", lambda response: response)
     monkeypatch.setattr(consent, 'BINDINGS', {**consent.BINDINGS, **{
         f: ('synthetic.layer-test', ()) for f in
         ('coach', 'summary', 'nutrition', 'menu_extract', 'menu_ocr', 'vision', 'health_probe', 'other')
@@ -100,3 +102,16 @@ def bound_candidate(owner, document_text, feature='training_plan'):
     """A staged AI candidate as production stages it (LP21 provenance envelope)."""
     from app.services import ai_consent as consent
     return consent.bind_candidate(synthetic_authority(owner, feature), document_text)
+
+
+def publish_synthetic_texts(monkeypatch, policies):
+    """Test-only exact EN/TR documents; no runtime registry population."""
+    from dataclasses import replace
+    from hashlib import sha256
+    from app.services import ai_consent_disclosures as disclosures
+    texts = {"en": "SYNTHETIC approved fixture", "tr": "SENTETİK onaylı test"}
+    digests = tuple((k, sha256(v.encode()).hexdigest()) for k, v in texts.items())
+    qualified = {key: replace(policy, texts=digests) for key, policy in policies.items()}
+    monkeypatch.setattr(disclosures, "PUBLISHED_TEXTS", {
+        (p.version, locale): body for p in qualified.values() for locale, body in texts.items()})
+    return qualified

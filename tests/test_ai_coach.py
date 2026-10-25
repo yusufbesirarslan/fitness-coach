@@ -78,6 +78,7 @@ def test_coach_search_falls_back_to_static_then_llm(monkeypatch):
     assert _coach_search_food("egzotik meyve") == llm
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_openai_tool_loop_provider_error_returns_friendly_fallback(app, monkeypatch):
     class _Completions:
         def create(self, **kwargs):

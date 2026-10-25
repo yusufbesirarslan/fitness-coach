@@ -320,6 +320,8 @@ def create_app():
 
     register_cli(app)
     _run_startup(app, startup_mode)
+    from app.consent_publication import ConsentPublication
+    app.wsgi_app = ConsentPublication(app.wsgi_app)
     return app
 
 

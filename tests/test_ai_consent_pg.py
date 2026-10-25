@@ -35,6 +35,8 @@ def pg_app(monkeypatch):
         version = 'synthetic-' + feature
         policies[version] = consent.Disclosure(version, purpose, categories,
             (('bedrock', app_config.BEDROCK_MODEL), ('openai', ai.OPENAI_MODEL)), (('en', 'a' * 64),))
+    from consent_projection_support import publish_synthetic_texts
+    policies = publish_synthetic_texts(monkeypatch, policies)
     monkeypatch.setattr(consent, 'POLICIES', policies)
     monkeypatch.setattr(calls, 'model_concurrency_slot', lambda *a, **k: nullcontext())
     monkeypatch.setattr(ai_spend_guard, 'charge', lambda *a, **k: None)
@@ -53,7 +55,7 @@ def pg_app(monkeypatch):
 
 def command(feature='training_plan', generation=0, action='affirmative_grant', key='grant-0001'):
     return dict(action=action, purpose=consent.BINDINGS[feature][0], version='synthetic-' + feature,
-                locale='en', text_digest='a'*64, contract_digest=consent.contract_digest(consent.POLICIES['synthetic-' + feature]),
+                locale='en', text_digest=dict(consent.POLICIES['synthetic-' + feature].texts)['en'], contract_digest=consent.contract_digest(consent.POLICIES['synthetic-' + feature]),
                 expected_generation=generation, request_id=key)
 
 
