@@ -62,6 +62,8 @@ def get_or_create_active_conversation(user_id):
     from app.extensions import db
     from app.models import CoachConversation, User
 
+    from app.services import ai_consent
+    ai_consent.fence_active(user_id)
     db.session.query(User.id).filter_by(id=user_id).with_for_update().first()
     conv = (CoachConversation.query
             .filter_by(user_id=user_id, archived_at=None)

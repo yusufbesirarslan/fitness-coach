@@ -237,13 +237,15 @@ def _send_authorized_turn(user, question, handoff):
             response = mobile_error(
                 "COACH_UNAVAILABLE", "The Coach is temporarily unavailable.",
                 503, True)
-        return _with_deferred_summary(response, result)
+        from app.consent_publication import protect_response
+        return protect_response(_with_deferred_summary(response, result))
 
     ai_recovery.clear_ai_failures(user_id)
     payload = mobile_coach.turn_payload(
         result.get("recorded_turn"), question, result["answer"], user_id,
         current_app.config["SECRET_KEY"])
-    return _with_deferred_summary(jsonify(payload), result)
+    from app.consent_publication import protect_response
+    return protect_response(_with_deferred_summary(jsonify(payload), result))
 
 
 @bp.get("/coach/history")

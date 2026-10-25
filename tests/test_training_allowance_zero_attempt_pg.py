@@ -97,6 +97,8 @@ def disclose(monkeypatch, recipients=None, purpose_feature="training_plan"):
     recipients = recipients or (("bedrock", app_config.BEDROCK_MODEL), ("openai", ai.OPENAI_MODEL))
     policy = ai_consent.Disclosure("synthetic-a1-" + purpose_feature, purpose, categories,
                                    tuple(recipients), (("en", "a" * 64),))
+    from consent_projection_support import publish_synthetic_texts
+    policy = publish_synthetic_texts(monkeypatch, {policy.version: policy})[policy.version]
     monkeypatch.setattr(ai_consent, "POLICIES", {policy.version: policy})
     return policy
 
@@ -105,7 +107,7 @@ def consent(owner, policy, action, request_id):
     from app.services import ai_consent
     return ai_consent.mutate(owner, dict(
         action=action, purpose=policy.purpose, version=policy.version, locale="en",
-        text_digest="a" * 64, contract_digest=ai_consent.contract_digest(policy),
+        text_digest=dict(policy.texts)["en"], contract_digest=ai_consent.contract_digest(policy),
         expected_generation=ai_consent.generation(owner), request_id=request_id))
 
 

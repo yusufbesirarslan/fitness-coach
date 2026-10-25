@@ -1,72 +1,81 @@
-# Coach D1 integration — incomplete, default closed
+# Coach D1 integration — engineering only, default closed
 
-Backend main base `2e0bdb53a0804e9bcc4c91aa5cc925cfbd5774cf`.
-Composed dependency: D1 #464 `c6050c703174432e322f3a824e908eeca59543b4`,
-not a claim that #464 has merged to main.
-This PR is a prerequisite component, not a functioning Coach integration or
-permission to activate. No published disclosure, Coach binding, endpoint
-opening, provider call, migration, model-routing or feature-flag change.
+Existing PR #463 composes merged #464 operation authority. Founder task
+PRIV-D1-BACKEND-463-OWNERSHIP-AND-P1-RESOLUTION-06 reassigns only the remaining
+integration hunks to this integration owner. Other owner worktrees are retained.
+No new policy authority, approved legal copy, provider facts or migration exists.
 
-## Exact disclosure text
+## Disclosure and grant
 
-`app/services/ai_consent_disclosures.py` projects only text whose UTF-8 SHA-256
-matches the existing authoritative `Disclosure.texts`. Both EN and TR must
-exist for the same authoritative policy. The shipped text registry is empty.
-The new native component expects `localized_texts: {en: ..., tr: ...}` alongside
-the existing metadata in `available_disclosures`. Old digest-only responses
-remain denied. This helper still needs the D1 owner's integration into
-`ai_consent._public`; it is not yet part of the live GET endpoint.
+`ai_consent._public` projects exact EN/TR UTF-8 text only when both documents
+match the source-owned `Disclosure.texts` digests. `mutate` independently checks
+that same complete pair inside its existing owner transaction before accepting
+an affirmative grant. Missing, partial or altered publication cannot be granted
+by bypassing the status endpoint. The shipping policy/text registries remain
+empty and Coach has no binding. Historical records retain their contract digest.
 
-Grant qualification must ALSO require that the text pair is publishable.
-Merely changing status serialization does not close direct API grant bypasses.
-The owner must compose that requirement with existing D1 policy validation,
-without accepting any runtime or client-defined disclosure content.
+## Original operation and canonical writes
 
-## Remaining shared source work
+The native route captures one `OperationAuthority` before quota/context and
+retains it through provider attempts, tools, conversation writes and response
+projection. Provider loops rethrow `ConsentDenied` before broad/superclass catches;
+no denial becomes a fallback reply, retry, cooldown or replacement provider call.
+Existing possible-attempt accounting remains authoritative for quota refunds.
 
-1. D1 operation-fencing owner has supplied the versioned operation interface
-   in #464, with real-PG writer tests. Its documented check-then-send HTTP
-   residual still does not satisfy acknowledged-withdrawal publication ordering.
-   Local checkpoint `6adb17a` is historical, not merged qualification.
-2. Integrate one bounded Coach binding into D1 and the shared pipeline after
-   reviewing exact context and tool-result categories. Reuse that owner's
-   operation token. Do not write a parallel generation authority here.
-3. Compose signed cohort authority from eligibility #462 and independently
-   qualified first-party health authority. Eligibility's `screen_passed` is
-   self-declared cohort evidence; none of its capabilities grants Coach AI.
-   No first-party health authorization contract has been supplied.
-4. Consent preflight precedes paid allowance reservation and context building.
-   Terminal permission exceptions bypass provider failure/retry handling.
-   After a possible physical attempt, retain truthful settlement uncertainty.
-5. Keep exact model/recipient authorization on every final SDK attempt,
-   continuation and fallback. Fence all Coach tool/domain writes, conversation
-   persistence and HTTP handoff after provider completion. Do not swallow a
-   fence refusal in the pipeline's best-effort `_record` catch.
-6. Remove only the qualified blocking Coach endpoint(s) from the early closure;
-   streaming, optional Memory and all unrelated AI paths remain closed.
+Meal/workout staging locks the owner, binds original server-held authority into
+the pending payload and commits under that lock. Confirmation fences that original
+authority, even in a newer turn, before claiming or writing a canonical log.
+Revoke→regrant cannot revive an earlier operation. Authority metadata is removed
+from display/provider result payloads. Existing plan continuation authority from
+#464 is preserved. Conversation creation and turn writes fence the active original
+operation; typed fence denials propagate out of best-effort memory handling.
 
-## Native admission composed, endpoint still closed
+## Actual HTTP publication boundary
 
-`mobile_coach.send_coach_message` now captures the owner's `begin_operation`
-once using the server's `heavy_primary_route()` before allowance reservation
-or context construction. The whole native turn uses `operation_scope`, including
-the shared pipeline, tools, persistence and payload projection. This reuses D1's
-original generation; no new permission registry or operation authority exists.
+`app/consent_publication.py` protects native Coach success and operation-derived
+fallback status responses. The route stamps the immutable server authority while
+the authenticated subject is live. After Flask teardown, middleware buffers at
+most 1 MiB and accepts only the exact Gunicorn 26 HTTP/1 Response/plain socket
+adapter. Unknown versions, TLS-at-Gunicorn, HTTP/2 and other adapters fail closed.
+Production's configured threads=8 selects Gunicorn gthread; no worker, timeout,
+nginx or deployment setting is changed by this integration.
 
-Terminal `ConsentDenied` reaching the route returns `consent_error_response`
-without adding a provider failure/cooldown. The established provider-door
-`attempt_observer` records only whether an attempt might have been transmitted.
-A zero-attempt failure can refund the weekly allowance; a possible attempt
-cannot. This in-request billing observation is not durable operation recovery.
+The existing D1 owner row lock spans final generation validation AND actual
+header/body socket sends. A synchronous nonblocking sender uses one monotonic
+absolute 750 ms budget across all partial sends and backpressure waits, below
+the existing 2 s mutation lock timeout. There is no background writer. On timeout,
+disconnect, denial or interruption, socket shutdown and close precede release of
+the serialization lock. Partial responses never receive a fallback body, retry or
+chunk terminator. Success has fixed Content-Length, forces connection close, and
+returns no bytes for Gunicorn to transmit later. WSGI start_response, serialization
+and authorization checks alone are not socket completion.
 
-The provider loops in `ai_coach.py` still need their owner's typed exception
-propagation: a swallowed denial cannot be recovered by this route. Coach meal
-and workout tool writes, deferred work and the HTTP transport handoff also
-need the D1 owner's remaining qualification. Empty policies, absent Coach
-binding and every early route closure remain unchanged. Cohort screening does
-not replace independent health-processing authority. New route tests use
-explicit synthetic layer isolation and qualify composition only, not consent
-approval, real-PG ordering or live Coach readiness.
+The boundary is backend socket acceptance, commonly by nginx. Bytes already
+accepted by kernel/proxy can arrive at a device after withdrawal acknowledgement
+and cannot be recalled. A local real nginx fixture tests HTTP/1.1 upstream with
+proxy_buffering off; it does not attest a currently deployed runtime. nginx may
+emit its own 502 after a denied upstream closes; no protected body is supplied.
+
+## Qualification and holds
+
+`test_coach_consent_boundaries_pg.py` exercises synthetic exact grants, original
+meal/workout confirmation authority, account switches, conversation denial and
+typed first/later provider-loop attempts. `test_coach_publication_transport_pg.py`
+runs real PostgreSQL, a Gunicorn gthread process and native route→pipeline→
+conversation→projection→socket path with synthetic identity/provider facts only.
+Events and publisher-specific PostgreSQL lock waits order both race directions;
+TCP sends are not mocked. It covers zero readers, slow readers, partial writes,
+timeouts, disconnect, SIGKILL, revoke→regrant and real nginx. The macOS fixture
+explicitly disables local libpq GSS negotiation for fork safety; no production
+connection options are changed. CI runs both suites in its PostgreSQL job and
+qualifies the existing branch's exact HEAD separately from PR merge refs.
+
+Final acceptance requires exact-head hosted CI and independent security review;
+local test counts and reports live in the founder task's evidence directory.
+All endpoint closures, absent Coach binding, empty policy/text registries,
+streaming/Memory and activation holds remain. Eligibility screening does not
+replace independent health-processing authority. No live provider calls, merge,
+deployment, mobile implementation or production changes are authorized here.
 
 ## Internal EN/TR copy draft — NOT APPROVED, NOT PUBLISHABLE
 

@@ -11,7 +11,7 @@ on:
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
     # Qualify the K6 rollback gate (stacked on #446) at exact HEAD as well.
-    branches: [feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, privacy/pa03-be-core-01, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation, fix/priv-k6-pg18-migration, fix/mon-02-be-02-pg18-compatibility]
+    branches: [feat/priv-d1-coach-native, feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, privacy/pa03-be-core-01, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation, fix/priv-k6-pg18-migration, fix/mon-02-be-02-pg18-compatibility]
 
 jobs:
   tests:
@@ -415,6 +415,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y nginx
       - name: Run deterministic races
         run: >-
           python -m pytest -m pg_concurrency -q
@@ -438,6 +440,8 @@ jobs:
           tests/test_pa06_privacy_pg.py
           tests/test_ai_consent_pg.py
           tests/test_lp21_d1_operation_fencing_pg.py
+          tests/test_coach_consent_boundaries_pg.py
+          tests/test_coach_publication_transport_pg.py
           tests/test_training_plan_replacement_pg.py
           tests/test_lp21_general_training_plan_pg.py
           tests/test_lp18_b0_pg.py

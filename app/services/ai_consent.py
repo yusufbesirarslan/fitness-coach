@@ -93,15 +93,13 @@ def _state(conn, owner):
 
 def _public(state):
     grants = state["grants"] if isinstance(state["grants"], dict) else {}
+    from app.services.ai_consent_disclosures import available_disclosures
     return {"generation": state["generation"], "scopes": {
         purpose: {"state": "granted" if _record_valid(purpose, record) else "unavailable",
                   "version": record.get("version") if isinstance(record, dict) else None}
         for purpose, record in grants.items()
-    }, "available_disclosures": [
-        {"version": p.version, "contract_digest": contract_digest(p), "purpose": p.purpose, "categories": list(p.categories),
-         "recipients": [list(r) for r in p.recipients], "texts": dict(p.texts)}
-        for p in POLICIES.values()
-    ]}
+    }, "available_disclosures": available_disclosures()}
+
 
 
 def status(owner):
@@ -154,8 +152,10 @@ def mutate(owner, data):
             raise ConsentDenied("AI_CONSENT_CONFLICT", 409)
         grants = dict(state["grants"]) if isinstance(state["grants"], dict) else {}
         if data["action"] == "affirmative_grant":
+            from app.services.ai_consent_disclosures import localized_texts
             policy = POLICIES.get(data["version"])
-            if (not policy or policy.purpose != data["purpose"]
+            if (not policy or localized_texts(policy) is None
+                    or policy.purpose != data["purpose"]
                     or dict(policy.texts).get(data["locale"]) != data["text_digest"]
                     or data["contract_digest"] != contract_digest(policy)):
                 raise ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE", 403)

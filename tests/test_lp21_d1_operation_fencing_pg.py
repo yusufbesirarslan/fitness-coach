@@ -142,6 +142,8 @@ def disclose(monkeypatch, recipients=None):
     for feature, (purpose, categories) in ai_consent.BINDINGS.items():
         policies[feature] = ai_consent.Disclosure(
             "synthetic-lp21-" + feature, purpose, categories, tuple(recipients), (("en", "a" * 64),))
+    from consent_projection_support import publish_synthetic_texts
+    policies = publish_synthetic_texts(monkeypatch, policies)
     monkeypatch.setattr(ai_consent, "POLICIES", {p.version: p for p in policies.values()})
     return policies
 
@@ -149,7 +151,7 @@ def disclose(monkeypatch, recipients=None):
 def command(policy, action, request_id, expected):
     from app.services import ai_consent
     return dict(action=action, purpose=policy.purpose, version=policy.version, locale="en",
-                text_digest="a" * 64, contract_digest=ai_consent.contract_digest(policy),
+                text_digest=dict(policy.texts)["en"], contract_digest=ai_consent.contract_digest(policy),
                 expected_generation=expected, request_id=request_id)
 
 

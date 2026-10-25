@@ -40,7 +40,7 @@ def localized_texts(policy):
 def available_disclosures():
     """D1's public metadata plus the exact reviewed text a client must display.
 
-    Integration seam for ai_consent._public, pending that owner's handoff.
+    Used by ai_consent._public; grants independently verify this same pair.
     This helper cannot grant, authorize dispatch, or bypass the endpoint gate.
     """
     disclosures = []

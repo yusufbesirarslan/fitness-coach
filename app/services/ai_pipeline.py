@@ -85,6 +85,10 @@ def _memory_stage(user_id):
         # Displayable history remains separate from optional AI personalization.
         try:
             return memory_manager.get_or_create_active_conversation(user_id), [], None
+        except ai_consent.ConsentDenied:
+            from app.extensions import db
+            db.session.rollback()
+            raise
         except Exception:
             from app.extensions import db
             db.session.rollback()
@@ -94,6 +98,10 @@ def _memory_stage(user_id):
         deferred_summarize = _maybe_enqueue_summarize(conversation)
         return (conversation, memory_manager.build_context_window(conversation),
                 deferred_summarize)
+    except ai_consent.ConsentDenied:
+        from app.extensions import db
+        db.session.rollback()
+        raise
     except Exception:
         # Commit yarıda kaldıysa session kirli kalır; rollback etmezsek sonraki
         # bağlam sorguları da patlar (hafıza arızası TÜM yanıtı düşürürdü).

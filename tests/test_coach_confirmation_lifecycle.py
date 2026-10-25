@@ -152,6 +152,7 @@ def test_ambiguous_reply_does_not_execute_or_restage(
     assert "yes" in reply.lower() and "no" in reply.lower()
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_duplicate_proceed_does_not_log_twice(app, auth_user, monkeypatch):
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     restage = _ScriptedLLM([
@@ -176,6 +177,7 @@ def test_duplicate_proceed_does_not_log_twice(app, auth_user, monkeypatch):
     assert _pending_logs(auth_user) == []
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_standalone_yes_does_not_execute_stale_or_new_log(
         app, auth_user, monkeypatch):
     llm = _ScriptedLLM([
@@ -821,6 +823,7 @@ def test_streaming_apply_now_does_not_emit_success_before_persist(
     assert len(fake.calls) == 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
 def test_apply_now_later_yes_does_not_mutate_or_stage_workout(
         app, planned_user, tools_on, monkeypatch):
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
