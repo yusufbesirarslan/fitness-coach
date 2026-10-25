@@ -30,6 +30,7 @@ def probe(environ, start_response):
 
 
 def main():
+    sys.path.insert(0, '/app')
     from gunicorn.app.wsgiapp import WSGIApplication
     from packaging.requirements import Requirement
     from app.consent_publication import ConsentPublication
