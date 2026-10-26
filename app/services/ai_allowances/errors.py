@@ -1,6 +1,7 @@
 """Closed allowance error vocabulary: (code, HTTP status, retryable)."""
 
 CATALOG = {
+    "AI_ACTION_BUDGET_EXHAUSTED": (422, False),
     "AI_ALLOWANCE_DISABLED": (503, False),
     "AI_ALLOWANCE_POLICY_UNCONFIGURED": (503, False),
     "AI_ALLOWANCE_INVALID_REQUEST": (400, False),

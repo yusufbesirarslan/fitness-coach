@@ -1,0 +1,1903 @@
+{
+  "inputs_sha256": "6bb3decca2d73009aca3b2b13548b244ab87f3b279e706e147b9f0d316a523f1",
+  "scenarios": {
+    "A_CURRENT": {
+      "conditional_expected_ai_active_month": 3.3945800092278136,
+      "full_ai_by_weeks": {
+        "4": 4.486544778461538,
+        "4.333333333333333": 4.8604235099999995,
+        "5": 5.608180973076923,
+        "6": 6.729817167692307
+      },
+      "margins": {
+        "monthly_30": {
+          "proceeds_per_month": 4.330191750442473,
+          "expected_ai_per_month": 2.715664007382251,
+          "expected_contribution_per_month": 1.574527743060222,
+          "expected_margin_pct": 36.36161707848923,
+          "full_margin_pct_by_weeks": {
+            "4": -4.765447811819873,
+            "4.333333333333333": -13.399678189729979,
+            "5": -30.66813894555021,
+            "6": -56.57083007928052
+          },
+          "full_contribution_by_weeks": {
+            "4": -0.20635302801906547,
+            "4.333333333333333": -0.5802317595575268,
+            "5": -1.3279892226344503,
+            "6": -2.449625417249834
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -6.96278111469033,
+            "53": -8.071392924690329,
+            "54": -9.180004734690328
+          }
+        },
+        "monthly_15": {
+          "proceeds_per_month": 5.258089982680147,
+          "expected_ai_per_month": 2.715664007382251,
+          "expected_contribution_per_month": 2.5024259752978963,
+          "expected_margin_pct": 47.59191994699115,
+          "full_margin_pct_by_weeks": {
+            "4": 13.722572390266013,
+            "4.333333333333333": 6.612029726104753,
+            "5": -7.6090556022177855,
+            "6": -28.94068359470157
+          },
+          "full_contribution_by_weeks": {
+            "4": 0.7215452042186088,
+            "4.333333333333333": 0.34766647268014755,
+            "5": -0.4000909903967759,
+            "6": -1.5217271850121599
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 4.1719976721617655,
+            "53": 3.063385862161766,
+            "54": 1.9547740521617665
+          }
+        },
+        "annual_30": {
+          "proceeds_per_month": 3.608574318493876,
+          "expected_ai_per_month": 2.3762060064594692,
+          "expected_contribution_per_month": 1.1973683120344067,
+          "expected_margin_pct": 33.181201392968866,
+          "full_margin_pct_by_weeks": {
+            "4": -25.71570870002125,
+            "4.333333333333333": -36.07655202871035,
+            "5": -56.7982386860886,
+            "6": -87.88076867215592
+          },
+          "full_contribution_by_weeks": {
+            "4": -0.9279704599676621,
+            "4.333333333333333": -1.3018491915061234,
+            "5": -2.0496066545830467,
+            "6": -3.1712428491984306
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -15.622190298073484,
+            "53": -16.730802108073487,
+            "54": -17.839413918073486
+          }
+        },
+        "annual_15": {
+          "proceeds_per_month": 4.381840243885422,
+          "expected_ai_per_month": 2.3762060064594692,
+          "expected_contribution_per_month": 1.9706342374259522,
+          "expected_margin_pct": 44.972754088327314,
+          "full_margin_pct_by_weeks": {
+            "4": -3.5305836353116,
+            "4.333333333333333": -12.063042847173222,
+            "5": -29.127961270896478,
+            "6": -54.72533890648133
+          },
+          "full_contribution_by_weeks": {
+            "4": -0.1547045345761166,
+            "4.333333333333333": -0.528583266114578,
+            "5": -1.2763407291915014,
+            "6": -2.397976923806885
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -6.342999193374936,
+            "53": -7.451611003374936,
+            "54": -8.560222813374935
+          }
+        }
+      },
+      "additional_one_unknown_release_per_family_per_week_mean_5weeks": 1.21825719
+    },
+    "A_STRESS": {
+      "conditional_expected_ai_active_month": 4.5761763603173495,
+      "full_ai_by_weeks": {
+        "4": 6.2886293815384615,
+        "4.333333333333333": 6.812681829999999,
+        "5": 7.8607867269230765,
+        "6": 9.432944072307691
+      },
+      "margins": {
+        "monthly_30": {
+          "proceeds_per_month": 4.330191750442473,
+          "expected_ai_per_month": 3.66094108825388,
+          "expected_contribution_per_month": 0.6292506621885932,
+          "expected_margin_pct": 14.531704332130195,
+          "full_margin_pct_by_weeks": {
+            "4": -46.38218690640571,
+            "4.333333333333333": -58.48447887553128,
+            "5": -82.68906281378248,
+            "6": -118.99593872115926
+          },
+          "full_contribution_by_weeks": {
+            "4": -2.0084376310959886,
+            "4.333333333333333": -2.532490079557526,
+            "5": -3.5805949764806035,
+            "6": -5.1527523218652185
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -30.389880954690327,
+            "53": -31.945524684690326,
+            "54": -33.501168414690326
+          }
+        },
+        "monthly_15": {
+          "proceeds_per_month": 5.258089982680147,
+          "expected_ai_per_month": 3.66094108825388,
+          "expected_contribution_per_month": 1.5571488944262675,
+          "expected_margin_pct": 29.61434474410724,
+          "full_margin_pct_by_weeks": {
+            "4": -20.55003627586349,
+            "4.333333333333333": -30.516629662202195,
+            "5": -50.44981643487965,
+            "6": -80.34959659389581
+          },
+          "full_contribution_by_weeks": {
+            "4": -1.0805393988583145,
+            "4.333333333333333": -1.604591847319852,
+            "5": -2.6526967442429292,
+            "6": -4.224854089627544
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -19.25510216783823,
+            "53": -20.81074589783823,
+            "54": -22.36638962783823
+          }
+        },
+        "annual_30": {
+          "proceeds_per_month": 3.608574318493876,
+          "expected_ai_per_month": 3.2033234522221443,
+          "expected_contribution_per_month": 0.37025086627173165,
+          "expected_margin_pct": 10.260308742269846,
+          "full_margin_pct_by_weeks": {
+            "4": -75.65467195875956,
+            "4.333333333333333": -90.17709555901017,
+            "5": -119.22194275951146,
+            "6": -162.7892135602634
+          },
+          "full_contribution_by_weeks": {
+            "4": -2.7300550630445852,
+            "4.333333333333333": -3.2541075115061227,
+            "5": -4.3022124084292,
+            "6": -5.8743697538138155
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -39.04929013807348,
+            "53": -40.60493386807348,
+            "54": -42.16057759807348
+          }
+        },
+        "annual_15": {
+          "proceeds_per_month": 4.381840243885422,
+          "expected_ai_per_month": 3.2033234522221443,
+          "expected_contribution_per_month": 1.1435167916632771,
+          "expected_margin_pct": 26.096724846575178,
+          "full_margin_pct_by_weeks": {
+            "4": -44.65678867191962,
+            "4.333333333333333": -56.616431636831884,
+            "5": -80.53571756665647,
+            "6": -116.41464646139335
+          },
+          "full_contribution_by_weeks": {
+            "4": -1.95678913765304,
+            "4.333333333333333": -2.480841586114577,
+            "5": -3.5289464830376547,
+            "6": -5.10110382842227
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -29.770099033374933,
+            "53": -31.325742763374933,
+            "54": -32.88138649337493
+          }
+        }
+      },
+      "additional_one_unknown_release_per_family_per_week_mean_5weeks": 1.86805095
+    },
+    "B_TARGET": {
+      "conditional_expected_ai_active_month": 2.8638516345574563,
+      "full_ai_by_weeks": {
+        "4": 3.7848138177948716,
+        "4.333333333333333": 4.1002149692777765,
+        "5": 4.73101727224359,
+        "6": 5.677220726692307
+      },
+      "margins": {
+        "monthly_30": {
+          "proceeds_per_month": 4.330191750442473,
+          "expected_ai_per_month": 2.2910813076459653,
+          "expected_contribution_per_month": 1.9991104427965078,
+          "expected_margin_pct": 46.16678793940782,
+          "full_margin_pct_by_weeks": {
+            "4": 11.440092291455267,
+            "4.333333333333333": 4.156323588818108,
+            "5": -10.41121381645629,
+            "6": -32.26251992436783
+          },
+          "full_contribution_by_weeks": {
+            "4": 0.49537793264760116,
+            "4.333333333333333": 0.17997678116469623,
+            "5": -0.4508255218011172,
+            "6": -1.3970289762498347
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 2.159721373976339,
+            "53": 1.2245969841430053,
+            "54": 0.28947259430967176
+          }
+        },
+        "monthly_15": {
+          "proceeds_per_month": 5.258089982680147,
+          "expected_ai_per_month": 2.2910813076459653,
+          "expected_contribution_per_month": 2.927008675034182,
+          "expected_margin_pct": 55.66676653833587,
+          "full_margin_pct_by_weeks": {
+            "4": 27.068311298845536,
+            "4.333333333333333": 21.069913543732582,
+            "5": 9.073118033506614,
+            "6": -8.922075231832293
+          },
+          "full_contribution_by_weeks": {
+            "4": 1.4232761648852754,
+            "4.333333333333333": 1.1078750134023705,
+            "5": 0.47707271043655713,
+            "6": -0.4691307440121603
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 13.294500160828434,
+            "53": 12.3593757709951,
+            "54": 11.424251381161767
+          }
+        },
+        "annual_30": {
+          "proceeds_per_month": 3.608574318493876,
+          "expected_ai_per_month": 2.0046961441902194,
+          "expected_contribution_per_month": 1.568878174303657,
+          "expected_margin_pct": 43.47639914919268,
+          "full_margin_pct_by_weeks": {
+            "4": -6.269498126767744,
+            "4.333333333333333": -15.009823907685709,
+            "5": -32.49047546952173,
+            "6": -58.71145281227569
+          },
+          "full_contribution_by_weeks": {
+            "4": -0.22623949930099546,
+            "4.333333333333333": -0.5416406507839004,
+            "5": -1.1724429537497139,
+            "6": -2.118646408198431
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -6.499687809406815,
+            "53": -7.434812199240149,
+            "54": -8.369936589073482
+          }
+        },
+        "annual_15": {
+          "proceeds_per_month": 4.381840243885422,
+          "expected_ai_per_month": 2.0046961441902194,
+          "expected_contribution_per_month": 2.3421440996952025,
+          "expected_margin_pct": 53.451152240511625,
+          "full_margin_pct_by_weeks": {
+            "4": 12.483942719132457,
+            "4.333333333333333": 5.286027370141195,
+            "5": -9.10980332784141,
+            "6": -30.703549374815257
+          },
+          "full_contribution_by_weeks": {
+            "4": 0.54702642609055,
+            "4.333333333333333": 0.2316252746076451,
+            "5": -0.3991770283581683,
+            "6": -1.3453804828068858
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 2.7795032952917325,
+            "53": 1.8443789054583988,
+            "54": 0.9092545156250652
+          }
+        }
+      },
+      "additional_one_unknown_release_per_family_per_week_mean_5weeks": 1.027776152333333
+    },
+    "B_GLOBAL_PARITY": {
+      "conditional_expected_ai_active_month": 2.2639143356185425,
+      "full_ai_by_weeks": {
+        "4": 2.9919476820512823,
+        "4.333333333333333": 3.2412766555555557,
+        "5": 3.739934602564103,
+        "6": 4.487921523076923
+      },
+      "margins": {
+        "monthly_30": {
+          "proceeds_per_month": 4.330191750442473,
+          "expected_ai_per_month": 1.811131468494834,
+          "expected_contribution_per_month": 2.479060281947639,
+          "expected_margin_pct": 57.25058899976706,
+          "full_margin_pct_by_weeks": {
+            "4": 29.750277646701292,
+            "4.333333333333333": 23.99235772366795,
+            "5": 12.476517877601253,
+            "6": -4.797241891498776
+          },
+          "full_contribution_by_weeks": {
+            "4": 1.2882440683911904,
+            "4.333333333333333": 1.038915094886917,
+            "5": 0.5402571478783698,
+            "6": -0.20772977263445042
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 12.466981138643002,
+            "53": 11.727752371976331,
+            "54": 10.988523605309668
+          }
+        },
+        "monthly_15": {
+          "proceeds_per_month": 5.258089982680147,
+          "expected_ai_per_month": 1.811131468494834,
+          "expected_contribution_per_month": 3.4069585141853134,
+          "expected_margin_pct": 64.79460270569054,
+          "full_margin_pct_by_weeks": {
+            "4": 42.14728747375403,
+            "4.333333333333333": 37.40547106655009,
+            "5": 27.921838252142233,
+            "6": 13.696389030530446
+          },
+          "full_contribution_by_weeks": {
+            "4": 2.216142300628865,
+            "4.333333333333333": 1.9668133271245913,
+            "5": 1.468155380116044,
+            "6": 0.7201684596032238
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 23.601759925495095,
+            "53": 22.862531158828425,
+            "54": 22.12330239216176
+          }
+        },
+        "annual_30": {
+          "proceeds_per_month": 3.608574318493876,
+          "expected_ai_per_month": 1.5847400349329797,
+          "expected_contribution_per_month": 1.9888342835608965,
+          "expected_margin_pct": 55.11412840711519,
+          "full_margin_pct_by_weeks": {
+            "4": 15.702229923286957,
+            "4.333333333333333": 8.792881479873529,
+            "5": -5.025815406953343,
+            "6": -25.753860737193634
+          },
+          "full_contribution_by_weeks": {
+            "4": 0.5666266364425938,
+            "4.333333333333333": 0.31729766293832046,
+            "5": -0.1813602840702268,
+            "6": -0.9293472045830471
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 3.807571955259848,
+            "53": 3.0683431885931776,
+            "54": 2.3291144219265143
+          }
+        },
+        "annual_15": {
+          "proceeds_per_month": 4.381840243885422,
+          "expected_ai_per_month": 1.5847400349329797,
+          "expected_contribution_per_month": 2.7621002089524422,
+          "expected_margin_pct": 63.035164570565456,
+          "full_margin_pct_by_weeks": {
+            "4": 30.578306995648095,
+            "4.333333333333333": 24.888255336366445,
+            "5": 13.50815201780314,
+            "6": -3.5620029600418
+          },
+          "full_contribution_by_weeks": {
+            "4": 1.3398925618341393,
+            "4.333333333333333": 1.0905635883298659,
+            "5": 0.5919056413213186,
+            "6": -0.15608127919150155
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": 13.086763059958395,
+            "53": 12.347534293291725,
+            "54": 11.608305526625061
+          }
+        }
+      },
+      "additional_one_unknown_release_per_family_per_week_mean_5weeks": 0.8124712666666667
+    },
+    "D_STRESS": {
+      "conditional_expected_ai_active_month": 4.364137658420874,
+      "full_ai_by_weeks": {
+        "4": 5.996829091733334,
+        "4.333333333333333": 6.496564849377778,
+        "5": 7.496036364666667,
+        "6": 8.9952436376
+      },
+      "margins": {
+        "monthly_30": {
+          "proceeds_per_month": 4.330191750442473,
+          "expected_ai_per_month": 3.4913101267366993,
+          "expected_contribution_per_month": 0.7988816237057739,
+          "expected_margin_pct": 18.44910502229241,
+          "full_margin_pct_by_weeks": {
+            "4": -39.64344860976306,
+            "4.333333333333333": -51.184179054168425,
+            "5": -74.26563994297916,
+            "6": -108.88783127619529
+          },
+          "full_contribution_by_weeks": {
+            "4": -1.716637341290861,
+            "4.333333333333333": -2.216373098935305,
+            "5": -3.215844614224194,
+            "6": -4.715051887157527
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -26.596477187223666,
+            "53": -28.07983390015701,
+            "54": -29.563190613090338
+          }
+        },
+        "monthly_15": {
+          "proceeds_per_month": 5.258089982680147,
+          "expected_ai_per_month": 3.4913101267366993,
+          "expected_contribution_per_month": 1.7267798559434482,
+          "expected_margin_pct": 32.84043943012318,
+          "full_margin_pct_by_weeks": {
+            "4": -15.000487090393072,
+            "4.333333333333333": -24.504618044609256,
+            "5": -43.512879953041626,
+            "6": -72.02527281569019
+          },
+          "full_contribution_by_weeks": {
+            "4": -0.7887391090531868,
+            "4.333333333333333": -1.2884748666976311,
+            "5": -2.2879463819865196,
+            "6": -3.7871536549198526
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -15.461698400371567,
+            "53": -16.945055113304914,
+            "54": -18.428411826238243
+          }
+        },
+        "annual_30": {
+          "proceeds_per_month": 3.608574318493876,
+          "expected_ai_per_month": 3.0548963608946114,
+          "expected_contribution_per_month": 0.5186779575992646,
+          "expected_margin_pct": 14.373486918117488,
+          "full_margin_pct_by_weeks": {
+            "4": -67.56836794917726,
+            "4.333333333333333": -81.4169328819627,
+            "5": -109.11406274753358,
+            "6": -150.65975754588996
+          },
+          "full_contribution_by_weeks": {
+            "4": -2.4382547732394575,
+            "4.333333333333333": -2.937990530883902,
+            "5": -3.9374620461727905,
+            "6": -5.436669319106124
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -35.25588637060682,
+            "53": -36.73924308354016,
+            "54": -38.22259979647349
+          }
+        },
+        "annual_15": {
+          "proceeds_per_month": 4.381840243885422,
+          "expected_ai_per_month": 3.0548963608946114,
+          "expected_contribution_per_month": 1.29194388299081,
+          "expected_margin_pct": 29.484048050214408,
+          "full_margin_pct_by_weeks": {
+            "4": -37.99747948755772,
+            "4.333333333333333": -49.40218002043984,
+            "5": -72.2115810862041,
+            "6": -106.4256826848505
+          },
+          "full_contribution_by_weeks": {
+            "4": -1.6649888478479122,
+            "4.333333333333333": -2.1647246054923563,
+            "5": -3.164196120781245,
+            "6": -4.663403393714578
+          },
+          "annual_52_53_54_buckets_contribution": {
+            "52": -25.976695265908273,
+            "53": -27.460051978841616,
+            "54": -28.943408691774945
+          }
+        }
+      },
+      "additional_one_unknown_release_per_family_per_week_mean_5weeks": 1.7815571940833337
+    }
+  },
+  "physical_tails": {
+    "current": {
+      "action_upper_usd": {
+        "coach": 0.873,
+        "training_generation": 0.522,
+        "nutrition_generation": 0.156,
+        "pump_check": 0.108,
+        "qr_menu": 1.0308
+      },
+      "offer_week_upper_usd": 20.1708,
+      "five_week_upper_usd": 100.854,
+      "six_week_upper_usd": 121.0248,
+      "additional_one_unknown_released_action_per_family_week_five_weeks": 13.449,
+      "annual_52_53_54_bucket_upper_usd": {
+        "52": 1048.8816,
+        "53": 1069.0524,
+        "54": 1089.2232
+      }
+    },
+    "future_global": {
+      "action_upper_usd": {
+        "coach": 0.5820000000000001,
+        "training_generation": 0.34800000000000003,
+        "nutrition_generation": 0.10400000000000001,
+        "pump_check": 0.07200000000000001,
+        "qr_menu": 0.756
+      },
+      "offer_week_upper_usd": 13.516,
+      "five_week_upper_usd": 67.58,
+      "six_week_upper_usd": 81.096,
+      "additional_one_unknown_released_action_per_family_week_five_weeks": 9.31,
+      "annual_52_53_54_bucket_upper_usd": {
+        "52": 702.832,
+        "53": 716.348,
+        "54": 729.864
+      }
+    },
+    "future_eu": {
+      "action_upper_usd": {
+        "coach": 0.6402,
+        "training_generation": 0.38280000000000003,
+        "nutrition_generation": 0.1144,
+        "pump_check": 0.07919999999999999,
+        "qr_menu": 0.8316
+      },
+      "offer_week_upper_usd": 14.8676,
+      "five_week_upper_usd": 74.338,
+      "six_week_upper_usd": 89.2056,
+      "additional_one_unknown_released_action_per_family_week_five_weeks": 10.241,
+      "annual_52_53_54_bucket_upper_usd": {
+        "52": 773.1152,
+        "53": 787.9828,
+        "54": 802.8503999999999
+      }
+    }
+  },
+  "fx_refund_sensitivity": [
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 4.876545882352941,
+      "expected_contribution": 2.1208818749706904,
+      "full_contribution": -0.7816350907239817,
+      "full_margin_pct": -16.028457633353415
+    },
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 4.876545882352941,
+      "expected_contribution": 2.1208818749706904,
+      "full_contribution": -1.9032712853393656,
+      "full_margin_pct": -39.02908598126496
+    },
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 5.92152,
+      "expected_contribution": 3.1658559926177494,
+      "full_contribution": 0.2633390269230773,
+      "full_margin_pct": 4.447152537238367
+    },
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 5.92152,
+      "expected_contribution": 3.1658559926177494,
+      "full_contribution": -0.8582971676923066,
+      "full_margin_pct": -14.49454139633585
+    },
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 4.063879672815349,
+      "expected_contribution": 1.6526736663558799,
+      "full_contribution": -1.5943013002615736,
+      "full_margin_pct": -39.23101638383608
+    },
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 4.063879672815349,
+      "expected_contribution": 1.6526736663558799,
+      "full_contribution": -2.7159374948769575,
+      "full_margin_pct": -66.83114938281199
+    },
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.934711031275782,
+      "expected_contribution": 2.5235050248163127,
+      "full_contribution": -0.7234699418011408,
+      "full_margin_pct": -14.660837021982632
+    },
+    {
+      "fx": 45,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.934711031275782,
+      "expected_contribution": 2.5235050248163127,
+      "full_contribution": -1.8451061364165247,
+      "full_margin_pct": -37.39035831525692
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 4.7780298039215685,
+      "expected_contribution": 2.022365796539318,
+      "full_contribution": -0.8801511691553543,
+      "full_margin_pct": -18.42079696599988
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 4.7780298039215685,
+      "expected_contribution": 2.022365796539318,
+      "full_contribution": -2.001787363770738,
+      "full_margin_pct": -41.89566507366218
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 5.801893333333333,
+      "expected_contribution": 3.0462293259510824,
+      "full_contribution": 0.14371236025641032,
+      "full_margin_pct": 2.476990733882451
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 5.801893333333333,
+      "expected_contribution": 3.0462293259510824,
+      "full_contribution": -0.9779238343589736,
+      "full_margin_pct": -16.85525359007474
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.9817810935665547,
+      "expected_contribution": 1.5705750871070854,
+      "full_contribution": -1.676399879510368,
+      "full_margin_pct": -42.10175898968835
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.9817810935665547,
+      "expected_contribution": 1.5705750871070854,
+      "full_contribution": -2.798036074125752,
+      "full_margin_pct": -70.27096689585966
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.835019899330816,
+      "expected_contribution": 2.4238138928713466,
+      "full_contribution": -0.8231610737461068,
+      "full_margin_pct": -17.024977991508063
+    },
+    {
+      "fx": 45,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.835019899330816,
+      "expected_contribution": 2.4238138928713466,
+      "full_contribution": -1.9447972683614907,
+      "full_margin_pct": -40.22314920835502
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 4.531739607843138,
+      "expected_contribution": 1.7760756004608869,
+      "full_contribution": -1.1264413652337852,
+      "full_margin_pct": -24.856709844586817
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 4.531739607843138,
+      "expected_contribution": 1.7760756004608869,
+      "full_contribution": -2.248077559849169,
+      "full_margin_pct": -49.60738600157859
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 5.502826666666667,
+      "expected_contribution": 2.7471626592844167,
+      "full_contribution": -0.15535430641025538,
+      "full_margin_pct": -2.8231728131891374
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 5.502826666666667,
+      "expected_contribution": 2.7471626592844167,
+      "full_contribution": -1.2769905010256393,
+      "full_margin_pct": -23.206082589535303
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.7765346454445674,
+      "expected_contribution": 1.365328638985098,
+      "full_contribution": -1.8816463276323554,
+      "full_margin_pct": -49.82468067391054
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.7765346454445674,
+      "expected_contribution": 1.365328638985098,
+      "full_contribution": -3.0032825222477393,
+      "full_margin_pct": -79.52482379237375
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.585792069468403,
+      "expected_contribution": 2.1745860630089338,
+      "full_contribution": -1.0723889036085197,
+      "full_margin_pct": -23.385031143220452
+    },
+    {
+      "fx": 45,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.585792069468403,
+      "expected_contribution": 2.1745860630089338,
+      "full_contribution": -2.1940250982239036,
+      "full_margin_pct": -47.84397253489604
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 4.419474054575307,
+      "expected_contribution": 1.6638100471930564,
+      "full_contribution": -1.2387069185016157,
+      "full_margin_pct": -28.02837856281182
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 4.419474054575307,
+      "expected_contribution": 1.6638100471930564,
+      "full_contribution": -2.3603431131169996,
+      "full_margin_pct": -53.407783006971826
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 5.36650420912716,
+      "expected_contribution": 2.6108402017449093,
+      "full_contribution": -0.29167676394976283,
+      "full_margin_pct": -5.435135287021472
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 5.36650420912716,
+      "expected_contribution": 2.6108402017449093,
+      "full_contribution": -1.4133129585651467,
+      "full_margin_pct": -26.335821299859116
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.6829779126896263,
+      "expected_contribution": 1.271771906230157,
+      "full_contribution": -1.9752030603872965,
+      "full_margin_pct": -53.630597500511044
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.6829779126896263,
+      "expected_contribution": 1.271771906230157,
+      "full_contribution": -3.0968392550026804,
+      "full_margin_pct": -84.08519758786994
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.472187465408832,
+      "expected_contribution": 2.060981458949363,
+      "full_contribution": -1.1859935076680905,
+      "full_margin_pct": -26.519315588656145
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.472187465408832,
+      "expected_contribution": 2.060981458949363,
+      "full_contribution": -2.3076297022834744,
+      "full_margin_pct": -51.599574484128176
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 4.330191750442473,
+      "expected_contribution": 1.574527743060222,
+      "full_contribution": -1.32798922263445,
+      "full_margin_pct": -30.668138945550204
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 4.330191750442473,
+      "expected_contribution": 1.574527743060222,
+      "full_contribution": -2.449625417249834,
+      "full_margin_pct": -56.57083007928052
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 5.258089982680147,
+      "expected_contribution": 2.5024259752978963,
+      "full_contribution": -0.40009099039677576,
+      "full_margin_pct": -7.609055602217783
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 5.258089982680147,
+      "expected_contribution": 2.5024259752978963,
+      "full_contribution": -1.5217271850121596,
+      "full_margin_pct": -28.940683594701564
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.608574318493876,
+      "expected_contribution": 1.1973683120344067,
+      "full_contribution": -2.0496066545830467,
+      "full_margin_pct": -56.7982386860886
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.608574318493876,
+      "expected_contribution": 1.1973683120344067,
+      "full_contribution": -3.1712428491984306,
+      "full_margin_pct": -87.88076867215592
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.381840243885422,
+      "expected_contribution": 1.9706342374259522,
+      "full_contribution": -1.2763407291915012,
+      "full_margin_pct": -29.127961270896474
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.381840243885422,
+      "expected_contribution": 1.9706342374259522,
+      "full_contribution": -2.397976923806885,
+      "full_margin_pct": -54.72533890648133
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 4.1069859901103865,
+      "expected_contribution": 1.3513219827281358,
+      "full_contribution": -1.5511949829665364,
+      "full_margin_pct": -37.769668236069236
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 4.1069859901103865,
+      "expected_contribution": 1.3513219827281358,
+      "full_contribution": -2.6728311775819202,
+      "full_margin_pct": -65.08011432271968
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.987054416562613,
+      "expected_contribution": 2.2313904091803627,
+      "full_contribution": -0.6711265565143094,
+      "full_margin_pct": -13.457373841468756
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.987054416562613,
+      "expected_contribution": 2.2313904091803627,
+      "full_contribution": -1.7927627511296933,
+      "full_margin_pct": -35.948329442239704
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.4225653330045014,
+      "expected_contribution": 1.011359326545032,
+      "full_contribution": -2.2356156400724214,
+      "full_margin_pct": -65.31988209294123
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.4225653330045014,
+      "expected_contribution": 1.011359326545032,
+      "full_contribution": -3.3572518346878053,
+      "full_margin_pct": -98.09168001303395
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.155972190076895,
+      "expected_contribution": 1.7447661836174255,
+      "full_contribution": -1.502208783000028,
+      "full_margin_pct": -36.14578525301041
+    },
+    {
+      "fx": 49.654,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.155972190076895,
+      "expected_contribution": 1.7447661836174255,
+      "full_contribution": -2.623844977615412,
+      "full_margin_pct": -63.13432471661618
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.989901176470588,
+      "expected_contribution": 1.2342371690883374,
+      "full_contribution": -1.6682797966063347,
+      "full_margin_pct": -41.81255932965418
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.989901176470588,
+      "expected_contribution": 1.2342371690883374,
+      "full_contribution": -2.7899159912217186,
+      "full_margin_pct": -69.92443842154607
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.844880000000001,
+      "expected_contribution": 2.08921599261775,
+      "full_contribution": -0.8133009730769221,
+      "full_margin_pct": -16.786813565597534
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.844880000000001,
+      "expected_contribution": 2.08921599261775,
+      "full_contribution": -1.934937167692306,
+      "full_margin_pct": -39.93777281774379
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.3249924595761953,
+      "expected_contribution": 0.9137864531167259,
+      "full_contribution": -2.3331885135007275,
+      "full_margin_pct": -70.17124224691074
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.3249924595761953,
+      "expected_contribution": 0.9137864531167259,
+      "full_contribution": -3.4548247081161114,
+      "full_margin_pct": -103.90473813454797
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.037490843771095,
+      "expected_contribution": 1.6262848373116254,
+      "full_contribution": -1.620690129305828,
+      "full_margin_pct": -40.14102302686765
+    },
+    {
+      "fx": 55,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.037490843771095,
+      "expected_contribution": 1.6262848373116254,
+      "full_contribution": -2.742326323921212,
+      "full_margin_pct": -67.92154905198066
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.909297112299465,
+      "expected_contribution": 1.1536331049172142,
+      "full_contribution": -1.748883860777458,
+      "full_margin_pct": -44.736529625110975
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.909297112299465,
+      "expected_contribution": 1.1536331049172142,
+      "full_contribution": -2.870520055392842,
+      "full_margin_pct": -73.42803509003157
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.747003636363637,
+      "expected_contribution": 1.991339628981386,
+      "full_contribution": -0.911177336713286,
+      "full_margin_pct": -19.194789103032548
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.747003636363637,
+      "expected_contribution": 1.991339628981386,
+      "full_contribution": -2.03281353132867,
+      "full_margin_pct": -42.82308772120244
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.257820894736272,
+      "expected_contribution": 0.8466148882768025,
+      "full_contribution": -2.400360078340651,
+      "full_margin_pct": -73.67992765406355
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.257820894736272,
+      "expected_contribution": 0.8466148882768025,
+      "full_contribution": -3.521996272956035,
+      "full_margin_pct": -108.10895953938402
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.955925372179759,
+      "expected_contribution": 1.5447193657202898,
+      "full_contribution": -1.7022556008971637,
+      "full_margin_pct": -43.030528656287615
+    },
+    {
+      "fx": 55,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.955925372179759,
+      "expected_contribution": 1.5447193657202898,
+      "full_contribution": -2.8238917955125475,
+      "full_margin_pct": -71.38384903243389
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.7077869518716575,
+      "expected_contribution": 0.9521229444894068,
+      "full_contribution": -1.9503940212052653,
+      "full_margin_pct": -52.60264536560613
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.7077869518716575,
+      "expected_contribution": 0.9521229444894068,
+      "full_contribution": -3.072030215820649,
+      "full_margin_pct": -82.85347177970719
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.502312727272728,
+      "expected_contribution": 1.7466487198904774,
+      "full_contribution": -1.1558682458041947,
+      "full_margin_pct": -25.672766771675605
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.502312727272728,
+      "expected_contribution": 1.7466487198904774,
+      "full_contribution": -2.2775044404195786,
+      "full_margin_pct": -50.58521205387647
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.0898919826364644,
+      "expected_contribution": 0.678685976176995,
+      "full_contribution": -2.5682889904404584,
+      "full_margin_pct": -83.11905415700177
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.0898919826364644,
+      "expected_contribution": 0.678685976176995,
+      "full_contribution": -3.6899251850558423,
+      "full_margin_pct": -119.41922907956793
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.752011693201421,
+      "expected_contribution": 1.3408056867419518,
+      "full_contribution": -1.9061692798755017,
+      "full_margin_pct": -50.80392695282497
+    },
+    {
+      "fx": 55,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.752011693201421,
+      "expected_contribution": 1.3408056867419518,
+      "full_contribution": -3.0278054744908856,
+      "full_margin_pct": -80.6981886537618
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.657409411764706,
+      "expected_contribution": 0.9017454043824551,
+      "full_contribution": -2.000771561312217,
+      "full_margin_pct": -54.704610177804554
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.657409411764706,
+      "expected_contribution": 0.9017454043824551,
+      "full_contribution": -3.122407755927601,
+      "full_margin_pct": -85.37211464168662
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.441140000000001,
+      "expected_contribution": 1.68547599261775,
+      "full_contribution": -1.217040973076922,
+      "full_margin_pct": -27.403796617015495
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.441140000000001,
+      "expected_contribution": 1.68547599261775,
+      "full_contribution": -2.338677167692306,
+      "full_margin_pct": -52.65938852844777
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.047909754611512,
+      "expected_contribution": 0.6367037481520428,
+      "full_contribution": -2.6102712184654107,
+      "full_margin_pct": -85.6413551784481
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.047909754611512,
+      "expected_contribution": 0.6367037481520428,
+      "full_contribution": -3.7319074130807945,
+      "full_margin_pct": -122.44153251041598
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.7010332734568365,
+      "expected_contribution": 1.2898272669973672,
+      "full_contribution": -1.9571476996200863,
+      "full_margin_pct": -52.88111602931018
+    },
+    {
+      "fx": 60,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.7010332734568365,
+      "expected_contribution": 1.2898272669973672,
+      "full_contribution": -3.07878389423547,
+      "full_margin_pct": -83.18714442034255
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.583522352941176,
+      "expected_contribution": 0.8278583455589255,
+      "full_contribution": -2.0746586201357466,
+      "full_margin_pct": -57.89439595466652
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.583522352941176,
+      "expected_contribution": 0.8278583455589255,
+      "full_contribution": -3.1962948147511305,
+      "full_margin_pct": -89.19422009821625
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.351420000000001,
+      "expected_contribution": 1.5957559926177503,
+      "full_contribution": -1.3067609730769219,
+      "full_margin_pct": -30.03067902149003
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.351420000000001,
+      "expected_contribution": 1.5957559926177503,
+      "full_contribution": -2.4283971676923057,
+      "full_margin_pct": -55.80700478676628
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 2.9863358201749155,
+      "expected_contribution": 0.5751298137154461,
+      "full_contribution": -2.6718451529020073,
+      "full_margin_pct": -89.46901198625118
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 2.9863358201749155,
+      "expected_contribution": 0.5751298137154461,
+      "full_contribution": -3.793481347517391,
+      "full_margin_pct": -127.02795586114624
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.6262649244981127,
+      "expected_contribution": 1.2150589180386433,
+      "full_contribution": -2.03191604857881,
+      "full_margin_pct": -56.03330398867739
+    },
+    {
+      "fx": 60,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.6262649244981127,
+      "expected_contribution": 1.2150589180386433,
+      "full_contribution": -3.153552243194194,
+      "full_margin_pct": -86.96419894447332
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.3988047058823527,
+      "expected_contribution": 0.643140698500102,
+      "full_contribution": -2.25937626719457,
+      "full_margin_pct": -66.47561312611577
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.3988047058823527,
+      "expected_contribution": 0.643140698500102,
+      "full_contribution": -3.381012461809954,
+      "full_margin_pct": -99.47651466877149
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.127120000000001,
+      "expected_contribution": 1.3714559926177499,
+      "full_contribution": -1.5310609730769222,
+      "full_margin_pct": -37.097563750918845
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.127120000000001,
+      "expected_contribution": 1.3714559926177499,
+      "full_contribution": -2.652697167692306,
+      "full_margin_pct": -64.27477678604707
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 2.8324009840834257,
+      "expected_contribution": 0.4211949776239563,
+      "full_contribution": -2.825779988993497,
+      "full_margin_pct": -99.76624089854738
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 2.8324009840834257,
+      "expected_contribution": 0.4211949776239563,
+      "full_contribution": -3.947416183608881,
+      "full_margin_pct": -139.366431723165
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.439344052101303,
+      "expected_contribution": 1.0281380456418336,
+      "full_contribution": -2.21883692097562,
+      "full_margin_pct": -64.51337485762724
+    },
+    {
+      "fx": 60,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.439344052101303,
+      "expected_contribution": 1.0281380456418336,
+      "full_contribution": -3.3404731155910037,
+      "full_margin_pct": -97.12529671319469
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.3760702262443436,
+      "expected_contribution": 0.6204062188620929,
+      "full_contribution": -2.282110746832579,
+      "full_margin_pct": -67.59666102595494
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.3760702262443436,
+      "expected_contribution": 0.6204062188620929,
+      "full_contribution": -3.403746941447963,
+      "full_margin_pct": -100.81979086182719
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.0995138461538465,
+      "expected_contribution": 1.3438498387715958,
+      "full_contribution": -1.5586671269230763,
+      "full_margin_pct": -38.02077966843346
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.0995138461538465,
+      "expected_contribution": 1.3438498387715958,
+      "full_contribution": -2.68030332153846,
+      "full_margin_pct": -65.38100423915176
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 2.8134551581029346,
+      "expected_contribution": 0.4022491516434652,
+      "full_contribution": -2.8447258149739882,
+      "full_margin_pct": -101.11146810998541
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 2.8134551581029346,
+      "expected_contribution": 0.4022491516434652,
+      "full_contribution": -3.966362009589372,
+      "full_margin_pct": -140.97832688628395
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.4163384062678492,
+      "expected_contribution": 1.0051323998083799,
+      "full_contribution": -2.2418425668090736,
+      "full_margin_pct": -65.62120903175268
+    },
+    {
+      "fx": 65,
+      "refund": 0.01,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.4163384062678492,
+      "expected_contribution": 1.0051323998083799,
+      "full_contribution": -3.3634787614244575,
+      "full_margin_pct": -98.45273978870442
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.3078667873303167,
+      "expected_contribution": 0.552202779948066,
+      "full_contribution": -2.350314185746606,
+      "full_margin_pct": -71.05226228422205
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.3078667873303167,
+      "expected_contribution": 0.552202779948066,
+      "full_contribution": -3.47195038036199,
+      "full_margin_pct": -104.96040510640093
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 4.016695384615385,
+      "expected_contribution": 1.2610313772331345,
+      "full_contribution": -1.6414855884615376,
+      "full_margin_pct": -40.86656893994754
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 4.016695384615385,
+      "expected_contribution": 1.2610313772331345,
+      "full_contribution": -2.7631217830769215,
+      "full_margin_pct": -68.79092185233014
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 2.7566176801614612,
+      "expected_contribution": 0.3454116737019919,
+      "full_contribution": -2.9015632929154616,
+      "full_margin_pct": -105.25809631843872
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 2.7566176801614612,
+      "expected_contribution": 0.3454116737019919,
+      "full_contribution": -4.023199487530846,
+      "full_margin_pct": -145.94695218290838
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.3473214687674884,
+      "expected_contribution": 0.936115462308019,
+      "full_contribution": -2.3108595043094344,
+      "full_margin_pct": -69.03607932106719
+    },
+    {
+      "fx": 65,
+      "refund": 0.03,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.3473214687674884,
+      "expected_contribution": 0.936115462308019,
+      "full_contribution": -3.4324956989248183,
+      "full_margin_pct": -102.54454885651278
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 3.1373581900452487,
+      "expected_contribution": 0.38169418266299804,
+      "full_contribution": -2.520822783031674,
+      "full_margin_pct": -80.34858088662543
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 3.1373581900452487,
+      "expected_contribution": 0.38169418266299804,
+      "full_contribution": -3.642458977647058,
+      "full_margin_pct": -116.09955755783575
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.8096492307692316,
+      "expected_contribution": 1.0539852233869809,
+      "full_contribution": -1.8485317423076912,
+      "full_margin_pct": -48.52236073016208
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "monthly",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.8096492307692316,
+      "expected_contribution": 1.0539852233869809,
+      "full_contribution": -2.970167936923075,
+      "full_margin_pct": -77.96434151821764
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 5,
+      "proceeds_month": 2.6145239853077777,
+      "expected_contribution": 0.20331797884830838,
+      "full_contribution": -3.043656987769145,
+      "full_margin_pct": -116.41342764009298
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.3,
+      "weeks": 6,
+      "proceeds_month": 2.6145239853077777,
+      "expected_contribution": 0.20331797884830838,
+      "full_contribution": -4.165293182384529,
+      "full_margin_pct": -159.31363436676207
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 5,
+      "proceeds_month": 3.174779125016587,
+      "expected_contribution": 0.7635731185571175,
+      "full_contribution": -2.483401848060336,
+      "full_margin_pct": -78.22282276242953
+    },
+    {
+      "fx": 65,
+      "refund": 0.08,
+      "plan": "annual",
+      "commission": 0.15,
+      "weeks": 6,
+      "proceeds_month": 3.174779125016587,
+      "expected_contribution": 0.7635731185571175,
+      "full_contribution": -3.60503804267572,
+      "full_margin_pct": -113.55240477262761
+    }
+  ]
+}
