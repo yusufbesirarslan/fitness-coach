@@ -426,6 +426,11 @@ Production rollout (each step a separate human approval; none done here):
    the production API buys Monthly in Sandbox, verify returns 200, and the row is
    `environment='Sandbox'`. Restore is idempotent, and a second account gets 409.
 4. Submit for App Review with the review notes that the subscription is live.
+   Purchases need a signed adult Türkiye record (§ Türkiye server purchase
+   eligibility), so provide a prepared `18_plus`/`TR` reviewer account. A
+   reviewer who registers with another country is refused with 403
+   `SUBSCRIPTION_ELIGIBILITY_REQUIRED`. New accounts get a record only while
+   `ACCOUNT_ELIGIBILITY_ENABLED=1`, and legacy accounts only through its one-time review.
 5. After launch, the first real purchase verifies as a `Production` row with no
    Sandbox lookup.
 

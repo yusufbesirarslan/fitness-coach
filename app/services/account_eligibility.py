@@ -15,8 +15,8 @@ VERSION = "age-screen-v1"
 METADATA_KEY = "_account_eligibility_v1"
 COUNTRIES = frozenset({"TR", "US", "GB", "CA", "AU"})
 REGISTRATION_TTL_SECONDS = 600  # Credential lifetime, not a data-retention rule.
-# No age-of-record purchase expiry: no existing-account re-declaration exists,
-# so one would strand renewing subscribers. Editable profile age never renews it.
+# No age-of-record purchase expiry: nothing renews an existing record (review is
+# one-time), so one would strand renewing subscribers. Profile age never renews it.
 PURCHASE_COUNTRIES = frozenset({"TR"})
 
 
