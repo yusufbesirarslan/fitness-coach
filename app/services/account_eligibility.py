@@ -152,17 +152,19 @@ def projection(user):
             "capabilities": _capabilities(status, band)}
 
 
-def purchase_eligible(user):
+def purchase_eligible(user, now):
     """Validate the canonical subject-bound signature, independently of rollout.
 
     The canonical schema derives screen_passed from a valid record; it has no
     client-writable status. Unknown/review schemas fail closed in _record.
+    ``now`` is an aware UTC instant; a declaration dated after it is not one yet.
     """
     record = _record(user)
     if (not user.cognito_sub or not record or record["age_band"] != "18_plus"
             or record["country"] not in PURCHASE_COUNTRIES):
         return False
-    return datetime.fromisoformat(record["checked_at"]).tzinfo is not None
+    checked = datetime.fromisoformat(record["checked_at"])
+    return checked.tzinfo is not None and checked <= now
 
 
 def require_capability(user, capability):

@@ -54,14 +54,16 @@ promise. Errors follow existing `error` with `code`, safe `message`, `retryable`
 Production context issuance and every effective-entitlement decision validate the
 authenticated account's canonical `_account_eligibility_v1` signature and Cognito
 subject. A valid canonical record derives `screen_passed`; it must also have
-`age_band=18_plus`, `country=TR`, and an aware `checked_at`. There is **no
-age-of-record purchase expiry**: no existing-account re-declaration journey
+`age_band=18_plus`, `country=TR`, and an aware `checked_at` no later than the
+server's UTC now (compared as instants, so any offset works). A future-dated,
+naive or unparseable `checked_at` fails closed. There is **no age-of-record
+purchase expiry**: no existing-account re-declaration journey
 exists, so a record-age limit would lapse a paying annual subscriber with no
 self-service recovery. Any future expiry needs an approved policy and a qualified
 renewal contract first. This is separate from the 600-second registration ticket
 and Apple's 24-hour verification freshness; it does not activate purchases.
-Missing, malformed, copied, tampered, contradictory, teen, unsupported-market
-and unknown/review-state records fail closed. The age screen is
+Missing, malformed, copied, tampered, contradictory, teen, unsupported-market,
+future-dated and unknown/review-state records fail closed. The age screen is
 self-declaration, not independent age assurance. Editable age can restrict, but
 cannot establish or renew eligibility. Client claims never authorize purchase.
 

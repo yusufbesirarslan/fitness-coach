@@ -51,6 +51,8 @@ def invalidate(uid, case):
             record.update(age_band="13_17", country="TR")
         elif case == "country":
             record["country"] = "US"
+        elif case == "future":
+            record["checked_at"] = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         elif case == "naive":
             record["checked_at"] = datetime.now().isoformat()
         elif case == "invalid_time":
@@ -65,7 +67,7 @@ def invalidate(uid, case):
 
 
 CASES = ["missing", "unsigned", "tampered", "other_subject", "no_subject", "contradictory",
-         "teen", "tr_teen", "country", "naive", "invalid_time",
+         "teen", "tr_teen", "country", "future", "naive", "invalid_time",
          "review_required", "ineligible", "qualification_required"]
 
 
@@ -146,15 +148,56 @@ def test_legacy_boundary_has_no_production_bypass(app, owner, environment, fallb
     app.config.update(APPLE_SUBSCRIPTION_ENVIRONMENT=environment,
                       APPLE_SANDBOX_FALLBACK_ENABLED=fallback, ACCOUNT_ELIGIBILITY_ENABLED=screen)
     user = db.session.get(User, owner)
-    assert s._purchase_eligible(user, "Sandbox") is bypass
-    assert s._purchase_eligible(user, "Production") is False
+    now = datetime.now(timezone.utc)
+    assert s._purchase_eligible(user, now, "Sandbox") is bypass
+    assert s._purchase_eligible(user, now, "Production") is False
 
 
 def test_purpose_binding(owner):
     user = db.session.get(User, owner)
-    assert policy.purchase_eligible(user)
+    now = datetime.now(timezone.utc)
+    assert policy.purchase_eligible(user, now)
     user.user_metadata = {policy.METADATA_KEY: policy._signer().dumps({"age": 25, "country": "TR"})}
-    assert not policy.purchase_eligible(user)
+    assert not policy.purchase_eligible(user, now)
+
+
+NOW = datetime(2026, 10, 26, 12, 0, tzinfo=timezone.utc)
+EAST, WEST = timezone(timedelta(hours=3)), timezone(timedelta(hours=-5))
+
+
+@pytest.mark.parametrize("checked_at,eligible", [
+    (NOW.isoformat(), True),
+    ((NOW - timedelta(microseconds=1)).isoformat(), True),
+    ((NOW + timedelta(microseconds=1)).isoformat(), False),
+    (NOW.astimezone(EAST).isoformat(), True),
+    (NOW.astimezone(WEST).isoformat(), True),
+    ((NOW + timedelta(microseconds=1)).astimezone(EAST).isoformat(), False),
+    ((NOW + timedelta(microseconds=1)).astimezone(WEST).isoformat(), False),
+    ("2026-10-26T12:00:00Z", True),
+    ((NOW - timedelta(days=3 * 365)).isoformat(), True),
+    ((NOW + timedelta(days=1)).isoformat(), False),
+    (NOW.replace(tzinfo=None).isoformat(), False),
+    ("2026-10-26", False),
+    ("not-a-date", False),
+    ("", False),
+])
+def test_checked_at_is_an_aware_instant_not_after_now(owner, checked_at, eligible):
+    # Frozen clock: same instant in any offset is equal; a future record fails closed.
+    user = adult_account(db.session.get(User, owner), checked_at=checked_at)
+    assert policy.purchase_eligible(user, NOW) is eligible
+    user.cognito_sub = "other-subject"
+    assert policy.purchase_eligible(user, NOW) is False
+
+
+def test_future_dated_record_cannot_open_grant_or_restore(client, owner):
+    client.get(PATH + "purchase-context", headers=HEADERS)
+    assert client.post(PATH + "verify", json={"transaction_id": "101"}, headers=HEADERS).json["entitlement"]["effective_premium"]
+    invalidate(owner, "future")
+    assert client.get(PATH + "purchase-context", headers=HEADERS).status_code == 403
+    assert client.get(PATH + "entitlement", headers=HEADERS).json["entitlement"]["status"] == "ELIGIBILITY_REVIEW_REQUIRED"
+    restored = client.post(PATH + "verify", json={"transaction_id": "101"}, headers=HEADERS).json["entitlement"]
+    assert restored["effective_premium"] is False and restored["purchase_recovery_required"] is True
+    assert AppleSubscription.query.one().status == 1
 
 
 def test_record_age_alone_never_lapses_a_renewing_subscriber(client, owner):
