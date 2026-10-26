@@ -26,15 +26,17 @@ purchases while this configuration error persists. Authentication still applies.
   locally from the last authenticated Apple lookup. Does not call Apple.
 
 Entitlement fields: `tier` (`FREE|PREMIUM`), `effective_premium` (boolean),
-`status` (`FREE|ACTIVE|EXPIRED|REVOKED|BILLING_RETRY|GRACE_PERIOD|VERIFICATION_PENDING`),
+`status` (`FREE|ACTIVE|EXPIRED|REVOKED|BILLING_RETRY|GRACE_PERIOD|VERIFICATION_PENDING|ELIGIBILITY_REVIEW_REQUIRED`),
 `expires_at` (UTC ISO timestamp or null), `verification_pending` (boolean).
-No row yields FREE. An expiry can appear on a FREE result; it is not an access
+With valid eligibility (or the explicit legacy Sandbox boundary), no row yields
+FREE. Otherwise the eligibility review state below applies. An expiry can appear on a FREE result; it is not an access
 promise. Errors follow existing `error` with `code`, safe `message`, `retryable`,
 `request_id`, and Retry-After for temporary failures.
 
 | HTTP | Code | Meaning |
 | --- | --- | --- |
 | 400 / 413 | SUBSCRIPTION_INVALID_REQUEST | Invalid shape/type/size |
+| 403 | SUBSCRIPTION_ELIGIBILITY_REQUIRED | Canonical adult Türkiye eligibility missing or requires review; no purchase context issued |
 | 409 | SUBSCRIPTION_PURCHASE_CONTEXT_REQUIRED | Fetch context before buying |
 | 409 | SUBSCRIPTION_OWNERSHIP_CONFLICT | Association mismatch or owned elsewhere; no account details |
 | 409 | SUBSCRIPTION_ACCOUNT_UNAVAILABLE | Owner no longer exists |
@@ -45,6 +47,71 @@ promise. Errors follow existing `error` with `code`, safe `message`, `retryable`
 | 503 | SUBSCRIPTION_VERIFICATION_PENDING | Stale/out-of-order signed state or attempted revocation reset |
 | 503 | SUBSCRIPTION_TEMPORARILY_UNAVAILABLE | Apple/OCSP/storage temporary failure |
 | 503 | SUBSCRIPTION_INVALID_STATE | Invalid persisted schema/state; fail closed |
+
+## Türkiye server purchase eligibility (#467)
+
+Production context issuance and every effective-entitlement decision validate the
+authenticated account's canonical `_account_eligibility_v1` signature and Cognito
+subject. A valid canonical record derives `screen_passed`; it must also have
+`age_band=18_plus`, `country=TR`, and an aware `checked_at` no later than now.
+Purchase freshness is **365 days**, with the exact TTL boundary expired. This is
+a new conservative purchase policy, separate from the 600-second registration
+ticket and Apple's 24-hour verification freshness. Founder acceptance of this
+policy is part of the source decision; this change does not activate purchases.
+Missing, malformed, copied, tampered, contradictory, teen, unsupported-market,
+future, expired and unknown/review-state records fail closed. The age screen is
+self-declaration, not independent age assurance. Editable age can restrict, but
+cannot establish or renew eligibility. Client claims never authorize purchase.
+
+This check runs even with `ACCOUNT_ELIGIBILITY_ENABLED=0` in Production. The
+explicit legacy MON-03 boundary applies only when the deployment environment is
+`Sandbox`, `APPLE_SANDBOX_FALLBACK_ENABLED` is exactly false and
+`ACCOUNT_ELIGIBILITY_ENABLED` is exactly false; only Sandbox evidence can use it.
+Never configure a Production host as Sandbox. A Sandbox transaction accepted by
+Production's App Review/TestFlight fallback receives the full production check.
+No TESTING switch or client environment/status creates an exception.
+
+Context checks precede association creation under the refreshed User lock.
+Verify/restore and reconciliation still perform real Apple verification and
+enforce token ownership, original identity, monotonic evidence and revocation.
+They recheck the canonical account under that same owner lock before returning
+access. `GET entitlement` also refreshes and locks the owner; a previously
+eligible purchase cannot retain access from a stale in-memory account snapshot.
+
+**Paid transaction, eligibility now invalid:** do not refuse to record an
+authentic, correctly owned payment. Verification commits the existing Apple
+state/identity idempotently, then returns 200 with `tier=FREE`,
+`effective_premium=false`, `status=ELIGIBILITY_REVIEW_REQUIRED`,
+`purchase_recovery_required=true`, and
+`resolution=CONTACT_SUPPORT_OR_APPLE_REFUND`. These additional fields also appear
+on entitlement reads while suspended. The stored Apple status and expiry remain
+unchanged; the response grants no Premium. With no verified purchase the status
+is also `ELIGIBILITY_REVIEW_REQUIRED`, recovery is false and resolution is
+`REVIEW_ELIGIBILITY`. Apple freshness and revocation checks still apply.
+
+Mobile must treat this 200 as durable receipt acknowledgement, allow StoreKit
+finish, and show the eligibility restriction plus account-review/support and
+Apple refund/subscription-management actions. A 2xx alone never means Premium;
+only `effective_premium=true` grants access. Do not launch another purchase or
+retry-loop to recover access. Explain how to request an Apple refund and cancel
+future renewal in Apple's subscription management; cancellation and refund are
+different actions. This backend does not automatically cancel, promise a refund,
+or invent an entitlement. If the commit or Apple verification fails, return the
+existing error and retain StoreKit retry/restore behavior instead of finishing.
+
+Support must inspect the owned Apple record and canonical restriction, arrange
+controlled eligibility review or direct the customer to Apple's refund and
+cancellation flows, and preserve the transaction for reconciliation. Do not edit
+profile age or clear the reserved signed record to promote an account. Existing
+self-service review cannot renew an expired signed record or change its cohort;
+that remains a controlled review case. A valid reviewed record can restore access
+only while authentic Apple evidence is still fresh, paid and unrevoked. Background
+reconciliation continues to record renewals/refunds/revocations while suspended;
+its `APPLIED` outcome acknowledges Apple state persistence, not an access grant.
+
+Release remains held until the mobile suspended-payment UX and support handling
+are qualified. No allowances, D1 consent, infrastructure or activation change is
+part of this source delta.
 
 ## Apple trust and mobile dependency
 
@@ -363,7 +430,8 @@ only the staging account. For a Production-API build:
 - never send an environment to the backend.
 - submit the transaction ID on purchase, on `Transaction.updates` (renewals) and
   on restore, and finish the transaction only after a 2xx.
-- `GET entitlement` never refreshes from Apple.
+- `GET entitlement` never refreshes from Apple. A 2xx is receipt acknowledgement;
+  honor `effective_premium` and the suspended-payment handling above.
 
 A 422 for a review purchase means the fallback flag is OFF.
 

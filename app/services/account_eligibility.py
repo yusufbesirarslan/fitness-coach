@@ -6,7 +6,7 @@ The reserved signed metadata record cannot be edited through profile/memory
 fields and never promotes a teen because their editable profile age changed.
 No DOB, identity document, address, IP or guardian assertion is retained here.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import current_app, request
 from itsdangerous import BadSignature, URLSafeSerializer, URLSafeTimedSerializer
@@ -15,6 +15,10 @@ VERSION = "age-screen-v1"
 METADATA_KEY = "_account_eligibility_v1"
 COUNTRIES = frozenset({"TR", "US", "GB", "CA", "AU"})
 REGISTRATION_TTL_SECONDS = 600  # Credential lifetime, not a data-retention rule.
+# Türkiye purchase authorization needs a current declaration, not lifetime access
+# from an old cohort. Expiry requires review; editable profile age cannot renew it.
+PURCHASE_RECORD_MAX_AGE = timedelta(days=365)
+PURCHASE_COUNTRIES = frozenset({"TR"})
 
 
 class EligibilityDenied(Exception):
@@ -147,6 +151,21 @@ def projection(user):
             "country": record["country"] if record else None,
             "source": record["source"] if record else None,
             "capabilities": _capabilities(status, band)}
+
+
+def purchase_eligible(user, now):
+    """Validate the canonical subject-bound signature, independently of rollout.
+
+    The canonical schema derives screen_passed from a valid record; it has no
+    client-writable status. Unknown/review schemas fail closed in _record.
+    """
+    record = _record(user)
+    if (not user.cognito_sub or not record or record["age_band"] != "18_plus"
+            or record["country"] not in PURCHASE_COUNTRIES):
+        return False
+    checked = datetime.fromisoformat(record["checked_at"])
+    return (checked.tzinfo is not None
+            and timedelta(0) <= now - checked < PURCHASE_RECORD_MAX_AGE)
 
 
 def require_capability(user, capability):

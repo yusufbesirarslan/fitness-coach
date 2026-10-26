@@ -481,6 +481,9 @@ def world(app, monkeypatch):
                       APPLE_SANDBOX_FALLBACK_ENABLED=True)
     with app.app_context():
         users = [User(username=f"dual{i}", email=f"dual{i}@example.invalid") for i in range(2)]
+        from subscription_support import adult_account
+        for user in users:
+            adult_account(user)
         db.session.add_all(users); db.session.commit()
         owners = [(u.id, str(uuid4())) for u in users]
         db.session.add_all([AppleAccountAssociation(user_id=uid, token=t) for uid, t in owners])

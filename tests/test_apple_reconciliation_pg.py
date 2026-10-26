@@ -35,6 +35,9 @@ def pg_app(monkeypatch):
         assert db.engine.dialect.name == "postgresql"
         db.drop_all(); db.create_all()
         users = [User(username=f"pgrecon{i}", email=f"pgrecon{i}@example.invalid") for i in range(2)]
+        from subscription_support import adult_account
+        for user in users:
+            adult_account(user)
         db.session.add_all(users); db.session.commit()
         owners = [(u.id, str(uuid4())) for u in users]
         db.session.add_all([AppleAccountAssociation(user_id=uid, token=token) for uid, token in owners])

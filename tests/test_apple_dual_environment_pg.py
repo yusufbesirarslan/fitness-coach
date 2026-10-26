@@ -36,6 +36,9 @@ def pg_app(monkeypatch):
         assert db.engine.dialect.name == "postgresql"
         db.drop_all(); db.create_all()
         users = [User(username=f"pgdual{i}", email=f"pgdual{i}@example.invalid") for i in range(2)]
+        from subscription_support import adult_account
+        for user in users:
+            adult_account(user)
         db.session.add_all(users); db.session.commit()
         owners = [(u.id, str(uuid4())) for u in users]
         db.session.add_all([AppleAccountAssociation(user_id=uid, token=token) for uid, token in owners])
@@ -222,3 +225,63 @@ def test_deletion_after_persistence_lock_cascades(pg_app, monkeypatch):
     with app.app_context():
         assert AppleSubscription.query.count() == 0
         assert AppleAccountAssociation.query.filter_by(user_id=a).count() == 0
+
+
+@pytest.mark.parametrize("operation", ["context", "verify", "entitlement"])
+def test_committed_eligibility_change_wins_while_waiting_for_owner_lock(pg_app, monkeypatch, operation):
+    """Observe real blocking, then re-read the signed state after writer commit."""
+    from app.extensions import db
+    from app.models import AppleSubscription
+    from app.services import subscriptions
+    app, ((uid, token), _) = pg_app
+    dual = Dual(token)
+    monkeypatch.setattr(subscriptions, "AppleAdapter", lambda _: dual.p)
+    with app.app_context():
+        engine = db.engine
+        if operation == "entitlement":
+            assert subscriptions.verify_purchase(uid, "201")["effective_premium"]
+    results = {}
+    with engine.connect() as writer:
+        transaction = writer.begin()
+        writer.execute(sa.text('UPDATE "user" SET user_metadata = :metadata WHERE id = :id'),
+                       {"metadata": "{}", "id": uid})
+        fn, args = {"context": (subscriptions.purchase_context, (uid,)),
+                    "verify": (subscriptions.verify_purchase, (uid, "201")),
+                    "entitlement": (subscriptions.entitlement, (uid,))}[operation]
+        worker = _run(app, results, "eligibility-waiter", fn, *args)
+        try:
+            assert _blocked(engine), "eligibility check must wait on the real owner lock"
+        finally:
+            transaction.commit()
+            worker.join(10)
+    assert not worker.is_alive()
+    if operation == "context":
+        assert results["eligibility-waiter"] == "SUBSCRIPTION_ELIGIBILITY_REQUIRED"
+    else:
+        view = results["eligibility-waiter"]
+        assert view["status"] == "ELIGIBILITY_REVIEW_REQUIRED" and not view["effective_premium"]
+        with app.app_context():
+            assert AppleSubscription.query.one().user_id == uid
+
+
+def test_reconciliation_retains_paid_state_without_grant_after_eligibility_loss(pg_app, monkeypatch):
+    from datetime import datetime, timezone
+    from app.extensions import db
+    from app.models import User, AppleSubscription
+    from app.services import subscriptions, apple_reconciliation as reconciliation
+    app, ((uid, token), _) = pg_app
+    dual = Dual(token)
+    monkeypatch.setattr(subscriptions, "AppleAdapter", lambda _: dual.p)
+    monkeypatch.setattr(reconciliation, "AppleAdapter", lambda _: dual.p)
+    app.config["APPLE_NOTIFICATIONS_ENABLED"] = True
+    with app.app_context():
+        user = db.session.get(User, uid)
+        user.user_metadata = {}
+        reconciliation.request_reconciliation("Sandbox", "200", token, datetime.now(timezone.utc))
+        db.session.commit()
+        assert reconciliation.run()["APPLIED"] == 1
+        row = AppleSubscription.query.one()
+        assert (row.user_id, row.status, row.latest_transaction_id) == (uid, 1, "201")
+        view = subscriptions.entitlement(uid)
+        assert not view["effective_premium"] and view["purchase_recovery_required"]
+        assert view["resolution"] == "CONTACT_SUPPORT_OR_APPLE_REFUND"
