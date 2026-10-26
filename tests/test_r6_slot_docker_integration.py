@@ -364,7 +364,20 @@ def test_apple_files_in_real_blue_green_containers(stack, tmp_path):
            "0440" if filename == "private-key.p8" else "0444",
            str(tmp_path / filename), str(directory / filename))
 
+    def wait_port_released(slot):
+        # Prior real HTTP probes can leave Linux TIME_WAIT sockets after a
+        # container is removed. Preserve the runtime's conservative bind gate;
+        # wait for kernel release rather than bypassing admission in the test.
+        runtime = rt.SlotRuntime(deploy)
+        deadline = time.monotonic() + 150
+        while time.monotonic() < deadline:
+            if runtime.port_available(slot):
+                return
+            time.sleep(2)
+        raise AssertionError(f"removed slot {slot} did not release its port")
+
     assert call("remove", "--slot", "blue", "--expected-revision", rev)[0] == 0
+    wait_port_released("blue")
     try:
         sh("sudo", "-n", "install", "-d", "-o", "0", "-g", "0", "-m", "0755", str(source))
         sh("sudo", "-n", "install", "-d", "-o", "0", "-g", "0", "-m", "0755", str(previous_source))
@@ -427,6 +440,7 @@ for name in ('private-key.p8', 'root-g2.cer', 'root-g3.cer'):
         assert call("verify", "--slot", "blue", "--revision", previous,
                     "--allow-existing-files", mode="0")[0] == 0
         assert call("remove", "--slot", "blue", "--expected-revision", previous)[0] == 0
+        wait_port_released("blue")
         # Malformed bytes pass metadata admission by design. Startup with
         # subscription flags OFF remains healthy; adapter initialization fails
         # closed locally before any Apple request. Health is not key validity.
