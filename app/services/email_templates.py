@@ -30,8 +30,9 @@ tests/test_auth_email_language.py eşitliklerini zorlar. Dil yalnızca sunumu
 
 Güvenlik: doğrulama/sıfırlama kodları YALNIZCA gövdede yer alır, konu satırında
 ASLA bulunmaz (konu satırları loglanır). Gizli önizleme metni (preheader) kodu
-TAŞIMAZ ve gelen kutusu önizlemesini doldurur, böylece kod bildirim/önizleme
-satırına düşmez. Kullanıcıdan gelen `name` HTML-escape edilir (Cognito 'name'
+TAŞIMAZ ve HTML gelen-kutusu önizlemesini doldurur, böylece HTML'den önizleme
+çıkaran istemcide kod önizleme satırına düşmez (düz-metin alternatifi bilerek
+değişmedi; ondan önizleme çıkaran istemci kodu yine görebilir). Kullanıcıdan gelen `name` HTML-escape edilir (Cognito 'name'
 attribute'u kullanıcı girdisidir). Tek uzak kaynak, landing'in zaten herkese
 açık sunduğu statik uygulama simgesidir — alıcıya özel parametre taşımaz
 (izleme pikseli DEĞİLDİR); görsel kapalı istemcide ad metin olarak kalır.
@@ -112,6 +113,10 @@ _HEAD_STYLES = (
     'font-size:inherit!important;font-family:inherit!important;'
     'font-weight:inherit!important;line-height:inherit!important}'
     '</style>'
+    # Outlook (Word motoru) -apple-system'i tanımaz → Times'a düşmesin.
+    '<!--[if mso]><style>body,table,td,div,p,h1,a{font-family:Arial,Helvetica,'
+    'sans-serif!important}.ax-digits{font-family:Consolas,\'Courier New\','
+    'monospace!important}</style><![endif]-->'
 ) % {
     "d_canvas": _DARK_CANVAS, "d_surface": _DARK_SURFACE,
     "d_surface_2": _DARK_SURFACE_2, "d_border": _DARK_BORDER,
@@ -179,7 +184,8 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
         '</td></tr>'
         '<tr><td class="ax-pad" style="padding:8px 32px 32px">'
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
-        '<td bgcolor="%(axis)s" style="border-radius:16px;background-color:%(axis)s">'
+        '<td bgcolor="%(axis)s" style="border-radius:16px;background-color:%(axis)s;'
+        'mso-padding-alt:15px 28px">'
         '<a href="%(cta_url)s" style="display:inline-block;padding:15px 28px;'
         'font-family:%(font)s;font-size:16px;line-height:22px;font-weight:600;'
         'color:%(on_axis)s;text-decoration:none;border-radius:16px">%(cta_label)s</a>'
@@ -215,7 +221,7 @@ def _code_block(code, label):
         '<div class="ax-muted" style="color:%(muted)s;font-size:13px;line-height:18px;'
         'font-weight:500">%(label)s</div>'
         # padding-left = letter-spacing: son rakamın ardındaki boşluğu dengeler.
-        '<div class="ax-text" style="padding:6px 0 0 8px;font-family:%(mono)s;font-size:32px;'
+        '<div class="ax-text ax-digits" style="padding:6px 0 0 8px;font-family:%(mono)s;font-size:32px;'
         'line-height:40px;letter-spacing:8px;font-weight:700;color:%(text)s">%(code)s</div>'
         '</div>'
     ) % {"surface_2": _SURFACE_2, "border": _BORDER, "muted": _MUTED, "text": _TEXT,

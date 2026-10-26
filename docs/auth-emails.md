@@ -42,8 +42,8 @@ Lambda'da da çalışsın diye). Lambda'daki kopya bayt-bayt aynı olmalı;
 ile (#080D1A / #0F1628 / #F1F4FB), tek marka mavisi #2A62F5 CTA, resmi
 kilit = holo "A" uygulama simgesi (`https://www.axisaiapp.com/icon-holo.png`,
 statik, alıcıdan bağımsız) + "AxisAI" metni. Uzak web fontu yok (platform
-yazı tipi). Gizli preheader gelen-kutusu önizlemesini doldurur; kod önizleme
-satırına düşmez. Eski Aurora Axis mor/camgöbeği paleti ve "AXIS·AI" wordmark'ı
+yazı tipi). Gizli preheader HTML gelen-kutusu önizlemesini doldurur; HTML'den önizleme
+çıkaran istemcide kod önizleme satırına düşmez (düz-metin parçası değişmedi). Eski Aurora Axis mor/camgöbeği paleti ve "AXIS·AI" wordmark'ı
 BRAND-1 (2026-10-26) ile emekliye ayrıldı.
 
 ## Şifre sıfırlama akışı (Sprint 3'te eklendi)

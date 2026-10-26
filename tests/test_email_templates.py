@@ -4,6 +4,8 @@ Hermetik: şablonlar saf fonksiyondur, ağ/SDK yoktur. Her şablonun
 (subject, html, text) sözleşmesi, marka öğeleri ve güvenlik kuralları
 (kod konu satırında olmaz, kullanıcı adı HTML-escape edilir) sınanır.
 """
+import re
+
 import pytest
 
 from app.services import email_templates
@@ -66,6 +68,9 @@ def test_only_remote_resource_is_the_static_brand_mark(label, build):
     """İzleme pikseli yok: tek <img> statik, alıcıdan bağımsız marka işaretidir."""
     _, html, _ = build()
     assert html.count("<img") == 1
+    resources = set(re.findall(r'\b(?:src|srcset|background)\s*=\s*"([^"]*)"', html, re.I))
+    assert resources == {email_templates.BRAND_MARK_URL}
+    assert "<link" not in html.lower() and "<script" not in html.lower()
     assert "@import" not in html and "url(" not in html
     assert "fonts.googleapis" not in html and "gstatic" not in html
 
