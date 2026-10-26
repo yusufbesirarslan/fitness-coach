@@ -674,6 +674,15 @@ only `web` and admits exactly three read-only bind mounts, with
 `create_host_path: false`; arbitrary paths, options, named volumes, secrets,
 configs, device access and additional services are refused.
 
+Apple opt-in qualification uses Docker Compose **5.5.1**. The renderer must
+retain explicit `bind.create_host_path: false` in its JSON model. Compose
+2.38.2 omits false during serialization and is safely refused for opt-in;
+default-OFF slots remain compatible. CI checksum-pins the qualified Linux
+renderer in `.github/actions/setup-qualified-compose/action.yml`. A host CLI
+upgrade, if needed, requires separate operator authorization and is not
+performed by this source change. Do not relax the mount validator to admit
+an absent or ambiguous bind setting.
+
 Before a separately authorized deployment, an operator must provision these
 regular, nonempty, single-link files outside the checkout and image:
 
