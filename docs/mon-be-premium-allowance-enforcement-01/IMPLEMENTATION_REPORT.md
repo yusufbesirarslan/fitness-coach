@@ -30,7 +30,7 @@ New tests: `test_premium_allowance_execution.py`,
 is parameterized legacy/metered; existing architecture import boundaries are
 updated for the explicit new seams. Current-head migration assertions advance
 to the single 59-revision head; historical migration-parent assertions remain.
-Changed head assertions: `test_ai_consent_pg`, `test_completion_fence_pg`,
+Changed head assertions: `test_ai_consent_pg`, `test_apple_lifecycle_migration_pg`, `test_completion_fence_pg`,
 `test_lp18_b0_migration`, `test_lp18_b1_migration`, `test_migration_graph`,
 `test_mobile_training_allowance_pg`, `test_mobile_workout_sessions_architecture`,
 `test_priv_k6_no_photo_completion_pg`. See `git diff --name-status <base> HEAD`
@@ -52,7 +52,7 @@ model inputs remain read-only. Logs are retained in the external task directory
 | `postgres-regression.log` | 460 PASS: ledger races, native Training dispatch/zero-attempt/expiry compensation, D1 operation fences, Pump, Apple reconciliation and fresh/current-main migration chain/no drift |
 | `new-postgres-final.log` | 24 PASS: all-family finite reservations/finalization, strict entitlement ordering and real enabled Pump lease/hold races |
 | `final-postgres-transport.log` | 52 PASS: focused PG plus existing Gunicorn26 real TCP/withdrawal/deadline/account-switch harness in legacy and metered modes; no send/consent/socket mocks |
-| `final-native-training.log` | Unified mode through original native command, real generator/router/D1/dispatch/binding, mocked SDK; final result recorded with CI evidence |
+| `final-native-training.log` | 2 PASS: unified mode through original native command, real generator/router/D1/dispatch/binding, mocked SDK |
 | `finops-verify-final.log`, `policy-comparison.log` | Original claims 58/58; original cost/proceeds reconciliation; extended three-policy model |
 | Hosted exact-head CI | Required before source-merge recommendation; authoritative Linux/image/migration/PG/shard evidence collected separately after push |
 
