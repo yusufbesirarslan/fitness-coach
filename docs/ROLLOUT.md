@@ -1,5 +1,17 @@
 # Production rollout runbook — feature flag activation
 
+MON-BE-PREMIUM-ALLOWANCE-ENFORCEMENT-01 adds default-OFF
+`AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED` and additive migration
+`b5e7a9c1d3f0` (four nullable dispatch-evidence columns on the existing reservation,
+59 revisions, no backfill or new ledger). No policy is installed. This flag has
+atomic five-family dependencies; do not enable a subset or fall back to legacy
+unlimited Premium during a paid launch. Existing D1 closure and publication rules
+remain in force. **No deployment, migration execution, staging, production or
+payment activation is authorized by source qualification.** Follow the task's
+[release checklist](mon-be-premium-allowance-enforcement-01/RELEASE_CHECKLIST.md),
+including closing paid AI admission before rollback and keeping the ledger ON
+until outstanding reservations settle. The migration downgrade preserves evidence.
+
 PRIV-LAUNCH `ACCOUNT_ELIGIBILITY_ENABLED` stays strict default OFF (only `1`
 enables). **OFF is not a qualified launch workaround**: it preserves legacy
 registration behaviour, while the paired mobile client refuses registration

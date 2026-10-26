@@ -39,6 +39,7 @@ from app.models import (
     TrainingPlanGenerationOperation,
 )
 from app.services import ai, ai_allowances, ai_consent
+from app.services.ai_allowances import execution as allowance_execution
 from app.services.training_generation.preference_contract import (
     CODE_GENERATION_INVALID,
     CODE_GENERATION_PARSE_FAILED,
@@ -58,6 +59,14 @@ _TERMINAL = (TRAINING_PLAN_GENERATION_SUCCEEDED, TRAINING_PLAN_GENERATION_FAILED
 _INVALID_OUTPUT_CODES = INVALID_CANDIDATE_CODES | {
     CODE_GENERATION_INVALID, CODE_GENERATION_PARSE_FAILED, CODE_GENERATION_TRUNCATED}
 _SETTLE_PER_COMMAND = 3
+
+
+def require_all_feature_ready():
+    allowance_execution.require_ready()
+
+
+def execution_scope(operation_id):
+    return allowance_execution.native_training(operation_id)
 
 
 def enforcement_enabled():
@@ -93,8 +102,10 @@ def bind_for_dispatch(operation, now):
     if not metered:
         return
     try:
+        options = {"strict_entitlement": True} if allowance_execution.enabled() else {}
         hold = ai_allowances.reserve_within(
-            operation.user_id, FEATURE, "training-dispatch:" + secrets.token_hex(16), now=now)
+            operation.user_id, FEATURE, "training-dispatch:" + secrets.token_hex(16), now=now,
+            **options)
     except ai_allowances.AllowanceError as error:
         raise _refused(error.code) from None
     if not hold.may_execute:

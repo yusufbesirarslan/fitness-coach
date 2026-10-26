@@ -78,6 +78,10 @@ def _forget_reservation_week(user, counter_key):
 
 def reserve_ai_quota(user, counter_key, limit):
     """Atomically reserve one weekly allowance before an AI provider call."""
+    from app.services.ai_allowances import execution
+    if execution.enabled():
+        execution.require_ready()
+        return True  # the logical execution binding is now the sole quota
     if getattr(user, "is_premium", False):
         return True
 
@@ -120,6 +124,9 @@ def reserve_ai_quota_in_transaction(user_id, counter_key, limit):
 
 def refund_ai_quota(user, counter_key, reserved_week=None):
     """Atomically return one reserved allowance, never dropping below zero."""
+    from app.services.ai_allowances import execution
+    if execution.enabled():
+        return  # never refund the legacy counter for a ledger-metered action
     if getattr(user, "is_premium", False):
         return
 

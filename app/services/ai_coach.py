@@ -359,7 +359,11 @@ def _tool_confirm_and_commit_meal_log(user_id):
     ))
     award_xp(user_id, 10)
     log_activity(user_id, "nutrition_logged", f"{name} — {round(cal)} kcal")
+    from app.services.ai_allowances.execution import canonical_within
+    canonical_within(user_id)
     db.session.commit()
+    from app.services.ai_allowances.execution import canonical_success
+    canonical_success()
 
     return json.dumps({
         "status": "committed",
@@ -487,7 +491,11 @@ def _tool_confirm_and_commit_workout_log(user_id):
     # akar. Seans-başı dedup ile huniyi bağlamak istenirse ürün kararı gerekir.
     log_activity(user_id, "workout_completed",
                  f"{d.get('exercise_name')} — {d.get('sets')}x{d.get('reps')} @ {d.get('weight_kg')}kg")
+    from app.services.ai_allowances.execution import canonical_within
+    canonical_within(user_id)
     db.session.commit()
+    from app.services.ai_allowances.execution import canonical_success
+    canonical_success()
 
     return json.dumps({
         "status": "committed",
@@ -1504,7 +1512,19 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
     return _coach_tool_fallback(language)
 
 
-def generate_coach_reply(name, age, gender, weight, height,
+def generate_coach_reply(*args, **kwargs):
+    from app.services.ai_allowances import execution as meter
+    from app.services.ai_spend_guard import current_subject
+    if not meter.enabled():
+        return _generate_coach_reply(*args, **kwargs)
+    with meter.logical_action(current_subject(), "coach", {"args": args, "options": kwargs}) as action:
+        result = _generate_coach_reply(*args, **kwargs)
+        if not is_coach_error_fallback(result):
+            action.success()
+        return result
+
+
+def _generate_coach_reply(name, age, gender, weight, height,
                          goal, level, current_activity,
                          bmr, tdee, target_calories,
                          training_plan, nutrition_plan,

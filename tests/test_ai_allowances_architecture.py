@@ -6,11 +6,19 @@ from app.feature_flags import FLAGS_BY_KEY
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "app/services/ai_allowances"
-# BE-03A wires nothing: only its own transport and the operator sweep import it.
-# BE-03B-01B adds exactly one enforcement seam: native initial Training
-# generation. Every other AI route stays unmetered until separately approved.
-ALLOWED_IMPORTERS = {"app/blueprints/mobile_ai_allowances.py", "app/cli.py",
-                     "app/services/mobile_training_generation/allowance.py"}
+# Financial writes still belong only to service.py; approved domain seams use
+# execution.py. Native Training keeps exactly its original allowance adapter.
+ALLOWED_IMPORTERS = {
+    "app/__init__.py", "app/blueprints/mobile_ai_allowances.py", "app/blueprints/mobile_menu.py",
+    "app/blueprints/coach.py", "app/cli.py", "app/services/mobile_training_generation/allowance.py",
+    "app/services/ai_coach.py", "app/services/ai_nutrition.py", "app/services/ai_pipeline.py",
+    "app/services/ai_provider_call.py", "app/services/menu_analysis.py", "app/services/menu_extract.py",
+    "app/services/memory_manager.py", "app/services/mobile_pump_checks/service.py",
+    "app/services/mobile_pump_check_comparisons/service.py", "app/services/nutrition_native/plan.py",
+    "app/services/nutrition_plan_generation.py", "app/services/premium.py",
+    "app/services/training_generation/service.py", "app/services/training_plan_replacement/generation.py",
+    "app/services/training_plan_replacement/service.py", "app/services/plan_mutation/service.py",
+}
 
 
 def _python(root):
@@ -26,7 +34,7 @@ def _imports(tree):
                 yield alias.name, []
 
 
-def test_no_existing_route_or_service_consults_the_ledger():
+def test_only_qualified_domain_seams_import_allowance_execution():
     importers = set()
     for path in _python(ROOT / "app") + _python(ROOT / "fitx_mcp"):
         rel = path.relative_to(ROOT).as_posix()
@@ -39,9 +47,12 @@ def test_no_existing_route_or_service_consults_the_ledger():
     assert importers == ALLOWED_IMPORTERS
 
 
-def test_legacy_quota_module_does_not_know_the_ledger():
+def test_legacy_quota_shim_uses_execution_readiness_and_never_writes_ledger():
     source = (ROOT / "app/services/premium.py").read_text(encoding="utf-8")
-    assert "ai_allowance" not in source and "AiAllowance" not in source
+    tree = ast.parse(source)
+    assert "from app.services.ai_allowances import execution" in source
+    assert not any(module.endswith("ai_allowances.service") for module, _ in _imports(tree))
+    assert "AiAllowanceBucket" not in source and "AiUsageReservation" not in source
 
 
 def test_ledger_never_reads_legacy_premium_env_or_logs():
@@ -50,7 +61,8 @@ def test_ledger_never_reads_legacy_premium_env_or_logs():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
         attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
-        assert not (banned_names & (names | attrs)), path.name
+        banned = banned_names - ({"logger"} if path.name == "execution.py" else set())
+        assert not (banned & (names | attrs)), path.name
         assert not any(m in ("os", "logging") for m, _ in _imports(tree)), path.name
 
 
