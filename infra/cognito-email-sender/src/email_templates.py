@@ -1,10 +1,15 @@
 """Markalı HTML e-posta şablonları — Email Sprint 3 (auth e-postaları).
 
 Tek yeniden kullanılabilir kabuk (render_branded_email) AxisAI görünümünü taşır
-— koyu tema, tek sütun responsive, CTA butonu, landing footer'ındaki sosyal
-bağlantılar — ve e-posta-başına fonksiyonlar içeriği doldurur. Palet, landing
-sitesinin Aurora Axis token'larını (styles.css :root) aynalar; landing repo'daki
-backend/src/email_templates.py kabuğunun birebir taşınmış halidir. Tüm stiller
+— tek sütun responsive kart, resmi marka kilidi (holo "A" uygulama simgesi +
+"AxisAI" adı), CTA butonu, footer'daki sosyal bağlantılar — ve e-posta-başına
+fonksiyonlar içeriği doldurur. Tasarım otoritesi mobil uygulamanın Axis Signal
+sistemidir (axisai-mobile docs/design/axis-signal/VISUAL_SYSTEM.md,
+lib/app/theme/axisai_tokens.dart): renkler AxisAiPalette'in açık/koyu
+token'larının birebir değerleridir. Eski Aurora Axis (mor/camgöbeği, "AXIS·AI")
+paleti emekliye ayrıldı (BRAND-1). Açık tema satır-içi varsayılandır; koyu tema
+`prefers-color-scheme` destekleyen istemcilerde (Apple Mail, iOS Mail) <style>
+ile gelir, desteklemeyen istemci okunaklı açık temada kalır. Tüm temel stiller
 e-posta istemcisi uyumluluğu için satır içidir. Her şablon (subject, html, text)
 döndürür; düz-metin alternatifi HTML ile daima birlikte gider.
 
@@ -24,18 +29,43 @@ tests/test_auth_email_language.py eşitliklerini zorlar. Dil yalnızca sunumu
 (konu, gövde, <html lang>) değiştirir; kod, bağlantı ve alıcı dilden bağımsızdır.
 
 Güvenlik: doğrulama/sıfırlama kodları YALNIZCA gövdede yer alır, konu satırında
-ASLA bulunmaz (konu satırları loglanır). Kullanıcıdan gelen `name` HTML-escape
-edilir (Cognito 'name' attribute'u kullanıcı girdisidir).
+ASLA bulunmaz (konu satırları loglanır). Gizli önizleme metni (preheader) kodu
+TAŞIMAZ ve gelen kutusu önizlemesini doldurur, böylece kod bildirim/önizleme
+satırına düşmez. Kullanıcıdan gelen `name` HTML-escape edilir (Cognito 'name'
+attribute'u kullanıcı girdisidir). Tek uzak kaynak, landing'in zaten herkese
+açık sunduğu statik uygulama simgesidir — alıcıya özel parametre taşımaz
+(izleme pikseli DEĞİLDİR); görsel kapalı istemcide ad metin olarak kalır.
 """
 import html as _html
 import os
 
-_BG = "#07070D"        # --ax-bg
-_SURFACE = "#0F1020"   # --ax-surface
-_BORDER = "#23264a"
-_TEXT = "#ECEDF6"      # --ax-text
-_MUTED = "#9AA0C0"     # --ax-text-2
-_VIOLET = "#7C5CFF"    # --ax-violet
+# Axis Signal token'ları (AxisAiPalette.light / .dark).
+_CANVAS = "#F3F5FA"        # canvas
+_SURFACE = "#FFFFFF"       # surface.1 — kart
+_SURFACE_2 = "#EEF1F8"     # surface.2 — kod kutusu
+_BORDER = "#DCE1EC"        # border.subtle
+_TEXT = "#0A1020"          # text.primary
+_MUTED = "#4A5470"         # text.secondary
+_AXIS = "#2A62F5"          # brand.axis — TEK birincil dolgu (beyaz metin 5.04:1)
+_AXIS_TEXT = "#2453D9"     # brand.axisText — bağlantılar
+_ON_AXIS = "#FFFFFF"       # onAxis
+
+_DARK_CANVAS = "#080D1A"
+_DARK_SURFACE = "#0F1628"
+_DARK_SURFACE_2 = "#151E33"
+_DARK_BORDER = "#222D47"
+_DARK_TEXT = "#F1F4FB"
+_DARK_MUTED = "#A4AECA"
+_DARK_AXIS_TEXT = "#84A9FF"
+
+# Okuma yüzü platform fontudur (mobil: SF); uzak web fontu YOK (Resend uyarısı).
+_FONT = ("-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,"
+         "sans-serif")
+_MONO = "'SF Mono',SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace"
+
+# Resmi işaret: App Store simgesi (#91) ile aynı holo "A" — landing'in favicon/
+# og:image olarak sunduğu statik dosya. Yeniden renklendirilmez, kırpılmaz.
+BRAND_MARK_URL = "https://www.axisaiapp.com/icon-holo.png"
 
 # Yalnızca landing footer'ındaki gerçek profiller (LinkedIn orada hâlâ '#').
 _SOCIAL_LINKS = (
@@ -57,43 +87,119 @@ def _lang(language):
     return language if language in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
 
 
+# Koyu tema + dar ekran iyileştirmeleri. Ayrı <style> blokları: Gmail
+# desteklemediği bir seçici gördüğünde bütün bloğu atabilir, öznitelik
+# seçicileri (Apple veri dedektörleri) bu yüzden kendi bloğundadır.
+_HEAD_STYLES = (
+    '<style>'
+    ':root{color-scheme:light dark;supported-color-schemes:light dark}'
+    '@media (prefers-color-scheme:dark){'
+    '.ax-canvas{background-color:%(d_canvas)s!important}'
+    '.ax-card{background-color:%(d_surface)s!important;border-color:%(d_border)s!important}'
+    '.ax-code{background-color:%(d_surface_2)s!important;border-color:%(d_border)s!important}'
+    '.ax-rule{border-color:%(d_border)s!important}'
+    '.ax-text{color:%(d_text)s!important}'
+    '.ax-muted{color:%(d_muted)s!important}'
+    '.ax-link{color:%(d_axis_text)s!important}'
+    '}'
+    '@media only screen and (max-width:600px){'
+    '.ax-pad{padding-left:24px!important;padding-right:24px!important}'
+    '.ax-h1{font-size:22px!important;line-height:28px!important}'
+    '}'
+    '</style>'
+    '<style>'
+    'a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important;'
+    'font-size:inherit!important;font-family:inherit!important;'
+    'font-weight:inherit!important;line-height:inherit!important}'
+    '</style>'
+) % {
+    "d_canvas": _DARK_CANVAS, "d_surface": _DARK_SURFACE,
+    "d_surface_2": _DARK_SURFACE_2, "d_border": _DARK_BORDER,
+    "d_text": _DARK_TEXT, "d_muted": _DARK_MUTED, "d_axis_text": _DARK_AXIS_TEXT,
+}
+
+
+def _preheader(text):
+    """Gizli gelen-kutusu önizlemesi; dolgu, gövdenin (kodun) önizlemeye sızmasını önler."""
+    if not text:
+        return ""
+    return (
+        '<div style="display:none;max-height:0;max-width:0;overflow:hidden;'
+        'mso-hide:all;opacity:0;font-size:1px;line-height:1px;color:%s">'
+        '%s%s</div>' % (_CANVAS, text, "&#847;&zwnj;&nbsp;" * 90)
+    )
+
+
 def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
-                         language=DEFAULT_LANGUAGE):
+                         language=DEFAULT_LANGUAGE, preheader=""):
     """İçeriği ortak AxisAI kabuğuna sar; tam HTML dokümanı döndürür."""
     social = " &nbsp;&middot;&nbsp; ".join(
-        '<a href="%s" style="color:%s;text-decoration:underline">%s</a>' % (url, _MUTED, name)
+        '<a class="ax-muted" href="%s" style="color:%s;text-decoration:underline">%s</a>'
+        % (url, _MUTED, name)
         for name, url in _SOCIAL_LINKS
     )
     return (
         '<!DOCTYPE html>'
-        '<html lang="%(lang)s"><body style="margin:0;padding:0;background:%(bg)s">'
-        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"'
-        ' style="background:%(bg)s;padding:32px 16px"><tr><td align="center">'
-        '<table role="presentation" width="100%%" cellpadding="0" cellspacing="0"'
-        ' style="max-width:560px;background:%(surface)s;border:1px solid %(border)s;'
-        'border-radius:16px;font-family:Arial,Helvetica,sans-serif">'
-        '<tr><td style="padding:32px 32px 8px">'
-        '<div style="font-size:18px;font-weight:bold;letter-spacing:2px;color:%(text)s">'
-        'AXIS<span style="color:%(violet)s">AI</span></div>'
+        '<html lang="%(lang)s"><head>'
+        '<meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="x-apple-disable-message-reformatting">'
+        '<meta name="format-detection" content="telephone=no,date=no,address=no,email=no">'
+        '<meta name="color-scheme" content="light dark">'
+        '<meta name="supported-color-schemes" content="light dark">'
+        '<title>AxisAI</title>'
+        '%(head_styles)s'
+        '</head>'
+        '<body class="ax-canvas" style="margin:0;padding:0;background-color:%(canvas)s;'
+        '-webkit-text-size-adjust:100%%">'
+        '%(preheader)s'
+        '<table role="presentation" class="ax-canvas" width="100%%" cellpadding="0"'
+        ' cellspacing="0" border="0" bgcolor="%(canvas)s" style="background-color:%(canvas)s">'
+        '<tr><td align="center" style="padding:32px 12px">'
+        '<!--[if mso]><table role="presentation" width="560" cellpadding="0" cellspacing="0"'
+        ' border="0"><tr><td><![endif]-->'
+        '<table role="presentation" class="ax-card" width="100%%" cellpadding="0"'
+        ' cellspacing="0" border="0" bgcolor="%(surface)s" style="max-width:560px;'
+        'background-color:%(surface)s;border:1px solid %(border)s;border-radius:24px;'
+        'font-family:%(font)s">'
+        # Marka kilidi: işaret + ad, aradaki boşluk işaretin 0.2 katı (BrandMark).
+        '<tr><td class="ax-pad" style="padding:32px 32px 8px">'
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
+        '<td style="vertical-align:middle;padding:0 8px 0 0">'
+        '<img src="%(mark)s" width="40" height="40" alt=""'
+        ' style="display:block;width:40px;height:40px;border:0;outline:none"></td>'
+        '<td class="ax-text" style="vertical-align:middle;font-family:%(font)s;'
+        'font-size:19px;line-height:24px;font-weight:700;letter-spacing:-0.2px;'
+        'color:%(text)s">AxisAI</td>'
+        '</tr></table>'
         '</td></tr>'
-        '<tr><td style="padding:16px 32px 8px;color:%(text)s;font-size:15px;line-height:1.6">'
+        '<tr><td class="ax-pad ax-text" style="padding:24px 32px 8px;color:%(text)s;'
+        'font-family:%(font)s;font-size:16px;line-height:24px">'
         '%(body)s'
         '</td></tr>'
-        '<tr><td style="padding:8px 32px 32px">'
-        '<a href="%(cta_url)s" style="display:inline-block;background:%(violet)s;'
-        'color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;'
-        'padding:12px 24px;border-radius:10px">%(cta_label)s</a>'
+        '<tr><td class="ax-pad" style="padding:8px 32px 32px">'
+        '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
+        '<td bgcolor="%(axis)s" style="border-radius:16px;background-color:%(axis)s">'
+        '<a href="%(cta_url)s" style="display:inline-block;padding:15px 28px;'
+        'font-family:%(font)s;font-size:16px;line-height:22px;font-weight:600;'
+        'color:%(on_axis)s;text-decoration:none;border-radius:16px">%(cta_label)s</a>'
+        '</td></tr></table>'
         '</td></tr>'
-        '<tr><td style="padding:20px 32px 28px;border-top:1px solid %(border)s;'
-        'color:%(muted)s;font-size:12px;line-height:1.8">'
+        '<tr><td class="ax-pad ax-muted ax-rule" style="padding:24px 32px 32px;'
+        'border-top:1px solid %(border)s;color:%(muted)s;font-family:%(font)s;'
+        'font-size:13px;line-height:20px">'
         '%(footer_extra)s'
         '<div>%(social)s</div>'
-        '<div>&copy; 2026 AxisAI &middot; Find your axis.</div>'
+        '<div style="padding-top:4px">&copy; 2026 AxisAI &middot; Find your axis.</div>'
         '</td></tr>'
-        '</table></td></tr></table></body></html>'
+        '</table>'
+        '<!--[if mso]></td></tr></table><![endif]-->'
+        '</td></tr></table></body></html>'
     ) % {
-        "bg": _BG, "surface": _SURFACE, "border": _BORDER, "text": _TEXT,
-        "muted": _MUTED, "violet": _VIOLET, "body": body_html,
+        "canvas": _CANVAS, "surface": _SURFACE, "border": _BORDER, "text": _TEXT,
+        "muted": _MUTED, "axis": _AXIS, "on_axis": _ON_AXIS, "font": _FONT,
+        "mark": BRAND_MARK_URL, "head_styles": _HEAD_STYLES,
+        "preheader": _preheader(preheader), "body": body_html,
         "cta_label": cta_label, "cta_url": cta_url,
         "footer_extra": footer_extra_html, "social": social,
         "lang": _lang(language),
@@ -101,17 +207,27 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
 
 
 def _code_block(code, label):
-    """Tek kullanımlık kodu belirgin göster (waitlist member-code kutusu deseni)."""
+    """Tek kullanımlık kodu belirgin göster: büyük, aralıklı, eş-aralıklı rakamlar."""
     return (
-        '<div style="margin:0 0 16px;background:%(bg)s;border:1px solid %(border)s;'
-        'border-radius:10px;padding:14px 18px">'
-        '<div style="color:%(muted)s;font-size:11px;letter-spacing:1px;'
-        'text-transform:uppercase">%(label)s</div>'
-        '<div style="font-family:Consolas,Menlo,monospace;font-size:28px;'
-        'letter-spacing:6px;font-weight:bold;color:%(violet)s">%(code)s</div>'
+        '<div class="ax-code" style="margin:0 0 20px;background-color:%(surface_2)s;'
+        'border:1px solid %(border)s;border-radius:16px;padding:16px 20px;'
+        'text-align:center">'
+        '<div class="ax-muted" style="color:%(muted)s;font-size:13px;line-height:18px;'
+        'font-weight:500">%(label)s</div>'
+        # padding-left = letter-spacing: son rakamın ardındaki boşluğu dengeler.
+        '<div class="ax-text" style="padding:6px 0 0 8px;font-family:%(mono)s;font-size:32px;'
+        'line-height:40px;letter-spacing:8px;font-weight:700;color:%(text)s">%(code)s</div>'
         '</div>'
-    ) % {"bg": _BG, "border": _BORDER, "muted": _MUTED, "violet": _VIOLET,
-         "label": label, "code": _html.escape(str(code))}
+    ) % {"surface_2": _SURFACE_2, "border": _BORDER, "muted": _MUTED, "text": _TEXT,
+         "mono": _MONO, "label": label, "code": _html.escape(str(code))}
+
+
+_H1 = ('<h1 class="ax-text ax-h1" style="margin:0 0 12px;font-family:%s;font-size:24px;'
+       'line-height:30px;font-weight:700;letter-spacing:-0.2px;color:%s">%%s</h1>'
+       % (_FONT, _TEXT))
+_P = '<p style="margin:0 0 20px">%s</p>'
+_NOTE = ('<p class="ax-muted" style="margin:0 0 8px;color:%s;font-size:14px;'
+         'line-height:20px">%%s</p>' % _MUTED)
 
 
 # Dil-başına metinler. "tr" değerleri LP-14 öncesi metinlerin birebir aynısıdır;
@@ -258,16 +374,11 @@ def _code_email(kind, name, code, language, path):
     copy = _COPY[lang][kind]
     greet = _greeting(name, lang)
     text = copy["text"] % {"greet": greet, "code": code, "base": APP_BASE_URL}
-    body_html = (
-        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">%(title)s</h1>'
-        '<p style="margin:0 0 16px">%(greet)s %(intro)s</p>'
-        '%(code_block)s'
-        '<p style="margin:0 0 8px;color:%(muted)s;font-size:13px">%(note)s</p>'
-    ) % {"text": _TEXT, "muted": _MUTED, "greet": greet, "title": copy["title"],
-         "intro": copy["intro"], "note": copy["note"],
-         "code_block": _code_block(code, copy["code_label"])}
+    lead = "%s %s" % (greet, copy["intro"])
+    body_html = (_H1 % copy["title"] + _P % lead
+                 + _code_block(code, copy["code_label"]) + _NOTE % copy["note"])
     html = render_branded_email(body_html, copy["cta"], APP_BASE_URL + path,
-                                language=lang)
+                                language=lang, preheader=lead)
     return copy["subject"], html, text
 
 
@@ -289,13 +400,10 @@ def welcome_email(name, language=None):
     safe = _html.escape(raw)
     subject = copy["subject_named"] % raw if raw else copy["subject"]
     text = copy["text"] % {"greet": _greeting(name, lang), "base": APP_BASE_URL}
-    body_html = (
-        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">%(title)s</h1>'
-        '<p style="margin:0 0 16px">%(intro)s</p>'
-    ) % {"text": _TEXT, "intro": copy["intro"],
-         "title": copy["title"] % {"comma_name": (", " + safe) if safe else ""}}
+    title = copy["title"] % {"comma_name": (", " + safe) if safe else ""}
+    body_html = _H1 % title + _P % copy["intro"]
     html = render_branded_email(body_html, copy["cta"], APP_BASE_URL + "/login",
-                                language=lang)
+                                language=lang, preheader=copy["intro"])
     return subject, html, text
 
 
@@ -305,18 +413,15 @@ def password_changed_email(name, language=None):
     copy = _COPY[lang]["password_changed"]
     greet = _greeting(name, lang)
     text = copy["text"] % {"greet": greet, "base": APP_BASE_URL}
-    body_html = (
-        '<h1 style="margin:0 0 12px;font-size:22px;color:%(text)s">%(title)s</h1>'
-        '<p style="margin:0 0 16px">%(greet)s %(intro)s</p>'
-        '<p style="margin:0 0 8px;color:%(muted)s;font-size:13px">%(note)s</p>'
-    ) % {"text": _TEXT, "muted": _MUTED, "greet": greet, "title": copy["title"],
-         "intro": copy["intro"], "note": copy["note"]}
+    lead = "%s %s" % (greet, copy["intro"])
+    body_html = _H1 % copy["title"] + _P % lead + _NOTE % copy["note"]
     footer_extra = (
-        '<div>%s <a href="mailto:hello@axisaiapp.com" '
-        'style="color:%s;text-decoration:underline">hello@axisaiapp.com</a></div>'
-        % (copy["support"], _MUTED)
+        '<div style="padding-bottom:4px">%s <a class="ax-link" '
+        'href="mailto:hello@axisaiapp.com" style="color:%s;text-decoration:underline">'
+        'hello@axisaiapp.com</a></div>'
+        % (copy["support"], _AXIS_TEXT)
     )
     html = render_branded_email(body_html, copy["cta"],
                                 APP_BASE_URL + "/forgot-password", footer_extra,
-                                language=lang)
+                                language=lang, preheader=lead)
     return copy["subject"], html, text
