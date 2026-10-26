@@ -409,7 +409,26 @@ def test_nested_consent_refusal_cannot_be_swallowed_into_partial_success(door,mo
     with E.scope(action):
         with pytest.raises(C.ConsentDenied):
             invoke(door,'nutrition',request(2000,1000),sdk=lambda **kw:sdk.append(kw))
-        with pytest.raises(E.ExecutionRefused):action.success()
+        with pytest.raises(C.ConsentDenied):action.success()
     action.finish()
     assert not sdk and Hold.query.one().physical_attempts==0
     assert Hold.query.one().billing_evidence=='CONFIRMED_NOT_BILLED'
+
+
+@pytest.mark.parametrize('status,code',[(403,'AI_CONSENT_REQUIRED'),(503,'AI_CONSENT_AUTHORITY_UNAVAILABLE')])
+def test_swallowed_consent_refusal_preserves_original_customer_envelope(app,door,monkeypatch,status,code):
+    from flask import g
+    from types import SimpleNamespace
+    def denied(*a,**kw):raise C.ConsentDenied(code,status)
+    monkeypatch.setattr(C,'dispatch',denied)
+    @app.post('/synthetic/consent-partial')
+    def operation():
+        g.mobile_user=SimpleNamespace(id=door)
+        with E.logical_action(door,'qr_menu',{},key='preserve-consent-error'):
+            try:invoke(door,'nutrition',request(2000,1000))
+            except C.ConsentDenied:pass
+            return {'misleading_partial':'must not publish'}
+    response=app.test_client().post('/synthetic/consent-partial')
+    assert response.status_code==status and response.json['error']['code']==code
+    assert response.json['error']['retryable'] is (status==503)
+    assert 'misleading_partial' not in response.json

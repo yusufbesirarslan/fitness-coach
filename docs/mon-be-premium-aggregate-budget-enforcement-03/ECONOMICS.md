@@ -60,7 +60,7 @@ Actual Annual exposure is 52/53/54 weekly buckets, not six resets in every month
 
 ## FX and refund sensitivity
 
-`results.json` includes 120 combinations: FX 45/49.654/55/60/65, refunds 1%/3%/8%, Monthly/Annual, Apple 15%/30%, and five/six-week exposure. Expected current-routing contribution ranges from $0.20 to $3.17 per subscriber month across those inherited scenarios. All full-use five/six-week 30% cases remain negative. Annual export evidence, realized retry/UNKNOWN frequency, subscription activity and payload distribution remain decision gaps. No new FX feed, ASC export, live provider benchmark or financial forecast was invented.
+`model/fx_refund_sensitivity.csv` includes 120 combinations: FX 45/49.654/55/60/65, refunds 1%/3%/8%, Monthly/Annual, Apple 15%/30%, and five/six-week exposure. Expected current-routing contribution ranges from $0.20 to $3.17 per subscriber month across those inherited scenarios. All full-use five/six-week 30% cases remain negative. Annual export evidence, realized retry/UNKNOWN frequency, subscription activity and payload distribution remain decision gaps. No new FX feed, ASC export, live provider benchmark or financial forecast was invented.
 
 ## Decision
 

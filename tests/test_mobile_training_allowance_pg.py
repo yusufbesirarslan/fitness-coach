@@ -619,7 +619,7 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["b5e7a9c1d3f0"]
+    assert script.get_heads() == ["c6f8b0d2e4a1"]
     assert len(list(script.walk_revisions())) == 59
     assert script.get_revision("a4d6f8b0c2e1").down_revision == "d7e3a9c1f5b8"
     assert script.get_revision("d7e3a9c1f5b8").down_revision == "f9c6d0a1b2e3"
@@ -656,7 +656,7 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
         upgrade()
         check()  # model/schema comparison against the actual full chain
         with db.engine.connect() as conn:
-            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "b5e7a9c1d3f0"
+            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "c6f8b0d2e4a1"
             for name, (columns, rows) in before.items():
                 projection = ','.join('"' + c + '"' for c in columns)
                 assert conn.exec_driver_sql(f'SELECT {projection} FROM "{name}"').all() == rows

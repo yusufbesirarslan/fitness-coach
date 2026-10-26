@@ -6,6 +6,7 @@ unit costs and population assumptions. Means are never clipped to a refusal cap:
 a rejected answer is not a cheaper successful answer. All values are USD.
 """
 import ast
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -75,7 +76,10 @@ for fx in [45,49.654,55,60,65]:
      sensitivity.append(dict(fx=fx,refund=refund,plan=plan,commission=commission,weeks=weeks,
        proceeds_month=rev,expected_contribution=rev-expected,full_contribution=rev-cost,
        full_margin_pct=100*(rev-cost)/rev))
-result['fx_refund_sensitivity']=sensitivity
+result['fx_refund_sensitivity_file']='fx_refund_sensitivity.csv'
+with (HERE/'fx_refund_sensitivity.csv').open('w',newline='') as stream:
+    writer=csv.DictWriter(stream,fieldnames=list(sensitivity[0]))
+    writer.writeheader();writer.writerows(sensitivity)
 assert len(sensitivity)==120
 assert abs(proceeds(399.99,1,.15)-269.16/49.654*.97) < 1e-12
 assert all(v['six_week_upper_usd']>v['five_week_upper_usd'] for v in tails.values())

@@ -423,9 +423,9 @@ def admit(*, feature, provider, payload, deadline=None, tool_round=None,
                     deadline=deadline, tool_round=tool_round, reduce=reduce,
                     gate=gate, charge=charge) as admission:
             yield admission
-    except (ai_consent.ConsentDenied, ai_spend_guard.AISpendLimitExceeded):
+    except (ai_consent.ConsentDenied, ai_spend_guard.AISpendLimitExceeded) as error:
         from app.services.ai_allowances import execution as allowance_execution
-        allowance_execution.provider_refused()
+        allowance_execution.provider_refused(error)
         raise
 
 

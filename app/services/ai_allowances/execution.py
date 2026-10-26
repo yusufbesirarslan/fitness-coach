@@ -160,13 +160,14 @@ def canonical_within(owner):
         _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
 
 
-def provider_refused():
+def provider_refused(error):
     """A swallowed D1/admission refusal cannot publish a partial action."""
     action = _ACTIVE.get()
     if action is not None:
         with action._lock:
             if action.refusal is None:
-                action.refusal = ExecutionRefused('AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE')
+                action.refusal = (error if isinstance(error, ai_consent.ConsentDenied)
+                    else ExecutionRefused('AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE'))
 
 
 def current_action():
@@ -435,6 +436,9 @@ def before_attempt(owner, feature, *, provider, payload):
 def install(app):
     """Recover typed refusals even where legacy routes catch provider errors."""
     def response(error):
+        if isinstance(error, ai_consent.ConsentDenied):
+            from app.blueprints.ai_consent import consent_error_response
+            return consent_error_response(error)
         from app.blueprints.mobile_api import mobile_error
         message = ("This AI request could not be completed. Try a simpler request."
                    if error.code == 'AI_ACTION_BUDGET_EXHAUSTED'
