@@ -55,9 +55,10 @@ def sh(*args, check=True, timeout=600, cwd=None, env=None):
     return proc
 
 
-def helper(deploy, *args, main=MAIN):
+def helper(deploy, *args, main=MAIN, apple_files="0"):
     proc = sh(sys.executable, str(HELPER), "--deploy-dir", str(deploy),
-              "--main-project", main, *args, check=False, timeout=900)
+              "--main-project", main, *args, check=False, timeout=900,
+              env={**os.environ, "AXISAI_WEB_SLOT_APPLE_FILES": apple_files})
     try:
         payload = json.loads(proc.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -146,6 +147,7 @@ def stack(tmp_path_factory):
     shutil.copy(ROOT / "docker-compose.web-slot.yml", deploy)
     for slot in ("blue", "green"):
         shutil.copy(ROOT / f"deploy/compose/web-slot-{slot}.yml", deploy / "deploy/compose")
+    shutil.copy(ROOT / "deploy/compose/web-slot-apple-files.yml", deploy / "deploy/compose")
     key = base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip("=")
     (deploy / ".env").write_text("\n".join([
         "SECRET_KEY=r6b-ci-only-secret",
@@ -308,3 +310,151 @@ def test_stop_grace_lets_gunicorn_drain_instead_of_sigkill(stack):
     state = inspect(container["Id"])["State"]
     assert state["ExitCode"] != 137 and not state["OOMKilled"], state
     assert elapsed < 45
+
+
+def test_apple_files_in_real_blue_green_containers(stack, tmp_path):
+    """Disposable Linux host only: real binds, appuser reads, root cannot write.
+
+    Credentials are generated here; no Apple traffic or real credentials.
+    Keep this after the default-OFF lifecycle above, which leaves blue stopped.
+    """
+    from datetime import datetime, timedelta, timezone
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+    from scripts import web_slot_runtime as rt
+
+    rev, deploy = stack["revision"], stack["deploy"]
+    previous = sh("git", "rev-parse", "HEAD^", cwd=ROOT).stdout.strip()
+    previous_context = tmp_path / "previous-context"
+    previous_context.mkdir()
+    previous_archive = tmp_path / "previous.tar"
+    sh("git", "archive", "--format=tar", previous, "-o", str(previous_archive), cwd=ROOT)
+    with tarfile.open(previous_archive) as tar:
+        tar.extractall(previous_context, filter="data")
+    previous_image = f"axisai-web:{previous}"
+    sh("docker", "build", "--build-arg", f"BUILD_REVISION={previous}",
+       "-t", previous_image, str(previous_context), timeout=1200)
+    source = rt.APPLE_HOST_ROOT / rev
+    previous_source = rt.APPLE_HOST_ROOT / previous
+    # Never overwrite preexisting material, even on a mistakenly selected host.
+    assert all(not p.exists() and not p.is_symlink() for p in (source, previous_source))
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "R6 synthetic only")])
+    now = datetime.now(timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name)
+            .public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1))
+            .not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256()).public_bytes(serialization.Encoding.DER))
+    payloads = {"private-key.p8": key.private_bytes(serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8, serialization.NoEncryption()),
+                "root-g2.cer": cert, "root-g3.cer": cert}
+    for filename, data in payloads.items():
+        (tmp_path / filename).write_bytes(data)
+
+    def call(*args, mode="1"):
+        return helper(deploy, *args, apple_files=mode)
+
+    def install(filename, directory=source):
+        sh("sudo", "-n", "install", "-o", "0", "-g",
+           "10001" if filename == "private-key.p8" else "0", "-m",
+           "0440" if filename == "private-key.p8" else "0444",
+           str(tmp_path / filename), str(directory / filename))
+
+    assert call("remove", "--slot", "blue", "--expected-revision", rev)[0] == 0
+    try:
+        sh("sudo", "-n", "install", "-d", "-o", "0", "-g", "0", "-m", "0755", str(source))
+        sh("sudo", "-n", "install", "-d", "-o", "0", "-g", "0", "-m", "0755", str(previous_source))
+        for filename in payloads:
+            install(filename, previous_source)
+        # Missing and unreadable files fail before any container is created.
+        assert call("start", "--slot", "blue", "--revision", rev)[0] == 3
+        for filename in payloads:
+            install(filename)
+        sh("sudo", "-n", "chmod", "0400", str(source / "private-key.p8"))
+        assert call("start", "--slot", "blue", "--revision", rev)[0] == 3
+        sh("sudo", "-n", "rm", "--", str(source / "private-key.p8"))
+        sh("sudo", "-n", "ln", "-s", str(tmp_path / "private-key.p8"), str(source / "private-key.p8"))
+        assert call("start", "--slot", "blue", "--revision", rev)[0] == 3
+        sh("sudo", "-n", "rm", "--", str(source / "private-key.p8"))
+        install("private-key.p8")
+        # A non-root writer cannot substitute a checked path before creation.
+        attack = sh("python", "-c", "import os,sys; os.replace(sys.argv[1],sys.argv[2])",
+                    str(tmp_path / "private-key.p8"), str(source / "private-key.p8"), check=False)
+        assert attack.returncode != 0
+        for slot, slot_rev in (("blue", previous), ("green", rev)):
+            code, out = call("start", "--slot", slot, "--revision", slot_rev)
+            assert code == 0, out
+            assert call("verify", "--slot", slot, "--revision", slot_rev)[0] == 0
+            container = slot_container(slot)
+            rt.SlotRuntime(deploy, environ={rt.APPLE_FILES_SWITCH: "1"})._validate_container_files(container, slot_rev)
+            # Read every byte inside the real image as its default appuser;
+            # parse the synthetic key and DER roots, printing no file data.
+            probe = '''
+import os
+from pathlib import Path
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+assert os.getuid() == 10001 and os.getgid() == 10001
+key = Path(os.environ['APPLE_PRIVATE_KEY_PATH']).read_bytes()
+serialization.load_pem_private_key(key, password=None)
+for path in os.environ['APPLE_ROOT_CERTIFICATE_PATHS'].split(':'):
+    x509.load_der_x509_certificate(Path(path).read_bytes())
+print('synthetic-files-readable')
+'''
+            assert sh("docker", "exec", container["Id"], "python", "-c", probe).stdout.strip() == "synthetic-files-readable"
+            # Read-only mount enforcement, even for container root.
+            deny_write = '''
+import errno
+from pathlib import Path
+for name in ('private-key.p8', 'root-g2.cer', 'root-g3.cer'):
+    try:
+        Path('/run/secrets/axisai/apple', name).open('wb')
+    except OSError as exc:
+        assert exc.errno == errno.EROFS
+    else:
+        raise AssertionError('writable credential mount')
+'''
+            sh("docker", "exec", "--user", "0", container["Id"], "python", "-c", deny_write)
+            assert call("verify", "--slot", slot, "--revision", slot_rev, mode="0")[0] == 3
+            assert call("verify", "--slot", slot, "--revision", slot_rev,
+                        "--allow-existing-files", mode="0")[0] == 0
+        # Candidate removal leaves the approved previous slot and its files.
+        assert call("remove", "--slot", "green", "--expected-revision", rev)[0] == 0
+        assert call("verify", "--slot", "blue", "--revision", previous,
+                    "--allow-existing-files", mode="0")[0] == 0
+        assert call("remove", "--slot", "blue", "--expected-revision", previous)[0] == 0
+        # Malformed bytes pass metadata admission by design. Startup with
+        # subscription flags OFF remains healthy; adapter initialization fails
+        # closed locally before any Apple request. Health is not key validity.
+        (tmp_path / "private-key.p8").write_bytes(b"R6 deliberately malformed synthetic key")
+        install("private-key.p8")
+        assert call("start", "--slot", "blue", "--revision", rev)[0] == 0
+        assert call("verify", "--slot", "blue", "--revision", rev)[0] == 0
+        malformed = '''
+import os
+from app.services.apple_subscriptions import AppleAdapter, SubscriptionError
+config = dict(APPLE_SUBSCRIPTION_ENVIRONMENT='Sandbox', APPLE_BUNDLE_ID='synthetic.r6',
+    APPLE_APP_ID=1, APPLE_MONTHLY_PRODUCT_ID='month', APPLE_ANNUAL_PRODUCT_ID='year',
+    APPLE_SUBSCRIPTION_GROUP_ID='group', APPLE_KEY_ID='dummy', APPLE_ISSUER_ID='dummy',
+    APPLE_PRIVATE_KEY_PATH=os.environ['APPLE_PRIVATE_KEY_PATH'],
+    APPLE_ROOT_CERTIFICATE_PATHS=os.environ['APPLE_ROOT_CERTIFICATE_PATHS'].split(':'))
+try:
+    AppleAdapter(config)
+except SubscriptionError as exc:
+    assert (exc.code, exc.status) == ('SUBSCRIPTION_NOT_CONFIGURED', 503)
+else:
+    raise AssertionError('malformed key accepted')
+print('malformed-key-fails-closed')
+'''
+        assert sh("docker", "exec", slot_container("blue")["Id"], "python", "-c", malformed).stdout.strip() == "malformed-key-fails-closed"
+    finally:
+        for slot in ("blue", "green"):
+            call("remove", "--slot", slot, "--expected-revision", rev)
+        call("remove", "--slot", "blue", "--expected-revision", previous)
+        # Delete only the exact synthetic revision directories created above.
+        sh("sudo", "-n", "rm", "-rf", "--", str(source), str(previous_source))
+        sh("docker", "rmi", previous_image, check=False)

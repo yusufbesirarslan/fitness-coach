@@ -294,6 +294,17 @@ def validate_rendered(doc, slot, revision, network, *, apple_files=False):
     if set(services) != {SERVICE}:
         problems.append("services must be exactly {web}")
     web = services.get(SERVICE) or {}
+    # Fail closed for implicit mounts (e.g. use_api_socket), lifecycle hooks,
+    # changed users/commands and future Compose features. Only the archived
+    # slot definitions' rendered fields are part of this runtime contract.
+    allowed_web_fields = {"image", "pull_policy", "restart", "mem_limit",
+                          "stop_grace_period", "stop_signal", "env_file",
+                          "environment", "logging", "networks", "ports", "volumes",
+                          "command", "entrypoint"}
+    if set(web) - allowed_web_fields:
+        problems.append("unapproved service fields")
+    if web.get("command") is not None or web.get("entrypoint") is not None:
+        problems.append("unapproved service fields: command/entrypoint")
     if web.get("image") != slot_image(revision):
         problems.append("image")
     if web.get("pull_policy") != "never":

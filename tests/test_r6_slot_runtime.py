@@ -717,6 +717,21 @@ def test_apple_mounts_require_explicit_opt_in():
         rt.SlotRuntime(Path.cwd(), environ={rt.APPLE_FILES_SWITCH: "yes"})
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("field,value", [
+    ("use_api_socket", True), ("credential_spec", {"file": "/etc/shadow"}),
+    ("post_start", [{"command": "cat /etc/shadow", "user": "root"}]),
+    ("user", "root"), ("entrypoint", ["sh"]), ("runtime", "unapproved"),
+    ("develop", {"watch": [{"path": "/etc", "action": "sync", "target": "/host"}]}),
+    ("future_implicit_mount", True),
+])
+def test_implicit_file_access_and_unapproved_service_fields_fail_closed(enabled, field, value):
+    doc = _apple_doc() if enabled else _rendered("green", REV_A)
+    doc["services"]["web"][field] = value
+    with pytest.raises(rt.Refused, match="unapproved service fields"):
+        rt.validate_rendered(doc, "green", REV_A, "fitness-coach_default", apple_files=enabled)
+
+
 def _apple_container(revision=REV_A):
     container = _container("green", revision)
     container["Config"]["Env"] += [f"{k}={v}" for k, v in rt.apple_environment().items()]

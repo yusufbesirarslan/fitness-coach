@@ -712,3 +712,33 @@ mode, traffic authority, release identity and worker behavior are unchanged.
 
 This source change does not enable subscription flags, validate real Apple
 credentials, qualify Apple API/OCSP behavior, or authorize production access.
+
+Production operator order (requires separate production authorization):
+
+1. Merge and qualify backend Apple Dual Environment **#467** before payment
+   activation. Injection alone supplies files and does not implement #467.
+2. Provision and independently authenticate the approved key and DER roots at
+   the candidate's exact revision paths with the ownership/modes above. Keep
+   all subscription/payment flags OFF while checking mount readability.
+3. Opt in through the deployment process environment, run candidate preflight,
+   then the existing R6 transaction. It starts and verifies the candidate
+   without migrations before traffic cutover; the previous slot remains
+   available for verified rollback. Worker/Redis lifecycle is unaffected.
+4. Separately qualify Apple configuration, Sandbox/Production selection and
+   provider behavior before enabling payment flags. `/health` proves service
+   health, not valid keys, trusted roots or Apple authorization.
+
+Missing/empty files or incorrect metadata refuse a new candidate before
+container creation. Nonempty malformed bytes are intentionally outside host
+metadata validation: flags-OFF startup can remain healthy; malformed keys or
+unreadable files fail adapter initialization with
+`SUBSCRIPTION_NOT_CONFIGURED` (503), and certificate trust is checked during
+signed evidence verification. Never interpret mount success as Apple trust.
+Keep root provisioning serialized with deployment: the trusted operator must
+not rename, replace, chmod or alter revision directories/files between
+validation and container creation, or during the release/rollback window.
+Root and Docker-daemon authority are trusted; read-only binds prevent container
+writes, not privileged host writes. Rotation means provisioning a new release
+revision, verifying its candidate and cutting over; rollback verifies and
+routes back to the retained previous slot and its original revision files.
+Do not remove the previous credentials until that rollback window is closed.
