@@ -165,6 +165,26 @@ def _record(conversation, question, answer, usage=None, interrupted=False,
 
 
 def generate_answer(user_id, question, client_history=None, language="tr", handoff=None):
+    from app.services.ai_allowances import execution as meter
+    if not meter.enabled():
+        return _generate_answer(user_id, question, client_history, language, handoff)
+    err_key = moderation.validate_question(question)
+    if err_key:
+        raise ValueError(err_key)
+    command = {"question": question, "history": client_history, "language": language, "handoff": handoff}
+    with meter.logical_action(user_id, "coach", command) as action:
+        try:
+            result = _generate_answer(user_id, question, client_history, language, handoff)
+            if not result["is_error_fallback"]:
+                action.success()
+            return result
+        finally:
+            from app.services import coach_plan_tools
+            if coach_plan_tools.plan_changed_this_turn() or coach_plan_tools.proposal_created_this_turn():
+                action.success()
+
+
+def _generate_answer(user_id, question, client_history=None, language="tr", handoff=None):
     """Koç sorusu için uçtan uca modüler hat (bloklayıcı — /ask).
 
     Dönüş: {"answer": str, "is_error_fallback": bool, "conversation_id": int|None,
@@ -222,6 +242,29 @@ def generate_answer(user_id, question, client_history=None, language="tr", hando
 
 
 def stream_answer(user_id, question, client_history=None, language="tr", handoff=None):
+    from app.services.ai_allowances import execution as meter
+    if not meter.enabled():
+        yield from _stream_answer(user_id, question, client_history, language, handoff)
+        return
+    err_key = moderation.validate_question(question)
+    if err_key:
+        raise ValueError(err_key)
+    command = {"question": question, "history": client_history, "language": language, "handoff": handoff}
+    with meter.logical_action(user_id, "coach", command) as action:
+        try:
+            for event in _stream_answer(user_id, question, client_history, language, handoff):
+                if event["type"] == "delta" and event.get("text"):
+                    action.success()  # partial delivery consumes, including close
+                elif event["type"] == "done" and not event.get("is_error_fallback"):
+                    action.success()
+                yield event
+        finally:
+            from app.services import coach_plan_tools
+            if coach_plan_tools.plan_changed_this_turn() or coach_plan_tools.proposal_created_this_turn():
+                action.success()
+
+
+def _stream_answer(user_id, question, client_history=None, language="tr", handoff=None):
     """Koç sorusu için AKIŞLI hat (WS2 — /ask/stream). Olay üreticisi.
 
     Ürettiği olaylar (route bunları SSE çerçevesine sarar):

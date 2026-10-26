@@ -138,7 +138,10 @@ def _fail(what):
 # A create_all-first schema is built from CURRENT models, so it already carries
 # the delta of later expand-only revisions when this one verifies it. Only that
 # exact, documented delta is accepted (b1e4f5a6c7d8 re-verifies it itself).
-_LATER_COLUMNS = {"ai_usage_reservation": {"billing_evidence"}}
+_LATER_COLUMNS = {"ai_usage_reservation": {
+    "billing_evidence", "request_fingerprint", "physical_attempts",
+    "physical_attempt_limit", "canonical_committed",
+}}
 _LATER_NULLABLE = {"ai_usage_reservation": {"provider_billed"}}
 
 

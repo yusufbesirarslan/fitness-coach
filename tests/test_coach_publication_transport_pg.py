@@ -35,8 +35,8 @@ def pg_generation_app(monkeypatch):
     yield from _pg_generation_app.__wrapped__(monkeypatch)
 
 
-@pytest.fixture
-def server_rig(pg_generation_app):
+@pytest.fixture(params=[False, True], ids=['legacy', 'metered'])
+def server_rig(pg_generation_app, request):
     from app import consent_publication as publication
     from app.extensions import db, limiter
     from app.models import User
@@ -46,6 +46,18 @@ def server_rig(pg_generation_app):
     from consent_projection_support import publish_synthetic_texts
 
     app, owners, patch = pg_generation_app
+    if request.param:
+        from ai_allowance_support import enable_subscriptions, premium_row
+        from app.services.ai_allowances import execution
+        from app.services.ai_allowances.policy import AllowancePolicy, ScopePolicy, SUPPORTED_FEATURES
+        enable_subscriptions(app, patch)
+        app.config.update(AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED=True,
+            AI_ALLOWANCE_LEDGER_ENABLED=True, AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED=True,
+            AI_ALLOWANCE_POLICY=AllowancePolicy('synthetic-transport',
+                premium=ScopePolicy('WEEKLY', {f:2 for f in SUPPORTED_FEATURES},1)))
+        execution.install(app)
+        with app.app_context():
+            premium_row(owners[0])
     app.config.update(AI_CHAT_QUOTA_ENABLED=False, RATELIMIT_ENABLED=False)
     limiter.init_app(app)
     patch.setattr(limiter, "enabled", False)
@@ -224,8 +236,10 @@ proxy_buffering off; proxy_request_buffering off; }} }} }}
             client.settimeout(4)
             client.connect(("127.0.0.1", port))
             body = b'{"message":"synthetic question"}'
+            allowance_header = b'Idempotency-Key: synthetic-transport-action\r\n' if request.param else b''
             client.sendall(b"POST /api/v1/coach/messages HTTP/1.1\r\nHost: localhost\r\n"
                            b"Authorization: Bearer synthetic\r\nContent-Type: application/json\r\n"
+                           + allowance_header
                            + f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
             try:
                 yield client
@@ -260,8 +274,23 @@ proxy_buffering off; proxy_request_buffering off; }} }} }}
         pytest.fail("withdrawal did not reach real PostgreSQL lock wait")
 
     return SimpleNamespace(app=app, owners=owners, policy=policy, patch=patch, mutate=mutate, running=running,
+                           metered=request.param,
                            ready=ready, release=release, headers=headers,
                            closed=closed, worker=worker, wait_for_lock=wait_for_lock)
+
+
+def test_native_publication_ledger_mode(server_rig):
+    from app.models import AiUsageReservation
+    r=server_rig
+    with r.running() as client:
+        wire=receive(client)
+        assert b'200 OK' in wire and b'SYNTHETIC-' in wire
+    with r.app.app_context():
+        rows=AiUsageReservation.query.all()
+        if r.metered:
+            assert len(rows)==1 and rows[0].feature=='coach' and rows[0].state=='COMMITTED'
+        else:
+            assert rows==[]
 
 
 def receive(client):

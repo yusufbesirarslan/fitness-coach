@@ -135,6 +135,20 @@ def _rollback(key):
 # no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
+        key="AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED",
+        capability="Atomic five-family logical allowance enforcement and provider-door backstop; no unlimited Premium path.",
+        owner=_OWNER, default=False,
+        depends_on=("AI_ALLOWANCE_LEDGER_ENABLED", "AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED", "APPLE_SUBSCRIPTIONS_ENABLED"),
+        observability="Closed allowance event, feature and error codes; existing sanitized physical usage telemetry.",
+        prerequisites=("Founder-approved complete policy and Starter eligibility",
+                       "All-feature client and consent qualification; independent review and exact-head CI",
+                       "Separate staging/deployment/payment/activation approvals"),
+        success_signals=("No provider attempt without a bound logical action", "Finite Premium and owner-scoped replay"),
+        abort_signals=("Unattributed physical attempts", "Double charge or cross-account execution"),
+        rollback="Close paid AI admission before disabling enforcement. Keep ledger ON to settle existing holds. Never fall back to unlimited Premium during a paid launch.",
+        lifecycle=LIFECYCLE_BLOCKED, review_by="2026-11-01", decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="ACCOUNT_ELIGIBILITY_ENABLED",
         capability="PRIV-LAUNCH age/country declaration before registration and backend teen feature restrictions; not health or AI consent.",
         owner=_OWNER, default=False, depends_on=(),

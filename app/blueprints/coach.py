@@ -345,6 +345,12 @@ def ask_coach_stream():
     if cooling is not None:
         return cooling
 
+    from app.services.ai_allowances import execution as meter
+    if meter.enabled():
+        meter.require_ready()
+        from app.services.ai_consent import ConsentDenied
+        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+
     quota_enabled = current_app.config.get("AI_CHAT_QUOTA_ENABLED", True)
     if quota_enabled and not reserve_ai_quota(
             current_user, "chat", FREE_WEEKLY_AI_CHATS):

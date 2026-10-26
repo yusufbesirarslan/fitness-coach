@@ -360,7 +360,7 @@ def reserve(user_id, feature, idempotency_key, *, now=None):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def reserve_within(user_id, feature, idempotency_key, *, now=None):
+def reserve_within(user_id, feature, idempotency_key, *, now=None, strict_entitlement=False):
     """``reserve`` for a caller that authorizes provider dispatch in the SAME commit.
 
     The caller owns the transaction: nothing here commits or rolls back, so the
@@ -376,13 +376,131 @@ def reserve_within(user_id, feature, idempotency_key, *, now=None):
     digest = _digest(idempotency_key)
     policy = _policy()
     now = _now(now)
-    subscription = _subscription(user_id)
+    subscription = None if strict_entitlement else _subscription(user_id)
     try:
         owner = _lock_owner(user_id)
+        if strict_entitlement:
+            subscription = _dispatch_subscription(owner.id)
         if _by_digest(owner.id, digest) is not None:
             raise AllowanceError("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
         return _fresh_hold(owner, policy, subscription, feature, digest, now, bound=True)
     except SQLAlchemyError:
+        raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
+
+
+def _dispatch_subscription(user_id):
+    """Resolve after the owner lock, without expiring the caller's dirty lease."""
+    from app.models import AppleSubscription
+    for identity in list(db.session.identity_map.values()):
+        if isinstance(identity, AppleSubscription):
+            db.session.expire(identity)
+    subscription = _subscription(user_id)
+    if subscription.state != "AVAILABLE" or subscription.entitlement.get("verification_pending"):
+        raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+    return subscription
+
+
+def reserve_dispatch_within(user_id, feature, idempotency_key, fingerprint,
+                            attempt_limit, *, now=None):
+    """Bind one generic logical dispatch to the ledger in the caller's commit.
+
+    A RESERVED row with non-NULL dispatch evidence IS the durable dispatch
+    marker. Only this fresh return authorizes execution; even RELEASED keys
+    cannot execute again. Durable callers update their own lease in this same
+    transaction. No provider I/O occurs here.
+    """
+    _require_enabled()
+    feature, digest = _feature(feature), _digest(idempotency_key)
+    if (not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
+            or type(attempt_limit) is not int or not 1 <= attempt_limit <= 100):
+        raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
+    policy, now = _policy(), _now(now)
+    try:
+        owner = _lock_owner(user_id)
+        # Subscription writers serialize on this same owner row.
+        subscription = _dispatch_subscription(owner.id)
+        existing = _by_digest(user_id, digest)
+        if existing is not None:
+            if existing.feature != feature or existing.request_fingerprint != fingerprint:
+                raise AllowanceError("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
+            if existing.state == RESERVED and _utc(existing.expires_at) > now:
+                raise AllowanceError("AI_ALLOWANCE_IN_PROGRESS")
+            # A retained replay is never a second dispatch, including after
+            # hold expiry. Sweep owns expiry accounting; no hidden commit.
+            raise AllowanceError("AI_ALLOWANCE_RESERVATION_CONFLICT")
+        hold = _fresh_hold(owner, policy, subscription, feature, digest, now, bound=True)
+        row = _by_digest(user_id, digest)
+        row.request_fingerprint = fingerprint
+        row.physical_attempts, row.physical_attempt_limit = 0, attempt_limit
+        row.canonical_committed = False
+        db.session.flush()
+        return hold
+    except SQLAlchemyError:
+        raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
+
+
+def record_dispatch_attempt(user_id, reference, *, now=None):
+    """Committed evidence BEFORE each SDK entry, inside the existing D1 fence.
+
+    Intentionally no owner/entitlement/bucket lock: D1 holds User on a separate
+    connection. This one conditional reservation update cannot invert that
+    lock order. NULL/historical, terminal, expired and exhausted work refuse.
+    """
+    _require_enabled()
+    now = _now(now)
+    row = AiUsageReservation
+    try:
+        changed = db.session.execute(sa.update(row).where(
+            row.user_id == user_id, row.public_id == reference,
+            row.state == RESERVED, row.expires_at > now,
+            row.request_fingerprint.is_not(None), row.physical_attempts >= 0,
+            row.physical_attempts < row.physical_attempt_limit,
+        ).values(physical_attempts=row.physical_attempts + 1)
+          .execution_options(synchronize_session=False)).rowcount
+        if changed != 1:
+            raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+        db.session.commit()
+    except (AllowanceError, SQLAlchemyError) as error:
+        db.session.rollback()
+        if isinstance(error, AllowanceError):
+            raise
+        raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
+
+
+def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="provider_error"):
+    """Seal attempts and settle under ONE owner/reservation transaction.
+
+    D1 serializes physical entry on this same owner row. Once locked, no
+    producer can enter or append evidence until finalize commits a terminal
+    state. Its conditional pre-attempt update then refuses. Zero is therefore
+    immutable proof even when a disconnected streaming producer outlives its
+    consumer. A crash before this transaction leaves expiry to consume.
+    """
+    _require_enabled()
+    if failure_outcome not in FAILURE_OUTCOMES:
+        raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
+    try:
+        _lock_owner(user_id)
+        row = db.session.execute(sa.select(AiUsageReservation).where(
+            AiUsageReservation.user_id == user_id,
+            AiUsageReservation.public_id == reference)
+            .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+        if row is None:
+            raise AllowanceError("AI_ALLOWANCE_RESERVATION_NOT_FOUND")
+        if row.request_fingerprint is None:
+            raise AllowanceError("AI_ALLOWANCE_RESERVATION_CONFLICT")
+        if row.state != RESERVED:
+            return finalize(user_id, reference, row.outcome if row.state != EXPIRED else "provider_timeout",
+                            billing_evidence=row.billing_evidence or BILLING_UNKNOWN)
+        evidence = BILLING_CONFIRMED_NOT_BILLED if row.physical_attempts == 0 else BILLING_UNKNOWN
+        outcome = "success" if successful or row.canonical_committed is True else (
+            "refused_before_provider" if evidence == BILLING_CONFIRMED_NOT_BILLED else (
+                failure_outcome if failure_outcome != "refused_before_provider" else "provider_error"))
+        return finalize(user_id, reference, outcome, billing_evidence=evidence)
+    except (AllowanceError, SQLAlchemyError) as error:
+        db.session.rollback()
+        if isinstance(error, AllowanceError):
+            raise
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 

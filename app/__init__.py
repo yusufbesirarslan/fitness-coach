@@ -321,6 +321,8 @@ def create_app():
     register_cli(app)
     _run_startup(app, startup_mode)
     from app.consent_publication import ConsentPublication
+    from app.services.ai_allowances.execution import install as install_allowance_execution
+    install_allowance_execution(app)
     app.wsgi_app = ConsentPublication(app.wsgi_app)
     return app
 

@@ -940,7 +940,7 @@ def test_d9_the_full_alembic_chain_installs_exactly_the_reviewed_fence(migrate_e
             completion_fence.verify_fence(conn)
             # MON-02-BE-02's empty Apple tables (a4d6f8b0c2e1) follow the fence.
             assert conn.exec_driver_sql(
-                "SELECT version_num FROM alembic_version").scalar_one() == "a4d6f8b0c2e1"
+                "SELECT version_num FROM alembic_version").scalar_one() == "b5e7a9c1d3f0"
         upgrade()                                                    # repeated: no-op
         downgrade(revision="f9c6d0a1b2e3")                           # empty: drops cleanly
         with db.engine.connect() as conn:

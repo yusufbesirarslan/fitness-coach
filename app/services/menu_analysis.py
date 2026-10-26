@@ -39,6 +39,7 @@ from app.extensions import redis_client
 from app.i18n import t
 from app.models import MealLog, UserSession
 from app.services import ai_spend_guard, nutrition_pipeline
+from app.services.ai_allowances import execution as allowance_execution
 from app.services.ai_nutrition import (
     MAX_MENU_ITEMS, _cap_items_round_robin, _estimate_macros_llm,
     _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type,
@@ -362,8 +363,33 @@ def analysis_request_from_scan(scan):
 # Analysis
 # ---------------------------------------------------------------------------
 
+def require_analysis_profile(user_id):
+    """Validate deterministic targets before metering or possible paid OCR."""
+    sess = UserSession.query.filter_by(user_id=user_id).order_by(
+        UserSession.created_at.desc(), UserSession.id.desc()).first()
+    if derive_daily_macro_targets(getattr(sess, "target_calories", None), getattr(sess, "goal", None)) is None:
+        raise MenuAnalysisError("PROFILE_DATA_MISSING")
+
+
 def analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper",
                       headings=None):
+    from app.services.ai_allowances import execution as meter
+    if not meter.enabled():
+        return _analyze_menu_text(user_id, raw_text, fw_state, menu_source, headings)
+    if not raw_text or len(raw_text.replace(" ", "").replace("\n", "")) < 15:
+        raise MenuAnalysisError("EMPTY_MENU_TEXT")
+    require_analysis_profile(user_id)
+    command = {"text": raw_text, "state": fw_state, "source": menu_source, "headings": headings}
+    outer = meter.current_action() is None
+    with meter.logical_action(user_id, "qr_menu", command) as action:
+        result = _analyze_menu_text(user_id, raw_text, fw_state, menu_source, headings)
+        if outer:
+            action.success()
+        return result
+
+
+def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper",
+                       headings=None):
     """Categorize, estimate and score one menu text for `user_id`.
 
     Returns a dict: `menu_source` (raw token), `categories` (ordered
@@ -532,6 +558,7 @@ def analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper
         app = current_app._get_current_object()
 
         # Executor threads: bind the requesting account (spend guard).
+        @allowance_execution.bind_worker
         @ai_usage.bind_request
         @ai_spend_guard.bind_subject
         def _weights_job():
@@ -540,6 +567,7 @@ def analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scraper
                                                      fallback_weights=fallback_g,
                                                      return_fallbacks=True)
 
+        @allowance_execution.bind_worker
         @ai_usage.bind_request
         @ai_spend_guard.bind_subject
         def _macros_job():

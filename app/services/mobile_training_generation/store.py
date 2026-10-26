@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -198,11 +198,15 @@ def mark_attempt_possible(operation_id):
         raise ai_provider_call.AttemptEvidenceUnavailable() from None
 
 
+@contextmanager
 def attempt_evidence(operation_id, tracked):
     """Scope generation so every physical attempt is recorded first (metered only)."""
     if not tracked:
-        return nullcontext()
-    return ai_provider_call.attempt_observer(lambda: mark_attempt_possible(operation_id))
+        yield
+        return
+    with allowance.execution_scope(operation_id), ai_provider_call.attempt_observer(
+            lambda: mark_attempt_possible(operation_id)):
+        yield
 
 
 def retire_abandoned(user_id):

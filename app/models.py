@@ -137,6 +137,12 @@ class AiUsageReservation(db.Model):
     # NULL = not recorded (BE-03A callers); otherwise CONFIRMED_NOT_BILLED,
     # CONFIRMED_BILLED or UNKNOWN. ``ai_allowances.service`` is the only writer.
     billing_evidence = db.Column(db.String(24))
+    # Generic logical dispatch evidence. NULL = historical/Training authority;
+    # no backfill may turn those rows into generic execution authority.
+    request_fingerprint = db.Column(db.String(64), nullable=True)
+    physical_attempts = db.Column(db.Integer, nullable=True)
+    physical_attempt_limit = db.Column(db.Integer, nullable=True)
+    canonical_committed = db.Column(db.Boolean, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
     finalized_at = db.Column(db.DateTime(timezone=True))

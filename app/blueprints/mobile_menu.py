@@ -102,6 +102,18 @@ def nutrition_menu_analyze():
                             retry_after=error.limit.limit.get_expiry())
 
     owner = g.mobile_user
+    from app.services.ai_allowances import execution as meter
+    if meter.enabled():
+        try:
+            menu_analysis.require_analysis_profile(owner.id)
+        except menu_analysis.MenuAnalysisError as error:
+            return _fail(mobile_menu.analysis_failure(error), "analysis_rejected")
+        with meter.logical_action(owner.id, "qr_menu", {"url": url}) as action:
+            return _analyze_validated_menu(owner, url)
+    return _analyze_validated_menu(owner, url)
+
+
+def _analyze_validated_menu(owner, url):
 
     # Phase 1 — network acquisition, under the scrape permit only.
     try:
@@ -134,4 +146,6 @@ def nutrition_menu_analyze():
         "mobile_menu event=analyzed request_id=%s categories=%d candidates=%d "
         "loggable=%d", current_request_id(), len(body["categories"]),
         body["candidate_count"], body["loggable_count"])
+    from app.services.ai_allowances.execution import canonical_success
+    canonical_success()
     return jsonify(payload)

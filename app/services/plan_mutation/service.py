@@ -307,6 +307,8 @@ def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> 
 
         db.session.flush()
         mutation_id = record.public_id
+        from app.services.ai_allowances.execution import canonical_within
+        canonical_within(user_id)
         db.session.commit()
     except IntegrityError:
         # The database arbitrated, which is the only arbiter that can be trusted
@@ -424,6 +426,8 @@ def undo_last_change(user_id, context, *, expected_binding=None) -> PlanMutation
 
         db.session.flush()
         mutation_id = record.public_id
+        from app.services.ai_allowances.execution import canonical_within
+        canonical_within(user_id)
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
