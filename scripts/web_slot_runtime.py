@@ -33,6 +33,7 @@ import json
 import os
 import re
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -51,6 +52,52 @@ IMAGE_REPO = "axisai-web"
 BASE_FILE = "docker-compose.web-slot.yml"
 OVERLAY_TEMPLATE = "deploy/compose/web-slot-{slot}.yml"
 CANDIDATE_STARTUP_MODE = "read-only"
+APPLE_OVERLAY = "deploy/compose/web-slot-apple-files.yml"
+APPLE_FILES_SWITCH = "AXISAI_WEB_SLOT_APPLE_FILES"
+APPLE_HOST_ROOT = Path("/etc/axisai/apple/web-slots")
+APPLE_CONTAINER_ROOT = "/run/secrets/axisai/apple"
+APPLE_FILE_NAMES = ("private-key.p8", "root-g2.cer", "root-g3.cer")
+
+
+def apple_environment():
+    return {
+        "APPLE_PRIVATE_KEY_PATH": f"{APPLE_CONTAINER_ROOT}/private-key.p8",
+        "APPLE_ROOT_CERTIFICATE_PATHS": ":".join(
+            f"{APPLE_CONTAINER_ROOT}/{name}" for name in APPLE_FILE_NAMES[1:]),
+    }
+
+
+def apple_volumes(revision):
+    validate_revision(revision)
+    return [{"type": "bind", "source": str(APPLE_HOST_ROOT / revision / name),
+             "target": f"{APPLE_CONTAINER_ROOT}/{name}", "read_only": True,
+             "bind": {"create_host_path": False}} for name in APPLE_FILE_NAMES]
+
+
+def validate_apple_host_files(revision):
+    """Metadata only: never read, copy or log credential bytes.
+
+    Root-owned ancestors cannot be replaced by the deploy user. The key is
+    readable only by root and the image's appuser group (10001).
+    """
+    for mount in apple_volumes(revision):
+        path = Path(mount["source"])
+        try:
+            for parent in reversed(path.parents):
+                info = parent.lstat()
+                if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
+                        or info.st_mode & 0o022):
+                    raise Refused("Apple file ancestor is not a trusted directory")
+            info = path.lstat()
+            key = path.name == "private-key.p8"
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                    or info.st_nlink != 1 or info.st_size == 0
+                    or stat.S_IMODE(info.st_mode) != (0o440 if key else 0o444)
+                    or (key and info.st_gid != 10001)):
+                raise Refused("Apple file metadata violates contract")
+        except OSError:
+            raise Refused("Apple file metadata unavailable") from None
+
 # Production deploy dir is /home/ubuntu/fitness-coach and docker-compose.yml has
 # no `name:`, so the main project (and its network prefix) is the basename.
 DEFAULT_MAIN_PROJECT = "fitness-coach"
@@ -237,7 +284,7 @@ def _bytes(value):
     return None
 
 
-def validate_rendered(doc, slot, revision, network):
+def validate_rendered(doc, slot, revision, network, *, apple_files=False):
     """The rendered model must be exactly one loopback-only web slot."""
     problems = []
     project = slot_project(slot)
@@ -253,13 +300,27 @@ def validate_rendered(doc, slot, revision, network):
         problems.append("pull_policy")
     if "build" in web or "container_name" in web or "depends_on" in web:
         problems.append("build/container_name/depends_on present")
-    if web.get("volumes"):
-        problems.append("volumes present")
+    volumes = web.get("volumes") or []
+    expected = apple_volumes(revision) if apple_files else []
+    if (not isinstance(volumes, list) or len(volumes) != len(expected)
+            or any(not isinstance(mount, dict) or mount.get("read_only") is not True
+                   or (mount.get("bind") or {}).get("create_host_path") is not False
+                   or mount not in expected for mount in volumes)
+            or any(volumes.count(mount) != 1 for mount in expected)):
+        problems.append("Apple file mounts")
+    file_access_keys = ("secrets", "configs", "volumes_from", "tmpfs",
+                        "devices", "device_cgroup_rules", "privileged")
+    if any(doc.get(key) or web.get(key) for key in file_access_keys):
+        problems.append("additional file access present")
+    if doc.get("volumes"):
+        problems.append("named volumes present")
     if _bytes(web.get("mem_limit")) != SLOT_MEM_LIMIT_MIB * 1024 * 1024:
         problems.append("mem_limit")
     if web.get("stop_grace_period") != f"{STOP_GRACE_SECONDS}s":
         problems.append("stop_grace_period")
     env = web.get("environment") or {}
+    if apple_files and any(env.get(key) != value for key, value in apple_environment().items()):
+        problems.append("Apple file environment")
     if env.get("FITX_STARTUP_MODE") != CANDIDATE_STARTUP_MODE:
         problems.append("FITX_STARTUP_MODE")
     if env.get("APP_REVISION") != revision:
@@ -354,13 +415,17 @@ class SlotRuntime:
         self._http_get = http_get
         self._sleep = sleep
         self._environ = dict(os.environ if environ is None else environ)
+        switch = self._environ.get(APPLE_FILES_SWITCH, "0")
+        if switch not in ("0", "1"):
+            raise InvalidInput("Apple files switch must be 0 or 1")
+        self.apple_files = switch == "1"
 
     # docker plumbing
     def _docker(self, *args, timeout=DOCKER_TIMEOUT_SECONDS, env=None, ok=True):
         result = self._run(["docker", *args], timeout, env)
         if ok and result.returncode != 0:
             raise DockerFailed(
-                f"docker {args[0]} failed: {(result.stderr or '').strip()[:300]}")
+                f"docker {args[0]} failed (exit {result.returncode})")
         return result
 
     def _compose_env(self, revision):
@@ -372,7 +437,10 @@ class SlotRuntime:
 
     def _compose(self, slot, revision, *args, timeout=DOCKER_TIMEOUT_SECONDS):
         files = []
-        for rel in (BASE_FILE, OVERLAY_TEMPLATE.format(slot=validate_slot(slot))):
+        definitions = [BASE_FILE, OVERLAY_TEMPLATE.format(slot=validate_slot(slot))]
+        if self.apple_files:
+            definitions.append(APPLE_OVERLAY)
+        for rel in definitions:
             path = self.deploy_dir / rel
             if not path.is_file():
                 raise Refused(f"slot definition missing: {rel}")
@@ -397,7 +465,7 @@ class SlotRuntime:
         finally:
             result = None
         try:
-            validate_rendered(doc, slot, revision, self.network)
+            validate_rendered(doc, slot, revision, self.network, apple_files=self.apple_files)
         finally:
             redact_rendered_environment(doc)
         return doc
@@ -496,11 +564,30 @@ class SlotRuntime:
                     f"{INTERNAL_PORT}/tcp": [{"HostIp": LOOPBACK,
                                               "HostPort": str(slot_port(slot))}]})
 
+    def _validate_container_files(self, container, revision, *, allow_existing=False):
+        mounts = container.get("Mounts") or []
+        enabled = bool(mounts) if allow_existing else self.apple_files
+        expected = apple_volumes(revision) if enabled else []
+        actual = [{"type": m.get("Type"), "source": m.get("Source"),
+                   "target": m.get("Destination"), "read_only": m.get("RW") is False,
+                   "bind": {"create_host_path": False}} for m in mounts]
+        if (len(actual) != len(expected) or any(m not in expected for m in actual)
+                or any(actual.count(m) != 1 for m in expected)):
+            raise Refused("slot container file mounts violate contract")
+        if enabled:
+            env = dict(item.split("=", 1) for item in
+                       (container.get("Config") or {}).get("Env", []) if "=" in item)
+            if any(env.get(k) != v for k, v in apple_environment().items()):
+                raise Refused("slot container Apple paths violate contract")
+
     # lifecycle
     def preflight(self, slot, revision, host_reserve_mib):
         validate_slot(slot)
         validate_revision(revision)
-        existing = [self._describe(c) for c in self.slot_containers(slot)]
+        containers = self.slot_containers(slot)
+        for container in containers:
+            self._validate_container_files(container, revision)
+        existing = [self._describe(c) for c in containers]
         if existing:
             # Only a running, still-plausible candidate of exactly this
             # revision is reused; verify() then decides readiness. Anything
@@ -514,6 +601,8 @@ class SlotRuntime:
                           f"a running {revision[:12]} candidate; remove it "
                           "explicitly (never overwritten)")
         self.render(slot, revision)
+        if self.apple_files:
+            validate_apple_host_files(revision)
         self.verify_image(revision)
         self.check_shared_network()
         if not self.port_available(slot):
@@ -542,11 +631,12 @@ class SlotRuntime:
                 f"slot {slot} has {len(containers)} containers, expected 1")
         return containers[0]
 
-    def verify(self, slot, revision):
+    def verify(self, slot, revision, *, allow_existing_files=False):
         validate_revision(revision)
         info = None
         for _ in range(HEALTH_WAIT_POLLS):
             container = self._single(slot)
+            self._validate_container_files(container, revision, allow_existing=allow_existing_files)
             info = self._describe(container)
             if not self._matches(info, slot, revision):
                 raise VerificationFailed("slot container identity does not match "
@@ -629,6 +719,8 @@ def main(argv=None):
         command = sub.add_parser(name)
         command.add_argument("--slot", required=True)
         command.add_argument("--revision", required=True)
+        if name == "verify":
+            command.add_argument("--allow-existing-files", action="store_true")
         if name in ("preflight", "start"):
             command.add_argument("--host-reserve-mib")
     sub.add_parser("admission").add_argument("--host-reserve-mib")
@@ -651,7 +743,8 @@ def main(argv=None):
         elif args.command == "start":
             out = runtime.start(args.slot, args.revision, reserve)
         elif args.command == "verify":
-            out = runtime.verify(validate_slot(args.slot), args.revision)
+            out = runtime.verify(validate_slot(args.slot), args.revision,
+                                 allow_existing_files=args.allow_existing_files)
         elif args.command == "inspect":
             out = runtime.inspect(validate_slot(args.slot))
         else:
