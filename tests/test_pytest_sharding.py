@@ -171,6 +171,7 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert workflow["name"] == "CI"
     assert set(workflow["on"]) == {"pull_request", "push"}
     assert workflow["on"]["push"]["branches"] == [
+        "fix/mon-ops-r6-apple-secret-injection-02",
         "feat/mon-be-premium-allowance-enforcement-01",
         "feat/priv-d1-coach-native",
         "feat/priv-k6-b1-no-photo-completion", "feat/priv-k6-rollback-gate", "main", "privacy/pa03-be-core-01",
