@@ -112,8 +112,8 @@ def test_metered_crash_boundary_never_strands_duplicates_or_falsely_settles(
     executions = []
 
     def candidate(*args, **kwargs):
-        from app.services import ai_provider_call
-        ai_provider_call._before_physical_attempt()  # like every real SDK call
+        from physical_budget_support import before_attempt
+        before_attempt(args[0].id, 'training_plan')  # actual aggregate evidence door
         executions.append(1)
         if boundary == "in_provider":
             raise Crash()

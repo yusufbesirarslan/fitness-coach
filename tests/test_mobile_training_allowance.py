@@ -54,7 +54,8 @@ def provider(monkeypatch):
         state.calls += 1
         # A synthetic PHYSICAL attempt: through the pre-SDK evidence door, as
         # every real call is (ai_provider_call.Admission.create).
-        ai_provider_call._before_physical_attempt()
+        from physical_budget_support import before_attempt
+        before_attempt(user.id, 'training_plan')
         if state.mode == "unavailable":
             raise GenerationUnavailableError("provider endpoint detail")
         if state.mode == "invalid":
@@ -591,7 +592,8 @@ def test_unrepairable_provider_text_is_invalid_output_in_one_hold(
         client, mobile_user, as_mobile, metered, monkeypatch):
     completions = []
     def physical(**kwargs):  # through the pre-SDK evidence door, like a real call
-        ai_provider_call._before_physical_attempt()
+        from physical_budget_support import before_attempt
+        before_attempt(mobile_user.id, 'training_plan')
         completions.append(1)
         return "not json"
     monkeypatch.setattr("app.blueprints.mobile_training._heavy_chat", physical)
