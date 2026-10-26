@@ -34,7 +34,7 @@ def isolated(monkeypatch):
         AI_ALLOWANCE_POLICY=AllowancePolicy('synthetic-pg',
             premium=ScopePolicy('WEEKLY', {f: 2 for f in SUPPORTED_FEATURES}, 1)))
     db.init_app(app)
-    monkeypatch.setattr(subscriptions, 'AppleAdapter', lambda _: SimpleNamespace(environment='Sandbox'))
+    monkeypatch.setattr(subscriptions, 'AppleAdapter', lambda _: SimpleNamespace(environment='Sandbox', environments=('Sandbox',)))
     # Explicit synthetic legal test fixture only; production registry untouched.
     bindings = {f: ('synthetic.'+f, ('synthetic',)) for f in set(E.CONSENT_FEATURE.values())}
     monkeypatch.setattr(C, 'BINDINGS', bindings)
