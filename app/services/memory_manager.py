@@ -1,3 +1,4 @@
+from app.services.ai_allowances.execution import exempt_operation as _allowance_exempt
 # AI yanıt hattı — Hafıza Yöneticisi aşaması (Sprint 4 WS3 + WS1).
 # İki hafıza katmanı:
 #  1) Kalıcı DB hafızası (CoachConversation/CoachMessage): rolling context
@@ -254,6 +255,7 @@ def build_context_window(conversation, budget=None):
     return merged
 
 
+@_allowance_exempt("coach_summary")
 def maybe_summarize(conversation):
     """Özetlenmemiş kuyruk AI_SUMMARY_TRIGGER_TOKENS'ı aşarsa eski turları tek
     hafif LLM çağrısıyla conversation.summary'ye katla. İstek başında lazy

@@ -205,6 +205,22 @@ def generate_plan_options(chat_fn, lang, target_calories, goal, selected_protein
     prompt, system_prompt = build_prompts(
         lang, target_calories, goal, selected_proteins, selected_carbs,
         selected_fats, custom_foods)
+    from app.services.ai_allowances import execution as meter
+    from app.services.ai_spend_guard import current_subject
+    if not meter.enabled():
+        return _complete_plan_options(chat_fn, prompt, system_prompt)
+    outer = meter.current_action() is None
+    command = {"language": lang, "target": target_calories, "goal": goal,
+               "proteins": selected_proteins, "carbs": selected_carbs,
+               "fats": selected_fats, "custom_foods": custom_foods}
+    with meter.logical_action(current_subject(), "nutrition_generation", command) as action:
+        plans = _complete_plan_options(chat_fn, prompt, system_prompt)
+        if outer:
+            action.success()
+        return plans
+
+
+def _complete_plan_options(chat_fn, prompt, system_prompt):
     raw = chat_fn(
         messages=[{"role": "user", "content": prompt}],
         system_prompt=system_prompt,
@@ -212,5 +228,10 @@ def generate_plan_options(chat_fn, lang, target_calories, goal, selected_protein
         temperature=0.3,
         feature="nutrition_plan",
     )
-    plans = parse_plan_options(raw)
-    return plans["planlar"]
+    try:
+        plans = parse_plan_options(raw)
+        return plans["planlar"]
+    except (ValueError, KeyError, TypeError):
+        from app.services.ai_allowances.execution import failure
+        failure("invalid_output")
+        raise

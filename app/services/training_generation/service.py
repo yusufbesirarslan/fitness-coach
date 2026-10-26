@@ -404,6 +404,27 @@ def generate_training_plan_payload(
     user, last_session, request_data, chat_fn, language="tr", logger=None,
     *, context_token_factory=None,
 ):
+    from app.services.ai_allowances import execution as meter
+    if not meter.enabled():
+        return _generate_training_plan_payload(user, last_session, request_data, chat_fn,
+            language, logger, context_token_factory=context_token_factory)
+    stored = (getattr(user, "user_metadata", None) or {}).get("injuries") or ""
+    require_supported(parse_preferences(request_data, stored_injuries=stored))
+    with meter.logical_action(user.id, "training_generation", request_data) as action:
+        try:
+            result = _generate_training_plan_payload(user, last_session, request_data, chat_fn,
+                language, logger, context_token_factory=context_token_factory)
+        except (ParseFailedError, SchemaInvalidError, SemanticInvalidError, TruncatedError):
+            meter.failure("invalid_output")
+            raise
+        action.success()
+        return result
+
+
+def _generate_training_plan_payload(
+    user, last_session, request_data, chat_fn, language="tr", logger=None,
+    *, context_token_factory=None,
+):
     """Preserve the legacy browser candidate payload over the shared generator.
 
     ``context_token_factory`` (``Callable[[ExerciseContext], str]``) is how the

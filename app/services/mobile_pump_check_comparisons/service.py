@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 import s3_helper
 from app.extensions import db
+from app.services.ai_allowances import execution as meter
 from app.i18n import DEFAULT_LOCALE
 from app.models import (
     PumpCheck,
@@ -290,8 +291,17 @@ def create_or_replay(user_id, key, command, *, language=DEFAULT_LOCALE):
         row_id, created = _create_or_get_pair_and_request(
             user_id, key, digest, sources)
     db.session.rollback()
-    return _run_or_reuse_analysis(
-        user_id, row_id, created, media, language=language)
+    if not meter.enabled() or _terminal_state(user_id, row_id)[0] == "completed":
+        return _run_or_reuse_analysis(user_id, row_id, created, media, language=language)
+    # Requests with DIFFERENT keys can converge to the same canonical pair.
+    # Its durable pair identity, not the request key, owns one dispatch.
+    action = meter.prepare(user_id, "pump_comparison", {"pair": row_id},
+                           key=f"comparison-pair:{row_id}")
+    with meter.scope(action):
+        try:
+            return _run_or_reuse_analysis(user_id, row_id, created, media, language=language)
+        finally:
+            action.finish()
 
 
 def _terminal_state(user_id, row_id):
@@ -350,6 +360,7 @@ def _run_or_reuse_analysis(user_id, row_id, created, media, *,
         if not _finalize_success(
                 row_id, user_id, attempt, comparability, analysis):
             return _fresh(row_id), False
+        meter.canonical_success()
         _log_outcome(
             "analyzed", status="completed", comparability=comparability,
             attempt=attempt,
@@ -363,6 +374,10 @@ def _run_or_reuse_analysis(user_id, row_id, created, media, *,
             "comparison finalization unavailable") from exc
     except Exception as exc:
         db.session.rollback()
+        if isinstance(exc, InvalidComparisonAnalysis):
+            meter.failure("invalid_output")
+        elif isinstance(exc, TimeoutError):
+            meter.failure("provider_timeout")
         kind = _failure_kind(exc)
         _finalize_failure(row_id, user_id, attempt, kind)
         _log_outcome("failed", status="failed", attempt=attempt,
@@ -421,7 +436,16 @@ def _claim_analysis(row_id, user_id, now=None):
             PumpCheckComparison.analysis_attempt + 1,
         PumpCheckComparison.analysis_failure_kind: None,
     }, synchronize_session=False)
-    db.session.commit()
+    action = meter.current_action()
+    try:
+        if claimed and action is not None:
+            action.bind_within()
+        db.session.commit()
+    except BaseException:
+        db.session.rollback()
+        if action is not None:
+            action.reference = None
+        raise
     if not claimed:
         return None
     attempt = db.session.query(
@@ -443,6 +467,7 @@ def _owns_attempt(row_id, user_id, attempt):
 
 
 def _finalize_success(row_id, user_id, attempt, comparability, analysis):
+    meter.canonical_within(user_id)
     updated = PumpCheckComparison.query.filter_by(
         id=row_id,
         user_id=user_id,
@@ -455,6 +480,9 @@ def _finalize_success(row_id, user_id, attempt, comparability, analysis):
         PumpCheckComparison.analysis_started_at: None,
         PumpCheckComparison.analysis_failure_kind: None,
     }, synchronize_session=False)
+    if not updated and meter.current_action() is not None:
+        db.session.rollback()
+        return False
     try:
         db.session.commit()
     except Exception as commit_error:

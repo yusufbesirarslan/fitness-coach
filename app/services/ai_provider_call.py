@@ -328,8 +328,10 @@ class Admission:
     def create(self, method, **transport):
         """Blocking call with charged, bounded transient retries."""
         transport = self._take(transport)
+        from app.services.ai_allowances import execution as allowance_execution
         attempts = _max_attempts(self.family)
         for attempt in range(1, attempts + 1):
+            allowance_execution.check_provider(self.subject, self.feature)
             if attempt > 1 and self._charge:
                 # A retry is a new paid attempt: admitted like one. A refusal
                 # propagates — the guard's "stop" is never retried.
@@ -345,6 +347,7 @@ class Admission:
                 with ai_consent.dispatch(self.subject, self.feature, self.provider,
                                          kwargs, self.consent_generation):
                     _before_physical_attempt()
+                    allowance_execution.before_attempt(self.subject, self.feature)
                     bounded_transport = dict(transport)
                     bounded_transport["timeout"] = min(float(transport.get("timeout", 30.0)), 30.0)
                     resp = method(**kwargs, **bounded_transport)
@@ -369,10 +372,13 @@ class Admission:
     def stream(self, method, **transport):
         """Streaming call: exactly one attempt (a stream is not replayable)."""
         transport = self._take(transport)
+        from app.services.ai_allowances import execution as allowance_execution
+        allowance_execution.check_provider(self.subject, self.feature)
         with ai_consent.stream_dispatch(self.subject, self.feature, self.provider,
                                         self._payload, self.consent_generation):
             holder = _StreamUsage()
             _before_physical_attempt()
+            allowance_execution.before_attempt(self.subject, self.feature)
             try:
                 with method(**copy.deepcopy(self._payload), **transport) as stream:
                     yield _StreamProxy(stream, holder)

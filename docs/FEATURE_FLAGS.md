@@ -1,5 +1,15 @@
 # Feature flags — inventory and lifecycle
 
+`AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED` (MON-BE-PREMIUM-ALLOWANCE-ENFORCEMENT-01)
+defaults OFF, shipped_dark. It requires the ledger, native Training enforcement,
+Apple entitlement verification and a complete explicitly installed five-family
+Premium policy. No production policy or extension mapping is installed. It binds
+logical actions to the existing ledger and refuses unclassified provider work;
+Premium never implies unlimited access in this mode. D1 remains independently
+authoritative and closed transports remain closed. Rollback requires closing paid
+AI admission before switching this flag OFF, retaining the ledger for settlement.
+See [decision and release package](mon-be-premium-allowance-enforcement-01/RELEASE_CHECKLIST.md).
+
 `ACCOUNT_ELIGIBILITY_ENABLED` (PRIV-LAUNCH) is strict default OFF: only the
 literal `1` enables it. ON requires the shared pre-contact declaration ticket
 for registration and enforces canonical cohort capability restrictions. OFF
@@ -23,8 +33,9 @@ retained). See [mobile/training-allowance-enforcement.md](mobile/training-allowa
 owner @yusufbesirarslan, review by 2026-11-13. Depends on `MOBILE_AUTH_ENABLED`
 and reads Premium only through `APPLE_SUBSCRIPTIONS_ENABLED`'s entitlement. OFF:
 `GET /api/v1/ai/allowances` answers 404 before auth and every ledger entry point
-refuses; no existing route consults the ledger in either state. No Starter or
-Premium quantities exist in code or env. Rollback: set 0 (rows retained). See
+refuses. Route integrations require their separate enforcement gates. No production
+Starter or Premium policy exists in code or env. Rollback: set 0 (rows retained,
+only after closing paid AI admission if unified enforcement was enabled). See
 [ledger design](AI_ALLOWANCE_LEDGER.md) and [mobile contract](mobile/ai-allowances-v1.md).
 
 `APPLE_NOTIFICATIONS_ENABLED` (MON-02-BE-02) defaults OFF, shipped_dark, owner

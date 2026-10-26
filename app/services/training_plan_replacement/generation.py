@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from flask import current_app
 from sqlalchemy import text
 from app.extensions import db
+from app.services.ai_allowances import execution as meter
 from app.models import User, TrainingPlan, TrainingPlanReplacementProposal as Proposal
 from app.models import TrainingPlanReplacementGenerationOperation as Operation
 from app.services import premium, mobile_training, ai, ai_consent
@@ -82,7 +83,7 @@ def _result(row, replayed):
                             row.proposal_expires_at, replayed)
 
 
-def claim(user, request, key, authority):
+def claim(user, request, key, authority, metering=None):
     """Commit identity and quota before any provider call; refresh on every lock.
 
     A new operation freezes ``authority`` (D1) into its context; lease recovery
@@ -136,7 +137,7 @@ def claim(user, request, key, authority):
                             base_snapshot_digest=snapshot_fingerprint(plan.plan_data),
                             generation_context=context, status='IN_PROGRESS', attempt_count=1)
             # No plan lock is held while quota takes User UPDATE.
-            if current_app.config.get('AI_PLAN_QUOTA_ENABLED', True):
+            if metering is None and current_app.config.get('AI_PLAN_QUOTA_ENABLED', True):
                 week = premium.reserve_ai_quota_in_transaction(uid, 'training', premium.FREE_WEEKLY_AI_PLANS)
                 owner = db.session.get(User, uid)
                 if owner is None:
@@ -150,10 +151,14 @@ def claim(user, request, key, authority):
         row.updated_at = now
         db.session.flush()
         admitted = (row.id, row.lease_token, row.generation_context)
+        if metering is not None:
+            metering.bind_within()
         db.session.commit()
         return admitted
     except Exception:
         db.session.rollback()
+        if metering is not None:
+            metering.reference = None
         raise
 
 
@@ -220,6 +225,7 @@ def publish(operation_id, token, document, score):
         row.review_data = bound_review
         _finish(row, 'SUCCEEDED')
         result = GenerationResult(proposal.public_id, review, proposal.expires_at, False)
+        meter.canonical_within(row.user_id)
         db.session.commit()
         return result
     except ai_consent.ConsentDenied as denied:
@@ -250,11 +256,32 @@ def _authorize_replay(uid, result):
 
 
 def generate_proposal(user, request, key, *, chat_fn, provider_guard):
+    if not meter.enabled():
+        return _generate_proposal(user, request, key, chat_fn=chat_fn, provider_guard=provider_guard)
+    if not isinstance(request, NativePlanRequest):
+        raise TypeError('request must be NativePlanRequest')
+    authority = ai_consent.begin_operation(user.id, 'training_plan', *ai.heavy_primary_route())
+    with ai_consent.operation_scope(authority):
+        action = meter.prepare(user.id, "training_replacement", {"intent": request.fingerprint}, key=key)
+    with meter.scope(action):
+        try:
+            result = _generate_proposal(user, request, key, chat_fn=chat_fn,
+                provider_guard=provider_guard, metering=action, authority=authority)
+            if action.reference is not None:
+                action.success()
+            return result
+        finally:
+            action.finish()
+
+
+def _generate_proposal(user, request, key, *, chat_fn, provider_guard,
+                       metering=None, authority=None):
     if not isinstance(request, NativePlanRequest):
         raise TypeError('request must be NativePlanRequest')
     recipient, model = ai.heavy_primary_route()
-    authority = ai_consent.begin_operation(user.id, 'training_plan', recipient, model)
-    admitted = claim(user, request, key, authority)
+    authority = authority or ai_consent.begin_operation(user.id, 'training_plan', recipient, model)
+    admitted = (claim(user, request, key, authority) if metering is None else
+                claim(user, request, key, authority, metering=metering))
     if isinstance(admitted, GenerationResult):
         _authorize_replay(user.id, admitted)
         return admitted

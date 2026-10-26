@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 import s3_helper
 from app.extensions import db
+from app.services.ai_allowances import execution as meter
 from app.i18n import DEFAULT_LOCALE
 from app.models import PumpCheck
 from app.services.mobile_pump_checks.analysis import (
@@ -181,6 +182,19 @@ def create_or_replay(user_id, key, command, *, language=DEFAULT_LOCALE):
     row, created = _claim_row(user_id, key, command)
     row_id = row.id
     db.session.rollback()
+    # Completed analyses are ordinary reads; the existing command fingerprint
+    # was checked by _claim_row before returning any prior result.
+    if row.analysis_status == "completed" or not meter.enabled():
+        return _run_pump_analysis(row_id, user_id, command, created, language)
+    action = meter.prepare(user_id, "pump_check", {"command": fingerprint(command)}, key=key)
+    with meter.scope(action):
+        try:
+            return _run_pump_analysis(row_id, user_id, command, created, language)
+        finally:
+            action.finish()
+
+
+def _run_pump_analysis(row_id, user_id, command, created, language):
     attempt = _claim_analysis(row_id, user_id)
     if attempt is None:
         return db.session.get(PumpCheck, row_id), created
@@ -215,7 +229,8 @@ def create_or_replay(user_id, key, command, *, language=DEFAULT_LOCALE):
             },
             language=language,
         )
-        _finalize_success(row_id, user_id, attempt, analysis)
+        if _finalize_success(row_id, user_id, attempt, analysis):
+            meter.canonical_success()
         return db.session.get(PumpCheck, row_id), created
     except PersistenceFinalizationUncertain as exc:
         db.session.rollback()
@@ -224,6 +239,10 @@ def create_or_replay(user_id, key, command, *, language=DEFAULT_LOCALE):
     except Exception as exc:
         db.session.rollback()
         kind = _failure_kind(exc)
+        if isinstance(exc, InvalidAnalysis):
+            meter.failure("invalid_output")
+        elif isinstance(exc, TimeoutError):
+            meter.failure("provider_timeout")
         _finalize_failure(row_id, user_id, attempt, kind)
         if isinstance(exc, StorageUnavailable):
             raise
@@ -259,7 +278,16 @@ def _claim_analysis(row_id, user_id, now=None):
             PumpCheck.analysis_attempt, 0) + 1,
         PumpCheck.analysis_failure_kind: None,
     }, synchronize_session=False)
-    db.session.commit()
+    action = meter.current_action()
+    try:
+        if claimed and action is not None:
+            action.bind_within()
+        db.session.commit()
+    except BaseException:
+        db.session.rollback()
+        if action is not None:
+            action.reference = None
+        raise
     if not claimed:
         return None
     attempt = db.session.query(PumpCheck.analysis_attempt).filter_by(
@@ -269,6 +297,7 @@ def _claim_analysis(row_id, user_id, now=None):
 
 
 def _finalize_success(row_id, user_id, attempt, analysis):
+    meter.canonical_within(user_id)
     updated = PumpCheck.query.filter_by(
         id=row_id,
         user_id=user_id,
@@ -281,6 +310,9 @@ def _finalize_success(row_id, user_id, attempt, analysis):
         PumpCheck.analysis_started_at: None,
         PumpCheck.analysis_failure_kind: None,
     }, synchronize_session=False)
+    if not updated and meter.current_action() is not None:
+        db.session.rollback()  # no domain write: do not commit a success receipt
+        return False
     try:
         db.session.commit()
     except Exception as commit_error:

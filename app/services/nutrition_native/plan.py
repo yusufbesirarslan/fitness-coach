@@ -422,6 +422,20 @@ def generate_proposals(user, secret, request, chat_fn, quota_enabled, logger=Non
     db.session.rollback()
     recipient, model = ai.heavy_primary_route()
     authority = ai_consent.begin_operation(user.id, 'nutrition_plan', recipient, model)
+    from app.services.ai_allowances import execution as meter
+    if meter.enabled():
+        with ai_consent.operation_scope(authority), meter.logical_action(
+                user.id, "nutrition_generation", request) as action:
+            result = _generate_authorized_proposals(user, secret, request, chat_fn,
+                quota_enabled, logger, target, goal, authority)
+            action.success()
+            return result
+    return _generate_authorized_proposals(user, secret, request, chat_fn,
+        quota_enabled, logger, target, goal, authority)
+
+
+def _generate_authorized_proposals(user, secret, request, chat_fn, quota_enabled,
+                                    logger, target, goal, authority):
     if quota_enabled and not reserve_ai_quota(user, "nutrition", FREE_WEEKLY_AI_PLANS):
         raise errors.GenerationQuotaExceeded
     try:

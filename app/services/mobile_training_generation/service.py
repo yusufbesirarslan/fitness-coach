@@ -87,6 +87,7 @@ def generate_and_persist(
     logger=None,
 ) -> GenerationCommandResult:
     """Generate and atomically persist one first plan, or replay its outcome."""
+    allowance.require_all_feature_ready()
     if not isinstance(request, NativePlanRequest):
         raise TypeError("request must be NativePlanRequest")
     last_session = _required_session(user)

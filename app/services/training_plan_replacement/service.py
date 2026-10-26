@@ -112,6 +112,8 @@ def stage_proposal(user_id, binding, *, plan_data, score):
     try:
         public_id = stage_proposal_in_transaction(
             user_id, binding, plan_data=plan_data, score=score)
+        from app.services.ai_allowances.execution import canonical_within
+        canonical_within(user_id)
         db.session.commit()
         return public_id
     except Exception:

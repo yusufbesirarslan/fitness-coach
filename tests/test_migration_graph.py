@@ -44,7 +44,7 @@ def test_alembic_migrations_have_single_head():
     # PRIV-K6-B1 adds the completion-day claim on top of BE-03B-A2-A1.
     # The K6 rollback gate's completion-authority fence follows the claim.
     # MON-02-BE-02's empty Apple notification/reconciliation tables follow the fence.
-    assert heads == ["a4d6f8b0c2e1"]
+    assert heads == ["b5e7a9c1d3f0"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -81,7 +81,7 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # PRIV-K6-B1 adds the workout-completion day claim, no catalog schema.
     # The K6 rollback gate adds the completion fence, no catalog schema.
     # MON-02-BE-02 adds Apple notification/reconciliation tables, no catalog schema.
-    assert len(revision_files) == 58
+    assert len(revision_files) == 59
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 
