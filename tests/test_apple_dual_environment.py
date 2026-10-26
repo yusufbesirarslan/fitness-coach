@@ -439,16 +439,38 @@ def test_production_only_rejects_sandbox_notification():
         signer.adapter("Production").notification(signed)
 
 
-def test_retryable_production_notification_failure_never_falls_back():
+@pytest.mark.parametrize("status,code", [
+    (VerificationStatus.RETRYABLE_VERIFICATION_FAILURE, "TEMPORARILY_UNAVAILABLE"),
+    (VerificationStatus.VERIFICATION_FAILURE, "INVALID_EVIDENCE"),
+    (VerificationStatus.INVALID_CERTIFICATE, "INVALID_EVIDENCE"),
+    (VerificationStatus.INVALID_CHAIN_LENGTH, "INVALID_EVIDENCE"),
+])
+def test_unauthenticated_production_notification_never_falls_back(status, code):
     signer = Signer()
     a = _notification_dual(signer)
-    def unavailable(_):
-        raise VerificationException(VerificationStatus.RETRYABLE_VERIFICATION_FAILURE)
-    a.verifier.verify_and_decode_notification = unavailable
+    def fail(_):
+        raise VerificationException(status)
+    a.verifier.verify_and_decode_notification = fail
     a.fallback.verifier.verify_and_decode_notification = lambda _: pytest.fail("fallback used")
     signed, _ = signer.notification(str(uuid4()))
-    with pytest.raises(SubscriptionError, match="TEMPORARILY_UNAVAILABLE"):
+    with pytest.raises(SubscriptionError, match=code):
         a.notification(signed)
+
+
+def test_fallback_is_logged_with_closed_codes_only(caplog):
+    import logging
+    signer = Signer()
+    dual = Dual(str(uuid4()))
+    token = dual.stx.appAccountToken
+    with caplog.at_level(logging.INFO, logger="app.apple_subscriptions"):
+        dual.p.verify("101", token)
+        assert caplog.messages == []
+        dual.p.verify("201", token)
+        signed, _ = signer.notification(str(uuid4()))
+        _notification_dual(signer).notification(signed)
+    assert caplog.messages == ["apple_subscription event=sandbox_fallback kind=verify",
+                               "apple_subscription event=sandbox_fallback kind=notification"]
+    assert token not in caplog.text and "201" not in caplog.text
 
 
 # ── Persistence, entitlement and lifecycle (SQLite) ────────────────────────
@@ -519,9 +541,13 @@ def test_same_original_id_in_both_environments_stays_distinct(world):
         assert rows[("Production", "100")].user_id == a and rows[("Production", "100")].status == 1
         assert rows[("Sandbox", "100")].user_id == b and rows[("Sandbox", "100")].status == 5
         assert s.entitlement(a)["tier"] == "PREMIUM" and s.entitlement(b)["tier"] == "FREE"
-        # Sandbox evidence for the Production owner never claims the Production row either.
+        # A's Sandbox evidence for that identity conflicts with B's Sandbox row and
+        # leaves A's Production row exactly as it was.
+        before = (rows[("Production", "100")].latest_transaction_id, rows[("Production", "100")].updated_at)
         with pytest.raises(SubscriptionError, match="OWNERSHIP_CONFLICT"):
-            s.persist_verified(a, evidence(a_token, environment="Sandbox"), a_token)
+            s.persist_verified(a, evidence(a_token, environment="Sandbox", transaction_id="999"), a_token)
+        production = _rows()[("Production", "100")]
+        assert (production.latest_transaction_id, production.updated_at) == before
 
 
 def test_entitlement_projection_and_kill_switch(world):

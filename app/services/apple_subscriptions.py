@@ -7,6 +7,7 @@ A Production deployment may add an operator-enabled Sandbox fallback for App
 Review and TestFlight purchases. Apple decides the environment: the endpoint that
 knows the transaction and the signed data it returns, never the client.
 """
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -75,6 +76,8 @@ TRANSACTION_ID_NOT_FOUND = 4040010
 # Statuses an authentic Sandbox notification raises in the Production verifier
 # (Sandbox omits App Apple ID, or names its environment). Signature is checked first.
 _OTHER_ENVIRONMENT = (VerificationStatus.INVALID_APP_IDENTIFIER, VerificationStatus.INVALID_ENVIRONMENT)
+# Child of the application logger. Closed codes only: no transaction, token or payload.
+_log = logging.getLogger("app.apple_subscriptions")
 
 
 class BoundedAppleClient(AppStoreServerAPIClient):
@@ -161,6 +164,7 @@ class AppleAdapter:
             if (self.fallback is None or error.http_status_code != 404
                     or error.raw_api_error != TRANSACTION_ID_NOT_FOUND):
                 raise
+        _log.info("apple_subscription event=sandbox_fallback kind=verify")
         return self.fallback._find(transaction_id)
 
     def status(self, original_id, token, environment=None):
@@ -235,6 +239,7 @@ class AppleAdapter:
             # The fallback re-verifies from scratch and demands its own environment.
             if self.fallback is None or error.status not in _OTHER_ENVIRONMENT:
                 raise
+            _log.info("apple_subscription event=sandbox_fallback kind=notification")
             return self.fallback._notification(signed_payload)
         uuid = str(UUID(payload.notificationUUID))
         signed_at = milliseconds(payload.signedDate)

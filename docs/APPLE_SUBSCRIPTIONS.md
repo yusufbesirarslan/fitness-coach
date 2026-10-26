@@ -286,13 +286,29 @@ Launch policy (founder decision required before ON):
   Production host and Apple's Sandbox endpoint returned authentic Sandbox data for
   this account's token. There is no reviewer allowlist, no client environment claim
   and no global Sandbox switch.
-- Every App Review submission, including updates, buys in Sandbox, so the flag must
-  be ON whenever a build is in review.
-- While ON, any TestFlight tester of a Production-API build gets Premium from a
-  free Sandbox purchase. Sandbox and TestFlight renewals follow Apple's accelerated
-  schedules and end on Apple's terms. Access stays bounded by expiry, revocation
-  and the 24 h verification age.
-- If Premium meters AI cost, those testers consume it.
+- Every App Review submission, including updates, buys in Sandbox, so in practice
+  the flag stays ON for the life of the app.
+- While ON, any TestFlight tester of a Production-API build gets Premium from a free
+  Sandbox purchase. Sandbox purchases can be repeated, so in practice a tester's
+  Premium never ends. It belongs to the account, so it also applies when the
+  same account signs in to the App Store build.
+- A public TestFlight link extends this to anyone who joins. Production-API builds
+  must not use public links unless the founder accepts that.
+- Access stays bounded by expiry, revocation and the 24 h verification age of each
+  Sandbox record.
+- Where Premium meters AI cost, those testers consume it.
+
+Residual P3s, accepted:
+- An authentic notification signed for another bundle, or a garbage transaction
+  ID, costs one extra verification (OCSP) or Apple lookup before it is rejected.
+  This is bounded by the per-IP and owner rate limits and the shared concurrency
+  permit.
+- The library reads Apple's `errorCode` only when `content-type` is exactly
+  `application/json`. Any other response fails closed: the review purchase gets
+  422. Rollout step 3 must therefore pass before submission.
+
+Each Sandbox lookup logs `apple_subscription event=sandbox_fallback
+kind=verify|notification` (closed codes only).
 
 Notifications and reconciliation. Intake verifies with the Production verifier
 first. Only a notification whose signature is already valid and which fails on
