@@ -620,7 +620,7 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == ["c6f8b0d2e4a1"]
-    assert len(list(script.walk_revisions())) == 59
+    assert len(list(script.walk_revisions())) == 60
     assert script.get_revision("a4d6f8b0c2e1").down_revision == "d7e3a9c1f5b8"
     assert script.get_revision("d7e3a9c1f5b8").down_revision == "f9c6d0a1b2e3"
     assert script.get_revision("f9c6d0a1b2e3").down_revision == "f8b2d4e6a0c3"

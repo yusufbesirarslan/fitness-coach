@@ -78,7 +78,7 @@ for fx in [45,49.654,55,60,65]:
        full_margin_pct=100*(rev-cost)/rev))
 result['fx_refund_sensitivity_file']='fx_refund_sensitivity.csv'
 with (HERE/'fx_refund_sensitivity.csv').open('w',newline='') as stream:
-    writer=csv.DictWriter(stream,fieldnames=list(sensitivity[0]))
+    writer=csv.DictWriter(stream,fieldnames=list(sensitivity[0]),lineterminator="\n")
     writer.writeheader();writer.writerows(sensitivity)
 assert len(sensitivity)==120
 assert abs(proceeds(399.99,1,.15)-269.16/49.654*.97) < 1e-12

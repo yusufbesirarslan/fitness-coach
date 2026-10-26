@@ -152,7 +152,17 @@ def test_native_six_day_heavy_plan_keeps_full_generation_output(chain):
             name=day['gun']
             day.update(copy.deepcopy(template));day['gun']=name
             day['sure_dk']=90
-            day['egzersizler']=copy.deepcopy(template['egzersizler'])*6
+            # Varied catalog-backed movements; the heavy fixture is a real
+            # structured weekly plan, not repeated copies of one exercise.
+            exercise_ids=(('ex_barbell_bench_press','ex_incline_dumbbell_press',
+                'ex_dumbbell_shoulder_press','ex_lateral_raise','ex_triceps_pushdown','ex_push_up'),
+                ('ex_barbell_row','ex_lat_pulldown','ex_seated_cable_row',
+                 'ex_reverse_dumbbell_fly','ex_dumbbell_biceps_curl','ex_hammer_curl'),
+                ('ex_barbell_back_squat','ex_barbell_romanian_deadlift','ex_leg_press',
+                 'ex_lying_leg_curl','ex_leg_extension','ex_calf_raise'))[index%3]
+            day['odak']=('Push','Pull','Legs')[index%3]
+            day['egzersizler']=[dict(copy.deepcopy(template['egzersizler'][0]),exercise_id=identity)
+                               for identity in exercise_ids]
         else:
             day.update(tip='dinlenme',odak='Recovery',sure_dk=0,tahmini_kalori=0,egzersizler=[])
     document['haftalik_ozet'].update(toplam_antrenman_gun=6,toplam_tahmini_kalori=1800)
