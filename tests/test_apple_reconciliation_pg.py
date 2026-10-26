@@ -174,7 +174,7 @@ def test_worker_and_client_verify_converge_monotonically(pg_app, monkeypatch):
                                          renewal_signed_at=older - timedelta(seconds=5)), token)
     _due(app, "100")
     worker_view = evidence(token, status=5, revoked_at=older, transaction_signed_at=older, renewal_signed_at=older)
-    monkeypatch.setattr(r, "AppleAdapter", lambda _: NS(environment="Sandbox", status=lambda *_: worker_view))
+    monkeypatch.setattr(r, "AppleAdapter", lambda _: NS(environment="Sandbox", environments=("Sandbox",), status=lambda *_: worker_view))
     client = lambda: s.persist_verified(uid, evidence(token, transaction_signed_at=newer,  # noqa: E731
                                                       renewal_signed_at=newer), token)
     results, blocked = _race(app, client, lambda: r.run(limit=1, sweep_limit=0), "UPDATE apple_subscription ")

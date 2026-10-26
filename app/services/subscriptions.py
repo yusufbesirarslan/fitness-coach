@@ -82,12 +82,16 @@ def entitlement_view(row, now):
 
 def entitlement(user_id):
     _enabled()
-    environment = AppleAdapter(current_app.config).environment
+    # Records count only from environments this deployment verifies. Each row keeps
+    # its own Apple identity and state; the configured environment ranks first.
+    environments = AppleAdapter(current_app.config).environments
     try:
         if db.session.get(User, user_id) is None:
             raise SubscriptionError("SUBSCRIPTION_ACCOUNT_UNAVAILABLE", 409)
         rows = db.session.execute(sa.select(AppleSubscription).where(
-            AppleSubscription.user_id == user_id, AppleSubscription.environment == environment)).scalars().all()
+            AppleSubscription.user_id == user_id, AppleSubscription.environment.in_(environments))
+            .order_by(AppleSubscription.id)).scalars().all()
+        rows.sort(key=lambda row: environments.index(row.environment))
         now = datetime.now(timezone.utc)
         views = [entitlement_view(row, now) for row in rows]
         return next((v for v in views if v["effective_premium"]),

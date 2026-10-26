@@ -14,6 +14,8 @@ purchases while this configuration error persists. Authentication still applies.
 
 - `GET /api/v1/subscription/purchase-context`: 200
   `{"contract_version":1,"app_account_token":"<UUID>","environment":"Sandbox|Production","evidence_type":"transaction_id"}`.
+  `environment` is the deployment's configured environment, also on a Production
+  deployment with the Sandbox fallback; it never predicts a transaction's environment.
   The token is generated once under the User row lock and is private to that
   authenticated account. It survives reinstall, but not deletion/re-registration.
 - `POST /api/v1/subscription/verify`: strict JSON object
@@ -222,7 +224,8 @@ Host-injected nonsecret values and mounted secret/root paths follow existing
 env-file loading. Required keys are listed in `.env.example`. Issuer/key/private
 key, app ID, bundle, product and group identifiers remain pending; no values
 invented. Separate environments use separate deployment configurations and
-credentials; Production config verifies and serves Production records only.
+credentials; Production config verifies and serves Production records only,
+plus Sandbox records while `APPLE_SANDBOX_FALLBACK_ENABLED` is ON (see below).
 No client chooses an environment. Do not configure Sandbox on a production host.
 Missing configuration does not block boot or CI, but closes all active APIs.
 
@@ -237,6 +240,124 @@ operational correction requires a separately authorized procedure. Downgrade
 erases the new tables and is not an operational rollback instruction. A merge
 can trigger a production candidate after main CI; boot may apply the migration.
 Do not merge/deploy without separate human gates; flag remains OFF.
+
+## Dual-environment verification
+
+MON-BE-APPLE-DUAL-ENV-REVIEW-01. App Review and TestFlight install the Production
+build but buy in Apple's Sandbox, so a Production backend that trusts only
+Production rejects the reviewer's purchase. `APPLE_SANDBOX_FALLBACK_ENABLED`
+(rollout flag, default OFF, no migration) adds Sandbox to a Production deployment.
+It is valid only with `APPLE_SUBSCRIPTION_ENVIRONMENT=Production`; with any other
+environment every subscription API answers 503 `SUBSCRIPTION_NOT_CONFIGURED`.
+Staging (Sandbox) stays single-environment and is unchanged.
+
+Verification. The adapter keeps one fully qualified Production verifier and API
+client and, when ON, a second Sandbox verifier and client (`AppleAdapter.fallback`)
+built from the same roots, bundle, App Apple ID and API key, with online checks.
+Client verify calls Get Transaction Info in Production first. Only Apple's exact
+`TransactionIdNotFoundError` (HTTP 404, `errorCode` 4040010) moves the lookup to
+Sandbox. Authentication (401), other 4xx, rate limit (429), server errors, timeouts,
+every other 404 code (account/app/original-transaction not found, retryable or
+not), signature or OCSP failure, wrong environment, wrong identity and ownership
+conflicts are final and never reach Sandbox. The environment that found the ID
+then does everything else: its verifier authenticates the transaction JWS and
+demands its own signed environment, and its client runs Get All Subscription
+Statuses, whose envelope, transactions and renewals must name the same
+environment. Bundle, product, subscription group, auto-renewable type, purchased
+ownership, transaction ID echo and the account token are checked exactly as before.
+The App Apple ID is required in Production and, if present, must match in Sandbox.
+The verify body stays `{"transaction_id"}`; no client value selects or labels an
+environment.
+
+Persistence and entitlement. Evidence carries the verified environment. Rows keep
+the unique `(environment, original_transaction_id)` identity, so a Sandbox record
+is a different identity from any Production record, even with the same numeric ID.
+It can neither claim, update nor revoke the other, and the BE-01 owner lock,
+monotonic timestamps, terminal revocation and controlled repurchase apply to each
+row on its own. Entitlement reads rows of the deployment's accepted environments
+only (Production, plus Sandbox while ON) and ranks Production first:
+the first effective row, else the first pending row, else the first row. States
+are never merged across rows. Turning the flag OFF removes Sandbox rows from
+entitlement at once, and Sandbox transactions then verify as not found. Rows are
+retained, and Production access is unchanged.
+
+Launch policy (founder decision required before ON):
+- Sandbox entitlement exists only because the operator enabled the flag on the
+  Production host and Apple's Sandbox endpoint returned authentic Sandbox data for
+  this account's token. There is no reviewer allowlist, no client environment claim
+  and no global Sandbox switch.
+- Every App Review submission, including updates, buys in Sandbox, so the flag must
+  be ON whenever a build is in review.
+- While ON, any TestFlight tester of a Production-API build gets Premium from a
+  free Sandbox purchase. Sandbox and TestFlight renewals follow Apple's accelerated
+  schedules and end on Apple's terms. Access stays bounded by expiry, revocation
+  and the 24 h verification age.
+- If Premium meters AI cost, those testers consume it.
+
+Notifications and reconciliation. Intake verifies with the Production verifier
+first. Only a notification whose signature is already valid and which fails on
+App Apple ID or environment (an authentic Sandbox one: Apple omits the App Apple
+ID there) is re-verified from scratch by the Sandbox verifier, which demands
+Sandbox. Retryable OCSP failures and bad signatures never fall back. Inner
+transaction and renewal JWS are checked by the verifier that accepted the outer
+payload. The receipt and the coalesced request carry that verified environment.
+`flask apple-subscription-reconcile` runs one bounded pass per accepted
+environment (each with its own `--limit` / `--sweep-limit`), and each pass asks
+that environment's client for status. A Sandbox request can therefore only write
+its `(Sandbox, original)` row. A Production outage stops only the Production pass.
+
+Production notification/reconciliation release gate (separate approval; nothing
+here enables it): `APPLE_NOTIFICATIONS_ENABLED` stays OFF. Before ON:
+- the BE-02 migration and an approved production deploy
+- production ingress/TLS for the exact route
+- the App Store Connect Production Server URL
+- a decision on the Sandbox Server URL, which today belongs to staging MON-03
+  (`asn-sandbox`). Pointing it at production moves all Sandbox notifications there.
+- an hourly reconcile schedule sized per environment (L from each environment's
+  N; a pass can run up to 2L lookups when Sandbox is accepted)
+- the Production Request-a-Test-Notification qualification
+- alerting on `RETRY_EXHAUSTED` and `APPLE_NOT_FOUND`
+
+Without a schedule, every row (Production and Sandbox) lapses to
+`VERIFICATION_PENDING` 24 h after its last client verify.
+
+Production rollout (each step a separate human approval; none done here):
+1. Founder merge (source only, no migration). The production deploy of current
+   main (with every migration it carries) is its own gate.
+2. Production host: complete Apple config with `APPLE_SUBSCRIPTION_ENVIRONMENT=Production`,
+   the numeric App Apple ID, the API key and the mounted Apple roots. Set
+   `APPLE_SUBSCRIPTIONS_ENABLED=1` (payment activation approval) and
+   `APPLE_SANDBOX_FALLBACK_ENABLED=1`.
+3. Off-box check: `purchase-context` reports `Production`. A TestFlight build on
+   the production API buys Monthly in Sandbox, verify returns 200, and the row is
+   `environment='Sandbox'`. Restore is idempotent, and a second account gets 409.
+4. Submit for App Review with the review notes that the subscription is live.
+5. After launch, the first real purchase verifies as a `Production` row with no
+   Sandbox lookup.
+
+Rollback: set the fallback flag to 0 (Sandbox access stops), or set
+`APPLE_SUBSCRIPTIONS_ENABLED=0`.
+
+StoreKit #144 handoff (mobile). The release build must target the production
+API. #144 currently refuses any origin other than `asn-sandbox` and authorizes
+only the staging account. For a Production-API build:
+- expect `purchase-context.environment == "Production"`, even for App Review and
+  TestFlight purchases.
+- never compare it with StoreKit `Transaction.environment`.
+- never send an environment to the backend.
+- submit the transaction ID on purchase, on `Transaction.updates` (renewals) and
+  on restore, and finish the transaction only after a 2xx.
+- `GET entitlement` never refreshes from Apple.
+
+A 422 for a review purchase means the fallback flag is OFF.
+
+Tests: `tests/test_apple_dual_environment.py` (fake per-environment API with
+exact 4040010, official verifier over a synthetic chain for signed-environment
+authority, SQLite lifecycle, entitlement and reconciliation) and
+`tests/test_apple_dual_environment_pg.py` (CI PostgreSQL list: unique arbitration
+of one Sandbox identity, no cross-environment contention, concurrent restore,
+account deletion before and after persistence). No live Apple Production or
+Sandbox call is claimed.
 
 ## Next tasks and qualification limits
 

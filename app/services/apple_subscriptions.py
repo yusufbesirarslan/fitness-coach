@@ -2,6 +2,10 @@
 
 Notifications are authenticated hints only: they name a subscription to
 reconcile, and only a fresh authenticated status lookup changes access.
+
+A Production deployment may add an operator-enabled Sandbox fallback for App
+Review and TestFlight purchases. Apple decides the environment: the endpoint that
+knows the transaction and the signed data it returns, never the client.
 """
 import re
 from dataclasses import dataclass
@@ -66,6 +70,11 @@ class Notification:
 
 _NOTIFICATION_NAME = re.compile(r"[A-Z0-9_]{1,40}")
 MAX_CLOCK_SKEW_SECONDS = 300
+# Apple's documented Get Transaction Info answer for an ID unknown in that environment.
+TRANSACTION_ID_NOT_FOUND = 4040010
+# Statuses an authentic Sandbox notification raises in the Production verifier
+# (Sandbox omits App Apple ID, or names its environment). Signature is checked first.
+_OTHER_ENVIRONMENT = (VerificationStatus.INVALID_APP_IDENTIFIER, VerificationStatus.INVALID_ENVIRONMENT)
 
 
 class BoundedAppleClient(AppStoreServerAPIClient):
@@ -77,13 +86,16 @@ class BoundedAppleClient(AppStoreServerAPIClient):
 
 
 class AppleAdapter:
-    def __init__(self, config):
-        self.environment = config.get("APPLE_SUBSCRIPTION_ENVIRONMENT")
+    # Sandbox fallback of a Production deployment (App Review, TestFlight); None otherwise.
+    fallback = None
+
+    def __init__(self, config, environment=None):
+        self.environment = environment or config.get("APPLE_SUBSCRIPTION_ENVIRONMENT")
         self.bundle = config.get("APPLE_BUNDLE_ID")
         self.app_id = config.get("APPLE_APP_ID")
         self.products = {config.get("APPLE_MONTHLY_PRODUCT_ID"), config.get("APPLE_ANNUAL_PRODUCT_ID")}
         self.group = config.get("APPLE_SUBSCRIPTION_GROUP_ID")
-        # One server deployment trusts exactly one environment, never client-selected.
+        # Each adapter trusts exactly one environment, never client-selected.
         if (self.environment not in ("Sandbox", "Production") or not self.bundle
                 or type(self.app_id) is not int or self.app_id <= 0
                 or len(self.products) != 2 or not all(self.products) or not self.group):
@@ -99,6 +111,18 @@ class AppleAdapter:
                                             config["APPLE_ISSUER_ID"], self.bundle, env)
         except (KeyError, TypeError, ValueError, OSError):
             raise SubscriptionError("SUBSCRIPTION_NOT_CONFIGURED", 503) from None
+        # Only the operator, never a client, adds Sandbox to a Production deployment.
+        # It gets its own Sandbox-qualified verifier and API client; Sandbox-only
+        # deployments stay single-environment.
+        if environment is None and config.get("APPLE_SANDBOX_FALLBACK_ENABLED") is True:
+            if self.environment != "Production":
+                raise SubscriptionError("SUBSCRIPTION_NOT_CONFIGURED", 503)
+            self.fallback = AppleAdapter(config, "Sandbox")
+
+    @property
+    def environments(self):
+        """Environments whose verified records count here, the configured one first."""
+        return (self.environment,) + ((self.fallback.environment,) if self.fallback else ())
 
     def _transaction(self, signed, token):
         tx = self.verifier.verify_and_decode_signed_transaction(signed)
@@ -118,19 +142,37 @@ class AppleAdapter:
 
     def verify(self, transaction_id, token):
         def lookup():
-            submitted = self._transaction(
-                self.client.get_transaction_info(transaction_id).signedTransactionInfo, token)
+            # The environment that knows the ID verifies everything that follows:
+            # its verifier checks the signed environment, its client the statuses.
+            source, signed = self._find(transaction_id)
+            submitted = source._transaction(signed, token)
             if submitted.transactionId != transaction_id:
                 raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            return self._status(submitted.originalTransactionId, token)
+            return source._status(submitted.originalTransactionId, token)
         return self._guard(lookup)
 
-    def status(self, original_id, token):
+    def _find(self, transaction_id):
+        """Configured environment first; only Apple's exact TransactionIdNotFoundError
+        moves to the fallback. Authentication, rate limit, outage and every other 404
+        stay final."""
+        try:
+            return self, self.client.get_transaction_info(transaction_id).signedTransactionInfo
+        except APIException as error:
+            if (self.fallback is None or error.http_status_code != 404
+                    or error.raw_api_error != TRANSACTION_ID_NOT_FOUND):
+                raise
+        return self.fallback._find(transaction_id)
+
+    def status(self, original_id, token, environment=None):
         """Reconciliation: a fresh authoritative lookup for a known original ID."""
         if type(original_id) is not str or not original_id.isascii() or not original_id.isdigit() \
                 or not 1 <= len(original_id) <= 64:
             raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-        return self._guard(lambda: self._status(original_id, token))
+        wanted = environment or self.environment
+        source = next((a for a in (self, self.fallback) if a and a.environment == wanted), None)
+        if source is None:
+            raise SubscriptionError("SUBSCRIPTION_NOT_CONFIGURED", 503)
+        return self._guard(lambda: source._status(original_id, token))
 
     def _status(self, original_id, token):
         response = self.client.get_all_subscription_statuses(original_id)
@@ -184,50 +226,57 @@ class AppleAdapter:
         Signature/identity failures are INVALID. An authentic notification that
         concerns nothing this deployment sells is IGNORED, so Apple stops retrying.
         """
-        def decode():
-            payload = self.verifier.verify_and_decode_notification(signed_payload)
-            uuid = str(UUID(payload.notificationUUID))
-            signed_at = milliseconds(payload.signedDate)
-            kind, subtype = payload.rawNotificationType, payload.rawSubtype
-            if (payload.version != "2.0" or uuid != payload.notificationUUID.lower()
-                    or type(kind) is not str or not _NOTIFICATION_NAME.fullmatch(kind)
-                    or (subtype is not None and (type(subtype) is not str
-                                                 or not _NOTIFICATION_NAME.fullmatch(subtype)))
-                    or (signed_at - datetime.now(timezone.utc)).total_seconds() > MAX_CLOCK_SKEW_SECONDS):
-                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            data = payload.data
+        return self._guard(lambda: self._notification(signed_payload))
 
-            def result(disposition, original_id=None, token=None):
-                return Notification(uuid, self.environment, kind, subtype, signed_at,
-                                    original_id, token, disposition)
-            if data is None or not data.signedTransactionInfo:
-                # TEST, summaries and app-level events carry no subscription.
-                return result("IGNORED_NO_TRANSACTION")
-            # The verifier compares App Apple ID in Production only; Sandbox omits it.
-            if data.appAppleId is not None and data.appAppleId != self.app_id:
+    def _notification(self, signed_payload):
+        try:
+            payload = self.verifier.verify_and_decode_notification(signed_payload)
+        except VerificationException as error:
+            # The fallback re-verifies from scratch and demands its own environment.
+            if self.fallback is None or error.status not in _OTHER_ENVIRONMENT:
+                raise
+            return self.fallback._notification(signed_payload)
+        uuid = str(UUID(payload.notificationUUID))
+        signed_at = milliseconds(payload.signedDate)
+        kind, subtype = payload.rawNotificationType, payload.rawSubtype
+        if (payload.version != "2.0" or uuid != payload.notificationUUID.lower()
+                or type(kind) is not str or not _NOTIFICATION_NAME.fullmatch(kind)
+                or (subtype is not None and (type(subtype) is not str
+                                             or not _NOTIFICATION_NAME.fullmatch(subtype)))
+                or (signed_at - datetime.now(timezone.utc)).total_seconds() > MAX_CLOCK_SKEW_SECONDS):
+            raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+        data = payload.data
+
+        def result(disposition, original_id=None, token=None):
+            return Notification(uuid, self.environment, kind, subtype, signed_at,
+                                original_id, token, disposition)
+        if data is None or not data.signedTransactionInfo:
+            # TEST, summaries and app-level events carry no subscription.
+            return result("IGNORED_NO_TRANSACTION")
+        # The verifier compares App Apple ID in Production only; Sandbox omits it.
+        if data.appAppleId is not None and data.appAppleId != self.app_id:
+            raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+        tx = self.verifier.verify_and_decode_signed_transaction(data.signedTransactionInfo)
+        original = tx.originalTransactionId
+        if (tx.bundleId != self.bundle or tx.environment != Environment(self.environment)
+                or type(original) is not str or not original.isascii() or not original.isdigit()
+                or not 1 <= len(original) <= 64):
+            raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+        if data.signedRenewalInfo:
+            renewal = self.verifier.verify_and_decode_renewal_info(data.signedRenewalInfo)
+            if (renewal.originalTransactionId != original
+                    or renewal.environment != Environment(self.environment)):
                 raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            tx = self.verifier.verify_and_decode_signed_transaction(data.signedTransactionInfo)
-            original = tx.originalTransactionId
-            if (tx.bundleId != self.bundle or tx.environment != Environment(self.environment)
-                    or type(original) is not str or not original.isascii() or not original.isdigit()
-                    or not 1 <= len(original) <= 64):
-                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            if data.signedRenewalInfo:
-                renewal = self.verifier.verify_and_decode_renewal_info(data.signedRenewalInfo)
-                if (renewal.originalTransactionId != original
-                        or renewal.environment != Environment(self.environment)):
-                    raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            if (tx.type != Type.AUTO_RENEWABLE_SUBSCRIPTION or tx.productId not in self.products
-                    or tx.subscriptionGroupIdentifier != self.group):
-                return result("IGNORED_PRODUCT")
-            if tx.inAppOwnershipType != InAppOwnershipType.PURCHASED:
-                return result("IGNORED_OWNERSHIP")
-            try:
-                token = str(UUID(tx.appAccountToken))
-            except (ValueError, TypeError, AttributeError):
-                token = None  # Only an existing ownership row can then be reconciled.
-            return result("ENQUEUED", original, token)
-        return self._guard(decode)
+        if (tx.type != Type.AUTO_RENEWABLE_SUBSCRIPTION or tx.productId not in self.products
+                or tx.subscriptionGroupIdentifier != self.group):
+            return result("IGNORED_PRODUCT")
+        if tx.inAppOwnershipType != InAppOwnershipType.PURCHASED:
+            return result("IGNORED_OWNERSHIP")
+        try:
+            token = str(UUID(tx.appAccountToken))
+        except (ValueError, TypeError, AttributeError):
+            token = None  # Only an existing ownership row can then be reconciled.
+        return result("ENQUEUED", original, token)
 
     def _guard(self, operation):
         try:
