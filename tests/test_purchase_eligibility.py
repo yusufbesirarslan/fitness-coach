@@ -51,10 +51,6 @@ def invalidate(uid, case):
             record.update(age_band="13_17", country="TR")
         elif case == "country":
             record["country"] = "US"
-        elif case == "expired":
-            record["checked_at"] = (datetime.now(timezone.utc) - policy.PURCHASE_RECORD_MAX_AGE).isoformat()
-        elif case == "future":
-            record["checked_at"] = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
         elif case == "naive":
             record["checked_at"] = datetime.now().isoformat()
         elif case == "invalid_time":
@@ -69,7 +65,7 @@ def invalidate(uid, case):
 
 
 CASES = ["missing", "unsigned", "tampered", "other_subject", "no_subject", "contradictory",
-         "teen", "tr_teen", "country", "expired", "future", "naive", "invalid_time",
+         "teen", "tr_teen", "country", "naive", "invalid_time",
          "review_required", "ineligible", "qualification_required"]
 
 
@@ -150,20 +146,45 @@ def test_legacy_boundary_has_no_production_bypass(app, owner, environment, fallb
     app.config.update(APPLE_SUBSCRIPTION_ENVIRONMENT=environment,
                       APPLE_SANDBOX_FALLBACK_ENABLED=fallback, ACCOUNT_ELIGIBILITY_ENABLED=screen)
     user = db.session.get(User, owner)
-    now = datetime.now(timezone.utc)
-    assert s._purchase_eligible(user, now, "Sandbox") is bypass
-    assert s._purchase_eligible(user, now, "Production") is False
+    assert s._purchase_eligible(user, "Sandbox") is bypass
+    assert s._purchase_eligible(user, "Production") is False
 
 
-def test_purpose_binding_and_expiry_boundary(owner):
+def test_purpose_binding(owner):
     user = db.session.get(User, owner)
-    checked = datetime.fromisoformat(policy._record(user)["checked_at"])
-    assert policy.purchase_eligible(user, checked + policy.PURCHASE_RECORD_MAX_AGE - timedelta(microseconds=1))
-    assert not policy.purchase_eligible(user, checked + policy.PURCHASE_RECORD_MAX_AGE)
+    assert policy.purchase_eligible(user)
     user.user_metadata = {policy.METADATA_KEY: policy._signer().dumps({"age": 25, "country": "TR"})}
-    assert not policy.purchase_eligible(user, checked)
+    assert not policy.purchase_eligible(user)
+
+
+def test_record_age_alone_never_lapses_a_renewing_subscriber(client, owner):
+    # No existing-account re-declaration exists, so a valid record has no purchase expiry.
+    adult_account(db.session.get(User, owner),
+                  checked_at=(datetime.now(timezone.utc) - timedelta(days=3 * 365)).isoformat())
+    db.session.commit()
+    client.get(PATH + "purchase-context", headers=HEADERS)
+    assert client.post(PATH + "verify", json={"transaction_id": "101"}, headers=HEADERS).json["entitlement"]["effective_premium"]
+    assert client.get(PATH + "entitlement", headers=HEADERS).json["entitlement"]["effective_premium"]
 
 
 @pytest.mark.parametrize("extra", [{"age": 25}, {"eligibility": "screen_passed"}, {"country": "TR"}])
 def test_verify_rejects_client_eligibility_fields(client, owner, extra):
     assert client.post(PATH + "verify", json={"transaction_id": "101", **extra}, headers=HEADERS).status_code == 400
+
+
+@pytest.mark.parametrize("case", ["missing", "country", "teen"])
+def test_views_without_premium_keep_the_v1_contract(client, owner, monkeypatch, case):
+    # Shipped clients decode status from a closed v1 set; only a withheld grant changes it.
+    invalidate(owner, case)
+    v1 = {"tier": "FREE", "effective_premium": False, "status": "FREE",
+          "expires_at": None, "verification_pending": False}
+    assert client.get(PATH + "entitlement", headers=HEADERS).json["entitlement"] == v1
+    adult_account(db.session.get(User, owner))
+    db.session.commit()
+    client.get(PATH + "purchase-context", headers=HEADERS)
+    monkeypatch.setattr(s, "AppleAdapter", lambda _: NS(environment="Production",
+        environments=("Production", "Sandbox"), verify=lambda _, t: evidence(
+            t, environment="Production", expires_at=datetime.now(timezone.utc) - timedelta(days=1))))
+    invalidate(owner, case)
+    view = client.post(PATH + "verify", json={"transaction_id": "101"}, headers=HEADERS).json["entitlement"]
+    assert set(view) == set(v1) and view["status"] == "EXPIRED" and not view["effective_premium"]

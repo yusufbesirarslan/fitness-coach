@@ -28,8 +28,9 @@ purchases while this configuration error persists. Authentication still applies.
 Entitlement fields: `tier` (`FREE|PREMIUM`), `effective_premium` (boolean),
 `status` (`FREE|ACTIVE|EXPIRED|REVOKED|BILLING_RETRY|GRACE_PERIOD|VERIFICATION_PENDING|ELIGIBILITY_REVIEW_REQUIRED`),
 `expires_at` (UTC ISO timestamp or null), `verification_pending` (boolean).
-With valid eligibility (or the explicit legacy Sandbox boundary), no row yields
-FREE. Otherwise the eligibility review state below applies. An expiry can appear on a FREE result; it is not an access
+No row yields FREE, with or without valid eligibility. `ELIGIBILITY_REVIEW_REQUIRED`
+appears only when eligibility withholds a grant (below); every other view keeps
+the v1 status set that shipped clients decode. An expiry can appear on a FREE result; it is not an access
 promise. Errors follow existing `error` with `code`, safe `message`, `retryable`,
 `request_id`, and Retry-After for temporary failures.
 
@@ -53,13 +54,14 @@ promise. Errors follow existing `error` with `code`, safe `message`, `retryable`
 Production context issuance and every effective-entitlement decision validate the
 authenticated account's canonical `_account_eligibility_v1` signature and Cognito
 subject. A valid canonical record derives `screen_passed`; it must also have
-`age_band=18_plus`, `country=TR`, and an aware `checked_at` no later than now.
-Purchase freshness is **365 days**, with the exact TTL boundary expired. This is
-a new conservative purchase policy, separate from the 600-second registration
-ticket and Apple's 24-hour verification freshness. Founder acceptance of this
-policy is part of the source decision; this change does not activate purchases.
-Missing, malformed, copied, tampered, contradictory, teen, unsupported-market,
-future, expired and unknown/review-state records fail closed. The age screen is
+`age_band=18_plus`, `country=TR`, and an aware `checked_at`. There is **no
+age-of-record purchase expiry**: no existing-account re-declaration journey
+exists, so a record-age limit would lapse a paying annual subscriber with no
+self-service recovery. Any future expiry needs an approved policy and a qualified
+renewal contract first. This is separate from the 600-second registration ticket
+and Apple's 24-hour verification freshness; it does not activate purchases.
+Missing, malformed, copied, tampered, contradictory, teen, unsupported-market
+and unknown/review-state records fail closed. The age screen is
 self-declaration, not independent age assurance. Editable age can restrict, but
 cannot establish or renew eligibility. Client claims never authorize purchase.
 
@@ -84,10 +86,19 @@ state/identity idempotently, then returns 200 with `tier=FREE`,
 `effective_premium=false`, `status=ELIGIBILITY_REVIEW_REQUIRED`,
 `purchase_recovery_required=true`, and
 `resolution=CONTACT_SUPPORT_OR_APPLE_REFUND`. These additional fields also appear
-on entitlement reads while suspended. The stored Apple status and expiry remain
-unchanged; the response grants no Premium. With no verified purchase the status
-is also `ELIGIBILITY_REVIEW_REQUIRED`, recovery is false and resolution is
-`REVIEW_ELIGIBILITY`. Apple freshness and revocation checks still apply.
+on entitlement reads (and the allowance view's embedded entitlement) while
+suspended. The stored Apple status and expiry remain unchanged; the response
+grants no Premium. Only a view that would otherwise grant Premium is rewritten:
+no row stays `FREE` and a lapsed or pending row keeps its v1 status, without the
+additional fields, whatever the eligibility. Apple freshness and revocation
+checks still apply.
+
+**Mobile contract (StoreKit #144, `ca6b1ad`):** its `decodeEntitlement` maps
+`status` through a closed v1 switch, so `ELIGIBILITY_REVIEW_REQUIRED` is decoded
+as an incompatible response: no Premium is shown, but the transaction is not
+finished and no recovery copy appears. A purchase-context `403
+SUBSCRIPTION_ELIGIBILITY_REQUIRED` also maps to the generic incompatible error.
+Both need the mobile follow-up below before a paid release.
 
 Mobile must treat this 200 as durable receipt acknowledgement, allow StoreKit
 finish, and show the eligibility restriction plus account-review/support and
@@ -102,9 +113,9 @@ existing error and retain StoreKit retry/restore behavior instead of finishing.
 Support must inspect the owned Apple record and canonical restriction, arrange
 controlled eligibility review or direct the customer to Apple's refund and
 cancellation flows, and preserve the transaction for reconciliation. Do not edit
-profile age or clear the reserved signed record to promote an account. Existing
-self-service review cannot renew an expired signed record or change its cohort;
-that remains a controlled review case. A valid reviewed record can restore access
+profile age or clear the reserved signed record to promote an account. No
+self-service review can change a signed record's cohort; that remains a
+controlled review case. A valid reviewed record can restore access
 only while authentic Apple evidence is still fresh, paid and unrevoked. Background
 reconciliation continues to record renewals/refunds/revocations while suspended;
 its `APPLIED` outcome acknowledges Apple state persistence, not an access grant.

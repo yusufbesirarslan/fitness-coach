@@ -42,7 +42,7 @@ def _association(user_id):
     return association
 
 
-def _purchase_eligible(user, now, environment=None):
+def _purchase_eligible(user, environment=None):
     # Explicit compatibility boundary for the qualified MON-03 Sandbox-only
     # deployment while its account screen is OFF. Never applies to Production,
     # including authentic Sandbox transactions verified by its review fallback.
@@ -51,17 +51,18 @@ def _purchase_eligible(user, now, environment=None):
             and current_app.config.get("ACCOUNT_ELIGIBILITY_ENABLED") is False
             and environment in (None, "Sandbox")):
         return True
-    return account_eligibility.purchase_eligible(user, now)
+    return account_eligibility.purchase_eligible(user)
 
 
 def _eligible_view(user, row, now):
     view = entitlement_view(row, now)
-    if not _purchase_eligible(user, now, row.environment if row else None):
+    # Only a view that would grant Premium changes; every other view keeps the v1
+    # status set that shipped clients decode (no row, lapsed or pending rows).
+    if view["effective_premium"] and not _purchase_eligible(user, row.environment):
         # Keep real Apple state/ownership for restore, refunds and reconciliation.
         # Recording payment evidence is not permission to grant access.
         view.update(tier="FREE", effective_premium=False, status="ELIGIBILITY_REVIEW_REQUIRED",
-                    purchase_recovery_required=row is not None,
-                    resolution="CONTACT_SUPPORT_OR_APPLE_REFUND" if row else "REVIEW_ELIGIBILITY")
+                    purchase_recovery_required=True, resolution="CONTACT_SUPPORT_OR_APPLE_REFUND")
     return view
 
 
@@ -70,7 +71,7 @@ def purchase_context(user_id):
     try:
         # Config must be complete before a client can start purchasing.
         adapter = AppleAdapter(current_app.config)
-        if not _purchase_eligible(_owner(user_id), datetime.now(timezone.utc)):
+        if not _purchase_eligible(_owner(user_id)):
             raise SubscriptionError("SUBSCRIPTION_ELIGIBILITY_REQUIRED", 403)
         token = _association(user_id).token
         db.session.commit()
