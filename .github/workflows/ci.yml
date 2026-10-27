@@ -38,6 +38,13 @@ jobs:
         # Dependency outages fail the required gate instead of hanging a runner.
         timeout-minutes: 10
         run: |
+          # The runner's Azure mirror repeatedly stalled on browser fonts.
+          # Change transport only; retain suites, signature keys and deadline.
+          for mirror_list in /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-security.txt; do
+            if [ -f "$mirror_list" ]; then
+              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$mirror_list"
+            fi
+          done
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
