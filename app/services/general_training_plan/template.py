@@ -1,4 +1,9 @@
-"""The reviewed, deterministic general training template (rules version 1).
+"""The reviewed, deterministic general training templates.
+
+``general_full_body_v1`` (rules version 1) is the strength-only week.
+``general_full_body_cardio_v1`` is that SAME strength week, unchanged, with
+dedicated cardio days placed on fixed rest slots; it never alters a strength
+day and always leaves Sunday as a full rest day.
 
 Pure data and one pure builder: no database, Flask, clock, randomness,
 profile, history or provider. The same ``(days, equipment, language)`` always
@@ -20,13 +25,15 @@ Deliberate omissions, each a truthfulness choice rather than a gap:
 """
 from __future__ import annotations
 
+from app.services import general_plan_identity as identity
 from app.services.exercise_catalog import load_exercise_catalog
-from app.services.training_generation.plan_schema import WEEKDAYS
+from app.services.training_generation.plan_schema import CARDIO_TIP, WEEKDAYS
 
 
-TEMPLATE_ID = "general_full_body_v1"
-SUPPORTED_DAYS = frozenset({3, 4})
-SUPPORTED_EQUIPMENT = frozenset({"ev", "minimal", "spor_salonu"})
+TEMPLATE_ID = identity.TEMPLATE_V1
+CARDIO_TEMPLATE_ID = identity.TEMPLATE_CARDIO_V1
+SUPPORTED_DAYS = identity.STRENGTH_DAYS
+SUPPORTED_EQUIPMENT = identity.EQUIPMENT
 SESSION_MINUTES = 45
 
 # Weekday slot (index into WEEKDAYS) -> session variant. Non-adjacent days
@@ -139,4 +146,97 @@ def build_program(days: int, equipment: str, language) -> list[dict]:
                 for exercise_id, sets, reps, rest in _SESSIONS[equipment][variant]
             ],
         })
+    return program
+
+
+# Cardio days fill rest slots in this order: Saturday first, then the
+# mid-week gaps. Sunday is never listed, so every week keeps one full rest
+# day; the slot lists are long enough for ``cardio_day_choices`` exactly.
+_CARDIO_SLOTS = {
+    3: (5, 1, 3),
+    4: (5, 2),
+}
+
+# One catalog cardio entry per type. Mixed rotates through activities that
+# need no pool, so it never prescribes swimming to someone without one.
+_CARDIO_EXERCISES = {
+    "kosu": ("ex_outdoor_run",),
+    "bisiklet": ("ex_stationary_cycling",),
+    "yuzme": ("ex_swimming",),
+    "ip_atlama": ("ex_jump_rope",),
+    "yuruyus": ("ex_brisk_walk",),
+    "karisik": ("ex_outdoor_run", "ex_stationary_cycling", "ex_brisk_walk"),
+}
+
+# Day labels only: the activity and the intensity the user chose, echoed.
+_CARDIO_LABELS = {
+    "tr": {
+        "cardio": "Kardiyo",
+        "ex_outdoor_run": "Koşu",
+        "ex_stationary_cycling": "Bisiklet",
+        "ex_swimming": "Yüzme",
+        "ex_jump_rope": "İp atlama",
+        "ex_brisk_walk": "Tempolu yürüyüş",
+        "dusuk": "Düşük yoğunluk",
+        "orta": "Orta yoğunluk",
+        "yuksek": "Yüksek yoğunluk",
+        "karisik": "Karışık yoğunluk",
+    },
+    "en": {
+        "cardio": "Cardio",
+        "ex_outdoor_run": "Running",
+        "ex_stationary_cycling": "Cycling",
+        "ex_swimming": "Swimming",
+        "ex_jump_rope": "Jump rope",
+        "ex_brisk_walk": "Brisk walking",
+        "dusuk": "Low intensity",
+        "orta": "Moderate intensity",
+        "yuksek": "High intensity",
+        "karisik": "Mixed intensity",
+    },
+}
+
+
+def build_cardio_program(
+    days: int,
+    equipment: str,
+    cardio_type: str,
+    cardio_days: int,
+    cardio_minutes: int,
+    intensity: str,
+    language,
+) -> list[dict]:
+    """The v1 strength week plus ``cardio_days`` dedicated cardio days.
+
+    Every strength day is exactly ``build_program``'s; only rest slots become
+    cardio days. Each cardio day holds one catalog cardio entry for the
+    requested minutes: one round, no rest, no estimated calories, no notes.
+    """
+    if (cardio_type not in identity.CARDIO_TYPES
+            or cardio_days not in identity.cardio_day_choices(days)
+            or cardio_minutes not in identity.CARDIO_DURATIONS
+            or intensity not in identity.CARDIO_INTENSITIES):
+        raise ValueError("unsupported general cardio parameters")
+    program = build_program(days, equipment, language)
+    labels = _CARDIO_LABELS[label_language(language)]
+    names = load_exercise_catalog().by_id
+    rotation = _CARDIO_EXERCISES[cardio_type]
+    for index, slot in enumerate(sorted(_CARDIO_SLOTS[days][:cardio_days])):
+        exercise_id = rotation[index % len(rotation)]
+        program[slot] = {
+            "gun": WEEKDAYS[slot],
+            "tip": CARDIO_TIP,
+            "odak": " · ".join((
+                labels["cardio"], labels[exercise_id], labels[intensity])),
+            "sure_dk": cardio_minutes,
+            "tahmini_kalori": 0,
+            "egzersizler": [{
+                "exercise_id": exercise_id,
+                "isim": names[exercise_id].canonical_name,
+                "set": 1,
+                "tekrar": f"{cardio_minutes} dk",
+                "dinlenme": "0 sn",
+                "not": "",
+            }],
+        }
     return program

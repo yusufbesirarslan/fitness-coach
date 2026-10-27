@@ -375,3 +375,44 @@ def test_plan_origin_is_read_from_the_ledger_on_postgresql(pg_general_app):
             assert resolve_plan_origin(ai_plan, other_id)["kind"] == "ai_generated"
         finally:
             db.session.remove()
+
+
+CARDIO_BODY = {
+    "template": "general_full_body_cardio_v1", "gun_sayisi": 3, "ekipman": "ev",
+    "kardiyo_tipi": "kosu", "kardiyo_gun": 2, "kardiyo_sure": 30,
+    "kardiyo_yogunluk": "orta",
+}
+
+
+def test_cardio_and_strength_only_creates_race_to_exactly_one_plan(pg_general_app):
+    """LP21 cardio: the two templates share one ledger, lock order and key space."""
+    from app.extensions import db
+    from app.models import TrainingPlan
+    from app.services.training_plan_origin import resolve_plan_origin
+
+    app, (user_id, _other) = pg_general_app
+    lock = _OwnerLock(app, user_id)
+    outcomes = {}
+    threads = _threads([
+        (_general, (app, user_id, "pg-cardio-a", outcomes, 0, CARDIO_BODY)),
+        (_general, (app, user_id, "pg-cardio-b", outcomes, 1, BODY)),
+        # Same key as the cardio request, other template: never a replay.
+        (_general, (app, user_id, "pg-cardio-a", outcomes, 2, BODY)),
+    ])
+    lock.wait_for_waiters(3)
+    lock.release()
+    _join(threads)
+
+    plans, receipts = _rows(app, user_id)
+    assert len(plans) == 1 and len(receipts) == 1
+    kinds = sorted(o[0] for o in outcomes.values())
+    assert kinds.count("ok") == 1, outcomes
+    assert set(kinds) <= {"ok", "existing", "conflict"}, outcomes
+    winner = next(i for i, o in outcomes.items() if o[0] == "ok")
+    expected = (CARDIO_BODY if winner == 0 else BODY)["template"]
+    with app.app_context():
+        try:
+            plan = TrainingPlan.query.filter_by(user_id=user_id).one()
+            assert resolve_plan_origin(plan, user_id)["template"] == expected
+        finally:
+            db.session.remove()

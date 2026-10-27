@@ -28,19 +28,22 @@ def today():
 
     The user comes from the verified Bearer credential (`g.mobile_user`) and from
     nowhere else: this route reads no body, no header beyond the auth boundary
-    and no query parameter except the LP21 `include_origin` shape opt-in, so
+    and no query parameter except the LP21 `include_origin` and
+    `include_day_kind` shape opt-ins, so
     there is no owner to tamper with and no client clock that could move the day.
     """
     try:
-        # The ONE query value read here: the LP21 origin opt-in. It selects a
-        # response shape, never an owner or a day.
+        # The only query values read here: the LP21 origin and day-kind
+        # opt-ins. They select a response shape, never an owner or a day.
         include_origin = origin_requested(request.args)
-    except InvalidOriginExpansion:
+        include_day_kind = mobile_today.day_kind_requested(request.args)
+    except (InvalidOriginExpansion, mobile_today.InvalidDayKindExpansion):
         return mobile_error(
             "TODAY_INVALID_REQUEST", "Invalid Today request.", 400, False)
     try:
         return jsonify(mobile_today.build_today(
-            g.mobile_user.id, include_origin=include_origin))
+            g.mobile_user.id, include_origin=include_origin,
+            include_day_kind=include_day_kind))
     except mobile_today.TodayUnavailable as error:
         # Fail closed with a Today-shaped error rather than falling through to the
         # blueprint's auth-flavoured handler: a storage fault is not an

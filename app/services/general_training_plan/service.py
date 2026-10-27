@@ -24,7 +24,7 @@ from app.services.training_plan_origin import is_general_receipt
 
 from .contract import GeneralPlanRequest
 from .errors import GeneralPlanSuperseded, GeneralPlanUnavailable
-from .template import build_program
+from .template import build_cardio_program, build_program
 
 
 @dataclass(frozen=True)
@@ -37,12 +37,19 @@ def canonical_document(request: GeneralPlanRequest, language) -> str:
     """The persisted plan text: template -> canonical save validation -> JSON."""
     if not isinstance(request, GeneralPlanRequest):
         raise TypeError("request must be GeneralPlanRequest")
+    cardio = request.cardio
     context = ExerciseContext(
-        equipment_context=request.equipment, cardio_type="yok", style="genel")
+        equipment_context=request.equipment,
+        cardio_type=cardio.cardio_type if cardio is not None else "yok",
+        style="genel")
     try:
-        document = validate_plan_for_save(
-            {"program": build_program(request.days, request.equipment, language)},
-            context)
+        if cardio is None:
+            program = build_program(request.days, request.equipment, language)
+        else:
+            program = build_cardio_program(
+                request.days, request.equipment, cardio.cardio_type,
+                cardio.days, cardio.minutes, cardio.intensity, language)
+        document = validate_plan_for_save({"program": program}, context)
     except (GenerationOutputError, KeyError, ValueError) as error:
         raise GeneralPlanUnavailable() from error
     return json.dumps(

@@ -44,6 +44,7 @@ from datetime import timezone
 
 from flask import current_app
 
+from app.services.mobile_training import day_kind
 from app.services.today_facts import get_active_plan
 from app.services.training_plan_origin import resolve_plan_origin
 from app.services.workout_state import resolve_workout_state
@@ -52,10 +53,32 @@ from app.services.workout_state.serialization import (
 from app.services.workout_state.snapshot import coherent_read_snapshot
 from app.timeutil import UTC, app_now, app_today
 
+# LP21 cardio: the per-request opt-in that adds `summary.kind`. Shipped mobile
+# DTOs read the summary with exact keys, so the key is never added globally.
+INCLUDE_DAY_KIND_PARAM = "include_day_kind"
+
 # The flag that selects the workout-state contract version. Read here for the
 # same reason `/training/bootstrap` reads it: the value must be captured ONCE and
 # passed in, so every read in one response describes one contract.
 _SESSIONS_FLAG = "FITX_WORKOUT_SESSIONS_ENABLED"
+
+
+class InvalidDayKindExpansion(ValueError):
+    """`include_day_kind` was present but not exactly one `1`."""
+
+
+def day_kind_requested(args) -> bool:
+    """The LP21 cardio opt-in. Absent → legacy summary; exactly `1` → `kind`.
+
+    Same strictness as `include_origin`: anything else is refused, never
+    coerced. `args` is the request's query `MultiDict`.
+    """
+    values = args.getlist(INCLUDE_DAY_KIND_PARAM)
+    if not values:
+        return False
+    if values == ["1"]:
+        return True
+    raise InvalidDayKindExpansion(INCLUDE_DAY_KIND_PARAM)
 
 
 class TodayUnavailable(RuntimeError):
@@ -66,7 +89,10 @@ class TodayUnavailable(RuntimeError):
     """
 
 
-def build_today(user_id: int, *, include_origin: bool = False) -> dict:
+def build_today(
+    user_id: int, *, include_origin: bool = False,
+    include_day_kind: bool = False,
+) -> dict:
     """Project the authenticated user's canonical Today state.
 
     `user_id` is the authenticated principal, supplied by the route from
@@ -77,6 +103,11 @@ def build_today(user_id: int, *, include_origin: bool = False) -> dict:
     `include_origin` is the LP21 per-request opt-in: only then does
     `today.plan` carry `origin` (and the one ledger read it costs). Without it
     the pre-LP21 contract is returned exactly.
+
+    `include_day_kind` is the LP21 cardio opt-in: only then does a non-null
+    `today.workout.summary` carry `kind` (`training` | `cardio` | `rest`), read
+    from the same serialized plan day. Presentation only: `schedule_state`
+    stays the one authority for rest, and the opt-in costs no extra read.
 
     Raises `TodayUnavailable` if a canonical authority cannot be read.
     """
@@ -94,7 +125,8 @@ def build_today(user_id: int, *, include_origin: bool = False) -> dict:
                 sessions_enabled=_sessions_enabled(),
                 strict_reads=True,
             )
-            payload = _project(day, plan, plan_data, snapshot)
+            payload = _project(
+                day, plan, plan_data, snapshot, include_day_kind)
             if include_origin:
                 payload["today"]["plan"]["origin"] = origin
             return payload
@@ -129,7 +161,7 @@ def _sessions_enabled() -> bool:
         return False
 
 
-def _project(day, plan, plan_data, snapshot) -> dict:
+def _project(day, plan, plan_data, snapshot, include_day_kind=False) -> dict:
     """Serialize already-resolved canonical facts. Pure: no reads, no decisions."""
     state = snapshot.to_dict()
     return {
@@ -147,7 +179,7 @@ def _project(day, plan, plan_data, snapshot) -> dict:
                 "schedule_state": snapshot.schedule_state,
                 "is_rest_day": snapshot.is_rest_day,
                 "completed": snapshot.completed_today,
-                "summary": _summary(plan_data, day),
+                "summary": _summary(plan_data, day, include_day_kind),
                 # Present only once the persisted session lifecycle is the active
                 # contract; `None` otherwise. Never an invented identity.
                 "session": state.get("session"),
@@ -162,7 +194,7 @@ def _project(day, plan, plan_data, snapshot) -> dict:
     }
 
 
-def _summary(plan_data, day):
+def _summary(plan_data, day, include_day_kind=False):
     """A bounded summary of today's canonical plan day, or `None`.
 
     Narrowed from `serialize_today_plan` - the same bounded projection
@@ -177,6 +209,11 @@ def _summary(plan_data, day):
     canonical answers are `date` and `schedule_state`. `focus` is plan *content*
     (free text an author wrote, like an exercise name), not an enum: display it,
     never branch on it.
+
+    With the cardio opt-in the summary also names the day's canonical `kind`,
+    the same closed vocabulary the current-plan projection publishes per day,
+    so a client can label a cardio session. It never answers "is today a rest
+    day?" — `schedule_state` does.
     """
     if plan_data is None:
         return None
@@ -186,12 +223,15 @@ def _summary(plan_data, day):
         return None
     if today_plan is None:
         return None
-    return {
+    summary = {
         "focus": today_plan["odak"],
         "duration_min": today_plan["sure_dk"],
         "estimated_calories": today_plan["tahmini_kalori"],
         "exercise_count": len(today_plan["egzersizler"]),
     }
+    if include_day_kind:
+        summary["kind"] = day_kind(today_plan["tip"])
+    return summary
 
 
 def _plan(plan):

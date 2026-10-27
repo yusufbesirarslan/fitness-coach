@@ -170,18 +170,22 @@ def test_route_accepts_no_client_supplied_owner_or_day():
     for forbidden in ("request.get_json", "request.form",
                       "request.headers", "request.values", "user_id="):
         assert forbidden not in route_source, f"client input reached the route: {forbidden}"
-    # LP21: the ONE admitted query read is the origin opt-in, handed whole to
-    # its strict parser (absent / exactly "1" / refused). It selects a response
-    # shape, never an owner or a day.
-    assert route_source.count("request.args") == 1
+    # LP21: the only admitted query reads are the origin and the cardio
+    # day-kind opt-ins, each handed whole to its strict parser (absent /
+    # exactly "1" / refused). They select a response shape, never an owner or
+    # a day.
+    assert route_source.count("request.args") == 2
     assert "origin_requested(request.args)" in route_source
+    assert "mobile_today.day_kind_requested(request.args)" in route_source
 
-    # ...and the projection takes the owner positionally; the only other knob
-    # is the keyword-only shape opt-in, off by default.
+    # ...and the projection takes the owner positionally; the only other knobs
+    # are the keyword-only shape opt-ins, off by default.
     signature = inspect.signature(mobile_today.build_today)
-    assert list(signature.parameters) == ["user_id", "include_origin"]
-    knob = signature.parameters["include_origin"]
-    assert knob.kind is inspect.Parameter.KEYWORD_ONLY and knob.default is False
+    assert list(signature.parameters) == [
+        "user_id", "include_origin", "include_day_kind"]
+    for name in ("include_origin", "include_day_kind"):
+        knob = signature.parameters[name]
+        assert knob.kind is inspect.Parameter.KEYWORD_ONLY and knob.default is False
 
 
 def test_route_is_thin_and_holds_no_domain_branching():

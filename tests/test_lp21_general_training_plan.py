@@ -931,15 +931,326 @@ def test_origin_module_is_a_neutral_read_only_projection():
                 if isinstance(node, ast.ImportFrom)}
     imported |= {alias.name for node in ast.walk(tree)
                  if isinstance(node, ast.Import) for alias in node.names}
-    # Only the model: no Flask, AI ledger store, provider or general-plan package.
-    assert imported == {"__future__", "app.models"}
+    # Only the model and the neutral request identities: no Flask, AI ledger
+    # store, provider or general-plan package.
+    assert imported == {
+        "__future__", "app.models", "app.services.general_plan_identity"}
+    identity_path = APP_ROOT / "services" / "general_plan_identity.py"
+    identity_tree = ast.parse(identity_path.read_text(encoding="utf-8"))
+    identity_imports = {node.module for node in ast.walk(identity_tree)
+                        if isinstance(node, ast.ImportFrom)}
+    identity_imports |= {alias.name for node in ast.walk(identity_tree)
+                         if isinstance(node, ast.Import) for alias in node.names}
+    # Standard library only.
+    assert identity_imports == {
+        "__future__", "hashlib", "json", "functools", "itertools"}
     source = path.read_text(encoding="utf-8")
     for write in ("session.add", "session.flush", "session.commit", ".update(",
                   ".delete("):
         assert write not in source
     # A failed read must propagate to the callers' fail-closed handlers.
     assert not any(isinstance(node, ast.ExceptHandler) for node in ast.walk(tree))
-    # One template exists; a second must version the projection first.
-    assert training_plan_origin.GENERAL_TEMPLATE_ID == TEMPLATE_ID
+    # Every template the command accepts is one the projection can name.
+    assert training_plan_origin.GENERAL_TEMPLATE_IDS == (
+        TEMPLATE_ID, general_template.CARDIO_TEMPLATE_ID)
     assert general_template.TEMPLATE_ID == TEMPLATE_ID
     assert general_training_plan.is_general_receipt is training_plan_origin.is_general_receipt
+
+
+# -- LP21 cardio: general_full_body_cardio_v1 ---------------------------------
+
+from app.services import general_plan_identity as identity  # noqa: E402
+from app.services.general_training_plan import CARDIO_TEMPLATE_ID  # noqa: E402
+
+CARDIO_BODY = {
+    "template": CARDIO_TEMPLATE_ID, "gun_sayisi": 3, "ekipman": "ev",
+    "kardiyo_tipi": "kosu", "kardiyo_gun": 2, "kardiyo_sure": 30,
+    "kardiyo_yogunluk": "orta",
+}
+CARDIO_ORIGIN = {
+    "kind": "general_template", "template": CARDIO_TEMPLATE_ID,
+    "personalized": False}
+SATURDAY = datetime(2026, 7, 25, 15, 0, tzinfo=APP_TZ)
+SUNDAY = datetime(2026, 7, 26, 15, 0, tzinfo=APP_TZ)
+DAY_KIND = "?include_day_kind=1"
+
+
+def _cardio(**overrides):
+    return {**CARDIO_BODY, **overrides}
+
+
+@pytest.mark.parametrize("days", sorted(identity.STRENGTH_DAYS))
+@pytest.mark.parametrize("equipment", sorted(identity.EQUIPMENT))
+@pytest.mark.parametrize("cardio_type", sorted(identity.CARDIO_TYPES))
+@pytest.mark.parametrize("language", ["tr", "en"])
+def test_every_cardio_input_keeps_the_v1_strength_week_and_adds_real_cardio_days(
+        days, equipment, cardio_type, language):
+    v1 = _program(canonical_document(parse_general_request(
+        {"template": TEMPLATE_ID, "gun_sayisi": days, "ekipman": equipment}),
+        language))
+    catalog = load_exercise_catalog()
+    for cardio_days in identity.cardio_day_choices(days):
+        request = parse_general_request(_cardio(
+            gun_sayisi=days, ekipman=equipment, kardiyo_tipi=cardio_type,
+            kardiyo_gun=cardio_days, kardiyo_sure=20, kardiyo_yogunluk="dusuk"))
+        document = json.loads(canonical_document(request, language))
+
+        assert set(document) == {"program", "exercise_context"}
+        assert document["exercise_context"]["equipment_context"] == equipment
+        assert document["exercise_context"]["cardio_type"] == cardio_type
+        program = document["program"]
+        assert [day["gun"] for day in program] == WEEKDAYS
+        tips = [day["tip"] for day in program]
+        assert tips.count("antrenman") == days
+        assert tips.count("kardiyo") == cardio_days
+        # Never a full week: Sunday stays a rest day.
+        assert tips.count("dinlenme") == 7 - days - cardio_days >= 1
+        assert program[6]["tip"] == "dinlenme"
+        context = ExerciseContext(equipment_context=equipment,
+                                  cardio_type=cardio_type)
+        for strength, original in zip(program, v1):
+            if original["tip"] == "antrenman":
+                # The strength week is v1's, byte for byte.
+                assert strength == original
+                continue
+            assert strength["tahmini_kalori"] == 0
+            if strength["tip"] == "dinlenme":
+                assert strength == original
+                continue
+            assert strength["sure_dk"] == 20
+            [exercise] = strength["egzersizler"]
+            entry = catalog.by_id[exercise["exercise_id"]]
+            assert entry.active and entry.movement == "cardio"
+            assert is_exercise_compatible(entry, context)
+            assert exercise["isim"] == entry.canonical_name
+            assert (exercise["set"], exercise["tekrar"], exercise["dinlenme"],
+                    exercise["not"]) == (1, "20 dk", "0 sn", "")
+            assert entry.exercise_id != "ex_swimming" or cardio_type == "yuzme"
+
+
+def test_cardio_day_placement_and_labels_are_fixed():
+    program = _program(canonical_document(parse_general_request(_cardio(
+        gun_sayisi=3, kardiyo_gun=3, kardiyo_tipi="karisik")), "en"))
+    assert [day["tip"] for day in program] == [
+        "antrenman", "kardiyo", "antrenman", "kardiyo", "antrenman", "kardiyo",
+        "dinlenme"]
+    assert [day["odak"] for day in program if day["tip"] == "kardiyo"] == [
+        "Cardio · Running · Moderate intensity",
+        "Cardio · Cycling · Moderate intensity",
+        "Cardio · Brisk walking · Moderate intensity"]
+    four = _program(canonical_document(parse_general_request(_cardio(
+        gun_sayisi=4, kardiyo_gun=2, kardiyo_tipi="yuzme",
+        kardiyo_yogunluk="yuksek")), "tr"))
+    assert [day["tip"] for day in four] == [
+        "antrenman", "antrenman", "kardiyo", "antrenman", "antrenman",
+        "kardiyo", "dinlenme"]
+    assert four[2]["odak"] == "Kardiyo · Yüzme · Yüksek yoğunluk"
+    one = _program(canonical_document(parse_general_request(_cardio(
+        kardiyo_gun=1)), "tr"))
+    assert [day["tip"] for day in one].index("kardiyo") == 5  # Saturday
+
+
+def test_cardio_documents_are_deterministic_and_language_only_relabels():
+    request = parse_general_request(CARDIO_BODY)
+    first = canonical_document(request, "tr")
+    assert canonical_document(parse_general_request(dict(CARDIO_BODY)), "tr") == first
+    for tr_day, en_day in zip(_program(first),
+                              _program(canonical_document(request, "en"))):
+        assert {**tr_day, "odak": None} == {**en_day, "odak": None}
+    assert canonical_document(request, "de") == first
+
+
+@pytest.mark.parametrize("body", [
+    {key: value for key, value in CARDIO_BODY.items() if key != "kardiyo_sure"},
+    _cardio(injuries="knee"),
+    _cardio(kardiyo_tipi="yok"),
+    _cardio(kardiyo_tipi="crossfit"),
+    _cardio(kardiyo_tipi="KOSU"),
+    _cardio(kardiyo_gun=0),
+    _cardio(gun_sayisi=3, kardiyo_gun=4),  # 3 + 4 fills the week
+    _cardio(gun_sayisi=4, kardiyo_gun=3),  # 4 + 3 fills the week
+    _cardio(kardiyo_gun=True),
+    _cardio(kardiyo_gun="2"),
+    _cardio(kardiyo_sure=25),
+    _cardio(kardiyo_sure=30.0),
+    _cardio(kardiyo_yogunluk="extreme"),
+    _cardio(kardiyo_yogunluk=None),
+    _cardio(gun_sayisi=5),
+    # A v1 body never carries cardio, and a cardio body never omits it.
+    {**BODY, "kardiyo_tipi": "kosu"},
+    {**BODY, "kardiyo_tipi": "kosu", "kardiyo_gun": 2, "kardiyo_sure": 30,
+     "kardiyo_yogunluk": "orta"},
+    _cardio(template="general_full_body_cardio_v2"),
+])
+def test_unsupported_cardio_inputs_are_refused_never_coerced(body):
+    with pytest.raises(InvalidPlanRequest):
+        parse_general_request(body)
+
+
+def test_cardio_fingerprint_binds_every_field_and_keeps_v1_identity():
+    import hashlib
+    base = parse_general_request(CARDIO_BODY)
+    assert base.fingerprint != parse_general_request(BODY).fingerprint
+    for field, value in (("kardiyo_tipi", "bisiklet"), ("kardiyo_gun", 1),
+                         ("kardiyo_sure", 45), ("kardiyo_yogunluk", "dusuk"),
+                         ("gun_sayisi", 4), ("ekipman", "minimal")):
+        assert parse_general_request(_cardio(**{field: value})).fingerprint \
+            != base.fingerprint
+    canonical = json.dumps(CARDIO_BODY, sort_keys=True,
+                           separators=(",", ":")).encode()
+    assert base.fingerprint == hashlib.sha256(
+        b"axisai:training-plan-general:v1\0" + canonical).hexdigest()
+
+
+def test_every_accepted_request_names_its_template_and_nothing_else_does():
+    space = list(identity.request_space())
+    # 6 strength-only + (3 + 2 cardio-day counts) * 3 equipment * 6 types
+    # * 4 durations * 4 intensities.
+    assert len(space) == 6 + 5 * 3 * 6 * 4 * 4
+    for body in space:
+        request = parse_general_request(body)
+        assert identity.template_for_fingerprint(request.fingerprint) \
+            == body["template"]
+    assert identity.template_for_fingerprint("0" * 64) is None
+    assert identity.template_for_fingerprint(None) is None
+
+
+def test_identity_vocabularies_match_the_canonical_preference_contract():
+    from app.services.training_generation import preference_contract as prefs
+    assert identity.CARDIO_TYPES == prefs.CARDIO_TYPES - {"yok"}
+    assert identity.CARDIO_DURATIONS == prefs.CARDIO_DURATIONS
+    assert identity.CARDIO_INTENSITIES == prefs.CARDIO_INTENSITIES
+    assert identity.STRENGTH_DAYS <= prefs.DAY_COUNTS
+    assert identity.EQUIPMENT == prefs.EQUIPMENT_VALUES
+    for days in identity.STRENGTH_DAYS:
+        assert set(identity.cardio_day_choices(days)) <= prefs.CARDIO_DAYS
+        assert days + max(identity.cardio_day_choices(days)) == 6
+    # The cardio slots hold exactly the largest allowed cardio week.
+    for days, slots in general_template._CARDIO_SLOTS.items():
+        assert len(slots) == max(identity.cardio_day_choices(days))
+        assert 6 not in slots
+    assert set(general_template._CARDIO_EXERCISES) == identity.CARDIO_TYPES
+
+
+def test_a_cardio_plan_is_persisted_with_a_truthful_receipt_and_origin(
+        client, owner, as_mobile, no_ai):
+    response = _post(client, as_mobile(owner, "cardio-key-0001"), CARDIO_BODY)
+
+    assert response.status_code == 201, response.json
+    body = response.json
+    assert body["origin"] == CARDIO_ORIGIN
+    assert [day["kind"] for day in body["plan"]["days"]] == [
+        "training", "cardio", "training", "rest", "training", "cardio", "rest"]
+    cardio_day = body["plan"]["days"][1]
+    assert cardio_day["workout_ref"] is not None
+    plan = TrainingPlan.query.filter_by(user_id=owner.id).one()
+    assert plan.score is None
+    assert plan.plan_data == canonical_document(
+        parse_general_request(CARDIO_BODY), "tr")
+    receipt = TrainingPlanGenerationOperation.query.filter_by(user_id=owner.id).one()
+    assert is_general_receipt(receipt)
+    assert receipt.request_fingerprint == parse_general_request(CARDIO_BODY).fingerprint
+
+    current, today = _reads(client, owner, as_mobile, OPT_IN)
+    assert current.json["plan"]["origin"] == CARDIO_ORIGIN
+    assert today.json["today"]["plan"]["origin"] == CARDIO_ORIGIN
+    assert no_ai == []
+
+
+def test_cardio_idempotency_replays_and_conflicts_like_v1(
+        client, owner, as_mobile, no_ai):
+    first = _post(client, as_mobile(owner, "cardio-key-0002"), CARDIO_BODY)
+    replay = _post(client, as_mobile(owner, "cardio-key-0002"), CARDIO_BODY)
+    assert replay.status_code == 201
+    assert replay.headers["Idempotency-Replayed"] == "true"
+    assert replay.json == first.json
+
+    # Same key, another cardio intent, or the strength-only intent: conflict.
+    for body in (_cardio(kardiyo_gun=1), BODY):
+        conflict = _post(client, as_mobile(owner, "cardio-key-0002"), body)
+        assert conflict.status_code == 409
+        assert conflict.json["error"]["code"] == "TRAINING_PLAN_IDEMPOTENCY_CONFLICT"
+    # A new key never adds a second plan.
+    second = _post(client, as_mobile(owner, "cardio-key-0003"), CARDIO_BODY)
+    assert second.status_code == 409
+    assert second.json["error"]["code"] == "TRAINING_PLAN_REPLACEMENT_REFUSED"
+    assert TrainingPlan.query.filter_by(user_id=owner.id).count() == 1
+    assert no_ai == []
+
+
+def test_cardio_owners_are_isolated_under_the_same_key(
+        client, owner, stranger, as_mobile):
+    mine = _post(client, as_mobile(owner, "cardio-key-0004"), CARDIO_BODY)
+    theirs = _post(client, as_mobile(stranger, "cardio-key-0004"), BODY)
+    assert mine.status_code == theirs.status_code == 201
+    assert mine.json["origin"] == CARDIO_ORIGIN
+    assert theirs.json["origin"] == GENERAL_ORIGIN
+    assert mine.json["plan"]["plan_lineage"] != theirs.json["plan"]["plan_lineage"]
+
+
+def test_a_general_receipt_with_an_unrecognized_fingerprint_is_unknown(
+        client, owner, as_mobile):
+    plan = _legacy_plan(owner.id)
+    _receipt(owner.id, plan, "origin-key-09")  # general state, fingerprint 0*64
+
+    _assert_origin(client, owner, as_mobile, UNKNOWN_ORIGIN)
+
+
+@pytest.mark.parametrize("when,kind", [
+    (MONDAY, "training"), (SATURDAY, "cardio"), (SUNDAY, "rest")])
+def test_today_names_a_cardio_session_only_when_opted_in(
+        client, owner, as_mobile, when, kind):
+    assert _post(client, as_mobile(owner, "cardio-key-0005"),
+                 CARDIO_BODY).status_code == 201
+
+    with audit_clock(when):
+        legacy = client.get(TODAY_PATH, headers=as_mobile(owner))
+        origin_only = client.get(TODAY_PATH + OPT_IN, headers=as_mobile(owner))
+        opted = client.get(TODAY_PATH + DAY_KIND, headers=as_mobile(owner))
+        both = client.get(TODAY_PATH + OPT_IN + "&include_day_kind=1",
+                          headers=as_mobile(owner))
+    for response in (legacy, origin_only, opted, both):
+        assert response.status_code == 200, response.json
+    # Installed builds send include_origin=1 and read the summary exactly.
+    assert "kind" not in legacy.json["today"]["workout"]["summary"]
+    assert "kind" not in origin_only.json["today"]["workout"]["summary"]
+    summary = opted.json["today"]["workout"]["summary"]
+    assert summary["kind"] == kind
+    assert {**summary, "kind": None} == {
+        **legacy.json["today"]["workout"]["summary"], "kind": None}
+    assert both.json["today"]["workout"]["summary"]["kind"] == kind
+    assert both.json["today"]["plan"]["origin"] == CARDIO_ORIGIN
+    # The rest authority is unchanged and agrees.
+    assert opted.json["today"]["workout"]["is_rest_day"] is (kind == "rest")
+    assert {key: value for key, value in opted.json["today"].items()
+            if key not in {"workout", "server_time"}} == {
+        key: value for key, value in legacy.json["today"].items()
+        if key not in {"workout", "server_time"}}
+
+
+def test_today_day_kind_without_a_plan_keeps_a_null_summary(
+        client, owner, as_mobile):
+    with audit_clock(MONDAY):
+        response = client.get(TODAY_PATH + DAY_KIND, headers=as_mobile(owner))
+    assert response.status_code == 200
+    assert response.json["today"]["workout"]["summary"] is None
+
+
+@pytest.mark.parametrize("query", [
+    "?include_day_kind=0", "?include_day_kind=true", "?include_day_kind=",
+    "?include_day_kind=1&include_day_kind=1"])
+def test_a_malformed_day_kind_opt_in_is_refused_never_coerced(
+        client, owner, as_mobile, query):
+    with audit_clock(MONDAY):
+        response = client.get(TODAY_PATH + query, headers=as_mobile(owner))
+    assert response.status_code == 400
+    assert response.json["error"]["code"] == "TODAY_INVALID_REQUEST"
+    assert response.json["error"]["retryable"] is False
+
+
+def test_the_day_kind_opt_in_costs_no_extra_ledger_read(
+        client, owner, as_mobile):
+    assert _post(client, as_mobile(owner, "cardio-key-0006"),
+                 CARDIO_BODY).status_code == 201
+    assert _ledger_statements(client, owner, as_mobile,
+                              TODAY_PATH + DAY_KIND) == []
