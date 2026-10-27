@@ -61,13 +61,14 @@ def _postgres_contract(bind, table=TABLE, kinds=("c", "c", "f", "f", "f", "f", "
                                  "proof_version", "reason", "applied_at")):
     # Reflection omits validation status and can hide standalone unique indexes.
     # Inspect the effective authority, without validating/repairing any evidence.
-    pg18 = int(bind.exec_driver_sql("SHOW server_version_num").scalar_one()) >= 180000
+    pg18 = int(bind.exec_driver_sql("SELECT current_setting('server_version_num')").scalar_one()) >= 180000
     # conenforced was added in PG18. PG16 constraints are always enforced.
-    enforced = "c.conenforced" if pg18 else "true"
-    constraints = bind.execute(sa.text(f"""
+    constraints = bind.execute(sa.text("""
         SELECT c.oid, c.contype, c.convalidated, c.condeferrable, c.condeferred,
                c.connoinherit, c.confupdtype, c.confmatchtype,
-               {enforced} AS enforced, c.conkey, c.conislocal, c.coninhcount,
+               CASE WHEN current_setting('server_version_num')::int >= 180000
+                    THEN (to_jsonb(c)->>'conenforced')::boolean ELSE true END AS enforced,
+               c.conkey, c.conislocal, c.coninhcount,
                c.conparentid, c.contypid, c.conindid, c.confrelid,
                c.conbin IS NULL AS no_expression,
                c.connamespace = (SELECT relnamespace FROM pg_class
