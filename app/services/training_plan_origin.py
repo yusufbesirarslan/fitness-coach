@@ -13,7 +13,10 @@ lineage AND name this plan row; then:
 
 * ``general_template`` — the row is a general receipt (``is_general_receipt``);
   only ``store.commit_general_plan`` writes that state, in the same
-  transaction as the plan.
+  transaction as the plan. ``template`` is the one template whose closed
+  request space contains the receipt's fingerprint
+  (``general_plan_identity``); a general receipt whose fingerprint names
+  neither template is ``unknown``.
 * ``ai_generated`` — the row is ``SUCCEEDED`` with
   ``provider_dispatch_possible is True``: the native AI first-plan command
   committed ``authorize_dispatch`` before the candidate this plan was built
@@ -26,7 +29,8 @@ lineage AND name this plan row; then:
 Origin describes the lineage's CREATION. Later journal edits keep the lineage
 (and so the origin); ``mutation_version > 0`` is how a client sees them.
 
-Neutral on purpose: it imports only the model, so the Today and Training read
+Neutral on purpose: it imports only the model and the standard-library
+request identities, so the Today and Training read
 projections can use it without reaching the general-plan package or the AI
 ledger module (whose ``store`` imports provider and premium modules).
 Read-only: one owner-scoped SELECT, no writes. A failed read raises; callers
@@ -38,13 +42,13 @@ from app.models import (
     TRAINING_PLAN_GENERATION_SUCCEEDED,
     TrainingPlanGenerationOperation,
 )
+from app.services.general_plan_identity import TEMPLATE_IDS, template_for_fingerprint
 
 
-# The only template the general command accepts (``general_training_plan``
-# ``TEMPLATE_ID``; parity pinned by tests). A receipt cannot carry the template
-# itself — only the fingerprint that binds it — so a second template must
-# version this projection before it ships.
-GENERAL_TEMPLATE_ID = "general_full_body_v1"
+# The templates the general command accepts (``general_training_plan``;
+# parity pinned by tests). A receipt carries only the fingerprint that binds
+# its request, so the template is recovered from it, never from content.
+GENERAL_TEMPLATE_IDS = TEMPLATE_IDS
 
 ORIGIN_GENERAL = "general_template"
 ORIGIN_AI = "ai_generated"
@@ -85,8 +89,10 @@ def _is_ai_receipt(operation) -> bool:
             and operation.provider_dispatch_possible is True)
 
 
-def general_origin() -> dict:
-    return {"kind": ORIGIN_GENERAL, "template": GENERAL_TEMPLATE_ID,
+def general_origin(template: str) -> dict:
+    if template not in GENERAL_TEMPLATE_IDS:
+        raise ValueError("not a general template")
+    return {"kind": ORIGIN_GENERAL, "template": template,
             "personalized": False}
 
 
@@ -109,7 +115,10 @@ def resolve_plan_origin(plan, user_id: int) -> dict:
             or rows[0].training_plan_id != plan.id):
         return unknown_origin()
     if is_general_receipt(rows[0]):
-        return general_origin()
+        template = template_for_fingerprint(rows[0].request_fingerprint)
+        if template is None:
+            return unknown_origin()
+        return general_origin(template)
     if _is_ai_receipt(rows[0]):
         return ai_origin()
     return unknown_origin()

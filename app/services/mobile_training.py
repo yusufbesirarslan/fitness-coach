@@ -49,6 +49,15 @@ _REST_RE = re.compile(r"^(0|[1-9][0-9]*) (sn|dk)$")
 _KIND = {"antrenman": "training", "kardiyo": "cardio", "dinlenme": "rest"}
 
 
+def day_kind(tip: str) -> str:
+    """A canonical plan day ``tip`` in the native vocabulary (``kind``).
+
+    The one mapping the current plan, the workout detail and the opted-in
+    Today summary all publish, so the three can never name a day differently.
+    """
+    return _KIND[tip]
+
+
 class PlanUnprojectable(ValueError):
     """A persisted current plan exists but cannot satisfy the native contract."""
 
@@ -247,7 +256,7 @@ def _project_plan(plan, user_id, secret) -> dict:
 def _project_day(day, slot, user_id, secret, lineage, version):
     if len(day["egzersizler"]) > MAX_EXERCISES_PER_DAY:
         raise PlanUnprojectable("day exceeds the native exercise bound")
-    kind = _KIND[day["tip"]]
+    kind = day_kind(day["tip"])
     reference = None
     if kind != "rest":
         reference = workout_ref(secret, user_id, lineage, version, slot)
