@@ -420,6 +420,8 @@ jobs:
           tests/test_completion_fence_pg.py
           tests/test_priv_k6_no_photo_completion_pg.py
           tests/test_workout_completion_pg.py
+          tests/test_training_expiry_compensation_pg.py
+          tests/test_r6_dual_revision_pg.py
 
   mobile-pg-concurrency:
     name: PostgreSQL concurrency

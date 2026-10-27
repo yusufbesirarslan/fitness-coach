@@ -56,16 +56,46 @@ def _fixed_check(expression, column, literal):
             and operand(tokens[equal + 1:], ("'" + literal + "'",)))
 
 
-def _postgres_contract(bind, table=TABLE, kinds=("c", "c", "f", "f", "f", "f", "p", "u"), unique=("p", "u")):
+def _postgres_contract(bind, table=TABLE, kinds=("c", "c", "f", "f", "f", "f", "p", "u"), unique=("p", "u"),
+                       not_null=("reservation_id", "operation_id", "user_id", "bucket_id",
+                                 "proof_version", "reason", "applied_at")):
     # Reflection omits validation status and can hide standalone unique indexes.
     # Inspect the effective authority, without validating/repairing any evidence.
-    constraints = bind.execute(sa.text("""
+    pg18 = int(bind.exec_driver_sql("SHOW server_version_num").scalar_one()) >= 180000
+    # conenforced was added in PG18. PG16 constraints are always enforced.
+    enforced = "c.conenforced" if pg18 else "true"
+    constraints = bind.execute(sa.text(f"""
         SELECT c.oid, c.contype, c.convalidated, c.condeferrable, c.condeferred,
-               c.connoinherit, c.confupdtype, c.confmatchtype
+               c.connoinherit, c.confupdtype, c.confmatchtype,
+               {enforced} AS enforced, c.conkey, c.conislocal, c.coninhcount,
+               c.conparentid, c.contypid, c.conindid, c.confrelid,
+               c.conbin IS NULL AS no_expression,
+               c.connamespace = (SELECT relnamespace FROM pg_class
+                                WHERE oid = c.conrelid) AS same_namespace
         FROM pg_constraint c WHERE c.conrelid = to_regclass(:table)
     """), {"table": table}).mappings().all()
-    if (sorted(c["contype"] for c in constraints) != list(kinds)
-            or any(not c["convalidated"] or c["condeferrable"] or c["condeferred"]
+    attributes = bind.execute(sa.text("""
+        SELECT attnum, attname, attnotnull, attislocal, attinhcount
+        FROM pg_attribute WHERE attrelid = to_regclass(:table)
+          AND attnum > 0 AND NOT attisdropped
+    """), {"table": table}).mappings().all()
+    if (set(a["attname"] for a in attributes) != set(not_null)
+            or any(not a["attnotnull"] or not a["attislocal"] or a["attinhcount"]
+                   for a in attributes)):
+        return False
+    # PG18 makes each NOT NULL authority explicit. Require a bijection with
+    # the expected live columns, not merely attnotnull (which can be invalid).
+    # Constraint names may differ harmlessly; their column authority may not.
+    nulls = [c for c in constraints if c["contype"] == "n"]
+    expected_keys = sorted((a["attnum"],) for a in attributes) if pg18 else []
+    if (any(not c["conkey"] or len(c["conkey"]) != 1 or c["connoinherit"]
+            or not c["conislocal"] or c["coninhcount"] or c["conparentid"]
+            or c["contypid"] or c["conindid"] or c["confrelid"]
+            or not c["no_expression"] or not c["same_namespace"] for c in nulls)
+            or sorted(tuple(c["conkey"]) for c in nulls) != expected_keys):
+        return False
+    if (sorted(c["contype"] for c in constraints if c["contype"] != "n") != list(kinds)
+            or any(not c["enforced"] or not c["convalidated"] or c["condeferrable"] or c["condeferred"]
                    or (c["contype"] == "c" and c["connoinherit"]) or (c["contype"] == "f" and
                        (c["confupdtype"] != "a" or c["confmatchtype"] != "s"))
                    for c in constraints)):
@@ -169,7 +199,8 @@ def upgrade():
                 or normalized != {"ck_ai_allowance_purge_singleton": "id=1",
                                   "ck_ai_allowance_purge_progress": "after_id>=0ANDthrough_id>=after_id"}
                 or (bind.dialect.name == "postgresql" and not _postgres_contract(
-                    bind, table=table, kinds=("c", "c", "p"), unique=("p",)))):
+                    bind, table=table, kinds=("c", "c", "p"), unique=("p",),
+                    not_null=("id", "after_id", "through_id")))):
             raise RuntimeError("incompatible allowance purge progress schema")
 
 
