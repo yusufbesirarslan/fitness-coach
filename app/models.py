@@ -143,6 +143,13 @@ class AiUsageReservation(db.Model):
     physical_attempts = db.Column(db.Integer, nullable=True)
     physical_attempt_limit = db.Column(db.Integer, nullable=True)
     canonical_committed = db.Column(db.Boolean, nullable=True)
+    # Immutable admission snapshot and conservative pre-SDK reservations.
+    # NULL historical rows cannot acquire aggregate execution authority.
+    physical_budget = db.Column(db.Text, nullable=True)
+    physical_input_reserved = db.Column(db.BigInteger, nullable=True)
+    physical_output_reserved = db.Column(db.BigInteger, nullable=True)
+    physical_images_reserved = db.Column(db.BigInteger, nullable=True)
+    physical_cost_reserved = db.Column(db.BigInteger, nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False)
     expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
     finalized_at = db.Column(db.DateTime(timezone=True))

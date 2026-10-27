@@ -341,15 +341,16 @@ class Admission:
                     self._emit_guard_rejection()
                     raise
             kwargs = copy.deepcopy(self._payload)
+            bounded_transport = dict(transport)
+            bounded_transport["timeout"] = min(float(transport.get("timeout", 30.0)), 30.0)
             try:
                 # SDK retries are disabled. Every physical attempt has a fresh
                 # durable check after capacity/backoff, under the account fence.
                 with ai_consent.dispatch(self.subject, self.feature, self.provider,
                                          kwargs, self.consent_generation):
                     _before_physical_attempt()
-                    allowance_execution.before_attempt(self.subject, self.feature)
-                    bounded_transport = dict(transport)
-                    bounded_transport["timeout"] = min(float(transport.get("timeout", 30.0)), 30.0)
+                    allowance_execution.before_attempt(self.subject, self.feature,
+                        provider=self.provider, payload=kwargs)
                     resp = method(**kwargs, **bounded_transport)
             except Exception as exc:
                 self._emit(_outcome_of(exc), attempt)
@@ -374,13 +375,15 @@ class Admission:
         transport = self._take(transport)
         from app.services.ai_allowances import execution as allowance_execution
         allowance_execution.check_provider(self.subject, self.feature)
+        kwargs = copy.deepcopy(self._payload)
         with ai_consent.stream_dispatch(self.subject, self.feature, self.provider,
-                                        self._payload, self.consent_generation):
+                                        kwargs, self.consent_generation):
             holder = _StreamUsage()
             _before_physical_attempt()
-            allowance_execution.before_attempt(self.subject, self.feature)
+            allowance_execution.before_attempt(self.subject, self.feature,
+                provider=self.provider, payload=kwargs)
             try:
-                with method(**copy.deepcopy(self._payload), **transport) as stream:
+                with method(**kwargs, **transport) as stream:
                     yield _StreamProxy(stream, holder)
             except BaseException as exc:
                 self._emit(_outcome_of(exc), 1)
@@ -414,6 +417,21 @@ class _StreamProxy:
 @contextmanager
 def admit(*, feature, provider, payload, deadline=None, tool_round=None,
           reduce=None, gate=True, charge=True):
+    """Preserve terminal admission refusals across legacy nested helpers."""
+    try:
+        with _admit(feature=feature, provider=provider, payload=payload,
+                    deadline=deadline, tool_round=tool_round, reduce=reduce,
+                    gate=gate, charge=charge) as admission:
+            yield admission
+    except (ai_consent.ConsentDenied, ai_spend_guard.AISpendLimitExceeded) as error:
+        from app.services.ai_allowances import execution as allowance_execution
+        allowance_execution.provider_refused(error)
+        raise
+
+
+@contextmanager
+def _admit(*, feature, provider, payload, deadline=None, tool_round=None,
+           reduce=None, gate=True, charge=True):
     """Admit one provider call; yields an `Admission` to make it with.
 
     ``provider`` is the gate label: "bedrock", "bedrock-stream" or "openai".

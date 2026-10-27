@@ -40,6 +40,12 @@ def _maybe_enqueue_summarize(conversation):
     akışta done aşaması). Kendi hatalarını yutar: özetleme tetiklenemezse bağlam
     penceresi yine kurulur."""
     try:
+        from app.services.ai_allowances import execution as meter
+        if meter.enabled():
+            # A queued/deferred task would lose the action and its terminal
+            # hold. Meter summary under this turn's original D1 + budget.
+            memory_manager.maybe_summarize(conversation)
+            return None
         from app.jobs import enqueue_or_run, get_queue
         from app.jobs.tasks import summarize_conversation
         if get_queue() is not None:

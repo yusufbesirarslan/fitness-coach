@@ -1265,3 +1265,117 @@ def test_populated_reentry_retention_and_reconciliation_preserve_receipt(expired
         allowance.settle_pending(owner)
     assert state(expired)==before
     assert apply(expired)=='COMPENSATION_ALREADY_APPLIED'
+
+
+@pytest.mark.parametrize("table,column", [
+    (TABLE, "reason"), ("ai_allowance_purge_progress", "after_id"),
+])
+@pytest.mark.parametrize("definition", ["nullable", "not_valid", "no_inherit"])
+def test_expiry_verifier_rejects_noncanonical_not_null(migrate_engine, table, column, definition):
+    """Real SQL drift: attnotnull alone does not prove a validated authority."""
+    with migrate_engine.begin() as conn:
+        if int(conn.exec_driver_sql("SHOW server_version_num").scalar_one()) < 180000:
+            pytest.skip("PostgreSQL18 named NOT NULL syntax")
+        _b1e4_schema(conn)
+        migration = _module(MIGRATION)
+        _run(conn, migration.upgrade)
+        if definition == "no_inherit":
+            conn.exec_driver_sql(f"ALTER TABLE {table} ALTER CONSTRAINT {table}_{column}_not_null NO INHERIT")
+        else:
+            conn.exec_driver_sql(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL")
+            if definition == "not_valid":
+                conn.exec_driver_sql(f"ALTER TABLE {table} ADD CONSTRAINT drift NOT NULL {column} NOT VALID")
+        before = conn.exec_driver_sql(
+            "SELECT to_jsonb(c) FROM pg_constraint c WHERE conrelid=%s::regclass ORDER BY oid", (table,)).all()
+        with pytest.raises(RuntimeError, match="incompatible"):
+            _run(conn, migration.upgrade)
+        assert conn.exec_driver_sql(
+            "SELECT to_jsonb(c) FROM pg_constraint c WHERE conrelid=%s::regclass ORDER BY oid", (table,)).all() == before
+
+
+@pytest.mark.parametrize("table,column", [
+    (TABLE, "reason"), ("ai_allowance_purge_progress", "after_id"),
+])
+@pytest.mark.parametrize("assignment", [
+    "convalidated=false", "conenforced=false", "condeferrable=true", "condeferred=true",
+    "conkey=NULL", "conkey=ARRAY[0]::smallint[]", "conkey=ARRAY[1]::smallint[]",
+    "conkey=ARRAY[1,2]::smallint[]", "conkey=ARRAY[99]::smallint[]",
+    "conislocal=false", "coninhcount=1",
+    "conparentid=1", "contypid=23", "conindid=1", "confrelid=1",
+    "connamespace=11", "contype='x'",
+])
+def test_expiry_verifier_fails_closed_on_not_null_catalog_drift(
+        migrate_engine, table, column, assignment):
+    """Rollback-only corrupt catalog evidence must never be silently filtered out."""
+    with migrate_engine.begin() as conn:
+        if int(conn.exec_driver_sql("SHOW server_version_num").scalar_one()) < 180000:
+            pytest.skip("PostgreSQL18 NOT NULL catalog authorities")
+        _b1e4_schema(conn)
+        migration = _module(MIGRATION)
+        _run(conn, migration.upgrade)
+        with conn.begin_nested() as probe:
+            conn.exec_driver_sql(f"UPDATE pg_constraint SET {assignment} "
+                                "WHERE conrelid=%s::regclass AND conname=%s",
+                                (table, f"{table}_{column}_not_null"))
+            before = conn.exec_driver_sql(
+                "SELECT to_jsonb(c) FROM pg_constraint c WHERE conrelid=%s::regclass ORDER BY oid", (table,)).all()
+            with pytest.raises(RuntimeError, match="incompatible"):
+                _run(conn, migration.upgrade)
+            assert conn.exec_driver_sql(
+                "SELECT to_jsonb(c) FROM pg_constraint c WHERE conrelid=%s::regclass ORDER BY oid", (table,)).all() == before
+            probe.rollback()
+        _run(conn, migration.upgrade)  # the unmodified authority remains valid
+
+
+@pytest.mark.parametrize("table,column", [
+    (TABLE, "reason"), ("ai_allowance_purge_progress", "after_id"),
+])
+def test_expiry_verifier_cross_checks_not_null_attribute(migrate_engine, table, column):
+    with migrate_engine.begin() as conn:
+        _b1e4_schema(conn)
+        migration = _module(MIGRATION)
+        _run(conn, migration.upgrade)
+        with conn.begin_nested() as probe:
+            conn.exec_driver_sql("UPDATE pg_attribute SET attnotnull=false "
+                                 "WHERE attrelid=%s::regclass AND attname=%s", (table, column))
+            with pytest.raises(RuntimeError, match="incompatible"):
+                _run(conn, migration.upgrade)
+            probe.rollback()
+        _run(conn, migration.upgrade)
+
+
+def test_expiry_verifier_requires_enforced_checks_pg18(migrate_engine):
+    with migrate_engine.begin() as conn:
+        if int(conn.exec_driver_sql("SHOW server_version_num").scalar_one()) < 180000:
+            pytest.skip("PostgreSQL18 NOT ENFORCED checks")
+        _b1e4_schema(conn)
+        migration = _module(MIGRATION)
+        _run(conn, migration.upgrade)
+        conn.exec_driver_sql(f"ALTER TABLE {TABLE} DROP CONSTRAINT ck_training_compensation_reason")
+        conn.exec_driver_sql(f"ALTER TABLE {TABLE} ADD CONSTRAINT ck_training_compensation_reason "
+                             "CHECK (reason='EXPIRED_ZERO_ATTEMPTS') NOT ENFORCED")
+        with pytest.raises(RuntimeError, match="incompatible"):
+            _run(conn, migration.upgrade)
+
+
+@pytest.mark.parametrize("table,column", [
+    (TABLE, "reason"), ("ai_allowance_purge_progress", "after_id"),
+])
+def test_expiry_verifier_requires_each_live_column_authority(migrate_engine, table, column):
+    with migrate_engine.begin() as conn:
+        if int(conn.exec_driver_sql("SHOW server_version_num").scalar_one()) < 180000:
+            pytest.skip("PostgreSQL18 NOT NULL catalog authorities")
+        _b1e4_schema(conn)
+        migration = _module(MIGRATION)
+        _run(conn, migration.upgrade)
+        with conn.begin_nested() as probe:
+            # Keep attnotnull=true: losing the actual validated constraint must
+            # still fail. A harmless rename, conversely, changes no authority.
+            conn.exec_driver_sql("DELETE FROM pg_constraint WHERE conrelid=%s::regclass AND conname=%s",
+                                 (table, f"{table}_{column}_not_null"))
+            with pytest.raises(RuntimeError, match="incompatible"):
+                _run(conn, migration.upgrade)
+            probe.rollback()
+        conn.exec_driver_sql(f"ALTER TABLE {table} RENAME CONSTRAINT {table}_{column}_not_null TO equivalent_not_null")
+        _run(conn, migration.upgrade)
+        _run(conn, migration.upgrade)

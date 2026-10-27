@@ -141,6 +141,8 @@ def _fail(what):
 _LATER_COLUMNS = {"ai_usage_reservation": {
     "billing_evidence", "request_fingerprint", "physical_attempts",
     "physical_attempt_limit", "canonical_committed",
+    "physical_budget", "physical_input_reserved", "physical_output_reserved",
+    "physical_images_reserved", "physical_cost_reserved",
 }}
 _LATER_NULLABLE = {"ai_usage_reservation": {"provider_billed"}}
 

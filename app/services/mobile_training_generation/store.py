@@ -204,8 +204,10 @@ def attempt_evidence(operation_id, tracked):
     if not tracked:
         yield
         return
-    with allowance.execution_scope(operation_id), ai_provider_call.attempt_observer(
-            lambda: mark_attempt_possible(operation_id)):
+    # The provider door commits the SAME original Boolean marker together
+    # with its vector debit. A second fallible post-debit observer would turn
+    # a proven zero-SDK refusal into UNKNOWN consumption.
+    with allowance.execution_scope(operation_id):
         yield
 
 
