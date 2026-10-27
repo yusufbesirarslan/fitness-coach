@@ -17,7 +17,8 @@ binds exactly one hold to one metered operation:
 Every dispatch-bound hold starts as UNKNOWN billing evidence: the adapter
 supplies no charge receipt. BE-03B-A1: the dispatch commit also sets
 ``provider_attempt_possible`` False and every physical SDK invocation is
-preceded by a committed True (``store.mark_attempt_possible``). A FAILED
+preceded by a committed True (the aggregate physical reservation commits it
+atomically with its resource vector). A FAILED
 operation still False therefore made no physical attempt, ever, and settles
 ``CONFIRMED_NOT_BILLED`` instead of UNKNOWN. Nothing here logs identifiers,
 keys, prompts or plan content.
@@ -110,6 +111,11 @@ def bind_for_dispatch(operation, now):
         raise _refused(error.code) from None
     if not hold.may_execute:
         raise _refused("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+    from app.models import AiUsageReservation
+    from app.services.ai_allowances import physical
+    row = db.session.query(AiUsageReservation).filter_by(
+        user_id=operation.user_id, public_id=hold.reference).one()
+    physical.initialize(row)
     from . import store  # store imports this module
     if hold.expires_at > now + store.ABANDON_AFTER:
         # Retirement (marker instant + ABANDON_AFTER) must find this hold

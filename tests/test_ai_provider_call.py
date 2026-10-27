@@ -923,9 +923,9 @@ def test_every_module_touching_an_sdk_entry_point_uses_the_door():
 
 
 def test_input_check_runs_before_the_permit_and_the_charge():
-    """admit(): check_payload() precedes model_concurrency_slot()/charge()."""
+    """Admission core checks payload before capacity or spend is acquired."""
     import inspect
-    src = inspect.getsource(ai_provider_call.admit)
+    src = inspect.getsource(ai_provider_call._admit)
     assert src.index("check_payload(") < src.index("model_concurrency_slot(")
     assert src.index("check_payload(") < src.index("ai_spend_guard.charge(")
 

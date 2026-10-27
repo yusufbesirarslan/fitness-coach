@@ -24,6 +24,7 @@ from app.services import ai_consent, ai_spend_guard
 from . import service as ledger
 from .errors import AllowanceError, CATALOG
 from .policy import AllowancePolicy, SUPPORTED_FEATURES
+from . import physical
 
 FLAG = "AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED"
 _ACTIVE = ContextVar("allowance_logical_action", default=None)
@@ -31,14 +32,14 @@ _NATIVE = ContextVar("allowance_native_training", default=None)
 _EXEMPT = ContextVar("allowance_exempt_action", default=None)
 # Physical safety ceilings, not additional visible units. Snapshot at dispatch.
 # Each retry/fallback/tool/batch shares this finite ceiling and the spend guard.
-ATTEMPT_LIMITS = {"coach": 30, "training_generation": 12,
-                  "nutrition_generation": 8, "pump_check": 4, "qr_menu": 48}
+ATTEMPT_LIMITS = {"coach": 8, "training_generation": 4,
+                  "nutrition_generation": 2, "pump_check": 2, "qr_menu": 16}
 PHYSICAL_FEATURES = {
-    "coach": frozenset({"coach", "nutrition", "vision"}),
+    "coach": frozenset({"coach", "nutrition", "vision", "summary"}),
     "training_generation": frozenset({"training_plan"}),
     "nutrition_generation": frozenset({"nutrition_plan"}),
     "pump_check": frozenset({"vision"}),
-    "qr_menu": frozenset({"menu_extract", "menu_ocr", "nutrition"}),
+    "qr_menu": frozenset({"menu_extract", "nutrition"}),
 }
 CONSENT_FEATURE = {"coach": "coach", "training_generation": "training_plan",
                    "nutrition_generation": "nutrition_plan", "pump_check": "vision",
@@ -147,6 +148,8 @@ def canonical_within(owner):
     if action is None:
         return
     _check_owner(owner)
+    if action.refusal is not None:
+        raise action.refusal
     from app.models import AiUsageReservation as Hold
     ai_consent.fence(action.authority, owner)
     changed = db.session.execute(sa.update(Hold).where(
@@ -155,6 +158,16 @@ def canonical_within(owner):
     ).values(canonical_committed=True).execution_options(synchronize_session=False)).rowcount
     if changed != 1:
         _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+
+
+def provider_refused(error):
+    """A swallowed D1/admission refusal cannot publish a partial action."""
+    action = _ACTIVE.get()
+    if action is not None:
+        with action._lock:
+            if action.refusal is None:
+                action.refusal = (error if isinstance(error, ai_consent.ConsentDenied)
+                    else ExecutionRefused('AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE'))
 
 
 def current_action():
@@ -200,6 +213,8 @@ class Action:
 
     def success(self):
         _check_owner(self.owner)
+        if self.refusal is not None:
+            raise self.refusal
         ai_consent.authorize_operation(self.authority)
         self.successful = True
 
@@ -373,13 +388,17 @@ def check_provider(owner, feature):
 
 
 def _exempt_feature(feature):
-    return ((_EXEMPT.get() == "workout_photo_proof" and feature == "vision")
-            or (_EXEMPT.get() == "coach_summary" and feature == "summary"))
+    return ((_ACTIVE.get() is None and _EXEMPT.get() == "workout_photo_proof" and feature == "vision")
+            or (not enabled() and _EXEMPT.get() == "coach_summary" and feature == "summary"))
 
 
-def before_attempt(owner, feature):
+def before_attempt(owner, feature, *, provider, payload):
     """Inside D1: row-only committed evidence, never an account lock."""
-    if not enabled():
+    native = _NATIVE.get()
+    # This scope is entered only for an originally metered operation. A flag
+    # change cannot erase its durable dispatch obligation while it is running.
+    native_metered = native is not None
+    if not enabled() and not native_metered:
         if _ACTIVE.get() is not None:
             _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
         return
@@ -388,13 +407,27 @@ def before_attempt(owner, feature):
         return
     action = _ACTIVE.get()
     if action is None:
-        return  # native Training's existing observer / explicit exemption
+        if not native_metered or feature != 'training_plan':
+            _refuse('AI_FEATURE_NOT_IN_PLAN')
+        from app.models import TrainingPlanGenerationAllowance as Bind
+        try:
+            reference = db.session.execute(sa.select(Bind.reservation_ref).where(
+                Bind.operation_id == native, Bind.user_id == owner,
+                Bind.state == 'RESERVED')).scalar_one_or_none()
+            if reference is None:
+                _refuse('AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE')
+            physical.reserve(owner, reference, feature, provider, payload, operation_id=native)
+        except AllowanceError as error:
+            _refuse(error.code)
+        return
     if action.owner != owner or feature not in PHYSICAL_FEATURES[action.feature]:
         _refuse("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
     # Serializes joined menu workers locally; PostgreSQL arbitrates processes.
     with action._lock:
+        if action.refusal is not None:
+            raise action.refusal
         try:
-            ledger.record_dispatch_attempt(owner, action.reference)
+            physical.reserve(owner, action.reference, feature, provider, payload)
         except AllowanceError as error:
             action.refusal = ExecutionRefused(error.code, **error.details)
             raise action.refusal from None
@@ -403,9 +436,15 @@ def before_attempt(owner, feature):
 def install(app):
     """Recover typed refusals even where legacy routes catch provider errors."""
     def response(error):
+        if isinstance(error, ai_consent.ConsentDenied):
+            from app.blueprints.ai_consent import consent_error_response
+            return consent_error_response(error)
         from app.blueprints.mobile_api import mobile_error
+        message = ("This AI request could not be completed. Try a simpler request."
+                   if error.code == 'AI_ACTION_BUDGET_EXHAUSTED'
+                   else "AI allowance unavailable.")
         result = current_app.make_response(mobile_error(
-            error.code, "AI allowance unavailable.", error.status,
+            error.code, message, error.status,
             error.retryable, retry_after=30 if error.retryable else None))
         result.headers["Cache-Control"] = "no-store"
         return result

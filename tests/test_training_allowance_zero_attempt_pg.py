@@ -151,7 +151,7 @@ def _unbilled(state, holds=1):
     assert state.bucket == (0, 0, 0)  # nothing consumed, nothing counted as billed
 
 
-def _age(user_id, minutes=16):
+def _age(user_id, minutes=16, *, expire_hold=True):
     """Move the operation and its hold past ABANDON_AFTER / RESERVATION_TTL."""
     from app.extensions import db
     from app.models import (AiUsageReservation, TrainingPlanGenerationOperation,
@@ -170,7 +170,8 @@ def _age(user_id, minutes=16):
         binding.created_at = aged.replace(tzinfo=None)
     for hold in AiUsageReservation.query.filter_by(user_id=user_id):
         hold.created_at = aged
-        hold.expires_at = aged + ai_allowances.RESERVATION_TTL
+        if expire_hold:
+            hold.expires_at = aged + ai_allowances.RESERVATION_TTL
     db.session.commit()
 
 
@@ -298,13 +299,14 @@ def test_crash_boundaries_never_produce_a_false_zero_attempt_release(chain, boun
     from app.services.mobile_training_generation import store
     from app.services.mobile_training_generation.errors import StoredGenerationFailure
     owner = chain.owners[0]
-    real_mark = store.mark_attempt_possible
+    from app.services.ai_allowances import physical
+    real_mark = physical.reserve
     if boundary == "before_marker":
-        chain.monkeypatch.setattr(store, "mark_attempt_possible",
-                                  lambda operation_id: (_ for _ in ()).throw(Crash()))
+        chain.monkeypatch.setattr(physical, "reserve",
+                                  lambda *args, **kwargs: (_ for _ in ()).throw(Crash()))
     elif boundary == "after_marker_commit":
-        chain.monkeypatch.setattr(store, "mark_attempt_possible",
-                                  lambda operation_id: (real_mark(operation_id), (_ for _ in ()).throw(Crash())))
+        chain.monkeypatch.setattr(physical, "reserve",
+                                  lambda *args, **kwargs: (real_mark(*args, **kwargs), (_ for _ in ()).throw(Crash())))
     else:
         chain.behaviour[:] = ["crash"]
     with chain.app.app_context():
@@ -321,7 +323,7 @@ def test_crash_boundaries_never_produce_a_false_zero_attempt_release(chain, boun
         assert state.holds == [("RESERVED", None, "UNKNOWN", None)] and state.bucket == (0, 1, 0)
         assert chain.calls["openai"] == (1 if boundary == "in_sdk" else 0)
 
-        chain.monkeypatch.setattr(store, "mark_attempt_possible", real_mark)
+        chain.monkeypatch.setattr(physical, "reserve", real_mark)
         _age(owner)
         with pytest.raises(StoredGenerationFailure):
             generate(owner, "a1-crash")  # retirement, then the stored terminal answer
@@ -741,17 +743,18 @@ def test_a2_active_d1_fence_refuses_retirement_until_sdk_exit(chain, boundary, s
         events.append("SDK_RETURN")
         return response
     chain.monkeypatch.setattr(ai.openai_client.chat.completions, "create", sdk)
-    real_marker = store.mark_attempt_possible
+    from app.services.ai_allowances import physical
+    real_marker = physical.reserve
 
-    def marker(op):
-        _age(owner)
+    def marker(*args, **kwargs):
+        _age(owner, expire_hold=False)
         if boundary == "after_consent":
             blocked_retirement()
-        real_marker(op)
+        real_marker(*args, **kwargs)
         events.append("MARKER_COMMITTED")
         if boundary == "after_marker":
             blocked_retirement()
-    chain.monkeypatch.setattr(store, "mark_attempt_possible", marker)
+    chain.monkeypatch.setattr(physical, "reserve", marker)
     real_dispatch = ai_consent.dispatch
 
     @contextmanager
@@ -762,6 +765,7 @@ def test_a2_active_d1_fence_refuses_retirement_until_sdk_exit(chain, boundary, s
         finally:
             # AFTER D1 releases, BEFORE staging or another recovery attempt.
             events.append("D1_RELEASED")
+            _age(owner)
             assert _a2_retire_in_worker(chain, owner) == "retired"
             events.append("RETIRE_COMMITTED")
     chain.monkeypatch.setattr(ai_consent, "dispatch", dispatch)
@@ -816,22 +820,24 @@ def test_a2_worker_crash_releases_fence_and_allows_retirement(chain, boundary):
     from app.services.mobile_training_generation import store
     from app.services.mobile_training_generation.errors import StoredGenerationFailure
     owner = chain.owners[0]
-    real = store.mark_attempt_possible
+    from app.services.ai_allowances import physical
+    real = physical.reserve
 
-    def marker(op):
-        _age(owner)
+    def marker(*args, **kwargs):
+        _age(owner, expire_hold=False)
         if boundary == "before_marker":
             raise Crash()
-        real(op)
+        real(*args, **kwargs)
         if boundary == "after_marker":
             raise Crash()
-    chain.monkeypatch.setattr(store, "mark_attempt_possible", marker)
+    chain.monkeypatch.setattr(physical, "reserve", marker)
     if boundary == "in_sdk":
         chain.behaviour[:] = ["crash"]
     with chain.app.app_context():
         consent(owner, chain.policy, "affirmative_grant", "a2-crash-grant")
         with pytest.raises(Crash):
             generate(owner, "a2-crash")
+        _age(owner)
         assert _a2_retire_in_worker(chain, owner) == "retired"
         with pytest.raises(StoredGenerationFailure):
             generate(owner, "a2-crash")
@@ -934,13 +940,14 @@ def test_a2_retirement_concurrent_with_revocation_or_deletion(chain, action):
     from app.services.mobile_training_generation import store
     from app.services.mobile_training_generation.errors import GenerationPersistenceUnavailable
     owner, other = chain.owners
-    real = store.mark_attempt_possible
+    from app.services.ai_allowances import physical
+    real = physical.reserve
     workers, outcomes, errors = [], [], []
 
-    def marker(op):
+    def marker(*args, **kwargs):
+        real(*args, **kwargs)
         _age(owner)
-        real(op)
-    chain.monkeypatch.setattr(store, "mark_attempt_possible", marker)
+    chain.monkeypatch.setattr(physical, "reserve", marker)
 
     def mutate():
         with chain.app.app_context():

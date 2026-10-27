@@ -1,0 +1,342 @@
+{
+  "as_of": "2026-10-26",
+  "purpose": "Only unchanged 20/2/2/3/1 offer; affected vector and single-image mapping requalification",
+  "source_provenance": {
+    "finops_model_sha256": "1e16477ab26fc7472bbe2a6cbe597d78ce07bd1af90f2d155683b273b2f153c5",
+    "comparison_model_sha256": "eb340e9a59a920fbcb033cc5d05470cfedb5163b6df4b10a6503184b93620dc0",
+    "pinned_sources": {
+      "mon_cost_inputs": {
+        "path": "~/axisai-mon-cost-01/model/inputs.json",
+        "sha256": "66cff79e90a560687ca14bf42d83a04809da18ab26d4109a2a07218432da8e57",
+        "use": "token profiles per operation/case and usage profiles F4-F7 (reused, not re-derived)"
+      },
+      "d22_inputs": {
+        "path": "~/axisai-mon-d22-pricing-allowance-decision-01/model/inputs.json",
+        "sha256": "c7461d86f61aadcd701a9d5dee8d3f577d1a3c8ecac68258f5a47095138bdb64",
+        "use": "allowance policies S_*/P_* (reused)"
+      },
+      "price_list": {
+        "path": "evidence/pricing/index_fm.json",
+        "sha256": "ca50edc0c67c3379b253fd3aaec07cb6a732fd96324910b1f0f3b1e690cf7fc7",
+        "use": "AWS Price List AmazonBedrockFoundationModels eu-central-1, version 20261012084008; re-downloaded 2026-10-25 14:06Z and still 'current'"
+      },
+      "asc_export": {
+        "path": "evidence/asc_prices_zip/Starting Price.csv",
+        "sha256": "58d59b6952f97dc8a55fdf7e6027e597ae634093f08fc2604b5a135c76508b94",
+        "use": "App Store Connect 'Current Prices' export, founder Downloads 2026-10-22: T\u00fcrkiye TRY 399.99 -> Year 1 proceeds 269.16, Year 2 269.16"
+      },
+      "tcmb": {
+        "path": "evidence/tcmb-today.xml",
+        "sha256": "c9a98629ceb3195f0cf6de8e2156eb6089944ad052b1aa43eefd17e61fa494d2"
+      }
+    }
+  },
+  "population_mix": {
+    "LIGHT": 0.3,
+    "MEDIAN": 0.55,
+    "P90": 0.1,
+    "P99": 0.04,
+    "EXTREME": 0.01
+  },
+  "weekly_offer": {
+    "coach": 20,
+    "training_generation": 2,
+    "nutrition_generation": 2,
+    "pump_check": 3,
+    "qr_menu": 1
+  },
+  "scenarios": {
+    "A_CURRENT": {
+      "assumptions": {
+        "routing": "LEGACY",
+        "tf": 1.0,
+        "mix": "EXPECTED",
+        "cache": null,
+        "extra": 0.0,
+        "label": "Current verified runtime: Sonnet 4.5 global + gpt-4o-mini, cache OFF"
+      },
+      "profiles": {
+        "LIGHT": {
+          "original_ai_month": 0.7113366,
+          "single_image_ai_month": 0.7071440999999999,
+          "pump_comparison_replaced_count": 0.5,
+          "exempt_ai_month": 0.03118725
+        },
+        "MEDIAN": {
+          "original_ai_month": 4.07545299,
+          "single_image_ai_month": 4.058682989999999,
+          "pump_comparison_replaced_count": 2,
+          "exempt_ai_month": 0.056439
+        },
+        "P90": {
+          "original_ai_month": 5.659630724545454,
+          "single_image_ai_month": 5.6332052699999995,
+          "pump_comparison_replaced_count": 3.1515151515151514,
+          "exempt_ai_month": 0.10100700000000001
+        },
+        "P99": {
+          "original_ai_month": 7.432045999040425,
+          "single_image_ai_month": 7.405209785695338,
+          "pump_comparison_replaced_count": 3.2005024859972115,
+          "exempt_ai_month": 0.11506653569534044
+        },
+        "EXTREME": {
+          "original_ai_month": 9.090472879999998,
+          "single_image_ai_month": 9.063221629999997,
+          "pump_comparison_replaced_count": 3.25,
+          "exempt_ai_month": 0.130395
+        }
+      },
+      "mean_action_usd": {
+        "coach": 0.039517788,
+        "training_generation": 0.0500124,
+        "nutrition_generation": 0.030719999999999997,
+        "pump_check": 0.016694999999999998,
+        "qr_menu": 0.10670625
+      }
+    },
+    "A_STRESS": {
+      "assumptions": {
+        "routing": "LEGACY",
+        "tf": 1.0,
+        "mix": "STRESS",
+        "cache": null,
+        "extra": 0.1,
+        "label": "Legacy routing under the same stress mix"
+      },
+      "profiles": {
+        "LIGHT": {
+          "original_ai_month": 1.113982665,
+          "single_image_ai_month": 1.108669665,
+          "pump_comparison_replaced_count": 0.5,
+          "exempt_ai_month": 0.039827249999999995
+        },
+        "MEDIAN": {
+          "original_ai_month": 5.657759094999999,
+          "single_image_ai_month": 5.636507095,
+          "pump_comparison_replaced_count": 2,
+          "exempt_ai_month": 0.07155899999999998
+        },
+        "P90": {
+          "original_ai_month": 7.22075002,
+          "single_image_ai_month": 7.1872620199999995,
+          "pump_comparison_replaced_count": 3.1515151515151514,
+          "exempt_ai_month": 0.12692699999999998
+        },
+        "P99": {
+          "original_ai_month": 8.337992796099941,
+          "single_image_ai_month": 8.303984256683735,
+          "pump_comparison_replaced_count": 3.2005024859972115,
+          "exempt_ai_month": 0.14404597668373767
+        },
+        "EXTREME": {
+          "original_ai_month": 9.295633129999999,
+          "single_image_ai_month": 9.26109863,
+          "pump_comparison_replaced_count": 3.25,
+          "exempt_ai_month": 0.16279499999999997
+        }
+      },
+      "mean_action_usd": {
+        "coach": 0.053229825,
+        "training_generation": 0.08796886500000001,
+        "nutrition_generation": 0.038472,
+        "pump_check": 0.022112999999999997,
+        "qr_menu": 0.17182650000000002
+      }
+    },
+    "B_TARGET": {
+      "assumptions": {
+        "routing": "C55_EU",
+        "tf": 1.15,
+        "mix": "EXPECTED",
+        "cache": null,
+        "extra": 0.0,
+        "label": "#456 claude55 routing, EU geo profiles, tokens x1.15"
+      },
+      "profiles": {
+        "LIGHT": {
+          "original_ai_month": 0.6001563535,
+          "single_image_ai_month": 0.5966206785,
+          "pump_comparison_replaced_count": 0.5,
+          "exempt_ai_month": 0.026404345000000003
+        },
+        "MEDIAN": {
+          "original_ai_month": 3.4381813234999994,
+          "single_image_ai_month": 3.4240386234999995,
+          "pump_comparison_replaced_count": 2,
+          "exempt_ai_month": 0.04800928000000001
+        },
+        "P90": {
+          "original_ai_month": 4.775062829944444,
+          "single_image_ai_month": 4.752777363277778,
+          "pump_comparison_replaced_count": 3.1515151515151514,
+          "exempt_ai_month": 0.08641974000000001
+        },
+        "P99": {
+          "original_ai_month": 6.270224599635204,
+          "single_image_ai_month": 6.247592726380848,
+          "pump_comparison_replaced_count": 3.2005024859972115,
+          "exempt_ai_month": 0.09868900510307045
+        },
+        "EXTREME": {
+          "original_ai_month": 7.669256157444443,
+          "single_image_ai_month": 7.646274269944443,
+          "pump_comparison_replaced_count": 3.25,
+          "exempt_ai_month": 0.11202840000000001
+        }
+      },
+      "mean_action_usd": {
+        "coach": 0.03333294396666666,
+        "training_generation": 0.04217712399999999,
+        "nutrition_generation": 0.025907199999999995,
+        "pump_check": 0.01407945,
+        "qr_menu": 0.09005851249999998
+      }
+    },
+    "B_GLOBAL_PARITY": {
+      "assumptions": {
+        "routing": "C55_GLOBAL",
+        "tf": 1.0,
+        "mix": "EXPECTED",
+        "cache": null,
+        "extra": 0.0,
+        "label": "claude55 Global profiles, token parity (optimistic bound)"
+      },
+      "profiles": {
+        "LIGHT": {
+          "original_ai_month": 0.47443189999999996,
+          "single_image_ai_month": 0.47163689999999997,
+          "pump_comparison_replaced_count": 0.5,
+          "exempt_ai_month": 0.020873000000000003
+        },
+        "MEDIAN": {
+          "original_ai_month": 2.7179299,
+          "single_image_ai_month": 2.7067499,
+          "pump_comparison_replaced_count": 2,
+          "exempt_ai_month": 0.037952
+        },
+        "P90": {
+          "original_ai_month": 3.774753225252525,
+          "single_image_ai_month": 3.7571362555555554,
+          "pump_comparison_replaced_count": 3.1515151515151514,
+          "exempt_ai_month": 0.068316
+        },
+        "P99": {
+          "original_ai_month": 4.956699288249173,
+          "single_image_ai_month": 4.938808479352449,
+          "pump_comparison_replaced_count": 3.2005024859972115,
+          "exempt_ai_month": 0.07801502379689362
+        },
+        "EXTREME": {
+          "original_ai_month": 6.062653088888888,
+          "single_image_ai_month": 6.044485588888889,
+          "pump_comparison_replaced_count": 3.25,
+          "exempt_ai_month": 0.08856000000000001
+        }
+      },
+      "mean_action_usd": {
+        "coach": 0.026350153333333334,
+        "training_generation": 0.0333416,
+        "nutrition_generation": 0.02048,
+        "pump_check": 0.01113,
+        "qr_menu": 0.07119249999999999
+      }
+    },
+    "D_STRESS": {
+      "assumptions": {
+        "routing": "C55_EU",
+        "tf": 1.3,
+        "mix": "STRESS",
+        "cache": null,
+        "extra": 0.1,
+        "label": "claude55 EU, tokens x1.3, retry/repair/fallback-heavy mix, +10% failed heavy attempts"
+      },
+      "profiles": {
+        "LIGHT": {
+          "original_ai_month": 1.06237486355,
+          "single_image_ai_month": 1.0573098035500001,
+          "pump_comparison_replaced_count": 0.5,
+          "exempt_ai_month": 0.038085190000000005
+        },
+        "MEDIAN": {
+          "original_ai_month": 5.3954777019,
+          "single_image_ai_month": 5.3752174619,
+          "pump_comparison_replaced_count": 2,
+          "exempt_ai_month": 0.06868576000000001
+        },
+        "P90": {
+          "original_ai_month": 6.886537089177778,
+          "single_image_ai_month": 6.854611862511111,
+          "pump_comparison_replaced_count": 3.1515151515151514,
+          "exempt_ai_month": 0.12240228000000002
+        },
+        "P99": {
+          "original_ai_month": 7.952115485059724,
+          "single_image_ai_month": 7.919694010816274,
+          "pump_comparison_replaced_count": 3.2005024859972115,
+          "exempt_ai_month": 0.1391885511051633
+        },
+        "EXTREME": {
+          "original_ai_month": 8.865539552711112,
+          "single_image_ai_month": 8.832616662711112,
+          "pump_comparison_replaced_count": 3.25,
+          "exempt_ai_month": 0.15752880000000002
+        }
+      },
+      "mean_action_usd": {
+        "coach": 0.050754887516666666,
+        "training_generation": 0.0838636513,
+        "nutrition_generation": 0.036676639999999996,
+        "pump_check": 0.02108106,
+        "qr_menu": 0.16393520000000003
+      }
+    }
+  },
+  "proceeds": {
+    "monthly_price_try": 399.99,
+    "annual_price_try": 3999.99,
+    "export_monthly_15_after_tax_try": 269.16,
+    "fx": 49.654,
+    "refunds": 0.03,
+    "monthly_active": 0.8,
+    "annual_active": 0.7,
+    "non_ai_per_active_month": 0.05
+  },
+  "limits": {
+    "coach": [
+      256000,
+      7000,
+      8,
+      2,
+      0.873
+    ],
+    "training_generation": [
+      64000,
+      22000,
+      4,
+      0,
+      0.522
+    ],
+    "nutrition_generation": [
+      32000,
+      4000,
+      2,
+      0,
+      0.156
+    ],
+    "pump_check": [
+      24000,
+      2400,
+      2,
+      2,
+      0.108
+    ],
+    "qr_menu": [
+      208000,
+      34000,
+      16,
+      0,
+      1.0308
+    ]
+  }
+}

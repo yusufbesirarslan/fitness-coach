@@ -138,8 +138,8 @@ def test_real_first_plan_refusal_terminates_refunds_and_replays(
     error = deny('AI_CONSENT_CHANGED')
     def refuse(*args, **kwargs):
         if attempted:
-            from app.services import ai_provider_call
-            ai_provider_call._before_physical_attempt()
+            from physical_budget_support import before_attempt
+            before_attempt(uid, 'training_plan')
         raise error
     generate = Mock(side_effect=refuse)
     monkeypatch.setattr(service, 'generate_training_plan_candidate', generate)

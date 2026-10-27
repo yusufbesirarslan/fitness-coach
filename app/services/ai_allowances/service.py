@@ -433,6 +433,8 @@ def reserve_dispatch_within(user_id, feature, idempotency_key, fingerprint,
         row.request_fingerprint = fingerprint
         row.physical_attempts, row.physical_attempt_limit = 0, attempt_limit
         row.canonical_committed = False
+        from . import physical
+        physical.initialize(row)
         db.session.flush()
         return hold
     except SQLAlchemyError:

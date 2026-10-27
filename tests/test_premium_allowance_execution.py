@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from physical_budget_support import before_attempt as physical_attempt
 import sqlalchemy as sa
 
 from ai_allowance_support import enable_subscriptions, premium_row
@@ -86,7 +87,7 @@ def test_unknown_failures_are_bounded_and_retry_is_one_visible_unit(ready, famil
         with E.logical_action(ready, family, {'n': n}, key=f'failed-action-{n}') as action:
             for _ in range(2):
                 E.check_provider(ready, physical)
-                E.before_attempt(ready, physical)
+                physical_attempt(ready, physical)
     assert counts(ready, family) == (2, 0, 1)
     rows = AiUsageReservation.query.order_by(AiUsageReservation.id).all()
     assert [r.state for r in rows] == ['RELEASED', 'COMMITTED', 'COMMITTED']
@@ -167,9 +168,9 @@ def test_flag_rollback_never_disables_active_operation_evidence(app, ready, befo
     action = hold(ready, 'coach')
     with E.scope(action):
         if before_attempt:
-            E.before_attempt(ready, 'coach')
+            physical_attempt(ready, 'coach')
         app.config[E.FLAG] = False
-        for guard in [E.check_provider, E.before_attempt]:
+        for guard in [E.check_provider, physical_attempt]:
             with pytest.raises(E.ExecutionRefused):
                 guard(ready, 'coach')
     action.finish()
@@ -202,9 +203,9 @@ def test_physical_tool_budget_cannot_expand_under_one_unit(ready):
     action = hold(ready, 'qr_menu')
     with E.scope(action):
         for _ in range(E.ATTEMPT_LIMITS['qr_menu']):
-            E.before_attempt(ready, 'nutrition')
+            physical_attempt(ready, 'nutrition')
         with pytest.raises(E.ExecutionRefused):
-            E.before_attempt(ready, 'nutrition')
+            physical_attempt(ready, 'nutrition')
     action.finish()
     row = AiUsageReservation.query.one()
     assert row.physical_attempts == E.ATTEMPT_LIMITS['qr_menu']
@@ -291,7 +292,7 @@ def test_account_switch_cannot_hide_inside_attribution_scope(app, ready):
         with E.scope(action):
             g.mobile_user = SimpleNamespace(id=ready+1)
             for operation in [action.success, lambda: E.canonical_within(ready),
-                              lambda: E.before_attempt(ready, 'coach')]:
+                              lambda: physical_attempt(ready, 'coach')]:
                 with pytest.raises(ai_consent.ConsentDenied):
                     operation()
         action.finish()
@@ -320,7 +321,7 @@ def test_typed_refusal_recovers_swallowed_legacy_errors(app, ready):
 def test_failure_outcome_does_not_invent_billing_evidence(ready, family, outcome):
     action = hold(ready, family, 'logical-failure-outcome')
     with E.scope(action):
-        E.before_attempt(ready, next(iter(E.PHYSICAL_FEATURES[family])))
+        physical_attempt(ready, next(iter(E.PHYSICAL_FEATURES[family])))
         E.failure(outcome)
     action.finish()
     row = AiUsageReservation.query.one()
