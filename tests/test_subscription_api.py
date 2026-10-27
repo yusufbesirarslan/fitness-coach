@@ -25,7 +25,7 @@ def principal(app, monkeypatch):
 def enabled(app, monkeypatch):
     app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_SUBSCRIPTION_ENVIRONMENT="Sandbox")
     monkeypatch.setattr(s, "AppleAdapter", lambda _: NS(
-        environment="Sandbox", verify=lambda transaction_id, token: evidence(token)))
+        environment="Sandbox", environments=("Sandbox",), verify=lambda transaction_id, token: evidence(token)))
 
 
 @pytest.mark.parametrize("suffix,method", [("purchase-context", "get"), ("entitlement", "get"), ("verify", "post")])
@@ -87,7 +87,7 @@ def test_outage_preserves_bounded_verified_state(app, client, principal, enabled
     client.post(PATH + "verify", json={"transaction_id": "101"}, headers=headers)
     def fail(*_):
         raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503)
-    monkeypatch.setattr(s, "AppleAdapter", lambda _: NS(environment="Sandbox", verify=fail))
+    monkeypatch.setattr(s, "AppleAdapter", lambda _: NS(environment="Sandbox", environments=("Sandbox",), verify=fail))
     response = client.post(PATH + "verify", json={"transaction_id": "101"}, headers=headers)
     assert response.status_code == 503 and response.json["error"]["retryable"]
     assert client.get(PATH + "entitlement", headers=headers).json["entitlement"]["effective_premium"]

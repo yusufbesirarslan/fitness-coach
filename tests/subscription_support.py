@@ -8,6 +8,17 @@ from appstoreserverlibrary.models.InAppOwnershipType import InAppOwnershipType
 from app.services.apple_subscriptions import AppleAdapter, Evidence
 
 
+def adult_account(user, **changes):
+    """Real canonical signature, explicitly requested by purchase test owners."""
+    from app.services import account_eligibility as policy
+    user.cognito_sub = user.cognito_sub or f"purchase-fixture-{uuid4()}"
+    record = dict(version=policy.VERSION, age_band="18_plus", country="TR",
+                  source="self_declared", checked_at=datetime.now(timezone.utc).isoformat(), _age=25)
+    record.update(changes)
+    policy.attach(user, record)
+    return user
+
+
 def evidence(token, **changes):
     now = datetime.now(timezone.utc)
     values = dict(environment="Sandbox", original_id="100", transaction_id="101",

@@ -255,7 +255,7 @@ def _process(adapter, environment, claim):
     try:
         try:
             with blocking_concurrency_slot():
-                evidence = adapter.status(original_id, token)
+                evidence = adapter.status(original_id, token, environment)
         except BlockingConcurrencyLimit:
             raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None
         subscriptions.persist_verified(user_id, evidence, token)
@@ -274,12 +274,22 @@ def _process(adapter, environment, claim):
 
 
 def run(limit=DEFAULT_LIMIT, sweep_limit=DEFAULT_SWEEP_LIMIT):
-    """One bounded pass. An Apple/OCSP outage stops the pass (no hammering)."""
+    """One bounded pass per verified environment, each with its own limits.
+
+    An Apple/OCSP outage stops that environment's pass (no hammering).
+    """
     try:
         adapter = _adapter()
     except SubscriptionError as error:
         raise ReconciliationDisabled(error.code) from None
-    environment = adapter.environment
+    counts = {"enqueued": 0, "purged": 0, "processed": 0}
+    for environment in adapter.environments:
+        for key, value in _run_environment(adapter, environment, limit, sweep_limit).items():
+            counts[key] = counts.get(key, 0) + value
+    return counts
+
+
+def _run_environment(adapter, environment, limit, sweep_limit):
     try:
         counts = {"enqueued": enqueue_stale(environment, _now(), sweep_limit), "purged": 0, "processed": 0}
     except (SQLAlchemyError, SubscriptionError):
