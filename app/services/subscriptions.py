@@ -10,6 +10,7 @@ from app.extensions import db
 from app.models import User, AppleAccountAssociation, AppleSubscription
 from app.services.apple_subscriptions import AppleAdapter, SubscriptionError
 from app.services.ai_gate import blocking_concurrency_slot, BlockingConcurrencyLimit
+from app.services import account_eligibility
 
 MAX_VERIFICATION_AGE = timedelta(hours=24)
 
@@ -41,11 +42,37 @@ def _association(user_id):
     return association
 
 
+def _purchase_eligible(user, now, environment=None):
+    # Explicit compatibility boundary for the qualified MON-03 Sandbox-only
+    # deployment while its account screen is OFF. Never applies to Production,
+    # including authentic Sandbox transactions verified by its review fallback.
+    if (current_app.config.get("APPLE_SUBSCRIPTION_ENVIRONMENT") == "Sandbox"
+            and current_app.config.get("APPLE_SANDBOX_FALLBACK_ENABLED") is False
+            and current_app.config.get("ACCOUNT_ELIGIBILITY_ENABLED") is False
+            and environment in (None, "Sandbox")):
+        return True
+    return account_eligibility.purchase_eligible(user, now)
+
+
+def _eligible_view(user, row, now):
+    view = entitlement_view(row, now)
+    # Only a view that would grant Premium changes; every other view keeps the v1
+    # status set that shipped clients decode (no row, lapsed or pending rows).
+    if view["effective_premium"] and not _purchase_eligible(user, now, row.environment):
+        # Keep real Apple state/ownership for restore, refunds and reconciliation.
+        # Recording payment evidence is not permission to grant access.
+        view.update(tier="FREE", effective_premium=False, status="ELIGIBILITY_REVIEW_REQUIRED",
+                    purchase_recovery_required=True, resolution="CONTACT_SUPPORT_OR_APPLE_REFUND")
+    return view
+
+
 def purchase_context(user_id):
     _enabled()
     try:
         # Config must be complete before a client can start purchasing.
         adapter = AppleAdapter(current_app.config)
+        if not _purchase_eligible(_owner(user_id), datetime.now(timezone.utc)):
+            raise SubscriptionError("SUBSCRIPTION_ELIGIBILITY_REQUIRED", 403)
         token = _association(user_id).token
         db.session.commit()
         return {"contract_version": 1, "app_account_token": token,
@@ -82,17 +109,20 @@ def entitlement_view(row, now):
 
 def entitlement(user_id):
     _enabled()
-    environment = AppleAdapter(current_app.config).environment
+    # Records count only from environments this deployment verifies. Each row keeps
+    # its own Apple identity and state; the configured environment ranks first.
+    environments = AppleAdapter(current_app.config).environments
     try:
-        if db.session.get(User, user_id) is None:
-            raise SubscriptionError("SUBSCRIPTION_ACCOUNT_UNAVAILABLE", 409)
+        user = _owner(user_id)
         rows = db.session.execute(sa.select(AppleSubscription).where(
-            AppleSubscription.user_id == user_id, AppleSubscription.environment == environment)).scalars().all()
+            AppleSubscription.user_id == user_id, AppleSubscription.environment.in_(environments))
+            .order_by(AppleSubscription.id)).scalars().all()
+        rows.sort(key=lambda row: environments.index(row.environment))
         now = datetime.now(timezone.utc)
-        views = [entitlement_view(row, now) for row in rows]
+        views = [_eligible_view(user, row, now) for row in rows]
         return next((v for v in views if v["effective_premium"]),
                     next((v for v in views if v["verification_pending"]),
-                         views[0] if views else entitlement_view(None, now)))
+                         views[0] if views else _eligible_view(user, None, now)))
     except SQLAlchemyError:
         db.session.rollback()
         raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None
@@ -105,7 +135,7 @@ def persist_verified(user_id, evidence, expected_token):
     deletion lock and never reassign an existing original identity.
     """
     try:
-        _owner(user_id)
+        user = _owner(user_id)
         association = db.session.get(AppleAccountAssociation, user_id)
         if association is None or association.token != expected_token or evidence.account_token != expected_token:
             raise SubscriptionError("SUBSCRIPTION_OWNERSHIP_CONFLICT", 409)
@@ -147,8 +177,9 @@ def persist_verified(user_id, evidence, expected_token):
                 raise SubscriptionError("SUBSCRIPTION_VERIFICATION_PENDING", 503, "REVOCATION_TERMINAL")
         for key, value in _fields(evidence).items():
             setattr(row, key, value)
+        view = _eligible_view(user, row, datetime.now(timezone.utc))
         db.session.commit()
-        return entitlement_view(row, datetime.now(timezone.utc))
+        return view
     except (SubscriptionError, SQLAlchemyError) as error:
         db.session.rollback()
         if isinstance(error, SubscriptionError):

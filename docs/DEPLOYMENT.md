@@ -663,3 +663,91 @@ Static administrator credentials, manual startup and privileged host access
 remain alternate authorities requiring operator remediation. Source merge,
 production deploy, database migration and payment activation are all withheld
 for this task. PR #436 remains blocked pending review and operator evidence.
+
+### R6 Apple file injection (source contract; host activation is separate)
+
+The slot runtime accepts `AXISAI_WEB_SLOT_APPLE_FILES=0` (default) or `1`
+from the deployment process environment. `.env` cannot enable the overlay.
+When enabled, the exact-SHA archived runtime adds
+`deploy/compose/web-slot-apple-files.yml` after the identity overlay. It owns
+only `web` and admits exactly three read-only bind mounts, with
+`create_host_path: false`; arbitrary paths, options, named volumes, secrets,
+configs, device access and additional services are refused.
+
+Apple opt-in qualification uses Docker Compose **5.5.1**. The renderer must
+retain explicit `bind.create_host_path: false` in its JSON model. Compose
+2.38.2 omits false during serialization and is safely refused for opt-in;
+default-OFF slots remain compatible. CI checksum-pins the qualified Linux
+renderer in `.github/actions/setup-qualified-compose/action.yml`. A host CLI
+upgrade, if needed, requires separate operator authorization and is not
+performed by this source change. Do not relax the mount validator to admit
+an absent or ambiguous bind setting.
+
+Before a separately authorized deployment, an operator must provision these
+regular, nonempty, single-link files outside the checkout and image:
+
+| Host source | Container destination |
+| --- | --- |
+| `/etc/axisai/apple/web-slots/<40-hex-revision>/private-key.p8` | `/run/secrets/axisai/apple/private-key.p8` |
+| `/etc/axisai/apple/web-slots/<40-hex-revision>/root-g2.cer` | `/run/secrets/axisai/apple/root-g2.cer` |
+| `/etc/axisai/apple/web-slots/<40-hex-revision>/root-g3.cer` | `/run/secrets/axisai/apple/root-g3.cer` |
+
+Use the approved App Store Server API key and authenticated Apple G2/G3 DER
+roots. The key must be root-owned, group 10001 (the image appuser), mode 0440;
+roots must be root-owned, mode 0444. Every ancestor must be a root-owned
+non-symlink directory without group/world write permission. Preflight checks
+metadata only and fails before `compose up` if the contract is not met.
+No file contents are read or printed by the host helper. The overlay fixes
+`APPLE_PRIVATE_KEY_PATH` and the colon-separated `APPLE_ROOT_CERTIFICATE_PATHS`
+to the container destinations, overriding `.env` path values.
+
+Pass `AXISAI_WEB_SLOT_APPLE_FILES=1` in the authorized host deployment process
+environment, including any sudo/SSM boundary. Existing workflow invocation
+must be reviewed to preserve this explicit setting; this change does not
+activate injection in CI/CD or mutate host configuration. A read-only
+`web_slot_runtime.py ... preflight --slot <candidate> --revision <sha>` with
+that environment checks the proposed candidate under the existing admission
+rules. `render` validates the model without requiring host files.
+
+Keep provisioned files immutable for the lifetime of the release and rollback
+window. Provision new revision directories for rotation; never overwrite a
+running release's files. The helper never provisions, chmods, copies or deletes
+these files. Container reuse and verification check actual mount sources,
+destinations, read-only state and Apple path environment. Previous-release
+verification explicitly accepts either no mounts or this exact allowlist for
+its own revision, independent of the candidate injection mode. Removal retains
+its revision guard and never removes host files. Memory admission, startup
+mode, traffic authority, release identity and worker behavior are unchanged.
+
+This source change does not enable subscription flags, validate real Apple
+credentials, qualify Apple API/OCSP behavior, or authorize production access.
+
+Production operator order (requires separate production authorization):
+
+1. Merge and qualify backend Apple Dual Environment **#467** before payment
+   activation. Injection alone supplies files and does not implement #467.
+2. Provision and independently authenticate the approved key and DER roots at
+   the candidate's exact revision paths with the ownership/modes above. Keep
+   all subscription/payment flags OFF while checking mount readability.
+3. Opt in through the deployment process environment, run candidate preflight,
+   then the existing R6 transaction. It starts and verifies the candidate
+   without migrations before traffic cutover; the previous slot remains
+   available for verified rollback. Worker/Redis lifecycle is unaffected.
+4. Separately qualify Apple configuration, Sandbox/Production selection and
+   provider behavior before enabling payment flags. `/health` proves service
+   health, not valid keys, trusted roots or Apple authorization.
+
+Missing/empty files or incorrect metadata refuse a new candidate before
+container creation. Nonempty malformed bytes are intentionally outside host
+metadata validation: flags-OFF startup can remain healthy; malformed keys or
+unreadable files fail adapter initialization with
+`SUBSCRIPTION_NOT_CONFIGURED` (503), and certificate trust is checked during
+signed evidence verification. Never interpret mount success as Apple trust.
+Keep root provisioning serialized with deployment: the trusted operator must
+not rename, replace, chmod or alter revision directories/files between
+validation and container creation, or during the release/rollback window.
+Root and Docker-daemon authority are trusted; read-only binds prevent container
+writes, not privileged host writes. Rotation means provisioning a new release
+revision, verifying its candidate and cutting over; rollback verifies and
+routes back to the retained previous slot and its original revision files.
+Do not remove the previous credentials until that rollback window is closed.

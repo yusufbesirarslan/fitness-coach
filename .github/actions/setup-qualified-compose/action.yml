@@ -1,0 +1,18 @@
+name: Qualified Compose renderer
+description: Install the checksum-pinned renderer used by the strict R6 mount contract
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        test "$(uname -m)" = x86_64
+        plugin="$RUNNER_TEMP/r6-docker-compose"
+        curl --fail --silent --show-error --location --retry 3 \
+          https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-x86_64 \
+          --output "$plugin"
+        echo "db1889184726840f75c4f9c001048430d4f25b3be3cb084d3ddd762bc0aed576  $plugin" | sha256sum --check --strict
+        install -d -m 0755 "$HOME/.docker/cli-plugins"
+        install -m 0755 "$plugin" "$HOME/.docker/cli-plugins/docker-compose"
+        test "$(docker compose version --short)" = 5.5.1
+        docker compose version

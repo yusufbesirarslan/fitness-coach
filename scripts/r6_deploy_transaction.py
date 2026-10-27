@@ -577,7 +577,11 @@ class HostOps:
         return payload
 
     def slot_verify(self, slot, revision, timeout):
-        rc, payload = self._slot(timeout, "verify", "--slot", slot, "--revision", revision)
+        # Previous releases may predate injection or use the prior mode.
+        # Candidate verification always requires this deployment's exact mode.
+        flags = ["--allow-existing-files"] if revision != self.deploy_sha else []
+        rc, payload = self._slot(timeout, "verify", "--slot", slot,
+                                 "--revision", revision, *flags)
         if rc != 0 or payload.get("deep_health_revision") != revision:
             raise OpError(f"slot {slot} verify failed (exit {rc}): {payload}")
         return payload

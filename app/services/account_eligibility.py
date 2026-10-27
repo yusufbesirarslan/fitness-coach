@@ -15,6 +15,9 @@ VERSION = "age-screen-v1"
 METADATA_KEY = "_account_eligibility_v1"
 COUNTRIES = frozenset({"TR", "US", "GB", "CA", "AU"})
 REGISTRATION_TTL_SECONDS = 600  # Credential lifetime, not a data-retention rule.
+# No age-of-record purchase expiry: nothing renews an existing record (review is
+# one-time), so one would strand renewing subscribers. Profile age never renews it.
+PURCHASE_COUNTRIES = frozenset({"TR"})
 
 
 class EligibilityDenied(Exception):
@@ -147,6 +150,21 @@ def projection(user):
             "country": record["country"] if record else None,
             "source": record["source"] if record else None,
             "capabilities": _capabilities(status, band)}
+
+
+def purchase_eligible(user, now):
+    """Validate the canonical subject-bound signature, independently of rollout.
+
+    The canonical schema derives screen_passed from a valid record; it has no
+    client-writable status. Unknown/review schemas fail closed in _record.
+    ``now`` is an aware UTC instant; a declaration dated after it is not one yet.
+    """
+    record = _record(user)
+    if (not user.cognito_sub or not record or record["age_band"] != "18_plus"
+            or record["country"] not in PURCHASE_COUNTRIES):
+        return False
+    checked = datetime.fromisoformat(record["checked_at"])
+    return checked.tzinfo is not None and checked <= now
 
 
 def require_capability(user, capability):

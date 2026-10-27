@@ -11,7 +11,13 @@ on:
     # Qualify BE-03B post-D1 integration at exact HEAD as well as the PR merge.
     # Independent integration review is still required before source merge.
     # Qualify the K6 rollback gate (stacked on #446) at exact HEAD as well.
-    branches: [feat/mon-be-premium-aggregate-budget-enforcement-03, feat/mon-be-premium-allowance-enforcement-01, feat/priv-d1-coach-native, feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, privacy/pa03-be-core-01, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation, fix/priv-k6-pg18-migration, fix/mon-02-be-02-pg18-compatibility]
+    branches: [feat/mon-be-premium-aggregate-budget-enforcement-03, fix/mon-ops-r6-apple-secret-injection-02, feat/mon-be-premium-allowance-enforcement-01, feat/priv-d1-coach-native, feat/priv-k6-b1-no-photo-completion, feat/priv-k6-rollback-gate, main, privacy/pa03-be-core-01, r6/03a-bluegreen-deploy-transaction, feat/privacy-d1-backend-consent, feat/mon-02-be-03b-01b-training-allowance, fix/mon-02-be-03b-a2-a1-expiry-compensation, fix/priv-k6-pg18-migration, fix/mon-02-be-02-pg18-compatibility]
+
+# Qualify the source HEAD itself on pull requests, never GitHub's synthetic merge
+# commit; push events (main included) keep the pushed commit. Every checkout uses
+# this ref and proves it before any work; shard evidence records it as revision.
+env:
+  CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   tests:
@@ -24,6 +30,11 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CI_HEAD_SHA }}
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
+      - uses: ./.github/actions/setup-qualified-compose
       - name: Record executed source identity
         run: |
           git rev-parse HEAD
@@ -37,12 +48,17 @@ jobs:
         # Dependency outages fail the required gate instead of hanging a runner.
         timeout-minutes: 10
         run: |
+          # The runner's Azure mirror repeatedly stalled on browser fonts.
+          # Change transport only; retain suites, signature keys and deadline.
+          for mirror_list in /etc/apt/apt-mirrors.txt /etc/apt/apt-mirrors-security.txt; do
+            if [ -f "$mirror_list" ]; then
+              sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$mirror_list"
+            fi
+          done
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
       - name: Run tests
-        env:
-          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         # conftest.py tüm env'i hermetik kurar (in-memory SQLite, sahte anahtarlar,
         # REDIS_URL boş) → ek servise gerek yok.
         run: >-
@@ -69,6 +85,10 @@ jobs:
           SHARD_RESULT: ${{ needs.tests.result }}
         run: test "$SHARD_RESULT" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CI_HEAD_SHA }}
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -83,10 +103,9 @@ jobs:
       - name: Prove exact collection and execution parity
         env:
           SHARD_RESULT: ${{ needs.tests.result }}
-          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >-
           python -m scripts.pytest_sharding shard-evidence
-          --revision="$GITHUB_SHA" --result="$SHARD_RESULT"
+          --revision="$CI_HEAD_SHA" --result="$SHARD_RESULT"
           --run-id="$GITHUB_RUN_ID" --run-attempt="$GITHUB_RUN_ATTEMPT"
           --head-sha="$CI_HEAD_SHA"
 
@@ -96,7 +115,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.CI_HEAD_SHA }}
           persist-credentials: false
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -128,7 +150,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.CI_HEAD_SHA }}
           persist-credentials: false
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - name: Build the production image with a synthetic revision
         shell: bash
         run: |
@@ -224,7 +249,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.CI_HEAD_SHA }}
           persist-credentials: false
+          # Apple rotation proof builds HEAD and its exact previous revision.
+          fetch-depth: 2
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
+      - uses: ./.github/actions/setup-qualified-compose
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -254,7 +285,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.CI_HEAD_SHA }}
           persist-credentials: false
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -317,6 +351,10 @@ jobs:
       FITX_SKIP_DB_INIT: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CI_HEAD_SHA }}
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
@@ -360,6 +398,10 @@ jobs:
       PG_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fitx_fence_pg18
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CI_HEAD_SHA }}
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - name: Record executed source and PostgreSQL versions
         run: |
           git rev-parse HEAD
@@ -402,6 +444,10 @@ jobs:
         postgresql://postgres:postgres@localhost:5432/fitx_mobile_race
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.CI_HEAD_SHA }}
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - name: Record executed source identity
         run: |
           git rev-parse HEAD
@@ -421,6 +467,7 @@ jobs:
         run: >-
           python -m pytest -m pg_concurrency -q
           tests/test_apple_subscriptions_pg.py
+          tests/test_apple_dual_environment_pg.py
           tests/test_apple_reconciliation_pg.py
           tests/test_apple_lifecycle_migration_pg.py
           tests/test_ai_allowances_pg.py
@@ -515,7 +562,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.CI_HEAD_SHA }}
           persist-credentials: false
+      - name: Require the exact source HEAD
+        run: test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"

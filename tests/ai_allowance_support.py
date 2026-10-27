@@ -39,8 +39,9 @@ def enable_ledger(app, policy=None):
 
 def enable_subscriptions(app, monkeypatch):
     """#436 entitlement on, with no Apple client (DB rows only)."""
-    app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_SUBSCRIPTION_ENVIRONMENT="Sandbox")
-    monkeypatch.setattr(subscriptions, "AppleAdapter", lambda _: NS(environment="Sandbox"))
+    app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_SUBSCRIPTION_ENVIRONMENT="Sandbox",
+                      ACCOUNT_ELIGIBILITY_ENABLED=False, APPLE_SANDBOX_FALLBACK_ENABLED=False)
+    monkeypatch.setattr(subscriptions, "AppleAdapter", lambda _: NS(environment="Sandbox", environments=("Sandbox",)))
 
 
 def premium_row(user_id, *, expires_in=timedelta(days=20), verified_ago=timedelta(minutes=1),

@@ -56,6 +56,15 @@ migration/deploy gate. `flask apple-subscription-reconcile` is not scheduled
 anywhere; a schedule, the App Store Connect notification URL and MON-03 sandbox
 qualification are separate approvals. Rollback: set 0; receipts are retained.
 
+MON-BE-APPLE-DUAL-ENV-REVIEW-01 `APPLE_SANDBOX_FALLBACK_ENABLED` remains OFF. It
+applies only to a Production subscription deployment and is the App Review /
+TestFlight enabler: ON before submitting a build for review, and kept ON while
+reviews or TestFlight purchases must work (every update review uses Sandbox).
+While ON, TestFlight testers obtain Premium from free Sandbox purchases (founder
+acceptance required). Staging (Sandbox) keeps it OFF. No migration. Rollback: set
+0; Sandbox rows stop counting immediately. Production rollout plan:
+[APPLE_SUBSCRIPTIONS.md](APPLE_SUBSCRIPTIONS.md#dual-environment-verification).
+
 MON-02-BE-01 `APPLE_SUBSCRIPTIONS_ENABLED` remains OFF. No payment activation
 is authorized. Independent review, MON-03 Apple sandbox qualification, lifecycle
 reconciliation and feature enforcement precede separate human activation approval.

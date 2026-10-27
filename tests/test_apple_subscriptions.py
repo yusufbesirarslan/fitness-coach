@@ -128,6 +128,8 @@ def test_bounded_entitlement(status, expired, revoked, grace, old, expected):
 def test_idempotency_ownership_staleness_and_rollback(app):
     with app.app_context():
         user = User(username="apple1", email="apple1@example.invalid")
+        from subscription_support import adult_account
+        adult_account(user)
         other = User(username="apple2", email="apple2@example.invalid")
         db.session.add_all([user, other]); db.session.commit()
         ids = user.id, other.id

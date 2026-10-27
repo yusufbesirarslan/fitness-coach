@@ -1,0 +1,25 @@
+# Explicit opt-in only; revision paths are validated by web_slot_runtime.py.
+services:
+  web:
+    environment:
+      APPLE_PRIVATE_KEY_PATH: /run/secrets/axisai/apple/private-key.p8
+      APPLE_ROOT_CERTIFICATE_PATHS: /run/secrets/axisai/apple/root-g2.cer:/run/secrets/axisai/apple/root-g3.cer
+    volumes:
+      - type: bind
+        source: /etc/axisai/apple/web-slots/${AXISAI_WEB_SLOT_REVISION:?exact revision required}/private-key.p8
+        target: /run/secrets/axisai/apple/private-key.p8
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/axisai/apple/web-slots/${AXISAI_WEB_SLOT_REVISION:?exact revision required}/root-g2.cer
+        target: /run/secrets/axisai/apple/root-g2.cer
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /etc/axisai/apple/web-slots/${AXISAI_WEB_SLOT_REVISION:?exact revision required}/root-g3.cer
+        target: /run/secrets/axisai/apple/root-g3.cer
+        read_only: true
+        bind:
+          create_host_path: false
