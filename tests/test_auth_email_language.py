@@ -153,7 +153,9 @@ def test_cta_target_is_language_independent(kind, path):
 @pytest.mark.parametrize("kind", list(_EXPECT))
 def test_name_is_html_escaped_in_every_language(kind, lang):
     _, html, _ = _build(email_templates, kind, lang, name=_HOSTILE)
-    assert "<img" not in html
+    # Tek <img> statik marka işaretidir; saldırgan isim asla etiket olmaz.
+    assert "<img src=x" not in html and "onerror=alert(1)>" not in html
+    assert html.count("<img") == 1
     assert "&lt;img" in html
 
 

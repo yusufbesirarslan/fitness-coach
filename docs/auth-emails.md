@@ -35,8 +35,16 @@ Flask (auth.py) ── app/services/email_service.py (Resend SDK) ──► Rese
 Şablonların tek kaynağı **`app/services/email_templates.py`** (saf stdlib —
 Lambda'da da çalışsın diye). Lambda'daki kopya bayt-bayt aynı olmalı;
 `tests/test_email_templates_sync.py` bunu zorlar. Ortak kabuk
-(`render_branded_email`) koyu tema + AXISAI wordmark + CTA + footer taşır;
-kopya landing sprint'inin (Resend 2) görünümüyle birebirdir.
+(`render_branded_email`) mobil uygulamanın Axis Signal sistemini
+(axisai-mobile `docs/design/axis-signal/VISUAL_SYSTEM.md`,
+`lib/app/theme/axisai_tokens.dart`) izler: açık tema satır-içi varsayılan
+(canvas #F3F5FA, kart #FFFFFF, metin #0A1020), koyu tema `prefers-color-scheme`
+ile (#080D1A / #0F1628 / #F1F4FB), tek marka mavisi #2A62F5 CTA, resmi
+kilit = holo "A" uygulama simgesi (`https://www.axisaiapp.com/icon-holo.png`,
+statik, alıcıdan bağımsız) + "AxisAI" metni. Uzak web fontu yok (platform
+yazı tipi). Gizli preheader HTML gelen-kutusu önizlemesini doldurur; HTML'den önizleme
+çıkaran istemcide kod önizleme satırına düşmez (düz-metin parçası değişmedi). Eski Aurora Axis mor/camgöbeği paleti ve "AXIS·AI" wordmark'ı
+BRAND-1 (2026-10-26) ile emekliye ayrıldı.
 
 ## Şifre sıfırlama akışı (Sprint 3'te eklendi)
 
