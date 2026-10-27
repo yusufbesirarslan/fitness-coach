@@ -17,7 +17,7 @@ Discovery: `LP21-NONAI-PLAN-00` (`NONAI_GENERAL_PLAN_DISCOVERY.md`, base
 | D1 | in `ai_consent._CLOSED_ENDPOINTS` (403 before the view) | not gated: there is no AI processing to consent to |
 | Provider / consent / allowance / quota | yes | none, and none imported (AST gate) |
 | Rate limit | `AI_RATELIMIT` + `BEDROCK_RATELIMIT` + AI concurrency slot | ordinary per-owner write limit `10/min; 60/h` |
-| Input | 11 preference fields incl. injuries | `template`, `gun_sayisi`, `ekipman` only |
+| Input | 11 preference fields incl. injuries | `template`, `gun_sayisi`, `ekipman` (+ the four cardio preferences for the cardio template) |
 
 The general route is a separate endpoint, not a branch of the AI route, and it
 does not disable a provider flag or bypass `ai_consent`. A D1 refusal of the AI
@@ -33,8 +33,21 @@ Idempotency-Key: [A-Za-z0-9._:-]{8,64}
 {"template": "general_full_body_v1", "gun_sayisi": 3 | 4, "ekipman": "ev" | "minimal" | "spor_salonu"}
 ```
 
-A closed key set. Any other key (injuries, goal, plan, …), a bool or float day
-count, or an unknown template/equipment is `422 TRAINING_PLAN_INVALID_REQUEST`.
+Or, for strength plus cardio (LP21 cardio launch closure):
+
+```
+{"template": "general_full_body_cardio_v1", "gun_sayisi": 3 | 4,
+ "ekipman": "ev" | "minimal" | "spor_salonu",
+ "kardiyo_tipi": "kosu" | "bisiklet" | "yuzme" | "ip_atlama" | "yuruyus" | "karisik",
+ "kardiyo_gun": 1..(6 - gun_sayisi), "kardiyo_sure": 15 | 20 | 30 | 45,
+ "kardiyo_yogunluk": "dusuk" | "orta" | "yuksek" | "karisik"}
+```
+
+Each template has its own closed key set. Any other key (injuries, goal, plan,
+…), a v1 body carrying a cardio key, a cardio body missing one, `kardiyo_tipi:
+"yok"` on the cardio template, a week that leaves no rest day, a bool or float
+count, or an unknown template/equipment/cardio token is
+`422 TRAINING_PLAN_INVALID_REQUEST`.
 Nothing is coerced. The only account value read is `User.language`, which picks
 the day labels (`tr` default, `en`).
 
@@ -61,7 +74,33 @@ the day labels (`tr` default, `en`).
     path reads no body data.
   * Exercise notes are empty. Coaching or safety copy needs approved wording.
 * The same `(gun_sayisi, ekipman, language)` always produces byte-identical plan
-  text. Language changes only the day labels.
+  text. Language changes only the day labels. The same holds for the cardio
+  template's full parameter set.
+
+## Template — `general_full_body_cardio_v1`
+
+`build_cardio_program` in the same module, pure. It is a separate, versioned
+template: `general_full_body_v1` is unchanged (same body, fingerprint and
+content, pinned by tests).
+
+* The strength days are `build_program`'s, byte for byte. Only rest slots
+  become cardio days, in a fixed order:
+  * three strength days: Saturday, then Tuesday, then Thursday (1–3 cardio days);
+  * four strength days: Saturday, then Wednesday (1–2 cardio days).
+* Sunday is always a rest day. A non-personalized template keeps at least one
+  full rest day, so strength + cardio is at most six (the AI matrix's ceiling
+  is seven).
+* Each cardio day (`tip: "kardiyo"`) holds one active catalog cardio entry for
+  the chosen type, `set` 1, `tekrar` "<minutes> dk", `dinlenme` "0 sn", empty
+  note; `sure_dk` is the chosen minutes and `tahmini_kalori` is 0.
+  * `kosu` → `ex_outdoor_run`, `bisiklet` → `ex_stationary_cycling`, `yuzme`
+    → `ex_swimming`, `ip_atlama` → `ex_jump_rope`, `yuruyus` → `ex_brisk_walk`;
+  * `karisik` rotates run → cycling → walk, so it never assumes a pool.
+* The day label (`odak`) echoes the user's choices only, e.g.
+  "Kardiyo · Koşu · Orta yoğunluk" / "Cardio · Running · Moderate intensity".
+* The canonical save boundary validates it with the request's `cardio_type`
+  in the exercise context, and the persisted `exercise_context.cardio_type` is
+  that type (cardio entries stay bound to cardio days by `check_placement`).
 
 No injury, medical or goal-specific prescription is made or implied. The
 template's suitability for a given person is a product/safety decision, not a
@@ -125,7 +164,7 @@ PostgreSQL reports the workers waiting on a lock. They cover:
 
 ```
 201 {"contract_version": 1,
-     "origin": {"kind": "general_template", "template": "general_full_body_v1", "personalized": false},
+     "origin": {"kind": "general_template", "template": "<the request's template>", "personalized": false},
      "plan": <exactly GET /api/v1/training/plans/current's "plan">}
 ```
 
@@ -200,7 +239,7 @@ top-level `origin`, and a `plan` that is the legacy current-plan object.
 
 | `kind` | `template` | `personalized` | Evidence |
 |---|---|---|---|
-| `general_template` | `general_full_body_v1` | `false` | a general receipt (`is_general_receipt`) |
+| `general_template` | `general_full_body_v1` or `general_full_body_cardio_v1` | `false` | a general receipt (`is_general_receipt`) whose fingerprint names a request of that template |
 | `ai_generated` | `null` | `true` | a native AI first-plan receipt: `SUCCEEDED` with `provider_dispatch_possible` `true` |
 | `unknown` | `null` | `null` | anything else |
 
@@ -235,9 +274,12 @@ created, not whether its content has changed since; a client that needs to
 know about edits reads `mutation_version`.
 
 **Template id.** A receipt stores only the request fingerprint, not the
-template. `GENERAL_TEMPLATE_ID` is therefore pinned to the one template the
-command accepts. A second template must version this projection before it
-ships, and a test pins the two ids together.
+template. Both templates' request spaces are small and closed (6 + 1,440
+bodies), so `app/services/general_plan_identity.py` (standard library only)
+enumerates them once and maps each fingerprint back to its template. That is
+durable server evidence, not content. A general receipt whose fingerprint is
+in neither space is `unknown`. A further template must extend that module
+before it ships; a test pins the command's templates to the projection's.
 
 **Cost and failure.**
 
@@ -261,6 +303,17 @@ origin", and the PostgreSQL check is in
 Follow-up, not done: an AI *replacement* result (an LP18-B1 confirm whose
 `APPLIED` receipt binds `result_lineage_id`) is reported `unknown`.
 Recognizing it means reading a second authority.
+
+## Today day kind (per-request opt-in, LP21 cardio)
+
+`GET /api/v1/today?include_day_kind=1` adds `kind` (`training` | `cardio` |
+`rest`) to a non-null `today.workout.summary`, read from the same serialized
+plan day with the current-plan projection's own mapping
+(`mobile_training.day_kind`). It is independent of `include_origin` and costs
+no extra read. Absent → the legacy summary exactly (installed builds send
+`include_origin=1` and parse the summary with exact keys); anything other
+than exactly `1` → `400 TODAY_INVALID_REQUEST`. `kind` is presentation only:
+`schedule_state` / `is_rest_day` stay the rest-day authority.
 
 ## Not done here
 

@@ -88,7 +88,11 @@ def create_general_training_plan():
             True,
         )
 
-    response = jsonify({"contract_version": 1, "origin": general_origin(), **payload})
+    response = jsonify({
+        "contract_version": 1,
+        "origin": general_origin(general_request.template),
+        **payload,
+    })
     response.status_code = 201
     response.headers["Idempotency-Replayed"] = str(result.replayed).lower()
     return response
