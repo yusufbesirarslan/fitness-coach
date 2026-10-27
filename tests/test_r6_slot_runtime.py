@@ -344,7 +344,7 @@ class FakeDocker:
         a = args[1:]
         out = lambda s="", rc=0: SimpleNamespace(returncode=rc, stdout=s, stderr="")
         if a[0] == "compose":
-            verb = a[a.index("-f", a.index("-f") + 1) + 2]
+            verb = next(v for v in a if v in ("config", "up", "down"))
             project = a[a.index("-p") + 1]
             slot = project.rsplit("-", 1)[1]
             if verb == "config":
@@ -390,7 +390,7 @@ class FakeDocker:
 def deploy_dir(tmp_path):
     (tmp_path / "deploy/compose").mkdir(parents=True)
     shutil.copy(BASE, tmp_path / BASE.name)
-    for path in OVERLAYS.values():
+    for path in [*OVERLAYS.values(), Path(rt.APPLE_OVERLAY)]:
         shutil.copy(path, tmp_path / path)
     return tmp_path
 
@@ -668,3 +668,140 @@ def test_real_compose_render_without_revision_refuses(deploy_dir):
              "AXISAI_SHARED_NETWORK": "fitness-coach_default"})
     assert proc.returncode != 0
     assert "AXISAI_WEB_SLOT_REVISION" in proc.stderr
+
+
+# Apple file injection: exact model, hostile overlays and real Compose renders.
+def _apple_doc(slot="green", revision=REV_A):
+    doc = _rendered(slot, revision)
+    web = doc["services"]["web"]
+    web["volumes"] = rt.apple_volumes(revision)
+    web["environment"].update(rt.apple_environment())
+    return doc
+
+
+@pytest.mark.parametrize("slot", ["blue", "green"])
+def test_apple_overlay_real_compose_render(slot, deploy_dir):
+    if not _compose_cli():
+        pytest.skip("docker compose CLI unavailable")
+    (deploy_dir / ".env").write_text("APPLE_PRIVATE_KEY_PATH=/evil\nAPPLE_ROOT_CERTIFICATE_PATHS=/evil\n")
+    runtime = rt.SlotRuntime(deploy_dir, environ={**os.environ, rt.APPLE_FILES_SWITCH: "1"})
+    doc = runtime.render(slot, REV_A)
+    assert doc["services"]["web"]["volumes"] == rt.apple_volumes(REV_A)
+    assert set(doc["services"]) == {"web"}
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda d: d["services"]["web"]["volumes"][0].update(source="/etc/shadow"),
+    lambda d: d["services"]["web"]["volumes"][0].update(target="/app"),
+    lambda d: d["services"]["web"]["volumes"][0].update(read_only=False),
+    lambda d: d["services"]["web"]["volumes"][0]["bind"].update(create_host_path=True),
+    lambda d: d["services"]["web"]["volumes"][0]["bind"].update(propagation="shared"),
+    lambda d: d["services"]["web"]["volumes"].pop(),
+    lambda d: d["services"]["web"]["volumes"].append(d["services"]["web"]["volumes"][0]),
+    lambda d: d["services"]["web"]["environment"].update(APPLE_PRIVATE_KEY_PATH="/evil"),
+    lambda d: d["services"]["web"].update(secrets=["evil"]),
+    lambda d: d.update(volumes={"evil": {}}),
+    lambda d: d["services"].update(worker={}),
+])
+def test_apple_mount_contract_rejects_drift(mutate):
+    doc = _apple_doc()
+    mutate(doc)
+    with pytest.raises(rt.Refused):
+        rt.validate_rendered(doc, "green", REV_A, "fitness-coach_default", apple_files=True)
+
+
+def test_apple_mounts_require_explicit_opt_in():
+    with pytest.raises(rt.Refused):
+        rt.validate_rendered(_apple_doc(), "green", REV_A, "fitness-coach_default")
+    with pytest.raises(rt.InvalidInput):
+        rt.SlotRuntime(Path.cwd(), environ={rt.APPLE_FILES_SWITCH: "yes"})
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("field,value", [
+    ("use_api_socket", True), ("credential_spec", {"file": "/etc/shadow"}),
+    ("post_start", [{"command": "cat /etc/shadow", "user": "root"}]),
+    ("user", "root"), ("entrypoint", ["sh"]), ("runtime", "unapproved"),
+    ("develop", {"watch": [{"path": "/etc", "action": "sync", "target": "/host"}]}),
+    ("future_implicit_mount", True),
+])
+def test_implicit_file_access_and_unapproved_service_fields_fail_closed(enabled, field, value):
+    doc = _apple_doc() if enabled else _rendered("green", REV_A)
+    doc["services"]["web"][field] = value
+    with pytest.raises(rt.Refused, match="unapproved service fields"):
+        rt.validate_rendered(doc, "green", REV_A, "fitness-coach_default", apple_files=enabled)
+
+
+def _apple_container(revision=REV_A):
+    container = _container("green", revision)
+    container["Config"]["Env"] += [f"{k}={v}" for k, v in rt.apple_environment().items()]
+    container["Mounts"] = [{"Type": "bind", "Source": m["source"],
+                            "Destination": m["target"], "RW": False}
+                           for m in rt.apple_volumes(revision)]
+    return container
+
+
+def test_reused_candidate_checks_actual_files_and_paths(deploy_dir):
+    fake = FakeDocker(containers={"green": [_apple_container()]})
+    runtime = _runtime(deploy_dir, fake)
+    runtime.apple_files = True
+    assert runtime.start("green", REV_A, 256)["action"] == "already-running"
+    fake.containers["green"][0]["Mounts"][0]["RW"] = True
+    with pytest.raises(rt.Refused, match="mounts"):
+        runtime.start("green", REV_A, 256)
+    with pytest.raises(rt.Refused, match="mounts"):
+        runtime.verify("green", REV_A)
+    assert "compose up" not in fake.verbs()
+
+
+def test_missing_host_file_refuses_before_up(deploy_dir, monkeypatch):
+    fake = FakeDocker(rendered=_apple_doc())
+    runtime = _runtime(deploy_dir, fake)
+    runtime.apple_files = True
+    def missing(revision):
+        raise rt.Refused("Apple file metadata unavailable")
+    monkeypatch.setattr(rt, "validate_apple_host_files", missing)
+    with pytest.raises(rt.Refused, match="metadata"):
+        runtime.start("green", REV_A, 256)
+    assert not any("up" in c[0] for c in fake.calls)
+
+
+def test_apple_revision_paths_do_not_reuse_rollback_files():
+    assert {m["source"] for m in rt.apple_volumes(REV_A)}.isdisjoint(
+        m["source"] for m in rt.apple_volumes(REV_B))
+
+
+@pytest.mark.parametrize("bad", ["missing", "symlink", "directory", "writable-parent", "wrong-owner", "key-world-readable", "key-wrong-group", "hardlink", "empty"])
+def test_apple_host_metadata_fails_closed(monkeypatch, bad):
+    import stat
+    def metadata(path):
+        leaf = path.name in rt.APPLE_FILE_NAMES
+        key = path.name == "private-key.p8"
+        if bad == "missing" and leaf:
+            raise FileNotFoundError()
+        mode = (stat.S_IFREG | (0o440 if key else 0o444)) if leaf else (stat.S_IFDIR | 0o755)
+        if leaf and bad == "symlink": mode = stat.S_IFLNK | 0o777
+        if leaf and bad == "directory": mode = stat.S_IFDIR | 0o755
+        if not leaf and bad == "writable-parent": mode |= 0o020
+        if key and bad == "key-world-readable": mode |= 0o004
+        return SimpleNamespace(st_mode=mode, st_uid=1 if bad == "wrong-owner" else 0,
+                               st_gid=0 if bad == "key-wrong-group" else 10001,
+                               st_nlink=2 if bad == "hardlink" else 1,
+                               st_size=0 if bad == "empty" else 100)
+    monkeypatch.setattr(Path, "lstat", metadata)
+    with pytest.raises(rt.Refused):
+        rt.validate_apple_host_files(REV_A)
+
+
+def test_previous_slot_file_mode_is_independent_of_candidate_mode(deploy_dir):
+    for enabled, container in [(True, _container("green")), (False, _apple_container())]:
+        runtime = _runtime(deploy_dir, FakeDocker(containers={"green": [container]}))
+        runtime.apple_files = enabled
+        assert runtime.verify("green", REV_A, allow_existing_files=True)["action"] == "verified"
+        with pytest.raises(rt.Refused):
+            runtime.verify("green", REV_A)
+    container = _apple_container()
+    container["Mounts"][0]["Source"] = "/etc/shadow"
+    runtime = _runtime(deploy_dir, FakeDocker(containers={"green": [container]}))
+    with pytest.raises(rt.Refused):
+        runtime.verify("green", REV_A, allow_existing_files=True)

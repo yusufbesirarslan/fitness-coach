@@ -13,7 +13,7 @@
 #   include filter keeps shipping its logs. Slots differ by PROJECT
 #   (axisai-web-blue / axisai-web-green), never by service name.
 # - No container_name: Compose derives unique names from the project.
-# - No redis, no worker, no volumes, no depends_on: a slot can never create,
+# - No redis, no worker, no base volumes, no depends_on: a slot can never create,
 #   recreate, stop or remove them. It reaches the main project's `redis`
 #   by joining that project's network as EXTERNAL (never created/removed here).
 # - The image is never built or pulled here: it must already exist locally
@@ -22,6 +22,8 @@
 #   so a slot can never boot self-migrating because .env says otherwise.
 # - The memory ceiling and stop grace are literals the runtime helper's
 #   admission maths mirror; they are not .env-tunable.
+# Apple files are separately opt-in via deploy/compose/web-slot-apple-files.yml;
+# the runtime validates exact revision-scoped sources and read-only targets.
 services:
   web:
     image: axisai-web:${AXISAI_WEB_SLOT_REVISION:?AXISAI_WEB_SLOT_REVISION must be the exact 40-hex revision}

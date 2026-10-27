@@ -1541,3 +1541,11 @@ def test_missing_docker_socket_cannot_prove_migrator_absence(tmp_path):
     ops = host(tmp_path, recorder)
     with pytest.raises(tx.PreparationCleanupUnproven, match="cleanup"):
         ops.release_prepare(CAND, 120)
+
+
+def test_previous_slot_verify_allows_only_existing_allowlisted_files(tmp_path):
+    recorder = Recorder({" verify ": (0, json.dumps({"deep_health_revision": PREV}), "")})
+    ops = host(tmp_path, recorder)
+    ops.slot_verify("blue", PREV, 60)
+    assert recorder.calls[-1][-1] == "--allow-existing-files"
+    assert recorder.calls[-1][-3:-1] == ["--revision", PREV]
