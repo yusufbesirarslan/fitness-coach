@@ -185,6 +185,19 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert shards["strategy"] == {"fail-fast": "false", "max-parallel": "4",
                                   "matrix": {"shard": ["0", "1", "2", "3"]}}
     assert shards["runs-on"] == "ubuntu-latest"
+    # Exact HEAD: one workflow-level ref, every checkout pinned to it and proved at once.
+    assert workflow["env"] == {"CI_HEAD_SHA": "${{ github.event.pull_request.head.sha || github.sha }}"}
+    checkouts = 0
+    for job in jobs.values():
+        steps = job["steps"]
+        for index, step in enumerate(steps):
+            if step.get("uses", "").startswith("actions/checkout@"):
+                checkouts += 1
+                assert step["with"]["ref"] == "${{ env.CI_HEAD_SHA }}"
+                assert steps[index + 1] == {"name": "Require the exact source HEAD",
+                                            "run": 'test "$(git rev-parse HEAD)" = "$CI_HEAD_SHA"'}
+        assert all("CI_HEAD_SHA" not in step.get("env", {}) for step in steps)
+    assert checkouts == len(jobs)
     install = next(s for s in shards["steps"] if s.get("name") == "Install dependencies")
     assert install["timeout-minutes"] == "10"
     run = next(s["run"] for s in shards["steps"] if s.get("name") == "Run tests")
@@ -205,18 +218,17 @@ def test_workflow_retains_stable_fail_closed_gate():
     assert download["with"] == {"pattern": "pytest-shard-*-*", "path": "shard-evidence",
                                 "merge-multiple": "false"}
     assert download["uses"] == "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093"
-    assert next(s for s in shards["steps"] if s.get("name") == "Run tests")["env"]["CI_HEAD_SHA"] == "${{ github.event.pull_request.head.sha || github.sha }}"
-    assert gate["steps"][-1]["env"]["CI_HEAD_SHA"] == "${{ github.event.pull_request.head.sha || github.sha }}"
     for argument in ('--run-id="$GITHUB_RUN_ID"', '--run-attempt="$GITHUB_RUN_ATTEMPT"',
-                     '--head-sha="$CI_HEAD_SHA"', '--revision="$GITHUB_SHA"'):
+                     '--head-sha="$CI_HEAD_SHA"', '--revision="$CI_HEAD_SHA"'):
         assert argument in gate["steps"][-1]["run"]
+    assert "GITHUB_SHA" not in json.dumps(workflow)
     for job in (shards, gate):
         assert "continue-on-error" not in job
         assert all("continue-on-error" not in step for step in job["steps"])
 
 
 def write_artifact(directory, doc, attempt=1):
-    doc = dict(doc, run_id="123", run_attempt=str(attempt), head_sha="head", tree="tree")
+    doc = dict(doc, run_id="123", run_attempt=str(attempt), head_sha="revision", tree="tree")
     artifact = directory / f"pytest-shard-{attempt}-{doc['shard']}"
     artifact.mkdir()
     path = artifact / f"shard-{doc['shard']}.json"
@@ -226,7 +238,7 @@ def write_artifact(directory, doc, attempt=1):
 
 def selected_artifacts(directory, attempt="2"):
     return load_artifacts(directory, run_id="123", run_attempt=attempt,
-                          head_sha="head", revision="revision", tree="tree")
+                          head_sha="revision", revision="revision", tree="tree")
 
 
 @pytest.mark.parametrize("attempts", [(1, 1, 1, 1), (1, 1, 2, 1), (2, 2, 2, 2),
@@ -248,7 +260,7 @@ def test_artifact_selection_complete_and_mixed_attempts(tmp_path, attempts):
     "leading_zero", "invalid_shard", "future_attempt", "symlink", "bad_json",
     "duplicate_json_key", "wrong_run", "wrong_attempt", "wrong_head", "wrong_tree",
     "wrong_revision", "wrong_shard", "newer_failed", "newer_invalid", "wrong_profile",
-    "missing_execution",
+    "missing_execution", "conflicting_retained", "superseded_wrong_head",
 ])
 def test_artifact_selection_rejects_invalid_evidence(tmp_path, mutation):
     docs = evidence()
@@ -292,8 +304,31 @@ def test_artifact_selection_rejects_invalid_evidence(tmp_path, mutation):
     elif mutation == "missing_execution":
         doc["reports"] = {}
         path.write_text(json.dumps(doc))
+    elif mutation == "conflicting_retained":
+        # A superseded success that disagrees with the selected one is ambiguous.
+        write_artifact(tmp_path, docs[2], 2)
+        path.write_text(json.dumps(dict(doc, full=doc["full"][1:])))
+    elif mutation == "superseded_wrong_head":
+        write_artifact(tmp_path, docs[2], 2)
+        path.write_text(json.dumps(dict(doc, head_sha="other")))
     with pytest.raises((ValueError, KeyError, TypeError)):
         verify(selected_artifacts(tmp_path), "revision")
+
+
+def test_synthetic_merge_revision_is_not_exact_head(tmp_path):
+    for doc in evidence():
+        write_artifact(tmp_path, dict(doc, revision="merge"))
+    with pytest.raises(ValueError, match="not the PR HEAD"):
+        load_artifacts(tmp_path, run_id="123", run_attempt="1",
+                       head_sha="revision", revision="merge", tree="tree")
+
+
+def test_crashed_superseded_attempt_does_not_block_a_successful_rerun(tmp_path):
+    docs = evidence()
+    for doc in docs:
+        write_artifact(tmp_path, doc, 1 if doc["shard"] != 2 else 2)
+    write_artifact(tmp_path, dict(docs[2], exitstatus=2, full=[], selected=[], reports={}), 1)
+    assert verify(selected_artifacts(tmp_path), "revision") == 36
 
 
 def test_artifact_loader_cli_checks_provenance_and_parity(tmp_path):
@@ -309,11 +344,11 @@ def test_artifact_loader_cli_checks_provenance_and_parity(tmp_path):
                           for node in parts[i]}
         path = write_artifact(tmp_path, doc, 2 if i == 2 else 1)
         saved = json.loads(path.read_text())
-        saved["tree"] = tree
+        saved.update(tree=tree, head_sha=revision)
         path.write_text(json.dumps(saved))
     command = [sys.executable, "-m", "scripts.pytest_sharding", str(tmp_path),
                "--revision", revision, "--result", "success", "--run-id", "123",
-               "--run-attempt", "2", "--head-sha", "head"]
+               "--run-attempt", "2", "--head-sha", revision]
     process = subprocess.run(command, capture_output=True, text=True)
     assert process.returncode == 0, process.stdout + process.stderr
     assert "Exact parity: 36 selected; 0 missing; 0 duplicates" in process.stdout

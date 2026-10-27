@@ -46,6 +46,15 @@ changes only through a fresh authenticated status lookup by the unscheduled
 `flask apple-subscription-reconcile` worker. Rollback: set 0 (rows retained). See
 [subscription contract](APPLE_SUBSCRIPTIONS.md).
 
+`APPLE_SANDBOX_FALLBACK_ENABLED` (MON-BE-APPLE-DUAL-ENV-REVIEW-01) defaults OFF,
+shipped_dark, owner @yusufbesirarslan, review by 2026-11-27. Valid only with
+`APPLE_SUBSCRIPTION_ENVIRONMENT=Production` (otherwise every subscription API
+answers `SUBSCRIPTION_NOT_CONFIGURED`). ON: Production Get Transaction Info first,
+Sandbox only on Apple's `TransactionIdNotFoundError` (4040010); Sandbox rows are
+verified by Sandbox-qualified clients, kept under their own environment and count
+toward entitlement only while ON. Rollback: set 0 (rows retained, Sandbox access
+stops immediately). See [subscription contract](APPLE_SUBSCRIPTIONS.md).
+
 `APPLE_SUBSCRIPTIONS_ENABLED` (MON-02-BE-01) defaults OFF. With mobile auth
 enabled, authenticated subscription routes report `SUBSCRIPTIONS_DISABLED`
 without Apple I/O. Existing `User.is_premium` and quotas remain unchanged.

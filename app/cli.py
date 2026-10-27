@@ -463,6 +463,9 @@ def ai_allowance_sweep_cmd():
 def apple_subscription_reconcile_cmd(limit, sweep_limit):
     """MON-02-BE-02: one bounded pass of authoritative Apple reconciliation.
 
+    One pass per verified environment: with APPLE_SANDBOX_FALLBACK_ENABLED a
+    Production deployment also passes over Sandbox, so up to 2 x --limit lookups.
+
     Refuses while APPLE_SUBSCRIPTIONS_ENABLED is OFF or Apple configuration is
     incomplete. Safe to repeat or run concurrently; not scheduled anywhere.
 

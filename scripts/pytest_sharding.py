@@ -210,18 +210,31 @@ def _unique_object(pairs):
     return result
 
 
+# Fields every successful shard of one run must agree on, superseded or not.
+COLLECTION_FIELDS = ("schema", "count", "collection_only", "timing_digest",
+                     "full", "deselected", "collection_skips")
+
+
 def load_artifacts(directory, *, run_id, run_attempt, head_sha, revision, tree):
     """Select the newest evidence per shard from this run, never flatten or fall back.
 
     The download action is scoped to the current run (no token/run-id override).
     Canonical artifact directories preserve attempt identity; manifests bind it
-    to the executed checkout and PR HEAD. verify() still proves test parity.
+    to the executed checkout, which must BE the PR HEAD (never a synthetic merge).
+    A shard retained from an earlier attempt (selective rerun) is accepted only
+    because every artifact of every attempt proves the same run and source, and
+    every successful one the same test collection; a conflict refuses instead of
+    picking one.
+    verify() still proves parity and success of the selected set.
     """
     if (not re.fullmatch(r"[1-9][0-9]*", run_id)
             or not re.fullmatch(r"[1-9][0-9]*", run_attempt)):
         raise ValueError("invalid run identity")
+    if revision != head_sha:
+        raise ValueError("executed revision is not the PR HEAD")
     latest = {}
     identities = set()
+    collection = None
     for artifact in sorted(directory.iterdir()):
         match = re.fullmatch(r"pytest-shard-([1-9][0-9]*)-([0-9]+)", artifact.name)
         if not match or artifact.is_symlink() or not artifact.is_dir():
@@ -242,12 +255,20 @@ def load_artifacts(directory, *, run_id, run_attempt, head_sha, revision, tree):
                 or doc.get("head_sha") != head_sha or doc.get("revision") != revision
                 or doc.get("tree") != tree):
             raise ValueError("mismatched artifact provenance")
+        if doc.get("exitstatus") == 0:  # a crashed attempt may have collected partially
+            shape = {field: doc.get(field) for field in COLLECTION_FIELDS}
+            if collection is None:
+                collection = shape
+            elif shape != collection:
+                raise ValueError("conflicting collection evidence across attempts")
         if shard not in latest or attempt > latest[shard][0]:
             latest[shard] = (attempt, doc, artifact.name)
     if set(latest) != set(range(SHARDS)):
         raise ValueError("missing shard evidence")
     for shard, (attempt, _, name) in sorted(latest.items()):
+        superseded = sorted(a for a, s in identities if s == shard and a != attempt)
         print(f"Selected {name}: run={run_id} attempt={attempt} shard={shard} "
+              f"superseded={superseded or 'none'} "
               f"head={head_sha} revision={revision} tree={tree}")
     return [latest[shard][1] for shard in range(SHARDS)]
 
