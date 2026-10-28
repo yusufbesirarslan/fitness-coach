@@ -629,3 +629,31 @@ def test_paid_entitlement_and_reserved_allowance_cannot_authorize_sdk(pg_app, mo
         assert captured == []
         assert db.session.query(AIConsentState).count() == db.session.query(AIConsentEvent).count() == 0
         assert consent.memory_available(1) is False
+
+
+@pytest.mark.parametrize('feature', ['coach', 'training_plan', 'nutrition_plan', 'vision', 'menu_extract'])
+def test_phase2_purposes_are_independent_and_original_generation_is_fenced(pg_app, feature):
+    with pg_app.app_context(), ai_spend_guard.subject_scope(1):
+        consent.mutate(1, command(feature))
+        authority = consent.begin_operation(1, feature, 'openai', ai.OPENAI_MODEL)
+        consent.authorize_operation(authority)
+        captured = []
+        with consent.operation_scope(authority):
+            invoke(feature=feature, sdk=lambda **payload: captured.append(payload))
+        assert len(captured) == 1
+        for other in consent.BINDINGS:
+            if other == feature:
+                continue
+            with pytest.raises(consent.ConsentDenied) as denied:
+                consent.begin_operation(1, other, 'openai', ai.OPENAI_MODEL)
+            assert denied.value.code == 'AI_CONSENT_REQUIRED'
+        with ai_spend_guard.subject_scope(2):
+            with pytest.raises(consent.ConsentDenied):
+                consent.authorize_operation(authority)
+        consent.mutate(1, command(feature, generation=1, action='revoke', key='revoke-phase2'))
+        with pytest.raises(consent.ConsentDenied) as stale:
+            consent.authorize_operation(authority)
+        assert stale.value.code == 'AI_CONSENT_CHANGED'
+        consent.mutate(1, command(feature, generation=2, key='regrant-phase2'))
+        with pytest.raises(consent.ConsentDenied):
+            consent.authorize_operation(authority)

@@ -10,7 +10,7 @@ from app.services import ai_consent as consent, ai_provider_call as calls
 
 def test_release_has_no_inferred_or_configured_disclosures():
     assert dict(consent.POLICIES) == {}
-    assert set(consent.BINDINGS) == {'training_plan', 'nutrition_plan'}
+    assert set(consent.BINDINGS) == {'coach', 'training_plan', 'nutrition_plan', 'vision', 'menu_extract'}
 
 
 @pytest.mark.parametrize('record', [None, True, {}, {'version': []},
@@ -20,8 +20,7 @@ def test_malformed_and_legacy_records_deny(record):
     assert not consent._record_valid('training.plan', record)
 
 
-@pytest.mark.parametrize('feature', ['coach', 'summary', 'nutrition', 'menu_extract',
-                                    'menu_ocr', 'vision', 'health_probe', 'other', 'unknown'])
+@pytest.mark.parametrize('feature', ['summary', 'nutrition', 'menu_ocr', 'health_probe', 'other', 'unknown'])
 def test_unqualified_physical_paths_deny_without_sdk(feature):
     sdk = Mock()
     with pytest.raises(consent.ConsentDenied):

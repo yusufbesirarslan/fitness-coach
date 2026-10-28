@@ -22,7 +22,7 @@ def synthetic_policy(monkeypatch):
 def test_shipping_registry_is_empty_and_does_not_open_coach():
     assert dict(copy.PUBLISHED_TEXTS) == {}
     assert dict(consent.POLICIES) == {}
-    assert "coach" not in consent.BINDINGS
+    assert consent.BINDINGS["coach"][0] == "coach.conversation"
     assert copy.available_disclosures() == []
 
 

@@ -17,6 +17,9 @@ def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
         f: ('synthetic.layer-test', ()) for f in
         ('coach', 'summary', 'nutrition', 'menu_extract', 'menu_ocr', 'vision', 'health_probe', 'other')
     }})
+    # This helper explicitly selects ALLOW for provider-layer tests only.
+    # Real native-operation/path denial is covered by D1/PG qualification.
+    monkeypatch.setattr(consent, 'NATIVE_OPERATION_FEATURES', frozenset())
     monkeypatch.setattr(consent, 'generation', lambda owner: 0)
     monkeypatch.setattr(consent, 'preflight', lambda *a, **kw: None)
     allow_operation_fences(monkeypatch)
@@ -72,7 +75,7 @@ def assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient):
     from app.blueprints import ai_consent as routes
     from app.models import AIConsentEvent, AIConsentState
 
-    assert set(consent.BINDINGS) == {"training_plan", "nutrition_plan"}
+    assert set(consent.BINDINGS) == {"coach", "training_plan", "nutrition_plan", "vision", "menu_extract"}
     assert routes._CLOSED_ENDPOINTS
     assert app.config["AI_MEMORY_ENABLED"] is False
     assert dict(consent.POLICIES) == {}

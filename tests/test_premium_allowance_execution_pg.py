@@ -456,3 +456,18 @@ def test_aggregate_migration_postgres_rejects_integer_width_drift(isolated,monke
             migration=aggregate_migration()
             monkeypatch.setattr(migration,'op',Operations(MigrationContext.configure(connection)))
             with pytest.raises(RuntimeError,match='schema mismatch'):migration.upgrade()
+
+
+def test_receipt_reads_pending_and_terminal_only_for_original_owner(isolated):
+    with isolated.app_context():
+        hold = reserve(1, 'coach', 'receipt-original-key')
+        before = db.session.execute(sa.select(AiAllowanceBucket.used,
+            AiAllowanceBucket.reserved)).all()
+        assert L.action_receipt(1, 'coach', 'receipt-original-key')['state'] == 'PENDING'
+        assert L.action_receipt(2, 'coach', 'receipt-original-key')['state'] == 'UNKNOWN'
+        assert L.action_receipt(1, 'qr_menu', 'receipt-original-key')['state'] == 'UNKNOWN'
+        assert db.session.execute(sa.select(AiAllowanceBucket.used,
+            AiAllowanceBucket.reserved)).all() == before
+        db.session.rollback()
+        L.finalize_dispatch(1, hold.reference, successful=False)
+        assert L.action_receipt(1, 'coach', 'receipt-original-key')['state'] == 'TERMINAL'

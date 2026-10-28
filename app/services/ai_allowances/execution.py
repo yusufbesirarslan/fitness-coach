@@ -446,6 +446,15 @@ def install(app):
         result = current_app.make_response(mobile_error(
             error.code, message, error.status,
             error.retryable, retry_after=30 if error.retryable else None))
+        # Only source-known customer allowance metadata may leave the server.
+        # No reservation IDs, request digests or financial/provider rows.
+        if error.code in {"AI_ALLOWANCE_EXHAUSTED", "AI_FEATURE_NOT_IN_PLAN"}:
+            details = {key: value for key, value in error.details.items()
+                       if key in {"feature", "scope", "reset", "resets_at"}
+                       and (value is None or isinstance(value, str))}
+            body = result.get_json()
+            body["error"]["details"] = details
+            result.set_data(current_app.json.dumps(body))
         result.headers["Cache-Control"] = "no-store"
         return result
     app.register_error_handler(ExecutionRefused, response)

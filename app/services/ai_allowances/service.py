@@ -781,3 +781,35 @@ def allowance_view(user_id, *, now=None):
         "features": [_feature_view(f, access, policy, starter_state, buckets, now)
                      for f in P.SUPPORTED_FEATURES],
     }
+
+
+def action_receipt(user_id, feature, idempotency_key):
+    """Read only an owner's generic action state; never execution authority.
+
+    No policy, entitlement refresh, expiration, reconciliation or balance write.
+    Missing/purged/foreign and historical unbound keys all remain UNKNOWN.
+    Expired RESERVED evidence is still pending until durable settlement: time
+    alone is never permission to replace an uncertain action.
+    """
+    _require_enabled()
+    if type(user_id) is not int or user_id <= 0:
+        raise AllowanceError("AI_ALLOWANCE_ACCOUNT_UNAVAILABLE")
+    if feature not in {"coach", "nutrition_generation", "qr_menu"}:
+        raise AllowanceError("AI_ALLOWANCE_FEATURE_UNSUPPORTED")
+    digest = _digest(idempotency_key)
+    try:
+        row = db.session.execute(sa.select(
+            AiUsageReservation.feature, AiUsageReservation.state,
+            AiUsageReservation.request_fingerprint,
+        ).where(AiUsageReservation.user_id == user_id,
+                AiUsageReservation.key_digest == digest)).one_or_none()
+        state = "UNKNOWN"
+        if row is not None and row.feature == feature and row.request_fingerprint is not None:
+            if row.state == RESERVED:
+                state = "PENDING"
+            elif row.state in {COMMITTED, RELEASED, EXPIRED}:
+                state = "TERMINAL"
+        return {"contract_version": 1, "feature": feature, "state": state}
+    except SQLAlchemyError:
+        db.session.rollback()
+        raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
