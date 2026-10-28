@@ -9,7 +9,7 @@ PACKAGE = ROOT / "app/services/ai_allowances"
 # Financial writes still belong only to service.py; approved domain seams use
 # execution.py. Native Training keeps exactly its original allowance adapter.
 ALLOWED_IMPORTERS = {
-    "app/__init__.py", "app/blueprints/mobile_ai_allowances.py", "app/blueprints/mobile_menu.py",
+    "app/__init__.py", "app/config.py", "app/blueprints/mobile_ai_allowances.py", "app/blueprints/mobile_menu.py",
     "app/blueprints/coach.py", "app/cli.py", "app/services/mobile_training_generation/allowance.py",
     "app/services/ai_coach.py", "app/services/ai_nutrition.py", "app/services/ai_pipeline.py",
     "app/services/ai_provider_call.py", "app/services/menu_analysis.py", "app/services/menu_extract.py",
@@ -67,7 +67,7 @@ def test_ledger_never_reads_legacy_premium_env_or_logs():
 
 
 def test_no_policy_or_quantity_is_installed_by_application_code():
-    """Only tests construct an AllowancePolicy; config pins the slot to None."""
+    """Only tests construct policies; the source installer stays empty and dark."""
     constructors = []
     for path in _python(ROOT / "app"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -81,7 +81,18 @@ def test_no_policy_or_quantity_is_installed_by_application_code():
     writes = [node for node in ast.walk(config) if isinstance(node, ast.Assign)
               and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
                       and t.slice.value == "AI_ALLOWANCE_POLICY" for t in node.targets)]
-    assert len(writes) == 1 and isinstance(writes[0].value, ast.Constant) and writes[0].value.value is None
+    assert len(writes) == 1
+    value = writes[0].value
+    assert isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+    assert value.func.id == "installed_policy" and not value.args and not value.keywords
+    # The only source installer has no installed values or external channel.
+    launch = ast.parse((PACKAGE / "launch_policy.py").read_text(encoding="utf-8"))
+    approved = [n for n in launch.body if isinstance(n, ast.AnnAssign)
+                and isinstance(n.target, ast.Name) and n.target.id == "APPROVED_POLICY"]
+    assert len(approved) == 1 and isinstance(approved[0].value, ast.Constant)
+    assert approved[0].value.value is None
+    from app.services.ai_allowances.launch_policy import installed_policy
+    assert installed_policy() is None
 
 
 def test_rollout_flag_is_registered_dark():
