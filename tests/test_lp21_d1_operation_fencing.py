@@ -16,9 +16,14 @@ def _authority(owner=7, feature="training_plan", generation=3, version="syntheti
     return OperationAuthority(owner, feature, generation, version)
 
 
-def test_shipping_policies_stay_empty_and_bindings_unchanged():
+def test_shipping_policies_stay_empty_and_five_bindings_are_exact():
     assert isinstance(ai_consent.POLICIES, MappingProxyType) and dict(ai_consent.POLICIES) == {}
     assert dict(ai_consent.BINDINGS) == {
+        "coach": ("coach.conversation", ("personal_free_text", "fitness_preferences",
+            "training_history", "workout_state", "nutrition_activity", "nutrition_targets",
+            "body_metrics", "recovery_ratings", "health_constraints", "tool_results")),
+        "vision": ("pump_check.analysis", ("fitness_image", "fitness_context", "personal_free_text")),
+        "menu_extract": ("qr_menu.analysis", ("menu_content", "food_descriptions")),
         "training_plan": ("training.plan", ("fitness_preferences", "body_metrics", "health_constraints")),
         "nutrition_plan": ("nutrition.plan", ("nutrition_targets", "food_preferences", "personal_free_text")),
     }
@@ -27,7 +32,7 @@ def test_shipping_policies_stay_empty_and_bindings_unchanged():
 @pytest.mark.parametrize("mutate", [
     lambda c: c.update(owner=8),
     lambda c: c.update(owner=True),
-    lambda c: c.update(feature="coach"),
+    lambda c: c.update(feature="nutrition"),  # unbound nested provider purpose
     lambda c: c.update(generation=0),
     lambda c: c.update(generation=True),
     lambda c: c.update(generation="3"),

@@ -38,12 +38,23 @@ class Disclosure:
 
 # NO approved text, vendor terms or production recipient facts inferred here.
 POLICIES = MappingProxyType({})
-# Only these existing builders have an unambiguous, bounded purpose. Coach,
-# generic nutrition helpers, vision, memory and streaming remain disabled.
+# Purpose projections only: no grant or published contract is installed here.
+# New category tuples remain inert until exact source disclosures are approved.
+# Generic nutrition, nested tools, memory and streaming stay unbound.
 BINDINGS = MappingProxyType({
+    "coach": ("coach.conversation", ("personal_free_text", "fitness_preferences",
+        "training_history", "workout_state", "nutrition_activity", "nutrition_targets",
+        "body_metrics", "recovery_ratings", "health_constraints", "tool_results")),
+    "vision": ("pump_check.analysis", ("fitness_image", "fitness_context", "personal_free_text")),
+    "menu_extract": ("qr_menu.analysis", ("menu_content", "food_descriptions")),
     "training_plan": ("training.plan", ("fitness_preferences", "body_metrics", "health_constraints")),
     "nutrition_plan": ("nutrition.plan", ("nutrition_targets", "food_preferences", "personal_free_text")),
 })
+
+
+# A physical taxonomy label cannot turn legacy image/tool paths into a new
+# purpose. These native families require original logical-operation authority.
+NATIVE_OPERATION_FEATURES = frozenset({"coach", "vision", "menu_extract"})
 
 
 def contract_digest(policy):
@@ -308,6 +319,8 @@ def admission_generation(owner, feature):
     """The generation a new Admission fences on: the operation's, never a newer one."""
     operation = _OPERATION.get()
     if operation is None:
+        if feature in NATIVE_OPERATION_FEATURES:
+            raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
         return generation(owner)
     if operation.owner != owner:
         raise ConsentDenied()

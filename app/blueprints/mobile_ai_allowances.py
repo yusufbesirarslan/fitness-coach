@@ -40,3 +40,20 @@ def ai_allowances_read():
         return mobile_error(error.code, "AI allowances could not be read.",
                             error.status, error.retryable,
                             retry_after=30 if error.retryable else None)
+
+
+@bp.get("/ai/actions/<feature>")
+@_rollout_gated
+@require_mobile_auth
+def ai_action_receipt(feature):
+    """No result/protected content; one owner's opaque action key only."""
+    from flask import request
+    from app.services.ai_allowances.service import action_receipt
+    try:
+        response = jsonify(action_receipt(g.mobile_user.id, feature,
+                                         request.headers.get("Idempotency-Key")))
+    except ai_allowances.AllowanceError as error:
+        response = current_app.make_response(mobile_error(
+            error.code, "AI action receipt unavailable.", error.status, error.retryable))
+    response.headers["Cache-Control"] = "no-store"
+    return response

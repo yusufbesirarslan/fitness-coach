@@ -342,3 +342,17 @@ def test_lost_pump_lease_cannot_commit_false_canonical_success(ready, comparison
     row = AiUsageReservation.query.one()
     assert row.canonical_committed is False
     assert row.state == 'RELEASED'
+
+
+def test_read_only_action_receipt_has_no_provider_or_balance_authority(ready):
+    action = hold(ready, 'coach')
+    before = counts(ready, 'coach')
+    assert L.action_receipt(ready, 'coach', 'logical-key-0001')['state'] == 'PENDING'
+    assert counts(ready, 'coach') == before
+    assert L.action_receipt(ready + 100, 'coach', 'logical-key-0001')['state'] == 'UNKNOWN'
+    assert L.action_receipt(ready, 'qr_menu', 'logical-key-0001')['state'] == 'UNKNOWN'
+    action.finish()
+    before = counts(ready, 'coach')
+    assert L.action_receipt(ready, 'coach', 'logical-key-0001') == {
+        'contract_version': 1, 'feature': 'coach', 'state': 'TERMINAL'}
+    assert counts(ready, 'coach') == before

@@ -159,6 +159,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         # MON-02-BE-02: Apple-signed intake, own flag (404 when OFF).
         ("/api/v1/subscription/apple-notifications", ("POST",)),
         ("/api/v1/ai/allowances", ("GET",)),
+        # D1 Phase 2: read-only, owner-scoped receipt behind ledger flag.
+        ("/api/v1/ai/actions/<feature>", ("GET",)),
         ("/api/v1/auth/login", ("POST",)),
         ("/api/v1/auth/refresh", ("POST",)),
         ("/api/v1/auth/logout", ("POST",)),

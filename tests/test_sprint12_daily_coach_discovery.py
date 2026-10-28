@@ -114,6 +114,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/subscription/entitlement",
         "/api/v1/subscription/apple-notifications",
         "/api/v1/ai/allowances",
+        # D1 Phase 2: owner-scoped, read-only, dark ledger action receipt.
+        "/api/v1/ai/actions/<feature>",
         "/api/v1/auth/login",
         "/api/v1/auth/refresh",
         "/api/v1/auth/logout",

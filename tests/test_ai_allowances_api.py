@@ -128,3 +128,22 @@ def test_failures_are_typed_and_never_auth_shaped(app, client, principal, monkey
     error = response.get_json()["error"]
     assert error["code"] == error_code and error["retryable"] is retryable
     assert ("Retry-After" in response.headers) is retryable
+
+
+def test_action_receipt_is_dark_authenticated_owner_scoped_and_read_only(app, client, principal, monkeypatch):
+    path = '/api/v1/ai/actions/coach'
+    assert client.get(path, headers=AUTH).status_code == 404
+    enable_ledger(app)
+    assert client.get(path).status_code == 401
+    from app.services.ai_allowances import service
+    seen = []
+    def receipt(owner, feature, key):
+        seen.append((owner, feature, key))
+        return {'contract_version': 1, 'feature': feature, 'state': 'UNKNOWN'}
+    monkeypatch.setattr(service, 'action_receipt', receipt)
+    response = client.get(path + '?user_id=999', headers={**AUTH, 'Idempotency-Key': 'opaque-key-123'})
+    assert response.status_code == 200
+    assert response.get_json() == {'contract_version': 1, 'feature': 'coach', 'state': 'UNKNOWN'}
+    assert seen == [(principal['current'], 'coach', 'opaque-key-123')]
+    assert response.headers['Cache-Control'] == 'no-store'
+    assert rows() == (0, 0, 0)
