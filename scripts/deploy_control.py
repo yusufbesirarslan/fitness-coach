@@ -240,6 +240,7 @@ def run(encoded_command, os_module, stat_module, fcntl_module,
             env={
                 "PATH": HARDENED_PATH,
                 "AXISAI_ROOT_LOCK_FD": "7",
+                "AXISAI_WEB_SLOT_APPLE_FILES": "0",
             },
         )
         return completed.returncode
@@ -462,6 +463,7 @@ def run(user_name, helper_path, deploy_sha, deploy_dir, public_url, fd_text,
             {
                 "PATH": HARDENED_PATH,
                 "AXISAI_OUTER_LOCK_FD": "7",
+                "AXISAI_WEB_SLOT_APPLE_FILES": "0",
                 "AXISAI_MONOTONIC_STATE": MONOTONIC_STATE_PATH,
                 **HOST_TIMEOUT_ENVIRONMENT,
             },
@@ -577,6 +579,7 @@ class DeployConfig:
     deploy_user: str
     deploy_dir: str
     public_health_url: str | None
+    apple_files: str = "0"
 
     @classmethod
     def from_environ(cls, env: Mapping[str, str]) -> "DeployConfig":
@@ -586,6 +589,9 @@ class DeployConfig:
         deploy_user = env.get("DEPLOY_USER", "")
         deploy_dir = env.get("DEPLOY_DIR", "")
         public_url = env.get("PUBLIC_HEALTH_URL", "") or None
+        apple_files = env.get("AXISAI_WEB_SLOT_APPLE_FILES", "0")
+        if apple_files not in ("0", "1"):
+            raise ConfigError("Apple files switch must be 0 or 1")
 
         if not SHA_RE.fullmatch(deploy_sha):
             raise ConfigError("DEPLOY_SHA must be lowercase 40-hex")
@@ -609,7 +615,7 @@ class DeployConfig:
                 "PUBLIC_HEALTH_URL is required: the blue/green transaction "
                 "proves public health and mobile ingress after the switch")
         validate_public_health_url(public_url)
-        return cls(deploy_sha, region, instance_id, deploy_user, deploy_dir, public_url)
+        return cls(deploy_sha, region, instance_id, deploy_user, deploy_dir, public_url, apple_files)
 
 
 @dataclass(frozen=True)
@@ -922,8 +928,19 @@ def render_bootstrap(
     encoded_url: str,
     encoded_authority_parameter: str,
     region: str,
+    apple_files: str = "0",
 ) -> str:
     """Render a fixed root bootstrap from validated and base64-encoded values."""
+    if apple_files not in ("0", "1"):
+        raise ConfigError("Apple files switch must be 0 or 1")
+    # Bind the reviewed process opt-in into both clean remote environments.
+    # No inherited remote environment or shared .env can activate transport.
+    root_source = ROOT_LOCK_WRAPPER_SOURCE.replace(
+        '"AXISAI_WEB_SLOT_APPLE_FILES": "0"',
+        '"AXISAI_WEB_SLOT_APPLE_FILES": ' + json.dumps(apple_files))
+    drop_source = PRIVILEGE_DROP_SOURCE.replace(
+        '"AXISAI_WEB_SLOT_APPLE_FILES": "0"',
+        '"AXISAI_WEB_SLOT_APPLE_FILES": ' + json.dumps(apple_files))
     helper_sha256 = hashlib.sha256(
         base64.b64decode(encoded_script, validate=True)
     ).hexdigest()
@@ -1097,7 +1114,7 @@ esac
 script_path="$helper_dir/{HELPER_NAME}"
 python3 - '{deploy_user}' "$script_path" '{deploy_sha}' "$deploy_dir" \
   "$public_health_url" '{OUTER_LOCK_CAPABILITY_FD}' <<'AXISAI_PRIVILEGE_DROP_PY'
-{PRIVILEGE_DROP_SOURCE}AXISAI_PRIVILEGE_DROP_PY
+{drop_source}AXISAI_PRIVILEGE_DROP_PY
 """
     encoded_bootstrap = base64.b64encode(inner_bootstrap.encode("utf-8")).decode("ascii")
     # The authority gate moved into the root-lock child and took the outer
@@ -1109,7 +1126,7 @@ python3 - '{deploy_user}' "$script_path" '{deploy_sha}' "$deploy_dir" \
         "set -eu\n"
         f"python3 - {shlex.quote(encoded_bootstrap)} "
         "<<'AXISAI_ROOT_LOCK_PY'\n"
-        f"{ROOT_LOCK_WRAPPER_SOURCE}"
+        f"{root_source}"
         "AXISAI_ROOT_LOCK_PY\n"
     )
 
@@ -1145,6 +1162,7 @@ def build_remote_command(
         encoded_url,
         encoded_authority_parameter,
         config.region,
+        config.apple_files,
     )
 
 

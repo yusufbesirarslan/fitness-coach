@@ -751,3 +751,88 @@ writes, not privileged host writes. Rotation means provisioning a new release
 revision, verifying its candidate and cutting over; rollback verifies and
 routes back to the retained previous slot and its original revision files.
 Do not remove the previous credentials until that rollback window is closed.
+
+## Apple intake source closure (MON-R6-23)
+
+The protected workflow carries `vars.AXISAI_WEB_SLOT_APPLE_FILES` (unset = `0`)
+through controller validation and both literal remote clean environments into
+the archived R6 runtime. Only exactly `0`/`1` are accepted. Shared `.env` cannot
+opt in. Both rendered and actual container state refuse enabled Apple intake or
+purchase gates without the revision-bound credential transport. Existing
+three-file paths, metadata, Compose 5.5.1, read-only binds and
+`create_host_path: false` checks remain mandatory. Previous verification retains
+its independent mount/revision mode. No credentials are installed by a release.
+
+`APPLE_NOTIFICATIONS_ENABLED=1` independently authorizes signed V2 receipt and
+authoritative financial reconciliation. `APPLE_SUBSCRIPTIONS_ENABLED=0` keeps
+purchase-context, verify, entitlement APIs and effective Apple Premium access
+OFF. Financial rows, ownership, revocations and durable coalesced requests are
+retained; there is no synthetic grant or skipped event acknowledged as applied.
+Later paid activation is a separate founder decision. Other paid-AI gates and
+Sandbox fallback retain their independent approvals. No pricing changes.
+
+The single release-owned hourly scheduler is supplied as source only:
+
+- `scripts/apple_release_scheduler.py` → root-owned mode 0444
+  `/usr/local/libexec/axisai-apple-scheduler` (invoked with `/usr/bin/python3 -I`).
+- Exact `deploy/systemd/axisai-apple-reconcile.{service,timer}` → root-owned
+  mode 0644 files of the same name in `/etc/systemd/system/`.
+- Root-owned, single-link, non-symlink mode 0644
+  `/etc/axisai/apple-reconcile.json`, containing only
+  `{"protocol":1,"deploy_dir":"/actual/production/checkout","limit":25}`.
+  Bind the real checkout path under separate preparation approval. `limit`
+  must be 25..200 and at least `max(25,ceil(N/10))` for EACH accepted environment;
+  N includes relevant lapsed recovery rows. Sweep limit is exactly twice limit.
+  Above N=2000 requires separate capacity qualification; readiness refuses.
+
+All ancestors must be root-owned and non-writable by group/others. Installation,
+`daemon-reload`, enabling/starting the one timer, responder/alert configuration
+and configuration changes require separate production preparation approval.
+Do not add cron, RQ schedules, or a second timer. The ordinary RQ worker remains
+keyless. No schedule or production configuration is installed by this source PR.
+
+With credential transport ON, R6 refuses before release preparation unless
+installed launcher/unit bytes match candidate source, configuration binds the
+checkout, and loaded units have no drop-ins or pending daemon reload. The timer
+must be enabled/active and own the service. Existing installed scheduler parity
+is also checked on later transport-OFF releases. Candidate verification runs a
+bounded read-only in-image runner check before route switch, including schema,
+adapter configuration and environment-scoped capacity. Flags-OFF candidates
+need no Apple adapter. This is source readiness, not signed-delivery proof.
+
+Every invocation holds the existing shared production lock through execution,
+and a separate exclusive pass lock. R6 holds the exclusive production lock
+through preparation, cutover, worker replacement and rollback. After locking,
+the launcher resolves the canonical route, one healthy web, immutable image,
+checkout/baked/runtime SHA equality and launcher protocol source at that SHA.
+The image owns a root-installed pass script; its existing exact archive/image
+admission provides provenance. The pass starts read-only, refuses revision drift,
+and uses the existing durable lease/generation/idempotent reconciliation logic.
+A keyless retained flags-OFF release returns explicit DISABLED without importing
+new code or credentials. An enabled incompatible old release fails closed.
+
+The Docker client inherits locks, and an image-side KILL timeout bounds the pass
+to 240 seconds. Before both another pass and any release schema preparation,
+all running-container process lists must prove no surviving marked pass or
+legacy reconciliation CLI. This catches daemon-side execs surviving a client
+crash. An uninspectable host or surviving process refuses; wait for the bounded
+pass to end and recover the existing outcome, never start a competing schedule.
+The timer survives release/rollback without replacement; service inactivity
+between oneshots is expected. Non-success outcomes fail the unit visibly.
+
+Inspect ownership/execution via `systemctl show axisai-apple-reconcile.timer`
+and `systemctl show axisai-apple-reconcile.service` (Result, ExecMainStatus,
+ExecMainStartTimestamp/ExitTimestamp). Journal output exposes closed outcomes
+and validated environment-scoped counts: relevant rows, backlog, due, leased,
+oldest verification age. No payload, credential, transaction or user identifier
+is emitted. Alert on service failure, missing/late successful pass, due backlog
+and stale verification age; authentic production monitoring delivery is a later
+operator qualification requirement. Empty passes do not prove transaction refresh.
+
+This PR adds no migration. Existing expand/schema/floor and recovery gates are
+unchanged. Its previous keyless baseline and current schema are compatible;
+future migrations or runner protocol changes require independent retained-image
+compatibility qualification. Fresh old-image read-only startup may refuse a
+newer schema; do not claim generic rollback compatibility, weaken schema checks,
+or downgrade to make a runner start. Completion-floor rollback restrictions
+continue to govern web AND worker. A source test is not production readiness.

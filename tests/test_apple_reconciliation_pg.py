@@ -127,12 +127,14 @@ def test_concurrent_distinct_notifications_coalesce(pg_app, intake):
         assert AppleSubscriptionReconciliation.query.one().generation == 2
 
 
-def test_intake_commit_failure_leaves_nothing(pg_app, intake, monkeypatch):
+@pytest.mark.parametrize("paid", [False, True])
+def test_intake_commit_failure_leaves_nothing(pg_app, intake, monkeypatch, paid):
     from app.extensions import db
     from app.models import AppleNotificationReceipt, AppleSubscriptionReconciliation
     from app.services import apple_reconciliation as r
     from app.services.apple_subscriptions import SubscriptionError
     app, owners = pg_app
+    app.config['APPLE_SUBSCRIPTIONS_ENABLED'] = paid
     with app.app_context():
         def fail():
             raise sa.exc.OperationalError("commit", {}, Exception("synthetic"))

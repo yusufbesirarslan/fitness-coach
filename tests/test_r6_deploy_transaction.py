@@ -1549,3 +1549,193 @@ def test_previous_slot_verify_allows_only_existing_allowlisted_files(tmp_path):
     ops.slot_verify("blue", PREV, 60)
     assert recorder.calls[-1][-1] == "--allow-existing-files"
     assert recorder.calls[-1][-3:-1] == ["--revision", PREV]
+
+
+# ASN release scheduler: pure host command model, no schedule installation.
+def _apple_scheduler():
+    return tx._load_sibling('apple_release_scheduler')
+
+
+class AppleRunnerWorld:
+    cid = 'd' * 64
+    def __init__(self):
+        self.calls = []
+        self.route = 'op=status state=blue backend=127.0.0.1:5001 result=ok'
+        self.revision = CAND
+        self.baked = CAND
+        self.runtime = CAND
+        self.enabled = '1'
+        self.orphan = False
+        self.failed_pass = False
+        self.wrong_source = False
+    def __call__(self, argv, timeout=10, pass_fds=()):
+        self.calls.append((argv, timeout, pass_fds))
+        scheduler = _apple_scheduler()
+        if argv[:3] == ['docker', 'ps', '-q']:
+            return self.cid
+        if argv[:2] == ['docker', 'top']:
+            return 'COMMAND\npython axisai-apple-pass' if self.orphan else 'COMMAND\ngunicorn starter:app'
+        if argv[0].endswith('axisai-switch-web-slot'):
+            return self.route
+        if argv[:2] == ['docker', 'inspect']:
+            return 'running healthy sha256:' + '1' * 64
+        if argv[0] == 'git':
+            if 'show' in argv:
+                return 'wrong source' if self.wrong_source else (ROOT / 'scripts/apple_release_scheduler.py').read_text().strip()
+            return self.revision
+        if argv[:2] == ['docker', 'exec']:
+            if '/app/BUILD_REVISION' in argv:
+                return self.baked
+            if argv[-1] == 'import os; print(os.environ.get("APP_REVISION", ""))':
+                return self.runtime
+            if 'FITX_SKIP_DB_INIT=0' in argv:
+                if self.failed_pass:
+                    return 'APPLE_RELEASE_PASS=FAILED'
+                return 'APPLE_RELEASE_HEALTH={"Sandbox":{"relevant_rows":1,"backlog":0,"due":0,"leased":0,"oldest_verification_age_seconds":0}}\nAPPLE_RELEASE_PASS=OK'
+            return self.enabled
+        raise AssertionError(argv)
+
+
+def test_apple_runner_uses_only_canonical_active_revision_and_shared_lock_fds(capsys):
+    scheduler = _apple_scheduler()
+    world = AppleRunnerWorld()
+    assert scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, world, (7, 8)) == 'OK'
+    command, timeout, fds = world.calls[-1]
+    assert command == ['docker', 'exec', '-e', 'FITX_STARTUP_MODE=read-only', '-e', 'FITX_SKIP_DB_INIT=0',
+                       world.cid, '/usr/bin/timeout', '--signal=KILL', '240', 'python', scheduler.PASS, CAND, '25']
+    assert fds == (7, 8) and timeout > 240
+    assert 'oldest_verification_age_seconds' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('attribute,value', [('revision', OTHER), ('baked', OTHER), ('runtime', OTHER),
+    ('route', 'op=status state=blue backend=127.0.0.1:5002 result=ok'), ('route', 'unknown'),
+    ('enabled', 'INVALID'), ('wrong_source', True), ('failed_pass', True), ('orphan', True)])
+def test_apple_runner_refuses_stale_competing_or_unqualified_execution(attribute, value):
+    scheduler = _apple_scheduler()
+    world = AppleRunnerWorld()
+    setattr(world, attribute, value)
+    with pytest.raises(scheduler.Refused):
+        scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, world)
+
+
+def test_apple_runner_keyless_retained_release_is_explicitly_disabled():
+    scheduler = _apple_scheduler()
+    world = AppleRunnerWorld()
+    world.enabled, world.wrong_source = '0', True
+    assert scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, world) == 'DISABLED'
+    assert not any('show' in argv or 'FITX_SKIP_DB_INIT=0' in argv for argv, _, _ in world.calls)
+
+
+def test_apple_runner_crash_then_retry_preserves_lease_recovery_boundary():
+    scheduler = _apple_scheduler()
+    world = AppleRunnerWorld()
+    world.orphan = True
+    with pytest.raises(scheduler.Refused, match='STILL_RUNNING'):
+        scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, world)
+    assert not any('FITX_SKIP_DB_INIT=0' in argv for argv, _, _ in world.calls)
+    world.orphan = False  # bounded image-side timeout has removed the orphan
+    assert scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, world) == 'OK'
+
+
+def test_apple_orphan_prevents_release_schema_preparation_even_when_transport_off(tmp_path):
+    world = AppleRunnerWorld(); world.orphan = True
+    def invoke(argv, timeout, env):
+        try:
+            return 0, world(argv), ''
+        except AssertionError:
+            return 0, '', ''
+    ops = host(tmp_path, invoke, control_plane_files=())
+    assert ops.control_plane_mismatches(30) == ['Apple scheduler ownership/source/execution unproven']
+
+
+@pytest.mark.parametrize('change', [{'protocol': 2}, {'limit': 24}, {'limit': 201}, {'limit': True},
+                                   {'deploy_dir': '/srv/../app'}, {'extra': 'unsupported'}])
+def test_apple_scheduler_configuration_is_closed_and_bounded(change):
+    scheduler = _apple_scheduler()
+    with pytest.raises(scheduler.Refused):
+        scheduler.configuration(json.dumps({'protocol': 1, 'deploy_dir': '/srv/app', 'limit': 25, **change}))
+
+
+def test_apple_scheduler_requires_loaded_enabled_timer_without_overrides(monkeypatch, tmp_path):
+    scheduler = _apple_scheduler()
+    for _dest, rel in scheduler.FILES:
+        path = tmp_path / rel; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'reviewed')
+    monkeypatch.setattr(scheduler, 'trusted_file', lambda path, uid: json.dumps(
+        {'protocol': 1, 'deploy_dir': '/srv/app', 'limit': 25}).encode() if path == scheduler.CONFIG else b'reviewed')
+    def unit(argv):
+        name = argv[2]
+        return '\n'.join(['LoadState=loaded', 'FragmentPath=/etc/systemd/system/' + name,
+                          'DropInPaths=', 'NeedDaemonReload=no', 'UnitFileState=enabled', 'ActiveState=active',
+                          'Triggers=' + scheduler.SERVICE, 'TimersMonotonic=OnUnitInactiveUSec=1h',
+                          'ExecStart=' + scheduler.INSTALLED])
+    assert scheduler.installed(tmp_path, '/srv/app', unit)['limit'] == 25
+    for old, new in [('DropInPaths=', 'DropInPaths=/tmp/override.conf'),
+                     ('NeedDaemonReload=no', 'NeedDaemonReload=yes'), ('ActiveState=active', 'ActiveState=inactive'),
+                     ('UnitFileState=enabled', 'UnitFileState=disabled'), ('LoadState=loaded', 'LoadState=not-found'),
+                     ('Triggers=' + scheduler.SERVICE, 'Triggers=other.service')]:
+        with pytest.raises(scheduler.Refused):
+            scheduler.installed(tmp_path, '/srv/app', lambda argv: unit(argv).replace(old, new))
+
+
+def test_apple_candidate_readiness_is_bound_to_verified_container_and_revision(tmp_path, monkeypatch):
+    scheduler = _apple_scheduler()
+    recorder = Recorder({'inspect --format {{.Id}}': (0, 'd' * 64, ''),
+                         '--check': (0, 'APPLE_RELEASE_PASS=READY', '')})
+    ops = host(tmp_path, recorder)
+    ops.environ['AXISAI_WEB_SLOT_APPLE_FILES'] = '1'
+    monkeypatch.setattr(tx, '_load_sibling', lambda name: scheduler)
+    monkeypatch.setattr(scheduler, 'trusted_file', lambda *args: b'{"protocol":1,"deploy_dir":"/srv/app","limit":25}')
+    monkeypatch.setattr(ops, '_slot', lambda *args: (0, {'deep_health_revision': CAND, 'container': {'id': 'd' * 12}}))
+    ops.slot_verify('blue', CAND, 30)
+    assert recorder.calls[-1][-5:] == ['python', scheduler.PASS, CAND, '25', '--check']
+    assert 'FITX_STARTUP_MODE=read-only' in recorder.calls[-1]
+    recorder.replies['--check'] = (0, 'APPLE_RELEASE_PASS=FAILED', '')
+    with pytest.raises(tx.OpError, match='readiness'):
+        ops.slot_verify('blue', CAND, 30)
+    # Retained previous releases are verified by their existing runtime contract.
+    monkeypatch.setattr(ops, '_slot', lambda *args: (0, {'deep_health_revision': PREV}))
+    prior = len(recorder.calls)
+    ops.slot_verify('green', PREV, 30)
+    assert len(recorder.calls) == prior
+
+
+@pytest.mark.parametrize('value,expected', [('', '0'), (' ', '0'), ('0', '0'), ('1', '1'), ('1 ', 'INVALID'), ('true', 'INVALID')])
+def test_scheduler_flag_probe_matches_registry_parser(value, expected):
+    import subprocess
+    world = AppleRunnerWorld(); world.enabled = '0'
+    _apple_scheduler().execute({'deploy_dir': '/srv/app', 'limit': 25}, world)
+    probe = [argv[-1] for argv, _, _ in world.calls if argv[:2] == ['docker', 'exec'] and 'v=[' in argv[-1]][0]
+    result = subprocess.run([sys.executable, '-c', probe], env={'APPLE_NOTIFICATIONS_ENABLED': value},
+                            capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == expected
+
+
+def test_actual_flock_prevents_competing_passes_and_survives_launcher_exit(tmp_path, monkeypatch):
+    import fcntl
+    import os
+    import subprocess
+    from types import SimpleNamespace
+    scheduler = _apple_scheduler()
+    original = os.fstat
+    monkeypatch.setattr(scheduler.os, 'fstat', lambda fd: SimpleNamespace(
+        st_uid=0, st_mode=original(fd).st_mode, st_nlink=original(fd).st_nlink))
+    path = tmp_path / 'production.lock'
+    path.write_text(''); path.chmod(0o644)
+    shared = scheduler.locked_file(path, fcntl.LOCK_SH)
+    other = scheduler.locked_file(path, fcntl.LOCK_SH)
+    child = subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read()'],
+                             stdin=subprocess.PIPE, pass_fds=(shared,))
+    try:
+        os.close(shared); os.close(other)
+        with pytest.raises(BlockingIOError):
+            scheduler.locked_file(path, fcntl.LOCK_EX)
+    finally:
+        child.stdin.close(); child.wait(timeout=10)
+    exclusive = scheduler.locked_file(path, fcntl.LOCK_EX)
+    try:
+        with pytest.raises(BlockingIOError):
+            scheduler.locked_file(path, fcntl.LOCK_SH)
+        with pytest.raises(BlockingIOError):
+            scheduler.locked_file(path, fcntl.LOCK_EX)
+    finally:
+        os.close(exclusive)

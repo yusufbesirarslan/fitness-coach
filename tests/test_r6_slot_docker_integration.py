@@ -472,3 +472,32 @@ print('malformed-key-fails-closed')
         # Delete only the exact synthetic revision directories created above.
         sh("sudo", "-n", "rm", "-rf", "--", str(source), str(previous_source))
         sh("docker", "rmi", previous_image, check=False)
+
+
+def test_revision_bound_pass_is_immutable_and_read_only_in_exact_image(stack):
+    revision, image = stack['revision'], stack['image']
+    proof = '''
+import os, pathlib
+p=pathlib.Path('/usr/local/libexec/axisai-apple-pass')
+assert p.read_bytes() == pathlib.Path('/app/scripts/apple_release_pass.py').read_bytes()
+assert p.stat().st_uid == 0 and p.stat().st_mode & 0o222 == 0
+assert os.geteuid() == 10001
+try:
+    p.write_bytes(b'invalid')
+except PermissionError:
+    pass
+else:
+    raise AssertionError('runner writable')
+print('immutable-pass-proven')
+'''
+    assert sh('docker', 'run', '--rm', '--network', 'none', '--entrypoint', 'python', image,
+              '-c', proof).stdout.strip() == 'immutable-pass-proven'
+    # Current schema + flags OFF: no credential/Apple I/O required for readiness.
+    command = [*stack['main'], 'run', '--rm', '--no-deps', '-T',
+               '-e', 'APP_REVISION=' + revision, '-e', 'FITX_STARTUP_MODE=read-only',
+               '-e', 'FITX_SKIP_DB_INIT=0', '-e', 'APPLE_NOTIFICATIONS_ENABLED=0',
+               '-e', 'APPLE_SUBSCRIPTIONS_ENABLED=0', '--entrypoint', 'python', 'web',
+               '/usr/local/libexec/axisai-apple-pass', revision, '25', '--check']
+    assert sh(*command).stdout.strip().splitlines()[-1] == 'APPLE_RELEASE_PASS=READY'
+    command[-3] = 'a' * 40
+    assert sh(*command, check=False).returncode != 0

@@ -145,7 +145,7 @@ def _rows(app):
         return (AppleNotificationReceipt.query.count(), AppleSubscriptionReconciliation.query.all())
 
 
-@pytest.mark.parametrize("flags", [(False, False), (False, True), (True, False)])
+@pytest.mark.parametrize("flags", [(False, False), (False, True)])
 def test_flag_off_is_absent_before_any_work(app, client, monkeypatch, signer, flags):
     app.config.update(APPLE_NOTIFICATIONS_ENABLED=flags[0], APPLE_SUBSCRIPTIONS_ENABLED=flags[1])
     def forbidden(*_):
@@ -308,7 +308,33 @@ def test_off_route_is_404_and_never_rate_limited(app, client, monkeypatch, flags
     limiter.enabled = True
     limiter.reset()
     try:
-        assert {client.post(PATH, json={}).status_code for _ in range(5)} == {404}
+        expected = {404} if flags.get('APPLE_NOTIFICATIONS_ENABLED') is False else {400, 429}
+        assert {client.post(PATH, json={}).status_code for _ in range(5)} == expected
     finally:
         limiter.reset()
         limiter.enabled = False
+
+
+def test_intake_only_signed_receipt_without_paid_activation(app, client, intake, monkeypatch):
+    app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=False, APPLE_NOTIFICATIONS_ENABLED=True)
+    signed = intake.notification(str(uuid4()))[0]
+    assert client.post(PATH, json={'signedPayload': signed}).status_code == 200
+    assert client.post(PATH, json={'signedPayload': signed}).status_code == 200
+    receipts, requests_ = _rows(app)
+    assert receipts == 1 and len(requests_) == 1
+    with app.app_context():
+        assert AppleSubscription.query.count() == 0
+        for operation in (lambda: s.purchase_context(999), lambda: s.verify_purchase(999, '101'),
+                          lambda: s.entitlement(999)):
+            with pytest.raises(SubscriptionError, match='SUBSCRIPTIONS_DISABLED'):
+                operation()
+
+
+def test_intake_only_storage_failure_is_not_acknowledged(app, client, intake, monkeypatch):
+    from sqlalchemy.exc import SQLAlchemyError
+    app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=False)
+    def fail():
+        raise SQLAlchemyError('synthetic-storage-failure')
+    monkeypatch.setattr(db.session, 'commit', fail)
+    assert client.post(PATH, json={'signedPayload': intake.notification(str(uuid4()))[0]}).status_code == 503
+    # Authoritative atomic rollback is exercised by the PostgreSQL intake-only matrix.

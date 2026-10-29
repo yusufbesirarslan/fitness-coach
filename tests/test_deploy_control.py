@@ -1662,6 +1662,7 @@ def test_root_lock_wrapper_provisions_root_owned_nonwritable_directory_and_reada
         "env": {
             "PATH": deploy_control.HARDENED_EXECUTION_PATH,
             "AXISAI_ROOT_LOCK_FD": str(deploy_control.OUTER_LOCK_CAPABILITY_FD),
+            "AXISAI_WEB_SLOT_APPLE_FILES": "0",
         },
     })]
     assert fake_os.dup2_calls == [(12, deploy_control.OUTER_LOCK_CAPABILITY_FD, True)]
@@ -1711,6 +1712,7 @@ def test_privilege_drop_validates_user_drops_groups_then_execs_exact_helper():
             ], {
                 "PATH": deploy_control.HARDENED_EXECUTION_PATH,
                 "AXISAI_OUTER_LOCK_FD": "7",
+                "AXISAI_WEB_SLOT_APPLE_FILES": "0",
                 "AXISAI_MONOTONIC_STATE": deploy_control.MONOTONIC_STATE_PATH,
                 **host_timeout_environment(),
             }),
@@ -3980,3 +3982,25 @@ def test_authority_cleanup_with_real_cli_shape_is_not_reported_as_failure(
 
     assert error is None
     assert _cleanup_messages(messages) == ["SSM delivery authority removed"]
+
+
+@pytest.mark.parametrize('switch', ['0', '1'])
+def test_apple_transport_is_bound_into_both_remote_clean_environments(switch):
+    config = DeployConfig.from_environ({**VALID_ENV, 'AXISAI_WEB_SLOT_APPLE_FILES': switch})
+    command = build_remote_command(config, b'#!/bin/sh\nexit 0\n')
+    lines = command.splitlines()
+    argv = shlex.split(next(line for line in lines if line.startswith('python3 - ')).split(' <<', 1)[0])
+    inner = base64.b64decode(argv[2]).decode()
+    namespace = {'__name__': 'root_source_test'}
+    exec('\n'.join(lines[lines.index(next(l for l in lines if l.startswith('python3 - '))) + 1:-1]), namespace)
+    assert f'"AXISAI_WEB_SLOT_APPLE_FILES": "{switch}"' in inner
+    assert f'"AXISAI_WEB_SLOT_APPLE_FILES": "{switch}"' in '\n'.join(lines)
+    # Both templates are fixed to OFF; remote inherited environment cannot opt in.
+    assert '"AXISAI_WEB_SLOT_APPLE_FILES": "0"' in deploy_control.ROOT_LOCK_WRAPPER_SOURCE
+    assert '"AXISAI_WEB_SLOT_APPLE_FILES": "0"' in deploy_control.PRIVILEGE_DROP_SOURCE
+
+
+@pytest.mark.parametrize('switch', ['', 'true', 'yes', '2', '1; touch /tmp/no'])
+def test_invalid_apple_transport_is_rejected_before_aws(switch):
+    with pytest.raises(ConfigError, match='Apple files switch'):
+        DeployConfig.from_environ({**VALID_ENV, 'AXISAI_WEB_SLOT_APPLE_FILES': switch})

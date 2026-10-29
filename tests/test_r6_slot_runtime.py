@@ -805,3 +805,20 @@ def test_previous_slot_file_mode_is_independent_of_candidate_mode(deploy_dir):
     runtime = _runtime(deploy_dir, FakeDocker(containers={"green": [container]}))
     with pytest.raises(rt.Refused):
         runtime.verify("green", REV_A, allow_existing_files=True)
+
+
+@pytest.mark.parametrize('key', ['APPLE_NOTIFICATIONS_ENABLED', 'APPLE_SUBSCRIPTIONS_ENABLED'])
+def test_shared_env_cannot_enable_apple_without_process_transport(key):
+    doc = _rendered('green', REV_A)
+    doc['services']['web']['environment'][key] = '1'
+    with pytest.raises(rt.Refused, match='credential transport'):
+        rt.validate_rendered(doc, 'green', REV_A, 'fitness-coach_default')
+    container = _container('green')
+    container['Config']['Env'].append(key + '=1')
+    runtime = rt.SlotRuntime('/unused', environ={})
+    for allow_existing in (True, False):
+        with pytest.raises(rt.Refused, match='credential transport'):
+            runtime._validate_container_files(container, REV_A, allow_existing=allow_existing)
+    credentialed = _apple_container()
+    credentialed['Config']['Env'].append(key + '=1')
+    runtime._validate_container_files(credentialed, REV_A, allow_existing=True)

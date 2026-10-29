@@ -86,7 +86,10 @@ def _log(event, outcome):
 
 
 def _adapter():
-    if not current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED"):
+    # Intake/financial reconciliation is independently authorized. Purchase
+    # APIs and effective paid access remain gated in subscriptions.py.
+    if not (current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is True
+            or current_app.config.get("APPLE_NOTIFICATIONS_ENABLED") is True):
         raise SubscriptionError("SUBSCRIPTIONS_DISABLED", 503)
     return AppleAdapter(current_app.config)
 
@@ -329,3 +332,29 @@ def _run_environment(adapter, environment, limit, sweep_limit):
         if outage:
             break
     return counts
+
+
+def health(adapter=None):
+    """Read-only, environment-scoped aggregates; no Apple/customer identifiers."""
+    adapter = _adapter() if adapter is None else adapter
+    now = _now()
+    result = {}
+    for environment in adapter.environments:
+        requests = sa.select(sa.func.count()).select_from(Request).where(Request.environment == environment)
+        rows = sa.select(sa.func.count()).select_from(AppleSubscription).where(
+            AppleSubscription.environment == environment,
+            AppleSubscription.revoked_at.is_(None), AppleSubscription.status != 5,
+            AppleSubscription.expires_at > now - RECOVERY_WINDOW)
+        oldest = db.session.execute(sa.select(sa.func.min(AppleSubscription.last_verified_at)).where(
+            AppleSubscription.environment == environment,
+            AppleSubscription.revoked_at.is_(None), AppleSubscription.status != 5,
+            AppleSubscription.expires_at > now - RECOVERY_WINDOW)).scalar_one()
+        result[environment] = {
+            'relevant_rows': db.session.execute(rows).scalar_one(),
+            'backlog': db.session.execute(requests).scalar_one(),
+            'due': db.session.execute(requests.where(Request.next_attempt_at <= now)).scalar_one(),
+            'leased': db.session.execute(requests.where(Request.lease_until > now)).scalar_one(),
+            'oldest_verification_age_seconds': max(0, int((now - s_utc(oldest)).total_seconds())) if oldest else None,
+        }
+    db.session.rollback()
+    return result

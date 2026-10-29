@@ -743,3 +743,67 @@ def test_receipts_are_purged_after_retention_in_bounded_batches(world):
         assert r.purge_receipts("Sandbox", now, limit=2) == 2
         assert r.run()["purged"] == 1
         assert sorted(x.environment for x in AppleNotificationReceipt.query) == ["Production", "Sandbox"]
+
+
+def test_intake_only_keeps_financial_state_and_recovers_access_only_after_explicit_activation(world):
+    app, owners, apple = world
+    uid, token = owners[0]
+    with app.app_context():
+        _owned(uid, token, apple)
+        app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=False, APPLE_NOTIFICATIONS_ENABLED=True)
+        _request(token=token)
+        assert r.run()['APPLIED'] == 1
+        row = _row()
+        assert row.user_id == uid and row.status == 1
+        assert s._eligible_view(db.session.get(User, uid), row, datetime.now(timezone.utc))['effective_premium'] is False
+        assert not db.session.get(User, uid).is_premium
+        for operation in (lambda: s.purchase_context(uid), lambda: s.verify_purchase(uid, '101'), lambda: s.entitlement(uid)):
+            with pytest.raises(SubscriptionError, match='SUBSCRIPTIONS_DISABLED'):
+                operation()
+        # Financial evidence remains available for a later separately approved activation.
+        app.config['APPLE_SUBSCRIPTIONS_ENABLED'] = True
+        assert s.entitlement(uid)['effective_premium']
+        app.config['APPLE_SUBSCRIPTIONS_ENABLED'] = False
+        apple.state(status=5, revocationDate=ms(datetime.now(timezone.utc)))
+        _request(); assert r.run()['APPLIED'] == 1
+        assert _row().status == 5
+        app.config['APPLE_SUBSCRIPTIONS_ENABLED'] = True
+        assert s.entitlement(uid)['effective_premium'] is False
+
+
+def test_health_is_read_only_and_environment_scoped(world):
+    app, owners, apple = world
+    with app.app_context():
+        _owned(*owners[0], apple)
+        _request()
+        before = (AppleSubscription.query.count(), Request.query.count())
+        health = r.health()
+        assert set(health) == {'Sandbox'}
+        assert health['Sandbox']['relevant_rows'] == 1
+        assert health['Sandbox']['backlog'] == health['Sandbox']['due'] == 1
+        assert health['Sandbox']['oldest_verification_age_seconds'] >= 0
+        assert before == (AppleSubscription.query.count(), Request.query.count())
+
+
+@pytest.mark.parametrize('check,capacity,expected', [(True, 1, 0), (False, 1, 0), (True, 251, 1)])
+def test_revision_bound_image_pass_checks_capacity_and_preserves_paid_gate(world, monkeypatch, capsys, check, capacity, expected):
+    import sys
+    from pathlib import Path
+    from scripts import apple_release_pass as runner
+    app, owners, apple = world
+    app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=False, APPLE_NOTIFICATIONS_ENABLED=True)
+    revision = 'c' * 40
+    original = Path.read_text
+    monkeypatch.setattr(Path, 'read_text', lambda path, *a, **kw: revision if str(path) == '/app/BUILD_REVISION' else original(path, *a, **kw))
+    monkeypatch.setenv('APP_REVISION', revision)
+    monkeypatch.setenv('FITX_STARTUP_MODE', 'read-only')
+    monkeypatch.setenv('FITX_SKIP_DB_INIT', '0')
+    monkeypatch.setitem(sys.modules, 'starter', NS(app=app))
+    calls = []
+    monkeypatch.setattr(r, 'health', lambda *_: {'Sandbox': {'relevant_rows': capacity}})
+    monkeypatch.setattr(r, 'run', lambda **kwargs: calls.append(kwargs) or {'processed': 0})
+    args = [revision, '25'] + (['--check'] if check else [])
+    assert runner.main(args) == expected
+    assert calls == ([] if check or expected else [{'limit': 25, 'sweep_limit': 50}])
+    assert app.config['APPLE_SUBSCRIPTIONS_ENABLED'] is False
+    assert runner.main(['a' * 40, '25', '--check']) == 1

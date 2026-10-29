@@ -128,4 +128,5 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
           PUBLIC_HEALTH_URL: ${{ vars.PUBLIC_HEALTH_URL }}
+          AXISAI_WEB_SLOT_APPLE_FILES: ${{ vars.AXISAI_WEB_SLOT_APPLE_FILES || '0' }}
         run: python3 scripts/deploy_control.py

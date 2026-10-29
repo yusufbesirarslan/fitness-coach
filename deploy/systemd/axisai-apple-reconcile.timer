@@ -1,0 +1,10 @@
+[Unit]
+Description=AxisAI hourly Apple reconciliation owner
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=1h
+Unit=axisai-apple-reconcile.service
+
+[Install]
+WantedBy=timers.target

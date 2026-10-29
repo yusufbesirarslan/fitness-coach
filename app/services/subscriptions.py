@@ -56,6 +56,9 @@ def _purchase_eligible(user, now, environment=None):
 
 def _eligible_view(user, row, now):
     view = entitlement_view(row, now)
+    if current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True:
+        view.update(tier="FREE", effective_premium=False)
+        return view
     # Only a view that would grant Premium changes; every other view keeps the v1
     # status set that shipped clients decode (no row, lapsed or pending rows).
     if view["effective_premium"] and not _purchase_eligible(user, now, row.environment):

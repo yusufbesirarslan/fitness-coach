@@ -47,3 +47,8 @@
 
 # Deploy contract documentation
 /docs/DEPLOYMENT.md @yusufbesirarslan
+
+# Active-release Apple scheduler and immutable pass
+/scripts/apple_release_scheduler.py @yusufbesirarslan
+/scripts/apple_release_pass.py @yusufbesirarslan
+/deploy/systemd/** @yusufbesirarslan

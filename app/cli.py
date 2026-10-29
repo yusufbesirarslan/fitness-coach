@@ -466,8 +466,10 @@ def apple_subscription_reconcile_cmd(limit, sweep_limit):
     One pass per verified environment: with APPLE_SANDBOX_FALLBACK_ENABLED a
     Production deployment also passes over Sandbox, so up to 2 x --limit lookups.
 
-    Refuses while APPLE_SUBSCRIPTIONS_ENABLED is OFF or Apple configuration is
-    incomplete. Safe to repeat or run concurrently; not scheduled anywhere.
+    Refuses while both APPLE_SUBSCRIPTIONS_ENABLED and APPLE_NOTIFICATIONS_ENABLED
+    are OFF or Apple configuration is incomplete. Financial evidence can refresh
+    under intake-only authorization; paid access stays gated independently.
+    Production cadence belongs to the separately installed R6 active-release timer.
 
         flask --app starter apple-subscription-reconcile
     """
