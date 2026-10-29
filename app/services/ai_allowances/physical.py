@@ -118,20 +118,20 @@ def _cache_input_bound(payload, family):
                     or (key == 'tools' and (block.get('type') not in (None, 'custom')
                                             or not isinstance(block.get('input_schema'), dict)))):
                 _unavailable()
-            allowed.add(id(block))
+            allowed.add((key, index))
             prefix[key] = blocks[:index + 1]
             if key == 'system' and tools:
                 prefix['tools'] = tools
 
-    def validate(value):
+    def validate(value, path=()):
         if isinstance(value, dict):
-            if 'cache_control' in value and id(value) not in allowed:
+            if 'cache_control' in value and path not in allowed:
                 _unavailable()
-            for child in value.values():
-                validate(child)
+            for key, child in value.items():
+                validate(child, (*path, key))
         elif isinstance(value, (list, tuple)):
-            for child in value:
-                validate(child)
+            for index, child in enumerate(value):
+                validate(child, (*path, index))
     validate(payload)
     if not allowed:
         return 0

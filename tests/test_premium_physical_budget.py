@@ -441,7 +441,8 @@ def test_cache_miss_hit_and_manipulated_usage_cannot_discount_durable_bound(door
         'cache_write_tokens': 1000, 'cache_read_tokens': 2000}) == pytest.approx(.00495)
 
 
-@pytest.mark.parametrize('corrupt', ['ttl', 'nested', 'messages', 'openai', 'missing_price', 'too_many'])
+@pytest.mark.parametrize('corrupt', ['ttl', 'nested', 'messages', 'openai', 'missing_price',
+                                    'too_many', 'aliased_messages', 'aliased_checkpoints'])
 def test_unqualified_cache_shapes_and_price_authority_fail_closed(door, monkeypatch, corrupt):
     p = cached_payload()
     provider = 'bedrock'
@@ -452,6 +453,8 @@ def test_unqualified_cache_shapes_and_price_authority_fail_closed(door, monkeypa
         provider, p['model'] = 'openai', 'gpt-4o-mini'
     if corrupt == 'missing_price': monkeypatch.setattr(F, 'CACHE_PRICES', {})
     if corrupt == 'too_many': p['system'] = [dict(p['system'][0]) for _ in range(5)]
+    if corrupt == 'aliased_messages': p['messages'][0]['content'] = [p['system'][0]]
+    if corrupt == 'aliased_checkpoints': p['system'] = [p['system'][0]] * 5
     action = hold(door, 'coach')
     with E.scope(action), pytest.raises(E.ExecutionRefused):
         invoke(door, 'coach', p, provider=provider, sdk=lambda **kw: pytest.fail('SDK reached'))
