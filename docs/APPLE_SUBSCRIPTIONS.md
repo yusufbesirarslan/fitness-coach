@@ -206,8 +206,11 @@ recovery/transfers are deferred, not automatic.
 
 `POST /api/v1/subscription/apple-notifications` (App Store Server Notifications
 V2, `{"signedPayload": "<JWS>"}`, ≤ 64 KiB) exists only when
-`APPLE_NOTIFICATIONS_ENABLED` and `APPLE_SUBSCRIPTIONS_ENABLED` are ON; otherwise
-404 before any work. No Bearer: authenticity is the official
+`APPLE_NOTIFICATIONS_ENABLED` is ON; otherwise 404 before any work. This also
+authorizes authoritative financial reconciliation while
+`APPLE_SUBSCRIPTIONS_ENABLED=0` keeps purchase APIs and effective Apple Premium
+disabled. Financial evidence and revocations remain durable for later separately
+approved activation. No Bearer: authenticity is the official
 `verify_and_decode_notification` (online checks) plus verification of the inner
 signed transaction and renewal, exact bundle/environment, App Apple ID (library
 in Production; any value present in Sandbox must match), version 2.0, canonical
@@ -224,8 +227,10 @@ subtype, original transaction ID, disposition, timestamps; no payload or token)
 and coalesces an `apple_subscription_reconciliation` request per (environment,
 original transaction) with the signed account token as a hint only.
 
-`flask apple-subscription-reconcile [--limit 25] [--sweep-limit 50]` (not
-scheduled anywhere) runs one bounded pass: it enqueues subscriptions last
+`flask apple-subscription-reconcile [--limit 25] [--sweep-limit 50]` runs one
+bounded pass. Production execution belongs to the separately installed
+[R6 active-release timer](DEPLOYMENT.md#apple-intake-source-closure-mon-r6-23);
+no competing cron/RQ schedule is authorized. It enqueues subscriptions last
 verified over 12 h ago (not revoked, expiry within 60 days: Apple's billing retry
 maximum), then claims due requests one at a time (`FOR UPDATE SKIP LOCKED`,
 5-minute lease, attempt counted before any Apple I/O). The owner is our
@@ -278,7 +283,8 @@ L = 4 every healthy row stays under 24 h, and at L = 2 the bound is broken.
 L <= 200 per process. Duration is an estimate, not a bound: each status call has
 a 3 s connect and 8 s per-read timeout, plus OCSP, so 200 slow lookups can take
 about 37 min or more; overlapping passes are safe under leases and SKIP LOCKED. For
-N > 2000, run concurrent workers (SKIP LOCKED is safe) or raise the cadence.
+N > 2000, stop for independent capacity/cadence qualification; the R6 launcher
+refuses unsupported capacity. Do not add competing production workers.
 Alert on `RETRY_EXHAUSTED`, and on a pass that ends with `processed = L` while
 due requests remain.
 
@@ -417,7 +423,11 @@ here enables it): `APPLE_NOTIFICATIONS_ENABLED` stays OFF. Before ON:
 Without a schedule, every row (Production and Sandbox) lapses to
 `VERIFICATION_PENDING` 24 h after its last client verify.
 
-Production rollout (each step a separate human approval; none done here):
+Commercial purchase rollout (each step a separate human approval; none done here).
+This is separate from ASN intake-only qualification, whose purchase gate stays
+OFF. Follow the R6 deployment contract for transport, runner, migrations and
+production readiness; no production schedule is installed by source changes.
+The following steps apply only after separate payment activation approval:
 1. Founder merge (source only, no migration). The production deploy of current
    main (with every migration it carries) is its own gate.
 2. Production host: complete Apple config with `APPLE_SUBSCRIPTION_ENVIRONMENT=Production`,

@@ -784,6 +784,10 @@ The single release-owned hourly scheduler is supplied as source only:
   must be 25..200 and at least `max(25,ceil(N/10))` for EACH accepted environment;
   N includes relevant lapsed recovery rows. Sweep limit is exactly twice limit.
   Above N=2000 requires separate capacity qualification; readiness refuses.
+  This count floor is necessary, not proof of throughput: the 240-second pass
+  bound can defer work to later passes. Actual elapsed processing, retry backlog
+  and freshness must be qualified under the intended environment before intake
+  activation; never infer capacity from an empty pass or raise the bound silently.
 
 All ancestors must be root-owned and non-writable by group/others. Installation,
 `daemon-reload`, enabling/starting the one timer, responder/alert configuration
