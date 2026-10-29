@@ -1151,6 +1151,15 @@ def log_provider_fallback(logger, prefix, fallback):
         pass
 
 
+def _resolve_first_party_coach_turn(user_id, language):
+    """Keep deterministic completion evidence at the qualified Coach seam."""
+    resolved = coach_confirmation.resolve_pending_turn(user_id, language)
+    if resolved is not None:
+        from app.services.ai_allowances import execution as allowance_execution
+        allowance_execution.coach_first_party_completion(user_id)
+    return resolved
+
+
 @ai_spend_guard.owner_argument
 def _run_coach_conversation(user_id, question, context, client_history=None,
                             language="tr", prepared_history=None):
@@ -1182,10 +1191,8 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
         history = history[-COACH_HISTORY_LIMIT:]
 
     _begin_coach_turn(question, history=history, user_id=user_id)
-    resolved = coach_confirmation.resolve_pending_turn(user_id, language)
+    resolved = _resolve_first_party_coach_turn(user_id, language)
     if resolved is not None:
-        from app.services.ai_allowances import execution as allowance_execution
-        allowance_execution.coach_first_party_completion(user_id)
         if prepared_history is None and client_history is None:
             new_history = history + [
                 {"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]},

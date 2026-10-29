@@ -181,13 +181,11 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
 
     ai_coach'ın araç ekosistemini kullanır; sağlayıcı yedeği yalnızca HİÇBİR
     delta gönderilmemişken mümkündür."""
-    from app.services import ai_coach, coach_confirmation
+    from app.services import ai_coach
 
     ai_coach._begin_coach_turn(question, history=history, user_id=user_id)
-    resolved = coach_confirmation.resolve_pending_turn(user_id, language)
+    resolved = ai_coach._resolve_first_party_coach_turn(user_id, language)
     if resolved is not None:
-        from app.services.ai_allowances import execution as allowance_execution
-        allowance_execution.coach_first_party_completion(user_id)
         yield from _emit_text(resolved, provider="server")
         return
     deadline = ai_coach._coach_turn_deadline()
