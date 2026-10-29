@@ -54,6 +54,10 @@ SHA_RE = re.compile(r"[0-9a-f]{40}")
 INSTANCE_RE = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?")
 USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 DEPLOY_DIR_RE = re.compile(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+")
+FORWARD_RECOVERY_AUTHORIZATION_ENV = "R6_FORWARD_RECOVERY_AUTHORIZATION"
+RUN_ID_RE = re.compile(r"[1-9][0-9]{0,19}")
+RUN_ATTEMPT_RE = re.compile(r"[1-9][0-9]{0,3}")
+TRANSACTION_MODES = ("normal", "forward-recovery")
 AWS_ERROR_CODE_RE = re.compile(
     r"An error occurred \(([A-Za-z][A-Za-z0-9]*)\) when calling"
 )
@@ -464,6 +468,7 @@ def run(user_name, helper_path, deploy_sha, deploy_dir, public_url, fd_text,
                 "PATH": HARDENED_PATH,
                 "AXISAI_OUTER_LOCK_FD": "7",
                 "AXISAI_WEB_SLOT_APPLE_FILES": "0",
+                "AXISAI_R6_TRANSACTION_MODE": "normal",
                 "AXISAI_MONOTONIC_STATE": MONOTONIC_STATE_PATH,
                 **HOST_TIMEOUT_ENVIRONMENT,
             },
@@ -580,6 +585,7 @@ class DeployConfig:
     deploy_dir: str
     public_health_url: str | None
     apple_files: str = "0"
+    transaction_mode: str = "normal"
 
     @classmethod
     def from_environ(cls, env: Mapping[str, str]) -> "DeployConfig":
@@ -615,7 +621,9 @@ class DeployConfig:
                 "PUBLIC_HEALTH_URL is required: the blue/green transaction "
                 "proves public health and mobile ingress after the switch")
         validate_public_health_url(public_url)
-        return cls(deploy_sha, region, instance_id, deploy_user, deploy_dir, public_url, apple_files)
+        mode = transaction_mode(env, deploy_sha)
+        return cls(deploy_sha, region, instance_id, deploy_user, deploy_dir, public_url,
+                   apple_files, mode)
 
 
 @dataclass(frozen=True)
@@ -638,6 +646,31 @@ class InvocationFailed(RuntimeError):
     def __init__(self, result: InvocationResult):
         super().__init__(f"SSM invocation failed: {result.status_details}")
         self.result = result
+
+
+def transaction_mode(env: Mapping[str, str], deploy_sha: str) -> str:
+    """R6-R1-28: ``normal``, or ``forward-recovery`` for exactly ONE run attempt.
+
+    Forward recovery (scripts/r6_deploy_transaction.py) restores service from
+    the exact candidate after the previous web died post-migration. The founder
+    authorizes one attempt by setting the production variable to
+    ``forward-recovery:<DEPLOY_SHA>:<run id>:<run attempt>`` before approving
+    it. It is checked here, on the protected runner, against the runner's own
+    run identity: a value naming another SHA, run or attempt (stale, copied, or
+    pre-set for "the next run") refuses the deployment outright; it never
+    degrades to either mode.
+    """
+    authorization = env.get(FORWARD_RECOVERY_AUTHORIZATION_ENV, "")
+    if authorization == "":
+        return "normal"
+    run_id = env.get("GITHUB_RUN_ID", "")
+    run_attempt = env.get("GITHUB_RUN_ATTEMPT", "")
+    if not RUN_ID_RE.fullmatch(run_id) or not RUN_ATTEMPT_RE.fullmatch(run_attempt):
+        raise ConfigError("forward recovery needs the runner's exact run identity")
+    if authorization != f"forward-recovery:{deploy_sha}:{run_id}:{run_attempt}":
+        raise ConfigError(
+            "forward recovery authorization does not name this exact run attempt")
+    return "forward-recovery"
 
 
 def validate_public_health_url(public_health_url: str | None) -> None:
@@ -929,10 +962,13 @@ def render_bootstrap(
     encoded_authority_parameter: str,
     region: str,
     apple_files: str = "0",
+    transaction_mode: str = "normal",
 ) -> str:
     """Render a fixed root bootstrap from validated and base64-encoded values."""
     if apple_files not in ("0", "1"):
         raise ConfigError("Apple files switch must be 0 or 1")
+    if transaction_mode not in TRANSACTION_MODES:
+        raise ConfigError("transaction mode must be normal or forward-recovery")
     # Bind the reviewed process opt-in into both clean remote environments.
     # No inherited remote environment or shared .env can activate transport.
     root_source = ROOT_LOCK_WRAPPER_SOURCE.replace(
@@ -940,7 +976,9 @@ def render_bootstrap(
         '"AXISAI_WEB_SLOT_APPLE_FILES": ' + json.dumps(apple_files))
     drop_source = PRIVILEGE_DROP_SOURCE.replace(
         '"AXISAI_WEB_SLOT_APPLE_FILES": "0"',
-        '"AXISAI_WEB_SLOT_APPLE_FILES": ' + json.dumps(apple_files))
+        '"AXISAI_WEB_SLOT_APPLE_FILES": ' + json.dumps(apple_files)).replace(
+        '"AXISAI_R6_TRANSACTION_MODE": "normal"',
+        '"AXISAI_R6_TRANSACTION_MODE": ' + json.dumps(transaction_mode))
     helper_sha256 = hashlib.sha256(
         base64.b64decode(encoded_script, validate=True)
     ).hexdigest()
@@ -1163,6 +1201,7 @@ def build_remote_command(
         encoded_authority_parameter,
         config.region,
         config.apple_files,
+        config.transaction_mode,
     )
 
 
@@ -1411,6 +1450,8 @@ def run_deploy(
     _require_live_clock(utc_now)
     controller_deadline = monotonic() + CONTROLLER_BUDGET_SECONDS
     config = DeployConfig.from_environ(environ)
+    if config.transaction_mode == "forward-recovery":
+        log("forward recovery authorized for this exact run attempt")
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
     preflight(config, aws, utc_now)
     script = _load_host_script(repo_path)

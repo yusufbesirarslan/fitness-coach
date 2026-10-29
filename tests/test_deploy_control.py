@@ -1713,6 +1713,7 @@ def test_privilege_drop_validates_user_drops_groups_then_execs_exact_helper():
                 "PATH": deploy_control.HARDENED_EXECUTION_PATH,
                 "AXISAI_OUTER_LOCK_FD": "7",
                 "AXISAI_WEB_SLOT_APPLE_FILES": "0",
+                "AXISAI_R6_TRANSACTION_MODE": "normal",
                 "AXISAI_MONOTONIC_STATE": deploy_control.MONOTONIC_STATE_PATH,
                 **host_timeout_environment(),
             }),
@@ -4004,3 +4005,75 @@ def test_apple_transport_is_bound_into_both_remote_clean_environments(switch):
 def test_invalid_apple_transport_is_rejected_before_aws(switch):
     with pytest.raises(ConfigError, match='Apple files switch'):
         DeployConfig.from_environ({**VALID_ENV, 'AXISAI_WEB_SLOT_APPLE_FILES': switch})
+
+
+# R6-R1-28: forward recovery is authorized for exactly one run attempt.
+RUN = {"GITHUB_RUN_ID": "40999999999", "GITHUB_RUN_ATTEMPT": "2"}
+RECOVERY_VALUE = f"forward-recovery:{'a' * 40}:40999999999:2"
+
+
+def _privilege_drop_mode(config):
+    command = build_remote_command(config, b'#!/bin/sh\nexit 0\n')
+    lines = command.splitlines()
+    argv = shlex.split(next(line for line in lines if line.startswith('python3 - ')).split(' <<', 1)[0])
+    return base64.b64decode(argv[2]).decode()
+
+
+def test_no_authorization_is_the_normal_transaction():
+    config = DeployConfig.from_environ({**VALID_ENV, **RUN})
+    assert config.transaction_mode == "normal"
+    inner = _privilege_drop_mode(config)
+    assert '"AXISAI_R6_TRANSACTION_MODE": "normal"' in inner
+    assert '"forward-recovery"' not in inner
+
+
+def test_exact_run_attempt_authorization_selects_forward_recovery():
+    config = DeployConfig.from_environ(
+        {**VALID_ENV, **RUN, "R6_FORWARD_RECOVERY_AUTHORIZATION": RECOVERY_VALUE})
+    assert config.transaction_mode == "forward-recovery"
+    inner = _privilege_drop_mode(config)
+    assert '"AXISAI_R6_TRANSACTION_MODE": "forward-recovery"' in inner
+    # The root wrapper never carries it; only the privilege drop's clean env.
+    assert "AXISAI_R6_TRANSACTION_MODE" not in deploy_control.ROOT_LOCK_WRAPPER_SOURCE
+    assert '"AXISAI_R6_TRANSACTION_MODE": "normal"' in deploy_control.PRIVILEGE_DROP_SOURCE
+
+
+@pytest.mark.parametrize("value,run", [
+    (f"forward-recovery:{'b' * 40}:40999999999:2", RUN),          # other SHA
+    (f"forward-recovery:{'a' * 40}:40822008262:2", RUN),          # other run
+    (f"forward-recovery:{'a' * 40}:40999999999:1", RUN),          # earlier attempt (stale)
+    (f"forward-recovery:{'a' * 40}:40999999999:3", RUN),          # pre-set next attempt
+    ("forward-recovery", RUN), ("1", RUN), ("true", RUN), ("normal", RUN),
+    (f"FORWARD-RECOVERY:{'a' * 40}:40999999999:2", RUN),
+    (RECOVERY_VALUE + " ", RUN), (RECOVERY_VALUE + "\n", RUN),
+    (RECOVERY_VALUE, {}),                                          # no runner identity
+    (RECOVERY_VALUE, {"GITHUB_RUN_ID": "40999999999", "GITHUB_RUN_ATTEMPT": "0"}),
+    (RECOVERY_VALUE, {"GITHUB_RUN_ID": "4099x", "GITHUB_RUN_ATTEMPT": "2"}),
+])
+def test_any_other_authorization_refuses_before_aws(value, run):
+    with pytest.raises(ConfigError, match="forward recovery"):
+        DeployConfig.from_environ(
+            {**VALID_ENV, **run, "R6_FORWARD_RECOVERY_AUTHORIZATION": value})
+
+
+@pytest.mark.parametrize("mode", ["", "recovery", "skip-health-check", "normal\n"])
+def test_render_refuses_an_unknown_transaction_mode(mode):
+    with pytest.raises(ConfigError, match="transaction mode"):
+        deploy_control.render_bootstrap(
+            base64.b64encode(b"x").decode(), "a" * 40, "eA==", "deploy", "eA==",
+            base64.b64encode(b"/axisai/production-deploy-authority/x").decode(),
+            "eu-central-1", "0", mode)
+
+
+def test_stale_authorization_refuses_the_whole_run_before_any_aws_call():
+    calls = []
+
+    def aws(argv):
+        calls.append(argv)
+        raise AssertionError("AWS reached despite a stale authorization")
+
+    code = deploy_control.main(
+        environ={**VALID_ENV, **RUN,
+                 "R6_FORWARD_RECOVERY_AUTHORIZATION": RECOVERY_VALUE.replace(":2", ":1")},
+        repo_path=Path("."), aws=aws, log=lambda message: None)
+    assert code == 1 and calls == []

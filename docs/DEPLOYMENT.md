@@ -325,6 +325,56 @@ bounds the host worst case, which is unchanged at 1980 seconds. Manual route,
 slot or compose restores bypass this layer by construction; the database fence
 still refuses their completion writes. Nothing here is production-validated.
 
+### Post-migration forward recovery (R6-R1-28)
+
+release-prepare moves the schema past the previous revision, and the previous
+revision's read-only boot then refuses (`not_at_head`/`unknown_revision`). If
+the previous web dies after migration and before commit, it can never re-verify,
+the normal baseline refuses every later run, and no protected deployment could
+restore service. Forward recovery closes that gap with the same transaction:
+
+* **Authorization.** One production variable,
+  `R6_FORWARD_RECOVERY_AUTHORIZATION = forward-recovery:<DEPLOY_SHA>:<run id>:<run attempt>`,
+  checked on the protected runner against `GITHUB_RUN_ID`/`GITHUB_RUN_ATTEMPT`.
+  Empty means normal. Any other value (another SHA, run or attempt, stale or
+  pre-set) refuses the run before any AWS call; it never degrades to a mode.
+  The controller binds the mode into the privilege drop's clean environment
+  (`AXISAI_R6_TRANSACTION_MODE`), the host helper validates it before any git
+  work and refuses recovery when the checkout already runs `DEPLOY_SHA`.
+  Everything else is unchanged: exact SHA on `origin/main`, successful CI,
+  OIDC + production reviewers, the candidate-bound RDS snapshot, the
+  `production-deploy` concurrency group and the host outer lock.
+* **Baseline.** Route, control plane, checkout, slot identities, worker identity
+  and Redis are proven as usual. A previous web/worker that cannot be proven is
+  recorded (`recovery-baseline previous_web=unproven`) instead of refused.
+  Every slot and the worker must still carry exactly the previous or the
+  candidate revision; a legacy route, two workers or anything foreign refuses.
+* **Schema evidence**, before release-prepare: `flask schema-heads` (one-off of
+  the exact candidate image ID, READ ONLY transaction) must report heads that
+  are all in the candidate's reviewed graph, at least one outside the previous
+  graph. Otherwise the run stops after the image build: a death before
+  migration is not a recovery (the previous writer can still boot).
+* **Resumption.** Release-prepare is idempotent and completes an interrupted
+  migration. A running candidate of the exact revision is reused; any other
+  exact-revision candidate container is removed and restarted; a route already
+  on the candidate is not switched again; a worker already replaced is proven
+  again. Capability admission, the pre-switch fence check, the post-switch
+  public/mobile proof, Redis identity, retirement and floor activation are the
+  normal ones.
+* **Failure.** When the previous state was not proven, a failure never routes
+  back, never restarts the previous worker, never removes the candidate; only
+  the checkout is restored. Exit 2 with `FORWARD_RECOVERY_INCOMPLETE` and the
+  remaining route/candidate/worker state. When the previous web AND worker were
+  proven at baseline, the normal rollback applies.
+
+Procedure: confirm the outage is post-migration (`release-prepared` in the
+failed run's log, or `schema-heads` evidence), set the variable to the exact
+NEXT attempt of the same run (`Re-run all jobs` keeps the run id and increments
+the attempt), re-run, approve the production review, then delete the variable.
+A leftover value refuses every later deployment until removed. Re-runs of a run
+created before this change execute that revision's workflow and have no
+recovery mode.
+
 Every externally sourced production image remains version- and digest-pinned.
 Redis and the application base retain their existing immutable image contract.
 

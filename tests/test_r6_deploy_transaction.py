@@ -65,6 +65,10 @@ class World:
     baked: dict = field(default_factory=dict)          # image id -> revision
     head: str = PREV
     db_revision: str = "old-head"
+    # R6-R1-28: the live Alembic heads `schema-heads` reports (None = unknown)
+    # and the candidate heads release-prepare moves them to.
+    db_heads: frozenset | None = frozenset({"p1"})
+    candidate_heads: frozenset = frozenset({"c1"})
     connections: dict = field(default_factory=dict)    # backend -> list of counts
     mem_ok: bool = True
     now: float = 1000.0
@@ -284,7 +288,7 @@ class FakeOps:
         self._rec("slot_inspect", slot, timeout=timeout)
         box = self.w.slots.get(slot)
         return [] if box is None else [{"app_revision": box.app_revision,
-                                        "status": box.status}]
+                                        "status": box.status, "health": box.health}]
 
     def slot_remove(self, slot, revision, timeout):
         self._rec("slot_remove", slot, revision, timeout=timeout)
@@ -322,6 +326,7 @@ class FakeOps:
         self._rec("release_prepare", revision, timeout=timeout)
         self._fail("release_prepare")
         self.w.db_revision = "new-head"
+        self.w.db_heads = self.w.candidate_heads
 
     def worker_up(self, kind, image_tag, revision, timeout):
         self._rec("worker_up", kind, image_tag, revision, timeout=timeout)
@@ -383,6 +388,13 @@ class FakeOps:
     def source_migration_revisions(self, which, timeout):
         self._rec("source_migration_revisions", which, timeout=timeout)
         return frozenset(self.w.source_revisions.get(which, ()))
+
+    def schema_heads(self, image_id, revision, timeout):
+        self._rec("schema_heads", image_id, timeout=timeout)
+        self._fail("schema_heads")
+        if self.w.db_heads is None:
+            return {"result": "ok", "has_table": False, "current": []}
+        return {"result": "ok", "has_table": True, "current": sorted(self.w.db_heads)}
 
     def completion_floor(self, image_id, revision, action, timeout):
         self._rec("completion_floor", action, image_id, timeout=timeout)
@@ -1378,7 +1390,8 @@ GOOD_ARGS = ["run", "--deploy-sha", CAND, "--previous-commit", PREV,
              "--deploy-dir", "/home/ubuntu/fitness-coach",
              "--context", "/home/ubuntu/fitness-coach/.axisai-build-context.x",
              "--work-dir", "/home/ubuntu/fitness-coach/.axisai-r6-work.x",
-             "--public-health-url", URL, "--transaction-epoch", "1000"]
+             "--public-health-url", URL, "--transaction-epoch", "1000",
+             "--mode", "normal"]
 
 
 @pytest.mark.parametrize("change", [
@@ -1387,6 +1400,8 @@ GOOD_ARGS = ["run", "--deploy-sha", CAND, "--previous-commit", PREV,
     {"--public-health-url": "http://fitx.example/health"},
     {"--public-health-url": "https://user:pw@fitx.example/health"},
     {"--transaction-epoch": "-5"}, {"--deploy-dir": "/home/ubuntu/axisai-web-blue"},
+    {"--mode": "skip-health-check"}, {"--mode": ""}, {"--mode": "Forward-Recovery"},
+    {"--mode": "forward-recovery", "--previous-commit": CAND},
 ])
 def test_cli_rejects_invalid_invocations_before_anything(change):
     args = list(GOOD_ARGS)

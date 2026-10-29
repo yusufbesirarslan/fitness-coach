@@ -537,11 +537,37 @@ def completion_floor_raise_cmd(revision):
     _completion_floor_emit(outcome)
 
 
+SCHEMA_HEADS_PREFIX = "schema-heads: "
+
+
+def schema_heads_cmd():
+    """R6-R1-28 forward recovery: the database's current Alembic heads, read-only.
+
+    One machine line; the deploy transaction parses exactly this prefix and
+    treats anything else as unknown (never as "not migrated").
+
+        FITX_SKIP_DB_INIT=1 flask --app starter schema-heads
+    """
+    import json
+
+    from app.schema_safety import _read_current_heads
+    try:
+        has_table, current = _read_current_heads(db.engine)
+    except Exception as exc:  # noqa: BLE001 - unknown is reported, never guessed
+        click.echo(SCHEMA_HEADS_PREFIX + json.dumps(
+            {"result": "error", "reason": type(exc).__name__}, sort_keys=True))
+        raise SystemExit(1)
+    click.echo(SCHEMA_HEADS_PREFIX + json.dumps(
+        {"result": "ok", "has_table": has_table, "current": sorted(current or ())},
+        sort_keys=True))
+
+
 def register_cli(app):
     app.cli.add_command(completion_floor_cmd)
     app.cli.command("ai-allowance-sweep")(ai_allowance_sweep_cmd)
     app.cli.command("apple-subscription-reconcile")(apple_subscription_reconcile_cmd)
     app.cli.command("release-prepare")(release_prepare_cmd)
+    app.cli.command("schema-heads")(schema_heads_cmd)
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)
     app.cli.command("cleanup-test-users")(cleanup_test_users)
