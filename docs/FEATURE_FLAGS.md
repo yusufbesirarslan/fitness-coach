@@ -39,11 +39,14 @@ only after closing paid AI admission if unified enforcement was enabled). See
 [ledger design](AI_ALLOWANCE_LEDGER.md) and [mobile contract](mobile/ai-allowances-v1.md).
 
 `APPLE_NOTIFICATIONS_ENABLED` (MON-02-BE-02) defaults OFF, shipped_dark, owner
-@yusufbesirarslan, review by 2026-11-21. Gates only the Apple-signed
-`POST /api/v1/subscription/apple-notifications` intake (404 before any work unless
-it and `APPLE_SUBSCRIPTIONS_ENABLED` are ON). A notification is a hint: access
-changes only through a fresh authenticated status lookup by the unscheduled
-`flask apple-subscription-reconcile` worker. Rollback: set 0 (rows retained). See
+@yusufbesirarslan, review by 2026-11-21. Gates Apple-signed
+`POST /api/v1/subscription/apple-notifications` intake and authoritative financial
+reconciliation independently of `APPLE_SUBSCRIPTIONS_ENABLED`. OFF answers 404
+before intake work. Intake-only mode preserves financial evidence while purchase
+APIs and effective Apple Premium stay disabled. The release-owned active-web
+timer invokes the existing reconciliation path; installation is separately
+approved. See [R6 scheduler contract](DEPLOYMENT.md#apple-intake-source-closure-mon-r6-23).
+Rollback: set 0 (rows retained). See
 [subscription contract](APPLE_SUBSCRIPTIONS.md).
 
 `APPLE_SANDBOX_FALLBACK_ENABLED` (MON-BE-APPLE-DUAL-ENV-REVIEW-01) defaults OFF,

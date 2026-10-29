@@ -480,6 +480,22 @@ class HostOps:
             candidate = (self.context / repo_rel).read_bytes()
             if hashlib.sha256(installed_bytes).digest() != hashlib.sha256(candidate).digest():
                 problems.append(f"{installed} differs from the candidate's {repo_rel}")
+        # The existing outer lock is exclusive here. An orphan daemon-side
+        # Docker exec must be absent before any schema preparation, even when
+        # this deployment opts out of new Apple credential transport.
+        scheduler = _load_sibling("apple_release_scheduler")
+        def run(argv, timeout=10, pass_fds=()):
+            rc, out, _err = self._command(argv, min(timeout, 10), self.environ)
+            if rc:
+                raise scheduler.Refused("SCHEDULER_INSPECTION_FAILED")
+            return out.strip()
+        try:
+            scheduler.no_surviving_passes(run)
+            if (self.environ.get("AXISAI_WEB_SLOT_APPLE_FILES", "0") == "1"
+                    or Path(scheduler.INSTALLED).exists()):
+                scheduler.installed(self.context, self.deploy_dir, run, self.trusted_uid)
+        except (OSError, ValueError, scheduler.Refused):
+            problems.append("Apple scheduler ownership/source/execution unproven")
         return problems
 
     # git
@@ -584,6 +600,22 @@ class HostOps:
                                  "--revision", revision, *flags)
         if rc != 0 or payload.get("deep_health_revision") != revision:
             raise OpError(f"slot {slot} verify failed (exit {rc}): {payload}")
+        if revision == self.deploy_sha and self.environ.get("AXISAI_WEB_SLOT_APPLE_FILES", "0") == "1":
+            scheduler = _load_sibling("apple_release_scheduler")
+            config = scheduler.configuration(scheduler.trusted_file(scheduler.CONFIG, self.trusted_uid))
+            cid = payload.get("container", {}).get("id", "")
+            if not re.fullmatch(r"[0-9a-f]{12}", cid):
+                raise OpError("Apple runner candidate container unproven")
+            full_id = self._docker(timeout, "inspect", "--format", "{{.Id}}", cid).strip()
+            if not scheduler.CID.fullmatch(full_id) or not full_id.startswith(cid):
+                raise OpError("Apple runner candidate identity mismatch")
+            cid = full_id
+            proof = self._docker(timeout, "exec", "-e", "FITX_STARTUP_MODE=read-only",
+                                 "-e", "FITX_SKIP_DB_INIT=0", cid,
+                                 "/usr/bin/timeout", "--signal=KILL", "20",
+                                 "python", scheduler.PASS, revision, str(config["limit"]), "--check")
+            if proof.strip().splitlines()[-1:] != ["APPLE_RELEASE_PASS=READY"]:
+                raise OpError("Apple runner candidate readiness unproven")
         return payload
 
     def slot_inspect(self, slot, timeout):

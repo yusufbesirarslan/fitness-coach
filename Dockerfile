@@ -49,6 +49,8 @@ RUN install -o root -g root -m 0444 /app/release/completion-capabilities \
 # kalır; bu yalnızca appuser'ın /app'in KENDİSİNE doğrudan girdi ekleme/silme/yeniden
 # adlandırma yeteneğini kaldırır.
 RUN chown root:root /app && chmod 0755 /app
+RUN install -d -o root -g root -m 0755 /usr/local/libexec && \
+    install -o root -g root -m 0444 /app/scripts/apple_release_pass.py /usr/local/libexec/axisai-apple-pass
 USER appuser
 
 EXPOSE 5000

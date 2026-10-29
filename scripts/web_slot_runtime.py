@@ -330,6 +330,9 @@ def validate_rendered(doc, slot, revision, network, *, apple_files=False):
     if web.get("stop_grace_period") != f"{STOP_GRACE_SECONDS}s":
         problems.append("stop_grace_period")
     env = web.get("environment") or {}
+    if not apple_files and any(env.get(key) == "1" for key in
+                               ("APPLE_NOTIFICATIONS_ENABLED", "APPLE_SUBSCRIPTIONS_ENABLED")):
+        problems.append("enabled Apple state requires explicit credential transport")
     if apple_files and any(env.get(key) != value for key, value in apple_environment().items()):
         problems.append("Apple file environment")
     if env.get("FITX_STARTUP_MODE") != CANDIDATE_STARTUP_MODE:
@@ -578,6 +581,11 @@ class SlotRuntime:
     def _validate_container_files(self, container, revision, *, allow_existing=False):
         mounts = container.get("Mounts") or []
         enabled = bool(mounts) if allow_existing else self.apple_files
+        env = dict(item.split("=", 1) for item in
+                   (container.get("Config") or {}).get("Env", []) if "=" in item)
+        if not enabled and any(env.get(key) == "1" for key in
+                               ("APPLE_NOTIFICATIONS_ENABLED", "APPLE_SUBSCRIPTIONS_ENABLED")):
+            raise Refused("enabled Apple state requires revision-bound credential transport")
         expected = apple_volumes(revision) if enabled else []
         actual = [{"type": m.get("Type"), "source": m.get("Source"),
                    "target": m.get("Destination"), "read_only": m.get("RW") is False,

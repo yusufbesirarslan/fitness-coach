@@ -66,8 +66,7 @@ def subscription_entitlement():
 
 
 def _notifications_off():
-    return (current_app.config.get("APPLE_NOTIFICATIONS_ENABLED") is not True
-            or current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True)
+    return current_app.config.get("APPLE_NOTIFICATIONS_ENABLED") is not True
 
 
 # MON-02-BE-02: App Store Server Notifications V2 intake. Not Bearer-authenticated:
