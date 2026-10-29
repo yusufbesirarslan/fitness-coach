@@ -522,15 +522,20 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
     if not lookup_names:
         current_app.logger.info(f"[MACRO ENGINE] All {len(item_names)} items served from cache — skipping FatSecret + LLM")
     else:
-        try:
-            token = _get_fatsecret_token()
-            current_app.logger.info(f"[MACRO ENGINE] FatSecret token acquired")
-            per_serving, per_100g_items = _lookup_macros_fatsecret(lookup_names, token, category_map)
-            macro_map.update(per_serving)
-            for n in per_serving:
-                source_map[n] = "fatsecret_serving"
-        except Exception as e:
-            current_app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}")
+        from app.services import ai_consent
+        # Optional proxy lookups remain unavailable inside D1 operations until
+        # their actual recipient/host sharing contract is qualified. Use the
+        # existing bounded AI estimation path; do not request even an OAuth token.
+        if ai_consent.current_operation() is None:
+            try:
+                token = _get_fatsecret_token()
+                current_app.logger.info(f"[MACRO ENGINE] FatSecret token acquired")
+                per_serving, per_100g_items = _lookup_macros_fatsecret(lookup_names, token, category_map)
+                macro_map.update(per_serving)
+                for n in per_serving:
+                    source_map[n] = "fatsecret_serving"
+            except Exception as e:
+                current_app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}")
 
     # Kalan iki LLM aşaması BİRBİRİNDEN BAĞIMSIZDIR: (a) per-100g öğelerin porsiyon
     # ağırlığı tahmini, (b) hiçbir kaynaktan çözülemeyen öğelerin makro tahmini.

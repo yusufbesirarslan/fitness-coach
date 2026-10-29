@@ -439,7 +439,7 @@ def _admit(*, feature, provider, payload, deadline=None, tool_round=None,
     historical path). ``charge=False`` is reserved for the deep-health probe,
     whose payload is a fixed one-word prompt with a one-token output.
     """
-    if feature not in ai_consent.BINDINGS:
+    if ai_consent.provider_binding(ai_spend_guard.current_subject(), feature) is None:
         raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
     feature = ai_input_budget.normalize_feature(feature)
     frozen = copy.deepcopy(payload)

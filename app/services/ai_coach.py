@@ -971,6 +971,11 @@ COACH_TOOLS = [_to_openai_tool(t) for t in _COACH_TOOL_DEFS]
 # Bedrock/Anthropic döngüsü için aynı kaynaktan türetilen biçim.
 COACH_TOOLS_ANTHROPIC = [_to_anthropic_tool(t) for t in _COACH_TOOL_DEFS]
 
+# Unqualified sharing capabilities are absent from both provider schemas AND
+# refused at execution (a model may still emit a stale/forged tool name).
+_UNQUALIFIED_D1_TOOLS = frozenset({"fetch_nutrition_and_stage_log",
+    "analyze_gym_photo", "manage_user_memory"})
+
 
 def _coach_tool_defs_for_call(user_id=None):
     """Bu istekte modele sunulacak kanonik araç tanımları.
@@ -982,6 +987,7 @@ def _coach_tool_defs_for_call(user_id=None):
     ek kopya, ek alan, ek boşluk yok.
     """
     defs = coach_confirmation.filter_coach_tool_defs(_COACH_TOOL_DEFS, user_id)
+    defs = [tool for tool in defs if tool["name"] not in _UNQUALIFIED_D1_TOOLS]
     if not coach_plan_tools.plan_mutation_tools_enabled():
         return defs
     return defs + list(
@@ -1003,6 +1009,13 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
     """LLM'in istediği aracı sunucu tarafında çalıştır. user_id ASLA LLM'den
     gelmez — güvenlik için current_user'dan enjekte edilir. JSON string döndürür."""
     _assert_principal(user_id)
+    if name in _UNQUALIFIED_D1_TOOLS:
+        return json.dumps({"status": "unavailable", "message": "Tool unavailable."})
+    authority = ai_consent.current_operation()
+    if authority is not None:
+        if authority.owner != user_id or authority.feature != "coach":
+            raise ai_consent.ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+        ai_consent.authorize_operation(authority)
     arguments_parsed = True
     try:
         args = json.loads(arguments_json) if arguments_json else {}
