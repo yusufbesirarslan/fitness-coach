@@ -591,3 +591,108 @@ def test_schema_heads_refuses_a_tag_instead_of_an_image_id(tmp_path):
     with pytest.raises(tx.OpError):
         host(tmp_path, recorder).schema_heads(f"axisai-web:{CAND}", CAND, 60)
     assert recorder.calls == []
+
+
+# ── independent-review regressions (R6-R1-28 R2) ────────────────────────────
+
+def test_review_proven_previous_web_is_routed_back_even_when_the_worker_is_unproven():
+    """A verifying previous web is restorable on its own: a post-switch failure
+    routes back to it (never leaving traffic on a broken candidate), while the
+    unproven worker is reported and never restored."""
+    world = migrated(r1_world(public=True))
+    world.worker.status, world.worker.health = "restarting", "unhealthy"
+    code, transaction = recover(world)
+    assert transaction.previous_proven and transaction.previous_worker is None
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert world.route == "green" and world.slots["green"].revision == PREV
+    assert calls(world, "route_switch", "green")
+    assert not calls(world, "worker_up", "previous")
+    assert any("previous worker was unproven at the recovery baseline" in e
+               for e in world.events)
+
+
+def test_review_unhealthy_routed_candidate_is_never_removed_while_serving():
+    world = green_dead_after_migration()
+    world.slots["blue"] = Box(id="blue-flap".ljust(64, "0"), image_id=IMG[CAND],
+                              revision=CAND, app_revision=CAND, health="unhealthy")
+    world.images[f"axisai-web:{CAND}"] = IMG[CAND]
+    world.route = "blue"
+    code, transaction = recover(world)
+    assert transaction.already_switched and code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert not calls(world, "slot_remove", "blue")
+    assert world.slots["blue"].id.startswith("blue-flap") and world.route == "blue"
+    assert any("a serving backend is never removed" in e for e in world.events)
+    assert_never_resurrected(world)
+
+
+def test_review_dead_routed_candidate_is_replaced_and_recovers():
+    world = green_dead_after_migration()
+    world.slots["blue"] = Box(id="blue-gone".ljust(64, "0"), image_id=IMG[CAND],
+                              revision=CAND, app_revision=CAND, status="exited",
+                              health=None)
+    world.route = "blue"
+    code, transaction = recover(world)
+    assert code == tx.EXIT_OK and transaction.already_switched
+    assert calls(world, "slot_remove", "blue", CAND)
+    assert_recovered(world)
+
+
+def test_review_healthy_candidate_from_a_different_image_build_is_replaced():
+    world = green_dead_after_migration()
+    world.slots["blue"] = Box(id="blue-stale".ljust(64, "0"), image_id="sha256:" + "e" * 64,
+                              revision=CAND, app_revision=CAND)
+    code, _ = recover(world)
+    assert code == tx.EXIT_OK
+    assert calls(world, "slot_remove", "blue", CAND)
+    assert any("reason=different image build" in e for e in world.events)
+    assert_recovered(world)
+
+
+def test_review_schema_gate_shares_the_capability_admission_budget():
+    """The gate adds no step budget: after a slow schema probe, admission gets
+    only what is left of the SAME capability-admission step (a fresh 150 s
+    would let this run proceed), and refuses before release-prepare."""
+    step = contract.RELEASE_FORWARD_STEP_SECONDS["capability_admission"]
+    world = green_dead_after_migration(**{"schema_heads:cost": step - 10,
+                                          "image_capability_manifest:cost": 20})
+    code, _ = recover(world)
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert "image_capability_manifest" in names(world)
+    assert any("DeadlineExhausted" in e for e in world.events)
+    assert_no_host_mutation_past_build(world)
+
+
+def test_review_refusal_before_any_mutation_says_so():
+    world = kill_previous(r1_world())                         # schema not migrated
+    code, _ = recover(world)
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert any("FORWARD_RECOVERY_REFUSED" in e and "host serving state unchanged" in e
+               for e in world.events)
+    assert not any("FORWARD_RECOVERY_INCOMPLETE" in e for e in world.events)
+
+
+def test_review_resumed_route_baseline_names_the_real_slots():
+    world = green_dead_after_migration()
+    world.slots["blue"] = Box(id="blue-live".ljust(64, "0"), image_id=IMG[CAND],
+                              revision=CAND, app_revision=CAND)
+    world.images[f"axisai-web:{CAND}"] = IMG[CAND]
+    world.route = "blue"
+    recover(world)
+    baselines = [e for e in world.events if e.startswith("route-baseline")]
+    assert baselines == ["route-baseline previous=green candidate=blue"]
+
+
+def test_review_non_object_previous_proof_is_recorded_not_fatal(monkeypatch):
+    world = migrated(r1_world())
+    original = FakeOps.slot_verify
+
+    def odd(self, slot, revision, timeout):
+        if slot == "green":
+            self._rec("slot_verify", slot, revision, timeout=timeout)
+            return ["not", "a", "proof"]
+        return original(self, slot, revision, timeout)
+
+    monkeypatch.setattr(FakeOps, "slot_verify", odd)
+    code, transaction = recover(world)
+    assert code == tx.EXIT_OK and not transaction.previous_proven
+    assert any(e.startswith("previous-web-unproven slot=green") for e in world.events)

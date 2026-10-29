@@ -229,7 +229,9 @@ class FakeOps:
 
     def _box(self, container_id):
         for box in [self.w.legacy, self.w.worker, *self.w.slots.values()]:
-            if box is not None and box.id == container_id:
+            # docker accepts the 12-char short ID the slot runtime reports.
+            if box is not None and (box.id == container_id or (
+                    len(container_id) == 12 and box.id.startswith(container_id))):
                 return box
         return None
 
@@ -287,7 +289,7 @@ class FakeOps:
     def slot_inspect(self, slot, timeout):
         self._rec("slot_inspect", slot, timeout=timeout)
         box = self.w.slots.get(slot)
-        return [] if box is None else [{"app_revision": box.app_revision,
+        return [] if box is None else [{"id": box.id[:12], "app_revision": box.app_revision,
                                         "status": box.status, "health": box.health}]
 
     def slot_remove(self, slot, revision, timeout):

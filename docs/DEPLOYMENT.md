@@ -354,18 +354,25 @@ restore service. Forward recovery closes that gap with the same transaction:
   are all in the candidate's reviewed graph, at least one outside the previous
   graph. Otherwise the run stops after the image build: a death before
   migration is not a recovery (the previous writer can still boot).
+  The probe shares the capability-admission step deadline (no extra step
+  budget; the contract's timing algebra is unchanged).
 * **Resumption.** Release-prepare is idempotent and completes an interrupted
-  migration. A running candidate of the exact revision is reused; any other
-  exact-revision candidate container is removed and restarted; a route already
-  on the candidate is not switched again; a worker already replaced is proven
-  again. Capability admission, the pre-switch fence check, the post-switch
-  public/mobile proof, Redis identity, retirement and floor activation are the
-  normal ones.
-* **Failure.** When the previous state was not proven, a failure never routes
+  migration. A running healthy candidate of the exact revision AND the exact
+  built image ID is reused; any other exact-revision candidate container
+  (stopped, unhealthy, or from another image build) is removed and restarted,
+  except that a running container the route already serves is never removed
+  (the run refuses instead). A route already on the candidate is not switched
+  again; a worker already replaced is proven again. Capability admission, the
+  pre-switch fence check, the post-switch public/mobile proof, Redis identity,
+  retirement and floor activation are the normal ones.
+* **Failure.** When the previous WEB was not proven, a failure never routes
   back, never restarts the previous worker, never removes the candidate; only
   the checkout is restored. Exit 2 with `FORWARD_RECOVERY_INCOMPLETE` and the
-  remaining route/candidate/worker state. When the previous web AND worker were
-  proven at baseline, the normal rollback applies.
+  remaining route/candidate/worker state, or `FORWARD_RECOVERY_REFUSED` when
+  it stopped before release-prepare, candidate start, switch or worker change
+  (serving state unchanged; clear the stated reason before re-authorizing).
+  When the previous web was proven, the normal rollback routes back to it; an
+  unproven previous worker is reported and never restored (exit 2).
 
 Procedure: confirm the outage is post-migration (`release-prepared` in the
 failed run's log, or `schema-heads` evidence), set the variable to the exact

@@ -1027,9 +1027,10 @@ class Transaction:
             self._baseline()
             self._migration_gate()
             self._build_and_prove_image()
+            admission = self._step_deadline("capability_admission")
             if self.forward_recovery:
-                self._recovery_schema_gate()
-            self._admit_capability()
+                self._recovery_schema_gate(admission)
+            self._admit_capability(admission)
             self._release_prepare()
             self._start_candidate()
             self._admit_before_switch()
@@ -1063,7 +1064,9 @@ class Transaction:
             raise StepFailed(f"active route is not a proven state: {route}")
         self.previous_route, self.previous_backend = route.state, route.backend
         self.target_slot = CANDIDATE_SLOT[route.state]
-        self._event("route-baseline", previous=route.state, candidate=self.target_slot)
+        if not self.forward_recovery:
+            self._event("route-baseline", previous=route.state,
+                        candidate=self.target_slot)
 
         mismatches = self._call(deadline, "control-plane parity",
                                 self.ops.control_plane_mismatches)
@@ -1189,6 +1192,8 @@ class Transaction:
                                  "foreign revision")
         else:
             raise StepFailed(f"routed slot {route.state} holds a foreign revision")
+        self._event("route-baseline", previous=self.previous_route,
+                    candidate=self.target_slot)
         self.previous_revision = self.previous_commit
 
         web_proven = False
@@ -1196,6 +1201,8 @@ class Transaction:
             try:
                 proof = self.ops.slot_verify(route.state, self.previous_commit,
                                              self._time_left(deadline))
+                if not isinstance(proof, dict):
+                    raise OpError("slot verify returned no proof object")
                 identity = (proof.get("container") or {}).get("id")
                 serving = (self.ops.container(identity, self._time_left(deadline))
                            if isinstance(identity, str) and identity else None)
@@ -1223,20 +1230,23 @@ class Transaction:
                     self.log(f"previous worker revision unproven: {exc}")
             if worker_proven:
                 self.previous_worker = worker
-        self.previous_proven = web_proven and worker_proven
+        # The previous WEB decides whether there is anything to route back to.
+        # An unproven worker is never restored (it is reported instead).
+        self.previous_proven = web_proven
         self._event("recovery-baseline", route=route.state, candidate=self.target_slot,
                     switched="yes" if self.already_switched else "no",
                     previous_web="proven" if web_proven else "unproven",
                     previous_worker="proven" if worker_proven else "unproven")
         self._redis_baseline(deadline)
 
-    def _recovery_schema_gate(self):
+    def _recovery_schema_gate(self, deadline):
         """Before release-prepare, the live database must PROVE the post-
         migration state: every current head is in the candidate's reviewed
         graph (so release-prepare can only move forward) and at least one is
         outside the previous revision's graph (so the previous writer can no
-        longer boot). Otherwise forward recovery has no authority here."""
-        deadline = self._step_deadline("capability_admission")
+        longer boot). Otherwise forward recovery has no authority here. It
+        spends the capability-admission step budget (shared, not added), so
+        the contract's forward timing algebra is unchanged."""
         current = parse_schema_heads(self._call(
             deadline, "schema heads", self.ops.schema_heads,
             self.candidate_image_id, self.deploy_sha))
@@ -1260,22 +1270,36 @@ class Transaction:
                     advanced=",".join(advanced))
 
     def _clear_stale_candidate(self, deadline):
-        """Resume what an earlier attempt left in the candidate slot: a running
-        healthy/starting candidate is reused by start itself; any other
-        container of EXACTLY the candidate revision is removed first (the slot
-        runtime never overwrites one)."""
+        """Resume what an earlier attempt left in the candidate slot. A running
+        healthy/starting container of the exact built image is reused by start
+        itself. Any other container of EXACTLY the candidate revision (stopped,
+        unhealthy, or from a different image build) is removed first, because
+        the slot runtime never overwrites one, but only while the route does
+        not serve it: a running backend that receives traffic is never removed."""
         found = self._call(deadline, "candidate slot", self.ops.slot_inspect,
                            self.target_slot)
         if len(found) != 1 or found[0].get("app_revision") != self.deploy_sha:
             return
-        if found[0].get("status") == "running" and found[0].get("health") in (
-                "healthy", "starting"):
-            return
+        running = found[0].get("status") == "running"
+        reason = "not running"
+        if running and found[0].get("health") in ("healthy", "starting"):
+            current = self._call(deadline, "stale candidate image", self.ops.container,
+                                 found[0].get("id") or "")
+            if (current is not None and current.image_id == self.candidate_image_id
+                    and current.app_revision == self.deploy_sha):
+                return
+            reason = "different image build"
+        elif running:
+            reason = f"health {found[0].get('health')}"
+        if running and self.already_switched:
+            raise StepFailed(f"routed candidate slot {self.target_slot} is running but "
+                             f"unusable ({reason}); a serving backend is never removed")
         outcome = self._call(deadline, "stale candidate removal", self.ops.slot_remove,
                              self.target_slot, self.deploy_sha)
         if outcome == "foreign":
             raise StepFailed(f"candidate slot {self.target_slot} changed revision")
-        self._event("stale-candidate-removed", slot=self.target_slot, outcome=outcome)
+        self._event("stale-candidate-removed", slot=self.target_slot, outcome=outcome,
+                    reason=reason)
 
     def _migration_gate(self):
         delta, problems = self._call(self._step_deadline("migration_gate"),
@@ -1367,10 +1391,9 @@ class Transaction:
         return (f"{floor['floor']}/fence-{floor['fence']}/"
                 f"claims-{'yes' if floor['claims_present'] else 'no'}")
 
-    def _admit_capability(self):
+    def _admit_capability(self, deadline):
         """Before ANY database mutation: qualify candidate and previous images,
         read the floor, refuse a candidate that the floor would fence."""
-        deadline = self._step_deadline("capability_admission")
         capabilities, problem = self._trusted_capabilities(
             "candidate", self.candidate_image_id, deadline)
         if problem:
@@ -1379,7 +1402,11 @@ class Transaction:
         if self.previous_proven:
             web, web_problem = self._trusted_capabilities(
                 "previous", self.previous_web_image_id, deadline)
-            if self.previous_worker.image_id == self.previous_web_image_id:
+            if self.previous_worker is None:
+                # Forward recovery with a proven web but no provable worker:
+                # nothing restorable carries the capability as a pair.
+                worker, worker_problem = frozenset(), "previous worker unproven"
+            elif self.previous_worker.image_id == self.previous_web_image_id:
                 worker, worker_problem = web, web_problem
             else:
                 worker, worker_problem = self._trusted_capabilities(
@@ -1613,6 +1640,9 @@ class Transaction:
                   if self.release_prepare_cleanup_unproven else [])
         if not self.previous_proven:
             return self._forward_only_failure(manual, steps)
+        if self.forward_recovery and self.previous_worker is None:
+            manual.append("previous worker was unproven at the recovery baseline and "
+                          "is never restored")
 
         # Layer B: never route back to, or restart, a writer the durable floor
         # fences. The candidate keeps serving; recovery is fix forward.
@@ -1687,9 +1717,16 @@ class Transaction:
                 self.budget.deadline(steps["route_restore"]))).state
         except (StepFailed, OpError):
             route = "unknown"
-        manual.insert(0, "FORWARD_RECOVERY_INCOMPLETE: the previous serving state was "
-                         "not proven and is never restored; fix forward under a new "
-                         "attempt-bound authorization")
+        if not (self.release_prepared or self.candidate_started
+                or self.route_switch_attempted or self.worker_attempted):
+            manual.insert(0, "FORWARD_RECOVERY_REFUSED: stopped before release-prepare, "
+                             "candidate start, switch or worker change; host serving "
+                             "state unchanged. Clear the stated reason before any new "
+                             "authorization")
+        else:
+            manual.insert(0, "FORWARD_RECOVERY_INCOMPLETE: the previous serving state "
+                             "was not proven and is never restored; fix forward under "
+                             "a new attempt-bound authorization")
         manual.append(f"route={route} candidate={self.target_slot} "
                       f"candidate_started={'yes' if self.candidate_started else 'no'} "
                       f"release_prepared={'yes' if self.release_prepared else 'no'} "
@@ -1738,6 +1775,9 @@ class Transaction:
             return False
 
     def _restore_worker(self, deadline):
+        if self.previous_worker is None:
+            self.log("no proven previous worker to restore")
+            return False
         try:
             pinned = self.ops.image_id(self.worker_rollback_tag, self._time_left(deadline))
             if pinned != self.previous_worker.image_id:

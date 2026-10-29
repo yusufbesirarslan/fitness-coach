@@ -138,7 +138,7 @@ def _gate(payload, trees):
                                  public_health_url="https://fitx.example/health",
                                  log=lambda message: None, mode="forward-recovery")
     transaction.candidate_image_id = "sha256:" + "c" * 64
-    transaction._recovery_schema_gate()
+    transaction._recovery_schema_gate(transaction._step_deadline("capability_admission"))
     return transaction
 
 
