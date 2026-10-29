@@ -1184,6 +1184,8 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
     _begin_coach_turn(question, history=history, user_id=user_id)
     resolved = coach_confirmation.resolve_pending_turn(user_id, language)
     if resolved is not None:
+        from app.services.ai_allowances import execution as allowance_execution
+        allowance_execution.coach_first_party_completion(user_id)
         if prepared_history is None and client_history is None:
             new_history = history + [
                 {"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]},

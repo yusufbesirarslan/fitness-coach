@@ -17,7 +17,7 @@ from app.services import ai_input_budget, ai_model_policy
 from .errors import AllowanceError
 
 VERSION = "aggregate-v1"
-CATALOG = "standard-no-cache-2026-10-26-v1"
+CATALOG = "standard-ephemeral-cache-2026-10-29-v1"
 # Integers: USD nanodollars per token. No rounding or floating point admission.
 PRICES = MappingProxyType({
     ("bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0"): (3000, 15000),
@@ -28,6 +28,17 @@ PRICES = MappingProxyType({
     ("bedrock", "eu.anthropic.claude-sonnet-5-5"): (2200, 11000),
     ("bedrock", "global.anthropic.claude-haiku-5-5"): (100, 500),
     ("bedrock", "eu.anthropic.claude-haiku-5-5"): (110, 550),
+})
+# FINOPS-26 eu-central-1 price list (2026-10-29), 5-minute writes only.
+# Nanodollars/token, rounded UP for the fractional Haiku EU write rate.
+# Reads never receive an admission discount: the next request may be a miss.
+CACHE_PRICES = MappingProxyType({
+    ("bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0"): (3750, 300),
+    ("bedrock", "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"): (4125, 330),
+    ("bedrock", "global.anthropic.claude-sonnet-5-5"): (2500, 100),
+    ("bedrock", "eu.anthropic.claude-sonnet-5-5"): (2750, 110),
+    ("bedrock", "global.anthropic.claude-haiku-5-5"): (125, 10),
+    ("bedrock", "eu.anthropic.claude-haiku-5-5"): (138, 11),
 })
 # Engineering envelopes only. Customer weekly quantities are deliberately absent.
 # All nested tools, fallback, repairs and transport retries share these vectors.
@@ -75,13 +86,58 @@ def initialize(row):
 
 
 def _nonstandard_pricing(value):
-    # Cache writes can cost MORE than standard input. No speculative cache
-    # discount, latency tier or server tools with an independent tariff.
+    # Cache controls are validated separately by location and exact shape.
     if isinstance(value, dict):
-        return (any(k in value for k in ('cache_control', 'service_tier', 'performanceConfig'))
-                or value.get('type', '').startswith(('web_search_', 'code_execution_'))
+        return (any(k in value for k in ('service_tier', 'performanceConfig'))
+                or str(value.get('type', '')).startswith(('web_search_', 'code_execution_'))
                 or any(_nonstandard_pricing(v) for v in value.values()))
     return isinstance(value, (list, tuple)) and any(_nonstandard_pricing(v) for v in value)
+
+
+def _cache_input_bound(payload, family):
+    """Bound the union of cached prefixes, never sum overlapping checkpoints.
+
+    Only the existing Coach tools/system surface is qualified. Messages,
+    nested schema markers, explicit TTLs and automatic caching fail closed.
+    The prefix includes the normal hidden-tool overhead; all later input is
+    still charged normally. Short prefixes ignored by Bedrock are also safe.
+    """
+    prefix = {}
+    allowed = set()
+    tools = payload.get('tools', [])
+    system = payload.get('system', [])
+    for key, blocks in (('tools', tools), ('system', system)):
+        if not isinstance(blocks, (list, tuple)):
+            continue
+        for index, block in enumerate(blocks):
+            if not isinstance(block, dict) or 'cache_control' not in block:
+                continue
+            if (block['cache_control'] != {'type': 'ephemeral'}
+                    or (key == 'system' and (block.get('type') != 'text'
+                                             or not isinstance(block.get('text'), str)))
+                    or (key == 'tools' and (block.get('type') not in (None, 'custom')
+                                            or not isinstance(block.get('input_schema'), dict)))):
+                _unavailable()
+            allowed.add(id(block))
+            prefix[key] = blocks[:index + 1]
+            if key == 'system' and tools:
+                prefix['tools'] = tools
+
+    def validate(value):
+        if isinstance(value, dict):
+            if 'cache_control' in value and id(value) not in allowed:
+                _unavailable()
+            for child in value.values():
+                validate(child)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                validate(child)
+    validate(payload)
+    if not allowed:
+        return 0
+    if len(allowed) > 4 or (family, payload.get('model')) not in CACHE_PRICES:
+        _unavailable()
+    return ai_input_budget.input_upper_bound(prefix)[0]
 
 
 def reserve(owner, reference, feature, provider, payload, *, operation_id=None, now=None):
@@ -96,6 +152,7 @@ def reserve(owner, reference, feature, provider, payload, *, operation_id=None, 
     try:
         if _nonstandard_pricing(payload):
             _unavailable()
+        cached = _cache_input_bound(payload, family)
         inp, images = ai_input_budget.input_upper_bound(payload)
         if 'claude-haiku-5-5' in str(payload.get('model', '')) and inp > 100000:
             _unavailable()  # long-context tariff is outside this price authority
@@ -121,7 +178,13 @@ def reserve(owner, reference, feature, provider, payload, *, operation_id=None, 
             _unavailable()  # comparisons have no qualified single-image budget
         if feature == 'menu_ocr':
             _unavailable()  # dormant PDF/image OCR is not enabled by a budget
-        amounts = (inp, out, images, inp * rates[0] + out * rates[1])
+        # Keep the original dollar ceiling. The write surcharge may reach it
+        # before the token ceiling; a cache hit or malformed usage cannot refill.
+        surcharge = 0
+        if cached:
+            write, read = CACHE_PRICES[family, payload.get('model')]
+            surcharge = min(inp, cached) * (max(rates[0], write, read) - rates[0])
+        amounts = (inp, out, images, inp * rates[0] + out * rates[1] + surcharge)
         limits = (budget['input'], budget['output'], budget['images'], budget['cost'])
         predicates = [Hold.user_id == owner, Hold.public_id == reference,
             Hold.feature == budget['feature'],

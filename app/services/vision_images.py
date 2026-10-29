@@ -23,13 +23,16 @@ class ImageTooLargeError(ImagePreparationError):
 
 
 def prepare_image_for_vision(image_bytes: bytes, media_type: str = "image/jpeg",
-                             max_bytes: int = MAX_IMAGE_BYTES) -> tuple[bytes, str]:
+                             max_bytes: int = MAX_IMAGE_BYTES, *,
+                             max_dimension: int = MAX_IMAGE_DIMENSION) -> tuple[bytes, str]:
     """Always sanitize; the supplied MIME label cannot certify image content."""
     if not isinstance(max_bytes, int) or max_bytes <= 0:
         raise ImagePreparationError("image_output_limit")
+    if type(max_dimension) is not int or not 0 < max_dimension <= MAX_IMAGE_DIMENSION:
+        raise ImagePreparationError("image_dimension_limit")
     max_bytes = min(max_bytes, MAX_IMAGE_BYTES)
     try:
-        result = sanitize_image(image_bytes, max_dimension=MAX_IMAGE_DIMENSION)
+        result = sanitize_image(image_bytes, max_dimension=max_dimension)
         if len(result.data) <= max_bytes:
             return result.data, result.media_type
         with Image.open(io.BytesIO(result.data)) as image:

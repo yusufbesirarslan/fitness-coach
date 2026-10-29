@@ -469,7 +469,8 @@ def record_dispatch_attempt(user_id, reference, *, now=None):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="provider_error"):
+def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="provider_error",
+                      coach_first_party=False):
     """Seal attempts and settle under ONE owner/reservation transaction.
 
     D1 serializes physical entry on this same owner row. Once locked, no
@@ -495,6 +496,13 @@ def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="
             return finalize(user_id, reference, row.outcome if row.state != EXPIRED else "provider_timeout",
                             billing_evidence=row.billing_evidence or BILLING_UNKNOWN)
         evidence = BILLING_CONFIRMED_NOT_BILLED if row.physical_attempts == 0 else BILLING_UNKNOWN
+        if (coach_first_party is True and row.feature == 'coach'
+                and successful is True and evidence == BILLING_CONFIRMED_NOT_BILLED):
+            # Earlier provider-authored proposals were metered on their own
+            # operation. Only this completed deterministic turn is released.
+            # The same locked transaction seals zero against late producers.
+            return finalize(user_id, reference, 'refused_before_provider',
+                            billing_evidence=evidence)
         outcome = "success" if successful or row.canonical_committed is True else (
             "refused_before_provider" if evidence == BILLING_CONFIRMED_NOT_BILLED else (
                 failure_outcome if failure_outcome != "refused_before_provider" else "provider_error"))

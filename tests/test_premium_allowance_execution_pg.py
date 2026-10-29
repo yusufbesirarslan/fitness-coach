@@ -157,6 +157,53 @@ def test_finalize_and_physical_attempt_races_are_atomic(isolated, family):
         assert AiAllowanceBucket.query.one().billed_releases==1
 
 
+@pytest.mark.parametrize('attempts', [0, 1, 2])
+def test_first_party_coach_concurrent_completion_releases_at_most_once(isolated, attempts):
+    def finish(owner, reference):
+        return L.finalize_dispatch(owner, reference, successful=True, coach_first_party=True)
+    with isolated.app_context():
+        h = reserve(1, 'coach', 'first-party-concurrent')
+        row = AiUsageReservation.query.one()
+        row.canonical_committed = True
+        db.session.commit()
+        for _ in range(attempts): L.record_dispatch_attempt(1, h.reference)
+    results = race(isolated, finish, [(1, h.reference)] * 8)
+    assert all(isinstance(r, L.Settlement) for r in results), results
+    assert sum(not r.replayed for r in results) == 1
+    with isolated.app_context():
+        row = AiUsageReservation.query.one()
+        bucket = AiAllowanceBucket.query.one()
+        assert (bucket.used, bucket.reserved, bucket.billed_releases) == (int(bool(attempts)), 0, 0)
+        assert row.state == ('COMMITTED' if attempts else 'RELEASED')
+        assert row.billing_evidence == ('UNKNOWN' if attempts else 'CONFIRMED_NOT_BILLED')
+        with pytest.raises(L.AllowanceError): finish(2, h.reference)
+        with pytest.raises(L.AllowanceError): L.record_dispatch_attempt(1, h.reference)
+
+
+def test_cache_write_cost_boundary_is_atomic_across_workers(isolated):
+    from app.services.ai_allowances import physical as F
+    from app.services.ai_input_budget import input_upper_bound
+    from physical_budget_support import payload
+    p = payload('coach')
+    p['system'] = [{'type': 'text', 'text': 'Static prefix ' * 100,
+                    'cache_control': {'type': 'ephemeral'}}]
+    inp, _ = input_upper_bound(p)
+    cost = inp * 3000 + 15000 + F._cache_input_bound(p, 'bedrock') * 750
+    with isolated.app_context():
+        h = reserve(1, 'coach', 'cache-cost-concurrent')
+        row = AiUsageReservation.query.one()
+        row.physical_cost_reserved = F.LIMITS['coach'][4] - cost
+        db.session.commit()
+    args = (1, h.reference, 'coach', 'bedrock', p)
+    results = race(isolated, F.reserve, [args] * 8)
+    assert results.count(None) == 1, results
+    assert results.count('AI_ACTION_BUDGET_EXHAUSTED') == 7, results
+    with isolated.app_context():
+        row = AiUsageReservation.query.one()
+        assert row.physical_attempts == 1
+        assert row.physical_cost_reserved == F.LIMITS['coach'][4]
+
+
 def test_d1_attempt_owns_user_before_settlement_seals(isolated):
     with isolated.app_context():
         action=E.prepare(1,'nutrition_generation',{},key='d1-physical-race')

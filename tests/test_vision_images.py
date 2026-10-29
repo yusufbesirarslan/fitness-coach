@@ -61,3 +61,9 @@ def test_caller_cannot_raise_provider_byte_ceiling(app):
     )
     assert len(prepared) <= vision_images.MAX_IMAGE_BYTES
     assert media_type == "image/jpeg"
+
+
+@pytest.mark.parametrize('dimension', [True, 0, -1, 1601, '1024'])
+def test_dimension_override_cannot_raise_or_disable_image_ceiling(dimension):
+    with pytest.raises(ImagePreparationError):
+        prepare_image_for_vision(_jpeg_bytes((32, 32)), max_dimension=dimension)
