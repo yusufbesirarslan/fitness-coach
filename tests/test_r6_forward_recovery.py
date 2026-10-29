@@ -666,7 +666,8 @@ def test_review_refusal_before_any_mutation_says_so():
     world = kill_previous(r1_world())                         # schema not migrated
     code, _ = recover(world)
     assert code == tx.EXIT_ROLLBACK_INCOMPLETE
-    assert any("FORWARD_RECOVERY_REFUSED" in e and "host serving state unchanged" in e
+    assert any("FORWARD_RECOVERY_REFUSED" in e
+               and "route, slots, worker and schema unchanged" in e
                for e in world.events)
     assert not any("FORWARD_RECOVERY_INCOMPLETE" in e for e in world.events)
 
@@ -696,3 +697,68 @@ def test_review_non_object_previous_proof_is_recorded_not_fatal(monkeypatch):
     code, transaction = recover(world)
     assert code == tx.EXIT_OK and not transaction.previous_proven
     assert any(e.startswith("previous-web-unproven slot=green") for e in world.events)
+
+
+# ── independent-review regressions, round 2 ─────────────────────────────────
+
+def test_review2_previous_web_not_reported_healthy_is_never_probed():
+    """A dying web that Docker does not report healthy is recorded unproven
+    from the inspect view; its verify (which would poll for minutes) never
+    runs inside the baseline step."""
+    world = migrated(r1_world())
+    world.slots["green"].health = "unhealthy"
+    code, transaction = recover(world)
+    assert code == tx.EXIT_OK and not transaction.previous_proven
+    assert not calls(world, "slot_verify", "green")
+    assert any(e.startswith("previous-web-unproven slot=green reason=running/unhealthy")
+               for e in world.events)
+    assert_recovered(world)
+
+
+def test_review2_hung_previous_web_verify_cannot_starve_the_baseline(monkeypatch):
+    """A verify that only returns when killed at its timeout (the real
+    subprocess bound) consumes a bounded share of the baseline step; the
+    worker/Redis proofs still run and recovery proceeds."""
+    world = migrated(r1_world())
+    original = FakeOps.slot_verify
+
+    def hang(self, slot, revision, timeout):
+        if slot == "green":
+            self._rec("slot_verify", slot, revision, timeout=timeout)
+            self.w.now += timeout
+            raise tx.OpError("slot verify timed out")
+        return original(self, slot, revision, timeout)
+
+    monkeypatch.setattr(FakeOps, "slot_verify", hang)
+    code, transaction = recover(world)
+    assert code == tx.EXIT_OK and not transaction.previous_proven
+    assert_recovered(world)
+
+
+def test_review2_schema_probe_is_capped_like_every_one_off(monkeypatch):
+    world = green_dead_after_migration()
+    seen = []
+    original = FakeOps.schema_heads
+
+    def record(self, image_id, revision, timeout):
+        seen.append(timeout)
+        return original(self, image_id, revision, timeout)
+
+    monkeypatch.setattr(FakeOps, "schema_heads", record)
+    code, _ = recover(world)
+    assert code == tx.EXIT_OK and seen and max(seen) <= tx.CAPABILITY_PROBE_SECONDS
+
+
+def test_review2_previous_web_is_never_paired_with_the_candidate_worker():
+    """Proven previous web, but the only worker is already the candidate's
+    (an earlier attempt replaced it): a failure keeps the candidate pair
+    serving instead of routing back to a mixed-revision web/worker pair."""
+    world = migrated(r1_world(public=True))
+    world.worker = Box(id="worker-cand".ljust(64, "0"), image_id=IMG[CAND],
+                       revision=CAND, app_revision=CAND)
+    code, transaction = recover(world)
+    assert transaction.previous_proven and transaction.previous_worker is None
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert not calls(world, "route_switch", "green") and world.route == "blue"
+    assert world.worker.revision == CAND
+    assert any("never paired with it" in e for e in world.events)

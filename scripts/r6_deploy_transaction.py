@@ -155,6 +155,10 @@ CAPABILITY_IMAGE_PATH = "/app/COMPLETION_CAPABILITIES"
 CAPABILITY_FLOOR_PREFIX = "completion-floor: "
 CAPABILITY_FLOOR_SERVICE = "completion-floor"
 CAPABILITY_PROBE_SECONDS = 60
+# Forward recovery records (never requires) the previous web. Its proof gets a
+# bounded share of the baseline step so a dying web that never turns healthy
+# cannot starve the worker/Redis identity proofs that follow.
+RECOVERY_PREVIOUS_WEB_PROBE_SECONDS = 25
 _FLOOR_STATES = {"raised", "absent"}
 _FENCE_STATES = {"verified", "absent", "invalid"}
 
@@ -989,6 +993,7 @@ class Transaction:
         # recovery records whether it could; only a proven one is ever restored.
         self.previous_proven = not self.forward_recovery
         self.already_switched = False
+        self.baseline_worker_revision = None
         # mutation ledger (what rollback must undo)
         self.release_prepared = False
         self.release_prepare_cleanup_unproven = False
@@ -1150,17 +1155,21 @@ class Transaction:
         self.redis_baseline = redis[0]
 
     # ── forward recovery (R6-R1-28) ──
-    def _slot_revision(self, slot, deadline):
-        """APP_REVISION of the one container in ``slot``; None when empty."""
+    def _slot_container(self, slot, deadline):
+        """The one container in ``slot`` (inspect view), None when empty; its
+        APP_REVISION must be 40-hex."""
         found = self._call(deadline, f"slot {slot} inspect", self.ops.slot_inspect, slot)
         if len(found) > 1:
             raise StepFailed(f"slot {slot} holds {len(found)} containers")
         if not found:
             return None
-        revision = found[0].get("app_revision")
-        if not _SHA.fullmatch(revision or ""):
+        if not _SHA.fullmatch(found[0].get("app_revision") or ""):
             raise StepFailed(f"slot {slot} container carries no 40-hex revision")
-        return revision
+        return found[0]
+
+    def _slot_revision(self, slot, deadline):
+        found = self._slot_container(slot, deadline)
+        return found["app_revision"] if found else None
 
     def _recovery_baseline(self, route, deadline):
         """The normal identity proofs, except that a previous web/worker which
@@ -1173,7 +1182,8 @@ class Transaction:
         if self._call(deadline, "legacy web", self.ops.main_web):
             raise StepFailed(f"route is {route.state} but a main-project web "
                              "container still exists")
-        routed = self._slot_revision(route.state, deadline)
+        routed_container = self._slot_container(route.state, deadline)
+        routed = routed_container["app_revision"] if routed_container else None
         if routed == self.deploy_sha:
             # An earlier attempt switched before it stopped: the candidate slot
             # already receives traffic and the other slot is the old backend.
@@ -1197,18 +1207,25 @@ class Transaction:
         self.previous_revision = self.previous_commit
 
         web_proven = False
-        if routed == self.previous_commit:
+        if routed == self.previous_commit and (
+                routed_container.get("status") != "running"
+                or routed_container.get("health") != "healthy"):
+            self._event("previous-web-unproven", slot=route.state,
+                        reason=f"{routed_container.get('status')}/"
+                               f"{routed_container.get('health')}")
+        elif routed == self.previous_commit:
+            probe = min(deadline, self.clock() + RECOVERY_PREVIOUS_WEB_PROBE_SECONDS)
             try:
                 proof = self.ops.slot_verify(route.state, self.previous_commit,
-                                             self._time_left(deadline))
+                                             self._time_left(probe))
                 if not isinstance(proof, dict):
                     raise OpError("slot verify returned no proof object")
                 identity = (proof.get("container") or {}).get("id")
-                serving = (self.ops.container(identity, self._time_left(deadline))
+                serving = (self.ops.container(identity, self._time_left(probe))
                            if isinstance(identity, str) and identity else None)
                 self.previous_web_image_id = serving.image_id if serving else None
                 web_proven = True
-            except OpError as exc:
+            except (OpError, StepFailed) as exc:
                 self._event("previous-web-unproven", slot=route.state,
                             reason=str(exc)[:200])
 
@@ -1220,13 +1237,14 @@ class Transaction:
             worker = workers[0]
             if worker.app_revision not in (self.previous_commit, self.deploy_sha):
                 raise StepFailed("worker carries a foreign revision")
+            self.baseline_worker_revision = worker.app_revision
             if (worker.app_revision == self.previous_commit
                     and worker.status == "running" and worker.health == "healthy"
                     and _IMAGE_ID.fullmatch(worker.image_id)):
                 try:
                     worker_proven = self.ops.container_build_revision(
                         worker.id, self._time_left(deadline)) == self.previous_commit
-                except OpError as exc:
+                except (OpError, StepFailed) as exc:
                     self.log(f"previous worker revision unproven: {exc}")
             if worker_proven:
                 self.previous_worker = worker
@@ -1247,9 +1265,13 @@ class Transaction:
         longer boot). Otherwise forward recovery has no authority here. It
         spends the capability-admission step budget (shared, not added), so
         the contract's forward timing algebra is unchanged."""
-        current = parse_schema_heads(self._call(
-            deadline, "schema heads", self.ops.schema_heads,
-            self.candidate_image_id, self.deploy_sha))
+        try:
+            payload = self.ops.schema_heads(
+                self.candidate_image_id, self.deploy_sha,
+                min(CAPABILITY_PROBE_SECONDS, self._time_left(deadline)))
+        except OpError as exc:
+            raise StepFailed(f"schema heads: {exc}") from exc
+        current = parse_schema_heads(payload)
         if current is None:
             raise StepFailed("forward recovery refused: schema heads unknown or malformed")
         candidate = self._call(deadline, "candidate migration revisions",
@@ -1640,6 +1662,14 @@ class Transaction:
                   if self.release_prepare_cleanup_unproven else [])
         if not self.previous_proven:
             return self._forward_only_failure(manual, steps)
+        if (self.forward_recovery and self.previous_worker is None
+                and (self.worker_attempted
+                     or self.baseline_worker_revision == self.deploy_sha)):
+            # The only worker left is the candidate's: routing back would pair
+            # the previous web with it. Keep the candidate pair serving.
+            return self._forward_only_failure(manual, steps, reason=(
+                "the previous worker was not proven and the candidate worker "
+                "already runs; the previous web is never paired with it"))
         if self.forward_recovery and self.previous_worker is None:
             manual.append("previous worker was unproven at the recovery baseline and "
                           "is never restored")
@@ -1705,7 +1735,7 @@ class Transaction:
         except (StepFailed, OpError) as exc:
             manual.append(f"checkout not restored to {self.previous_commit}: {exc}")
 
-    def _forward_only_failure(self, manual, steps):
+    def _forward_only_failure(self, manual, steps, reason=None):
         """Forward recovery that could not prove the previous state has nothing
         to return to: the schema is past the previous writer. It never routes
         back, never restarts the previous worker and never removes the
@@ -1720,13 +1750,15 @@ class Transaction:
         if not (self.release_prepared or self.candidate_started
                 or self.route_switch_attempted or self.worker_attempted):
             manual.insert(0, "FORWARD_RECOVERY_REFUSED: stopped before release-prepare, "
-                             "candidate start, switch or worker change; host serving "
-                             "state unchanged. Clear the stated reason before any new "
+                             "candidate start, switch or worker change; route, slots, "
+                             "worker and schema unchanged (only the candidate image "
+                             "was built). Clear the stated reason before any new "
                              "authorization")
         else:
-            manual.insert(0, "FORWARD_RECOVERY_INCOMPLETE: the previous serving state "
-                             "was not proven and is never restored; fix forward under "
-                             "a new attempt-bound authorization")
+            manual.insert(0, "FORWARD_RECOVERY_INCOMPLETE: "
+                             + (reason or "the previous serving state was not proven "
+                                          "and is never restored")
+                             + "; fix forward under a new attempt-bound authorization")
         manual.append(f"route={route} candidate={self.target_slot} "
                       f"candidate_started={'yes' if self.candidate_started else 'no'} "
                       f"release_prepared={'yes' if self.release_prepared else 'no'} "

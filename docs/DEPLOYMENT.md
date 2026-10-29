@@ -346,7 +346,9 @@ restore service. Forward recovery closes that gap with the same transaction:
   `production-deploy` concurrency group and the host outer lock.
 * **Baseline.** Route, control plane, checkout, slot identities, worker identity
   and Redis are proven as usual. A previous web/worker that cannot be proven is
-  recorded (`recovery-baseline previous_web=unproven`) instead of refused.
+  recorded (`recovery-baseline previous_web=unproven`) instead of refused. The
+  previous web is probed only when Docker reports it running and healthy, and
+  then for at most 25 s, so a dying web cannot starve the worker/Redis proofs.
   Every slot and the worker must still carry exactly the previous or the
   candidate revision; a legacy route, two workers or anything foreign refuses.
 * **Schema evidence**, before release-prepare: `flask schema-heads` (one-off of
@@ -355,7 +357,8 @@ restore service. Forward recovery closes that gap with the same transaction:
   graph. Otherwise the run stops after the image build: a death before
   migration is not a recovery (the previous writer can still boot).
   The probe shares the capability-admission step deadline (no extra step
-  budget; the contract's timing algebra is unchanged).
+  budget; the contract's timing algebra is unchanged) and is capped like every
+  one-off at `CAPABILITY_PROBE_SECONDS`.
 * **Resumption.** Release-prepare is idempotent and completes an interrupted
   migration. A running healthy candidate of the exact revision AND the exact
   built image ID is reused; any other exact-revision candidate container
@@ -372,7 +375,11 @@ restore service. Forward recovery closes that gap with the same transaction:
   it stopped before release-prepare, candidate start, switch or worker change
   (serving state unchanged; clear the stated reason before re-authorizing).
   When the previous web was proven, the normal rollback routes back to it; an
-  unproven previous worker is reported and never restored (exit 2).
+  unproven previous worker is reported and never restored (exit 2). The
+  previous web is never paired with the candidate worker: when the only worker
+  left is the candidate's, the failure stays forward-only. A running candidate
+  the route already serves that is not the exact built image is refused, not
+  replaced (manual classification).
 
 Procedure: confirm the outage is post-migration (`release-prepared` in the
 failed run's log, or `schema-heads` evidence), set the variable to the exact

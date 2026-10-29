@@ -485,12 +485,16 @@ def apple_subscription_reconcile_cmd(limit, sweep_limit):
 COMPLETION_FLOOR_PREFIX = "completion-floor: "
 
 
-def _completion_floor_emit(payload, failed=False):
+def _emit_machine_line(prefix, payload, failed=False):
     """ONE machine-readable line (release tooling parses exactly this prefix)."""
     import json
-    click.echo(COMPLETION_FLOOR_PREFIX + json.dumps(payload, sort_keys=True))
+    click.echo(prefix + json.dumps(payload, sort_keys=True))
     if failed:
         raise SystemExit(1)
+
+
+def _completion_floor_emit(payload, failed=False):
+    _emit_machine_line(COMPLETION_FLOOR_PREFIX, payload, failed)
 
 
 # AppGroup like every other command here: the subcommands get the application
@@ -548,18 +552,15 @@ def schema_heads_cmd():
 
         FITX_SKIP_DB_INIT=1 flask --app starter schema-heads
     """
-    import json
-
     from app.schema_safety import _read_current_heads
     try:
         has_table, current = _read_current_heads(db.engine)
     except Exception as exc:  # noqa: BLE001 - unknown is reported, never guessed
-        click.echo(SCHEMA_HEADS_PREFIX + json.dumps(
-            {"result": "error", "reason": type(exc).__name__}, sort_keys=True))
-        raise SystemExit(1)
-    click.echo(SCHEMA_HEADS_PREFIX + json.dumps(
-        {"result": "ok", "has_table": has_table, "current": sorted(current or ())},
-        sort_keys=True))
+        _emit_machine_line(SCHEMA_HEADS_PREFIX,
+                           {"result": "error", "reason": type(exc).__name__},
+                           failed=True)
+    _emit_machine_line(SCHEMA_HEADS_PREFIX, {"result": "ok", "has_table": has_table,
+                                             "current": sorted(current or ())})
 
 
 def register_cli(app):
