@@ -125,7 +125,9 @@ def test_bounded_entitlement(status, expired, revoked, grace, old, expected):
     assert result["effective_premium"] == (expected in ("ACTIVE", "GRACE_PERIOD"))
 
 
-def test_idempotency_ownership_staleness_and_rollback(app):
+@pytest.mark.parametrize("paid", [False, True])
+def test_idempotency_ownership_staleness_and_rollback(app, paid):
+    app.config["APPLE_SUBSCRIPTIONS_ENABLED"] = paid
     with app.app_context():
         user = User(username="apple1", email="apple1@example.invalid")
         from subscription_support import adult_account
@@ -138,8 +140,8 @@ def test_idempotency_ownership_staleness_and_rollback(app):
                             AppleAccountAssociation(user_id=ids[1], token=other_token)])
         db.session.commit()
         ev = evidence(token)
-        assert s.persist_verified(ids[0], ev, token)["effective_premium"]
-        assert s.persist_verified(ids[0], ev, token)["effective_premium"]
+        assert s.persist_verified(ids[0], ev, token)["effective_premium"] is paid
+        assert s.persist_verified(ids[0], ev, token)["effective_premium"] is paid
         assert AppleSubscription.query.count() == 1
         # Even a contradictory trusted-adapter association cannot move a row.
         with pytest.raises(SubscriptionError, match="OWNERSHIP_CONFLICT"):
