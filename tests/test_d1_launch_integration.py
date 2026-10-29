@@ -30,6 +30,12 @@ def contracts(monkeypatch):
 
 
 @pytest.fixture
+def approved_cohort(monkeypatch):
+    # Synthetic approval for authority-layer tests only. Shipping pin is None.
+    monkeypatch.setattr(ai_launch, "APPROVED_SERVICE_COHORT_VERSION", ai_launch.account_eligibility.VERSION)
+
+
+@pytest.fixture
 def source_policy(monkeypatch):
     units = {f: 1 for f in SUPPORTED_FEATURES}
     policy = AllowancePolicy("synthetic-launch", ScopePolicy("NEVER", units, 0),
@@ -98,7 +104,7 @@ def test_coach_unqualified_tools_absent_and_forged_calls_have_no_effect(app, mak
 
 @pytest.mark.parametrize("case", ["missing", "unsigned", "tampered", "other_subject", "no_subject", "contradictory",
     "teen", "tr_teen", "country", "future", "naive", "invalid_time", "review_required"])
-def test_signed_launch_cohort_reuses_canonical_evidence(app, make_user, case):
+def test_signed_launch_cohort_reuses_canonical_evidence(app, make_user, approved_cohort, case):
     from test_purchase_eligibility import invalidate
     user = adult_account(make_user("launch-cohort"))
     db.session.commit()
@@ -109,7 +115,7 @@ def test_signed_launch_cohort_reuses_canonical_evidence(app, make_user, case):
     assert error.value.code == "AI_SERVICE_ELIGIBILITY_REQUIRED"
 
 
-def test_starter_cannot_allocate_with_unverified_service_cohort(app, make_user, source_policy):
+def test_starter_cannot_allocate_with_unverified_service_cohort(app, make_user, source_policy, approved_cohort):
     user = make_user("launch-no-starter")
     with pytest.raises(consent.ConsentDenied):
         ledger._starter_locked(user, source_policy, datetime.now(timezone.utc))
@@ -118,7 +124,7 @@ def test_starter_cannot_allocate_with_unverified_service_cohort(app, make_user, 
     assert db.session.query(AiAllowanceBucket).count() == 0
 
 
-def test_runtime_needs_source_policy_flags_and_redis(app, source_policy, monkeypatch):
+def test_runtime_needs_source_policy_flags_and_redis(app, source_policy, approved_cohort, monkeypatch):
     from app.services import ai_spend_guard
     app.config.update(AI_ALLOWANCE_POLICY=source_policy, AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED=True,
         AI_ALLOWANCE_LEDGER_ENABLED=True, AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED=True,
@@ -159,7 +165,7 @@ def test_menu_network_requires_original_qr_scope_and_generation(contracts, monke
 
 
 @pytest.mark.parametrize("endpoint", list(ai_launch.NATIVE_ENDPOINTS))
-def test_only_five_native_views_can_pass_source_gate(client, app, make_user, bearer, contracts, source_policy, monkeypatch, endpoint):
+def test_only_five_native_views_can_pass_source_gate(client, app, make_user, bearer, contracts, source_policy, approved_cohort, monkeypatch, endpoint):
     from flask import jsonify
     from app.services import ai_spend_guard
     user = adult_account(make_user("launch-native"))
@@ -187,3 +193,11 @@ def test_only_five_native_views_can_pass_source_gate(client, app, make_user, bea
     assert response.status_code == 403
     assert response.json["error"]["code"] == "AI_SERVICE_ELIGIBILITY_REQUIRED"
     assert sink.call_count == 1
+
+
+def test_signed_declaration_alone_cannot_satisfy_unapproved_service_authority(app, make_user):
+    user = adult_account(make_user("unapproved-cohort"))
+    assert ai_launch.APPROVED_SERVICE_COHORT_VERSION is None
+    with pytest.raises(consent.ConsentDenied) as error:
+        ai_launch.require_cohort(user)
+    assert error.value.code == "AI_SERVICE_ELIGIBILITY_REQUIRED"

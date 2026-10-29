@@ -22,18 +22,25 @@ NATIVE_ENDPOINTS = {
     "mobile_api.nutrition_menu_analyze": "menu_extract",
 }
 
+# The current signed schema attests a self-declaration, not independent
+# assurance. Only reviewed source can pin an approved service authority after
+# its assurance/freshness contract is resolved by the existing owner.
+APPROVED_SERVICE_COHORT_VERSION: str | None = None
+
 
 def require_cohort(user):
     # The existing canonical subject-bound signed record is the authority.
     # Editable profile/client claims, a purchase or a D1 grant cannot promote it.
-    if not account_eligibility.purchase_eligible(user, datetime.now(timezone.utc)):
+    if (APPROVED_SERVICE_COHORT_VERSION != account_eligibility.VERSION
+            or not account_eligibility.purchase_eligible(user, datetime.now(timezone.utc))):
         raise consent.ConsentDenied("AI_SERVICE_ELIGIBILITY_REQUIRED")
 
 
 def require_runtime():
     from app.services import ai_spend_guard
     policy = launch_policy.installed_policy()
-    if (policy is None or current_app.config.get("AI_ALLOWANCE_POLICY") != policy
+    if (APPROVED_SERVICE_COHORT_VERSION != account_eligibility.VERSION
+            or policy is None or current_app.config.get("AI_ALLOWANCE_POLICY") != policy
             or not execution.enabled() or not ai_spend_guard.ENABLED
             or ai_spend_guard._get_redis() is None):
         raise consent.ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE")

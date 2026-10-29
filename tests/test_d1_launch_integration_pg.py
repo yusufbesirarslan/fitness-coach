@@ -9,6 +9,9 @@ from app.models import User
 from app.services import ai_consent as consent, ai_consent_disclosures as disclosures, ai, ai_provider_call as calls, ai_spend_guard, ai_launch
 from test_ai_consent_pg import pg_app, command
 from subscription_support import adult_account
+from test_d1_launch_integration import approved_cohort
+
+pytestmark = pytest.mark.pg_concurrency
 
 
 def call_nutrition(sdk):
@@ -61,7 +64,7 @@ def test_qr_nested_denial_never_calls_sdk(pg_app, monkeypatch, case):
     sdk.assert_not_called()
 
 
-def test_launch_evidence_rechecked_from_database_before_provider_and_publication(pg_app, monkeypatch):
+def test_launch_evidence_rechecked_from_database_before_provider_and_publication(pg_app, monkeypatch, approved_cohort):
     from app.services.ai_allowances import launch_policy
     with pg_app.app_context(), ai_spend_guard.subject_scope(1):
         user = adult_account(db.session.get(User, 1))
@@ -88,7 +91,7 @@ def test_launch_evidence_rechecked_from_database_before_provider_and_publication
             consent.authorize_operation(authority)
 
 
-def test_qr_nested_provider_calls_debit_one_original_finite_hold(pg_app, monkeypatch):
+def test_qr_nested_provider_calls_debit_one_original_finite_hold(pg_app, monkeypatch, approved_cohort):
     from datetime import datetime, timezone
     from app.services.ai_allowances import launch_policy, execution, service as ledger
     from app.services.ai_allowances.policy import AllowancePolicy, ScopePolicy, SUPPORTED_FEATURES
