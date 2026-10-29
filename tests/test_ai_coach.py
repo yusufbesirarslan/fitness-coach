@@ -299,7 +299,7 @@ def test_dispatch_routes_and_rejects_unknown(auth_user, monkeypatch):
                         lambda uid, q: _search.append((uid, q)) or "{}")
     _dispatch_coach_tool(auth_user.id, "fetch_nutrition_and_stage_log",
                          '{"food_query": "muz"}')
-    assert _search == [(auth_user.id, "muz")]            # user_id sunucudan enjekte
+    assert _search == []  # unqualified external food lookup stays unavailable
 
     result = json.loads(_dispatch_coach_tool(auth_user.id, "rm_rf", "{}"))
     assert result["status"] == "error"
@@ -307,7 +307,8 @@ def test_dispatch_routes_and_rejects_unknown(auth_user, monkeypatch):
     # Bozuk argüman JSON'u → boş argümanlarla güvenli çağrı.
     result = json.loads(_dispatch_coach_tool(auth_user.id,
                                              "fetch_nutrition_and_stage_log", "{bozuk"))
-    assert _search[-1] == (auth_user.id, "")
+    assert result["status"] == "unavailable"
+    assert _search == []
 
 
 def test_dispatch_routes_remaining_tools(auth_user, monkeypatch):
@@ -581,7 +582,7 @@ def test_conversation_plain_answer(auth_user, monkeypatch):
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_conversation_tool_call_roundtrip(auth_user, monkeypatch):
+def test_conversation_unadvertised_tool_call_refuses_side_effects(auth_user, monkeypatch):
     monkeypatch.setattr(ai_coach, "_coach_search_food",
                         lambda q: [{"name": "Muz", "food_id": "9",
                                     "per_100g": {"calories": 89.0, "protein": 1.1,
@@ -595,12 +596,12 @@ def test_conversation_tool_call_roundtrip(auth_user, monkeypatch):
 
     answer = _run_coach_conversation(auth_user.id, "muz yedim", "", client_history=[])
     assert answer == "Muz 89 kcal. Kaydedeyim mi?"
-    assert PendingAction.query.filter_by(user_id=auth_user.id).count() == 1  # staged
+    assert PendingAction.query.filter_by(user_id=auth_user.id).count() == 0  # unavailable tool
 
     second_call = llm.calls[1]["messages"]
     tool_msg = second_call[-1]
     assert tool_msg["role"] == "tool"
-    assert json.loads(tool_msg["content"])["status"] == "staged"
+    assert json.loads(tool_msg["content"])["status"] == "error"  # schema allowlist refuses first
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
