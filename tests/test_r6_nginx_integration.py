@@ -25,6 +25,7 @@ import hashlib
 import http.client
 import json
 import os
+import re
 import shutil
 import socket
 import ssl
@@ -133,7 +134,12 @@ def make_cert(directory):
 
 def runnable_site(site, ports, cert, key, options, include_path):
     """The single test-only rewrite, applied identically before and after."""
-    out = site
+    # Replace original backend endpoints once, before inserting ephemeral
+    # listeners. A global prefix replacement afterwards corrupts e.g. listen
+    # :50001 into :<legacy-port>1, and can rewrite an inserted backend again.
+    backend_ports = {b"5000": ports["legacy"], b"3000": ports["fatsecret"]}
+    out = re.sub(rb"127\.0\.0\.1:(5000|3000)(?![0-9])",
+                 lambda match: f"127.0.0.1:{backend_ports[match[1]]}".encode(), site)
     for old, new in (
         (b"listen 443 ssl; # managed by Certbot", f"listen 127.0.0.1:{ports['https']} ssl; # managed by Certbot".encode()),
         (b"listen [::]:443 ssl ipv6only=on; # managed by Certbot", b"# (ipv6 listen removed for the disposable test)"),
@@ -143,11 +149,9 @@ def runnable_site(site, ports, cert, key, options, include_path):
         (f"/etc/letsencrypt/live/{HOST}/privkey.pem".encode(), str(key).encode()),
         (b"include /etc/letsencrypt/options-ssl-nginx.conf;", f"include {options};".encode()),
         (b"ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;", b"# (dhparam omitted for the disposable test)"),
-        (b"127.0.0.1:5000", f"127.0.0.1:{ports['legacy']}".encode()),
-        (b"127.0.0.1:3000", f"127.0.0.1:{ports['fatsecret']}".encode()),
         (sw.INCLUDE_PATH.encode(), str(include_path).encode()),
     ):
-        assert old in out or old in (sw.INCLUDE_PATH.encode(), b"127.0.0.1:5000"), old
+        assert old in out or old == sw.INCLUDE_PATH.encode(), old
         out = out.replace(old, new)
     return out
 
@@ -207,8 +211,10 @@ class Nginx:
         return self.base + ("-s", "reload")
 
     def start(self):
-        subprocess.run(self.test_argv, check=True, capture_output=True, timeout=30)
-        subprocess.run(self.base, check=True, capture_output=True, timeout=30)
+        for argv in (self.test_argv, self.base):
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, (
+                f"disposable nginx failed: {argv!r}\n{result.stdout}\n{result.stderr}")
         self.started = True
         wait_for(lambda: self.master_pid() is not None, "nginx master")
 
@@ -321,6 +327,19 @@ def routed(nginx):
 
 
 # --- 13. real routing switch -----------------------------------------------------------------
+
+@pytest.mark.parametrize("site", [LIVE, boot.transform(LIVE, sw.INCLUDE_PATH, 5000)])
+def test_fixture_port_rewrite_preserves_ephemeral_endpoints(site):
+    ports = {"https": 50001, "http": 30001, "legacy": 30002, "fatsecret": 50002}
+    rendered = runnable_site(site, ports, Path("/cert"), Path("/key"),
+                             Path("/options"), Path("/upstream"))
+    assert b"listen 127.0.0.1:50001 ssl;" in rendered
+    assert b"listen 127.0.0.1:30001;" in rendered
+    assert b"server 127.0.0.1:50002;" in rendered
+    if site == LIVE:
+        assert b"proxy_pass http://127.0.0.1:30002;" in rendered
+    else:
+        assert b"include /upstream;" in rendered
 
 def test_real_nginx_switch_routes_new_traffic_and_rolls_back_to_legacy(routed):
     ngx, cfg = routed

@@ -158,7 +158,7 @@ def native(v):
     return v[1]+":"+v[2:] if os.name=="nt" and len(v)>3 and v[0]=="/" and v[2]=="/" else v
 parser=argparse.ArgumentParser()
 parser.add_argument("command",choices=["run"])
-for name in ("deploy-sha","previous-commit","deploy-dir","context","work-dir","public-health-url","transaction-epoch"):
+for name in ("deploy-sha","previous-commit","deploy-dir","context","work-dir","public-health-url","transaction-epoch","mode"):
     parser.add_argument("--"+name,required=True)
 a=parser.parse_args()
 context,deploy,work=(Path(native(v)) for v in (a.context,a.deploy_dir,a.work_dir))
@@ -169,6 +169,7 @@ assert (context/"release.txt").read_text().strip()=="candidate"
 assert not (context/"untracked-host.txt").exists() and not (context/".env").exists()
 assert subprocess.check_output([os.environ["REAL_GIT"],"-C",str(deploy),"rev-parse","HEAD"],text=True).strip()==a.previous_commit
 assert a.deploy_sha==os.environ["FAKE_CANDIDATE_SHA"]
+assert a.mode==os.environ["AXISAI_R6_TRANSACTION_MODE"]
 with Path(native(os.environ["TRACE_FILE"])).open("a") as f:
     f.write("ENGINE_PROOF="+json.dumps(vars(a),sort_keys=True)+"\n")
 sys.exit(int(os.environ.get("FAKE_ENGINE_EXIT","0")))
@@ -455,6 +456,7 @@ esac
                 'FLOCK_EXIT': str(flock_exit),
                 'EXPECTED_OUTER_LOCK_PATH': OUTER_LOCK_PATH,
                 'AXISAI_MONOTONIC_STATE': _bash_path(monotonic_state),
+                'AXISAI_R6_TRANSACTION_MODE': 'normal',
                 'FAKE_OUTER_DIR_METADATA': "0:directory:755",
                 'FAKE_OUTER_FILE_METADATA': "11:22:0:regular empty file:644:1",
                 'FAKE_OUTER_FD_METADATA': "11:22:0:regular empty file:644:1",
@@ -1179,3 +1181,27 @@ def test_cleanup_total_ceiling_fits_the_reserved_phase(bash_executable,host_fixt
     grants=re.findall(r"--kill-after=(\d+)s (\d+)s rm -[fr]+ -- ",f.trace_text())
     assert grants
     assert sum(int(grace)+int(limit) for grace,limit in grants)<=HOST_PHASE_SECONDS["cleanup"]
+
+
+# R6-R1-28: the transaction mode comes only from the privilege drop's clean
+# environment and is validated before any git, Docker or engine work.
+@pytest.mark.parametrize("mode", ["", "recovery", "skip-health-check", "Forward-Recovery",
+                                  "forward-recovery ", "normal;true"])
+def test_unknown_transaction_mode_refuses_before_git_or_engine(bash_executable, host_fixture, mode):
+    f = host_fixture()
+    result = f.run(bash_executable, AXISAI_R6_TRANSACTION_MODE=mode)
+    assert result.returncode == 64
+    assert "AXISAI_R6_TRANSACTION_MODE must be normal or forward-recovery" in result.stderr
+    trace = f.trace_text()
+    assert "git " not in trace and "docker " not in trace and "ENGINE_PROOF=" not in trace
+
+
+def test_forward_recovery_mode_reaches_the_engine_verbatim(bash_executable, host_fixture):
+    import json
+    f = host_fixture()
+    result = f.run(bash_executable, AXISAI_R6_TRANSACTION_MODE="forward-recovery")
+    assert result.returncode == 0, result.stderr
+    (proof,) = [line for line in f.trace_text().splitlines() if line.startswith("ENGINE_PROOF=")]
+    assert json.loads(proof.split("=", 1)[1])["mode"] == "forward-recovery"
+    assert "mode forward-recovery" in result.stderr
+    assert _run(["git", "-C", str(f.deploy_dir), "rev-parse", "HEAD"]) == f.prev_commit

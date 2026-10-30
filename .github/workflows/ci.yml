@@ -422,6 +422,7 @@ jobs:
           tests/test_workout_completion_pg.py
           tests/test_training_expiry_compensation_pg.py
           tests/test_r6_dual_revision_pg.py
+          tests/test_r6_forward_recovery_pg.py
 
   mobile-pg-concurrency:
     name: PostgreSQL concurrency
@@ -523,6 +524,7 @@ jobs:
           tests/test_account_profile_pg.py
           tests/test_quest_challenge_commit_pg.py
           tests/test_r6_dual_revision_pg.py
+          tests/test_r6_forward_recovery_pg.py
       - name: Completion fence everywhere (activated floor)
         # PRIV-K6 rollback gate: the completion suites again, on a schema with
         # the REVIEWED fence installed and the floor raised. Every canonical
