@@ -258,11 +258,13 @@ def test_budget_error_is_customer_visible_nonretryable_and_not_partial_success(a
     assert 'misleading_partial' not in response.json
 
 
+@pytest.mark.parametrize('cache', [False, True])
 @pytest.mark.parametrize('language', ['en','tr'])
 @pytest.mark.parametrize('rounds', [1,5])
-def test_real_coach_prompts_and_tool_loop_complete_synthetic_workflow(door,monkeypatch,language,rounds):
+def test_real_coach_prompts_and_tool_loop_complete_synthetic_workflow(door,monkeypatch,language,rounds,cache):
     from types import SimpleNamespace as Obj
     from app.services import ai_coach
+    monkeypatch.setattr(ai_coach, 'BEDROCK_PROMPT_CACHE', cache)
     action = hold(door,'coach')
     calls = []
     expected = ('Keep the load comfortable and use controlled repetitions.' if language=='en'
@@ -287,7 +289,8 @@ def test_real_coach_prompts_and_tool_loop_complete_synthetic_workflow(door,monke
     with E.scope(action):
         result = ai_coach._run_coach_conversation_bedrock(door,question,context,history,language)
         assert result == expected
-        assert all('overhead' in c['system'] or 'baş üstü' in c['system'] for c in calls)
+        assert all('overhead' in json.dumps(c['system'], ensure_ascii=False)
+                   or 'baş üstü' in json.dumps(c['system'], ensure_ascii=False) for c in calls)
         action.success()
     action.finish()
     assert Hold.query.one().physical_attempts == rounds
@@ -347,13 +350,15 @@ def test_real_pump_image_preparation_and_schema_complete(door,monkeypatch,langua
         action.success()
     row=Hold.query.one()
     assert row.physical_attempts == row.physical_images_reserved == 2
-    assert row.physical_output_reserved == 2400
-    assert all(c['max_tokens']==1200 for c in calls)
+    assert row.physical_output_reserved == 1200
+    assert all(c['max_tokens']==600 for c in calls)
 
 
-def test_real_coach_provider_fallback_shares_one_action(door,monkeypatch):
+@pytest.mark.parametrize('cache', [False, True])
+def test_real_coach_provider_fallback_shares_one_action(door,monkeypatch,cache):
     from types import SimpleNamespace as Obj
     from app.services import ai_coach as coach
+    monkeypatch.setattr(coach, 'BEDROCK_PROMPT_CACHE', cache)
     calls=[]
     def unavailable(**kw):
         calls.append(('bedrock',kw))
@@ -398,6 +403,92 @@ def test_future_haiku_long_context_refuses_even_if_per_call_config_is_enlarged(r
     p['model']='global.anthropic.claude-haiku-5-5'
     with pytest.raises(AllowanceError):F.reserve(ready,action.reference,'coach','bedrock',p)
     assert Hold.query.one().physical_attempts==0
+
+
+def cached_payload():
+    p = request(5000)
+    p['tools'] = [{'name': 'synthetic', 'input_schema': {'type': 'object'},
+                   'cache_control': {'type': 'ephemeral'}}]
+    p['system'] = [{'type': 'text', 'text': 'Static prefix ' * 100,
+                    'cache_control': {'type': 'ephemeral'}},
+                   {'type': 'text', 'text': 'Dynamic user context ' * 100}]
+    return p
+
+
+@pytest.mark.parametrize('usage', [None,
+    {'input_tokens': 100, 'output_tokens': 20, 'cache_creation_input_tokens': 1000},
+    {'input_tokens': 100, 'output_tokens': 20, 'cache_read_input_tokens': 1000},
+    {'input_tokens': -1000000, 'output_tokens': -100, 'cache_read_input_tokens': 9999999}])
+def test_cache_miss_hit_and_manipulated_usage_cannot_discount_durable_bound(door, usage):
+    from types import SimpleNamespace
+    from app.services import ai_usage
+    action = hold(door, 'coach')
+    p = cached_payload()
+    inp, _ = B.input_upper_bound(p)
+    prefix, _ = B.input_upper_bound({'tools': p['tools'], 'system': p['system'][:1]})
+    expected = inp * 3000 + 700 * 15000 + prefix * 750
+    with E.scope(action):
+        invoke(door, 'coach', p, sdk=lambda **kw: SimpleNamespace(usage=usage))
+        action.success()
+    action.finish()
+    row = Hold.query.one()
+    assert row.physical_attempts == 1 and row.physical_cost_reserved == expected
+    assert row.physical_input_reserved == inp and row.billing_evidence == 'UNKNOWN'
+    # Existing usage telemetry prices disjoint normal/write/read tokens. It
+    # never controls the durable debit or credits a hit back to the hold.
+    assert ai_usage.estimated_cost_usd('bedrock', 'claude-sonnet-4-5', {
+        'input_tokens': 100, 'output_tokens': 20,
+        'cache_write_tokens': 1000, 'cache_read_tokens': 2000}) == pytest.approx(.00495)
+
+
+@pytest.mark.parametrize('corrupt', ['ttl', 'nested', 'messages', 'openai', 'missing_price',
+                                    'too_many', 'aliased_messages', 'aliased_checkpoints'])
+def test_unqualified_cache_shapes_and_price_authority_fail_closed(door, monkeypatch, corrupt):
+    p = cached_payload()
+    provider = 'bedrock'
+    if corrupt == 'ttl': p['system'][0]['cache_control']['ttl'] = '1h'
+    if corrupt == 'nested': p['tools'][0]['input_schema']['cache_control'] = {'type': 'ephemeral'}
+    if corrupt == 'messages': p['messages'][0]['cache_control'] = {'type': 'ephemeral'}
+    if corrupt == 'openai':
+        provider, p['model'] = 'openai', 'gpt-4o-mini'
+    if corrupt == 'missing_price': monkeypatch.setattr(F, 'CACHE_PRICES', {})
+    if corrupt == 'too_many': p['system'] = [dict(p['system'][0]) for _ in range(5)]
+    if corrupt == 'aliased_messages': p['messages'][0]['content'] = [p['system'][0]]
+    if corrupt == 'aliased_checkpoints': p['system'] = [p['system'][0]] * 5
+    action = hold(door, 'coach')
+    with E.scope(action), pytest.raises(E.ExecutionRefused):
+        invoke(door, 'coach', p, provider=provider, sdk=lambda **kw: pytest.fail('SDK reached'))
+    assert Hold.query.one().physical_attempts == 0
+
+
+def test_cached_cost_ceiling_is_not_raised_or_refilled_and_terminal_replay_refuses(door):
+    from app.services.ai_allowances.errors import AllowanceError
+    action = hold(door, 'coach')
+    p = cached_payload()
+    inp, _ = B.input_upper_bound(p)
+    expected = inp * 3000 + 700 * 15000 + F._cache_input_bound(p, 'bedrock') * 750
+    row = Hold.query.one()
+    row.physical_cost_reserved = F.LIMITS['coach'][4] - expected
+    db.session.commit()
+    F.reserve(door, action.reference, 'coach', 'bedrock', p)
+    assert Hold.query.one().physical_cost_reserved == F.LIMITS['coach'][4]
+    with pytest.raises(AllowanceError): F.reserve(door, action.reference, 'coach', 'bedrock', p)
+    action.finish()
+    with pytest.raises(AllowanceError): F.reserve(door, action.reference, 'coach', 'bedrock', p)
+    assert Hold.query.one().physical_attempts == 1
+
+
+def test_cache_catalog_rotation_does_not_reinitialize_old_hold(door):
+    action = hold(door, 'coach')
+    row = Hold.query.one()
+    old = json.loads(row.physical_budget)
+    old['catalog'] = 'standard-no-cache-2026-10-26-v1'
+    row.physical_budget = json.dumps(old)
+    db.session.commit()
+    with E.scope(action), pytest.raises(E.ExecutionRefused):
+        invoke(door, 'coach', cached_payload())
+    action.finish()
+    assert Hold.query.one().physical_attempts == 0
 
 
 

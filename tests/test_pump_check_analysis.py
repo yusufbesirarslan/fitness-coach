@@ -204,14 +204,64 @@ def test_analysis_adapter_passes_only_bounded_context_and_validates_output():
         assert image.size == (8, 8)
         assert not image.getexif()
     assert seen["media_type"] == "image/jpeg"
-    assert seen["max_tokens"] == 1200
+    assert seen["max_tokens"] == 600
     assert "user_id" not in seen["prompt"]
+
+
+@pytest.mark.parametrize('language', ['tr', 'en'])
+@pytest.mark.parametrize('scene', ['well_lit', 'dark', 'cropped', 'clothed', 'mirror', 'object', 'two_people'])
+def test_lightweight_synthetic_images_keep_framing_contrast_and_schema(language, scene):
+    """Offline image/contract qualification, not a model-quality A/B claim."""
+    from PIL import ImageDraw
+    canvas = Image.new('RGB', (2048, 1536), (20, 20, 20))
+    draw = ImageDraw.Draw(canvas)
+    color = (60, 60, 60) if scene == 'dark' else (180, 150, 120)
+    # Large head/torso/arm landmarks represent useful fitness framing detail.
+    draw.ellipse((800, 100, 1200, 500), fill=color)
+    draw.rectangle((750, 500, 1250, 1350), fill=color)
+    draw.rectangle((500, 550, 750, 1150), fill=color)
+    if scene == 'two_people': draw.rectangle((1500, 500, 1900, 1350), fill=color)
+    if scene == 'clothed': draw.rectangle((750, 500, 1250, 1100), fill=(60, 100, 180))
+    if scene == 'object':
+        draw.rectangle((0, 0, 2048, 1536), fill=(20, 20, 20))
+        draw.rectangle((750, 500, 1250, 1350), fill=color)
+    if scene == 'cropped': canvas = canvas.crop((0, 400, 2048, 1536))
+    if scene == 'mirror': canvas = canvas.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    raw = BytesIO()
+    exif = Image.Exif()
+    exif[270] = 'synthetic-private-metadata'
+    canvas.save(raw, 'JPEG', exif=exif)
+    seen = {}
+    output = _valid(quality='insufficient' if scene == 'object' else 'limited')
+    def provider(data, media, prompt, max_tokens):
+        seen.update(bytes=len(data), max_tokens=max_tokens)
+        assert 'at most 3 observations and 2 items' in prompt
+        with Image.open(BytesIO(data)) as prepared:
+            assert prepared.size == (1024, canvas.height // 2)
+            assert not prepared.getexif() and 'exif' not in prepared.info
+            # Compare central landmark colors to source pixels. Resizing must
+            # preserve contrast and clothing, including already-dark input.
+            for x, y in [(1000, 800), (625, 800), (100, 100)]:
+                if y < canvas.height:
+                    actual = prepared.getpixel((x // 2, y // 2))
+                    expected = canvas.getpixel((x, y))
+                    assert max(abs(a - b) for a, b in zip(actual, expected)) < 15
+        return json.dumps(output)
+    assert analyze_image(raw.getvalue(), 'image/jpeg', {}, provider, language=language) == output
+    assert seen['bytes'] < len(raw.getvalue()) and seen['max_tokens'] == 600
+
+
+def test_legacy_stored_analysis_bounds_remain_readable():
+    output = _valid(observations=['Visible outline.'] * 5,
+                    strengths=['Consistent framing.'] * 4,
+                    limitations=['x' * 240])
+    assert parse_analysis(json.dumps(output)) == output
 
 
 def test_canonical_pr1_normalizes_before_single_image_provider(monkeypatch):
     seen = {}
     monkeypatch.setattr(
-        analysis, "prepare_image_for_vision", lambda raw, media: (b"bounded", "image/jpeg")
+        analysis, "prepare_image_for_vision", lambda raw, media, *, max_dimension: (b"bounded", "image/jpeg")
     )
 
     def provider(raw, media, prompt, max_tokens):

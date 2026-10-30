@@ -174,6 +174,20 @@ def current_action():
     return _ACTIVE.get()
 
 
+def coach_first_party_completion(owner):
+    """Only the deterministic confirmation resolver may mark this outcome.
+
+    This is a candidate for release, never billing proof. Settlement seals and
+    checks the durable attempt count, including summaries and nested calls.
+    """
+    action = _ACTIVE.get()
+    if action is not None:
+        _check_owner(owner)
+        if action.owner != owner or action.feature != 'coach':
+            _refuse('AI_ALLOWANCE_IDEMPOTENCY_CONFLICT')
+        action.coach_first_party = True
+
+
 @dataclass
 class Action:
     owner: int
@@ -183,6 +197,7 @@ class Action:
     authority: object = None
     reference: str | None = None
     successful: bool = False
+    coach_first_party: bool = False
     failure_outcome: str = "provider_error"
     refusal: object = None
     _lock: object = field(default_factory=threading.Lock)
@@ -226,8 +241,12 @@ class Action:
         db.session.rollback()
         try:
             settled = ledger.finalize_dispatch(self.owner, self.reference,
-                successful=self.successful, failure_outcome=self.failure_outcome)
-            _metric("settled_success" if settled.outcome == "success" else "settled_failure", self.feature)
+                successful=self.successful, failure_outcome=self.failure_outcome,
+                coach_first_party=self.coach_first_party)
+            event = ("settled_coach_first_party" if self.coach_first_party and self.successful
+                     and settled.state == ledger.RELEASED else
+                     "settled_success" if settled.outcome == "success" else "settled_failure")
+            _metric(event, self.feature)
         except AllowanceError as error:
             # Hold remains durable and expires consumed. Never free ambiguity.
             current_app.logger.warning("ai_allowance event=settlement_deferred feature=%s code=%s",
