@@ -543,8 +543,13 @@ class HostOps:
             if (self.environ.get("AXISAI_WEB_SLOT_APPLE_FILES", "0") == "1"
                     or Path(scheduler.INSTALLED).exists()):
                 scheduler.installed(self.context, self.deploy_dir, run, self.trusted_uid)
-        except (OSError, ValueError, scheduler.Refused):
-            problems.append("Apple scheduler ownership/source/execution unproven")
+        except scheduler.Refused as exc:
+            # Closed refusal codes only; never command output or file content.
+            code = str(exc) if re.fullmatch(r"[A-Z_]{1,64}", str(exc)) else "REFUSED"
+            problems.append(f"Apple scheduler ownership/source/execution unproven ({code})")
+        except (OSError, ValueError) as exc:
+            problems.append("Apple scheduler ownership/source/execution unproven "
+                            f"({type(exc).__name__})")
         return problems
 
     # git

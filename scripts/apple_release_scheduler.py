@@ -113,7 +113,8 @@ def no_surviving_passes(run=command):
     for cid in ids:
         if not CID.fullmatch(cid):
             raise Refused('AMBIGUOUS_CONTAINER')
-        top = run(['docker', 'top', cid, '-eo', 'args'])
+        # dockerd refuses ps output without a PID column, so it must be requested.
+        top = run(['docker', 'top', cid, '-eo', 'pid,args'])
         if MARKER in top or 'apple-subscription-reconcile' in top:
             raise Refused('PREVIOUS_RECONCILIATION_STILL_RUNNING')
 
