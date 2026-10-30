@@ -11,6 +11,10 @@ readonly OUTER_LOCK_CAPABILITY_FD="${AXISAI_OUTER_LOCK_FD:-}"
 # transaction in this file's sibling, run from the git-archive context of
 # DEPLOY_SHA (never from the mutable checkout).
 readonly TRANSACTION_ENGINE="scripts/r6_deploy_transaction.py"
+# R6-R1-28: normal, or forward-recovery when the protected controller verified
+# an exact run-attempt authorization. Only the privilege drop's clean
+# environment sets it; anything else refuses before any mutation.
+readonly TRANSACTION_MODE="${AXISAI_R6_TRANSACTION_MODE:-}"
 
 require_timeout_value() {
   local name="$1" value="${!1-}"
@@ -169,6 +173,10 @@ if [[ -z "$PUBLIC_HEALTH_URL" ]]; then
   echo "PUBLIC_HEALTH_URL is required for the post-switch proof" >&2
   exit 64
 fi
+if [[ "$TRANSACTION_MODE" != "normal" && "$TRANSACTION_MODE" != "forward-recovery" ]]; then
+  echo "AXISAI_R6_TRANSACTION_MODE must be normal or forward-recovery" >&2
+  exit 64
+fi
 
 if ((HOST_ROOT_BOOTSTRAP_SECONDS + HOST_LOCK_ACQUISITION_SECONDS +
       HOST_AUTHORITY_AND_STALE_PROOF_SECONDS + HOST_CLOCK_SETUP_SECONDS +
@@ -272,6 +280,10 @@ if ! run_external git merge-base --is-ancestor "$PREV_COMMIT" "$DEPLOY_SHA"; the
   echo "deployment candidate is older than or divergent from production" >&2
   exit 1
 fi
+if [[ "$TRANSACTION_MODE" == "forward-recovery" && "$PREV_COMMIT" == "$DEPLOY_SHA" ]]; then
+  echo "forward recovery refused: the checkout already runs DEPLOY_SHA" >&2
+  exit 1
+fi
 
 # The exact candidate tree, from git objects only: untracked or ignored host
 # files can never enter the image build or the transaction engine. The
@@ -289,7 +301,7 @@ if [[ ! -f "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" ]]; then
 fi
 
 enter_phase transaction "$TRANSACTION_CUTOFF"
-echo "starting blue/green transaction for $DEPLOY_SHA (previous $PREV_COMMIT)" >&2
+echo "starting blue/green transaction for $DEPLOY_SHA (previous $PREV_COMMIT, mode $TRANSACTION_MODE)" >&2
 run_external python3 -I -B "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" run \
   --deploy-sha "$DEPLOY_SHA" \
   --previous-commit "$PREV_COMMIT" \
@@ -297,5 +309,6 @@ run_external python3 -I -B "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" run \
   --context "$BUILD_CONTEXT_DIR" \
   --work-dir "$WORK_DIR" \
   --public-health-url "$PUBLIC_HEALTH_URL" \
-  --transaction-epoch "$TRANSACTION_EPOCH"
+  --transaction-epoch "$TRANSACTION_EPOCH" \
+  --mode "$TRANSACTION_MODE"
 echo "deployment verified at $DEPLOY_SHA" >&2

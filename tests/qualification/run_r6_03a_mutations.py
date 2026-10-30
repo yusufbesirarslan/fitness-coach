@@ -39,7 +39,7 @@ MUTANTS = [
      "test_redis_restart_during_worker_update_rolls_back"),
     ("drain-bound", TX, "self.drain_max_seconds = drain_max_seconds",
      "self.drain_max_seconds = 3600", "test_drain_deadline_forces_bounded_retirement_without_rollback"),
-    ("pre-switch-route-drift", TX, "        if route.state != self.previous_route:\n            raise StepFailed(f\"route drifted to {route.state} before the switch\")",
+    ("pre-switch-route-drift", TX, "        if route.state != expected:\n            raise StepFailed(f\"route drifted to {route.state} before the switch\")",
      "        if False:\n            raise StepFailed(f\"route drifted to {route.state} before the switch\")", "test_pre_switch_route_drift_is_never_repaired_or_switched"),
     ("public-health-gate", TX, "        return status == 200\n",
      "        return True\n", "test_post_switch_proof_failure_restores_previous_route_then_removes_candidate"),
@@ -48,8 +48,12 @@ MUTANTS = [
     ("retirement-after-commit", TX, '        self._call(deadline, "worker update", self.ops.worker_up, "candidate",',
      '        self._retire()\n        self._call(deadline, "worker update", self.ops.worker_up, "candidate",',
      "test_old_backend_is_never_retired_before_the_commit_point"),
-    ("worker-immutable-rollback", TX, "            if pinned != self.previous_worker.image_id:\n",
-     "            if False:\n", "test_worker_rollback_tag_drift_keeps_candidate_and_reports_incomplete"),
+    ("worker-immutable-rollback", TX,
+     "            if pinned != self.previous_worker.image_id:\n"
+     "                self.log(\"worker rollback tag no longer names",
+     "            if False:\n"
+     "                self.log(\"worker rollback tag no longer names",
+     "test_worker_rollback_tag_drift_keeps_candidate_and_reports_incomplete"),
     ("exact-candidate-image-id", TX, "or current.image_id != self.candidate_image_id",
      "or False", "test_existing_same_revision_candidate_must_use_the_built_image"),
     ("retirement-route-reproof", TX,

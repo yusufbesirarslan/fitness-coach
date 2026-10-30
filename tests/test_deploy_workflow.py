@@ -308,6 +308,8 @@ def test_deploy_lifecycle_has_one_controller_entrypoint_and_named_inputs():
         "DEPLOY_DIR": "${{ secrets.DEPLOY_DIR }}",
         "PUBLIC_HEALTH_URL": "${{ vars.PUBLIC_HEALTH_URL }}",
         "AXISAI_WEB_SLOT_APPLE_FILES": "${{ vars.AXISAI_WEB_SLOT_APPLE_FILES || '0' }}",
+        # R6-R1-28: no default; empty is the normal transaction.
+        "R6_FORWARD_RECOVERY_AUTHORIZATION": "${{ vars.R6_FORWARD_RECOVERY_AUTHORIZATION }}",
     }
     assert _workflow_doc()["env"] == {
         "DEPLOY_SHA": "${{ github.event.workflow_run.head_sha }}",
