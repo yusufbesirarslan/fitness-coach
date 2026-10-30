@@ -38,7 +38,7 @@ promise. Errors follow existing `error` with `code`, safe `message`, `retryable`
 | --- | --- | --- |
 | 400 / 413 | SUBSCRIPTION_INVALID_REQUEST | Invalid shape/type/size |
 | 403 | SUBSCRIPTION_ELIGIBILITY_REQUIRED | Canonical adult Türkiye eligibility missing or requires review; no purchase context issued |
-| 403 | SUBSCRIPTION_PURCHASE_UNAVAILABLE | Production deployment whose D1 launch closure (`ai_launch.premium_ready`: runtime, finite policy, approved cohort, all five published disclosures) is not complete; checked before eligibility, no association created. Verify, restore, renewals and entitlement are unaffected; Sandbox-only deployments are exempt (no real payment) |
+| 403 | SUBSCRIPTION_PURCHASE_UNAVAILABLE | Production deployment whose D1 launch closure (`ai_launch.premium_ready`: runtime, finite policy, approved cohort, all five published disclosures naming the live heavy route; any unexpected error = not ready) is not complete; checked before eligibility, no association created. Verify, restore, renewals and entitlement are unaffected; Sandbox-only deployments are exempt (no real payment) |
 | 409 | SUBSCRIPTION_PURCHASE_CONTEXT_REQUIRED | Fetch context before buying |
 | 409 | SUBSCRIPTION_OWNERSHIP_CONFLICT | Association mismatch or owned elsewhere; no account details |
 | 409 | SUBSCRIPTION_ACCOUNT_UNAVAILABLE | Owner no longer exists |

@@ -11,7 +11,7 @@ from flask import g
 
 from app.extensions import db
 from app.models import AppleAccountAssociation, User
-from app.services import ai_launch, ai_consent_disclosures as disclosures, mobile_auth, subscriptions as s
+from app.services import ai, ai_launch, ai_consent_disclosures as disclosures, mobile_auth, subscriptions as s
 from app.services.ai_allowances import launch_policy
 from subscription_support import adult_account, evidence
 from test_d1_launch_integration import approved_cohort, contracts, source_policy  # noqa: F401
@@ -41,6 +41,8 @@ def launch_ready(app, contracts, approved_cohort, source_policy, monkeypatch):  
                       AI_ALLOWANCE_LEDGER_ENABLED=True, AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED=True)
     monkeypatch.setattr(ai_spend_guard, "ENABLED", True)
     monkeypatch.setattr(ai_spend_guard, "_get_redis", lambda: object())
+    # The synthetic contracts name ("openai", "synthetic"); the live route must match.
+    monkeypatch.setattr(ai, "heavy_primary_route", lambda: ("openai", "synthetic"))
 
 
 def test_shipping_source_refuses_new_purchase_without_association(client, production):
@@ -58,7 +60,8 @@ def test_full_launch_closure_issues_context(client, production, launch_ready):
     assert response.status_code == 200 and response.json["environment"] == "Production"
 
 
-@pytest.mark.parametrize("gap", ["policy", "cohort", "flag", "redis", "disclosure", "launch_version"])
+@pytest.mark.parametrize("gap", ["policy", "cohort", "flag", "enforcement", "spend_guard", "redis",
+                                 "disclosure", "launch_version", "route", "malformed_policy", "error"])
 def test_any_launch_gap_closes_new_purchases(app, client, production, launch_ready, monkeypatch, gap):
     from app.services import ai_spend_guard
     if gap == "policy":
@@ -67,8 +70,21 @@ def test_any_launch_gap_closes_new_purchases(app, client, production, launch_rea
         monkeypatch.setattr(ai_launch, "APPROVED_SERVICE_COHORT_VERSION", None)
     elif gap == "flag":
         app.config["AI_ALLOWANCE_LEDGER_ENABLED"] = False
+    elif gap == "enforcement":
+        app.config["AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED"] = False
+    elif gap == "spend_guard":
+        monkeypatch.setattr(ai_spend_guard, "ENABLED", False)
     elif gap == "redis":
         monkeypatch.setattr(ai_spend_guard, "_get_redis", lambda: None)
+    elif gap == "route":
+        # e.g. AI_MODEL_ROUTING switched, or Bedrock off -> OpenAI light route.
+        monkeypatch.setattr(ai, "heavy_primary_route", lambda: ("bedrock", "unpublished-model"))
+    elif gap == "malformed_policy":
+        monkeypatch.setattr(launch_policy, "APPROVED_POLICY", object())
+    elif gap == "error":
+        def broken():
+            raise RuntimeError("unexpected")
+        monkeypatch.setattr(ai, "heavy_primary_route", broken)
     elif gap == "disclosure":
         monkeypatch.setattr(disclosures, "PUBLISHED_TEXTS", {})
     else:
@@ -76,8 +92,17 @@ def test_any_launch_gap_closes_new_purchases(app, client, production, launch_rea
         versions.pop(next(iter(versions)))  # One of five benefits unpublished.
         monkeypatch.setattr(disclosures, "LAUNCH_VERSIONS", versions)
     response = client.get(PATH + "purchase-context", headers=HEADERS)
+    assert response.status_code == 403
     assert response.json["error"]["code"] == "SUBSCRIPTION_PURCHASE_UNAVAILABLE"
     assert db.session.get(AppleAccountAssociation, production) is None
+
+
+def test_readiness_is_decided_before_eligibility(client, production):
+    user = db.session.get(User, production)
+    user.user_metadata = {}
+    db.session.commit()
+    response = client.get(PATH + "purchase-context", headers=HEADERS)
+    assert response.json["error"]["code"] == "SUBSCRIPTION_PURCHASE_UNAVAILABLE"
 
 
 def test_probe_does_not_turn_the_response_into_an_allowance_refusal(app, client, production, launch_ready):

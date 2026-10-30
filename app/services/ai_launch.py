@@ -93,13 +93,25 @@ def premium_ready():
     """Whether a new Premium purchase may be offered: every native benefit it
     promises can open now. Account-independent; consent, cohort and allowance
     still decide each user's request. Any doubt is no (fail closed).
+
+    Each launch disclosure must name the live heavy route, the (recipient,
+    model) every native operation is admitted on; otherwise dispatch refuses
+    it (AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE) for every user.
     """
+    from app.services import ai
     refusal = g.get("allowance_refusal") if has_request_context() else None
     try:
         require_runtime()
+        route = ai.heavy_primary_route()
         for feature in NATIVE_ENDPOINTS.values():
-            _published(feature)
+            _, version = _published(feature)
+            if route not in consent.POLICIES[version].recipients:
+                return False
     except (AISpendLimitExceeded, PolicyError):
+        return False
+    except Exception as error:
+        current_app.logger.error(
+            "ai_launch event=premium_readiness_failed error_type=%s", type(error).__name__)
         return False
     finally:
         # A readiness probe is not a refused AI request: keep the response as is.
