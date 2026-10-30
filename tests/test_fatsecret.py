@@ -100,6 +100,9 @@ def test_token_fetched_then_cached(monkeypatch):
     assert _get_fatsecret_token() == "tok1"
     assert calls[0]["auth"] == ("cid", "csecret")
     assert calls[0]["data"]["grant_type"] == "client_credentials"
+    # Sabit "basic" kapsamı barkod aramasını (scope "barcode") dışlıyordu;
+    # kapsam gönderilmezse FatSecret istemcinin tüm yetkili kapsamlarını verir.
+    assert "scope" not in calls[0]["data"]
 
     assert _get_fatsecret_token() == "tok1"  # ikinci çağrı önbellekten
     assert len(calls) == 1

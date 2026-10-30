@@ -69,9 +69,14 @@ def _get_fatsecret_token() -> str:
         client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
         if not client_id or not client_secret:
             raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
+        # Kapsam (scope) bilerek GÖNDERİLMEZ: FatSecret o zaman istemcinin erişebildiği
+        # TÜM kapsamları verir. "basic" sabiti food.find_id_for_barcode'un istediği
+        # "barcode" kapsamını dışarıda bırakıyordu → hesap yetkili olsa bile her barkod
+        # araması sağlayıcı hatasıyla 503 dönüyordu. Yetkisiz kapsam istemek de token'ı
+        # tümden düşürebileceğinden, hesabın planını varsaymak yerine boş bırakılır.
         resp = _fs_post(
             FATSECRET_TOKEN_URL,
-            data={"grant_type": "client_credentials", "scope": "basic"},
+            data={"grant_type": "client_credentials"},
             auth=(client_id, client_secret),
             timeout=10,
         )
