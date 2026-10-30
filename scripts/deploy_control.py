@@ -1451,7 +1451,9 @@ def run_deploy(
     controller_deadline = monotonic() + CONTROLLER_BUDGET_SECONDS
     config = DeployConfig.from_environ(environ)
     if config.transaction_mode == "forward-recovery":
-        log("forward recovery authorized for this exact run attempt")
+        log("forward recovery authorized for this exact run attempt; delete "
+            f"{FORWARD_RECOVERY_AUTHORIZATION_ENV} now: any value left behind "
+            "refuses every later deployment")
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
     preflight(config, aws, utc_now)
     script = _load_host_script(repo_path)

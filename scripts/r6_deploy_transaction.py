@@ -994,6 +994,7 @@ class Transaction:
         self.previous_proven = not self.forward_recovery
         self.already_switched = False
         self.baseline_worker_revision = None
+        self.image_build_attempted = False
         # mutation ledger (what rollback must undo)
         self.release_prepared = False
         self.release_prepare_cleanup_unproven = False
@@ -1304,7 +1305,9 @@ class Transaction:
             return
         running = found[0].get("status") == "running"
         reason = "not running"
-        if running and found[0].get("health") in ("healthy", "starting"):
+        # Left by an EARLIER attempt, so it had its whole boot window: only a
+        # healthy container is reusable; "starting" by now is stuck.
+        if running and found[0].get("health") == "healthy":
             current = self._call(deadline, "stale candidate image", self.ops.container,
                                  found[0].get("id") or "")
             if (current is not None and current.image_id == self.candidate_image_id
@@ -1334,6 +1337,7 @@ class Transaction:
 
     def _build_and_prove_image(self):
         tag = f"{IMAGE_REPO}:{self.deploy_sha}"
+        self.image_build_attempted = True
         self._call(self._step_deadline("image_build"), "image build",
                    self.ops.build_image, self.deploy_sha)
         deadline = self._step_deadline("image_proof")
@@ -1751,8 +1755,10 @@ class Transaction:
                 or self.route_switch_attempted or self.worker_attempted):
             manual.insert(0, "FORWARD_RECOVERY_REFUSED: stopped before release-prepare, "
                              "candidate start, switch or worker change; route, slots, "
-                             "worker and schema unchanged (only the candidate image "
-                             "was built). Clear the stated reason before any new "
+                             "worker and schema unchanged"
+                             + (" (the candidate image was built)"
+                                if self.image_build_attempted else "")
+                             + ". Clear the stated reason before any new "
                              "authorization")
         else:
             manual.insert(0, "FORWARD_RECOVERY_INCOMPLETE: "

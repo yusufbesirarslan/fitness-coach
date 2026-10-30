@@ -762,3 +762,33 @@ def test_review2_previous_web_is_never_paired_with_the_candidate_worker():
     assert not calls(world, "route_switch", "green") and world.route == "blue"
     assert world.worker.revision == CAND
     assert any("never paired with it" in e for e in world.events)
+
+
+# ── independent-review regressions, round 3 ─────────────────────────────────
+
+def test_review3_candidate_stuck_starting_from_an_earlier_attempt_is_replaced():
+    world = green_dead_after_migration()
+    world.slots["blue"] = Box(id="blue-stuck".ljust(64, "0"), image_id=IMG[CAND],
+                              revision=CAND, app_revision=CAND, health="starting")
+    world.images[f"axisai-web:{CAND}"] = IMG[CAND]
+    code, _ = recover(world)
+    assert code == tx.EXIT_OK
+    assert calls(world, "slot_remove", "blue", CAND)
+    assert not world.slots["blue"].id.startswith("blue-stuck")
+    assert_recovered(world)
+
+
+def test_review3_refusal_before_the_build_does_not_claim_a_build():
+    world = green_dead_after_migration()
+    world.head = OTHER                                        # checkout drifted
+    code, _ = recover(world)
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE and "build_image" not in names(world)
+    refused = [e for e in world.events if "FORWARD_RECOVERY_REFUSED" in e]
+    assert refused and "image was built" not in refused[0]
+
+
+def test_review3_refusal_after_the_build_says_the_image_was_built():
+    world = kill_previous(r1_world())                         # schema not migrated
+    recover(world)
+    assert any("FORWARD_RECOVERY_REFUSED" in e and "the candidate image was built" in e
+               for e in world.events)
