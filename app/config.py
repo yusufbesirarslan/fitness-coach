@@ -40,8 +40,10 @@ FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
 # prod'da ayarlanmazsa OAuth bearer token'ını düz metin HTTP üzerinde sızdırıyordu.
 FATSECRET_BASE_URL = os.environ.get("FATSECRET_BASE_URL", "")
 FATSECRET_API_URL = f"{FATSECRET_BASE_URL}/rest/server.api"
-# Premier localization (FatSecret "Localization" guide) for native food
-# discovery only. Unset = provider default (US/English), requests unchanged.
+# Premier localization (FatSecret "Localization" guide) for every call that
+# issues or resolves a food identity (search, food.get, barcode; web + native).
+# Read at import: a change needs a container recreate. Unset = provider default
+# (US/English), requests unchanged.
 # Set ONLY after the account's entitlement for that region is verified: the
 # provider then returns its own localized foods and IDs, never our translation.
 FATSECRET_REGION = os.environ.get("FATSECRET_REGION", "")

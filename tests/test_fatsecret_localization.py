@@ -7,6 +7,8 @@ provider's own names and IDs pass through untranslated.
 import pytest
 
 from app import config
+from app.models import BarcodeFoodCache
+from app.extensions import db
 from app.services import fatsecret, mobile_food_discovery
 
 
@@ -101,3 +103,43 @@ def test_boot_refuses_malformed_or_language_only_settings(monkeypatch, region, l
     else:
         with pytest.raises(RuntimeError):
             config._enforce_fatsecret_localization()
+
+
+def test_servings_by_name_resolves_its_identity_in_the_same_region(client, auth_user, provider, monkeypatch):
+    from app.blueprints import food as food_bp
+    _localize(monkeypatch, "TR", "tr")
+    monkeypatch.setattr(food_bp, "_get_fatsecret_token", lambda: "token")
+    monkeypatch.setattr(fatsecret, "_is_specific_match", lambda query, name: True)
+    body = client.get("/api/food/servings-by-name?name=mercimek").get_json()
+    assert body["food_id"] == "4242"
+    searches = [p for p in provider if p["method"] == "foods.search"]
+    gets = [p for p in provider if p["method"].startswith("food.get")]
+    assert searches and gets
+    assert all(p.get("region") == "TR" and p.get("language") == "tr" for p in searches + gets)
+
+
+def test_menu_macro_candidates_stay_on_provider_default(app, provider, monkeypatch):
+    _localize(monkeypatch, "TR", "tr")
+    monkeypatch.setattr(fatsecret, "_is_specific_match", lambda query, name: True)
+    with app.app_context():
+        fatsecret._fs_relevant_candidates("lentil soup", "", "token")
+    assert provider and all("region" not in p for p in provider)
+
+
+def test_cached_barcode_id_that_misses_asks_the_barcode_again(app, monkeypatch):
+    with app.app_context():
+        db.session.add(BarcodeFoodCache(barcode="8690000000001", food_id="us-1",
+                                        food_name="Legacy", payload={}))
+        db.session.commit()
+        asked = []
+
+        def servings(food_id):
+            asked.append(food_id)
+            if food_id == "us-1":
+                raise fatsecret.FoodProviderUnavailable
+            return {"food_id": food_id}
+
+        monkeypatch.setattr(mobile_food_discovery, "servings", servings)
+        monkeypatch.setattr(fatsecret, "_food_find_id_by_barcode_raw", lambda code, strict: "tr-9")
+        assert mobile_food_discovery.barcode_lookup("8690000000001") == {"food_id": "tr-9"}
+        assert asked == ["us-1", "tr-9"]

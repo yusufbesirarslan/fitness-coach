@@ -190,9 +190,10 @@ class FoodProviderUnavailable(Exception):
 def _localization():
     """Configured Premier region/language for every call that issues or
     resolves a provider food identity (search, food.get, barcode), so an ID
-    found by one path is always re-read in the same region. The AI macro
-    estimate (`_fs_search_foods`) searches English-normalized text, keeps no
-    identity and stays on the provider default. Unset: no parameters."""
+    found by one path is always re-read in the same region. `_fs_search_foods`
+    joins only when its result becomes an identity (`servings-by-name`); the
+    menu/social/MCP macro estimates keep no identity and stay on the provider
+    default. Unset: no parameters."""
     if not FATSECRET_REGION:
         return {}
     params = {"region": FATSECRET_REGION}
@@ -704,7 +705,7 @@ def _is_per_serving(serving_text):
     return any(p in s for p in serving_patterns)
 
 
-def _fs_search_foods(query, token):
+def _fs_search_foods(query, token, *, localize=False):
     """Tek bir FatSecret foods.search çağrısı → ham 'food' dict listesi (veya []).
     Ağ/format hatasında sessizce [] döner (çağıran karar verir)."""
     try:
@@ -713,6 +714,7 @@ def _fs_search_foods(query, token):
             "search_expression": query,
             "format": "json",
             "max_results": 5,
+            **(_localization() if localize else {}),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = resp.json()
         if "error" in data:
@@ -726,7 +728,7 @@ def _fs_search_foods(query, token):
         return []
 
 
-def _fs_relevant_candidates(name, english, token, category=None):
+def _fs_relevant_candidates(name, english, token, category=None, *, localize=False):
     """FatSecret aday besinlerini KATI alaka kapısından geçir + en spesifik eşleşmeyi
     öne al — menü makro hattı için ham 'food' dict'leri döndürür.
 
@@ -767,11 +769,16 @@ def _fs_relevant_candidates(name, english, token, category=None):
         relevant.sort(key=lambda f: _token_match_count(query, f.get("food_name", "")), reverse=True)
         return relevant
 
-    relevant = _filter_sorted(name, _fs_search_foods(name, token))
+    def search(query):
+        # Unlocalized calls keep their exact pre-localization shape.
+        return (_fs_search_foods(query, token, localize=True) if localize
+                else _fs_search_foods(query, token))
+
+    relevant = _filter_sorted(name, search(name))
     if relevant:
         return relevant
     if english and english.lower() != name.lower():
-        relevant = _filter_sorted(english, _fs_search_foods(english, token))
+        relevant = _filter_sorted(english, search(english))
         if relevant:
             return relevant
     return []

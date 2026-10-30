@@ -116,12 +116,32 @@ running service by itself.
 
 ## Localization (PRELAUNCH-02)
 
-`FATSECRET_REGION` / `FATSECRET_LANGUAGE` (unset by default) add the Premier
-`region`/`language` parameters to every call that issues or resolves a food
-identity: `foods.search` (web + native), `food.get`, `food.find_id_for_barcode`.
-The AI macro estimate (`_fs_search_foods`) is excluded: it searches
-English-normalized text and keeps no identity. Boot refuses a malformed code or a
-language without a region. Proxy and nginx need no change (query string passes
-through). Enable only after the token grant for this account lists the required
-scopes and a localized TR search/barcode answer is observed; until then Turkish
-search stays on the English database, unchanged.
+`FATSECRET_REGION` / `FATSECRET_LANGUAGE` (unset by default; read at import, so
+a change needs a container recreate) add the Premier `region`/`language`
+parameters to every call that issues or resolves a food identity:
+`foods.search` (web, coach tool and native), `/api/food/servings-by-name`,
+`food.get`, `food.find_id_for_barcode` (raw and legacy). An ID found by one path
+is therefore re-read in the same region by the shared provider snapshot
+(native and web logging). Excluded on purpose: the menu, social and MCP macro
+estimates (`_fs_search_foods` without `localize`), which keep no identity.
+Boot refuses a malformed code or a language without a region. Proxy and nginx
+need no change (query string passes through).
+
+Enablement gates — all before setting the variables in any environment:
+
+1. Entitlement: the token grant for this account lists the Premier scopes
+   (prepared read-only probe) AND a localized TR `foods.search` and barcode
+   answer is observed. A granted scope alone does not prove TR access.
+2. Web description text: web/coach search parses `food_description`
+   (`Calories/Fat/Carbs/Protein`). If TR descriptions are Turkish, those rows are
+   dropped and web search falls back to the static table / LLM estimate. Capture
+   one TR description sample first; native discovery (structured servings) is
+   unaffected.
+3. Stored identities: `MealLog` rows keep their own nutrition copy and are
+   safe. Native barcode re-asks the barcode when a cached ID misses; the legacy
+   web barcode path keeps serving its stored payload, and `CustomMealItem`
+   rows staged before the switch are re-resolved at log time. Plan the switch
+   with an operator decision on `BarcodeFoodCache` and staged meals, and a
+   rollback (unset + recreate) that reverses the same way.
+
+Until all three hold, Turkish search stays on the English database, unchanged.
