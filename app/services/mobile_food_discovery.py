@@ -130,7 +130,14 @@ def barcode_lookup(code):
     if cached and cached.food_id:
         # Legacy cache payloads may contain synthetic serving identities and
         # estimated mass. Only the provider food ID crosses the native boundary.
-        return servings(_identity(cached.food_id))
+        # An ID cached under another provider region may not resolve here; the
+        # barcode itself is then asked again rather than reported missing.
+        try:
+            food = servings(_identity(cached.food_id))
+        except fatsecret.FoodProviderUnavailable:
+            food = None  # An outage fails the barcode lookup below as well.
+        if food:
+            return food
     # Resolve the food identity first, then use the same serving pipeline.
     with blocking_concurrency_slot():
         food_id = fatsecret._food_find_id_by_barcode_raw(normalized, strict=True)

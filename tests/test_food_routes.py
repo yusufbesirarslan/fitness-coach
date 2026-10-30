@@ -173,7 +173,7 @@ def test_servings_by_name_falls_back_to_english_search(client, auth_user, monkey
     # rota ham/İngilizce terimleri (name, english) o katmana geçirir.
     monkeypatch.setattr(food_bp, "_get_fatsecret_token", lambda: "tok")
 
-    def fake_relevant(name, english, token):
+    def fake_relevant(name, english, token, **_):
         # Ham Türkçe sorgu ('muz') alaka-kapısından geçmez; İngilizce terim eşleşir.
         if english == "banana":
             return [{"food_id": "42", "food_name": "Banana"}]
@@ -194,7 +194,7 @@ def test_servings_by_name_no_relevant_match_returns_empty(client, auth_user, mon
     # rota boş döner ve GLOBAL food_id önbelleğine yanlış eşleşme YAZILMAZ.
     monkeypatch.setattr(food_bp, "_get_fatsecret_token", lambda: "tok")
     monkeypatch.setattr(food_bp, "_fs_relevant_candidates",
-                        lambda name, english, token: [])
+                        lambda name, english, token, **_: [])
     body = client.get("/api/food/servings-by-name?name=muz").get_json()
     assert body == {"servings": [], "food_id": ""}
     assert "muz" not in foodcache._food_id_cache

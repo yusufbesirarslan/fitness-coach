@@ -260,7 +260,7 @@ def food_servings_by_name():
     try:
         with blocking_concurrency_slot():
             token = _get_fatsecret_token()
-            candidates = _fs_relevant_candidates(name, english, token)
+            candidates = _fs_relevant_candidates(name, english, token, localize=True)
             if candidates:
                 fid = candidates[0].get("food_id", "")
                 current_app.logger.info("servings-by-name: relevant food_id=%s for '%s'", fid, name)

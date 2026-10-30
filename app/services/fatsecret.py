@@ -10,7 +10,7 @@ from flask import current_app
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
+from app.config import FATSECRET_API_URL, FATSECRET_LANGUAGE, FATSECRET_REGION, FATSECRET_TOKEN_URL
 from app.services.ai_nutrition import _dish_types, _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _primary_dish_type, _token_match_count
 from app.services.foodcache import _cache_food_id, _cache_macros
 
@@ -187,6 +187,21 @@ class FoodProviderUnavailable(Exception):
     """Sanitized native discovery failure; never contains upstream detail."""
 
 
+def _localization():
+    """Configured Premier region/language for every call that issues or
+    resolves a provider food identity (search, food.get, barcode), so an ID
+    found by one path is always re-read in the same region. `_fs_search_foods`
+    joins only when its result becomes an identity (`servings-by-name`); the
+    menu/social/MCP macro estimates keep no identity and stay on the provider
+    default. Unset: no parameters."""
+    if not FATSECRET_REGION:
+        return {}
+    params = {"region": FATSECRET_REGION}
+    if FATSECRET_LANGUAGE:
+        params["language"] = FATSECRET_LANGUAGE
+    return params
+
+
 def _native_payload(response):
     if not 200 <= response.status_code < 300:
         raise FoodProviderUnavailable from None
@@ -215,6 +230,7 @@ def _food_get_raw(food_id, *, strict=False):
                 "method": method,
                 "food_id": food_id,
                 "format": "json",
+                **_localization(),
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             data = _native_payload(resp) if strict else resp.json()
         except Exception as error:
@@ -314,6 +330,7 @@ def _food_find_id_by_barcode_raw(code, *, strict=False):
             "method": "food.find_id_for_barcode",
             "barcode": gtin,
             "format": "json",
+            **_localization(),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = _native_payload(response) if strict else response.json()
         if strict and "error" in data:
@@ -356,7 +373,7 @@ def _food_find_by_barcode(code):
     try:
         resp = _fs_get(FATSECRET_API_URL, params={
             "method": "food.find_id_for_barcode",
-            "barcode": gtin, "format": "json",
+            "barcode": gtin, "format": "json", **_localization(),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = resp.json()
     except Exception as e:
@@ -373,6 +390,7 @@ def _food_find_by_barcode(code):
         for method in ("food.get.v4", "food.get.v2", "food.get"):
             gr = _fs_get(FATSECRET_API_URL, params={
                 "method": method, "food_id": fid, "format": "json",
+                **_localization(),
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             gdata = gr.json()
             if "error" in gdata:
@@ -404,6 +422,7 @@ def _food_search_raw(q, *, strict=False):
             "search_expression": q,
             "format": "json",
             "max_results": 8,
+            **_localization(),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = _native_payload(resp) if strict else resp.json()
         if strict and ("error" in data or not isinstance(data.get("foods"), dict)):
@@ -686,7 +705,7 @@ def _is_per_serving(serving_text):
     return any(p in s for p in serving_patterns)
 
 
-def _fs_search_foods(query, token):
+def _fs_search_foods(query, token, *, localize=False):
     """Tek bir FatSecret foods.search çağrısı → ham 'food' dict listesi (veya []).
     Ağ/format hatasında sessizce [] döner (çağıran karar verir)."""
     try:
@@ -695,6 +714,7 @@ def _fs_search_foods(query, token):
             "search_expression": query,
             "format": "json",
             "max_results": 5,
+            **(_localization() if localize else {}),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = resp.json()
         if "error" in data:
@@ -708,7 +728,7 @@ def _fs_search_foods(query, token):
         return []
 
 
-def _fs_relevant_candidates(name, english, token, category=None):
+def _fs_relevant_candidates(name, english, token, category=None, *, localize=False):
     """FatSecret aday besinlerini KATI alaka kapısından geçir + en spesifik eşleşmeyi
     öne al — menü makro hattı için ham 'food' dict'leri döndürür.
 
@@ -749,11 +769,16 @@ def _fs_relevant_candidates(name, english, token, category=None):
         relevant.sort(key=lambda f: _token_match_count(query, f.get("food_name", "")), reverse=True)
         return relevant
 
-    relevant = _filter_sorted(name, _fs_search_foods(name, token))
+    def search(query):
+        # Unlocalized calls keep their exact pre-localization shape.
+        return (_fs_search_foods(query, token, localize=True) if localize
+                else _fs_search_foods(query, token))
+
+    relevant = _filter_sorted(name, search(name))
     if relevant:
         return relevant
     if english and english.lower() != name.lower():
-        relevant = _filter_sorted(english, _fs_search_foods(english, token))
+        relevant = _filter_sorted(english, search(english))
         if relevant:
             return relevant
     return []
