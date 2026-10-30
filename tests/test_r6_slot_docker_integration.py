@@ -501,3 +501,32 @@ print('immutable-pass-proven')
     assert sh(*command).stdout.strip().splitlines()[-1] == 'APPLE_RELEASE_PASS=READY'
     command[-3] = 'a' * 40
     assert sh(*command, check=False).returncode != 0
+
+
+def test_apple_orphan_inspection_uses_the_real_docker_top_contract(stack, tmp_path):
+    # Run 40996042888: dockerd refuses `docker top` ps output without a PID column.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import r6_deploy_transaction as tx
+    scheduler = tx._load_sibling("apple_release_scheduler")
+    ids = sh("docker", "ps", "-q", "--no-trunc").stdout.split()
+    assert ids
+    old = sh("docker", "top", ids[0], "-eo", "args", check=False)
+    assert old.returncode != 0 and "PID field" in old.stderr
+    assert sh("docker", "top", ids[0], "-eo", "pid,args").stdout.split()[:2] == ["PID", "COMMAND"]
+    deploy = tmp_path / "deploy"
+    (deploy / "context").mkdir(parents=True)
+    ops = tx.HostOps(deploy_dir=deploy, context_dir=deploy / "context", work_dir=tmp_path,
+                     main_project=MAIN, deploy_sha=stack["revision"], previous_commit=OTHER_REV,
+                     python=sys.executable, environ={"PATH": os.environ["PATH"]},
+                     control_plane_files=())
+    scheduler.no_surviving_passes()
+    assert ops.control_plane_mismatches(30) == []
+    orphan = sh("docker", "run", "-d", "--rm", "--network", "none", "--entrypoint", "python",
+                stack["image"], "-c", "import time; time.sleep(300)", scheduler.MARKER).stdout.strip()
+    try:
+        with pytest.raises(scheduler.Refused, match="PREVIOUS_RECONCILIATION_STILL_RUNNING"):
+            scheduler.no_surviving_passes()
+        assert ops.control_plane_mismatches(30) == [
+            "Apple scheduler ownership/source/execution unproven (PREVIOUS_RECONCILIATION_STILL_RUNNING)"]
+    finally:
+        sh("docker", "rm", "-f", orphan, check=False)

@@ -65,6 +65,10 @@ class World:
     baked: dict = field(default_factory=dict)          # image id -> revision
     head: str = PREV
     db_revision: str = "old-head"
+    # R6-R1-28: the live Alembic heads `schema-heads` reports (None = unknown)
+    # and the candidate heads release-prepare moves them to.
+    db_heads: frozenset | None = frozenset({"p1"})
+    candidate_heads: frozenset = frozenset({"c1"})
     connections: dict = field(default_factory=dict)    # backend -> list of counts
     mem_ok: bool = True
     now: float = 1000.0
@@ -225,7 +229,9 @@ class FakeOps:
 
     def _box(self, container_id):
         for box in [self.w.legacy, self.w.worker, *self.w.slots.values()]:
-            if box is not None and box.id == container_id:
+            # docker accepts the 12-char short ID the slot runtime reports.
+            if box is not None and (box.id == container_id or (
+                    len(container_id) == 12 and box.id.startswith(container_id))):
                 return box
         return None
 
@@ -283,8 +289,8 @@ class FakeOps:
     def slot_inspect(self, slot, timeout):
         self._rec("slot_inspect", slot, timeout=timeout)
         box = self.w.slots.get(slot)
-        return [] if box is None else [{"app_revision": box.app_revision,
-                                        "status": box.status}]
+        return [] if box is None else [{"id": box.id[:12], "app_revision": box.app_revision,
+                                        "status": box.status, "health": box.health}]
 
     def slot_remove(self, slot, revision, timeout):
         self._rec("slot_remove", slot, revision, timeout=timeout)
@@ -322,6 +328,7 @@ class FakeOps:
         self._rec("release_prepare", revision, timeout=timeout)
         self._fail("release_prepare")
         self.w.db_revision = "new-head"
+        self.w.db_heads = self.w.candidate_heads
 
     def worker_up(self, kind, image_tag, revision, timeout):
         self._rec("worker_up", kind, image_tag, revision, timeout=timeout)
@@ -383,6 +390,13 @@ class FakeOps:
     def source_migration_revisions(self, which, timeout):
         self._rec("source_migration_revisions", which, timeout=timeout)
         return frozenset(self.w.source_revisions.get(which, ()))
+
+    def schema_heads(self, image_id, revision, timeout):
+        self._rec("schema_heads", image_id, timeout=timeout)
+        self._fail("schema_heads")
+        if self.w.db_heads is None:
+            return {"result": "ok", "has_table": False, "current": []}
+        return {"result": "ok", "has_table": True, "current": sorted(self.w.db_heads)}
 
     def completion_floor(self, image_id, revision, action, timeout):
         self._rec("completion_floor", action, image_id, timeout=timeout)
@@ -1378,7 +1392,8 @@ GOOD_ARGS = ["run", "--deploy-sha", CAND, "--previous-commit", PREV,
              "--deploy-dir", "/home/ubuntu/fitness-coach",
              "--context", "/home/ubuntu/fitness-coach/.axisai-build-context.x",
              "--work-dir", "/home/ubuntu/fitness-coach/.axisai-r6-work.x",
-             "--public-health-url", URL, "--transaction-epoch", "1000"]
+             "--public-health-url", URL, "--transaction-epoch", "1000",
+             "--mode", "normal"]
 
 
 @pytest.mark.parametrize("change", [
@@ -1387,6 +1402,8 @@ GOOD_ARGS = ["run", "--deploy-sha", CAND, "--previous-commit", PREV,
     {"--public-health-url": "http://fitx.example/health"},
     {"--public-health-url": "https://user:pw@fitx.example/health"},
     {"--transaction-epoch": "-5"}, {"--deploy-dir": "/home/ubuntu/axisai-web-blue"},
+    {"--mode": "skip-health-check"}, {"--mode": ""}, {"--mode": "Forward-Recovery"},
+    {"--mode": "forward-recovery", "--previous-commit": CAND},
 ])
 def test_cli_rejects_invalid_invocations_before_anything(change):
     args = list(GOOD_ARGS)
@@ -1556,9 +1573,26 @@ def _apple_scheduler():
     return tx._load_sibling('apple_release_scheduler')
 
 
+# dockerd (moby daemon/top_unix.go parsePSOutput) refuses any `docker top` ps
+# output without a PID title: "Couldn't find PID field in ps output".
+PS_TITLES = {'pid': 'PID', 'args': 'COMMAND', 'comm': 'COMMAND', 'cmd': 'CMD'}
+
+
+def moby_top(ps_args, command):
+    assert len(ps_args) == 2 and ps_args[0] == '-eo', ps_args
+    titles = [PS_TITLES.get(name, name.upper()) for name in ps_args[1].split(',')]
+    if 'PID' not in titles:
+        return 1, '', "Error response from daemon: Couldn't find PID field in ps output"
+    row = {'PID': '4242', 'COMMAND': command, 'CMD': command}
+    return 0, ' '.join(titles) + '\n' + ' '.join(row.get(t, '-') for t in titles), ''
+
+
 class AppleRunnerWorld:
     cid = 'd' * 64
-    def __init__(self):
+    def __init__(self, scheduler=None):
+        self.scheduler = scheduler or _apple_scheduler()
+        self.extra = []
+        self.top_error = None
         self.calls = []
         self.route = 'op=status state=blue backend=127.0.0.1:5001 result=ok'
         self.revision = CAND
@@ -1570,11 +1604,15 @@ class AppleRunnerWorld:
         self.wrong_source = False
     def __call__(self, argv, timeout=10, pass_fds=()):
         self.calls.append((argv, timeout, pass_fds))
-        scheduler = _apple_scheduler()
         if argv[:3] == ['docker', 'ps', '-q']:
-            return self.cid
+            return self.cid if '--filter' in argv else '\n'.join(self.extra + [self.cid])
         if argv[:2] == ['docker', 'top']:
-            return 'COMMAND\npython axisai-apple-pass' if self.orphan else 'COMMAND\ngunicorn starter:app'
+            assert argv[2] in self.extra + [self.cid]
+            orphan = self.orphan and argv[2] == self.cid
+            rc, out, _err = moby_top(argv[3:], 'python axisai-apple-pass' if orphan else 'gunicorn starter:app')
+            if rc or self.top_error:
+                raise self.scheduler.Refused('COMMAND_FAILED')  # scheduler.command() semantics
+            return out
         if argv[0].endswith('axisai-switch-web-slot'):
             return self.route
         if argv[:2] == ['docker', 'inspect']:
@@ -1594,6 +1632,13 @@ class AppleRunnerWorld:
                 return 'APPLE_RELEASE_HEALTH={"Sandbox":{"relevant_rows":1,"backlog":0,"due":0,"leased":0,"oldest_verification_age_seconds":0}}\nAPPLE_RELEASE_PASS=OK'
             return self.enabled
         raise AssertionError(argv)
+
+    def invoke(self, argv, timeout, env):
+        """HostOps run shape over the same world: failures are exit codes."""
+        try:
+            return 0, self(argv), ''
+        except self.scheduler.Refused:
+            return 1, '', self.top_error or "Couldn't find PID field in ps output"
 
 
 def test_apple_runner_uses_only_canonical_active_revision_and_shared_lock_fds(capsys):
@@ -1639,13 +1684,105 @@ def test_apple_runner_crash_then_retry_preserves_lease_recovery_boundary():
 
 def test_apple_orphan_prevents_release_schema_preparation_even_when_transport_off(tmp_path):
     world = AppleRunnerWorld(); world.orphan = True
-    def invoke(argv, timeout, env):
+    ops = host(tmp_path, world.invoke, control_plane_files=())
+    assert ops.control_plane_mismatches(30) == [
+        'Apple scheduler ownership/source/execution unproven (PREVIOUS_RECONCILIATION_STILL_RUNNING)']
+
+
+def _transport_off_inspection(tmp_path, world, scheduler=None):
+    ops = host(tmp_path, world.invoke, control_plane_files=())
+    if scheduler is not None:
+        ops_load = tx._load_sibling
+        tx._load_sibling = lambda name: scheduler if name == 'apple_release_scheduler' else ops_load(name)
         try:
-            return 0, world(argv), ''
-        except AssertionError:
-            return 0, '', ''
-    ops = host(tmp_path, invoke, control_plane_files=())
-    assert ops.control_plane_mismatches(30) == ['Apple scheduler ownership/source/execution unproven']
+            return ops.control_plane_mismatches(30)
+        finally:
+            tx._load_sibling = ops_load
+    return ops.control_plane_mismatches(30)
+
+
+def _args_only_scheduler():
+    """The scheduler exactly as released in 5ca8f0eb (run 40996042888)."""
+    path = ROOT / 'scripts/apple_release_scheduler.py'
+    source = path.read_text(encoding='utf-8')
+    fixed = "['docker', 'top', cid, '-eo', 'pid,args']"
+    assert source.count(fixed) == 1
+    module = type(sys)('_r6_sibling_apple_release_scheduler_args_only')
+    module.__file__ = str(path)
+    exec(compile(source.replace(fixed, "['docker', 'top', cid, '-eo', 'args']"), str(path), 'exec'),
+         module.__dict__)
+    return module
+
+
+def test_moby_top_fake_enforces_the_daemon_pid_column_contract():
+    assert moby_top(['-eo', 'args'], 'gunicorn starter:app')[0] == 1
+    assert moby_top(['-eo', 'comm'], 'gunicorn')[0] == 1
+    rc, out, _ = moby_top(['-eo', 'pid,args'], 'python axisai-apple-pass')
+    assert rc == 0 and out.splitlines() == ['PID COMMAND', '4242 python axisai-apple-pass']
+
+
+def test_pre_fix_args_only_inspection_reproduces_run_40996042888(tmp_path):
+    old = _args_only_scheduler()
+    with pytest.raises(old.Refused, match='COMMAND_FAILED'):
+        old.no_surviving_passes(AppleRunnerWorld(old))
+    with pytest.raises(old.Refused, match='COMMAND_FAILED'):  # every installed timer pass
+        old.execute({'deploy_dir': '/srv/app', 'limit': 25}, AppleRunnerWorld(old))
+    assert _transport_off_inspection(tmp_path, AppleRunnerWorld(old), old) == [
+        'Apple scheduler ownership/source/execution unproven (SCHEDULER_INSPECTION_FAILED)']
+
+
+def test_pid_inclusive_inspection_is_shared_by_release_transaction_and_scheduler(tmp_path):
+    scheduler = _apple_scheduler()
+    expected = [['docker', 'top', cid, '-eo', 'pid,args'] for cid in ('a' * 64, 'b' * 64, 'd' * 64)]
+    release = AppleRunnerWorld(); release.extra = ['a' * 64, 'b' * 64]
+    assert _transport_off_inspection(tmp_path, release) == []
+    assert [argv for argv, _, _ in release.calls if argv[:2] == ['docker', 'top']] == expected
+    timer = AppleRunnerWorld(scheduler); timer.extra = ['a' * 64, 'b' * 64]
+    assert scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, timer) == 'OK'
+    assert [argv for argv, _, _ in timer.calls if argv[:2] == ['docker', 'top']] == expected
+
+
+def test_apple_orphan_in_any_container_still_refuses_both_paths(tmp_path):
+    scheduler = _apple_scheduler()
+    timer = AppleRunnerWorld(scheduler); timer.extra = ['a' * 64]; timer.orphan = True
+    with pytest.raises(scheduler.Refused, match='PREVIOUS_RECONCILIATION_STILL_RUNNING'):
+        scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, timer)
+    assert not any(argv[:2] == ['docker', 'exec'] for argv, _, _ in timer.calls)
+    release = AppleRunnerWorld(); release.extra = ['a' * 64]; release.orphan = True
+    assert _transport_off_inspection(tmp_path, release) == [
+        'Apple scheduler ownership/source/execution unproven (PREVIOUS_RECONCILIATION_STILL_RUNNING)']
+
+
+@pytest.mark.parametrize('attribute,value,code', [
+    ('top_error', 'Error response from daemon: SECRET=hunter2 container exited', 'SCHEDULER_INSPECTION_FAILED'),
+    ('extra', ['not-a-container-id'], 'AMBIGUOUS_CONTAINER')])
+def test_docker_inspection_failures_stay_fail_closed_without_leaking_output(tmp_path, attribute, value, code):
+    scheduler = _apple_scheduler()
+    timer = AppleRunnerWorld(scheduler); setattr(timer, attribute, value)
+    with pytest.raises(scheduler.Refused):
+        scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, timer)
+    assert not any(argv[:2] == ['docker', 'exec'] for argv, _, _ in timer.calls)
+    release = AppleRunnerWorld(); setattr(release, attribute, value)
+    problems = _transport_off_inspection(tmp_path, release)
+    assert problems == [f'Apple scheduler ownership/source/execution unproven ({code})']
+    assert 'SECRET' not in ''.join(problems)
+
+
+def test_docker_ps_failure_and_unreadable_scheduler_state_stay_fail_closed(tmp_path):
+    ops = host(tmp_path, lambda argv, timeout, env: (1, '', 'SECRET=1'), control_plane_files=())
+    assert ops.control_plane_mismatches(30) == [
+        'Apple scheduler ownership/source/execution unproven (SCHEDULER_INSPECTION_FAILED)']
+    world = AppleRunnerWorld()
+    ops = host(tmp_path, world.invoke, control_plane_files=())
+    ops.environ = {**ops.environ, 'AXISAI_WEB_SLOT_APPLE_FILES': '1'}  # config absent on this host
+    assert ops.control_plane_mismatches(30) == [
+        'Apple scheduler ownership/source/execution unproven (FileNotFoundError)']
+
+
+def test_release_inspection_is_read_only_with_transport_off(tmp_path):
+    world = AppleRunnerWorld(); world.extra = ['a' * 64]
+    assert _transport_off_inspection(tmp_path, world) == []
+    assert {tuple(argv[:2]) for argv, _, _ in world.calls} == {('docker', 'ps'), ('docker', 'top')}
 
 
 @pytest.mark.parametrize('change', [{'protocol': 2}, {'limit': 24}, {'limit': 201}, {'limit': True},
