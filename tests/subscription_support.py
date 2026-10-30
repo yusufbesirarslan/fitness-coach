@@ -53,3 +53,13 @@ def adapter(token=None):
     a.verifier = NS(verify_and_decode_signed_transaction=lambda _: tx,
                     verify_and_decode_renewal_info=lambda _: renewal)
     return a, token, tx, renewal, item, response
+
+
+def premium_benefits_ready(monkeypatch, ready=True):
+    """Stand in for the D1 launch closure a Production purchase context requires.
+
+    Purchase suites that test other authorities open it explicitly; the real
+    readiness rule has its own suite (tests/test_premium_purchase_readiness.py).
+    """
+    from app.services import ai_launch
+    monkeypatch.setattr(ai_launch, "premium_ready", lambda: ready)

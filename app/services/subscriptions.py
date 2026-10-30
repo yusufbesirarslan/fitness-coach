@@ -74,6 +74,14 @@ def purchase_context(user_id):
     try:
         # Config must be complete before a client can start purchasing.
         adapter = AppleAdapter(current_app.config)
+        # Founder decision: no new purchase while the promised AI benefits are
+        # closed. Checked before any account row is touched. A Sandbox-only
+        # deployment takes no real payment and keeps its qualification path.
+        # Restore, verify, renewals and entitlement are never gated here.
+        if adapter.environment != "Sandbox":
+            from app.services import ai_launch
+            if not ai_launch.premium_ready():
+                raise SubscriptionError("SUBSCRIPTION_PURCHASE_UNAVAILABLE", 403)
         if not _purchase_eligible(_owner(user_id), datetime.now(timezone.utc)):
             raise SubscriptionError("SUBSCRIPTION_ELIGIBILITY_REQUIRED", 403)
         token = _association(user_id).token

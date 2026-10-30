@@ -6,12 +6,14 @@ texts, finite policy or operational guards, the legacy closure remains closed.
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from flask import current_app
+from flask import current_app, g, has_request_context
 from sqlalchemy import select
 
 from app.services import ai_consent as consent, account_eligibility
 from app.services.ai_consent_disclosures import localized_texts
 from app.services.ai_allowances import execution, launch_policy
+from app.services.ai_allowances.policy import PolicyError
+from app.services.ai_spend_guard import AISpendLimitExceeded
 
 
 NATIVE_ENDPOINTS = {
@@ -57,7 +59,8 @@ def require_owner_within(conn, owner):
     require_cohort(SimpleNamespace(**row))
 
 
-def require_selected(state, feature):
+def _published(feature):
+    """The exact launch disclosure a feature opens under, or a refusal."""
     from app.services.ai_consent_disclosures import LAUNCH_VERSIONS
     purpose, categories = consent.BINDINGS[feature]
     version = LAUNCH_VERSIONS.get(purpose)
@@ -68,6 +71,11 @@ def require_selected(state, feature):
                 and policy.external_scopes != ("public_https_menu_source",))
             or (feature != "menu_extract" and policy.external_scopes)):
         raise consent.ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE")
+    return purpose, version
+
+
+def require_selected(state, feature):
+    purpose, version = _published(feature)
     grants = state.get("grants")
     record = grants.get(purpose) if isinstance(grants, dict) else None
     if not consent._record_valid(purpose, record) or record["version"] != version:
@@ -79,6 +87,25 @@ def admit_endpoint(owner, feature):
     with consent._transaction(owner) as conn:
         require_owner_within(conn, owner)
         require_selected(consent._state(conn, owner), feature)
+
+
+def premium_ready():
+    """Whether a new Premium purchase may be offered: every native benefit it
+    promises can open now. Account-independent; consent, cohort and allowance
+    still decide each user's request. Any doubt is no (fail closed).
+    """
+    refusal = g.get("allowance_refusal") if has_request_context() else None
+    try:
+        require_runtime()
+        for feature in NATIVE_ENDPOINTS.values():
+            _published(feature)
+    except (AISpendLimitExceeded, PolicyError):
+        return False
+    finally:
+        # A readiness probe is not a refused AI request: keep the response as is.
+        if has_request_context():
+            g.allowance_refusal = refusal
+    return True
 
 
 def check_operation_within(conn, state, authority):

@@ -8,7 +8,7 @@ from app.extensions import db
 from app.models import User, AppleAccountAssociation, AppleSubscription
 from app.services import account_eligibility as policy, mobile_auth, subscriptions as s
 from app.services.apple_subscriptions import SubscriptionError
-from subscription_support import adult_account, evidence
+from subscription_support import adult_account, evidence, premium_benefits_ready
 
 PATH = "/api/v1/subscription/"
 HEADERS = {"Authorization": "Bearer fixture"}
@@ -18,6 +18,7 @@ HEADERS = {"Authorization": "Bearer fixture"}
 def owner(app, make_user, monkeypatch):
     app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_SUBSCRIPTION_ENVIRONMENT="Production",
                       APPLE_SANDBOX_FALLBACK_ENABLED=True, ACCOUNT_ELIGIBILITY_ENABLED=False)
+    premium_benefits_ready(monkeypatch)
     user = adult_account(make_user("purchase-adult"))
     db.session.commit()
     uid = user.id
