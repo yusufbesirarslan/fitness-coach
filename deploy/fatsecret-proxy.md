@@ -113,3 +113,15 @@ systemctl show nginx -p Restart -p RestartUSec -p StartLimitIntervalUSec -p Star
 
 Removing the drop-in does not change nginx site configuration or restart the
 running service by itself.
+
+## Localization (PRELAUNCH-02)
+
+`FATSECRET_REGION` / `FATSECRET_LANGUAGE` (unset by default) add the Premier
+`region`/`language` parameters to every call that issues or resolves a food
+identity: `foods.search` (web + native), `food.get`, `food.find_id_for_barcode`.
+The AI macro estimate (`_fs_search_foods`) is excluded: it searches
+English-normalized text and keeps no identity. Boot refuses a malformed code or a
+language without a region. Proxy and nginx need no change (query string passes
+through). Enable only after the token grant for this account lists the required
+scopes and a localized TR search/barcode answer is observed; until then Turkish
+search stays on the English database, unchanged.

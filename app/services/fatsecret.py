@@ -10,7 +10,7 @@ from flask import current_app
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
+from app.config import FATSECRET_API_URL, FATSECRET_LANGUAGE, FATSECRET_REGION, FATSECRET_TOKEN_URL
 from app.services.ai_nutrition import _dish_types, _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _primary_dish_type, _token_match_count
 from app.services.foodcache import _cache_food_id, _cache_macros
 
@@ -187,6 +187,20 @@ class FoodProviderUnavailable(Exception):
     """Sanitized native discovery failure; never contains upstream detail."""
 
 
+def _localization():
+    """Configured Premier region/language for every call that issues or
+    resolves a provider food identity (search, food.get, barcode), so an ID
+    found by one path is always re-read in the same region. The AI macro
+    estimate (`_fs_search_foods`) searches English-normalized text, keeps no
+    identity and stays on the provider default. Unset: no parameters."""
+    if not FATSECRET_REGION:
+        return {}
+    params = {"region": FATSECRET_REGION}
+    if FATSECRET_LANGUAGE:
+        params["language"] = FATSECRET_LANGUAGE
+    return params
+
+
 def _native_payload(response):
     if not 200 <= response.status_code < 300:
         raise FoodProviderUnavailable from None
@@ -215,6 +229,7 @@ def _food_get_raw(food_id, *, strict=False):
                 "method": method,
                 "food_id": food_id,
                 "format": "json",
+                **_localization(),
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             data = _native_payload(resp) if strict else resp.json()
         except Exception as error:
@@ -314,6 +329,7 @@ def _food_find_id_by_barcode_raw(code, *, strict=False):
             "method": "food.find_id_for_barcode",
             "barcode": gtin,
             "format": "json",
+            **_localization(),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = _native_payload(response) if strict else response.json()
         if strict and "error" in data:
@@ -356,7 +372,7 @@ def _food_find_by_barcode(code):
     try:
         resp = _fs_get(FATSECRET_API_URL, params={
             "method": "food.find_id_for_barcode",
-            "barcode": gtin, "format": "json",
+            "barcode": gtin, "format": "json", **_localization(),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = resp.json()
     except Exception as e:
@@ -373,6 +389,7 @@ def _food_find_by_barcode(code):
         for method in ("food.get.v4", "food.get.v2", "food.get"):
             gr = _fs_get(FATSECRET_API_URL, params={
                 "method": method, "food_id": fid, "format": "json",
+                **_localization(),
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             gdata = gr.json()
             if "error" in gdata:
@@ -404,6 +421,7 @@ def _food_search_raw(q, *, strict=False):
             "search_expression": q,
             "format": "json",
             "max_results": 8,
+            **_localization(),
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = _native_payload(resp) if strict else resp.json()
         if strict and ("error" in data or not isinstance(data.get("foods"), dict)):
