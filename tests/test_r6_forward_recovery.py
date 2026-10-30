@@ -792,3 +792,14 @@ def test_review3_refusal_after_the_build_says_the_image_was_built():
     recover(world)
     assert any("FORWARD_RECOVERY_REFUSED" in e and "the candidate image was built" in e
                for e in world.events)
+
+
+# ── independent-review regressions, final round ─────────────────────────────
+
+def test_review4_worker_without_an_image_id_is_recorded_unproven_not_a_crash():
+    world = kill_previous(migrated(r1_world()), worker=False)
+    world.worker.image_id = None
+    code, transaction = recover(world)
+    assert transaction.previous_worker is None
+    assert code == tx.EXIT_OK
+    assert_recovered(world)

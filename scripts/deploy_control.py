@@ -974,11 +974,14 @@ def render_bootstrap(
     root_source = ROOT_LOCK_WRAPPER_SOURCE.replace(
         '"AXISAI_WEB_SLOT_APPLE_FILES": "0"',
         '"AXISAI_WEB_SLOT_APPLE_FILES": ' + json.dumps(apple_files))
+    mode_line = '"AXISAI_R6_TRANSACTION_MODE": ' + json.dumps(transaction_mode)
     drop_source = PRIVILEGE_DROP_SOURCE.replace(
         '"AXISAI_WEB_SLOT_APPLE_FILES": "0"',
         '"AXISAI_WEB_SLOT_APPLE_FILES": ' + json.dumps(apple_files)).replace(
-        '"AXISAI_R6_TRANSACTION_MODE": "normal"',
-        '"AXISAI_R6_TRANSACTION_MODE": ' + json.dumps(transaction_mode))
+        '"AXISAI_R6_TRANSACTION_MODE": "normal"', mode_line)
+    if mode_line not in drop_source:
+        # Never let an authorized mode silently degrade to the default.
+        raise ConfigError("privilege-drop source lost the transaction mode")
     helper_sha256 = hashlib.sha256(
         base64.b64decode(encoded_script, validate=True)
     ).hexdigest()

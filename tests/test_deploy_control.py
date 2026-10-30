@@ -4065,6 +4065,20 @@ def test_render_refuses_an_unknown_transaction_mode(mode):
             "eu-central-1", "0", mode)
 
 
+def test_render_refuses_when_the_mode_marker_is_missing(monkeypatch):
+    """An authorized recovery must never silently degrade to the normal mode."""
+    monkeypatch.setattr(
+        deploy_control, "PRIVILEGE_DROP_SOURCE",
+        deploy_control.PRIVILEGE_DROP_SOURCE.replace(
+            '"AXISAI_R6_TRANSACTION_MODE": "normal"',
+            "'AXISAI_R6_TRANSACTION_MODE': 'normal'"))
+    with pytest.raises(ConfigError, match="lost the transaction mode"):
+        deploy_control.render_bootstrap(
+            base64.b64encode(b"x").decode(), "a" * 40, "eA==", "deploy", "eA==",
+            base64.b64encode(b"/axisai/production-deploy-authority/x").decode(),
+            "eu-central-1", "0", "forward-recovery")
+
+
 def test_stale_authorization_refuses_the_whole_run_before_any_aws_call():
     calls = []
 

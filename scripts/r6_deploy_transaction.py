@@ -1241,7 +1241,7 @@ class Transaction:
             self.baseline_worker_revision = worker.app_revision
             if (worker.app_revision == self.previous_commit
                     and worker.status == "running" and worker.health == "healthy"
-                    and _IMAGE_ID.fullmatch(worker.image_id)):
+                    and _IMAGE_ID.fullmatch(worker.image_id or "")):
                 try:
                     worker_proven = self.ops.container_build_revision(
                         worker.id, self._time_left(deadline)) == self.previous_commit
@@ -1294,7 +1294,7 @@ class Transaction:
 
     def _clear_stale_candidate(self, deadline):
         """Resume what an earlier attempt left in the candidate slot. A running
-        healthy/starting container of the exact built image is reused by start
+        healthy container of the exact built image is reused by start
         itself. Any other container of EXACTLY the candidate revision (stopped,
         unhealthy, or from a different image build) is removed first, because
         the slot runtime never overwrites one, but only while the route does
