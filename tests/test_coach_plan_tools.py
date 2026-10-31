@@ -120,15 +120,16 @@ def seed_plan(user_id, program):
 
 # ── The flag ─────────────────────────────────────────────────────────────────
 
-def test_off_publishes_the_pre_pr3_tool_surface_to_both_providers(app):
-    """OFF is byte-identical to the surface that existed before PR3."""
+def test_off_publishes_qualified_base_tools_to_both_providers(app):
+    """The plan flag cannot expose unqualified D1 sharing tools."""
     with app.test_request_context("/ask"):
         openai_names = [t["function"]["name"]
                         for t in ai_coach._openai_tools_for_call()]
         anthropic_names = [t["name"]
                            for t in ai_coach._anthropic_tools_for_call()]
 
-    canonical = [t["name"] for t in ai_coach._COACH_TOOL_DEFS]
+    canonical = [t["name"] for t in ai_coach._COACH_TOOL_DEFS
+                 if t["name"] not in ai_coach._UNQUALIFIED_D1_TOOLS]
     assert openai_names == canonical
     assert anthropic_names == canonical
     assert not set(canonical) & coach_plan_tools.PLAN_MUTATION_TOOL_NAMES
@@ -1137,9 +1138,9 @@ def test_a_coach_edit_does_not_touch_the_workout_session_or_history(
     assert (log.exercise_name, log.sets, log.reps, log.volume) == before_log
 
 
-def test_the_existing_coach_tools_are_unaffected_by_the_flag(
+def test_plan_flag_cannot_enable_unqualified_food_sharing(
         app, auth_user, tools_on, turn, monkeypatch):
-    """PR3 adds a surface; it must not change the eight that were there (§49)."""
+    """First-party plan mutation does not grant food-recipient permission."""
     monkeypatch.setattr(
         ai_coach, "_coach_search_food",
         lambda q: [{"name": "Tavuk", "food_id": "1",
@@ -1149,7 +1150,7 @@ def test_the_existing_coach_tools_are_unaffected_by_the_flag(
         auth_user.id, "fetch_nutrition_and_stage_log",
         json.dumps({"food_query": "100g tavuk"})))
 
-    assert staged["status"] == "staged"
+    assert staged["status"] == "unavailable"
 
 
 # ── Sprint 11 PR4 Task 5: the Coach door obeys the catalog too ───────────────

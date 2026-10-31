@@ -104,7 +104,7 @@ class ConsentPublication:
                 ai_consent._operation_binding(authority)
                 with ai_consent._transaction(authority.owner) as conn:
                     try:
-                        ai_consent._check_operation(ai_consent._state(conn, authority.owner), authority)
+                        ai_consent._check_operation(ai_consent._state(conn, authority.owner), authority, conn)
                         deadline = time.monotonic() + SEND_SECONDS
                         sock.setblocking(False)
                         transport.sock = _DeadlineSocket(sock, deadline)

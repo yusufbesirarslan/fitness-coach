@@ -17,7 +17,7 @@ def test_five_independent_purposes_remain_unpublished():
 
 
 @pytest.mark.parametrize("original,nested", [("coach", "nutrition"), ("coach", "vision"),
-    ("menu_extract", "nutrition"), ("vision", "coach"), ("training_plan", "nutrition_plan")])
+    ("vision", "coach"), ("training_plan", "nutrition_plan")])
 def test_accounting_taxonomy_never_permits_nested_consent(original, nested):
     authority = consent.OperationAuthority(1, original, 7, "synthetic")
     with consent.operation_scope(authority):

@@ -1,0 +1,12 @@
+{
+  "status": "UNAPPROVED_REVIEW_INPUT_ONLY",
+  "proposed_version": "tr-ios-launch-v1",
+  "feature_order": ["coach", "training_generation", "nutrition_generation", "pump_check", "qr_menu"],
+  "starter": {"period": "NEVER", "allowances": [10, 1, 1, 1, 1]},
+  "premium": {"period": "MONTHLY", "allowances": [60, 2, 2, 16, 2]},
+  "trial": "NORMAL_VERIFIED_PREMIUM_NO_EXTRA_BUCKET",
+  "starter_eligible_from": null,
+  "max_billed_releases_starter": null,
+  "max_billed_releases_premium": null,
+  "approval_reference": null
+}

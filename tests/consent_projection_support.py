@@ -20,6 +20,7 @@ def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
     # This helper explicitly selects ALLOW for provider-layer tests only.
     # Real native-operation/path denial is covered by D1/PG qualification.
     monkeypatch.setattr(consent, 'NATIVE_OPERATION_FEATURES', frozenset())
+    monkeypatch.setattr(consent, 'provider_binding', lambda owner, feature: consent.BINDINGS.get(feature))
     monkeypatch.setattr(consent, 'generation', lambda owner: 0)
     monkeypatch.setattr(consent, 'preflight', lambda *a, **kw: None)
     allow_operation_fences(monkeypatch)
