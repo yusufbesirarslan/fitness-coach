@@ -191,6 +191,80 @@ def test_canonical_commit_lost_response_is_never_free(ready):
     assert AiUsageReservation.query.one().outcome == 'success'
 
 
+@pytest.mark.parametrize('attempts', [0, 1, 2])
+@pytest.mark.parametrize('canonical', [False, True])
+def test_completed_first_party_coach_releases_only_proven_zero(ready, attempts, canonical):
+    action = hold(ready, 'coach')
+    with E.scope(action):
+        for _ in range(attempts):
+            physical_attempt(ready, 'coach')
+        if canonical:
+            E.canonical_within(ready)
+            db.session.commit()
+        E.coach_first_party_completion(ready)
+        action.success()
+    action.finish()
+    action.finish()  # no second release, even after a canonical first-party write
+    row = AiUsageReservation.query.one()
+    assert row.state == ('COMMITTED' if attempts else 'RELEASED')
+    assert row.billing_evidence == ('UNKNOWN' if attempts else 'CONFIRMED_NOT_BILLED')
+    assert counts(ready, 'coach') == (int(bool(attempts)), 0, 0)
+    with pytest.raises(E.ExecutionRefused): hold(ready, 'coach')
+    with pytest.raises(L.AllowanceError): physical_attempt(ready, 'coach')
+
+
+def test_first_party_marker_cannot_cross_owner_or_feature(ready):
+    action = hold(ready, 'coach')
+    with E.scope(action), pytest.raises(ai_consent.ConsentDenied):
+        E.coach_first_party_completion(ready + 1)
+    action.finish()
+    action = hold(ready, 'nutrition_generation', 'other-feature')
+    with E.scope(action), pytest.raises(E.ExecutionRefused):
+        E.coach_first_party_completion(ready)
+    assert not action.coach_first_party
+
+
+@pytest.mark.parametrize('stream', [False, True])
+def test_real_first_party_workout_confirmation_does_not_consume_ai_unit(app, ready, monkeypatch, stream):
+    import json
+    from flask import g
+    from app.models import WorkoutLog
+    from app.observability import assign_request_id
+    from app.services import ai_coach, ai_stream
+    from app.services.ai_allowances import physical
+    monkeypatch.setattr(ai_coach, '_run_coach_conversation_light',
+                        lambda *a, **kw: pytest.fail('model loop reached'))
+    monkeypatch.setattr(ai_coach, '_run_coach_conversation_bedrock',
+                        lambda *a, **kw: pytest.fail('model loop reached'))
+    with app.test_request_context('/ask', method='POST'):
+        g.mobile_user = SimpleNamespace(id=ready)
+        assign_request_id()
+        ai_coach._begin_coach_turn('log my workout', user_id=ready)
+        with E.logical_action(ready, 'coach', {'question': 'log my workout'}, key='model-proposal') as proposal:
+            physical_attempt(ready, 'coach')
+            staged = json.loads(ai_coach._tool_stage_workout_log(ready, 'Bench Press', 3, 10, 20))
+            assert staged['status'] == 'staged'
+            proposal.success()
+    monkeypatch.setattr(physical, 'reserve', lambda *a, **kw: pytest.fail('provider attempt reached'))
+    with app.test_request_context('/ask', method='POST'):
+        g.mobile_user = SimpleNamespace(id=ready)
+        with E.logical_action(ready, 'coach', {'question': 'yes'}, key='first-party-confirm') as action:
+            if stream:
+                events = list(ai_stream.stream_coach_answer(ready, 'yes', '', [], 'en'))
+                assert events
+            else:
+                reply = ai_coach._run_coach_conversation(ready, 'yes', '', [], 'en')
+                assert 'logged' in reply.lower()
+            assert action.coach_first_party
+            action.success()
+    assert WorkoutLog.query.filter_by(user_id=ready).count() == 1
+    rows = AiUsageReservation.query.order_by(AiUsageReservation.id).all()
+    assert rows[0].state == 'COMMITTED' and rows[0].physical_attempts == 1
+    row = rows[1]
+    assert row.physical_attempts == 0 and row.state == 'RELEASED'
+    assert counts(ready, 'coach') == (1, 0, 0)
+
+
 def test_finalization_seals_zero_attempt_against_late_producer(ready):
     action = hold(ready, 'coach')
     action.finish()
