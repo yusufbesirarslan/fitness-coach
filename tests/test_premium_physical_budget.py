@@ -33,6 +33,9 @@ def door(ready, monkeypatch):
     monkeypatch.setattr(P, 'model_concurrency_slot', lambda *a, **kw: nullcontext())
     monkeypatch.setattr(P.ai_spend_guard, 'charge', lambda *a, **kw: None)
     monkeypatch.setattr(P.time, 'sleep', lambda _: None)
+    # This suite isolates physical accounting, including deliberately unqualified
+    # features. Real D1 composition/refusal is qualified in the launch/PG suites.
+    monkeypatch.setattr(C, 'provider_binding', lambda owner, feature: C.BINDINGS.get(feature))
     monkeypatch.setattr(C, 'admission_generation', lambda *a: 1)
     monkeypatch.setattr(C, 'dispatch', lambda *a, **kw: nullcontext())
     return ready

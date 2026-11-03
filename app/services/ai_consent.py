@@ -34,6 +34,9 @@ class Disclosure:
     categories: tuple[str, ...]
     recipients: tuple[tuple[str, str], ...]  # exact (service, model/profile)
     texts: tuple[tuple[str, str], ...]  # exact (locale, SHA-256)
+    # Non-AI sharing scopes are separately approved in the SAME immutable
+    # contract. No external recipient facts are installed by this extension.
+    external_scopes: tuple[str, ...] = ()
 
 
 # NO approved text, vendor terms or production recipient facts inferred here.
@@ -165,7 +168,9 @@ def mutate(owner, data):
         if data["action"] == "affirmative_grant":
             from app.services.ai_consent_disclosures import localized_texts
             policy = POLICIES.get(data["version"])
+            from app.services.ai_consent_disclosures import LAUNCH_VERSIONS
             if (not policy or localized_texts(policy) is None
+                    or (LAUNCH_VERSIONS and LAUNCH_VERSIONS.get(data["purpose"]) != data["version"])
                     or policy.purpose != data["purpose"]
                     or dict(policy.texts).get(data["locale"]) != data["text_digest"]
                     or data["contract_digest"] != contract_digest(policy)):
@@ -199,13 +204,25 @@ def generation(owner):
 
 
 def _binding_for(owner, feature, recipient):
-    binding = BINDINGS.get(feature)
+    binding = provider_binding(owner, feature)
     if not binding or recipient not in {"bedrock", "openai"}:
         raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
     authenticated = current_subject()
     if authenticated is not None and authenticated != owner:
         raise ConsentDenied()
     return binding
+
+
+def provider_binding(owner, feature):
+    """Physical composition is explicit; accounting labels confer no consent."""
+    operation = current_operation()
+    if operation is not None:
+        _operation_binding(operation, owner)
+        if operation.feature == "menu_extract" and feature == "nutrition":
+            return BINDINGS["menu_extract"]
+        if operation.feature != feature:
+            raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+    return BINDINGS.get(feature)
 
 
 def _authorize(state, binding, recipient, model):
@@ -215,6 +232,9 @@ def _authorize(state, binding, recipient, model):
     if not _record_valid(purpose, record):
         raise ConsentDenied("AI_CONSENT_REQUIRED")
     policy = POLICIES[record["version"]]
+    from app.services.ai_consent_disclosures import localized_texts
+    if localized_texts(policy) is None:
+        raise ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE")
     if policy.categories != categories or (recipient, model) not in policy.recipients:
         raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
 
@@ -243,6 +263,9 @@ def dispatch(owner, feature, recipient, payload, expected_generation):
     binding = _binding_for(owner, feature, recipient)
     with _transaction(owner) as conn:
         state = _state(conn, owner)
+        operation = current_operation()
+        if operation is not None:
+            _check_operation(state, operation, conn)
         if state["generation"] != expected_generation:
             raise ConsentDenied("AI_CONSENT_CHANGED")
         _authorize(state, binding, recipient, payload.get("model"))
@@ -291,12 +314,23 @@ def begin_operation(owner, feature, recipient, model):
     decided at. Recovery of existing work never calls this: it reuses the
     authority stored with that work.
     """
+    original = current_operation()
+    if original is not None:
+        _operation_binding(original, owner)
+        if original.feature != feature:
+            raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
     binding = _binding_for(owner, feature, recipient)
     with _transaction(owner) as conn:
         state = _state(conn, owner)
         _authorize(state, binding, recipient, model)
-        return OperationAuthority(owner, feature, state["generation"],
-                                  state["grants"][binding[0]]["version"])
+        if original is not None:
+            _check_operation(state, original, conn)
+            return original
+        authority = OperationAuthority(owner, feature, state["generation"],
+                                       state["grants"][binding[0]]["version"])
+        from app.services import ai_launch
+        ai_launch.check_operation_within(conn, state, authority)
+        return authority
 
 
 @contextmanager
@@ -324,12 +358,12 @@ def admission_generation(owner, feature):
         return generation(owner)
     if operation.owner != owner:
         raise ConsentDenied()
-    if operation.feature != feature:
+    if operation.feature != feature and not (operation.feature == "menu_extract" and feature == "nutrition"):
         raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
     return operation.generation
 
 
-def _check_operation(state, authority):
+def _check_operation(state, authority, conn=None):
     if state["generation"] != authority.generation:
         raise ConsentDenied("AI_CONSENT_CHANGED")
     purpose, categories = BINDINGS[authority.feature]
@@ -339,6 +373,12 @@ def _check_operation(state, authority):
         raise ConsentDenied("AI_CONSENT_REQUIRED")
     if POLICIES[record["version"]].categories != categories:
         raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+    from app.services.ai_consent_disclosures import localized_texts
+    if localized_texts(POLICIES[record["version"]]) is None:
+        raise ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE")
+    if conn is not None:
+        from app.services import ai_launch
+        ai_launch.check_operation_within(conn, state, authority)
 
 
 def _operation_binding(authority, owner=None):
@@ -365,7 +405,7 @@ def authorize_operation(authority):
     """
     _operation_binding(authority)
     with _transaction(authority.owner) as conn:
-        _check_operation(_state(conn, authority.owner), authority)
+        _check_operation(_state(conn, authority.owner), authority, conn)
 
 
 # Bounded wait for the owner row inside a writer's transaction: longer than
@@ -420,7 +460,7 @@ def fence(authority, owner, feature=None):
         state = _state(conn, authority.owner)
     except SQLAlchemyError:
         raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503) from None
-    _check_operation(state, authority)
+    _check_operation(state, authority, conn)
 
 
 def fence_active(owner):
@@ -444,6 +484,29 @@ def authorize_active():
     if operation is not None:
         authorize_operation(operation)
     return operation
+
+
+@contextmanager
+def menu_source_dispatch():
+    """QR-only, public HTTPS/text acquisition under the original generation.
+
+    The credential-free fetch worker retains DNS/peer/redirect/size/deadline
+    protections. The contract must explicitly approve contacting public menu
+    websites; this scope never authorizes FatSecret/proxies or image/OCR work.
+    Legacy first-party acquisition is unchanged and cannot open an AI endpoint.
+    """
+    authority = current_operation()
+    if authority is None:
+        yield
+        return
+    _operation_binding(authority)
+    if authority.feature != "menu_extract":
+        raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+    with _transaction(authority.owner) as conn:
+        _check_operation(_state(conn, authority.owner), authority, conn)
+        if "public_https_menu_source" not in POLICIES[authority.version].external_scopes:
+            raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+        yield
 
 
 # Internal staged AI candidates (first-plan GENERATED row, replacement

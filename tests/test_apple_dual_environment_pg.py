@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
-from subscription_support import evidence
+from subscription_support import evidence, premium_benefits_ready
 from test_apple_dual_environment import Dual
 
 pytestmark = pytest.mark.pg_concurrency
@@ -32,6 +32,7 @@ def pg_app(monkeypatch):
     app = create_app(); app.config["TESTING"] = True; limiter.enabled = False
     app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_SUBSCRIPTION_ENVIRONMENT="Production",
                       APPLE_SANDBOX_FALLBACK_ENABLED=True)
+    premium_benefits_ready(monkeypatch)
     with app.app_context():
         assert db.engine.dialect.name == "postgresql"
         db.drop_all(); db.create_all()
