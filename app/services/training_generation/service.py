@@ -58,6 +58,7 @@ from app.services.training_generation.response_validator import (
     validate_generated_plan,
     validate_plan_structure,
 )
+from app.services.training_generation.focus_title import normalize_generated_titles
 from app.services.training_generation.semantic_validator import validate_plan_semantics
 
 
@@ -373,6 +374,10 @@ def generate_training_plan_candidate(
         )
         raise
     injury_warnings = annotate_injuries(plan, preferences.injuries)
+    # MINERVA-DEMO-R4: a Turkish day title still in the few-shot's
+    # programming-note shape is persisted as a member-facing title. Only
+    # ``odak`` changes; the prescription is copied as is.
+    plan = normalize_generated_titles(plan, language)
 
     ozet = plan.get("haftalik_ozet", {})
     yogunluk = ozet.get("yogunluk_skoru") or 7
