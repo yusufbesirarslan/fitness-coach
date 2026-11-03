@@ -240,6 +240,16 @@ def run_worker(payload, seconds):
 
 
 def fetch(url, *, max_bytes=None, max_redirects=MAX_REDIRECTS):
+    # Import only in the parent; the isolated network worker has no app/auth
+    # context, credentials, user targets or database access.
+    from app.services import ai_consent
+    with ai_consent.menu_source_dispatch():
+        if ai_consent.current_operation() is not None and validate_url(url).scheme != "https":
+            raise ValueError("MENU_HTTPS_REQUIRED")
+        return _fetch_authorized(url, max_bytes=max_bytes, max_redirects=max_redirects)
+
+
+def _fetch_authorized(url, *, max_bytes=None, max_redirects=MAX_REDIRECTS):
     validate_url(url)  # no subprocess/network for malformed/userinfo URLs
     budget = _budget.get() or Budget()
     left = MAX_REQUESTS - budget.requests

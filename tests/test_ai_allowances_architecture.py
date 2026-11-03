@@ -9,7 +9,7 @@ PACKAGE = ROOT / "app/services/ai_allowances"
 # Financial writes still belong only to service.py; approved domain seams use
 # execution.py. Native Training keeps exactly its original allowance adapter.
 ALLOWED_IMPORTERS = {
-    "app/__init__.py", "app/config.py", "app/blueprints/mobile_ai_allowances.py", "app/blueprints/mobile_menu.py",
+    "app/__init__.py", "app/config.py", "app/services/ai_launch.py", "app/blueprints/mobile_ai_allowances.py", "app/blueprints/mobile_menu.py",
     "app/blueprints/coach.py", "app/cli.py", "app/services/mobile_training_generation/allowance.py",
     "app/services/ai_coach.py", "app/services/ai_nutrition.py", "app/services/ai_pipeline.py",
     "app/services/ai_provider_call.py", "app/services/menu_analysis.py", "app/services/menu_extract.py",

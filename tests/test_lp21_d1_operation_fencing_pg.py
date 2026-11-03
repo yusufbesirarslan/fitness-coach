@@ -422,9 +422,12 @@ def test_r02_regrant_before_recovery_admission_refuses_the_new_admission(rig):
         assert holds(owner) == [("COMMITTED", "UNKNOWN")]
 
 
-def test_r02_control_without_operation_generation_the_regrant_would_succeed(rig):
-    """Non-vacuity: an admission that re-reads the account generation (the
-    pre-LP21 behaviour) lets the regranted recovery attempt commit a plan."""
+def test_r02_dispatch_fence_still_blocks_if_admission_generation_is_rebased(rig):
+    """The original-operation dispatch check also blocks a rebased admission.
+
+    This used to reach the second SDK call before the dispatch check was added.
+    Other mutation controls below still prove publication-fence non-vacuity.
+    """
     from app.services import ai_consent
     owner = rig.owners[0]
     rig.monkeypatch.setattr(ai_consent, "admission_generation",
@@ -433,9 +436,10 @@ def test_r02_control_without_operation_generation_the_regrant_would_succeed(rig)
     rig.recovery[:] = [lambda: regrant(owner, rig.training, "r02-control")]
     with rig.app.app_context():
         consent(owner, rig.training, "affirmative_grant", "grant-r02-control")
-        with pytest.raises(ConsentDenied):  # caught one fence later, at staging
+        with pytest.raises(ConsentDenied) as refused:
             first_plan(owner, "r02-control-key")
-        assert len(rig.calls) == 2  # the second admission DID reach the SDK
+        assert refused.value.code == "AI_CONSENT_CHANGED"
+        assert len(rig.calls) == 1  # original authority blocks the second SDK call
 
 
 def test_r02_bedrock_failure_then_regrant_never_reaches_the_openai_fallback(rig):

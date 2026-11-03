@@ -206,6 +206,8 @@ def _starter_locked(owner, policy, now):
     Quantities are snapshotted into STARTER buckets, so a later policy change
     never rewrites a balance that was already granted.
     """
+    from app.services.ai_launch import check_allocation
+    check_allocation(owner)
     grant = db.session.get(AiStarterGrant, owner.id, populate_existing=True)
     if grant is not None:
         return grant, False
@@ -231,6 +233,8 @@ def _starter_locked(owner, policy, now):
 
 def _authorize(owner, policy, subscription, feature, now):
     """Effective Premium uses only Premium allowances: no unlimited, no fallback."""
+    from app.services.ai_launch import check_allocation
+    check_allocation(owner)
     if subscription.premium:
         premium = policy.premium
         if premium is None or feature not in premium.allowances:

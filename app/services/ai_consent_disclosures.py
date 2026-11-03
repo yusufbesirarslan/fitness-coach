@@ -13,6 +13,9 @@ from app.services import ai_consent
 
 # (version, locale) -> exact, reviewed UTF-8 text, without newline normalization.
 PUBLISHED_TEXTS = MappingProxyType({})
+# Exact active versions, selected only by reviewed source after approval.
+# Historical contracts may remain in POLICIES but cannot open new launch work.
+LAUNCH_VERSIONS = MappingProxyType({})
 LOCALES = frozenset({"en", "tr"})
 
 
@@ -45,6 +48,8 @@ def available_disclosures():
     """
     disclosures = []
     for policy in ai_consent.POLICIES.values():
+        if LAUNCH_VERSIONS and LAUNCH_VERSIONS.get(policy.purpose) != policy.version:
+            continue
         texts = localized_texts(policy)
         if texts is None:
             continue
@@ -53,6 +58,7 @@ def available_disclosures():
             "purpose": policy.purpose,
             "categories": list(policy.categories),
             "recipients": [list(recipient) for recipient in policy.recipients],
+            "external_scopes": list(policy.external_scopes),
             "contract_digest": ai_consent.contract_digest(policy),
             "texts": dict(policy.texts),
             "localized_texts": texts,

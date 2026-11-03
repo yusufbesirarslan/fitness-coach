@@ -555,10 +555,16 @@ def test_coach_refusal_ends_the_turn_without_fallback(auth_user, monkeypatch):
 def test_consent_grants_are_bound_to_the_exact_model(monkeypatch):
     # A grant whose disclosure names Sonnet 4.5 does not authorize a 5.5 model:
     # switching models needs a new reviewed disclosure, never an inherited one.
+    from hashlib import sha256
+    from app.services import ai_consent_disclosures
+    texts = {locale: "Synthetic model binding test: " + locale for locale in ("en", "tr")}
+    monkeypatch.setattr(ai_consent_disclosures, "PUBLISHED_TEXTS",
+                        {("v-test", locale): body for locale, body in texts.items()})
     policy = ai_consent.Disclosure(
         version="v-test", purpose="training.plan",
         categories=("fitness_preferences", "body_metrics", "health_constraints"),
-        recipients=(("bedrock", SONNET45),), texts=(("en", "d"),))
+        recipients=(("bedrock", SONNET45),),
+        texts=tuple((locale, sha256(body.encode()).hexdigest()) for locale, body in texts.items()))
     monkeypatch.setattr(ai_consent, "POLICIES", {"v-test": policy})
     monkeypatch.setattr(ai_consent, "_record_valid", lambda purpose, record: True)
     state = {"grants": {"training.plan": {"version": "v-test"}}}

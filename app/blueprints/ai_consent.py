@@ -84,6 +84,14 @@ def install(app):
             if ceiling is not None and request.content_length is not None and request.content_length > ceiling:
                 raise RequestEntityTooLarge()
             def deny():
+                from app.services.ai_launch import NATIVE_ENDPOINTS, admit_endpoint
+                feature = NATIVE_ENDPOINTS.get(request.endpoint)
+                if feature is not None:
+                    try:
+                        admit_endpoint(g.mobile_user.id, feature)
+                    except consent.ConsentDenied as error:
+                        return consent_error_response(error)
+                    return None
                 return consent_error_response(consent.ConsentDenied('AI_CONSENT_DISCLOSURE_UNAVAILABLE'))
             if request.endpoint.startswith('mobile_api.'):
                 return require_mobile_auth(deny)()
