@@ -69,7 +69,24 @@ def build_training_prompt(
                      "Türkçe yazılacak (yukarıdaki İngilizce kural/örnek "
                      "metinlerine rağmen); gun ve tip kanonik Türkçe kalacak; "
                      "exercise_id görünen metin DEĞİLDİR, opak kimliktir ve "
-                     "ASLA çevrilmez.")
+                     "ASLA çevrilmez. "
+                     # LP20-TR-04: odak/not, few-shot ve sakatlık blokundaki
+                     # İngilizce/klinik terimlerin birebir çevirisi oluyordu
+                     # ("Torasik mobilite", "RPE 7, kontrollü tempo").
+                     "Üslup: odak ve notu salondaki sıradan bir üyeye konuşan "
+                     "deneyimli bir antrenör gibi sade, günlük Türkçeyle yaz; o "
+                     "harekette ne yapacağını söyle. Anatomik/klinik jargon "
+                     "(torasik, skapular, lomber, fleksiyon) ve yukarıdaki "
+                     "İngilizce ifadelerin birebir çevirisi yerine üst sırt, "
+                     "kürek kemikleri, bel gibi bilinen kelimeler kullan (ör. "
+                     "\"torasik mobilite\" yerine, harekete uygunsa \"Üst "
+                     "sırtını yavaşça döndür, belini sabit tut\"); squat, "
+                     "deadlift, plank gibi yerleşik adları çevirme. RPE değerini "
+                     "değiştirme; gerekirse kısaca açıkla (RPE 7 = setin sonunda "
+                     "yaklaşık 3 tekrar daha yapabilecek kadar). Notu en fazla "
+                     "iki kısa cümle tut ama gerekli teknik ve "
+                     "güvenlik/sakatlık ipucunu atlama; "
+                     "harekette olmayan talimat uydurma.")
     cardio_labels = {
         "kosu": "koşu",
         "bisiklet": "bisiklet",
@@ -109,6 +126,14 @@ def build_training_prompt(
         f"{choice_lines}\n"
     )
     example_id = _example_exercise_id(exercise_choices)
+    # The example "not" is what the model imitates. The TR example says the
+    # same intensity (RPE 7) in plain words and is exercise-agnostic, because
+    # the example ID is whichever catalog choice the request allows.
+    if language == "en":
+        example_note = "RPE 7, kontrollü tempo"
+    else:
+        example_note = ("RPE 7: setin sonunda yaklaşık 3 tekrar daha yapabilecek "
+                        "kadar zor; hareketi acele etmeden, kontrollü yap")
     return f"""
 PROGRAM GENERATION CONTRACT
 - LLM sınıflandırma yapmayacak; sınıflandırma deterministik olarak önceden yapıldı.
@@ -160,5 +185,5 @@ PROGRAM RULES
 12. tip="dinlenme" günü HİÇBİR egzersiz içermez: "egzersizler": [] olmalı. Aktif toparlanma önerisini o günün "odak" alanına yaz; yürüyüş/esneme/mobilite dahil hiçbir hareketi dinlenme gününün egzersiz listesine ekleme.
 
 JSON FORMAT
-{{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"exercise_id":"{example_id}","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}
+{{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"exercise_id":"{example_id}","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"{example_note}"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}
 """.strip()
