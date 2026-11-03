@@ -23,7 +23,7 @@ from app.models import (AppleAccountAssociation, AppleNotificationReceipt, Apple
 from app.services import apple_reconciliation as r, apple_subscriptions as apple, subscriptions as s
 from app.services.apple_subscriptions import AppleAdapter, SubscriptionError
 from apple_notification_support import APP_ID, BUNDLE, GROUP, Signer
-from subscription_support import adapter as fake_adapter, evidence
+from subscription_support import adapter as fake_adapter, evidence, premium_benefits_ready
 
 NOT_FOUND = 4040010
 
@@ -479,6 +479,7 @@ def test_fallback_is_logged_with_closed_codes_only(caplog):
 def world(app, monkeypatch):
     app.config.update(APPLE_SUBSCRIPTIONS_ENABLED=True, APPLE_SUBSCRIPTION_ENVIRONMENT="Production",
                       APPLE_SANDBOX_FALLBACK_ENABLED=True)
+    premium_benefits_ready(monkeypatch)
     with app.app_context():
         users = [User(username=f"dual{i}", email=f"dual{i}@example.invalid") for i in range(2)]
         from subscription_support import adult_account
