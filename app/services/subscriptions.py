@@ -105,13 +105,16 @@ def entitlement_view(row, now):
     expiry = utc(row.grace_expires_at) if status == "GRACE_PERIOD" else utc(row.expires_at)
     if row.revoked_at:
         status = "REVOKED"
-    pending = (utc(row.last_verified_at) > now
-               or now - utc(row.last_verified_at) >= MAX_VERIFICATION_AGE)
-    effective = (not pending and status in ("ACTIVE", "GRACE_PERIOD")
-                 and expiry is not None and expiry > now)
     if status in ("ACTIVE", "GRACE_PERIOD") and (expiry is None or expiry <= now):
         status = "EXPIRED"
-    if pending and status not in ("REVOKED", "EXPIRED"):
+    # Freshness only gates a row that could grant (or regain, BILLING_RETRY)
+    # Premium. An expired or revoked row grants nothing however old it is, so
+    # its age must not hold the account in pending and hide the offers.
+    pending = (status in ("ACTIVE", "GRACE_PERIOD", "BILLING_RETRY")
+               and (utc(row.last_verified_at) > now
+                    or now - utc(row.last_verified_at) >= MAX_VERIFICATION_AGE))
+    effective = not pending and status in ("ACTIVE", "GRACE_PERIOD")
+    if pending:
         status = "VERIFICATION_PENDING"
     return {"tier": "PREMIUM" if effective else "FREE", "effective_premium": effective,
             "status": status, "expires_at": expiry.isoformat().replace("+00:00", "Z") if expiry else None,

@@ -191,6 +191,13 @@ A verified row grants access only while
 its paid/grace expiry is future AND last verification age is under 24 hours.
 An outage leaves previously verified state intact within that bound, then
 returns FREE/pending. Lookup never refreshes or extends the validity itself.
+The age bound applies only to a row that could grant or regain Premium
+(`ACTIVE`/`GRACE_PERIOD` before its expiry, `BILLING_RETRY`). A row whose
+paid/grace expiry has passed, or that Apple reported `EXPIRED`/`REVOKED`,
+answers `EXPIRED`/`REVOKED` with `verification_pending=false` however old its
+verification is: it grants nothing, so its age must not hold the account in
+pending, which hides the purchase offers and refuses Starter AI (2026-11-02
+Sandbox defect). Premium, tier and status are unchanged for every row.
 
 `apple_account_association`: User FK/PK, unique random UUID token.
 `apple_subscription`: User FK, environment, original/latest transaction,
@@ -421,8 +428,9 @@ here enables it): `APPLE_NOTIFICATIONS_ENABLED` stays OFF. Before ON:
 - the Production Request-a-Test-Notification qualification
 - alerting on `RETRY_EXHAUSTED` and `APPLE_NOT_FOUND`
 
-Without a schedule, every row (Production and Sandbox) lapses to
-`VERIFICATION_PENDING` 24 h after its last client verify.
+Without a schedule, every row (Production and Sandbox) still within its paid or
+grace term (or in billing retry) lapses to `VERIFICATION_PENDING` 24 h after its
+last client verify; past its expiry it answers `EXPIRED`, not pending.
 
 Commercial purchase rollout (each step a separate human approval; none done here).
 This is separate from ASN intake-only qualification, whose purchase gate stays
