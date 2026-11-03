@@ -99,7 +99,8 @@ def test_turkish_prompt_asks_for_plain_everyday_gym_language(ekipman, injuries):
     rule = _lang_rule(prompt)
     # Plain-language coach voice, about what the user actually does.
     assert "sade, günlük Türkçe" in rule
-    assert "ne yapacağını söyle" in rule
+    assert "ne yapacağını söylesin" in rule
+    assert "odak kısa bir başlık kalsın" in rule  # FOCUS_MAX title, not prose
     # Jargon named, with familiar replacements and a movement-specific example.
     for term in ("torasik", "skapular", "lomber", "fleksiyon"):
         assert term in rule
@@ -110,9 +111,11 @@ def test_turkish_prompt_asks_for_plain_everyday_gym_language(ekipman, injuries):
     assert "yerleşik adları çevirme" in rule
     # Intensity semantics: the RPE value itself must not change.
     assert "RPE değerini değiştirme" in rule
-    assert "RPE 7 = setin sonunda yaklaşık 3 tekrar daha yapabilecek kadar" in rule
+    assert "kalan tekrar ≈ 10 - RPE" in rule      # general, not RPE-7-only
+    assert "RPE 7 = setin sonunda yaklaşık 3 tekrar daha" in rule
+    assert "günün yalnızca ilk notunda" in rule    # no per-exercise repetition
     # Concise, but never at the cost of technique/safety, and nothing invented.
-    assert "iki kısa cümle" in rule
+    assert "iki kısa cümleyi geçmesin" in rule
     assert "güvenlik/sakatlık ipucunu atlama" in rule
     assert "harekette olmayan talimat uydurma" in rule
     # The pre-existing ID carve-out is intact in the same rule line.
@@ -125,14 +128,16 @@ def test_style_rule_appears_once_and_only_in_the_user_prompt():
     assert "Üslup:" not in build_system_prompt("tr")
 
 
-def test_turkish_example_note_is_plain_and_keeps_rpe_7():
+def test_turkish_example_note_is_plain_short_and_keeps_rpe_7():
     prompt, _ = _prompt("tr")
     note = _example_note(prompt)
     assert note != LEGACY_NOTE
     assert LEGACY_NOTE not in prompt
-    assert note.startswith("RPE 7:")          # same prescribed intensity
-    assert "3 tekrar daha" in note            # RPE 7 ≈ 3 reps in reserve
-    assert len(note) <= NOTE_MAX
+    assert note.startswith("RPE 7,")          # same prescribed intensity
+    # The model copies this note onto every exercise: keep it close to the
+    # legacy size so Turkish output tokens stay well under PRIMARY_MAX_TOKENS.
+    assert len(note) <= 2 * len(LEGACY_NOTE)
+    assert "tekrar daha" not in note          # RPE is explained once a day, not here
     # Exercise-agnostic: the example ID may be any catalog choice, so the
     # example must not carry a movement-specific cue such as squat depth.
     for specific in ("diz", "squat", "iniş", "kalça"):

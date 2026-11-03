@@ -74,19 +74,20 @@ def build_training_prompt(
                      # İngilizce/klinik terimlerin birebir çevirisi oluyordu
                      # ("Torasik mobilite", "RPE 7, kontrollü tempo").
                      "Üslup: odak ve notu salondaki sıradan bir üyeye konuşan "
-                     "deneyimli bir antrenör gibi sade, günlük Türkçeyle yaz; o "
-                     "harekette ne yapacağını söyle. Anatomik/klinik jargon "
-                     "(torasik, skapular, lomber, fleksiyon) ve yukarıdaki "
-                     "İngilizce ifadelerin birebir çevirisi yerine üst sırt, "
-                     "kürek kemikleri, bel gibi bilinen kelimeler kullan (ör. "
+                     "deneyimli bir antrenör gibi sade, günlük Türkçeyle yaz; "
+                     "odak kısa bir başlık kalsın, not o harekette ne "
+                     "yapacağını söylesin. Anatomik/klinik jargon (torasik, "
+                     "skapular, lomber, fleksiyon) ve yukarıdaki İngilizce "
+                     "ifadelerin birebir çevirisi yerine üst sırt, kürek "
+                     "kemikleri, bel gibi bilinen kelimeler kullan (ör. "
                      "\"torasik mobilite\" yerine, harekete uygunsa \"Üst "
                      "sırtını yavaşça döndür, belini sabit tut\"); squat, "
                      "deadlift, plank gibi yerleşik adları çevirme. RPE değerini "
-                     "değiştirme; gerekirse kısaca açıkla (RPE 7 = setin sonunda "
-                     "yaklaşık 3 tekrar daha yapabilecek kadar). Notu en fazla "
-                     "iki kısa cümle tut ama gerekli teknik ve "
-                     "güvenlik/sakatlık ipucunu atlama; "
-                     "harekette olmayan talimat uydurma.")
+                     "değiştirme; açıklaman gerekirse günün yalnızca ilk "
+                     "notunda kısaca açıkla (kalan tekrar ≈ 10 - RPE; ör. RPE 7 "
+                     "= setin sonunda yaklaşık 3 tekrar daha). Not iki kısa "
+                     "cümleyi geçmesin ama gerekli teknik ve güvenlik/sakatlık "
+                     "ipucunu atlama; harekette olmayan talimat uydurma.")
     cardio_labels = {
         "kosu": "koşu",
         "bisiklet": "bisiklet",
@@ -126,14 +127,13 @@ def build_training_prompt(
         f"{choice_lines}\n"
     )
     example_id = _example_exercise_id(exercise_choices)
-    # The example "not" is what the model imitates. The TR example says the
-    # same intensity (RPE 7) in plain words and is exercise-agnostic, because
-    # the example ID is whichever catalog choice the request allows.
+    # The example "not" is what the model imitates on EVERY exercise, so the
+    # TR one stays short (output tokens) and exercise-agnostic (the example ID
+    # is whichever catalog choice the request allows); same RPE 7 intensity.
     if language == "en":
         example_note = "RPE 7, kontrollü tempo"
     else:
-        example_note = ("RPE 7: setin sonunda yaklaşık 3 tekrar daha yapabilecek "
-                        "kadar zor; hareketi acele etmeden, kontrollü yap")
+        example_note = "RPE 7, hareketi acele etmeden kontrollü yap"
     return f"""
 PROGRAM GENERATION CONTRACT
 - LLM sınıflandırma yapmayacak; sınıflandırma deterministik olarak önceden yapıldı.
