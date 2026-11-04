@@ -264,7 +264,10 @@ def test_web_registration_contact_controls_stay_in_inert_template(app, client):
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(client.get("/register").data, "html.parser")
     assert soup.select_one("#eligibility-age") and soup.select_one("#eligibility-country")
-    assert soup.select_one("template#eligible-contact-template #email")
+    # A template's contents are its own fragment, not document descendants
+    # (soupsieve >= 4.0 follows the HTML spec), so select from the template.
+    template = soup.select_one("template#eligible-contact-template")
+    assert template and template.select_one("#email")
     assert not soup.select_one("#eligible-contact-stage input")
 
 
