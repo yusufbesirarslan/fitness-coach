@@ -65,6 +65,9 @@ def _setup_rejection(rejection):
     if (rejection.field == account_profile.WEIGHT
             and rejection.reason == account_profile.REASON_RANGE):
         return t("route.weight_range")
+    if (rejection.field == account_profile.AGE
+            and rejection.reason == account_profile.REASON_RANGE):
+        return t("setup.adults_only")
     return t("route.body_numeric")
 
 

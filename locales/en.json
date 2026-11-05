@@ -588,6 +588,7 @@
   "setup.basics_sub": "Your coach needs these to build the right plan for you.",
   "setup.weight": "Weight (kg)",
   "setup.height": "Height (cm)",
+  "setup.adults_only": "AxisAI is for adults aged 18 and over.",
   "setup.age": "Age",
   "setup.gender": "Gender",
   "setup.male": "Male",

@@ -297,6 +297,7 @@ def test_unsupported_tokens_fail_closed(raw_client, native, principal, field, va
     ("weight_kg", 19.9), ("weight_kg", 500.5), ("weight_kg", -80),
     ("target_weight_kg", 10), ("target_weight_kg", 600),
     ("height_cm", 0), ("height_cm", -170), ("age", 0), ("age", -1),
+    ("age", 1), ("age", 17),
 ])
 def test_values_outside_canonical_rules_are_refused(
         raw_client, native, principal, field, value):
