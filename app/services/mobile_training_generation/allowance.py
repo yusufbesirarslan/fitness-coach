@@ -214,10 +214,12 @@ def settle(operation_id):
         operation, binding = row
         user_id, reference = operation.user_id, binding.reservation_ref
         outcome, evidence = _settlement(operation)
+        result_known = operation.error_code != OUTCOME_UNKNOWN_CODE
         db.session.rollback()  # no read transaction across the ledger owner lock
         try:
             observed = ai_allowances.finalize(
-                user_id, reference, outcome, billing_evidence=evidence).state
+                user_id, reference, outcome, billing_evidence=evidence,
+                result_known=result_known).state
         except ai_allowances.AllowanceError as error:
             if error.code != "AI_ALLOWANCE_RESERVATION_NOT_FOUND":
                 _deferred(error.code)

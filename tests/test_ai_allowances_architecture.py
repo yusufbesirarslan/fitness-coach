@@ -18,6 +18,7 @@ ALLOWED_IMPORTERS = {
     "app/services/nutrition_plan_generation.py", "app/services/premium.py",
     "app/services/training_generation/service.py", "app/services/training_plan_replacement/generation.py",
     "app/services/training_plan_replacement/service.py", "app/services/plan_mutation/service.py",
+    "app/services/workout_completion/service.py",
 }
 
 
@@ -66,8 +67,8 @@ def test_ledger_never_reads_legacy_premium_env_or_logs():
         assert not any(m in ("os", "logging") for m, _ in _imports(tree)), path.name
 
 
-def test_no_policy_or_quantity_is_installed_by_application_code():
-    """Only tests construct policies; the source installer stays empty and dark."""
+def test_only_source_installer_constructs_policy():
+    """Approved quantities have one source installer, never an env/client channel."""
     constructors = []
     for path in _python(ROOT / "app"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -76,7 +77,7 @@ def test_no_policy_or_quantity_is_installed_by_application_code():
                     and getattr(node.func, "id", getattr(node.func, "attr", None)) in (
                         "AllowancePolicy", "ScopePolicy")):
                 constructors.append(path.relative_to(ROOT).as_posix())
-    assert constructors == []
+    assert constructors == ["app/services/ai_allowances/launch_policy.py"] * 3
     config = ast.parse((ROOT / "app/config.py").read_text(encoding="utf-8"))
     writes = [node for node in ast.walk(config) if isinstance(node, ast.Assign)
               and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
@@ -85,14 +86,14 @@ def test_no_policy_or_quantity_is_installed_by_application_code():
     value = writes[0].value
     assert isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
     assert value.func.id == "installed_policy" and not value.args and not value.keywords
-    # The only source installer has no installed values or external channel.
+    # Only reviewed source can install the founder-approved finite values.
     launch = ast.parse((PACKAGE / "launch_policy.py").read_text(encoding="utf-8"))
     approved = [n for n in launch.body if isinstance(n, ast.AnnAssign)
                 and isinstance(n.target, ast.Name) and n.target.id == "APPROVED_POLICY"]
-    assert len(approved) == 1 and isinstance(approved[0].value, ast.Constant)
-    assert approved[0].value.value is None
-    from app.services.ai_allowances.launch_policy import installed_policy
-    assert installed_policy() is None
+    assert len(approved) == 1 and isinstance(approved[0].value, ast.Name)
+    assert approved[0].value.id == "LAUNCH_V1_POLICY"
+    from app.services.ai_allowances.launch_policy import LAUNCH_V1_POLICY
+    assert LAUNCH_V1_POLICY.refund_unusable_results is True
 
 
 def test_rollout_flag_is_registered_dark():

@@ -37,17 +37,21 @@ class Disclosure:
     # Non-AI sharing scopes are separately approved in the SAME immutable
     # contract. No external recipient facts are installed by this extension.
     external_scopes: tuple[str, ...] = ()
+    # Optional bounded helpers of THIS purpose, included in contract_digest.
+    # Never imports a separate purpose's grant or an accounting alias.
+    nested_features: tuple[str, ...] = ()
 
 
 # NO approved text, vendor terms or production recipient facts inferred here.
 POLICIES = MappingProxyType({})
 # Purpose projections only: no grant or published contract is installed here.
 # New category tuples remain inert until exact source disclosures are approved.
-# Generic nutrition, nested tools, memory and streaming stay unbound.
+# Generic nutrition, memory and streaming stay unbound. Nested helpers require
+# explicit qualification in the original purpose's immutable disclosure.
 BINDINGS = MappingProxyType({
     "coach": ("coach.conversation", ("personal_free_text", "fitness_preferences",
         "training_history", "workout_state", "nutrition_activity", "nutrition_targets",
-        "body_metrics", "recovery_ratings", "health_constraints", "tool_results")),
+        "body_metrics", "recovery_ratings", "health_constraints", "tool_results", "fitness_image")),
     "vision": ("pump_check.analysis", ("fitness_image", "fitness_context", "personal_free_text")),
     "menu_extract": ("qr_menu.analysis", ("menu_content", "food_descriptions")),
     "training_plan": ("training.plan", ("fitness_preferences", "body_metrics", "health_constraints")),
@@ -220,9 +224,30 @@ def provider_binding(owner, feature):
         _operation_binding(operation, owner)
         if operation.feature == "menu_extract" and feature == "nutrition":
             return BINDINGS["menu_extract"]
+        if operation.feature == "coach" and feature in qualified_coach_helpers(operation):
+            return BINDINGS["coach"]
         if operation.feature != feature:
             raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
     return BINDINGS.get(feature)
+
+
+def qualified_coach_helpers(authority):
+    """Source contract capability, not a second consent grant/registry.
+
+    Dispatch still rechecks the original owner, generation, exact published
+    text, categories and each helper's actual recipient/model under D1's lock.
+    Memory, summaries and nested plan generation cannot be added by a tuple.
+    """
+    if not isinstance(authority, OperationAuthority) or authority.feature != "coach":
+        return ()
+    policy = POLICIES.get(authority.version)
+    if (policy is None or policy.purpose != BINDINGS["coach"][0]
+            or policy.categories != BINDINGS["coach"][1]
+            or type(policy.nested_features) is not tuple
+            or len(set(policy.nested_features)) != len(policy.nested_features)
+            or not set(policy.nested_features) <= {"nutrition", "vision"}):
+        return ()
+    return policy.nested_features
 
 
 def _authorize(state, binding, recipient, model):
@@ -358,7 +383,9 @@ def admission_generation(owner, feature):
         return generation(owner)
     if operation.owner != owner:
         raise ConsentDenied()
-    if operation.feature != feature and not (operation.feature == "menu_extract" and feature == "nutrition"):
+    if operation.feature != feature and not (
+            (operation.feature == "menu_extract" and feature == "nutrition")
+            or (operation.feature == "coach" and feature in qualified_coach_helpers(operation))):
         raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
     return operation.generation
 

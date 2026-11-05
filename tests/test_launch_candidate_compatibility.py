@@ -1,38 +1,23 @@
-"""Allowance/Apple layer compatibility, never an installed launch policy.
-
-Synthetic approval inputs below are test choices, not commercial decisions.
-Real native admission and PostgreSQL fences have their own integration suites.
-"""
-import json
-from datetime import datetime, timezone
-from pathlib import Path
+"""Approved launch allocation against synthetic signed Apple evidence."""
 from types import SimpleNamespace
 
 import pytest
 
 from app.extensions import db
-from app.models import AppleAccountAssociation
+from app.models import AppleAccountAssociation, AiAllowanceBucket
 from app.services import ai_allowances as ledger, subscriptions
 from app.services.ai_allowances import launch_policy
-from app.services.ai_allowances.policy import AllowancePolicy, ScopePolicy
 from ai_allowance_support import enable_ledger, enable_subscriptions
 from subscription_support import adapter, adult_account
+from test_d1_launch_integration import approved_cohort
 
 
 @pytest.mark.parametrize("trial", [False, True])
 @pytest.mark.parametrize("product", ["monthly.fixture", "annual.fixture"])
-def test_verified_trial_and_paid_products_select_same_finite_candidate(app, make_user, monkeypatch, trial, product):
-    candidate = json.loads((Path(__file__).resolve().parents[1] / "docs" /
-        "mon-d1-premium-launch-closure-30" / "POLICY_CANDIDATE.json").read_text())
-    assert candidate["status"] == "UNAPPROVED_REVIEW_INPUT_ONLY"
-    assert launch_policy.APPROVED_POLICY is None
-    assert candidate["starter_eligible_from"] is None
-    assert candidate["max_billed_releases_premium"] is None
-    features = candidate["feature_order"]
-    policy = AllowancePolicy("synthetic-candidate",
-        ScopePolicy("NEVER", dict(zip(features, candidate["starter"]["allowances"])), 0),
-        datetime(1970, 1, 1, tzinfo=timezone.utc),
-        ScopePolicy("MONTHLY", dict(zip(features, candidate["premium"]["allowances"])), 0))
+def test_verified_trial_and_paid_products_select_same_finite_candidate(app, make_user, monkeypatch, approved_cohort, approved_launch_policy, trial, product):
+    from app.services.ai_allowances.policy import SUPPORTED_FEATURES
+    features = SUPPORTED_FEATURES
+    policy = launch_policy.installed_policy()
     enable_subscriptions(app, monkeypatch)
     enable_ledger(app, policy=policy)
     user = adult_account(make_user("candidate"))
@@ -56,3 +41,13 @@ def test_verified_trial_and_paid_products_select_same_finite_candidate(app, make
             for row in view["features"]} == {
         feature: (limit, 1, "MONTHLY")
         for feature, limit in zip(features, [60, 2, 2, 16, 2])}
+    bucket_ids = {bucket.id for bucket in AiAllowanceBucket.query.all()}
+    # The signed trial-to-paid transaction is a normal entitlement refresh,
+    # never a new allowance identity, period or grant.
+    tx.transactionId = "102"
+    tx.offerType = tx.offerDiscountType = None
+    tx.signedDate += 1
+    renewal.signedDate += 1
+    assert subscriptions.persist_verified(user.id, a.verify("102", token), token)["effective_premium"] is True
+    assert {bucket.id for bucket in AiAllowanceBucket.query.all()} == bucket_ids
+    assert all(row["used"] == 1 for row in ledger.allowance_view(user.id)["features"])

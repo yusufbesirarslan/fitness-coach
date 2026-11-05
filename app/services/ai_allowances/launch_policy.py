@@ -1,13 +1,23 @@
-"""Source-only installation seam; no approved launch allocation exists yet.
+"""Founder-approved Launch V1 allocation; source merge does not activate AI.
 
-Changing this module requires a reviewed, versioned source policy and founder
-approval. Runtime flags, environment JSON and client claims cannot select one.
-Eligibility for Starter allocation is not signed service/age eligibility.
+Approval: AXISAI-D1-LAUNCH-V1-FULL-FUNCTIONAL-INTEGRATION, including the
+account-scoped Starter clarification. All valid existing account timestamps
+qualify; NULL timestamps do not. Re-registration is a new account, with no
+cross-account tracking. D1, signed eligibility, Apple and runtime gates remain
+independent. Runtime/environment/client input cannot select these values.
 """
-from .policy import AllowancePolicy, PERIOD_MONTHLY, SUPPORTED_FEATURES, PolicyError
+from datetime import datetime, timezone
 
-# Intentionally inactive. Do not substitute candidate or test quantities.
-APPROVED_POLICY: AllowancePolicy | None = None
+from .policy import AllowancePolicy, ScopePolicy, PERIOD_MONTHLY, SUPPORTED_FEATURES, PolicyError
+
+LAUNCH_V1_POLICY = AllowancePolicy(
+    version="launch-v1-usable-result",
+    starter=ScopePolicy("NEVER", dict(zip(SUPPORTED_FEATURES, (10, 1, 1, 1, 1))), 0),
+    starter_eligible_from=datetime.min.replace(tzinfo=timezone.utc),
+    premium=ScopePolicy("MONTHLY", dict(zip(SUPPORTED_FEATURES, (60, 2, 2, 16, 2))), 0),
+    refund_unusable_results=True,
+)
+APPROVED_POLICY: AllowancePolicy | None = LAUNCH_V1_POLICY
 
 
 def installed_policy():

@@ -45,8 +45,8 @@ def launch_ready(app, contracts, approved_cohort, source_policy, monkeypatch):  
     monkeypatch.setattr(ai, "heavy_primary_route", lambda: ("openai", "synthetic"))
 
 
-def test_shipping_source_refuses_new_purchase_without_association(client, production):
-    assert launch_policy.APPROVED_POLICY is None and ai_launch.APPROVED_SERVICE_COHORT_VERSION is None
+def test_shipping_source_refuses_new_purchase_without_association(client, production, approved_launch_policy):
+    assert launch_policy.APPROVED_POLICY is not None and ai_launch.APPROVED_SERVICE_COHORT_VERSION is None
     response = client.get(PATH + "purchase-context", headers=HEADERS)
     assert response.status_code == 403
     assert response.json["error"]["code"] == "SUBSCRIPTION_PURCHASE_UNAVAILABLE"

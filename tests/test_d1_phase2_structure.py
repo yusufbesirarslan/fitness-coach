@@ -27,10 +27,10 @@ def test_accounting_taxonomy_never_permits_nested_consent(original, nested):
         assert consent.admission_generation(1, original) == 7
 
 
-def test_no_runtime_policy_channel(app, monkeypatch):
+def test_no_runtime_policy_channel(app, monkeypatch, approved_launch_policy):
     monkeypatch.setenv("AI_ALLOWANCE_POLICY", '{"premium":"unlimited"}')
-    assert launch_policy.installed_policy() is None
-    assert app.config["AI_ALLOWANCE_POLICY"] is None
+    assert launch_policy.installed_policy() is launch_policy.APPROVED_POLICY
+    assert app.config["AI_ALLOWANCE_POLICY"] == launch_policy.APPROVED_POLICY
 
 
 def test_source_installer_requires_both_complete_scopes(monkeypatch):

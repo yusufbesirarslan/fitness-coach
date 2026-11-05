@@ -129,13 +129,14 @@ def canonical_success():
         action.success()
 
 
-def failure(outcome):
+def failure(outcome, *, result_known=False):
     """Logical outcome only; never invents provider billing evidence."""
     if outcome not in ledger.FAILURE_OUTCOMES:
         raise ValueError("unsupported settlement outcome")
     action = _ACTIVE.get()
     if action is not None:
         action.failure_outcome = outcome
+        action.result_known = action.result_known or result_known or outcome == "invalid_output"
 
 
 def canonical_within(owner):
@@ -200,6 +201,7 @@ class Action:
     coach_first_party: bool = False
     failure_outcome: str = "provider_error"
     refusal: object = None
+    result_known: bool = False
     _lock: object = field(default_factory=threading.Lock)
 
     def bind_within(self):
@@ -242,7 +244,7 @@ class Action:
         try:
             settled = ledger.finalize_dispatch(self.owner, self.reference,
                 successful=self.successful, failure_outcome=self.failure_outcome,
-                coach_first_party=self.coach_first_party)
+                coach_first_party=self.coach_first_party, result_known=self.result_known)
             event = ("settled_coach_first_party" if self.coach_first_party and self.successful
                      and settled.state == ledger.RELEASED else
                      "settled_success" if settled.outcome == "success" else "settled_failure")
@@ -321,6 +323,7 @@ def logical_action(owner, feature, command, *, key=None):
     with scope(action):
         try:
             yield action
+            action.result_known = True
         except TimeoutError:
             failure("provider_timeout")
             raise

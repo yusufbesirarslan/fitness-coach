@@ -474,7 +474,7 @@ def record_dispatch_attempt(user_id, reference, *, now=None):
 
 
 def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="provider_error",
-                      coach_first_party=False):
+                      coach_first_party=False, result_known=False):
     """Seal attempts and settle under ONE owner/reservation transaction.
 
     D1 serializes physical entry on this same owner row. Once locked, no
@@ -496,7 +496,7 @@ def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="
             raise AllowanceError("AI_ALLOWANCE_RESERVATION_NOT_FOUND")
         if row.request_fingerprint is None:
             raise AllowanceError("AI_ALLOWANCE_RESERVATION_CONFLICT")
-        if row.state != RESERVED:
+        if row.state not in (RESERVED, EXPIRED):
             return finalize(user_id, reference, row.outcome if row.state != EXPIRED else "provider_timeout",
                             billing_evidence=row.billing_evidence or BILLING_UNKNOWN)
         evidence = BILLING_CONFIRMED_NOT_BILLED if row.physical_attempts == 0 else BILLING_UNKNOWN
@@ -510,7 +510,9 @@ def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="
         outcome = "success" if successful or row.canonical_committed is True else (
             "refused_before_provider" if evidence == BILLING_CONFIRMED_NOT_BILLED else (
                 failure_outcome if failure_outcome != "refused_before_provider" else "provider_error"))
-        return finalize(user_id, reference, outcome, billing_evidence=evidence)
+        return finalize(user_id, reference, outcome, billing_evidence=evidence,
+                        result_known=(result_known or outcome == "success"
+                                      or evidence == BILLING_CONFIRMED_NOT_BILLED))
     except (AllowanceError, SQLAlchemyError) as error:
         db.session.rollback()
         if isinstance(error, AllowanceError):
@@ -519,20 +521,22 @@ def finalize_dispatch(user_id, reference, *, successful=False, failure_outcome="
 
 
 def finalize(user_id, reference, outcome, *, provider_billed=False, billing_evidence=None,
-             now=None):
-    """Settle a hold exactly once: success consumes, a qualifying failure releases.
+             now=None, result_known=False):
+    """Settle exactly once, keeping logical results separate from billing.
 
-    A provider-billed failure is recorded on the row (FinOps evidence) and is
-    released at most ``max_billed_releases`` times per bucket; beyond that it
-    consumes. Repeating the same settlement replays; a different one conflicts.
+    Launch V1 consumes usable results and refunds known unusable ones even if
+    billed. Unknown outcomes remain held (conservatively consumed on expiry)
+    until an internal domain caller reconciles the original result. Retained
+    physical budgets/attempts and confirmed billing facts are never refunded.
+    Historical bucket policies retain their original billed-release caps.
 
-    ``billing_evidence`` (instead of ``provider_billed``) records the tri-state.
-    UNKNOWN stores ``provider_billed = NULL`` and, because it is not proven
-    unbilled, a failure is subject to the same ``max_billed_releases`` cap as a
-    billed one. A dispatch-bound hold (``reserve_within``) must be settled with
-    explicit evidence so a Boolean default can never overwrite UNKNOWN.
+    ``result_known`` is internal evidence from synchronous completion or a
+    terminal domain receipt, never a request field. Bound holds require explicit
+    tri-state billing; UNKNOWN cannot downgrade a confirmed financial fact.
     """
     _require_enabled()
+    if type(result_known) is not bool:
+        raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
     if billing_evidence is not None:
         if billing_evidence not in _BILLED or provider_billed is not False:
             raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
@@ -553,8 +557,57 @@ def finalize(user_id, reference, outcome, *, provider_billed=False, billing_evid
             .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
         if row is None:
             raise AllowanceError("AI_ALLOWANCE_RESERVATION_NOT_FOUND")
+        if row.billing_evidence is not None and billing_evidence is None:
+            raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
+        bucket = db.session.get(AiAllowanceBucket, row.bucket_id, populate_existing=True)
+        usable_only = (policy is not None and policy.refund_unusable_results
+                       and bucket.policy_version == policy.version)
+        if usable_only and row.billing_evidence in (BILLING_CONFIRMED_BILLED, BILLING_CONFIRMED_NOT_BILLED):
+            if billing_evidence == BILLING_UNKNOWN:
+                billing_evidence = row.billing_evidence
+                provider_billed = _BILLED[billing_evidence]
+            elif billing_evidence != row.billing_evidence:
+                raise AllowanceError("AI_ALLOWANCE_RESERVATION_CONFLICT")
+        # A deterministic confirmation has no second AI action: its proposal
+        # was metered on the original turn. Require sealed zero-attempt proof,
+        # never a claimed billing Boolean or a non-Coach accounting alias.
+        zero_attempt_confirmation = (
+            row.feature == "coach" and row.request_fingerprint is not None
+            and row.physical_attempts == 0 and outcome == "refused_before_provider"
+            and billing_evidence == BILLING_CONFIRMED_NOT_BILLED)
+        # Otherwise a canonical receipt wins over a lost response/tool error.
+        if usable_only and row.canonical_committed is True and not zero_attempt_confirmation:
+            outcome, result_known = OUTCOME_SUCCESS, True
+        known = result_known or outcome == OUTCOME_SUCCESS or provider_billed is False
+        # Reconciliation may finish an original expired hold, never dispatch it.
+        # Original bucket counters and all physical/billing evidence survive.
+        if usable_only and row.state == EXPIRED and known:
+            if outcome == OUTCOME_SUCCESS:
+                row.state, row.outcome = COMMITTED, outcome
+            else:
+                changed = db.session.execute(sa.update(AiAllowanceBucket).where(
+                    AiAllowanceBucket.id == bucket.id, AiAllowanceBucket.used >= 1)
+                    .values(used=AiAllowanceBucket.used - 1,
+                            billed_releases=AiAllowanceBucket.billed_releases + int(provider_billed is not False),
+                            updated_at=now).execution_options(synchronize_session=False)).rowcount
+                if changed != 1:
+                    raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
+                row.state, row.outcome = RELEASED, outcome
+            row.provider_billed, row.billing_evidence = provider_billed, billing_evidence
+            row.finalized_at = now
+            result = Settlement(row.public_id, row.state, row.outcome, row.state == COMMITTED, False)
+            db.session.commit()
+            return result
+        if usable_only and row.state == RESERVED and not known:
+            # Unknown logical outcome is not UNKNOWN provider billing. Keep the
+            # original hold until durable domain reconciliation; expiry remains
+            # conservative and the original key can never authorize re-entry.
+            row.provider_billed, row.billing_evidence = provider_billed, billing_evidence
+            db.session.commit()
+            return Settlement(row.public_id, row.state, row.outcome, False, False)
         if row.state == RESERVED and _utc(row.expires_at) <= now:
-            _settle(row, EXPIRED, OUTCOME_EXPIRED, consume=True, now=now)
+            if not usable_only:
+                _settle(row, EXPIRED, OUTCOME_EXPIRED, consume=True, now=now)
         if row.state != RESERVED:
             if row.state != EXPIRED and row.outcome != outcome:
                 raise AllowanceError("AI_ALLOWANCE_RESERVATION_CONFLICT")
@@ -569,10 +622,9 @@ def finalize(user_id, reference, outcome, *, provider_billed=False, billing_evid
             _settle(row, COMMITTED, outcome, consume=True, now=now)
         else:
             possibly_billed = provider_billed is not False
-            bucket = db.session.get(AiAllowanceBucket, row.bucket_id, populate_existing=True)
             scope_policy = policy.scope(bucket.scope) if policy is not None else None
             cap = scope_policy.max_billed_releases if scope_policy is not None else 0
-            if possibly_billed and bucket.billed_releases >= cap:
+            if not usable_only and possibly_billed and bucket.billed_releases >= cap:
                 _settle(row, COMMITTED, outcome, consume=True, now=now)
             else:
                 _settle(row, RELEASED, outcome, consume=False, billed=possibly_billed, now=now)

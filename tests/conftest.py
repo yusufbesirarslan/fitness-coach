@@ -70,6 +70,27 @@ def _release_disposable_pg_engines(request):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_source_launch_policy():
+    # Existing layer tests supply synthetic policies/contracts independently.
+    # Do not weaken production's final cohort/readiness fence to accommodate
+    # them. Launch integration tests opt in to an explicit source policy.
+    from app.services.ai_allowances import launch_policy
+    # Some crash tests explicitly undo their own patches mid-test. Keep this
+    # layer boundary independent of that operation.
+    with pytest.MonkeyPatch.context() as isolated:
+        isolated.setattr(launch_policy, "APPROVED_POLICY", None)
+        yield
+
+
+@pytest.fixture
+def approved_launch_policy(app, monkeypatch):
+    from app.services.ai_allowances import launch_policy
+    monkeypatch.setattr(launch_policy, "APPROVED_POLICY", launch_policy.LAUNCH_V1_POLICY)
+    app.config["AI_ALLOWANCE_POLICY"] = launch_policy.LAUNCH_V1_POLICY
+    return launch_policy.LAUNCH_V1_POLICY
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ai_spend_guard_local_counters():
     # The production guard uses Redis windows. Hermetic tests intentionally
     # have no Redis, so process-local windows must not leak between test cases.

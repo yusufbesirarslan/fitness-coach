@@ -21,7 +21,7 @@ def test_shipping_policies_stay_empty_and_five_bindings_are_exact():
     assert dict(ai_consent.BINDINGS) == {
         "coach": ("coach.conversation", ("personal_free_text", "fitness_preferences",
             "training_history", "workout_state", "nutrition_activity", "nutrition_targets",
-            "body_metrics", "recovery_ratings", "health_constraints", "tool_results")),
+            "body_metrics", "recovery_ratings", "health_constraints", "tool_results", "fitness_image")),
         "vision": ("pump_check.analysis", ("fitness_image", "fitness_context", "personal_free_text")),
         "menu_extract": ("qr_menu.analysis", ("menu_content", "food_descriptions")),
         "training_plan": ("training.plan", ("fitness_preferences", "body_metrics", "health_constraints")),

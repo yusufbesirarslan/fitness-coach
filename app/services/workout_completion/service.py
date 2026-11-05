@@ -245,6 +245,15 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
         # before the single commit — one atomic unit with all completion artifacts.
         session_completed = mark_session_completed(session, now)
 
+        # Keep the existing session -> day -> User lock order (award_xp has
+        # already locked User). The admitted Coach tool's original success
+        # receipt commits atomically with completion/XP, including lost acks.
+        # A late D1 refusal rolls back the whole still-uncommitted transaction.
+        from app.services.ai_allowances import execution as meter
+        action = meter.current_action()
+        if action is not None and action.feature == "coach":
+            meter.canonical_within(command.user_id)
+
         db.session.commit()
     except IntegrityError as exc:
         db.session.rollback()

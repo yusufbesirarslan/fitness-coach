@@ -426,8 +426,15 @@ def generate_proposals(user, secret, request, chat_fn, quota_enabled, logger=Non
     if meter.enabled():
         with ai_consent.operation_scope(authority), meter.logical_action(
                 user.id, "nutrition_generation", request) as action:
-            result = _generate_authorized_proposals(user, secret, request, chat_fn,
-                quota_enabled, logger, target, goal, authority)
+            try:
+                result = _generate_authorized_proposals(user, secret, request, chat_fn,
+                    quota_enabled, logger, target, goal, authority)
+            except Exception:
+                # This synchronous path only builds proposals. It never writes
+                # a canonical plan; validation/publication failures prove that
+                # no usable proposal was delivered, regardless of SDK billing.
+                meter.failure("provider_error", result_known=True)
+                raise
             action.success()
             return result
     return _generate_authorized_proposals(user, secret, request, chat_fn,

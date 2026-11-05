@@ -91,7 +91,8 @@ def test_launch_evidence_rechecked_from_database_before_provider_and_publication
             consent.authorize_operation(authority)
 
 
-def test_qr_nested_provider_calls_debit_one_original_finite_hold(pg_app, monkeypatch, approved_cohort):
+@pytest.mark.parametrize("original,family", [("menu_extract", "qr_menu"), ("coach", "coach")])
+def test_nested_provider_calls_debit_one_original_finite_hold(pg_app, monkeypatch, approved_cohort, original, family):
     from datetime import datetime, timezone
     from app.services.ai_allowances import launch_policy, execution, service as ledger
     from app.services.ai_allowances.policy import AllowancePolicy, ScopePolicy, SUPPORTED_FEATURES
@@ -103,31 +104,33 @@ def test_qr_nested_provider_calls_debit_one_original_finite_hold(pg_app, monkeyp
     with pg_app.app_context(), ai_spend_guard.subject_scope(1):
         adult_account(db.session.get(User, 1))
         db.session.commit()
-        qr_policy = consent.POLICIES["synthetic-menu_extract"]
-        monkeypatch.setitem(consent.POLICIES, qr_policy.version,
-                            replace(qr_policy, external_scopes=("public_https_menu_source",)))
-        monkeypatch.setattr(disclosures, "LAUNCH_VERSIONS", {"qr_menu.analysis": qr_policy.version})
+        original_policy = consent.POLICIES["synthetic-" + original]
+        monkeypatch.setitem(consent.POLICIES, original_policy.version,
+                            replace(original_policy,
+                                external_scopes=("public_https_menu_source",) if family == "qr_menu" else (),
+                                nested_features=("nutrition", "vision") if family == "coach" else ()))
+        monkeypatch.setattr(disclosures, "LAUNCH_VERSIONS", {original_policy.purpose: original_policy.version})
         monkeypatch.setattr(launch_policy, "APPROVED_POLICY", policy)
         monkeypatch.setattr(ai_spend_guard, "_get_redis", lambda: object())
         monkeypatch.setattr(ai_spend_guard, "ENABLED", True)
         pg_app.config.update(AI_ALLOWANCE_POLICY=policy, AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED=True,
             AI_ALLOWANCE_LEDGER_ENABLED=True, AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED=True)
         enable_subscriptions(pg_app, monkeypatch)
-        consent.mutate(1, command("menu_extract"))
-        with execution.logical_action(1, "qr_menu", {"url": "https://menu.invalid"}, key="original-qr-0001") as action:
+        consent.mutate(1, command(original))
+        with execution.logical_action(1, family, {"input": "synthetic"}, key="original-action-0001") as action:
             sdk = Mock(return_value=object())
-            for feature in ("menu_extract", "nutrition", "nutrition"):
+            for feature in (original, "nutrition", "vision" if family == "coach" else "nutrition"):
                 with calls.admit(feature=feature, provider="openai", payload={"model": ai.OPENAI_MODEL,
                         "messages": [{"role": "user", "content": "SYNTHETIC_MENU"}], "max_tokens": 100},
                         gate=False, charge=False) as admission:
                     admission.create(sdk)
             action.success()
         hold = db.session.query(AiUsageReservation).one()
-        assert hold.feature == "qr_menu" and hold.physical_attempts == 3
+        assert hold.feature == family and hold.physical_attempts == 3
         assert hold.state == ledger.COMMITTED
         assert hold.physical_input_reserved > 0
         assert sdk.call_count == 3
         with pytest.raises(execution.ExecutionRefused):
-            with execution.logical_action(1, "qr_menu", {"url": "https://menu.invalid"}, key="original-qr-0001"):
+            with execution.logical_action(1, family, {"input": "synthetic"}, key="original-action-0001"):
                 pytest.fail("terminal replay must not redispatch")
         assert sdk.call_count == 3
