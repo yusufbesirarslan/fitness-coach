@@ -99,6 +99,11 @@ def _coach_search_food(query):
     Hepsi 100g bazlı 'per_100g' makroları içerir."""
     raw = (query or "").strip()
 
+    if ai_consent.current_operation() is not None:
+        # D1 Coach nutrition composition uses independent estimates. No proxy
+        # request, OAuth token or unqualified FatSecret sharing is introduced.
+        return _food_search_static(raw) or _food_search_llm(raw) or []
+
     relevant = [r for r in (_food_search_fatsecret(raw) or [])
                 if _is_relevant_food(raw, r.get("name", ""))]
     if relevant:
@@ -691,8 +696,10 @@ def _tool_query_fitx_metrics(user_id, metric_type, date_range):
 
 
 # ── analyze_gym_photo (multimodal Pump Check) ─────────────────────────────────
-def _parse_photo_validation(raw):
+def _parse_photo_validation(raw, *, strict=False):
     """Modelin ham yanıtından {"is_gym":bool,"form_rating":1-10,"reason":str} ayıkla."""
+    if strict and not isinstance(raw, str):
+        return None
     s = (raw or "").strip().replace("```json", "").replace("```", "")
     start = s.find("{")
     end = s.rfind("}") + 1
@@ -702,6 +709,11 @@ def _parse_photo_validation(raw):
         data = json.loads(s)
     except (json.JSONDecodeError, TypeError, ValueError):
         data = {}
+    if strict and (not isinstance(data, dict) or type(data.get("is_gym")) is not bool
+            or type(data.get("form_rating")) is not int or not 0 <= data["form_rating"] <= 10
+            or (data["is_gym"] and data["form_rating"] == 0)
+            or not isinstance(data.get("reason"), str) or not data["reason"].strip()):
+        return None
     try:
         rating = int(data.get("form_rating") or 0)
     except (TypeError, ValueError):
@@ -771,14 +783,15 @@ def _tool_analyze_gym_photo(user_id, s3_key):
         current_app.logger.warning("[ANALYZE PHOTO] Bedrock başarısız: %s: %s", type(e).__name__, e)
         return json.dumps({"status": "error", "message": "Görsel analizi şu an yapılamadı."},
                           ensure_ascii=False)
-    if not (raw or "").strip():
-        # Boş model yanıtı (transport/model aksaklığı): _parse_photo_validation bunu
-        # is_gym:false'a çevirip "burası spor salonu değil" gibi YANLIŞ bir cevaba
-        # dönüştürürdü. Gerçek "değil" kararından ayır, hata olarak dön.
-        current_app.logger.warning("[ANALYZE PHOTO] Bedrock boş yanıt döndürdü")
+    result = _parse_photo_validation(raw, strict=True)
+    if result is None:
+        # Invalid provider output is a technical failure, never a fabricated
+        # negative fitness analysis. A later usable Coach fallback still wins.
+        from app.services.ai_allowances import execution as meter
+        meter.failure("invalid_output", result_known=True)
+        current_app.logger.warning("[ANALYZE PHOTO] Bedrock invalid analysis")
         return json.dumps({"status": "error", "message": "Görsel analizi şu an yapılamadı."},
                           ensure_ascii=False)
-    result = _parse_photo_validation(raw)
 
     if not result["is_gym"]:
         return json.dumps({"status": "ok", "is_gym": False, "form_rating": result["form_rating"],
@@ -977,6 +990,15 @@ _UNQUALIFIED_D1_TOOLS = frozenset({"fetch_nutrition_and_stage_log",
     "analyze_gym_photo", "manage_user_memory"})
 
 
+def _qualified_composite_tool(user_id, name):
+    authority = ai_consent.current_operation()
+    if authority is None or authority.owner != user_id:
+        return False
+    helper = {"fetch_nutrition_and_stage_log": "nutrition",
+              "analyze_gym_photo": "vision"}.get(name)
+    return helper is not None and helper in ai_consent.qualified_coach_helpers(authority)
+
+
 def _coach_tool_defs_for_call(user_id=None):
     """Bu istekte modele sunulacak kanonik araç tanımları.
 
@@ -987,7 +1009,8 @@ def _coach_tool_defs_for_call(user_id=None):
     ek kopya, ek alan, ek boşluk yok.
     """
     defs = coach_confirmation.filter_coach_tool_defs(_COACH_TOOL_DEFS, user_id)
-    defs = [tool for tool in defs if tool["name"] not in _UNQUALIFIED_D1_TOOLS]
+    defs = [tool for tool in defs if tool["name"] not in _UNQUALIFIED_D1_TOOLS
+            or _qualified_composite_tool(user_id, tool["name"])]
     if not coach_plan_tools.plan_mutation_tools_enabled():
         return defs
     return defs + list(
@@ -1009,7 +1032,7 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
     """LLM'in istediği aracı sunucu tarafında çalıştır. user_id ASLA LLM'den
     gelmez — güvenlik için current_user'dan enjekte edilir. JSON string döndürür."""
     _assert_principal(user_id)
-    if name in _UNQUALIFIED_D1_TOOLS:
+    if name in _UNQUALIFIED_D1_TOOLS and not _qualified_composite_tool(user_id, name):
         return json.dumps({"status": "unavailable", "message": "Tool unavailable."})
     authority = ai_consent.current_operation()
     if authority is not None:

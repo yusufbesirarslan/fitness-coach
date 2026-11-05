@@ -244,6 +244,10 @@ def _run_pump_analysis(row_id, user_id, command, created, language):
         elif isinstance(exc, TimeoutError):
             meter.failure("provider_timeout")
         _finalize_failure(row_id, user_id, attempt, kind)
+        # The terminal failed analysis is durable; no late writer owns its
+        # lease. Billing may remain UNKNOWN without charging an unusable result.
+        meter.failure("invalid_output" if isinstance(exc, InvalidAnalysis) else "provider_error",
+                      result_known=True)
         if isinstance(exc, StorageUnavailable):
             raise
         if isinstance(exc, s3_helper.S3Error):

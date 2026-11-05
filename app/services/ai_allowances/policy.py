@@ -1,10 +1,8 @@
 """Pure allowance policy: feature taxonomy, validated quantities and periods.
 
-Stdlib + ``app.timeutil`` only. There is deliberately NO production default and
-NO environment channel: ``current_app.config["AI_ALLOWANCE_POLICY"]`` is
-``None`` unless something constructs an ``AllowancePolicy`` explicitly (today:
-tests only). A missing policy, scope or feature is reported as such and is
-never read as "unlimited" or as zero.
+Stdlib + ``app.timeutil`` only. The source installer selects the approved launch
+policy; there is no environment/client policy channel. A missing policy, scope
+or feature is reported as such and never read as "unlimited" or as zero.
 """
 from __future__ import annotations
 
@@ -100,8 +98,9 @@ def _count(value, low, high, what):
 class ScopePolicy:
     period: str
     allowances: MappingProxyType
-    # Provider-billed failures are released at most this many times per bucket;
-    # after that a billed failure consumes its unit (no unlimited free retries).
+    # Historical settlement cap. Usable-result policies refund known unusable
+    # outcomes independently; original-action physical and operational budgets
+    # still bound every paid attempt.
     max_billed_releases: int
 
     def __init__(self, period, allowances, max_billed_releases):
@@ -124,13 +123,18 @@ class ScopePolicy:
 class AllowancePolicy:
     version: str
     starter: ScopePolicy | None = None
-    # Accounts created at/after this instant are Starter-eligible. Existing
-    # accounts are NOT backfilled in this provisional test policy.
-    # FOUNDER_DECISION_REQUIRED before activation; see docs/AI_ALLOWANCE_LEDGER.md.
+    # Accounts created at/after this instant are Starter-eligible. Launch V1
+    # includes every valid creation timestamp; NULL is never auto-granted.
     starter_eligible_from: datetime | None = None
     premium: ScopePolicy | None = None
+    # Customer settlement is independent of provider billing. Historical
+    # policies retain their original release caps; the launch policy refunds
+    # only a reconciled absence of a usable result.
+    refund_unusable_results: bool = False
 
     def __post_init__(self):
+        if type(self.refund_unusable_results) is not bool:
+            raise PolicyError("refund_unusable_results must be Boolean")
         if not isinstance(self.version, str) or not _VERSION.fullmatch(self.version):
             raise PolicyError("version must match [A-Za-z0-9._-]{1,32}")
         if self.starter is not None:

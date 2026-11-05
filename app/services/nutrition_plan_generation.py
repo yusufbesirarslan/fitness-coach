@@ -214,7 +214,13 @@ def generate_plan_options(chat_fn, lang, target_calories, goal, selected_protein
                "proteins": selected_proteins, "carbs": selected_carbs,
                "fats": selected_fats, "custom_foods": custom_foods}
     with meter.logical_action(current_subject(), "nutrition_generation", command) as action:
-        plans = _complete_plan_options(chat_fn, prompt, system_prompt)
+        try:
+            plans = _complete_plan_options(chat_fn, prompt, system_prompt)
+        except Exception:
+            # This path only generates options: no canonical domain write can
+            # have an unknown commit. Provider billing remains independent.
+            meter.failure("provider_error", result_known=True)
+            raise
         if outer:
             action.success()
         return plans

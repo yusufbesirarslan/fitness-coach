@@ -85,6 +85,48 @@ def test_qr_composition_uses_qr_contract_not_nutrition_grant(contracts):
         consent._check_operation(contracts, authority)
 
 
+@pytest.mark.parametrize("helper,tool", [("nutrition", "fetch_nutrition_and_stage_log"),
+                                       ("vision", "analyze_gym_photo")])
+def test_coach_composition_requires_exact_original_contract(contracts, monkeypatch, app, make_user, helper, tool):
+    from app.services import ai_coach
+    from app.services.ai_spend_guard import subject_scope
+    owner = make_user("coach-composite").id
+    policy = consent.POLICIES["coach"]
+    qualified = replace(policy, nested_features=(helper,))
+    monkeypatch.setitem(consent.POLICIES, "coach", qualified)
+    contracts["grants"][policy.purpose]["contract_digest"] = consent.contract_digest(qualified)
+    contracts["grants"].pop("nutrition.plan")
+    contracts["grants"].pop("pump_check.analysis")
+    authority = consent.OperationAuthority(owner, "coach", 5, "coach")
+    with subject_scope(owner), consent.operation_scope(authority):
+        assert consent.admission_generation(owner, helper) == 5
+        assert consent.provider_binding(owner, helper) == consent.BINDINGS["coach"]
+        consent._authorize(contracts, consent.provider_binding(owner, helper), "openai", "synthetic")
+        consent._check_operation(contracts, authority)
+        assert tool in {t["name"] for t in ai_coach._coach_tool_defs_for_call(owner)}
+        assert not ai_coach._qualified_composite_tool(owner + 1, tool)
+        assert not ai_coach._qualified_composite_tool(owner, "manage_user_memory")
+        for forbidden in ("training_plan", "nutrition_plan", "summary", "menu_extract"):
+            with pytest.raises(consent.ConsentDenied):
+                consent.provider_binding(owner, forbidden)
+        with pytest.raises(consent.ConsentDenied):
+            consent.provider_binding(owner + 1, helper)
+        contracts["generation"] += 2
+        with pytest.raises(consent.ConsentDenied):
+            consent._check_operation(contracts, authority)
+
+
+def test_coach_food_helper_never_contacts_unqualified_fatsecret(app, monkeypatch):
+    from app.services import ai_coach
+    sink = Mock(side_effect=AssertionError("unqualified FatSecret call"))
+    monkeypatch.setattr(ai_coach, "_food_search_fatsecret", sink)
+    monkeypatch.setattr(ai_coach, "_food_search_static", lambda _: [])
+    monkeypatch.setattr(ai_coach, "_food_search_llm", lambda _: [{"name": "independent estimate"}])
+    with consent.operation_scope(consent.OperationAuthority(1, "coach", 1, "synthetic")):
+        assert ai_coach._coach_search_food("synthetic food") == [{"name": "independent estimate"}]
+    sink.assert_not_called()
+
+
 def test_coach_unqualified_tools_absent_and_forged_calls_have_no_effect(app, make_user, monkeypatch):
     from app.services import ai_coach
     user = make_user("launch-tools")
