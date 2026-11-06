@@ -493,7 +493,13 @@ the list was refused. The window is open only with
 `APPLE_SANDBOX_FALLBACK_ENABLED=1`.
 
 `APPLE_QUALIFICATION_CONTROL_SUBJECTS` uses the same format. It names denial
-controls, which hold a real declaration but can't purchase.
+controls, which hold a real declaration but can't purchase. A subject in both
+lists is a control.
+
+While the window is open, the pre-auth native preview answers every caller, so
+the binary's sign-up works without the global flag. It issues no ticket to a
+declared minor, because with the flag off nothing would record that declaration
+or restrict the account. Those callers get `AUTH_ELIGIBILITY_UNAVAILABLE`.
 
 | Surface | Named account | Control account | Any other account |
 |---|---|---|---|

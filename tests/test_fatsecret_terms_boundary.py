@@ -27,7 +27,9 @@ SERVING_ID = "s1"
 STORED_NAME = "Stored Provider Bar"
 LIVE_NAME = "Live Provider Bar"
 PROVIDER_KCAL = 731.0
-ADVICE_KEYS = {"analysis", "recommendations", "portion_recommendation", "daily_context"}
+ADVICE_KEYS = {"analysis", "recommendations", "portion_recommendation", "daily_context",
+               "goal_impact"}
+ADVICE_FUNCTIONS = ("recommend_for_food", "analyze_food", "goal_impact_for_add")
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -115,14 +117,27 @@ def test_web_barcode_add_uses_live_truth_and_logs(live, stored_row, client, auth
     response = client.post("/api/food/barcode/add", json={
         "barcode": CODE, "meal": "Ara Öğün", "serving_id": SERVING_ID, "serving_quantity": 1})
     assert response.status_code == 200
+    assert not ADVICE_KEYS & set(response.get_json())
     row = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert LIVE_NAME in row.yemekler and row.source == "barcode"
+
+
+def test_web_barcode_add_replay_carries_no_targets(live, client, auth_user):
+    db.session.add(UserSession(user_id=auth_user.id, target_calories=2000, goal="kas kazanma"))
+    db.session.commit()
+    body = {"barcode": CODE, "meal": "Ara Öğün", "serving_id": SERVING_ID, "serving_quantity": 1}
+    headers = {"Idempotency-Key": "018f47d2-a2c7-7f52-a5b0-123456789abd"}
+    for _ in range(2):
+        response = client.post("/api/food/barcode/add", json=body, headers=headers)
+        assert response.status_code == 200
+        assert not ADVICE_KEYS & set(response.get_json())
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 1
 
 
 def test_no_route_can_reach_the_advice_functions():
     for path in (ROOT / "app" / "blueprints").rglob("*.py"):
         text = path.read_text(encoding="utf-8")
-        assert "recommend_for_food" not in text and "analyze_food" not in text, path
+        assert not [name for name in ADVICE_FUNCTIONS if name in text], path
     source = (ROOT / "app" / "services" / "barcode.py").read_text(encoding="utf-8")
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.FunctionDef) and node.name == "build_lookup_response":

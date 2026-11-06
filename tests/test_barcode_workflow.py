@@ -164,7 +164,7 @@ def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user, 
     assert "meal_log_id" not in data, (
         "The deprecated surface must not expose a raw ledger row id.")
     assert data["nutrients"] == {"kalori": 420.0, "protein": 42.0, "karb": 46.0, "yag": 12.0}
-    assert data["goal_impact"]["after"]["protein"] == 42.0
+    assert "goal_impact" not in data
     row = MealLog.query.filter_by(user_id=auth_user.id, source="barcode").one()
     assert row.yemekler == "Acme Protein Bar (2x 1 bar)"
     assert row.kalori == 420.0

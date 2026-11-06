@@ -139,6 +139,40 @@ def test_control_account_declares_but_is_refused_by_the_purchase_gate(app, clien
     policy.require_capability(db.session.get(User, window.other), "body_photos")
 
 
+def test_subject_in_both_lists_is_a_control(app, client, window):
+    """A pasted control must never widen who can purchase."""
+    app.config.update(
+        APPLE_PURCHASE_QUALIFICATION_SUBJECTS=frozenset({NAMED_SUBJECT, OTHER_SUBJECT}),
+        APPLE_QUALIFICATION_CONTROL_SUBJECTS=frozenset({OTHER_SUBJECT}))
+    assert client.post(REVIEW, headers=OTHER, json={"eligibility_token": _ticket(client)}).status_code == 200
+    response = client.get(CONTEXT, headers=OTHER)
+    assert response.status_code == 403
+    assert response.json["error"]["code"] == "SUBSCRIPTION_PURCHASE_UNAVAILABLE"
+    assert db.session.get(AppleAccountAssociation, window.other) is None
+    assert _declare(client).status_code == 200
+    assert client.get(CONTEXT, headers=NAMED).status_code == 200
+
+
+@pytest.mark.parametrize("age,country", [(13, "US"), (17, "GB"), (14, "CA"), (15, "AU")])
+def test_window_opens_no_sign_up_for_a_declared_minor(app, client, window, age, country):
+    """With the flag off nothing would record the declaration or restrict the account."""
+    response = client.post(PREVIEW, json={"age": age, "country": country})
+    assert response.status_code == 503
+    assert response.json["error"]["code"] == "AUTH_ELIGIBILITY_UNAVAILABLE"
+
+    app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = True
+    assert _ticket(client, age, country)
+
+
+@pytest.mark.parametrize("age,country,status", [
+    (12, "US", "ineligible"), (30, "ZZ", "ineligible"), (17, "TR", "qualification_required")])
+def test_window_keeps_the_ticketless_answers(client, window, age, country, status):
+    response = client.post(PREVIEW, json={"age": age, "country": country})
+    assert response.status_code == 200
+    assert response.json["eligibility"]["status"] == status
+    assert response.json["eligibility"]["registration_token"] is None
+
+
 def test_control_list_alone_opens_nothing(app, client, window):
     app.config.update(APPLE_PURCHASE_QUALIFICATION_SUBJECTS=frozenset(),
                       APPLE_QUALIFICATION_CONTROL_SUBJECTS=frozenset({OTHER_SUBJECT}))

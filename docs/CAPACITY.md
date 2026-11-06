@@ -85,12 +85,10 @@ Kanıta dayalı; her satır gerçek koda karşı doğrulanmıştır.
 
 ### Bilerek kapıya alınMAYANlar (ve neden)
 
-- **`/api/food/barcode*` (FatSecret barkod)** — `BarcodeFoodCache` DB tablosu
-  önünde durur, yani istekler ÇOĞUNLUKLA ağ'a hiç çıkmaz; çağrı 5–10 sn ile
-  sınırlı ve `FOOD_SEARCH_RATELIMIT` altında. Bu yolu kapıya almak, AI
-  doygunluğunda önbellekten servis edilebilecek istekleri de reddederdi —
-  "sağlayıcı kodunun yanında duruyor diye hızlı yerel işi kapıya alma" kuralının
-  ihlali olurdu.
+- **`/api/food/barcode*` (FatSecret barkod) artık bu listede değil** — web artık
+  `BarcodeFoodCache`'ten servis etmez (`docs/compliance/fatsecret-launch-boundary.md`),
+  yani her web taraması bir sağlayıcı çağrısıdır. `get_barcode_product` yalnız ağ
+  turunu `blocking_concurrency_slot` içinde yapar; doluysa route 503 döner.
 - **`menu_ocr` OpenAI vision çağrısı** — çağıran route'lar zaten `_ai_slots` veya
   `_scrape_slots` tutar, yani THREAD rezervi korunur. Ama bu çağrı
   `model_concurrency_slot` KULLANMAZ: model tavanı bu yolu saymaz, `AiProviderCalls`

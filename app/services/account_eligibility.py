@@ -49,8 +49,9 @@ def _listed(user, key):
 
 
 def qualification_subject(user):
-    """May pass the closed purchase gate."""
-    return _listed(user, "APPLE_PURCHASE_QUALIFICATION_SUBJECTS")
+    """May pass the closed purchase gate. A subject in both lists is a control."""
+    return (_listed(user, "APPLE_PURCHASE_QUALIFICATION_SUBJECTS")
+            and not _listed(user, "APPLE_QUALIFICATION_CONTROL_SUBJECTS"))
 
 
 def served_to(user):
@@ -103,10 +104,15 @@ def preview(data):
     # The native route is pre-auth, so the window opens it for every caller. The
     # ticket is inert unless the flag is on: registration ignores it and only a
     # named account can present it to review_existing.
-    if not enabled() and not (qualification_open()
-                              and request.endpoint == "mobile_api.eligibility_preview"):
+    window_only = not enabled()
+    if window_only and not (qualification_open()
+                            and request.endpoint == "mobile_api.eligibility_preview"):
         raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
     result = evaluate(data)
+    # With the flag off nothing would record a minor's declaration or restrict the
+    # account, so the window must not open sign-up for one.
+    if window_only and result["status"] == "screen_passed" and result["age_band"] != "18_plus":
+        raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
     result["registration_token"] = (_signer().dumps({
         "version": VERSION, "age": data["age"], "country": data["country"]})
         if result["status"] == "screen_passed" else None)

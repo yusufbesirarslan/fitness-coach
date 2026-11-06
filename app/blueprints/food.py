@@ -125,9 +125,6 @@ def barcode_add_to_diary():
     idempotency_key = meal_idempotency.read_idempotency_key()
     existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
     if existing:
-        goal_impact = barcode_svc.goal_impact_for_add(current_user.id, {
-            "calories": 0, "protein": 0, "carbs": 0, "fat": 0,
-        })
         return _deprecated_compatibility_response({
             "message": "logged",
             "nutrients": {
@@ -136,7 +133,6 @@ def barcode_add_to_diary():
                 "karb": round(existing.karb or 0, 1),
                 "yag": round(existing.yag or 0, 1),
             },
-            "goal_impact": goal_impact,
             "analytics_events": ["Added To Diary"],
         })
 
@@ -157,7 +153,6 @@ def barcode_add_to_diary():
     if not serving or not added_preview or added_preview["calories"] <= 0:
         return _deprecated_compatibility_response(
             {"error": "invalid_serving"}, 400)
-    goal_impact = barcode_svc.goal_impact_for_add(current_user.id, added_preview)
 
     result = barcode_svc.add_food_to_diary(
         current_user.id,
@@ -181,7 +176,6 @@ def barcode_add_to_diary():
             "karb": round(entry.karb or 0, 1),
             "yag": round(entry.yag or 0, 1),
         },
-        "goal_impact": goal_impact,
         "analytics_events": ["Added To Diary"],
     }
     if quest_result:

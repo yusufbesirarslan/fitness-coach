@@ -21,14 +21,17 @@ Read from the public pages on 2026-11-06. They state no effective date.
 | Path | State in this source | Result |
 |---|---|---|
 | Live search, servings, barcode, selected-serving logging | Unchanged | Permitted use, subject to retention below |
-| Web barcode advice (`analysis`, `recommendations`, `portion_recommendation`) | **Removed from the response.** No shipped client read them | Closed |
+| Web barcode advice (`analysis`, `recommendations`, `portion_recommendation`, `daily_context`) and `goal_impact` on add | **Removed from the responses.** No shipped client read them | Closed |
 | `BarcodeFoodCache` payload re-served without an age limit | **Live lookup only; no new rows.** Native only ever read `food_id` | Closed for serving. Existing rows remain at rest |
-| FatSecret macros in the shared Redis and L1 cache | **Not written:** search, social and menu analysis. Old `food:macros:v1:*` isn't read and expires within 3 days | Closed. The cache can't feed provider values to QR or Coach |
+| FatSecret macros in the shared Redis and L1 cache | **Not written:** search, social and menu analysis. Old `food:macros:v1:*` isn't read and expires on `FOODCACHE_REDIS_TTL` (3 days by default; the production value is unverified) | Closed. The cache can't feed provider values to QR or Coach |
+| Name-to-`food_id` map in process memory (`_cache_food_id`) | Unchanged. Holds a food name as its key, bounded, no TTL, never persisted | Low-impact; the value is an ID |
 | Direct Coach and QR lookups inside D1 | No request, since #486 | Closed |
 | Diary totals to Coach tools, Coach context, the nutrition-day handoff and the QR budget | Unchanged. `MealLog` has no reliable lineage | **OPEN.** Unreachable only while AI is closed |
 | Logged values kept past 24 hours: `MealLog`, `CustomMealItem`, `PendingAction`, Coach content | Unchanged | **OPEN.** Rights required, no small source fix |
 | `BarcodeFoodCache` rows and old Redis keys at rest | Not purged; no purge authorized | **OPEN**, retention decision |
+| Web `/meal-log/today` `targets` and `remaining` over logged totals; the native nutrition day's calorie target beside its totals | Unchanged and reachable today. Arithmetic, no recommendation text | **OPEN**, founder or counsel judgement on whether numeric target comparison is "guidance" |
 | Web `/dashboard-nudges` weekly protein congratulation from `MealLog` | Unchanged; native doesn't use it | Low-impact, founder or counsel judgement |
+| `fitx_mcp` `analyze_and_rank_menu`: live FatSecret macros to a score and warnings | Unchanged. Nothing starts it and `requirements-mcp.txt` is excluded from the image, though the code ships in it | Not reachable as deployed. **Don't run it with real credentials** |
 
 The diary and Coach paths can't be solved by filtering: a partial total isn't the user's remaining budget. `manual` isn't proof of independence either, since web AI estimates and Repeat write it.
 
