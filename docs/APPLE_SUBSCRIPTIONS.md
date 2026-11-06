@@ -492,13 +492,16 @@ the list was refused. The window is open only with
 `APPLE_SUBSCRIPTIONS_ENABLED=1`, `APPLE_SUBSCRIPTION_ENVIRONMENT=Production` and
 `APPLE_SANDBOX_FALLBACK_ENABLED=1`.
 
-| Surface | Named account | Any other account |
-|---|---|---|
-| `GET /account/me` `eligibility` | Present | Absent |
-| `GET`, `POST /account/eligibility` | Served | 503 `AUTH_ELIGIBILITY_UNAVAILABLE` |
-| `GET /subscription/purchase-context` | Decided by its signed adult TR record | 403 `SUBSCRIPTION_PURCHASE_UNAVAILABLE`, no association |
-| Feature restrictions | None | None |
-| AI | Refused | Refused |
+`APPLE_QUALIFICATION_CONTROL_SUBJECTS` uses the same format. It names denial
+controls, which hold a real declaration but can't purchase.
+
+| Surface | Named account | Control account | Any other account |
+|---|---|---|---|
+| `GET /account/me` `eligibility` | Present | Present | Absent |
+| `GET`, `POST /account/eligibility` | Served | Served | 503 `AUTH_ELIGIBILITY_UNAVAILABLE` |
+| `GET /subscription/purchase-context` | Decided by its signed adult TR record | 403 `SUBSCRIPTION_PURCHASE_UNAVAILABLE`, no association | Same 403 |
+| Feature restrictions | None | None | None |
+| AI | Refused | Refused | Refused |
 
 `ACCOUNT_ELIGIBILITY_ENABLED` stays 0, so `enforce_request` restricts nobody and
 registration attaches no record.
@@ -506,7 +509,7 @@ registration attaches no record.
 **Known side effect:** `POST /api/v1/auth/eligibility` runs before authentication,
 so an open window answers every caller, including the shipped client's
 registration step. Its ticket is inert while the flag is off: registration ignores
-it and `/account/eligibility` serves only the named account. Web `/eligibility`
+it and `/account/eligibility` serves only listed accounts. Web `/eligibility`
 stays 503.
 
 **Closing the window:** removing the list stops new purchase contexts and

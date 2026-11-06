@@ -124,6 +124,28 @@ def test_other_account_cannot_take_over_the_named_association(client, window):
     db.session.rollback()
 
 
+def test_control_account_declares_but_is_refused_by_the_purchase_gate(app, client, window):
+    """Row 2 of the RC2 acceptance: the gate refuses it, not the eligibility check."""
+    app.config["APPLE_QUALIFICATION_CONTROL_SUBJECTS"] = frozenset({OTHER_SUBJECT})
+    assert client.get(ME, headers=OTHER).json["user"]["eligibility"]["status"] == "review_required"
+    response = client.post(REVIEW, headers=OTHER, json={"eligibility_token": _ticket(client)})
+    assert response.status_code == 200
+    assert client.get(REVIEW, headers=OTHER).json["eligibility"]["status"] == "screen_passed"
+
+    response = client.get(CONTEXT, headers=OTHER)
+    assert response.status_code == 403
+    assert response.json["error"]["code"] == "SUBSCRIPTION_PURCHASE_UNAVAILABLE"
+    assert db.session.get(AppleAccountAssociation, window.other) is None
+    policy.require_capability(db.session.get(User, window.other), "body_photos")
+
+
+def test_control_list_alone_opens_nothing(app, client, window):
+    app.config.update(APPLE_PURCHASE_QUALIFICATION_SUBJECTS=frozenset(),
+                      APPLE_QUALIFICATION_CONTROL_SUBJECTS=frozenset({OTHER_SUBJECT}))
+    assert client.get(REVIEW, headers=OTHER).status_code == 503
+    assert client.post(PREVIEW, json={"age": 30, "country": "TR"}).status_code == 503
+
+
 def test_list_does_not_restrict_any_account(client, window):
     """Unknown cohorts keep body photos and weight targets: the global gate is off."""
     for uid in (window.named, window.other):
@@ -213,7 +235,7 @@ def test_no_subject_reaches_the_logs(client, window, caplog):
 
 def test_seam_is_confined_to_named_modules():
     root = Path(__file__).resolve().parents[1]
-    seam = ("APPLE_PURCHASE_QUALIFICATION_SUBJECTS", "qualification_subject",
+    seam = ("APPLE_PURCHASE_QUALIFICATION_SUBJECTS", "APPLE_QUALIFICATION_CONTROL_SUBJECTS", "qualification_subject",
             "qualification_open", "served_to(")
     found = set()
     for folder in ("app", "fitx_mcp"):

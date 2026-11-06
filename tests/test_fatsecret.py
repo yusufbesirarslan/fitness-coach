@@ -303,9 +303,8 @@ def test_food_search_skips_caching_low_confidence_fallback_weight(app, monkeypat
     assert "Karışık Izgara" not in foodcache._macro_cache["per_100g"]  # önbelleğe yazılmadı
 
 
-def test_food_search_caches_when_weight_is_real_estimate(app, monkeypatch):
-    # Kontrast: servis ağırlığı gerçek LLM tahmini (fallback değil) ise per-100g
-    # değeri normal şekilde önbelleğe yazılır.
+def test_food_search_never_caches_provider_macros(app, monkeypatch):
+    # Reliable or not, provider macros stay out of the shared cache (Terms 1.5).
     foodcache._macro_cache["per_100g"].clear()
     monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
     monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Resp(_per_serving_payload()))
@@ -314,7 +313,7 @@ def test_food_search_caches_when_weight_is_real_estimate(app, monkeypatch):
 
     results = fatsecret._food_search_fatsecret("karışık ızgara")
     assert results and results[0]["name"] == "Karışık Izgara"
-    assert "Karışık Izgara" in foodcache._macro_cache["per_100g"]   # güvenilir → önbellekte
+    assert "Karışık Izgara" not in foodcache._macro_cache["per_100g"]
 
 
 def test_food_search_error_payload_returns_none(monkeypatch):

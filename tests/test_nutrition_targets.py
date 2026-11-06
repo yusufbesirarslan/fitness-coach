@@ -380,11 +380,6 @@ def test_barcode_recommendations_degrade_to_a_target_independent_answer(
     # Target-independent analysis is unaffected.
     assert "This food is high in sugar." in out["messages"]
 
-    payload = barcode.build_lookup_response({"source": "cache", "food": food},
-                                            context)
-    assert payload["daily_context"]["targets"] is None
-    assert payload["analysis"]["axisai_food_score"] >= 1
-
 
 def test_goal_impact_reports_absence_instead_of_a_fabricated_target(
         app, make_user):

@@ -388,10 +388,13 @@ def configure_app(app):
         app.config[key] = os.environ.get(key, "")
     raw_subjects = os.environ.get("APPLE_PURCHASE_QUALIFICATION_SUBJECTS", "")
     app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"] = _qualification_subjects(raw_subjects)
-    if raw_subjects.strip():
-        # count=0 means the list was refused as malformed. Never log a subject.
-        app.logger.warning("apple_subscription event=qualification_cohort count=%d",
-                           len(app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"]))
+    raw_controls = os.environ.get("APPLE_QUALIFICATION_CONTROL_SUBJECTS", "")
+    app.config["APPLE_QUALIFICATION_CONTROL_SUBJECTS"] = _qualification_subjects(raw_controls)
+    if raw_subjects.strip() or raw_controls.strip():
+        # count=0 means a list was refused as malformed. Never log a subject.
+        app.logger.warning("apple_subscription event=qualification_cohort count=%d controls=%d",
+                           len(app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"]),
+                           len(app.config["APPLE_QUALIFICATION_CONTROL_SUBJECTS"]))
     raw_app_id = os.environ.get("APPLE_APP_ID", "")
     app.config["APPLE_APP_ID"] = int(raw_app_id) if raw_app_id.isascii() and raw_app_id.isdigit() else None
     app.config["APPLE_ROOT_CERTIFICATE_PATHS"] = tuple(

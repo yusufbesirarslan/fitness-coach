@@ -10,11 +10,8 @@ from copy import deepcopy
 from datetime import datetime
 
 from app.services import nutrition_pipeline
-from sqlalchemy.exc import IntegrityError
 
-from app.extensions import db
 from app.models import (
-    BarcodeFoodCache,
     MealLog,
     UserSession,
 )
@@ -368,47 +365,24 @@ def _cache_payload(cache_row):
 
 
 def get_barcode_product(code, lookup_func=None):
+    """Live provider truth only, so a stored payload can never be re-served.
+
+    Only food and serving IDs may be kept past 24 hours (FatSecret Terms 1.5).
+    BarcodeFoodCache rows are no longer read or written here; native reads only
+    their food_id. Existing rows stay in place until a retention decision.
+    """
     barcode = normalize_barcode(code)
     if not barcode:
         return None
 
-    cached = BarcodeFoodCache.query.filter_by(barcode=barcode).first()
-    if cached:
-        return _cache_payload(cached)
-
-    # Cache MISS → FatSecret'e senkron, bloklayıcı bir tur (timeout=10). Uygulama
-    # tek gunicorn worker + 8 thread çalışır; bu tur rezerv-sayılan slotun DIŞINDA
-    # kalırsa, FatSecret gecikme atağında kullanıcılar-arası bir barkod yığını
-    # thread'lerin hepsini park edip /health'i kuyruğa sokabilir (triage
-    # 2026-08-07 #2; PR #199'un food_search için kapattığı sınıfın aynısı).
-    # Slot YALNIZCA ağ turunu sarar: yukarıdaki cache HIT'i saf DB'dir ve slot
-    # tüketmez, böylece ucuz tarama akışı gereksiz 503 yemez. Kapasite dolu ise
-    # BlockingConcurrencyLimit ÇAĞIRANA yükselir — "besin bulunamadı"ya
-    # ÇEVRİLMEZ (kapasite reddi bir arama sonucu değildir).
+    # Slot YALNIZCA ağ turunu sarar. Kapasite dolu ise BlockingConcurrencyLimit
+    # ÇAĞIRANA yükselir — "besin bulunamadı"ya ÇEVRİLMEZ (triage 2026-08-07 #2).
     lookup = lookup_func or _food_find_by_barcode
     with blocking_concurrency_slot():
         raw = lookup(barcode)
     if not raw:
         return None
-
-    food = normalize_food_model(barcode, raw)
-    row = BarcodeFoodCache(
-        barcode=barcode,
-        food_id=food["food_id"],
-        food_name=food["name"],
-        brand=food["brand"],
-        payload=food,
-    )
-    db.session.add(row)
-    try:
-        db.session.commit()
-    except IntegrityError:
-        db.session.rollback()
-        existing = BarcodeFoodCache.query.filter_by(barcode=barcode).first()
-        if existing:
-            return _cache_payload(existing)
-        raise
-    return {"source": "fatsecret", "food": food}
+    return {"source": "fatsecret", "food": normalize_food_model(barcode, raw)}
 
 
 def legacy_servings(food):
@@ -429,18 +403,14 @@ def legacy_servings(food):
     return result
 
 
-def build_lookup_response(product, context):
+def build_lookup_response(product):
+    """Facts only. Scores and portion advice built from provider data are what
+    FatSecret Terms 1.7(iii) prohibit, and no shipped client reads them."""
     food = product["food"]
-    default_serving = food.get("default_serving_id")
-    recommendations = recommend_for_food(food, context, default_serving)
     return {
         "barcode": food.get("barcode", ""),
         "source": product.get("source", ""),
         "food": food,
-        "analysis": analyze_food(food, default_serving),
-        "recommendations": recommendations["messages"],
-        "portion_recommendation": recommendations["portion"],
-        "daily_context": context,
         "analytics_events": ["Food Found"],
         # Backwards-compatible keys for existing nutrition.js callers.
         "food_id": food.get("food_id", ""),

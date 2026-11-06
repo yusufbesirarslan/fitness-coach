@@ -634,7 +634,10 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
                 macro_map[n] = m
                 source_map[n] = "llm_stated_grams"
 
-    _cache_macros(macro_map, basis="per_serving")
+    # Provider values serve this analysis only: the shared cache records no origin.
+    _cache_macros({n: m for n, m in macro_map.items()
+                   if not str(source_map.get(n, "")).startswith("fatsecret")},
+                  basis="per_serving")
 
     final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
     final_zero = len(item_names) - final_resolved

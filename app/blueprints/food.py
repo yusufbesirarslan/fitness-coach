@@ -85,11 +85,7 @@ def food_by_barcode():
         return _fatsecret_busy_response("food_by_barcode")
     if not product:
         return jsonify(barcode_svc.not_found_response()), 404
-    context = barcode_svc.get_user_barcode_context(
-        current_user.id,
-        meal_time=request.args.get("meal_time", "").strip(),
-    )
-    return jsonify(barcode_svc.build_lookup_response(product, context))
+    return jsonify(barcode_svc.build_lookup_response(product))
 
 
 def _deprecated_compatibility_response(payload, status=200):
@@ -116,7 +112,7 @@ def barcode_add_to_diary():
 
     F6: the caller-supplied `food` object is NO LONGER READ. Provider nutrition
     is resolved server-side from the barcode alone (`get_barcode_product`, i.e.
-    `BarcodeFoodCache` → FatSecret), so a caller can no longer decide what a
+    live FatSecret), so a caller can no longer decide what a
     `source="barcode"` ledger row means. A payload that cannot identify provider
     truth without trusting caller nutrition fails CLOSED. The raw `MealLog.id` is
     no longer published on any variant — first write, replay or error.

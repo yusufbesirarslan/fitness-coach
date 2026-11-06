@@ -43,14 +43,24 @@ def qualification_open():
             and config.get("APPLE_SANDBOX_FALLBACK_ENABLED") is True)
 
 
+def _listed(user, key):
+    return (qualification_open() and bool(user.cognito_sub)
+            and user.cognito_sub.lower() in current_app.config.get(key, frozenset()))
+
+
 def qualification_subject(user):
-    return (qualification_open() and bool(user.cognito_sub) and user.cognito_sub.lower()
-            in current_app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"])
+    """May pass the closed purchase gate."""
+    return _listed(user, "APPLE_PURCHASE_QUALIFICATION_SUBJECTS")
 
 
 def served_to(user):
-    """Whether this account is asked for a declaration. Enforcement stays on enabled()."""
-    return enabled() or qualification_subject(user)
+    """Whether this account is asked for a declaration. Enforcement stays on enabled().
+
+    A control account holds a real record but never purchases, so the qualification
+    can prove the purchase gate itself refuses it, not the eligibility check.
+    """
+    return (enabled() or qualification_subject(user)
+            or _listed(user, "APPLE_QUALIFICATION_CONTROL_SUBJECTS"))
 
 
 def _signer(*, account=False):
