@@ -859,8 +859,8 @@ _COACH_TOOL_DEFS = [
         "name": "fetch_nutrition_and_stage_log",
         "description": (
             "Kullanıcı bir yiyecek/içecek YEDİĞİNİ söylediğinde VEYA bir yiyeceğin "
-            "kalori/makro değerlerini sorduğunda çağır. FatSecret'tan gerçek makroları "
-            "çeker ve onaya hazır şekilde geçici olarak hazırlar (stage). KALICI KAYIT "
+            "kalori/makro değerlerini sorduğunda çağır. Yaklaşık makro tahminini "
+            "getirir ve onaya hazır şekilde geçici olarak hazırlar (stage). KALICI KAYIT "
             "YAPMAZ; sadece veriyi getirir."
         ),
         "parameters": {

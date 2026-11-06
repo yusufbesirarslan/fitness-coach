@@ -41,7 +41,11 @@ _FOOD_ID_CACHE_MAX = 1000
 # makrolar oraya da yazılır ve L1 miss'lerinde okunur; Redis yoksa (lokal/test)
 # davranış birebir eski süreç-içi önbellektir. Tüm Redis hataları yutulur —
 # önbellek arızası besin çözümlemesini asla düşürmez.
-_MACRO_REDIS_PREFIX = "food:macros:v1:"
+# v2: v1 anahtarları köken bilgisi olmadan FatSecret ve LLM değerlerini karıştırır;
+# okunmayan v1 kayıtları kendi TTL'iyle sona erer. Bu ad alanı değişikliği yalnızca
+# geçmiş v1 değerlerini yalıtır — v2 de köken taşımaz; saklama/köken yükümlülüklerini
+# tek başına çözmez.
+_MACRO_REDIS_PREFIX = "food:macros:v2:"
 _MACRO_REDIS_TTL = int(os.getenv("FOODCACHE_REDIS_TTL", str(3 * 24 * 3600)))
 
 

@@ -28,7 +28,7 @@ from app.models import (
 from app.services.ai_gate import BlockingConcurrencyLimit, blocking_concurrency_slot
 from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _parse_suggestion_items, _turkish_ablative_suffix
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
-from app.services.foodcache import _cache_macros, _get_cached_macros
+from app.services.foodcache import _get_cached_macros
 from app.services.gamification import award_xp, complete_quest_for_user, get_level, level_title, log_activity
 from app.services.notifications import notify
 from app.services.pump_checks import can_view_pump_check, get_friend_ids, serialize_pump_check_card
@@ -1135,7 +1135,8 @@ def _calculate_meal_suggestion(snapshot):
                     if per_100g_items or any(n not in macro_map for n in uncached):
                         return None
 
-                    _cache_macros(macro_map, basis="per_serving")
+                    # FatSecret values serve this calculation only: the shared
+                    # per-serving cache feeds QR scoring and carries no origin.
             except BlockingConcurrencyLimit:
                 current_app.logger.warning(
                     "[SUGGESTION] event=blocking_capacity_exhausted "

@@ -728,15 +728,10 @@ def test_suggestion_gate_cache_and_macro_helpers_run_outside_transaction(
         return ({item: {"calories": 200.0, "protein": 10.0,
                         "carbs": 15.0, "fat": 10.0} for item in items}, {})
 
-    def cache_write(macro_map, basis="per_serving"):
-        assert db.session().in_transaction() is False
-        assert list(macro_map) == ["gizemli yemek", "pilav"]
-
     monkeypatch.setattr(social_bp, "_parse_suggestion_items", parse)
     monkeypatch.setattr(social_bp, "_get_cached_macros", cache_read)
     monkeypatch.setattr(social_bp, "_get_fatsecret_token", token)
     monkeypatch.setattr(social_bp, "_lookup_macros_fatsecret", lookup)
-    monkeypatch.setattr(social_bp, "_cache_macros", cache_write)
     monkeypatch.setattr(
         social_bp, "_estimate_macros_llm",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
