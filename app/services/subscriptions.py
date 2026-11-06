@@ -69,6 +69,21 @@ def _eligible_view(user, row, now):
     return view
 
 
+def _qualification_subject(user_id):
+    """One operator-named account may qualify Sandbox purchase on Production.
+
+    This opens no AI: premium_ready() stays false and every AI gate still
+    refuses this account. It needs the Sandbox fallback that real TestFlight
+    purchases verify through, and the signed eligibility check below still
+    applies. Empty configuration leaves the readiness gate exactly as it was.
+    """
+    user = db.session.get(User, user_id)
+    if user is None or not account_eligibility.qualification_subject(user):
+        return False
+    current_app.logger.warning("apple_subscription event=qualification_purchase_context")
+    return True
+
+
 def purchase_context(user_id):
     _enabled()
     try:
@@ -80,7 +95,7 @@ def purchase_context(user_id):
         # Restore, verify, renewals and entitlement are never gated here.
         if adapter.environment != "Sandbox":
             from app.services import ai_launch
-            if not ai_launch.premium_ready():
+            if not ai_launch.premium_ready() and not _qualification_subject(user_id):
                 raise SubscriptionError("SUBSCRIPTION_PURCHASE_UNAVAILABLE", 403)
         if not _purchase_eligible(_owner(user_id), datetime.now(timezone.utc)):
             raise SubscriptionError("SUBSCRIPTION_ELIGIBILITY_REQUIRED", 403)

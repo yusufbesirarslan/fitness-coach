@@ -30,6 +30,29 @@ def enabled():
     return current_app.config.get("ACCOUNT_ELIGIBILITY_ENABLED") is True
 
 
+def qualification_open():
+    """RC2 StoreKit qualification window. Remove with the D1 launch commit.
+
+    Needs a named list on a complete Production deployment with its Sandbox
+    fallback. It restricts no account, gates no feature and opens no AI.
+    """
+    config = current_app.config
+    return (bool(config.get("APPLE_PURCHASE_QUALIFICATION_SUBJECTS"))
+            and config.get("APPLE_SUBSCRIPTIONS_ENABLED") is True
+            and config.get("APPLE_SUBSCRIPTION_ENVIRONMENT") == "Production"
+            and config.get("APPLE_SANDBOX_FALLBACK_ENABLED") is True)
+
+
+def qualification_subject(user):
+    return (qualification_open() and bool(user.cognito_sub) and user.cognito_sub.lower()
+            in current_app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"])
+
+
+def served_to(user):
+    """Whether this account is asked for a declaration. Enforcement stays on enabled()."""
+    return enabled() or qualification_subject(user)
+
+
 def _signer(*, account=False):
     kind = URLSafeSerializer if account else URLSafeTimedSerializer
     return kind(current_app.config["SECRET_KEY"],
@@ -67,7 +90,11 @@ def _capabilities(status, band):
 
 
 def preview(data):
-    if not enabled():
+    # The native route is pre-auth, so the window opens it for every caller. The
+    # ticket is inert unless the flag is on: registration ignores it and only a
+    # named account can present it to review_existing.
+    if not enabled() and not (qualification_open()
+                              and request.endpoint == "mobile_api.eligibility_preview"):
         raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
     result = evaluate(data)
     result["registration_token"] = (_signer().dumps({
@@ -77,8 +104,10 @@ def preview(data):
 
 
 def registration_record(token):
-    if not enabled():
-        return None
+    return _ticket_record(token) if enabled() else None
+
+
+def _ticket_record(token):
     try:
         if not isinstance(token, str) or not token or len(token) > 1024:
             raise ValueError()
@@ -174,9 +203,9 @@ def require_capability(user, capability):
 
 def review_existing(user, token):
     """One-time legacy declaration; no self-service promotion/country switch."""
-    if not enabled():
+    if not served_to(user):
         raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
-    record = registration_record(token)
+    record = _ticket_record(token)
     from app.extensions import db
     from app.models import User
     owner = db.session.execute(db.select(User).where(User.id == user.id)

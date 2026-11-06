@@ -221,7 +221,7 @@ def account_projection(user):
         "goal_type": user.goal_type,
     }}
     from app.services import account_eligibility
-    if account_eligibility.enabled():
+    if account_eligibility.served_to(user):
         payload["user"]["eligibility"] = account_eligibility.projection(user)
     return payload
 

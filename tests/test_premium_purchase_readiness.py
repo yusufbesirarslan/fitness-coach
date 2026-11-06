@@ -145,3 +145,61 @@ def test_ineligible_account_still_gets_its_own_answer_once_ready(client, product
     response = client.get(PATH + "purchase-context", headers=HEADERS)
     assert response.json["error"]["code"] == "SUBSCRIPTION_ELIGIBILITY_REQUIRED"
 
+
+
+SUBJECT = "11111111-2222-3333-4444-555555555555"
+
+
+@pytest.fixture
+def qualification(app, production):
+    # The signed eligibility record is bound to the account's own subject.
+    app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"] = frozenset(
+        {db.session.get(User, production).cognito_sub.lower()})
+    return production
+
+
+def test_named_subject_gets_context_with_ai_still_closed(client, qualification, approved_launch_policy):
+    response = client.get(PATH + "purchase-context", headers=HEADERS)
+    assert response.status_code == 200 and response.json["environment"] == "Production"
+    assert db.session.get(AppleAccountAssociation, qualification) is not None
+    assert ai_launch.premium_ready() is False
+    with pytest.raises(ai_launch.consent.ConsentDenied):
+        ai_launch.require_runtime()
+
+
+def test_other_subject_stays_refused_without_association(app, client, production, approved_launch_policy):
+    app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"] = frozenset({SUBJECT})
+    response = client.get(PATH + "purchase-context", headers=HEADERS)
+    assert response.status_code == 403
+    assert response.json["error"]["code"] == "SUBSCRIPTION_PURCHASE_UNAVAILABLE"
+    assert db.session.get(AppleAccountAssociation, production) is None
+
+
+def test_named_subject_needs_sandbox_fallback(app, client, qualification, approved_launch_policy):
+    app.config["APPLE_SANDBOX_FALLBACK_ENABLED"] = False
+    assert client.get(PATH + "purchase-context", headers=HEADERS).status_code == 403
+    assert db.session.get(AppleAccountAssociation, qualification) is None
+
+
+def test_named_subject_still_needs_signed_eligibility(client, qualification, approved_launch_policy):
+    db.session.get(User, qualification).user_metadata = {}
+    db.session.commit()
+    response = client.get(PATH + "purchase-context", headers=HEADERS)
+    assert response.status_code == 403
+    assert response.json["error"]["code"] == "SUBSCRIPTION_ELIGIBILITY_REQUIRED"
+    assert db.session.get(AppleAccountAssociation, qualification) is None
+
+
+def test_subject_with_no_configuration_stays_refused(app, client, qualification, approved_launch_policy):
+    app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"] = frozenset()
+    assert client.get(PATH + "purchase-context", headers=HEADERS).status_code == 403
+
+
+@pytest.mark.parametrize("raw,count", [
+    ("", 0), (SUBJECT, 1), (f" {SUBJECT.upper()} ", 1), (f"{SUBJECT},{SUBJECT}", 1),
+    ("not-a-uuid", 0), (f"{SUBJECT},*", 0),
+    (",".join(f"{i}1111111-2222-3333-4444-555555555555" for i in range(4)), 0),
+])
+def test_subject_configuration_fails_closed(raw, count):
+    from app.config import _qualification_subjects
+    assert len(_qualification_subjects(raw)) == count
