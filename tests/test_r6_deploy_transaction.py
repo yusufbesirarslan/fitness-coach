@@ -18,10 +18,15 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
+import re
 import shutil
+import stat as stat_module
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1680,6 +1685,121 @@ def test_apple_runner_crash_then_retry_preserves_lease_recovery_boundary():
     assert not any('FITX_SKIP_DB_INIT=0' in argv for argv, _, _ in world.calls)
     world.orphan = False  # bounded image-side timeout has removed the orphan
     assert scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, world) == 'OK'
+
+
+def _git_as_root_world(monkeypatch, scheduler, uid=1000, gid=1000, account_gid=1000, mode=stat_module.S_IFDIR | 0o755):
+    """The launcher as root, with subprocess recorded. Stubs stay on the module, never on os itself."""
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(kwargs, argv=argv)
+        return SimpleNamespace(returncode=0, stdout='ok\n')
+
+    def getpwuid(owner):
+        if account_gid is None:
+            raise KeyError(owner)
+        return SimpleNamespace(pw_gid=account_gid)
+
+    monkeypatch.setattr(scheduler, 'subprocess', SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired))
+    monkeypatch.setattr(scheduler, 'pwd', SimpleNamespace(getpwuid=getpwuid))
+    monkeypatch.setattr(scheduler, 'os', SimpleNamespace(
+        geteuid=lambda: 0, environ={'PATH': '/usr/bin', 'SUDO_UID': '1000', 'GIT_CONFIG_GLOBAL': '/evil'},
+        lstat=lambda path: SimpleNamespace(st_uid=uid, st_gid=gid, st_mode=mode)))
+    return seen
+
+
+@pytest.mark.parametrize('args', [('rev-parse', 'HEAD^{commit}'), ('show', 'a' * 40 + ':scripts/apple_release_scheduler.py')])
+def test_apple_launcher_git_runs_as_the_checkout_owner_never_root(monkeypatch, args):
+    scheduler = _apple_scheduler()
+    seen = _git_as_root_world(monkeypatch, scheduler)
+    assert scheduler.command(['git', '-C', '/srv/app', *args]) == 'ok'
+    assert (seen['user'], seen['group'], seen['extra_groups'], seen['cwd']) == (1000, 1000, [], '/')
+    assert seen['env'] == {'PATH': '/usr/bin', 'HOME': '/nonexistent', 'LC_ALL': 'C'}
+    assert seen['pass_fds'] == () and 'close_fds' not in seen  # the locks stay out of git
+
+
+def test_apple_launcher_git_group_is_the_owners_not_the_directorys(monkeypatch):
+    scheduler = _apple_scheduler()
+    seen = _git_as_root_world(monkeypatch, scheduler, gid=999, account_gid=1000)  # owner may chgrp its checkout
+    scheduler.command(['git', '-C', '/srv/app', 'rev-parse', 'HEAD^{commit}'])
+    assert seen['group'] == 1000
+
+
+@pytest.mark.parametrize('world', [
+    {'uid': 0},  # root-owned: there is nobody to drop to
+    {'account_gid': 0},  # the owner's own group is root
+    {'account_gid': None},  # no such account
+    {'mode': stat_module.S_IFLNK | 0o777},  # a symlink's target isn't what was checked
+    {'mode': stat_module.S_IFREG | 0o644},
+])
+def test_apple_launcher_git_refuses_an_unproven_checkout_without_running_git(monkeypatch, world):
+    scheduler = _apple_scheduler()
+    seen = _git_as_root_world(monkeypatch, scheduler, **world)
+    with pytest.raises(scheduler.Refused, match='GIT_CHECKOUT_UNPROVEN'):
+        scheduler.command(['git', '-C', '/srv/app', 'rev-parse', 'HEAD^{commit}'])
+    assert 'argv' not in seen
+
+
+def test_apple_launcher_git_without_an_explicit_checkout_refuses(monkeypatch):
+    scheduler = _apple_scheduler()
+    seen = _git_as_root_world(monkeypatch, scheduler)
+    with pytest.raises(scheduler.Refused, match='GIT_CHECKOUT_UNPROVEN'):
+        scheduler.command(['git', 'rev-parse', 'HEAD^{commit}'])
+    assert 'argv' not in seen
+
+
+def test_apple_launcher_git_with_an_unreadable_checkout_fails_closed(monkeypatch):
+    scheduler = _apple_scheduler()
+    seen = _git_as_root_world(monkeypatch, scheduler)
+
+    def missing(path):
+        raise FileNotFoundError(path)
+
+    scheduler.os.lstat = missing
+    with pytest.raises(scheduler.Refused, match='COMMAND_UNAVAILABLE'):
+        scheduler.command(['git', '-C', '/srv/app', 'rev-parse', 'HEAD^{commit}'])
+    assert 'argv' not in seen
+
+
+@pytest.mark.skipif(os.name != 'posix' or os.geteuid() == 0, reason='needs a real failure to drop')
+def test_apple_launcher_git_stops_when_the_real_drop_fails(monkeypatch, tmp_path):
+    # Real subprocess, real setgroups: unprivileged, so the drop itself is refused before git starts.
+    scheduler = _apple_scheduler()
+    monkeypatch.setattr(scheduler, 'os', SimpleNamespace(geteuid=lambda: 0, environ=os.environ, lstat=os.lstat))
+    with pytest.raises(scheduler.Refused, match='COMMAND_UNAVAILABLE'):
+        scheduler.command(['git', '-C', str(tmp_path), 'rev-parse', 'HEAD^{commit}'])
+
+
+def test_apple_launcher_docker_and_route_calls_keep_root_and_their_locks(monkeypatch):
+    scheduler = _apple_scheduler()
+    seen = _git_as_root_world(monkeypatch, scheduler)
+    scheduler.command(['docker', 'exec', 'cid', 'python'], pass_fds=(7, 8))
+    assert seen['pass_fds'] == (7, 8) and not {'user', 'group', 'extra_groups', 'env', 'cwd'} & set(seen)
+
+
+def test_apple_launcher_unprivileged_git_is_unchanged(monkeypatch):
+    scheduler = _apple_scheduler()
+    seen = _git_as_root_world(monkeypatch, scheduler)
+    scheduler.os.geteuid = lambda: 1000
+    scheduler.command(['git', '-C', '/srv/app', 'rev-parse', 'HEAD^{commit}'])
+    assert not {'user', 'group', 'extra_groups', 'env', 'cwd'} & set(seen)
+
+
+def test_apple_launcher_has_one_way_to_start_a_process_and_every_git_names_its_checkout():
+    # A later git call, or a second way to start a process, must not slip past the drop.
+    source = (Path(tx.__file__).parent / 'apple_release_scheduler.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    starts, gits = [], []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            if node.func.value.id == 'subprocess' or (node.func.value.id == 'os' and node.func.attr.startswith(('exec', 'spawn', 'system', 'popen', 'posix_spawn'))):
+                starts.append(node)
+        if isinstance(node, ast.List) and node.elts and isinstance(node.elts[0], ast.Constant) and node.elts[0].value == 'git':
+            gits.append(node)
+    assert len(starts) == 1
+    assert any(keyword.arg is None and getattr(keyword.value.func, 'id', '') == 'as_checkout_owner' for keyword in starts[0].keywords)
+    assert len(gits) == 2 and all(git.elts[1].value == '-C' for git in gits)
+    assert not re.search(r"['\"]/\S*/git['\"]", source)  # an absolute path would miss argv[0] != 'git'
 
 
 def test_apple_orphan_prevents_release_schema_preparation_even_when_transport_off(tmp_path):
