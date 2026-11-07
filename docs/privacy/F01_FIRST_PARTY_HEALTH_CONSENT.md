@@ -57,3 +57,21 @@ After those determinations, the existing owner can propose a versioned publicati
 Selections overlap; these counts are separate runs, not additive unique coverage. SQLite synthetic domain fixtures explicitly construct prospective health evidence; PostgreSQL tests use real advisory locks. Synthetic disclosures, identities, provider stubs and local databases are not production approval or runtime evidence. Full hosted CI is reported separately at its actual status.
 
 The wider local smoke stopped at 2,341 passing checks with three changed-boundary assertions and seven sandbox-blocked Chromium fixtures; it is not a full-suite pass. After preserving existing response-close callback timing and updating health-cache/new-account expectations, the affected transport selection passed **110 checks** with unraisable errors fatal, and all **7 browser checks** passed with local Chromium permissions. No test gate was weakened or skipped for the new health implementation.
+
+
+## Exact-head CI follow-up
+
+The response boundary adds `no-store` without erasing existing `private` cache
+contracts. Explicit scope ownership and a context-bound finalizer retain body
+and authority until response close, including cyclic GC, disconnect/error and
+closed-iterator cases. Shared processing locks still order withdrawal after
+admitted processing. Dark endpoint 404s and ordinary health/referral controls
+retain their contracts. Subscription identity binding on mobile depends on the
+existing eligibility restriction, independently of the health permission.
+
+Domain query guards explicitly assert and separate exactly one fixed health
+state read from their previous domain budgets. Positive domain fixtures supply
+prospective synthetic evidence; no historical account is grandfathered by
+application code. The additive migration now declares frozen metadata rather
+than importing mutable runtime models; the existing expand safety gate is
+unchanged. No operational migration was executed.

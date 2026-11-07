@@ -19,7 +19,7 @@ import pytest
 from app.blueprints import social
 from app.models import MealLog
 from app.prompts import system
-from app.services import ai_coach, ai_consent, coach_privacy, foodcache, menu_analysis
+from app.services import health_consent, ai_coach, ai_consent, coach_privacy, foodcache, menu_analysis
 
 from test_lp15c_native_menu_analysis import (  # noqa: F401
     MACROS, MENU_URL, alice, analyze, bearer, mobile, provider, routed_wire, wire,
@@ -119,7 +119,7 @@ def test_old_value_is_ignored_inside_a_d1_operation_and_no_token_is_requested(
         raise AssertionError("no FatSecret token inside a D1 operation")
     monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", no_token)
     authority = ai_consent.OperationAuthority(alice.id, "menu_extract", 5, "menu_extract")
-    with app.test_request_context(), ai_consent.operation_scope(authority):
+    with app.test_request_context(), health_consent.processing(alice.id), ai_consent.operation_scope(authority):
         result = menu_analysis._analyze_menu_text(
             alice.id, "Ana Yemekler\nIzgara Tavuk\nAdana Kebap\nKunefe yemek menu")
     items = {i["name"]: i for category in result["categories"].values() for i in category}
@@ -131,7 +131,7 @@ def test_old_value_is_ignored_inside_a_d1_operation_and_no_token_is_requested(
 
 def _qr_in_d1(app, alice):
     authority = ai_consent.OperationAuthority(alice.id, "menu_extract", 5, "menu_extract")
-    with app.test_request_context(), ai_consent.operation_scope(authority):
+    with app.test_request_context(), health_consent.processing(alice.id), ai_consent.operation_scope(authority):
         result = menu_analysis._analyze_menu_text(
             alice.id, "Ana Yemekler\nIzgara Tavuk\nAdana Kebap\nKunefe yemek menu")
     return {i["name"]: i for category in result["categories"].values() for i in category}

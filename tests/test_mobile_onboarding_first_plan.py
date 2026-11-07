@@ -81,7 +81,10 @@ def _signed_in(client):
     login = client.post("/api/v1/auth/login",
                         json={"username": USERNAME, "password": PASSWORD})
     assert login.status_code == 200
-    return {"Authorization": "Bearer " + login.json["session"]["access_credential"]}
+    headers = {"Authorization": "Bearer " + login.json["session"]["access_credential"]}
+    from tests.test_health_consent import command
+    assert client.post('/api/v1/health-consent', headers=headers, json=command()).status_code == 200
+    return headers
 
 
 def _user():

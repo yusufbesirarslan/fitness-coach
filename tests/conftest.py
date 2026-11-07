@@ -142,7 +142,8 @@ class AutoOriginClient(FlaskClient):
 
 
 @pytest.fixture
-def app(monkeypatch):
+def app():
+    monkeypatch = pytest.MonkeyPatch()
     from app import create_app
     from app.extensions import db, limiter
     from app.services import gamification
@@ -177,6 +178,7 @@ def app(monkeypatch):
         yield flask_app
         db.session.remove()
         db.drop_all()
+    monkeypatch.undo()
 
 
 @pytest.fixture

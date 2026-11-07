@@ -243,3 +243,76 @@ def test_wsgi_scope_is_released_exactly_once(consume):
     result.close()
     result.close()
     assert scope.exits == 1
+
+
+def test_cyclic_unclosed_iterables_finalize_in_their_own_context(app, make_user):
+    import gc
+    import sys
+    from app.health_boundary import HealthProcessingBoundary, MARKER
+    owner = make_user("health-gc")
+    errors = []
+    old = sys.unraisablehook
+    sys.unraisablehook = errors.append
+    released = []
+    try:
+        def application(environ, start_response):
+            scope = consent.processing(owner.id)
+            scope.__enter__()
+            environ[MARKER] = scope
+            # Deliberately form a cycle, as Flask response callbacks can do.
+            def body():
+                try:
+                    yield b"synthetic"
+                finally:
+                    assert consent.current_generation() == 1
+                    released.append(True)
+            return body()
+        for _ in range(40):
+            response = HealthProcessingBoundary(application)({}, lambda *args: None)
+            assert next(response) == b"synthetic"
+            cycle = [response]
+            cycle.append(cycle)
+            del response, cycle
+        gc.collect()
+        assert errors == []
+        assert len(released) == 40
+        assert consent.current_generation() is None
+    finally:
+        sys.unraisablehook = old
+
+
+@pytest.mark.parametrize("path,method,body", [
+    ("/api/v1/account/me", "get", None),
+    ("/api/v1/account/language", "put", {"language": "tr"}),
+    ("/api/v1/account/eligibility", "get", None),
+    ("/api/v1/subscription/entitlement", "get", None),
+    ("/api/v1/subscription/purchase-context", "get", None),
+    ("/api/v1/subscription/verify", "post", {}),
+    ("/api/v1/ai-consent", "get", None),
+    ("/api/v1/ai/allowances", "get", None),
+])
+def test_ordinary_controls_do_not_require_a_health_grant(
+        client, make_user, principal, path, method, body):
+    owner = make_user("ordinary-health-refusal", health_consent=False)
+    response = getattr(client, method)(path, headers=principal(owner), json=body)
+    assert response.status_code != 405, (path, response.status_code)
+    if response.status_code == 404:
+        assert path == "/api/v1/ai/allowances"  # existing default-dark release gate
+    value = response.get_json(silent=True) or {}
+    assert not str(value.get("error", {}).get("code", "")).startswith("HEALTH_CONSENT_")
+    assert HealthConsentState.query.count() == HealthConsentEvent.query.count() == 0
+    assert client.get(PROFILE, headers=principal(owner)).status_code == 403
+
+
+def test_closed_iterable_cannot_publish_late_chunks():
+    from app.health_boundary import HealthProcessingBoundary, MARKER
+    class Scope:
+        def __exit__(self, *args):
+            pass
+    def application(environ, start_response):
+        environ[MARKER] = Scope()
+        return [b"first", b"must-not-publish"]
+    response = HealthProcessingBoundary(application)({}, lambda *args: None)
+    assert next(response) == b"first"
+    response.close()
+    assert list(response) == []

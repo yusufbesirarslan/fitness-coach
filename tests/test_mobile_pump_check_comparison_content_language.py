@@ -1,4 +1,5 @@
 """Current account authority across mixed historical sources and pair reuse."""
+from tests.health_consent_support import domain_statements
 import json
 from datetime import timedelta
 
@@ -54,7 +55,7 @@ def test_mixed_historical_sources_preserved_and_current_account_controls_output(
 
     def enter(*args, **kwargs):
         event.remove(db.engine, "before_cursor_execute", record_sql)
-        assert queries == []
+        assert domain_statements(queries) == []
         return real(*args, **kwargs)
 
     monkeypatch.setattr(service, "create_or_replay", enter)

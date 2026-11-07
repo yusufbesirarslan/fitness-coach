@@ -148,25 +148,53 @@ def mutate(owner, data):
         return _public(dict(state, **values))
 
 
-@contextmanager
-def processing(owner, *, expected_generation=None):
-    active = _ACTIVE.get()
-    if active is not None:
-        if active[0] != owner or (expected_generation is not None and active[1] != expected_generation):
-            raise HealthConsentDenied("HEALTH_CONSENT_CHANGED")
-        yield active[1]
-        return
-    with _authority(owner) as conn:
-        state = _state(conn, owner)
-        if not _valid(state["record"]):
-            raise HealthConsentDenied()
-        if expected_generation is not None and state["generation"] != expected_generation:
-            raise HealthConsentDenied("HEALTH_CONSENT_CHANGED")
-        token = _ACTIVE.set((owner, state["generation"]))
+class processing:
+    """Explicit scope ownership: GC must never resume a token-reset generator.
+
+    The WSGI owner closes this scope in its originating Context. Keeping the
+    token in a regular object also makes cyclic collection safe: Python may
+    otherwise finalize a suspended contextmanager generator before the WSGI
+    iterable's finalizer, in the collector's unrelated Context.
+    """
+    def __init__(self, owner, *, expected_generation=None):
+        self.owner = owner
+        self.expected_generation = expected_generation
+        self.authority = None
+        self.token = None
+
+    def __enter__(self):
+        active = _ACTIVE.get()
+        if active is not None:
+            if (active[0] != self.owner or (self.expected_generation is not None
+                    and active[1] != self.expected_generation)):
+                raise HealthConsentDenied("HEALTH_CONSENT_CHANGED")
+            return active[1]
+        authority = _authority(self.owner)
+        conn = authority.__enter__()
         try:
-            yield state["generation"]
-        finally:
-            _ACTIVE.reset(token)
+            state = _state(conn, self.owner)
+            if not _valid(state["record"]):
+                raise HealthConsentDenied()
+            if (self.expected_generation is not None
+                    and state["generation"] != self.expected_generation):
+                raise HealthConsentDenied("HEALTH_CONSENT_CHANGED")
+            self.token = _ACTIVE.set((self.owner, state["generation"]))
+            self.authority = authority
+            return state["generation"]
+        except BaseException:
+            import sys
+            authority.__exit__(*sys.exc_info())
+            raise
+
+    def __exit__(self, *exc):
+        authority, self.authority = self.authority, None
+        if authority is not None:
+            try:
+                _ACTIVE.reset(self.token)
+                self.token = None
+            finally:
+                authority.__exit__(*exc)
+        return False
 
 
 def current_generation():

@@ -301,7 +301,7 @@ def test_worker_uses_database_owner_and_existing_job_id(app, make_user, monkeypa
         return True
     monkeypatch.setattr(memory_manager, "maybe_summarize", summarize)
     monkeypatch.setattr(rq, "get_current_job", lambda: SimpleNamespace(id="12345678-1234-4234-8234-123456789abc"))
-    assert tasks.summarize_conversation(conversation.id) is True
+    assert tasks.summarize_conversation(conversation.id, health_generation=1) is True
     assert len(events) == 1
     assert events[0]["subject_id"] == user.id
     assert events[0]["request_id"] is None

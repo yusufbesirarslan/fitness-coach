@@ -16,9 +16,31 @@ expand_contract = "expand"
 
 
 def _tables():
-    # Metadata only; model import performs no data read/backfill.
-    from app.health_consent_models import HealthConsentState, HealthConsentEvent
-    return HealthConsentState.__table__, HealthConsentEvent.__table__
+    metadata = sa.MetaData()
+    sa.Table('user', metadata, sa.Column('id', sa.Integer, primary_key=True))
+    state = sa.Table('health_consent_state', metadata,
+        sa.Column('owner_id', sa.Integer, sa.ForeignKey('user.id', ondelete='CASCADE'), primary_key=True),
+        sa.Column('generation', sa.BigInteger, nullable=False),
+        sa.Column('record', sa.JSON, nullable=False),
+        sa.Column('changed_at', sa.DateTime, nullable=False),
+        sa.CheckConstraint('generation > 0', name='ck_health_consent_generation'))
+    event = sa.Table('health_consent_event', metadata,
+        sa.Column('id', sa.Integer, primary_key=True),
+        sa.Column('owner_id', sa.Integer, sa.ForeignKey('user.id', ondelete='CASCADE'), nullable=False),
+        sa.Column('generation', sa.BigInteger, nullable=False),
+        sa.Column('purpose', sa.String(80), nullable=False),
+        sa.Column('version', sa.String(80), nullable=False),
+        sa.Column('locale', sa.String(8), nullable=False),
+        sa.Column('text_digest', sa.String(64), nullable=False),
+        sa.Column('action', sa.String(24), nullable=False),
+        sa.Column('occurred_at', sa.DateTime, nullable=False),
+        sa.Column('request_id', sa.String(80), nullable=False),
+        sa.Column('request_digest', sa.String(64), nullable=False),
+        sa.UniqueConstraint('owner_id', 'request_id', name='uq_health_consent_request'),
+        sa.UniqueConstraint('owner_id', 'generation', name='uq_health_consent_generation'),
+        sa.CheckConstraint('generation > 0', name='ck_health_event_generation'),
+        sa.CheckConstraint("action IN ('affirmative_grant', 'decline', 'withdraw')", name='ck_health_event_action'))
+    return state, event
 
 
 def _predicate(value):

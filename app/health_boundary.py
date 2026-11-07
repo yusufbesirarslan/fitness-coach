@@ -17,12 +17,20 @@ SAFE_ENDPOINTS = frozenset({
     "mobile_api.subscription_purchase_context", "mobile_api.subscription_verify",
     "mobile_api.subscription_entitlement", "mobile_api.subscription_apple_notifications",
     "mobile_api.ai_allowances_read", "mobile_api.ai_action_receipt",
-    "ai_consent.web_consent",
+    "ai_consent.web_consent", "health", "pages.referral_data",
 })
 
 
 def needs_health():
     endpoint = request.endpoint or ""
+    if endpoint == "mobile_api.today_guidance":
+        from app.blueprints.mobile_today_guidance import _guidance_enabled
+        if not _guidance_enabled():
+            return False
+    if endpoint in {"mobile_api.exercise_history_capabilities", "mobile_api.read_exercise_history"}:
+        from app.blueprints.mobile_exercise_history import _ready
+        if not _ready():
+            return False
     return bool(endpoint and endpoint not in SAFE_ENDPOINTS
                 and not endpoint.startswith(("auth.", "static", "account_eligibility."))
                 and endpoint not in {"mobile_api.login", "mobile_api.refresh", "mobile_api.logout",
@@ -80,7 +88,7 @@ def install(app):
     @app.after_request
     def no_health_cache(response):
         if MARKER in request.environ:
-            response.headers["Cache-Control"] = "no-store"
+            response.cache_control.no_store = True
         return response
 
 
@@ -118,13 +126,19 @@ class HealthProcessingBoundary:
                 finally:
                     scope.__exit__(None, None, None)
 
-        iterator = iter(iterable)
+        try:
+            iterator = context.run(iter, iterable)
+        except BaseException:
+            context.run(release)
+            raise
 
         class ContextIterator:
             def __iter__(self):
                 return self
 
             def __next__(self):
+                if closed:
+                    raise StopIteration
                 try:
                     return context.run(next, iterator)
                 except StopIteration:
@@ -136,14 +150,16 @@ class HealthProcessingBoundary:
                     raise
 
             def close(self):
-                context.run(release)
+                finalizer = getattr(self, "_finalizer", None)
+                if finalizer is None:
+                    context.run(release)
+                else:
+                    finalizer()
 
-            def __del__(self):
-                # WSGI servers call close; discarded test/client iterables must
-                # also release in the context where the token was created.
-                try:
-                    self.close()
-                except Exception:
-                    pass
-
-        return ContextIterator()
+        result = ContextIterator()
+        # A registry-held finalizer keeps the suspended body/authority alive
+        # until cleanup can run in this Context. A __del__ alone cannot order
+        # their generator finalizers during cyclic GC.
+        import weakref
+        result._finalizer = weakref.finalize(result, context.run, release)
+        return result

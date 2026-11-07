@@ -6,6 +6,7 @@ Real Flask boundary, real canonical persistence. The Bearer principal is stubbed
 
     python -m pytest tests/test_lp17_b1_today_guidance_api.py -q
 """
+from tests.health_consent_support import domain_statements
 import ast
 import json
 import logging
@@ -646,7 +647,7 @@ def _measure(client, headers):
     finally:
         event.remove(engine, "before_cursor_execute", capture)
     assert response.status_code == 200
-    return len(seen), len(response.data)
+    return len(domain_statements(seen)), len(response.data)
 
 
 def _legacy_weightless_history(user_id, count):
