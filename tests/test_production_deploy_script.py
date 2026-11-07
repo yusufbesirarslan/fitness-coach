@@ -1220,7 +1220,7 @@ HOSTILE_GIT_PROBE = """#!/bin/sh
   echo "groups=$(/usr/bin/id -G)"
   echo "home=$HOME"
   echo "sudo=${{SUDO_UID:-none}}"
-  echo "fds=$(/bin/ls /proc/$$/fd | /usr/bin/tr '\\n' ' ')"
+  echo "fds=$(/bin/ls -l /proc/$$/fd | /usr/bin/tr '\\n' ' ')"
 }} > {marker}
 exit 1
 """
@@ -1297,8 +1297,14 @@ def test_real_root_launcher_git_confines_hostile_config_to_the_owner(owned_check
     assert "uid=0\n" in c.marker.read_text(encoding="utf-8")
     c.marker.unlink()
 
-    held = os.open(c.checkout / ".git" / "HEAD", os.O_RDONLY)  # stands in for the launcher's held locks
+    # Stands in for the launcher's held locks. Named, because the shell's own descriptors reuse small numbers.
+    held = os.open(c.checkout.parent / "held-lock", os.O_RDONLY | os.O_CREAT, 0o644)
     try:
+        # Control: handed over on purpose, the probe sees it.
+        with pytest.raises(c.scheduler.Refused, match="COMMAND_FAILED"):
+            c.scheduler.command(["git", *argv], pass_fds=(held,))
+        assert "held-lock" in c.marker.read_text(encoding="utf-8")
+        c.marker.unlink()
         with pytest.raises(c.scheduler.Refused, match="COMMAND_FAILED"):
             c.scheduler.command(["git", *argv])
     finally:
@@ -1308,7 +1314,7 @@ def test_real_root_launcher_git_confines_hostile_config_to_the_owner(owned_check
     assert fired["gid"] == str(c.account.pw_gid)
     assert fired["groups"] == str(c.account.pw_gid)
     assert fired["home"] == "/nonexistent" and fired["sudo"] == "none"
-    assert str(held) not in fired["fds"].split()
+    assert "held-lock" not in fired["fds"]
 
 
 @pytest.mark.linux_helper_identity
