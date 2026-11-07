@@ -127,6 +127,10 @@ class HealthProcessingBoundary:
             def __next__(self):
                 try:
                     return context.run(next, iterator)
+                except StopIteration:
+                    # Preserve existing response.call_on_close timing. The WSGI
+                    # server closes after it has consumed/published the body.
+                    raise
                 except BaseException:
                     self.close()
                     raise

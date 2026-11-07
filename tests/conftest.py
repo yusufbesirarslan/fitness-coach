@@ -138,13 +138,7 @@ class AutoOriginClient(FlaskClient):
                         sess["_csrf_token"] = token
                 headers["X-CSRFToken"] = token
             kwargs["headers"] = headers
-        response = super().open(*args, **kwargs)
-        # Ordinary responses finish as on a WSGI server. SSE tests retain their
-        # explicit close/disconnect semantics and can inspect live iterators.
-        if response.mimetype != "text/event-stream" and not kwargs.get("buffered"):
-            response.get_data()
-            response.close()
-        return response
+        return super().open(*args, **kwargs)
 
 
 @pytest.fixture

@@ -55,3 +55,5 @@ After those determinations, the existing owner can propose a versioned publicati
 - Paired mobile: [draft #174](https://github.com/axisaiapp/axisai-mobile/pull/174), 13 new flow tests + 105 existing regressions; analysis clean.
 
 Selections overlap; these counts are separate runs, not additive unique coverage. SQLite synthetic domain fixtures explicitly construct prospective health evidence; PostgreSQL tests use real advisory locks. Synthetic disclosures, identities, provider stubs and local databases are not production approval or runtime evidence. Full hosted CI is reported separately at its actual status.
+
+The wider local smoke stopped at 2,341 passing checks with three changed-boundary assertions and seven sandbox-blocked Chromium fixtures; it is not a full-suite pass. After preserving existing response-close callback timing and updating health-cache/new-account expectations, the affected transport selection passed **110 checks** with unraisable errors fatal, and all **7 browser checks** passed with local Chromium permissions. No test gate was weakened or skipped for the new health implementation.
