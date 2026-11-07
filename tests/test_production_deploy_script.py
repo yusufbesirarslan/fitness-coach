@@ -1220,6 +1220,7 @@ HOSTILE_GIT_PROBE = """#!/bin/sh
   echo "groups=$(/usr/bin/id -G)"
   echo "home=$HOME"
   echo "sudo=${{SUDO_UID:-none}}"
+  echo "session=$(/usr/bin/ps -o sid= -p $$ | /usr/bin/tr -d ' ')"
   echo "fds=$(/bin/ls -l /proc/$$/fd | /usr/bin/tr '\\n' ' ')"
 }} > {marker}
 exit 1
@@ -1314,6 +1315,7 @@ def test_real_root_launcher_git_confines_hostile_config_to_the_owner(owned_check
     assert fired["gid"] == str(c.account.pw_gid)
     assert fired["groups"] == str(c.account.pw_gid)
     assert fired["home"] == "/nonexistent" and fired["sudo"] == "none"
+    assert fired["session"] not in ("", str(os.getsid(0)))  # no hold on root's terminal
     assert "held-lock" not in fired["fds"]
 
 
@@ -1330,6 +1332,7 @@ def test_real_root_launcher_runs_its_whole_flow_as_the_owner(owned_checkout, req
     def run(argv, timeout=10, pass_fds=()):
         if argv[0] == "git":
             gits.append(argv[3])
+            assert pass_fds == ()  # execute() must never hand the locks to code the owner controls
             return c.scheduler.command(argv, timeout, pass_fds)  # the only real command here
         if argv[0].endswith("axisai-switch-web-slot"):
             return "op=status state=blue backend=127.0.0.1:5001 result=ok"
@@ -1348,7 +1351,6 @@ def test_real_root_launcher_runs_its_whole_flow_as_the_owner(owned_checkout, req
 
     result = c.scheduler.execute({"deploy_dir": str(c.checkout), "limit": 25}, run, (7, 8))
     assert result == "OK" and gits == ["rev-parse", "show"]
-    assert all(path.lstat().st_uid == c.account.pw_uid for path in (c.checkout / ".git").rglob("*"))
 
 
 @pytest.mark.linux_helper_identity

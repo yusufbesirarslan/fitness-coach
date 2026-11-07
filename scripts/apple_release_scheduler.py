@@ -51,6 +51,7 @@ def as_checkout_owner(argv):
     if not stat.S_ISDIR(info.st_mode) or info.st_uid == 0 or group == 0:
         raise Refused('GIT_CHECKOUT_UNPROVEN')
     return {'user': info.st_uid, 'group': group, 'extra_groups': [], 'cwd': '/',
+            'stdin': subprocess.DEVNULL, 'start_new_session': True,  # no hold on root's terminal
             'env': {'PATH': os.environ.get('PATH', ''), 'HOME': '/nonexistent', 'LC_ALL': 'C'}}
 
 

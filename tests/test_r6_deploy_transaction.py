@@ -1700,7 +1700,7 @@ def _git_as_root_world(monkeypatch, scheduler, uid=1000, gid=1000, account_gid=1
             raise KeyError(owner)
         return SimpleNamespace(pw_gid=account_gid)
 
-    monkeypatch.setattr(scheduler, 'subprocess', SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired))
+    monkeypatch.setattr(scheduler, 'subprocess', SimpleNamespace(run=run, TimeoutExpired=subprocess.TimeoutExpired, DEVNULL=subprocess.DEVNULL))
     monkeypatch.setattr(scheduler, 'pwd', SimpleNamespace(getpwuid=getpwuid))
     monkeypatch.setattr(scheduler, 'os', SimpleNamespace(
         geteuid=lambda: 0, environ={'PATH': '/usr/bin', 'SUDO_UID': '1000', 'GIT_CONFIG_GLOBAL': '/evil'},
@@ -1715,6 +1715,7 @@ def test_apple_launcher_git_runs_as_the_checkout_owner_never_root(monkeypatch, a
     assert scheduler.command(['git', '-C', '/srv/app', *args]) == 'ok'
     assert (seen['user'], seen['group'], seen['extra_groups'], seen['cwd']) == (1000, 1000, [], '/')
     assert seen['env'] == {'PATH': '/usr/bin', 'HOME': '/nonexistent', 'LC_ALL': 'C'}
+    assert seen['stdin'] == subprocess.DEVNULL and seen['start_new_session'] is True
     assert seen['pass_fds'] == () and 'close_fds' not in seen  # the locks stay out of git
 
 
@@ -1774,7 +1775,15 @@ def test_apple_launcher_docker_and_route_calls_keep_root_and_their_locks(monkeyp
     scheduler = _apple_scheduler()
     seen = _git_as_root_world(monkeypatch, scheduler)
     scheduler.command(['docker', 'exec', 'cid', 'python'], pass_fds=(7, 8))
-    assert seen['pass_fds'] == (7, 8) and not {'user', 'group', 'extra_groups', 'env', 'cwd'} & set(seen)
+    assert seen['pass_fds'] == (7, 8) and not {'user', 'group', 'extra_groups', 'env', 'cwd', 'stdin', 'start_new_session'} & set(seen)
+
+
+def test_apple_launcher_never_hands_its_locks_to_git():
+    scheduler = _apple_scheduler()
+    world = AppleRunnerWorld()
+    assert scheduler.execute({'deploy_dir': '/srv/app', 'limit': 25}, world, (7, 8)) == 'OK'
+    gits = [fds for argv, _, fds in world.calls if argv[0] == 'git']
+    assert len(gits) == 2 and all(fds == () for fds in gits)
 
 
 def test_apple_launcher_unprivileged_git_is_unchanged(monkeypatch):
@@ -1782,7 +1791,7 @@ def test_apple_launcher_unprivileged_git_is_unchanged(monkeypatch):
     seen = _git_as_root_world(monkeypatch, scheduler)
     scheduler.os.geteuid = lambda: 1000
     scheduler.command(['git', '-C', '/srv/app', 'rev-parse', 'HEAD^{commit}'])
-    assert not {'user', 'group', 'extra_groups', 'env', 'cwd'} & set(seen)
+    assert not {'user', 'group', 'extra_groups', 'env', 'cwd', 'stdin', 'start_new_session'} & set(seen)
 
 
 def test_apple_launcher_has_one_way_to_start_a_process_and_every_git_names_its_checkout():
