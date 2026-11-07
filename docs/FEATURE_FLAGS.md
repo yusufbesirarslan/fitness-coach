@@ -49,6 +49,10 @@ approved. See [R6 scheduler contract](DEPLOYMENT.md#apple-intake-source-closure-
 Rollback: set 0 (rows retained). See
 [subscription contract](APPLE_SUBSCRIPTIONS.md).
 
+`APPLE_PRERELEASE_401_FALLBACK_ENABLED` (RC2 only) defaults OFF, shipped_dark, owner
+@yusufbesirarslan, review by 2026-11-27, decision remove. See
+[pre-release Production lock](APPLE_SUBSCRIPTIONS.md#rc2-pre-release-production-lock-temporary).
+
 `APPLE_SANDBOX_FALLBACK_ENABLED` (MON-BE-APPLE-DUAL-ENV-REVIEW-01) defaults OFF,
 shipped_dark, owner @yusufbesirarslan, review by 2026-11-27. Valid only with
 `APPLE_SUBSCRIPTION_ENVIRONMENT=Production` (otherwise every subscription API
