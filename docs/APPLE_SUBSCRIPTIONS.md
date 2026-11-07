@@ -444,6 +444,10 @@ The following steps apply only after separate payment activation approval:
    the numeric App Apple ID, the API key and the mounted Apple roots. Set
    `APPLE_SUBSCRIPTIONS_ENABLED=1` (payment activation approval) and
    `APPLE_SANDBOX_FALLBACK_ENABLED=1`.
+   Before the app's first production release, Production API access is refused, so
+   steps 3 and 4 answer 503 for any account outside the temporary
+   [pre-release exception](#rc2-pre-release-production-lock-temporary). A review-safe
+   purchase path is required before submission.
 3. Off-box check: `purchase-context` reports `Production`. A TestFlight build on
    the production API buys Monthly in Sandbox, verify returns 200, and the row is
    `environment='Sandbox'`. Restore is idempotent, and a second account gets 409.
@@ -531,9 +535,10 @@ receipt for this key shows Production HTTP 401 and Sandbox accepted, but a 401 d
 identify its cause. Remove this exception with the seam in the D1 launch commit.
 
 `APPLE_PRERELEASE_401_FALLBACK_ENABLED` defaults OFF.
-`APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT` is an exact `YYYY-MM-DDTHH:MM:SSZ`. A missing,
-malformed or passed deadline closes the exception, as does anything that closes the
-qualification window.
+`APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT` is an exact `YYYY-MM-DDTHH:MM:SSZ`, at most
+30 days out at boot. A missing, malformed, passed or too distant deadline closes the
+exception, as does an empty or malformed control list and anything that closes the
+qualification window. Boot logs `deadline=0` when the deadline was refused.
 
 | Situation in client verify | Named purchase subject, open | Anyone else, or closed |
 |---|---|---|

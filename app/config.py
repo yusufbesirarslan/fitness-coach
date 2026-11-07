@@ -344,6 +344,12 @@ def _utc_deadline(raw):
         return None
 
 
+def _prerelease_401_deadline(raw, now):
+    """A deadline already passed, or more than 30 days out, is refused like a malformed one."""
+    deadline = _utc_deadline(raw)
+    return deadline if deadline is not None and now < deadline <= now + timedelta(days=30) else None
+
+
 def configure_app(app):
     # Tek güvenilir reverse proxy (host nginx) arkasında X-Forwarded-For/-Proto'ya
     # güven. Host ve port doğrudan Host başlığından gelir; istemci tarafından
@@ -405,10 +411,10 @@ def configure_app(app):
         app.logger.warning("apple_subscription event=qualification_cohort count=%d controls=%d",
                            len(app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"]),
                            len(app.config["APPLE_QUALIFICATION_CONTROL_SUBJECTS"]))
-    app.config["APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT"] = _utc_deadline(
-        os.environ.get("APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT", ""))
+    app.config["APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT"] = _prerelease_401_deadline(
+        os.environ.get("APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT", ""), datetime.now(timezone.utc))
     if app.config["APPLE_PRERELEASE_401_FALLBACK_ENABLED"]:
-        # deadline=0 means a missing or malformed deadline: the exception stays closed.
+        # deadline=0 means missing, malformed, passed or too far out: the exception stays closed.
         app.logger.warning("apple_subscription event=prerelease_401_fallback deadline=%d",
                            app.config["APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT"] is not None)
     raw_app_id = os.environ.get("APPLE_APP_ID", "")

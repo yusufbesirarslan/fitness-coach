@@ -58,7 +58,9 @@ qualification are separate approvals. Rollback: set 0; receipts are retained.
 
 RC2 `APPLE_PRERELEASE_401_FALLBACK_ENABLED` remains OFF. Enabling it needs its own
 founder approval and an `APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT` deadline, and it must
-be OFF before any App Store submission or release. It doesn't cover App Review.
+be OFF before any App Store submission or release. It doesn't cover App Review:
+before a first production release, the Sandbox fallback alone doesn't make review
+purchases verify, and a review-safe purchase path is required before submission.
 
 MON-BE-APPLE-DUAL-ENV-REVIEW-01 `APPLE_SANDBOX_FALLBACK_ENABLED` remains OFF. It
 applies only to a Production subscription deployment and is the App Review /

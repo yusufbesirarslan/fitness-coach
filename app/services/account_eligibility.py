@@ -57,14 +57,16 @@ def qualification_subject(user):
 def prerelease_401_window_open():
     """RC2 pre-release Production lock. Remove with the D1 launch commit.
 
-    Needs the flag, an unexpired deadline and the complete qualification window.
-    A missing, malformed or passed deadline closes it.
+    Needs the flag, an unexpired deadline, a control list and the complete
+    qualification window. A malformed control list parses as empty, and a subject
+    on it must not become a purchase subject here, so an empty one closes it too.
     """
     config = current_app.config
     deadline = config.get("APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT")
     return (config.get("APPLE_PRERELEASE_401_FALLBACK_ENABLED") is True
             and isinstance(deadline, datetime) and deadline.tzinfo is not None
             and datetime.now(timezone.utc) < deadline
+            and bool(config.get("APPLE_QUALIFICATION_CONTROL_SUBJECTS"))
             and qualification_open())
 
 

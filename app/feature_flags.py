@@ -222,11 +222,11 @@ ROLLOUT_FLAGS = (
     ),
     FeatureFlag(
         key="APPLE_PRERELEASE_401_FALLBACK_ENABLED",
-        capability="RC2 only, removed with the D1 launch commit. Before an app's first production release Apple refuses Production App Store Server API access. While ON and before APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT, a client verify by a named RC2 purchase subject moves from an exact Production HTTP 401 to the Sandbox lookup. Control accounts, every other account, reconciliation and notifications never use it. Sandbox 401 stays final, and a Sandbox 404 after Production 401 answers temporarily unavailable, not invalid evidence.",
+        capability="RC2 only, removed with the D1 launch commit. Before an app's first production release Apple refuses Production App Store Server API access. While ON, with a non-empty control list and before APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT (at most 30 days out at boot), a client verify by a named RC2 purchase subject moves from an exact Production HTTP 401 to the Sandbox lookup. Control accounts, every other account, reconciliation and notifications never use it. Sandbox 401 stays final, and a Sandbox 404 after Production 401 answers temporarily unavailable, not invalid evidence.",
         owner=_OWNER,
         default=False,
         depends_on=("APPLE_SANDBOX_FALLBACK_ENABLED", "APPLE_SUBSCRIPTIONS_ENABLED"),
-        observability="Boot line `apple_subscription event=prerelease_401_fallback deadline=0|1`; per lookup `apple_subscription event=sandbox_fallback kind=verify trigger=prerelease_401`, and `event=prerelease_401 outcome=sandbox_auth_rejected|sandbox_not_found|sandbox_error` when Sandbox doesn't answer. No subject, transaction or token is logged.",
+        observability="Boot line `apple_subscription event=prerelease_401_fallback deadline=0|1`; per lookup moved by a Production 401 `apple_subscription event=sandbox_fallback kind=verify trigger=prerelease_401`, and `event=prerelease_401 outcome=sandbox_auth_rejected|sandbox_not_found|sandbox_error` when Sandbox doesn't answer. The trigger line alone doesn't mean success: read the response status or the row. No subject, transaction or token is logged.",
         prerequisites=("Independent security review of the exact head and human merge",
                        "Named purchase and control lists on a Production deployment with the Sandbox fallback ON",
                        "Founder-set APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT covering only the approved qualification window",

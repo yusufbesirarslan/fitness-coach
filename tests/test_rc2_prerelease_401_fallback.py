@@ -16,7 +16,7 @@ from appstoreserverlibrary.api_client import APIException
 from appstoreserverlibrary.models.Environment import Environment
 from appstoreserverlibrary.signed_data_verifier import VerificationException, VerificationStatus
 
-from app.config import _utc_deadline
+from app.config import _prerelease_401_deadline, _utc_deadline
 from app.extensions import db
 from app.feature_flags import FeatureFlagConfigurationError, resolve_rollout_flags
 from app.models import AppleAccountAssociation, AppleSubscription, User
@@ -181,6 +181,20 @@ def test_every_sandbox_check_still_applies(break_evidence, code):
     assert _refused(lambda: dual.p.verify_prerelease_401_subject("201", token)).code == code
 
 
+@pytest.mark.parametrize("failure,outcome", [
+    (APIException(401), "sandbox_auth_rejected"),
+    (APIException(404, NOT_FOUND, "Transaction id not found."), "sandbox_not_found"),
+    (APIException(500), "sandbox_error"),
+    (requests.Timeout("private"), "sandbox_error"),
+])
+def test_sandbox_outcome_labels(caplog, failure, outcome):
+    dual = _locked()
+    dual.s.client.fail = failure
+    with caplog.at_level(logging.DEBUG):
+        _refused(lambda: dual.p.verify_prerelease_401_subject("201", dual.stx.appAccountToken))
+    assert f"event=prerelease_401 outcome={outcome}" in caplog.text
+
+
 def test_log_lines_are_closed(caplog):
     dual = _locked()
     dual.s.client.fail = APIException(401)
@@ -239,6 +253,16 @@ def test_named_subject_gets_a_sandbox_row_and_no_ai(world):
         ai_launch.require_cohort(db.session.get(User, world.ids["a"]))
 
 
+def test_no_read_transaction_stays_open_across_apple_calls(world):
+    seen, lookup = [], world.dual.p.client.get_transaction_info
+    def spy(transaction_id):
+        seen.append(db.session().in_transaction())
+        return lookup(transaction_id)
+    world.dual.p.client.get_transaction_info = spy
+    s.verify_purchase(world.ids["a"], "201")
+    assert seen == [False]
+
+
 def test_second_named_subject_cannot_claim_the_transaction(world):
     assert _refused(lambda: s.verify_purchase(world.ids["b"], "201")).code == "SUBSCRIPTION_OWNERSHIP_CONFLICT"
     assert _rows() == []
@@ -275,6 +299,7 @@ def test_subject_on_both_lists_is_a_control(world):
     {"APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT": datetime(2099, 1, 1)},
     {"APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT": datetime(2020, 1, 1, tzinfo=timezone.utc)},
     {"APPLE_PURCHASE_QUALIFICATION_SUBJECTS": frozenset()},
+    {"APPLE_QUALIFICATION_CONTROL_SUBJECTS": frozenset()},
     {"APPLE_SANDBOX_FALLBACK_ENABLED": False},
     {"APPLE_SUBSCRIPTION_ENVIRONMENT": "Sandbox"},
 ])
@@ -297,7 +322,10 @@ def test_flag_off_reads_no_subject_and_uses_plain_verify(world, monkeypatch):
         raise AssertionError("subject read with the exception off")
     monkeypatch.setattr(policy, "qualification_subject", unused)
     monkeypatch.setattr(AppleAdapter, "verify_prerelease_401_subject", unused)
+    read, session_get = [], db.session.get
+    monkeypatch.setattr(db.session, "get", lambda model, key: read.append(model) or session_get(model, key))
     assert _refused(lambda: s.verify_purchase(world.ids["a"], "201")).code == TEMPORARY
+    assert read == [AppleAccountAssociation]
 
 
 def test_reconciliation_never_moves_on_production_401(world):
@@ -336,6 +364,38 @@ def test_deadline_parser_accepts_one_exact_form():
                 "2026-11-20T12:30:00+00:00", "2026-11-20 12:30:00Z", "2026-13-01T00:00:00Z",
                 "2026-02-30T00:00:00Z", "2026-1-1T00:00:00Z", "tomorrow", "٢٠٢٦-11-20T12:30:00Z"):
         assert _utc_deadline(raw) is None
+
+
+def test_deadline_must_be_ahead_and_within_thirty_days():
+    now = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
+    assert _prerelease_401_deadline("2026-11-08T12:00:01Z", now) is not None
+    assert _prerelease_401_deadline("2026-12-08T12:00:00Z", now) is not None
+    for raw in ("2026-11-08T12:00:00Z", "2020-01-01T00:00:00Z", "2026-12-08T12:00:01Z", "2062-11-08T12:00:00Z", "soon", ""):
+        assert _prerelease_401_deadline(raw, now) is None
+
+
+def _boot(monkeypatch, caplog, enabled, deadline):
+    from app import create_app
+    monkeypatch.setenv("APPLE_PRERELEASE_401_FALLBACK_ENABLED", enabled)
+    monkeypatch.setenv("APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT", deadline)
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        return create_app().config
+
+
+def test_boot_reads_the_environment_and_reports_a_refused_deadline(monkeypatch, caplog):
+    ahead = _future().replace(microsecond=0)
+    config = _boot(monkeypatch, caplog, "1", ahead.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    assert config["APPLE_PRERELEASE_401_FALLBACK_ENABLED"] is True
+    assert config["APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT"] == ahead
+    assert "event=prerelease_401_fallback deadline=1" in caplog.text
+
+    config = _boot(monkeypatch, caplog, "1", "2020-01-01T00:00:00Z")
+    assert config["APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT"] is None
+    assert "event=prerelease_401_fallback deadline=0" in caplog.text
+
+    _boot(monkeypatch, caplog, "0", "2020-01-01T00:00:00Z")
+    assert "event=prerelease_401_fallback" not in caplog.text
 
 
 def _source(path):
