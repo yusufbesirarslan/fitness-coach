@@ -360,12 +360,9 @@ def test_the_flag_gate_is_applied_outside_every_throttle_and_the_ai_gate():
     assert seen == len(ENDPOINTS), seen
 
 
-def test_every_session_route_is_absent_while_the_flag_is_off(app, monkeypatch):
+def test_every_session_route_is_absent_while_the_flag_is_off(app, monkeypatch, make_user):
     app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = False
-    user = User(username="flag-off", email="flag-off@example.com",
-                cognito_sub="sub-flag-off")
-    db.session.add(user)
-    db.session.commit()
+    user = make_user("flag-off", cognito_sub="sub-flag-off")
     user_id = user.id
     monkeypatch.setattr(
         mobile_auth, "authenticate_access",
@@ -426,7 +423,7 @@ def test_the_migration_only_adds_columns_and_keeps_one_alembic_head():
     # The head moves with every added revision; f5a6b7c8d9e0 must still
     # exist (asserted above) but is no longer the tip. F7 chains its Coach
     # history index onto F1's credential-epoch revision.
-    assert revisions - parents == {"c6f8b0d2e4a1"}, sorted(revisions - parents)
+    assert revisions - parents == {"f01c0a1e0001"}, sorted(revisions - parents)
 
 
 # 13/14. Untouched neighbours.
@@ -552,6 +549,8 @@ def test_a_checkpoint_costs_a_bounded_number_of_statements(
 
     counts = []
     for revision, set_count in enumerate((1, 20)):
+        # Compare equally cold identity maps as real request teardown does.
+        db.session.remove()
         statements = []
         engine = db.engine
 

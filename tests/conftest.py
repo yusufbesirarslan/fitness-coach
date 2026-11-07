@@ -138,17 +138,36 @@ class AutoOriginClient(FlaskClient):
                         sess["_csrf_token"] = token
                 headers["X-CSRFToken"] = token
             kwargs["headers"] = headers
-        return super().open(*args, **kwargs)
+        response = super().open(*args, **kwargs)
+        # Ordinary responses finish as on a WSGI server. SSE tests retain their
+        # explicit close/disconnect semantics and can inspect live iterators.
+        if response.mimetype != "text/event-stream" and not kwargs.get("buffered"):
+            response.get_data()
+            response.close()
+        return response
 
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
     from app import create_app
     from app.extensions import db, limiter
     from app.services import gamification
 
     flask_app = create_app()
     flask_app.config["TESTING"] = True
+    # Existing domain/transport tests use synthetic, prospectively consented
+    # owners. This SQLite adapter is NOT distributed-authority qualification;
+    # test_health_consent_pg exercises the real cross-connection PG boundary.
+    # New refusal/existing-account tests explicitly request health_consent=False.
+    from contextlib import contextmanager
+    from app.services import health_consent, health_disclosure
+    @contextmanager
+    def sqlite_health_authority(owner, *, exclusive=False):
+        from app.extensions import db
+        with db.engine.begin() as connection:
+            yield connection
+    monkeypatch.setattr(health_consent, "_authority", sqlite_health_authority)
+    monkeypatch.setattr(health_disclosure, "APPROVED_VERSION", health_disclosure.VERSION)
     flask_app.test_client_class = AutoOriginClient
     # Rate limits off by default; the dedicated rate-limit tests re-enable.
     limiter.enabled = False
@@ -187,6 +206,7 @@ def make_user(app):
 
         user = User(username=username, email=email or f"{username}@example.com")
         fields.setdefault("cognito_sub", f"sub-{username}")
+        health_permission = fields.pop("health_consent", True)
         onboarded = fields.pop("profile_complete", None) is True
         for key, value in fields.items():
             setattr(user, key, value)
@@ -196,6 +216,12 @@ def make_user(app):
             # (flag AND canonical UserSession) — see tests/onboarding_support.py.
             mark_onboarded(user)
         db.session.commit()
+        if health_permission:
+            from app.services import health_consent, health_disclosure
+            health_consent.mutate(user.id, dict(action="affirmative_grant",
+                purpose=health_disclosure.PURPOSE, version=health_disclosure.VERSION,
+                locale="en", text_digest=health_disclosure.DIGESTS["en"],
+                expected_generation=0, request_id="synthetic-first-party-grant"))
         return user
 
     return _make

@@ -212,13 +212,15 @@ def account_projection(user):
     token (`lose_weight` / `build_muscle`), or null when the stored value is
     not a canonical goal; the stored Turkish literal never reaches the wire.
     """
+    from app.health_boundary import permit_account_projection
+    health_visible = permit_account_projection(user.id)
     payload = {"user": {
         "username": user.username,
         "display_name": user.full_name or user.username,
-        "profile_complete": account_profile.onboarding_state(user).complete,
+        "profile_complete": health_visible and account_profile.onboarding_state(user).complete,
         "preferred_language": user.language,
-        "goal": account_profile.goal_token(user.goal),
-        "goal_type": user.goal_type,
+        "goal": account_profile.goal_token(user.goal) if health_visible else None,
+        "goal_type": user.goal_type if health_visible else None,
     }}
     from app.services import account_eligibility
     if account_eligibility.served_to(user):
@@ -263,6 +265,11 @@ from app.blueprints import mobile_weekly_checkin  # noqa: E402,F401
 from app.blueprints.ai_consent import mobile_consent, consent_error_response
 from app.services.ai_consent import ConsentDenied
 bp.add_url_rule('/ai-consent', view_func=mobile_consent, methods=['GET', 'POST'])
+from app.blueprints.health_consent import health_consent
+bp.add_url_rule('/health-consent', view_func=health_consent, methods=['GET', 'POST'])
+from app.health_boundary import failure as health_consent_failure
+from app.services.health_consent import HealthConsentDenied
+bp.register_error_handler(HealthConsentDenied, health_consent_failure)
 bp.register_error_handler(ConsentDenied, consent_error_response)
 from app.blueprints import mobile_subscriptions  # noqa: E402,F401
 from app.blueprints import mobile_ai_allowances  # noqa: E402,F401

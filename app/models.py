@@ -2063,6 +2063,9 @@ class TrainingPlanReplacementGenerationOperation(db.Model):
     )
 
 
+from app.health_consent_models import HealthConsentEvent, HealthConsentState  # noqa: E402,F401
+
+
 class AIConsentState(db.Model):
     """Current authority; no prompt, profile, photo, credential or IP values."""
     __tablename__ = "ai_consent_state"

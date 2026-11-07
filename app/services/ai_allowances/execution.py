@@ -337,14 +337,22 @@ def logical_action(owner, feature, command, *, key=None):
 def bind_worker(fn):
     """Copy the SAME action and original D1 authority into joined workers."""
     action, authority, exemption = _ACTIVE.get(), ai_consent.current_operation(), _EXEMPT.get()
+    from app.services import health_consent
+    health_generation = health_consent.current_generation()
+    from flask import current_app, has_app_context
+    health_app = current_app._get_current_object() if has_app_context() else None
     @wraps(fn)
     def run(*args, **kwargs):
         token, ex_token = _ACTIVE.set(action), _EXEMPT.set(exemption)
         try:
             if authority is None:
                 return fn(*args, **kwargs)
-            with ai_consent.operation_scope(authority):
-                return fn(*args, **kwargs)
+            if health_generation is None or health_app is None:
+                raise health_consent.HealthConsentDenied()
+            with health_app.app_context():
+                with health_consent.processing(authority.owner, expected_generation=health_generation):
+                    with ai_consent.operation_scope(authority):
+                        return fn(*args, **kwargs)
         finally:
             _EXEMPT.reset(ex_token)
             _ACTIVE.reset(token)
