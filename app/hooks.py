@@ -293,6 +293,10 @@ def request_runs_maintenance():
 
 
 def maybe_weekly_rollover():
+    # An account-control/consent request must not start unrelated health work.
+    from app.health_boundary import MARKER
+    if has_request_context() and MARKER not in request.environ:
+        return
     if not request_runs_maintenance():
         return
     now = datetime.utcnow()
@@ -316,6 +320,9 @@ def maybe_weekly_rollover():
 
 
 def update_streak():
+    from app.health_boundary import MARKER
+    if MARKER not in request.environ:
+        return
     # Mobile API identity is Bearer-only. Never load or mutate an ambient
     # Flask-Login cookie user while serving /api/v1 requests.
     if request.blueprint == "mobile_api":

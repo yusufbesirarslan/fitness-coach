@@ -49,6 +49,8 @@ def pg_app(monkeypatch):
     from app.services import gamification, mobile_auth
 
     app = create_app()
+    from tests.health_consent_support import grant_synthetic_health, track_response_cleanup
+    close_responses = track_response_cleanup(app)
     app.config["TESTING"] = True
     limiter.enabled = False
     gamification._last_rollover_check[0] = datetime.utcnow()
@@ -74,9 +76,11 @@ def pg_app(monkeypatch):
             db.session.add(UserSession(user_id=user.id, weight=80.0, bmr=1.0,
                                        tdee=2.0, target_calories=3.0))
         db.session.commit()
+        grant_synthetic_health(monkeypatch, [u.id for u in User.query.all()])
     try:
         yield app
     finally:
+        close_responses()
         with app.app_context():
             db.session.remove()
             db.engine.dispose()

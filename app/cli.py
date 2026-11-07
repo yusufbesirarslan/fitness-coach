@@ -175,6 +175,8 @@ _USER_FK_MANUAL_CLEANUP = frozenset({
     ("Notification", "actor_id"),
     ("AIConsentEvent", "owner_id"),
     ("AIConsentState", "owner_id"),
+    ("HealthConsentEvent", "owner_id"),
+    ("HealthConsentState", "owner_id"),
 })
 
 
@@ -252,7 +254,8 @@ def _purge_user(user):
 
     # D1 authority/evidence use owner_id, so the user_id loop cannot cover
     # them. Preserve explicit erasure on local databases without FK actions.
-    for Model in (AIConsentEvent, AIConsentState):
+    from app.health_consent_models import HealthConsentEvent, HealthConsentState
+    for Model in (AIConsentEvent, AIConsentState, HealthConsentEvent, HealthConsentState):
         Model.query.filter_by(owner_id=uid).delete(synchronize_session=False)
 
     for Model in _USER_CHILD_MODELS:

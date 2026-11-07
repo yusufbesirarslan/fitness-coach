@@ -235,7 +235,7 @@ def test_m03_background_summary_excludes_legacy_and_keeps_signed_facts(app, make
         summary_bytes.append(frozen(kwargs))
         return answer('OWN_SAFE_SUMMARY')
     monkeypatch.setattr(ai, 'openai_client', NS(chat=NS(completions=NS(create=create))))
-    assert summarize_conversation(conv.id) is True
+    assert summarize_conversation(conv.id, health_generation=1) is True
     assert summary_bytes and b'OWN_FIRST_PARTY_FACT' in summary_bytes[0]
     assert all(CANARY.encode() not in body for body in summary_bytes)
     assert provenance.summary_text(conv) == 'OWN_SAFE_SUMMARY'

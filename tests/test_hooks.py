@@ -252,7 +252,7 @@ def _fresh(user_id):
 def test_streak_increments_on_consecutive_day(client, make_user, login):
     user = make_user("alice", last_login=app_today() - timedelta(days=1), streak_count=3)
     login("alice")
-    client.get("/health")
+    client.get("/setup")
     user = _fresh(user.id)
     assert user.streak_count == 4
     assert user.last_login == app_today()
@@ -261,22 +261,22 @@ def test_streak_increments_on_consecutive_day(client, make_user, login):
 def test_streak_resets_after_gap(client, make_user, login):
     user = make_user("bob", last_login=app_today() - timedelta(days=3), streak_count=10)
     login("bob")
-    client.get("/health")
+    client.get("/setup")
     assert _fresh(user.id).streak_count == 1
 
 
 def test_streak_first_login_starts_at_one(client, make_user, login):
     user = make_user("carol")  # last_login=None
     login("carol")
-    client.get("/health")
+    client.get("/setup")
     assert _fresh(user.id).streak_count == 1
 
 
 def test_streak_same_day_counts_once(client, make_user, login):
     user = make_user("dave", last_login=app_today() - timedelta(days=1), streak_count=1)
     login("dave")
-    client.get("/health")
-    client.get("/health")
+    client.get("/setup")
+    client.get("/setup")
     assert _fresh(user.id).streak_count == 2
 
 
@@ -284,7 +284,7 @@ def test_streak_milestone_awards_xp_and_activity(client, make_user, login):
     user = make_user("eve", last_login=app_today() - timedelta(days=1),
                      streak_count=6, rank_points=0, weekly_xp=0)
     login("eve")
-    client.get("/health")
+    client.get("/setup")
     user = _fresh(user.id)
     assert user.streak_count == 7
     assert user.rank_points == 14  # streak * 2
@@ -297,7 +297,7 @@ def test_streak_non_milestone_awards_nothing(client, make_user, login):
     user = make_user("frank", last_login=app_today() - timedelta(days=1),
                      streak_count=3, rank_points=0)
     login("frank")
-    client.get("/health")
+    client.get("/setup")
     assert _fresh(user.id).rank_points == 0
 
 
@@ -325,7 +325,7 @@ def test_streak_increments_inside_the_utc_istanbul_midnight_window(
     user = make_user("boundary", last_login=date(2026, 3, 10), streak_count=5)
     login("boundary")
     with audit_clock(frozen):
-        client.get("/health")
+        client.get("/setup")
 
     user = _fresh(user.id)
     assert user.streak_count == 6
@@ -564,3 +564,18 @@ def test_mobile_413_is_not_reported_as_a_retryable_outage(client, app):
     body = response.get_json()["error"]
     assert body["code"] == "REQUEST_TOO_LARGE"
     assert body["retryable"] is False
+
+
+def test_health_probe_keeps_streak_unchanged_for_a_consented_account(client, make_user, login):
+    owner = make_user("probe-streak", last_login=app_today() - timedelta(days=1), streak_count=3)
+    login("probe-streak")
+    assert client.get("/health").status_code == 200
+    assert _fresh(owner.id).streak_count == 3
+
+
+def test_health_refusal_never_updates_streak(client, make_user, login):
+    owner = make_user("refused-streak", health_consent=False,
+                      last_login=app_today() - timedelta(days=1), streak_count=3)
+    login("refused-streak")
+    assert client.get("/setup").status_code == 403
+    assert _fresh(owner.id).streak_count == 3

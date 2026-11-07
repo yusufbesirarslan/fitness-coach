@@ -477,6 +477,10 @@ def test_summarize_task_inline_runs_without_queue(app, make_user, monkeypatch):
         called["n"] += 1
         return True
     monkeypatch.setattr(memory_manager, "maybe_summarize", summarize)
-    result = tasks.summarize_conversation(conv.id)
+    # Old queued work without a grant snapshot cannot read health content.
+    assert tasks.summarize_conversation(conv.id) is False
+    from app.services import health_consent
+    generation = health_consent.status(user.id)["generation"]
+    result = tasks.summarize_conversation(conv.id, health_generation=generation)
     assert result is True
     assert called["n"] == 1

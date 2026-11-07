@@ -1,3 +1,4 @@
+from tests.health_consent_support import domain_statements
 import json
 import logging
 from contextlib import contextmanager
@@ -538,7 +539,7 @@ def test_success_has_bounded_constant_sql_cost_without_exercise_n_plus_one(
     # cost, not a per-exercise one -- both parametrisations below measure 21 --
     # so this bound still fails on a genuine N+1, which would make the
     # 20-exercise case cost far more than the 1-exercise case.
-    assert len(statements) <= 21, statements
+    assert len(domain_statements(statements)) <= 21, statements
     operation_lookups = [
         sql for sql in statements
         if "FROM training_plan_generation_operation" in sql

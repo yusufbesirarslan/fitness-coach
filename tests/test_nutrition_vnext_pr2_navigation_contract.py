@@ -1,4 +1,5 @@
 """Rendered Nutrition hierarchy and canonical server request budget."""
+from tests.health_consent_support import domain_statements
 from html.parser import HTMLParser
 
 import pytest
@@ -84,4 +85,4 @@ def test_initial_route_query_budget(app, client, make_user, login):
     assert response.status_code == 200
     assert not any('supplements' in s or 'custom_meal' in s or 'water_logs' in s for s in statements)
     # Measured pre-change budget includes shared authentication and daily-login hooks.
-    assert len(statements) <= 9, statements
+    assert len(domain_statements(statements)) <= 9, statements

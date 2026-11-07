@@ -5,7 +5,18 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _isolate_process_environment():
+def _isolate_process_environment(monkeypatch):
+    # Synthetic local harness only: the real first-party authority is qualified
+    # separately against PostgreSQL, never broadened to SQLite in production.
+    from contextlib import contextmanager
+    from app.extensions import db
+    from app.services import health_consent, health_disclosure
+    @contextmanager
+    def authority(owner, **kwargs):
+        with db.engine.begin() as conn:
+            yield conn
+    monkeypatch.setattr(health_consent, '_authority', authority)
+    monkeypatch.setattr(health_disclosure, 'APPROVED_VERSION', health_disclosure.VERSION)
     # create_audit_app() deliberately configures the process for the audit
     # server (FLASK_DEBUG=1, audit keys) and restores only DATABASE_URL. Inside
     # the shared pytest process that leaked FLASK_DEBUG into later tests: any
@@ -86,6 +97,7 @@ def test_seeded_scenario_login_satisfies_real_auth_middleware(tmp_path):
 
     audit_app = create_audit_app(tmp_path / "audit.db")
     seed_all(audit_app)
+    _consent_synthetic_accounts(audit_app)
     client = audit_app.test_client()
     response = client.get("/__audit__/login/active-workout")
     assert response.status_code == 302
@@ -170,6 +182,7 @@ def test_seeded_training_bootstrap_succeeds_without_harness_repair(tmp_path):
 
     audit_app = create_audit_app(tmp_path / "audit.db")
     seed_all(audit_app)
+    _consent_synthetic_accounts(audit_app)
     client = audit_app.test_client()
     for scenario in ("active-workout", "active-rest-day"):
         login = client.get(f"/__audit__/login/{scenario}")
@@ -194,3 +207,13 @@ def test_workout_audit_harness_does_not_repair_the_seed():
     assert 'tip"] = "antrenman"' not in tree
     assert 'tip": "kuvvet"' not in tree
     assert 'setdefault("dinlenme"' not in tree
+
+
+def _consent_synthetic_accounts(app):
+    from app.models import User
+    from app.services import health_consent
+    from tests.test_health_consent import command
+    with app.app_context():
+        for owner in User.query.all():
+            assert owner.username.startswith('audit-')
+            health_consent.mutate(owner.id, command(request_id=f"synthetic-health-{owner.id}"))

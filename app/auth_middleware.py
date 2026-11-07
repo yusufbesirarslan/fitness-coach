@@ -8,7 +8,7 @@ Cognito `sub` aynı yerel kullanıcıya bağlanır.
 """
 from functools import wraps
 
-from flask import g, jsonify, session
+from flask import g, jsonify, session, request
 from flask_login import current_user, logout_user
 
 from app.extensions import login_manager
@@ -54,6 +54,13 @@ def require_auth(view):
         sid = session.get("cognito_sid")
         if not sid:
             return _invalidate()
+        cached = request.environ.get("axisai.verified_web_principal")
+        if cached is not None and cached[0] == sid and str(cached[1]) == session.get("_user_id"):
+            from app.health_boundary import enforce_request as enforce_health
+            enforce_health(cached[2])
+            from app.services.account_eligibility import enforce_request
+            enforce_request(cached[2])
+            return view(*args, **kwargs)
         try:
             access = session_store.get_valid_access_token(sid, current_user.id)
             # Token use ve expiry leeway'i BU dosya seçmez — sözleşme seçer
@@ -74,10 +81,13 @@ def require_auth(view):
         resolved = User.query.filter_by(cognito_sub=claims.get("sub")).first()
         if resolved is None or resolved.id != current_user.id:
             return _invalidate()
+        request.environ["axisai.verified_web_principal"] = (sid, resolved.id, resolved)
         g.cognito_claims = claims
         session_store.touch(sid)
         auth_contract.record_outcome(
             auth_contract.WEB, auth_contract.OUTCOME_OK)
+        from app.health_boundary import enforce_request as enforce_health
+        enforce_health(resolved)
         from app.services.account_eligibility import enforce_request
         enforce_request(resolved)
         return view(*args, **kwargs)

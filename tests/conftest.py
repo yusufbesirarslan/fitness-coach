@@ -143,12 +143,38 @@ class AutoOriginClient(FlaskClient):
 
 @pytest.fixture
 def app():
+    monkeypatch = pytest.MonkeyPatch()
     from app import create_app
     from app.extensions import db, limiter
     from app.services import gamification
 
     flask_app = create_app()
     flask_app.config["TESTING"] = True
+    # Existing domain/transport tests use synthetic, prospectively consented
+    # owners. This SQLite adapter is NOT distributed-authority qualification;
+    # test_health_consent_pg exercises the real cross-connection PG boundary.
+    # New refusal/existing-account tests explicitly request health_consent=False.
+    from contextlib import contextmanager
+    from app.services import health_consent, health_disclosure
+    @contextmanager
+    def sqlite_health_authority(owner, *, exclusive=False):
+        from app.extensions import db
+        with db.engine.begin() as connection:
+            yield connection
+    monkeypatch.setattr(health_consent, "_authority", sqlite_health_authority)
+    monkeypatch.setattr(health_disclosure, "APPROVED_VERSION", health_disclosure.VERSION)
+    # WSGI servers close every live iterable. Tests may intentionally retain
+    # responses (including streaming ones) until the test ends. Close those at
+    # fixture teardown, never eagerly during assertions/call_on_close checks.
+    import weakref
+    live_iterables = weakref.WeakSet()
+    application = flask_app.wsgi_app
+    def track_iterables(environ, start_response):
+        result = application(environ, start_response)
+        if hasattr(result, "close"):
+            live_iterables.add(result)
+        return result
+    flask_app.wsgi_app = track_iterables
     flask_app.test_client_class = AutoOriginClient
     # Rate limits off by default; the dedicated rate-limit tests re-enable.
     limiter.enabled = False
@@ -162,8 +188,11 @@ def app():
     with flask_app.app_context():
         db.create_all()
         yield flask_app
+        for iterable in list(live_iterables):
+            iterable.close()
         db.session.remove()
         db.drop_all()
+    monkeypatch.undo()
 
 
 @pytest.fixture
@@ -187,6 +216,7 @@ def make_user(app):
 
         user = User(username=username, email=email or f"{username}@example.com")
         fields.setdefault("cognito_sub", f"sub-{username}")
+        health_permission = fields.pop("health_consent", True)
         onboarded = fields.pop("profile_complete", None) is True
         for key, value in fields.items():
             setattr(user, key, value)
@@ -196,6 +226,12 @@ def make_user(app):
             # (flag AND canonical UserSession) — see tests/onboarding_support.py.
             mark_onboarded(user)
         db.session.commit()
+        if health_permission:
+            from app.services import health_consent, health_disclosure
+            health_consent.mutate(user.id, dict(action="affirmative_grant",
+                purpose=health_disclosure.PURPOSE, version=health_disclosure.VERSION,
+                locale="en", text_digest=health_disclosure.DIGESTS["en"],
+                expected_generation=0, request_id="synthetic-first-party-grant"))
         return user
 
     return _make

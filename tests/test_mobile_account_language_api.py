@@ -1,4 +1,5 @@
 """LP14 PR-D: closed, transactional, Bearer-owned language setting."""
+from tests.health_consent_support import domain_statements
 import logging
 from types import SimpleNamespace
 
@@ -233,6 +234,6 @@ def test_query_budget_has_one_language_update_and_bounded_projection(
     finally:
         event.remove(db.engine, "before_cursor_execute", observe)
     assert response.status_code == 200
-    assert len(statements) == 3  # UPDATE, post-commit User reload, UserSession read
+    assert len(domain_statements(statements)) == 3  # UPDATE, post-commit User reload, UserSession read
     [update] = [sql for sql in statements if sql.lstrip().upper().startswith("UPDATE")]
     assert 'SET language=? WHERE' in update

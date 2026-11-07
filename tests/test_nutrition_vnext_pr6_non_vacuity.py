@@ -205,11 +205,14 @@ def test_n7_provider_on_open_is_detected(app, client, make_user, login, monkeypa
 def test_n7_eager_request_on_open_is_detected(app, gate, client, make_user, login):  # noqa: F811
     edit = [("  renderNextStep('loading', null);\n",
              "  renderNextStep('loading', null);\n"
-             "  fetch('/nutrition-plan/active');\n")]
+             "  fetch('/nutrition-plan/active').then(r => r.arrayBuffer());\n")]
     serve_script(gate.page, client, edit)
     with pytest.raises(AssertionError):
         browser.test_request_topology(app, gate, make_user, login)
-    assert_served(gate.page, ['loadDayView'], "fetch('/nutrition-plan/active')")
+    # Drain the deliberately injected response. With required no-store, an
+    # unread duplicate fetch can remain a pending browser body and obscure the
+    # intended request-count assertion with a networkidle timeout.
+    assert_served(gate.page, ['loadDayView'], "fetch('/nutrition-plan/active').then(r => r.arrayBuffer())")
 
 
 # ── P6-N8 / N9 · Review with AxisAI ────────────────────────────────────

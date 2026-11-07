@@ -133,7 +133,7 @@ def test_legacy_confirmation_never_promotes_raw_copy(
     monkeypatch.setattr('app.config.AI_SUMMARY_TRIGGER_TOKENS', 100)
     summary_bodies = capture(monkeypatch, 'summary', label)
     from app.jobs.tasks import summarize_conversation
-    assert summarize_conversation(conv.id) is True
+    assert summarize_conversation(conv.id, health_generation=1) is True
     assert summary_bodies and b'yes' in summary_bodies[0] and b'OWN_FACT' in summary_bodies[0]
     assert all(CANARY.encode() not in body for body in summary_bodies)
     assert provenance.summary_text(conv) == 'OWN_SAFE_SUMMARY'

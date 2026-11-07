@@ -45,11 +45,11 @@ def test_pr2_real_pg_authenticated_transport_four_states(pg, real_bearer, state)
             persist(owner, candidate('pg-owned', day(-1)))
         if state in ('undetermined', 'available_with_gaps'):
             persist(owner, candidate('pg-corrupt', day(-2), checkpoint_data='{x'))
-        baseline, statements = assert_read_only_request(client, a)
+        baseline, statements = assert_read_only_request(client, a, health_authority_sql=True)
         body = baseline.get_json()['exercise_performance_history']
         assert body['state'] == state
         # Auth infrastructure SELECTs are recorded separately from the sole history SELECT.
-        print('PR2 PG auth SELECT count=', len(statements) - 1, 'history SELECT count=1')
+        print('PR2 PG auth/authority SQL count=', len(statements) - 1, 'history SELECT count=1')
         persist(stranger, candidate('foreign', day(-1)))
         assert get_history(client, a).data == baseline.data
         foreign = get_history(client, b).get_json()['exercise_performance_history']
@@ -88,7 +88,7 @@ REQUIRED_TIE_ORDER = ["atie", "_tie", "Btie", "-tie"]
 
 
 @pytest.fixture
-def pg():
+def pg(monkeypatch):
     _require_pg()
     os.environ["DATABASE_URL"] = _PG_URL
     os.environ["FITX_SKIP_DB_INIT"] = "1"
@@ -97,6 +97,8 @@ def pg():
     from app.models import User
 
     app = create_app()
+    from tests.health_consent_support import grant_synthetic_health, track_response_cleanup
+    close_responses = track_response_cleanup(app)
     app.config["TESTING"] = True
     with app.app_context():
         db.drop_all()
@@ -106,7 +108,9 @@ def pg():
         db.session.add_all([owner, stranger])
         db.session.commit()
         ids = (owner.id, stranger.id)
+        grant_synthetic_health(monkeypatch, ids)
     yield app, ids
+    close_responses()
     with app.app_context():
         db.session.remove()
         db.drop_all()

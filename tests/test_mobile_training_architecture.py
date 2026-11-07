@@ -1,4 +1,5 @@
 """Architecture and side-effect guards for native Training reads."""
+from tests.health_consent_support import domain_statements
 import ast
 import json
 import re
@@ -320,7 +321,7 @@ def _statements_for(client, path, headers, *, freeze=False):
     finally:
         event.remove(db.engine, "before_cursor_execute", _record)
     assert response.status_code == 200
-    return response, statements
+    return response, domain_statements(statements)
 
 
 _PLAN_TABLE = re.compile(r"\bFROM training_plan\b(?!_)")
