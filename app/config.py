@@ -3,7 +3,7 @@ import logging
 import os
 import re
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
@@ -334,6 +334,16 @@ def _qualification_subjects(raw):
     return subjects
 
 
+def _utc_deadline(raw):
+    """Exact YYYY-MM-DDTHH:MM:SSZ as an aware UTC time. Anything else means no deadline."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", raw, re.ASCII):
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def configure_app(app):
     # Tek güvenilir reverse proxy (host nginx) arkasında X-Forwarded-For/-Proto'ya
     # güven. Host ve port doğrudan Host başlığından gelir; istemci tarafından
@@ -395,6 +405,12 @@ def configure_app(app):
         app.logger.warning("apple_subscription event=qualification_cohort count=%d controls=%d",
                            len(app.config["APPLE_PURCHASE_QUALIFICATION_SUBJECTS"]),
                            len(app.config["APPLE_QUALIFICATION_CONTROL_SUBJECTS"]))
+    app.config["APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT"] = _utc_deadline(
+        os.environ.get("APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT", ""))
+    if app.config["APPLE_PRERELEASE_401_FALLBACK_ENABLED"]:
+        # deadline=0 means a missing or malformed deadline: the exception stays closed.
+        app.logger.warning("apple_subscription event=prerelease_401_fallback deadline=%d",
+                           app.config["APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT"] is not None)
     raw_app_id = os.environ.get("APPLE_APP_ID", "")
     app.config["APPLE_APP_ID"] = int(raw_app_id) if raw_app_id.isascii() and raw_app_id.isdigit() else None
     app.config["APPLE_ROOT_CERTIFICATE_PATHS"] = tuple(

@@ -226,6 +226,14 @@ def _fields(evidence):
                 renewal_signed_at=evidence.renewal_signed_at, last_verified_at=now, updated_at=now)
 
 
+def _prerelease_401_subject(user_id):
+    """Only a named purchase subject may continue past a Production 401. Off reads nothing."""
+    if not account_eligibility.prerelease_401_window_open():
+        return False
+    user = db.session.get(User, user_id)
+    return user is not None and account_eligibility.qualification_subject(user)
+
+
 def verify_purchase(user_id, transaction_id):
     _enabled()
     try:
@@ -233,14 +241,16 @@ def verify_purchase(user_id, transaction_id):
         if association is None:
             raise SubscriptionError("SUBSCRIPTION_PURCHASE_CONTEXT_REQUIRED", 409)
         token = association.token
+        prerelease_401 = _prerelease_401_subject(user_id)
         # Release the read transaction before external I/O; persist re-locks owner.
         db.session.rollback()
         adapter = AppleAdapter(current_app.config)
+        lookup = adapter.verify_prerelease_401_subject if prerelease_401 else adapter.verify
         # One shared permit covers API lookups and online signature/OCSP checks.
         # Release it before acquiring ownership locks or writing verified state.
         try:
             with blocking_concurrency_slot():
-                evidence = adapter.verify(transaction_id, token)
+                evidence = lookup(transaction_id, token)
         except BlockingConcurrencyLimit:
             raise SubscriptionError("SUBSCRIPTION_TEMPORARILY_UNAVAILABLE", 503) from None
         return persist_verified(user_id, evidence, token)

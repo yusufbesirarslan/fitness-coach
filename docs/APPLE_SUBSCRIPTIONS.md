@@ -353,7 +353,8 @@ Client verify calls Get Transaction Info in Production first. Only Apple's exact
 Sandbox. Authentication (401), other 4xx, rate limit (429), server errors, timeouts,
 every other 404 code (account/app/original-transaction not found, retryable or
 not), signature or OCSP failure, wrong environment, wrong identity and ownership
-conflicts are final and never reach Sandbox. The environment that found the ID
+conflicts are final and never reach Sandbox, apart from the bounded RC2 exception
+under [pre-release Production lock](#rc2-pre-release-production-lock-temporary). The environment that found the ID
 then does everything else: its verifier authenticates the transaction JWS and
 demands its own signed environment, and its client runs Get All Subscription
 Statuses, whose envelope, transactions and renewals must name the same
@@ -521,6 +522,39 @@ stays 503.
 **Closing the window:** removing the list stops new purchase contexts and
 declarations. A signed record and any Sandbox subscription row remain, and that
 row counts toward entitlement until `APPLE_SANDBOX_FALLBACK_ENABLED=0`.
+
+## RC2 pre-release Production lock (temporary)
+
+An Apple App Store Commerce Engineer stated that Production API access isn't allowed
+until an app has a production release. Apple didn't name a status code. The diagnostic
+receipt for this key shows Production HTTP 401 and Sandbox accepted, but a 401 doesn't
+identify its cause. Remove this exception with the seam in the D1 launch commit.
+
+`APPLE_PRERELEASE_401_FALLBACK_ENABLED` defaults OFF.
+`APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT` is an exact `YYYY-MM-DDTHH:MM:SSZ`. A missing,
+malformed or passed deadline closes the exception, as does anything that closes the
+qualification window.
+
+| Situation in client verify | Named purchase subject, open | Anyone else, or closed |
+|---|---|---|
+| Production 200 | Production verifies | Same |
+| Production 404 with 4040010 | Sandbox lookup, unchanged, and its 404 stays invalid evidence | Same |
+| Production exact HTTP 401 | Sandbox lookup | Final, 503 |
+| Then Sandbox 401 | Final, 503 | Not reached |
+| Then Sandbox 404, any code, at either lookup | 503, because Production never answered | Not reached |
+| Production 403, 429, 5xx, other 404, timeout | Final | Final |
+
+Control accounts, unlisted accounts holding an old association, reconciliation and
+notifications never use it. Sandbox verification, ownership, environment isolation
+and AI closure are unchanged, and the result is a Sandbox row.
+
+**What this doesn't prove:** a run through this path observes neither Production API
+acceptance nor the real 4040010 path. Production API verification stays a separate
+gate after the first release.
+
+**App Review isn't covered.** An unlisted App Review account gets the final 503 from a
+Production 401, and this exception is removed with D1. A separate review-safe purchase
+path is required before submission.
 
 ## Next tasks and qualification limits
 

@@ -54,6 +54,20 @@ def qualification_subject(user):
             and not _listed(user, "APPLE_QUALIFICATION_CONTROL_SUBJECTS"))
 
 
+def prerelease_401_window_open():
+    """RC2 pre-release Production lock. Remove with the D1 launch commit.
+
+    Needs the flag, an unexpired deadline and the complete qualification window.
+    A missing, malformed or passed deadline closes it.
+    """
+    config = current_app.config
+    deadline = config.get("APPLE_PRERELEASE_401_FALLBACK_EXPIRES_AT")
+    return (config.get("APPLE_PRERELEASE_401_FALLBACK_ENABLED") is True
+            and isinstance(deadline, datetime) and deadline.tzinfo is not None
+            and datetime.now(timezone.utc) < deadline
+            and qualification_open())
+
+
 def served_to(user):
     """Whether this account is asked for a declaration. Enforcement stays on enabled().
 

@@ -88,6 +88,14 @@ class BoundedAppleClient(AppStoreServerAPIClient):
                                 json=json, data=data, timeout=(3, 8), allow_redirects=False)
 
 
+class _ProductionRejected(Exception):
+    """Production answered exactly HTTP 401 to a lookup allowed to continue past it."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+
 class AppleAdapter:
     # Sandbox fallback of a Production deployment (App Review, TestFlight); None otherwise.
     fallback = None
@@ -144,23 +152,54 @@ class AppleAdapter:
         return tx
 
     def verify(self, transaction_id, token):
+        return self._guard(lambda: self._verified(self._find(transaction_id), transaction_id, token))
+
+    def verify_prerelease_401_subject(self, transaction_id, token):
+        """RC2 only: Apple refuses Production API access before a first release.
+
+        subscriptions.verify_purchase is the one caller, and only for a named purchase
+        subject inside the deadline. Production keeps the first answer. If it only
+        rejected us, Sandbox may verify, with every check of a normal Sandbox purchase.
+        Production never spoke, so a Sandbox 404 can't prove the transaction invalid:
+        it answers as the Production 401 does. Sandbox 401 stays final.
+        """
         def lookup():
-            # The environment that knows the ID verifies everything that follows:
-            # its verifier checks the signed environment, its client the statuses.
-            source, signed = self._find(transaction_id)
-            submitted = source._transaction(signed, token)
-            if submitted.transactionId != transaction_id:
-                raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
-            return source._status(submitted.originalTransactionId, token)
+            try:
+                return self._verified(self._find(transaction_id, production_401=True), transaction_id, token)
+            except _ProductionRejected as rejected:
+                production = rejected.error
+            _log.warning("apple_subscription event=sandbox_fallback kind=verify trigger=prerelease_401")
+            try:
+                return self._verified(self.fallback._find(transaction_id), transaction_id, token)
+            except (APIException, requests.RequestException) as error:
+                status = getattr(error, "http_status_code", None)
+                outcome = {401: "sandbox_auth_rejected", 404: "sandbox_not_found"}.get(status, "sandbox_error")
+                _log.warning("apple_subscription event=prerelease_401 outcome=%s", outcome)
+                if status == 404:
+                    raise production from None
+                raise
         return self._guard(lookup)
 
-    def _find(self, transaction_id):
+    @staticmethod
+    def _verified(found, transaction_id, token):
+        # The environment that knows the ID verifies everything that follows:
+        # its verifier checks the signed environment, its client the statuses.
+        source, signed = found
+        submitted = source._transaction(signed, token)
+        if submitted.transactionId != transaction_id:
+            raise SubscriptionError("SUBSCRIPTION_INVALID_EVIDENCE")
+        return source._status(submitted.originalTransactionId, token)
+
+    def _find(self, transaction_id, *, production_401=False):
         """Configured environment first; only Apple's exact TransactionIdNotFoundError
         moves to the fallback. Authentication, rate limit, outage and every other 404
-        stay final."""
+        stay final. production_401 belongs to verify_prerelease_401_subject alone."""
         try:
             return self, self.client.get_transaction_info(transaction_id).signedTransactionInfo
         except APIException as error:
+            if (production_401 and self.fallback is not None and self.environment == "Production"
+                    and error.http_status_code == 401):
+                raise _ProductionRejected(error) from None
             if (self.fallback is None or error.http_status_code != 404
                     or error.raw_api_error != TRANSACTION_ID_NOT_FOUND):
                 raise
