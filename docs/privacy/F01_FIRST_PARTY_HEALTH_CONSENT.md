@@ -51,7 +51,7 @@ After those determinations, the existing owner can propose a versioned publicati
 - Health HTTP/evidence/refusal/withdrawal/API bypass, auth/stream lifecycle and bounded checkpoint regressions: **238 passed**, with unraisable lifecycle errors treated as failures.
 - Separate D1/allowance/jobs/eligibility regression selection: **262 passed**.
 - Profile/D1/migration/deletion/mobile-route selection: **208 passed**.
-- Expanded disposable PostgreSQL consent/D1/worker/migration selection: **244 passed, 2 existing skips** (the skipped legacy D1 tests require a separately qualified Memory policy; this task does not enable it). Final health/D1 PostgreSQL rerun is recorded with the PR receipt.
+- Expanded disposable PostgreSQL consent/D1/worker/migration selection: **244 passed, 2 existing skips** (two existing PostgreSQL-18-only catalog cases are skipped by the local PostgreSQL 16 harness). Final health/D1 PostgreSQL rerun: **55 passed**, including response isolation and worker context/generation checks.
 - Paired mobile: [draft #174](https://github.com/axisaiapp/axisai-mobile/pull/174), 13 new flow tests + 105 existing regressions; analysis clean.
 
 Selections overlap; these counts are separate runs, not additive unique coverage. SQLite synthetic domain fixtures explicitly construct prospective health evidence; PostgreSQL tests use real advisory locks. Synthetic disclosures, identities, provider stubs and local databases are not production approval or runtime evidence. Full hosted CI is reported separately at its actual status.
