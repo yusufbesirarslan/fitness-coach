@@ -29,7 +29,6 @@ import pytest
 
 from app.extensions import db
 from app.models import (
-    BarcodeFoodCache,
     CustomMeal,
     CustomMealItem,
     DailyQuest,
@@ -512,8 +511,8 @@ def test_the_barcode_flow_still_stamps_the_barcode_discovery_source(
 # F6 / C13 - the legacy compatibility route is safe and deprecated
 # ---------------------------------------------------------------------------
 
-def _seed_barcode_cache():
-    food = barcode_svc.normalize_food_model(BARCODE, {
+def _stub_provider(monkeypatch):
+    monkeypatch.setattr(barcode_svc, "_food_find_by_barcode", lambda code: {
         "food_id": FOOD_ID,
         "name": "Acme Protein Bar",
         "brand": "Acme",
@@ -525,17 +524,12 @@ def _seed_barcode_cache():
             "calories": 210, "protein": 21, "carbs": 23, "fat": 6,
         }],
     })
-    db.session.add(BarcodeFoodCache(
-        barcode=BARCODE, food_id=food["food_id"],
-        food_name=food["name"], brand=food["brand"], payload=food))
-    db.session.commit()
-    return food
 
 
 def test_legacy_barcode_add_ignores_caller_supplied_nutrition(
-        client, auth_user):
+        client, auth_user, monkeypatch):
     """F6: only server-resolved provider truth may be persisted."""
-    _seed_barcode_cache()
+    _stub_provider(monkeypatch)
 
     response = client.post("/api/food/barcode/add", json={
         "barcode": BARCODE,
@@ -563,9 +557,10 @@ def test_legacy_barcode_add_ignores_caller_supplied_nutrition(
     assert row.yemekler == "Acme Protein Bar (1x 1 bar)"
 
 
-def test_legacy_barcode_add_publishes_no_raw_meal_log_id(client, auth_user):
+def test_legacy_barcode_add_publishes_no_raw_meal_log_id(
+        client, auth_user, monkeypatch):
     """Section 24: neither the first success nor the replay exposes the row id."""
-    _seed_barcode_cache()
+    _stub_provider(monkeypatch)
     headers = {"Idempotency-Key": _key("legacy")}
     payload = {
         "barcode": BARCODE, "meal": "Ara Öğün",
@@ -581,9 +576,10 @@ def test_legacy_barcode_add_publishes_no_raw_meal_log_id(client, auth_user):
     assert MealLog.query.filter_by(user_id=auth_user.id).count() == 1
 
 
-def test_legacy_barcode_add_is_deprecated_but_still_responds(client, auth_user):
+def test_legacy_barcode_add_is_deprecated_but_still_responds(
+        client, auth_user, monkeypatch):
     """C13: deprecation is observable; removal is PR5's decision, with evidence."""
-    _seed_barcode_cache()
+    _stub_provider(monkeypatch)
 
     response = client.post("/api/food/barcode/add", json={
         "barcode": BARCODE, "meal": "Ara Öğün",

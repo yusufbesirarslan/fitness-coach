@@ -61,34 +61,29 @@ def test_recommendation_engine_uses_goal_remaining_targets_and_workout():
     assert "This food is an excellent choice after today's workout." in out["messages"]
 
 
-def test_barcode_lookup_uses_database_cache_before_fatsecret(app, client, auth_user, monkeypatch):
-    cached_food = barcode_svc.normalize_food_model("5000159407236", _protein_bar_payload())
+def test_barcode_lookup_never_serves_a_stored_payload(app, client, auth_user, monkeypatch):
+    stale = barcode_svc.normalize_food_model("5000159407236", dict(_protein_bar_payload(), name="Stale Stored Name"))
     db.session.add(BarcodeFoodCache(
         barcode="5000159407236",
         food_id="77777",
-        food_name=cached_food["name"],
-        brand=cached_food["brand"],
-        payload=cached_food,
+        food_name=stale["name"],
+        brand=stale["brand"],
+        payload=stale,
     ))
     db.session.commit()
-
-    monkeypatch.setattr(
-        barcode_svc,
-        "_food_find_by_barcode",
-        lambda code: (_ for _ in ()).throw(AssertionError("FatSecret should not be called")),
-    )
+    monkeypatch.setattr(barcode_svc, "_food_find_by_barcode", lambda code: _protein_bar_payload())
 
     resp = client.get("/api/food/barcode?code=5000159407236")
 
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["source"] == "cache"
+    assert data["source"] == "fatsecret"
     assert data["food"]["name"] == "Acme Protein Bar"
-    assert data["analysis"]["axisai_food_score"] >= 1
-    assert data["food_id"] == "77777"  # backwards-compatible legacy key
+    # The stored row is kept, not refreshed or deleted.
+    assert BarcodeFoodCache.query.one().food_name == "Stale Stored Name"
 
 
-def test_barcode_lookup_fatsecret_result_is_normalized_and_cached(app, client, auth_user, monkeypatch):
+def test_barcode_lookup_is_factual_and_stores_nothing(app, client, auth_user, monkeypatch):
     calls = {"count": 0}
 
     def fake_lookup(code):
@@ -103,8 +98,10 @@ def test_barcode_lookup_fatsecret_result_is_normalized_and_cached(app, client, a
     data = resp.get_json()
     assert data["source"] == "fatsecret"
     assert data["food"]["servings"][0]["macros"]["calories"] == 210
-    assert data["analysis"]["badges"]
-    assert BarcodeFoodCache.query.filter_by(barcode="5000159407236").one().food_id == "77777"
+    assert data["servings"][0]["calories"] == 210  # the keys nutrition.js reads
+    assert data["food_id"] == "77777"
+    assert not {"analysis", "recommendations", "portion_recommendation", "daily_context"} & set(data)
+    assert BarcodeFoodCache.query.count() == 0
     assert calls["count"] == 1
 
 
@@ -117,31 +114,22 @@ def test_barcode_not_found_offers_manual_and_future_ocr_actions(client, auth_use
     assert resp.get_json()["actions"] == ["manual_search", "scan_nutrition_label"]
 
 
-def _seed_barcode_cache(barcode="5000159407236"):
+def _stub_provider(monkeypatch):
     """Server-side provider truth for the deprecated add surface.
 
     Sprint 13 PR3 / F6: the route no longer reads the caller's `food` object,
-    so the product must be resolvable from the server's own cache/provider.
+    so the product must be resolvable from the provider.
     """
-    food = barcode_svc.normalize_food_model(barcode, _protein_bar_payload())
-    db.session.add(BarcodeFoodCache(
-        barcode=barcode,
-        food_id=food["food_id"],
-        food_name=food["name"],
-        brand=food["brand"],
-        payload=food,
-    ))
-    db.session.commit()
-    return food
+    monkeypatch.setattr(barcode_svc, "_food_find_by_barcode", lambda code: _protein_bar_payload())
 
 
-def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user):
+def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user, monkeypatch):
     # Pre-PR3 this test supplied the whole `food` object in the request body and
     # the route persisted the caller's numbers - the F6 defect (N2: no supported
     # writer may persist caller-supplied provider nutrition). The corrected
     # invariant seeds server-side truth and sends deliberately tampered macros:
     # the ledger must reflect the server's product, not the request's.
-    _seed_barcode_cache()
+    _stub_provider(monkeypatch)
     tampered = barcode_svc.normalize_food_model(
         "5000159407236", _protein_bar_payload())
     tampered["servings"][0]["macros"]["calories"] = 1.0
@@ -176,18 +164,18 @@ def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user):
     assert "meal_log_id" not in data, (
         "The deprecated surface must not expose a raw ledger row id.")
     assert data["nutrients"] == {"kalori": 420.0, "protein": 42.0, "karb": 46.0, "yag": 12.0}
-    assert data["goal_impact"]["after"]["protein"] == 42.0
+    assert "goal_impact" not in data
     row = MealLog.query.filter_by(user_id=auth_user.id, source="barcode").one()
     assert row.yemekler == "Acme Protein Bar (2x 1 bar)"
     assert row.kalori == 420.0
 
 
-def test_barcode_add_idempotency_writes_one_row(client, auth_user):
+def test_barcode_add_idempotency_writes_one_row(client, auth_user, monkeypatch):
     # Pre-PR3 the replay was proved by comparing the `meal_log_id` both
     # responses leaked. PR3 stops exposing raw ledger ids on every variant
     # of this surface, so replay is proved by the ledger itself: one row,
     # and the replayed response repeats the same nutrients.
-    _seed_barcode_cache()
+    _stub_provider(monkeypatch)
     headers = {"Idempotency-Key": "018f47d2-a2c7-7f52-a5b0-123456789abc"}
     payload = {
         "barcode": "5000159407236",

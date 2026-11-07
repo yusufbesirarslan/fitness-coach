@@ -43,7 +43,7 @@ def web_existing():
 
 
 def existing(user):
-    if not eligibility.enabled():
+    if not eligibility.served_to(user):
         raise eligibility.EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
     if request.method == "GET":
         return jsonify(eligibility=eligibility.projection(user))

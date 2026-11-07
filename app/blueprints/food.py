@@ -85,11 +85,7 @@ def food_by_barcode():
         return _fatsecret_busy_response("food_by_barcode")
     if not product:
         return jsonify(barcode_svc.not_found_response()), 404
-    context = barcode_svc.get_user_barcode_context(
-        current_user.id,
-        meal_time=request.args.get("meal_time", "").strip(),
-    )
-    return jsonify(barcode_svc.build_lookup_response(product, context))
+    return jsonify(barcode_svc.build_lookup_response(product))
 
 
 def _deprecated_compatibility_response(payload, status=200):
@@ -116,7 +112,7 @@ def barcode_add_to_diary():
 
     F6: the caller-supplied `food` object is NO LONGER READ. Provider nutrition
     is resolved server-side from the barcode alone (`get_barcode_product`, i.e.
-    `BarcodeFoodCache` → FatSecret), so a caller can no longer decide what a
+    live FatSecret), so a caller can no longer decide what a
     `source="barcode"` ledger row means. A payload that cannot identify provider
     truth without trusting caller nutrition fails CLOSED. The raw `MealLog.id` is
     no longer published on any variant — first write, replay or error.
@@ -129,9 +125,6 @@ def barcode_add_to_diary():
     idempotency_key = meal_idempotency.read_idempotency_key()
     existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
     if existing:
-        goal_impact = barcode_svc.goal_impact_for_add(current_user.id, {
-            "calories": 0, "protein": 0, "carbs": 0, "fat": 0,
-        })
         return _deprecated_compatibility_response({
             "message": "logged",
             "nutrients": {
@@ -140,7 +133,6 @@ def barcode_add_to_diary():
                 "karb": round(existing.karb or 0, 1),
                 "yag": round(existing.yag or 0, 1),
             },
-            "goal_impact": goal_impact,
             "analytics_events": ["Added To Diary"],
         })
 
@@ -161,7 +153,6 @@ def barcode_add_to_diary():
     if not serving or not added_preview or added_preview["calories"] <= 0:
         return _deprecated_compatibility_response(
             {"error": "invalid_serving"}, 400)
-    goal_impact = barcode_svc.goal_impact_for_add(current_user.id, added_preview)
 
     result = barcode_svc.add_food_to_diary(
         current_user.id,
@@ -185,7 +176,6 @@ def barcode_add_to_diary():
             "karb": round(entry.karb or 0, 1),
             "yag": round(entry.yag or 0, 1),
         },
-        "goal_impact": goal_impact,
         "analytics_events": ["Added To Diary"],
     }
     if quest_result:

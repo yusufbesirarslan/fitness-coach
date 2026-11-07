@@ -30,6 +30,40 @@ def enabled():
     return current_app.config.get("ACCOUNT_ELIGIBILITY_ENABLED") is True
 
 
+def qualification_open():
+    """RC2 StoreKit qualification window. Remove with the D1 launch commit.
+
+    Needs a named list on a complete Production deployment with its Sandbox
+    fallback. It restricts no account, gates no feature and opens no AI.
+    """
+    config = current_app.config
+    return (bool(config.get("APPLE_PURCHASE_QUALIFICATION_SUBJECTS"))
+            and config.get("APPLE_SUBSCRIPTIONS_ENABLED") is True
+            and config.get("APPLE_SUBSCRIPTION_ENVIRONMENT") == "Production"
+            and config.get("APPLE_SANDBOX_FALLBACK_ENABLED") is True)
+
+
+def _listed(user, key):
+    return (qualification_open() and bool(user.cognito_sub)
+            and user.cognito_sub.lower() in current_app.config.get(key, frozenset()))
+
+
+def qualification_subject(user):
+    """May pass the closed purchase gate. A subject in both lists is a control."""
+    return (_listed(user, "APPLE_PURCHASE_QUALIFICATION_SUBJECTS")
+            and not _listed(user, "APPLE_QUALIFICATION_CONTROL_SUBJECTS"))
+
+
+def served_to(user):
+    """Whether this account is asked for a declaration. Enforcement stays on enabled().
+
+    A control account holds a real record but never purchases, so the qualification
+    can prove the purchase gate itself refuses it, not the eligibility check.
+    """
+    return (enabled() or qualification_subject(user)
+            or _listed(user, "APPLE_QUALIFICATION_CONTROL_SUBJECTS"))
+
+
 def _signer(*, account=False):
     kind = URLSafeSerializer if account else URLSafeTimedSerializer
     return kind(current_app.config["SECRET_KEY"],
@@ -67,9 +101,18 @@ def _capabilities(status, band):
 
 
 def preview(data):
-    if not enabled():
+    # The native route is pre-auth, so the window opens it for every caller. The
+    # ticket is inert unless the flag is on: registration ignores it and only a
+    # named account can present it to review_existing.
+    window_only = not enabled()
+    if window_only and not (qualification_open()
+                            and request.endpoint == "mobile_api.eligibility_preview"):
         raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
     result = evaluate(data)
+    # With the flag off nothing would record a minor's declaration or restrict the
+    # account, so the window must not open sign-up for one.
+    if window_only and result["status"] == "screen_passed" and result["age_band"] != "18_plus":
+        raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
     result["registration_token"] = (_signer().dumps({
         "version": VERSION, "age": data["age"], "country": data["country"]})
         if result["status"] == "screen_passed" else None)
@@ -77,8 +120,10 @@ def preview(data):
 
 
 def registration_record(token):
-    if not enabled():
-        return None
+    return _ticket_record(token) if enabled() else None
+
+
+def _ticket_record(token):
     try:
         if not isinstance(token, str) or not token or len(token) > 1024:
             raise ValueError()
@@ -174,9 +219,9 @@ def require_capability(user, capability):
 
 def review_existing(user, token):
     """One-time legacy declaration; no self-service promotion/country switch."""
-    if not enabled():
+    if not served_to(user):
         raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
-    record = registration_record(token)
+    record = _ticket_record(token)
     from app.extensions import db
     from app.models import User
     owner = db.session.execute(db.select(User).where(User.id == user.id)

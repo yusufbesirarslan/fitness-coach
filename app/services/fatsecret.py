@@ -508,12 +508,8 @@ def _food_search_fatsecret(q):
 
         name = f.get("food_name", "")
         fid = f.get("food_id", "")
-        # Düşük güvenli (fallback ağırlıkla ölçeklenmiş) per-100g değerini ÖNBELLEĞE
-        # YAZMA — gerçek porsiyon bilinmediğinden ~2.3× şişebilir ve kalıcı yanlış bir
-        # baseline olarak gelecekteki tüm aramaları zehirler (#13). Bu istek için yine
-        # döndürülür; sonraki aramada belki daha iyi bir ağırlık tahminiyle çözülür.
-        if not low_confidence:
-            _cache_macros({name: per_100g}, basis="per_100g")
+        # Provider macros never enter the shared cache: it has a 3-day TTL (Terms 1.5
+        # allows 24 hours) and records no origin. Only the food_id is storable.
         if fid:
             _cache_food_id(name, fid)
         results.append({

@@ -480,6 +480,48 @@ of one Sandbox identity, no cross-environment contention, concurrent restore,
 account deletion before and after persistence). No live Apple Production or
 Sandbox call is claimed.
 
+## RC2 named qualification cohort (temporary)
+
+Proves the StoreKit chain on the Production API while the purchase gate stays
+closed for everyone else. Remove this seam in the D1 launch commit.
+
+`APPLE_PURCHASE_QUALIFICATION_SUBJECTS` holds at most three exact Cognito subject
+UUIDs. A malformed or longer list means nobody. Boot logs
+`apple_subscription event=qualification_cohort count=<n>`, where `count=0` means
+the list was refused. The window is open only with
+`APPLE_SUBSCRIPTIONS_ENABLED=1`, `APPLE_SUBSCRIPTION_ENVIRONMENT=Production` and
+`APPLE_SANDBOX_FALLBACK_ENABLED=1`.
+
+`APPLE_QUALIFICATION_CONTROL_SUBJECTS` uses the same format. It names denial
+controls, which hold a real declaration but can't purchase. A subject in both
+lists is a control.
+
+While the window is open, the pre-auth native preview answers every caller, so
+the binary's sign-up works without the global flag. It issues no ticket to a
+declared minor, because with the flag off nothing would record that declaration
+or restrict the account. Those callers get `AUTH_ELIGIBILITY_UNAVAILABLE`.
+
+| Surface | Named account | Control account | Any other account |
+|---|---|---|---|
+| `GET /account/me` `eligibility` | Present | Present | Absent |
+| `GET`, `POST /account/eligibility` | Served | Served | 503 `AUTH_ELIGIBILITY_UNAVAILABLE` |
+| `GET /subscription/purchase-context` | Decided by its signed adult TR record | 403 `SUBSCRIPTION_PURCHASE_UNAVAILABLE`, no association | Same 403 |
+| Feature restrictions | None | None | None |
+| AI | Refused | Refused | Refused |
+
+`ACCOUNT_ELIGIBILITY_ENABLED` stays 0, so `enforce_request` restricts nobody and
+registration attaches no record.
+
+**Known side effect:** `POST /api/v1/auth/eligibility` runs before authentication,
+so an open window answers every caller, including the shipped client's
+registration step. Its ticket is inert while the flag is off: registration ignores
+it and `/account/eligibility` serves only listed accounts. Web `/eligibility`
+stays 503.
+
+**Closing the window:** removing the list stops new purchase contexts and
+declarations. A signed record and any Sandbox subscription row remain, and that
+row counts toward entitlement until `APPLE_SANDBOX_FALLBACK_ENABLED=0`.
+
 ## Next tasks and qualification limits
 
 - BE-02 (implemented, dark): see above. Open: owner confirmation of 180-day

@@ -703,25 +703,6 @@ def test_fatsecret_food_routes_shed_load_instead_of_parking_threads(
     assert "error" in response.get_json()
 
 
-def test_barcode_cache_hit_does_not_consume_a_blocking_permit(client, auth_user):
-    """Slot YALNIZCA ağ turunu sarar — cache HIT saf DB'dir.
-
-    Aksi halde ucuz tarama akışı sağlayıcıya hiç gitmediği hâlde 503 yerdi.
-    """
-    from app.extensions import db
-    from app.models import BarcodeFoodCache
-
-    db.session.add(BarcodeFoodCache(
-        barcode="5000159407236", food_id="77777", food_name="Protein Bar",
-        brand="Acme", payload={"food_id": "77777", "name": "Protein Bar",
-                               "brand": "Acme", "servings": []}))
-    db.session.commit()
-
-    with _saturated_blocking_capacity():
-        response = client.get("/api/food/barcode?code=5000159407236")
-    assert response.status_code == 200
-
-
 def test_mobile_food_discovery_provider_calls_are_gated():
     """Mobil keşif yüzeyi de PAYLAŞILAN kapasiteyi tüketir (aynı sınıf)."""
     path = os.path.join("app", "services", "mobile_food_discovery.py")

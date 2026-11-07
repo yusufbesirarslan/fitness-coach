@@ -99,7 +99,7 @@ def test_route_success_200(client, auth_user, monkeypatch):
     assert data["brand"] == payload["brand"]
     assert data["servings"][0]["serving_description"] == "1 bar"
     assert data["food"]["name"] == payload["name"]
-    assert "analysis" in data
+    assert "analysis" not in data and "recommendations" not in data
 
 
 def test_route_requires_login(raw_client):
