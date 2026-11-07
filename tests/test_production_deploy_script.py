@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import queue
 import re
@@ -10,6 +11,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1205,3 +1207,182 @@ def test_forward_recovery_mode_reaches_the_engine_verbatim(bash_executable, host
     assert json.loads(proof.split("=", 1)[1])["mode"] == "forward-recovery"
     assert "mode forward-recovery" in result.stderr
     assert _run(["git", "-C", str(f.deploy_dir), "rev-parse", "HEAD"]) == f.prev_commit
+
+
+# ---------------------------------------------------------------------------
+# Apple launcher git, as real root. Selected by the same root CI job.
+# ---------------------------------------------------------------------------
+
+HOSTILE_GIT_PROBE = """#!/bin/sh
+{{
+  echo "uid=$(/usr/bin/id -u)"
+  echo "gid=$(/usr/bin/id -g)"
+  echo "groups=$(/usr/bin/id -G)"
+  echo "home=$HOME"
+  echo "sudo=${{SUDO_UID:-none}}"
+  echo "session=$(/usr/bin/ps -o sid= -p $$ | /usr/bin/tr -d ' ')"
+  echo "fds=$(/bin/ls -l /proc/$$/fd | /usr/bin/tr '\\n' ' ')"
+}} > {marker}
+exit 1
+"""
+
+
+def _as_root(*argv, cwd=None):
+    env = {"PATH": "/usr/bin:/bin", "HOME": "/root", "LC_ALL": "C"}
+    done = subprocess.run(argv, cwd=cwd, env=env, text=True, capture_output=True, check=True, timeout=30)
+    return done.stdout.strip()
+
+
+@pytest.fixture
+def owned_checkout():
+    """A checkout owned by "nobody", with a marker it can write. /tmp, because pytest's tmp is root-only."""
+    import pwd
+    import scripts.apple_release_scheduler as scheduler
+
+    assert os.name == "posix" and os.geteuid() == 0
+    account = pwd.getpwnam("nobody")
+    base = Path(tempfile.mkdtemp(prefix="axisai-git-owner-", dir="/tmp"))
+    base.chmod(0o755)
+    checkout = base / "checkout"
+    checkout.mkdir()
+    _as_root("git", "init", "-q", cwd=checkout)
+    (checkout / "scripts").mkdir()
+    # The real launcher, so execute() can compare it with itself at the revision.
+    shutil.copy(scheduler.__file__, checkout / "scripts" / "apple_release_scheduler.py")
+    _as_root("git", "add", ".", cwd=checkout)
+    _as_root("git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "c", cwd=checkout)
+    marks = base / "marks"
+    marks.mkdir()
+    marker = marks / "fired"
+    probe = base / "probe.sh"
+    probe.write_text(HOSTILE_GIT_PROBE.format(marker=marker), encoding="utf-8")
+    probe.chmod(0o755)
+    head = _as_root("git", "rev-parse", "HEAD", cwd=checkout)
+    blob = _as_root("git", "rev-parse", "HEAD:scripts/apple_release_scheduler.py", cwd=checkout)
+
+    def chown():
+        for path in [checkout, marks, *checkout.rglob("*")]:
+            os.lchown(path, account.pw_uid, account.pw_gid)
+
+    def hostile(missing):
+        """A promisor remote plus a missing object: git fetches it, and that runs the probe."""
+        for key, value in (("core.repositoryformatversion", "1"), ("extensions.partialClone", "evil"),
+                           ("remote.evil.promisor", "true"), ("remote.evil.url", "git@127.0.0.1:x/y"),
+                           ("core.sshCommand", str(probe))):
+            _as_root("git", "config", key, value, cwd=checkout)
+        loose = checkout / ".git" / "objects" / missing[:2] / missing[2:]
+        loose.unlink()
+
+    try:
+        yield SimpleNamespace(scheduler=scheduler, account=account, checkout=checkout, marker=marker,
+                              head=head, blob=blob, chown=chown, hostile=hostile)
+    finally:
+        shutil.rmtree(base)
+
+
+@pytest.mark.linux_helper_identity
+@pytest.mark.parametrize("target, args", [
+    ("head", lambda c: ("rev-parse", "HEAD^{commit}")),
+    ("blob", lambda c: ("show", c.head + ":scripts/apple_release_scheduler.py")),
+])
+def test_real_root_launcher_git_confines_hostile_config_to_the_owner(owned_checkout, request, target, args):
+    assert request.config.getoption("--run-authoritative-linux-lock-tests")
+    c = owned_checkout
+    argv = ("-C", str(c.checkout), *args(c))
+    c.hostile(getattr(c, target))
+    c.chown()
+
+    # Control: this config really does run code as root once git trusts the checkout.
+    subprocess.run(["git", "-c", "safe.directory=*", *argv], env={"PATH": "/usr/bin:/bin", "HOME": "/root"},
+                   capture_output=True, check=False, timeout=30)
+    assert "uid=0\n" in c.marker.read_text(encoding="utf-8")
+    c.marker.unlink()
+
+    # Stands in for the launcher's held locks. Named, because the shell's own descriptors reuse small numbers.
+    held = os.open(c.checkout.parent / "held-lock", os.O_RDONLY | os.O_CREAT, 0o644)
+    try:
+        # Control: handed over on purpose, the probe sees it.
+        with pytest.raises(c.scheduler.Refused, match="COMMAND_FAILED"):
+            c.scheduler.command(["git", *argv], pass_fds=(held,))
+        assert "held-lock" in c.marker.read_text(encoding="utf-8")
+        c.marker.unlink()
+        with pytest.raises(c.scheduler.Refused, match="COMMAND_FAILED"):
+            c.scheduler.command(["git", *argv])
+    finally:
+        os.close(held)
+    fired = dict(line.split("=", 1) for line in c.marker.read_text(encoding="utf-8").splitlines())
+    assert fired["uid"] == str(c.account.pw_uid) != "0"
+    assert fired["gid"] == str(c.account.pw_gid)
+    assert fired["groups"] == str(c.account.pw_gid)
+    assert fired["home"] == "/nonexistent" and fired["sudo"] == "none"
+    assert fired["session"] not in ("", str(os.getsid(0)))  # no hold on root's terminal
+    assert "held-lock" not in fired["fds"]
+
+
+@pytest.mark.linux_helper_identity
+def test_real_root_launcher_runs_its_whole_flow_as_the_owner(owned_checkout, request):
+    assert request.config.getoption("--run-authoritative-linux-lock-tests")
+    c = owned_checkout
+    c.chown()
+    assert os.environ.get("SUDO_UID")  # the job runs under sudo, and the drop must not depend on it
+    gits, cid = [], "c" * 64
+    health = json.dumps({"Production": {"relevant_rows": 0, "backlog": 0, "due": 0, "leased": 0,
+                                        "oldest_verification_age_seconds": None}})
+
+    def run(argv, timeout=10, pass_fds=()):
+        if argv[0] == "git":
+            gits.append(argv[3])
+            assert pass_fds == ()  # execute() must never hand the locks to code the owner controls
+            return c.scheduler.command(argv, timeout, pass_fds)  # the only real command here
+        if argv[0].endswith("axisai-switch-web-slot"):
+            return "op=status state=blue backend=127.0.0.1:5001 result=ok"
+        if argv[:2] == ["docker", "ps"]:
+            return cid
+        if argv[:2] == ["docker", "top"]:
+            return "PID COMMAND"
+        if argv[:2] == ["docker", "inspect"]:
+            return "running healthy sha256:" + "d" * 64
+        if "/app/BUILD_REVISION" in argv or "APP_REVISION" in " ".join(argv):
+            return c.head
+        if c.scheduler.PASS in argv:
+            assert pass_fds == (7, 8)  # the docker client still carries the locks
+            return f"APPLE_RELEASE_HEALTH={health}\nAPPLE_RELEASE_PASS=OK"
+        return "1"
+
+    result = c.scheduler.execute({"deploy_dir": str(c.checkout), "limit": 25}, run, (7, 8))
+    assert result == "OK" and gits == ["rev-parse", "show"]
+
+
+@pytest.mark.linux_helper_identity
+def test_real_root_launcher_git_refuses_checkouts_it_cannot_drop_for(owned_checkout, request):
+    assert request.config.getoption("--run-authoritative-linux-lock-tests")
+    c = owned_checkout
+    rev_parse = ["git", "-C", str(c.checkout), "rev-parse", "HEAD^{commit}"]
+
+    # Still root-owned, and hostile: nothing to drop to, so git must not start.
+    c.hostile(c.head)
+    with pytest.raises(c.scheduler.Refused, match="GIT_CHECKOUT_UNPROVEN"):
+        c.scheduler.command(rev_parse)
+    assert not c.marker.exists()
+
+    # A symlink at the configured path.
+    c.chown()
+    link = c.checkout.parent / "link"
+    link.symlink_to(c.checkout)
+    os.lchown(link, c.account.pw_uid, c.account.pw_gid)  # owned by the owner, so only the symlink check can stop it
+    with pytest.raises(c.scheduler.Refused, match="GIT_CHECKOUT_UNPROVEN"):
+        c.scheduler.command(["git", "-C", str(link), "rev-parse", "HEAD^{commit}"])
+    assert not c.marker.exists()
+
+    # An owner with no account.
+    os.lchown(c.checkout, 54321, 54321)
+    with pytest.raises(c.scheduler.Refused, match="GIT_CHECKOUT_UNPROVEN"):
+        c.scheduler.command(rev_parse)
+    assert not c.marker.exists()
+
+    # Owner's checkout but root's .git: git itself refuses, as the owner, and runs no config.
+    os.lchown(c.checkout, c.account.pw_uid, c.account.pw_gid)
+    os.lchown(c.checkout / ".git", 0, 0)
+    with pytest.raises(c.scheduler.Refused, match="COMMAND_FAILED"):
+        c.scheduler.command(rev_parse)
+    assert not c.marker.exists()

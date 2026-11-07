@@ -873,6 +873,9 @@ and a separate exclusive pass lock. R6 holds the exclusive production lock
 through preparation, cutover, worker replacement and rollback. After locking,
 the launcher resolves the canonical route, one healthy web, immutable image,
 checkout/baked/runtime SHA equality and launcher protocol source at that SHA.
+Its two git reads run as the checkout's owner, never root, with no supplementary
+groups and a clean environment, because that owner can write the repository's
+config. A checkout it can't drop for (root-owned, symlink, no account) refuses.
 The image owns a root-installed pass script; its existing exact archive/image
 admission provides provenance. The pass starts read-only, refuses revision drift,
 and uses the existing durable lease/generation/idempotent reconciliation logic.

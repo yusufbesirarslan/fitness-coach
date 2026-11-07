@@ -12,6 +12,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import stat
 import subprocess
@@ -36,10 +37,28 @@ class Refused(RuntimeError):
     pass
 
 
+def as_checkout_owner(argv):
+    """Root never runs git: its config is writable by the checkout's owner, so git runs as that owner."""
+    if argv[0] != 'git' or os.geteuid() != 0:
+        return {}
+    if argv[1] != '-C':
+        raise Refused('GIT_CHECKOUT_UNPROVEN')
+    info = os.lstat(argv[2])
+    try:
+        group = pwd.getpwuid(info.st_uid).pw_gid
+    except KeyError:
+        raise Refused('GIT_CHECKOUT_UNPROVEN') from None
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid == 0 or group == 0:
+        raise Refused('GIT_CHECKOUT_UNPROVEN')
+    return {'user': info.st_uid, 'group': group, 'extra_groups': [], 'cwd': '/',
+            'stdin': subprocess.DEVNULL, 'start_new_session': True,  # no hold on root's terminal
+            'env': {'PATH': os.environ.get('PATH', ''), 'HOME': '/nonexistent', 'LC_ALL': 'C'}}
+
+
 def command(argv, timeout=10, pass_fds=()):
     try:
         p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout,
-                           pass_fds=pass_fds, check=False)
+                           pass_fds=pass_fds, check=False, **as_checkout_owner(argv))
     except (OSError, subprocess.TimeoutExpired):
         raise Refused('COMMAND_UNAVAILABLE') from None
     if p.returncode:
