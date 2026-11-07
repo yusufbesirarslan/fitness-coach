@@ -89,6 +89,14 @@ def server_rig(pg_generation_app, request):
                 expected_generation=consent.generation(owners[0]),
                 request_id=f"transport-{counter:08d}"))
     mutate("affirmative_grant")
+    # The independent first-party decision is prospective synthetic evidence,
+    # not supplied by the D1 grant above. Exercise the actual PG authority.
+    from app.services import health_consent, health_disclosure
+    from test_health_consent import command as health_command
+    patch.setattr(health_disclosure, "APPROVED_VERSION", health_disclosure.VERSION)
+    with app.app_context():
+        for owner in owners:
+            health_consent.mutate(owner, health_command())
     # Native route, pipeline, conversation writes and projection stay real.
     # Only provider output/context facts are synthetic; no SDK is invoked.
     size = [64]
@@ -104,6 +112,8 @@ def server_rig(pg_generation_app, request):
     app.add_url_rule("/api/v1/coach/messages", view_func=route.send_coach_message, methods=["POST"])
     app.add_url_rule("/health", view_func=lambda: "ok")
     app.wsgi_app = publication.ConsentPublication(app.wsgi_app)
+    from app.health_boundary import HealthProcessingBoundary
+    app.wsgi_app = HealthProcessingBoundary(app.wsgi_app)
     ctx = multiprocessing.get_context("fork")
     ready, release, headers, closed = [ctx.Event() for _ in range(4)]
     worker = ctx.Value("i", 0)

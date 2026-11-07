@@ -163,6 +163,18 @@ def app():
             yield connection
     monkeypatch.setattr(health_consent, "_authority", sqlite_health_authority)
     monkeypatch.setattr(health_disclosure, "APPROVED_VERSION", health_disclosure.VERSION)
+    # WSGI servers close every live iterable. Tests may intentionally retain
+    # responses (including streaming ones) until the test ends. Close those at
+    # fixture teardown, never eagerly during assertions/call_on_close checks.
+    import weakref
+    live_iterables = weakref.WeakSet()
+    application = flask_app.wsgi_app
+    def track_iterables(environ, start_response):
+        result = application(environ, start_response)
+        if hasattr(result, "close"):
+            live_iterables.add(result)
+        return result
+    flask_app.wsgi_app = track_iterables
     flask_app.test_client_class = AutoOriginClient
     # Rate limits off by default; the dedicated rate-limit tests re-enable.
     limiter.enabled = False
@@ -176,6 +188,8 @@ def app():
     with flask_app.app_context():
         db.create_all()
         yield flask_app
+        for iterable in list(live_iterables):
+            iterable.close()
         db.session.remove()
         db.drop_all()
     monkeypatch.undo()
