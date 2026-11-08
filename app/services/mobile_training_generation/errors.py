@@ -99,11 +99,18 @@ class TrainingAllowanceRefused(PlanGenerationCommandError):
     """An AI allowance refusal before dispatch; no unit was held or used.
 
     Carries the closed ``ai_allowances`` catalogue code, HTTP status and
-    retryability unchanged, never an internal ledger detail.
+    retryability unchanged. Only the same public string/null metadata allowed
+    by the generic allowance response may cross the native Training boundary.
     """
 
-    def __init__(self, public_code, http_status, retryable):
+    def __init__(self, public_code, http_status, retryable, *, details=None):
         super().__init__("training allowance refused")
         self.public_code = public_code
         self.http_status = http_status
         self.retryable = retryable
+        self.details = {
+            key: value for key, value in (details or {}).items()
+            if public_code in {"AI_ALLOWANCE_EXHAUSTED", "AI_FEATURE_NOT_IN_PLAN"}
+            and key in {"feature", "scope", "resets_at"}
+            and (value is None or isinstance(value, str))
+        }

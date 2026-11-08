@@ -58,6 +58,9 @@ def test_create_all_first_boot_is_accepted(tmp_path):
         base(conn)
         for model in (AiStarterGrant, AiAllowanceBucket, AiUsageReservation):
             model.__table__.create(conn)
+        # The boot path presents the shipped scope predicate; d8f1 widens it.
+        from app.db_init import replay_shipped_predicates
+        replay_shipped_predicates(conn, {"ai_allowance_bucket"})
         run(conn, migration().upgrade)
 
 
@@ -191,6 +194,8 @@ def test_b1e4_verifier_on_sqlite_create_all_first(tmp_path, damage, refusal):
                 if damage and damage[0] in statement:
                     statement = statement.replace(*damage)
                 conn.execute(sa.text(statement))
+        from app.db_init import replay_shipped_predicates
+        replay_shipped_predicates(conn, {"ai_allowance_bucket"})
         for name in ("a9c1d2e3f4b5_ai_allowance_ledger.py",
                      "d3e4f5a6b7c8_add_training_plan_generation_operations.py",
                      "b0d3e4f5a6b7_training_dispatch_boundary.py"):

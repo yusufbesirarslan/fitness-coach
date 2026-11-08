@@ -75,9 +75,9 @@ def test_only_source_installer_constructs_policy():
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute))
                     and getattr(node.func, "id", getattr(node.func, "attr", None)) in (
-                        "AllowancePolicy", "ScopePolicy")):
+                        "AllowancePolicy", "ScopePolicy", "CampaignPolicy")):
                 constructors.append(path.relative_to(ROOT).as_posix())
-    assert constructors == ["app/services/ai_allowances/launch_policy.py"] * 3
+    assert constructors == ["app/services/ai_allowances/launch_policy.py"] * 5
     config = ast.parse((ROOT / "app/config.py").read_text(encoding="utf-8"))
     writes = [node for node in ast.walk(config) if isinstance(node, ast.Assign)
               and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
