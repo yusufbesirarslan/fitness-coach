@@ -42,7 +42,6 @@ def _row(user, source):
     return row
 
 
-@GAP
 @pytest.mark.parametrize("source", SOURCES)
 def test_provider_or_unproven_history_excluded_at_coach_tool_boundary(app, make_user, source):
     user = make_user("fs-qual-tool")
@@ -52,7 +51,6 @@ def test_provider_or_unproven_history_excluded_at_coach_tool_boundary(app, make_
     assert str(SENTINEL) not in json.dumps(projected)
 
 
-@GAP
 @pytest.mark.parametrize("source", SOURCES)
 def test_provider_or_unproven_history_excluded_before_coach_context(app, make_user, source):
     user = make_user("fs-qual-context")
@@ -96,7 +94,6 @@ def menu_probe(app, make_user, monkeypatch):
     yield user, observed, analyze
 
 
-@GAP
 @pytest.mark.parametrize("source", SOURCES)
 def test_unproven_aggregate_never_enters_qr_scorer(menu_probe, source):
     user, observed, analyze = menu_probe
@@ -107,7 +104,6 @@ def test_unproven_aggregate_never_enters_qr_scorer(menu_probe, source):
     assert observed == []
 
 
-@GAP
 def test_unknown_current_redis_envelope_never_enters_qr_scorer(menu_probe, monkeypatch):
     _, _, analyze = menu_probe
     key = foodcache._macro_redis_key("per_serving", "Independent fixture dish")

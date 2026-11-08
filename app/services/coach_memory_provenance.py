@@ -13,7 +13,9 @@ from flask import current_app
 from app.extensions import db
 from app.models import User
 
-INDEX_KEY = '_pa06_coach_turns_v1'
+# v2: old ownership signatures do not attest independent nutrition inputs.
+# Leave the old index/messages/summaries intact, but never reuse them for AI.
+INDEX_KEY = '_pa06_coach_turns_v2'
 INDEX_LIMIT = 200
 
 
@@ -39,7 +41,7 @@ def _signature(kind, conversation, row_id, role, text):
         raise RuntimeError('Coach provenance requires application signing key')
     if isinstance(secret, str):
         secret = secret.encode()
-    data = json.dumps(['axisai/pa06/coach-memory/v1', kind, conversation.user_id, conversation.id, row_id, role, text],
+    data = json.dumps(['axisai/pa06/coach-memory/v2', kind, conversation.user_id, conversation.id, row_id, role, text],
                       ensure_ascii=False, separators=(',', ':')).encode()
     return hmac.new(secret, data, hashlib.sha256).hexdigest()
 
@@ -82,7 +84,7 @@ def summary_text(conversation):
     try:
         envelope = json.loads(conversation.summary or '')
         text, signature = envelope['text'], envelope['signature']
-        if (envelope['version'] == 1 and isinstance(text, str) and isinstance(signature, str)
+        if (envelope['version'] == 2 and isinstance(text, str) and isinstance(signature, str)
                 and hmac.compare_digest(signature, _signature(
                     'summary', conversation, conversation.summarized_upto_id, 'summary', text))):
             return text
@@ -92,5 +94,5 @@ def summary_text(conversation):
 
 
 def signed_summary(conversation, text, upto_id):
-    return json.dumps({'version': 1, 'text': text, 'signature': _signature(
+    return json.dumps({'version': 2, 'text': text, 'signature': _signature(
         'summary', conversation, upto_id, 'summary', text)}, ensure_ascii=False)

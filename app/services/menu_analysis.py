@@ -1,3 +1,4 @@
+from app.services import fatsecret_boundary
 """Canonical restaurant-menu acquisition and analysis (LP15-C).
 
 Transport-neutral home of the two authorities the web menu routes used to
@@ -418,15 +419,13 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
         raise MenuAnalysisError("PROFILE_DATA_MISSING")
 
     today_str = day_key()
-    meals = MealLog.query.filter_by(user_id=user_id, tarih=today_str).all()
-    consumed = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
-    for m in meals:
-        consumed["calories"] += m.kalori or 0
-        consumed["protein"]  += m.protein or 0
-        consumed["carbs"]    += m.karb or 0
-        consumed["fat"]      += m.yag or 0
-
-    remaining = remaining_macro_budget(targets, consumed).as_dict()
+    advisory_available = not fatsecret_boundary.intake_unproven(user_id)
+    # No ledger value is read into advice. A nonempty diary is unknown as a
+    # whole, including "manual" labels that also describe copied provider data.
+    consumed = ({"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+                if advisory_available else fatsecret_boundary.unavailable_macros())
+    remaining = (remaining_macro_budget(targets, consumed).as_dict()
+                 if advisory_available else None)
 
     headings_hint = headings
 
@@ -509,7 +508,7 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
     # porsiyonu denetiminde otorite ipucu. Çoğu öğede None (gramaj belirtilmemiş).
     stated_grams_map = {n: nutrition_pipeline.parse_stated_grams(n) for n in item_names}
 
-    cached_hits, uncached_names = _get_cached_macros(item_names, basis="per_serving")
+    cached_hits, uncached_names = fatsecret_boundary.cached_estimates(item_names)
     if cached_hits:
         current_app.logger.info(f"[MACRO ENGINE] Cache hit: {len(cached_hits)}/{len(item_names)} items from cache")
 
@@ -521,21 +520,8 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
     lookup_names = uncached_names
     if not lookup_names:
         current_app.logger.info(f"[MACRO ENGINE] All {len(item_names)} items served from cache — skipping FatSecret + LLM")
-    else:
-        from app.services import ai_consent
-        # Optional proxy lookups remain unavailable inside D1 operations until
-        # their actual recipient/host sharing contract is qualified. Use the
-        # existing bounded AI estimation path; do not request even an OAuth token.
-        if ai_consent.current_operation() is None:
-            try:
-                token = _get_fatsecret_token()
-                current_app.logger.info(f"[MACRO ENGINE] FatSecret token acquired")
-                per_serving, per_100g_items = _lookup_macros_fatsecret(lookup_names, token, category_map)
-                macro_map.update(per_serving)
-                for n in per_serving:
-                    source_map[n] = "fatsecret_serving"
-            except Exception as e:
-                current_app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}")
+    # Advisory menu composition never uses FatSecret, even outside a D1 scope.
+    # Factual food search/barcode remain separate, unchanged front doors.
 
     # Kalan iki LLM aşaması BİRBİRİNDEN BAĞIMSIZDIR: (a) per-100g öğelerin porsiyon
     # ağırlığı tahmini, (b) hiçbir kaynaktan çözülemeyen öğelerin makro tahmini.
@@ -634,10 +620,8 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
                 macro_map[n] = m
                 source_map[n] = "llm_stated_grams"
 
-    # Provider values serve this analysis only: the shared cache records no origin.
-    _cache_macros({n: m for n, m in macro_map.items()
-                   if not str(source_map.get(n, "")).startswith("fatsecret")},
-                  basis="per_serving")
+    fatsecret_boundary.cache_estimates({n: m for n, m in macro_map.items()
+        if source_map.get(n) in ("llm", "llm_stated_grams")})
 
     final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
     final_zero = len(item_names) - final_resolved
@@ -694,11 +678,14 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
             macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
             current_app.logger.info("[MACRO ENGINE] ZERO-MACRO ITEM: 1 item — no data from FatSecret or LLM")
 
-        if has_macros:
+        if has_macros and advisory_available:
             score, warnings, reason = _menu_score(macros, remaining)
             # The same canonical score, as locale-free tokens for non-web callers.
             fit = nutrition_pipeline.score_compatibility(macros, remaining)
             fit_flags, fit_warnings = list(fit["flags"]), list(fit["warnings"])
+        elif not advisory_available:
+            score, warnings, reason = None, [], fatsecret_boundary.notice()
+            fit_flags, fit_warnings = [], []
         else:
             score, warnings, reason = 0, [], t("route.macros_unavailable")
             fit_flags, fit_warnings = [], []
@@ -724,11 +711,12 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
         if cat not in categories_result:
             categories_result[cat] = []
         categories_result[cat].append(item_obj)
-        if has_macros:
+        if has_macros and advisory_available:
             all_scored.append(item_obj)
 
-    for cat in categories_result:
-        categories_result[cat].sort(key=lambda x: (-x["score"], x["name"]))
+    if advisory_available:
+        for cat in categories_result:
+            categories_result[cat].sort(key=lambda x: (-x["score"], x["name"]))
 
     all_scored.sort(key=lambda x: (-x["score"], x["name"]))
 
@@ -736,9 +724,12 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
         "menu_source": menu_source,
         "categories": categories_result,
         "coach_picks": all_scored[:3],
-        "remaining": {k: int(round(v)) for k, v in remaining.items()},
+        "advice_available": advisory_available,
+        "remaining": ({k: int(round(v)) for k, v in remaining.items()}
+                      if advisory_available else None),
         "target": {k: int(round(v)) for k, v in targets.as_dict().items()},
-        "consumed": {k: int(round(v)) for k, v in consumed.items()},
+        "consumed": ({k: int(round(v)) for k, v in consumed.items()}
+                     if advisory_available else None),
     }
 
 
@@ -764,4 +755,5 @@ def web_analysis_payload(analysis):
         "remaining": analysis["remaining"],
         "target": analysis["target"],
         "consumed": analysis["consumed"],
+        "advice_available": analysis.get("advice_available", True),
     }

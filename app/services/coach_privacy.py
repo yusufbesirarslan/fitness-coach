@@ -80,7 +80,7 @@ _MACROS = ('calories', 'protein', 'carbs', 'fat')
 _WORKOUT = ('sets', 'reps', 'weight_kg', 'volume')
 
 
-def tool_result(name, raw):
+def tool_result(name, raw, *, user_id=None):
     """Project immediately before insertion into *any* provider's next round.
 
     Internal confirmation logic still receives the original domain result.
@@ -93,6 +93,13 @@ def tool_result(name, raw):
     if not isinstance(source, dict):
         source = {}
     out = {'status': token(source.get('status'), _STATUSES) or 'error'}
+    if name == 'query_fitx_metrics' and source.get('metric_type') == 'calories':
+        return json.dumps({'status': 'unsupported', 'metric_type': 'calories'})
+    if name in ('fetch_nutrition_and_stage_log', 'confirm_and_commit_meal_log'):
+        from app.services import fatsecret_boundary
+        if not fatsecret_boundary.verified('tool-result', user_id, source):
+            return json.dumps({'status': 'unsupported'})
+
     if name == 'query_fitx_metrics':
         for key, choices in (
             ('metric_type', ('calories', 'water_ml', 'volume_lifted', 'weight_kg', 'sleep_hours')),

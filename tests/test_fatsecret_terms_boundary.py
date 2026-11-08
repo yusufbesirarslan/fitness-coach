@@ -172,7 +172,7 @@ def test_menu_analysis_keeps_provider_values_out_of_the_shared_cache(app, make_u
     menu_analysis._analyze_menu_text(user.id, "Restaurant menu: Provider Dish, Estimated Dish")
     cached = foodcache._macro_cache.get("per_serving", {})
     assert "Provider Dish" not in cached
-    assert "Estimated Dish" in cached
+    assert "Estimated Dish" not in cached  # independent estimates use the attested namespace
     foodcache._macro_cache.clear()
 
 
@@ -266,9 +266,6 @@ def test_web_search_llm_fallback_stays_closed(env_absent, client, auth_user, mon
     assert dispatched == []
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "OPEN BEFORE AI OPENS: diary totals have no reliable lineage and enter Coach tools "
-    "(#485 blocker 2). Needs FatSecret's written permission or the #485 boundary."))
 def test_provider_derived_diary_calories_must_not_enter_coach_tools(app, make_user):
     user = make_user("fs-terms-history")
     db.session.add(MealLog(user_id=user.id, ogun="Lunch", yemekler="Provider food", kalori=731,
