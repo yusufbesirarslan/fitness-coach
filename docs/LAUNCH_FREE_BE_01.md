@@ -118,6 +118,23 @@ reviewed source change to `LAUNCH_FREE_CAMPAIGN`.
 
 ## Cross-repository contract handoff (MOB-01)
 
+- **Native Training closure:** `POST /api/v1/training/plans` preserves
+  `details.feature`, `details.scope` and `details.resets_at` through
+  `TrainingAllowanceRefused` for both existing 402 codes
+  (`AI_ALLOWANCE_EXHAUSTED`, `AI_FEATURE_NOT_IN_PLAN`). Its original message,
+  status, retryability, request ID and cache/retry headers remain unchanged.
+  Other command errors keep their original envelope. This adds no operation
+  state, retry, idempotency, entitlement or provider-dispatch behavior.
+  The native boundary allowlists only these three keys with the generic
+  serializer's string-or-null value rule; internal metadata never passes.
+  It does not add the generic serializer's optional `reset` token.
+  Missing/non-string reset values stay absent, null stays null and malformed
+  strings pass unchanged for the mobile decoder to ignore. No reset date is
+  synthesized or inferred. In particular, LF3 exhaustion carries null,
+  never a fourth campaign period. A feature-not-in-plan refusal carries only
+  metadata supplied by its authority (currently feature/scope, no reset date).
+  Actual HTTP coverage: `tests/test_native_training_allowance_contract.py`;
+  all ledger calls use synthetic/test policies and no provider is called.
 - **Scope encoding:** the string `"LAUNCH_FREE"` in `error.details.scope`,
   `access` and `features[].scope`.
 - **Exhaustion:** HTTP 402, `AI_ALLOWANCE_EXHAUSTED`, `retryable: false`,
