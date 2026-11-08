@@ -174,15 +174,16 @@ def test_social_meal_suggestion_never_fetches_provider_totals(app, monkeypatch):
     from types import SimpleNamespace
     from app.blueprints import social
 
-    def boom(*a, **k):
-        raise AssertionError("no FatSecret lookup for a persisted suggestion")
+    calls = []  # recorded, not raised: the suggestion path swallows provider errors
 
     monkeypatch.setattr(social, "_parse_structured_suggestion_items", lambda body: ["Tavuk"])
     monkeypatch.setattr(social, "_get_cached_macros", lambda items, basis=None: ({}, list(items)))
-    monkeypatch.setattr(social, "_get_fatsecret_token", boom)
-    monkeypatch.setattr(social, "_lookup_macros_fatsecret", boom)
+    monkeypatch.setattr(social, "_get_fatsecret_token", lambda: calls.append("token") or "tok")
+    monkeypatch.setattr(social, "_lookup_macros_fatsecret",
+                        lambda *a, **k: calls.append("lookup") or ({"Tavuk": {"calories": 1}}, {}))
     with app.test_request_context():
         assert social._calculate_meal_suggestion(SimpleNamespace(body="x", message_id=1)) is None
+    assert calls == []
 
 
 # ── R-5 web protein nudge ──────────────────────────────────────────────────
