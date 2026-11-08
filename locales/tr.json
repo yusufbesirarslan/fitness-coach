@@ -295,6 +295,7 @@
   "nutrition.total_label": "Toplam:",
   "nutrition.adding": "EKLENİYOR...",
   "nutrition.add_error": "Ekleme hatası",
+  "nutrition.provider_logging_unavailable": "Bu besini kaydetmek şu anda kullanılamıyor. Manuel olarak ekleyebilirsin.",
   "nutrition.update_error": "Güncelleme hatası",
   "nutrition.delete_error": "Silme hatası",
   "nutrition.add_food_first": "Önce besin ekle",

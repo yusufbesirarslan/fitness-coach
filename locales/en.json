@@ -284,6 +284,7 @@
   "nutrition.total_label": "Total:",
   "nutrition.adding": "ADDING...",
   "nutrition.add_error": "Add error",
+  "nutrition.provider_logging_unavailable": "Logging this food is currently unavailable. You can add it manually.",
   "nutrition.update_error": "Update error",
   "nutrition.delete_error": "Delete error",
   "nutrition.add_food_first": "Add a food first",

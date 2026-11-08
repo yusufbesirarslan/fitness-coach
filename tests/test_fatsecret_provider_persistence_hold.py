@@ -200,3 +200,23 @@ def test_protein_nudge_is_withheld_on_any_unproven_week(make_user):
     nudges = _nudge_types(user)
     assert "NUDGE_PROTEIN_GOAL" not in nudges
     assert "NUDGE_NO_NUTRITION" not in nudges  # log-existence nudges are unaffected
+
+
+# ── Browser: our own UI never relabels FatSecret Content as "manual" ───────
+
+def test_browser_never_copies_a_provider_result_into_a_manual_entry():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parent.parent / "static" / "nutrition.js").read_text(encoding="utf-8")
+    add = js[js.index("function addSelectedFood("):]
+    add = add[:add.index("\nfunction ", 1)]
+    # Gram/manual fallback: the provider guard precedes the per_100g copy.
+    assert add.index("if (food.food_id) {") < add.index("const base = food.per_100g")
+    assert "nutrition.provider_logging_unavailable" in add
+    # Diary builder: same guard before the per_100g manual body is built.
+    assert js.index("if (!body && _smFood.food_id) {") < js.index("per_100g: _smFood.per_100g")
+    # The held diary answer is shown as localized copy, not a raw token.
+    assert "d.error === 'provider_logging_unavailable'" in js
+    for locale in ("en", "tr"):
+        import json
+        catalog = json.loads((Path(__file__).resolve().parent.parent / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
+        assert catalog["nutrition.provider_logging_unavailable"]
