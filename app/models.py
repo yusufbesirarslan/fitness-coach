@@ -110,7 +110,7 @@ class AiAllowanceBucket(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False)
     __table_args__ = (
         db.UniqueConstraint("user_id", "scope", "feature", "period_key", name="uq_ai_allowance_bucket"),
-        db.CheckConstraint("scope IN ('STARTER', 'PREMIUM')", name="ck_ai_allowance_bucket_scope"),
+        db.CheckConstraint("scope IN ('STARTER', 'PREMIUM', 'LAUNCH_FREE')", name="ck_ai_allowance_bucket_scope"),
         db.CheckConstraint("granted >= 0", name="ck_ai_allowance_bucket_granted"),
         db.CheckConstraint("used >= 0", name="ck_ai_allowance_bucket_used"),
         db.CheckConstraint("reserved >= 0", name="ck_ai_allowance_bucket_reserved"),

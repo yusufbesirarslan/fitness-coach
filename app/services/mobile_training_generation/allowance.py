@@ -78,9 +78,9 @@ def _ledger_enabled():
     return current_app.config.get("AI_ALLOWANCE_LEDGER_ENABLED") is True
 
 
-def _refused(code):
+def _refused(code, *, details=None):
     status, retryable = ai_allowances.CATALOG[code]
-    return TrainingAllowanceRefused(code, status, retryable)
+    return TrainingAllowanceRefused(code, status, retryable, details=details)
 
 
 def _binding(operation_id, *, lock=False):
@@ -108,7 +108,7 @@ def bind_for_dispatch(operation, now):
             operation.user_id, FEATURE, "training-dispatch:" + secrets.token_hex(16), now=now,
             **options)
     except ai_allowances.AllowanceError as error:
-        raise _refused(error.code) from None
+        raise _refused(error.code, details=error.details) from None
     if not hold.may_execute:
         raise _refused("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
     from app.models import AiUsageReservation

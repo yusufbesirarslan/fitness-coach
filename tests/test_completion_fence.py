@@ -146,8 +146,8 @@ def test_reviewed_ddl_pin_matches_the_fence_migration():
         import migration_expand_contract as mec
     finally:
         sys.path.pop(0)
-    assert mec.REVIEWED_DDL == {
-        "d7e3a9c1f5b8": mec.normalized_digest(MIGRATION_PATH.read_bytes())}
+    assert set(mec.REVIEWED_DDL) == {"d7e3a9c1f5b8", "d8f1a3c5e7b9"}  # LAUNCH-FREE-BE-01 scope widening
+    assert mec.REVIEWED_DDL["d7e3a9c1f5b8"] == mec.normalized_digest(MIGRATION_PATH.read_bytes())
     result = mec.scan()
     assert result["classes"]["d7e3a9c1f5b8"] == mec.EXPAND
     assert "d7e3a9c1f5b8_completion_authority_fence.py" not in result["violations"]

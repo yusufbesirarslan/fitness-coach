@@ -43,13 +43,19 @@ def _native_generation_provider_guard():
 
 
 def _generation_error(error, *, retry_after=None):
-    return mobile_error(
+    response = mobile_error(
         error.public_code,
         "The Training plan request could not be completed.",
         error.http_status,
         error.retryable,
         retry_after=retry_after,
     )
+    if isinstance(error, TrainingAllowanceRefused) and error.public_code in {
+            "AI_ALLOWANCE_EXHAUSTED", "AI_FEATURE_NOT_IN_PLAN"}:
+        payload = response.get_json()
+        payload["error"]["details"] = error.details
+        response.set_data(current_app.json.dumps(payload))
+    return response
 
 
 @bp.post("/training/plans")

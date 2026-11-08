@@ -35,6 +35,11 @@ def check(body):
             assert (feature['state'] == 'AVAILABLE') == (remaining > 0)
             if feature['scope'] == 'STARTER':
                 assert feature['reset'] == 'NEVER' and feature['resets_at'] is None
+            elif feature['scope'] == 'LAUNCH_FREE':
+                # A further window has a reset instant; the final window has none.
+                assert (feature['reset'], feature['resets_at'] is None) in (
+                    ('CAMPAIGN_WINDOW', False), ('CAMPAIGN_END', True))
+                assert feature['resets_at'] is None or feature['resets_at'].endswith('Z')
             else:
                 assert feature['reset'] in ('WEEKLY', 'MONTHLY') and feature['resets_at'].endswith('Z')
     return body
@@ -106,3 +111,25 @@ def test_schema_rejects_unsupported_or_malformed_observations(app, make_user, mu
     else: body['starter']['granted_at'] = '2026-10-14T00:00:00+03:00'
     with pytest.raises(ValidationError):
         VALIDATOR.validate(body)
+
+
+@pytest.mark.parametrize('window', [0, 1, 2])
+def test_launch_free_view_is_schema_valid_in_every_window(app, make_user, window):
+    from dataclasses import replace
+    from app.services.ai_allowances import launch_policy
+    campaign = replace(launch_policy.LAUNCH_FREE_CAMPAIGN, version='contract-lf')
+    enable_ledger(app, replace(launch_policy.LAUNCH_V1_POLICY, version='contract-lf-base',
+                               launch_free=campaign))
+    app.config['APPLE_SUBSCRIPTIONS_ENABLED'] = False
+    owner = make_user(f'contract-lf-{window}').id
+    now = campaign.boundary(window)
+    hold = A.reserve(owner, 'qr_menu', f'contract-lf-menu-{window}', now=now)
+    A.finalize(owner, hold.reference, 'success', now=now)
+    body = check(A.allowance_view(owner, now=now))
+    assert body['access'] == 'LAUNCH_FREE'
+    assert {f['scope'] for f in body['features']} == {'LAUNCH_FREE'}
+    menu = body['features'][4]
+    assert (menu['limit'], menu['used'], menu['remaining']) == (5, 1, 4)
+    assert menu['reset'] == ('CAMPAIGN_END' if window == 2 else 'CAMPAIGN_WINDOW')
+    after = check(A.allowance_view(owner, now=campaign.ends_at))
+    assert after['access'] == 'STARTER'

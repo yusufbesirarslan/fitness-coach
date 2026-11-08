@@ -22,6 +22,7 @@
     "access": {
       "enum": [
         "PREMIUM",
+        "LAUNCH_FREE",
         "STARTER",
         "NONE",
         "UNCONFIGURED"
@@ -149,6 +150,7 @@
             "enum": [
               "STARTER",
               "PREMIUM",
+              "LAUNCH_FREE",
               null
             ]
           },
@@ -193,6 +195,8 @@
               "NEVER",
               "WEEKLY",
               "MONTHLY",
+              "CAMPAIGN_WINDOW",
+              "CAMPAIGN_END",
               null
             ]
           },

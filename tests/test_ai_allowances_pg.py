@@ -257,6 +257,9 @@ def test_create_all_first_boot_on_postgresql(pg_app, damage):
     app, _ = pg_app
     with app.app_context():
         with db.engine.begin() as conn:
+            # The fresh boot presents the shipped scope predicate first.
+            from app.db_init import replay_shipped_predicates
+            replay_shipped_predicates(conn, {"ai_allowance_bucket"})
             if damage:
                 conn.execute(sa.text(damage))
             with Operations.context(MigrationContext.configure(conn)):
