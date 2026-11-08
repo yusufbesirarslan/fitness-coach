@@ -225,6 +225,11 @@ def test_owner_comes_only_from_the_bearer_credential(
     # Bob: 1500 kcal, 400 eaten — and only Bob's request sees it.
     assert b["menu_analysis"]["day"]["target"]["energy_kcal"] == 1500
     assert b["menu_analysis"]["day"]["remaining"]["energy_kcal"] is None
+    # Unknown stays null on the native DTO too — never zero-filled.
+    assert set(b["menu_analysis"]["day"]["consumed"].values()) == {None}
+    assert set(b["menu_analysis"]["day"]["remaining"].values()) == {None}
+    assert all(i["fit"]["score"] is None for c in b["menu_analysis"]["categories"]
+               for i in c["candidates"])
     assert b["menu_analysis"]["coach_pick_ids"] == []
     assert b["menu_analysis"]["day"]["advice_available"] is False
     # Proofs are owner-bound: Alice's tokens verify for Alice, never for Bob.
