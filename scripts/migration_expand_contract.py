@@ -187,7 +187,7 @@ REVIEWED_DDL = {
     # (drop + add in one transaction; exact original or already-widened only).
     # The serving revision writes only STARTER/PREMIUM, which both predicates admit.
     "d8f1a3c5e7b9":
-        "465bc63880be24dd16881e6ab7317d17c18a2c59b26d99e0cc97ebaf72fe5b3d",
+        "676b7a92ae8f49eef0c1e6b30b9ebfcefb16937d2696ea5f36a8247541eb89e9",
 }
 
 EXPAND = "expand"

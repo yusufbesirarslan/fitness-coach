@@ -35,6 +35,21 @@ def replay_shipped_predicates(conn, created):
                 batch.create_check_constraint(name, predicate)
 
 
+def unstamped_empty_tables(conn):
+    """Shipped tables an earlier fresh boot created but never stamped.
+
+    Called ONLY while ``alembic_version`` is absent: a fresh boot that died
+    between ``create_all`` and its stamp leaves these tables behind with the
+    current model predicate. They are empty, so replaying the shipped
+    predicate hides nothing and (on SQLite) its rebuild cascades nothing.
+    """
+    import sqlalchemy as sa
+    inspector = sa.inspect(conn)
+    return {table for table, *_ in SHIPPED_CHECK_PREDICATES
+            if inspector.has_table(table)
+            and conn.execute(sa.text(f'SELECT 1 FROM "{table}" LIMIT 1')).first() is None}
+
+
 def _handle_upgrade_failure(app, message):
     db.session.rollback()
     app.logger.exception(message)
@@ -128,7 +143,7 @@ def prepare_release(app):
                 from flask_migrate import stamp, upgrade
                 if os.path.isdir(_migrations_dir):
                     with db.engine.begin() as conn:
-                        replay_shipped_predicates(conn, _absent)
+                        replay_shipped_predicates(conn, _absent | unstamped_empty_tables(conn))
                     stamp(revision=_FRESH_SCHEMA_STAMP)
                     upgrade()
                     app.logger.info("[DB] Taze şema Alembic head'e yükseltildi.")

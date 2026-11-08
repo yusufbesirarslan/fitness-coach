@@ -687,6 +687,68 @@ def test_migration_widens_scope_and_preserves_existing_rows(tmp_path):
                 _insert(conn, "LAUNCH_FREE")
 
 
+def _fk_engine(path):
+    import sqlalchemy as sa
+    engine = sa.create_engine(f"sqlite:///{path}")
+
+    @sa.event.listens_for(engine, "connect")
+    def _fk(dbapi, _record):  # as app/extensions.py does for every SQLite connection
+        dbapi.execute("PRAGMA foreign_keys=ON")
+    return engine
+
+
+def _populated_narrow_ledger(conn):
+    import sqlalchemy as sa
+    from datetime import datetime
+    from app.db_init import replay_shipped_predicates
+    from app.models import AiUsageReservation
+    _model_ledger(conn)
+    replay_shipped_predicates(conn, {"ai_allowance_bucket"})
+    _insert(conn, "STARTER", "NEVER", granted=10)
+    values = {"public_id": "r" * 22, "user_id": 1, "bucket_id": 1, "feature": "coach",
+              "key_digest": "d" * 64, "state": "RESERVED", "provider_billed": False,
+              "created_at": datetime(2026, 11, 1), "expires_at": datetime(2026, 11, 1)}
+    conn.execute(AiUsageReservation.__table__.insert().values(**values))
+
+
+def _counts(conn):
+    import sqlalchemy as sa
+    return tuple(conn.execute(sa.text(f"SELECT count(*) FROM {t}")).scalar()
+                 for t in ("ai_allowance_bucket", "ai_usage_reservation"))
+
+
+def test_sqlite_rebuild_never_cascades_into_reservations(tmp_path):
+    # SQLite batch mode drops and recreates the table; with foreign keys ON
+    # (app/extensions.py) that DROP is an implicit DELETE cascading into
+    # ai_usage_reservation. Upgrade and downgrade keep every row.
+    import sqlalchemy as sa
+    m = _migration("d8f1a3c5e7b9_ai_allowance_launch_free_scope.py")
+    engine = _fk_engine(tmp_path / "fk.db")
+    with engine.begin() as conn:
+        _populated_narrow_ledger(conn)
+    for step in (m.upgrade, m.downgrade, m.upgrade):
+        with engine.connect() as conn:
+            _run(conn, step)
+            conn.commit()
+        with engine.connect() as conn:
+            assert _counts(conn) == (1, 1)
+            assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+            assert conn.exec_driver_sql("PRAGMA foreign_key_check").all() == []
+    with engine.begin() as conn:
+        _insert(conn, "LAUNCH_FREE")
+
+
+def test_sqlite_rebuild_refuses_when_foreign_keys_cannot_be_disabled(tmp_path):
+    import sqlalchemy as sa
+    m = _migration("d8f1a3c5e7b9_ai_allowance_launch_free_scope.py")
+    engine = _fk_engine(tmp_path / "fk.db")
+    with engine.begin() as conn:
+        _populated_narrow_ledger(conn)  # DML opened the transaction: PRAGMA is now a no-op
+        with pytest.raises(RuntimeError, match="cascade-delete"):
+            _run(conn, m.upgrade)
+        assert _counts(conn) == (1, 1)
+
+
 def _model_ledger(conn):
     import sqlalchemy as sa
     from app.models import AiAllowanceBucket as Bucket, AiStarterGrant, AiUsageReservation
@@ -739,7 +801,7 @@ def test_replay_never_touches_a_table_this_boot_did_not_create(tmp_path):
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'existing.db'}")
     with engine.begin() as conn:
         _narrow_ledger(conn)
-        _run(conn, lambda: m._replace("scope IN ('STARTER', 'PREMIUM') OR 1=1"))
+        _run(conn, lambda: m._replace(conn, "scope IN ('STARTER', 'PREMIUM') OR 1=1"))
         before = sa.inspect(conn).get_check_constraints("ai_allowance_bucket")
         replay_shipped_predicates(conn, set())   # pre-existing: never "repaired"
         assert sa.inspect(conn).get_check_constraints("ai_allowance_bucket") == before
@@ -747,11 +809,26 @@ def test_replay_never_touches_a_table_this_boot_did_not_create(tmp_path):
             _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
 
 
+def test_interrupted_fresh_boot_recovers_only_empty_unstamped_tables(tmp_path):
+    # A fresh boot that died after create_all and before its stamp leaves the
+    # widened table behind with no alembic_version; the next boot replays it.
+    import sqlalchemy as sa
+    from app.db_init import replay_shipped_predicates, unstamped_empty_tables
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'interrupted.db'}")
+    with engine.begin() as conn:
+        _model_ledger(conn)
+        assert unstamped_empty_tables(conn) == {"ai_allowance_bucket"}
+        replay_shipped_predicates(conn, unstamped_empty_tables(conn))
+        _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
+        _insert(conn, "STARTER", "NEVER")
+        assert unstamped_empty_tables(conn) == set()   # rows: never rewritten
+
+
 def test_fresh_boot_path_records_absence_before_create_all():
     from pathlib import Path
     source = (Path(__file__).resolve().parents[1] / "app/db_init.py").read_text(encoding="utf-8")
     absent, create_all = source.index("_absent = {"), source.index("db.create_all()")
-    replay, stamp = source.index("replay_shipped_predicates(conn, _absent)"), source.index(
+    replay, stamp = source.index("replay_shipped_predicates(conn, _absent | unstamped_empty_tables(conn))"), source.index(
         "stamp(revision=_FRESH_SCHEMA_STAMP)")
     assert absent < create_all < replay < stamp
     from app.db_init import SHIPPED_CHECK_PREDICATES
@@ -765,7 +842,7 @@ def test_unfamiliar_scope_predicate_fails_closed(tmp_path):
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'unfamiliar.db'}")
     with engine.begin() as conn:
         _narrow_ledger(conn)
-        _run(conn, lambda: m._replace("scope IN ('STARTER', 'PREMIUM') OR 1=1"))
+        _run(conn, lambda: m._replace(conn, "scope IN ('STARTER', 'PREMIUM') OR 1=1"))
         with pytest.raises(RuntimeError):
             _run(conn, m.upgrade)
         with pytest.raises(RuntimeError):

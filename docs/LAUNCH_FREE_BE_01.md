@@ -41,6 +41,16 @@ the migration lock timeout); anything else (including `NOT VALID`) → stop.
 Writes no rows. Previous code is compatible with the widened schema. Downgrade
 restores the narrow predicate only while no `LAUNCH_FREE` row exists.
 
+SQLite (local/dev only) has no `ALTER CONSTRAINT`: batch mode copies, drops and
+renames the table, and with `PRAGMA foreign_keys=ON` (`app/extensions.py`) that
+DROP is an implicit DELETE cascading into `ai_usage_reservation`. The rebuild
+therefore runs with enforcement off, checks every referencing table with
+`PRAGMA foreign_key_check` afterwards, and soft-invalidates the pooled
+connection so it reopens with enforcement on. If enforcement cannot be turned
+off (an open transaction) and any row references a bucket, it refuses.
+Verified through the real `env.py`: a populated SQLite database keeps its
+reservations across the upgrade.
+
 Two repository gates shaped this:
 
 - **Static expand gate** (`scripts/migration_expand_contract.py`) rejects any
@@ -54,7 +64,9 @@ Two repository gates shaped this:
   `a9c1d2e3f4b5` shipped with R1 and pins the narrow predicate in its
   create_all-first verifier, so it is left byte-identical. A fresh boot instead
   presents the shipped predicate on tables it just created
-  (`db_init.replay_shipped_predicates`), then the chain widens it.
+  (`db_init.replay_shipped_predicates`), then the chain widens it. A fresh boot
+  that died before its stamp leaves an empty, unversioned table; the next boot
+  replays that too (`unstamped_empty_tables`), never a table with rows.
   Verified: `classify_migration_delta` against `e7bfa139` and `d13c9fa1` →
   `{'d8f1a3c5e7b9': 'expand'}`, no problems.
 
@@ -89,6 +101,18 @@ reviewed source change to `LAUNCH_FREE_CAMPAIGN`.
 - A start-date revision after accounts opened `LF1` stretches their existing
   `LF1` bucket to the new window (never a second grant). A different campaign
   must use a new `key_prefix` (validated `[A-Z]{2,8}`) and version.
+- A database that has `alembic_version` but predates `a9c1d2e3f4b5` and boots
+  with auto-upgrade off gets a widened table from `create_all`; its later
+  upgrade then stops in the `a9c1` verifier. Production and staging are past
+  `a9c1`; this is a legacy/dev hazard only.
+- Empty past-window campaign buckets purge after the retention period. If a
+  reviewed start-date revision made an already-purged window number current
+  again, that window would grant afresh. A revision must not move a used window
+  back into the active range (or must use a new `key_prefix`).
+- The non-strict `reserve_within` path (Training with Premium enforcement off)
+  accepts Apple OFF without the campaign check, unchanged from `d13c9fa1`; D1
+  `require_runtime()` still refuses before any provider call unless the
+  execution gate is enabled.
 - The shipped mobile allowance decoder rejects `LAUNCH_FREE` in the view; the
   free build does not read the view (audit), the February build must learn it.
 
