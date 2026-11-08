@@ -98,10 +98,9 @@ def tool_result(name, raw, *, user_id=None):
     if name in ('fetch_nutrition_and_stage_log', 'confirm_and_commit_meal_log'):
         from app.services import fatsecret_boundary
         if not fatsecret_boundary.verified('tool-result', user_id, source):
-            # Unattested nutrition never reaches the model. A data-free status
-            # (dispatcher refusal, not_found, no_pending...) keeps its meaning.
-            if any(key in source for key in ('staged_food', 'logged', 'today_totals', 'evaluation')):
-                return json.dumps({'status': 'unsupported'})
+            # Unattested nutrition never reaches the model: status only, no
+            # values. A legacy commit still reports 'committed' (no false
+            # failure that invites a duplicate log); refusals keep their meaning.
             return json.dumps(out, ensure_ascii=False, allow_nan=False)
 
     if name == 'query_fitx_metrics':

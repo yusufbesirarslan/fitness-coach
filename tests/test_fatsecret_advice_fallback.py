@@ -184,7 +184,7 @@ def test_unattested_nutrition_tool_result_is_not_projected(app, make_user, tool)
                          "today_totals": {"calories": SENTINEL}})
     with app.app_context():
         assert json.loads(coach_privacy.tool_result(tool, forged, user_id=user.id)) == {
-            "status": "unsupported"}
+            "status": "staged"}  # status only: no unattested value is projected
         other = make_user("fs-fallback-tool-b")
         signed_for_other = json.dumps(fatsecret_boundary.attest(
             "tool-result", other.id, {"status": "staged", "staged_food": {"calories": SENTINEL}}))
@@ -216,9 +216,10 @@ def test_legacy_unattested_pending_meal_commits_but_never_reaches_the_model(app,
     # The user's explicit confirmation still logs the meal (diary stays usable)...
     assert json.loads(raw)["status"] == "committed"
     assert MealLog.query.filter_by(user_id=auth_user.id).one().kalori == SENTINEL
-    # ...but its unattested numbers are never projected into the next model round.
+    # ...the model learns it committed (no false failure → no duplicate log), but
+    # its unattested numbers are never projected into the next model round.
     projected = coach_privacy.tool_result("confirm_and_commit_meal_log", raw, user_id=auth_user.id)
-    assert json.loads(projected) == {"status": "unsupported"}
+    assert json.loads(projected) == {"status": "committed"}
 
 
 def _v1_signature(app, conversation, row_id, role, text, kind):
@@ -250,6 +251,13 @@ def test_pre_fallback_signed_memory_and_summary_are_not_reused(app, make_user):
     db.session.commit()
 
     assert coach_memory_provenance.summary_text(conversation) == ""
+    # The next (v2) summarization preserves the quarantined v1 summary verbatim.
+    legacy_raw = conversation.summary
+    rewritten = json.loads(coach_memory_provenance.signed_summary(conversation, "new", message.id))
+    assert rewritten["legacy"] == legacy_raw and rewritten["text"] == "new"
+    conversation.summary = json.dumps(rewritten)
+    again = json.loads(coach_memory_provenance.signed_summary(conversation, "newer", message.id))
+    assert again["legacy"] == legacy_raw  # carried forward, never dropped
     assert coach_memory_provenance.candidate_ids(conversation) == []
     assert coach_memory_provenance.trusted_rows(conversation, [message]) == []
     # Preserved in place, never deleted or rewritten.

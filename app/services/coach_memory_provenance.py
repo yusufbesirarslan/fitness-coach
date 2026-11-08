@@ -93,6 +93,24 @@ def summary_text(conversation):
     return ''
 
 
+def _legacy_summary(previous):
+    """Pre-v2 summary content, preserved verbatim and never read for AI."""
+    if not previous:
+        return None
+    try:
+        envelope = json.loads(previous)
+    except (ValueError, TypeError):
+        return previous
+    if isinstance(envelope, dict) and envelope.get('version') == 2:
+        return envelope.get('legacy')
+    return previous
+
+
 def signed_summary(conversation, text, upto_id):
-    return json.dumps({'version': 2, 'text': text, 'signature': _signature(
-        'summary', conversation, upto_id, 'summary', text)}, ensure_ascii=False)
+    envelope = {'version': 2, 'text': text, 'signature': _signature(
+        'summary', conversation, upto_id, 'summary', text)}
+    # No purge: a quarantined v1 summary is carried forward, not overwritten.
+    legacy = _legacy_summary(conversation.summary)
+    if legacy is not None:
+        envelope['legacy'] = legacy
+    return json.dumps(envelope, ensure_ascii=False)
