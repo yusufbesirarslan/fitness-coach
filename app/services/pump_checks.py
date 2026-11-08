@@ -6,6 +6,7 @@ from app.models import PumpCheck, PumpCheckLike, TrainingPlan
 # Geriye uyumluluk: get_friend_ids artık friends servisinde yaşıyor; buradan
 # import eden mevcut modüller (social, training, ...) kırılmasın diye re-export.
 from app.services.friends import get_friend_ids  # noqa: F401
+from app.services.launch_social import available as social_available, effective_visibility
 from app.timeutil import display_dt
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,9 @@ _SHARING_STATUS_KEYS = {
 def can_view_pump_check(user_id, check):
     if check.user_id == user_id:
         return True
-    visibility = check.visibility or "private"
+    # Launch V1: a stored ``feed``/``friends`` value is preserved but enforced as
+    # private, so no other account can read the check or its image.
+    visibility = effective_visibility(check.visibility)
     if visibility == "feed":
         return user_id in get_friend_ids(check.user_id)
     if visibility == "friends":
@@ -64,7 +67,7 @@ def pump_check_image_url(check, viewer_id, expires_in=3600, visibility_preauthor
 
 
 def sharing_status(check):
-    visibility = check.visibility or "private"
+    visibility = effective_visibility(check.visibility)
     return {
         "key": _SHARING_STATUS_KEYS.get(visibility, _SHARING_STATUS_KEYS["private"]),
         "value": visibility if visibility in _SHARING_STATUS_KEYS else "private",
@@ -126,7 +129,7 @@ def serialize_pump_check_card(
         "workoutScore": workout_score(check),
         "environment": check.location_type or "",
         "description": check.description or "",
-        "visibility": check.visibility or "private",
+        "visibility": effective_visibility(check.visibility),
         "sharingStatus": sharing_status(check),
         "likesCount": check.likes_count or 0,
         "commentsCount": check.comments_count or 0,
@@ -134,6 +137,6 @@ def serialize_pump_check_card(
         "likedByMe": liked,
         "repostedByMe": (reposted_ref_ids is not None and check.id in reposted_ref_ids),
     }
-    if viewer_id == check.user_id:
+    if social_available() and viewer_id == check.user_id:
         card["sharedFriendIds"] = check.shared_friend_ids or []
     return card

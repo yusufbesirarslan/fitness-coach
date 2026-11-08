@@ -29,9 +29,9 @@
                 <option value="all_time">{{ t('leaderboard.all_time') }}</option>
                 <option value="weekly">{{ t('leaderboard.weekly') }}</option>
             </select>
+            {#- Launch V1: friends ranking closed; the global board is unchanged. -#}
             <div class="lb-tabs">
-                <button class="lb-tab active" data-scope="friends" data-action="loadBoard" data-args='["friends"]'>{{ t('leaderboard.tab_friends') }}</button>
-                <button class="lb-tab" data-scope="global" data-action="loadBoard" data-args='["global"]'>{{ t('leaderboard.tab_global') }}</button>
+                <button class="lb-tab active" data-scope="global" data-action="loadBoard" data-args='["global"]'>{{ t('leaderboard.tab_global') }}</button>
             </div>
         </div>
         <div id="lb-list" class="lb-list">
@@ -93,11 +93,10 @@ function emptyStateHTML() {
             <div class="empty-icon">🤝</div>
             <div class="empty-title">${__t('leaderboard.empty_title')}</div>
             <div class="empty-desc">${__t('leaderboard.empty_desc')}</div>
-            <a href="/friends" class="lb-cta">${__t('leaderboard.empty_cta')}</a>
         </div>`;
 }
 
-let currentScope = 'friends';
+let currentScope = 'global';
 let currentTimeframe = 'all_time';
 
 // ── Weekly countdown ──────────────────────────────────────────────
@@ -190,7 +189,7 @@ document.addEventListener('visibilitychange', () => {
 });
 _startCountdown();
 
-loadBoard('friends');
+loadBoard('global');
 </script>
 <script src="/static/actions.js"></script>
 </body>

@@ -15,6 +15,9 @@ from app.i18n import t
 from app.models import Activity, FeedHide, FeedItem, FeedReport, Friendship, PumpCheck
 from app.services.feed import MILESTONE_ACTIVITY_TYPES, can_view_feed_activity
 
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
+
 NOT_FOUND_ID = 999999999
 
 

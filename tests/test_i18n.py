@@ -275,7 +275,6 @@ def test_secondary_pages_render_en(app, client, make_user, login):
     checks = {
         "/quests": ("Complete your daily quests", "Günlük görevlerini"),
         "/premium": ("GO PREMIUM", "PREMIUM'A GEÇ"),
-        "/friends": ("INVITE A FRIEND", "ARKADAŞINI DAVET ET"),
         "/leaderboard": ("All Time", "Tüm Zamanlar"),
     }
     for path, (en_str, tr_str) in checks.items():
@@ -286,7 +285,9 @@ def test_secondary_pages_render_en(app, client, make_user, login):
         assert tr_str not in body, path
     # leaderboard kuplaj: timeframe/scope değerleri kanonik kalır
     lb = client.get("/leaderboard").get_data(as_text=True)
-    assert 'value="all_time"' in lb and 'data-args=\'["friends"]\'' in lb
+    assert 'value="all_time"' in lb
+    # Launch V1 social boundary: the friends scope tab is not rendered.
+    assert 'data-args=\'["friends"]\'' not in lb
 
 
 def test_final_pages_render_en(app, client, make_user, login):
@@ -528,6 +529,7 @@ def test_training_js_day_label_coupling_is_gone_with_the_legacy_client():
 
 # ── Route mesajları (jsonify error/message) dile göre ──
 
+@pytest.mark.usefixtures("social_reopened")
 def test_route_error_messages_localized(app, client, make_user, login):
     """Blueprint jsonify hata mesajları kullanıcının diline göre döner."""
     make_user("otherperson")                 # var olan ama arkadaş OLMAYAN kullanıcı
@@ -539,6 +541,7 @@ def test_route_error_messages_localized(app, client, make_user, login):
     assert r.get_json()["error"] == "You're not friends."
 
 
+@pytest.mark.usefixtures("social_reopened")
 def test_route_message_turkish_for_tr_user(app, client, make_user, login):
     make_user("otherperson2")
     make_user("routetr", language="tr")
@@ -560,6 +563,7 @@ def test_edit_profile_renders_en(app, client, make_user, login):
     assert '["kilo verme"]' in body                 # goal kanonik değer
 
 
+@pytest.mark.usefixtures("social_reopened")
 def test_chat_page_renders_en(app, client, make_user, login):
     """chat sayfası EN render; öneri tipi kodları (message_type/data-type) kanonik kalır."""
     from app.extensions import db

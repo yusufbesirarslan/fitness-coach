@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import expect
 
 from app.extensions import db
@@ -132,6 +133,8 @@ def test_pr7_surface_matrix_has_no_overflow_or_hierarchy_regression(
     assert errors == []
 
 
+# Seeds social notification types, hidden by the Launch V1 boundary.
+@pytest.mark.usefixtures("social_reopened")
 def test_notification_load_error_retries_and_read_failure_is_visible(
         app, auth_user, make_user, training_page):
     actor = make_user("notificationactor")
@@ -299,6 +302,8 @@ def test_account_browser_covers_avatar_premium_and_keyboard_choices(
     expect(goal).to_have_class(re.compile(r"\bselected\b"))
 
 
+# Seeds social notification types, hidden by the Launch V1 boundary.
+@pytest.mark.usefixtures("social_reopened")
 def test_notifications_browser_covers_empty_and_mixed_read_state(
         app, auth_user, make_user, training_page):
     page, _, _, _ = training_page
@@ -364,8 +369,10 @@ def _seed_notifications(app, user_id, actor_id, count, read_every=0):
 
     with app.app_context():
         for i in range(count):
-            n = notify(user_id, "friend_request", actor_id=actor_id,
-                       target_type="friendship", target_id=10_000 + i)
+            # Launch V1 social boundary: only non-social types are listed.
+            n = notify(user_id, "challenge_complete", actor_id=actor_id,
+                       target_type="challenge", target_id=10_000 + i,
+                       payload={"code": "pr7", "xp": 50, "week": "2026-W01"})
             assert n is not None
             if read_every and i % read_every == 0:
                 n.is_read = True
@@ -541,7 +548,7 @@ def test_notification_pending_mark_read_blocks_repeat_activation_and_false_navig
     assert page.evaluate("window.__readCalls") == 2
     assert page.evaluate("window.__navs") == []
     ctl["held_read"].pop().fallback()
-    page.wait_for_url("**/friends")
+    page.wait_for_url("**/challenges")
 
 
 def test_account_goal_and_language_choices_expose_selected_state(
@@ -653,7 +660,7 @@ def test_notification_state_matrix_across_widths_and_languages(
             check("read-failure", language, width)
             ctl["read"] = "pass"
             row.click()
-            page.wait_for_url(re.compile(r"/friends$"))
+            page.wait_for_url(re.compile(r"/challenges$"))
             # restore the read row for the next cell
             with app.app_context():
                 from app.models import Notification

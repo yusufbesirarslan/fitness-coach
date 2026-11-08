@@ -24,6 +24,7 @@ from app.services.ai_gate import ai_concurrency_gate
 from app.services.gamification import complete_quest_for_user
 from app.services.menu_extract import validate_pump_check
 from app.services.pump_checks import get_friend_ids, normalize_workout_score
+from app.services import launch_social
 from app.services.premium import premium_ai_plan_gate
 from app.plan_presenter import build_plan_view
 from app.services.plan_facts import gather_plan_facts
@@ -177,7 +178,8 @@ def _weekly_program_error_class(error):
 def _parse_pump_visibility(data):
     raw_visibility = data.get("visibility")
     if raw_visibility is None:
-        visibility = "feed"
+        # Launch V1: an absent value is private, never the legacy feed default.
+        visibility = "feed" if launch_social.available() else "private"
     elif isinstance(raw_visibility, str):
         visibility = raw_visibility.strip().lower()
     else:
@@ -487,6 +489,11 @@ def complete_workout():
     visibility, selected_friend_ids, visibility_error = _parse_pump_visibility(data)
     if visibility_error:
         return jsonify({"error": visibility_error}), 400
+    if visibility != "private" and not launch_social.available():
+        # Launch V1: sharing is closed. Refuse before the AI check, S3 and any
+        # write; the photo is never silently stored with a different audience.
+        return jsonify({"error": t("social.unavailable"),
+                        "code": launch_social.ERROR_CODE}), 403
     if visibility == "friends":
         accepted_ids = get_friend_ids(current_user.id)
         if any(fid not in accepted_ids for fid in selected_friend_ids):

@@ -16,6 +16,9 @@ from app.services.notifications import (
     mark_read, notify, purge_old, serialize_notification, unread_count,
 )
 
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
+
 
 @pytest.fixture
 def two_users(make_user):

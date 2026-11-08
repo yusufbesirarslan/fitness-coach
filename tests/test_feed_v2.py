@@ -4,6 +4,10 @@ from datetime import datetime
 from app.extensions import db
 from app.models import Activity, FeedItem, Friendship, PumpCheck
 from app.services import feed as feed_svc
+import pytest
+
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
 
 
 def _feed_check(user_id, created_at=None, visibility="feed", date_key=None, **kw):
@@ -195,7 +199,8 @@ def test_feed_and_gallery_pages_render(app, auth_user, client):
     assert "renderItem" in html and "/feed/data" in html and "const ME" in html
     g = client.get("/pump-check-gallery")
     assert g.status_code == 200
-    assert "data-share-gallery" in g.get_data(as_text=True)
+    # Launch V1: the gallery no longer offers a social share action.
+    assert "data-share-gallery" not in g.get_data(as_text=True)
 
 
 def test_gallery_delete_removes_referencing_reposts(app, auth_user, make_user, client):

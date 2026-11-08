@@ -556,8 +556,11 @@ def seed_state(app, client, monkeypatch, user_id, surface, state):
             db.session.add(actor)
             db.session.commit()
             for i in range(3):
-                row = notify(user_id, "friend_request", actor_id=actor.id,
-                             target_type="friendship", target_id=20_000 + i)
+                # Launch V1 social boundary: only non-social types are
+                # listed, so the populated state seeds challenge_complete.
+                row = notify(user_id, "challenge_complete", actor_id=actor.id,
+                             target_type="challenge", target_id=20_000 + i,
+                             payload={"code": "pr8", "xp": 50, "week": "2026-W01"})
                 if i == 0:
                     row.is_read = True
             db.session.commit()
