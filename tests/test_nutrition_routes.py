@@ -23,6 +23,12 @@ from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserS
 from app.services import mobile_food_discovery
 
 
+# D-B2: these tests qualify provider-backed persistence MECHANICS for the day a
+# written FatSecret retention permission exists; the launch hold is tested in
+# tests/test_fatsecret_provider_persistence_hold.py.
+pytestmark = pytest.mark.usefixtures("provider_persistence_permitted")
+
+
 @pytest.fixture
 def diary_provider(monkeypatch):
     servings = {

@@ -16,6 +16,17 @@ from app.services import foodcache
 from app.timeutil import day_key
 
 PROOF = "_independent_nutrition_v1"
+
+# D-B2 (founder, 2026-11-08): new provider-backed diary / saved-meal
+# persistence is HELD until written FatSecret retention permission is verified.
+# Fail-closed code constant, deliberately not an environment flag: enabling
+# requires a reviewed change that records the written permission reference.
+PROVIDER_PERSISTENCE_PERMISSION_REF = None
+
+
+def provider_persistence_allowed():
+    ref = PROVIDER_PERSISTENCE_PERMISSION_REF
+    return isinstance(ref, str) and bool(ref.strip())
 CACHE_PREFIX = "food:independent-menu:v1:per_serving:"
 CACHE_TTL = 3 * 24 * 3600
 
@@ -25,6 +36,13 @@ def intake_unproven(user_id):
     # as the user's complete consumption. Empty is genuinely measured empty.
     return MealLog.query.with_entities(MealLog.id).filter_by(
         user_id=user_id, tarih=day_key()).first() is not None
+
+
+def intake_unproven_between(user_id, first_day_key, last_day_key):
+    """Same rule over an inclusive Istanbul day-key range (R-5 weekly nudges)."""
+    return MealLog.query.with_entities(MealLog.id).filter(
+        MealLog.user_id == user_id, MealLog.tarih >= first_day_key,
+        MealLog.tarih <= last_day_key).first() is not None
 
 
 def unavailable_macros():

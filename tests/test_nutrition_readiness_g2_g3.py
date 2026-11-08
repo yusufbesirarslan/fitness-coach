@@ -146,6 +146,7 @@ def empty_cache(monkeypatch):
     foodcache._macro_cache.clear()
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_social_fatsecret_values_cannot_reenter_the_qr_cache(
         app, alice, provider, empty_cache, monkeypatch):

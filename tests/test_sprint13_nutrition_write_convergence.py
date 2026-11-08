@@ -41,6 +41,12 @@ from app.services import fatsecret, mobile_auth
 from app.services.mobile_nutrition import serialization
 
 
+# D-B2: these tests qualify provider-backed persistence MECHANICS for the day a
+# written FatSecret retention permission exists; the launch hold is tested in
+# tests/test_fatsecret_provider_persistence_hold.py.
+pytestmark = pytest.mark.usefixtures("provider_persistence_permitted")
+
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 NUTRITION_JS = (REPO_ROOT / "static" / "nutrition.js").read_text(encoding="utf-8")
 

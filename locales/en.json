@@ -1183,6 +1183,7 @@
   "route.meal_already_logged": "This meal is already logged",
   "route.food_name_required": "Food name is required",
   "route.food_not_found": "Food not found",
+  "route.provider_logging_unavailable": "Logging this food is currently unavailable. You can add it manually.",
   "route.add_one_food": "Add at least one food to the meal",
   "route.invalid_meal_slot": "Invalid meal: only Kahvaltı, Öğle, Akşam or Ara Öğün.",
   "route.invalid_manual_nutrition": "The macro values you entered are invalid.",

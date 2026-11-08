@@ -23,6 +23,7 @@ from app.services.mobile_log_food.parsing import (
 )
 from app.services.provider_food_snapshot import (
     ProviderFoodNotFound,
+    ProviderPersistenceHeld,
     resolve_provider_food,
 )
 from app.services.validators import _to_float
@@ -123,6 +124,8 @@ def _transport_quantity(data, field, default):
 
 def _provider_error(exc):
     db.session.rollback()
+    if isinstance(exc, ProviderPersistenceHeld):
+        return jsonify({"error": "provider_logging_unavailable", "retryable": False}), 503
     if isinstance(exc, (ProviderFoodNotFound, ValueError)):
         return jsonify({"error": "invalid_serving"}), 400
     current_app.logger.exception("[DIARY] provider resolution failed")

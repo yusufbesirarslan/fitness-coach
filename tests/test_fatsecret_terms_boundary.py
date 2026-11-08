@@ -113,6 +113,7 @@ def test_web_barcode_stores_no_new_row(live, client, auth_user):
     assert BarcodeFoodCache.query.count() == 0
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 def test_web_barcode_add_uses_live_truth_and_logs(live, stored_row, client, auth_user):
     response = client.post("/api/food/barcode/add", json={
         "barcode": CODE, "meal": "Ara Öğün", "serving_id": SERVING_ID, "serving_quantity": 1})
@@ -122,6 +123,7 @@ def test_web_barcode_add_uses_live_truth_and_logs(live, stored_row, client, auth
     assert LIVE_NAME in row.yemekler and row.source == "barcode"
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 def test_web_barcode_add_replay_carries_no_targets(live, client, auth_user):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2000, goal="kas kazanma"))
     db.session.commit()
@@ -208,6 +210,7 @@ def test_unavailable_provider_serves_no_stored_payload_on_web(env_absent, stored
     assert STORED_NAME not in response.get_data(as_text=True)
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 def test_unavailable_provider_writes_no_diary_row_from_a_stored_payload(
         env_absent, stored_row, client, auth_user):
     response = client.post("/api/food/barcode/add", json={
@@ -230,6 +233,7 @@ def test_unavailable_provider_on_native_is_typed_and_leaks_nothing(
     assert STORED_NAME not in response.get_data(as_text=True)
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 def test_stored_provider_item_does_not_log_without_provider(env_absent, client, auth_user):
     meal = CustomMeal(user_id=auth_user.id, meal_name="Mix", date_key=day_key())
     db.session.add(meal)

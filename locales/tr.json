@@ -1183,6 +1183,7 @@
   "route.meal_already_logged": "Bu öğün zaten kaydedilmiş",
   "route.food_name_required": "Besin adı gerekli",
   "route.food_not_found": "Besin bulunamadı",
+  "route.provider_logging_unavailable": "Bu besini kaydetmek şu anda kullanılamıyor. Manuel olarak ekleyebilirsin.",
   "route.add_one_food": "Öğüne en az bir besin ekle",
   "route.invalid_meal_slot": "Geçersiz öğün: yalnızca Kahvaltı, Öğle, Akşam veya Ara Öğün.",
   "route.invalid_manual_nutrition": "Girilen makro değerleri geçersiz.",
