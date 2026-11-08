@@ -327,6 +327,18 @@ def test_apple_files_in_real_blue_green_containers(stack, tmp_path):
 
     rev, deploy = stack["revision"], stack["deploy"]
     previous = sh("git", "rev-parse", "HEAD^", cwd=ROOT).stdout.strip()
+    if (sh("git", "rev-parse", "HEAD^:migrations", cwd=ROOT).stdout
+            != sh("git", "rev-parse", "HEAD:migrations", cwd=ROOT).stdout):
+        # The legacy web (this revision) already migrated the database, and a
+        # read-only candidate correctly refuses a head outside its own graph,
+        # so a parent with other migrations cannot be the second revision.
+        # Use a local, never-pushed commit of this exact tree: a distinct
+        # revision identity with exactly this revision's migration heads.
+        ident = {f"GIT_{role}_{field}": value for role in ("AUTHOR", "COMMITTER")
+                 for field, value in (("NAME", "r6-it"), ("EMAIL", "r6-it@invalid"))}
+        previous = sh("git", "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m",
+                      "R6 IT schema-equivalent second revision", cwd=ROOT,
+                      env={**os.environ, **ident}).stdout.strip()
     previous_context = tmp_path / "previous-context"
     previous_context.mkdir()
     previous_archive = tmp_path / "previous.tar"
