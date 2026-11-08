@@ -63,7 +63,7 @@ def test_native_provider_backed_log_is_held(client, mobile_user, as_mobile, no_p
                            headers=as_mobile(mobile_user))
     assert response.status_code == 503
     body = response.get_json()
-    assert body["error"]["code"] == "PROVIDER_LOGGING_UNAVAILABLE"
+    assert body["error"]["code"] == "FOOD_PROVIDER_UNAVAILABLE"  # known to the shipped client
     assert body["error"]["retryable"] is False
     assert MealLog.query.filter_by(user_id=mobile_user.id).count() == 0
 
