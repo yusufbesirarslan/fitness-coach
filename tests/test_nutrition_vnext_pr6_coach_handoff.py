@@ -238,6 +238,22 @@ def test_send_time_facts_win_over_the_preview(app, make_user):
     assert '500 kcal' not in current
 
 
+def test_send_time_empty_preview_does_not_survive_a_new_meal(app, make_user):
+    """Preview on a measured-empty day; a meal logged before SEND must not be
+    sent as "measured 0" — send-time re-derivation is still the authority."""
+    user = onboarded(make_user, 'pr6fresh_empty')
+    seed(user.id, meals=())
+    with app.test_request_context('/coach'):
+        preview = coach_handoff_message('nutrition-day', user.id, 'en')
+        db.session.add(MealLog(user_id=user.id, ogun='Akşam', yemekler='x', kalori=800,
+                               protein=1, karb=1, yag=1, tarih=app_today().isoformat()))
+        db.session.commit()
+        current = coach_handoff_context('nutrition-day', user.id, 'en')
+    assert preview is not None
+    assert 'measured 0' not in current and '800' not in current
+    assert 'Logged intake is unavailable for advice' in current
+
+
 @pytest.mark.parametrize('failed,line', [
     ('_read_hydration', '- hydration today: unknown (read failed)'),
     ('_read_plan', '- nutrition plan: unknown (read failed)'),

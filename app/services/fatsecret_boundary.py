@@ -31,16 +31,14 @@ def unavailable_macros():
     return dict.fromkeys(("calories", "protein", "carbs", "fat"))
 
 
+NOTICE_KEY = "coach.nutrition_advice_unavailable_notice"
+
+
 def notice(language="en"):
-    return ("Logged intake is unavailable for advice because its nutrition source "
-            "is unverified. Do not infer consumed intake, remaining budgets or "
-            "progress against the daily target, and do not substitute zero or a partial total. "
-            "Independent training, hydration and nutrition questions remain available."
-            if language == "en" else
-            "Kayıtlı beslenme verilerinin kaynağı doğrulanamadığından bu verilerle "
-            "kişisel değerlendirme yapılamıyor. Tüketim, kalan bütçe veya günlük "
-            "uyum hesaplama; bilinmeyen değer yerine sıfır ya da kısmi toplam kullanma. "
-            "Bağımsız antrenman, su takibi ve beslenme soruları kullanılabilir.")
+    # Model-facing; the single copy lives in the locale catalog so the
+    # AI-free coach_handoff module can render it through app.i18n alone.
+    from app.i18n import t
+    return t(NOTICE_KEY, locale="en" if language == "en" else "tr")
 
 
 def _sign(domain, owner, payload):

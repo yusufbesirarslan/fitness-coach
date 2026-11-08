@@ -1141,8 +1141,9 @@ def test_a_coach_edit_does_not_touch_the_workout_session_or_history(
 def test_plan_flag_cannot_enable_unqualified_food_sharing(
         app, auth_user, tools_on, turn, monkeypatch):
     """First-party plan mutation does not grant food-recipient permission."""
+    from app.services import fatsecret_boundary
     monkeypatch.setattr(
-        ai_coach, "_coach_search_food",
+        fatsecret_boundary, "independent_food_search",
         lambda q: [{"name": "Tavuk", "food_id": "1",
                     "per_100g": {"calories": 165.0, "protein": 31.0,
                                  "carbs": 0.0, "fat": 3.6}}])

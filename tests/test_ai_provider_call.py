@@ -518,7 +518,7 @@ def test_tool_result_growth_is_rechecked_before_every_round(
     2 is refused before the provider, with no OpenAI fallback."""
     # Isolate the downstream budget invariant: PA06 would discard this opaque
     # result before admission, so bypass projection only in this budget test.
-    monkeypatch.setattr(ai_coach.coach_privacy, "tool_result", lambda _name, raw: raw)
+    monkeypatch.setattr(ai_coach.coach_privacy, "tool_result", lambda _name, raw, **_kw: raw)
     user = make_user("grower")
     coach_providers.bedrock.script = [_tool_use()]
     monkeypatch.setattr(ai_coach, "_dispatch_coach_tool",

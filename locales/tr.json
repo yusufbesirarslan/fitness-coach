@@ -1095,6 +1095,7 @@
   "route.weight_same": " Geçen kayıtla aynı kilo. Tutarlısın.",
   "route.macros_unavailable": "Besin değerleri hesaplanamadı",
   "route.menu_advice_unavailable": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
+  "coach.nutrition_advice_unavailable_notice": "Kayıtlı beslenme verilerinin kaynağı doğrulanamadığından bu verilerle kişisel değerlendirme yapılamıyor. Tüketim, kalan bütçe veya günlük uyum hesaplama; bilinmeyen değer yerine sıfır ya da kısmi toplam kullanma. Bağımsız antrenman, su takibi ve beslenme soruları kullanılabilir.",
   "route.eval_failed": "Değerlendirme şu an alınamadı, lütfen tekrar dene.",
   "route.csrf_failed": "CSRF doğrulaması başarısız.",
   "common.cancel": "İptal",

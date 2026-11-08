@@ -1095,6 +1095,7 @@
   "route.weight_same": " Same weight as last time. Consistent!",
   "route.macros_unavailable": "Nutrition values unavailable",
   "route.menu_advice_unavailable": "Personal fit unavailable: logged intake has no verified nutrition source. Estimates are shown without a remaining-budget score.",
+  "coach.nutrition_advice_unavailable_notice": "Logged intake is unavailable for advice because its nutrition source is unverified. Do not infer consumed intake, remaining budgets or progress against the daily target, and do not substitute zero or a partial total. Independent training, hydration and nutrition questions remain available.",
   "route.eval_failed": "The evaluation couldn't be generated right now, please try again.",
   "route.csrf_failed": "CSRF validation failed.",
   "common.cancel": "Cancel",

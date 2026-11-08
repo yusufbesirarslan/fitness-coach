@@ -157,11 +157,12 @@ def _nutrition_context_text(view, language):
         target = "not set"
     else:
         target = state_word(view.target.state)
-    from app.services import fatsecret_boundary
     # Keep independent target/hydration/plan facts, but never serialize a
     # ledger-derived number, even when a concurrent writer changes the view.
     intake = ("no meals logged yet (measured 0)" if view.intake.state == EMPTY
-              else fatsecret_boundary.notice(language))
+              # = fatsecret_boundary.notice(); same catalog key, no AI-reachable import.
+              else t("coach.nutrition_advice_unavailable_notice",
+                     locale="en" if language == "en" else "tr"))
     if view.hydration.state in (AVAILABLE, EMPTY):
         hydration = f"{view.hydration.amount} glass(es) of water"
     else:
