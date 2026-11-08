@@ -74,10 +74,12 @@ def correct_within(user_id, operation_id, now):
     if (bucket is None or bucket.user_id != user_id or bucket.feature != hold.feature
             or not bucket.policy_version
             or (bucket.scope == "STARTER" and bucket.period_key != "NEVER")
-            or bucket.scope not in ("STARTER", "PREMIUM")
+            or bucket.scope not in ("STARTER", "PREMIUM", "LAUNCH_FREE")
             or ledger._utc(bucket.created_at) > ledger._utc(hold.created_at)
             or (bucket.scope == "PREMIUM" and not _premium_period(
-                bucket.period_key, ledger._utc(hold.created_at)))):
+                bucket.period_key, ledger._utc(hold.created_at)))
+            or (bucket.scope == "LAUNCH_FREE" and not _campaign_period(
+                bucket, ledger._utc(hold.created_at)))):
         return "COMPENSATION_BUCKET_UNAVAILABLE"
     if bucket.scope == "STARTER":
         grant = db.session.get(AiStarterGrant, user_id, populate_existing=True)
@@ -121,6 +123,14 @@ def _premium_period(key, reserved_at):
     except (ValueError, TypeError):
         pass
     return False
+
+
+def _campaign_period(bucket, reserved_at):
+    """A LAUNCH_FREE bucket proves its window only under the installed campaign."""
+    policy = ledger._policy(required=False)
+    campaign = policy.launch_free if policy is not None else None
+    return (campaign is not None and bucket.policy_version == campaign.version
+            and ledger.P.campaign_period_key(campaign, reserved_at) == bucket.period_key)
 
 
 def compensate(user_id, operation_id, *, now=None):

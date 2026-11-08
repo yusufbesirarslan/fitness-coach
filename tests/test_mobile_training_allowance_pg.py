@@ -542,6 +542,8 @@ def test_create_all_first_schema_passes_both_verifiers(migrate_engine):
         for model in (AiStarterGrant, AiAllowanceBucket, AiUsageReservation,
                       TrainingPlanGenerationOperation, TrainingPlanGenerationAllowance):
             model.__table__.create(conn)
+        from app.db_init import replay_shipped_predicates
+        replay_shipped_predicates(conn, {"ai_allowance_bucket"})
         _run(conn, _module("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
         _run(conn, _module("d3e4f5a6b7c8_add_training_plan_generation_operations.py").upgrade)
         _run(conn, _module("b0d3e4f5a6b7_training_dispatch_boundary.py").upgrade)
@@ -619,8 +621,8 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
     cfg = Config()
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["c6f8b0d2e4a1"]
-    assert len(list(script.walk_revisions())) == 60
+    assert script.get_heads() == ["d8f1a3c5e7b9"]
+    assert len(list(script.walk_revisions())) == 61
     assert script.get_revision("a4d6f8b0c2e1").down_revision == "d7e3a9c1f5b8"
     assert script.get_revision("d7e3a9c1f5b8").down_revision == "f9c6d0a1b2e3"
     assert script.get_revision("f9c6d0a1b2e3").down_revision == "f8b2d4e6a0c3"
@@ -656,7 +658,7 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
         upgrade()
         check()  # model/schema comparison against the actual full chain
         with db.engine.connect() as conn:
-            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "c6f8b0d2e4a1"
+            assert conn.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "d8f1a3c5e7b9"
             for name, (columns, rows) in before.items():
                 projection = ','.join('"' + c + '"' for c in columns)
                 assert conn.exec_driver_sql(f'SELECT {projection} FROM "{name}"').all() == rows
