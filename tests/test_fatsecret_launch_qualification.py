@@ -108,6 +108,28 @@ def test_unproven_aggregate_never_enters_qr_scorer(menu_probe, source):
 
 
 @GAP
+def test_unknown_current_redis_envelope_never_enters_qr_scorer(menu_probe, monkeypatch):
+    _, _, analyze = menu_probe
+    key = foodcache._macro_redis_key("per_serving", "Independent fixture dish")
+    # This is not the already isolated v1 namespace. A raw v2 value still has
+    # no trustworthy producer/input lineage and must not acquire it on read.
+    store = {key: json.dumps({"calories": SENTINEL, "protein": 25., "carbs": 60., "fat": 15.})}
+    redis = SimpleNamespace(mget=lambda keys: [store.get(k) for k in keys],
+        pipeline=lambda transaction=False: SimpleNamespace(setex=lambda *a: None, execute=lambda: []))
+    monkeypatch.setattr(foodcache, "_get_redis", lambda: redis)
+    original_score = menu_analysis._menu_score
+    scored_calories = []
+
+    def score(macros, remaining):
+        scored_calories.append(macros["calories"])
+        return original_score(macros, remaining)
+
+    monkeypatch.setattr(menu_analysis, "_menu_score", score)
+    analyze()
+    assert SENTINEL not in scored_calories
+
+
+@GAP
 def test_unbounded_provider_snapshot_is_not_replayed_after_24h(app, make_user, monkeypatch):
     user = make_user("fs-qual-retention")
     snapshot = SimpleNamespace(description="Synthetic provider snapshot", nutrition=SimpleNamespace(
