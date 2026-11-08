@@ -70,18 +70,27 @@ def _refuse(code):
 
 
 def require_ready():
-    """Atomic launch: no state can enable a subset with Premium bypasses."""
+    """Atomic launch: no state can enable a subset with Premium bypasses.
+
+    Apple verification OFF is accepted only under a policy carrying the
+    complete finite campaign scope (LAUNCH_FREE): the tier is then decided as
+    "no Premium source", and finite LAUNCH_FREE/Starter limits apply. Apple OFF
+    never opens anything by itself; every other gate below and in D1 stays.
+    """
     if not enabled():
         return
     if any(current_app.config.get(key) is not True for key in (
         "AI_ALLOWANCE_LEDGER_ENABLED", "AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED",
-        "APPLE_SUBSCRIPTIONS_ENABLED",
     )):
         _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
     policy = current_app.config.get("AI_ALLOWANCE_POLICY")
     if (not isinstance(policy, AllowancePolicy) or policy.premium is None
             or set(policy.premium.allowances) != set(SUPPORTED_FEATURES)):
         _refuse("AI_ALLOWANCE_POLICY_UNCONFIGURED")
+    if current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True and (
+            policy.launch_free is None
+            or set(policy.launch_free.allowances.allowances) != set(SUPPORTED_FEATURES)):
+        _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
 
 
 def fingerprint(owner, action, value):

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from types import MappingProxyType
 
 from app.timeutil import APP_TZ
@@ -74,10 +74,20 @@ def canonical_feature(name):
 # ── Scopes and periods ─────────────────────────────────────────────────────
 SCOPE_STARTER = "STARTER"
 SCOPE_PREMIUM = "PREMIUM"
+# A finite, campaign-anchored AI allowance scope. It is never a subscription
+# entitlement: it cannot make Premium effective or stand in for Apple evidence.
+SCOPE_LAUNCH_FREE = "LAUNCH_FREE"
+SCOPES = (SCOPE_STARTER, SCOPE_PREMIUM, SCOPE_LAUNCH_FREE)
 
 PERIOD_NEVER = "NEVER"
 PERIOD_WEEKLY = "WEEKLY"
 PERIOD_MONTHLY = "MONTHLY"
+# Campaign windows. The scope's own period; the wire ``reset`` token is
+# CAMPAIGN_WINDOW while another window follows and CAMPAIGN_END in the last.
+PERIOD_CAMPAIGN = "CAMPAIGN_WINDOW"
+RESET_CAMPAIGN_END = "CAMPAIGN_END"
+CAMPAIGN_WINDOW_DAYS = 30
+MAX_CAMPAIGN_WINDOWS = 12
 
 MAX_UNITS = 10_000
 MAX_BILLED_RELEASES = 1_000
@@ -104,7 +114,7 @@ class ScopePolicy:
     max_billed_releases: int
 
     def __init__(self, period, allowances, max_billed_releases):
-        if period not in (PERIOD_NEVER, PERIOD_WEEKLY, PERIOD_MONTHLY):
+        if period not in (PERIOD_NEVER, PERIOD_WEEKLY, PERIOD_MONTHLY, PERIOD_CAMPAIGN):
             raise PolicyError("unknown period")
         if not isinstance(allowances, dict) or not allowances:
             raise PolicyError("allowances must be a non-empty dict")
@@ -120,6 +130,40 @@ class ScopePolicy:
 
 
 @dataclass(frozen=True)
+class CampaignPolicy:
+    """A finite campaign: fixed 30-day windows anchored at ``starts_at``.
+
+    Window ``n`` (1-based) is ``[start + 30(n-1) days, start + 30n days)`` at
+    00:00 Europe/Istanbul, start-inclusive and end-exclusive. Nothing exists
+    before the start or at/after the end. Source-only, like every policy.
+    """
+    version: str
+    starts_at: datetime
+    windows: int
+    allowances: ScopePolicy
+
+    def __post_init__(self):
+        if not isinstance(self.version, str) or not _VERSION.fullmatch(self.version):
+            raise PolicyError("version must match [A-Za-z0-9._-]{1,32}")
+        if not isinstance(self.starts_at, datetime) or self.starts_at.tzinfo is None:
+            raise PolicyError("campaign needs an aware start instant")
+        if self.starts_at.astimezone(APP_TZ).timetz().replace(tzinfo=None) != time(0):
+            raise PolicyError("campaign starts at 00:00 Europe/Istanbul")
+        _count(self.windows, 1, MAX_CAMPAIGN_WINDOWS, "windows")
+        if not isinstance(self.allowances, ScopePolicy) or self.allowances.period != PERIOD_CAMPAIGN:
+            raise PolicyError("campaign allowances renew per campaign window")
+
+    def boundary(self, n):
+        """Start of window ``n + 1`` (``boundary(0)`` is the campaign start), aware UTC."""
+        day = self.starts_at.astimezone(APP_TZ).date() + timedelta(days=CAMPAIGN_WINDOW_DAYS * n)
+        return datetime.combine(day, time(0), tzinfo=APP_TZ).astimezone(timezone.utc)
+
+    @property
+    def ends_at(self):
+        return self.boundary(self.windows)
+
+
+@dataclass(frozen=True)
 class AllowancePolicy:
     version: str
     starter: ScopePolicy | None = None
@@ -131,6 +175,8 @@ class AllowancePolicy:
     # policies retain their original release caps; the launch policy refunds
     # only a reconciled absence of a usable result.
     refund_unusable_results: bool = False
+    # Optional finite campaign scope. Its buckets carry the campaign's version.
+    launch_free: CampaignPolicy | None = None
 
     def __post_init__(self):
         if type(self.refund_unusable_results) is not bool:
@@ -146,11 +192,28 @@ class AllowancePolicy:
         elif self.starter_eligible_from is not None:
             raise PolicyError("eligibility without a Starter scope")
         if self.premium is not None and (not isinstance(self.premium, ScopePolicy)
-                                         or self.premium.period == PERIOD_NEVER):
+                                         or self.premium.period not in (PERIOD_WEEKLY, PERIOD_MONTHLY)):
             raise PolicyError("Premium allowances renew weekly or monthly")
+        if self.launch_free is not None:
+            if not isinstance(self.launch_free, CampaignPolicy):
+                raise PolicyError("Launch Free is a campaign policy")
+            if self.launch_free.version == self.version:
+                raise PolicyError("campaign buckets carry their own policy version")
 
     def scope(self, name):
-        return self.starter if name == SCOPE_STARTER else self.premium
+        if name == SCOPE_STARTER:
+            return self.starter
+        if name == SCOPE_PREMIUM:
+            return self.premium
+        if name == SCOPE_LAUNCH_FREE:
+            return self.launch_free.allowances if self.launch_free is not None else None
+        return None
+
+    def bucket_version(self, name):
+        """The policy version a bucket of this scope is granted under."""
+        if name == SCOPE_LAUNCH_FREE:
+            return self.launch_free.version if self.launch_free is not None else None
+        return self.version
 
 
 def starter_eligible(policy, account_created_at):
@@ -191,3 +254,44 @@ def resets_at(period, now):
     else:
         raise PolicyError("unknown period")
     return datetime(start.year, start.month, start.day, tzinfo=APP_TZ).astimezone(timezone.utc)
+
+
+# ── Campaign windows (LAUNCH_FREE) ─────────────────────────────────────────
+def campaign_window(campaign, now):
+    """``(n, start, end)`` of the window containing ``now``, or ``None``.
+
+    ``None`` before the start, at/after the end, or without a campaign. A pure
+    function of the source campaign and the server clock; never a request value.
+    """
+    if campaign is None:
+        return None
+    if not isinstance(now, datetime) or now.tzinfo is None:
+        raise PolicyError("campaign windows need an aware instant")
+    now = now.astimezone(timezone.utc)
+    if now < campaign.boundary(0) or now >= campaign.ends_at:
+        return None
+    for n in range(1, campaign.windows + 1):
+        end = campaign.boundary(n)
+        if now < end:
+            return n, campaign.boundary(n - 1), end
+    return None  # unreachable: now < ends_at
+
+
+def campaign_period_key(campaign, now):
+    """``LF1``..``LFn`` for an active window, else ``None`` (no grant)."""
+    window = campaign_window(campaign, now)
+    return None if window is None else f"LF{window[0]}"
+
+
+def campaign_reset(campaign, now):
+    """``(reset, resets_at)`` for an active window, else ``(None, None)``.
+
+    The final window advertises no further campaign replenishment.
+    """
+    window = campaign_window(campaign, now)
+    if window is None:
+        return None, None
+    n, _, end = window
+    if n < campaign.windows:
+        return PERIOD_CAMPAIGN, end
+    return RESET_CAMPAIGN_END, None

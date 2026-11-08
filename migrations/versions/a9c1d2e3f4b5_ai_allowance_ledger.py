@@ -145,6 +145,21 @@ _LATER_COLUMNS = {"ai_usage_reservation": {
     "physical_images_reserved", "physical_cost_reserved",
 }}
 _LATER_NULLABLE = {"ai_usage_reservation": {"provider_billed"}}
+# d8f1a3c5e7b9 (LAUNCH_FREE) widens exactly this predicate; it re-verifies it.
+_LATER_SCOPE = ("STARTER", "PREMIUM", "LAUNCH_FREE")
+_LATER_CHECKS = {"ck_ai_allowance_bucket_scope": (
+    "scope IN ('STARTER', 'PREMIUM', 'LAUNCH_FREE')",
+    "scope::text = ANY (ARRAY[" + ", ".join(f"'{v}'::character varying" for v in _LATER_SCOPE)
+    + "]::text[])",
+    "(scope)::text = ANY ((ARRAY[" + ", ".join(f"'{v}'::character varying" for v in _LATER_SCOPE)
+    + "])::text[])")}
+
+
+def _later_check(sqltext, name, dialect):
+    forms = _LATER_CHECKS.get(name, ())
+    forms = forms if dialect == "postgresql" else forms[:1]
+    forms = set(forms) | {f"({form})" for form in forms}
+    return isinstance(sqltext, str) and _compact(sqltext) in {_compact(f) for f in forms}
 
 
 def _verify(bind, table):
@@ -176,7 +191,9 @@ def _verify(bind, table):
         _fail("ownership constraints")
     checks = {c["name"]: c.get("sqltext") for c in inspector.get_check_constraints(table.name)}
     required_checks = [c for c in table.constraints if isinstance(c, sa.CheckConstraint)]
-    if any(not _check_matches(checks.get(c.name), c, bind.dialect.name) for c in required_checks):
+    if any(not (_check_matches(checks.get(c.name), c, bind.dialect.name)
+                or _later_check(checks.get(c.name), c.name, bind.dialect.name))
+           for c in required_checks):
         _fail("check constraints")
     if bind.dialect.name == "postgresql" and required_checks:
         relation = bind.dialect.identifier_preparer.format_table(table)
