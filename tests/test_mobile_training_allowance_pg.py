@@ -542,6 +542,8 @@ def test_create_all_first_schema_passes_both_verifiers(migrate_engine):
         for model in (AiStarterGrant, AiAllowanceBucket, AiUsageReservation,
                       TrainingPlanGenerationOperation, TrainingPlanGenerationAllowance):
             model.__table__.create(conn)
+        from app.db_init import replay_shipped_predicates
+        replay_shipped_predicates(conn, {"ai_allowance_bucket"})
         _run(conn, _module("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
         _run(conn, _module("d3e4f5a6b7c8_add_training_plan_generation_operations.py").upgrade)
         _run(conn, _module("b0d3e4f5a6b7_training_dispatch_boundary.py").upgrade)

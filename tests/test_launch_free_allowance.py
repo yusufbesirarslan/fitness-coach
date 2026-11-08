@@ -276,9 +276,52 @@ def test_null_creation_timestamp_gets_no_campaign_units(apple_off):
     db.session.commit()
     with pytest.raises(AllowanceError) as error:
         reserve(apple_off, "coach", "null-created-at", LF1)
-    assert (error.value.code, error.value.details["scope"]) == ("AI_FEATURE_NOT_IN_PLAN", "LAUNCH_FREE")
+    assert (error.value.code, error.value.details["scope"]) == ("AI_FEATURE_NOT_IN_PLAN", "STARTER")
     assert AiAllowanceBucket.query.count() == 0
     assert L.allowance_view(apple_off, now=LF1)["access"] == "NONE"
+
+
+def test_null_timestamp_with_existing_starter_grant_reads_and_reserves_the_same(apple_off):
+    from app.models import AiStarterGrant as Grant
+    db.session.add(Grant(user_id=apple_off, policy_version="synthetic-lf-base", granted_at=LF1 - US))
+    db.session.add(AiAllowanceBucket(user_id=apple_off, scope="STARTER", feature="coach", period_key="NEVER",
+                                     policy_version="synthetic-lf-base", granted=10, used=0, reserved=0,
+                                     billed_releases=0, created_at=LF1 - US, updated_at=LF1 - US))
+    db.session.get(User, apple_off).created_at = None
+    db.session.commit()
+    view = L.allowance_view(apple_off, now=LF2)
+    assert view["access"] == "STARTER" and view["features"][0]["remaining"] == 10
+    assert reserve(apple_off, "coach", "null-created-at-starter", LF2).scope == "STARTER"
+    assert AiAllowanceBucket.query.filter_by(scope="LAUNCH_FREE").count() == 0
+
+
+def test_campaign_key_prefix_separates_campaigns(apple_off, app):
+    held = reserve(apple_off, "qr_menu", "first-campaign-key", LF1)
+    L.finalize(apple_off, held.reference, "success", now=LF1)
+    app.config["AI_ALLOWANCE_POLICY"] = replace(launch_policy.LAUNCH_V1_POLICY, version="synthetic-lf-base",
+        launch_free=replace(CAMPAIGN, version="synthetic-lf2", key_prefix="LFB"))
+    assert reserve(apple_off, "qr_menu", "second-campaign-key", LF1).scope == "LAUNCH_FREE"
+    keys = sorted(b.period_key for b in AiAllowanceBucket.query.filter_by(scope="LAUNCH_FREE"))
+    assert keys == ["LF1", "LFB1"]
+    assert bucket(apple_off, "qr_menu", key="LF1").used == 1  # first campaign untouched
+    for bad in ("lf", "L", "LF1", "TOOLONGXX", ""):
+        with pytest.raises(PolicyError):
+            replace(CAMPAIGN, key_prefix=bad)
+
+
+def test_retention_purges_campaign_buckets_like_premium(apple_off):
+    held = reserve(apple_off, "coach", "retention-key-0001", LF1)
+    L.finalize(apple_off, held.reference, "success", now=LF1)
+    late = reserve(apple_off, "coach", "retention-key-0002", LF3)
+    L.finalize(apple_off, late.reference, "success", now=LF3)
+    later = END + L.TERMINAL_RETENTION + timedelta(days=1)
+    db.session.expire_all()
+    for row in AiAllowanceBucket.query.filter_by(period_key="LF3"):
+        row.updated_at = later - timedelta(days=10)  # touched inside retention: kept
+    db.session.commit()
+    settled, periods = L.purge_retained(now=later)
+    assert (settled, periods) == (2, 1)
+    assert sorted(b.period_key for b in AiAllowanceBucket.query.all()) == ["LF3"]
 
 
 # ── Ledger correctness ────────────────────────────────────────────────────
@@ -634,8 +677,6 @@ def test_migration_widens_scope_and_preserves_existing_rows(tmp_path):
             with pytest.raises(sa.exc.IntegrityError):
                 with conn.begin_nested():
                     bad()
-        # The original ledger verifier accepts the documented widened predicate.
-        _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
         with pytest.raises(RuntimeError):
             _run(conn, m.downgrade)  # a campaign bucket exists
         conn.execute(sa.text("DELETE FROM ai_allowance_bucket WHERE scope = 'LAUNCH_FREE'"))
@@ -646,16 +687,76 @@ def test_migration_widens_scope_and_preserves_existing_rows(tmp_path):
                 _insert(conn, "LAUNCH_FREE")
 
 
-def test_create_all_first_boot_is_accepted_by_both_revisions(tmp_path):
+def _model_ledger(conn):
     import sqlalchemy as sa
     from app.models import AiAllowanceBucket as Bucket, AiStarterGrant, AiUsageReservation
+    conn.execute(sa.text('CREATE TABLE "user" (id INTEGER PRIMARY KEY)'))
+    conn.execute(sa.text('INSERT INTO "user" VALUES (1)'))
+    for model in (AiStarterGrant, Bucket, AiUsageReservation):
+        model.__table__.create(conn)
+
+
+def test_shipped_ledger_revision_is_byte_identical_to_production():
+    import hashlib, subprocess
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    rel = "migrations/versions/a9c1d2e3f4b5_ai_allowance_ledger.py"
+    shipped = subprocess.run(["git", "show", "d13c9fa1871b375a62dde3590eda547833dbb8e6:" + rel],
+                             cwd=root, capture_output=True)
+    if shipped.returncode != 0:
+        pytest.skip("audit baseline commit not available in this checkout")
+    assert hashlib.sha256((root / rel).read_bytes()).digest() == hashlib.sha256(shipped.stdout).digest()
+
+
+def test_fresh_boot_replays_shipped_predicate_then_widens(tmp_path):
+    import sqlalchemy as sa
+    from app.db_init import replay_shipped_predicates
     engine = sa.create_engine(f"sqlite:///{tmp_path / 'models.db'}")
     with engine.begin() as conn:
-        conn.execute(sa.text('CREATE TABLE "user" (id INTEGER PRIMARY KEY)'))
-        for model in (AiStarterGrant, Bucket, AiUsageReservation):
-            model.__table__.create(conn)
+        _model_ledger(conn)
+        # Shipped a9c1 is immutable and pins the original predicate exactly.
+        with pytest.raises(RuntimeError):
+            with conn.begin_nested():
+                _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
+        replay_shipped_predicates(conn, {"ai_allowance_bucket"})
+        with pytest.raises(sa.exc.IntegrityError):
+            with conn.begin_nested():
+                _insert(conn, "LAUNCH_FREE")
         _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
         _run(conn, _migration("d8f1a3c5e7b9_ai_allowance_launch_free_scope.py").upgrade)
+        _insert(conn, "LAUNCH_FREE")
+        for bad in (lambda: _insert(conn, "UNLIMITED", "LF2"),
+                    lambda: _insert(conn, "LAUNCH_FREE", "LF2", used=31)):
+            with pytest.raises(sa.exc.IntegrityError):
+                with conn.begin_nested():
+                    bad()
+
+
+def test_replay_never_touches_a_table_this_boot_did_not_create(tmp_path):
+    import sqlalchemy as sa
+    from app.db_init import replay_shipped_predicates
+    m = _migration("d8f1a3c5e7b9_ai_allowance_launch_free_scope.py")
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'existing.db'}")
+    with engine.begin() as conn:
+        _narrow_ledger(conn)
+        _run(conn, lambda: m._replace("scope IN ('STARTER', 'PREMIUM') OR 1=1"))
+        before = sa.inspect(conn).get_check_constraints("ai_allowance_bucket")
+        replay_shipped_predicates(conn, set())   # pre-existing: never "repaired"
+        assert sa.inspect(conn).get_check_constraints("ai_allowance_bucket") == before
+        with pytest.raises(RuntimeError):
+            _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
+
+
+def test_fresh_boot_path_records_absence_before_create_all():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "app/db_init.py").read_text(encoding="utf-8")
+    absent, create_all = source.index("_absent = {"), source.index("db.create_all()")
+    replay, stamp = source.index("replay_shipped_predicates(conn, _absent)"), source.index(
+        "stamp(revision=_FRESH_SCHEMA_STAMP)")
+    assert absent < create_all < replay < stamp
+    from app.db_init import SHIPPED_CHECK_PREDICATES
+    assert SHIPPED_CHECK_PREDICATES == (("ai_allowance_bucket", "ck_ai_allowance_bucket_scope",
+                                         "scope IN ('STARTER', 'PREMIUM')", "d8f1a3c5e7b9"),)
 
 
 def test_unfamiliar_scope_predicate_fails_closed(tmp_path):
@@ -721,3 +822,20 @@ def test_native_views_pass_the_launch_gate_with_apple_off(client, app, make_user
     assert response.status_code == 403
     assert response.json["error"]["code"] == "AI_SERVICE_ELIGIBILITY_REQUIRED"
     assert sink.call_count == 1
+
+
+def test_scope_widening_is_a_pinned_reviewed_expand_migration():
+    import sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "scripts"))
+    try:
+        import migration_expand_contract as mec
+    finally:
+        sys.path.pop(0)
+    path = root / "migrations/versions/d8f1a3c5e7b9_ai_allowance_launch_free_scope.py"
+    assert mec.REVIEWED_DDL["d8f1a3c5e7b9"] == mec.normalized_digest(path.read_bytes())
+    result = mec.scan()
+    assert result["classes"]["d8f1a3c5e7b9"] == mec.EXPAND
+    assert result["violations"] == {}
+    assert "d8f1a3c5e7b9" not in mec.contract_revisions()

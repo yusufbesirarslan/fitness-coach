@@ -6,10 +6,20 @@ rewritten or deleted, and every other constraint is untouched. Code from before
 this revision only writes STARTER/PREMIUM, so the previous release stays
 compatible with the widened schema (R6 expand-first).
 
-Verify-or-replace, fail closed: an already widened predicate (a create_all-first
-schema built from current models) is accepted as is; the exact original
-predicate is replaced; anything else stops the migration. Downgrade restores
-the original predicate only while no LAUNCH_FREE bucket exists.
+Verify-or-replace, fail closed: an already widened, validated predicate is
+accepted as is; the exact original predicate is replaced (drop + add in this
+one transaction); anything else, including NOT VALID, stops the migration.
+Downgrade restores the original predicate only while no LAUNCH_FREE bucket
+exists.
+
+Shipped ``a9c1d2e3f4b5`` is immutable and pins the original predicate, so a
+fresh create_all-first boot presents it first (``app.db_init.
+replay_shipped_predicates``) and this revision widens it, exactly as on a
+migrated database. The static expand gate cannot prove a CHECK replacement
+overlap-safe; this file is pinned in
+``scripts/migration_expand_contract.py::REVIEWED_DDL`` after line-by-line
+review: the serving revision never writes LAUNCH_FREE, so widening changes
+nothing it does.
 """
 import re
 

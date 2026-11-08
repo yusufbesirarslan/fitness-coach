@@ -14,7 +14,8 @@ routing, Apple configuration or AWS.
 | `ai_allowances/service.py` | `_authorize` order Premium → campaign → Starter; `_period_bucket` shared lazy bucket creation; campaign exhaustion details; settlement version per scope; allowance view `LAUNCH_FREE`; `_dispatch_subscription` accepts Apple OFF only under a campaign policy |
 | `ai_allowances/execution.py` | `require_ready()` drops the Apple flag from its tuple; Apple OFF requires the complete campaign |
 | `ai_allowances/training_compensation.py` | Expiry correction recognizes an installed-campaign bucket |
-| `models.py` + `d8f1a3c5e7b9` | Scope CHECK `STARTER | PREMIUM | LAUNCH_FREE`; `a9c1d2e3f4b5` verifier accepts exactly that delta |
+| `models.py` + `d8f1a3c5e7b9` | Scope CHECK `STARTER | PREMIUM | LAUNCH_FREE`; pinned in `REVIEWED_DDL` |
+| `db_init.py` | Fresh create_all-first boots replay the shipped narrow predicate on tables they just created, so immutable `a9c1d2e3f4b5` verifies and `d8f1` widens |
 | Docs | `AI_ALLOWANCE_LEDGER.md`, `mobile/ai-allowances-v1.{md,schema.json}`, `CLAUDE.md` |
 
 ## Entitlement invariants
@@ -35,10 +36,27 @@ Apple ON stay `AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE`.
 
 Expand only, parent `c6f8b0d2e4a1`. Reads the named CHECK; widened and validated
 → no-op; exact original → drop + add the widened predicate (one transaction,
-`ACCESS EXCLUSIVE` on the small bucket table for the validation scan); anything
-else (including `NOT VALID`) → stop. Writes no rows. Previous code is
-compatible with the widened schema. Downgrade restores the narrow predicate
-only while no `LAUNCH_FREE` row exists.
+`ACCESS EXCLUSIVE` on the small bucket table for the validation scan, bounded by
+the migration lock timeout); anything else (including `NOT VALID`) → stop.
+Writes no rows. Previous code is compatible with the widened schema. Downgrade
+restores the narrow predicate only while no `LAUNCH_FREE` row exists.
+
+Two repository gates shaped this:
+
+- **Static expand gate** (`scripts/migration_expand_contract.py`) rejects any
+  `drop_constraint`/`create_check_constraint` in an expand migration. The
+  widening is overlap-safe (the serving revision writes only STARTER/PREMIUM),
+  so the file is pinned by digest in `REVIEWED_DDL` (precedent: the K6 fence
+  `d7e3a9c1f5b8`). **This pin needs line-by-line human review**; any edit to the
+  file fails the gate until re-pinned.
+- **R6 shipped-history immutability** (`r6_deploy_transaction.
+  classify_migration_delta`) refuses a shipped migration whose bytes changed.
+  `a9c1d2e3f4b5` shipped with R1 and pins the narrow predicate in its
+  create_all-first verifier, so it is left byte-identical. A fresh boot instead
+  presents the shipped predicate on tables it just created
+  (`db_init.replay_shipped_predicates`), then the chain widens it.
+  Verified: `classify_migration_delta` against `e7bfa139` and `d13c9fa1` →
+  `{'d8f1a3c5e7b9': 'expand'}`, no problems.
 
 ## Deployment prerequisites (each separately approved; none done here)
 
@@ -59,13 +77,18 @@ reviewed source change to `LAUNCH_FREE_CAMPAIGN`.
 
 ## Residual risks
 
+- With Apple ON during a campaign window, effective Premium (60/2/2/16/2) has
+  less `pump_check` (16 vs 20) and `qr_menu` (2 vs 5) than LAUNCH_FREE, because
+  precedence is fixed. Founder decision if Apple is enabled before 2027-02-23.
+
 - Opening AI before 2026-11-25 00:00 TRT gives Starter, and that one-time grant
   is then not available after 2027-02-23.
 - Account re-creation yields a new account with fresh campaign units (the
   accepted Launch V1 identity policy); bounded by Cognito verification, the
   signed cohort and spend ceilings.
 - A start-date revision after accounts opened `LF1` stretches their existing
-  `LF1` bucket to the new window (never a second grant).
+  `LF1` bucket to the new window (never a second grant). A different campaign
+  must use a new `key_prefix` (validated `[A-Z]{2,8}`) and version.
 - The shipped mobile allowance decoder rejects `LAUNCH_FREE` in the view; the
   free build does not read the view (audit), the February build must learn it.
 

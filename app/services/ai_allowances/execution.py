@@ -73,9 +73,11 @@ def require_ready():
     """Atomic launch: no state can enable a subset with Premium bypasses.
 
     Apple verification OFF is accepted only under a policy carrying the
-    complete finite campaign scope (LAUNCH_FREE): the tier is then decided as
-    "no Premium source", and finite LAUNCH_FREE/Starter limits apply. Apple OFF
-    never opens anything by itself; every other gate below and in D1 stays.
+    complete finite campaign scope (``campaign_ready``): the tier is then
+    decided as "no Premium source", and the finite scope for the instant
+    applies (LAUNCH_FREE inside a window, the once-per-account Starter outside
+    it, as approved). Apple OFF is never sufficient: every other gate below
+    and in D1 (signed cohort, consent, spend guard, physical budgets) stays.
     """
     if not enabled():
         return
@@ -87,9 +89,7 @@ def require_ready():
     if (not isinstance(policy, AllowancePolicy) or policy.premium is None
             or set(policy.premium.allowances) != set(SUPPORTED_FEATURES)):
         _refuse("AI_ALLOWANCE_POLICY_UNCONFIGURED")
-    if current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True and (
-            policy.launch_free is None
-            or set(policy.launch_free.allowances.allowances) != set(SUPPORTED_FEATURES)):
+    if current_app.config.get("APPLE_SUBSCRIPTIONS_ENABLED") is not True and not policy.campaign_ready:
         _refuse("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
 
 

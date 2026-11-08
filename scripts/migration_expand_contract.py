@@ -183,6 +183,11 @@ REVIEWED_DDL = {
     # (historical writers unaffected) until `flask completion-floor raise`.
     "d7e3a9c1f5b8":
         "8f30fb09d35779af8c34a5bca1ed9fb6345bc23473f2eb235a50bcad0fede4c5",
+    # LAUNCH-FREE-BE-01: widens ck_ai_allowance_bucket_scope to add LAUNCH_FREE
+    # (drop + add in one transaction; exact original or already-widened only).
+    # The serving revision writes only STARTER/PREMIUM, which both predicates admit.
+    "d8f1a3c5e7b9":
+        "465bc63880be24dd16881e6ab7317d17c18a2c59b26d99e0cc97ebaf72fe5b3d",
 }
 
 EXPAND = "expand"

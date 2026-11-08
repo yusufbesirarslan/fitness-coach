@@ -198,24 +198,57 @@ def test_expand_migration_on_populated_postgresql(pg_app):
                 with pytest.raises(sa.exc.IntegrityError):
                     with conn.begin_nested():
                         bad()
-            # The original ledger verifier accepts the widened predicate.
-            _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
             with pytest.raises(RuntimeError):
                 _run(conn, m.downgrade)
             assert conn.execute(sa.text(
                 "SELECT count(*) FROM ai_allowance_bucket WHERE scope = 'LAUNCH_FREE'")).scalar() == 1
 
 
-def test_create_all_first_schema_is_already_widened(pg_app):
+def test_create_all_first_schema_replays_then_widens(pg_app):
+    from app.db_init import replay_shipped_predicates
     from app.extensions import db
     app, _ = pg_app
     with app.app_context():
         with db.engine.begin() as conn:
             definition, valid = _definition(conn)
             assert valid is True and "'LAUNCH_FREE'" in definition
+            with pytest.raises(RuntimeError):
+                with conn.begin_nested():
+                    _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
+            replay_shipped_predicates(conn, {"ai_allowance_bucket"})
+            assert "'LAUNCH_FREE'" not in _definition(conn)[0]
             _run(conn, _migration("a9c1d2e3f4b5_ai_allowance_ledger.py").upgrade)
             _run(conn, _migration("d8f1a3c5e7b9_ai_allowance_launch_free_scope.py").upgrade)
             assert _definition(conn) == (definition, True)
+
+
+def test_real_fresh_boot_reaches_head_with_the_widened_scope(monkeypatch):
+    """prepare_release on an empty PostgreSQL: create_all, replay, stamp, full upgrade."""
+    url = os.environ["PG_TEST_DATABASE_URL"]
+    reset = "DROP SCHEMA public CASCADE; CREATE SCHEMA public"
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(reset)
+    monkeypatch.setenv("DATABASE_URL", url)
+    monkeypatch.setenv("FITX_SKIP_DB_INIT", "1")
+    try:
+        from app import create_app, db_init
+        from app.extensions import db
+        app = create_app()
+        app.config.update(TESTING=True)
+        db_init.prepare_release(app)
+        with app.app_context():
+            with db.engine.connect() as conn:
+                assert conn.exec_driver_sql(
+                    "SELECT version_num FROM alembic_version").scalar_one() == "d8f1a3c5e7b9"
+                definition, valid = _definition(conn)
+                assert valid is True and "'LAUNCH_FREE'" in definition
+            db.session.remove()
+            db.engine.dispose()
+    finally:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(reset)
+        engine.dispose()
 
 
 @pytest.mark.parametrize("damage", [

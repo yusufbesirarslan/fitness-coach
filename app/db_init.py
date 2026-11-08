@@ -7,6 +7,33 @@ from app.services.gamification import lb_rebuild
 
 _FRESH_SCHEMA_STAMP = "aa11bb22cc33"
 
+# Predicates current models widened AFTER a shipped verify-or-create revision
+# that runs after _FRESH_SCHEMA_STAMP and pins the predicate it shipped with.
+# Shipped migrations are immutable (R6), so a table this boot created from
+# current metadata presents the shipped predicate; the owning later revision
+# widens it again during the same upgrade. (table, constraint, shipped, owner)
+SHIPPED_CHECK_PREDICATES = (
+    ("ai_allowance_bucket", "ck_ai_allowance_bucket_scope",
+     "scope IN ('STARTER', 'PREMIUM')", "d8f1a3c5e7b9"),
+)
+
+
+def replay_shipped_predicates(conn, created):
+    """Rewrite ONLY tables this boot just created from current metadata.
+
+    ``created`` names tables absent before ``create_all``: they are empty and
+    carry exactly the current model predicate, so nothing is repaired or
+    hidden from the later revision's fail-closed verifier.
+    """
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    operations = Operations(MigrationContext.configure(conn))
+    for table, name, predicate, _owner in SHIPPED_CHECK_PREDICATES:
+        if table in created:
+            with operations.batch_alter_table(table) as batch:
+                batch.drop_constraint(name, type_="check")
+                batch.create_check_constraint(name, predicate)
+
 
 def _handle_upgrade_failure(app, message):
     db.session.rollback()
@@ -86,6 +113,9 @@ def prepare_release(app):
                     "[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.",
                 )
 
+        from sqlalchemy import inspect as _inspect
+        _absent = {table for table, *_ in SHIPPED_CHECK_PREDICATES
+                   if not _inspect(db.engine).has_table(table)}
         db.create_all()
 
         # Fresh schemas are created from current model metadata, then stamped at
@@ -97,6 +127,8 @@ def prepare_release(app):
             try:
                 from flask_migrate import stamp, upgrade
                 if os.path.isdir(_migrations_dir):
+                    with db.engine.begin() as conn:
+                        replay_shipped_predicates(conn, _absent)
                     stamp(revision=_FRESH_SCHEMA_STAMP)
                     upgrade()
                     app.logger.info("[DB] Taze şema Alembic head'e yükseltildi.")

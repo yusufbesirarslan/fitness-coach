@@ -285,7 +285,8 @@ subscriptions stay dark. It is an AI allowance scope, never an entitlement:
 nothing sets `effective_premium`, writes Apple evidence or reads `is_premium`.
 
 - **Policy.** `policy.CampaignPolicy(version, starts_at, windows, allowances)`
-  attached as `AllowancePolicy.launch_free`; the only instance is
+  attached as `AllowancePolicy.launch_free` (`campaign_ready` is the one
+  completeness rule used by the installer, `require_ready` and dispatch); the only instance is
   `launch_policy.LAUNCH_FREE_CAMPAIGN` (`launch-free-v1`, 2026-11-25 00:00
   Europe/Istanbul, 3 windows, 30/2/2/20/5, `refund_unusable_results` inherited).
   Validation refuses naive/non-midnight starts, windows outside 1..12, a
@@ -296,11 +297,13 @@ nothing sets `effective_premium`, writes Apple evidence or reads `is_premium`.
 - **Windows.** `boundary(n)` = local date `start + 30n days` at 00:00 Istanbul,
   converted to UTC. Window `n` is `[boundary(n-1), boundary(n))`; nothing exists
   before `boundary(0)` or from `ends_at`. `campaign_window/period_key/reset` are
-  pure functions of the source campaign and the server clock.
+  pure functions of the source campaign and the server clock. Keys are
+  `<key_prefix><n>` (`LF1`..`LF3`); a different campaign must take a new prefix.
 - **Authorization** (`service._authorize`, under the owner lock): effective
   Premium → active window (`_launch_free`, lazy bucket via `_period_bucket`, the
   same savepoint + UNIQUE arbitration as Premium) → Starter. NULL `created_at`
-  gets `AI_FEATURE_NOT_IN_PLAN` (scope `LAUNCH_FREE`). Exhaustion refuses with
+  is outside the campaign and takes the existing Starter path (as the view
+  reports it). Exhaustion refuses with
   `reset` `CAMPAIGN_WINDOW` + next window start, or `CAMPAIGN_END` + `null` in the
   last window; it never falls through to Starter. During the campaign no Starter
   grant is written; after it, the once-per-account Starter resumes lazily.
@@ -312,12 +315,30 @@ nothing sets `effective_premium`, writes Apple evidence or reads `is_premium`.
   accepts a `LAUNCH_FREE` bucket only when its key and version match the
   installed campaign at the hold's creation.
 - **Apple decoupling.** `execution.require_ready()` no longer lists
-  `APPLE_SUBSCRIPTIONS_ENABLED`; with Apple OFF it additionally requires a policy
-  carrying the complete campaign. `_dispatch_subscription(user_id, policy)`
-  accepts the decided `DISABLED` tier only under such a policy. Ledger flag,
-  Training enforcement, finite policy, D1, signed cohort, spend guard, Redis and
-  physical budgets are unchanged and still refuse.
+  `APPLE_SUBSCRIPTIONS_ENABLED`; with Apple OFF it additionally requires
+  `policy.campaign_ready`. `_dispatch_subscription(user_id, policy)` accepts the
+  decided `DISABLED` tier only under the same rule. With Apple OFF the finite
+  scope for the instant applies: LAUNCH_FREE inside a window, the once-per-account
+  Starter outside it (approved behavior; opening AI before the start spends the
+  Starter grant). Ledger flag, Training enforcement, finite policy, D1, signed
+  cohort, spend guard, Redis and physical budgets are unchanged and still refuse.
+- **Premium vs campaign.** Precedence is fixed: effective Premium uses only
+  Premium (60/2/2/16/2 monthly), which is smaller than the campaign's
+  `pump_check` 20 and `qr_menu` 5. Founder decision before Apple is enabled
+  during a campaign window.
+- **Migration and fresh boots.** `d8f1a3c5e7b9` widens the CHECK (verify-or-
+  replace; downgrade refuses campaign rows) and is pinned in
+  `scripts/migration_expand_contract.py::REVIEWED_DDL` (the static gate cannot
+  prove a CHECK replacement overlap-safe; the serving revision only writes
+  STARTER/PREMIUM). Shipped `a9c1d2e3f4b5` is byte-identical to production and
+  still pins the narrow predicate, so `db_init.prepare_release`'s fresh path
+  records which tables are absent before `create_all` and, for those only,
+  `replay_shipped_predicates` presents the shipped predicate before stamping;
+  the chain then widens it exactly as on a migrated database.
 - **Revising dates.** A source change. Keys are relative, so a revision never
   re-grants a window an account already opened, and historical buckets are never
   rewritten. Extending past `LF3` is a separately authorized `windows` change.
-- **Retention.** Campaign buckets are not purged (at most 15 rows per account).
+- **Retention.** `purge_retained` removes empty campaign buckets on the same
+  90-day `updated_at` rule as Premium (a window lasts 30 days, so a bucket that
+  old is never the current one). Training expiry correction checks the
+  installed campaign; once a campaign is removed it fails closed (no refund).

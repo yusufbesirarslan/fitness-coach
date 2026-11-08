@@ -47,8 +47,7 @@ def installed_policy():
             or policy.premium.period != PERIOD_MONTHLY
             or set(policy.starter.allowances) != set(SUPPORTED_FEATURES)
             or set(policy.premium.allowances) != set(SUPPORTED_FEATURES)
-            or (policy.launch_free is not None
-                and set(policy.launch_free.allowances.allowances) != set(SUPPORTED_FEATURES))):
+            or (policy.launch_free is not None and not policy.campaign_ready)):
         raise PolicyError("launch requires finite five-family Starter, monthly Premium "
                           "and complete campaign scopes")
     return policy

@@ -92,6 +92,9 @@ MAX_CAMPAIGN_WINDOWS = 12
 MAX_UNITS = 10_000
 MAX_BILLED_RELEASES = 1_000
 _VERSION = re.compile(r"[A-Za-z0-9._-]{1,32}")
+# Fits ``ai_allowance_bucket.period_key`` (16) with MAX_CAMPAIGN_WINDOWS digits.
+# Keys are scoped by the bucket's scope column and always end in a window number.
+_KEY_PREFIX = re.compile(r"[A-Z]{2,8}")
 
 
 class PolicyError(ValueError):
@@ -141,10 +144,16 @@ class CampaignPolicy:
     starts_at: datetime
     windows: int
     allowances: ScopePolicy
+    # Bucket keys are ``<key_prefix><n>``. A date revision of THIS campaign keeps
+    # the prefix (no window is ever re-granted); a different campaign must use a
+    # new prefix so it never reuses another campaign's buckets.
+    key_prefix: str = "LF"
 
     def __post_init__(self):
         if not isinstance(self.version, str) or not _VERSION.fullmatch(self.version):
             raise PolicyError("version must match [A-Za-z0-9._-]{1,32}")
+        if not isinstance(self.key_prefix, str) or not _KEY_PREFIX.fullmatch(self.key_prefix):
+            raise PolicyError("campaign key prefix must match [A-Z]{2,8}")
         if not isinstance(self.starts_at, datetime) or self.starts_at.tzinfo is None:
             raise PolicyError("campaign needs an aware start instant")
         if self.starts_at.astimezone(APP_TZ).timetz().replace(tzinfo=None) != time(0):
@@ -208,6 +217,12 @@ class AllowancePolicy:
         if name == SCOPE_LAUNCH_FREE:
             return self.launch_free.allowances if self.launch_free is not None else None
         return None
+
+    @property
+    def campaign_ready(self):
+        """The one "complete finite campaign" rule (Apple-off admission uses it)."""
+        return (self.launch_free is not None
+                and set(self.launch_free.allowances.allowances) == set(SUPPORTED_FEATURES))
 
     def bucket_version(self, name):
         """The policy version a bucket of this scope is granted under."""
@@ -280,7 +295,7 @@ def campaign_window(campaign, now):
 def campaign_period_key(campaign, now):
     """``LF1``..``LFn`` for an active window, else ``None`` (no grant)."""
     window = campaign_window(campaign, now)
-    return None if window is None else f"LF{window[0]}"
+    return None if window is None else f"{campaign.key_prefix}{window[0]}"
 
 
 def campaign_reset(campaign, now):

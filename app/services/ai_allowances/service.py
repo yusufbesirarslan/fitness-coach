@@ -249,17 +249,18 @@ def _period_bucket(owner, scope, feature, key, units, version, now):
 
 
 def _launch_free(owner, policy, feature, now):
-    """The active campaign window's bucket, or ``None`` outside the campaign.
+    """The active campaign window's bucket, or ``None`` when it does not apply.
 
     Never Premium: no entitlement, transaction or ``is_premium`` is touched.
     Exhaustion inside a window refuses; it never falls through to Starter.
+    A NULL creation timestamp is outside the campaign (the Launch V1 rule), so
+    it follows the existing Starter path exactly as the read view reports it.
     """
     campaign = policy.launch_free
     key = P.campaign_period_key(campaign, now)
-    if key is None:
+    if key is None or owner.created_at is None:
         return None
-    # Same NULL-timestamp rule as the Launch V1 Starter scope.
-    if owner.created_at is None or feature not in campaign.allowances.allowances:
+    if feature not in campaign.allowances.allowances:
         raise AllowanceError("AI_FEATURE_NOT_IN_PLAN", feature=feature, scope=P.SCOPE_LAUNCH_FREE)
     return _period_bucket(owner, P.SCOPE_LAUNCH_FREE, feature, key,
                           campaign.allowances.allowances[feature], campaign.version, now)
@@ -430,16 +431,16 @@ def _dispatch_subscription(user_id, policy):
     """Resolve after the owner lock, without expiring the caller's dirty lease.
 
     Verification OFF is a decided tier (no Premium source exists). Dispatch
-    accepts it only under a policy that carries the finite campaign scope, so
-    Apple being off never opens dispatch by itself; Starter/LAUNCH_FREE limits,
-    D1, eligibility and the physical guards still decide the request.
+    accepts it only under a policy carrying the complete campaign scope (the
+    same ``campaign_ready`` rule as ``execution.require_ready``); Apple OFF is
+    never sufficient. Finite limits, D1, eligibility and physical guards decide.
     """
     from app.models import AppleSubscription
     for identity in list(db.session.identity_map.values()):
         if isinstance(identity, AppleSubscription):
             db.session.expire(identity)
     subscription = _subscription(user_id)
-    if subscription.state == "DISABLED" and policy.launch_free is not None:
+    if subscription.state == "DISABLED" and policy.campaign_ready:
         return subscription
     if subscription.state != "AVAILABLE" or subscription.entitlement.get("verification_pending"):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
@@ -797,7 +798,10 @@ def purge_retained(*, now=None, retention=TERMINAL_RETENTION, limit=500):
         if db.engine.dialect.name == "postgresql":
             db.session.execute(sa.text("SET LOCAL lock_timeout = '2000ms'"))
         old_buckets = sa.select(AiAllowanceBucket.id).where(
-            AiAllowanceBucket.scope == P.SCOPE_PREMIUM, AiAllowanceBucket.updated_at < cutoff,
+            # A campaign window lasts 30 days, so a bucket untouched for the
+            # 90-day retention cutoff is never the current window's.
+            AiAllowanceBucket.scope.in_((P.SCOPE_PREMIUM, P.SCOPE_LAUNCH_FREE)),
+            AiAllowanceBucket.updated_at < cutoff,
             ~sa.exists().where(reservation.bucket_id == AiAllowanceBucket.id)
         ).order_by(AiAllowanceBucket.id).limit(batch_limit)
         periods = db.session.execute(sa.delete(AiAllowanceBucket).where(
@@ -810,7 +814,7 @@ def purge_retained(*, now=None, retention=TERMINAL_RETENTION, limit=500):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def _feature_view(feature, access, policy, starter_state, buckets, now):
+def _feature_view(feature, access, policy, starter_state, buckets, now, campaign_view=None):
     view = {"feature": feature, "scope": None, "state": "NOT_IN_PLAN", "limit": None,
             "used": None, "reserved": None, "remaining": None, "reset": None, "resets_at": None}
     if access == "UNCONFIGURED":
@@ -820,14 +824,14 @@ def _feature_view(feature, access, policy, starter_state, buckets, now):
     if access == "LAUNCH_FREE":
         campaign, scope = policy.launch_free, P.SCOPE_LAUNCH_FREE
         view["scope"] = scope
-        bucket = buckets.get((scope, feature, P.campaign_period_key(campaign, now)))
+        key, reset, resets_at = campaign_view
+        bucket = buckets.get((scope, feature, key))
         if bucket is not None:
             limit, used, held = bucket.granted, bucket.used, bucket.reserved
         elif feature in campaign.allowances.allowances:
             limit, used, held = campaign.allowances.allowances[feature], 0, 0
         else:
             return view
-        reset, resets_at = P.campaign_reset(campaign, now)
         remaining = max(limit - used - held, 0)
         return {**view, "state": "AVAILABLE" if remaining else "EXHAUSTED", "limit": limit,
                 "used": used, "reserved": held, "remaining": remaining, "reset": reset,
@@ -899,13 +903,17 @@ def allowance_view(user_id, *, now=None):
         access = "STARTER"
     else:
         access = "NONE"
+    # One window computation shared by all five features.
+    campaign_view = None
+    if access == "LAUNCH_FREE":
+        campaign_view = (campaign_key, *P.campaign_reset(policy.launch_free, now))
     return {
         "contract_version": CONTRACT_VERSION,
         "policy_state": "UNCONFIGURED" if policy is None else "CONFIGURED",
         "access": access,
         "subscription": {"state": subscription.state, "entitlement": subscription.entitlement},
         "starter": {"state": starter_state, "granted_at": _iso(grant.granted_at) if grant else None},
-        "features": [_feature_view(f, access, policy, starter_state, buckets, now)
+        "features": [_feature_view(f, access, policy, starter_state, buckets, now, campaign_view)
                      for f in P.SUPPORTED_FEATURES],
     }
 
