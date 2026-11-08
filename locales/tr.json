@@ -1094,6 +1094,7 @@
   "route.weight_gained": " Geçen kayda göre {diff} kg aldın.",
   "route.weight_same": " Geçen kayıtla aynı kilo. Tutarlısın.",
   "route.macros_unavailable": "Besin değerleri hesaplanamadı",
+  "route.menu_advice_unavailable": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
   "route.eval_failed": "Değerlendirme şu an alınamadı, lütfen tekrar dene.",
   "route.csrf_failed": "CSRF doğrulaması başarısız.",
   "common.cancel": "İptal",

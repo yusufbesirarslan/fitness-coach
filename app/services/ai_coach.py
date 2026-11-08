@@ -335,8 +335,10 @@ def _tool_confirm_and_commit_meal_log(user_id):
         }, ensure_ascii=False)
 
     data = _fence_pending_log(user_id, pending.payload)
-    if not fatsecret_boundary.verified("pending-meal", user_id, data):
-        return json.dumps({"status": "unsupported", "message": fatsecret_boundary.notice()})
+    # A pending meal staged before the advice fallback (no proof) may carry
+    # provider values. The user's explicit confirmation still logs it (diary
+    # logging stays usable), but its numbers are never attested for the model.
+    independent = fatsecret_boundary.verified("pending-meal", user_id, data)
     data.pop(fatsecret_boundary.PROOF, None)
     cal = float(data.get("calories", 0) or 0)
     pro = float(data.get("protein", 0) or 0)
@@ -377,7 +379,7 @@ def _tool_confirm_and_commit_meal_log(user_id):
     from app.services.ai_allowances.execution import canonical_success
     canonical_success()
 
-    return json.dumps(fatsecret_boundary.attest("tool-result", user_id, {
+    result = {
         "status": "committed",
         "logged": {
             "food_name": name, "calories": cal, "protein": pro,
@@ -385,7 +387,10 @@ def _tool_confirm_and_commit_meal_log(user_id):
         },
         "xp_awarded": 10,
         "today_totals": None,
-    }), ensure_ascii=False)
+    }
+    if independent:
+        result = fatsecret_boundary.attest("tool-result", user_id, result)
+    return json.dumps(result, ensure_ascii=False)
 
 
 _PENDING_TTL = timedelta(hours=1)

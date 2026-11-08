@@ -205,7 +205,7 @@ def test_send_time_context_is_typed_and_factual(app, make_user):
     assert '- nutrition plan: saved plan with 2 planned meal(s)' in context
     assert 'Secret soup' not in context and 'Lean plan' not in context
     body = context.split('\n', 2)[2].lower()
-    for word in ('on track', 'behind', 'ahead', '%', 'you should', 'eat more'):
+    for word in ('adherence', 'on track', 'behind', 'ahead', '%', 'you should', 'eat more'):
         assert word not in body, word
 
 
@@ -217,7 +217,8 @@ def test_server_rederives_by_authenticated_owner(app, make_user):
     with app.test_request_context('/coach'):
         context = coach_handoff_context('nutrition-day', b.id, 'en')
     assert '2700' not in context and '3 meal' not in context
-    assert 'Logged intake is unavailable for advice' in context
+    # B has no rows: a genuinely measured empty day, not unverified provider data.
+    assert '- logged today: no meals logged yet (measured 0)' in context
     assert '- daily target: not set' in context
     assert '- hydration today: 0 glass(es) of water' in context
     assert '- nutrition plan: no saved plan' in context
@@ -320,7 +321,9 @@ def test_browser_calories_never_become_model_context(app, client, auth_user, mon
     assert res.status_code == 200, res.get_data(as_text=True)
     (uid, question, context), = seen
     assert uid == auth_user.id and question == 'Review today with me.'
-    assert '300 kcal' not in context and 'Logged intake is unavailable for advice' in context
+    from app.services import fatsecret_boundary
+    # This user's Coach context is Turkish; the localized notice replaces the total.
+    assert '300 kcal' not in context and fatsecret_boundary.notice('tr') in context
     assert '9999' not in context
 
 

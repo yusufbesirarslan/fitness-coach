@@ -160,7 +160,8 @@ def _nutrition_context_text(view, language):
     from app.services import fatsecret_boundary
     # Keep independent target/hydration/plan facts, but never serialize a
     # ledger-derived number, even when a concurrent writer changes the view.
-    intake = fatsecret_boundary.notice(language)
+    intake = ("no meals logged yet (measured 0)" if view.intake.state == EMPTY
+              else fatsecret_boundary.notice(language))
     if view.hydration.state in (AVAILABLE, EMPTY):
         hydration = f"{view.hydration.amount} glass(es) of water"
     else:

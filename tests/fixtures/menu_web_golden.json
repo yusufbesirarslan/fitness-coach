@@ -302,6 +302,257 @@
   },
   "status": 200
  },
+ "analyze_full__fatsecret_advice_fallback": {
+  "body": {
+   "advice_available": false,
+   "categories": {
+    "Ana Yemekler": [
+     {
+      "confidence": 0.0,
+      "macro_source": "none",
+      "macros": {
+       "calories": 0,
+       "carbs": 0,
+       "fat": 0,
+       "protein": 0
+      },
+      "name": "Izgara Tavuk",
+      "reason": "Besin değerleri hesaplanamadı",
+      "score": null,
+      "warnings": []
+     },
+     {
+      "confidence": 0.6,
+      "macro_source": "llm",
+      "macros": {
+       "calories": 650,
+       "carbs": 10,
+       "fat": 48,
+       "protein": 45
+      },
+      "name": "Adana Kebap",
+      "reason": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
+      "score": null,
+      "warnings": []
+     },
+     {
+      "confidence": 0.7,
+      "macro_source": "llm_stated_grams",
+      "macros": {
+       "calories": 430,
+       "carbs": 28,
+       "fat": 18,
+       "protein": 32
+      },
+      "name": "Tavuklu Fajita (220 GR)",
+      "reason": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
+      "score": null,
+      "warnings": []
+     },
+     {
+      "confidence": 0.0,
+      "macro_source": "none",
+      "macros": {
+       "calories": 0,
+       "carbs": 0,
+       "fat": 0,
+       "protein": 0
+      },
+      "name": "Margherita Pizza",
+      "reason": "Besin değerleri hesaplanamadı",
+      "score": null,
+      "warnings": []
+     },
+     {
+      "confidence": 0.0,
+      "macro_source": "none",
+      "macros": {
+       "calories": 0,
+       "carbs": 0,
+       "fat": 0,
+       "protein": 0
+      },
+      "name": "Imkansiz Tabak",
+      "reason": "Besin değerleri hesaplanamadı",
+      "score": null,
+      "warnings": []
+     }
+    ],
+    "Corbalar": [
+     {
+      "confidence": 0.6,
+      "macro_source": "llm",
+      "macros": {
+       "calories": 180,
+       "carbs": 26,
+       "fat": 4,
+       "protein": 9
+      },
+      "name": "Mercimek Corbasi",
+      "reason": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
+      "score": null,
+      "warnings": []
+     }
+    ],
+    "Tatlilar": [
+     {
+      "confidence": 0.0,
+      "macro_source": "none",
+      "macros": {
+       "calories": 0,
+       "carbs": 0,
+       "fat": 0,
+       "protein": 0
+      },
+      "name": "Kunefe",
+      "reason": "Besin değerleri hesaplanamadı",
+      "score": null,
+      "warnings": []
+     },
+     {
+      "confidence": 0.0,
+      "macro_source": "none",
+      "macros": {
+       "calories": 0,
+       "carbs": 0,
+       "fat": 0,
+       "protein": 0
+      },
+      "name": "Gizemli Tatli",
+      "reason": "Besin değerleri hesaplanamadı",
+      "score": null,
+      "warnings": []
+     }
+    ]
+   },
+   "coach_picks": [],
+   "consumed": null,
+   "items": [
+    {
+     "confidence": 0.0,
+     "macro_source": "none",
+     "macros": {
+      "calories": 0,
+      "carbs": 0,
+      "fat": 0,
+      "protein": 0
+     },
+     "name": "Izgara Tavuk",
+     "reason": "Besin değerleri hesaplanamadı",
+     "score": null,
+     "warnings": []
+    },
+    {
+     "confidence": 0.6,
+     "macro_source": "llm",
+     "macros": {
+      "calories": 650,
+      "carbs": 10,
+      "fat": 48,
+      "protein": 45
+     },
+     "name": "Adana Kebap",
+     "reason": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
+     "score": null,
+     "warnings": []
+    },
+    {
+     "confidence": 0.7,
+     "macro_source": "llm_stated_grams",
+     "macros": {
+      "calories": 430,
+      "carbs": 28,
+      "fat": 18,
+      "protein": 32
+     },
+     "name": "Tavuklu Fajita (220 GR)",
+     "reason": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
+     "score": null,
+     "warnings": []
+    },
+    {
+     "confidence": 0.0,
+     "macro_source": "none",
+     "macros": {
+      "calories": 0,
+      "carbs": 0,
+      "fat": 0,
+      "protein": 0
+     },
+     "name": "Margherita Pizza",
+     "reason": "Besin değerleri hesaplanamadı",
+     "score": null,
+     "warnings": []
+    },
+    {
+     "confidence": 0.0,
+     "macro_source": "none",
+     "macros": {
+      "calories": 0,
+      "carbs": 0,
+      "fat": 0,
+      "protein": 0
+     },
+     "name": "Imkansiz Tabak",
+     "reason": "Besin değerleri hesaplanamadı",
+     "score": null,
+     "warnings": []
+    },
+    {
+     "confidence": 0.0,
+     "macro_source": "none",
+     "macros": {
+      "calories": 0,
+      "carbs": 0,
+      "fat": 0,
+      "protein": 0
+     },
+     "name": "Kunefe",
+     "reason": "Besin değerleri hesaplanamadı",
+     "score": null,
+     "warnings": []
+    },
+    {
+     "confidence": 0.0,
+     "macro_source": "none",
+     "macros": {
+      "calories": 0,
+      "carbs": 0,
+      "fat": 0,
+      "protein": 0
+     },
+     "name": "Gizemli Tatli",
+     "reason": "Besin değerleri hesaplanamadı",
+     "score": null,
+     "warnings": []
+    },
+    {
+     "confidence": 0.6,
+     "macro_source": "llm",
+     "macros": {
+      "calories": 180,
+      "carbs": 26,
+      "fat": 4,
+      "protein": 9
+     },
+     "name": "Mercimek Corbasi",
+     "reason": "Kişisel uyum hesaplanamıyor: kayıtlı beslenmenin kaynağı doğrulanamadı. Tahminler kalan bütçe puanı olmadan gösteriliyor.",
+     "score": null,
+     "warnings": []
+    }
+   ],
+   "menu_source": "Google Drive",
+   "remaining": null,
+   "success": true,
+   "target": {
+    "calories": 2000,
+    "carbs": 225,
+    "fat": 56,
+    "protein": 150
+   }
+  },
+  "status": 200
+ },
  "analyze_full_extract_calls": [
   {
    "fw": "{\"menu\": 1}",

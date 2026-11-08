@@ -1,4 +1,3 @@
-from app.services import fatsecret_boundary
 """Canonical restaurant-menu acquisition and analysis (LP15-C).
 
 Transport-neutral home of the two authorities the web menu routes used to
@@ -26,6 +25,7 @@ them in its own contract (web: the historical status/strings, pinned by
 Remote menu response content must never be interpolated into server logs.
 Use counts, fixed reason codes, exception types and redacted request URLs only.
 """
+from app.services import fatsecret_boundary
 from app.services import ai_usage
 import hashlib
 import json
@@ -683,11 +683,16 @@ def _analyze_menu_text(user_id, raw_text, fw_state=None, menu_source="web_scrape
             # The same canonical score, as locale-free tokens for non-web callers.
             fit = nutrition_pipeline.score_compatibility(macros, remaining)
             fit_flags, fit_warnings = list(fit["flags"]), list(fit["warnings"])
-        elif not advisory_available:
-            score, warnings, reason = None, [], fatsecret_boundary.notice()
+        elif has_macros:
+            # Advice withheld (unproven intake). User-facing copy; the
+            # model-facing notice is never shown as a dish reason.
+            score, warnings, reason = None, [], t("route.menu_advice_unavailable")
             fit_flags, fit_warnings = [], []
         else:
-            score, warnings, reason = 0, [], t("route.macros_unavailable")
+            # Unknown nutrition stays the existing truth. With advice withheld
+            # there is no personal score at all (null), never a fabricated 0.
+            score = 0 if advisory_available else None
+            warnings, reason = [], t("route.macros_unavailable")
             fit_flags, fit_warnings = [], []
 
         item_obj = {

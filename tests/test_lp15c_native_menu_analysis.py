@@ -317,8 +317,10 @@ def test_dto_shape_is_bounded_and_unknown_nutrition_stays_null(
                          "coach_pick_ids", "candidate_count", "loggable_count"}
     assert menu["expires_at"] - menu["issued_at"] == 1800
     assert set(menu["day"]) == {"target", "consumed", "remaining", "advice_available"}
-    for macros in menu["day"].values():
-        assert set(macros) == {"energy_kcal", "protein_g", "carbohydrate_g", "fat_g"}
+    # Additive v1 flag (shipped mobile parser ignores unknown keys and `day`).
+    assert menu["day"]["advice_available"] is True  # alice has no logged intake
+    for key in ("target", "consumed", "remaining"):
+        assert set(menu["day"][key]) == {"energy_kcal", "protein_g", "carbohydrate_g", "fat_g"}
 
     items = {i["name"]: i for c in menu["categories"] for i in c["candidates"]}
     for item in items.values():

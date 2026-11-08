@@ -34,7 +34,7 @@ def unavailable_macros():
 def notice(language="en"):
     return ("Logged intake is unavailable for advice because its nutrition source "
             "is unverified. Do not infer consumed intake, remaining budgets or "
-            "daily adherence, and do not substitute zero or a partial total. "
+            "progress against the daily target, and do not substitute zero or a partial total. "
             "Independent training, hydration and nutrition questions remain available."
             if language == "en" else
             "Kayıtlı beslenme verilerinin kaynağı doğrulanamadığından bu verilerle "
