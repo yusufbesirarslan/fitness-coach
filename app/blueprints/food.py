@@ -141,8 +141,8 @@ def barcode_add_to_diary():
         })
 
     from app.services import fatsecret_boundary
-    if not fatsecret_boundary.provider_persistence_allowed():
-        # D-B2: new provider-backed diary persistence is held.
+    if not fatsecret_boundary.uncovered_provider_persistence_allowed():
+        # D-B2: this writer stores no retention provenance; it stays held.
         return _deprecated_compatibility_response(
             {"error": "provider_logging_unavailable", "retryable": False}, 503)
 

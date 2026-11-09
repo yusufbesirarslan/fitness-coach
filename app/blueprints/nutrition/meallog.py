@@ -16,6 +16,7 @@ from app.config import AI_RATELIMIT
 from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import current_locale, t
 from app.models import MealLog, UserSession
+from app.services import fatsecret_boundary, provider_retention
 from app.prompts import nutrition as nutrition_prompts
 from app.services.ai import _openai_chat
 from app.services.nutrition_pipeline import sanitize_meal_total_macros
@@ -373,13 +374,14 @@ def today_meals():
         # CURRENT-DAY surface only; /meal-log/history stays uncorrectable by
         # construction, which is how N9 remains scoped to today.
         entry_token, revision = mobile_diary_mutation.entry_identity(m, secret)
+        shown = provider_retention.published(m)
         result.append({
             "ogun": m.ogun,
-            "yemekler": m.yemekler,
-            "kalori": m.kalori,
-            "protein": m.protein,
-            "karb": m.karb,
-            "yag": m.yag,
+            "yemekler": shown.yemekler,
+            "kalori": shown.kalori,
+            "protein": shown.protein,
+            "karb": shown.karb,
+            "yag": shown.yag,
             "source": getattr(m, "source", "manual") or "manual",
             "photo_url": _meal_photo_url(m),
             "created_at": m.created_at.isoformat() if m.created_at else None,
@@ -391,6 +393,13 @@ def today_meals():
         totals["protein"] += m.protein or 0
         totals["karb"]    += m.karb or 0
         totals["yag"]     += m.yag or 0
+
+    # Expired FatSecret per-item values live in the retained daily aggregate
+    # (provider_retention); adding it keeps the day total unchanged.
+    totals["kalori"], totals["protein"], totals["karb"], totals["yag"] = (
+        provider_retention.with_retained(
+            current_user.id, today, totals["kalori"], totals["protein"],
+            totals["karb"], totals["yag"]))
 
     # Sprint 13 PR5 / N4: the browser presents this derivation or none at all.
     # It must not invent a 30/40/30 split, a 2000 kcal stand-in, or a remaining
@@ -466,6 +475,8 @@ def delete_today_meal(entry_token):
     except mobile_diary_mutation.StaleDiaryEntry:
         db.session.rollback()
         return jsonify({"error": t("route.meal_delete_stale")}), 412
+    except mobile_diary_mutation.SummarizedDiaryEntry:
+        return jsonify({"error": t("route.meal_delete_summarized")}), 409
     except mobile_diary_mutation.UnreleasableStoredObject:
         db.session.rollback()
         return jsonify({"error": t("route.meal_delete_photo_unreleasable")}), 409
@@ -516,18 +527,24 @@ def meal_history():
         MealLog.user_id == current_user.id,
         MealLog.tarih.in_(recent_days),
     ).order_by(MealLog.created_at.desc()).all() if recent_days else [])
+    retained = provider_retention.retained_totals(current_user.id, recent_days)
+    names = provider_retention.LiveNames()
 
     days = {}
     for m in meals:
         if m.tarih not in days:
-            days[m.tarih] = {"meals": [], "totals": {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}}
+            extra = retained.get(m.tarih, provider_retention.ZERO)
+            days[m.tarih] = {"meals": [], "totals": {
+                "kalori": extra["energy_kcal"], "protein": extra["protein_g"],
+                "karb": extra["carbohydrate_g"], "yag": extra["fat_g"]}}
+        shown = provider_retention.published(m, names)
         days[m.tarih]["meals"].append({
             "ogun": m.ogun,
-            "yemekler": m.yemekler,
-            "kalori": m.kalori,
-            "protein": m.protein,
-            "karb": m.karb,
-            "yag": m.yag,
+            "yemekler": shown.yemekler,
+            "kalori": shown.kalori,
+            "protein": shown.protein,
+            "karb": shown.karb,
+            "yag": shown.yag,
             "photo_url": _meal_photo_url(m)
         })
         days[m.tarih]["totals"]["kalori"]  += m.kalori or 0
@@ -566,11 +583,27 @@ def review_meals():
     target = last_session.target_calories if last_session else 2000
     goal   = last_session.goal if last_session else "genel sağlık"
 
+    # #497 advice boundary (founder D3): logged intake has no attested
+    # lineage, so today's entries are not sent to a model for advice. Same
+    # predicate as Coach/QR (fatsecret_boundary.intake_unproven): when verified
+    # provenance refines it, this review reopens with no other change.
+    if fatsecret_boundary.intake_unproven(current_user.id):
+        logged = sum(m.kalori or 0 for m in meals) + provider_retention.retained_for_day(
+            current_user.id, today)["energy_kcal"]
+        return jsonify({
+            "review": t("route.meal_review_unavailable"),
+            "advice_available": False,
+            "total_calories": round(logged),
+            "target": round(configured.calories) if configured else None,
+        })
+
     meals_text = ""
     total_cal = 0
     for m in meals:
         meals_text += f"- {m.ogun}: {m.yemekler} ({m.kalori} kcal, P:{m.protein}g K:{m.karb}g Y:{m.yag}g)\n"
         total_cal += m.kalori or 0
+    total_cal += provider_retention.retained_for_day(
+        current_user.id, today)["energy_kcal"]
 
     # Değerlendirme metni kullanıcıya gösterilir → dile göre üret. meals_text içindeki
     # öğün/yemek adları (kanonik) girdi bağlamıdır; AI hedef dilde özetler.

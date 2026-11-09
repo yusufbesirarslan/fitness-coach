@@ -421,3 +421,8 @@ def provider_persistence_permitted(monkeypatch):
     from app.services import fatsecret_boundary
     monkeypatch.setattr(fatsecret_boundary, "PROVIDER_PERSISTENCE_PERMISSION_REF",
                         "TEST-ONLY-not-a-real-permission")
+    # Also opens the paths the retention design does not cover yet (web barcode
+    # add, social suggestion totals) so their MECHANICS stay qualified; their
+    # production hold is pinned in tests/test_fatsecret_provider_persistence_hold.py.
+    monkeypatch.setattr(fatsecret_boundary, "UNCOVERED_PROVIDER_PERSISTENCE_REF",
+                        "TEST-ONLY-not-a-real-permission")

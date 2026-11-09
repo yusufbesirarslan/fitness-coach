@@ -1119,8 +1119,9 @@ def _calculate_meal_suggestion(snapshot):
 
         if uncached:
             from app.services import fatsecret_boundary
-            if not fatsecret_boundary.provider_persistence_allowed():
-                # D-B2: provider totals would be persisted as a MealLog row.
+            if not fatsecret_boundary.uncovered_provider_persistence_allowed():
+                # D-B2: provider totals would be persisted as a MealLog row with
+                # no retention provenance; this path stays held.
                 return None
             try:
                 with blocking_concurrency_slot():

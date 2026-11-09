@@ -47,21 +47,36 @@ def fetch_ledger_entries(user_id, day_key):
     tiebreak so two rows written in the same second cannot swap places between
     reads — identities are only stable if the list they arrive in is.
     """
+    return fetch_published_ledger(user_id, day_key)[0]
+
+
+def fetch_published_ledger(user_id, day_key):
+    """``(entries, withheld)`` for one day.
+
+    Entries publish no per-item FatSecret values once those are due
+    (app/services/provider_retention.py). ``withheld`` is the sum of the values
+    so withheld that are still stored (not yet moved into the retained daily
+    aggregate), so the caller's day total stays exactly what storage holds.
+    """
     rows = (MealLog.query
             .filter_by(user_id=user_id, tarih=day_key)
             .order_by(MealLog.created_at.asc(), MealLog.id.asc())
             .all())
+    from app.services import provider_retention
+    shown = {row.id: provider_retention.published(row) for row in rows}
+    withheld = provider_retention.withheld_sum(
+        (row for row in rows if provider_retention.withholds(row)))
     return tuple(
         LedgerEntry(
             user_id=row.user_id,
             entry_id=row.id,
             meal_label=row.ogun,
-            description=row.yemekler,
+            description=shown[row.id].yemekler,
             source=row.source,
-            energy_kcal=row.kalori,
-            protein_g=row.protein,
-            carbohydrate_g=row.karb,
-            fat_g=row.yag,
+            energy_kcal=shown[row.id].kalori,
+            protein_g=shown[row.id].protein,
+            carbohydrate_g=shown[row.id].karb,
+            fat_g=shown[row.id].yag,
             diary_date=row.tarih,
             idempotency_key=row.idempotency_key,
             idempotency_fingerprint=row.idempotency_fingerprint,
@@ -69,7 +84,7 @@ def fetch_ledger_entries(user_id, day_key):
             created_at=row.created_at,
         )
         for row in rows
-    )
+    ), withheld
 
 
 def fetch_target_energy_kcal(user_id):

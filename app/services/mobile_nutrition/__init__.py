@@ -23,7 +23,7 @@ Contract, null semantics and source-of-truth matrix: docs/MOBILE_NUTRITION.md
 from app.timeutil import app_today
 
 from .identity import diary_entry_id, matches_diary_entry_id
-from .queries import fetch_ledger_entries, fetch_target_energy_kcal
+from .queries import fetch_published_ledger, fetch_target_energy_kcal
 from .revision import (
     DiaryEntryRevisionState,
     diary_entry_revision,
@@ -51,11 +51,16 @@ def build_diary_day(user_id, secret, day=None):
     own and no client input reaches it.
     """
     resolved_day = day or app_today()
-    entries = fetch_ledger_entries(user_id, resolved_day.isoformat())
+    entries, withheld = fetch_published_ledger(user_id, resolved_day.isoformat())
     target = fetch_target_energy_kcal(user_id)
+    from app.services import provider_retention
+    retained = provider_retention.add_totals(
+        withheld, provider_retention.retained_for_day(
+            user_id, resolved_day.isoformat()))
     return diary_day_payload(
         resolved_day, entries, target,
         lambda entry_id: diary_entry_id(secret, user_id, entry_id),
         lambda entry: diary_entry_revision(
             secret, revision_state_from_entry(entry)),
+        retained,
     )

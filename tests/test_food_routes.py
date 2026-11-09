@@ -38,7 +38,7 @@ def test_search_cache_hit_skips_lookup(client, auth_user, monkeypatch):
     # Koç araması 100g-bazlı yazar; arama da o bazdan okur. (Eski test düz
     # _macro_cache["muz"] yazıp düz .get(q) hatasını maskeliyordu — F2.)
     foodcache._cache_macros({"muz": BANANA}, "per_100g")
-    foodcache._food_id_cache["muz"] = "42"
+    foodcache._food_id_cache[foodcache._food_id_key("muz")] = "42"
 
     def boom(q):
         raise AssertionError("önbellek isabetinde arama çağrılmamalı")
@@ -159,7 +159,7 @@ def test_servings_by_name_short_query(client, auth_user):
 
 
 def test_servings_by_name_cached_food_id(client, auth_user, monkeypatch):
-    foodcache._food_id_cache["muz"] = "42"
+    foodcache._food_id_cache[foodcache._food_id_key("muz")] = "42"
     servings = [{"serving_description": "100 g"}]
     monkeypatch.setattr(food_bp, "_food_get_servings",
                         lambda fid: servings if fid == "42" else None)
@@ -186,7 +186,7 @@ def test_servings_by_name_falls_back_to_english_search(client, auth_user, monkey
 
     body = client.get("/api/food/servings-by-name?name=muz").get_json()
     assert body == {"servings": servings, "food_id": "42"}
-    assert foodcache._food_id_cache["muz"] == "42"  # doğrulanan id önbelleğe yazıldı
+    assert foodcache._food_id_cache[foodcache._food_id_key("muz")] == "42"  # doğrulanan id önbelleğe yazıldı
 
 
 def test_servings_by_name_no_relevant_match_returns_empty(client, auth_user, monkeypatch):
@@ -197,7 +197,7 @@ def test_servings_by_name_no_relevant_match_returns_empty(client, auth_user, mon
                         lambda name, english, token: [])
     body = client.get("/api/food/servings-by-name?name=muz").get_json()
     assert body == {"servings": [], "food_id": ""}
-    assert "muz" not in foodcache._food_id_cache
+    assert foodcache._food_id_key("muz") not in foodcache._food_id_cache
 
 
 def test_servings_by_name_token_failure_returns_empty(client, auth_user, monkeypatch):

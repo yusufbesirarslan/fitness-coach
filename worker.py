@@ -22,6 +22,10 @@ _log = logging.getLogger("fitx.worker")
 
 
 PROXY_SAMPLE_INTERVAL_SECONDS = 600
+# FatSecret 24h retention pass (app/services/provider_retention.py). Its margin
+# (EXPIRY_MARGIN, 30 min) is several times this interval, so a value is removed
+# before its deadline even when one enqueue waits behind other jobs.
+RETENTION_INTERVAL_SECONDS = 300
 
 
 def _sample_fatsecret_safely():
@@ -55,6 +59,31 @@ def _heartbeat_tick(last_proxy_sample, now):
     return now
 
 
+def _retention_tick(last_retention, now):
+    """Enqueue the retention pass on its own interval; never raise.
+
+    Only an ENQUEUE happens on this thread: the pass itself runs as an ordinary
+    job in the forked work horse (fresh app/DB per job, as every job does), so
+    no database connection is opened in the long-lived parent process. If the
+    queue cannot be reached nothing runs inline here; the next tick retries.
+    Returns the next ``last_retention``.
+    """
+    if now - last_retention < RETENTION_INTERVAL_SECONDS:
+        return last_retention
+    try:
+        from app.jobs import get_queue
+        from app.jobs.tasks import expire_provider_nutrition
+        queue = get_queue()
+        if queue is not None:
+            queue.enqueue_call(expire_provider_nutrition,
+                               timeout=240, ttl=RETENTION_INTERVAL_SECONDS,
+                               result_ttl=0, failure_ttl=86400)
+    except Exception:
+        _log.warning("Saklama gecisi kuyruga atilamadi — sonraki tikte denenecek",
+                     exc_info=True)
+    return now
+
+
 def _start_heartbeat():
     """Heartbeat'i arka-plan daemon thread'de TTL/2'de bir tazele. Boşta (job yok)
     worker bile canlı görünsün diye — RQ'nun kendi worker-heartbeat'i bizim
@@ -64,9 +93,11 @@ def _start_heartbeat():
 
     def _loop():
         last_proxy_sample = 0.0
+        last_retention = -float(RETENTION_INTERVAL_SECONDS)
         while not stop.is_set():
             last_proxy_sample = _heartbeat_tick(last_proxy_sample,
                                                 time.monotonic())
+            last_retention = _retention_tick(last_retention, time.monotonic())
             stop.wait(max(WORKER_HEARTBEAT_TTL // 2, 5))
 
     t = threading.Thread(target=_loop, name="worker-heartbeat", daemon=True)

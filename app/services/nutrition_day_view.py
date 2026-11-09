@@ -57,6 +57,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models import MealLog, NutritionPlan, UserSession, WaterLog
+from app.services import provider_retention
 from app.services.nutrition_plan_schema import MEAL_KEYS, NAME_KEY, NAME_MAX
 from app.services.nutrition_targets import derive_daily_macro_targets
 from app.timeutil import app_today
@@ -208,12 +209,17 @@ def _read_target(user_id) -> TargetSection:
 
 def _read_intake(user_id, day_iso) -> IntakeSection:
     with db.session.begin_nested():
+        # Expired FatSecret per-item values live in the retained daily
+        # aggregate (provider_retention); it is added in this same SELECT, so
+        # totals are conserved and meal_count still counts entries only.
+        retained = [provider_retention.retained_scalar(f, user_id, day_iso)
+                    for f in provider_retention.RETAINED_FIELDS]
         row = db.session.query(
             func.count(MealLog.id),
-            func.coalesce(func.sum(MealLog.kalori), 0),
-            func.coalesce(func.sum(MealLog.protein), 0),
-            func.coalesce(func.sum(MealLog.karb), 0),
-            func.coalesce(func.sum(MealLog.yag), 0),
+            func.coalesce(func.sum(MealLog.kalori), 0) + retained[0],
+            func.coalesce(func.sum(MealLog.protein), 0) + retained[1],
+            func.coalesce(func.sum(MealLog.karb), 0) + retained[2],
+            func.coalesce(func.sum(MealLog.yag), 0) + retained[3],
         ).filter(MealLog.user_id == user_id, MealLog.tarih == day_iso).one()
     count = row[0]
     if not isinstance(count, int) or isinstance(count, bool) or count < 0:

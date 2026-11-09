@@ -153,7 +153,7 @@ def test_dispatch_background_creates_no_second_app_and_no_env_mutation(
     assert done.wait(10), "maintenance daemon never ran"
 
     assert order == ["sessions", "mobile_auth", "notifications",
-                     "fatsecret_proxy"]
+                     "fatsecret_proxy", "provider_retention"]
     assert tasks._worker_app is None           # no cached second application
     assert "FITX_SKIP_DB_INIT" not in os.environ   # no process-global mutation
 
@@ -182,6 +182,7 @@ def _maintenance_probes(monkeypatch, failing=None):
     monkeypatch.setattr(mobile_auth, "purge_expired", probe("mobile_auth"))
     monkeypatch.setattr(notifications, "purge_old", probe("notifications"))
     monkeypatch.setattr(tasks, "sample_fatsecret_proxy", probe("fatsecret_proxy"))
+    monkeypatch.setattr(tasks, "_provider_retention_pass", probe("provider_retention"))
     return order
 
 
@@ -193,14 +194,15 @@ def test_daily_maintenance_runs_every_intended_operation(app, monkeypatch):
     results = tasks.run_daily_maintenance(_NOW_ISO)
 
     assert order == ["sessions", "mobile_auth", "notifications",
-                     "fatsecret_proxy"]
+                     "fatsecret_proxy", "provider_retention"]
     assert results == {"sessions": "sessions", "mobile_auth": "mobile_auth",
                        "notifications": "notifications",
-                       "fatsecret_proxy": "fatsecret_proxy"}
+                       "fatsecret_proxy": "fatsecret_proxy",
+                       "provider_retention": "provider_retention"}
 
 
 @pytest.mark.parametrize("failing", ["sessions", "mobile_auth", "notifications",
-                                     "fatsecret_proxy"])
+                                     "fatsecret_proxy", "provider_retention"])
 def test_daily_maintenance_isolates_one_failing_operation(app, monkeypatch,
                                                           failing):
     """One broken operation rolls back and is recorded — the rest still run."""
@@ -218,7 +220,7 @@ def test_daily_maintenance_isolates_one_failing_operation(app, monkeypatch,
 
     # Attempted in order, none skipped: the failure isolates, it does not abort.
     assert order == ["sessions", "mobile_auth", "notifications",
-                     "fatsecret_proxy"]
+                     "fatsecret_proxy", "provider_retention"]
     assert results[failing] == "error"
     assert [k for k, v in results.items() if v == "error"] == [failing]
     assert len(rollbacks) == 1        # rollback happened, for the failed op only

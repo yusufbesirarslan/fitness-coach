@@ -500,7 +500,9 @@ def test_the_read_does_not_grow_a_query_per_entry(
 
     reads = [s for s in statements
              if "meal_log" in s or "user_session" in s]
-    assert len(reads) == 2
+    # Ledger + target, plus ONE retained-total read (FatSecret retention):
+    # still constant in the number of entries.
+    assert len(reads) == 3
 
 
 # ---------------------------------------------------------------------------

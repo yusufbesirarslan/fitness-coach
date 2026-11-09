@@ -270,13 +270,15 @@ def _daily_progress(targets, consumed):
 
 
 def _today_totals(user_id):
+    from app.services import provider_retention
     today = day_key()
     meals = MealLog.query.filter_by(user_id=user_id, tarih=today).all()
+    retained = provider_retention.retained_for_day(user_id, today)
     return {
-        "calories": round(sum(m.kalori or 0 for m in meals), 1),
-        "protein": round(sum(m.protein or 0 for m in meals), 1),
-        "carbs": round(sum(m.karb or 0 for m in meals), 1),
-        "fat": round(sum(m.yag or 0 for m in meals), 1),
+        "calories": round(sum(m.kalori or 0 for m in meals) + retained["energy_kcal"], 1),
+        "protein": round(sum(m.protein or 0 for m in meals) + retained["protein_g"], 1),
+        "carbs": round(sum(m.karb or 0 for m in meals) + retained["carbohydrate_g"], 1),
+        "fat": round(sum(m.yag or 0 for m in meals) + retained["fat_g"], 1),
     }
 
 
