@@ -62,9 +62,8 @@ mobile files change in this task.
 
 The status API remains additive: `erasure: null | {state, requested_at, due_by}`.
 Mobile reads `erasure.state == pending`, hides grant and displays its pending
-notice. Its endpoint and request keys match the backend. F01 EN matches the
-source v2 bytes; TR removes one accidentally duplicated non-health-access
-sentence from #490. Digests are calculated from the final candidate bytes;
+notice. Its endpoint and request keys match the backend. F01 EN and TR match the
+reviewed source v2 bytes exactly. Digests are calculated from those candidate bytes;
 neither candidate is published and no v1 grant is grandfathered.
 
 ## Preserved boundaries and limits

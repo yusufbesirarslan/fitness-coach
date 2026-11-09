@@ -32,7 +32,7 @@ TEXTS = MappingProxyType({
         "ve kontrol yanıtları, yiyecek, su ve takviye kayıtları, antrenmanlar ile notlarımda veya "
         "seçtiğim fotoğraflarda bulunan sağlık bilgileri dahildir. Rıza isteğe bağlıdır. Rıza "
         "vermezsem veya geri alırsam bu sağlık özellikleri durur; hesap kontrolleri ve kullanılabilir "
-        "Rızamı Ayarlar'dan geri alabilirim. Geri "
+        "sağlık dışı özellikler erişilebilir kalır. Rızamı Ayarlar'dan geri alabilirim. Geri "
         "aldığımda bu sağlık özellikleri hemen durur ve sağlık kayıtlarım 30 gün içinde silinir; "
         "belirli bir kayıt bir hukuki talep veya başvuru için gerekliyse yalnızca bu amaçla ve "
         "gerektiği süre boyunca saklanır. Yeniden rıza versem de silinen kayıtlar geri getirilmez. "
