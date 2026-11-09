@@ -127,11 +127,14 @@ def test_publish_failure_is_swallowed(monkeypatch):
 def test_client_is_rebuilt_in_a_forked_child(monkeypatch):
     built = []
 
-    class FakeBoto3:
-        @staticmethod
-        def client(*args, **kwargs):
+    class FakeSession:
+        def client(self, *args, **kwargs):
             built.append(kwargs["config"])
             return object()
+
+    class FakeBoto3:
+        class session:
+            Session = FakeSession
 
     monkeypatch.setattr(rm, "boto3", FakeBoto3)
     monkeypatch.setattr(rm, "_client", None)
@@ -145,6 +148,45 @@ def test_client_is_rebuilt_in_a_forked_child(monkeypatch):
     config = built[0]
     assert config.connect_timeout == 2 and config.read_timeout == 3
     assert config.retries == {"max_attempts": 1}
+
+
+def test_a_child_forked_while_the_parent_held_the_lock_does_not_block(monkeypatch):
+    import threading
+
+    class FakeBoto3:
+        class session:
+            class Session:
+                def client(self, *args, **kwargs):
+                    return object()
+
+    monkeypatch.setattr(rm, "boto3", FakeBoto3)
+    monkeypatch.setattr(rm, "_client", object())
+    monkeypatch.setattr(rm, "_client_pid", 100)
+    held = threading.Lock()
+    held.acquire()                                  # parent's heartbeat thread mid-publish
+    monkeypatch.setattr(rm, "_client_lock", held)
+    monkeypatch.setattr(rm.os, "getpid", lambda: 101)
+    result = {}
+    worker = threading.Thread(target=lambda: result.setdefault("c", rm._get_client()),
+                              daemon=True)
+    worker.start()
+    worker.join(2)
+    assert not worker.is_alive() and result["c"] is not None
+    assert rm._client_lock is not held
+
+
+def test_the_fork_hook_is_registered():
+    import os
+    if not hasattr(os, "register_at_fork"):
+        pytest.skip("no fork on this platform")
+    pid = os.fork()
+    if pid == 0:                                    # child: lock and client are fresh
+        ok = rm._client is None and not rm._client_lock.locked()
+        os._exit(0 if ok else 1)
+    with rm._client_lock:                           # parent keeps its lock usable
+        pass
+    _, status = os.waitpid(pid, 0)
+    assert os.WEXITSTATUS(status) == 0
 
 
 def test_no_redis_or_unreachable_redis_publishes_no_heartbeat(enabled):
@@ -290,8 +332,15 @@ def test_m1_pages_within_five_minutes_and_escalates_at_sixty():
     alarms = _alarms()
     primary, escalation = alarms["WorkerHeartbeatMissing"], alarms["WorkerHeartbeatEscalation"]
     assert primary["Period"] * primary["DatapointsToAlarm"] == 300
-    assert escalation["Period"] * escalation["DatapointsToAlarm"] == 3600
+    # Fires on 50 empty minutes within the last 60: <= 60 min after the
+    # outage starts wherever it starts, and brief heartbeats cannot reset it.
+    assert escalation["Period"] == 60
+    assert escalation["Period"] * escalation["EvaluationPeriods"] == 3600
+    assert escalation["Period"] * escalation["DatapointsToAlarm"] <= 3600
+    assert escalation["DatapointsToAlarm"] < escalation["EvaluationPeriods"]
     assert escalation["AlarmActions"] == [{"Ref": "EscalationTopicArn"}]
+    rule = _template()["Rules"]["EscalationIsADifferentChannel"]["Assertions"][0]["Assert"]
+    assert rule == {"Not": [{"Equals": [{"Ref": "EscalationTopicArn"}, {"Ref": "AlarmTopicArn"}]}]}
     # The worker samples every 60 s, so a healthy minute always has a point.
     assert rm.SAMPLE_INTERVAL_SECONDS <= primary["Period"]
 
@@ -376,23 +425,32 @@ def test_zero_traffic_healthy_worker_keeps_every_alarm_ok(world):
     assert set(world.states().values()) == {"OK"}
 
 
-def test_dead_worker_pages_at_five_minutes_escalates_at_sixty_and_recovers(world):
+@pytest.mark.parametrize("offset", [0, 130, 290])
+def test_dead_worker_pages_within_six_minutes_escalates_within_sixty_and_recovers(world, offset):
+    world.run(offset)                                 # outage starts anywhere in a period
     world.worker_alive = False
     world.run(240)
     assert world.state("WorkerHeartbeatMissing") == "OK"
     world.run(120)
     assert world.state("WorkerHeartbeatMissing") == "ALARM"
-    world.run(50 * 60)
+    world.run(39 * 60)                                # outage + 45 min
     assert world.state("WorkerHeartbeatEscalation") == "OK"
-    world.run(15 * 60)
+    world.run(15 * 60)                                # outage + 60 min
     assert world.state("WorkerHeartbeatEscalation") == "ALARM"
     assert world.state("ProviderRetentionPassMissing") == "ALARM"   # no pass either
     assert world.state("QueueNotDraining") == "OK"                  # no double page
     world.worker_alive = True
     world.run(10 * 60)
     assert world.state("WorkerHeartbeatMissing") == "OK"
-    world.run(60 * 60)
+    world.run(10 * 60)
     assert world.state("WorkerHeartbeatEscalation") == "OK"
+
+
+def test_a_crash_looping_worker_with_brief_heartbeats_still_escalates(world):
+    def flap(w):                                      # alive one minute in every ten
+        w.worker_alive = (w.t % 600) < 60
+    world.run(65 * 60, on_tick=flap)
+    assert world.state("WorkerHeartbeatEscalation") == "ALARM"
 
 
 def test_unreachable_redis_reads_as_a_dead_worker(world):
@@ -407,11 +465,11 @@ def test_hung_worker_with_live_heartbeat_pages_on_a_queue_that_never_drains(worl
     def enqueue(w):                                   # the timer still enqueues every 300 s
         if int(w.t) % 300 == 0:
             w.queue.depth += 1
-    world.run(10 * 60, on_tick=enqueue)
-    assert world.state("WorkerHeartbeatMissing") == "OK"
     world.run(15 * 60, on_tick=enqueue)
+    assert world.state("WorkerHeartbeatMissing") == "OK"
+    assert world.state("QueueNotDraining") == "OK"
+    world.run(20 * 60, on_tick=enqueue)               # hang + 35 min
     assert world.state("QueueNotDraining") == "ALARM"
-    world.run(10 * 60, on_tick=enqueue)
     assert world.state("ProviderRetentionPassMissing") == "ALARM"
 
 
@@ -420,6 +478,28 @@ def test_a_long_job_or_brief_backlog_does_not_page(world):
         w.queue.depth = 2 if (w.t % 1800) < 240 else 0   # 4-minute backlog twice an hour
     world.run(3 * 3600, on_tick=burst)
     assert world.state("QueueNotDraining") == "OK"
+
+
+def test_a_fifteen_minute_erasure_job_does_not_page(world, monkeypatch):
+    """The longest legitimate job (retry_health_erasures, timeout 900 s) holds
+    the single worker; work enqueued meanwhile waits up to 15 minutes."""
+    start = world.t
+    base = datetime(2026, 11, 9, 12, 0, tzinfo=timezone.utc)
+
+    class Waiting:
+        enqueued_at = base
+
+    real = rm.sample_queue
+    monkeypatch.setattr(rm, "sample_queue", lambda q, c, now=None: real(
+        q, c, now=base + timedelta(seconds=world.t - start)))
+
+    def busy(w):
+        running = (w.t - start) < 900
+        w.queue = FakeQueue(depth=1 if running else 0, ids=["summary"] if running else [])
+    world.reads["jobs"] = {"summary": Waiting()}
+    world.run(40 * 60, on_tick=busy)
+    assert world.state("QueueNotDraining") == "OK"
+    assert world.state("QueueOldestJobAge") == "OK"
 
 
 def test_a_sample_catching_each_fresh_enqueue_does_not_page(world):
@@ -443,9 +523,9 @@ def test_stale_live_job_pages_on_age(world, monkeypatch):
     real = rm.sample_queue
     monkeypatch.setattr(rm, "sample_queue", lambda q, c, now=None: real(
         q, c, now=base + timedelta(seconds=world.t - start)))
-    world.run(10 * 60)
+    world.run(19 * 60)
     assert world.state("QueueOldestJobAge") == "OK"
-    world.run(5 * 60)
+    world.run(6 * 60)
     assert world.state("QueueOldestJobAge") == "ALARM"
 
 

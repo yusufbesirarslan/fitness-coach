@@ -18,8 +18,9 @@ Parameters:
     Type: String
     AllowedPattern: '^arn:aws:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+$'
     Description: >
-      Topic for the 60-minute worker escalation. May equal AlarmTopicArn;
-      a separate topic (e.g. SMS) makes the escalation a different channel.
+      Topic for the 60-minute worker escalation. Must differ from
+      AlarmTopicArn (enforced by the EscalationIsADifferentChannel rule),
+      e.g. an SMS topic.
   Namespace:
     Type: String
     Default: FitX/Runtime
@@ -33,6 +34,14 @@ Parameters:
 
 Conditions:
   Actions: !Equals [!Ref ActionsEnabled, 'true']
+
+Rules:
+  EscalationIsADifferentChannel:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref EscalationTopicArn, !Ref AlarmTopicArn]]
+        AssertDescription: >
+          The 60-minute escalation must reach a different topic (channel) than
+          the primary page, otherwise it is not an escalation.
 
 Resources:
   # ── M1 worker liveness ────────────────────────────────────────────────────
@@ -66,15 +75,16 @@ Resources:
     Properties:
       AlarmName: AxisAI-R6-M1-Worker-Heartbeat-Escalation-60m
       AlarmDescription: >
-        M1 escalation: worker heartbeat missing for 60 consecutive minutes
-        (not resolved within the one-hour acknowledgement window).
+        M1 escalation: worker heartbeat missing in 50 of the last 60 minutes
+        (not resolved within the one-hour acknowledgement window; a worker
+        that crash-loops with brief heartbeats still escalates).
       Namespace: !Ref Namespace
       MetricName: WorkerHeartbeat
       Dimensions: [{Name: Service, Value: worker}]
       Statistic: SampleCount
-      Period: 300
-      EvaluationPeriods: 12
-      DatapointsToAlarm: 12
+      Period: 60
+      EvaluationPeriods: 60
+      DatapointsToAlarm: 50
       Threshold: 1
       ComparisonOperator: LessThanThreshold
       TreatMissingData: breaching
@@ -90,22 +100,24 @@ Resources:
   # Depth is the stuck-worker signal: QueueDepth is LLEN, which still counts
   # ids whose job hash expired (the retention pass is enqueued with ttl 300),
   # so a worker that stops consuming never lets it reach 0 again. A healthy
-  # worker drains within seconds, so "never empty at any 1-minute sample for
-  # 15 minutes" is a hang (or a sustained backlog, also worth a page).
+  # worker drains within seconds. The longest legitimate job is the erasure
+  # retry (timeout 900 s), during which later enqueues wait, so the window is
+  # 25 minutes: "never empty at any 1-minute sample for 25 minutes" is a hang
+  # (or a sustained backlog, also worth a page).
   QueueNotDraining:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: AxisAI-R6-M2-Queue-Not-Draining
       AlarmDescription: >
-        M2: the RQ queue was never empty for 15 minutes (worker alive but not
+        M2: the RQ queue was never empty for 25 minutes (worker alive but not
         consuming, or sustained backlog). Runbook: README.md#m2.
       Namespace: !Ref Namespace
       MetricName: QueueDepth
       Dimensions: [{Name: Service, Value: worker}]
       Statistic: Minimum
       Period: 300
-      EvaluationPeriods: 3
-      DatapointsToAlarm: 3
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 5
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
@@ -114,13 +126,14 @@ Resources:
       OKActions: [!Ref AlarmTopicArn]
 
   # Age covers jobs without the short retention ttl (AI summaries, the hourly
-  # erasure retry): a live job waiting 10 minutes for 3 consecutive minutes.
+  # erasure retry): a live job waiting 20 minutes (longer than the 900 s
+  # erasure job it may legitimately queue behind) for 3 consecutive minutes.
   QueueOldestJobAge:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: AxisAI-R6-M2-Queue-Oldest-Job-Age
       AlarmDescription: >
-        M2: a queued job has waited more than 600 s for 3 minutes.
+        M2: a queued job has waited more than 1200 s for 3 minutes.
         Runbook: README.md#m2.
       Namespace: !Ref Namespace
       MetricName: QueueOldestJobAgeSeconds
@@ -129,7 +142,7 @@ Resources:
       Period: 60
       EvaluationPeriods: 3
       DatapointsToAlarm: 3
-      Threshold: 600
+      Threshold: 1200
       ComparisonOperator: GreaterThanThreshold
       TreatMissingData: notBreaching
       ActionsEnabled: !If [Actions, true, false]

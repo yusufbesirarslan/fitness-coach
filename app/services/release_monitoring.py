@@ -77,18 +77,40 @@ _client_pid = None
 _client_lock = threading.Lock()
 
 
+def _reset_after_fork():
+    """In the forked RQ work horse: forget the parent's client AND lock.
+
+    The parent's heartbeat thread may hold ``_client_lock`` (or be inside a
+    credential refresh of boto3's shared default session) at the instant the
+    main thread forks; a child that inherited either would block forever.
+    """
+    global _client, _client_pid, _client_lock
+    _client = None
+    _client_pid = None
+    _client_lock = threading.Lock()
+
+
+if hasattr(os, "register_at_fork"):  # POSIX; the worker runs on Linux
+    os.register_at_fork(after_in_child=_reset_after_fork)
+
+
 def is_enabled():
     return RUNTIME_METRICS_ENABLED and _BOTO3_AVAILABLE
 
 
 def _get_client():
-    """A CloudWatch client owned by THIS process (recreated after fork)."""
+    """A CloudWatch client owned by THIS process (recreated after fork).
+
+    Built from a fresh ``boto3.session.Session`` so no credential cache or
+    lock is shared with any other user of boto3's default session."""
     global _client, _client_pid
     pid = os.getpid()
+    if _client_pid != pid:          # belt and braces if the fork hook did not run
+        _reset_after_fork()
     with _client_lock:
-        if _client is None or _client_pid != pid:
+        if _client is None:
             from botocore.config import Config as _BotoConfig
-            _client = boto3.client(
+            _client = boto3.session.Session().client(
                 "cloudwatch", region_name=BEDROCK_REGION,
                 config=_BotoConfig(connect_timeout=2, read_timeout=3,
                                    retries={"max_attempts": 1}))
@@ -137,7 +159,9 @@ def sample_queue(queue, connection, now=None):
         enqueued = _aware(getattr(job, "enqueued_at", None)) if job is not None else None
         if enqueued is not None:
             oldest = max(oldest, (now - enqueued).total_seconds())
-    failed = FailedJobRegistry(queue=queue).get_job_count()
+    # cleanup=False: a pure read (no ZREMRANGEBYSCORE). Expired entries can
+    # only make the count fall, which QueueFailedJobsNew already clamps at 0.
+    failed = FailedJobRegistry(queue=queue).get_job_count(cleanup=False)
     return {"depth": int(depth), "oldest_age": max(oldest, 0.0), "failed": int(failed)}
 
 
