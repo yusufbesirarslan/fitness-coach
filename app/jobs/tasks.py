@@ -116,6 +116,20 @@ def expire_provider_nutrition():
     return _in_app_context(_body)
 
 
+def retry_health_erasures():
+    """F01 withdrawal erasures that failed in their request (A1 = O2-B).
+
+    Enqueued hourly by the worker's timer thread (worker.py), so a pending
+    erasure finishes with zero user traffic; also run by daily maintenance and
+    ``flask health-erasure-run``.
+    """
+    def _body():
+        from app.services import health_erasure
+        return health_erasure.run_pending()
+
+    return _in_app_context(_body)
+
+
 def _provider_retention_pass():
     from app.services import provider_retention
     return provider_retention.expire_due().folded_entries

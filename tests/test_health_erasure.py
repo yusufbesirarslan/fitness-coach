@@ -361,3 +361,70 @@ def test_erasure_migration_is_additive_idempotent_and_retains_evidence(tmp_path)
         conn.exec_driver_sql("INSERT INTO health_erasure (owner_id, generation, requested_at) VALUES (1,1,'2026-11-09')")
         with Operations.context(MigrationContext.configure(conn)), pytest.raises(RuntimeError, match='refuses to erase'):
             migration.downgrade()
+
+
+# ── Post-#500 follow-up (#490 review): grant-bound withdraw erasure,
+#    traffic-independent retry, held erasures not overdue ───────────────────
+
+def test_withdraw_without_a_recorded_grant_erases_nothing(make_user, world):
+    # APPROVED_VERSION unset, a stray client call or pre-F01 history: a
+    # withdraw with no grant behind it changes state only.
+    legacy = make_user("legacy_o2b_withdraw", health_consent=False, weight=90.0)
+    result = consent.mutate(legacy.id, command(0, "withdraw", "o2b-legacy-withdraw"))
+    assert result["state"] == "withdrawn" and result["erasure"] is None
+    assert HealthErasure.query.filter_by(owner_id=legacy.id).count() == 0
+    assert db.session.get(User, legacy.id).weight == 90.0
+
+
+def test_held_erasure_is_not_reported_overdue(world, caplog):
+    db.session.add(HealthLegalHold(owner_id=world.a_id, categories=["workouts"],
+                                   matter_ref="CLAIM-2026-002", created_at=datetime.utcnow(),
+                                   review_at=datetime.utcnow() + timedelta(days=90)))
+    db.session.commit()
+    _withdraw(world.a_id)
+    HealthErasure.query.filter_by(owner_id=world.a_id).one().requested_at = (
+        datetime.utcnow() - timedelta(days=40))
+    db.session.commit()
+    results = health_erasure.run_pending()
+    assert results["held"] == 1 and results["overdue"] == 0
+    assert "event=overdue" not in caplog.text
+
+
+def test_worker_timer_enqueues_erasure_retry_without_traffic(world, monkeypatch):
+    # Daily maintenance runs only on health requests; the worker timer thread
+    # enqueues the retry hourly and the job alone finishes the erasure.
+    from types import SimpleNamespace
+    import worker
+    from app.jobs import tasks
+    assert worker.HEALTH_ERASURE_INTERVAL_SECONDS == 3600
+
+    enqueued = []
+    queue = SimpleNamespace(enqueue_call=lambda func, **kw: enqueued.append((func, kw)))
+    monkeypatch.setattr("app.jobs.get_queue", lambda: queue)
+    last = worker._health_erasure_tick(-3600.0, 0.0)
+    assert worker._health_erasure_tick(last, 1800.0) == last     # inside the interval
+    assert worker._health_erasure_tick(last, 3600.0) == 3600.0
+    assert [f for f, _ in enqueued] == [tasks.retry_health_erasures] * 2
+    assert enqueued[0][1]["timeout"] == 900 and enqueued[0][1]["result_ttl"] == 0
+
+    world.s3.failing.add(world.a_keys["pump"])
+    _withdraw(world.a_id)
+    with pytest.raises(health_erasure.ErasureUnavailable):
+        health_erasure.run(world.a_id)
+    world.s3.failing.clear()
+    assert tasks.retry_health_erasures()["completed"] == 1
+    assert consent.status(world.a_id)["erasure"]["state"] == "completed"
+    assert PumpCheck.query.filter_by(user_id=world.a_id).count() == 0
+
+
+def test_erasure_tick_never_runs_inline_when_queue_is_unavailable(monkeypatch):
+    import worker
+    monkeypatch.setattr("app.jobs.get_queue", lambda: None)
+    monkeypatch.setattr("app.jobs.tasks.retry_health_erasures",
+                        lambda: (_ for _ in ()).throw(AssertionError("ran inline")))
+    assert worker._health_erasure_tick(-3600.0, 0.0) == 0.0
+
+    def broken():
+        raise RuntimeError("redis down")
+    monkeypatch.setattr("app.jobs.get_queue", broken)
+    assert worker._health_erasure_tick(-3600.0, 5.0) == 5.0      # logged, never raised

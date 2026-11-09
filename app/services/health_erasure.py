@@ -416,8 +416,13 @@ def run_pending(limit=200):
     results["records_expired"] = HealthErasure.query.filter(
         HealthErasure.completed_at.isnot(None), HealthErasure.completed_at < cutoff).delete(
         synchronize_session=False)
+    # A documented legal hold is the lawful reason an erasure stays open past
+    # 30 days; its review date is reported by hold_review_due instead.
+    from app.health_consent_models import HealthLegalHold
+    held_owners = select(HealthLegalHold.owner_id).where(HealthLegalHold.released_at.is_(None))
     overdue = HealthErasure.query.filter(
         HealthErasure.completed_at.is_(None),
+        HealthErasure.owner_id.notin_(held_owners),
         HealthErasure.requested_at < datetime.utcnow() - ERASURE_DEADLINE).count()
     db.session.commit()  # leaves no transaction open after maintenance
     if overdue:

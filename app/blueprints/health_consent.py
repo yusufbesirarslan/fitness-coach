@@ -21,7 +21,8 @@ def _respond(user):
     else:
         result = consent.mutate(user.id, data)
         if (result.get("erasure") or {}).get("state") == "pending":
-            # First attempt now; daily maintenance and the operator CLI retry.
+            # First attempt now; the worker timer (hourly), daily maintenance and
+            # the operator CLI retry.
             try:
                 health_erasure.run(user.id)
             except Exception as error:
