@@ -362,10 +362,10 @@ def run_pending(limit=200):
     results["records_expired"] = HealthErasure.query.filter(
         HealthErasure.completed_at.isnot(None), HealthErasure.completed_at < cutoff).delete(
         synchronize_session=False)
-    db.session.commit()
     overdue = HealthErasure.query.filter(
         HealthErasure.completed_at.is_(None),
         HealthErasure.requested_at < datetime.utcnow() - ERASURE_DEADLINE).count()
+    db.session.commit()  # leaves no transaction open after maintenance
     if overdue:
         current_app.logger.error("health_erasure event=overdue count=%d", overdue)
     results["overdue"] = overdue

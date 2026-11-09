@@ -153,7 +153,7 @@ def test_dispatch_background_creates_no_second_app_and_no_env_mutation(
     assert done.wait(10), "maintenance daemon never ran"
 
     assert order == ["sessions", "mobile_auth", "notifications",
-                     "fatsecret_proxy"]
+                     "fatsecret_proxy", "health_erasure"]
     assert tasks._worker_app is None           # no cached second application
     assert "FITX_SKIP_DB_INIT" not in os.environ   # no process-global mutation
 
@@ -166,7 +166,7 @@ _NOW_ISO = "2026-08-28T03:00:00"
 def _maintenance_probes(monkeypatch, failing=None):
     """Patch every maintenance operation; return the ordered call log."""
     from app.jobs import tasks
-    from app.services import mobile_auth, notifications, session_store
+    from app.services import health_erasure, mobile_auth, notifications, session_store
 
     order = []
 
@@ -182,6 +182,7 @@ def _maintenance_probes(monkeypatch, failing=None):
     monkeypatch.setattr(mobile_auth, "purge_expired", probe("mobile_auth"))
     monkeypatch.setattr(notifications, "purge_old", probe("notifications"))
     monkeypatch.setattr(tasks, "sample_fatsecret_proxy", probe("fatsecret_proxy"))
+    monkeypatch.setattr(health_erasure, "run_pending", probe("health_erasure"))
     return order
 
 
@@ -193,14 +194,15 @@ def test_daily_maintenance_runs_every_intended_operation(app, monkeypatch):
     results = tasks.run_daily_maintenance(_NOW_ISO)
 
     assert order == ["sessions", "mobile_auth", "notifications",
-                     "fatsecret_proxy"]
+                     "fatsecret_proxy", "health_erasure"]
     assert results == {"sessions": "sessions", "mobile_auth": "mobile_auth",
                        "notifications": "notifications",
-                       "fatsecret_proxy": "fatsecret_proxy"}
+                       "fatsecret_proxy": "fatsecret_proxy",
+                       "health_erasure": "health_erasure"}
 
 
 @pytest.mark.parametrize("failing", ["sessions", "mobile_auth", "notifications",
-                                     "fatsecret_proxy"])
+                                     "fatsecret_proxy", "health_erasure"])
 def test_daily_maintenance_isolates_one_failing_operation(app, monkeypatch,
                                                           failing):
     """One broken operation rolls back and is recorded — the rest still run."""
@@ -218,7 +220,7 @@ def test_daily_maintenance_isolates_one_failing_operation(app, monkeypatch,
 
     # Attempted in order, none skipped: the failure isolates, it does not abort.
     assert order == ["sessions", "mobile_auth", "notifications",
-                     "fatsecret_proxy"]
+                     "fatsecret_proxy", "health_erasure"]
     assert results[failing] == "error"
     assert [k for k, v in results.items() if v == "error"] == [failing]
     assert len(rollbacks) == 1        # rollback happened, for the failed op only

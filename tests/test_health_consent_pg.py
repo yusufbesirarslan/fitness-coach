@@ -8,7 +8,7 @@ from flask import Flask
 
 from app.extensions import db
 from app.models import User
-from app.services import health_consent as consent, health_disclosure as disclosure
+from app.services import health_consent as consent, health_disclosure as disclosure, health_erasure
 from test_health_consent import command
 
 pytestmark = pytest.mark.pg_concurrency
@@ -92,6 +92,11 @@ def test_old_work_and_mutation_replay_cannot_revive_after_regrant(pg_app):
         consent.mutate(1, grant)
         consent.mutate(1, command(1, "withdraw", "pg-stop-0002"))
         assert consent.mutate(1, grant)["state"] == "withdrawn"
+        # A1 = O2-B: no new grant before the withdrawal's erasure has finished.
+        with pytest.raises(consent.HealthConsentDenied) as pending:
+            consent.mutate(1, command(2, request_id="pg-regrant-early"))
+        assert (pending.value.code, pending.value.status) == ("HEALTH_ERASURE_PENDING", 409)
+        assert health_erasure.run(1) == "completed"
         consent.mutate(1, command(2, request_id="pg-regrant-0003"))
         with pytest.raises(consent.HealthConsentDenied) as denied:
             with consent.processing(1, expected_generation=1):
@@ -194,6 +199,7 @@ def test_joined_worker_rechecks_original_health_generation_in_own_app_context(pg
         with ThreadPoolExecutor(max_workers=1) as pool:
             assert pool.submit(worker).result(timeout=5) == 1
         consent.mutate(1, command(1, "withdraw", "worker-stop-0002"))
+        assert health_erasure.run(1) == "completed"
         consent.mutate(1, command(2, request_id="worker-regrant-0003"))
         with ThreadPoolExecutor(max_workers=1) as pool:
             with pytest.raises(consent.HealthConsentDenied):
