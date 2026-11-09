@@ -128,7 +128,7 @@ def test_query_metrics_calories_and_water(app, make_user):
     user = make_user("metrics")
     _seed_metrics(db, user.id)
     cal = json.loads(ai_coach._tool_query_fitx_metrics(user.id, "calories", "today"))
-    assert cal["status"] == "ok" and cal["value"] == 1000 and cal["unit"] == "kcal"
+    assert cal["status"] == "unsupported" and "value" not in cal
     water = json.loads(ai_coach._tool_query_fitx_metrics(user.id, "water_ml", "today"))
     assert water["value"] == 5 * 240 and water["unit"] == "ml"
 
@@ -151,7 +151,7 @@ def test_query_metrics_iso_and_datetime_ranges_agree_on_today(app, make_user):
     _seed_metrics(db, user.id)
     cal = json.loads(ai_coach._tool_query_fitx_metrics(user.id, "calories", "today"))
     vol = json.loads(ai_coach._tool_query_fitx_metrics(user.id, "volume_lifted", "today"))
-    assert cal["value"] == 1000 and vol["value"] == 2500  # ikisi de bugünü gördü
+    assert "value" not in cal and vol["value"] == 2500  # intake is unproven; training remains independent
 
 
 def test_query_metrics_sleep_unsupported_and_bad_enums(app, make_user):
@@ -166,7 +166,7 @@ def test_query_metrics_scoped_to_user(app, make_user):
     a = make_user("owner_a")
     b = make_user("owner_b")
     _seed_metrics(db, a.id)  # yalnızca A'nın verisi
-    assert json.loads(ai_coach._tool_query_fitx_metrics(b.id, "calories", "today"))["value"] == 0
+    assert json.loads(ai_coach._tool_query_fitx_metrics(b.id, "water_ml", "today"))["value"] == 0
 
 
 # ---------------------------------------------------------------------------

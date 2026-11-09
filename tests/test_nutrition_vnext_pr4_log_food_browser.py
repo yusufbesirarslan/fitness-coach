@@ -27,6 +27,12 @@ from test_ux3_pr4_nutrition_placement_browser import stub_meal_macro_provider  #
 from test_nutrition_vnext_pr2_navigation_browser import paths
 from test_nutrition_vnext_pr3_daily_browser import CATALOG, PLAN, fail, open_today, seed
 
+
+# D-B2: these tests qualify provider-backed persistence MECHANICS for the day a
+# written FatSecret retention permission exists; the launch hold is tested in
+# tests/test_fatsecret_provider_persistence_hold.py.
+pytestmark = pytest.mark.usefixtures("provider_persistence_permitted")
+
 OPEN = re.compile(r'\bopen\b')
 PRIMARY = ['search', 'barcode', 'menu', 'quick-add', 'build-meal']
 INITIAL = Counter({'/nutrition': 1, '/meal-log/today': 1, '/nutrition-plan/active': 1,

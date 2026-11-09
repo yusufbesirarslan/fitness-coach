@@ -5,6 +5,10 @@ from decimal import Decimal
 from app.services import mobile_food_discovery
 
 
+class ProviderPersistenceHeld(Exception):
+    """D-B2: new provider-backed persistence is held (no written retention right)."""
+
+
 class ProviderFoodNotFound(Exception):
     """The provider food or serving cannot be resolved authoritatively."""
 
@@ -60,7 +64,14 @@ def _nutrition(values, multiplier=Decimal("1")):
 
 
 def resolve_provider_food(provider, food_id, serving_id, quantity):
-    """Resolve and scale one semantic serving selection from provider truth."""
+    """Resolve and scale one semantic serving selection from provider truth.
+
+    Every caller persists the result (MealLog / CustomMealItem), so the D-B2
+    hold is enforced here, before any provider request.
+    """
+    from app.services import fatsecret_boundary
+    if not fatsecret_boundary.provider_persistence_allowed():
+        raise ProviderPersistenceHeld
     if provider != "fatsecret" or not food_id or not serving_id:
         raise ProviderFoodNotFound
     if (not isinstance(quantity, Decimal) or not quantity.is_finite()

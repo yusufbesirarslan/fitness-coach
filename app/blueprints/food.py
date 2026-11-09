@@ -140,6 +140,12 @@ def barcode_add_to_diary():
             "analytics_events": ["Added To Diary"],
         })
 
+    from app.services import fatsecret_boundary
+    if not fatsecret_boundary.provider_persistence_allowed():
+        # D-B2: new provider-backed diary persistence is held.
+        return _deprecated_compatibility_response(
+            {"error": "provider_logging_unavailable", "retryable": False}, 503)
+
     try:
         product = barcode_svc.get_barcode_product(data.get("barcode", ""))
     except BlockingConcurrencyLimit:

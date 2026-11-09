@@ -1,7 +1,7 @@
 """First-party health consent. Empty additive tables; no inferred permission.
 
 Revision ID: f01c0a1e0001
-Revises: c6f8b0d2e4a1
+Revises: d8f1a3c5e7b9
 No customer backfill, inferred grants or modifications to #436 migrations.
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 import re
 
 revision = 'f01c0a1e0001'
-down_revision = 'c6f8b0d2e4a1'
+down_revision = 'd8f1a3c5e7b9'
 branch_labels = None
 depends_on = None
 expand_contract = "expand"

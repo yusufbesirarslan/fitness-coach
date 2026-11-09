@@ -9,6 +9,12 @@ from app.extensions import db
 from app.models import BarcodeFoodCache, MealLog
 from app.services import fatsecret, mobile_auth
 
+
+# D-B2: these tests qualify provider-backed persistence MECHANICS for the day a
+# written FatSecret retention permission exists; the launch hold is tested in
+# tests/test_fatsecret_provider_persistence_hold.py.
+pytestmark = pytest.mark.usefixtures("provider_persistence_permitted")
+
 PREFIX = "/api/v1/nutrition"
 READS = ["/foods/search?q=food", "/foods/fatsecret/A/servings",
          "/foods/barcode?code=012345678905"]

@@ -10,6 +10,7 @@ import json
 import re
 import time
 import s3_helper
+from app.services import fatsecret_boundary
 from app.services import nutrition_pipeline, prompt_builder, coach_privacy
 from datetime import datetime, timedelta
 from flask import current_app, g, has_app_context, session
@@ -161,7 +162,10 @@ def _remaining_macros_for_user(user_id):
         getattr(sess, "target_calories", None), getattr(sess, "goal", None))
     if targets is None:
         return None
-    remaining = remaining_macro_budget(targets, _today_nutrition_totals(user_id))
+    if fatsecret_boundary.intake_unproven(user_id):
+        return None
+    remaining = remaining_macro_budget(
+        targets, {"calories": 0, "protein": 0, "carbs": 0, "fat": 0})
     return remaining.as_dict()
 
 
@@ -229,7 +233,7 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
     if not food_query:
         return json.dumps({"status": "error", "message": "Yiyecek sorgusu boş."}, ensure_ascii=False)
 
-    results = _coach_search_food(food_query)
+    results = fatsecret_boundary.independent_food_search(food_query)
     if not results:
         # FatSecret/fallback boş → LLM kullanıcıdan netleştirme istesin (hata yönetimi).
         return json.dumps({
@@ -275,7 +279,7 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
     _cleanup_stale_pending(user_id)
     # Cleanup can roll back on a storage failure; reacquire the original fence.
     authority = ai_consent.fence_active(user_id)
-    stored_payload = dict(payload)
+    stored_payload = fatsecret_boundary.attest("pending-meal", user_id, payload)
     if authority is not None:
         stored_payload[ai_consent.PAYLOAD_AUTHORITY_KEY] = authority.to_context()
     PendingAction.query.filter_by(user_id=user_id, action_type="log_meal").delete()
@@ -284,7 +288,7 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
     db.session.commit()
     _mark_staged_this_turn(staged_row.id)
 
-    return json.dumps({
+    return json.dumps(fatsecret_boundary.attest("tool-result", user_id, {
         "status": "staged",
         "staged_food": payload,
         "evaluation": evaluation,
@@ -292,7 +296,7 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
                         "değiştirmeden ve yeniden hesaplamadan sun — sayılar kesindir. "
                         "Sonra 'Günlüğüne kaydedeyim mi?' diye onay iste; onay gelmeden "
                         "confirm_and_commit_meal_log çağırma."),
-    }, ensure_ascii=False)
+    }), ensure_ascii=False)
 
 
 def _fence_pending_log(user_id, payload):
@@ -331,6 +335,11 @@ def _tool_confirm_and_commit_meal_log(user_id):
         }, ensure_ascii=False)
 
     data = _fence_pending_log(user_id, pending.payload)
+    # A pending meal staged before the advice fallback (no proof) may carry
+    # provider values. The user's explicit confirmation still logs it (diary
+    # logging stays usable), but its numbers are never attested for the model.
+    independent = fatsecret_boundary.verified("pending-meal", user_id, data)
+    data.pop(fatsecret_boundary.PROOF, None)
     cal = float(data.get("calories", 0) or 0)
     pro = float(data.get("protein", 0) or 0)
     carb = float(data.get("carbs", 0) or 0)
@@ -370,15 +379,18 @@ def _tool_confirm_and_commit_meal_log(user_id):
     from app.services.ai_allowances.execution import canonical_success
     canonical_success()
 
-    return json.dumps({
+    result = {
         "status": "committed",
         "logged": {
             "food_name": name, "calories": cal, "protein": pro,
             "carbs": carb, "fat": fat, "serving_size": data.get("serving_size", ""),
         },
         "xp_awarded": 10,
-        "today_totals": _today_nutrition_totals(user_id),
-    }, ensure_ascii=False)
+        "today_totals": None,
+    }
+    if independent:
+        result = fatsecret_boundary.attest("tool-result", user_id, result)
+    return json.dumps(result, ensure_ascii=False)
 
 
 _PENDING_TTL = timedelta(hours=1)
@@ -653,10 +665,11 @@ def _tool_query_fitx_metrics(user_id, metric_type, date_range):
     base = {"status": "ok", "metric_type": metric_type, "date_range": date_range}
 
     if metric_type == "calories":
-        lo, hi = _range_keys(date_range)
-        total = db.session.query(db.func.coalesce(db.func.sum(MealLog.kalori), 0)).filter(
-            MealLog.user_id == user_id, MealLog.tarih >= lo, MealLog.tarih <= hi).scalar()
-        return json.dumps({**base, "value": round(total or 0), "unit": "kcal"}, ensure_ascii=False)
+        # The ledger has no trustworthy provider/input lineage. A partial total
+        # must never be personalized as the complete consumption of this range.
+        return json.dumps({"status": "unsupported", "metric_type": metric_type,
+                           "date_range": date_range,
+                           "message": fatsecret_boundary.notice()}, ensure_ascii=False)
 
     if metric_type == "water_ml":
         lo, hi = _range_keys(date_range)
@@ -1394,7 +1407,7 @@ def _run_coach_conversation_openai(user_id, question, context, history,
         payloads = []
         for tc in tool_calls:
             result = _dispatch_coach_tool(user_id, tc.function.name, tc.function.arguments)
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": coach_privacy.tool_result(tc.function.name, result)})
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": coach_privacy.tool_result(tc.function.name, result, user_id=user_id)})
             parsed = _tool_payload(result)
             if parsed is not None:
                 payloads.append(parsed)
@@ -1524,7 +1537,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
             for block in resp.content:
                 if getattr(block, "type", None) == "tool_use":
                     out = _dispatch_coach_tool(user_id, block.name, json.dumps(block.input or {}))
-                    tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": coach_privacy.tool_result(block.name, out)})
+                    tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": coach_privacy.tool_result(block.name, out, user_id=user_id)})
                     tools_ran += 1
                     parsed = _tool_payload(out)
                     if parsed is not None:

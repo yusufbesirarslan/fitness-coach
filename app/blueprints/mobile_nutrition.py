@@ -130,6 +130,12 @@ def nutrition_log_food():
             "The Idempotency-Key belongs to a different command.", 409, False)
     except mobile_log_food.ProviderFoodNotFound:
         return mobile_error("FOOD_NOT_FOUND", "Food was not found.", 404, False)
+    except mobile_log_food.ProviderPersistenceHeld:
+        # D-B2 hold. Existing code: the shipped client maps it to its
+        # provider-unavailable log copy; not retryable (retry cannot succeed).
+        return mobile_error(
+            "FOOD_PROVIDER_UNAVAILABLE",
+            "Logging this food is unavailable. Add it manually instead.", 503, False)
     except Exception as error:
         try:
             db.session.rollback()

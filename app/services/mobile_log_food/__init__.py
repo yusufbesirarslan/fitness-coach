@@ -14,6 +14,7 @@ from .parsing import (
 from .service import (
     IdempotencyConflict,
     ProviderFoodNotFound,
+    ProviderPersistenceHeld,
     log_food,
     response_meal,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "parse_manual_nutrition",
     "IdempotencyConflict",
     "ProviderFoodNotFound",
+    "ProviderPersistenceHeld",
     "log_food",
     "response_meal",
 ]

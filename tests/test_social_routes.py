@@ -705,6 +705,7 @@ def test_local_items_normalized_and_raw_sender_prose_excluded(
     assert semaphore.acquisitions == semaphore.releases == 0
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 def test_suggestion_gate_cache_and_macro_helpers_run_outside_transaction(
         client, auth_user, friend, monkeypatch):
     semaphore = _RecordingSharedSemaphore(check_transaction=True)

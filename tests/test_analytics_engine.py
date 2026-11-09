@@ -147,6 +147,21 @@ def test_protein_goal_nudge_at_90_percent(make_user):
     db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="tavuk",
                            kalori=4000, protein=950))
     db.session.commit()
+    # R-5: logged intake has no verified lineage (may be FatSecret-derived), so
+    # the personalized protein praise is withheld...
+    assert "NUDGE_PROTEIN_GOAL" not in _nudge_types(user)
+
+
+def test_protein_goal_math_once_intake_is_proven(make_user, monkeypatch):
+    # ...while the 90 % weekly arithmetic itself stays intact for the day a
+    # verified-provenance predicate admits these rows.
+    from app.services import fatsecret_boundary
+    monkeypatch.setattr(fatsecret_boundary, "intake_unproven_between", lambda *a: False)
+    user = make_user("frank_proven", last_login=date.today())
+    db.session.add(UserSession(user_id=user.id, target_calories=2000, goal="kas kazanma"))
+    db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="tavuk",
+                           kalori=4000, protein=950))
+    db.session.commit()
     assert "NUDGE_PROTEIN_GOAL" in _nudge_types(user)
 
 

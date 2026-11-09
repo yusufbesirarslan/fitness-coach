@@ -36,17 +36,17 @@ StoreKit, product IDs or a cached boolean.
 |---|---|---|
 | `contract_version` | `1` | Integer 1, never string/bool; breaking fields, types or enum changes bump it; unknown additive fields may be ignored |
 | `policy_state` | `CONFIGURED` \| `UNCONFIGURED` | Whether the server has any allowance policy. `UNCONFIGURED` is not "unlimited" and not "zero" |
-| `access` | `PREMIUM` \| `STARTER` \| `NONE` \| `UNCONFIGURED` | Which scope applies now. `NONE` = no AI allowance for this account under current policy |
+| `access` | `PREMIUM` \| `LAUNCH_FREE` \| `STARTER` \| `NONE` \| `UNCONFIGURED` | Which scope applies now. `LAUNCH_FREE` = the finite free campaign window (not a subscription). `NONE` = no AI allowance for this account under current policy |
 | `subscription.state` | `AVAILABLE` \| `DISABLED` | `DISABLED` = subscription verification is off on this server, so Premium cannot be effective |
 | `subscription.entitlement` | object \| `null` | Verbatim #436 entitlement (`tier`, `effective_premium`, `status`, `expires_at`, `verification_pending`), see `docs/APPLE_SUBSCRIPTIONS.md` |
 | `starter.state` | `GRANTED` \| `ELIGIBLE` \| `NOT_ELIGIBLE` \| `UNCONFIGURED` | `ELIGIBLE` = not yet granted; the grant happens server-side at the first AI action |
 | `starter.granted_at` | ISO-8601 UTC \| `null` | |
 | `features[]` | always the 5 supported features, fixed order | `coach`, `training_generation`, `nutrition_generation`, `pump_check`, `qr_menu` |
-| `features[].scope` | `STARTER` \| `PREMIUM` \| `null` | |
+| `features[].scope` | `STARTER` \| `PREMIUM` \| `LAUNCH_FREE` \| `null` | |
 | `features[].state` | `AVAILABLE` \| `EXHAUSTED` \| `NOT_IN_PLAN` \| `NOT_CONFIGURED` | `NOT_IN_PLAN` = this scope does not include the feature (never unlimited) |
 | `limit`, `used`, `reserved`, `remaining` | integer \| `null` | `null` = not applicable/unknown — never render as 0. `reserved` = actions in flight |
-| `reset` | `NEVER` \| `WEEKLY` \| `MONTHLY` \| `null` | Starter is always `NEVER` (non-renewing) |
-| `resets_at` | ISO-8601 UTC \| `null` | Present only when a reset actually exists. Weekly/monthly use the Europe/Istanbul calendar |
+| `reset` | `NEVER` \| `WEEKLY` \| `MONTHLY` \| `CAMPAIGN_WINDOW` \| `CAMPAIGN_END` \| `null` | Starter is always `NEVER` (non-renewing). `LAUNCH_FREE`: `CAMPAIGN_WINDOW` while another campaign window follows, `CAMPAIGN_END` in the final window |
+| `resets_at` | ISO-8601 UTC \| `null` | Present only when a reset actually exists. Weekly/monthly use the Europe/Istanbul calendar; `CAMPAIGN_WINDOW` gives the next window's start; `CAMPAIGN_END` is always `null` |
 
 Unknown enum values must be treated as "unavailable", not mapped to a nearby state.
 
@@ -90,6 +90,9 @@ analysis).
 3. `null` numbers and `NOT_CONFIGURED`/`UNCONFIGURED` render as "not available", never "0 left".
 4. `reset: "NEVER"` must not be described as weekly/monthly; the legacy
    "resets next week" copy applies only to legacy codes.
+5. `LAUNCH_FREE` is never Premium: do not show subscription, restore or "manage
+   plan" copy for it. Show `resets_at` exactly as sent (never a hard-coded date);
+   `CAMPAIGN_END` / `null` means no further free window is promised.
 
 ## V1 normative semantics and integration boundary
 
@@ -150,3 +153,38 @@ only exercised with explicit test policy; it is not a production promise.
 Freeze readiness requires targeted schema/error tests, complete offline
 regression and disposable PostgreSQL/migration qualification. Independent
 review and an immutable delivered commit are separate integration gates.
+
+## LAUNCH_FREE campaign scope (AXISAI-LAUNCH-FREE-BE-01)
+
+Additive to contract_version 1 (see "Versioning decision" below). Source-only
+policy: `coach` 30, `training_generation` 2, `nutrition_generation` 2,
+`pump_check` 20, `qr_menu` 5 per window, no rollover. Three fixed 30-day windows
+from 2026-11-25 00:00 Europe/Istanbul, start-inclusive, end-exclusive:
+
+| Window | Starts (UTC) | Ends (UTC) | `reset` | `resets_at` |
+|---|---|---|---|---|
+| LF1 | 2026-11-24T21:00:00Z | 2026-12-24T21:00:00Z | `CAMPAIGN_WINDOW` | `2026-12-24T21:00:00Z` |
+| LF2 | 2026-12-24T21:00:00Z | 2027-01-23T21:00:00Z | `CAMPAIGN_WINDOW` | `2027-01-23T21:00:00Z` |
+| LF3 | 2027-01-23T21:00:00Z | 2027-02-22T21:00:00Z | `CAMPAIGN_END` | `null` |
+
+Precedence: effective verified Premium → active campaign window → Starter
+(10/1/1/1/1, once per account). Before the start and from the end, the account
+is on Starter; its refusals say `scope: "STARTER"`, `reset: "NEVER"`. Exhaustion
+inside a window refuses with `scope: "LAUNCH_FREE"` and never falls through to
+Starter. Window keys are server-side; reinstall/sign-out never resets usage.
+
+Refusal (`AI_ALLOWANCE_EXHAUSTED`, 402, not retryable), LF1:
+
+```json
+{"error": {"code": "AI_ALLOWANCE_EXHAUSTED", "message": "AI allowance unavailable.",
+  "retryable": false, "request_id": "0123456789abcdef",
+  "details": {"feature": "coach", "scope": "LAUNCH_FREE",
+              "reset": "CAMPAIGN_WINDOW", "resets_at": "2026-12-24T21:00:00Z"}}}
+```
+
+Final window: `"reset": "CAMPAIGN_END", "resets_at": null`.
+
+Versioning decision: `contract_version` stays `1`. Bumping it would make every
+shipped decoder reject the view for Starter/Premium accounts too; shipped
+decoders already treat an unknown `access`/`scope`/`reset` value as unavailable
+(fail closed), and the refusal decoder maps an unknown scope to `null`.

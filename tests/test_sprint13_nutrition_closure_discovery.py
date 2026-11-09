@@ -27,6 +27,12 @@ from app.extensions import db
 from app.models import CustomMeal, CustomMealItem, MealLog, UserSession
 
 
+# D-B2: these tests qualify provider-backed persistence MECHANICS for the day a
+# written FatSecret retention permission exists; the launch hold is tested in
+# tests/test_fatsecret_provider_persistence_hold.py.
+pytestmark = pytest.mark.usefixtures("provider_persistence_permitted")
+
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 FIXED_DAY = date(2026, 8, 9)

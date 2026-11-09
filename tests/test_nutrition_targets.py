@@ -259,10 +259,9 @@ def test_the_consumers_share_the_remaining_budget_interpretation(
     menu_remaining = client.post(
         "/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()["remaining"]
 
+    assert coach is None and menu_remaining is None  # unproven intake is not a partial budget
     for key, value in expected.items():
-        assert coach[key] == pytest.approx(value, abs=TOL), key
         assert barcode_remaining[key] == pytest.approx(value, abs=0.05), key
-        assert menu_remaining[key] == pytest.approx(value, abs=0.5), key
 
 
 def test_the_coach_still_reports_no_budget_for_an_unconfigured_user(

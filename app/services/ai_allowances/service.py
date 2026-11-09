@@ -1,6 +1,7 @@
 """Durable AI allowance ledger: Starter grant, reservations and the read view.
 
-Lifecycle: AUTHORIZE (tier from the #436 entitlement, then policy) -> RESERVE
+Lifecycle: AUTHORIZE (tier from the #436 entitlement, then policy: effective
+Premium, else an active LAUNCH_FREE campaign window, else Starter) -> RESERVE
 (one unit held under the owner lock) -> EXECUTE (caller's provider work, no
 lock held) -> FINALIZE (commit = consume, release = return the unit).
 
@@ -231,8 +232,45 @@ def _starter_locked(owner, policy, now):
     return grant, True
 
 
+def _period_bucket(owner, scope, feature, key, units, version, now):
+    """Lazy per-period bucket under the owner lock; the UNIQUE key arbitrates."""
+    bucket = _bucket(owner.id, scope, feature, key)
+    if bucket is None:
+        try:
+            with db.session.begin_nested():
+                bucket = _new_bucket(owner.id, scope, feature, key, units, version, now)
+                db.session.add(bucket)
+                db.session.flush()
+        except IntegrityError:
+            bucket = _bucket(owner.id, scope, feature, key)
+            if bucket is None:
+                raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
+    return bucket
+
+
+def _launch_free(owner, policy, feature, now):
+    """The active campaign window's bucket, or ``None`` when it does not apply.
+
+    Never Premium: no entitlement, transaction or ``is_premium`` is touched.
+    Exhaustion inside a window refuses; it never falls through to Starter.
+    A NULL creation timestamp is outside the campaign (the Launch V1 rule), so
+    it follows the existing Starter path exactly as the read view reports it.
+    """
+    campaign = policy.launch_free
+    key = P.campaign_period_key(campaign, now)
+    if key is None or owner.created_at is None:
+        return None
+    if feature not in campaign.allowances.allowances:
+        raise AllowanceError("AI_FEATURE_NOT_IN_PLAN", feature=feature, scope=P.SCOPE_LAUNCH_FREE)
+    return _period_bucket(owner, P.SCOPE_LAUNCH_FREE, feature, key,
+                          campaign.allowances.allowances[feature], campaign.version, now)
+
+
 def _authorize(owner, policy, subscription, feature, now):
-    """Effective Premium uses only Premium allowances: no unlimited, no fallback."""
+    """Effective Premium uses only Premium allowances: no unlimited, no fallback.
+
+    Precedence: effective Premium -> active LAUNCH_FREE window -> Starter.
+    """
     from app.services.ai_launch import check_allocation
     check_allocation(owner)
     if subscription.premium:
@@ -240,19 +278,12 @@ def _authorize(owner, policy, subscription, feature, now):
         if premium is None or feature not in premium.allowances:
             raise AllowanceError("AI_FEATURE_NOT_IN_PLAN", feature=feature, scope=P.SCOPE_PREMIUM)
         key = P.period_key(premium.period, now)
-        bucket = _bucket(owner.id, P.SCOPE_PREMIUM, feature, key)
-        if bucket is None:
-            try:
-                with db.session.begin_nested():
-                    bucket = _new_bucket(owner.id, P.SCOPE_PREMIUM, feature, key,
-                                         premium.allowances[feature], policy.version, now)
-                    db.session.add(bucket)
-                    db.session.flush()
-            except IntegrityError:
-                bucket = _bucket(owner.id, P.SCOPE_PREMIUM, feature, key)
-                if bucket is None:
-                    raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
+        bucket = _period_bucket(owner, P.SCOPE_PREMIUM, feature, key,
+                                premium.allowances[feature], policy.version, now)
         return bucket, P.SCOPE_PREMIUM
+    campaign_bucket = _launch_free(owner, policy, feature, now)
+    if campaign_bucket is not None:
+        return campaign_bucket, P.SCOPE_LAUNCH_FREE
     if policy.starter is not None:
         grant, _ = _starter_locked(owner, policy, now)
     else:
@@ -264,6 +295,10 @@ def _authorize(owner, policy, subscription, feature, now):
 
 
 def _exhausted(feature, scope, policy, now):
+    if scope == P.SCOPE_LAUNCH_FREE:
+        reset, resets_at = P.campaign_reset(policy.launch_free, now)
+        return AllowanceError("AI_ALLOWANCE_EXHAUSTED", feature=feature, scope=scope,
+                              reset=reset, resets_at=_iso(resets_at))
     period = P.PERIOD_NEVER
     if scope == P.SCOPE_PREMIUM and policy.premium is not None:
         period = policy.premium.period
@@ -384,7 +419,7 @@ def reserve_within(user_id, feature, idempotency_key, *, now=None, strict_entitl
     try:
         owner = _lock_owner(user_id)
         if strict_entitlement:
-            subscription = _dispatch_subscription(owner.id)
+            subscription = _dispatch_subscription(owner.id, policy)
         if _by_digest(owner.id, digest) is not None:
             raise AllowanceError("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
         return _fresh_hold(owner, policy, subscription, feature, digest, now, bound=True)
@@ -392,13 +427,21 @@ def reserve_within(user_id, feature, idempotency_key, *, now=None, strict_entitl
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def _dispatch_subscription(user_id):
-    """Resolve after the owner lock, without expiring the caller's dirty lease."""
+def _dispatch_subscription(user_id, policy):
+    """Resolve after the owner lock, without expiring the caller's dirty lease.
+
+    Verification OFF is a decided tier (no Premium source exists). Dispatch
+    accepts it only under a policy carrying the complete campaign scope (the
+    same ``campaign_ready`` rule as ``execution.require_ready``); Apple OFF is
+    never sufficient. Finite limits, D1, eligibility and physical guards decide.
+    """
     from app.models import AppleSubscription
     for identity in list(db.session.identity_map.values()):
         if isinstance(identity, AppleSubscription):
             db.session.expire(identity)
     subscription = _subscription(user_id)
+    if subscription.state == "DISABLED" and policy.campaign_ready:
+        return subscription
     if subscription.state != "AVAILABLE" or subscription.entitlement.get("verification_pending"):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE")
     return subscription
@@ -422,7 +465,7 @@ def reserve_dispatch_within(user_id, feature, idempotency_key, fingerprint,
     try:
         owner = _lock_owner(user_id)
         # Subscription writers serialize on this same owner row.
-        subscription = _dispatch_subscription(owner.id)
+        subscription = _dispatch_subscription(owner.id, policy)
         existing = _by_digest(user_id, digest)
         if existing is not None:
             if existing.feature != feature or existing.request_fingerprint != fingerprint:
@@ -561,7 +604,7 @@ def finalize(user_id, reference, outcome, *, provider_billed=False, billing_evid
             raise AllowanceError("AI_ALLOWANCE_INVALID_REQUEST")
         bucket = db.session.get(AiAllowanceBucket, row.bucket_id, populate_existing=True)
         usable_only = (policy is not None and policy.refund_unusable_results
-                       and bucket.policy_version == policy.version)
+                       and bucket.policy_version == policy.bucket_version(bucket.scope))
         if usable_only and row.billing_evidence in (BILLING_CONFIRMED_BILLED, BILLING_CONFIRMED_NOT_BILLED):
             if billing_evidence == BILLING_UNKNOWN:
                 billing_evidence = row.billing_evidence
@@ -755,7 +798,10 @@ def purge_retained(*, now=None, retention=TERMINAL_RETENTION, limit=500):
         if db.engine.dialect.name == "postgresql":
             db.session.execute(sa.text("SET LOCAL lock_timeout = '2000ms'"))
         old_buckets = sa.select(AiAllowanceBucket.id).where(
-            AiAllowanceBucket.scope == P.SCOPE_PREMIUM, AiAllowanceBucket.updated_at < cutoff,
+            # A campaign window lasts 30 days, so a bucket untouched for the
+            # 90-day retention cutoff is never the current window's.
+            AiAllowanceBucket.scope.in_((P.SCOPE_PREMIUM, P.SCOPE_LAUNCH_FREE)),
+            AiAllowanceBucket.updated_at < cutoff,
             ~sa.exists().where(reservation.bucket_id == AiAllowanceBucket.id)
         ).order_by(AiAllowanceBucket.id).limit(batch_limit)
         periods = db.session.execute(sa.delete(AiAllowanceBucket).where(
@@ -768,13 +814,28 @@ def purge_retained(*, now=None, retention=TERMINAL_RETENTION, limit=500):
         raise AllowanceError("AI_ALLOWANCE_TEMPORARILY_UNAVAILABLE") from None
 
 
-def _feature_view(feature, access, policy, starter_state, buckets, now):
+def _feature_view(feature, access, policy, starter_state, buckets, now, campaign_view=None):
     view = {"feature": feature, "scope": None, "state": "NOT_IN_PLAN", "limit": None,
             "used": None, "reserved": None, "remaining": None, "reset": None, "resets_at": None}
     if access == "UNCONFIGURED":
         return {**view, "state": "NOT_CONFIGURED"}
     if access == "NONE":
         return view
+    if access == "LAUNCH_FREE":
+        campaign, scope = policy.launch_free, P.SCOPE_LAUNCH_FREE
+        view["scope"] = scope
+        key, reset, resets_at = campaign_view
+        bucket = buckets.get((scope, feature, key))
+        if bucket is not None:
+            limit, used, held = bucket.granted, bucket.used, bucket.reserved
+        elif feature in campaign.allowances.allowances:
+            limit, used, held = campaign.allowances.allowances[feature], 0, 0
+        else:
+            return view
+        remaining = max(limit - used - held, 0)
+        return {**view, "state": "AVAILABLE" if remaining else "EXHAUSTED", "limit": limit,
+                "used": used, "reserved": held, "remaining": remaining, "reset": reset,
+                "resets_at": _iso(resets_at)}
     if access == "PREMIUM":
         scope_policy, scope = policy.premium, P.SCOPE_PREMIUM
     else:
@@ -813,6 +874,10 @@ def allowance_view(user_id, *, now=None):
         keys = {P.period_key(P.PERIOD_NEVER, now)}
         if policy is not None and policy.premium is not None:
             keys.add(P.period_key(policy.premium.period, now))
+        campaign_key = (P.campaign_period_key(policy.launch_free, now)
+                        if policy is not None else None)
+        if campaign_key is not None:
+            keys.add(campaign_key)
         buckets = {(b.scope, b.feature, b.period_key): b for b in db.session.execute(
             sa.select(AiAllowanceBucket).where(AiAllowanceBucket.user_id == user_id,
                                                AiAllowanceBucket.period_key.in_(keys))).scalars()}
@@ -832,17 +897,23 @@ def allowance_view(user_id, *, now=None):
         access = "UNCONFIGURED"
     elif subscription.premium:
         access = "PREMIUM"
+    elif campaign_key is not None and owner.created_at is not None:
+        access = "LAUNCH_FREE"
     elif starter_state in ("GRANTED", "ELIGIBLE"):
         access = "STARTER"
     else:
         access = "NONE"
+    # One window computation shared by all five features.
+    campaign_view = None
+    if access == "LAUNCH_FREE":
+        campaign_view = (campaign_key, *P.campaign_reset(policy.launch_free, now))
     return {
         "contract_version": CONTRACT_VERSION,
         "policy_state": "UNCONFIGURED" if policy is None else "CONFIGURED",
         "access": access,
         "subscription": {"state": subscription.state, "entitlement": subscription.entitlement},
         "starter": {"state": starter_state, "granted_at": _iso(grant.granted_at) if grant else None},
-        "features": [_feature_view(f, access, policy, starter_state, buckets, now)
+        "features": [_feature_view(f, access, policy, starter_state, buckets, now, campaign_view)
                      for f in P.SUPPORTED_FEATURES],
     }
 

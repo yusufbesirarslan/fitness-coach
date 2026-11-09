@@ -124,6 +124,12 @@ def _check_protein_goal(user, db, models, today, nudges, en=False):
     weekly_protein_goal = sess.target_calories * protein_pct / 4 * 7
 
     week_start = today - timedelta(days=today.weekday())
+    from app.services import fatsecret_boundary
+    if fatsecret_boundary.intake_unproven_between(
+            user.id, week_start.isoformat(), today.isoformat()):
+        # R-5: logged values have no verified lineage (may be FatSecret);
+        # never praise/advise from them. Empty week = 0 g, never reaches 90 %.
+        return
     # Kanonik gün anahtarı MealLog.tarih (Istanbul ISO) ile sorgula — created_at
     # (naive UTC) kullanmak gün dönümü yakınındaki öğünleri yanlış haftaya
     # büküyordu; uygulamanın geri kalanı (_today_nutrition_totals, analyze_menu)
