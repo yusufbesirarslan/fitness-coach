@@ -100,6 +100,8 @@ def require_mobile_auth(view):
             raise error
         auth_contract.record_outcome(
             auth_contract.MOBILE, auth_contract.OUTCOME_OK)
+        from app.health_boundary import enforce_request as enforce_health
+        enforce_health(g.mobile_user)
         from app.services.account_eligibility import enforce_request
         enforce_request(g.mobile_user)
         return view(*args, **kwargs)

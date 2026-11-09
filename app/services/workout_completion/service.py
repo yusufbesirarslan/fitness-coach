@@ -337,6 +337,10 @@ def _fan_out_friend_messages(command: CompleteWorkoutCommand, pump_check: PumpCh
     """
     if command.visibility != "friends" or not command.shared_friend_ids:
         return
+    # Launch V1: no user-to-user share is written, whatever the caller sent.
+    from app.services import launch_social
+    if not launch_social.available():
+        return
     payload = json.dumps(
         {
             "pump_check_id": pump_check.id,

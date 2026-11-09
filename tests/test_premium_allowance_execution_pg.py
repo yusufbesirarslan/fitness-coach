@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from contextlib import nullcontext
 
+from app.services import health_consent as H, health_disclosure as HD
 import pytest
 from physical_budget_support import before_attempt as physical_attempt
 import sqlalchemy as sa
@@ -45,10 +46,15 @@ def isolated(monkeypatch):
         (('bedrock', app_config.BEDROCK_MODEL), ('openai', ai.OPENAI_MODEL)), ()) for f,(purpose,categories) in bindings.items()}
     from consent_projection_support import publish_synthetic_texts
     monkeypatch.setattr(C, 'POLICIES', publish_synthetic_texts(monkeypatch, policies))
+    monkeypatch.setattr(HD, 'APPROVED_VERSION', HD.VERSION)
     with app.app_context():
         db.drop_all(); db.create_all()
         db.session.add_all([User(username='premium-a',email='a@example.invalid'), User(username='premium-b',email='b@example.invalid')])
         db.session.commit()
+        for owner in (1, 2):
+            H.mutate(owner, dict(action='affirmative_grant', purpose=HD.PURPOSE,
+                version=HD.VERSION, locale='en', text_digest=HD.DIGESTS['en'],
+                expected_generation=0, request_id='synthetic-health-grant'))
         premium_row(1)
         premium_row(2, original_id='901')
         for feature in bindings:
@@ -395,7 +401,7 @@ def test_parallel_nested_qr_workers_share_budget_and_failure(isolated):
     from concurrent.futures import ThreadPoolExecutor
     from app.services.ai_allowances import physical as F
     from physical_budget_support import payload
-    with isolated.app_context():
+    with isolated.app_context(), H.processing(1):
         action = E.prepare(1,'qr_menu',{},key='parallel-qr-vector')
         action.start()
         with E.scope(action):
@@ -455,7 +461,7 @@ def test_real_cold_qr_pipeline_batched_outputs_fit_durable_budget(isolated,monke
         return SimpleNamespace(stop_reason='end_turn',usage=None,
             content=[SimpleNamespace(type='text',text=json.dumps(value))])
     monkeypatch.setattr(ai,'bedrock_client',SimpleNamespace(messages=SimpleNamespace(create=sdk)))
-    with isolated.app_context():
+    with isolated.app_context(), H.processing(1):
         db.session.add(UserSession(user_id=1,target_calories=2200,goal='kas kazanma'))
         db.session.commit()
         with E.logical_action(1,'qr_menu',{},key='actual-cold-qr-workflow') as action:

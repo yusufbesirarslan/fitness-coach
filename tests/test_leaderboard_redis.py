@@ -1,3 +1,4 @@
+import pytest
 """Leaderboard'un REDIS hızlı yolu (app/services/gamification.py).
 
 Mevcut test_gamification_routes.py Redis'siz ortamda yalnızca Postgres yolunu
@@ -189,6 +190,7 @@ def test_global_redis_ties_use_numeric_id_and_exact_rank(
 # Friends kapsamı — ZMSCORE birleşmesi
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant friends board
 def test_friends_leaderboard_uses_zmscore(client, auth_user, make_users_bulk, monkeypatch):
     friend, stranger = make_users_bulk(2, prefix="f", rank_points=0)
     db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id,
@@ -204,6 +206,7 @@ def test_friends_leaderboard_uses_zmscore(client, auth_user, make_users_bulk, mo
     assert body["no_friends"] is False
 
 
+@pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant friends board
 def test_friends_missing_redis_score_defaults_to_zero(client, auth_user, make_users_bulk, monkeypatch):
     friend, = make_users_bulk(1, prefix="fz", rank_points=0)
     db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id,

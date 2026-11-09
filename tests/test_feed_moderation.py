@@ -1,6 +1,10 @@
 # Feed V2 (Sprint 5 PR2) — moderasyon (gizle/şikayet) route testleri.
 from app.extensions import db
 from app.models import FeedHide, FeedReport, Friendship, PumpCheck
+import pytest
+
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
 
 
 def _befriend(a_id, b_id):

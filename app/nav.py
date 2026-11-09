@@ -44,8 +44,6 @@ PRIMARY = _freeze([
 # ve Supplements birincil sahiplik eşlemesine aittir, ikincil chrome DEĞİLDİR.
 SECONDARY = _freeze([
     {"id": "notifications","label_key": "nav.notifications",         "path": "/notifications",      "icon": "bell",        "tier": "utility",   "active_when": ()},
-    {"id": "friends",      "label_key": "nav.friends",               "path": "/friends",            "icon": "friends",     "tier": "community", "active_when": ()},
-    {"id": "feed",         "label_key": "nav.feed",                  "path": "/feed",               "icon": "feed",        "tier": "community", "active_when": ()},
     {"id": "leaderboard",  "label_key": "nav.club",                  "path": "/leaderboard",        "icon": "club",        "tier": "community", "active_when": ()},
     {"id": "quests",       "label_key": "nav.quests",                "path": "/quests",             "icon": "quests",      "tier": "community", "active_when": ()},
     {"id": "challenges",   "label_key": "nav.challenges",            "path": "/challenges",         "icon": "challenges",  "tier": "community", "active_when": ()},

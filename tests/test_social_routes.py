@@ -20,6 +20,9 @@ from app.models import (
 from app.services import ai_gate
 from app.services.pump_checks import can_view_pump_check
 
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
+
 
 @pytest.fixture
 def friend(make_user, auth_user):

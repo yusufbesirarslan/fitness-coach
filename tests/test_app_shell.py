@@ -64,8 +64,8 @@ def test_viewport_fit_cover_for_safe_areas():
 
 
 SHELL_ROUTES = [
-    "/", "/nutrition", "/training", "/progress-page", "/quests", "/friends",
-    "/feed", "/leaderboard", "/supplements", "/premium", "/edit-profile",
+    "/", "/nutrition", "/training", "/progress-page", "/quests",
+    "/leaderboard", "/supplements", "/premium", "/edit-profile",
     "/pump-check-gallery", "/coach",
 ]
 
@@ -103,9 +103,11 @@ def test_plan_and_coach_header_avatar_matches_working_page(app, client, make_use
 
 def test_profile_hub_lists_community_and_account_destinations(client, auth_user):
     html = client.get("/edit-profile").get_data(as_text=True)
-    for href in ("/friends", "/feed", "/leaderboard", "/quests",
-                 "/challenges", "/logout"):
+    for href in ("/leaderboard", "/quests", "/challenges", "/logout"):
         assert f'href="{href}" class="hub-link' in html, href
+    # Launch V1 social boundary: no Friends or Feed entry.
+    assert 'href="/friends"' not in html
+    assert 'href="/feed"' not in html
     assert 'href="/pump-check-gallery" class="hub-link' not in html
     assert 'href="/supplements" class="hub-link' not in html
     assert 'href="/premium" class="hub-link' not in html

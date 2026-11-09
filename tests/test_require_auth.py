@@ -38,11 +38,8 @@ def legacy_user(app):
 
 
 @pytest.fixture
-def cognito_user(app):
-    u = User(username="cog", email="cog@example.com", cognito_sub="sub-cog")
-    db.session.add(u)
-    db.session.commit()
-    return u
+def cognito_user(app, make_user):
+    return make_user("cog", cognito_sub="sub-cog")
 
 
 def _login_session(client, user, sid=None):

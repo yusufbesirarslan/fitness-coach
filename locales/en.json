@@ -1054,6 +1054,7 @@
   "pump.friend_ids_invalid": "Select valid friends to share with.",
   "pump.verify_unavailable": "Your photo couldn't be verified right now. Please try again in a moment.",
   "pump.friend_required": "Select at least one friend.",
+  "social.unavailable": "This feature is not available.",
   "pump.share_to": "SHARE TO",
   "pump.share_feed": "Feed",
   "pump.share_friends": "Friends",

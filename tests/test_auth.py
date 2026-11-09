@@ -312,7 +312,10 @@ def test_cognito_verify_then_login_succeeds(client, cognito_native):
 
     response = client.post("/login", json={"username": "verifyme", "password": "Sifre123"})
     assert response.status_code == 200
-    assert client.get("/supplements").status_code == 200  # oturum kuruldu
+    # Authentication is established, but a new account has no health grant.
+    response = client.get("/supplements")
+    assert response.status_code == 403
+    assert response.json["error"]["code"] == "HEALTH_CONSENT_REQUIRED"
 
 
 def test_cognito_referral_reward_waits_for_verification(client, cognito_native, make_user):

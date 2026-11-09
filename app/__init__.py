@@ -291,8 +291,15 @@ def create_app():
     app.before_request(start_request_timer)
     app.before_request(assign_request_id)
     app.before_request(generate_csp_nonce)
+    # Launch V1: social surfaces are closed before CSRF, auth, limits and views.
+    from app.services.launch_social import install as install_social_boundary
+    install_social_boundary(app)
     app.before_request(_csrf_protect)
     app.before_request(bind_mobile_request_principal)
+    from app.health_boundary import install as install_health_boundary
+    from app.blueprints.health_consent import bp as health_consent_bp
+    app.register_blueprint(health_consent_bp)
+    install_health_boundary(app)
     from app.blueprints.account_eligibility import install as install_eligibility
     install_eligibility(app)
     from app.blueprints.ai_consent import install as install_ai_consent
@@ -324,6 +331,8 @@ def create_app():
     from app.services.ai_allowances.execution import install as install_allowance_execution
     install_allowance_execution(app)
     app.wsgi_app = ConsentPublication(app.wsgi_app)
+    from app.health_boundary import HealthProcessingBoundary
+    app.wsgi_app = HealthProcessingBoundary(app.wsgi_app)
     return app
 
 

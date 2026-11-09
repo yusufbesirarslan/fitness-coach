@@ -170,7 +170,7 @@ def test_all_main_pages_render(client, make_user, login):
                               brand="X", category="Other", status="Active"))
     db.session.commit()
     login("gezgin")
-    for path in ["/", "/nutrition", "/training", "/progress-page", "/friends",
+    for path in ["/", "/nutrition", "/training", "/progress-page",
                  "/quests", "/leaderboard", "/supplements", "/edit-profile",
                  "/premium", "/welcome"]:
         r = client.get(path)

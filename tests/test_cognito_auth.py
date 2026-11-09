@@ -97,4 +97,4 @@ def test_session_expiration_forces_relogin(client, cognito_env, cog_account, mon
 
 def test_protected_route_allows_after_login(client, cognito_env, cog_account):
     assert client.post("/login", json={"username": "e2e", "password": "x"}).status_code == 200
-    assert client.get("/supplements").status_code == 200
+    assert client.get("/api/health-consent").status_code == 200

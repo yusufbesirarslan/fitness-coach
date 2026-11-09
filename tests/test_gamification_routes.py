@@ -6,6 +6,8 @@ haftalık ödül pop-up uçları sabitlenir.
 
     python -m pytest tests/test_gamification_routes.py -v
 """
+import pytest
+
 from app.extensions import db
 from app.models import Friendship, User, WeeklyWinner
 
@@ -44,12 +46,14 @@ def test_leaderboard_me_outside_top100_gets_rank(client, auth_user, make_users_b
     assert body["me"]["rank"] == 102
 
 
+@pytest.mark.usefixtures("social_reopened")
 def test_leaderboard_friends_scope_empty(client, auth_user):
     body = client.get("/leaderboard/data?scope=friends").get_json()
     assert body["no_friends"] is True
     assert body["entries"] == []
 
 
+@pytest.mark.usefixtures("social_reopened")
 def test_leaderboard_friends_scope_includes_self_and_friends(client, auth_user, make_users_bulk):
     friend, stranger = make_users_bulk(2, prefix="kisi", rank_points=700)
     db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))

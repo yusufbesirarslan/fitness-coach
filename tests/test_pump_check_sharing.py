@@ -22,6 +22,9 @@ from app.services.pump_checks import (
 )
 from tests.test_validators import _image_data_url
 
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
+
 
 def _friend(a, b):
     db.session.add(Friendship(sender_id=a.id, receiver_id=b.id, status="accepted"))

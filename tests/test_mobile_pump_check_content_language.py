@@ -1,4 +1,5 @@
 """Account authority, new generation, Unicode persistence, and replay."""
+from tests.health_consent_support import domain_statements
 import json
 
 import pytest
@@ -51,7 +52,7 @@ def test_authenticated_account_controls_new_analysis_without_language_query(
 
     def enter(*args, **kwargs):
         event.remove(db.engine, "before_cursor_execute", record_sql)
-        assert queries == []
+        assert domain_statements(queries) == []
         return real(*args, **kwargs)
 
     monkeypatch.setattr(service, "create_or_replay", enter)

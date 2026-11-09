@@ -49,6 +49,8 @@ def pg_app(monkeypatch):
     from app.services import cognito_jwt, cognito_service, gamification
 
     app = create_app()
+    from tests.health_consent_support import grant_synthetic_health, track_response_cleanup
+    close_responses = track_response_cleanup(app)
     app.config.update(TESTING=True, PROPAGATE_EXCEPTIONS=False)
     limiter.enabled = False
     gamification._last_rollover_check[0] = datetime.utcnow()
@@ -121,10 +123,12 @@ def pg_app(monkeypatch):
             db.session.add(User(username=name, email=f"{name}@example.invalid",
                                 cognito_sub=f"sub-{name}"))
         db.session.commit()
+        grant_synthetic_health(monkeypatch, [u.id for u in User.query.all()])
         sa.event.listen(db.engine, "before_cursor_execute", record)
         try:
             yield app, state
         finally:
+            close_responses()
             sa.event.remove(db.engine, "before_cursor_execute", record)
             db.session.remove()
             db.drop_all()

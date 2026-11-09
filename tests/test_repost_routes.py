@@ -3,6 +3,10 @@ from app.extensions import db
 from app.models import (
     FeedItem, FeedItemComment, FeedItemLike, Friendship, Notification, PumpCheck,
 )
+import pytest
+
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
 
 
 def _befriend(a_id, b_id):

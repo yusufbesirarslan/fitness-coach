@@ -10,6 +10,7 @@ F-35 tabs · F-36 destructive rank. Authority boundaries are asserted too:
 no Supplement query on /nutrition, no new query on /supplements, canonical
 category/status/rating values unchanged, one editor.
 """
+from tests.health_consent_support import domain_statements
 import html as html_lib
 import json
 import re
@@ -371,7 +372,7 @@ def test_page_query_budget_is_unchanged(app, client, make_user, login, path, tot
     _rated_cabinet(user.id)
     statements = _selects(client, path)
     assert sum("from supplement" in s for s in statements) == supplement, statements
-    assert len(statements) == total, statements
+    assert len(domain_statements(statements)) == total, statements
 
 
 def test_supplement_routes_are_unchanged(app):

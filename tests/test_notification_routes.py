@@ -10,6 +10,10 @@ import re
 from app.extensions import db
 from app.models import Notification
 from app.services.notifications import notify
+import pytest
+
+pytestmark = pytest.mark.usefixtures("social_reopened")  # Launch V1: dormant social code
+
 
 
 def _seed(recipient_id, actor_id, count):

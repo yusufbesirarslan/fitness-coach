@@ -427,7 +427,9 @@ def test_complete_awards_xp_and_records_pump_check(client, workout_ready, monkey
     assert check.valid is True
     assert check.image_key is None                    # S3 kapalı (test env)
     assert check.date_key is not None                 # günlük idempotency anahtarı yazıldı
-    assert check.visibility == "feed"
+    # Launch V1 social boundary: a missing visibility now means private
+    # (the legacy default was feed).
+    assert check.visibility == "private"
     assert check.shared_friend_ids == []
 
     # Faz B/F6: UI antrenman tamamlama artık kanonik WorkoutLog da yazar —
