@@ -570,72 +570,6 @@ def schema_heads_cmd():
                                              "current": sorted(current or ())})
 
 
-@click.option("--limit", default=200, show_default=True, type=int)
-def health_erasure_run_cmd(limit):
-    """Retry unfinished F01 withdrawal erasures (also run by daily maintenance)."""
-    from app.services import health_erasure
-    click.echo(json.dumps(health_erasure.run_pending(limit), sort_keys=True))
-
-
-@click.option("--user-id", required=True, type=int)
-@click.option("--matter", required=True, help="Documented claim/request reference (no health content).")
-@click.option("--review-date", required=True, help="YYYY-MM-DD: when the hold must be reviewed.")
-@click.option("--category", "categories", multiple=True, required=True,
-              help="Health category to keep; repeat for each one needed for the matter.")
-def health_legal_hold_add_cmd(user_id, matter, review_date, categories):
-    """Controller only: exempt named health categories of one owner for one matter."""
-    from app.health_consent_models import HealthLegalHold
-    from app.models import User
-    from app.services import health_erasure
-    unknown = sorted(set(categories) - set(health_erasure.CATEGORIES))
-    if unknown:
-        raise click.UsageError(f"unknown categories: {', '.join(unknown)}")
-    matter = matter.strip()
-    if not matter or len(matter) > 120:
-        raise click.UsageError("matter must be 1-120 characters")
-    review = datetime.strptime(review_date, "%Y-%m-%d")
-    now = datetime.utcnow()
-    if review <= now:
-        raise click.UsageError("review date must be in the future")
-    if db.session.get(User, user_id) is None:
-        raise click.UsageError("no such user")
-    hold = HealthLegalHold(owner_id=user_id, categories=sorted(set(categories)),
-                           matter_ref=matter, created_at=now, review_at=review)
-    db.session.add(hold)
-    db.session.commit()
-    click.echo(json.dumps({"hold_id": hold.id, "categories": hold.categories}))
-
-
-@click.option("--hold-id", required=True, type=int)
-def health_legal_hold_release_cmd(hold_id):
-    """Release a hold; the owner's pending erasure then completes on its next run."""
-    from app.health_consent_models import HealthLegalHold
-    from app.services import health_erasure
-    hold = db.session.get(HealthLegalHold, hold_id)
-    if hold is None or hold.released_at is not None:
-        raise click.UsageError("no active hold with that id")
-    hold.released_at = datetime.utcnow()
-    owner = hold.owner_id
-    db.session.commit()
-    try:
-        outcome = health_erasure.run(owner)
-    except health_erasure.ErasureUnavailable:
-        outcome = "pending"
-    click.echo(json.dumps({"hold_id": hold_id, "erasure": outcome}))
-
-
-def health_legal_hold_list_cmd():
-    """Active holds: ids, owner, categories, review date. Matter text is not printed."""
-    from app.health_consent_models import HealthLegalHold
-    rows = HealthLegalHold.query.filter(HealthLegalHold.released_at.is_(None)).order_by(
-        HealthLegalHold.review_at).all()
-    for hold in rows:
-        click.echo(json.dumps({"hold_id": hold.id, "owner_id": hold.owner_id,
-                               "categories": hold.categories,
-                               "review_at": hold.review_at.date().isoformat(),
-                               "review_due": hold.review_at <= datetime.utcnow()}))
-
-
 @click.option("--expect-meal-log", type=int, required=True,
               help="Expected legacy provider meal_log rows (DB4: 3).")
 @click.option("--expect-items", type=int, required=True,
@@ -687,6 +621,80 @@ def fatsecret_retention_redis_v1_cmd(apply_, expect):
     click.echo(_json.dumps(result, sort_keys=True))
     if result["result"] != "DELETED":
         raise SystemExit(2)
+
+@click.option("--limit", default=200, show_default=True, type=int)
+def health_erasure_run_cmd(limit):
+    """Retry all unfinished erasures; limit sets the batch size, not a total cap."""
+    from app.services import health_erasure
+    click.echo(json.dumps(health_erasure.run_pending(limit), sort_keys=True))
+
+
+@click.option("--user-id", required=True, type=int)
+@click.option("--matter", required=True, help="Documented claim/request reference (no health content).")
+@click.option("--review-date", required=True, help="YYYY-MM-DD: when the hold must be reviewed.")
+@click.option("--category", "categories", multiple=True, required=True,
+              help="Health category to keep; repeat for each one needed for the matter.")
+def health_legal_hold_add_cmd(user_id, matter, review_date, categories):
+    """Controller only: exempt named health categories of one owner for one matter."""
+    from app.health_consent_models import HealthLegalHold
+    from app.models import User
+    from app.services import health_erasure
+    unknown = sorted(set(categories) - set(health_erasure.CATEGORIES))
+    if unknown:
+        raise click.UsageError(f"unknown categories: {', '.join(unknown)}")
+    matter = matter.strip()
+    if not matter or len(matter) > 120:
+        raise click.UsageError("matter must be 1-120 characters")
+    review = datetime.strptime(review_date, "%Y-%m-%d")
+    now = datetime.utcnow()
+    if review <= now:
+        raise click.UsageError("review date must be in the future")
+    from app.services import health_consent
+    # Same authority as erasure: a committed hold precedes any storage deletion.
+    with health_consent._authority(user_id, exclusive=True):
+        if db.session.get(User, user_id) is None:
+            raise click.UsageError("no such user")
+        hold = HealthLegalHold(owner_id=user_id, categories=sorted(set(categories)),
+                               matter_ref=matter, created_at=now, review_at=review)
+        db.session.add(hold)
+        db.session.commit()
+        result = {"hold_id": hold.id, "categories": hold.categories}
+    click.echo(json.dumps(result))
+
+
+@click.option("--hold-id", required=True, type=int)
+def health_legal_hold_release_cmd(hold_id):
+    """Release a hold; the owner's pending erasure then completes on its next run."""
+    from app.health_consent_models import HealthLegalHold
+    from app.services import health_erasure
+    from app.services import health_consent
+    owner = db.session.query(HealthLegalHold.owner_id).filter_by(id=hold_id).scalar()
+    db.session.rollback()
+    if owner is None:
+        raise click.UsageError("no active hold with that id")
+    with health_consent._authority(owner, exclusive=True):
+        hold = db.session.get(HealthLegalHold, hold_id)
+        if hold is None or hold.released_at is not None:
+            raise click.UsageError("no active hold with that id")
+        hold.released_at = datetime.utcnow()
+        db.session.commit()
+    try:
+        outcome = health_erasure.run(owner)
+    except health_erasure.ErasureUnavailable:
+        outcome = "pending"
+    click.echo(json.dumps({"hold_id": hold_id, "erasure": outcome}))
+
+
+def health_legal_hold_list_cmd():
+    """Active holds: ids, owner, categories, review date. Matter text is not printed."""
+    from app.health_consent_models import HealthLegalHold
+    rows = HealthLegalHold.query.filter(HealthLegalHold.released_at.is_(None)).order_by(
+        HealthLegalHold.review_at).all()
+    for hold in rows:
+        click.echo(json.dumps({"hold_id": hold.id, "owner_id": hold.owner_id,
+                               "categories": hold.categories,
+                               "review_at": hold.review_at.date().isoformat(),
+                               "review_due": hold.review_at <= datetime.utcnow()}))
 
 
 def register_cli(app):

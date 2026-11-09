@@ -31,13 +31,13 @@ carry the owner id, counts and an exception type, never health content.
 from datetime import datetime, timedelta
 
 from flask import current_app
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 
 import s3_helper
 from app.extensions import db
 
 ERASURE_DEADLINE = timedelta(days=30)
-ERASURE_RECORD_RETENTION = timedelta(days=3 * 366)
+ERASURE_RECORD_YEARS = 3
 MEAL_PHOTO = "meal_photo"
 MANAGED_OBJECT = "managed_object"
 
@@ -46,7 +46,8 @@ MANAGED_OBJECT = "managed_object"
 MEMORY_KEYS = ("injuries", "fitness_goals", "equipment_available",
                "dietary_restrictions", "preferences")
 COACH_INDEX_KEY = "_pa06_coach_turns_v2"
-PROFILE_FIELDS = ("weight", "height", "target_weight", "goal_type")
+PROFILE_FIELDS = ("weight", "height", "target_weight", "goal_type",
+                  "goal", "fitness_level", "current_activity")
 WORKOUT_COUNTERS = ("streak_count", "weekly_xp", "rank_points")
 
 CATEGORIES = ("profile", "checkins", "activity", "plans", "workouts",
@@ -54,7 +55,7 @@ CATEGORIES = ("profile", "checkins", "activity", "plans", "workouts",
 
 
 class ErasureUnavailable(Exception):
-    """Nothing was erased this time; the erasure stays pending and is retried."""
+    """Erasure is incomplete; keep the obligation pending and retry safely."""
 
 
 def _tables():
@@ -78,12 +79,16 @@ def pending(conn, owner):
 def public_state(conn, owner):
     """The latest erasure for the status response, or None."""
     erasures, _ = _tables()
-    row = conn.execute(select(erasures).where(erasures.c.owner_id == owner)
-                       .order_by(erasures.c.requested_at.desc(), erasures.c.id.desc())
-                       .limit(1)).mappings().one_or_none()
+    row = conn.execute(select(erasures).where(
+        erasures.c.owner_id == owner, erasures.c.completed_at.is_(None))
+        .order_by(erasures.c.requested_at, erasures.c.id).limit(1)).mappings().one_or_none()
+    open_rows = row is not None
+    if row is None:
+        row = conn.execute(select(erasures).where(erasures.c.owner_id == owner)
+            .order_by(erasures.c.requested_at.desc(), erasures.c.id.desc())
+            .limit(1)).mappings().one_or_none()
     if row is None:
         return None
-    open_rows = pending(conn, owner)
     requested = row["requested_at"]
     return {"state": "pending" if open_rows else "completed",
             "requested_at": requested.isoformat() + "Z",
@@ -104,7 +109,8 @@ def _held(owner, now):
 
 def storage(owner, held=frozenset()):
     """Owned health objects: Pump Check images and meal photos, never the avatar."""
-    from app.models import MealLog, MealPhotoCleanup, PumpCheck
+    from app.models import MealLog, MealPhotoCleanup, PumpCheck, User
+    avatar = db.session.query(User.profile_picture_key).filter(User.id == owner).scalar()
     references = []
     if "pump" not in held:
         references += [(MANAGED_OBJECT, key) for (key,) in db.session.query(
@@ -116,7 +122,9 @@ def storage(owner, held=frozenset()):
             MealPhotoCleanup.photo_key).filter(MealPhotoCleanup.user_id == owner)]
     objects = set()
     for kind, key in references:
-        if not key:
+        if not key or key == avatar:
+            continue
+        if kind == MANAGED_OBJECT and not key.startswith("pump-checks/"):
             continue
         deletable = (s3_helper.meal_photo_key_is_deletable(key, owner) if kind == MEAL_PHOTO
                      else s3_helper.managed_object_key_is_deletable(key, owner))
@@ -137,6 +145,15 @@ def _delete(model, *criteria):
     return model.query.filter(*criteria).delete(synchronize_session=False)
 
 
+def _release_rankings(owner):
+    """Prove removal of owned workout scores; configured cache errors retry."""
+    from app.services import gamification
+    if gamification.redis_client is None:
+        return
+    for key in (gamification.LB_ALLTIME_KEY, gamification.LB_WEEKLY_KEY):
+        gamification.redis_client.zrem(key, str(owner))
+
+
 def _delete_feed_refs(m, ref_type, ref_ids):
     """Feed items (anyone's) that repost or quote the erased records."""
     item_ids = [i for (i,) in db.session.query(m.FeedItem.id).filter(
@@ -153,12 +170,6 @@ def _erase_rows(user, held):
     from app import models as m
     from sqlalchemy.orm.attributes import flag_modified
     uid, counts = user.id, {}
-    # user_metadata: the user-stated memory keys (injuries, goals, equipment,
-    # dietary restrictions, preferences) are "profile"; the Coach turn index
-    # is "coach". Each follows its own category; written once below.
-    meta = dict(user.user_metadata or {})
-    if "coach" not in held:
-        meta.pop(COACH_INDEX_KEY, None)
 
     if "profile" not in held:
         changed = 0
@@ -166,18 +177,21 @@ def _erase_rows(user, held):
             if getattr(user, field) is not None:
                 setattr(user, field, None)
                 changed += 1
+        from app.services import account_profile
+        account_profile.invalidate_health_onboarding(user)
+        meta = dict(user.user_metadata or {})
         for key in MEMORY_KEYS:
             if meta.pop(key, None) is not None:
                 changed += 1
+        if meta != (user.user_metadata or {}):
+            user.user_metadata = meta
+            flag_modified(user, "user_metadata")
         # The onboarding session copies weight/height and derives BMR/TDEE,
         # targets and plan text from them: health data in full. Without it the
         # canonical onboarding state is incomplete (account_profile owns the
         # flag itself), so a new grant re-runs onboarding.
         changed += _delete(m.UserSession, m.UserSession.user_id == uid)
         counts["profile"] = changed
-    if meta != (user.user_metadata or {}):
-        user.user_metadata = meta
-        flag_modified(user, "user_metadata")
 
     if "checkins" not in held:
         counts["checkins"] = (_delete(m.WeeklyCheckIn, m.WeeklyCheckIn.user_id == uid)
@@ -212,11 +226,16 @@ def _erase_rows(user, held):
         activity_ids = [i for (i,) in db.session.query(m.Activity.id).filter(m.Activity.user_id == uid)]
         if activity_ids:
             changed += _delete_feed_refs(m, "activity", activity_ids)
-        if day_ids:
+        if day_ids and db.engine.dialect.name != "postgresql":
             changed += _delete(m.CompletionClaimTransaction,
                                m.CompletionClaimTransaction.claim_id.in_(day_ids))
         changed += sum(_delete(model, model.user_id == uid) for model in (
             m.WorkoutCompletionDay, m.WorkoutLog, m.WorkoutSession, m.ExerciseNote, m.Activity))
+        if day_ids and db.engine.dialect.name == "postgresql":
+            # Validate the erasure exception while the obligation is still open.
+            # Binding deletion remains restricted to the claim FK cascade.
+            db.session.execute(db.text(
+                "SET CONSTRAINTS completion_fence_claim_retention IMMEDIATE"))
         for field in WORKOUT_COUNTERS:
             setattr(user, field, 0)
         counts["workouts"] = changed
@@ -224,21 +243,16 @@ def _erase_rows(user, held):
     if "nutrition" not in held:
         meal_ids = [i for (i,) in db.session.query(m.CustomMeal.id).filter(m.CustomMeal.user_id == uid)]
         changed = _delete(m.CustomMealItem, m.CustomMealItem.custom_meal_id.in_(meal_ids)) if meal_ids else 0
-        # MealLog before its retained daily totals (FatSecret 24h boundary).
-        # provider_retention.expire_due folds expired values into those totals
-        # under meal_log row locks (SKIP LOCKED). If the fold claimed first, the
-        # MealLog DELETE waits for it and the later totals DELETE (new READ
-        # COMMITTED snapshot) sees what it folded; if this claimed first, the
-        # fold skips these rows. The fold's totals insert takes KEY SHARE on
-        # the user row this transaction holds FOR UPDATE, so the two can
-        # deadlock; PostgreSQL then aborts one side whole, and both retry
-        # (erasure hourly, fold every 5 min). No total row is left behind.
         changed += sum(_delete(model, model.user_id == uid) for model in (
-            m.MealPhotoCleanup, m.MealLog, m.MealLogRetainedTotal, m.WaterLog,
-            m.Supplement, m.CustomMeal))
+            m.MealPhotoCleanup, m.MealLog, m.MealLogRetainedTotal, m.WaterLog, m.Supplement, m.CustomMeal))
         counts["nutrition"] = changed
 
     if "coach" not in held:
+        meta = dict(user.user_metadata or {})
+        if COACH_INDEX_KEY in meta:
+            del meta[COACH_INDEX_KEY]
+            user.user_metadata = meta
+            flag_modified(user, "user_metadata")
         conv_ids = [i for (i,) in db.session.query(m.CoachConversation.id).filter(
             m.CoachConversation.user_id == uid)]
         changed = _delete(m.CoachMessage, m.CoachMessage.conversation_id.in_(conv_ids)) if conv_ids else 0
@@ -280,6 +294,18 @@ def _log(event, owner, **fields):
 
 
 def run(owner):
+    """Serialize erasure, holds and consent decisions, including storage I/O.
+
+    The independent authority connection holds no ORM changes. The ORM
+    transaction is released before storage, then the User row is locked for
+    the atomic row erase. Repeated workers recheck the obligation after waiting.
+    """
+    from app.services import health_consent
+    with health_consent._authority(owner, exclusive=True) as authority:
+        return _run_locked(owner, authority)
+
+
+def _run_locked(owner, authority):
     """Erase what is owed for ``owner``. Returns 'none', 'completed' or 'held'.
 
     Raises ErasureUnavailable when storage cannot be released; nothing in the
@@ -293,13 +319,11 @@ def run(owner):
             db.session.rollback()
             return "none"
         if db.session.get(User, owner) is None:
-            # Account deletion already purged every row this erasure covers.
-            for row in _open_rows(owner):
-                row.completed_at, row.summary = now, {"account_deleted": True}
-            db.session.commit()
-            _log("completed", owner, reason="account_deleted")
-            return "completed"
-        if health_consent.allowed(owner):
+            # No rows remain to inventory storage. Only canonical account
+            # deletion can prove its objects were released and close this debt.
+            db.session.rollback()
+            raise ErasureUnavailable("account_storage_unproven")
+        if health_consent._valid(health_consent._state(authority, owner)["record"]):
             # Unreachable while grants are refused during erasure; never erase
             # records collected under a live permission.
             db.session.rollback()
@@ -307,7 +331,7 @@ def run(owner):
             return "none"
         held = _held(owner, now)
         objects = storage(owner, held)
-        db.session.rollback()  # no transaction stays open over storage I/O
+        db.session.rollback()  # no ORM transaction stays open over storage I/O
     except Exception:
         db.session.rollback()
         raise
@@ -326,17 +350,17 @@ def run(owner):
                 .populate_existing().with_for_update().one_or_none())
         if user is None:
             db.session.rollback()
-            return run(owner)
-        if not _open_rows(owner):
-            # An overlapping run completed it first, and a new grant may already
-            # have collected records: never erase under a closed erasure.
-            db.session.rollback()
-            return "none"
+            raise ErasureUnavailable("account_storage_unproven")
         held = _held(owner, now)
         if not storage(owner, held) <= released:
             db.session.rollback()
             raise ErasureUnavailable("storage_changed")
         counts = _erase_rows(user, held)
+        if "workouts" not in held:
+            # The ordinary best-effort account-deletion helper cannot prove
+            # erasure. A partial Redis failure leaves the durable debt pending;
+            # repeated ZREM of an already removed member is safe.
+            _release_rankings(owner)
         summary = {"rows": counts, "objects": len(released), "held": sorted(held)}
         for row in _open_rows(owner):
             row.summary = summary
@@ -349,12 +373,6 @@ def run(owner):
         db.session.rollback()
         _log("incomplete", owner, stage="local", error_type=type(exc).__name__)
         raise ErasureUnavailable("local") from exc
-    if "workouts" not in held:
-        try:
-            from app.services import gamification
-            gamification.lb_remove_user(owner)
-        except Exception:
-            pass
     _log("held" if held else "completed", owner, objects=len(released),
          held=",".join(sorted(held)) or "-")
     return "held" if held else "completed"
@@ -362,33 +380,46 @@ def run(owner):
 
 def run_pending(limit=200):
     """Retry every unfinished erasure; drop erasure records past their retention."""
-    from app.health_consent_models import HealthErasure, HealthLegalHold
-    # Erasures under an active hold go last (a held run only logs review-due
-    # holds) so they never starve the unheld ones of the batch limit.
-    held_owners = select(HealthLegalHold.owner_id).where(HealthLegalHold.released_at.is_(None))
-    open_owners = db.session.query(HealthErasure.owner_id).filter(
-        HealthErasure.completed_at.is_(None)).distinct().order_by(HealthErasure.owner_id)
-    owners = [o for (o,) in open_owners.filter(
-        HealthErasure.owner_id.notin_(held_owners)).limit(limit)]
-    owners += [o for (o,) in open_owners.filter(
-        HealthErasure.owner_id.in_(held_owners)).limit(max(limit - len(owners), 0))]
+    from app.health_consent_models import HealthErasure
+    if type(limit) is not int or limit < 1:
+        raise ValueError("limit must be a positive batch size")
+    # A held/failing low owner id must never starve later withdrawals. Scan
+    # the initial owner range in bounded batches, once per maintenance run.
+    ceiling = db.session.query(func.max(HealthErasure.owner_id)).filter(
+        HealthErasure.completed_at.is_(None)).scalar() or 0
     db.session.rollback()
     results = {"completed": 0, "held": 0, "failed": 0}
-    for owner in owners:
-        try:
-            outcome = run(owner)
-        except Exception:
-            db.session.rollback()
-            results["failed"] += 1
-            continue
-        if outcome in results:
-            results[outcome] += 1
-    cutoff = datetime.utcnow() - ERASURE_RECORD_RETENTION
+    after = 0
+    while after < ceiling:
+        owners = [o for (o,) in db.session.query(HealthErasure.owner_id).filter(
+            HealthErasure.completed_at.is_(None), HealthErasure.owner_id > after,
+            HealthErasure.owner_id <= ceiling).distinct().order_by(
+                HealthErasure.owner_id).limit(limit)]
+        db.session.rollback()
+        if not owners:
+            break
+        after = owners[-1]
+        for owner in owners:
+            try:
+                outcome = run(owner)
+            except Exception:
+                db.session.rollback()
+                results["failed"] += 1
+                continue
+            if outcome in results:
+                results[outcome] += 1
+    now = datetime.utcnow()
+    try:
+        cutoff = now.replace(year=now.year - ERASURE_RECORD_YEARS)
+    except ValueError:  # leap day: anniversary is February 28
+        cutoff = now.replace(year=now.year - ERASURE_RECORD_YEARS, day=28)
     results["records_expired"] = HealthErasure.query.filter(
         HealthErasure.completed_at.isnot(None), HealthErasure.completed_at < cutoff).delete(
         synchronize_session=False)
     # A documented legal hold is the lawful reason an erasure stays open past
     # 30 days; its review date is reported by hold_review_due instead.
+    from app.health_consent_models import HealthLegalHold
+    held_owners = select(HealthLegalHold.owner_id).where(HealthLegalHold.released_at.is_(None))
     overdue = HealthErasure.query.filter(
         HealthErasure.completed_at.is_(None),
         HealthErasure.owner_id.notin_(held_owners),

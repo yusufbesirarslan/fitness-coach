@@ -14,7 +14,7 @@ from account_deletion_support import install_fakes, rows_exist, seed_account
 from app.extensions import db
 from app.health_consent_models import HealthConsentEvent, HealthErasure, HealthLegalHold
 from app.models import (
-    CoachMessage, CognitoSession, FeedHide, FeedItem, MealLog, Notification,
+    CoachMessage, CognitoSession, FeedHide, FeedItem, MealLog, MealLogRetainedTotal, Notification,
     PumpCheck, TrainingPlanGenerationOperation, User, UserBadge, UserSession,
     UserWearableConnection, WeeklyCheckIn, WeeklyWinner, WorkoutLog,
 )
@@ -36,10 +36,15 @@ def world(app, make_user, monkeypatch):
     alice = db.session.get(User, alice.id)
     alice.weight, alice.height, alice.target_weight, alice.goal_type = 61.0, 170.0, 58.0, "cut"
     alice.streak_count, alice.weekly_xp = 4, 120
+    alice.goal, alice.fitness_level, alice.current_activity = "lose-weight", "advanced", "very-active"
+    alice.profile_complete = True
     alice.user_metadata = {"injuries": "left knee", "dietary_restrictions": "celiac",
                            account_eligibility.METADATA_KEY: {"signed": "record"},
                            "pending_referral_code": "REF1",
                            health_erasure.COACH_INDEX_KEY: {"1": "sig"}}
+    for owner in (alice.id, bob.id):
+        db.session.add(MealLogRetainedTotal(user_id=owner, tarih="2026-11-01",
+            energy_kcal=500, protein_g=20, carbohydrate_g=50, fat_g=15, item_count=2))
     db.session.commit()
 
     class World:
@@ -67,6 +72,8 @@ def test_withdrawal_erases_health_and_keeps_ordinary_data(world):
     assert result["state"] == "withdrawn" and result["erasure"]["state"] == "pending"
     assert health_erasure.run(world.a_id) == "completed"
 
+    assert MealLogRetainedTotal.query.filter_by(user_id=world.a_id).count() == 0
+    assert MealLogRetainedTotal.query.filter_by(user_id=world.b_id).one().energy_kcal == 500
     # Every health row is gone, every ordinary row stays.
     assert rows_exist(_health(world.a_own)) == [
         (m.__name__, i) for m, i in _health(world.a_own)]
@@ -80,6 +87,8 @@ def test_withdrawal_erases_health_and_keeps_ordinary_data(world):
     from app.services import account_profile
     assert account_profile.onboarding_state(alice).complete is False
     assert alice.streak_count == 0 and alice.weekly_xp == 0
+    assert (alice.goal, alice.fitness_level, alice.current_activity) == (None,) * 3
+    assert alice.profile_complete is False
     assert alice.username == "alice_o2b" and alice.age == 17 and alice.gender == "female"
     assert alice.full_name == "Private Name A"
     assert alice.profile_picture_key == world.a_keys["avatar"]
@@ -167,6 +176,19 @@ def test_legal_hold_requires_named_categories_matter_and_future_review(app, worl
     assert HealthLegalHold.query.count() == 0
 
 
+def test_profile_hold_does_not_retain_unheld_coach_signature_index(world):
+    db.session.add(HealthLegalHold(owner_id=world.a_id, categories=["profile"],
+        matter_ref="PROFILE-ONLY", created_at=datetime.utcnow(),
+        review_at=datetime.utcnow() + timedelta(days=1)))
+    db.session.commit()
+    _withdraw(world.a_id)
+    assert health_erasure.run(world.a_id) == "held"
+    user = db.session.get(User, world.a_id)
+    assert user.weight is not None
+    assert health_erasure.COACH_INDEX_KEY not in user.user_metadata
+    assert user.user_metadata["injuries"] == "left knee"
+
+
 def test_decline_erases_only_after_a_grant(make_user, world):
     legacy = make_user("legacy_o2b", health_consent=False, weight=90.0)
     consent.mutate(legacy.id, command(0, "decline", "o2b-legacy-decline"))
@@ -179,14 +201,16 @@ def test_decline_erases_only_after_a_grant(make_user, world):
     assert PumpCheck.query.filter_by(user_id=world.a_id).count() == 0
 
 
-def test_deleted_account_closes_its_pending_erasure(world):
+def test_unproven_account_purge_keeps_storage_debt_pending(world):
     from app.cli import _purge_user
     _withdraw(world.a_id)
     _purge_user(db.session.get(User, world.a_id))
     db.session.commit()
-    assert health_erasure.run(world.a_id) == "completed"
+    with pytest.raises(health_erasure.ErasureUnavailable):
+        health_erasure.run(world.a_id)
     row = HealthErasure.query.filter_by(owner_id=world.a_id).one()
-    assert row.summary == {"account_deleted": True}
+    assert row.completed_at is None
+    assert world.a_keys["pump"] in world.s3.objects
 
 
 def test_account_deletion_purges_legal_holds(world):
@@ -224,25 +248,151 @@ def test_health_erasure_is_in_daily_maintenance(monkeypatch, app):
     assert called == [1]
 
 
-def test_withdrawal_erases_fatsecret_retained_daily_totals(world):
-    # #499: expired FatSecret per-item values are folded into a per-day total.
-    # Those totals are nutrition records too, so withdrawal must remove them.
-    from app.models import MealLogRetainedTotal
-    for owner in (world.a_id, world.b_id):
-        db.session.add(MealLogRetainedTotal(user_id=owner, tarih="2026-11-01",
-                                            energy_kcal=120.0, protein_g=4.0,
-                                            carbohydrate_g=20.0, fat_g=3.0, item_count=1))
+def test_repeated_withdrawal_is_idempotent_and_retry_after_completion_is_noop(world):
+    first = _withdraw(world.a_id)
+    assert _withdraw(world.a_id) == first
+    assert HealthErasure.query.filter_by(owner_id=world.a_id).count() == 1
+    assert health_erasure.run(world.a_id) == "completed"
+    assert health_erasure.run(world.a_id) == "none"
+    assert _withdraw(world.a_id)["erasure"]["state"] == "completed"
+    assert HealthErasure.query.filter_by(owner_id=world.a_id).count() == 1
+
+
+def test_pump_alias_never_deletes_avatar_or_foreign_owner_storage(world):
+    pumps = PumpCheck.query.filter_by(user_id=world.a_id).all()
+    pumps[0].image_key = world.a_keys["avatar"]
+    pumps[1].image_key = world.b_keys["pump"]
     db.session.commit()
     _withdraw(world.a_id)
     assert health_erasure.run(world.a_id) == "completed"
-    assert MealLogRetainedTotal.query.filter_by(user_id=world.a_id).count() == 0
-    assert MealLogRetainedTotal.query.filter_by(user_id=world.b_id).count() == 1
+    assert world.a_keys["avatar"] in world.s3.objects
+    assert world.b_keys["pump"] in world.s3.objects
+
+
+def test_failing_owners_do_not_starve_later_batches(world, monkeypatch):
+    _withdraw(world.a_id)
+    _withdraw(world.b_id)
+    called = []
+    def attempt(owner):
+        called.append(owner)
+        if owner == world.a_id:
+            raise health_erasure.ErasureUnavailable("synthetic")
+        return "completed"
+    monkeypatch.setattr(health_erasure, "run", attempt)
+    result = health_erasure.run_pending(limit=1)
+    assert called == [world.a_id, world.b_id]
+    assert result["failed"] == result["completed"] == 1
+
+
+def test_local_failure_rolls_back_all_rows_and_keeps_obligation(world, monkeypatch):
+    original = health_erasure._erase_rows
+    def fail(user, held):
+        original(user, held)
+        raise RuntimeError("synthetic local failure")
+    monkeypatch.setattr(health_erasure, "_erase_rows", fail)
+    _withdraw(world.a_id)
+    with pytest.raises(health_erasure.ErasureUnavailable):
+        health_erasure.run(world.a_id)
+    assert rows_exist(world.a_own) == []
+    assert HealthErasure.query.filter_by(owner_id=world.a_id).one().completed_at is None
+    monkeypatch.setattr(health_erasure, "_erase_rows", original)
+    assert health_erasure.run(world.a_id) == "completed"
+
+
+def test_partial_rank_cache_failure_stays_pending_and_retry_is_owner_scoped(world, monkeypatch):
+    from app.services import gamification
+    class Cache:
+        failing = True
+        values = {key: {str(world.a_id): 12300004, str(world.b_id): 45600002}
+                  for key in (gamification.LB_ALLTIME_KEY, gamification.LB_WEEKLY_KEY)}
+        def zrem(self, key, owner):
+            if self.failing and key == gamification.LB_WEEKLY_KEY:
+                raise RuntimeError("synthetic cache unavailable")
+            return int(self.values[key].pop(owner, None) is not None)
+    cache = Cache()
+    monkeypatch.setattr(gamification, "redis_client", cache)
+    _withdraw(world.a_id)
+    with pytest.raises(health_erasure.ErasureUnavailable):
+        health_erasure.run(world.a_id)
+    assert HealthErasure.query.filter_by(owner_id=world.a_id).one().completed_at is None
+    assert PumpCheck.query.filter_by(user_id=world.a_id).count() == 2
+    with pytest.raises(consent.HealthConsentDenied):
+        consent.mutate(world.a_id, command(2, request_id="cache-pending-regrant"))
+    cache.failing = False
+    assert health_erasure.run(world.a_id) == "completed"
+    assert all(values == {str(world.b_id): 45600002} for values in cache.values.values())
+
+
+def test_new_withdrawal_does_not_postpone_the_oldest_outstanding_deadline(world):
+    _withdraw(world.a_id)
+    row = HealthErasure.query.filter_by(owner_id=world.a_id).one()
+    row.requested_at = datetime.utcnow() - timedelta(days=29)
+    db.session.commit()
+    before = consent.status(world.a_id)['erasure']
+    consent.mutate(world.a_id, command(2, 'withdraw', 'o2b-another-withdrawal'))
+    assert consent.status(world.a_id)['erasure'] == before
+
+
+def test_expired_legal_hold_requires_controller_release(world, caplog):
+    db.session.add(HealthLegalHold(owner_id=world.a_id, categories=['pump'], matter_ref='SYNTHETIC',
+        created_at=datetime.utcnow() - timedelta(days=2), review_at=datetime.utcnow() - timedelta(days=1)))
+    db.session.commit()
+    _withdraw(world.a_id)
+    assert health_erasure.run(world.a_id) == 'held'
+    assert world.a_keys['pump'] in world.s3.objects
+    assert 'event=hold_review_due' in caplog.text
+
+
+def test_erasure_migration_is_additive_idempotent_and_retains_evidence(tmp_path):
+    from test_mobile_training_allowance_pg import _module
+    import sqlalchemy as sa
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+    migration = _module('f01e2a5e0002_health_withdrawal_erasure.py')
+    engine = sa.create_engine('sqlite:///' + str(tmp_path / 'o2b.db'))
+    with engine.begin() as conn:
+        conn.exec_driver_sql('CREATE TABLE user (id INTEGER PRIMARY KEY, weight FLOAT)')
+        conn.exec_driver_sql('INSERT INTO user VALUES (1, 81.5)')
+        with Operations.context(MigrationContext.configure(conn)):
+            migration.upgrade()
+            migration.upgrade()
+        assert conn.exec_driver_sql('SELECT weight FROM user').scalar_one() == 81.5
+        assert conn.exec_driver_sql('SELECT count(*) FROM health_erasure').scalar_one() == 0
+        conn.exec_driver_sql("INSERT INTO health_erasure (owner_id, generation, requested_at) VALUES (1,1,'2026-11-09')")
+        with Operations.context(MigrationContext.configure(conn)), pytest.raises(RuntimeError, match='refuses to erase'):
+            migration.downgrade()
+
+
+# ── Post-#500 follow-up (#490 review): grant-bound withdraw erasure,
+#    traffic-independent retry, held erasures not overdue ───────────────────
+
+def test_withdraw_without_a_recorded_grant_erases_nothing(make_user, world):
+    # APPROVED_VERSION unset, a stray client call or pre-F01 history: a
+    # withdraw with no grant behind it changes state only.
+    legacy = make_user("legacy_o2b_withdraw", health_consent=False, weight=90.0)
+    result = consent.mutate(legacy.id, command(0, "withdraw", "o2b-legacy-withdraw"))
+    assert result["state"] == "withdrawn" and result["erasure"] is None
+    assert HealthErasure.query.filter_by(owner_id=legacy.id).count() == 0
+    assert db.session.get(User, legacy.id).weight == 90.0
+
+
+def test_held_erasure_is_not_reported_overdue(world, caplog):
+    db.session.add(HealthLegalHold(owner_id=world.a_id, categories=["workouts"],
+                                   matter_ref="CLAIM-2026-002", created_at=datetime.utcnow(),
+                                   review_at=datetime.utcnow() + timedelta(days=90)))
+    db.session.commit()
+    _withdraw(world.a_id)
+    HealthErasure.query.filter_by(owner_id=world.a_id).one().requested_at = (
+        datetime.utcnow() - timedelta(days=40))
+    db.session.commit()
+    results = health_erasure.run_pending()
+    assert results["held"] == 1 and results["overdue"] == 0
+    assert "event=overdue" not in caplog.text
 
 
 def test_worker_timer_enqueues_erasure_retry_without_traffic(world, monkeypatch):
-    # Before F01 activation, retry must not depend on health-route traffic
-    # (daily maintenance runs only on health requests). The worker timer
-    # thread enqueues the retry hourly; the job itself finishes the erasure.
+    # Daily maintenance runs only on health requests; the worker timer thread
+    # enqueues the retry hourly and the job alone finishes the erasure.
     from types import SimpleNamespace
     import worker
     from app.jobs import tasks
@@ -262,7 +412,6 @@ def test_worker_timer_enqueues_erasure_retry_without_traffic(world, monkeypatch)
     with pytest.raises(health_erasure.ErasureUnavailable):
         health_erasure.run(world.a_id)
     world.s3.failing.clear()
-    # The enqueued job alone completes the erasure; no HTTP request is involved.
     assert tasks.retry_health_erasures()["completed"] == 1
     assert consent.status(world.a_id)["erasure"]["state"] == "completed"
     assert PumpCheck.query.filter_by(user_id=world.a_id).count() == 0
@@ -279,74 +428,3 @@ def test_erasure_tick_never_runs_inline_when_queue_is_unavailable(monkeypatch):
         raise RuntimeError("redis down")
     monkeypatch.setattr("app.jobs.get_queue", broken)
     assert worker._health_erasure_tick(-3600.0, 5.0) == 5.0      # logged, never raised
-
-
-def test_withdraw_without_a_recorded_grant_erases_nothing(make_user, world):
-    # APPROVED_VERSION unset, a stray client call or pre-F01 history: a
-    # withdraw with no grant behind it changes state only.
-    legacy = make_user("legacy_o2b_withdraw", health_consent=False, weight=90.0)
-    result = consent.mutate(legacy.id, command(0, "withdraw", "o2b-legacy-withdraw"))
-    assert result["state"] == "withdrawn" and result["erasure"] is None
-    assert HealthErasure.query.filter_by(owner_id=legacy.id).count() == 0
-    assert db.session.get(User, legacy.id).weight == 90.0
-
-
-def test_overlapping_run_never_erases_records_of_a_new_grant(world, monkeypatch):
-    # Run B passes its first phase, then run A completes the erasure, the
-    # owner grants again and logs a meal. B must stop at the owner row lock.
-    real_release, state = health_erasure._release, {"raced": False}
-
-    def release(owner, kind, key):
-        if not state["raced"]:
-            state["raced"] = True
-            monkeypatch.setattr(health_erasure, "_release", real_release)
-            assert health_erasure.run(owner) == "completed"            # run A
-            granted = consent.mutate(owner, command(2, request_id="o2b-race-regrant"))
-            assert granted["state"] == "granted"
-            db.session.add(MealLog(user_id=owner, ogun="Öğle", yemekler="Oats",
-                                   kalori=100.0, tarih="2026-11-09"))
-            alice = db.session.get(User, owner)
-            alice.weight = 60.0
-            db.session.commit()
-        return real_release(owner, kind, key)
-
-    _withdraw(world.a_id)
-    monkeypatch.setattr(health_erasure, "_release", release)
-    assert health_erasure.run(world.a_id) == "none"                     # run B
-    assert state["raced"]
-    assert MealLog.query.filter_by(user_id=world.a_id).count() == 1
-    assert db.session.get(User, world.a_id).weight == 60.0
-
-
-def test_held_erasures_are_not_overdue_and_never_starve_unheld_ones(app, world):
-    review = (datetime.utcnow() + timedelta(days=90)).strftime("%Y-%m-%d")
-    for owner in (world.a_id, world.b_id):
-        consent.mutate(owner, command(1, "withdraw", f"o2b-batch-{owner}"))
-    # The held owner sorts first by id; the unheld one must still be retried.
-    held, unheld = sorted((world.a_id, world.b_id))
-    with app.app_context():
-        added = app.test_cli_runner().invoke(args=[
-            "health-legal-hold-add", "--user-id", str(held), "--matter", "CLAIM-2026-002",
-            "--review-date", review, "--category", "workouts"])
-    assert added.exit_code == 0, added.output
-    for row in HealthErasure.query.all():
-        row.requested_at = datetime.utcnow() - timedelta(days=40)
-    db.session.commit()
-    results = health_erasure.run_pending(limit=1)
-    assert results["completed"] == 1 and results["overdue"] == 0
-    assert consent.status(unheld)["erasure"]["state"] == "completed"
-    assert consent.status(held)["erasure"]["state"] == "pending"
-
-
-def test_coach_index_follows_coach_when_profile_is_held(app, world):
-    review = (datetime.utcnow() + timedelta(days=90)).strftime("%Y-%m-%d")
-    with app.app_context():
-        added = app.test_cli_runner().invoke(args=[
-            "health-legal-hold-add", "--user-id", str(world.a_id), "--matter", "CLAIM-2026-003",
-            "--review-date", review, "--category", "profile"])
-    assert added.exit_code == 0, added.output
-    _withdraw(world.a_id)
-    assert health_erasure.run(world.a_id) == "held"
-    meta = db.session.get(User, world.a_id).user_metadata
-    assert meta["injuries"] == "left knee"                       # profile: held
-    assert health_erasure.COACH_INDEX_KEY not in meta            # coach: erased

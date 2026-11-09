@@ -95,7 +95,8 @@ def allowed(owner):
     if active is not None:
         return active[0] == owner
     try:
-        return status(owner)["state"] == "granted"
+        with _authority(owner) as conn:
+            return _valid(_state(conn, owner)["record"])
     except HealthConsentDenied:
         return False
 

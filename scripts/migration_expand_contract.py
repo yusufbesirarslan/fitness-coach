@@ -179,6 +179,10 @@ HISTORICAL_BASELINE = {
 # normalized content digest, so any edit (including to downgrade) is a
 # violation that needs a fresh review. Keep this map tiny.
 REVIEWED_DDL = {
+    # O2-B: additive schema and exact stopped-erasure retention exception.
+    # Admission/floor/binding/immutable/truncate fences remain unchanged.
+    "f01e2a5e0002":
+        "5f9a458fe579be81e32f72935cbdcff3fe7cac1555f7f093db37bcb4ef01d655",
     # PRIV-K6 rollback gate Layer A: completion-authority fence triggers. Dormant
     # (historical writers unaffected) until `flask completion-floor raise`.
     "d7e3a9c1f5b8":

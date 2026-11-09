@@ -46,7 +46,7 @@ def test_alembic_migrations_have_single_head():
     # MON-02-BE-02's empty Apple notification/reconciliation tables follow the fence.
     # LAUNCH-FREE-BE-01 widens the bucket scope CHECK on the physical budget.
     # FATSECRET-RETENTION-PHASE1 adds provider provenance on top of F01.
-    assert heads == ["f01c0a1e0002"]
+    assert heads == ["f01e2a5e0002"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():

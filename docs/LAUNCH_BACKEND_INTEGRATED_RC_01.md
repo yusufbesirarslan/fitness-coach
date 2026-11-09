@@ -1,3 +1,8 @@
+> Post-RC source amendment: the founder-selected O2-B withdrawal integration is
+> documented in [F01_O2B_POST_RC_INTEGRATION_01.md](privacy/F01_O2B_POST_RC_INTEGRATION_01.md).
+> It supersedes this receipt's earlier O2 disposition only. Activation and release
+> holds remain closed.
+
 # Backend integrated release candidate and E2E handoff
 
 TASK=AXISAI-LAUNCH-BACKEND-INTEGRATED-RC-01
@@ -87,8 +92,6 @@ Privacy Notice clause changes, with tests for any changed behavior. Keep
 `APPROVED_VERSION` unset until the decision and wording are resolved. This
 integration does not substantiate retention, approve final wording or silently
 enable processing.
-
-**Update 2026-11-09: O2 decided.** Founder decision AXISAI-F01-A1-O2B-FOUNDER-DISPOSITION-01 adopts A1 = O2-B: health records are erased within 30 days of withdrawal, there is no restore on a new grant, and a narrow legal hold applies only to a documented matter. It supersedes the pending-O2 paragraph above. The implementation is in #490's follow-up head: `app/services/health_erasure.py`, migration `f01c0a1e0002` and F01 text `health-fitness-v2-review`. `APPROVED_VERSION` stays unset until the founder approves the v2 text and the mobile confirmation (axisai-mobile #177) is in the release build. Details: `docs/privacy/F01_FIRST_PARTY_HEALTH_CONSENT.md` §Withdrawal erasure.
 
 ## Five D1 feature activation work
 

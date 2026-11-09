@@ -569,3 +569,17 @@ def test_leaderboard_entry_is_dropped(world, raw_client, monkeypatch):
     assert raw_client.delete(PATH, headers=world.a_bearer).status_code == 204
     for members in fake.sets.values():
         assert members == {str(world.b_id)}
+
+
+def test_canonical_account_deletion_closes_only_proven_o2b_storage_debt(world, raw_client):
+    from app.services import health_consent
+    from app.health_consent_models import HealthErasure
+    from test_health_consent import command
+    health_consent.mutate(world.a_id, command(1, 'withdraw', 'lp11-o2b-withdraw'))
+    assert HealthErasure.query.filter_by(owner_id=world.a_id).one().completed_at is None
+    result = raw_client.delete(PATH, headers=world.a_bearer)
+    assert result.status_code == 204
+    row = HealthErasure.query.filter_by(owner_id=world.a_id).one()
+    assert row.completed_at is not None and row.summary == {'account_deleted': True}
+    assert not set(world.a_keys.values()) & world.s3.objects
+    _assert_b_untouched(world, raw_client)

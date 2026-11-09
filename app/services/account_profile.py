@@ -240,6 +240,11 @@ def _stored_token(value, vocabulary):
     return value if isinstance(value, str) and value in vocabulary else None
 
 
+def invalidate_health_onboarding(user):
+    """Reset readiness inside the caller's locked health-erasure transaction."""
+    user.profile_complete = False
+
+
 def current_profile(user):
     """The canonical stored profile of `user`, in domain field names.
 
