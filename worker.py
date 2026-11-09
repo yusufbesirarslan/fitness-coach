@@ -22,6 +22,14 @@ _log = logging.getLogger("fitx.worker")
 
 
 PROXY_SAMPLE_INTERVAL_SECONDS = 600
+# FatSecret 24h retention pass (app/services/provider_retention.py). Values are
+# removed at 22h (EXPIRY_MARGIN = 2h, many times this interval), so a value is
+# gone before its deadline even when an enqueue waits behind other jobs.
+RETENTION_INTERVAL_SECONDS = 300
+# F01 withdrawal erasure retry (app/services/health_erasure.py, A1 = O2-B). The
+# withdrawal request erases at once; this only finishes ones that failed, so an
+# hourly pass keeps the 30-day bound with no dependence on user traffic.
+HEALTH_ERASURE_INTERVAL_SECONDS = 3600
 
 
 def _sample_fatsecret_safely():
@@ -55,6 +63,55 @@ def _heartbeat_tick(last_proxy_sample, now):
     return now
 
 
+def _retention_tick(last_retention, now):
+    """Enqueue the retention pass on its own interval; never raise.
+
+    Only an ENQUEUE happens on this thread: the pass itself runs as an ordinary
+    job in the forked work horse (fresh app/DB per job, as every job does), so
+    no database connection is opened in the long-lived parent process. If the
+    queue cannot be reached nothing runs inline here; the next tick retries.
+    Returns the next ``last_retention``.
+    """
+    if now - last_retention < RETENTION_INTERVAL_SECONDS:
+        return last_retention
+    try:
+        from app.jobs import get_queue
+        from app.jobs.tasks import expire_provider_nutrition
+        queue = get_queue()
+        if queue is not None:
+            queue.enqueue_call(expire_provider_nutrition,
+                               timeout=240, ttl=RETENTION_INTERVAL_SECONDS,
+                               result_ttl=0, failure_ttl=86400)
+    except Exception:
+        _log.warning("Saklama gecisi kuyruga atilamadi — sonraki tikte denenecek",
+                     exc_info=True)
+    return now
+
+
+def _health_erasure_tick(last_erasure, now):
+    """Enqueue the pending-erasure retry on its own interval; never raise.
+
+    Same contract as ``_retention_tick``: only an enqueue happens here, the
+    retry runs as an ordinary job in the work horse, and an unreachable queue
+    runs nothing inline (the next tick retries). Returns the next
+    ``last_erasure``.
+    """
+    if now - last_erasure < HEALTH_ERASURE_INTERVAL_SECONDS:
+        return last_erasure
+    try:
+        from app.jobs import get_queue
+        from app.jobs.tasks import retry_health_erasures
+        queue = get_queue()
+        if queue is not None:
+            queue.enqueue_call(retry_health_erasures,
+                               timeout=900, ttl=HEALTH_ERASURE_INTERVAL_SECONDS,
+                               result_ttl=0, failure_ttl=86400)
+    except Exception:
+        _log.warning("Saglik verisi silme yeniden denemesi kuyruga atilamadi — "
+                     "sonraki tikte denenecek", exc_info=True)
+    return now
+
+
 def _start_heartbeat():
     """Heartbeat'i arka-plan daemon thread'de TTL/2'de bir tazele. Boşta (job yok)
     worker bile canlı görünsün diye — RQ'nun kendi worker-heartbeat'i bizim
@@ -64,9 +121,13 @@ def _start_heartbeat():
 
     def _loop():
         last_proxy_sample = 0.0
+        last_retention = -float(RETENTION_INTERVAL_SECONDS)
+        last_erasure = -float(HEALTH_ERASURE_INTERVAL_SECONDS)
         while not stop.is_set():
             last_proxy_sample = _heartbeat_tick(last_proxy_sample,
                                                 time.monotonic())
+            last_retention = _retention_tick(last_retention, time.monotonic())
+            last_erasure = _health_erasure_tick(last_erasure, time.monotonic())
             stop.wait(max(WORKER_HEARTBEAT_TTL // 2, 5))
 
     t = threading.Thread(target=_loop, name="worker-heartbeat", daemon=True)

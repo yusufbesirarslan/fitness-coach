@@ -222,3 +222,60 @@ def test_health_erasure_is_in_daily_maintenance(monkeypatch, app):
     with app.app_context():
         tasks.run_daily_maintenance(datetime.utcnow().isoformat())
     assert called == [1]
+
+
+def test_withdrawal_erases_fatsecret_retained_daily_totals(world):
+    # #499: expired FatSecret per-item values are folded into a per-day total.
+    # Those totals are nutrition records too, so withdrawal must remove them.
+    from app.models import MealLogRetainedTotal
+    for owner in (world.a_id, world.b_id):
+        db.session.add(MealLogRetainedTotal(user_id=owner, tarih="2026-11-01",
+                                            energy_kcal=120.0, protein_g=4.0,
+                                            carbohydrate_g=20.0, fat_g=3.0, item_count=1))
+    db.session.commit()
+    _withdraw(world.a_id)
+    assert health_erasure.run(world.a_id) == "completed"
+    assert MealLogRetainedTotal.query.filter_by(user_id=world.a_id).count() == 0
+    assert MealLogRetainedTotal.query.filter_by(user_id=world.b_id).count() == 1
+
+
+def test_worker_timer_enqueues_erasure_retry_without_traffic(world, monkeypatch):
+    # Before F01 activation, retry must not depend on health-route traffic
+    # (daily maintenance runs only on health requests). The worker timer
+    # thread enqueues the retry hourly; the job itself finishes the erasure.
+    from types import SimpleNamespace
+    import worker
+    from app.jobs import tasks
+    assert worker.HEALTH_ERASURE_INTERVAL_SECONDS == 3600
+
+    enqueued = []
+    queue = SimpleNamespace(enqueue_call=lambda func, **kw: enqueued.append((func, kw)))
+    monkeypatch.setattr("app.jobs.get_queue", lambda: queue)
+    last = worker._health_erasure_tick(-3600.0, 0.0)
+    assert worker._health_erasure_tick(last, 1800.0) == last     # inside the interval
+    assert worker._health_erasure_tick(last, 3600.0) == 3600.0
+    assert [f for f, _ in enqueued] == [tasks.retry_health_erasures] * 2
+    assert enqueued[0][1]["timeout"] == 900 and enqueued[0][1]["result_ttl"] == 0
+
+    world.s3.failing.add(world.a_keys["pump"])
+    _withdraw(world.a_id)
+    with pytest.raises(health_erasure.ErasureUnavailable):
+        health_erasure.run(world.a_id)
+    world.s3.failing.clear()
+    # The enqueued job alone completes the erasure; no HTTP request is involved.
+    assert tasks.retry_health_erasures()["completed"] == 1
+    assert consent.status(world.a_id)["erasure"]["state"] == "completed"
+    assert PumpCheck.query.filter_by(user_id=world.a_id).count() == 0
+
+
+def test_erasure_tick_never_runs_inline_when_queue_is_unavailable(monkeypatch):
+    import worker
+    monkeypatch.setattr("app.jobs.get_queue", lambda: None)
+    monkeypatch.setattr("app.jobs.tasks.retry_health_erasures",
+                        lambda: (_ for _ in ()).throw(AssertionError("ran inline")))
+    assert worker._health_erasure_tick(-3600.0, 0.0) == 0.0
+
+    def broken():
+        raise RuntimeError("redis down")
+    monkeypatch.setattr("app.jobs.get_queue", broken)
+    assert worker._health_erasure_tick(-3600.0, 5.0) == 5.0      # logged, never raised

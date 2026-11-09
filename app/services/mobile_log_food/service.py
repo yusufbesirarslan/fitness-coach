@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from app.extensions import db
 from app.models import MealLog
-from app.services import meal_idempotency
+from app.services import meal_idempotency, provider_retention
 from app.services.provider_food_snapshot import (
     ProviderFoodNotFound,
     ProviderPersistenceHeld,
@@ -62,10 +62,15 @@ def log_food(user_id, key, command):
     # the short transaction whose race arbiter is the existing unique key.
     db.session.rollback()
 
+    provenance = None
     if isinstance(command, ProviderBackedLogFoodCommand):
         snapshot = resolve_provider_food(
             command.provider, command.food_id, command.serving_id,
             command.quantity)
+        # The 24h deadline runs from the moment the provider answered.
+        provenance = ([provider_retention.provider_component(
+            command.food_id, command.serving_id, command.quantity)],
+            provider_retention.utcnow())
         description, nutrition = snapshot.description, snapshot.nutrition
         source = command.discovery_source
     elif isinstance(command, MenuConfirmedLogFoodCommand):
@@ -74,6 +79,11 @@ def log_food(user_id, key, command):
     elif isinstance(command, ManualLogFoodCommand):
         description, nutrition = command.description, command.nutrition
         source = "manual"
+        # Repeat of a still-unexpired provider entry copies its provider values;
+        # the copy keeps the original deadline instead of escaping it.
+        provenance = provider_retention.copied_provenance(
+            user_id, description, nutrition)
+        db.session.rollback()  # close the read before the write transaction
     else:  # pragma: no cover - typed parser is the only caller
         raise TypeError("unsupported command")
 
@@ -90,6 +100,8 @@ def log_food(user_id, key, command):
         idempotency_fingerprint=fingerprint,
         created_at=datetime.utcnow(),
     )
+    if provenance is not None:
+        provider_retention.stamp(entry, *provenance)
     winner, created = meal_idempotency.commit_once(entry, key)
     if winner.idempotency_fingerprint != fingerprint:
         raise IdempotencyConflict
@@ -97,17 +109,18 @@ def log_food(user_id, key, command):
 
 
 def response_meal(entry, secret, user_id):
+    shown = provider_retention.published(entry)
     projected = SimpleNamespace(
         user_id=entry.user_id,
         entry_id=entry.id,
         meal_label=entry.ogun,
-        description=entry.yemekler,
+        description=shown.yemekler,
         source=entry.source,
         created_at=entry.created_at,
-        energy_kcal=entry.kalori,
-        protein_g=entry.protein,
-        carbohydrate_g=entry.karb,
-        fat_g=entry.yag,
+        energy_kcal=shown.kalori,
+        protein_g=shown.protein,
+        carbohydrate_g=shown.karb,
+        fat_g=shown.yag,
         diary_date=entry.tarih,
         idempotency_key=entry.idempotency_key,
         idempotency_fingerprint=entry.idempotency_fingerprint,

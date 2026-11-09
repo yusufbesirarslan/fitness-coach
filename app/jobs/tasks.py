@@ -99,6 +99,42 @@ def sample_fatsecret_proxy():
     return status
 
 
+def expire_provider_nutrition():
+    """FatSecret 24h boundary: remove per-item provider values past deadline.
+
+    Enqueued every few minutes by the worker's own timer thread (worker.py), so
+    expiry happens with zero user traffic; also run by daily maintenance.
+    """
+    def _body():
+        from app.services import provider_retention
+        result = provider_retention.expire_due()
+        return {"folded": result.folded_entries,
+                "relabelled": result.relabelled_summaries,
+                "scrubbed": result.scrubbed_items,
+                "overdue": result.overdue}
+
+    return _in_app_context(_body)
+
+
+def retry_health_erasures():
+    """F01 withdrawal erasures that failed in their request (A1 = O2-B).
+
+    Enqueued hourly by the worker's timer thread (worker.py), so a pending
+    erasure finishes with zero user traffic; also run by daily maintenance and
+    ``flask health-erasure-run``.
+    """
+    def _body():
+        from app.services import health_erasure
+        return health_erasure.run_pending()
+
+    return _in_app_context(_body)
+
+
+def _provider_retention_pass():
+    from app.services import provider_retention
+    return provider_retention.expire_due().folded_entries
+
+
 def run_daily_maintenance(now_iso):
     """Purge expired/old rows outside the request that won the daily lock."""
     now = datetime.fromisoformat(now_iso)
@@ -113,6 +149,7 @@ def run_daily_maintenance(now_iso):
             ("mobile_auth", lambda: mobile_auth.purge_expired(now)),
             ("notifications", lambda: notifications.purge_old(now)),
             ("fatsecret_proxy", sample_fatsecret_proxy),
+            ("provider_retention", _provider_retention_pass),
             ("health_erasure", health_erasure.run_pending),
         ):
             try:

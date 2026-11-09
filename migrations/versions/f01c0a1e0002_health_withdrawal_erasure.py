@@ -1,7 +1,7 @@
 """F01 withdrawal erasure (A1 = O2-B). Two empty additive tables; no backfill.
 
 Revision ID: f01c0a1e0002
-Revises: f01c0a1e0001
+Revises: e1a5f0c3d2b4
 `health_erasure` records owed/completed erasures (ids, times, counts; no account
 foreign key, so the record outlives the account). `health_legal_hold` holds the
 controller's documented exemptions and cascades with the account.
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 import re
 
 revision = 'f01c0a1e0002'
-down_revision = 'f01c0a1e0001'
+down_revision = 'e1a5f0c3d2b4'
 branch_labels = None
 depends_on = None
 expand_contract = "expand"

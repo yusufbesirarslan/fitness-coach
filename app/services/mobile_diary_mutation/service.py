@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import s3_helper
 from app.extensions import db
 from app.models import MealLog, MealPhotoCleanup
+from app.services import provider_retention
 from app.services.mobile_nutrition.identity import (
     diary_entry_id,
     matches_diary_entry_id,
@@ -35,6 +36,16 @@ logger = logging.getLogger(__name__)
 
 class EntryNotFound(Exception):
     pass
+
+
+class SummarizedDiaryEntry(Exception):
+    """The entry's own FatSecret values already moved into the day total.
+
+    Deleting it would leave its calories in the retained daily aggregate, which
+    no longer records which entry they came from. Refused rather than
+    corrupting the total (only reachable for an entry logged in the first
+    minutes after midnight, on its own day; past days are read-only anyway).
+    """
 
 
 class StaleDiaryEntry(Exception):
@@ -83,15 +94,16 @@ CleanupOutcome = namedtuple(
 
 
 def _state(row):
+    shown = provider_retention.published(row)  # what the diary publishes
     return DiaryEntryRevisionState(
         user_id=row.user_id,
         entry_id=row.id,
         meal_label=row.ogun,
-        description=row.yemekler,
-        energy_kcal=row.kalori,
-        protein_g=row.protein,
-        carbohydrate_g=row.karb,
-        fat_g=row.yag,
+        description=shown.yemekler,
+        energy_kcal=shown.kalori,
+        protein_g=shown.protein,
+        carbohydrate_g=shown.karb,
+        fat_g=shown.yag,
         diary_date=row.tarih,
         source=row.source,
         idempotency_key=row.idempotency_key,
@@ -102,17 +114,18 @@ def _state(row):
 
 
 def _canonical_meal(row, secret, user_id):
+    shown = provider_retention.published(row)
     projected = SimpleNamespace(
         user_id=row.user_id,
         entry_id=row.id,
         meal_label=row.ogun,
-        description=row.yemekler,
+        description=shown.yemekler,
         source=row.source,
         created_at=row.created_at,
-        energy_kcal=row.kalori,
-        protein_g=row.protein,
-        carbohydrate_g=row.karb,
-        fat_g=row.yag,
+        energy_kcal=shown.kalori,
+        protein_g=shown.protein,
+        carbohydrate_g=shown.karb,
+        fat_g=shown.yag,
         diary_date=row.tarih,
         idempotency_key=row.idempotency_key,
         idempotency_fingerprint=row.idempotency_fingerprint,
@@ -345,6 +358,11 @@ def delete_entry(user_id, diary_date, entry_token, revision, secret):
         _release_owned_object(
             pending.user_id, pending.entry_id, pending.photo_key, pending.id)
         return
+    if (provider_retention.is_due(row) and provider_retention.is_single_item(row)
+            and not provider_retention.is_legacy_provider(row)):
+        # Its value is (or is about to be) part of the day total only.
+        db.session.rollback()
+        raise SummarizedDiaryEntry
     photo_key = row.photo_key
     entry_id = row.id
     if photo_key and not s3_helper.meal_photo_key_is_deletable(

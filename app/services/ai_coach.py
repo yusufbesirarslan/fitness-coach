@@ -126,11 +126,14 @@ def _today_nutrition_totals(user_id):
     koçun 'kalan bütçe'si ile menü analizinin 'kalanı' birebir tutarlı olsun.
     (Faz C tarih semantiğini tüm okuyucularda birlikte ISO/Istanbul'a taşıyacak.)"""
     today_key = day_key()
+    from app.services import provider_retention
+    retained = [provider_retention.retained_scalar(f, user_id, today_key)
+                for f in provider_retention.RETAINED_FIELDS]
     row = db.session.query(
-        db.func.coalesce(db.func.sum(MealLog.kalori), 0),
-        db.func.coalesce(db.func.sum(MealLog.protein), 0),
-        db.func.coalesce(db.func.sum(MealLog.karb), 0),
-        db.func.coalesce(db.func.sum(MealLog.yag), 0),
+        db.func.coalesce(db.func.sum(MealLog.kalori), 0) + retained[0],
+        db.func.coalesce(db.func.sum(MealLog.protein), 0) + retained[1],
+        db.func.coalesce(db.func.sum(MealLog.karb), 0) + retained[2],
+        db.func.coalesce(db.func.sum(MealLog.yag), 0) + retained[3],
         db.func.count(MealLog.id),
     ).filter(
         MealLog.user_id == user_id,

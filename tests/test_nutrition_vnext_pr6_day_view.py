@@ -193,8 +193,10 @@ def test_exact_canonical_authorities_and_bounded_statements(app, make_user):
     seed(u.id)
     imported = {n.module for n in ast.walk(ast.parse(SERVICE))
                 if isinstance(n, ast.ImportFrom)}
+    # app.services: provider_retention's retained-total expression, added inside
+    # the same intake SELECT (statement count unchanged).
     assert imported == {'__future__', 'dataclasses', 'datetime', 'sqlalchemy', 'app.extensions',
-                        'app.models', 'app.services.nutrition_plan_schema',
+                        'app.models', 'app.services', 'app.services.nutrition_plan_schema',
                         'app.services.nutrition_targets', 'app.timeutil'}
     models = next(n for n in ast.walk(ast.parse(SERVICE))
                   if isinstance(n, ast.ImportFrom) and n.module == 'app.models')

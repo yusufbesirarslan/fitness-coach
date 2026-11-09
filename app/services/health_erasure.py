@@ -221,8 +221,13 @@ def _erase_rows(user, held):
     if "nutrition" not in held:
         meal_ids = [i for (i,) in db.session.query(m.CustomMeal.id).filter(m.CustomMeal.user_id == uid)]
         changed = _delete(m.CustomMealItem, m.CustomMealItem.custom_meal_id.in_(meal_ids)) if meal_ids else 0
+        # MealLog before its retained daily totals (FatSecret 24h boundary):
+        # provider_retention.expire_due folds expired values into those totals
+        # under meal_log row locks, so deleting MealLog first waits for any fold
+        # in flight and the totals DELETE then sees what it folded.
         changed += sum(_delete(model, model.user_id == uid) for model in (
-            m.MealPhotoCleanup, m.MealLog, m.WaterLog, m.Supplement, m.CustomMeal))
+            m.MealPhotoCleanup, m.MealLog, m.MealLogRetainedTotal, m.WaterLog,
+            m.Supplement, m.CustomMeal))
         counts["nutrition"] = changed
 
     if "coach" not in held:

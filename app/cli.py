@@ -102,7 +102,7 @@ def _user_child_models():
     from app.models import (
         Activity, AiAllowanceBucket, AiStarterGrant, AiUsageReservation, AppleAccountAssociation, AppleSubscription, CoachConversation, CognitoSession, CustomMeal, DailyActivity, ExerciseNote,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
-        MealLog, MealPhotoCleanup, MobileAuthSession, Notification,
+        MealLog, MealLogRetainedTotal, MealPhotoCleanup, MobileAuthSession, Notification,
         NutritionPlan, PendingAction,
         PlanMutationRecord, TrainingPlanConfirmationProposal,
         TrainingAllowanceCompensation, TrainingPlanGenerationAllowance, TrainingPlanGenerationOperation,
@@ -138,7 +138,7 @@ def _user_child_models():
         # stored objects is a separate lifecycle question, recorded as debt for
         # this operator path; native self-deletion (LP-11,
         # app/services/account_deletion.py) releases them BEFORE calling here.
-        MealPhotoCleanup, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
+        MealPhotoCleanup, MealLog, MealLogRetainedTotal, PendingAction, PumpCheckLike, PumpCheckComment,
         # Sprint 10 PR3: the request ledger points at the comparison, and the
         # comparison points at both source Pump Checks — so erasure runs
         # ledger, then comparison, then the sources below.
@@ -636,6 +636,59 @@ def health_legal_hold_list_cmd():
                                "review_due": hold.review_at <= datetime.utcnow()}))
 
 
+@click.option("--expect-meal-log", type=int, required=True,
+              help="Expected legacy provider meal_log rows (DB4: 3).")
+@click.option("--expect-items", type=int, required=True,
+              help="Expected legacy provider saved-meal items (DB4: 26).")
+def fatsecret_retention_legacy_dry_run_cmd(expect_meal_log, expect_items):
+    """Read-only dry run of the founder-gated FatSecret legacy disposition.
+
+    Prints aggregates only and mutates nothing; no apply mode exists. Exits 0
+    with RESULT=MATCH only when the counts equal the expected DB4 counts and
+    every affected day total is conserved; otherwise RESULT=HOLD, exit 2.
+
+        flask --app starter fatsecret-retention-legacy-dry-run \\
+            --expect-meal-log 3 --expect-items 26
+    """
+    import json as _json
+    from app.services import provider_retention
+    report = provider_retention.legacy_dry_run()
+    match = (report["meal_log_provider_rows"] == expect_meal_log
+             and report["custom_meal_item_provider_items"] == expect_items
+             and report["day_totals_conserved"])
+    report.update({"mode": "dry_run", "mutation": "none",
+                   "expected": {"meal_log": expect_meal_log, "items": expect_items},
+                   "RESULT": "MATCH" if match else "HOLD"})
+    click.echo(_json.dumps(report, sort_keys=True))
+    if not match:
+        raise SystemExit(2)
+
+
+@click.option("--apply", "apply_", is_flag=True,
+              help="Delete the keys (founder-gated). Default: count only.")
+@click.option("--expect", type=int, default=None,
+              help="Required with --apply: the count a prior dry run printed.")
+def fatsecret_retention_redis_v1_cmd(apply_, expect):
+    """Old FatSecret-era macro cache keys ``food:macros:v1:*`` (post-deploy).
+
+    Default prints the count only. ``--apply --expect N`` UNLINKs exactly that
+    pattern and only when a fresh scan still finds N keys (else HOLD, exit 2).
+    Production use is separately founder-gated.
+    """
+    import json as _json
+    from app.services import provider_retention
+    if not apply_:
+        click.echo(_json.dumps({"mode": "dry_run", "pattern": provider_retention.LEGACY_V1_CACHE_PATTERN,
+                                "keys": provider_retention.legacy_v1_cache_keys()}))
+        return
+    if expect is None:
+        raise click.UsageError("--apply requires --expect N from a dry run")
+    result = provider_retention.unlink_legacy_v1_cache(expect)
+    click.echo(_json.dumps(result, sort_keys=True))
+    if result["result"] != "DELETED":
+        raise SystemExit(2)
+
+
 def register_cli(app):
     app.cli.add_command(completion_floor_cmd)
     app.cli.command("ai-allowance-sweep")(ai_allowance_sweep_cmd)
@@ -650,6 +703,8 @@ def register_cli(app):
     app.cli.command("health-legal-hold-release")(health_legal_hold_release_cmd)
     app.cli.command("health-legal-hold-list")(health_legal_hold_list_cmd)
     app.cli.command("cleanup-pending-meal-photos")(cleanup_pending_meal_photos_cmd)
+    app.cli.command("fatsecret-retention-legacy-dry-run")(fatsecret_retention_legacy_dry_run_cmd)
+    app.cli.command("fatsecret-retention-redis-v1")(fatsecret_retention_redis_v1_cmd)
     app.cli.command("send-test-email")(send_test_email_cmd)
     app.cli.command("rq-failed")(rq_failed_cmd)
     app.cli.command("rq-requeue")(rq_requeue_cmd)
