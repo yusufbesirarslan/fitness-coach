@@ -1054,6 +1054,7 @@
   "pump.friend_ids_invalid": "Paylaşmak için geçerli arkadaşlar seç.",
   "pump.verify_unavailable": "Fotoğrafın şu an doğrulanamadı. Lütfen biraz sonra tekrar dene.",
   "pump.friend_required": "En az bir arkadaş seç.",
+  "social.unavailable": "Bu özellik kullanılamıyor.",
   "pump.share_to": "PAYLAŞ",
   "pump.share_feed": "Feed",
   "pump.share_friends": "Arkadaşlar",

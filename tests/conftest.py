@@ -90,6 +90,19 @@ def approved_launch_policy(app, monkeypatch):
     return launch_policy.LAUNCH_V1_POLICY
 
 
+@pytest.fixture
+def social_reopened(monkeypatch):
+    """TEST-ONLY: reopen the Launch V1 social boundary.
+
+    Production has no channel for this (``launch_social.SOCIAL_AVAILABLE`` is a
+    code constant). The legacy social suites use it so the dormant social code
+    stays characterized for a future, separately authorized reactivation; the
+    closed default is proven in ``tests/test_launch_v1_social_boundary.py``.
+    """
+    from app.services import launch_social
+    monkeypatch.setattr(launch_social, "SOCIAL_AVAILABLE", True)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_ai_spend_guard_local_counters():
     # The production guard uses Redis windows. Hermetic tests intentionally

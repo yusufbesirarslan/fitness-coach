@@ -255,9 +255,11 @@ def test_workout_transport_guard_does_not_consume_multipart(app, bearer):
 def test_web_social_is_closed_for_adult_senders_too(app, client, auth_user):
     policy.attach(auth_user, policy.registration_record(ticket(30)))
     db.session.commit()
+    # Launch V1: the social boundary (app/services/launch_social.py) answers
+    # before the eligibility check, so the refusal is its 404, not a 403.
     for route in ["/friends", "/friends/search", "/feed/data", "/chat/fixture/messages"]:
         response = client.get(route)
-        assert response.status_code == 403
+        assert response.status_code == 404
 
 
 def test_web_registration_contact_controls_stay_in_inert_template(app, client):

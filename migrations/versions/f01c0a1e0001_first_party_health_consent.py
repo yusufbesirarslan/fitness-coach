@@ -1,4 +1,4 @@
-"""First-party health consent and withdrawal erasure. Empty additive tables; no inferred permission.
+"""First-party health consent. Empty additive tables; no inferred permission.
 
 Revision ID: f01c0a1e0001
 Revises: d8f1a3c5e7b9
@@ -40,24 +40,7 @@ def _tables():
         sa.UniqueConstraint('owner_id', 'generation', name='uq_health_consent_generation'),
         sa.CheckConstraint('generation > 0', name='ck_health_event_generation'),
         sa.CheckConstraint("action IN ('affirmative_grant', 'decline', 'withdraw')", name='ck_health_event_action'))
-    erasure = sa.Table('health_erasure', metadata,
-        sa.Column('id', sa.Integer, primary_key=True),
-        sa.Column('owner_id', sa.Integer, nullable=False),
-        sa.Column('generation', sa.BigInteger, nullable=False),
-        sa.Column('requested_at', sa.DateTime, nullable=False),
-        sa.Column('completed_at', sa.DateTime, nullable=True),
-        sa.Column('summary', sa.JSON, nullable=True),
-        sa.UniqueConstraint('owner_id', 'generation', name='uq_health_erasure_generation'),
-        sa.CheckConstraint('generation > 0', name='ck_health_erasure_generation'))
-    hold = sa.Table('health_legal_hold', metadata,
-        sa.Column('id', sa.Integer, primary_key=True),
-        sa.Column('owner_id', sa.Integer, sa.ForeignKey('user.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('categories', sa.JSON, nullable=False),
-        sa.Column('matter_ref', sa.String(120), nullable=False),
-        sa.Column('created_at', sa.DateTime, nullable=False),
-        sa.Column('review_at', sa.DateTime, nullable=False),
-        sa.Column('released_at', sa.DateTime, nullable=True))
-    return state, event, erasure, hold
+    return state, event
 
 
 def _predicate(value):
@@ -87,11 +70,7 @@ def upgrade():
         if inspector.get_pk_constraint(table.name)['constrained_columns'] != [c.name for c in table.primary_key]:
             raise RuntimeError('Health consent table lacks owner/evidence identity')
         foreign = inspector.get_foreign_keys(table.name)
-        if not table.foreign_keys:
-            # The erasure record deliberately outlives the account: no fence.
-            if foreign:
-                raise RuntimeError('Health erasure record must not cascade with the account')
-        elif not any(f['constrained_columns'] == ['owner_id'] and f['referred_table'] == 'user'
+        if not any(f['constrained_columns'] == ['owner_id'] and f['referred_table'] == 'user'
                    and f['referred_columns'] == ['id'] and f.get('options', {}).get('ondelete') == 'CASCADE'
                    for f in foreign):
             raise RuntimeError('Health consent table lacks account deletion fence')
@@ -119,9 +98,8 @@ def upgrade():
 
 def downgrade():
     connection = op.get_bind()
-    tables = ('health_legal_hold', 'health_erasure', 'health_consent_event', 'health_consent_state')
-    for table in tables:
+    for table in ('health_consent_event', 'health_consent_state'):
         if connection.execute(sa.text('SELECT 1 FROM ' + table + ' LIMIT 1')).first():
-            raise RuntimeError('Health consent downgrade refuses to erase consent or erasure evidence; retain schema on rollback')
-    for table in tables:
-        op.drop_table(table)
+            raise RuntimeError('Health consent downgrade refuses to erase consent evidence; retain schema on rollback')
+    op.drop_table('health_consent_event')
+    op.drop_table('health_consent_state')

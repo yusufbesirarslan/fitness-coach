@@ -51,9 +51,12 @@ def test_profile_is_not_a_primary_destination():
 def test_community_destinations_are_secondary_not_primary():
     primary = {d["id"] for d in nav.primary_destinations()}
     secondary = {d["id"] for d in nav.secondary_destinations()}
-    for cid in ("feed", "friends", "leaderboard", "quests", "challenges"):
+    for cid in ("leaderboard", "quests", "challenges"):
         assert cid not in primary, cid
         assert cid in secondary, cid
+    # Launch V1: friends and feed are closed and have no navigation entry.
+    for cid in ("feed", "friends"):
+        assert cid not in primary and cid not in secondary, cid
     assert "gallery" not in primary
     assert "gallery" not in secondary
 

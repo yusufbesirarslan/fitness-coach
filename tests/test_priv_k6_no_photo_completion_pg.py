@@ -550,7 +550,7 @@ def test_full_chain_upgrade_preserves_pump_checks_and_backfills_nothing(migrate_
         with db.engine.connect() as conn:
             assert conn.exec_driver_sql(
                 # The K6 fence (d7e3a9c1f5b8) follows the claim; MON-02-BE-02 follows it.
-                "SELECT version_num FROM alembic_version").scalar_one() == "f01c0a1e0001"
+                "SELECT version_num FROM alembic_version").scalar_one() == "f01c0a1e0002"
             assert conn.exec_driver_sql("SELECT * FROM pump_check ORDER BY id").all() == before
             assert conn.exec_driver_sql(
                 "SELECT count(*) FROM workout_completion_day").scalar_one() == 0

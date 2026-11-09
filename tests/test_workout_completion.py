@@ -241,6 +241,7 @@ def test_session_not_poisoned_after_rollback(app, make_user, monkeypatch):
 # Side-effect fan-out (friends) + AI path (private)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("social_reopened")
 def test_friends_visibility_creates_share_messages(app, make_user):
     user = make_user("owner")
     f1 = make_user("f1")
