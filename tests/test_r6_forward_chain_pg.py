@@ -289,8 +289,8 @@ def test_release_chain_is_exactly_the_four_reviewed_forward_migrations():
 # Production (database-1-dr) at LIVE_HEAD. The column digest is the restore
 # verifier's: sha256 of json.dumps(information_schema.columns (table, column,
 # data_type, is_nullable) ORDER BY 1,2). The isolated restore (13:20Z) and the
-# founder-authorized read-only catalog SELECT on production (18:07Z, SSM
-# 708facb8, AXISAI-R6-MERGE-AND-SCHEMA-READBACK-01) agree on it. The fixture is
+# founder-authorized read-only catalog SELECT on production (18:07Z, readback
+# command 708facb8, AXISAI-R6-MERGE-AND-SCHEMA-READBACK-01) agree on it. The fixture is
 # that readback: schema metadata only (columns, constraints, triggers, function
 # definition md5s, sequences, relations), no rows.
 PRODUCTION_SCHEMA = json.loads(
