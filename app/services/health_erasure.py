@@ -153,6 +153,12 @@ def _erase_rows(user, held):
     from app import models as m
     from sqlalchemy.orm.attributes import flag_modified
     uid, counts = user.id, {}
+    # user_metadata: the user-stated memory keys (injuries, goals, equipment,
+    # dietary restrictions, preferences) are "profile"; the Coach turn index
+    # is "coach". Each follows its own category; written once below.
+    meta = dict(user.user_metadata or {})
+    if "coach" not in held:
+        meta.pop(COACH_INDEX_KEY, None)
 
     if "profile" not in held:
         changed = 0
@@ -160,21 +166,18 @@ def _erase_rows(user, held):
             if getattr(user, field) is not None:
                 setattr(user, field, None)
                 changed += 1
-        meta = dict(user.user_metadata or {})
         for key in MEMORY_KEYS:
             if meta.pop(key, None) is not None:
                 changed += 1
-        if "coach" not in held:
-            meta.pop(COACH_INDEX_KEY, None)
-        if meta != (user.user_metadata or {}):
-            user.user_metadata = meta
-            flag_modified(user, "user_metadata")
         # The onboarding session copies weight/height and derives BMR/TDEE,
         # targets and plan text from them: health data in full. Without it the
         # canonical onboarding state is incomplete (account_profile owns the
         # flag itself), so a new grant re-runs onboarding.
         changed += _delete(m.UserSession, m.UserSession.user_id == uid)
         counts["profile"] = changed
+    if meta != (user.user_metadata or {}):
+        user.user_metadata = meta
+        flag_modified(user, "user_metadata")
 
     if "checkins" not in held:
         counts["checkins"] = (_delete(m.WeeklyCheckIn, m.WeeklyCheckIn.user_id == uid)
@@ -221,10 +224,15 @@ def _erase_rows(user, held):
     if "nutrition" not in held:
         meal_ids = [i for (i,) in db.session.query(m.CustomMeal.id).filter(m.CustomMeal.user_id == uid)]
         changed = _delete(m.CustomMealItem, m.CustomMealItem.custom_meal_id.in_(meal_ids)) if meal_ids else 0
-        # MealLog before its retained daily totals (FatSecret 24h boundary):
+        # MealLog before its retained daily totals (FatSecret 24h boundary).
         # provider_retention.expire_due folds expired values into those totals
-        # under meal_log row locks, so deleting MealLog first waits for any fold
-        # in flight and the totals DELETE then sees what it folded.
+        # under meal_log row locks (SKIP LOCKED). If the fold claimed first, the
+        # MealLog DELETE waits for it and the later totals DELETE (new READ
+        # COMMITTED snapshot) sees what it folded; if this claimed first, the
+        # fold skips these rows. The fold's totals insert takes KEY SHARE on
+        # the user row this transaction holds FOR UPDATE, so the two can
+        # deadlock; PostgreSQL then aborts one side whole, and both retry
+        # (erasure hourly, fold every 5 min). No total row is left behind.
         changed += sum(_delete(model, model.user_id == uid) for model in (
             m.MealPhotoCleanup, m.MealLog, m.MealLogRetainedTotal, m.WaterLog,
             m.Supplement, m.CustomMeal))
@@ -319,6 +327,11 @@ def run(owner):
         if user is None:
             db.session.rollback()
             return run(owner)
+        if not _open_rows(owner):
+            # An overlapping run completed it first, and a new grant may already
+            # have collected records: never erase under a closed erasure.
+            db.session.rollback()
+            return "none"
         held = _held(owner, now)
         if not storage(owner, held) <= released:
             db.session.rollback()
@@ -349,9 +362,16 @@ def run(owner):
 
 def run_pending(limit=200):
     """Retry every unfinished erasure; drop erasure records past their retention."""
-    from app.health_consent_models import HealthErasure
-    owners = [o for (o,) in db.session.query(HealthErasure.owner_id).filter(
-        HealthErasure.completed_at.is_(None)).distinct().order_by(HealthErasure.owner_id).limit(limit)]
+    from app.health_consent_models import HealthErasure, HealthLegalHold
+    # Erasures under an active hold go last (a held run only logs review-due
+    # holds) so they never starve the unheld ones of the batch limit.
+    held_owners = select(HealthLegalHold.owner_id).where(HealthLegalHold.released_at.is_(None))
+    open_owners = db.session.query(HealthErasure.owner_id).filter(
+        HealthErasure.completed_at.is_(None)).distinct().order_by(HealthErasure.owner_id)
+    owners = [o for (o,) in open_owners.filter(
+        HealthErasure.owner_id.notin_(held_owners)).limit(limit)]
+    owners += [o for (o,) in open_owners.filter(
+        HealthErasure.owner_id.in_(held_owners)).limit(max(limit - len(owners), 0))]
     db.session.rollback()
     results = {"completed": 0, "held": 0, "failed": 0}
     for owner in owners:
@@ -367,8 +387,11 @@ def run_pending(limit=200):
     results["records_expired"] = HealthErasure.query.filter(
         HealthErasure.completed_at.isnot(None), HealthErasure.completed_at < cutoff).delete(
         synchronize_session=False)
+    # A documented legal hold is the lawful reason an erasure stays open past
+    # 30 days; its review date is reported by hold_review_due instead.
     overdue = HealthErasure.query.filter(
         HealthErasure.completed_at.is_(None),
+        HealthErasure.owner_id.notin_(held_owners),
         HealthErasure.requested_at < datetime.utcnow() - ERASURE_DEADLINE).count()
     db.session.commit()  # leaves no transaction open after maintenance
     if overdue:

@@ -279,3 +279,74 @@ def test_erasure_tick_never_runs_inline_when_queue_is_unavailable(monkeypatch):
         raise RuntimeError("redis down")
     monkeypatch.setattr("app.jobs.get_queue", broken)
     assert worker._health_erasure_tick(-3600.0, 5.0) == 5.0      # logged, never raised
+
+
+def test_withdraw_without_a_recorded_grant_erases_nothing(make_user, world):
+    # APPROVED_VERSION unset, a stray client call or pre-F01 history: a
+    # withdraw with no grant behind it changes state only.
+    legacy = make_user("legacy_o2b_withdraw", health_consent=False, weight=90.0)
+    result = consent.mutate(legacy.id, command(0, "withdraw", "o2b-legacy-withdraw"))
+    assert result["state"] == "withdrawn" and result["erasure"] is None
+    assert HealthErasure.query.filter_by(owner_id=legacy.id).count() == 0
+    assert db.session.get(User, legacy.id).weight == 90.0
+
+
+def test_overlapping_run_never_erases_records_of_a_new_grant(world, monkeypatch):
+    # Run B passes its first phase, then run A completes the erasure, the
+    # owner grants again and logs a meal. B must stop at the owner row lock.
+    real_release, state = health_erasure._release, {"raced": False}
+
+    def release(owner, kind, key):
+        if not state["raced"]:
+            state["raced"] = True
+            monkeypatch.setattr(health_erasure, "_release", real_release)
+            assert health_erasure.run(owner) == "completed"            # run A
+            granted = consent.mutate(owner, command(2, request_id="o2b-race-regrant"))
+            assert granted["state"] == "granted"
+            db.session.add(MealLog(user_id=owner, ogun="Öğle", yemekler="Oats",
+                                   kalori=100.0, tarih="2026-11-09"))
+            alice = db.session.get(User, owner)
+            alice.weight = 60.0
+            db.session.commit()
+        return real_release(owner, kind, key)
+
+    _withdraw(world.a_id)
+    monkeypatch.setattr(health_erasure, "_release", release)
+    assert health_erasure.run(world.a_id) == "none"                     # run B
+    assert state["raced"]
+    assert MealLog.query.filter_by(user_id=world.a_id).count() == 1
+    assert db.session.get(User, world.a_id).weight == 60.0
+
+
+def test_held_erasures_are_not_overdue_and_never_starve_unheld_ones(app, world):
+    review = (datetime.utcnow() + timedelta(days=90)).strftime("%Y-%m-%d")
+    for owner in (world.a_id, world.b_id):
+        consent.mutate(owner, command(1, "withdraw", f"o2b-batch-{owner}"))
+    # The held owner sorts first by id; the unheld one must still be retried.
+    held, unheld = sorted((world.a_id, world.b_id))
+    with app.app_context():
+        added = app.test_cli_runner().invoke(args=[
+            "health-legal-hold-add", "--user-id", str(held), "--matter", "CLAIM-2026-002",
+            "--review-date", review, "--category", "workouts"])
+    assert added.exit_code == 0, added.output
+    for row in HealthErasure.query.all():
+        row.requested_at = datetime.utcnow() - timedelta(days=40)
+    db.session.commit()
+    results = health_erasure.run_pending(limit=1)
+    assert results["completed"] == 1 and results["overdue"] == 0
+    assert consent.status(unheld)["erasure"]["state"] == "completed"
+    assert consent.status(held)["erasure"]["state"] == "pending"
+
+
+def test_coach_index_follows_coach_when_profile_is_held(app, world):
+    review = (datetime.utcnow() + timedelta(days=90)).strftime("%Y-%m-%d")
+    with app.app_context():
+        added = app.test_cli_runner().invoke(args=[
+            "health-legal-hold-add", "--user-id", str(world.a_id), "--matter", "CLAIM-2026-003",
+            "--review-date", review, "--category", "profile"])
+    assert added.exit_code == 0, added.output
+    _withdraw(world.a_id)
+    assert health_erasure.run(world.a_id) == "held"
+    meta = db.session.get(User, world.a_id).user_metadata
+    assert meta["injuries"] == "left knee"                       # profile: held
+    assert health_erasure.COACH_INDEX_KEY not in meta            # coach: erased

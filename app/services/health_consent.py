@@ -134,8 +134,13 @@ def mutate(owner, data):
             if health_erasure.pending(conn, owner):
                 raise HealthConsentDenied("HEALTH_ERASURE_PENDING", 409)
         now = datetime.now(timezone.utc)
-        erase = (data["action"] == "withdraw"
-                 or (data["action"] == "decline" and _valid(state["record"])))
+        # Erase only what a grant could have collected: a withdraw or decline
+        # with no recorded grant (pre-F01 history, APPROVED_VERSION unset, a
+        # stray client call) changes state only and deletes nothing. A grant
+        # under an earlier text version still counts.
+        erase = (data["action"] in ("withdraw", "decline")
+                 and isinstance(state["record"], dict)
+                 and state["record"].get("state") == "granted")
         record = dict(state["record"])
         if data["action"] == "affirmative_grant":
             record = {k: data[k] for k in ("purpose", "version", "locale", "text_digest")}
