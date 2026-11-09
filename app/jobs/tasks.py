@@ -105,7 +105,7 @@ def run_daily_maintenance(now_iso):
 
     def _body():
         from app.extensions import db
-        from app.services import mobile_auth, notifications, session_store
+        from app.services import health_erasure, mobile_auth, notifications, session_store
 
         results = {}
         for name, operation in (
@@ -113,6 +113,7 @@ def run_daily_maintenance(now_iso):
             ("mobile_auth", lambda: mobile_auth.purge_expired(now)),
             ("notifications", lambda: notifications.purge_old(now)),
             ("fatsecret_proxy", sample_fatsecret_proxy),
+            ("health_erasure", health_erasure.run_pending),
         ):
             try:
                 results[name] = operation()

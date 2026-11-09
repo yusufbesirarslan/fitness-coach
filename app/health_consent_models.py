@@ -30,3 +30,35 @@ class HealthConsentEvent(db.Model):
         db.CheckConstraint("generation > 0", name="ck_health_event_generation"),
         db.CheckConstraint("action IN ('affirmative_grant', 'decline', 'withdraw')", name="ck_health_event_action"),
     )
+
+
+class HealthErasure(db.Model):
+    """One erasure owed after a withdrawal. Ids and times only, no health payload.
+
+    No foreign key on purpose: the record of an erasure outlives the account it
+    describes (Erasure Regulation Art. 7(3)) and is itself removed three years
+    after completion by ``health_erasure.run_pending``.
+    """
+    __tablename__ = "health_erasure"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, nullable=False)
+    generation = db.Column(db.BigInteger, nullable=False)
+    requested_at = db.Column(db.DateTime, nullable=False)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    summary = db.Column(db.JSON, nullable=True)
+    __table_args__ = (
+        db.UniqueConstraint("owner_id", "generation", name="uq_health_erasure_generation"),
+        db.CheckConstraint("generation > 0", name="ck_health_erasure_generation"),
+    )
+
+
+class HealthLegalHold(db.Model):
+    """Controller-set exemption for named categories under one documented matter."""
+    __tablename__ = "health_legal_hold"
+    id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    categories = db.Column(db.JSON, nullable=False)
+    matter_ref = db.Column(db.String(120), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False)
+    review_at = db.Column(db.DateTime, nullable=False)
+    released_at = db.Column(db.DateTime, nullable=True)
