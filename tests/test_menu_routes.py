@@ -143,14 +143,22 @@ def profile_session(auth_user):
     return auth_user
 
 
+def _forbidden_fatsecret(*a, **k):
+    raise AssertionError("QR menu composition must never call FatSecret (advice fallback)")
+
+
 def _mock_pipeline(monkeypatch, categorized, per_serving=None, llm=None):
+    # FatSecret advice fallback: QR composition uses only independent estimates,
+    # so per-serving fixture values arrive through the independent LLM seam and
+    # every source-agnostic sanity gate below still sees them.
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: categorized)
-    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
-                        lambda items, token, cmap=None: (per_serving or {}, {}))
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", _forbidden_fatsecret)
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", _forbidden_fatsecret)
+    values = {**(per_serving or {}), **(llm or {})}
     monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
-                        lambda items, category_map=None: llm or {})
+                        lambda items, category_map=None, grams_hint=None:
+                        {n: dict(values[n]) for n in items if n in values})
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -163,24 +171,39 @@ def test_analyze_requires_text_and_profile(client, auth_user):
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_scores_items_and_computes_budget(client, profile_session, monkeypatch):
-    # Bugün 500 kcal yenmiş — kalan bütçeye yansımalı.
+    # Measured-empty day: the full personal budget scores and ranks dishes.
+    _mock_pipeline(monkeypatch, {"Ana Yemekler": ["Izgara Tavuk"]},
+                   per_serving={"Izgara Tavuk": CHICKEN})
+    body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
+    assert body["success"] is True and body["advice_available"] is True
+    assert body["target"] == {"calories": 2000, "protein": 150, "carbs": 225, "fat": 56}
+    assert body["consumed"]["calories"] == 0
+    assert body["remaining"] == body["target"]
+    item = body["categories"]["Ana Yemekler"][0]
+    assert item["name"] == "Izgara Tavuk"
+    assert item["macros"]["protein"] == 62
+    assert body["coach_picks"][0]["name"] == "Izgara Tavuk"
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer")
+def test_analyze_unproven_logged_intake_withholds_the_budget(client, profile_session, monkeypatch):
+    # FatSecret advice fallback: 500 kcal logged today has no verified lineage, so
+    # no consumed/remaining figure, score or pick is personalized from it — and
+    # the unknown budget is null, never 0 or the untouched target.
     from app.timeutil import day_key
     db.session.add(MealLog(user_id=profile_session.id, ogun="Kahvaltı", yemekler="x",
                            kalori=500, protein=30, karb=50, yag=15, tarih=day_key()))
     db.session.commit()
     _mock_pipeline(monkeypatch, {"Ana Yemekler": ["Izgara Tavuk"]},
                    per_serving={"Izgara Tavuk": CHICKEN})
-
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
-    assert body["success"] is True
+    assert body["success"] is True and body["advice_available"] is False
     assert body["target"] == {"calories": 2000, "protein": 150, "carbs": 225, "fat": 56}
-    assert body["consumed"]["calories"] == 500
-    assert body["remaining"]["calories"] == 1500
-
+    assert body["consumed"] is None and body["remaining"] is None
     item = body["categories"]["Ana Yemekler"][0]
-    assert item["name"] == "Izgara Tavuk"
-    assert item["macros"]["protein"] == 62
-    assert body["coach_picks"][0]["name"] == "Izgara Tavuk"
+    assert item["macros"]["protein"] == 62           # independent estimate kept
+    assert item["score"] is None
+    assert body["coach_picks"] == []
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -259,14 +282,23 @@ def test_analyze_retries_without_framework_state(client, profile_session, monkey
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_serves_cached_items_without_fatsecret(client, profile_session, monkeypatch):
-    # Menü hattı PORSİYON-bazlı namespace'ten okur (per-100g koç önbelleğiyle karışmaz).
-    foodcache._macro_cache.setdefault("per_serving", {})["Izgara Tavuk"] = CHICKEN
+    # QR reads only the HMAC-attested independent-estimate namespace; the shared
+    # mixed-origin per-serving cache is never trusted (FatSecret advice fallback).
+    from types import SimpleNamespace
+    from app.services import fatsecret_boundary
+    store = {}
+    redis = SimpleNamespace(mget=lambda keys: [store.get(k) for k in keys],
+                            pipeline=lambda transaction=False: SimpleNamespace(
+                                setex=lambda k, ttl, v: store.__setitem__(k, v), execute=lambda: []))
+    monkeypatch.setattr(foodcache, "_get_redis", lambda: redis)
+    fatsecret_boundary.cache_estimates({"Izgara Tavuk": dict(CHICKEN)})
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Ana Yemekler": ["Izgara Tavuk"]})
 
-    def boom():
-        raise AssertionError("tam önbellek isabetinde FatSecret çağrılmamalı")
+    def boom(*a, **k):
+        raise AssertionError("tam önbellek isabetinde FatSecret/LLM çağrılmamalı")
     monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", boom)
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", boom)
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     assert body["success"] is True
@@ -292,17 +324,18 @@ FAJITA_FIXED = {"calories": 430.0, "protein": 32.0, "carbs": 28.0, "fat": 18.0} 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_reestimates_low_density_stated_gram_item(client, profile_session, monkeypatch):
-    # 220g fajita FatSecret'tan 125 kcal geldi (imkânsız düşük); gramaj ipucuyla
-    # yeniden tahmin gerçekçi değere yükseltmeli.
+    # 220g fajita first estimated at 125 kcal (implausibly low); the stated-gram
+    # hint must raise it. Both passes are independent estimates (no FatSecret).
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Fajitalar": [FAJITA]})
-    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
-                        lambda items, token, cmap=None: ({FAJITA: FAJITA_LOW}, {}))
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", _forbidden_fatsecret)
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", _forbidden_fatsecret)
 
     seen = {}
 
     def fake_llm(items, category_map=None, grams_hint=None):
+        if grams_hint is None:
+            return {FAJITA: dict(FAJITA_LOW)}
         seen["grams_hint"] = grams_hint
         return {FAJITA: FAJITA_FIXED}
     monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", fake_llm)
@@ -318,11 +351,12 @@ def test_analyze_keeps_original_when_reestimate_not_better(client, profile_sessi
     # Yeniden tahmin hâlâ imkânsız-düşükse özgün değer korunur (asla kötüleştirme).
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Fajitalar": [FAJITA]})
-    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
-                        lambda items, token, cmap=None: ({FAJITA: FAJITA_LOW}, {}))
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", _forbidden_fatsecret)
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", _forbidden_fatsecret)
     monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
-                        lambda items, category_map=None, grams_hint=None: {FAJITA: {"calories": 90.0, "protein": 10, "carbs": 6, "fat": 1}})
+                        lambda items, category_map=None, grams_hint=None:
+                        {FAJITA: dict(FAJITA_LOW)} if grams_hint is None else
+                        {FAJITA: {"calories": 90.0, "protein": 10, "carbs": 6, "fat": 1}})
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     item = body["categories"]["Fajitalar"][0]
@@ -335,11 +369,12 @@ def test_analyze_does_not_reestimate_dense_stated_gram_item(client, profile_sess
     burger = "BBQ & Cheddar Burger (160 GR)"
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
                         lambda *a, **kw: {"Burgerler": [burger]})
-    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret",
-                        lambda items, token, cmap=None: ({burger: {"calories": 736.0, "protein": 42, "carbs": 34, "fat": 28}}, {}))
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", _forbidden_fatsecret)
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", _forbidden_fatsecret)
 
     def boom(items, category_map=None, grams_hint=None):
+        if grams_hint is None:  # first independent estimate
+            return {burger: {"calories": 736.0, "protein": 42, "carbs": 34, "fat": 28}}
         raise AssertionError("yoğunluğu gerçekçi öğe yeniden tahmin edilmemeli")
     monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", boom)
 
@@ -347,7 +382,9 @@ def test_analyze_does_not_reestimate_dense_stated_gram_item(client, profile_sess
     assert body["categories"]["Burgerler"][0]["macros"]["calories"] == 736
 
 
-@pytest.mark.parametrize("mode", ["empty", "exception", "zero", "impossible", "low", "clamp", "band-low", "scale", "reestimate"])
+# "scale" removed: QR never requests FatSecret per-100g values (advice fallback);
+# _mock_pipeline makes any FatSecret call raise, so that path is proven unreachable.
+@pytest.mark.parametrize("mode", ["empty", "exception", "zero", "impossible", "low", "clamp", "band-low", "reestimate"])
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_analyze_response_content_logs_are_counts_only(client, profile_session, monkeypatch, caplog, mode):
     import logging
@@ -368,12 +405,10 @@ def test_analyze_response_content_logs_are_counts_only(client, profile_session, 
         macros = {"calories": calories, "protein": 20, "carbs": 20, "fat": 10}
         if mode == "clamp":
             macros.update(carbs=150, fat=58)
-        monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", lambda *a, **kw: ({secret: macros}, {}))
+        monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
+                            lambda *a, **kw: {} if kw.get("grams_hint") else {secret: dict(macros)})
         if mode in {"clamp", "band-low"}:
             monkeypatch.setattr(menu_analysis, "_primary_dish_type", lambda *a: "pizza")
-    elif mode == "scale":
-        monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}))
-        monkeypatch.setattr(menu_analysis, "_estimate_serving_weights_llm", lambda *a, **kw: ({secret: 150}, set()))
     elif mode == "reestimate":
         monkeypatch.setattr(menu_analysis.nutrition_pipeline, "parse_stated_grams", lambda *a: 220)
         monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", lambda *a, **kw: {secret: CHICKEN} if kw.get("grams_hint") else {})
@@ -385,7 +420,7 @@ def test_analyze_response_content_logs_are_counts_only(client, profile_session, 
         "empty": "No food items extracted", "exception": "Extraction crashed: RuntimeError",
         "zero": "ZERO-MACRO ITEM", "impossible": "DISCARDED implausible item",
         "low": "DISCARDED implausibly-low dish", "clamp": "PORTION BAND CLAMP",
-        "band-low": "PORTION BAND LOW", "scale": "Scaled per-100g→serving",
+        "band-low": "PORTION BAND LOW",
         "reestimate": "Re-estimated: 1 item",
     }[mode]
     assert expected in caplog.text
@@ -435,8 +470,19 @@ def test_real_menu_analysis_helpers_do_not_log_response_content(client, profile_
     else:
         monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", lambda *a, **kw: ({}, {secret: CHICKEN}) if mode.startswith("weights") else ({}, {}))
     with caplog.at_level(logging.DEBUG):
-        response = client.post("/api/menu/analyze", json={"menu_text": secret, "headings": [secret]})
-    assert response.status_code == (422 if mode.startswith("extract-") else 200)
+        if mode in {"weights", "weights-error", "fatsecret-error"}:
+            # QR no longer reaches FatSecret or per-100g weight scaling (advice
+            # fallback); these helpers stay live for other callers, so their log
+            # hygiene is exercised directly with the same synthetic secret.
+            with client.application.test_request_context():
+                if mode == "fatsecret-error":
+                    fatsecret._lookup_macros_fatsecret([secret], "offline-token")
+                else:
+                    ai_nutrition._estimate_serving_weights_llm(
+                        [secret], fallback_weights={secret: 150.0}, return_fallbacks=True)
+        else:
+            response = client.post("/api/menu/analyze", json={"menu_text": secret, "headings": [secret]})
+            assert response.status_code == (422 if mode.startswith("extract-") else 200)
     expected = {
         "extract": "LLM returned 1 categories", "extract-nojson": "No valid JSON braces",
         "extract-badjson": "salvage found nothing", "extract-error": "[EXTRACT] ERROR: RuntimeError",

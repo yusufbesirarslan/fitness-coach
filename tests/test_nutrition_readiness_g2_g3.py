@@ -19,7 +19,7 @@ import pytest
 from app.blueprints import social
 from app.models import MealLog
 from app.prompts import system
-from app.services import ai_coach, ai_consent, coach_privacy, foodcache, menu_analysis
+from app.services import ai_coach, ai_consent, coach_privacy, foodcache, menu_analysis, fatsecret_boundary
 
 from test_lp15c_native_menu_analysis import (  # noqa: F401
     MACROS, MENU_URL, alice, analyze, bearer, mobile, provider, routed_wire, wire,
@@ -107,7 +107,7 @@ def test_old_value_is_not_renewed_so_it_can_expire(
         mobile, bearer, alice, wire, provider, old_cache):
     assert analyze(mobile, bearer(alice)).status_code == 200
     assert old_cache.writes and all(
-        key.startswith("food:macros:v2:") for key in old_cache.writes)
+        key.startswith(fatsecret_boundary.CACHE_PREFIX) for key in old_cache.writes)
     # Left exactly as found: not rewritten, not deleted.
     assert json.loads(old_cache.store[_v1_key(DISH)]) == OLD_VALUE
 
@@ -146,6 +146,7 @@ def empty_cache(monkeypatch):
     foodcache._macro_cache.clear()
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_social_fatsecret_values_cannot_reenter_the_qr_cache(
         app, alice, provider, empty_cache, monkeypatch):
@@ -179,7 +180,7 @@ def test_only_menu_analysis_writes_the_per_serving_cache():
                     basis = next((k.value for k in node.keywords if k.arg == "basis"), None)
                     if not (isinstance(basis, ast.Constant) and basis.value == "per_100g"):
                         writers.add(path.relative_to(root).as_posix())
-    assert writers == {"app/services/menu_analysis.py"}
+    assert writers == set()  # advisory estimates have a separate attested writer
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -194,7 +195,7 @@ def test_per_100g_values_do_not_reach_qr(app, alice, provider, empty_cache):
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_llm_estimates_are_still_estimated_and_cached_for_qr(app, alice, provider, empty_cache):
     assert _qr_in_d1(app, alice)[DISH]["macro_source"] == "llm"
-    assert foodcache._macro_redis_key("per_serving", DISH) in empty_cache.store
+    assert fatsecret_boundary._key(DISH) in empty_cache.store
     foodcache._macro_cache.clear()  # the next scan hits Redis, as a fresh process would
     again = _qr_in_d1(app, alice)[DISH]
     assert again["macro_source"] == "cache"

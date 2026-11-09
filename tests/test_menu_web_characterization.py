@@ -252,7 +252,15 @@ def test_web_menu_endpoints_match_pre_refactor_golden(
     expected = json.loads(GOLDEN.read_text(encoding="utf-8"))
     assert set(observed) <= set(expected)
     for name, value in observed.items():
-        assert value == expected[name], name
+        # analyze_full intentionally differs from the pre-refactor record: the
+        # approved FatSecret advice fallback (no provider values in QR, no
+        # budget/score/picks from unproven logged intake). The original record is
+        # kept unchanged; every other scenario is still pinned to it.
+        key = FALLBACK_GOLDEN.get(name, name)
+        assert value == expected[key], name
+
+
+FALLBACK_GOLDEN = {"analyze_full": "analyze_full__fatsecret_advice_fallback"}
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")

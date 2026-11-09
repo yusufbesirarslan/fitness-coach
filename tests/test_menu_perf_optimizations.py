@@ -144,14 +144,15 @@ def test_items_report_confidence_and_source(client, profile_session, monkeypatch
                         lambda items, token, cmap=None: ({"Izgara Tavuk": dict(CHICKEN)}, {}))
     monkeypatch.setattr(menu_analysis, "_estimate_macros_llm",
                         lambda items, category_map=None, grams_hint=None: {
+                            "Izgara Tavuk": dict(CHICKEN),
                             "Bilinmeyen Yemek": {"calories": 500.0, "protein": 25.0,
                                                  "carbs": 45.0, "fat": 22.0}})
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     items = {i["name"]: i for i in body["items"]}
 
-    assert items["Izgara Tavuk"]["macro_source"] == "fatsecret_serving"
-    assert items["Izgara Tavuk"]["confidence"] == pytest.approx(0.9)
+    assert items["Izgara Tavuk"]["macro_source"] == "llm"
+    assert items["Izgara Tavuk"]["confidence"] == pytest.approx(0.6)
     assert items["Bilinmeyen Yemek"]["macro_source"] == "llm"
     assert items["Bilinmeyen Yemek"]["confidence"] == pytest.approx(0.6)
     # Hiçbir kaynaktan çözülemeyen öğe: sıfır makro + sıfır güven, ama yanıtta KALIR.
@@ -160,7 +161,7 @@ def test_items_report_confidence_and_source(client, profile_session, monkeypatch
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_cached_macros_report_cache_source(client, profile_session, monkeypatch):
+def test_unknown_shared_macros_are_reestimated(client, profile_session, monkeypatch):
     monkeypatch.setattr(menu_analysis, "redis_client", None)
     foodcache._cache_macros({"Izgara Tavuk": dict(CHICKEN)}, basis="per_serving")
     monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
@@ -169,11 +170,13 @@ def test_cached_macros_report_cache_source(client, profile_session, monkeypatch)
     def boom():
         raise RuntimeError("FatSecret'a gidilmemeli")
     monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", boom)
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", lambda names, *a, **k: {
+        n: dict(CHICKEN) for n in names})
 
     body = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT}).get_json()
     item = body["items"][0]
-    assert item["macro_source"] == "cache"
-    assert item["confidence"] == pytest.approx(0.8)
+    assert item["macro_source"] == "llm"
+    assert item["confidence"] == pytest.approx(0.6)
 
 
 # ---------------------------------------------------------------------------

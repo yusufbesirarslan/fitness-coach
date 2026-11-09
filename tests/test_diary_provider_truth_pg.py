@@ -24,7 +24,10 @@ import pytest
 import sqlalchemy as sa
 
 
-pytestmark = pytest.mark.pg_concurrency
+# D-B2: qualifies provider-backed diary MECHANICS for a future written
+# FatSecret retention permission; the launch hold is tested separately.
+pytestmark = [pytest.mark.pg_concurrency,
+              pytest.mark.usefixtures("provider_persistence_permitted")]
 
 if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
     pytest.skip(

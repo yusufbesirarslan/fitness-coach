@@ -99,7 +99,10 @@ def test_openai_tool_loop_provider_error_returns_friendly_fallback(app, monkeypa
 # ---------------------------------------------------------------------------
 
 def _stage_meal(monkeypatch, user, query="300g tavuk"):
-    monkeypatch.setattr(ai_coach, "_coach_search_food",
+    # The Coach tool uses only the independent estimate seam (FatSecret advice
+    # fallback); `_coach_search_food` remains the factual /api/food/search path.
+    from app.services import fatsecret_boundary
+    monkeypatch.setattr(fatsecret_boundary, "independent_food_search",
                         lambda q: [{"name": "Tavuk Göğsü", "food_id": "1",
                                     "per_100g": CHICKEN_100G}])
     return json.loads(ai_coach._tool_fetch_nutrition_and_stage_log(user.id, query))
@@ -132,7 +135,8 @@ def test_stage_meal_handles_empty_and_not_found(auth_user, monkeypatch):
     result = json.loads(ai_coach._tool_fetch_nutrition_and_stage_log(auth_user.id, "  "))
     assert result["status"] == "error"
 
-    monkeypatch.setattr(ai_coach, "_coach_search_food", lambda q: [])
+    from app.services import fatsecret_boundary
+    monkeypatch.setattr(fatsecret_boundary, "independent_food_search", lambda q: [])
     result = json.loads(ai_coach._tool_fetch_nutrition_and_stage_log(auth_user.id, "zxqw"))
     assert result["status"] == "not_found"
     assert PendingAction.query.count() == 0
@@ -145,7 +149,8 @@ def test_commit_meal_moves_staged_to_permanent_log(auth_user, monkeypatch):
 
     assert result["status"] == "committed"
     assert result["xp_awarded"] == 10
-    assert result["today_totals"]["calories"] == 495
+    # Ledger totals have no verified lineage: never returned to the model.
+    assert result["today_totals"] is None
     # Koç artık tek kanonik deftere (MealLog) yazar — diyari/menü ile aynı tablo (Faz B).
     entry = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert entry.yemekler == "Tavuk Göğsü"
@@ -167,10 +172,12 @@ def test_commit_meal_clamps_absurd_staged_macros(auth_user):
     # yazılıyordu (diyari/menü/UI hepsi kısarken koç yolu atlıyordu). Fiziksel
     # olarak imkânsız bir porsiyon (9999 kcal) makul tavanlara kısılmalı.
     from app.services import nutrition_pipeline as np
+    from app.services import fatsecret_boundary
     db.session.add(PendingAction(
         user_id=auth_user.id, action_type="log_meal",
-        payload={"food_name": "saçma porsiyon", "calories": 9999,
-                 "protein": 500, "carbs": 400, "fat": 300}))
+        payload=fatsecret_boundary.attest("pending-meal", auth_user.id, {
+            "food_name": "saçma porsiyon", "calories": 9999,
+            "protein": 500, "carbs": 400, "fat": 300})))
     db.session.commit()
 
     result = json.loads(ai_coach._tool_confirm_and_commit_meal_log(auth_user.id))
@@ -583,7 +590,8 @@ def test_conversation_plain_answer(auth_user, monkeypatch):
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_conversation_unadvertised_tool_call_refuses_side_effects(auth_user, monkeypatch):
-    monkeypatch.setattr(ai_coach, "_coach_search_food",
+    from app.services import fatsecret_boundary
+    monkeypatch.setattr(fatsecret_boundary, "independent_food_search",
                         lambda q: [{"name": "Muz", "food_id": "9",
                                     "per_100g": {"calories": 89.0, "protein": 1.1,
                                                  "carbs": 23.0, "fat": 0.3}}])

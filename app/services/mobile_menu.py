@@ -472,8 +472,11 @@ def project(scan, analysis, *, secret, user_id, now=None):
         },
         "day": {
             "target": _macros(analysis["target"]),
-            "consumed": _macros(analysis["consumed"]),
-            "remaining": _macros(analysis["remaining"]),
+            "consumed": (_macros(analysis["consumed"]) if analysis["consumed"] is not None
+                         else dict.fromkeys(_NUTRIENTS)),
+            "remaining": (_macros(analysis["remaining"]) if analysis["remaining"] is not None
+                          else dict.fromkeys(_NUTRIENTS)),
+            "advice_available": analysis.get("advice_available", True),
         },
         "categories": categories,
         "coach_pick_ids": list(dict.fromkeys(picks)),

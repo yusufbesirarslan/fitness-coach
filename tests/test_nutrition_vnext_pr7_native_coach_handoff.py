@@ -48,7 +48,9 @@ def test_marker_adds_server_rederived_day_view_context(mobile, bearer, provider,
     context = call["context"]
     assert "[NUTRITION CONTEXT]" in context
     assert "- daily target: 2100 kcal per day" in context
-    assert "525 kcal" in context and "3 glass(es) of water" in context
+    # FatSecret advice fallback: unproven logged intake is withheld from the model.
+    assert "525 kcal" not in context and "Logged intake is unavailable for advice" in context
+    assert "3 glass(es) of water" in context
     assert "Secret soup" not in context           # no meal text in model context
     # Context is not persisted as user speech.
     assert [r.content for r in _rows(alice.id) if r.role == "user"] == ["Review my day"]
@@ -60,7 +62,10 @@ def test_latest_canonical_truth_wins_over_any_client_snapshot(mobile, bearer, pr
     _seed(alice, kcal=525)
     add_meal(alice.id, app_today().isoformat(), kcal=300)
     send(mobile, bearer(alice), json={"message": "Review", "handoff": MARKER})
-    assert "825 kcal" in provider.calls[0]["context"]
+    # Re-derived at send time and still withheld: neither 525 nor 825 reaches the model.
+    context = provider.calls[0]["context"]
+    assert "825 kcal" not in context and "525 kcal" not in context
+    assert "Logged intake is unavailable for advice" in context
 
 
 @pytest.mark.parametrize("body", [

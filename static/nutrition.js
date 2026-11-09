@@ -2240,6 +2240,13 @@ function addSelectedFood(food, serving, quantity, grams) {
       yag: (serving.fat || 0) * quantity,
     };
   } else {
+    // D-B2: FatSecret per_100g values are provider Content and are never
+    // copied into a manual entry. Only a provider command may carry them, and
+    // the server holds those until written retention permission exists.
+    if (food.food_id) {
+      showToast(__t('nutrition.provider_logging_unavailable'), 'error');
+      return;
+    }
     const base = food.per_100g || {};
     const scale = grams / 100;
     entry.label = food.name + ' (' + Math.round(grams) + 'g)';
@@ -2751,6 +2758,13 @@ async function confirmServingModal() {
       };
     }
   }
+  if (!body && _smFood.food_id) {
+    // D-B2: never copy FatSecret per_100g values into a manual diary item.
+    showToast(__t('nutrition.provider_logging_unavailable'), 'error');
+    btn.disabled = false;
+    btn.textContent = __t('nutrition.add');
+    return;
+  }
   if (!body) {
     const grams = parseFloat(document.getElementById('sm-gram-input').value) || 100;
     body = {
@@ -2765,7 +2779,13 @@ async function confirmServingModal() {
       body: JSON.stringify(body)
     });
     const d = await res.json();
-    if (d.error) { showToast(d.error, 'error'); return; }
+    if (d.error) {
+      showToast(d.error === 'provider_logging_unavailable'
+        ? __t('nutrition.provider_logging_unavailable') : d.error, 'error');
+      btn.disabled = false;
+      btn.textContent = __t('nutrition.add');
+      return;
+    }
     closeServingModal();
     loadDiary();
   } catch (e) { showToast(__t('nutrition.add_error'), 'error'); }

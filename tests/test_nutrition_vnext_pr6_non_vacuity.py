@@ -259,7 +259,9 @@ def test_n11_stale_preview_reused_at_send_is_detected(app, make_user, monkeypatc
         return memo[uid]
     monkeypatch.setattr(dv, 'build_nutrition_day_view', cached)
     with pytest.raises(AssertionError):
-        handoff.test_send_time_facts_win_over_the_preview(app, make_user)
+        # Under the FatSecret advice fallback totals never reach the model, so the
+        # observable stale-preview failure is an empty day surviving a new meal.
+        handoff.test_send_time_empty_preview_does_not_survive_a_new_meal(app, make_user)
 
 
 def test_n12_unknown_marker_reaching_the_pipeline_is_detected(client, auth_user, app, monkeypatch):

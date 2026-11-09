@@ -199,8 +199,8 @@ def test_send_time_context_is_typed_and_factual(app, make_user):
     assert context.startswith("[TODAY'S NUTRITION]\n[NUTRITION CONTEXT]")
     assert '- day: ' + app_today().isoformat() in context
     assert '- daily target: 2100 kcal per day' in context
-    assert '- logged today: 2 meal(s) logged; 1235 kcal, protein 60 g, carbs 120 g, fat 24 g' \
-        in context
+    assert 'Logged intake is unavailable for advice' in context
+    assert '1235' not in context and 'protein 60 g' not in context
     assert '- hydration today: 3 glass(es) of water' in context
     assert '- nutrition plan: saved plan with 2 planned meal(s)' in context
     assert 'Secret soup' not in context and 'Lean plan' not in context
@@ -217,6 +217,7 @@ def test_server_rederives_by_authenticated_owner(app, make_user):
     with app.test_request_context('/coach'):
         context = coach_handoff_context('nutrition-day', b.id, 'en')
     assert '2700' not in context and '3 meal' not in context
+    # B has no rows: a genuinely measured empty day, not unverified provider data.
     assert '- logged today: no meals logged yet (measured 0)' in context
     assert '- daily target: not set' in context
     assert '- hydration today: 0 glass(es) of water' in context
@@ -233,8 +234,24 @@ def test_send_time_facts_win_over_the_preview(app, make_user):
         db.session.commit()
         current = coach_handoff_context('nutrition-day', user.id, 'en')
     assert preview['lines'][0] == 'Meals logged today: 1 · 500 kcal'
-    assert '2 meal(s) logged; 1300 kcal' in current
+    assert '1300' not in current and 'Logged intake is unavailable for advice' in current
     assert '500 kcal' not in current
+
+
+def test_send_time_empty_preview_does_not_survive_a_new_meal(app, make_user):
+    """Preview on a measured-empty day; a meal logged before SEND must not be
+    sent as "measured 0" — send-time re-derivation is still the authority."""
+    user = onboarded(make_user, 'pr6fresh_empty')
+    seed(user.id, meals=())
+    with app.test_request_context('/coach'):
+        preview = coach_handoff_message('nutrition-day', user.id, 'en')
+        db.session.add(MealLog(user_id=user.id, ogun='Akşam', yemekler='x', kalori=800,
+                               protein=1, karb=1, yag=1, tarih=app_today().isoformat()))
+        db.session.commit()
+        current = coach_handoff_context('nutrition-day', user.id, 'en')
+    assert preview is not None
+    assert 'measured 0' not in current and '800' not in current
+    assert 'Logged intake is unavailable for advice' in current
 
 
 @pytest.mark.parametrize('failed,line', [
@@ -320,7 +337,9 @@ def test_browser_calories_never_become_model_context(app, client, auth_user, mon
     assert res.status_code == 200, res.get_data(as_text=True)
     (uid, question, context), = seen
     assert uid == auth_user.id and question == 'Review today with me.'
-    assert '1 meal(s) logged; 300 kcal' in context
+    from app.services import fatsecret_boundary
+    # This user's Coach context is Turkish; the localized notice replaces the total.
+    assert '300 kcal' not in context and fatsecret_boundary.notice('tr') in context
     assert '9999' not in context
 
 

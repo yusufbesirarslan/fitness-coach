@@ -319,6 +319,9 @@ def _log_provider_backed_meal(data, ogun, provider_food):
         return jsonify({"error": t("route.invalid_provider_meal_command")}), 400
     except mobile_log_food.ProviderFoodNotFound:
         return jsonify({"error": t("route.food_not_found")}), 404
+    except mobile_log_food.ProviderPersistenceHeld:
+        return jsonify({"error": t("route.provider_logging_unavailable"),
+                        "code": "provider_logging_unavailable", "retryable": False}), 503
     except mobile_log_food.IdempotencyConflict:
         return jsonify({"error": t("route.meal_idempotency_conflict")}), 409
     except BlockingConcurrencyLimit:

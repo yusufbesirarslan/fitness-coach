@@ -7,6 +7,7 @@ from app.models import MealLog
 from app.services import meal_idempotency
 from app.services.provider_food_snapshot import (
     ProviderFoodNotFound,
+    ProviderPersistenceHeld,
     resolve_provider_food,
 )
 from app.services.mobile_nutrition.identity import diary_entry_id

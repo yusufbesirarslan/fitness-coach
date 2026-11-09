@@ -360,3 +360,15 @@ def legacy_browser_plan_saves(app, monkeypatch):
     """
     from consent_projection_support import open_browser_plan_saves
     open_browser_plan_saves(monkeypatch)
+
+
+@pytest.fixture
+def provider_persistence_permitted(monkeypatch):
+    """TEST-ONLY stand-in for a future verified written FatSecret retention
+    permission (D-B2). Production keeps PROVIDER_PERSISTENCE_PERMISSION_REF=None,
+    so new provider-backed diary/saved-meal persistence is held. Opt in only in
+    suites that qualify the persistence mechanics themselves; the hold has its
+    own tests in tests/test_fatsecret_provider_persistence_hold.py."""
+    from app.services import fatsecret_boundary
+    monkeypatch.setattr(fatsecret_boundary, "PROVIDER_PERSISTENCE_PERMISSION_REF",
+                        "TEST-ONLY-not-a-real-permission")

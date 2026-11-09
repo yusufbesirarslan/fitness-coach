@@ -35,7 +35,9 @@ def test_status_exact_text_and_direct_grant_require_both_published_locales(serve
 
 def stage(r, kind):
     if kind == "meal":
-        r.patch.setattr(ai_coach, "_coach_search_food", lambda _: [
+        # The Coach meal tool's only search seam (FatSecret advice fallback).
+        from app.services import fatsecret_boundary
+        r.patch.setattr(fatsecret_boundary, "independent_food_search", lambda _: [
             {"name": "Synthetic food", "per_100g": {"calories": 100}}])
         return ai_coach._tool_fetch_nutrition_and_stage_log(r.owners[0], "100g synthetic food")
     return ai_coach._tool_stage_workout_log(r.owners[0], "Synthetic squat", 3, 10, 20)

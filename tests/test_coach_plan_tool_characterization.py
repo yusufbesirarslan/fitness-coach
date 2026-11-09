@@ -156,7 +156,8 @@ def test_dispatch_never_takes_user_id_from_the_model(app, make_user):
     with app.test_request_context():
         payload = json.loads(ai_coach._dispatch_coach_tool(
             user.id, "query_fitx_metrics",
-            json.dumps({"metric_type": "calories", "date_range": "today",
+            # water_ml: calories is unsupported under the FatSecret advice fallback.
+            json.dumps({"metric_type": "water_ml", "date_range": "today",
                         "user_id": user.id + 1})))
 
     assert payload["status"] == "ok"  # the extra field simply never arrives

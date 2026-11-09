@@ -123,6 +123,7 @@ def _stub_provider(monkeypatch):
     monkeypatch.setattr(barcode_svc, "_food_find_by_barcode", lambda code: _protein_bar_payload())
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user, monkeypatch):
     # Pre-PR3 this test supplied the whole `food` object in the request body and
     # the route persisted the caller's numbers - the F6 defect (N2: no supported
@@ -170,6 +171,7 @@ def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user, 
     assert row.kalori == 420.0
 
 
+@pytest.mark.usefixtures("provider_persistence_permitted")  # D-B2 mechanics
 def test_barcode_add_idempotency_writes_one_row(client, auth_user, monkeypatch):
     # Pre-PR3 the replay was proved by comparing the `meal_log_id` both
     # responses leaked. PR3 stops exposing raw ledger ids on every variant

@@ -868,7 +868,7 @@
       return '<div class="cw-dish' + (isTop ? ' top' : '') + '">' +
           '<div class="cw-dish-h">' +
             '<div class="cw-dish-name">' + this._esc(dd.name) + '</div>' +
-            '<div class="cw-dish-score ' + scoreClass + '">' + (dd.score > 0 ? '+' : '') + dd.score + '</div>' +
+            (typeof dd.score === 'number' ? '<div class="cw-dish-score ' + scoreClass + '">' + (dd.score > 0 ? '+' : '') + dd.score + '</div>' : '') +
           '</div>' +
           '<div class="cw-dish-reason">' + this._esc(dd.reason) + '</div>' +
           '<div class="cw-dish-macros">' +

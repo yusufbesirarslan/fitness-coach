@@ -353,7 +353,7 @@ def _stream_bedrock(user_id, question, context, history, language,
                         user_id, block.name, json.dumps(block.input or {}))
                     tools_ran += 1
                     tool_results.append({"type": "tool_result",
-                                         "tool_use_id": block.id, "content": ai_coach.coach_privacy.tool_result(block.name, out)})
+                                         "tool_use_id": block.id, "content": ai_coach.coach_privacy.tool_result(block.name, out, user_id=user_id)})
                     parsed = _tool_payload(out)
                     if parsed is not None:
                         payloads.append(parsed)

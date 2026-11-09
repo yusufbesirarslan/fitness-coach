@@ -132,7 +132,15 @@ def test_m02_tool_canaries_absent_in_multiple_openai_rounds(app, make_user, monk
         'logged': {'sets': 3, 'reps': 10, 'weight_kg': 42, 'exercise_name': CANARY,
                    'social': {'other': CANARY}}, 'message': CANARY, 'summary': CANARY,
         'change': {'exercise': CANARY, 'sets': 3, 'unknown': CANARY}}
-    monkeypatch.setattr(ai_coach, '_dispatch_coach_tool', lambda *a: json.dumps(contaminated))
+    def dispatch(*a):
+        if name in ('fetch_nutrition_and_stage_log', 'confirm_and_commit_meal_log'):
+            # FatSecret advice fallback: only server-attested nutrition results are
+            # projected; attest the contaminated payload so canary filtering is
+            # still exercised on the projection path (unattested → 'unsupported').
+            from app.services import fatsecret_boundary
+            return json.dumps(fatsecret_boundary.attest('tool-result', user.id, contaminated))
+        return json.dumps(contaminated)
+    monkeypatch.setattr(ai_coach, '_dispatch_coach_tool', dispatch)
     captures = openai_capture(monkeypatch, [answer(calls=[tool(name)]),
                              answer(calls=[tool(name, call_id='t2')]), answer()])
     result = ai_coach._run_coach_conversation_openai(user.id, 'review', '', [])
@@ -313,7 +321,10 @@ def test_m02_exact_nutrition_and_recovery_operation_projections(app, make_user, 
     captures = openai_capture(monkeypatch, [answer(), answer()])
     ai_pipeline.generate_answer(user.id, 'Review my nutrition day')
     ai_pipeline.generate_answer(user.id, 'Review recovery')
-    assert b'650' in captures[0] and b'2400' in captures[0]
+    # FatSecret advice fallback: unproven logged intake never reaches the model;
+    # the independent target and the factual-unavailable notice do.
+    assert b'650' not in captures[0] and b'2400' in captures[0]
+    assert b'unavailable for advice' in captures[0] or 'doğrulanamadığından'.encode() in captures[0]
     assert b'1260' not in captures[0] and b'deep squat' not in captures[0]
     assert b'uyku_kalitesi' in captures[1] and b'1260' not in captures[1]
     assert all(CANARY.encode() not in body for body in captures)

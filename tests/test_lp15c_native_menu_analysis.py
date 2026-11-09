@@ -224,7 +224,14 @@ def test_owner_comes_only_from_the_bearer_credential(
     assert a["menu_analysis"]["day"]["consumed"]["energy_kcal"] == 0
     # Bob: 1500 kcal, 400 eaten — and only Bob's request sees it.
     assert b["menu_analysis"]["day"]["target"]["energy_kcal"] == 1500
-    assert b["menu_analysis"]["day"]["remaining"]["energy_kcal"] == 1100
+    assert b["menu_analysis"]["day"]["remaining"]["energy_kcal"] is None
+    # Unknown stays null on the native DTO too — never zero-filled.
+    assert set(b["menu_analysis"]["day"]["consumed"].values()) == {None}
+    assert set(b["menu_analysis"]["day"]["remaining"].values()) == {None}
+    assert all(i["fit"]["score"] is None for c in b["menu_analysis"]["categories"]
+               for i in c["candidates"])
+    assert b["menu_analysis"]["coach_pick_ids"] == []
+    assert b["menu_analysis"]["day"]["advice_available"] is False
     # Proofs are owner-bound: Alice's tokens verify for Alice, never for Bob.
     secret = mobile.application.config["SECRET_KEY"]
     tokens_a = [i["confirmation_token"] for c in a["menu_analysis"]["categories"]
@@ -314,9 +321,11 @@ def test_dto_shape_is_bounded_and_unknown_nutrition_stays_null(
                          "expires_at", "source", "day", "categories",
                          "coach_pick_ids", "candidate_count", "loggable_count"}
     assert menu["expires_at"] - menu["issued_at"] == 1800
-    assert set(menu["day"]) == {"target", "consumed", "remaining"}
-    for macros in menu["day"].values():
-        assert set(macros) == {"energy_kcal", "protein_g", "carbohydrate_g", "fat_g"}
+    assert set(menu["day"]) == {"target", "consumed", "remaining", "advice_available"}
+    # Additive v1 flag (shipped mobile parser ignores unknown keys and `day`).
+    assert menu["day"]["advice_available"] is True  # alice has no logged intake
+    for key in ("target", "consumed", "remaining"):
+        assert set(menu["day"][key]) == {"energy_kcal", "protein_g", "carbohydrate_g", "fat_g"}
 
     items = {i["name"]: i for c in menu["categories"] for i in c["candidates"]}
     for item in items.values():
