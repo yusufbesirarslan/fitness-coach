@@ -13,8 +13,9 @@ the CHAIN qualification on a database built only by the real Alembic history:
   three itemized legacy differences (the ``activity_clap`` table, NOT NULL on
   ``user.rank_points`` and ``user.streak_count``), equals production's catalog
   as read back on 2026-11-09 (columns, constraints, triggers, functions,
-  sequences, relations) and reproduces the restore's column digest; every
-  other test here runs on that production-shaped schema;
+  sequences, relations; index definitions were not read back) and reproduces
+  the restore's column digest; every populated test here runs on that
+  production-shaped schema;
 * a database at ``c6f8b0d2e4a1`` populated the way production is (completion
   floor raised, historical Pump Check evidence, photo-free claims, legacy
   FatSecret rows, narrow-scope allowance buckets) is brought to head by the
@@ -298,7 +299,8 @@ PRODUCTION_LIVE_HEAD_SCHEMA_SHA256 = (
 
 # Every difference between the Alembic history at LIVE_HEAD and production,
 # itemized from that readback. The catalog test below proves nothing else
-# differs. All three are legacy objects older than the migration history's
+# differs in the sections read back. Index definitions were NOT read back
+# (output size limit), so non-constraint indexes are not compared. All three are legacy objects older than the migration history's
 # coverage; no release migration references any of them.
 #   D1 ``activity_clap``: created by an early create_all boot of the
 #      ``ActivityClap`` model (42fea79a; removed in 9c085e55; never in a
