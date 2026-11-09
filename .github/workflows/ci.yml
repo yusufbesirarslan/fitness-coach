@@ -475,6 +475,7 @@ jobs:
           tests/test_apple_lifecycle_migration_pg.py
           tests/test_ai_allowances_pg.py
           tests/test_launch_free_allowance_pg.py
+          tests/test_launch_free_allowance_pg.py
           tests/test_premium_allowance_execution_pg.py
           tests/test_premium_allowance_training_pg.py
           tests/test_mobile_auth_pg.py

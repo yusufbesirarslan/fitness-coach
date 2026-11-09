@@ -167,7 +167,9 @@ Do not infer live EU routing from `AWS_REGION=eu-central-1`.
    `aws login --profile axisai-login`; agents never run login. No default,
    deployer, root, new keys, secret output or denial workaround.
 2. Re-discover actual available profiles/model access/quotas from eu-central-1.
-   Source supports `AI_MODEL_ROUTING=claude55`,
+   The separately authorized staging activation must set `BEDROCK_ENABLED=1`,
+   `BEDROCK_REGION=eu-central-1`, `BEDROCK_PROMPT_CACHE=0` and
+   `AI_MODEL_ROUTING=claude55`. Source supports
    `BEDROCK_SONNET55_MODEL=eu.anthropic.claude-sonnet-5-5` and
    `BEDROCK_HAIKU55_MODEL=eu.anthropic.claude-haiku-5-5`; these are source
    registry entries, not verified account availability. If unavailable, stop
