@@ -6,22 +6,22 @@ founder approval, after the worker that publishes the metrics is serving.
 
 | | Signal | Published by | Alarm | Missing data |
 |---|---|---|---|---|
-| M1 | `WorkerHeartbeat` = 1/min | worker heartbeat thread, only after a Redis `PING` | `AxisAI-R6-M1-Worker-Heartbeat-Missing` (5 min) | **breaching** |
+| M1 | `WorkerHeartbeat` = 1/min | worker heartbeat thread, only after a Redis `PING` | `AxisAI-R6-M1-Worker-Heartbeat-Missing` (five empty one-minute periods in a row) | **breaching** |
 | M1 | same | same | `AxisAI-R6-M1-Worker-Heartbeat-Escalation-60m` (missing in 50 of the last 60 min, escalation topic) | **breaching** |
 | M2 | `QueueDepth` (LLEN) | heartbeat thread (Redis only) | `AxisAI-R6-M2-Queue-Not-Draining` (never empty for 25 min) | notBreaching (M1 covers) |
 | M2 | `QueueOldestJobAgeSeconds` | heartbeat thread | `AxisAI-R6-M2-Queue-Oldest-Job-Age` (>1200 s for 3 min) | notBreaching |
-| M2 | `QueueFailedJobsNew` (+ `QueueFailedJobs` total) | heartbeat thread | `AxisAI-R6-M2-Queue-Failed-Jobs` (≥1 in 5 min) | notBreaching |
+| M2 | `QueueFailedJobsNew` (+ `QueueFailedJobs` total) | heartbeat thread | `AxisAI-R6-M2-Queue-Failed-Jobs` (≥1 in one alarm period, `Period: 300`) | notBreaching |
 | M3 | `ProviderRetentionPassCompleted` | retention job, after `expire_due` returned | `AxisAI-R6-M3-FatSecret-Expiry-Pass-Missing` (none for 30 min) | **breaching** |
 | M3 | `ProviderRetentionOverdue` | same | `AxisAI-R6-M3-FatSecret-Values-Past-24h` (>0) | notBreaching |
 
 - **Namespace:** `FitX/Runtime`, dimension `Service=worker`.
 - **Switch:** `RUNTIME_METRICS_ENABLED`. The worker reads the same host `.env` as web, and web already publishes `FitX/Runtime` in production.
-- **Zero traffic:** every signal is driven by the worker's own timers (60 s sample, 300 s retention enqueue, hourly erasure enqueue). None depends on requests.
+- **Zero traffic:** every signal is driven by the worker's own timers: the 60 s sample, the retention enqueue (`RETENTION_INTERVAL_SECONDS`), and the hourly erasure enqueue. None depends on requests.
 
 ## Why these shapes
 
 - **M1 fails safe.** A dead worker, a dead heartbeat thread, unreachable Redis, metrics switched off, or a broken IAM or network path all look the same: no datapoint, so ALARM.
-- **M2 uses depth for a hung worker.** The retention job is enqueued with `ttl=300`. When the worker hangs, expired job hashes vanish, so the oldest *live* job's age cycles 0→300 s and never stays high. `LLEN` keeps counting those ids until a worker pops them, so the queue never drains. `Minimum` over each 5-minute period ignores the one sample a minute that legitimately catches a fresh enqueue.
+- **M2 uses depth for a hung worker.** The retention job is enqueued with `ttl=300`. When the worker hangs, expired job hashes vanish, so the oldest *live* job's age cycles back to zero at every job ttl and never stays high. `LLEN` keeps counting those ids until a worker pops them, so the queue never drains. `Minimum` over each alarm period (`Period: 300`) ignores the one-minute sample that legitimately catches a fresh enqueue.
 - **M3 respects the 22h/24h margin.** Values are removed at 22h. A pass missing for 30 minutes still leaves ≥ 90 minutes before any value reaches 24h. Any value actually past 24h pages at once.
 - **No acknowledgement API exists.** CloudWatch has none. "Acknowledged" means the founder records it in the incident log. "Not resolved within an hour" is the escalation alarm.
   - It fires when the heartbeat was missing in 50 of the last 60 one-minute periods: about 50 minutes after a continuous outage starts, wherever it starts.
