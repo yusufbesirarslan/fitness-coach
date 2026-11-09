@@ -18,10 +18,12 @@ the CHAIN qualification on a database built only by the real Alembic history:
 * the whole chain runs in ONE transaction (migrations/env.py): a lock that
   blocks the third migration rolls the first two back too, the previous
   (``c6f8b0d2e4a1``) writer still boots, and a plain rerun completes;
-* the R6 forward-recovery gate, given the true four-revision delta, admits
-  exactly the post-migration states; after migration the previous writer
-  cannot boot and the candidate can;
-* downgrade refuses once erasure/legal-hold evidence exists.
+* the R6 forward-recovery gate, given the true four-revision delta, refuses
+  the live head and admits post-migration states (first, third and final
+  revision); foreign/missing version states stay covered by
+  ``test_r6_forward_recovery_pg``; after migration the previous writer cannot
+  boot and the candidate can;
+* downgrade refuses once erasure or legal-hold evidence exists.
 
 This is disposable-schema qualification. It is NOT a rehearsal against a
 restored copy of production data.
@@ -336,7 +338,7 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
 
 # ── 3. failure mid-chain is atomic; the rerun completes ─────────────────────
 
-def _run_with_deadline(fn, deadline):
+def _start(fn):
     outcome = {}
 
     def _target():
@@ -349,8 +351,35 @@ def _run_with_deadline(fn, deadline):
 
     thread = threading.Thread(target=_target, daemon=True)
     thread.start()
-    thread.join(deadline)
     return thread, outcome
+
+
+def _observe_chain_waiting_on_meal_log(url, thread, seconds=30):
+    """Poll pg_locks while the release step runs: a session waiting for
+    meal_log that already holds ai_allowance_bucket (d8f1's ALTER)."""
+    seen = {"meal_log_wait": False, "holds_bucket_lock": False}
+    engine = _engine(url)
+    deadline = time.monotonic() + seconds
+    try:
+        with engine.connect() as connection:
+            while thread.is_alive() and time.monotonic() < deadline:
+                pids = connection.execute(sa.text(
+                    "SELECT pid FROM pg_catalog.pg_locks WHERE NOT granted "
+                    "AND relation = 'public.meal_log'::regclass")).scalars().all()
+                for pid in pids:
+                    seen["meal_log_wait"] = True
+                    held = connection.execute(sa.text(
+                        "SELECT count(*) FROM pg_catalog.pg_locks WHERE pid = :p AND granted "
+                        "AND relation = 'public.ai_allowance_bucket'::regclass"),
+                        {"p": pid}).scalar()
+                    seen["holds_bucket_lock"] = seen["holds_bucket_lock"] or held > 0
+                if seen["meal_log_wait"]:
+                    break
+                connection.rollback()
+                time.sleep(0.05)
+    finally:
+        engine.dispose()
+    return seen
 
 
 def test_a_lock_on_the_third_migration_rolls_back_the_whole_chain_then_rerun_completes(
@@ -358,7 +387,8 @@ def test_a_lock_on_the_third_migration_rolls_back_the_whole_chain_then_rerun_com
     _upgrade_to(monkeypatch, LIVE_HEAD)
     _seed(chain_url)
     before = _snapshot(chain_url)
-    monkeypatch.setenv("FITX_MIGRATION_LOCK_TIMEOUT_MS", "700")
+    # Long enough to observe the wait from here; still a bounded abort.
+    monkeypatch.setenv("FITX_MIGRATION_LOCK_TIMEOUT_MS", "4000")
 
     # A serving-revision write transaction left open on meal_log: e1a5f0c3d2b4
     # needs ACCESS EXCLUSIVE there for ADD COLUMN, after d8f1/f01c already ran.
@@ -366,7 +396,9 @@ def test_a_lock_on_the_third_migration_rolls_back_the_whole_chain_then_rerun_com
     blocker = blocker_engine.connect()
     blocker.execute(sa.text("UPDATE meal_log SET id = id WHERE false"))
     try:
-        thread, outcome = _run_with_deadline(lambda: _release_prepare(monkeypatch), 90)
+        thread, outcome = _start(lambda: _release_prepare(monkeypatch))
+        waited = _observe_chain_waiting_on_meal_log(chain_url, thread)
+        thread.join(90)
         if thread.is_alive():
             blocker.rollback()
             thread.join(30)
@@ -375,6 +407,10 @@ def test_a_lock_on_the_third_migration_rolls_back_the_whole_chain_then_rerun_com
         failed = outcome.get("error") is not None or (result is not None and result.exit_code != 0)
         assert failed, outcome
         assert outcome["elapsed"] < 60
+        # The failure is the third migration's lock wait, in the SAME
+        # transaction that had already run d8f1a3c5e7b9 (it still holds its
+        # lock on ai_allowance_bucket while it waits on meal_log).
+        assert waited == {"meal_log_wait": True, "holds_bucket_lock": True}, waited
     finally:
         blocker.rollback()
         blocker.close()
@@ -481,24 +517,57 @@ def test_after_the_chain_only_the_candidate_boots(chain_url, monkeypatch, trees)
 
 # ── 5. rollback boundary: no downgrade once O2-B evidence exists ────────────
 
-def test_downgrade_refuses_once_legal_hold_evidence_exists(chain_url, monkeypatch, caplog):
+EVIDENCE = {
+    "legal_hold": ("INSERT INTO health_legal_hold (owner_id, categories, matter_ref, created_at, "
+                   "review_at) VALUES (:u, '[\"workouts\"]', 'r6-synthetic', now(), "
+                   "now() + interval '30 days')"),
+    "erasure": ("INSERT INTO health_erasure (owner_id, generation, requested_at) "
+                "VALUES (:u, 1, now())"),
+}
+
+
+@pytest.mark.parametrize("evidence", sorted(EVIDENCE))
+def test_downgrade_refuses_once_erasure_or_legal_hold_evidence_exists(
+        chain_url, monkeypatch, evidence):
+    import importlib.util
+
     import flask_migrate
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
     _upgrade_to(monkeypatch, LIVE_HEAD)
     ids = _seed(chain_url)
     assert _release_prepare(monkeypatch).exit_code == 0
-    _sql(chain_url, "INSERT INTO health_legal_hold (owner_id, categories, matter_ref, created_at, "
-                    "review_at) VALUES (:u, '[\"workouts\"]', 'r6-synthetic', now(), "
-                    "now() + interval '30 days')", u=ids["r6_rich"])
+    _sql(chain_url, EVIDENCE[evidence], u=ids["r6_rich"])
+
+    # The migration itself refuses (asserted directly; Flask-Migrate's own log
+    # goes to the handler alembic.ini installs, not to pytest's caplog).
+    path = ROOT / "migrations" / "versions" / "f01e2a5e0002_health_withdrawal_erasure.py"
+    spec = importlib.util.spec_from_file_location("_r6_chain_o2b_down", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    engine = _engine(chain_url)
+    try:
+        with engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                with Operations.context(MigrationContext.configure(connection)):
+                    with pytest.raises(RuntimeError, match="refuses to erase consent or erasure evidence"):
+                        module.downgrade()
+            finally:
+                transaction.rollback()
+    finally:
+        engine.dispose()
+
+    # The operator path (`flask db downgrade`) exits 1 and changes nothing.
     tool = _boot_tool(monkeypatch)
     try:
         with tool.app_context():
-            # Flask-Migrate reports the migration's RuntimeError and exits 1,
-            # exactly as `flask db downgrade` would for an operator.
             with pytest.raises(SystemExit) as stopped:
                 flask_migrate.downgrade(revision=LIVE_HEAD)
     finally:
         _dispose(tool)
     assert stopped.value.code == 1
-    assert "refuses to erase consent or erasure evidence" in caplog.text
     assert _versions(chain_url) == [HEAD]
+    assert all(_has_tables(chain_url, NEW_TABLES).values())
     _verify_head_fence(chain_url)
