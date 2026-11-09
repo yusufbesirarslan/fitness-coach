@@ -2,6 +2,7 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 
 import pytest
 import sqlalchemy as sa
@@ -100,6 +101,108 @@ def test_direct_binding_delete_remains_forbidden_even_during_erasure(world):
         with db.engine.begin() as conn:
             conn.execute(sa.text('DELETE FROM completion_claim_transaction'))
     assert error.value.orig.pgcode == 'AXF05'
+
+
+def test_cache_failure_rolls_back_fenced_claim_erasure_until_retry(world, monkeypatch):
+    from app.services import gamification
+    class Cache:
+        def zrem(self, key, owner):
+            raise RuntimeError('synthetic cache unavailable')
+    monkeypatch.setattr(gamification, 'redis_client', Cache())
+    stop()
+    with pytest.raises(health_erasure.ErasureUnavailable):
+        health_erasure.run(1)
+    assert WorkoutCompletionDay.query.filter_by(user_id=1).count() == 1
+    assert CompletionClaimTransaction.query.count() == 2
+    assert HealthErasure.query.filter_by(owner_id=1).one().completed_at is None
+    monkeypatch.setattr(Cache, 'zrem', lambda *args: 0)
+    assert health_erasure.run(1) == 'completed'
+    assert WorkoutCompletionDay.query.filter_by(user_id=1).count() == 0
+    assert WorkoutCompletionDay.query.filter_by(user_id=2).count() == 1
+
+
+def _ranking_cache(world, monkeypatch):
+    from app.services import gamification as gam
+    from test_leaderboard_redis import FakeRedis
+    class Cache(FakeRedis):
+        def zrem(self, key, owner):
+            return int(self.zsets.get(key, {}).pop(str(owner), None) is not None)
+    cache = Cache()
+    monkeypatch.setattr(gam, 'redis_client', cache)
+    for owner in (1, 2):
+        user = db.session.get(User, owner)
+        user.rank_points, user.weekly_xp, user.streak_count = owner * 100, owner * 20, owner
+    db.session.commit()
+    return gam, cache
+
+
+@pytest.mark.parametrize('publisher', ['rebuild', 'delayed_commit'])
+def test_pre_erasure_ranking_snapshot_cannot_restore_erased_scores(world, monkeypatch, publisher):
+    app, *_ = world
+    gam, cache = _ranking_cache(world, monkeypatch)
+    entered, finish = threading.Event(), threading.Event()
+    original = gam._ranking_snapshots
+    @contextmanager
+    def paused(payloads):
+        if 1 in payloads:
+            entered.set()
+            assert finish.wait(5)
+        with original(payloads) as snapshots:
+            yield snapshots
+    monkeypatch.setattr(gam, '_ranking_snapshots', paused)
+    def publish():
+        with app.app_context():
+            if publisher == 'rebuild':
+                gam.lb_rebuild(batch_size=2)
+            else:
+                gam._sync_leaderboard_snapshot(1, {'rank_points': 100, 'weekly_xp': 20, 'streak_count': 1})
+                gam.lb_sync_user(db.session.get(User, 2))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        work = pool.submit(publish)
+        assert entered.wait(5)
+        stop()
+        assert health_erasure.run(1) == 'completed'
+        finish.set()
+        work.result(timeout=5)
+    assert cache.zscore(gam.LB_ALLTIME_KEY, '1') == 0
+    assert cache.zscore(gam.LB_WEEKLY_KEY, '1') == 0
+    assert cache.zscore(gam.LB_ALLTIME_KEY, '2') == gam._lb_score(200, 2)
+    assert cache.zscore(gam.LB_WEEKLY_KEY, '2') == gam._lb_score(40, 2)
+
+
+def test_inflight_ranking_publication_finishes_before_erasure_removal(world, monkeypatch):
+    app, *_ = world
+    gam, cache = _ranking_cache(world, monkeypatch)
+    stop()
+    entered, finish, erasing, done = (threading.Event() for _ in range(4))
+    original = cache.zadd
+    def paused(key, mapping):
+        if '1' in mapping and key == gam.LB_ALLTIME_KEY:
+            entered.set()
+            assert finish.wait(5)
+        return original(key, mapping)
+    monkeypatch.setattr(cache, 'zadd', paused)
+    def publish():
+        with app.app_context():
+            gam.lb_rebuild(batch_size=2)
+    def erase():
+        with app.app_context():
+            erasing.set()
+            result = health_erasure.run(1)
+            done.set()
+            return result
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        work = pool.submit(publish)
+        assert entered.wait(5)
+        erasure = pool.submit(erase)
+        assert erasing.wait(5)
+        assert not done.wait(0.15)
+        finish.set()
+        work.result(timeout=5)
+        assert erasure.result(timeout=5) == 'completed'
+    assert cache.zscore(gam.LB_ALLTIME_KEY, '1') is None
+    assert cache.zscore(gam.LB_WEEKLY_KEY, '1') is None
+    assert cache.zscore(gam.LB_ALLTIME_KEY, '2') == gam._lb_score(200, 2)
 
 
 def test_duplicate_retry_waits_and_cannot_erase_newly_granted_records(world, monkeypatch):

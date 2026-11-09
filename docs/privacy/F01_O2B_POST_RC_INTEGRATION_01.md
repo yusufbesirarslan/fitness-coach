@@ -38,6 +38,12 @@ health profile fields, unproven missing-account completion, and PostgreSQL
 completion-claim retention. The new migration narrowly reconciles that last
 retention rule; admission, immutable claims, binding ownership, capability floor
 and truncation protections remain exact. This never raises the floor.
+Workout-derived Redis scores require successful owner-specific removal before
+the debt completes; configured cache failures remain pending and retry safely.
+PostgreSQL cache publishers (including rebuild and delayed commit callbacks)
+share health authority through publication and re-read current counters, so
+pre-erasure snapshots cannot republish erased scores. Global ranking semantics
+and ordinary account data are preserved.
 
 ## Exact paired-source consistency
 

@@ -299,6 +299,30 @@ def test_local_failure_rolls_back_all_rows_and_keeps_obligation(world, monkeypat
     assert health_erasure.run(world.a_id) == "completed"
 
 
+def test_partial_rank_cache_failure_stays_pending_and_retry_is_owner_scoped(world, monkeypatch):
+    from app.services import gamification
+    class Cache:
+        failing = True
+        values = {key: {str(world.a_id): 12300004, str(world.b_id): 45600002}
+                  for key in (gamification.LB_ALLTIME_KEY, gamification.LB_WEEKLY_KEY)}
+        def zrem(self, key, owner):
+            if self.failing and key == gamification.LB_WEEKLY_KEY:
+                raise RuntimeError("synthetic cache unavailable")
+            return int(self.values[key].pop(owner, None) is not None)
+    cache = Cache()
+    monkeypatch.setattr(gamification, "redis_client", cache)
+    _withdraw(world.a_id)
+    with pytest.raises(health_erasure.ErasureUnavailable):
+        health_erasure.run(world.a_id)
+    assert HealthErasure.query.filter_by(owner_id=world.a_id).one().completed_at is None
+    assert PumpCheck.query.filter_by(user_id=world.a_id).count() == 2
+    with pytest.raises(consent.HealthConsentDenied):
+        consent.mutate(world.a_id, command(2, request_id="cache-pending-regrant"))
+    cache.failing = False
+    assert health_erasure.run(world.a_id) == "completed"
+    assert all(values == {str(world.b_id): 45600002} for values in cache.values.values())
+
+
 def test_new_withdrawal_does_not_postpone_the_oldest_outstanding_deadline(world):
     _withdraw(world.a_id)
     row = HealthErasure.query.filter_by(owner_id=world.a_id).one()

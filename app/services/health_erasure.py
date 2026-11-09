@@ -145,6 +145,15 @@ def _delete(model, *criteria):
     return model.query.filter(*criteria).delete(synchronize_session=False)
 
 
+def _release_rankings(owner):
+    """Prove removal of owned workout scores; configured cache errors retry."""
+    from app.services import gamification
+    if gamification.redis_client is None:
+        return
+    for key in (gamification.LB_ALLTIME_KEY, gamification.LB_WEEKLY_KEY):
+        gamification.redis_client.zrem(key, str(owner))
+
+
 def _delete_feed_refs(m, ref_type, ref_ids):
     """Feed items (anyone's) that repost or quote the erased records."""
     item_ids = [i for (i,) in db.session.query(m.FeedItem.id).filter(
@@ -168,7 +177,8 @@ def _erase_rows(user, held):
             if getattr(user, field) is not None:
                 setattr(user, field, None)
                 changed += 1
-        user.profile_complete = False
+        from app.services import account_profile
+        account_profile.invalidate_health_onboarding(user)
         meta = dict(user.user_metadata or {})
         for key in MEMORY_KEYS:
             if meta.pop(key, None) is not None:
@@ -346,6 +356,11 @@ def _run_locked(owner, authority):
             db.session.rollback()
             raise ErasureUnavailable("storage_changed")
         counts = _erase_rows(user, held)
+        if "workouts" not in held:
+            # The ordinary best-effort account-deletion helper cannot prove
+            # erasure. A partial Redis failure leaves the durable debt pending;
+            # repeated ZREM of an already removed member is safe.
+            _release_rankings(owner)
         summary = {"rows": counts, "objects": len(released), "held": sorted(held)}
         for row in _open_rows(owner):
             row.summary = summary
@@ -358,12 +373,6 @@ def _run_locked(owner, authority):
         db.session.rollback()
         _log("incomplete", owner, stage="local", error_type=type(exc).__name__)
         raise ErasureUnavailable("local") from exc
-    if "workouts" not in held:
-        try:
-            from app.services import gamification
-            gamification.lb_remove_user(owner)
-        except Exception:
-            pass
     _log("held" if held else "completed", owner, objects=len(released),
          held=",".join(sorted(held)) or "-")
     return "held" if held else "completed"

@@ -146,8 +146,10 @@ def test_reviewed_ddl_pin_matches_the_fence_migration():
         import migration_expand_contract as mec
     finally:
         sys.path.pop(0)
-    assert set(mec.REVIEWED_DDL) == {"d7e3a9c1f5b8", "d8f1a3c5e7b9"}  # LAUNCH-FREE-BE-01 scope widening
+    assert set(mec.REVIEWED_DDL) == {"d7e3a9c1f5b8", "d8f1a3c5e7b9", "f01e2a5e0002"}
     assert mec.REVIEWED_DDL["d7e3a9c1f5b8"] == mec.normalized_digest(MIGRATION_PATH.read_bytes())
+    erasure = ROOT / "migrations/versions/f01e2a5e0002_health_withdrawal_erasure.py"
+    assert mec.REVIEWED_DDL["f01e2a5e0002"] == mec.normalized_digest(erasure.read_bytes())
     result = mec.scan()
     assert result["classes"]["d7e3a9c1f5b8"] == mec.EXPAND
     assert "d7e3a9c1f5b8_completion_authority_fence.py" not in result["violations"]
