@@ -14,7 +14,7 @@ delete, exactly the rows ``ON DELETE CASCADE`` would remove, one level deep and
 inside the caller's transaction. Databases without the table (every fresh,
 test and staging schema built from the models or migrations) are a no-op.
 """
-from sqlalchemy import bindparam, inspect, text
+from sqlalchemy import inspect, text
 
 from app.extensions import db
 
@@ -36,14 +36,12 @@ def delete_for_user(user_id):
         {"uid": user_id}).rowcount
 
 
-def delete_for_activities(activity_ids):
-    """Claps (anyone's) on the given activities. Returns rows."""
-    if not activity_ids:
-        return 0
+def delete_on_activities_of(user_id):
+    """Claps (anyone's) ON the user's activities only. Returns rows."""
     connection = db.session.connection()
     if not _present(connection):
         return 0
     return connection.execute(text(
-        "DELETE FROM activity_clap WHERE activity_id IN :ids"
-    ).bindparams(bindparam("ids", expanding=True)),
-        {"ids": list(activity_ids)}).rowcount
+        "DELETE FROM activity_clap "
+        "WHERE activity_id IN (SELECT id FROM activity WHERE user_id = :uid)"),
+        {"uid": user_id}).rowcount

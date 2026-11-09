@@ -38,7 +38,7 @@ B is the smallest safe fix. It changes no schema, keeps the qualified migration 
 `app/services/legacy_activity_clap.py`:
 
 - **`delete_for_user(uid)`**, called by `_purge_user` before it deletes the user's activities and the user, inside the same transaction. It deletes `activity_clap` rows where `user_id = uid` **or** `activity_id` belongs to one of `uid`'s activities.
-- **`delete_for_activities(ids)`**, called by O2-B workout erasure next to the existing feed-reference cleanup. It deletes only the claps **on** the erased activities. The erased owner's own claps on other people's activities are social records, so they are kept, as they would be in any other social table O2-B does not cover.
+- **`delete_on_activities_of(uid)`**, called by O2-B workout erasure next to the existing feed-reference cleanup, in the same transaction that then deletes all of `uid`'s activities. It deletes only the claps **on** those activities, using a bounded subquery rather than an ID list. The erased owner's own claps on other people's activities are social records, so they are kept, as they would be in any other social table O2-B does not cover.
 - **When the table is absent** (`inspect().has_table`), both functions are no-ops.
 
 Each removes only rows that reference rows the caller is deleting in the same transaction. Unrelated claps are untouched, and the cleanup goes no deeper than that one level.

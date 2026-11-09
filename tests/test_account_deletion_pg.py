@@ -51,6 +51,10 @@ def pg_app(monkeypatch):
     db.init_app(app)
     cognito, s3 = install_fakes(monkeypatch)
     with app.app_context():
+        # A crashed earlier run may have left the unmapped legacy table, whose
+        # FKs would make drop_all fail (see LEGACY_ACTIVITY_CLAP_DDL).
+        with db.engine.begin() as conn:
+            conn.exec_driver_sql("DROP TABLE IF EXISTS activity_clap")
         db.drop_all()
         db.create_all()
     try:
@@ -398,9 +402,11 @@ def legacy_clap(pg_app):
     app = pg_app[0]
     with app.app_context():
         install_legacy_activity_clap()
-    yield pg_app
-    with app.app_context():
-        drop_legacy_activity_clap()
+    try:
+        yield pg_app
+    finally:
+        with app.app_context():
+            drop_legacy_activity_clap()
 
 
 def _clap_world(app, cognito, s3):
@@ -465,5 +471,8 @@ def test_without_the_cleanup_the_legacy_fk_aborts_the_purge(legacy_clap, monkeyp
             _purge_user(db.session.get(User, target_id))
             db.session.flush()
         assert error.value.orig.pgcode == "23503"
+        assert error.value.orig.diag.constraint_name == (
+            "activity_clap_user_id_fkey" if who == "clapper"
+            else "activity_clap_activity_id_fkey")
         db.session.rollback()
         assert claps() == before

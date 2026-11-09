@@ -230,7 +230,7 @@ def _erase_rows(user, held):
             # NO ACTION FK). The owner's own claps elsewhere are social records
             # that do not block this erasure, so they stay.
             from app.services import legacy_activity_clap
-            changed += legacy_activity_clap.delete_for_activities(activity_ids)
+            changed += legacy_activity_clap.delete_on_activities_of(uid)
         if day_ids and db.engine.dialect.name != "postgresql":
             changed += _delete(m.CompletionClaimTransaction,
                                m.CompletionClaimTransaction.claim_id.in_(day_ids))
