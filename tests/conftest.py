@@ -197,6 +197,17 @@ def app():
     # Disarm the 5-minute weekly-rollover hook so request-driven tests are
     # deterministic; rollover is tested by calling run_weekly_rollover directly.
     gamification._last_rollover_check[0] = datetime.utcnow()
+    # Disarm the daily maintenance throttle too. A test that forces only the
+    # rollover throttle (e.g. test_weekly_rollover_receives_istanbul_now) would
+    # otherwise pass the process-global purge throttle whenever it is the first
+    # in its process to reach it, and the hook dispatches the REAL
+    # run_daily_maintenance on a daemon thread (no queue in tests). That thread
+    # outlives the test and queries the single shared in-memory SQLite
+    # connection while teardown's drop_all() runs (CI run 42621146878 shard 2).
+    # Dispatch tests opt back in by patching _purge_throttle_passed or
+    # _last_purge_check themselves; this is restored at teardown.
+    from app import hooks
+    monkeypatch.setattr(hooks, "_last_purge_check", [datetime.utcnow()])
 
     with flask_app.app_context():
         db.create_all()
