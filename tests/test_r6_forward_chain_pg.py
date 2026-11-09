@@ -496,7 +496,9 @@ def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_
     clapping user, or the owner of a clapped activity, fails with 23503 and the
     purge rolls back. The chain neither causes nor changes this: same result
     at the live head and at the release head. Users without claps are
-    unaffected. Remediation is a separate, founder-approved change."""
+    unaffected. The F01 O2-B health erasure deletes ``activity`` rows too, so
+    it cannot complete for a clapped activity's owner. Remediation is a
+    separate, founder-approved change."""
     def accounts():
         made = {}
         for name in ("clap_owner", "clapper", "no_clap"):
@@ -527,6 +529,10 @@ def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_
         assert delete(made["clapper"]) == "23503", revision
         assert delete(made["clap_owner"]) == "23503", revision
         assert delete(made["no_clap"]) is None, revision
+        # The F01 O2-B erasure ("workouts" category) deletes the owner's
+        # activity rows; for the clapped activity's owner that fails the same way.
+        assert _pgcode(lambda: _sql(chain_url, "DELETE FROM activity WHERE user_id = :u",
+                                    u=made["clap_owner"])) == "23503", revision
         assert _sql(chain_url, 'SELECT count(*) FROM "user" WHERE id IN (:a, :b)',
                     a=made["clapper"], b=made["clap_owner"])[0][0] == 2
 
