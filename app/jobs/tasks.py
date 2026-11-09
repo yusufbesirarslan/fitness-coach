@@ -48,7 +48,7 @@ def _in_app_context(fn):
             db.session.remove()
 
 
-def summarize_conversation(conversation_id):
+def summarize_conversation(conversation_id, health_generation=None):
     """Bir konuşmanın özetlenmemiş eski turlarını conversation.summary'ye katla.
 
     İdempotent: `memory_manager.maybe_summarize` eşik + summarized_upto_id
@@ -60,14 +60,17 @@ def summarize_conversation(conversation_id):
         from app.extensions import db
         from app.models import CoachConversation
         from app.services import ai_metrics, ai_spend_guard, memory_manager
-        conv = db.session.get(CoachConversation, conversation_id)
-        if conv is None:
+        from app.services import health_consent
+        owner = db.session.query(CoachConversation.user_id).filter_by(id=conversation_id).scalar()
+        if owner is None or type(health_generation) is not int:
             _log.info("[JOBS] summarize: konusma %s bulunamadi", conversation_id)
             return False
         # RQ/deferred jobs have no request context. Attribute the paid summary
         # attempt to the conversation's database owner, never an enqueued id.
-        with ai_spend_guard.subject_scope(conv.user_id):
-            did = memory_manager.maybe_summarize(conv)
+        with health_consent.processing(owner, expected_generation=health_generation):
+            conv = db.session.get(CoachConversation, conversation_id)
+            with ai_spend_guard.subject_scope(owner):
+                did = memory_manager.maybe_summarize(conv)
         ai_metrics.increment("SummarizeJob",
                              dimensions={"result": "done" if did else "skip"})
         return did

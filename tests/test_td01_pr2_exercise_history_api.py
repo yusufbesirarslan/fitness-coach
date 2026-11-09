@@ -244,7 +244,7 @@ def test_pathological_json_and_telemetry_failure(ready, client, owner, real_bear
     _error(get_history(client, headers), 503, 'TRAINING_HISTORY_TEMPORARILY_UNAVAILABLE')
 
 
-def assert_read_only_request(client, headers):
+def assert_read_only_request(client, headers, *, health_authority_sql=False):
     """Auth reads may occur; history is exactly one five-column owner SELECT."""
     statements, commits, flushes = [], [], []
     def sql(*args):
@@ -261,7 +261,17 @@ def assert_read_only_request(client, headers):
         assert response.status_code == 200
         assert not commits and not flushes
         assert not db.session.new and not db.session.dirty and not db.session.deleted
-        assert all(s.lstrip().upper().startswith('SELECT') for s in statements)
+        setup = [s for s in statements if not s.lstrip().upper().startswith('SELECT')]
+        if health_authority_sql:
+            # The separate read authority bounds its own transaction. These
+            # exact session-local settings are not domain writes; arbitrary
+            # SETs, DDL/DML and ORM commits/flushes remain forbidden.
+            assert setup == ["SET LOCAL lock_timeout = '2000ms'",
+                             "SET LOCAL statement_timeout = '5000ms'"]
+            assert sum('SELECT pg_advisory_xact_lock_shared' in s for s in statements) == 1
+            assert sum('FROM health_consent_state' in s for s in statements) == 1
+        else:
+            assert setup == []
         history_sql = [s for s in statements if 'FROM workout_session' in s]
         assert len(history_sql) == 1
         select = history_sql[0]

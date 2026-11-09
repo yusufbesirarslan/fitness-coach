@@ -683,7 +683,7 @@ def test_mobile_auth_dependency_direction_is_one_way():
     # or provider access, and mobile_auth still cannot import its callers.
     assert _service_modules(api) == {
         "app.services.account_profile", "app.services.mobile_auth",
-        "app.services.mobile_credentials", "app.services.ai_consent",
+        "app.services.mobile_credentials", "app.services.ai_consent", "app.services.health_consent",
         "app.services.account_eligibility"}
     assert _service_modules(middleware) == {
         "app.services.auth_contract", "app.services.mobile_auth",

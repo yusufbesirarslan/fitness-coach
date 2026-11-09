@@ -45,7 +45,7 @@ def test_alembic_migrations_have_single_head():
     # The K6 rollback gate's completion-authority fence follows the claim.
     # MON-02-BE-02's empty Apple notification/reconciliation tables follow the fence.
     # LAUNCH-FREE-BE-01 widens the bucket scope CHECK on the physical budget.
-    assert heads == ["d8f1a3c5e7b9"]
+    assert heads == ["f01c0a1e0001"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -83,7 +83,7 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # The K6 rollback gate adds the completion fence, no catalog schema.
     # MON-02-BE-02 adds Apple notification/reconciliation tables, no catalog schema.
     # LAUNCH-FREE-BE-01 widens the allowance bucket scope CHECK, no catalog schema.
-    assert len(revision_files) == 61
+    assert len(revision_files) == 62
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 

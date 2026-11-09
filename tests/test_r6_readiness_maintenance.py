@@ -156,10 +156,10 @@ def test_anonymous_probe_reaches_no_hook_that_writes(client, armed):
 
 # ── 4. ordinary traffic keeps the maintenance contract ─────────────────────
 
-def test_ordinary_request_still_runs_rollover_and_purge(client, armed):
+def test_ordinary_request_still_runs_rollover_and_purge(client, armed, auth_user):
     from app.jobs.tasks import run_daily_maintenance
 
-    client.get("/login")
+    client.get("/setup")
     assert len(armed["rollovers"]) == 1
     assert armed["dispatched"] == [run_daily_maintenance]
     assert set(MAINTENANCE_KEYS) <= set(armed["redis"].strings)
@@ -168,19 +168,19 @@ def test_ordinary_request_still_runs_rollover_and_purge(client, armed):
     assert [s for s in armed["statements"] if _WRITE_SQL.match(s)]
 
 
-def test_ordinary_request_still_respects_the_throttle(client, armed):
-    client.get("/login")
-    client.get("/login")
+def test_ordinary_request_still_respects_the_throttle(client, armed, auth_user):
+    client.get("/setup")
+    client.get("/setup")
     assert len(armed["rollovers"]) == 1
     assert len(armed["dispatched"]) == 1
 
 
-def test_health_probes_do_not_consume_the_throttle_window(client, armed):
+def test_health_probes_do_not_consume_the_throttle_window(client, armed, auth_user):
     """A probe neither runs maintenance nor delays it for real traffic."""
     for _ in range(3):
         client.get("/health")
         client.get("/health?deep=1", environ_base={"REMOTE_ADDR": "127.0.0.1"})
-    client.get("/login")
+    client.get("/setup")
     assert len(armed["rollovers"]) == 1
     assert len(armed["dispatched"]) == 1
 

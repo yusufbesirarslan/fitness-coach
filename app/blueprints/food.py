@@ -59,6 +59,10 @@ def food_search():
     # Alaka-kapısı + TR→EN normalizasyonlu birleşik arama (koç ile aynı yol):
     # FatSecret Türkçe sorgulara ilgisiz jenerik besin döndürdüğü için ham
     # results[0]'a güvenmek yanlış makro veriyordu ('patates' → 'Soy Nuts').
+    # Admission retains its own health authority connection. Close only the
+    # ordinary authentication/read transaction before a blocking provider wait.
+    from app.extensions import db
+    db.session.rollback()
     try:
         with blocking_concurrency_slot():
             results = _coach_search_food(q)

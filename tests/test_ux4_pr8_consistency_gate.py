@@ -22,6 +22,7 @@ knows where the guard lives):
 The browser half of the gate is ``test_ux4_pr8_browser.py``.
 """
 from __future__ import annotations
+from tests.health_consent_support import domain_statements
 
 import json
 import re
@@ -243,7 +244,7 @@ def test_server_query_budget_does_not_widen(app, client, auth_user, monkeypatch,
     ready(app, auth_user.id, "en")
     seed_state(app, client, monkeypatch, auth_user.id, surface, state)
     _selects(client, path)                      # warm: pays the login cost
-    statements = _selects(client, path)
+    statements = domain_statements(_selects(client, path))
     assert len(statements) <= budget, (
         "surface=%s state=%s %s issues %d SELECTs, budget %d:\n  %s"
         % (surface, state, path, len(statements), budget, "\n  ".join(statements)))

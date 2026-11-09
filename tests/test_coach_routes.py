@@ -529,7 +529,7 @@ def test_ask_stream_emits_meta_delta_done_frames(client, auth_user, monkeypatch)
     assert resp.status_code == 200
     assert resp.headers["Content-Type"].startswith("text/event-stream")
     assert resp.headers["X-Accel-Buffering"] == "no"
-    assert resp.headers["Cache-Control"] == "no-cache"
+    assert resp.headers["Cache-Control"] == "no-cache, no-store"
 
     # meta çerçevesi conversation_id + WS6 request_id taşır (request_id dinamik).
     meta_event, meta_data = resp.frames[0]

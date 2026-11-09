@@ -369,13 +369,20 @@ def test_read_only_candidate_readiness_probes_mutate_nothing(pg_url, monkeypatch
         assert redis.snapshot() == leaderboard
         assert dispatched == []
 
-        # Control (non-vacuity) + contract preserved: the SAME armed state on
-        # an ordinary request does run the existing maintenance mechanism.
+        # Signed-out account control must not initiate health processing.
         client.get("/login")
+        assert "fitx:rollover_check" not in redis.strings
+        assert "fitx:session_purge" not in redis.strings
+        assert dispatched == []
+        # Non-vacuity: the same armed maintenance mechanism remains live when
+        # explicitly run outside an account-control request (job context).
+        with active.app_context():
+            hooks.maybe_weekly_rollover()
         assert "fitx:rollover_check" in redis.strings
         assert "fitx:session_purge" in redis.strings
         assert dispatched == [run_daily_maintenance]
-        assert len(_maintenance_state(pg_url)[0]) == 1  # this week's rollover
+        assert len(_maintenance_state(pg_url)[0]) == 1
+
     finally:
         _dispose(candidate)
         _dispose(active)
