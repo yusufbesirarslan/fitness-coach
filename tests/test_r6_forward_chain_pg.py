@@ -344,6 +344,11 @@ def test_the_qualified_live_head_schema_is_production_s_schema(chain_url, monkey
     with_legacy = sorted(columns + [list(row) for row in PRODUCTION_ONLY_LEGACY_COLUMNS],
                          key=lambda row: (row[0].encode(), row[1].encode()))
     digest = hashlib.sha256(json.dumps(with_legacy).encode()).hexdigest()
+    if digest != PRODUCTION_LIVE_HEAD_SCHEMA_SHA256:
+        # Diagnosable drift: the CI-side rows (schema metadata only, from a
+        # disposable database) so a mismatch can be tested offline against
+        # production's digest.
+        print("R6_CHAIN_LIVE_HEAD_COLUMNS=" + json.dumps(columns))
     assert digest == PRODUCTION_LIVE_HEAD_SCHEMA_SHA256, (
         "column-level drift between the Alembic history and production at "
         f"{LIVE_HEAD} beyond activity_clap: {digest}")
