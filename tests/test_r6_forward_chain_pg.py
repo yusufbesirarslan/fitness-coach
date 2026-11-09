@@ -9,10 +9,12 @@ Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
 
 * the graph is exactly those four revisions, linear, one head;
-* the schema the Alembic history builds at ``c6f8b0d2e4a1`` is production's
-  except for one orphan legacy table (``activity_clap``) that no release
-  migration touches: adding its four columns reproduces the 2026-11-09
-  restore's column-level digest exactly;
+* the schema the Alembic history builds at ``c6f8b0d2e4a1``, plus production's
+  three itemized legacy differences (the ``activity_clap`` table, NOT NULL on
+  ``user.rank_points`` and ``user.streak_count``), equals production's catalog
+  as read back on 2026-11-09 (columns, constraints, triggers, functions,
+  sequences, relations) and reproduces the restore's column digest; every
+  other test here runs on that production-shaped schema;
 * a database at ``c6f8b0d2e4a1`` populated the way production is (completion
   floor raised, historical Pump Check evidence, photo-free claims, legacy
   FatSecret rows, narrow-scope allowance buckets) is brought to head by the
@@ -36,6 +38,8 @@ Gating: ``pg_concurrency`` marker and a disposable ``PG_TEST_DATABASE_URL``.
 In the CI job ``R6_FORWARD_CHAIN_REQUIRED=1`` turns an unreachable database
 into a failure instead of a skip. Never point it at a database you care about.
 """
+import hashlib
+import json
 import os
 import shutil
 import sys
@@ -71,7 +75,7 @@ CAND_SHA = "c" * 40
 # Application tables the seed populates; every one exists at LIVE_HEAD.
 SEEDED = ("user", "meal_log", "custom_meal", "custom_meal_item", "weekly_check_in",
           "pump_check", "workout_log", "workout_completion_day", "ai_allowance_bucket",
-          "completion_capability_floor")
+          "completion_capability_floor", "activity", "activity_clap")
 NEW_TABLES = ("health_consent_state", "health_consent_event", "meal_log_retained_total",
               "health_erasure", "health_legal_hold")
 PROVIDER_COLUMNS = {"meal_log": ("provider_items", "provider_acquired_at", "provider_expired_at"),
@@ -156,6 +160,13 @@ def _seed(url):
                     {"n": name, "e": f"{name}@example.com", "s": f"sub-{name}",
                      "r": f"R6CHAIN{index:04d}"}).scalar()
             rich = ids["r6_rich"]
+            # Production's legacy social row: one clap (activity_clap holds one).
+            activity = c.execute(sa.text(
+                "INSERT INTO activity (user_id, activity_type, content, \"timestamp\") "
+                "VALUES (:u, 'workout', 'synthetic', now()) RETURNING id"), {"u": rich}).scalar()
+            c.execute(sa.text(
+                "INSERT INTO activity_clap (activity_id, user_id, created_at) "
+                "VALUES (:a, :u, now())"), {"a": activity, "u": ids["r6_bystander"]})
             # Historical (pre-floor) completion evidence and an ordinary log.
             c.execute(sa.text(
                 "INSERT INTO pump_check (user_id, image_key, location_type, description, "
@@ -273,89 +284,139 @@ def test_release_chain_is_exactly_the_four_reviewed_forward_migrations():
     assert "d7e3a9c1f5b8" in live and not live & set(CHAIN)
 
 
-# Production at LIVE_HEAD, from the isolated PITR restore of 2026-11-09
-# (RESTORE_TEST_RECEIPT.md; aggregate-only verifier): its 73 public tables and
-# the sha256 of json.dumps(information_schema.columns (table, column,
-# data_type, is_nullable) ORDER BY 1,2), the receipt's first schema baseline.
-PRODUCTION_LIVE_HEAD_TABLES = frozenset((
-    "activity", "activity_clap", "ai_allowance_bucket", "ai_allowance_purge_progress",
-    "ai_consent_event", "ai_consent_state", "ai_starter_grant", "ai_usage_reservation",
-    "alembic_version", "apple_account_association", "apple_notification_receipt",
-    "apple_subscription", "apple_subscription_reconciliation", "barcode_food_cache",
-    "challenge", "coach_conversation", "coach_message", "cognito_session",
-    "completion_capability_floor", "completion_claim_transaction", "custom_meal",
-    "custom_meal_item", "daily_activity", "daily_quest", "deleted_identity_tombstone",
-    "exercise_note", "feed_hide", "feed_item", "feed_item_comment", "feed_item_like",
-    "feed_report", "friendship", "meal_log", "meal_photo_cleanup", "message",
-    "mobile_access_credential", "mobile_auth_session", "mobile_refresh_credential",
-    "notification", "nutrition_plan", "pending_action", "plan_mutation_record",
-    "pump_check", "pump_check_comment", "pump_check_comparison",
-    "pump_check_comparison_request", "pump_check_like", "supplement",
-    "training_allowance_compensation", "training_plan",
-    "training_plan_confirmation_proposal", "training_plan_generation_allowance",
-    "training_plan_generation_operation", "training_plan_replacement_generation_operation",
-    "training_plan_replacement_proposal", "training_plan_replacement_receipt", "user",
-    "user_badge", "user_challenge_progress", "user_quest_progress", "user_session",
-    "user_wearable_connection", "water_log", "wearable_activity_log", "wearable_sleep_log",
-    "wearable_workout_log", "weekly_check_in", "weekly_log", "weekly_reset_log",
-    "weekly_winner", "workout_completion_day", "workout_log", "workout_session",
-))
+# Production (database-1-dr) at LIVE_HEAD. The column digest is the restore
+# verifier's: sha256 of json.dumps(information_schema.columns (table, column,
+# data_type, is_nullable) ORDER BY 1,2). The isolated restore (13:20Z) and the
+# founder-authorized read-only catalog SELECT on production (18:07Z, SSM
+# 708facb8, AXISAI-R6-MERGE-AND-SCHEMA-READBACK-01) agree on it. The fixture is
+# that readback: schema metadata only (columns, constraints, triggers, function
+# definition md5s, sequences, relations), no rows.
+PRODUCTION_SCHEMA = json.loads(
+    (ROOT / "tests" / "fixtures" / "r6_production_schema_c6f8b0d2e4a1.json").read_text())
 PRODUCTION_LIVE_HEAD_SCHEMA_SHA256 = (
     "e6102ff7584b7c349ca36f5711caeba1d2ec4314581a530a33f3cf7ab95253ba")
 
-# Known production-only table (first CI run of this test, job 129280469479):
-# ``activity_clap`` was created by an early create_all boot from the
-# ``ActivityClap`` model (42fea79a); the model was removed in 9c085e55 and no
-# migration ever created or dropped the table. None of the four release
-# migrations references it. Its last definition, as information_schema rows:
-PRODUCTION_ONLY_LEGACY_COLUMNS = (
-    ["activity_clap", "activity_id", "integer", "NO"],
-    ["activity_clap", "created_at", "timestamp without time zone", "YES"],
-    ["activity_clap", "id", "integer", "NO"],
-    ["activity_clap", "user_id", "integer", "NO"],
+# Every difference between the Alembic history at LIVE_HEAD and production,
+# itemized from that readback. The catalog test below proves nothing else
+# differs. All three are legacy objects older than the migration history's
+# coverage; no release migration references any of them.
+#   D1 ``activity_clap``: created by an early create_all boot of the
+#      ``ActivityClap`` model (42fea79a; removed in 9c085e55; never in a
+#      migration). Both of its foreign keys are ON DELETE NO ACTION.
+#   D2/D3 ``user.rank_points`` / ``user.streak_count``: NOT NULL in production;
+#      the model and the migrations leave them nullable (both DEFAULT 0).
+PRODUCTION_LEGACY_DDL = (
+    "CREATE TABLE activity_clap ("
+    " id SERIAL NOT NULL, activity_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
+    " created_at TIMESTAMP WITHOUT TIME ZONE, PRIMARY KEY (id),"
+    " CONSTRAINT uq_activity_clap UNIQUE (activity_id, user_id),"
+    " FOREIGN KEY (activity_id) REFERENCES activity (id),"
+    ' FOREIGN KEY (user_id) REFERENCES "user" (id))',
+    'ALTER TABLE "user" ALTER COLUMN rank_points SET NOT NULL',
+    'ALTER TABLE "user" ALTER COLUMN streak_count SET NOT NULL',
 )
+LEGACY_NAMES = ("activity_clap", "rank_points", "streak_count")
+
+_CATALOG = {
+    "columns": "SELECT table_name, column_name, data_type, is_nullable, udt_name, "
+               "character_maximum_length, numeric_precision, numeric_scale, "
+               "left(column_default, 80) FROM information_schema.columns "
+               "WHERE table_schema = 'public'",
+    # contype n (PG18 only) duplicates is_nullable and is left out on both sides.
+    "constraints": "SELECT cl.relname, co.conname, co.contype, pg_get_constraintdef(co.oid), "
+                   "co.confdeltype, co.confupdtype, rc.relname, co.condeferrable, co.convalidated "
+                   "FROM pg_constraint co JOIN pg_class cl ON cl.oid = co.conrelid "
+                   "JOIN pg_namespace n ON n.oid = cl.relnamespace "
+                   "LEFT JOIN pg_class rc ON rc.oid = co.confrelid "
+                   "WHERE n.nspname = 'public' AND co.contype <> 'n'",
+    "triggers": "SELECT c.relname, t.tgname, pg_get_triggerdef(t.oid), t.tgenabled "
+                "FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = 'public' AND NOT t.tgisinternal",
+    "functions": "SELECT p.proname, md5(pg_get_functiondef(p.oid)) FROM pg_proc p "
+                 "JOIN pg_namespace n ON n.oid = p.pronamespace "
+                 "WHERE n.nspname = 'public' AND p.prokind = 'f'",
+    "sequences": "SELECT sequence_name, data_type FROM information_schema.sequences "
+                 "WHERE sequence_schema = 'public'",
+    "relations": "SELECT c.relname, c.relkind FROM pg_class c "
+                 "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                 "WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m','f')",
+}
+
+
+def _catalog(url):
+    """The readback's catalog sections, read the same way from ``url``."""
+    engine = _engine(url)
+    try:
+        with engine.connect() as connection:
+            return {name: sorted(json.loads(json.dumps([list(row) for row in
+                                 connection.execute(sa.text(query))])))
+                    for name, query in _CATALOG.items()}
+    finally:
+        engine.dispose()
+
+
+def _column_digest(url):
+    rows = _sql(url, "SELECT table_name, column_name, data_type, is_nullable "
+                     "FROM information_schema.columns WHERE table_schema='public' ORDER BY 1,2")
+    return hashlib.sha256(json.dumps([list(row) for row in rows]).encode()).hexdigest()
+
+
+def _production_live_head(monkeypatch, url):
+    """A database at LIVE_HEAD shaped exactly like production's schema."""
+    _upgrade_to(monkeypatch, LIVE_HEAD)
+    for statement in PRODUCTION_LEGACY_DDL:
+        _sql(url, statement)
+
+
+def _diff(ci, production):
+    return {name: {"ci_only": [row for row in ci[name] if row not in production[name]],
+                   "production_only": [row for row in production[name] if row not in ci[name]]}
+            for name in _CATALOG
+            if ci[name] != production[name]}
 
 
 def test_the_qualified_live_head_schema_is_production_s_schema(chain_url, monkeypatch):
-    """The chain is qualified on a schema built by the Alembic history; this
-    proves that schema IS production's at c6f8b0d2e4a1 (same method as the
-    restore verifier), so the results transfer to the real upgrade."""
-    import hashlib
-    import json
+    """The chain is qualified on the Alembic history plus production's three
+    itemized legacy differences. This proves that schema IS production's at
+    c6f8b0d2e4a1, section by section, so the results transfer to the real
+    upgrade. A mismatch prints the itemized difference and fails."""
+    production = {name: sorted(PRODUCTION_SCHEMA[name]) for name in _CATALOG}
+    assert len(production["relations"]) == 73 and len(production["columns"]) == 709
+
     _upgrade_to(monkeypatch, LIVE_HEAD)
-    assert len(PRODUCTION_LIVE_HEAD_TABLES) == 73
-    engine = _engine(chain_url)
-    try:
-        with engine.connect() as connection:
-            tables = set(connection.execute(sa.text(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public'")).scalars())
-            columns = [list(row) for row in connection.execute(sa.text(
-                "SELECT table_name, column_name, data_type, is_nullable "
-                "FROM information_schema.columns WHERE table_schema='public' ORDER BY 1,2"))]
-    finally:
-        engine.dispose()
-    # Exactly one difference: production's orphan legacy table.
-    assert tables == PRODUCTION_LIVE_HEAD_TABLES - {"activity_clap"}, (
-        sorted(tables - PRODUCTION_LIVE_HEAD_TABLES), sorted(PRODUCTION_LIVE_HEAD_TABLES - tables))
-    # Adding its four columns reproduces production's digest byte for byte, so
-    # every other table and column is identical (name type sorts bytewise,
-    # as Python sorts these ASCII identifiers).
-    with_legacy = sorted(columns + [list(row) for row in PRODUCTION_ONLY_LEGACY_COLUMNS],
-                         key=lambda row: (row[0].encode(), row[1].encode()))
-    digest = hashlib.sha256(json.dumps(with_legacy).encode()).hexdigest()
-    if digest != PRODUCTION_LIVE_HEAD_SCHEMA_SHA256:
-        # Diagnosable drift: the CI-side rows (schema metadata only, from a
-        # disposable database) so a mismatch can be tested offline against
-        # production's digest.
-        print("R6_CHAIN_LIVE_HEAD_COLUMNS=" + json.dumps(columns))
-    assert digest == PRODUCTION_LIVE_HEAD_SCHEMA_SHA256, (
-        "column-level drift between the Alembic history and production at "
-        f"{LIVE_HEAD} beyond activity_clap: {digest}")
-    # And none of the release migrations touches the orphan table.
+    alembic = _catalog(chain_url)
+    for statement in PRODUCTION_LEGACY_DDL:
+        _sql(chain_url, statement)
+    shaped = _catalog(chain_url)
+
+    diff = _diff(shaped, production)
+    if diff:
+        print("R6_CHAIN_CATALOG_DIFF=" + json.dumps(diff))
+    assert diff == {}, sorted(diff)
+    assert _column_digest(chain_url) == PRODUCTION_LIVE_HEAD_SCHEMA_SHA256
+
+    # The legacy DDL is exactly the difference, nothing more: Alembic alone
+    # differs from production only in activity_clap's objects and the two
+    # NOT NULLs.
+    raw = _diff(alembic, production)
+    assert all(not part["ci_only"] or name == "columns" for name, part in raw.items()), raw
+    assert sorted(row[:4] for row in raw["columns"]["ci_only"]) == [
+        ["user", "rank_points", "integer", "YES"], ["user", "streak_count", "integer", "YES"]]
+    assert {(row[0], row[1]) for row in raw["columns"]["production_only"]} == {
+        ("activity_clap", "activity_id"), ("activity_clap", "created_at"),
+        ("activity_clap", "id"), ("activity_clap", "user_id"),
+        ("user", "rank_points"), ("user", "streak_count")}
+    for name in ("constraints", "sequences", "relations"):
+        assert raw[name]["production_only"] and all(
+            "activity_clap" in json.dumps(row) for row in raw[name]["production_only"]), raw[name]
+    assert "triggers" not in raw and "functions" not in raw
+
+    # And no release migration references a legacy object.
     for revision in CHAIN:
         (path,) = (ROOT / "migrations" / "versions").glob(f"{revision}_*.py")
-        assert "activity_clap" not in path.read_text()
+        text = path.read_text()
+        assert not [name for name in LEGACY_NAMES if name in text], path.name
 
 
 @pytest.fixture
@@ -376,7 +437,7 @@ def trees(tmp_path):
 # ── 2. populated upgrade through the real release step ──────────────────────
 
 def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_url, monkeypatch):
-    _upgrade_to(monkeypatch, LIVE_HEAD)
+    _production_live_head(monkeypatch, chain_url)
     assert _versions(chain_url) == [LIVE_HEAD]
     ids = _seed(chain_url)
     before = _snapshot(chain_url)
@@ -423,6 +484,51 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
     assert _versions(chain_url) == [HEAD]
     assert _snapshot(chain_url, SEEDED + NEW_TABLES) == settled
     _verify_head_fence(chain_url)
+
+
+def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_after(
+        chain_url, monkeypatch):
+    """P2 finding from the production readback, characterized (not fixed here).
+
+    ``activity_clap`` is the only table whose foreign key to ``user`` is not
+    CASCADE/SET NULL, and its ``activity_id`` key is NO ACTION too. Account
+    deletion (``_purge_user``) does not know the table, so deleting the
+    clapping user, or the owner of a clapped activity, fails with 23503 and the
+    purge rolls back. The chain neither causes nor changes this: same result
+    at the live head and at the release head. Users without claps are
+    unaffected. Remediation is a separate, founder-approved change."""
+    def accounts():
+        made = {}
+        for name in ("clap_owner", "clapper", "no_clap"):
+            made[name] = _sql(chain_url,
+                              'INSERT INTO "user" (username, email, cognito_sub) '
+                              "VALUES (:n, :e, :s) RETURNING id",
+                              n=name + str(len(_sql(chain_url, 'SELECT id FROM "user"'))),
+                              e=f"{name}-{time.monotonic_ns()}@example.com",
+                              s=f"sub-{name}-{time.monotonic_ns()}")[0][0]
+        for owner in (made["clap_owner"], made["no_clap"]):
+            _sql(chain_url, "INSERT INTO activity (user_id, activity_type, content, \"timestamp\") "
+                            "VALUES (:u, 'workout', 'synthetic', now())", u=owner)
+        activity = _sql(chain_url, "SELECT id FROM activity WHERE user_id = :u",
+                        u=made["clap_owner"])[0][0]
+        _sql(chain_url, "INSERT INTO activity_clap (activity_id, user_id) VALUES (:a, :u)",
+             a=activity, u=made["clapper"])
+        return made
+
+    def delete(user_id):
+        return _pgcode(lambda: _sql(chain_url, 'DELETE FROM "user" WHERE id = :u', u=user_id))
+
+    _production_live_head(monkeypatch, chain_url)
+    for revision in (LIVE_HEAD, HEAD):
+        if revision == HEAD:
+            assert _release_prepare(monkeypatch).exit_code == 0
+        assert _versions(chain_url) == [revision]
+        made = accounts()
+        assert delete(made["clapper"]) == "23503", revision
+        assert delete(made["clap_owner"]) == "23503", revision
+        assert delete(made["no_clap"]) is None, revision
+        assert _sql(chain_url, 'SELECT count(*) FROM "user" WHERE id IN (:a, :b)',
+                    a=made["clapper"], b=made["clap_owner"])[0][0] == 2
 
 
 # ── 3. failure mid-chain is atomic; the rerun completes ─────────────────────
@@ -473,7 +579,7 @@ def _observe_chain_waiting_on_meal_log(url, thread, seconds=30):
 
 def test_a_lock_on_the_third_migration_rolls_back_the_whole_chain_then_rerun_completes(
         chain_url, monkeypatch, trees):
-    _upgrade_to(monkeypatch, LIVE_HEAD)
+    _production_live_head(monkeypatch, chain_url)
     _seed(chain_url)
     before = _snapshot(chain_url)
     # Long enough to observe the wait from here; still a bounded abort.
@@ -582,7 +688,7 @@ def test_forward_recovery_gate_admits_exactly_the_post_migration_states(
 
 def test_after_the_chain_only_the_candidate_boots(chain_url, monkeypatch, trees):
     from app.schema_safety import SchemaNotReady
-    _upgrade_to(monkeypatch, LIVE_HEAD)
+    _production_live_head(monkeypatch, chain_url)
     _seed(chain_url)
     assert _release_prepare(monkeypatch).exit_code == 0
     with monkeypatch.context() as scoped:
@@ -624,7 +730,7 @@ def test_downgrade_refuses_once_erasure_or_legal_hold_evidence_exists(
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
 
-    _upgrade_to(monkeypatch, LIVE_HEAD)
+    _production_live_head(monkeypatch, chain_url)
     ids = _seed(chain_url)
     assert _release_prepare(monkeypatch).exit_code == 0
     _sql(chain_url, EVIDENCE[evidence], u=ids["r6_rich"])
