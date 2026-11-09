@@ -291,6 +291,9 @@ def create_app():
     app.before_request(start_request_timer)
     app.before_request(assign_request_id)
     app.before_request(generate_csp_nonce)
+    # Launch V1: social surfaces are closed before CSRF, auth, limits and views.
+    from app.services.launch_social import install as install_social_boundary
+    install_social_boundary(app)
     app.before_request(_csrf_protect)
     app.before_request(bind_mobile_request_principal)
     from app.health_boundary import install as install_health_boundary

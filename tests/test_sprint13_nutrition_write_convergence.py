@@ -627,8 +627,11 @@ def test_the_legacy_barcode_route_still_exists(app):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def accepted_suggestion(client, auth_user, make_user, monkeypatch):
-    """A deterministic meal suggestion addressed to the authenticated user."""
+def accepted_suggestion(client, auth_user, make_user, monkeypatch, social_reopened):
+    """A deterministic meal suggestion addressed to the authenticated user.
+
+    Suggestions live in the social blueprint, which the Launch V1 boundary
+    closes, so the dormant writer is exercised with social reopened."""
     from app.blueprints import social as social_bp
 
     sender = make_user("pr3-suggestion-sender")

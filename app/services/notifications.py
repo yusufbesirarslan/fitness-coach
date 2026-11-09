@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 
 from app.extensions import db
 from app.models import Notification
+from app.services import launch_social
 from app.timeutil import display_dt
 
 log = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ def notify(user_id, ntype, actor_id=None, target_type=None, target_id=None, payl
     """
     try:
         if actor_id is not None and actor_id == user_id:
+            return None
+        # Launch V1: no new social notification is written (defence in depth;
+        # the routes that emit them are already closed).
+        if not launch_social.notification_visible(ntype):
             return None
         # no_autoflush: dedup SELECT'i, ÇAĞIRANIN henüz commit'lenmemiş bekleyen
         # INSERT'lerini erken FLUSH etmemeli. Aksi halde tetikleyen eylemin UNIQUE
@@ -109,8 +114,17 @@ def purge_content_notifications(pump_check_ids=None, feed_item_ids=None):
         return 0
 
 
+def visible_notifications(query):
+    """Launch V1: hide stored social notifications; rows are kept, not deleted."""
+    if launch_social.available():
+        return query
+    return query.filter(Notification.ntype.in_(
+        sorted(launch_social.NON_SOCIAL_NOTIFICATION_TYPES)))
+
+
 def unread_count(user_id):
-    return Notification.query.filter_by(user_id=user_id, is_read=False).count()
+    return visible_notifications(
+        Notification.query.filter_by(user_id=user_id, is_read=False)).count()
 
 
 def mark_read(user_id, ids=None, mark_all=False):
@@ -118,7 +132,8 @@ def mark_read(user_id, ids=None, mark_all=False):
 
     Döndürür: etkilenen satır sayısı. Commit EDER (kendi başına uç nokta eylemi).
     """
-    q = Notification.query.filter_by(user_id=user_id, is_read=False)
+    q = visible_notifications(
+        Notification.query.filter_by(user_id=user_id, is_read=False))
     if not mark_all:
         if not ids:
             return 0

@@ -7,7 +7,9 @@ from sqlalchemy.orm import joinedload
 from app.auth_middleware import require_auth
 from app.i18n import t
 from app.models import Notification
-from app.services.notifications import mark_read, serialize_notification, unread_count
+from app.services.notifications import (
+    mark_read, serialize_notification, unread_count, visible_notifications,
+)
 
 bp = Blueprint("notifications", __name__)
 
@@ -32,9 +34,9 @@ def notifications_data():
     except (TypeError, ValueError):
         before_id = 0
 
-    query = Notification.query.options(
+    query = visible_notifications(Notification.query.options(
         joinedload(Notification.actor),
-    ).filter(Notification.user_id == current_user.id)
+    ).filter(Notification.user_id == current_user.id))
     if before_id > 0:
         query = query.filter(Notification.id < before_id)
     rows = query.order_by(Notification.id.desc()).limit(limit + 1).all()

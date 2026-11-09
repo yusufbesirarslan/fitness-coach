@@ -81,9 +81,11 @@ def test_profile_script_url_is_versioned_so_avatar_fixes_reach_existing_clients(
 
 def test_profile_hub_destinations_preserved(client, auth_user):
     html = _html(client)
-    for href in ("/friends", "/feed", "/leaderboard", "/quests",
-                 "/challenges", "/logout"):
+    for href in ("/leaderboard", "/quests", "/challenges", "/logout"):
         assert f'href="{href}" class="hub-link' in html, href
+    # Launch V1 social boundary: no Friends or Feed entry.
+    assert 'href="/friends"' not in html
+    assert 'href="/feed"' not in html
     assert 'href="/pump-check-gallery" class="hub-link' not in html
     assert 'href="/supplements" class="hub-link' not in html
     assert 'href="/premium" class="hub-link' not in html

@@ -123,8 +123,6 @@ def test_utility_and_community_routes_activate_no_primary(client, make_user, log
         "/notifications",
         "/edit-profile",
         "/premium",
-        "/friends",
-        "/feed",
         "/leaderboard",
         "/quests",
         "/challenges",

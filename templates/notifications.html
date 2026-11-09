@@ -81,10 +81,8 @@ function iconFor(type) {
     return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICONS[kind] + '</svg>';
 }
 
-// Hedef yüzey: pump check / feed-item etkileşimleri → feed, arkadaşlık → arkadaşlar.
+// Launch V1: social notifications are not served, so only non-social targets link.
 function targetUrl(n) {
-    if (n.targetType === 'pump_check' || n.targetType === 'feed_item') return '/feed';
-    if (n.targetType === 'friendship') return '/friends';
     if (n.targetType === 'challenge') return '/challenges';
     return '#';
 }

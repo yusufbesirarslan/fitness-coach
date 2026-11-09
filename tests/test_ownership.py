@@ -82,6 +82,7 @@ def test_supplement_unknown_id_404(attacker_client):
 # Arkadaşlık istekleri — yalnızca alıcı kabul/ret edebilir.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("social_reopened")
 def test_friend_request_accept_by_third_party_forbidden(owner, make_user, attacker_client):
     other = make_user("recipient")
     fr = Friendship(sender_id=owner.id, receiver_id=other.id, status="pending")
@@ -98,6 +99,7 @@ def test_friend_request_accept_by_third_party_forbidden(owner, make_user, attack
 # Sohbet — arkadaş olmayan kullanıcının mesajları okunamaz/yazılamaz.
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("social_reopened")
 def test_chat_with_non_friend_forbidden(owner, attacker_client):
     assert attacker_client.get("/chat/owner/messages").status_code == 403
     response = attacker_client.post("/chat/owner/send", json={"body": "selam"})
