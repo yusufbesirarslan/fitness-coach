@@ -9,6 +9,8 @@ Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
 
 * the graph is exactly those four revisions, linear, one head;
+* the schema the Alembic history builds at ``c6f8b0d2e4a1`` is production's
+  (same 73 tables and column-level digest as the 2026-11-09 restore);
 * a database at ``c6f8b0d2e4a1`` populated the way production is (completion
   floor raised, historical Pump Check evidence, photo-free claims, legacy
   FatSecret rows, narrow-scope allowance buckets) is brought to head by the
@@ -267,6 +269,64 @@ def test_release_chain_is_exactly_the_four_reviewed_forward_migrations():
     # The completion fence the O2-B migration replaces is already live.
     live = {rev.revision for rev in script.iterate_revisions(LIVE_HEAD, "base")}
     assert "d7e3a9c1f5b8" in live and not live & set(CHAIN)
+
+
+# Production at LIVE_HEAD, from the isolated PITR restore of 2026-11-09
+# (RESTORE_TEST_RECEIPT.md; aggregate-only verifier): its 73 public tables and
+# the sha256 of json.dumps(information_schema.columns (table, column,
+# data_type, is_nullable) ORDER BY 1,2), the receipt's first schema baseline.
+PRODUCTION_LIVE_HEAD_TABLES = frozenset((
+    "activity", "activity_clap", "ai_allowance_bucket", "ai_allowance_purge_progress",
+    "ai_consent_event", "ai_consent_state", "ai_starter_grant", "ai_usage_reservation",
+    "alembic_version", "apple_account_association", "apple_notification_receipt",
+    "apple_subscription", "apple_subscription_reconciliation", "barcode_food_cache",
+    "challenge", "coach_conversation", "coach_message", "cognito_session",
+    "completion_capability_floor", "completion_claim_transaction", "custom_meal",
+    "custom_meal_item", "daily_activity", "daily_quest", "deleted_identity_tombstone",
+    "exercise_note", "feed_hide", "feed_item", "feed_item_comment", "feed_item_like",
+    "feed_report", "friendship", "meal_log", "meal_photo_cleanup", "message",
+    "mobile_access_credential", "mobile_auth_session", "mobile_refresh_credential",
+    "notification", "nutrition_plan", "pending_action", "plan_mutation_record",
+    "pump_check", "pump_check_comment", "pump_check_comparison",
+    "pump_check_comparison_request", "pump_check_like", "supplement",
+    "training_allowance_compensation", "training_plan",
+    "training_plan_confirmation_proposal", "training_plan_generation_allowance",
+    "training_plan_generation_operation", "training_plan_replacement_generation_operation",
+    "training_plan_replacement_proposal", "training_plan_replacement_receipt", "user",
+    "user_badge", "user_challenge_progress", "user_quest_progress", "user_session",
+    "user_wearable_connection", "water_log", "wearable_activity_log", "wearable_sleep_log",
+    "wearable_workout_log", "weekly_check_in", "weekly_log", "weekly_reset_log",
+    "weekly_winner", "workout_completion_day", "workout_log", "workout_session",
+))
+PRODUCTION_LIVE_HEAD_SCHEMA_SHA256 = (
+    "e6102ff7584b7c349ca36f5711caeba1d2ec4314581a530a33f3cf7ab95253ba")
+
+
+def test_the_qualified_live_head_schema_is_production_s_schema(chain_url, monkeypatch):
+    """The chain is qualified on a schema built by the Alembic history; this
+    proves that schema IS production's at c6f8b0d2e4a1 (same method as the
+    restore verifier), so the results transfer to the real upgrade."""
+    import hashlib
+    import json
+    _upgrade_to(monkeypatch, LIVE_HEAD)
+    assert len(PRODUCTION_LIVE_HEAD_TABLES) == 73
+    engine = _engine(chain_url)
+    try:
+        with engine.connect() as connection:
+            tables = set(connection.execute(sa.text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public'")).scalars())
+            columns = [list(row) for row in connection.execute(sa.text(
+                "SELECT table_name, column_name, data_type, is_nullable "
+                "FROM information_schema.columns WHERE table_schema='public' ORDER BY 1,2"))]
+    finally:
+        engine.dispose()
+    assert tables == PRODUCTION_LIVE_HEAD_TABLES, (
+        sorted(tables - PRODUCTION_LIVE_HEAD_TABLES), sorted(PRODUCTION_LIVE_HEAD_TABLES - tables))
+    digest = hashlib.sha256(json.dumps(columns).encode()).hexdigest()
+    assert digest == PRODUCTION_LIVE_HEAD_SCHEMA_SHA256, (
+        "column-level drift between the Alembic history and production at "
+        f"{LIVE_HEAD}: {digest}")
 
 
 @pytest.fixture
