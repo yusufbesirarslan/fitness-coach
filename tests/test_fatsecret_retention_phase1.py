@@ -552,8 +552,18 @@ def test_saved_meal_reuse_fails_closed_when_the_provider_is_down(app, client, au
     assert not db.session.get(CustomMeal, meal.id).is_logged
 
 
-def test_a_two_item_saved_meal_is_a_meal_summary_and_keeps_its_total(app, client, auth_user, provider):
+def _add_provider_item(meal_id, food_id="food-1"):
+    db.session.add(CustomMealItem(
+        custom_meal_id=meal_id, food_name="Provider Oats", grams=50.0, calories=120.0,
+        protein=4.0, carbs=20.0, fat=3.0, fatsecret_food_id=food_id, serving_id="serving-1",
+        serving_description="1 cup", serving_quantity=1.0,
+        provider_acquired_at=datetime.utcnow()))
+    db.session.commit()
+
+
+def test_two_provider_foods_are_a_meal_summary_and_keep_their_total(app, client, auth_user, provider):
     meal, _, _ = _saved_meal(auth_user.id, acquired_hours_ago=1)
+    _add_provider_item(meal.id)
     assert client.post(f"/api/diary/meal/{meal.id}/log").status_code == 200
     logged = MealLog.query.filter_by(user_id=auth_user.id, source="diary").one()
     logged.provider_acquired_at = datetime.utcnow() - 23 * H
@@ -561,8 +571,54 @@ def test_a_two_item_saved_meal_is_a_meal_summary_and_keeps_its_total(app, client
     result = provider_retention.expire_due()
     assert (result.folded_entries, result.relabelled_summaries) == (0, 1)
     db.session.refresh(logged)
-    assert logged.kalori == 270.0                                    # summary kept
-    assert logged.yemekler == "FatSecret (1.5x), Ev salatası (100g)"
+    assert logged.kalori == 390.0                                    # summary kept
+    assert logged.yemekler == "FatSecret (1.5x), Ev salatası (100g), FatSecret (1x)"
+
+
+def test_one_provider_food_plus_typed_items_is_per_item_and_folds(app, client, auth_user, provider):
+    """Its total minus the typed items' stored values would reveal the
+    provider item's own value, so it is not a meal summary."""
+    meal, _, _ = _saved_meal(auth_user.id, acquired_hours_ago=1)
+    assert client.post(f"/api/diary/meal/{meal.id}/log").status_code == 200
+    logged = MealLog.query.filter_by(user_id=auth_user.id, source="diary").one()
+    logged.provider_acquired_at = datetime.utcnow() - 23 * H
+    logged.tarih = _yesterday()
+    db.session.commit()
+    before = stored_day_total(auth_user.id, _yesterday())
+    assert provider_retention.expire_due().folded_entries == 1
+    db.session.refresh(logged)
+    assert logged.kalori is None
+    assert logged.yemekler == "FatSecret (1.5x), Ev salatası (100g)"  # typed text kept
+    assert stored_day_total(auth_user.id, _yesterday()) == before == 270.0
+
+
+def test_repeat_of_a_summary_from_history_carries_no_provider_name(
+        app, native, device, make_user, provider, redis):
+    """Review P1: a published summary keeps its total (Repeat stays available),
+    so its description must hold no provider text a copy could store."""
+    user = make_user("ret-repeat-summary")
+    day = _yesterday()
+    components = [provider_retention.provider_component("food-1", "serving-1", 1),
+                  provider_retention.provider_component("food-2", "serving-1", 2)]
+    db.session.add(MealLog(
+        user_id=user.id, ogun="Öğle", yemekler="Provider Oats (1x 1 cup), Provider Oats (2x 1 cup)",
+        kalori=360.0, protein=12.0, karb=60.0, yag=9.0, tarih=day, source="diary",
+        created_at=datetime.utcnow() - 30 * H, provider_acquired_at=datetime.utcnow() - 30 * H,
+        provider_items=components))
+    db.session.commit()
+    for when in ("before_pass", "after_pass"):
+        if when == "after_pass":
+            provider_retention.expire_due()
+        meal = history_day(native, device(user), day)["meals"][0]
+        assert meal["nutrition"]["energy_kcal"] == 360.0             # Repeat available
+        assert "Provider Oats" not in meal["description"]
+    copy = native.post(LOG, headers=device(user, key="k-sum-0001"), json={
+        "kind": "manual", "description": meal["description"], "slot": "ogle",
+        "nutrition": {k: meal["nutrition"][k] for k in
+                      ("energy_kcal", "protein_g", "carbohydrate_g", "fat_g")}})
+    assert copy.status_code == 201
+    stored = MealLog.query.filter_by(user_id=user.id, tarih=day_key()).one()
+    assert "Provider Oats" not in stored.yemekler and "cup" not in stored.yemekler
 
 
 # ── web surfaces ────────────────────────────────────────────────────────────

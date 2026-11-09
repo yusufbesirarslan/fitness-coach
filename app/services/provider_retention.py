@@ -46,7 +46,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 
 from app.extensions import db
-from app.models import CustomMeal, CustomMealItem, MealLog, MealLogRetainedTotal
+from app.models import (BarcodeFoodCache, CustomMeal, CustomMealItem, MealLog,
+                        MealLogRetainedTotal)
 
 _log = logging.getLogger(__name__)
 
@@ -118,13 +119,22 @@ def _is_provider(component):
             and component.get("food_id"))
 
 
-def is_single_item(row):
-    """One component = one food at one quantity = per-item values.
+def _provider_count(items):
+    return sum(1 for c in items
+               if isinstance(c, dict) and c.get("provider") == PROVIDER)
 
-    Unreadable provenance fails closed: it is treated as per-item.
+
+def is_single_item(row):
+    """Do this row's macros reveal one provider food's own values?
+
+    True when the row holds at most ONE provider component: a single provider
+    item, or one provider item plus the user's/independent items (whose own
+    values stay readable elsewhere, so the provider item's value would be the
+    difference). Only an aggregate of two or more provider foods is a meal
+    summary. Unreadable provenance fails closed: treated as per-item.
     """
     items = _components(row)
-    return items is None or len(items) == 1
+    return items is None or _provider_count(items) <= 1
 
 
 def neutral_label(components):
@@ -192,13 +202,17 @@ def display(row, names=None, now=None):
     values = tuple(getattr(row, column) for column, _ in _MACROS)
     if not is_due(row, now):
         return row.yemekler, values
-    # Without a LiveNames (identity/revision paths) the label is deterministic:
-    # it must not depend on whether a name happens to be cached.
-    description = (names.description(row) if names is not None
-                   else stable_label(row))
     if withholds(row, now):
+        # No values are published, so the iOS Repeat is unavailable and a live
+        # name cannot be copied into a new row. Without a LiveNames (identity/
+        # revision paths) the label stays deterministic.
+        description = (names.description(row) if names is not None
+                       else stable_label(row))
         return description, None
-    return description, values
+    # A meal summary keeps its total, so Repeat stays available on it: publish
+    # only the provider-free label, never a live provider name, so a copy can
+    # carry no provider text.
+    return stable_label(row), values
 
 
 def stable_label(row):
@@ -645,6 +659,8 @@ def legacy_dry_run():
         "custom_meal_item_live_name_lookup": int(item_count or 0),  # IDs stored
         "untouched_meal_log_by_source": {str(k): int(v) for k, v in untouched_sources.items()},
         "untouched_custom_meal_items_without_id": int(idless_items or 0),
+        "barcode_food_cache_rows": int(db.session.query(
+            func.count(BarcodeFoodCache.id)).scalar() or 0),
     }
     db.session.rollback()
     return result

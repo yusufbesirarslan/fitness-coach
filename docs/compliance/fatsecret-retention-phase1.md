@@ -23,8 +23,8 @@ The source is a written clarification from FatSecret Platform API Support, 2026-
 These are the only paths the hold now opens. Web barcode add and the social suggestion total are still held by `UNCOVERED_PROVIDER_PERSISTENCE_REF = None`.
 
 **Expiry pass.** `provider_retention.expire_due` runs once a row reaches `EXPIRE_AFTER = 22h`, in one transaction per batch, claiming rows `FOR UPDATE SKIP LOCKED`:
-- A **single-item** entry's four macros are added to `meal_log_retained_total` (owner × Istanbul day) and set to NULL on the row. The row keeps its slot, time, quantity and IDs. No new `meal_log` row is created, so entry counts and `meal_count` don't change.
-- A **multi-item** diary entry is a meal summary, so its macros stay.
+- A **per-item** entry — one with at most ONE provider component, including one provider food plus the user's own items (whose stored values would otherwise reveal the provider item by subtraction) — has its four macros added to `meal_log_retained_total` (owner × Istanbul day) and set to NULL on the row. The row keeps its slot, time, quantity and IDs. No new `meal_log` row is created, so entry counts and `meal_count` don't change.
+- A diary entry with **two or more provider foods** is a meal summary, so its macros stay. Its published description is the provider-free label: a summary keeps its total, so Repeat stays available on it, and a live provider name must never be copyable into a new row.
 - In both cases provider names and serving text leave `yemekler`. Text the user wrote, or text from an independent source, stays.
 - **Saved-meal items** (`custom_meal_item`): the provider's nutrients, per-100 g values, name and serving text are scrubbed. The user's quantity, the grams and the IDs stay. Logging that saved meal requests every provider item again live, and refuses with `503 food_provider_unavailable` if the provider is down.
 
@@ -82,6 +82,14 @@ flask --app starter fatsecret-retention-redis-v1 --apply --expect N  # separatel
 ```
 
 This applies to exactly `food:macros:v1:*`. The apply step refuses (`HOLD`, exit 2) unless a fresh scan still finds N keys. `v2` and `food:independent-menu:v1` are not provider data and are never touched.
+
+## Known residuals (independent review, all P3 or out of scope)
+
+- **Unrouted MCP readers** (`fitx_mcp/server.py`, `app/services/coach_context_queries.py`): raw-SQL readers on the stdio MCP server only. No app route imports them and they are not deployed (unchanged from #497). They neither withhold due values nor add the retained aggregate. Keep them unrouted; converge them before any MCP exposure.
+- **A copy of a legacy row** (from an older client) is due immediately, so deleting it returns the defined 409.
+- **Web `/meal-log` manual `override_macros`** has no exact-copy backstop. The web app has no Repeat; typed values are the user's own.
+- **A scrubbed saved-meal item** shows 0 kcal in `/api/diary/today` only during its own day's edge window. Logging it re-requests live.
+- **The history revision** of a withheld row may include a live name. History is read-only; mutations use the diary/today revision, which is name-free.
 
 ## Boundaries that need a separate operational decision
 

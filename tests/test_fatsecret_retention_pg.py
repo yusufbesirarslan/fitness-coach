@@ -150,3 +150,20 @@ def test_a_pass_and_new_writes_never_disturb_each_other(app, make_user):
     rows = MealLog.query.filter_by(user_id=owner_id, tarih=days[0]).all()
     assert sum(r.kalori or 0 for r in rows) + total.energy_kcal == pytest.approx(
         expected[(owner_id, days[0])] + 30 * 50.0)
+
+
+def test_native_history_retained_totals_sql_runs_on_postgresql(app, make_user):
+    """The correlated retained-total subquery in the history day-key SELECT."""
+    from app.extensions import db
+    from app.services import provider_retention
+    from app.services.nutrition_native import history
+
+    users, days, expected = _seed(make_user, rows_per_day=3)
+    provider_retention.expire_due(datetime.utcnow())
+    page = history.read_page(users[0].id, app.config["SECRET_KEY"], limit=14)
+    by_day = {d["date"]: d for d in page["days"]}
+    for day in days:
+        assert by_day[day]["totals"]["energy_kcal"] == pytest.approx(
+            expected[(users[0].id, day)])
+        assert all(m["nutrition"]["energy_kcal"] is None for m in by_day[day]["meals"])
+    db.session.rollback()

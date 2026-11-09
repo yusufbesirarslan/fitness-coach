@@ -22,9 +22,9 @@ _log = logging.getLogger("fitx.worker")
 
 
 PROXY_SAMPLE_INTERVAL_SECONDS = 600
-# FatSecret 24h retention pass (app/services/provider_retention.py). Its margin
-# (EXPIRY_MARGIN, 30 min) is several times this interval, so a value is removed
-# before its deadline even when one enqueue waits behind other jobs.
+# FatSecret 24h retention pass (app/services/provider_retention.py). Values are
+# removed at 22h (EXPIRY_MARGIN = 2h, many times this interval), so a value is
+# gone before its deadline even when an enqueue waits behind other jobs.
 RETENTION_INTERVAL_SECONDS = 300
 
 
