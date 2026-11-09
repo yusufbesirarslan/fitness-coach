@@ -10,7 +10,9 @@ the CHAIN qualification on a database built only by the real Alembic history:
 
 * the graph is exactly those four revisions, linear, one head;
 * the schema the Alembic history builds at ``c6f8b0d2e4a1`` is production's
-  (same 73 tables and column-level digest as the 2026-11-09 restore);
+  except for one orphan legacy table (``activity_clap``) that no release
+  migration touches: adding its four columns reproduces the 2026-11-09
+  restore's column-level digest exactly;
 * a database at ``c6f8b0d2e4a1`` populated the way production is (completion
   floor raised, historical Pump Check evidence, photo-free claims, legacy
   FatSecret rows, narrow-scope allowance buckets) is brought to head by the
@@ -301,6 +303,18 @@ PRODUCTION_LIVE_HEAD_TABLES = frozenset((
 PRODUCTION_LIVE_HEAD_SCHEMA_SHA256 = (
     "e6102ff7584b7c349ca36f5711caeba1d2ec4314581a530a33f3cf7ab95253ba")
 
+# Known production-only table (first CI run of this test, job 129280469479):
+# ``activity_clap`` was created by an early create_all boot from the
+# ``ActivityClap`` model (42fea79a); the model was removed in 9c085e55 and no
+# migration ever created or dropped the table. None of the four release
+# migrations references it. Its last definition, as information_schema rows:
+PRODUCTION_ONLY_LEGACY_COLUMNS = (
+    ["activity_clap", "activity_id", "integer", "NO"],
+    ["activity_clap", "created_at", "timestamp without time zone", "YES"],
+    ["activity_clap", "id", "integer", "NO"],
+    ["activity_clap", "user_id", "integer", "NO"],
+)
+
 
 def test_the_qualified_live_head_schema_is_production_s_schema(chain_url, monkeypatch):
     """The chain is qualified on a schema built by the Alembic history; this
@@ -321,12 +335,22 @@ def test_the_qualified_live_head_schema_is_production_s_schema(chain_url, monkey
                 "FROM information_schema.columns WHERE table_schema='public' ORDER BY 1,2"))]
     finally:
         engine.dispose()
-    assert tables == PRODUCTION_LIVE_HEAD_TABLES, (
+    # Exactly one difference: production's orphan legacy table.
+    assert tables == PRODUCTION_LIVE_HEAD_TABLES - {"activity_clap"}, (
         sorted(tables - PRODUCTION_LIVE_HEAD_TABLES), sorted(PRODUCTION_LIVE_HEAD_TABLES - tables))
-    digest = hashlib.sha256(json.dumps(columns).encode()).hexdigest()
+    # Adding its four columns reproduces production's digest byte for byte, so
+    # every other table and column is identical (name type sorts bytewise,
+    # as Python sorts these ASCII identifiers).
+    with_legacy = sorted(columns + [list(row) for row in PRODUCTION_ONLY_LEGACY_COLUMNS],
+                         key=lambda row: (row[0].encode(), row[1].encode()))
+    digest = hashlib.sha256(json.dumps(with_legacy).encode()).hexdigest()
     assert digest == PRODUCTION_LIVE_HEAD_SCHEMA_SHA256, (
         "column-level drift between the Alembic history and production at "
-        f"{LIVE_HEAD}: {digest}")
+        f"{LIVE_HEAD} beyond activity_clap: {digest}")
+    # And none of the release migrations touches the orphan table.
+    for revision in CHAIN:
+        (path,) = (ROOT / "migrations" / "versions").glob(f"{revision}_*.py")
+        assert "activity_clap" not in path.read_text()
 
 
 @pytest.fixture
