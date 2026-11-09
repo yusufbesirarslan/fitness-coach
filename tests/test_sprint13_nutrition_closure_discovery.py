@@ -194,6 +194,11 @@ def test_the_builder_holds_the_provenance_the_ledger_does_not():
         "id", "user_id", "ogun", "yemekler", "kalori", "protein", "karb",
         "yag", "tarih", "source", "idempotency_key",
         "idempotency_fingerprint", "photo_key", "created_at",
+        # FATSECRET-RETENTION-PHASE1 (founder-approved 2026-11-09): the 24h
+        # retention boundary needs server-written provider references and the
+        # acquisition instant. They live in one JSON column, not the builder's
+        # serving columns, and advanced diary editing is still out of scope.
+        "provider_items", "provider_acquired_at", "provider_expired_at",
     }
 
 

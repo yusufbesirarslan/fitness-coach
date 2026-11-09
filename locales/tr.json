@@ -1461,6 +1461,8 @@
   "route.meal_delete_precondition_required": "Silme için kaydın güncel sürümü gerekiyor.",
   "route.meal_delete_precondition_invalid": "Kayıt sürümü geçersiz.",
   "route.meal_delete_stale": "Bu kayıt değişmiş. Listeyi yenileyip tekrar dene.",
+  "route.meal_delete_summarized": "Bu kayıt artık günlük toplamın parçası ve silinemez.",
+  "route.meal_review_unavailable": "Bugünkü öğünlerin kişisel değerlendirmesi şu an kullanılamıyor. Kayıtlı öğünlerin ve toplamların değişmedi.",
   "route.meal_delete_photo_unreleasable": "Bu kaydın fotoğraf referansı tanınmıyor; güvenlik gereği hiçbir şey silinmedi.",
   "route.meal_delete_photo_not_released": "Öğün kaydı silindi. Fotoğrafının kaldırılması henüz tamamlanmadı, yeniden denenecek.",
   "route.meal_delete_failed": "Öğün kaydı silinemedi.",

@@ -435,9 +435,14 @@ def test_the_review_route_publishes_absence_but_keeps_its_prompt_fallback(
       default into a published target.
     """
     from app.blueprints.nutrition import meallog as nutrition_meallog
+    from app.services import fatsecret_boundary
 
     monkeypatch.setattr(nutrition_meallog, "_openai_chat",
                         lambda **kw: "Dengeli görünüyor.")
+    # The model path now sits behind the #497 advice boundary (founder D3,
+    # tests/test_fatsecret_retention_phase1.py). Model the future attested
+    # state so F3a/F3b keep being qualified on the prompt path itself.
+    monkeypatch.setattr(fatsecret_boundary, "intake_unproven", lambda user_id: False)
     client.post("/meal-log", json={
         "ogun": "Kahvaltı", "yemekler": "yulaf",
         "override_macros": {"kalori": 400, "protein": 20, "karb": 50, "yag": 10},

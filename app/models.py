@@ -885,6 +885,17 @@ class MealLog(db.Model):
     idempotency_fingerprint = db.Column(db.String(64), nullable=True)
     photo_key  = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı (opsiyonel)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # FatSecret retention (2026-11-09 written clarification; see
+    # app/services/provider_retention.py). Server-written only, never client
+    # input. ``provider_items`` lists the entry's components in display order:
+    # provider references (food_id/serving_id/quantity, storable indefinitely)
+    # and non-provider labels. ``provider_acquired_at`` is the UTC instant the
+    # provider values were fetched; the 24h deadline runs from it and nothing
+    # extends it. ``provider_expired_at`` is set once the restricted per-item
+    # values and provider text have been removed. All NULL = not provider data.
+    provider_items = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
+    provider_acquired_at = db.Column(db.DateTime, nullable=True)
+    provider_expired_at = db.Column(db.DateTime, nullable=True)
 
     # DB-seviyesi makro sağlık-kontrolü (3.8): negatif makro ASLA geçerli değildir;
     # üst tavan ise yalnızca açıkça bozuk/taşma (overflow, LLM çöpü, ör. 1e9) değerleri
@@ -903,6 +914,7 @@ class MealLog(db.Model):
         # yazılan defter; (user_id, tarih) kompozit indeksi user_id-only sorguları da
         # (leftmost prefix) karşılar.
         db.Index("ix_meal_log_user_id_tarih", "user_id", "tarih"),
+        db.Index("ix_meal_log_provider_acquired_at", "provider_acquired_at"),
         db.UniqueConstraint("user_id", "idempotency_key",
                             name="uq_meal_log_user_idempotency"),
     )
@@ -1885,6 +1897,31 @@ class CustomMealItem(db.Model):
     serving_id          = db.Column(db.String(50), nullable=True)
     serving_description = db.Column(db.String(200), nullable=True)
     serving_quantity    = db.Column(db.Float, nullable=True)
+    # FatSecret retention: when this item's provider values were fetched, and
+    # when they were scrubbed (app/services/provider_retention.py).
+    provider_acquired_at = db.Column(db.DateTime, nullable=True)
+    provider_expired_at  = db.Column(db.DateTime, nullable=True)
+
+
+class MealLogRetainedTotal(db.Model):
+    """Permitted daily aggregate of expired FatSecret per-item values.
+
+    When a single-item FatSecret entry passes its 24h deadline its own macros
+    are removed from ``meal_log``; their sum moves here, keyed by owner and
+    Istanbul day, so every day total stays exactly what it was. It is a total,
+    never an entry: no reader lists it and no meal count includes it.
+    """
+    __tablename__ = "meal_log_retained_total"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+                        primary_key=True)
+    tarih = db.Column(db.String(10), primary_key=True)
+    energy_kcal = db.Column(db.Float, nullable=False, default=0, server_default="0")
+    protein_g = db.Column(db.Float, nullable=False, default=0, server_default="0")
+    carbohydrate_g = db.Column(db.Float, nullable=False, default=0, server_default="0")
+    fat_g = db.Column(db.Float, nullable=False, default=0, server_default="0")
+    item_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
 class Notification(db.Model):

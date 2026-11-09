@@ -15,6 +15,7 @@ import re
 from datetime import date
 
 from app.models import MealLog
+from app.services import provider_retention
 from app.services.mobile_nutrition.identity import diary_entry_id
 from app.services.mobile_nutrition.queries import LedgerEntry
 from app.services.mobile_nutrition.revision import (
@@ -68,11 +69,15 @@ def decode_cursor(secret, user_id, cursor):
     return before
 
 
-def _entry(row):
+def _entry(row, names=None):
+    # A due FatSecret entry publishes no per-item macros (its value is in the
+    # day total) and its provider name is re-requested live by stored ID, never
+    # stored again; fail-soft to a neutral label. History is read-only.
+    shown = provider_retention.published(row, names)
     return LedgerEntry(
         user_id=row.user_id, entry_id=row.id, meal_label=row.ogun,
-        description=row.yemekler, source=row.source, energy_kcal=row.kalori,
-        protein_g=row.protein, carbohydrate_g=row.karb, fat_g=row.yag,
+        description=shown.yemekler, source=row.source, energy_kcal=shown.kalori,
+        protein_g=shown.protein, carbohydrate_g=shown.karb, fat_g=shown.yag,
         diary_date=row.tarih, idempotency_key=row.idempotency_key,
         idempotency_fingerprint=row.idempotency_fingerprint,
         photo_key=row.photo_key, created_at=row.created_at)
@@ -83,13 +88,22 @@ def read_page(user_id, secret, cursor=None, limit=DEFAULT_DAYS):
     from app.extensions import db
 
     before = decode_cursor(secret, user_id, cursor)
-    day_query = (db.session.query(MealLog.tarih)
+    # The day-key SELECT also carries each day's retained aggregate of expired
+    # FatSecret per-item values (correlated on the grouped day), so the page
+    # stays two bounded SELECTs and every day total is conserved.
+    retained_columns = [provider_retention.retained_scalar(f, user_id, MealLog.tarih)
+                        for f in provider_retention.RETAINED_FIELDS]
+    day_query = (db.session.query(MealLog.tarih, *retained_columns)
                  .filter(MealLog.user_id == user_id))
     if before is not None:
         day_query = day_query.filter(MealLog.tarih < before)
-    day_keys = [row[0] for row in (day_query.group_by(MealLog.tarih)
-                                   .order_by(MealLog.tarih.desc())
-                                   .limit(limit + 1).all())]
+    day_rows = (day_query.group_by(MealLog.tarih)
+                .order_by(MealLog.tarih.desc())
+                .limit(limit + 1).all())
+    retained = {row[0]: dict(zip(provider_retention.RETAINED_FIELDS,
+                                 (float(v or 0) for v in row[1:])))
+                for row in day_rows}
+    day_keys = [row[0] for row in day_rows]
     has_more = len(day_keys) > limit
     day_keys = day_keys[:limit]
     rows = []
@@ -100,8 +114,13 @@ def read_page(user_id, secret, cursor=None, limit=DEFAULT_DAYS):
                           MealLog.id.asc())
                 .all())
     grouped = {key: [] for key in day_keys}
+    withheld_rows = {key: [] for key in day_keys}
+    names = provider_retention.LiveNames()
     for row in rows:
-        grouped[row.tarih].append(_entry(row))
+        entry = _entry(row, names)
+        grouped[row.tarih].append(entry)
+        if provider_retention.withholds(row):
+            withheld_rows[row.tarih].append(row)
 
     def entry_id_for(entry_id):
         return diary_entry_id(secret, user_id, entry_id)
@@ -113,7 +132,8 @@ def read_page(user_id, secret, cursor=None, limit=DEFAULT_DAYS):
         "date": key,
         "meals": [logged_meal(entry, entry_id_for, revision_for)
                   for entry in grouped[key]],
-        "totals": day_totals(grouped[key]),
+        "totals": day_totals(grouped[key], provider_retention.add_totals(
+            retained.get(key), provider_retention.withheld_sum(withheld_rows[key]))),
     } for key in day_keys]
     return {
         "contract_version": CONTRACT_VERSION,

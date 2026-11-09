@@ -283,6 +283,10 @@ def nutrition_delete_log(entry_token):
     except mobile_diary_mutation.StaleDiaryEntry:
         return _mutation_error(
             "STALE_DIARY_ENTRY", "Diary entry has changed.", 412)
+    except mobile_diary_mutation.SummarizedDiaryEntry:
+        return _mutation_error(
+            "DIARY_ENTRY_SUMMARIZED",
+            "This entry is now part of the day total and cannot be deleted.", 409)
     except Exception as error:
         try:
             db.session.rollback()

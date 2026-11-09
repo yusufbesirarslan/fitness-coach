@@ -33,6 +33,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models import MealLog, NutritionPlan, Supplement, UserSession
+from app.services import provider_retention
 from app.plan_presenter import PlanDay, PlanExercise, PlanFacts, REST_DAY_KIND
 from app.services.today_facts import get_active_plan
 from app.services.workout_state import resolve_workout_state
@@ -217,7 +218,8 @@ def _read_today_nutrition(user_id):
     with db.session.begin_nested():
         count, calories = db.session.query(
             func.count(MealLog.id),
-            func.coalesce(func.sum(MealLog.kalori), 0),
+            func.coalesce(func.sum(MealLog.kalori), 0)
+            + provider_retention.retained_scalar("energy_kcal", user_id, today),
         ).filter(MealLog.user_id == user_id, MealLog.tarih == today).one()
     consumed = _display_kcal(float(calories or 0))
     if consumed is None:

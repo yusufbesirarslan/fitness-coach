@@ -104,7 +104,7 @@ def logged_meal(entry, entry_id_for, revision_for):
     }
 
 
-def day_totals(entries):
+def day_totals(entries, retained=None):
     """Sum the day the way the server already sums it: NULL counts as zero.
 
     This is the existing behaviour of `/meal-log/today` and it is published
@@ -119,12 +119,22 @@ def day_totals(entries):
     (docs/MOBILE_NUTRITION.md "Totals").
 
     A day with no entries totals zero, which is a measurement, not a gap.
+
+    ``retained`` is the day's retained aggregate of expired FatSecret per-item
+    values (app/services/provider_retention.py). Those entries now publish
+    ``null`` nutrition, and their value is added back here once, so the day
+    total is the same before and after expiry.
     """
+    extra = retained or {}
     return {
-        "energy_kcal": round(sum(e.energy_kcal or 0 for e in entries), 2),
-        "protein_g": round(sum(e.protein_g or 0 for e in entries), 2),
-        "carbohydrate_g": round(sum(e.carbohydrate_g or 0 for e in entries), 2),
-        "fat_g": round(sum(e.fat_g or 0 for e in entries), 2),
+        "energy_kcal": round(sum(e.energy_kcal or 0 for e in entries)
+                             + extra.get("energy_kcal", 0), 2),
+        "protein_g": round(sum(e.protein_g or 0 for e in entries)
+                           + extra.get("protein_g", 0), 2),
+        "carbohydrate_g": round(sum(e.carbohydrate_g or 0 for e in entries)
+                                + extra.get("carbohydrate_g", 0), 2),
+        "fat_g": round(sum(e.fat_g or 0 for e in entries)
+                       + extra.get("fat_g", 0), 2),
     }
 
 
@@ -146,7 +156,8 @@ def nutrition_goal(target_energy_kcal):
 
 
 def diary_day_payload(
-        day, entries, target_energy_kcal, entry_id_for, revision_for):
+        day, entries, target_energy_kcal, entry_id_for, revision_for,
+        retained=None):
     """Project one canonical ledger day onto the mobile contract."""
     return {
         "day": {"date": day.isoformat(), "timezone": APP_TZ.key},
@@ -154,6 +165,6 @@ def diary_day_payload(
             logged_meal(entry, entry_id_for, revision_for)
             for entry in entries
         ],
-        "totals": day_totals(entries),
+        "totals": day_totals(entries, retained),
         "goal": nutrition_goal(target_energy_kcal),
     }

@@ -15,7 +15,7 @@ from app.extensions import auth_write_limit, db
 from app.i18n import t
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan
 from app.services.gamification import complete_quest_for_user
-from app.services import meal_idempotency
+from app.services import meal_idempotency, provider_retention
 from app.services.mobile_log_food.parsing import (
     InvalidLogFoodCommand,
     parse_provider_identity,
@@ -158,6 +158,9 @@ def _apply_provider_snapshot(item, snapshot):
         item.per_100g_protein = None
         item.per_100g_carbs = None
         item.per_100g_fat = None
+    # FatSecret 24h retention: this staging copy expires from this moment.
+    item.provider_acquired_at = provider_retention.utcnow()
+    item.provider_expired_at = None
     _clamp_item_macros(item)
 
 
@@ -605,6 +608,15 @@ def diary_log_meal(meal_id):
         tarih=today,
         source="diary"
     )
+    if resolved:
+        # Every provider item was re-requested live above, so the meal's
+        # provider values were acquired now. Components keep the item order:
+        # provider references, and the user's/independent labels verbatim.
+        provider_retention.stamp(entry, [
+            provider_retention.provider_component(
+                i.fatsecret_food_id, i.serving_id, _stored_quantity(i.serving_quantity))
+            if i.id in resolved else provider_retention.text_component(_item_label(i))
+            for i in items], provider_retention.utcnow())
     db.session.add(entry)
     db.session.commit()
 

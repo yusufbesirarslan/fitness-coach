@@ -1461,6 +1461,8 @@
   "route.meal_delete_precondition_required": "Deleting requires the entry's current revision.",
   "route.meal_delete_precondition_invalid": "The entry revision is invalid.",
   "route.meal_delete_stale": "This entry has changed. Refresh the list and try again.",
+  "route.meal_delete_summarized": "This entry is now part of the day total and can't be deleted.",
+  "route.meal_review_unavailable": "A personal review of today's meals isn't available right now. Your logged meals and totals are unchanged.",
   "route.meal_delete_photo_unreleasable": "This entry's photo reference is not recognised, so nothing was deleted.",
   "route.meal_delete_photo_not_released": "The meal entry was deleted. Removing its photo has not finished yet and will be retried.",
   "route.meal_delete_failed": "The meal entry could not be deleted.",

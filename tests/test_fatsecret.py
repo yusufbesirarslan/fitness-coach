@@ -374,7 +374,7 @@ def test_macro_cache_defensive_copy_isolates_mutations():
 def test_food_id_cache_normalizes_and_caps():
     foodcache._food_id_cache.clear()
     foodcache._cache_food_id("Muz", "42")
-    assert foodcache._food_id_cache["muz"] == "42"
+    assert foodcache._food_id_cache[foodcache._food_id_key("muz")] == "42"
     foodcache._cache_food_id("", "42")
     foodcache._cache_food_id("elma", "")
     assert len(foodcache._food_id_cache) == 1

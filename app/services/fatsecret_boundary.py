@@ -17,15 +17,29 @@ from app.timeutil import day_key
 
 PROOF = "_independent_nutrition_v1"
 
-# D-B2 (founder, 2026-11-08): new provider-backed diary / saved-meal
-# persistence is HELD until written FatSecret retention permission is verified.
-# Fail-closed code constant, deliberately not an environment flag: enabling
-# requires a reviewed change that records the written permission reference.
-PROVIDER_PERSISTENCE_PERMISSION_REF = None
+# D-B2 (founder, 2026-11-08) held new provider-backed persistence until a
+# written FatSecret retention permission existed. That permission is FatSecret
+# Platform API Support's written clarification of 2026-11-09: raw per-item
+# values at most 24h on the server, IDs and aggregated totals indefinitely.
+# It covers ONLY the paths whose storage conforms to that design
+# (app/services/provider_retention.py): native/web provider-backed LogFood and
+# the diary builder (add/serving change/log). Fail-closed code constant,
+# deliberately not an environment flag.
+PROVIDER_PERSISTENCE_PERMISSION_REF = "fatsecret-support-written-clarification-2026-11-09"
+
+# Provider persistence paths NOT covered by the retention proof stay held:
+# the web barcode add (/api/food/barcode/add) and the social meal-suggestion
+# total. Their writes carry no provenance, so nothing would expire them.
+UNCOVERED_PROVIDER_PERSISTENCE_REF = None
 
 
 def provider_persistence_allowed():
     ref = PROVIDER_PERSISTENCE_PERMISSION_REF
+    return isinstance(ref, str) and bool(ref.strip())
+
+
+def uncovered_provider_persistence_allowed():
+    ref = UNCOVERED_PROVIDER_PERSISTENCE_REF
     return isinstance(ref, str) and bool(ref.strip())
 CACHE_PREFIX = "food:independent-menu:v1:per_serving:"
 CACHE_TTL = 3 * 24 * 3600

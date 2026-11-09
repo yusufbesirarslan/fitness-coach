@@ -26,7 +26,7 @@ _macro_cache = {
 }
 
 
-_food_id_cache = {}   # name → fatsecret food_id
+_food_id_cache = {}   # sha256(name) → fatsecret food_id (no provider text held)
 
 
 _MACRO_CACHE_MAX = 500
@@ -152,6 +152,17 @@ def _cache_macros(macro_map, basis="per_serving"):
                 _log.warning("[FOODCACHE] Redis write failed: %s: %s", type(e).__name__, e)
 
 
+def _food_id_key(name):
+    """Map key for a food name: a digest, never the text.
+
+    The key is frequently a FatSecret food name, which FatSecret's terms allow
+    the server to hold for 24 hours only; the value (food_id) is storable
+    indefinitely. Keying by digest keeps the lookup and holds no provider text,
+    so this process-lifetime map needs no expiry of its own.
+    """
+    return hashlib.sha256(name.lower().encode("utf-8")).hexdigest()
+
+
 def _get_cached_food_id(name, default=""):
     """name → food_id okumasını kilit altında yap. Düz `_food_id_cache.get(...)`
     okuması _cache_food_id'deki eviction `del`'iyle yarışıyordu; dict.get tek
@@ -159,7 +170,7 @@ def _get_cached_food_id(name, default=""):
     if not name:
         return default
     with _cache_lock:
-        return _food_id_cache.get(name.lower(), default)
+        return _food_id_cache.get(_food_id_key(name), default)
 
 
 def _cache_food_id(name, fid):
@@ -170,7 +181,7 @@ def _cache_food_id(name, fid):
     yavaş bir bellek-büyümesi (DoS) vektörü olurdu."""
     if not name or not fid:
         return
-    key = name.lower()
+    key = _food_id_key(name)
     with _cache_lock:
         if key not in _food_id_cache and len(_food_id_cache) >= _FOOD_ID_CACHE_MAX:
             oldest = next(iter(_food_id_cache))

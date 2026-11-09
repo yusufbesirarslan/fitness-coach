@@ -1,8 +1,12 @@
-"""D-B2 launch hold: no NEW provider-backed diary / saved-meal persistence.
+"""D-B2 persistence hold, after the 2026-11-09 written FatSecret clarification.
 
-Founder direction 2026-11-08: hold until written FatSecret retention permission
-is verified. Fail-closed code constant (no environment channel). Manual logging,
-diary history, idempotent replay of existing rows and deletion stay usable.
+Covered paths (native/web provider LogFood, diary builder) are open under the
+recorded permission reference, because their storage conforms to the 24h
+retention design (tests/test_fatsecret_retention_phase1.py). The uncovered
+paths (web barcode add, social suggestion totals) stay held by their own
+fail-closed constant. Both are code constants with no environment channel.
+The hold MECHANICS stay pinned below with the reference patched back to None:
+a reviewed revert of the reference must restore the full hold.
 Synthetic inputs only; no provider request is made.
 """
 import pytest
@@ -21,6 +25,12 @@ KEY = "018f47d2-a2c7-7f52-a5b0-123456789abd"
 
 
 @pytest.fixture
+def persistence_held(monkeypatch):
+    """Model the reference being reverted (the pre-2026-11-09 hold)."""
+    monkeypatch.setattr(fatsecret_boundary, "PROVIDER_PERSISTENCE_PERMISSION_REF", None)
+
+
+@pytest.fixture
 def no_provider(monkeypatch):
     """Any provider request under the hold is a failure."""
     from app.services import fatsecret, mobile_food_discovery
@@ -34,23 +44,34 @@ def no_provider(monkeypatch):
 
 # ── The boundary itself ────────────────────────────────────────────────────
 
-def test_hold_is_the_default_and_fail_closed(monkeypatch):
-    assert fatsecret_boundary.PROVIDER_PERSISTENCE_PERMISSION_REF is None
-    assert fatsecret_boundary.provider_persistence_allowed() is False
-    for value in ("", "   ", 0, 1, True, ["ref"], {"ref": 1}):
+def test_covered_paths_record_the_written_clarification(monkeypatch):
+    assert (fatsecret_boundary.PROVIDER_PERSISTENCE_PERMISSION_REF
+            == "fatsecret-support-written-clarification-2026-11-09")
+    assert fatsecret_boundary.provider_persistence_allowed() is True
+    for value in (None, "", "   ", 0, 1, True, ["ref"], {"ref": 1}):
         monkeypatch.setattr(fatsecret_boundary, "PROVIDER_PERSISTENCE_PERMISSION_REF", value)
         assert fatsecret_boundary.provider_persistence_allowed() is False, value
-    monkeypatch.setattr(fatsecret_boundary, "PROVIDER_PERSISTENCE_PERMISSION_REF", "WRITTEN-REF")
-    assert fatsecret_boundary.provider_persistence_allowed() is True
 
 
-def test_hold_has_no_environment_or_config_channel(app, monkeypatch):
-    monkeypatch.setenv("FATSECRET_PROVIDER_PERSISTENCE_PERMISSION_REF", "env-ref")
+def test_uncovered_paths_stay_held_and_fail_closed(monkeypatch):
+    assert fatsecret_boundary.UNCOVERED_PROVIDER_PERSISTENCE_REF is None
+    assert fatsecret_boundary.uncovered_provider_persistence_allowed() is False
+    for value in ("", "   ", 0, 1, True, ["ref"], {"ref": 1}):
+        monkeypatch.setattr(fatsecret_boundary, "UNCOVERED_PROVIDER_PERSISTENCE_REF", value)
+        assert fatsecret_boundary.uncovered_provider_persistence_allowed() is False, value
+
+
+def test_holds_have_no_environment_or_config_channel(app, monkeypatch, persistence_held):
+    for name in ("FATSECRET_PROVIDER_PERSISTENCE_PERMISSION_REF",
+                 "UNCOVERED_PROVIDER_PERSISTENCE_REF"):
+        monkeypatch.setenv(name, "env-ref")
+        app.config[name] = "config-ref"
     app.config["PROVIDER_PERSISTENCE_PERMISSION_REF"] = "config-ref"
     assert fatsecret_boundary.provider_persistence_allowed() is False
+    assert fatsecret_boundary.uncovered_provider_persistence_allowed() is False
 
 
-def test_shared_resolver_refuses_before_any_provider_request(no_provider):
+def test_shared_resolver_refuses_before_any_provider_request(no_provider, persistence_held):
     from decimal import Decimal
     with pytest.raises(provider_food_snapshot.ProviderPersistenceHeld):
         provider_food_snapshot.resolve_provider_food("fatsecret", "1", "2", Decimal(1))
@@ -58,7 +79,7 @@ def test_shared_resolver_refuses_before_any_provider_request(no_provider):
 
 # ── Native LogFood ─────────────────────────────────────────────────────────
 
-def test_native_provider_backed_log_is_held(client, mobile_user, as_mobile, no_provider):
+def test_native_provider_backed_log_is_held(client, mobile_user, as_mobile, no_provider, persistence_held):
     response = client.post("/api/v1/nutrition/logs", json=provider_command(),
                            headers=as_mobile(mobile_user))
     assert response.status_code == 503
@@ -94,7 +115,7 @@ def test_native_replay_of_an_existing_provider_row_is_preserved(
 
 # ── Web meal-log, diary / saved meals, barcode, social ─────────────────────
 
-def test_web_provider_meal_log_is_held(client, auth_user, no_provider):
+def test_web_provider_meal_log_is_held(client, auth_user, no_provider, persistence_held):
     response = _web_provider_log(client)
     assert response.status_code == 503
     body = response.get_json()
@@ -109,7 +130,7 @@ def _meal(user_id):
     return meal
 
 
-def test_saved_meal_provider_item_add_is_held(client, auth_user, no_provider):
+def test_saved_meal_provider_item_add_is_held(client, auth_user, no_provider, persistence_held):
     meal = _meal(auth_user.id)
     response = client.post(f"/api/diary/meal/{meal.id}/item", json={
         "food_name": "Provider bar", "fatsecret_food_id": FOOD_ID, "serving_id": BAR_SERVING, "serving_quantity": 1})
@@ -118,7 +139,7 @@ def test_saved_meal_provider_item_add_is_held(client, auth_user, no_provider):
     assert CustomMealItem.query.filter_by(custom_meal_id=meal.id).count() == 0
 
 
-def test_logging_a_saved_meal_with_a_provider_item_is_held(client, auth_user, no_provider):
+def test_logging_a_saved_meal_with_a_provider_item_is_held(client, auth_user, no_provider, persistence_held):
     meal = _meal(auth_user.id)
     db.session.add(CustomMealItem(
         custom_meal_id=meal.id, food_name="Provider bar", grams=50.0, calories=120.0,

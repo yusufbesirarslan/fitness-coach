@@ -1061,6 +1061,14 @@ def test_review_requires_meals(client, auth_user):
     assert client.post("/meal-log/review", json={}).status_code == 400
 
 
+def _attested_intake(monkeypatch):
+    """The model path sits behind the #497 advice boundary (founder D3); model
+    the future attested-intake state so the prompt path stays qualified. The
+    boundary itself: tests/test_fatsecret_retention_phase1.py."""
+    from app.services import fatsecret_boundary
+    monkeypatch.setattr(fatsecret_boundary, "intake_unproven", lambda user_id: False)
+
+
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_review_returns_ai_text_and_totals(client, auth_user, monkeypatch):
     _log_meal(client, "Kahvaltı", 800)
@@ -1068,6 +1076,7 @@ def test_review_returns_ai_text_and_totals(client, auth_user, monkeypatch):
                                goal="kilo verme"))
     db.session.commit()
     monkeypatch.setattr(nutrition_meallog, "_openai_chat", lambda **kw: "Gayet dengeli.")
+    _attested_intake(monkeypatch)
     body = client.post("/meal-log/review", json={}).get_json()
     assert body == {"review": "Gayet dengeli.", "total_calories": 800, "target": 2000}
 
@@ -1079,6 +1088,7 @@ def test_review_ai_failure_falls_back(client, auth_user, monkeypatch):
     def boom(**kwargs):
         raise RuntimeError("openai down")
     monkeypatch.setattr(nutrition_meallog, "_openai_chat", boom)
+    _attested_intake(monkeypatch)
     body = client.post("/meal-log/review", json={}).get_json()
     assert "tekrar dene" in body["review"]
 
