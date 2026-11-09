@@ -10,8 +10,9 @@ the CHAIN qualification on a database built only by the real Alembic history:
 
 * the graph is exactly those four revisions, linear, one head;
 * the schema the Alembic history builds at ``c6f8b0d2e4a1``, plus production's
-  three itemized legacy differences (the ``activity_clap`` table, NOT NULL on
-  ``user.rank_points`` and ``user.streak_count``), equals production's catalog
+  itemized legacy differences (the ``activity_clap`` table, NOT NULL on
+  ``user.rank_points`` and ``user.streak_count``, six server-side column
+  defaults), equals production's catalog
   as read back on 2026-11-09 (columns, constraints, triggers, functions,
   sequences, relations; index definitions were not read back) and reproduces
   the restore's column digest; every populated test here runs on that
@@ -298,15 +299,22 @@ PRODUCTION_LIVE_HEAD_SCHEMA_SHA256 = (
     "e6102ff7584b7c349ca36f5711caeba1d2ec4314581a530a33f3cf7ab95253ba")
 
 # Every difference between the Alembic history at LIVE_HEAD and production,
-# itemized from that readback. The catalog test below proves nothing else
-# differs in the sections read back. Index definitions were NOT read back
-# (output size limit), so non-constraint indexes are not compared. All three are legacy objects older than the migration history's
-# coverage; no release migration references any of them.
+# itemized from that readback and its first CI comparison. The catalog test
+# below proves nothing else differs in the sections read back. Index
+# definitions were NOT read back (output size limit), so indexes that are not
+# constraints are not compared. All are legacy definitions older than the
+# migration history's coverage; no release migration references any of them.
 #   D1 ``activity_clap``: created by an early create_all boot of the
 #      ``ActivityClap`` model (42fea79a; removed in 9c085e55; never in a
 #      migration). Both of its foreign keys are ON DELETE NO ACTION.
 #   D2/D3 ``user.rank_points`` / ``user.streak_count``: NOT NULL in production;
 #      the model and the migrations leave them nullable (both DEFAULT 0).
+#   D4-D9 server-side DEFAULTs production has and the migrations do not:
+#      friendship.created_at now(), friendship.status 'pending',
+#      meal_log.source 'manual' (= the model's client-side default),
+#      message.is_read false, message.message_type 'text',
+#      message.timestamp now(). Found by this test's first full-catalog CI
+#      run (job 129348812788); nothing else differed on PG18.
 PRODUCTION_LEGACY_DDL = (
     "CREATE TABLE activity_clap ("
     " id SERIAL NOT NULL, activity_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
@@ -316,8 +324,21 @@ PRODUCTION_LEGACY_DDL = (
     ' FOREIGN KEY (user_id) REFERENCES "user" (id))',
     'ALTER TABLE "user" ALTER COLUMN rank_points SET NOT NULL',
     'ALTER TABLE "user" ALTER COLUMN streak_count SET NOT NULL',
+    "ALTER TABLE friendship ALTER COLUMN created_at SET DEFAULT now(),"
+    " ALTER COLUMN status SET DEFAULT 'pending'",
+    "ALTER TABLE meal_log ALTER COLUMN source SET DEFAULT 'manual'",
+    "ALTER TABLE message ALTER COLUMN is_read SET DEFAULT false,"
+    " ALTER COLUMN message_type SET DEFAULT 'text',"
+    ' ALTER COLUMN "timestamp" SET DEFAULT now()',
 )
-LEGACY_NAMES = ("activity_clap", "rank_points", "streak_count")
+LEGACY_NAMES = ("activity_clap", "rank_points", "streak_count", "friendship", "message_type",
+                "is_read")
+# Columns whose definition differs (nullability or default) between the
+# Alembic history and production.
+LEGACY_CHANGED_COLUMNS = {
+    ("user", "rank_points"), ("user", "streak_count"),
+    ("friendship", "created_at"), ("friendship", "status"), ("meal_log", "source"),
+    ("message", "is_read"), ("message", "message_type"), ("message", "timestamp")}
 
 _CATALOG = {
     "columns": "SELECT table_name, column_name, data_type, is_nullable, udt_name, "
@@ -399,16 +420,14 @@ def test_the_qualified_live_head_schema_is_production_s_schema(chain_url, monkey
     assert _column_digest(chain_url) == PRODUCTION_LIVE_HEAD_SCHEMA_SHA256
 
     # The legacy DDL is exactly the difference, nothing more: Alembic alone
-    # differs from production only in activity_clap's objects and the two
-    # NOT NULLs.
+    # differs from production only in activity_clap's objects and the eight
+    # itemized column definitions.
     raw = _diff(alembic, production)
     assert all(not part["ci_only"] or name == "columns" for name, part in raw.items()), raw
-    assert sorted(row[:4] for row in raw["columns"]["ci_only"]) == [
-        ["user", "rank_points", "integer", "YES"], ["user", "streak_count", "integer", "YES"]]
-    assert {(row[0], row[1]) for row in raw["columns"]["production_only"]} == {
-        ("activity_clap", "activity_id"), ("activity_clap", "created_at"),
-        ("activity_clap", "id"), ("activity_clap", "user_id"),
-        ("user", "rank_points"), ("user", "streak_count")}
+    assert {(row[0], row[1]) for row in raw["columns"]["ci_only"]} == LEGACY_CHANGED_COLUMNS
+    assert {(row[0], row[1]) for row in raw["columns"]["production_only"]} == (
+        LEGACY_CHANGED_COLUMNS | {("activity_clap", "activity_id"), ("activity_clap", "created_at"),
+                                  ("activity_clap", "id"), ("activity_clap", "user_id")})
     for name in ("constraints", "sequences", "relations"):
         assert raw[name]["production_only"] and all(
             "activity_clap" in json.dumps(row) for row in raw[name]["production_only"]), raw[name]
