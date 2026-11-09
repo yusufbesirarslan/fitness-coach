@@ -12,10 +12,10 @@ from test_mobile_log_food_api import as_mobile, manual_command, provider_command
 def test_f01_expansion_follows_the_existing_launch_free_revision():
     from pathlib import Path
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / "migrations"))
-    assert scripts.get_heads() == ["f01c0a1e0001"]
+    assert scripts.get_heads() == ["e1a5f0c3d2b4"]  # FatSecret retention follows F01
     assert scripts.get_revision("f01c0a1e0001").down_revision == "d8f1a3c5e7b9"
     assert scripts.get_revision("d8f1a3c5e7b9").down_revision == "c6f8b0d2e4a1"
-    assert len(list(scripts.walk_revisions())) == 62
+    assert len(list(scripts.walk_revisions())) == 63
 
 
 @pytest.mark.parametrize("eligibility", [False, True])
@@ -45,6 +45,11 @@ def test_withdrawal_stops_manual_logging_without_erasing_history_or_opening_prov
     assert before.status_code == 201
     row = MealLog.query.filter_by(user_id=owner.id).one()
     retained = (row.id, row.source, row.kalori, row.protein, row.karb, row.yag)
+    # The D-B2 hold is lifted for covered paths since the 2026-11-09 FatSecret
+    # clarification (tests/test_fatsecret_retention_phase1.py); its mechanics,
+    # modelled here with the reference reverted, still refuse before any request.
+    from app.services import fatsecret_boundary
+    monkeypatch.setattr(fatsecret_boundary, "PROVIDER_PERSISTENCE_PERMISSION_REF", None)
     held = client.post("/api/v1/nutrition/logs", json=provider_command(),
                        headers=as_mobile(owner, key="integrated-provider-1"))
     assert held.status_code == 503
