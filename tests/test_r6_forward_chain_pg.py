@@ -140,11 +140,15 @@ def _seed(url):
     try:
         with engine.begin() as c:
             ids = {}
-            for name in ("r6_rich", "r6_claim_only", "r6_bystander"):
+            # Production accounts carry a referral code (registration sets it;
+            # release-prepare back-fills only missing ones, which is not part
+            # of the migration chain and would otherwise show up as a diff).
+            for index, name in enumerate(("r6_rich", "r6_claim_only", "r6_bystander")):
                 ids[name] = c.execute(sa.text(
-                    'INSERT INTO "user" (username, email, cognito_sub) '
-                    "VALUES (:n, :e, :s) RETURNING id"),
-                    {"n": name, "e": f"{name}@example.com", "s": f"sub-{name}"}).scalar()
+                    'INSERT INTO "user" (username, email, cognito_sub, referral_code) '
+                    "VALUES (:n, :e, :s, :r) RETURNING id"),
+                    {"n": name, "e": f"{name}@example.com", "s": f"sub-{name}",
+                     "r": f"R6CHAIN{index:04d}"}).scalar()
             rich = ids["r6_rich"]
             # Historical (pre-floor) completion evidence and an ordinary log.
             c.execute(sa.text(
@@ -477,7 +481,7 @@ def test_after_the_chain_only_the_candidate_boots(chain_url, monkeypatch, trees)
 
 # ── 5. rollback boundary: no downgrade once O2-B evidence exists ────────────
 
-def test_downgrade_refuses_once_legal_hold_evidence_exists(chain_url, monkeypatch):
+def test_downgrade_refuses_once_legal_hold_evidence_exists(chain_url, monkeypatch, caplog):
     import flask_migrate
     _upgrade_to(monkeypatch, LIVE_HEAD)
     ids = _seed(chain_url)
@@ -488,9 +492,13 @@ def test_downgrade_refuses_once_legal_hold_evidence_exists(chain_url, monkeypatc
     tool = _boot_tool(monkeypatch)
     try:
         with tool.app_context():
-            with pytest.raises(RuntimeError, match="refuses to erase"):
+            # Flask-Migrate reports the migration's RuntimeError and exits 1,
+            # exactly as `flask db downgrade` would for an operator.
+            with pytest.raises(SystemExit) as stopped:
                 flask_migrate.downgrade(revision=LIVE_HEAD)
     finally:
         _dispose(tool)
+    assert stopped.value.code == 1
+    assert "refuses to erase consent or erasure evidence" in caplog.text
     assert _versions(chain_url) == [HEAD]
     _verify_head_fence(chain_url)
