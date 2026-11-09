@@ -412,6 +412,10 @@ def test_weekly_rollover_receives_istanbul_now(app, monkeypatch):
     assert captured == [istanbul_now]
 
 
+from app import hooks as _hooks_at_import  # noqa: E402 - captured before any fixture runs
+_MODULE_PURGE_CHECK = _hooks_at_import._last_purge_check
+
+
 def test_app_fixture_never_lets_the_hook_start_real_maintenance(app, monkeypatch):
     """CI run 42621146878 shard 2: forcing ONLY the rollover throttle let the
     process-global purge throttle pass (first caller in the process), so the
@@ -421,6 +425,11 @@ def test_app_fixture_never_lets_the_hook_start_real_maintenance(app, monkeypatch
     from datetime import datetime
     from app import hooks, jobs
 
+    # Order-independent: the fixture must have REPLACED the process-global
+    # throttle list (an earlier test in this process could otherwise have
+    # consumed the original and made the checks below pass by accident).
+    assert hooks._last_purge_check is not _MODULE_PURGE_CHECK
+    assert hooks._last_purge_check[0] is not None
     dispatched = []
     monkeypatch.setattr(hooks, "_rollover_throttle_passed", lambda now: True)
     monkeypatch.setattr(hooks, "run_weekly_rollover", lambda now: None)
