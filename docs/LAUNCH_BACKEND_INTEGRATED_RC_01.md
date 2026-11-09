@@ -50,10 +50,17 @@ staging/customer database requires separate founder authorization.
 
 ## F01 withdrawal against pending O2
 
-O2 is pending. No authoritative decision text labeled O2 was located in the
-available F01/closure/triage evidence at integration time. The release owner
-requested that source; alignment must remain UNRESOLVED until it is supplied.
-This candidate implements the existing #490 contract, not a new legal choice:
+O2 alignment is **LEGAL_DECISION_PENDING**, not an engineering failure.
+Founder clarification confirms there is no signed O2 decision or approved
+final wording. The preference is to preserve existing fitness/health history
+only where a genuinely applicable independent legal basis permits retention;
+that basis is NOT VERIFIED. The separate
+`AXISAI-F01-O2-NARROW-LEGAL-VERIFICATION-01` owns verification. Relevant source:
+`yusufbesirarslan/axisai-landing` PR #78,
+[`docs/legal/launch-v1/PUBLICATION_CHECKLIST.md`, section 3, A1 Option O2](https://github.com/yusufbesirarslan/axisai-landing/blob/f8b3f3f2a2ab2826313ce4486a19ca8687444715/docs/legal/launch-v1/PUBLICATION_CHECKLIST.md).
+Do not start a broad legal investigation or invent a retention ground. This
+candidate preserves the existing #490 withdrawal contract and disclosure
+candidates, not a new legal choice:
 
 1. Decline/withdraw remain available with retired/unpublished text and do not
    depend on a new health grant. Account/auth/recovery/privacy/deletion controls
@@ -72,13 +79,14 @@ This candidate implements the existing #490 contract, not a new legal choice:
    intent across restart/logout. Other devices close at their next protected
    request/refresh; no remote erasure is promised.
 
-Legal/controller must decide whether finishing admitted work before confirming
-withdrawal, the disclosed unavailable features, prospective historical reuse,
-retention and consent-evidence disposition satisfy O2. If immediate cancellation
-or a different data disposition is required, implementation and new tests are
-required before publication. Keep `APPROVED_VERSION` unset. Publish only a new
-reviewed source version with approved exact EN/TR bytes/digests after the
-decision. Do not auto-delete records or silently enable processing.
+The narrow legal verification must resolve O2 and the corresponding
+F01/Privacy wording before publication/activation. Preserve withdrawal behavior
+while it is pending; no automatic deletion or archival changes are authorized.
+When the O2 result arrives, assess only necessary withdrawal and corresponding
+Privacy Notice clause changes, with tests for any changed behavior. Keep
+`APPROVED_VERSION` unset until the decision and wording are resolved. This
+integration does not substantiate retention, approve final wording or silently
+enable processing.
 
 ## Five D1 feature activation work
 
@@ -99,7 +107,8 @@ no health-generation snapshot stop; Memory activation is not promised.
 Activation order (owners must supply evidence, not flags alone):
 
 1. Close F01/O2 and the separate lawful health/service-cohort/transfer/recipient
-   decisions. Qualify actual retention and provider facts; preserve the
+   decisions, including landing #78's L03 evidence that the AWS annex covers
+   inference. Qualify actual retention and provider facts; preserve the
    documented FatSecret fallback and D-B2 hold. F01 is independent of D1.
 2. Approve exact five-purpose EN/TR text and categories from existing drafts.
    Install reviewed source `Disclosure` entries in `POLICIES`, exact bytes in
@@ -212,11 +221,12 @@ lane can prove negative gates; it cannot prove usable health or five AI flows.
 **Lane B — authorized positive qualification:** requires the reviewed F01/O2,
 D1/cohort/EU-route activation changes above and fresh exact-head CI/review.
 If the legal decision has not arrived, leave this lane BLOCKED. Use the paired
-mobile F01 implementation from mobile draft #174 or a later explicitly
-integrated equivalent; also include current Launch Free allowance/error UX
-from mobile main and verify it accepts `LAUNCH_FREE`. Resolve/pin the actual
-mobile SHA before building; #174's mention is not proof that current mobile
-main includes it. Backend integration does not modify mobile or ASC.
+mobile integrated main `c3de8eadfc57e87b533b209c3f5a741829d86ad9` or a later
+explicitly qualified equivalent. GitHub main readback identifies #176 as
+integrating #173 (FatSecret), #174 (F01) and #175 (Launch Free). Pin and inspect
+the actual build source and verify its `LAUNCH_FREE` decoder/error UX and F01
+flow; merge metadata alone is not a real-device pass. Backend integration does
+not modify mobile or ASC.
 
 On a real iPhone, record device/iOS, mobile SHA/build/flavor, API staging host,
 backend SHA/image and UTC times. Test EN and TR, fresh and existing synthetic
