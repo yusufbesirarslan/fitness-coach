@@ -1,3 +1,8 @@
+> Post-RC source amendment: the founder-selected O2-B withdrawal integration is
+> documented in [F01_O2B_POST_RC_INTEGRATION_01.md](privacy/F01_O2B_POST_RC_INTEGRATION_01.md).
+> It supersedes this receipt's earlier O2 disposition only. Activation and release
+> holds remain closed.
+
 # Backend integrated release candidate and E2E handoff
 
 TASK=AXISAI-LAUNCH-BACKEND-INTEGRATED-RC-01

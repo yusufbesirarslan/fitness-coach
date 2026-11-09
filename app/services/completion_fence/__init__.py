@@ -87,9 +87,18 @@ def _migration():
     return module
 
 
+@lru_cache(maxsize=1)
+def _erasure_migration():
+    path = _MIGRATION.with_name('f01e2a5e0002_health_withdrawal_erasure.py')
+    spec = importlib.util.spec_from_file_location('_completion_erasure_migration', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def verify_fence(connection) -> None:
     """Raise RuntimeError unless the installed fence is exactly the reviewed one."""
-    _migration().verify_fence(connection)
+    _erasure_migration().verify_fence(connection)
 
 
 def _fence_state(connection):
@@ -98,7 +107,7 @@ def _fence_state(connection):
     if not functions and not triggers:
         return "absent"
     try:
-        migration.verify_fence(connection)
+        verify_fence(connection)
     except RuntimeError:
         return "invalid"
     return "verified"

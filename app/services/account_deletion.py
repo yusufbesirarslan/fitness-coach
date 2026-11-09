@@ -258,6 +258,12 @@ def _purge_if_released(user_id, sub, released):
     # The anti-resurrection tombstone commits WITH the purge or not at all:
     # "user row gone, no tombstone" never exists (deleted_identity module doc).
     deleted_identity.record(sub)
+    # Storage inventory was proved released above; close only these O2 debts.
+    from app.health_consent_models import HealthErasure
+    from datetime import datetime
+    HealthErasure.query.filter_by(owner_id=user_id, completed_at=None).update(
+        {"completed_at": datetime.utcnow(), "summary": {"account_deleted": True}},
+        synchronize_session=False)
     _purge_user(owner)
     db.session.commit()
     return None

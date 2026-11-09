@@ -106,7 +106,7 @@ def test_refusal_is_persisted_and_existing_account_is_not_grandfathered(
     assert db.session.get(type(owner), owner.id).weight == 81.5
 
 
-def test_withdrawal_blocks_reads_writes_and_old_grant_replay_without_deletion(
+def test_withdrawal_blocks_reads_writes_and_old_grant_replay_and_erases_health(
         client, make_user, principal):
     owner = make_user("withdraw-health", health_consent=False, weight=82.25)
     headers = principal(owner)
@@ -120,7 +120,10 @@ def test_withdrawal_blocks_reads_writes_and_old_grant_replay_without_deletion(
     assert client.get(PROFILE, headers=headers).status_code == 403
     assert client.put(PROFILE, headers=headers, json=BODY).status_code == 403
     assert client.get("/api/v1/account/me", headers=headers).status_code == 200
-    assert db.session.get(type(owner), owner.id).weight == 82.25
+    # A1 = O2-B: withdrawal erases health fields; the account and evidence stay.
+    assert withdrawn.json["erasure"]["state"] == "completed"
+    stored = db.session.get(type(owner), owner.id)
+    assert stored.weight is None and stored.username == "withdraw-health"
     assert HealthConsentEvent.query.count() == 2
 
 
