@@ -73,18 +73,20 @@ def _valid(record):
         return False
 
 
-def _public(state):
+def _public(state, erasure=None):
     record = state["record"]
     return {"purpose": disclosure.PURPOSE, "generation": state["generation"],
             "state": "granted" if _valid(record) else
                      record.get("state", "not_granted") if record.get("state") in {"declined", "withdrawn"} else "not_granted",
             "version": record.get("version"), "granted_at": record.get("granted_at"),
-            "withdrawn_at": record.get("withdrawn_at"), "disclosure": disclosure.published()}
+            "withdrawn_at": record.get("withdrawn_at"), "disclosure": disclosure.published(),
+            "erasure": erasure}
 
 
 def status(owner):
+    from app.services import health_erasure
     with _authority(owner) as conn:
-        return _public(_state(conn, owner))
+        return _public(_state(conn, owner), health_erasure.public_state(conn, owner))
 
 
 def allowed(owner):
@@ -93,7 +95,8 @@ def allowed(owner):
     if active is not None:
         return active[0] == owner
     try:
-        return status(owner)["state"] == "granted"
+        with _authority(owner) as conn:
+            return _valid(_state(conn, owner)["record"])
     except HealthConsentDenied:
         return False
 
@@ -110,6 +113,7 @@ def mutate(owner, data):
             or len(data["version"]) > 80 or len(data["text_digest"]) > 64):
         raise HealthConsentDenied("HEALTH_CONSENT_INVALID_REQUEST", 400)
     fingerprint = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+    from app.services import health_erasure
     states, events = _tables()
     with _authority(owner, exclusive=True) as conn:
         state = _state(conn, owner)
@@ -118,7 +122,7 @@ def mutate(owner, data):
         if prior is not None:
             if prior != fingerprint:
                 raise HealthConsentDenied("HEALTH_CONSENT_CONFLICT", 409)
-            return _public(state)
+            return _public(state, health_erasure.public_state(conn, owner))
         if state["generation"] != data["expected_generation"]:
             raise HealthConsentDenied("HEALTH_CONSENT_CONFLICT", 409)
         if data["action"] == "affirmative_grant":
@@ -126,7 +130,13 @@ def mutate(owner, data):
             if (not published or data["version"] != published["version"]
                     or data["text_digest"] != published["text_digests"].get(data["locale"])):
                 raise HealthConsentDenied("HEALTH_CONSENT_DISCLOSURE_UNAVAILABLE", 403)
+            # A new grant starts from no health history: never while an earlier
+            # withdrawal's erasure (or a legal hold under it) is unfinished.
+            if health_erasure.pending(conn, owner):
+                raise HealthConsentDenied("HEALTH_ERASURE_PENDING", 409)
         now = datetime.now(timezone.utc)
+        erase = (data["action"] == "withdraw"
+                 or (data["action"] == "decline" and _valid(state["record"])))
         record = dict(state["record"])
         if data["action"] == "affirmative_grant":
             record = {k: data[k] for k in ("purpose", "version", "locale", "text_digest")}
@@ -145,7 +155,9 @@ def mutate(owner, data):
             locale=data["locale"], text_digest=record.get("text_digest", ""),
             action=data["action"], occurred_at=now.replace(tzinfo=None),
             request_id=data["request_id"], request_digest=fingerprint))
-        return _public(dict(state, **values))
+        if erase:
+            health_erasure.request(conn, owner, generation, now)
+        return _public(dict(state, **values), health_erasure.public_state(conn, owner))
 
 
 class processing:

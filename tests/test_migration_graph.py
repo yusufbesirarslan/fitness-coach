@@ -46,7 +46,7 @@ def test_alembic_migrations_have_single_head():
     # MON-02-BE-02's empty Apple notification/reconciliation tables follow the fence.
     # LAUNCH-FREE-BE-01 widens the bucket scope CHECK on the physical budget.
     # FATSECRET-RETENTION-PHASE1 adds provider provenance on top of F01.
-    assert heads == ["e1a5f0c3d2b4"]
+    assert heads == ["f01e2a5e0002"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -86,7 +86,7 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # LAUNCH-FREE-BE-01 widens the allowance bucket scope CHECK, no catalog schema.
     # FATSECRET-RETENTION-PHASE1 adds nullable meal_log/custom_meal_item
     # provenance columns and the retained-total table, no catalog schema.
-    assert len(revision_files) == 63
+    assert len(revision_files) == 64
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py"]
 

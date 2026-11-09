@@ -13,7 +13,7 @@ Classification below is an engineering handling boundary for review. Ordinary ac
 | Onboarding and profile editing | Weight, height, target weight, age, gender, fitness/activity level and goals; `account_profile.OnboardingProfile`, `User`/`UserSession` | Before native `/api/v1/account/profile` GET/PUT body handling and web `/setup`, `/edit-profile`; mobile health form not mounted before confirmed permission |
 | Injury/medical constraints and training | `TrainingPreferences.injuries`; health-bearing `User.user_metadata` (including injuries), preferences, plan/history, workout/activity records and free text | Native `/training/preferences`, `/training/plans*`, workouts/history, Coach and web equivalents; no new Memory purpose or intake is enabled |
 | Recovery and weekly check-in | `weight_kg`, training intensity, fatigue, sleep quality, nutrition adherence, progressive overload; history and derived summaries | Native `/progress/check-ins`, progress/history and web tracking/check-in/weight paths; recovery owners unbound while permission is closed |
-| Nutrition | Food descriptions/amounts, nutrients, diary/drafts, plans, water and supplement records, related history | Native `/nutrition/*` (including discovery/log/day/plan/hydration/history/supplements) and authenticated web counterparts; current FatSecret decision unchanged |
+| Nutrition | Food descriptions/amounts, nutrients, diary/drafts, retained daily nutrition aggregates, plans, water and supplement records, related history | Native `/nutrition/*` (including discovery/log/day/plan/hydration/history/supplements) and authenticated web counterparts; current FatSecret decision unchanged |
 | Notes and selected images | Health-bearing Coach input/history and images, Pump Check image/results, QR/menu input that may include health details | Health boundary before body/image handling; five existing D1 permission gates still apply independently before provider processing |
 | Ordinary account controls | Identity/contact/authentication, preferred language, eligibility declarations, subscription controls, privacy/permission management, account deletion | Remain accessible. `/account/me` masks goal/profile-completion health projection unless it can hold a current health authority scope. This table does not declare all age/gender data intrinsically health data outside their health context |
 
@@ -21,7 +21,7 @@ All authenticated product endpoints default to health-protected except the expli
 
 ## Exact text and evidence
 
-`app/services/health_disclosure.py` contains the equivalent EN/TR candidate bytes, SHA-256 digests and version `health-fitness-v1-review`. The mobile UI shows the server's exact localized text, a separate affirmative action, refusal, withdrawal, refresh and the existing Privacy Notice link. No generic onboarding acknowledgment grants permission. The text covers selected first-party tracking, calculations, plans and history, stopping health features, available account controls, prospective use of existing records and no automatic deletion. AI-provider permissions and international transfers are explicitly separate.
+`app/services/health_disclosure.py` contains the equivalent EN/TR candidate bytes, SHA-256 digests and version `health-fitness-v2-review`. The mobile UI shows the server's exact localized text, a separate affirmative action, refusal, withdrawal, refresh and the existing Privacy Notice link. No generic onboarding acknowledgment grants permission. The text covers selected first-party tracking, calculations, plans and history, stopping health features, available account controls, prospective use of existing records and erasure within 30 days after withdrawal (v2, A1 = O2-B). AI-provider permissions and international transfers are explicitly separate.
 
 GET/POST `/api/v1/health-consent` (and CSRF-protected web `/api/health-consent`) share one authority. Grants require the published exact purpose/version/locale/digest and the existing eligibility capability; the authenticated user is authoritative. No grant is accepted while the candidate is unpublished. Refusal/withdrawal remain possible with a retired/unpublished text.
 
@@ -33,18 +33,33 @@ PostgreSQL shared transaction advisory locks hold health authority through proce
 
 Mobile checks server evidence on account/epoch changes and foreground resume; there is no persisted local allow flag. It blocks health request dispatch and stale responses, drops in-memory health forms/controllers and unbinds recovery before further use. Existing durable recovery records are retained, not replayed while closed. A separate device-only, account-partitioned secure marker persists unconfirmed stop requests across logout/restart; unreadable storage also blocks. It stores stop intent only. Withdrawal is confirmed by the server; a failed request must be retried. Other devices are checked at their next protected request/refresh, not remotely erased.
 
-The expand-only migration creates empty consent tables. No existing field, account, D1 permission or historical collection becomes a grant. Existing health records stay paused until a new prospective grant; the new grant never rewrites collection history. Refusal/withdrawal do not delete records. Passive retention and any historical collection still require an independently supported legal disposition. Existing account deletion purges the new owner evidence alongside its current data inventory; no new retention schedule or historical deletion is introduced. Backup/provider-copy limits remain the existing F02 matter.
+The expand-only migration creates empty consent tables. No existing field, account, D1 permission or historical collection becomes a grant. Existing health records stay paused until a new prospective grant; the new grant never rewrites collection history. Withdrawal (and a decline after a grant) erases health records; see the next section. A first-time decline erases nothing, and records collected before F01 for accounts that never grant still need a founder disposition (legacy population, not covered by A1). Existing account deletion purges the new owner evidence alongside its current data inventory; no new retention schedule or historical deletion is introduced. Backup/provider-copy limits remain the existing F02 matter.
+
+## Withdrawal erasure (A1 = O2-B, founder decision 2026-11-09)
+
+Source: founder disposition AXISAI-F01-A1-O2B-FOUNDER-DISPOSITION-01 and the O2 verification memo (`F01_O2_POST_WITHDRAWAL_RETENTION_VERIFICATION.md`). The export sentence from the memo's candidate wording is not used: the app has no export feature, and none is built here.
+
+- **Stop.** Withdrawal blocks every health route and AI endpoint at once (the existing boundary; nothing new).
+- **Erase.** The withdrawal transaction records a `health_erasure` row. The same request then runs `health_erasure.run`, which releases Pump Check images and meal photos first, then changes every health row in one transaction under the owner row lock. The independent exclusive health authority serializes consent decisions, retries and controller holds across storage I/O. Failures stay pending and are retried by daily maintenance and `flask health-erasure-run` (all pending owners, in bounded batches so holds/failures cannot starve later owners); a pending erasure older than 30 days logs `event=overdue`.
+- **Scope (conservative).** Body fields on `User` (`weight`, `height`, `target_weight`, `goal_type`, `goal`, `fitness_level`, `current_activity`; reset `profile_complete`), Coach memory keys in `user_metadata`, `UserSession`, check-ins and weight logs, daily activity and wearable logs, training and nutrition plans and their journals, workout logs, sessions, completion days, exercise notes and activity entries (workouts are treated as health data until a confirmed classification says otherwise), meals, water, supplements, custom meals, Coach conversations and pending actions, and Pump Checks with comparisons and the feed items that repost them. Generation ledgers keep their idempotency and allowance rows; only the plan content they carry is removed.
+- **Kept.** Identity and sign-in, language, eligibility record, referral, subscription and AI allowance ledgers, age, gender, avatar, permission evidence, badges and wearable connections.
+- **No restore.** A new grant is refused with 409 `HEALTH_ERASURE_PENDING` while any erasure for the owner is unfinished, so a new grant always starts from no health history.
+- **Legal hold.** `flask health-legal-hold-add --user-id --matter --review-date --category …` (controller only; named categories, a matter reference, a future review date). Held categories are skipped and the erasure stays pending, so the owner cannot grant again and the held rows stay behind the boundary. `health-legal-hold-release` ends the hold and completes the erasure. Holds past their review date are logged, never released automatically.
+- **Erasure record.** `health_erasure` holds ids, times and row counts only, has no account foreign key (it outlives the account) and is deleted three years after completion.
+- **Status.** `GET/POST /api/v1/health-consent` adds `erasure: {state, requested_at, due_by}` or `null` (additive).
 
 ## Minimum decisions before release/publication
+
+A1 withdrawal disposition is now O2-B as selected by the founder. The previous retain-on-withdrawal question is superseded by the section above. Publication, Article 6 substantiation and activation still require separate approval.
 
 | Decision | Type / owner | Exact approval needed |
 |---|---|---|
 | First-party purpose and UX | FOUNDER_DECISION_REQUIRED / founder | Accept this bounded tracking/calculation/plans/history purpose and the disclosed stop behavior, including unavailable health features on refusal; approve equivalent candidate EN/TR wording for legal review |
 | Article 6 condition | EXTERNAL_DEPENDENCY / independent legal reviewer + controller | Substantiate Article 6(3)(a) applicability, specificity/freedom/information and withdrawal effect for these fields/purposes; assess existing eligibility/capacity restrictions without treating 13+ intent as permission |
-| Existing records and evidence | EXTERNAL_DEPENDENCY / controller + legal reviewer | Determine lawful handling/retention while consent is absent/withdrawn, prospective reuse and consent-evidence disposition under the existing F02 criteria; no retroactive cure or automatic purge |
+| Existing records and evidence | EXTERNAL_DEPENDENCY / controller + legal reviewer | Determine lawful handling/retention while consent is absent/withdrawn, prospective reuse and consent-evidence disposition under the existing F02 criteria; no retroactive cure; O2-B withdrawal erasure as specified above |
 | Notice clauses | EXTERNAL_DEPENDENCY / existing F01/F02 and D1 owners | Resolve only first-party health condition, collection-time action, refusal/withdrawal, and prospective-existing-data paragraphs in existing paired privacy texts. D1's five purpose/recipient and Article 9 clauses retain separate unresolved approvals; this first-party consent supplies neither |
 
-After those determinations, the existing owner can propose a versioned publication change and coordinate backend expand migration/mobile release for separate authorization. This task does not approve source policy publication, fill D1 registries, change model ordering, transfers, AWS, retention or release gates. No merge, deployment or production records changed.
+After those determinations, the existing owner can propose a versioned publication change and coordinate backend expand migration/mobile release for separate authorization. This task does not approve source policy publication, fill D1 registries, change model ordering, transfers, AWS or release gates. No merge, deployment or production records changed.
 
 ## Validation receipt
 
@@ -75,3 +90,17 @@ prospective synthetic evidence; no historical account is grandfathered by
 application code. The additive migration now declares frozen metadata rather
 than importing mutable runtime models; the existing expand safety gate is
 unchanged. No operational migration was executed.
+
+
+The post-RC integration uses a new additive revision `f01e2a5e0002` after
+`f01c0a1e0001`; merged migration bytes stay unchanged. PostgreSQL completion
+claim retention has one reviewed exception: the same owner's pending erasure,
+stopped permission and no active workout hold. Binding deletion remains an FK
+cascade; every other completion fence remains exact. Old images that verify
+only the earlier retention function reject the new schema, so rollback to such
+an image requires a separately reviewed forward-recovery plan.
+
+Only canonical account deletion, after proving its storage inventory released,
+may close an O2-B obligation when purging the account. An unproven controller
+row purge leaves the obligation pending for investigation; it never becomes a
+false storage-erasure success. Expired hold review dates never release a hold.

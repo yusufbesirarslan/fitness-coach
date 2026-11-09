@@ -418,6 +418,7 @@ jobs:
           tests/test_apple_lifecycle_migration_pg.py
           tests/test_apple_reconciliation_pg.py
           tests/test_completion_fence_pg.py
+          tests/test_health_erasure_pg.py
           tests/test_priv_k6_no_photo_completion_pg.py
           tests/test_workout_completion_pg.py
           tests/test_training_expiry_compensation_pg.py
@@ -493,6 +494,7 @@ jobs:
           tests/test_pa06_privacy_pg.py
           tests/test_ai_consent_pg.py
           tests/test_health_consent_pg.py
+          tests/test_health_erasure_pg.py
           tests/test_d1_launch_integration_pg.py
           tests/test_launch_usable_result_pg.py
           tests/test_lp21_d1_operation_fencing_pg.py
