@@ -396,6 +396,8 @@ jobs:
     env:
       FITX_PG_CONCURRENCY_TEST: "1"
       PG_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fitx_fence_pg18
+      # The R6 four-migration chain qualification must never pass by skipping.
+      R6_FORWARD_CHAIN_REQUIRED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -423,6 +425,7 @@ jobs:
           tests/test_workout_completion_pg.py
           tests/test_training_expiry_compensation_pg.py
           tests/test_r6_dual_revision_pg.py
+          tests/test_r6_forward_chain_pg.py
           tests/test_r6_forward_recovery_pg.py
 
   mobile-pg-concurrency:
@@ -444,6 +447,8 @@ jobs:
           --health-retries 5
     env:
       FITX_PG_CONCURRENCY_TEST: "1"
+      # The R6 four-migration chain qualification must never pass by skipping.
+      R6_FORWARD_CHAIN_REQUIRED: "1"
       PG_TEST_DATABASE_URL: >-
         postgresql://postgres:postgres@localhost:5432/fitx_mobile_race
     steps:
@@ -530,6 +535,7 @@ jobs:
           tests/test_account_profile_pg.py
           tests/test_quest_challenge_commit_pg.py
           tests/test_r6_dual_revision_pg.py
+          tests/test_r6_forward_chain_pg.py
           tests/test_r6_forward_recovery_pg.py
       - name: Completion fence everywhere (activated floor)
         # PRIV-K6 rollback gate: the completion suites again, on a schema with
