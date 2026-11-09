@@ -226,6 +226,11 @@ def _erase_rows(user, held):
         activity_ids = [i for (i,) in db.session.query(m.Activity.id).filter(m.Activity.user_id == uid)]
         if activity_ids:
             changed += _delete_feed_refs(m, "activity", activity_ids)
+            # Others' claps on these activities (production legacy table with a
+            # NO ACTION FK). The owner's own claps elsewhere are social records
+            # that do not block this erasure, so they stay.
+            from app.services import legacy_activity_clap
+            changed += legacy_activity_clap.delete_for_activities(activity_ids)
         if day_ids and db.engine.dialect.name != "postgresql":
             changed += _delete(m.CompletionClaimTransaction,
                                m.CompletionClaimTransaction.claim_id.in_(day_ids))

@@ -297,3 +297,45 @@ def rows_gone(own):
 
 def user_exists(user_id):
     return db.session.get(User, user_id) is not None
+
+
+# Production's legacy activity_clap (no model, no migration), exactly as the
+# R6 schema readback found it: both foreign keys NO ACTION. PostgreSQL tests
+# create it explicitly and MUST drop it before db.drop_all(), which does not
+# know the table and would otherwise fail on its foreign keys.
+LEGACY_ACTIVITY_CLAP_DDL = (
+    "CREATE TABLE activity_clap ( id SERIAL NOT NULL, activity_id INTEGER NOT NULL, "
+    "user_id INTEGER NOT NULL, created_at TIMESTAMP WITHOUT TIME ZONE, PRIMARY KEY (id), "
+    "CONSTRAINT uq_activity_clap UNIQUE (activity_id, user_id), "
+    "FOREIGN KEY (activity_id) REFERENCES activity (id), "
+    "FOREIGN KEY (user_id) REFERENCES \"user\" (id))")
+
+
+def install_legacy_activity_clap():
+    with db.engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS activity_clap")
+        conn.exec_driver_sql(LEGACY_ACTIVITY_CLAP_DDL)
+
+
+def drop_legacy_activity_clap():
+    db.session.remove()
+    with db.engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS activity_clap")
+
+
+def add_activity(user_id):
+    act = Activity(user_id=user_id, activity_type="workout", content="legacy clap target")
+    db.session.add(act)
+    db.session.flush()
+    return act.id
+
+
+def add_clap(activity_id, user_id):
+    db.session.execute(db.text(
+        "INSERT INTO activity_clap (activity_id, user_id, created_at) "
+        "VALUES (:a, :u, now())"), {"a": activity_id, "u": user_id})
+
+
+def claps():
+    return sorted(tuple(r) for r in db.session.execute(db.text(
+        "SELECT activity_id, user_id FROM activity_clap")))
