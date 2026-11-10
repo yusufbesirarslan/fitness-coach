@@ -9,7 +9,7 @@ deployment was performed. This draft is a source-only successor to that pin.
 
 ## Recovered authority, without new product or legal requirements
 
-The complete recovery inventory, including SHA-256 of all 25 specification,
+The complete recovery inventory, including SHA-256 of all 27 specification,
 legal-opinion and exact-text files, is
 [`recovered-specifications.json`](../../qualification/f01-d1/recovered-specifications.json).
 External paths identify the retained local approval packet; they are not claims
@@ -35,6 +35,14 @@ with zero health traffic**. At least one `retry_health_erasures` must have been
 enqueued and finished. **Read-only, separate authorization.** Blocks F01
 activation. A synthetic clock, local PostgreSQL, an empty erasure table or a
 successful daily/CLI pass does not satisfy this gate.
+
+The later R6 source-readiness report labels M4/M5 unimplemented and uses
+different shorthand (pending age >75 minutes, a proposed completion-pulse
+metric and a synthetic staging drill). No approved supersession of the full
+explicit table was found. This task preserves that full table, prepares the
+synthetic drill separately, and does not silently adopt the shorthand as a
+new requirement. The latest deployed receipt qualifies R6/PB1/PB2/M1–M3; its
+idle-queue snapshot and 16-minute watch are not M5's one-hour proof.
 
 ## Integrated-source findings
 
@@ -101,7 +109,15 @@ snapshot; completed passes with individual failures still expose pending debt.
 Daily/CLI passes do not manufacture hourly evidence.
 
 A single aggregate Redis snapshot feeds the existing fork-safe worker metric
-publisher. Lua compare-and-set rejects stale or duplicate snapshot replacement.
+publisher. After all bounded counter batches, a fresh monitoring-only PG
+transaction takes a disjoint advisory lock (namespace 17922), with 2-second
+lock and 5-second statement timeouts. It allocates `txid_current()` only after
+that lock, reads aggregate state, stamps actual completion and commits. Lua
+compare-and-set orders the v2 snapshot by that sequence, not process-start or
+wall-clock order. This prevents a later-finishing pass with the two-retry
+state from being rejected as older. A deterministic regression reproduced
+the missed alert under the earlier timestamp ordering before the correction.
+Stale or duplicate publication is rejected even if Redis stores arrive late.
 The parent opens no DB connection. Gauges include pending count, oldest-pending
 age, last-completed-retry age and count pending after two retries. Ages advance
 with zero health traffic. `HealthErasureOverdue` is explicitly a **0/1 breach
@@ -142,6 +158,7 @@ TTL, timeout, scheduling and failure TTL remain unchanged.
 | Five-purpose retired-version matrix + existing QR/cohort composition | 29 passed, no skips | `qualification/f01-d1/selected-version-postgres.xml` |
 | Final M4, Lua CAS, real RQ classes with emulated Redis, read-only M5 reader + existing timer | 18 passed, no skips | `qualification/f01-d1/m4-final.xml` |
 | New-successor compatibility in the historical migration fixture (seven hosted failures corrected) | 7 passed, no skips | `qualification/f01-d1/successor-compatibility.xml` |
+| Final M4 aggregate-order regression, overlapping counters, retention and migration | 6 passed, no skips | `qualification/f01-d1/snapshot-order-postgres.xml` |
 
 Selections overlap and are not additive unique coverage. Local PostgreSQL is
 16, not a new PG18 certification; existing R6/hosted PG18 receipts are reused.
@@ -161,7 +178,9 @@ It identified and closed stale-snapshot, out-of-order-counter and unbounded
 transaction defects, independently ran the new source checks and inspected the
 PG evidence. Review also closed the observer's unsafe RQ deserialization and
 unbounded timestamp predicates; hostile serialized fields and malformed,
-future and out-of-order timestamps now have negative tests. Final reviewed
+future and out-of-order timestamps now have negative tests. Final review also
+confirmed the aggregate snapshot-order race and its serialized-sequence fix;
+the regression fails before that correction and passes after it. Final reviewed
 commit and disposition belong in the PR/receipt.
 
 ## Exact later nonproduction qualification

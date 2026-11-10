@@ -5,14 +5,16 @@ Redis value; it never opens an ORM connection. Publication uses the existing
 fork-safe, bounded publisher. Missing/broken monitoring never authorizes work.
 """
 import json
+import time
 from datetime import datetime, timezone
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from app.extensions import db
 from app.health_consent_models import HealthErasure, HealthErasureRetry, HealthLegalHold
 
-KEY = "fitx:health-erasure:monitoring:v1"
+KEY = "fitx:health-erasure:monitoring:v2"
+SNAPSHOT_LOCK_NAMESPACE = 17922  # distinct from health authority (17921)
 PENDING = "HealthErasurePending"
 OLDEST = "HealthErasureOldestPendingAgeSeconds"
 PASS_AGE = "HealthErasureRetryPassAgeSeconds"
@@ -35,7 +37,6 @@ def finish_pass(start, slot, now=None, batch_size=200):
     """
     if type(slot) is not int or slot < 0:
         raise ValueError("scheduled UTC hour required")
-    now = now or datetime.now(timezone.utc)
     try:
         if type(batch_size) is not int or batch_size < 1:
             raise ValueError("positive batch size required")
@@ -59,7 +60,20 @@ def finish_pass(start, slot, now=None, batch_size=200):
                     retry.passes = min(retry.passes + 1, 2)
                     retry.last_slot = max(retry.last_slot, slot)
             db.session.commit()
-        db.session.flush()
+        # End every counter/scan transaction before taking the monitoring-only
+        # lock. No owner lock or previously allocated XID crosses this boundary.
+        db.session.rollback()
+        if db.engine.dialect.name == "postgresql":
+            db.session.execute(text("SET LOCAL lock_timeout = '2000ms'"))
+            db.session.execute(text("SET LOCAL statement_timeout = '5000ms'"))
+            db.session.execute(text("SELECT pg_advisory_xact_lock(:namespace, 0)"),
+                               {"namespace": SNAPSHOT_LOCK_NAMESPACE})
+            # Allocate AFTER the lock: PostgreSQL transaction ids give an
+            # ordered snapshot sequence independent of process start/wall time.
+            sequence = int(db.session.execute(text("SELECT txid_current()")).scalar_one())
+        else:
+            # SQLite is an offline fixture, never distributed qualification.
+            sequence = time.monotonic_ns()
         pending = HealthErasure.query.filter(HealthErasure.completed_at.is_(None))
         oldest = db.session.query(func.min(HealthErasure.requested_at)).filter(
             HealthErasure.completed_at.is_(None)).scalar()
@@ -70,7 +84,9 @@ def finish_pass(start, slot, now=None, batch_size=200):
             HealthErasureRetry.passes >= 2).count()
         def epoch(value):
             return value.replace(tzinfo=timezone.utc).timestamp() if value is not None else None
-        snapshot = dict(completed=now.timestamp(), pending=pending.count(),
+        count = pending.count()
+        completed = now or datetime.now(timezone.utc)
+        snapshot = dict(sequence=sequence, completed=completed.timestamp(), pending=count,
                         oldest=epoch(oldest), oldest_unheld=epoch(oldest_unheld), twice=twice)
         db.session.commit()
         return snapshot
@@ -88,10 +104,10 @@ def store_snapshot(snapshot):
     # No expiry: after a stopped retry, its age must continue to increase.
     connection.eval("""
         local old = redis.call('GET', KEYS[1])
-        if old and cjson.decode(old).completed >= tonumber(ARGV[1]) then return 0 end
+        if old and cjson.decode(old).sequence >= tonumber(ARGV[1]) then return 0 end
         redis.call('SET', KEYS[1], ARGV[2])
         return 1
-    """, 1, KEY, snapshot["completed"], json.dumps(snapshot, sort_keys=True))
+    """, 1, KEY, snapshot["sequence"], json.dumps(snapshot, sort_keys=True))
 
 
 def sample(connection, now):

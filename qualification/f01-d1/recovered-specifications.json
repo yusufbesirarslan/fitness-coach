@@ -125,6 +125,16 @@
       "path": "/Users/yusuf/outputs/axisai-d1-13plus-legal-redlines-01/candidate_texts/training.tr.txt",
       "sha256": "062ae5123955dae849ef48f91aa60387443bb53e14e94b2a1eb53808ecd82b80",
       "bytes": 2723
+    },
+    {
+      "path": "/Users/yusuf/axisai-r6-immediate-release-blocker-closure-01/evidence/G-release/RELEASE_RECEIPT.md",
+      "sha256": "300832653580cea39b70549ff9c69a7f8659953953a94ecdbe0de387c637e780",
+      "bytes": 8203
+    },
+    {
+      "path": "/Users/yusuf/axisai-r6-immediate-release-blocker-closure-01/RELEASE_READINESS_REPORT.md",
+      "sha256": "8e958daf53e74cabd37c355bca99905af11c7a6f26eb2f1b390f343db3457249",
+      "bytes": 16792
     }
   ]
 }

@@ -4,12 +4,12 @@
   "runs": [
     {
       "file": "qualification/f01-d1/m4-final.xml",
-      "sha256": "bffbc6f36969779811d5e182617f79b938d8f13395634495a4c4231e2d092657",
+      "sha256": "0f65a45b578638aec89262e406bdb59d504e91a4a1f728172ad8351bbf156f2f",
       "tests": 18,
       "failures": 0,
       "errors": 0,
       "skipped": 0,
-      "seconds": 2.557
+      "seconds": 2.713
     },
     {
       "file": "qualification/f01-d1/offline.xml",
@@ -37,6 +37,15 @@
       "errors": 0,
       "skipped": 0,
       "seconds": 7.933
+    },
+    {
+      "file": "qualification/f01-d1/snapshot-order-postgres.xml",
+      "sha256": "daa8dc2c1645fc4e6cb0c2d5adac547fe7bf52c23a97c290694be247b05ed302",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 2.736
     },
     {
       "file": "qualification/f01-d1/successor-compatibility.xml",
@@ -68,5 +77,16 @@
     "run": 42824243702,
     "head": "22a38d1ece8cce9f30e4f6573c6d297847d29edc",
     "pg18": "7 stale historical chain-fixture failures, 502 passed; seven failures corrected and locally verified"
+  },
+  "preceding_hosted_pass": {
+    "run": 42825971597,
+    "head": "029ba22ae468e43b6bdf7fe984192c3660c2b789",
+    "jobs": "13/13 success",
+    "note": "final snapshot-sequence correction requires its own final-head CI"
+  },
+  "snapshot_order_regression": {
+    "before": "FAIL: durable passes=2 but Redis twice=0",
+    "after": "PASS: later-finishing pass exposes twice=1; PG-serialized sequence orders CAS",
+    "test": "test_later_finishing_pass_publishes_its_newer_counter_snapshot"
   }
 }

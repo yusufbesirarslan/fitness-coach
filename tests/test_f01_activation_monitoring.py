@@ -169,12 +169,12 @@ def test_redis_lua_cas_rejects_stale_and_duplicate_snapshots(monkeypatch):
     from app import jobs
     redis = fakeredis.FakeStrictRedis()
     monkeypatch.setattr(jobs, "_rq_connection", lambda: redis)
-    newer = dict(completed=200, pending=1, oldest=1, oldest_unheld=1, twice=1)
+    newer = dict(sequence=2, completed=200, pending=1, oldest=1, oldest_unheld=1, twice=1)
     m.store_snapshot(newer)
-    m.store_snapshot(dict(newer, completed=100, twice=0))
+    m.store_snapshot(dict(newer, sequence=1, completed=300, twice=0))
     m.store_snapshot(dict(newer, twice=0))
     assert json.loads(redis.get(m.KEY)) == newer
-    m.store_snapshot(dict(newer, completed=201, pending=0, twice=0))
+    m.store_snapshot(dict(newer, sequence=3, completed=150, pending=0, twice=0))
     assert json.loads(redis.get(m.KEY))["pending"] == 0
 
 

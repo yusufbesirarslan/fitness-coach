@@ -67,3 +67,47 @@ def test_additive_migration_create_reentry_and_refuse_partial_schema(pg_app):
         conn.execute(sa.text("ALTER TABLE health_erasure_retry DROP COLUMN last_slot"))
         with pytest.raises(RuntimeError, match="incompatible"):
             _run(conn, migration.upgrade)
+
+
+def test_later_finishing_pass_publishes_its_newer_counter_snapshot(pg_app, monkeypatch):
+    """An earlier process start is not the aggregate snapshot's order."""
+    import json
+    import fakeredis
+    from app import jobs
+    redis = fakeredis.FakeStrictRedis()
+    monkeypatch.setattr(jobs, "_rq_connection", lambda: redis)
+    with pg_app.app_context():
+        db.session.add(HealthErasure(owner_id=1, generation=1,
+            requested_at=datetime.utcnow() - timedelta(hours=3)))
+        db.session.commit()
+        start = m.start_pass()
+        engine = db.engine
+    entered, release = threading.Event(), threading.Event()
+    def pause(connection, cursor, statement, parameters, context, executemany):
+        if (threading.current_thread().name == "earlier-start"
+                and "health_erasure" in statement and "FOR UPDATE" in statement
+                and not entered.is_set()):
+            entered.set()
+            assert release.wait(10)
+    sa.event.listen(engine, "before_cursor_execute", pause)
+    def finish(name, slot):
+        threading.current_thread().name = name
+        with pg_app.app_context():
+            snapshot = m.finish_pass(start, slot)
+            m.store_snapshot(snapshot)
+            return snapshot
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            early = pool.submit(finish, "earlier-start", 100)
+            assert entered.wait(5)
+            later = pool.submit(finish, "later-start", 101)
+            newer_started = later.result(timeout=10)
+            release.set()
+            later_finished = early.result(timeout=10)
+    finally:
+        release.set()
+        sa.event.remove(engine, "before_cursor_execute", pause)
+    with pg_app.app_context():
+        assert HealthErasureRetry.query.one().passes == 2
+    assert later_finished["sequence"] > newer_started["sequence"]
+    assert json.loads(redis.get(m.KEY))["twice"] == 1
