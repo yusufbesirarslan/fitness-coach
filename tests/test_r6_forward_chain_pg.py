@@ -1,14 +1,15 @@
-"""R6 release qualification: the exact four-migration chain from the live head.
+"""Historical R6 chain plus the additive M4 monitoring successor.
 
-Production's last verified Alembic head is ``c6f8b0d2e4a1`` (restore receipt,
-2026-11-09). The release candidate adds exactly four forward-only migrations:
+The historical R6 baseline was ``c6f8b0d2e4a1`` (restore receipt, 2026-11-09).
+Preserve its four reviewed forward migrations as a frozen prefix, then add
+only the source-qualified M4 monitoring revision:
 
-    c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
+    c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002 -> f01a4e000003
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
 
-* the graph is exactly those four revisions, linear, one head;
+* the graph is exactly that frozen prefix plus one successor, linear, one head;
 * the schema the Alembic history builds at ``c6f8b0d2e4a1``, plus production's
   itemized legacy differences (the ``activity_clap`` table, NOT NULL on
   ``user.rank_points`` and ``user.streak_count``, six server-side column
@@ -26,7 +27,7 @@ the CHAIN qualification on a database built only by the real Alembic history:
 * the whole chain runs in ONE transaction (migrations/env.py): a lock that
   blocks the third migration rolls the first two back too, the previous
   (``c6f8b0d2e4a1``) writer still boots, and a plain rerun completes;
-* the R6 forward-recovery gate, given the true four-revision delta, refuses
+* the R6 forward-recovery gate, given the complete source delta, refuses
   the live head and admits post-migration states (first, third and final
   revision); foreign/missing version states stay covered by
   ``test_r6_forward_recovery_pg``; after migration the previous writer cannot
@@ -68,7 +69,8 @@ import migration_expand_contract as mec  # noqa: E402
 import r6_deploy_transaction as tx  # noqa: E402
 
 LIVE_HEAD = "c6f8b0d2e4a1"
-CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
+R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
+CHAIN = R6_CHAIN + ("f01a4e000003",)
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -79,7 +81,7 @@ SEEDED = ("user", "meal_log", "custom_meal", "custom_meal_item", "weekly_check_i
           "pump_check", "workout_log", "workout_completion_day", "ai_allowance_bucket",
           "completion_capability_floor", "activity", "activity_clap")
 NEW_TABLES = ("health_consent_state", "health_consent_event", "meal_log_retained_total",
-              "health_erasure", "health_legal_hold")
+              "health_erasure", "health_legal_hold", "health_erasure_retry")
 PROVIDER_COLUMNS = {"meal_log": ("provider_items", "provider_acquired_at", "provider_expired_at"),
                     "custom_meal_item": ("provider_acquired_at", "provider_expired_at")}
 
@@ -270,10 +272,11 @@ def _verify_head_fence(url):
 
 # ── 1. the graph (no database) ──────────────────────────────────────────────
 
-def test_release_chain_is_exactly_the_four_reviewed_forward_migrations():
+def test_release_chain_preserves_reviewed_r6_prefix_and_adds_only_m4():
     from alembic.script import ScriptDirectory
     script = ScriptDirectory(str(ROOT / "migrations"))
     assert script.get_heads() == [HEAD]
+    assert CHAIN[:-1] == R6_CHAIN
     walked = [rev.revision for rev in script.iterate_revisions(HEAD, LIVE_HEAD)]
     assert tuple(reversed(walked)) == CHAIN
     parent = LIVE_HEAD
@@ -664,7 +667,7 @@ def test_a_lock_on_the_third_migration_rolls_back_the_whole_chain_then_rerun_com
     _verify_head_fence(chain_url)
 
 
-# ── 4. the R6 forward-recovery gate with the true four-revision delta ───────
+# ── 4. the existing forward-recovery gate with the complete source delta ────
 
 class _GateOps:
     def __init__(self, payload, trees):

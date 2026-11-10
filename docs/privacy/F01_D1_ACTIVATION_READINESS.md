@@ -141,6 +141,7 @@ TTL, timeout, scheduling and failure TTL remain unchanged.
 | Real disposable PostgreSQL F01/D1/erasure/operation/publication + new M4 overlap/cascade/adoption | 173 passed, no skips | `qualification/f01-d1/postgres.xml` |
 | Five-purpose retired-version matrix + existing QR/cohort composition | 29 passed, no skips | `qualification/f01-d1/selected-version-postgres.xml` |
 | Final M4, Lua CAS, real RQ classes with emulated Redis, read-only M5 reader + existing timer | 18 passed, no skips | `qualification/f01-d1/m4-final.xml` |
+| New-successor compatibility in the historical migration fixture (seven hosted failures corrected) | 7 passed, no skips | `qualification/f01-d1/successor-compatibility.xml` |
 
 Selections overlap and are not additive unique coverage. Local PostgreSQL is
 16, not a new PG18 certification; existing R6/hosted PG18 receipts are reused.
@@ -148,7 +149,12 @@ Redis/Lua uses `fakeredis==2.31.3` with the Lua engine; it proves source behavio
 not real Redis availability, CloudWatch delivery or target alarm actions. The
 real RQ classes complete jobs on that emulator. Upstream deprecation warnings
 were non-failing; no test was removed or weakened. Required hosted CI on the
-Draft PR remains separately visible. R6 and M1–M3 were not rerun as new gates.
+Draft PR remains separately visible. Its first PG18 run found seven stale
+historical fixture assumptions that still treated the four-revision R6 prefix
+as the current head. The fixture now preserves that frozen prefix and adds
+only M4 as its successor; the seven affected checks pass locally. New M4 PG
+cases are explicitly included in both hosted PG16 and PG18 selections. This
+qualifies the new migration delta; R6 and M1–M3 are not reopened as new gates.
 
 Independent review was requested under this task's explicit review authority.
 It identified and closed stale-snapshot, out-of-order-counter and unbounded

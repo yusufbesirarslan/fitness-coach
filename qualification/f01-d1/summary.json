@@ -37,6 +37,15 @@
       "errors": 0,
       "skipped": 0,
       "seconds": 7.933
+    },
+    {
+      "file": "qualification/f01-d1/successor-compatibility.xml",
+      "sha256": "5427db68a778fdb151320b0a0ade0bb8d4212126b771a4afdb46a57a2e8c7d73",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 11.928
     }
   ],
   "initial_selection": {
@@ -54,5 +63,10 @@
     "app/services/ai_allowances/launch_policy.py",
     "infra/r6-release-monitoring/template.yaml"
   ],
-  "migration_expand_contract": "PASS: 65 revisions; no old migration changed"
+  "migration_expand_contract": "PASS: 65 revisions; no old migration changed",
+  "hosted_first_attempt": {
+    "run": 42824243702,
+    "head": "22a38d1ece8cce9f30e4f6573c6d297847d29edc",
+    "pg18": "7 stale historical chain-fixture failures, 502 passed; seven failures corrected and locally verified"
+  }
 }
