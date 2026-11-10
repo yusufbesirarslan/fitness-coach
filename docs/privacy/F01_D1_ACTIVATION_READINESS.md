@@ -49,7 +49,7 @@ idle-queue snapshot and 16-minute watch are not M5's one-hour proof.
 | Area | Already implemented / qualified source | Genuine remaining prerequisite |
 | --- | --- | --- |
 | F01 approval and versioning | `health_disclosure.APPROVED_VERSION=None`. Candidate `health-fitness-v2-review`, separate purpose and exact locale SHA-256. Server-owned approval; request/env flags cannot publish it. Consent state/events use authenticated owner, CAS generation, exact digest, UTC timestamp, idempotent request digest. Unpublished/retired/malformed grants deny; stopped decisions remain available. | Controller/legal sign-off on exact version and handling of pre-F01 records of accounts that never grant. A later reviewed publication change is intentionally absent. |
-| First-party boundary | Default protection for authenticated product routes before body/image/context collection; ordinary account/consent/deletion controls remain. Independent PG shared health locks cover processing/response lifetime; withdrawal exclusive lock waits for admitted work; old worker generation cannot be renewed by regrant. Authority failures deny. | Later paired-client/device and target-environment receipt at the reviewed activation candidate. |
+| First-party boundary | Default protection for authenticated product routes before body/image/context collection; ordinary account/consent/deletion controls remain. Independent PG shared health locks cover processing/response lifetime; withdrawal exclusive lock waits for admitted work; old worker generation cannot be renewed by regrant. Authority failures deny. This draft additionally pins the independent F01 transaction to READ COMMITTED, matching D1. A non-RC default previously allowed a reader waiting behind withdrawal to retain the old grant snapshot; the deterministic regression reproduced admission after acknowledgment before the fix, and now denies under RR and SERIALIZABLE defaults. | Later paired-client/device and target-environment receipt at the reviewed activation candidate. |
 | D1 approval/publication | `POLICIES`, `PUBLISHED_TEXTS`, `LAUNCH_VERSIONS` are empty. Exact ordered purpose/categories, recipient/model pairs, EN/TR body hashes, nested/external scopes are in the contract digest. `ai_launch` requires selected exact version at capture, dispatch, canonical publication and native socket publication. Unsupported transports/streaming fail closed. | Final approved five-purpose contracts and exact ten texts/digests, source registration/publication and qualified service-cohort pin; none may be filled with guesses. |
 | Finite policy | `launch_policy.APPROVED_POLICY` **already equals `LAUNCH_V1_POLICY`** at c51f1422, including approved campaign. Older docs saying None are historical. Policy alone cannot open endpoints: enforcement flags, Redis, spend guard, cohort and exact grants remain required. | Actual nonproduction/runtime guard and cohort qualification, then separate activation authorization. No commercial redecision or new ledger is needed. |
 | Withdrawal/deletion | F01 commits stopped state + obligation, attempts storage before atomic health-row removal. Failed S3/cache/local deletion remains pending; no new grant until completion. Account deletion must prove storage inventory; missing account alone cannot falsely close debt. #504 legacy `activity_clap` fix is already integrated. | Adopt remaining legacy-never-granted retention/hold/evidence dispositions; target operational evidence, not another implementation of deletion. |
@@ -110,7 +110,8 @@ Daily/CLI passes do not manufacture hourly evidence.
 
 A single aggregate Redis snapshot feeds the existing fork-safe worker metric
 publisher. After all bounded counter batches, a fresh monitoring-only PG
-transaction takes a disjoint advisory lock (namespace 17922), with 2-second
+transaction explicitly pins READ COMMITTED before SQL and takes a disjoint
+advisory lock (namespace 17922), with 2-second
 lock and 5-second statement timeouts. It allocates `txid_current()` only after
 that lock, reads aggregate state, stamps actual completion and commits. Lua
 compare-and-set orders the v2 snapshot by that sequence, not process-start or
@@ -118,6 +119,9 @@ wall-clock order. This prevents a later-finishing pass with the two-retry
 state from being rejected as older. A deterministic regression reproduced
 the missed alert under the earlier timestamp ordering before the correction.
 Stale or duplicate publication is rejected even if Redis stores arrive late.
+Each counter batch also pins READ COMMITTED before its first SQL, so a
+non-RC server default cannot retain an old counter-row snapshot across a wait.
+These pins set scoped connection/transaction behavior, not database defaults.
 The parent opens no DB connection. Gauges include pending count, oldest-pending
 age, last-completed-retry age and count pending after two retries. Ages advance
 with zero health traffic. `HealthErasureOverdue` is explicitly a **0/1 breach
@@ -159,6 +163,8 @@ TTL, timeout, scheduling and failure TTL remain unchanged.
 | Final M4, Lua CAS, real RQ classes with emulated Redis, read-only M5 reader + existing timer | 18 passed, no skips | `qualification/f01-d1/m4-final.xml` |
 | New-successor compatibility in the historical migration fixture (seven hosted failures corrected) | 7 passed, no skips | `qualification/f01-d1/successor-compatibility.xml` |
 | Final M4 aggregate-order regression, overlapping counters, retention and migration | 6 passed, no skips | `qualification/f01-d1/snapshot-order-postgres.xml` |
+| F01 waiting-reader + M4 batch/snapshot authority under non-RC defaults | 21 passed, no skips | `qualification/f01-d1/isolation-postgres.xml` |
+| Final F01/erasure/M4 offline regression after isolation pins | 79 passed, 1 existing helper skip | `qualification/f01-d1/health-isolation-offline.xml` |
 
 Selections overlap and are not additive unique coverage. Local PostgreSQL is
 16, not a new PG18 certification; existing R6/hosted PG18 receipts are reused.
@@ -180,7 +186,10 @@ PG evidence. Review also closed the observer's unsafe RQ deserialization and
 unbounded timestamp predicates; hostile serialized fields and malformed,
 future and out-of-order timestamps now have negative tests. Final review also
 confirmed the aggregate snapshot-order race and its serialized-sequence fix;
-the regression fails before that correction and passes after it. Final reviewed
+the regression fails before that correction and passes after it. F01 and M4
+isolation-default defects were likewise confirmed against real PostgreSQL and
+closed with explicit READ COMMITTED transactions; no new purpose or permission
+is introduced. Final reviewed
 commit and disposition belong in the PR/receipt.
 
 ## Exact later nonproduction qualification
@@ -235,7 +244,9 @@ as an agent, switch profiles, print secrets, or work around MCP denial.
    selections and the five-purpose exact-version matrix against the final
    source/paired clients. Include pre-body refusals, foreign account, withdrawal
    in flight, durable failed stop across logout/restart, publication, old worker
-   generation, storage failure/retry and regrant after completion. For any
+   generation, storage failure/retry and regrant after completion. Include the
+waiting-reader regression under RR/SERIALIZABLE defaults and M4 duplicate
+workers under RR to prove the explicit READ COMMITTED authority. For any
    later paid/provider qualification, obtain explicit separate authority and
    exact recipient/model/location/retention facts first; no route switch is
    implied. Synthetic contracts never become approval evidence.

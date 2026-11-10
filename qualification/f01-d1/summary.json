@@ -3,6 +3,24 @@
   "base": "c51f142247341c79db979a70ed53461a19bfb3df",
   "runs": [
     {
+      "file": "qualification/f01-d1/health-isolation-offline.xml",
+      "sha256": "e1e52cc64029bd0c3eeeac938e36c3499f6805760194e24a5375272727f9369c",
+      "tests": 80,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "seconds": 7.95
+    },
+    {
+      "file": "qualification/f01-d1/isolation-postgres.xml",
+      "sha256": "cd1a79bc88056a4e82d371b62e9c77fac16d289618c073a995f15aab2b074b04",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 6.47
+    },
+    {
       "file": "qualification/f01-d1/m4-final.xml",
       "sha256": "0f65a45b578638aec89262e406bdb59d504e91a4a1f728172ad8351bbf156f2f",
       "tests": 18,
@@ -88,5 +106,11 @@
     "before": "FAIL: durable passes=2 but Redis twice=0",
     "after": "PASS: later-finishing pass exposes twice=1; PG-serialized sequence orders CAS",
     "test": "test_later_finishing_pass_publishes_its_newer_counter_snapshot"
+  },
+  "withdrawal_isolation_regression": {
+    "before": "FAIL: waiting reader ADMITTED after acknowledged withdrawal under RR default",
+    "after": "PASS: HEALTH_CONSENT_REQUIRED under RR and SERIALIZABLE defaults",
+    "test": "test_waiting_reader_sees_withdrawal_under_non_rc_default",
+    "change": "pin F01 independent authority READ COMMITTED; pin each M4 batch and final snapshot READ COMMITTED"
   }
 }

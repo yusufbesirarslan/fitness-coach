@@ -40,9 +40,12 @@ def finish_pass(start, slot, now=None, batch_size=200):
     try:
         if type(batch_size) is not int or batch_size < 1:
             raise ValueError("positive batch size required")
+        db.session.rollback()
         ceiling, started_at = start
         after = 0
         while after < ceiling:
+            if db.engine.dialect.name == "postgresql":
+                db.session.connection(execution_options={"isolation_level": "READ COMMITTED"})
             rows = HealthErasure.query.filter(HealthErasure.id > after,
                 HealthErasure.id <= ceiling, HealthErasure.requested_at <= started_at,
                 HealthErasure.completed_at.is_(None)).order_by(HealthErasure.id).limit(
@@ -64,6 +67,7 @@ def finish_pass(start, slot, now=None, batch_size=200):
         # lock. No owner lock or previously allocated XID crosses this boundary.
         db.session.rollback()
         if db.engine.dialect.name == "postgresql":
+            db.session.connection(execution_options={"isolation_level": "READ COMMITTED"})
             db.session.execute(text("SET LOCAL lock_timeout = '2000ms'"))
             db.session.execute(text("SET LOCAL statement_timeout = '5000ms'"))
             db.session.execute(text("SELECT pg_advisory_xact_lock(:namespace, 0)"),

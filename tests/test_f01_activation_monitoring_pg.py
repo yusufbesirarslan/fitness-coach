@@ -17,12 +17,15 @@ MIGRATION = "f01a4e000003_health_erasure_retry_monitoring.py"
 
 
 @pytest.mark.parametrize("slots,expected", [((100, 100), 1), ((100, 101), 2), ((101, 100), 2)])
-def test_overlapping_workers_count_distinct_hours_once(pg_app, slots, expected):
+@pytest.mark.parametrize("default_isolation", ["READ COMMITTED", "REPEATABLE READ"])
+def test_overlapping_workers_count_distinct_hours_once(pg_app, slots, expected, default_isolation):
     with pg_app.app_context():
         row = HealthErasure(owner_id=1, generation=1, requested_at=datetime.utcnow() - timedelta(hours=3))
         db.session.add(row)
         db.session.commit()
         key = row.id
+        db.session.remove()
+        db.engine.update_execution_options(isolation_level=default_isolation)
         start = m.start_pass()
     ready = threading.Barrier(2)
     def finish(slot):
@@ -111,3 +114,19 @@ def test_later_finishing_pass_publishes_its_newer_counter_snapshot(pg_app, monke
         assert HealthErasureRetry.query.one().passes == 2
     assert later_finished["sequence"] > newer_started["sequence"]
     assert json.loads(redis.get(m.KEY))["twice"] == 1
+
+
+def test_snapshot_transaction_is_read_committed_even_under_rr_default(pg_app):
+    with pg_app.app_context():
+        engine = db.engine
+        engine.update_execution_options(isolation_level="REPEATABLE READ")
+        levels = []
+        def capture(connection, cursor, statement, parameters, context, executemany):
+            if statement == "SELECT txid_current()":
+                levels.append(connection.get_isolation_level())
+        sa.event.listen(engine, "before_cursor_execute", capture)
+        try:
+            m.finish_pass(m.start_pass(), 100)
+        finally:
+            sa.event.remove(engine, "before_cursor_execute", capture)
+        assert levels == ["READ COMMITTED"]

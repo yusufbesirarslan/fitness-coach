@@ -32,7 +32,9 @@ def _authority(owner, *, exclusive=False):
     if type(owner) is not int or not 0 < owner <= 2147483647:
         raise HealthConsentDenied()
     try:
-        with db.engine.connect() as conn:
+        # The lock SELECT can wait behind withdrawal. Its pre-wait snapshot
+        # must not become the later state read under a database's RR default.
+        with db.engine.connect().execution_options(isolation_level="READ COMMITTED") as conn:
             if conn.dialect.name != "postgresql":
                 raise HealthConsentDenied("HEALTH_CONSENT_AUTHORITY_UNAVAILABLE", 503)
             with conn.begin():
