@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import time
+import uuid
 
 logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(),
                                   logging.INFO))
@@ -103,9 +104,13 @@ def _health_erasure_tick(last_erasure, now):
         from app.jobs.tasks import retry_health_erasures
         queue = get_queue()
         if queue is not None:
+            retry_slot = int(time.time() // HEALTH_ERASURE_INTERVAL_SECONDS)
             queue.enqueue_call(retry_health_erasures,
+                               kwargs={"retry_slot": retry_slot},
+                               job_id=f"f01-erasure-retry-{retry_slot}-{uuid.uuid4().hex}",
+                               description="axisai.f01.erasure-retry.v1",
                                timeout=900, ttl=HEALTH_ERASURE_INTERVAL_SECONDS,
-                               result_ttl=0, failure_ttl=86400)
+                               result_ttl=7200, failure_ttl=86400)
     except Exception:
         _log.warning("Saglik verisi silme yeniden denemesi kuyruga atilamadi — "
                      "sonraki tikte denenecek", exc_info=True)

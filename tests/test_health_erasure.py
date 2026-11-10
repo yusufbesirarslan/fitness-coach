@@ -405,7 +405,7 @@ def test_worker_timer_enqueues_erasure_retry_without_traffic(world, monkeypatch)
     assert worker._health_erasure_tick(last, 1800.0) == last     # inside the interval
     assert worker._health_erasure_tick(last, 3600.0) == 3600.0
     assert [f for f, _ in enqueued] == [tasks.retry_health_erasures] * 2
-    assert enqueued[0][1]["timeout"] == 900 and enqueued[0][1]["result_ttl"] == 0
+    assert enqueued[0][1]["timeout"] == 900 and enqueued[0][1]["result_ttl"] == 7200
 
     world.s3.failing.add(world.a_keys["pump"])
     _withdraw(world.a_id)

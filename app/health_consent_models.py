@@ -62,3 +62,16 @@ class HealthLegalHold(db.Model):
     created_at = db.Column(db.DateTime, nullable=False)
     review_at = db.Column(db.DateTime, nullable=False)
     released_at = db.Column(db.DateTime, nullable=True)
+
+
+class HealthErasureRetry(db.Model):
+    """Monitoring evidence only; no account identifier or health payload.
+
+    One counter per obligation. Distinct scheduled UTC hours are counted only
+    if the obligation survives the pass. Duplicate workers/jobs cannot count
+    the same scheduled hour twice. Removed with the parent erasure receipt.
+    """
+    __tablename__ = "health_erasure_retry"
+    erasure_id = db.Column(db.Integer, db.ForeignKey("health_erasure.id", ondelete="CASCADE"), primary_key=True)
+    passes = db.Column(db.Integer, nullable=False)
+    last_slot = db.Column(db.BigInteger, nullable=False)

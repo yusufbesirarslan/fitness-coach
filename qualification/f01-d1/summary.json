@@ -1,0 +1,58 @@
+{
+  "task": "AXISAI-F01-D1-LAUNCH-ACTIVATION-READINESS-20261110",
+  "base": "c51f142247341c79db979a70ed53461a19bfb3df",
+  "runs": [
+    {
+      "file": "qualification/f01-d1/m4-final.xml",
+      "sha256": "bffbc6f36969779811d5e182617f79b938d8f13395634495a4c4231e2d092657",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 2.557
+    },
+    {
+      "file": "qualification/f01-d1/offline.xml",
+      "sha256": "cceb332a498128a3ad080e8ff1fd66b3c319443b6a509f5f2cf1409dfa20b11b",
+      "tests": 157,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 7.603
+    },
+    {
+      "file": "qualification/f01-d1/postgres.xml",
+      "sha256": "0061411b958a6ddd428f55c9f037e06fc41f8c48eaa965f524ded424a07423c8",
+      "tests": 173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 88.013
+    },
+    {
+      "file": "qualification/f01-d1/selected-version-postgres.xml",
+      "sha256": "ae0fd89886ab19c5c959e3f6c3bd7cf682d40ef536f644288515edca36a26b2b",
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 7.933
+    }
+  ],
+  "initial_selection": {
+    "passed": 289,
+    "skipped": 1,
+    "evidence": "captured tool output; no JUnit generated"
+  },
+  "note": "Selections overlap; no additive unique-test total. M5 target runtime not executed. No AWS/prod/provider calls.",
+  "unchanged_authorities": [
+    "app/services/health_disclosure.py",
+    "app/services/ai_consent.py",
+    "app/services/ai_consent_disclosures.py",
+    "app/services/ai_model_policy.py",
+    "app/config.py",
+    "app/services/ai_allowances/launch_policy.py",
+    "infra/r6-release-monitoring/template.yaml"
+  ],
+  "migration_expand_contract": "PASS: 65 revisions; no old migration changed"
+}

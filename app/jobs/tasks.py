@@ -121,7 +121,7 @@ def expire_provider_nutrition():
     return outcome
 
 
-def retry_health_erasures():
+def retry_health_erasures(retry_slot=None):
     """F01 withdrawal erasures that failed in their request (A1 = O2-B).
 
     Enqueued hourly by the worker's timer thread (worker.py), so a pending
@@ -130,7 +130,13 @@ def retry_health_erasures():
     """
     def _body():
         from app.services import health_erasure
-        return health_erasure.run_pending()
+        from app.services import health_erasure_monitoring as monitoring
+        start = monitoring.start_pass() if retry_slot is not None else None
+        outcome = health_erasure.run_pending()
+        if retry_slot is not None:
+            snapshot = monitoring.finish_pass(start, retry_slot)
+            monitoring.store_snapshot(snapshot)
+        return outcome
 
     return _in_app_context(_body)
 
