@@ -113,7 +113,12 @@ def expire_provider_nutrition():
                 "scrubbed": result.scrubbed_items,
                 "overdue": result.overdue}
 
-    return _in_app_context(_body)
+    outcome = _in_app_context(_body)
+    # M3 (R6 release monitoring): only a pass that FINISHED reports, so a pass
+    # that keeps failing or never runs leaves the metric missing (= alarm).
+    from app.services import release_monitoring
+    release_monitoring.record_retention_pass(outcome["overdue"])
+    return outcome
 
 
 def retry_health_erasures():
