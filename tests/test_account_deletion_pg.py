@@ -51,6 +51,10 @@ def pg_app(monkeypatch):
     db.init_app(app)
     cognito, s3 = install_fakes(monkeypatch)
     with app.app_context():
+        # A crashed earlier run may have left the unmapped legacy table, whose
+        # FKs would make drop_all fail (see LEGACY_ACTIVITY_CLAP_DDL).
+        with db.engine.begin() as conn:
+            conn.exec_driver_sql("DROP TABLE IF EXISTS activity_clap")
         db.drop_all()
         db.create_all()
     try:
@@ -389,3 +393,86 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
         assert User.query.filter_by(username="pg_frank").count() == 0
         assert [t.fingerprint for t in DeletedIdentityTombstone.query] == [
             deleted_identity.fingerprint(sub)]
+
+
+@pytest.fixture
+def legacy_clap(pg_app):
+    from account_deletion_support import (drop_legacy_activity_clap,
+                                          install_legacy_activity_clap)
+    app = pg_app[0]
+    with app.app_context():
+        install_legacy_activity_clap()
+    try:
+        yield pg_app
+    finally:
+        with app.app_context():
+            drop_legacy_activity_clap()
+
+
+def _clap_world(app, cognito, s3):
+    """clapper claps owner's activity; owner claps the bystander's; the
+    bystander's own clap is unrelated to both deletions."""
+    from app.extensions import db
+    from account_deletion_support import add_activity, add_clap
+
+    c_id, _, c_principal = _seed(app, cognito, s3, "pg_clapper")
+    o_id, _, o_principal = _seed(app, cognito, s3, "pg_clap_owner")
+    b_id, _, _ = _seed(app, cognito, s3, "pg_clap_bystander")
+    with app.app_context():
+        owner_act, bystander_act = add_activity(o_id), add_activity(b_id)
+        add_clap(owner_act, c_id)
+        add_clap(bystander_act, o_id)
+        add_clap(bystander_act, b_id)
+        db.session.commit()
+    return (c_id, c_principal), (o_id, o_principal), b_id, owner_act, bystander_act
+
+
+@pytest.mark.parametrize("who", ["clapper", "activity_owner"])
+def test_legacy_activity_clap_no_longer_blocks_account_deletion(legacy_clap, who):
+    """Production's NO ACTION activity_clap FKs: deletion removes exactly the
+    claps that point at the deleted user or their activities, nothing else."""
+    from app.extensions import db
+    from app.models import Activity, User
+    from app.services import account_deletion
+    from account_deletion_support import claps
+
+    app, cognito, s3 = legacy_clap
+    clapper, owner, b_id, owner_act, bystander_act = _clap_world(app, cognito, s3)
+    target_id, principal = clapper if who == "clapper" else owner
+    with app.app_context():
+        account_deletion.delete_account(*principal)
+        assert db.session.get(User, target_id) is None
+        if who == "clapper":
+            assert claps() == sorted([(bystander_act, owner[0]), (bystander_act, b_id)])
+            assert db.session.get(Activity, owner_act) is not None
+        else:
+            assert claps() == [(bystander_act, b_id)]
+            assert db.session.get(Activity, owner_act) is None
+        assert db.session.get(User, b_id) is not None
+        assert db.session.get(Activity, bystander_act) is not None
+
+
+@pytest.mark.parametrize("who", ["clapper", "activity_owner"])
+def test_without_the_cleanup_the_legacy_fk_aborts_the_purge(legacy_clap, monkeypatch, who):
+    """Non-vacuity: the same purge with the cleanup disabled hits 23503."""
+    from app.cli import _purge_user
+    from app.extensions import db
+    from app.models import User
+    from app.services import legacy_activity_clap
+    from account_deletion_support import claps
+
+    app, cognito, s3 = legacy_clap
+    clapper, owner, *_ = _clap_world(app, cognito, s3)
+    target_id = (clapper if who == "clapper" else owner)[0]
+    monkeypatch.setattr(legacy_activity_clap, "delete_for_user", lambda uid: 0)
+    with app.app_context():
+        before = claps()
+        with pytest.raises(IntegrityError) as error:
+            _purge_user(db.session.get(User, target_id))
+            db.session.flush()
+        assert error.value.orig.pgcode == "23503"
+        assert error.value.orig.diag.constraint_name == (
+            "activity_clap_user_id_fkey" if who == "clapper"
+            else "activity_clap_activity_id_fkey")
+        db.session.rollback()
+        assert claps() == before

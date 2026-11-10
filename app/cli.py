@@ -262,6 +262,12 @@ def _purge_user(user):
                   HealthLegalHold):
         Model.query.filter_by(owner_id=uid).delete(synchronize_session=False)
 
+    # Production's unmapped legacy activity_clap has NO ACTION FKs to both
+    # user and activity; clear the rows that point at this user before the
+    # loop below deletes their activities and the user (no-op without it).
+    from app.services import legacy_activity_clap
+    legacy_activity_clap.delete_for_user(uid)
+
     for Model in _USER_CHILD_MODELS:
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)
 

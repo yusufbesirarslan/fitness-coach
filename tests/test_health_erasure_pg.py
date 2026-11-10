@@ -303,3 +303,50 @@ def test_hold_creation_waits_for_inflight_storage_erasure(world, monkeypatch):
         assert one.result(5) == 'completed'
         result = two.result(5)
         assert result.exit_code == 0, result.output
+
+
+@pytest.fixture
+def clap_world(world):
+    from account_deletion_support import (add_activity, add_clap, drop_legacy_activity_clap,
+                                          install_legacy_activity_clap)
+    install_legacy_activity_clap()
+    try:
+        own, other = add_activity(1), add_activity(2)
+        add_clap(own, 2)      # someone else's clap on the erased owner's activity
+        add_clap(other, 1)    # the erased owner's clap elsewhere: social, not health
+        add_clap(other, 2)
+        db.session.commit()
+        yield world, own, other
+    finally:
+        drop_legacy_activity_clap()
+
+
+def test_legacy_activity_clap_no_longer_blocks_workout_erasure(clap_world):
+    from app.models import Activity
+    from account_deletion_support import claps
+    _, own, other = clap_world
+    stop()
+    assert health_erasure.run(1) == 'completed'
+    assert db.session.get(Activity, own) is None
+    assert db.session.get(Activity, other) is not None
+    assert claps() == sorted([(other, 1), (other, 2)])
+    assert HealthErasure.query.filter_by(owner_id=1).one().completed_at is not None
+
+
+def test_without_the_cleanup_legacy_clap_keeps_workout_erasure_pending(clap_world, monkeypatch):
+    """Non-vacuity: the same erasure with the cleanup disabled cannot complete."""
+    from app.models import Activity
+    from app.services import legacy_activity_clap
+    from account_deletion_support import claps
+    _, own, other = clap_world
+    monkeypatch.setattr(legacy_activity_clap, 'delete_on_activities_of', lambda uid: 0)
+    stop()
+    before = claps()
+    with pytest.raises(health_erasure.ErasureUnavailable) as error:
+        health_erasure.run(1)
+    assert error.value.__cause__.orig.pgcode == '23503'
+    assert error.value.__cause__.orig.diag.constraint_name == 'activity_clap_activity_id_fkey'
+    db.session.rollback()
+    assert db.session.get(Activity, own) is not None
+    assert claps() == before
+    assert HealthErasure.query.filter_by(owner_id=1).one().completed_at is None

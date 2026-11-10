@@ -509,17 +509,19 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
 
 def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_after(
         chain_url, monkeypatch):
-    """P2 finding from the production readback, characterized (not fixed here).
+    """P2 finding from the production readback, characterized at the SQL level.
 
     ``activity_clap`` is the only table whose foreign key to ``user`` is not
-    CASCADE/SET NULL, and its ``activity_id`` key is NO ACTION too. Account
-    deletion (``_purge_user``) does not know the table, so deleting the
-    clapping user, or the owner of a clapped activity, fails with 23503 and the
-    purge rolls back. The chain neither causes nor changes this: same result
-    at the live head and at the release head. Users without claps are
-    unaffected. The F01 O2-B health erasure deletes ``activity`` rows too, so
-    it cannot complete for a clapped activity's owner. Remediation is a
-    separate, founder-approved change."""
+    CASCADE/SET NULL, and its ``activity_id`` key is NO ACTION too. A raw
+    delete of the clapping user, or of a clapped activity's owner or that
+    owner's activities, fails with 23503. The chain neither causes nor changes
+    this: same result at the live head and at the release head. Users without
+    claps are unaffected. The schema is deliberately left as is: account
+    deletion (``_purge_user``) and the F01 O2-B workout erasure remove the
+    referencing claps first, in application code
+    (``app/services/legacy_activity_clap.py``, ``docs/LEGACY_ACTIVITY_CLAP.md``,
+    tested in ``test_account_deletion_pg`` and ``test_health_erasure_pg``), so
+    only deletes made outside the application still hit 23503."""
     def accounts():
         made = {}
         for name in ("clap_owner", "clapper", "no_clap"):
