@@ -1,6 +1,8 @@
 """Real disposable PostgreSQL: no test replacement of consent/locking."""
 import os
 import threading
+import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -84,6 +86,59 @@ def test_withdrawal_serializes_with_processing_even_across_orm_commits(pg_app):
         with pytest.raises(consent.HealthConsentDenied):
             with consent.processing(1):
                 pytest.fail("processing after acknowledged withdrawal")
+
+
+@pytest.mark.parametrize("default_isolation", ["REPEATABLE READ", "SERIALIZABLE"])
+def test_waiting_reader_sees_withdrawal_under_non_rc_default(pg_app, monkeypatch, default_isolation):
+    """The advisory-lock SELECT must not freeze an old permission snapshot."""
+    import sqlalchemy as sa
+    with pg_app.app_context():
+        consent.mutate(1, command())
+        db.session.remove()
+        engine = db.engine
+        engine.update_execution_options(isolation_level=default_isolation)
+    locked, release = threading.Event(), threading.Event()
+    original = consent._authority
+    @contextmanager
+    def parked(owner, *, exclusive=False):
+        with original(owner, exclusive=exclusive) as connection:
+            if exclusive:
+                locked.set()
+                assert release.wait(10)
+            yield connection
+    monkeypatch.setattr(consent, "_authority", parked)
+    def withdraw():
+        with pg_app.app_context():
+            return consent.mutate(1, command(1, "withdraw", "rr-default-withdraw"))
+    def read():
+        with pg_app.app_context():
+            try:
+                with consent.processing(1):
+                    return "ADMITTED"
+            except consent.HealthConsentDenied as error:
+                return error.code
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            stopping = pool.submit(withdraw)
+            assert locked.wait(5)
+            reading = pool.submit(read)
+            deadline = time.monotonic() + 5
+            waiting = False
+            while time.monotonic() < deadline:
+                with engine.connect() as connection:
+                    waiting = bool(connection.execute(sa.text(
+                        "SELECT count(*) FROM pg_locks WHERE locktype='advisory' "
+                        "AND classid=:namespace AND objid=1 AND NOT granted"),
+                        {"namespace": consent.LOCK_NAMESPACE}).scalar_one())
+                if waiting:
+                    break
+                time.sleep(0.01)
+            assert waiting, "reader must actually wait behind withdrawal"
+            release.set()
+            assert stopping.result(timeout=10)["state"] == "withdrawn"
+            assert reading.result(timeout=10) == "HEALTH_CONSENT_REQUIRED"
+    finally:
+        release.set()
 
 
 def test_old_work_and_mutation_replay_cannot_revive_after_regrant(pg_app):

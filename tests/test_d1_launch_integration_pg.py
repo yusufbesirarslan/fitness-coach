@@ -14,6 +14,65 @@ from test_d1_launch_integration import approved_cohort
 pytestmark = pytest.mark.pg_concurrency
 
 
+@pytest.mark.parametrize("feature", list(consent.BINDINGS))
+@pytest.mark.parametrize("route,family,model", [
+    ("legacy", "openai", "gpt-4o-mini"),
+    ("legacy", "bedrock", "global.anthropic.claude-sonnet-4-5-20250929-v1:0"),
+    ("claude55", "bedrock", "eu.anthropic.claude-sonnet-5-5"),
+    ("claude55", "bedrock", "eu.anthropic.claude-haiku-5-5"),
+])
+def test_retired_selected_version_cannot_dispatch_on_any_model_route(
+        pg_app, monkeypatch, approved_cohort, feature, route, family, model):
+    """Real PG final authority: routing/fallback cannot upgrade an old grant.
+
+    Only runtime installation is isolated, as in the cohort test below. Text,
+    policy digest, owner, generation, selected version and SDK fences are real.
+    """
+    from app import config
+    from app.services.ai_allowances import launch_policy
+    from consent_projection_support import publish_synthetic_texts
+    monkeypatch.setattr(config, "AI_MODEL_ROUTING", route)
+    monkeypatch.setattr(config, "BEDROCK_SONNET55_MODEL", "eu.anthropic.claude-sonnet-5-5")
+    monkeypatch.setattr(config, "BEDROCK_HAIKU55_MODEL", "eu.anthropic.claude-haiku-5-5")
+    old = consent.POLICIES["synthetic-" + feature]
+    old = replace(old, recipients=((family, model),),
+        external_scopes=("public_https_menu_source",) if feature == "menu_extract" else ())
+    new = replace(old, version=old.version + "-selected")
+    policies = publish_synthetic_texts(monkeypatch, {old.version: old, new.version: new})
+    monkeypatch.setattr(consent, "POLICIES", policies)
+    monkeypatch.setattr(disclosures, "LAUNCH_VERSIONS", {old.purpose: old.version})
+    monkeypatch.setattr(launch_policy, "installed_policy", lambda: object())
+    monkeypatch.setattr(ai_launch, "require_runtime", lambda: None)
+    sdk = Mock(return_value=object())
+    payload = dict(model=model, max_tokens=100, messages=[dict(role="user", content="SYNTHETIC")])
+    with pg_app.app_context(), ai_spend_guard.subject_scope(1):
+        adult_account(db.session.get(User, 1))
+        db.session.commit()
+        consent.mutate(1, command(feature))
+        authority = consent.begin_operation(1, feature, family, model)
+        # Publish/select a successor without altering the durable old grant.
+        monkeypatch.setattr(disclosures, "LAUNCH_VERSIONS", {old.purpose: new.version})
+        with consent.operation_scope(authority), pytest.raises(consent.ConsentDenied):
+            with calls.admit(feature=feature, provider=family, payload=payload,
+                             gate=False, charge=False) as admitted:
+                admitted.create(sdk)
+        with pytest.raises(consent.ConsentDenied):
+            consent.authorize_operation(authority)
+        sdk.assert_not_called()
+        # Non-vacuity: a fresh affirmative grant of the selected exact contract
+        # reaches the same stub SDK through the same routing and final fence.
+        selected = policies[new.version]
+        consent.mutate(1, dict(command(feature, generation=1, key="selected-version-grant"),
+            version=selected.version, text_digest=dict(selected.texts)["en"],
+            contract_digest=consent.contract_digest(selected)))
+        fresh = consent.begin_operation(1, feature, family, model)
+        with consent.operation_scope(fresh):
+            with calls.admit(feature=feature, provider=family, payload=payload,
+                             gate=False, charge=False) as admitted:
+                admitted.create(sdk)
+        assert sdk.call_count == 1
+
+
 def call_nutrition(sdk):
     with calls.admit(feature="nutrition", provider="openai", payload={
         "model": ai.OPENAI_MODEL, "messages": [{"role": "user", "content": "SYNTHETIC_MENU_ONLY"}],

@@ -1,0 +1,182 @@
+[
+  {
+    "path": "app/blueprints/mobile_nutrition_closure.py",
+    "line": 132,
+    "call": "ai._heavy_chat",
+    "feature": null
+  },
+  {
+    "path": "app/blueprints/nutrition/meallog.py",
+    "line": 645,
+    "call": "_openai_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/blueprints/nutrition/meallog.py",
+    "line": 224,
+    "call": "_openai_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 229,
+    "call": "_bedrock_image_message",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 64,
+    "call": "_claude_chat",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 363,
+    "call": "_heavy_complete",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 76,
+    "call": "ai_provider_call.admit",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 144,
+    "call": "ai_provider_call.admit",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 203,
+    "call": "ai_provider_call.admit",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 251,
+    "call": "ai_provider_call.admit",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 311,
+    "call": "_claude_chat",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai.py",
+    "line": 333,
+    "call": "_openai_chat",
+    "feature": "feature"
+  },
+  {
+    "path": "app/services/ai_coach.py",
+    "line": 794,
+    "call": "_bedrock_validate_image",
+    "feature": null
+  },
+  {
+    "path": "app/services/ai_coach.py",
+    "line": 1606,
+    "call": "_heavy_chat",
+    "feature": "'coach'"
+  },
+  {
+    "path": "app/services/ai_coach.py",
+    "line": 1639,
+    "call": "_heavy_chat",
+    "feature": "'coach'"
+  },
+  {
+    "path": "app/services/ai_coach.py",
+    "line": 1362,
+    "call": "ai_provider_call.admit",
+    "feature": "'coach'"
+  },
+  {
+    "path": "app/services/ai_coach.py",
+    "line": 1506,
+    "call": "ai_provider_call.admit",
+    "feature": "'coach'"
+  },
+  {
+    "path": "app/services/ai_nutrition.py",
+    "line": 273,
+    "call": "_openai_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/services/ai_nutrition.py",
+    "line": 317,
+    "call": "_heavy_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/services/ai_nutrition.py",
+    "line": 483,
+    "call": "_heavy_chat",
+    "feature": "'menu_extract'"
+  },
+  {
+    "path": "app/services/ai_nutrition.py",
+    "line": 550,
+    "call": "_openai_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/services/ai_nutrition.py",
+    "line": 585,
+    "call": "_heavy_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/services/ai_nutrition.py",
+    "line": 691,
+    "call": "_heavy_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/services/ai_nutrition.py",
+    "line": 220,
+    "call": "_openai_chat",
+    "feature": "'nutrition'"
+  },
+  {
+    "path": "app/services/ai_stream.py",
+    "line": 143,
+    "call": "ai_provider_call.admit",
+    "feature": "'coach'"
+  },
+  {
+    "path": "app/services/bedrock_health.py",
+    "line": 66,
+    "call": "ai_provider_call.probe_bedrock_readiness",
+    "feature": null
+  },
+  {
+    "path": "app/services/memory_manager.py",
+    "line": 305,
+    "call": "_openai_chat",
+    "feature": "'summary'"
+  },
+  {
+    "path": "app/services/menu_extract.py",
+    "line": 410,
+    "call": "_bedrock_validate_image",
+    "feature": null
+  },
+  {
+    "path": "app/services/menu_ocr.py",
+    "line": 148,
+    "call": "ai_provider_call.admit",
+    "feature": "'menu_ocr'"
+  },
+  {
+    "path": "app/services/menu_ocr.py",
+    "line": 222,
+    "call": "ai_provider_call.admit",
+    "feature": "'menu_ocr'"
+  }
+]

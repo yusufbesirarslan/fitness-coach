@@ -187,6 +187,12 @@ class WorkerSampler:
             connection.ping()
             values = {WORKER_HEARTBEAT: (1, "Count")}
             try:
+                from app.services import health_erasure_monitoring
+                values.update(health_erasure_monitoring.sample(
+                    connection, _aware(now) or datetime.now(timezone.utc)))
+            except Exception as exc:
+                _log.warning("[ERASURE MONITORING] sample failed: %s", type(exc).__name__)
+            try:
                 sample = sample_queue(queue, connection, now=now)
             except Exception as exc:  # noqa: BLE001 - heartbeat still counts
                 _log.warning("[RELEASE MONITORING] queue sample failed: %s",

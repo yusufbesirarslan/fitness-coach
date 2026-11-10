@@ -1,0 +1,116 @@
+{
+  "task": "AXISAI-F01-D1-LAUNCH-ACTIVATION-READINESS-20261110",
+  "base": "c51f142247341c79db979a70ed53461a19bfb3df",
+  "runs": [
+    {
+      "file": "qualification/f01-d1/health-isolation-offline.xml",
+      "sha256": "e1e52cc64029bd0c3eeeac938e36c3499f6805760194e24a5375272727f9369c",
+      "tests": 80,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "seconds": 7.95
+    },
+    {
+      "file": "qualification/f01-d1/isolation-postgres.xml",
+      "sha256": "cd1a79bc88056a4e82d371b62e9c77fac16d289618c073a995f15aab2b074b04",
+      "tests": 21,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 6.47
+    },
+    {
+      "file": "qualification/f01-d1/m4-final.xml",
+      "sha256": "0f65a45b578638aec89262e406bdb59d504e91a4a1f728172ad8351bbf156f2f",
+      "tests": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 2.713
+    },
+    {
+      "file": "qualification/f01-d1/offline.xml",
+      "sha256": "cceb332a498128a3ad080e8ff1fd66b3c319443b6a509f5f2cf1409dfa20b11b",
+      "tests": 157,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 7.603
+    },
+    {
+      "file": "qualification/f01-d1/postgres.xml",
+      "sha256": "0061411b958a6ddd428f55c9f037e06fc41f8c48eaa965f524ded424a07423c8",
+      "tests": 173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 88.013
+    },
+    {
+      "file": "qualification/f01-d1/selected-version-postgres.xml",
+      "sha256": "ae0fd89886ab19c5c959e3f6c3bd7cf682d40ef536f644288515edca36a26b2b",
+      "tests": 29,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 7.933
+    },
+    {
+      "file": "qualification/f01-d1/snapshot-order-postgres.xml",
+      "sha256": "daa8dc2c1645fc4e6cb0c2d5adac547fe7bf52c23a97c290694be247b05ed302",
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 2.736
+    },
+    {
+      "file": "qualification/f01-d1/successor-compatibility.xml",
+      "sha256": "5427db68a778fdb151320b0a0ade0bb8d4212126b771a4afdb46a57a2e8c7d73",
+      "tests": 7,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "seconds": 11.928
+    }
+  ],
+  "initial_selection": {
+    "passed": 289,
+    "skipped": 1,
+    "evidence": "captured tool output; no JUnit generated"
+  },
+  "note": "Selections overlap; no additive unique-test total. M5 target runtime not executed. No AWS/prod/provider calls.",
+  "unchanged_authorities": [
+    "app/services/health_disclosure.py",
+    "app/services/ai_consent.py",
+    "app/services/ai_consent_disclosures.py",
+    "app/services/ai_model_policy.py",
+    "app/config.py",
+    "app/services/ai_allowances/launch_policy.py",
+    "infra/r6-release-monitoring/template.yaml"
+  ],
+  "migration_expand_contract": "PASS: 65 revisions; no old migration changed",
+  "hosted_first_attempt": {
+    "run": 42824243702,
+    "head": "22a38d1ece8cce9f30e4f6573c6d297847d29edc",
+    "pg18": "7 stale historical chain-fixture failures, 502 passed; seven failures corrected and locally verified"
+  },
+  "preceding_hosted_pass": {
+    "run": 42825971597,
+    "head": "029ba22ae468e43b6bdf7fe984192c3660c2b789",
+    "jobs": "13/13 success",
+    "note": "final snapshot-sequence correction requires its own final-head CI"
+  },
+  "snapshot_order_regression": {
+    "before": "FAIL: durable passes=2 but Redis twice=0",
+    "after": "PASS: later-finishing pass exposes twice=1; PG-serialized sequence orders CAS",
+    "test": "test_later_finishing_pass_publishes_its_newer_counter_snapshot"
+  },
+  "withdrawal_isolation_regression": {
+    "before": "FAIL: waiting reader ADMITTED after acknowledged withdrawal under RR default",
+    "after": "PASS: HEALTH_CONSENT_REQUIRED under RR and SERIALIZABLE defaults",
+    "test": "test_waiting_reader_sees_withdrawal_under_non_rc_default",
+    "change": "pin F01 independent authority READ COMMITTED; pin each M4 batch and final snapshot READ COMMITTED"
+  }
+}
