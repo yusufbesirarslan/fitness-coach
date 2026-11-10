@@ -112,12 +112,27 @@ def _health_erasure_tick(last_erasure, now):
     return now
 
 
+def _monitoring_tick(sampler, now):
+    """R6 M1/M2: publish worker liveness + queue health; never raise.
+
+    Redis only (no database connection in this long-lived parent). Without
+    Redis nothing is published, which the M1 alarm treats as breaching.
+    """
+    try:
+        from app.jobs import _rq_connection, get_queue
+        sampler.tick(now, get_queue, _rq_connection)
+    except Exception:
+        _log.warning("Izleme ornegi basarisiz — heartbeat devam ediyor", exc_info=True)
+
+
 def _start_heartbeat():
     """Heartbeat'i arka-plan daemon thread'de TTL/2'de bir tazele. Boşta (job yok)
     worker bile canlı görünsün diye — RQ'nun kendi worker-heartbeat'i bizim
     bilgilendirici anahtarımızı yazmaz."""
     from app.jobs import WORKER_HEARTBEAT_TTL
+    from app.services.release_monitoring import SAMPLE_INTERVAL_SECONDS, WorkerSampler
     stop = threading.Event()
+    sampler = WorkerSampler()
 
     def _loop():
         last_proxy_sample = 0.0
@@ -128,7 +143,10 @@ def _start_heartbeat():
                                                 time.monotonic())
             last_retention = _retention_tick(last_retention, time.monotonic())
             last_erasure = _health_erasure_tick(last_erasure, time.monotonic())
-            stop.wait(max(WORKER_HEARTBEAT_TTL // 2, 5))
+            _monitoring_tick(sampler, time.monotonic())
+            # The M1 sample must keep its 60 s cadence even if the heartbeat
+            # TTL is raised: wake at least once per sampling interval.
+            stop.wait(max(min(WORKER_HEARTBEAT_TTL // 2, SAMPLE_INTERVAL_SECONDS), 5))
 
     t = threading.Thread(target=_loop, name="worker-heartbeat", daemon=True)
     t.start()
