@@ -138,6 +138,12 @@ def test_minor_refuses_adult_body_composition_or_maximal_preferences(changes):
     assert youth_safety.require_supported(30, prefs) is prefs
 
 
+def test_effective_age_is_the_lowest_known_age():
+    assert youth_safety.effective_age(18, 15) == 15
+    assert youth_safety.effective_age(None, 16) == 16
+    assert youth_safety.effective_age(None, "17") is None
+
+
 def test_directive_is_minor_only_and_localized():
     assert youth_safety.directive(30, "tr") == youth_safety.directive(None, "en") == ""
     assert "GENÇ KULLANICI" in youth_safety.directive(13, "tr")
@@ -156,6 +162,9 @@ def _plan(**exercise):
     {"set": 5}, {"tekrar": "3-5"}, {"tekrar": "1"}, {"not": "RPE 9, heavy"},
     {"not": "Work up to a 1RM"}, {"not": "Tükenişe kadar devam et"},
     {"not": "Kalori açığı için hızlı yap"}, {"not": "Max effort single"},
+    {"not": "RPE 7-8"}, {"not": "RPE: 9"}, {"not": "RPE ~8"}, {"not": "RIR 0"},
+    {"not": "Tükenmeye yakın bitir"}, {"tekrar": "AMRAP"}, {"tekrar": "Tükenişe kadar"},
+    {"tekrar": "2x4"}, {"not": "Tükenişe kadar çalışma"},
 ])
 def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, caplog):
     plan = _plan(**exercise)
@@ -169,6 +178,9 @@ def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, cap
 
 @pytest.mark.parametrize("exercise", [
     {}, {"tekrar": "30 sn"}, {"not": "RPE 7, kontrollü"}, {"tekrar": "6-8"}, {"set": 4},
+    {"tekrar": "3x10"}, {"tekrar": "12 (her bacak)"}, {"not": "Do not go to failure"},
+    {"not": "Tükenişe kadar gitmeyin"}, {"not": "1RM testi yok"}, {"not": "Diyetisyene danış"},
+    {"not": "Maksimum tekrar 12"}, {"not": "RIR 3, RPE 6-7"}, {"tekrar": "45 saniye"},
 ])
 def test_minor_output_inside_the_boundary_passes(exercise):
     plan = _plan(**exercise)

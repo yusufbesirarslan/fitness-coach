@@ -101,7 +101,8 @@ def generate_and_persist(
         return result
     # Youth boundary before any claim, hold or provider work (adults: no-op).
     youth_safety.require_supported(
-        getattr(last_session, "age", None) or getattr(user, "age", None),
+        youth_safety.effective_age(getattr(last_session, "age", None),
+                                   getattr(user, "age", None)),
         request.preferences)
 
     with try_owner_lock(user_id) as acquired:

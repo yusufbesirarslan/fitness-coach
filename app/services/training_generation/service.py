@@ -271,7 +271,10 @@ def generate_training_plan_candidate(
         provider_invoked=1,
     )
     features = frozen_features if frozen_features is not None else build_features(user, last_session, preferences)
-    age = getattr(features, "age", None)
+    # Youth decisions use the lowest known age (profile vs session copy).
+    age = youth_safety.effective_age(getattr(features, "age", None),
+                                     getattr(user, "age", None),
+                                     getattr(last_session, "age", None))
     youth_safety.require_supported(age, preferences)
     classification = classify_user(features)
     context = build_program_context(features, preferences, classification)

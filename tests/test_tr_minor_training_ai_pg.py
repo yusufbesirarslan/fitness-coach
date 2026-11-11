@@ -202,23 +202,36 @@ def test_teen_revoke_and_closed_pin_stop_new_generation(teen_ai, monkeypatch):
     assert teen_ai.sdk == []
     teen_ai.call("post", "/api/v1/ai-consent", 200, headers, json={
         **grant, "action": "revoke", "expected_generation": 1, "request_id": "teenstop-revoke"})
-    teen_ai.call("post", "/api/v1/training/plans", 403,
-                 {**headers, "Idempotency-Key": "teenstop-after-revoke"}, json=CANONICAL)
+    revoked = teen_ai.call("post", "/api/v1/training/plans", 403,
+                           {**headers, "Idempotency-Key": "teenstop-after-revoke"}, json=CANONICAL)
+    assert revoked["error"]["code"] == "AI_CONSENT_REQUIRED"
     assert teen_ai.sdk == [] and TrainingPlan.query.filter_by(user_id=owner).count() == 0
 
 
 @pytest.mark.parametrize("path,body", [
     ("/api/v1/coach/messages", {"message": "hi"}),
     ("/api/v1/nutrition/plan/generate", {}),
+    ("/api/v1/nutrition/menu/analyze", {"url": "https://example.invalid/menu"}),
 ])
 def test_teen_other_ai_purposes_stay_closed(teen_ai, path, body):
     owner, headers = _onboard(teen_ai, 15, "teenother")
     _grant_training(teen_ai, headers, "teenother")
     response = teen_ai.call("post", path, 403, headers, json=body)
-    assert response["error"]["code"] in {"AI_SERVICE_ELIGIBILITY_REQUIRED",
-                                         "AI_CONSENT_DISCLOSURE_UNAVAILABLE",
-                                         "AI_CONSENT_REQUIRED"}
+    # The cohort refuses before any disclosure/grant lookup.
+    assert response["error"]["code"] == "AI_SERVICE_ELIGIBILITY_REQUIRED"
     assert teen_ai.sdk == []
+
+
+def test_stale_adult_session_age_never_lifts_the_youth_boundary(teen_ai):
+    from app.models import UserSession
+    owner, headers = _onboard(teen_ai, 15, "teenstale")
+    _grant_training(teen_ai, headers, "teenstale")
+    UserSession.query.filter_by(user_id=owner).update({"age": 30})
+    db.session.commit()
+    refused = teen_ai.call("post", "/api/v1/training/plans", 422,
+                           {**headers, "Idempotency-Key": "teenstale-fat-loss"},
+                           json={**CANONICAL, "odak_hedef": "yag_yakimi"})
+    assert refused["error"]["code"] == CODE_UNSUPPORTED and teen_ai.sdk == []
 
 
 def test_adult_tr_18_journey_has_no_youth_directive(teen_ai):
