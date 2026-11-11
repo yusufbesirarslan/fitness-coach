@@ -1,8 +1,9 @@
 """Launch-boundary probes, not a compliance PASS.
 
-All inputs are synthetic. Strict xfails identify missing restrictions requiring
-the founder decision in docs/compliance/fatsecret-boundary-01.md. An xfail is a
-release blocker; unrelated errors must fail normally. No runtime gate is added.
+All inputs are synthetic. These began as 15 strict xfails (#493, see
+docs/compliance/fatsecret-boundary-01.md); #497 closed the advice boundary and
+#499 the 24h retention. The last one (snapshot replay) is now a regression on
+the provenance clock. Unrelated errors must fail normally.
 """
 import json
 from datetime import datetime, timedelta
@@ -14,7 +15,7 @@ import pytest
 from app.extensions import db
 from app.models import MealLog, UserSession
 from app.services import ai_coach, ai_consent, coach_privacy, context_builder
-from app.services import foodcache, menu_analysis
+from app.services import foodcache, menu_analysis, provider_retention
 from app.services.mobile_log_food import service as logging_service
 from app.services.mobile_log_food.commands import ProviderBackedLogFoodCommand
 
@@ -23,11 +24,6 @@ from app.timeutil import day_key
 
 SENTINEL = 731
 SOURCES = ["search", "barcode", "manual", None]
-GAP = pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "OPEN FATSECRET LAUNCH BLOCKER: provider/unknown lineage reaches restricted "
-    "consumers; material fallback and retention disposition need founder choice"))
-
-
 def _row(user, source):
     row = MealLog(user_id=user.id, ogun="Lunch", yemekler="Synthetic historical food",
                   kalori=SENTINEL, protein=25, karb=60, yag=15, tarih=day_key(),
@@ -125,8 +121,7 @@ def test_unknown_current_redis_envelope_never_enters_qr_scorer(menu_probe, monke
     assert SENTINEL not in scored_calories
 
 
-@GAP
-def test_unbounded_provider_snapshot_is_not_replayed_after_24h(app, make_user, monkeypatch):
+def test_provider_snapshot_is_not_replayed_after_24h(app, make_user, monkeypatch):
     user = make_user("fs-qual-retention")
     snapshot = SimpleNamespace(description="Synthetic provider snapshot", nutrition=SimpleNamespace(
         energy_kcal=Decimal(SENTINEL), protein_g=Decimal(25),
@@ -135,8 +130,10 @@ def test_unbounded_provider_snapshot_is_not_replayed_after_24h(app, make_user, m
     command = ProviderBackedLogFoodCommand(
         "fatsecret", "fixture-food", "fixture-serving", Decimal(1), "ogle", "search")
     row, created = logging_service.log_food(user.id, "fs-qual-retained-0001", command)
-    assert created
-    row.created_at = datetime.utcnow() - timedelta(hours=25)
+    assert created and row.provider_acquired_at is not None
+    # The deadline runs on the provenance clock (when the provider answered),
+    # not on created_at: age both, as a real 25h-old row would be.
+    row.created_at = row.provider_acquired_at = datetime.utcnow() - timedelta(hours=25)
     db.session.commit()
 
     def unavailable(*a):
@@ -144,10 +141,17 @@ def test_unbounded_provider_snapshot_is_not_replayed_after_24h(app, make_user, m
 
     monkeypatch.setattr(logging_service, "resolve_provider_food", unavailable)
     replay, created = logging_service.log_food(user.id, "fs-qual-retained-0001", command)
-    # Current replay serves the indefinite nutrient snapshot without a refresh
-    # or verified retention exception. Keep the existing record: never purge.
-    assert not created
-    assert replay.kalori != SENTINEL
+    assert not created and replay.id == row.id  # same record, never purged
+    # Before the expiry pass: every reader withholds the per-item values.
+    assert provider_retention.published(replay).kalori is None
+    meal = logging_service.response_meal(replay, "qualification-secret", user.id)
+    assert meal["nutrition"]["energy_kcal"] is None
+    # After the pass: storage no longer holds them; the day total keeps them.
+    provider_retention.expire_due()
+    db.session.refresh(replay)
+    assert replay.kalori is None and replay.provider_expired_at is not None
+    assert provider_retention.retained_for_day(user.id, replay.tarih)["energy_kcal"] == SENTINEL
+    assert MealLog.query.filter_by(user_id=user.id).count() == 1
 
 
 def test_manual_logging_and_history_work_with_provider_unavailable(env_absent, native, raw_client):

@@ -193,14 +193,10 @@ def quick_add_meal():
     idempotency_key = meal_idempotency.read_idempotency_key()
     existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
     if existing:
+        # Owner-scoped key: the replayed row may be a provider row.
         return jsonify({
             "message": t("route.added_from_plan", meal=existing.ogun),
-            "nutrients": {
-                "kalori": existing.kalori,
-                "protein": existing.protein,
-                "karb": existing.karb,
-                "yag": existing.yag,
-            },
+            "nutrients": provider_retention.published_nutrients(existing),
         })
 
     plan_record = NutritionPlan.query.filter_by(user_id=current_user.id)\

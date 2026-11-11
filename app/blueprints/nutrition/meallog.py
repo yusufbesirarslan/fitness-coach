@@ -118,14 +118,11 @@ def log_meal():
     idempotency_key = meal_idempotency.read_idempotency_key()
     existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
     if existing:
+        # The key is owner-scoped, not endpoint-scoped: the row may be a
+        # provider row, so a replay answers through the retention reader.
         response = {
             "message": t("route.x_logged", name=existing.ogun),
-            "nutrients": {
-                "kalori": existing.kalori,
-                "protein": existing.protein,
-                "karb": existing.karb,
-                "yag": existing.yag,
-            },
+            "nutrients": provider_retention.published_nutrients(existing),
         }
         if existing.photo_key:
             response["photo_url"] = _meal_photo_url(existing)
@@ -339,10 +336,8 @@ def _log_provider_backed_meal(data, ogun, provider_food):
         current_user.id, "meal_logged") if created else None
     response = {
         "message": t("route.x_logged", name=entry.ogun),
-        "nutrients": {
-            "kalori": entry.kalori, "protein": entry.protein,
-            "karb": entry.karb, "yag": entry.yag,
-        },
+        # A replay may return a row that is already due (or legacy).
+        "nutrients": provider_retention.published_nutrients(entry),
     }
     if quest_result:
         response["quest_awarded"] = quest_result

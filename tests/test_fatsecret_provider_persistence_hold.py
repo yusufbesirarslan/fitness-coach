@@ -188,7 +188,12 @@ def test_web_barcode_add_is_held_but_existing_replay_answers(client, auth_user, 
     db.session.commit()
     replay = client.post("/api/food/barcode/add", json=body, headers={"Idempotency-Key": KEY})
     assert replay.status_code == 200 and replay.get_json()["message"] == "logged"
+    # A legacy barcode row has no provenance: its per-item values are withheld
+    # (null, never the stored number and never 0) even though the replay answers.
+    assert replay.get_json()["nutrients"] == {
+        "kalori": None, "protein": None, "karb": None, "yag": None}
     assert MealLog.query.filter_by(user_id=auth_user.id).count() == 1
+    assert MealLog.query.filter_by(user_id=auth_user.id).one().kalori == 120
 
 
 def test_social_meal_suggestion_never_fetches_provider_totals(app, monkeypatch):

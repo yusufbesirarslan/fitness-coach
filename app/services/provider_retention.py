@@ -236,6 +236,17 @@ def published(row, names=None, now=None):
                            karb=karb, yag=yag)
 
 
+def published_nutrients(row, now=None):
+    """The web ``nutrients`` object (``kalori/protein/karb/yag``) of ``published``.
+
+    For the web write routes' idempotent replay answers: the key is owner-scoped,
+    not endpoint-scoped, so a replay can return any of the owner's rows.
+    """
+    shown = published(row, now=now)
+    return {"kalori": shown.kalori, "protein": shown.protein,
+            "karb": shown.karb, "yag": shown.yag}
+
+
 # ── the expiry pass ─────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
