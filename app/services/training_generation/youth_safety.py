@@ -61,10 +61,10 @@ _EN_NEGATION = re.compile(r"\b(?:not|don'?t|never|avoid|no|without)\b", re.IGNOR
 # Turkish: only unambiguous forms. "-ma/-me" alone is also a verbal noun
 # ("tükenişe kadar çalışma" = training to failure), so it never negates.
 _TR_NEGATION = re.compile(
-    r"\b(?:yok|değil|olmadan|asla)\b|kaçın|\w+m[ae]y[ıi]n\b|\w+m[ae]m[ae]l[ıi]\b",
+    r"\b(?:yok|değil|olmadan|asla)\b|kaçın|\w+m[ae]y[ıi]n\b|\w+m[ae]m[ae]l[ıi]\w*|\w+m[ae]den\b",
     re.IGNORECASE)
 # "Not:" (Turkish for "Note:") starts a new clause; it is never a negator.
-_CLAUSE = re.compile(r"[.;:!?\n]|,\s")
+_CLAUSE = re.compile(r"[.;!?\n]|:(?!\s*\d)|,\s")
 _WINDOW_WORDS = 3
 
 
@@ -159,10 +159,12 @@ def validate_plan(age, plan: dict) -> dict:
             _reject("focus_term")
         for exercise in day.get("egzersizler") or ():
             reps = str(exercise.get("tekrar") or "")
-            if _prescribes_forbidden(reps) or (reps.strip() and not any(c.isdigit() for c in reps)):
-                # A reps value must be a count or a time; "Max"/"AMRAP" is not.
+            if _prescribes_forbidden(reps):
                 _reject("reps_term")
             if day.get("tip") == "antrenman":
+                # A strength reps value must be a count or a time; "Max" is not.
+                if reps.strip() and not any(c.isdigit() for c in reps):
+                    _reject("reps_term")
                 sets = exercise.get("set")
                 if type(sets) is int and sets > MAX_SETS:
                     _reject("sets")

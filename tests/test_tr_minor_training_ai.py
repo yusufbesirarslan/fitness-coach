@@ -186,6 +186,8 @@ def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, cap
     {"not": "Maksimum tekrar 12"}, {"not": "RIR 3, RPE 6-7"}, {"tekrar": "45 saniye"},
     {"not": "RPE 7/10 hissettir"}, {"not": "RPE 6/10"}, {"not": "Not: sırtını düz tut"},
     {"not": "Never train to failure"}, {"not": "max rep range 12"},
+    {"not": "Maksimum tekrar: 12"}, {"not": "Max reps: 12"},
+    {"not": "Tükenişe kadar gitmemelisin"}, {"not": "Tükenişe kadar gitmeden bitir"},
 ])
 def test_minor_output_inside_the_boundary_passes(exercise):
     plan = _plan(**exercise)
@@ -201,3 +203,12 @@ def test_preference_contract_omits_refused_choices_for_a_minor_only():
     assert "yag_yakimi" not in minor["odak_hedef"]["choices"]
     assert {k: v for k, v in adult.items() if k not in {"antrenman_tarzi", "odak_hedef"}} == {
         k: v for k, v in minor.items() if k not in {"antrenman_tarzi", "odak_hedef"}}
+
+
+def test_cardio_reps_text_is_not_a_strength_count():
+    plan = _plan()
+    plan["program"][1] = {"gun": "Salı", "tip": "kardiyo", "odak": "Kardiyo", "sure_dk": 20,
+                          "tahmini_kalori": 0, "egzersizler": [{
+                              "exercise_id": "ex_brisk_walk", "set": 1, "tekrar": "Orta tempo",
+                              "dinlenme": "-", "not": "Rahat nefes al"}]}
+    assert youth_safety.validate_plan(14, plan) is plan
