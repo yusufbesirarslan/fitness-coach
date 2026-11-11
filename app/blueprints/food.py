@@ -11,7 +11,7 @@ from app.services import barcode as barcode_svc
 from app.services.fatsecret import _food_get_servings, _fs_relevant_candidates, _get_fatsecret_token
 from app.services.foodcache import _cache_food_id, _get_cached_food_id, _get_cached_macros
 from app.services.gamification import complete_quest_for_user
-from app.services import meal_idempotency
+from app.services import meal_idempotency, provider_retention
 
 
 bp = Blueprint("food", __name__)
@@ -129,14 +129,13 @@ def barcode_add_to_diary():
     idempotency_key = meal_idempotency.read_idempotency_key()
     existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
     if existing:
+        # Owner-scoped key, answered before the D-B2 hold: the replayed row may
+        # be any provider row. Withheld values stay null, never 0.
+        shown = provider_retention.published_nutrients(existing)
         return _deprecated_compatibility_response({
             "message": "logged",
-            "nutrients": {
-                "kalori": round(existing.kalori or 0, 1),
-                "protein": round(existing.protein or 0, 1),
-                "karb": round(existing.karb or 0, 1),
-                "yag": round(existing.yag or 0, 1),
-            },
+            "nutrients": {name: None if value is None else round(value, 1)
+                          for name, value in shown.items()},
             "analytics_events": ["Added To Diary"],
         })
 

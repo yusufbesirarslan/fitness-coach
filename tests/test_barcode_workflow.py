@@ -192,5 +192,11 @@ def test_barcode_add_idempotency_writes_one_row(client, auth_user, monkeypatch):
     assert first.status_code == second.status_code == 200
     assert "meal_log_id" not in first.get_json()
     assert "meal_log_id" not in second.get_json()
-    assert second.get_json()["nutrients"] == first.get_json()["nutrients"]
+    assert first.get_json()["nutrients"] == {
+        "kalori": 210.0, "protein": 21.0, "karb": 23.0, "yag": 6.0}
+    # This writer stamps no retention provenance (why D-B2 holds it), so its
+    # row is a legacy `barcode` row to every reader: the replay answers through
+    # the retention reader and withholds the per-item values (#508).
+    assert second.get_json()["nutrients"] == {
+        "kalori": None, "protein": None, "karb": None, "yag": None}
     assert MealLog.query.filter_by(user_id=auth_user.id, source="barcode").count() == 1
