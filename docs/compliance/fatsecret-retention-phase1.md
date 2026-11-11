@@ -83,6 +83,11 @@ flask --app starter fatsecret-retention-redis-v1 --apply --expect N  # separatel
 
 This applies to exactly `food:macros:v1:*`. The apply step refuses (`HOLD`, exit 2) unless a fresh scan still finds N keys. `v2` and `food:independent-menu:v1` are not provider data and are never touched.
 
+## Launch fallback closure (AXISAI-FATSECRET-LAUNCH-FALLBACK-IMPLEMENTATION)
+
+- The idempotency key is owner-scoped, not endpoint-scoped (`meal_idempotency.find_existing`), so a web write route's replay answer can return ANY of the owner's rows, including a provider row. The three web replay answers (`POST /meal-log` manual-path replay, `POST /meal-log` provider-path answer, `POST /api/quick-add-meal` replay) echoed the stored macros. They now answer through `provider_retention.published_nutrients`. A row that is due by its provenance clock (22h, even before the expiry pass runs, or while the worker is down) and every legacy `search`/`barcode` row publish `null`, never the stored number. Fresh rows and independent rows (`manual`, `ai_plan`, legacy NULL source) are unchanged. A replay never deletes or rewrites a stored row. Tests: `tests/test_fatsecret_replay_retention.py`.
+- The last #493 strict xfail (`test_unbounded_provider_snapshot_is_not_replayed_after_24h`) aged only `created_at` and read raw storage, which correctly holds values until the pass. It is replaced by `test_provider_snapshot_is_not_replayed_after_24h`, which ages the provenance clock. It shows the replay makes no provider call, returns the same record, publishes no values before the pass, nulls storage after the pass, and keeps the day total. No strict FatSecret xfail remains.
+
 ## Known residuals (independent review, all P3 or out of scope)
 
 - **Unrouted MCP readers** (`fitx_mcp/server.py`, `app/services/coach_context_queries.py`): raw-SQL readers on the stdio MCP server only. No app route imports them and they are not deployed (unchanged from #497). They neither withhold due values nor add the retained aggregate. Keep them unrouted; converge them before any MCP exposure.
