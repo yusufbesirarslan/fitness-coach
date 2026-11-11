@@ -24,10 +24,10 @@ NATIVE_ENDPOINTS = {
     "mobile_api.nutrition_menu_analyze": "menu_extract",
 }
 
-# The current signed schema attests a self-declaration, not independent
-# assurance. Only reviewed source can pin an approved service authority after
-# its assurance/freshness contract is resolved by the existing owner.
-APPROVED_SERVICE_COHORT_VERSION: str | None = None
+# Founder-approved source candidate: existing adult-TR signed self-declaration,
+# with no periodic expiry or independent age/capacity verification. This pin
+# does not change teen/market restrictions or authorize production activation.
+APPROVED_SERVICE_COHORT_VERSION: str | None = "age-screen-v1"
 
 
 def require_cohort(user):

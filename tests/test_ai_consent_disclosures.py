@@ -14,16 +14,19 @@ def synthetic_policy(monkeypatch):
         ("personal_free_text",), (("bedrock", "synthetic-model"),),
         tuple((locale, sha256(text.encode()).hexdigest()) for locale, text in texts.items()))
     monkeypatch.setattr(consent, "POLICIES", {policy.version: policy})
+    monkeypatch.setattr(copy, "LAUNCH_VERSIONS", {})
     monkeypatch.setattr(copy, "PUBLISHED_TEXTS", {
         (policy.version, locale): text for locale, text in texts.items()})
     return policy, texts
 
 
-def test_shipping_registry_is_empty_and_does_not_open_coach():
-    assert dict(copy.PUBLISHED_TEXTS) == {}
-    assert dict(consent.POLICIES) == {}
+def test_source_registry_publishes_only_training_and_does_not_open_coach():
+    assert set(copy.PUBLISHED_TEXTS) == {("d1-closure01-training-candidate", locale) for locale in ("en", "tr")}
+    assert set(consent.POLICIES) == {"d1-closure01-training-candidate"}
+    assert dict(copy.LAUNCH_VERSIONS) == {"training.plan": "d1-closure01-training-candidate"}
+    disclosure, = copy.available_disclosures()
+    assert disclosure["purpose"] == "training.plan"
     assert consent.BINDINGS["coach"][0] == "coach.conversation"
-    assert copy.available_disclosures() == []
 
 
 def test_both_exact_locales_and_full_contract_are_projected(synthetic_policy):
