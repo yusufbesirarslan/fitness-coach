@@ -13,7 +13,8 @@ bp = Blueprint("health_consent", __name__)
 def _respond(user):
     data = request.get_json(silent=True) if request.method == "POST" else None
     if isinstance(data, dict) and data.get("action") == "affirmative_grant":
-        # Health-data processing is its own (adult-only) capability. A health
+        # Health-data processing is its own capability (adults, plus a
+        # source-pinned TR 13-17 record making its own F01 decision). A health
         # grant never opens a teen cohort, body-photo permission, automated
         # weight target, AI purpose or purchase gate.
         account_eligibility.require_capability(user, "health_data")

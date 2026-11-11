@@ -214,3 +214,39 @@ def test_ranking_publication_skips_and_evicts_minors(app, make_user, monkeypatch
     published = {member for members in fake.sets.values() for member in members}
     assert published == {str(adult.id)}
     assert str(teen.id) in fake.removed
+
+
+# ---- rollout flag is not a channel (review P2-2) ---------------------------
+
+@pytest.mark.parametrize("pin", [True, False])
+def test_flag_off_keeps_a_registered_minor_out_of_adult_lanes(journey, app, monkeypatch, pin):
+    from app.services import account_profile
+    user, headers = journey.register(15, f"trteenflag{int(pin)}")
+    assert journey.grant(headers).status_code == 200
+    app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = False
+    if not pin:
+        monkeypatch.setattr(policy, "APPROVED_TR_MINOR_NOTICE_VERSION", None)
+    monkeypatch.setattr(account_profile, "calculate_bmr", lambda *_: pytest.fail("adult math"))
+    adult_values = dict(TEEN_PROFILE, age=30, goal="lose_weight", target_weight_kg=45.0)
+    response = journey.client.put("/api/v1/account/profile", headers=headers, json=adult_values)
+    assert response.status_code in {403, 422}
+    assert User.query.get(user.id).age == 15
+    pump = journey.client.post("/api/v1/pump-checks", headers=headers, json={})
+    assert pump.json["error"]["code"] == "ELIGIBILITY_FEATURE_UNAVAILABLE"
+    if pin:
+        teen = journey.client.put("/api/v1/account/profile", headers=headers,
+                                  json=dict(TEEN_PROFILE, age=15))
+        assert teen.status_code == 200
+        assert UserSession.query.filter_by(user_id=user.id).one().target_calories is None
+
+
+def test_minor_viewer_sees_own_xp_without_a_rank(app, make_user):
+    from flask_login import login_user
+    from app.services import gamification
+    make_user("rankadult2", age=30, rank_points=10)
+    teen = make_user("rankteen2", age=14, rank_points=5)
+    db.session.commit()
+    with app.test_request_context():
+        login_user(teen)
+        board = gamification._leaderboard_via_postgres("global", "all_time").get_json()
+    assert board["in_list"] is False and board["me"]["rank"] is None

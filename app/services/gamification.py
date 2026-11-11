@@ -8,7 +8,7 @@ from sqlalchemy import event, select, text
 from app.config import LB_ALLTIME_KEY, LB_WEEKLY_KEY
 from app.extensions import db, redis_client
 from app.models import Activity, DailyQuest, User, UserQuestProgress, WeeklyResetLog, WeeklyWinner
-from app.services.public_ranking import rankable_clause
+from app.services.public_ranking import rankable, rankable_clause
 from app.timeutil import app_now, app_today
 
 
@@ -511,7 +511,9 @@ def _leaderboard_via_redis(scope, timeframe, key):
     in_list = any(e["is_me"] for e in entries)
     me = next((e for e in entries if e["is_me"]), None)
     if not in_list:
-        if scope == "friends":
+        if not rankable(current_user.age):
+            my_rank = None  # not publicly ranked: own XP, no position
+        elif scope == "friends":
             my_rank = next((i + 1 for i, (uid, _) in enumerate(ranked)
                             if uid == current_user.id), len(ranked) + 1)
         else:
@@ -552,7 +554,8 @@ def _leaderboard_via_postgres(scope, timeframe):
             xpc > my_xp,
             db.and_(xpc == my_xp, sc > my_sc),
             db.and_(xpc == my_xp, sc == my_sc, User.id < current_user.id))
-        my_rank = base.filter(ahead).count() + 1
+        my_rank = (base.filter(ahead).count() + 1
+                   if rankable(current_user.age) else None)
         me = _lb_serialize(current_user, my_rank, timeframe)
 
     return jsonify({"scope": scope, "timeframe": timeframe, "entries": entries,

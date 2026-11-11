@@ -158,12 +158,32 @@ def _internal_capabilities(status, band, country=None):
 def tr_minor_profile(user):
     """A live TR 13-17 record under the source pin: teen profile rules apply.
 
-    Off while eligibility enforcement is off (nothing is restricted then, and no
-    minor can register: preview refuses minors in that mode)."""
-    if not enabled():
-        return False
+    Decided from the signed record alone, like purchase_eligible: an
+    ACCOUNT_ELIGIBILITY_ENABLED flip must never hand a registered minor the
+    adult profile maths."""
     record = _record(user)
     return bool(record) and _tr_minor(record["age_band"], record["country"])
+
+
+def _signed_minor(user):
+    """A valid subject-bound declaration in the 13-17 band, pin or not.
+
+    Only accounts registered under eligibility carry one (no legacy row does),
+    so the negative boundary keeps applying to them when the rollout flag is
+    off: the flag is not a channel that opens a minor's adult-only lanes."""
+    try:
+        raw = (user.user_metadata or {}).get(METADATA_KEY)
+        if not isinstance(raw, str) or len(raw) > 2048:
+            return False
+        envelope = _signer(account=True).loads(raw)
+        return (envelope.get("subject") == user.cognito_sub
+                and envelope.get("record", {}).get("age_band") == "13_17")
+    except (AttributeError, BadSignature, ValueError, TypeError):
+        return False
+
+
+def _enforced(user):
+    return enabled() or _signed_minor(user)
 
 
 def preview(data):
@@ -293,7 +313,7 @@ def purchase_eligible(user, now):
 
 
 def require_capability(user, capability):
-    if not enabled():
+    if not _enforced(user):
         return
     record = _record(user)
     status = "screen_passed" if record else "review_required"
@@ -334,7 +354,7 @@ def enforce_request(user):
     This is the v1 negative feature boundary, not first-party health consent.
     Neutral teen onboarding and the actual permission/AI lanes remain required.
     """
-    if not enabled():
+    if not _enforced(user):
         return
     endpoint = request.endpoint or ""
     if endpoint.startswith("social."):

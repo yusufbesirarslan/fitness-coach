@@ -34,6 +34,10 @@ Founder decision: minimum age 13, with full onboarding in 1.0.0. Everything belo
 - challenge boards
 - weekly winners
 
-It covers every account with a minority age signal, not only TR. The account still sees its own standing.
+It covers every account with a minority age signal, not only TR. A minor still sees their own XP, without a rank.
+
+## Rollout flag
+
+A signed 13–17 record keeps the negative boundary when `ACCOUNT_ELIGIBILITY_ENABLED` is off (`_enforced`), and the teen profile branch is decided from the record alone. The flag cannot open a minor's adult-only lanes.
 
 Tests: `tests/test_tr_minor_onboarding.py`, `tests/test_tr_minor_full_onboarding.py`.

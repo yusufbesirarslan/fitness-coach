@@ -7,7 +7,7 @@ Law 5651 Ek-4(7) social-network classification is unresolved, so every account
 carrying a minority age signal is excluded, not only TR records. `User.age` is
 the conservative signal account_eligibility.attach writes from the declaration
 and the TR minor profile keeps within 13-17. A NULL age (legacy adult rows)
-keeps the pre-existing behaviour. The account still sees its own standing.
+keeps the pre-existing behaviour. A minor still sees their own XP, unranked.
 """
 from app.models import User
 
