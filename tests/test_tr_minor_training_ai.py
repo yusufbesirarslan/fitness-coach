@@ -157,10 +157,13 @@ def _plan(**exercise):
     {"not": "Work up to a 1RM"}, {"not": "Tükenişe kadar devam et"},
     {"not": "Kalori açığı için hızlı yap"}, {"not": "Max effort single"},
 ])
-def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise):
+def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, caplog):
     plan = _plan(**exercise)
     with pytest.raises(SemanticInvalidError):
         youth_safety.validate_plan(15, plan)
+    line, = [r.getMessage() for r in caplog.records if "YOUTH_BOUNDARY" in r.getMessage()]
+    assert line.startswith("[TRAINING][YOUTH_BOUNDARY] outcome=rejected rule=")
+    assert "15" not in line and "squat" not in line.lower()
     assert youth_safety.validate_plan(30, plan) is plan  # adults unchanged
 
 

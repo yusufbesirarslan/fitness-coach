@@ -16,11 +16,13 @@ unless ``is_minor(age)``. Three layers, all deterministic and fail closed:
 This is general fitness guidance, not medical screening; it does not decide a
 minor's capacity to consent (that is the separate F01/D1 + legal track).
 """
+import logging
 import re
 
 from app.services.training_generation.output_errors import SemanticInvalidError
 from app.services.training_generation.preference_contract import PreferenceContractError
 
+_log = logging.getLogger(__name__)
 MINOR_MAX_AGE = 17
 REFUSED_FOCUS = frozenset({"yag_yakimi"})          # fat-loss focus
 REFUSED_STYLES = frozenset({"powerlifting"})       # maximal-strength style
@@ -81,24 +83,31 @@ def directive(age, language: str) -> str:
     return _DIRECTIVE["en" if language == "en" else "tr"]
 
 
+def _reject(rule):
+    # Monitoring signal (Anthropic minors guidance): fixed rule token only,
+    # never age, user, plan text or provider output.
+    _log.warning("[TRAINING][YOUTH_BOUNDARY] outcome=rejected rule=%s", rule)
+    raise SemanticInvalidError(f"youth boundary: {rule}")
+
+
 def validate_plan(age, plan: dict) -> dict:
     if not is_minor(age):
         return plan
     for day in plan.get("program", ()):
         if _FORBIDDEN.search(str(day.get("odak") or "")):
-            raise SemanticInvalidError("youth boundary: forbidden day focus")
+            _reject("focus_term")
         for exercise in day.get("egzersizler") or ():
             if day.get("tip") == "antrenman":
                 sets = exercise.get("set")
                 if type(sets) is int and sets > MAX_SETS:
-                    raise SemanticInvalidError("youth boundary: too many sets")
+                    _reject("sets")
                 reps = _REPS.match(str(exercise.get("tekrar") or ""))
                 if reps and int(reps.group(1)) < MIN_REPS:
-                    raise SemanticInvalidError("youth boundary: too few reps")
+                    _reject("reps")
             note = str(exercise.get("not") or "")
             for value in _RPE.findall(note):
                 if float(value.replace(",", ".")) > MAX_RPE:
-                    raise SemanticInvalidError("youth boundary: RPE above limit")
+                    _reject("rpe")
             if _FORBIDDEN.search(note):
-                raise SemanticInvalidError("youth boundary: forbidden instruction")
+                _reject("note_term")
     return plan
