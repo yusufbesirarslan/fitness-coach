@@ -59,6 +59,7 @@ from app.services.training_generation.response_validator import (
     validate_plan_structure,
 )
 from app.services.training_generation.semantic_validator import validate_plan_semantics
+from app.services.training_generation import youth_safety
 
 
 _REPAIR_JSON_SUFFIX = (
@@ -170,11 +171,11 @@ class _CompletionBudget:
         return text, truncated
 
 
-def _parse_and_validate(text, truncated, preferences):
+def _parse_and_validate(text, truncated, preferences, age=None):
     parsed = extract_plan_object(text, truncated=truncated)
     structured, _ = validate_generated_plan(
         parsed, preferences, injuries=preferences.injuries)
-    return structured
+    return youth_safety.validate_plan(age, structured)
 
 
 def resolve_save_exercise_context(token, secret_key, user_id):
@@ -270,6 +271,11 @@ def generate_training_plan_candidate(
         provider_invoked=1,
     )
     features = frozen_features if frozen_features is not None else build_features(user, last_session, preferences)
+    # Youth decisions use the lowest known age (profile vs session copy).
+    age = youth_safety.effective_age(getattr(features, "age", None),
+                                     getattr(user, "age", None),
+                                     getattr(last_session, "age", None))
+    youth_safety.require_supported(age, preferences)
     classification = classify_user(features)
     context = build_program_context(features, preferences, classification)
     exercise_context = ExerciseContext(
@@ -284,6 +290,11 @@ def generate_training_plan_candidate(
         features, preferences, classification, context, language=language,
         exercise_choices=exercise_choices)
     system_prompt = build_system_prompt(language)
+    youth = youth_safety.directive(age, language)
+    if youth:
+        # Adults: byte-identical prompts. Minors: one fixed boundary block.
+        system_prompt = f"{system_prompt}\n\n{youth}"
+        prompt = f"{prompt}\n\n{youth}"
     budget = _CompletionBudget(chat_fn)
 
     try:
@@ -291,7 +302,7 @@ def generate_training_plan_candidate(
             prompt=prompt, system_prompt=system_prompt,
             max_tokens=PRIMARY_MAX_TOKENS, temperature=0.35)
         try:
-            plan = _parse_and_validate(text, truncated, preferences)
+            plan = _parse_and_validate(text, truncated, preferences, age)
         except (SchemaInvalidError, SemanticInvalidError):
             # Provider said it stopped at the token cap. A closed-but-short
             # object is still truncation, not a semantic command miss.
@@ -332,7 +343,7 @@ def generate_training_plan_candidate(
                 max_tokens=repair_tokens,
                 temperature=0.35,
             )
-            plan = _parse_and_validate(text, truncated, preferences)
+            plan = _parse_and_validate(text, truncated, preferences, age)
         except (ParseFailedError, TruncatedError, SchemaInvalidError, SemanticInvalidError):
             _log(logger, "repair_failed", calls=len(budget.calls))
             raise
