@@ -167,7 +167,8 @@ def _call_provider(event, table, operation, **kwargs):
 
 
 def register_account(username, email, password, language=None,
-                     referral_code=None, eligibility_token=None):
+                     referral_code=None, eligibility_token=None,
+                     minor_notice=None):
     """Create a pending account at the provider and its local profile row.
 
     `username` is used exactly as submitted (the validator rejects whitespace);
@@ -179,7 +180,8 @@ def register_account(username, email, password, language=None,
     """
     from app.services import account_eligibility
     try:
-        eligibility_record = account_eligibility.registration_record(eligibility_token)
+        eligibility_record = account_eligibility.registration_record(
+            eligibility_token, minor_notice)
     except account_eligibility.EligibilityDenied:
         raise RegistrationFailure(Outcome.ELIGIBILITY_REQUIRED, Phase.VALIDATION) from None
     username = username if isinstance(username, str) else ""

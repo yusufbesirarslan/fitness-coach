@@ -13,9 +13,10 @@ bp = Blueprint("health_consent", __name__)
 def _respond(user):
     data = request.get_json(silent=True) if request.method == "POST" else None
     if isinstance(data, dict) and data.get("action") == "affirmative_grant":
-        # Existing eligibility rules still apply. A health grant never opens
-        # a teen cohort, body-photo permission, AI purpose or purchase gate.
-        account_eligibility.require_capability(user, "automated_weight_targets")
+        # Health-data processing is its own (adult-only) capability. A health
+        # grant never opens a teen cohort, body-photo permission, automated
+        # weight target, AI purpose or purchase gate.
+        account_eligibility.require_capability(user, "health_data")
     if request.method == "GET":
         result = consent.status(user.id)
     else:
