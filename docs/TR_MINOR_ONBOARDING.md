@@ -1,41 +1,39 @@
-# TR 13–17 onboarding (minimum, source-pinned, closed by default)
+# TR 13–17 onboarding V1 (source-pinned, closed by default)
 
-Founder product decision: minimum age 13. This change prepares registration for
-Türkiye 13–17 under the live Terms §3 ("18 yaşından küçükseniz"). **No capability opens.**
+Founder decision: minimum age 13, with full onboarding in 1.0.0. Everything below runs only when
+`account_eligibility.APPROVED_TR_MINOR_NOTICE_VERSION == TR_MINOR_NOTICE_VERSION`. The pin is
+`None` in source. Unpinning returns every TR minor record to `review_required`.
 
-## Where `qualification_required` came from (before this change)
+## Journey (native)
 
-| Layer | Source | Effect on TR 13–17 |
+| Step | Behaviour | Authority |
 |---|---|---|
-| Declaration | `account_eligibility.evaluate` (`country == "TR" and age < 18`) | `qualification_required` / `MARKET_QUALIFICATION_REQUIRED`, no registration ticket |
-| Stored record | `account_eligibility._record` (TR + `13_17` → `None`) | any TR minor record reads as `review_required` |
-| Features | `_capabilities` + `enforce_request` | `body_photos`, `automated_weight_targets` adult-only; profile setup/edit, check-ins, web coach refused |
-| F01 health grant | `health_consent._respond` | refused (was proxied through `automated_weight_targets`) |
-| AI | `ai_launch.require_cohort` → `purchase_eligible` | adult TR only → `AI_SERVICE_ELIGIBILITY_REQUIRED` |
-| Flag off | `preview` window mode | minors get 503 `AUTH_ELIGIBILITY_UNAVAILABLE` |
+| Age 12 (any market) | `ineligible` / `UNDER_MINIMUM_AGE`, no ticket | `evaluate` |
+| TR 13–17 declaration | `screen_passed`, `13_17`, wire capabilities all false | `evaluate` |
+| Sign-up | Existing sign-up screen. The minor ticks the separate notice box. The register body carries `minor_notice_version`, which is bound into the signed record | `_ticket_record` |
+| F01 | The minor's **own** explicit grant of the unchanged F01 text. The notice is not consent and grants nothing | `health_data` capability (adult or TR minor) + `health_consent.mutate` |
+| Profile | `PUT /api/v1/account/profile` (same wire shape). TR minor branch: age 13–17, goal `build_muscle` only, no `target_weight_kg`. No BMR/TDEE/calorie target or nutrition plan text is computed or stored; those stay NULL, which readers treat as "no target", never 0 | `general_profile` + `account_profile` teen branch |
+| First plan | Non-AI general plan `POST /api/v1/training/plans/general` (days, equipment, cardio preferences). Needs no adult capability | unchanged |
+| TR 18+ | Unchanged adult flow, including weight targets | unchanged |
 
-## What changes
+## Still closed for TR 13–17
 
-- `APPROVED_TR_MINOR_NOTICE_VERSION = None` (source pin; no env/config/client channel).
-  When it equals `TR_MINOR_NOTICE_VERSION` (`tr-minor-notice-v1`), TR 13–17 declarations become
-  `screen_passed` / `13_17` with **all capabilities false**.
-- Registration for that cohort requires `minor_notice_version == "tr-minor-notice-v1"` on
-  `POST /api/v1/auth/register` (the minor's own acknowledgment on the existing sign-up screen).
-  It is bound into the signed `_account_eligibility_v1` record as `minor_notice`. It is never sent or
-  accepted for any other cohort. Web `/register` and existing-account review cannot attach a TR
-  minor record (no notice channel) and fail closed.
-- Removing the pin returns every TR minor record to `review_required`.
-- F01 grant now checks its own internal `health_data` capability (adult-only), separate from
-  `automated_weight_targets`. Wire projection key set is unchanged (shipped mobile parser).
+- **AI (all five D1 purposes, including Training):** `ai_launch.require_cohort` admits adult TR only.
+- **Automated weight targets:** check-ins, weight log, web profile edit and web coach chat.
+- **Body photos:** Pump Check and photo completion.
+- **Purchases:** `purchase_eligible` admits adults only.
+- **Social:** closed by the code constant.
 
-## Still closed for TR 13–17 (each needs its own reviewed decision)
+## Public ranking guard
 
-Health-data processing (F01), all five D1 AI purposes, Pump Check/body photos, automated weight
-targets (profile setup/edit, check-ins), purchases, social. The acknowledgment is not parental
-consent, not age assurance and not capacity evidence.
+`app/services/public_ranking.py` defines one predicate, `age IS NULL OR age >= 18`. It applies at:
 
-**Product consequence while those stay closed:** a registered TR minor can sign in, manage Settings
-and delete the account, but cannot complete the current profile (every goal is weight-based). Do not
-pin the notice until a teen-safe profile/first-plan path is decided, or the account is a dead end.
+- Redis publication: snapshots, with eviction of minor entries
+- the PostgreSQL leaderboard fallback
+- Redis reads
+- challenge boards
+- weekly winners
 
-Tests: `tests/test_tr_minor_onboarding.py`.
+It covers every account with a minority age signal, not only TR. The account still sees its own standing.
+
+Tests: `tests/test_tr_minor_onboarding.py`, `tests/test_tr_minor_full_onboarding.py`.

@@ -135,14 +135,35 @@ def _capabilities(status, band):
             "social": False}
 
 
-def _internal_capabilities(status, band):
-    """Server-only gates. First-party health-data processing (F01) is its own
-    capability, separate from automated weight targets; both stay adult-only
-    until a reviewed teen decision exists. AI service admission is separate
-    again (ai_launch.require_cohort -> purchase_eligible, adult TR only)."""
+def _internal_capabilities(status, band, country=None):
+    """Server-only gates, never published on the wire.
+
+    health_data: first-party health processing (F01 grant), separate from
+      automated weight targets. Adults, plus a source-admitted TR 13-17 record
+      (Terms §3 + the counsel-qualified F01 text; the grant itself is still the
+      minor's own explicit F01 decision, never this record or the notice).
+    general_profile: the native profile/first-plan path with NO automated
+      weight-target maths (account_profile teen branch).
+    automated_weight_targets, body_photos, social: unchanged (adult/none).
+    AI admission is separate again (ai_launch.require_cohort, adult TR only).
+    """
     caps = _capabilities(status, band)
-    caps["health_data"] = status == "screen_passed" and band == "18_plus"
+    adult = status == "screen_passed" and band == "18_plus"
+    teen = status == "screen_passed" and _tr_minor(band, country)
+    caps["health_data"] = adult or teen
+    caps["general_profile"] = adult or teen
     return caps
+
+
+def tr_minor_profile(user):
+    """A live TR 13-17 record under the source pin: teen profile rules apply.
+
+    Off while eligibility enforcement is off (nothing is restricted then, and no
+    minor can register: preview refuses minors in that mode)."""
+    if not enabled():
+        return False
+    record = _record(user)
+    return bool(record) and _tr_minor(record["age_band"], record["country"])
 
 
 def preview(data):
@@ -277,7 +298,8 @@ def require_capability(user, capability):
     record = _record(user)
     status = "screen_passed" if record else "review_required"
     band = record["age_band"] if record else None
-    if not _internal_capabilities(status, band).get(capability, False):
+    country = record["country"] if record else None
+    if not _internal_capabilities(status, band, country).get(capability, False):
         raise EligibilityDenied("ELIGIBILITY_FEATURE_UNAVAILABLE", 403)
 
 
@@ -338,11 +360,13 @@ def enforce_request(user):
             if _photo_evidence_submitted():
                 require_capability(user, "body_photos")
     # Every current profile goal is weight loss/gain; a numeric minimum change
-    # would still run adult calculations. Refuse before reading health input
-    # until an independently qualified neutral teen profile is composed.
+    # would still run adult calculations. Refuse before reading health input.
+    # The native profile write alone has a teen branch with no weight-target
+    # maths (account_profile), so it needs only general_profile here.
     if request.method in {"POST", "PUT", "PATCH"} and endpoint in {
         "profile.setup", "profile.edit_profile", "tracking.checkin",
-        "tracking.update_weight", "mobile_api.put_account_profile",
-        "mobile_api.create_check_in", "coach.chat",
+        "tracking.update_weight", "mobile_api.create_check_in", "coach.chat",
     }:
         require_capability(user, "automated_weight_targets")
+    if request.method in {"POST", "PUT", "PATCH"} and endpoint == "mobile_api.put_account_profile":
+        require_capability(user, "general_profile")

@@ -12,7 +12,8 @@ from app.services.ai_consent import ConsentDenied
 
 NOTICE = policy.TR_MINOR_NOTICE_VERSION
 WIRE_CAPS = {"body_photos": False, "automated_weight_targets": False, "social": False}
-RESTRICTED = ("health_data", "automated_weight_targets", "body_photos", "social")
+RESTRICTED = ("automated_weight_targets", "body_photos", "social")
+TEEN_ALLOWED = ("health_data", "general_profile")
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +81,7 @@ def test_notice_is_refused_outside_the_tr_minor_cohort(pinned, age, country):
     assert policy.registration_record(ticket(age, country))["age_band"]
 
 
-def test_registered_tr_minor_is_account_only(app, monkeypatch, pinned):
+def test_registered_tr_minor_gets_only_teen_lanes(app, monkeypatch, pinned):
     from app.services import cognito_service
     monkeypatch.setattr(cognito_service, "sign_up", lambda **_: "sub-trteen")
     account_registration.register_account(
@@ -91,6 +92,8 @@ def test_registered_tr_minor_is_account_only(app, monkeypatch, pinned):
     # Wire projection key set is unchanged (shipped mobile parser contract).
     assert policy.projection(user) == {"status": "screen_passed", "age_band": "13_17",
         "country": "TR", "source": "self_declared", "capabilities": WIRE_CAPS}
+    for capability in TEEN_ALLOWED:
+        policy.require_capability(user, capability)
     for capability in RESTRICTED:
         with pytest.raises(policy.EligibilityDenied) as caught:
             policy.require_capability(user, capability)
@@ -153,12 +156,13 @@ def test_native_register_carries_the_notice_version(app, monkeypatch, pinned):
     assert policy.projection(User.query.one())["age_band"] == "13_17"
 
 
-def test_health_consent_grant_is_refused_for_tr_minor(app, make_user, monkeypatch, pinned):
+def test_health_consent_grant_needs_the_live_pin_for_tr_minor(app, make_user, monkeypatch, pinned):
     from flask import g
     from app.blueprints import health_consent
     user = teen_user(make_user)
     called = []
     monkeypatch.setattr(health_consent.consent, "mutate", lambda *a: called.append(a))
+    monkeypatch.setattr(policy, "APPROVED_TR_MINOR_NOTICE_VERSION", None)
     with app.test_request_context(json={"action": "affirmative_grant"}, method="POST"):
         g.mobile_user = user
         with pytest.raises(policy.EligibilityDenied):

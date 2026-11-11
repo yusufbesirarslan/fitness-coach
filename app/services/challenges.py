@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from app.extensions import db
 from app.models import Challenge, User, UserChallengeProgress
+from app.services.public_ranking import rankable_clause
 from app.timeutil import UTC, app_now
 
 log = logging.getLogger(__name__)
@@ -249,7 +250,8 @@ def challenge_board(challenge_id, period_key, scope, viewer_id):
     q = (db.session.query(UserChallengeProgress, User)
          .join(User, User.id == UserChallengeProgress.user_id)
          .filter(UserChallengeProgress.challenge_id == challenge_id,
-                 UserChallengeProgress.period_key == period_key))
+                 UserChallengeProgress.period_key == period_key,
+                 rankable_clause()))
     if scope == "friends":
         ids = get_friend_ids(viewer_id) | {viewer_id}
         q = q.filter(UserChallengeProgress.user_id.in_(ids))
