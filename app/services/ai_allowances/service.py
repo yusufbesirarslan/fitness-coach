@@ -201,14 +201,14 @@ def _new_bucket(user_id, scope, feature, key, units, version, now):
                              billed_releases=0, created_at=now, updated_at=now)
 
 
-def _starter_locked(owner, policy, now):
+def _starter_locked(owner, policy, now, feature=None):
     """Exactly-once grant under the owner lock; the PK arbitrates any race.
 
     Quantities are snapshotted into STARTER buckets, so a later policy change
     never rewrites a balance that was already granted.
     """
     from app.services.ai_launch import check_allocation
-    check_allocation(owner)
+    check_allocation(owner, feature)
     grant = db.session.get(AiStarterGrant, owner.id, populate_existing=True)
     if grant is not None:
         return grant, False
@@ -272,7 +272,7 @@ def _authorize(owner, policy, subscription, feature, now):
     Precedence: effective Premium -> active LAUNCH_FREE window -> Starter.
     """
     from app.services.ai_launch import check_allocation
-    check_allocation(owner)
+    check_allocation(owner, feature)
     if subscription.premium:
         premium = policy.premium
         if premium is None or feature not in premium.allowances:
@@ -285,7 +285,7 @@ def _authorize(owner, policy, subscription, feature, now):
     if campaign_bucket is not None:
         return campaign_bucket, P.SCOPE_LAUNCH_FREE
     if policy.starter is not None:
-        grant, _ = _starter_locked(owner, policy, now)
+        grant, _ = _starter_locked(owner, policy, now, feature)
     else:
         grant = db.session.get(AiStarterGrant, owner.id, populate_existing=True)
     bucket = grant and _bucket(owner.id, P.SCOPE_STARTER, feature, P.period_key(P.PERIOD_NEVER, now))

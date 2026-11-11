@@ -10,6 +10,7 @@ from app.extensions import db
 from app.services import ai, ai_consent
 from app.services.ai_spend_guard import subject_scope
 from app.services.ai_consent import ConsentDenied
+from app.services.training_generation import youth_safety
 from app.services.training_generation.feature_extractor import build_features
 
 from app.models import (
@@ -98,6 +99,10 @@ def generate_and_persist(
     _operation, result = _inspect_durable(user.id, key, request.fingerprint)
     if result is not None:
         return result
+    # Youth boundary before any claim, hold or provider work (adults: no-op).
+    youth_safety.require_supported(
+        getattr(last_session, "age", None) or getattr(user, "age", None),
+        request.preferences)
 
     with try_owner_lock(user_id) as acquired:
         if not acquired:
