@@ -31,29 +31,48 @@ MIN_REPS = 6
 MAX_RPE = 7
 
 _NUM = r"(\d+(?:[.,]\d+)?)"
-# "RPE 8", "RPE: 9", "RPE ~8", "RPE 7-8" / "7/8" (the upper bound counts).
-_RPE = re.compile(r"\bRPE\s*[:~≈]?\s*" + _NUM + r"(?:\s*[-–/]\s*" + _NUM + r")?", re.IGNORECASE)
-# "RIR 0-1" = at or next to failure.
+# "RPE 8", "RPE: 9", "RPE ~8", "RPE 7-8" (the upper bound counts); "RPE 7/10"
+# names the scale, never a 7-10 range.
+_RPE = re.compile(r"\bRPE\s*[:~≈]?\s*" + _NUM + r"(?:\s*/\s*10\b)?(?:\s*[-–]\s*" + _NUM + r")?",
+                  re.IGNORECASE)
+# RPE <= 7 is roughly 3+ reps in reserve; RIR below that is near failure.
 _RIR = re.compile(r"\bRIR\s*[:~≈]?\s*" + _NUM, re.IGNORECASE)
+MIN_RIR = 3
 _TIME = re.compile(r"\d\s*(?:sn|s|sec|secs|saniye|dk|min|dakika)\b", re.IGNORECASE)
 _SETS_X_REPS = re.compile(r"^\s*\d+\s*[x×]\s*(\d+)")
 _LEADING_INT = re.compile(r"^\s*(\d+)")
+# "Max/maksimum reps" is maximal unless a number follows ("maksimum tekrar 12",
+# "max rep range 12" are ordinary ranges).
+_NOT_A_COUNT = r"(?!\s*(?:range|aralığı|sayısı)?\s*:?\s*\d)"
 _FORBIDDEN = re.compile(
     r"\b1\s?-?RM\b|\bone[- ]rep max\b|\bAMRAP\b|\bmax(?:imal|imum)?\s+(?:lift|effort|weight|attempt)"
-    r"|\bmaks(?:imal|imum)?\s+(?:kaldırış|ağırlık|deneme|efor)"
-    r"|\bto failure\b|tükeni[şs]e kadar|tükenmeye (?:kadar|yakın)|\bcalorie deficit\b|kalori açığı"
+    r"|\bmax(?:imum)?\s+reps?\b" + _NOT_A_COUNT
+    + r"|\bmaks(?:imal|imum)?\s+(?:kaldırış|ağırlık|deneme|efor)"
+    r"|\bmaks(?:imal|imum)?\s+tekrar\b" + _NOT_A_COUNT
+    + r"|\bto failure\b|tükeni[şs]e kadar|tükenmeye (?:kadar|yakın)|\bcalorie deficit\b|kalori açığı"
     r"|\bfat[- ]burn|\byağ yak|\bsupplement|besin takviye|protein tozu|\bdiet\b|\bdiyet\b|\bdiyete\b",
     re.IGNORECASE,
 )
-# A clause that warns AGAINST the forbidden thing is the boundary working.
-_NEGATION = re.compile(
-    r"\b(?:not|don'?t|never|avoid|no|without)\b"
-    # Turkish: only unambiguous forms. "-ma/-me" alone is also a verbal noun
-    # ("tükenişe kadar çalışma" = training to failure), so it never negates.
-    r"|\b(?:yok|değil|olmadan|asla)\b|kaçın|\w+m[ae]y[ıi]n\b|\w+m[ae]m[ae]l[ıi]\b",
-    re.IGNORECASE,
-)
-_CLAUSE = re.compile(r"[.;!?\n]|,\s")
+# A warning AGAINST the forbidden thing is the boundary working, but only when
+# the negator is adjacent to the term: English before it ("do not go to
+# failure", "avoid 1RM"), Turkish after it ("tükenişe kadar gitmeyin", "1RM
+# testi yok"). A negator elsewhere ("go to failure with no rest") never counts.
+_EN_NEGATION = re.compile(r"\b(?:not|don'?t|never|avoid|no|without)\b", re.IGNORECASE)
+# Turkish: only unambiguous forms. "-ma/-me" alone is also a verbal noun
+# ("tükenişe kadar çalışma" = training to failure), so it never negates.
+_TR_NEGATION = re.compile(
+    r"\b(?:yok|değil|olmadan|asla)\b|kaçın|\w+m[ae]y[ıi]n\b|\w+m[ae]m[ae]l[ıi]\b",
+    re.IGNORECASE)
+# "Not:" (Turkish for "Note:") starts a new clause; it is never a negator.
+_CLAUSE = re.compile(r"[.;:!?\n]|,\s")
+_WINDOW_WORDS = 3
+
+
+def _negated(clause, match):
+    before = clause[:match.start()].split()[-_WINDOW_WORDS:]
+    after = clause[match.end():].split()[:_WINDOW_WORDS]
+    return (bool(_EN_NEGATION.search(" ".join(before)))
+            or bool(_TR_NEGATION.search(" ".join(after))))
 
 
 def effective_age(*ages):
@@ -63,8 +82,9 @@ def effective_age(*ages):
 
 
 def _prescribes_forbidden(text):
-    return any(_FORBIDDEN.search(clause) and not _NEGATION.search(clause)
-               for clause in _CLAUSE.split(text or ""))
+    return any(not _negated(clause, match)
+               for clause in _CLAUSE.split(text or "")
+               for match in _FORBIDDEN.finditer(clause))
 
 
 def _rep_floor(text):
@@ -139,7 +159,8 @@ def validate_plan(age, plan: dict) -> dict:
             _reject("focus_term")
         for exercise in day.get("egzersizler") or ():
             reps = str(exercise.get("tekrar") or "")
-            if _prescribes_forbidden(reps):
+            if _prescribes_forbidden(reps) or (reps.strip() and not any(c.isdigit() for c in reps)):
+                # A reps value must be a count or a time; "Max"/"AMRAP" is not.
                 _reject("reps_term")
             if day.get("tip") == "antrenman":
                 sets = exercise.get("set")
@@ -153,7 +174,7 @@ def validate_plan(age, plan: dict) -> dict:
                 if max(float(v.replace(",", ".")) for v in (low, high) if v) > MAX_RPE:
                     _reject("rpe")
             for value in _RIR.findall(note):
-                if float(value.replace(",", ".")) < 2:
+                if float(value.replace(",", ".")) < MIN_RIR:
                     _reject("rir")
             if _prescribes_forbidden(note):
                 _reject("note_term")

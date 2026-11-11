@@ -165,6 +165,9 @@ def _plan(**exercise):
     {"not": "RPE 7-8"}, {"not": "RPE: 9"}, {"not": "RPE ~8"}, {"not": "RIR 0"},
     {"not": "Tükenmeye yakın bitir"}, {"tekrar": "AMRAP"}, {"tekrar": "Tükenişe kadar"},
     {"tekrar": "2x4"}, {"not": "Tükenişe kadar çalışma"},
+    {"not": "Not: son seti tükenişe kadar yap"}, {"not": "Go to failure with no rest"},
+    {"not": "Max reps on the last set"}, {"not": "Maksimum tekrar yap"}, {"tekrar": "Max"},
+    {"not": "RIR 2"}, {"not": "RPE 8/10"},
 ])
 def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, caplog):
     plan = _plan(**exercise)
@@ -181,6 +184,8 @@ def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, cap
     {"tekrar": "3x10"}, {"tekrar": "12 (her bacak)"}, {"not": "Do not go to failure"},
     {"not": "Tükenişe kadar gitmeyin"}, {"not": "1RM testi yok"}, {"not": "Diyetisyene danış"},
     {"not": "Maksimum tekrar 12"}, {"not": "RIR 3, RPE 6-7"}, {"tekrar": "45 saniye"},
+    {"not": "RPE 7/10 hissettir"}, {"not": "RPE 6/10"}, {"not": "Not: sırtını düz tut"},
+    {"not": "Never train to failure"}, {"not": "max rep range 12"},
 ])
 def test_minor_output_inside_the_boundary_passes(exercise):
     plan = _plan(**exercise)
