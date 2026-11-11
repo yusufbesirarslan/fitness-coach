@@ -170,3 +170,14 @@ def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise):
 def test_minor_output_inside_the_boundary_passes(exercise):
     plan = _plan(**exercise)
     assert youth_safety.validate_plan(16, plan) is plan
+
+
+def test_preference_contract_omits_refused_choices_for_a_minor_only():
+    from app.services.mobile_training import preference_contract
+    adult, minor = preference_contract()["fields"], preference_contract(minor=True)["fields"]
+    assert "powerlifting" in adult["antrenman_tarzi"]["choices"]
+    assert "yag_yakimi" in adult["odak_hedef"]["choices"]
+    assert "powerlifting" not in minor["antrenman_tarzi"]["choices"]
+    assert "yag_yakimi" not in minor["odak_hedef"]["choices"]
+    assert {k: v for k, v in adult.items() if k not in {"antrenman_tarzi", "odak_hedef"}} == {
+        k: v for k, v in minor.items() if k not in {"antrenman_tarzi", "odak_hedef"}}

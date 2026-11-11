@@ -74,8 +74,15 @@ class WorkoutStale(LookupError):
     """A well-formed reference does not match the owner's current revision."""
 
 
-def preference_contract() -> dict:
-    """Return deterministic rendering metadata from the canonical vocabularies."""
+def preference_contract(minor: bool = False) -> dict:
+    """Return deterministic rendering metadata from the canonical vocabularies.
+
+    ``minor`` (profile age < 18) omits the choices the youth boundary refuses,
+    so the client never offers them; the generator still refuses them itself.
+    """
+    from app.services.training_generation import youth_safety
+    styles = set(STYLE_RULE_KEYS) - (youth_safety.REFUSED_STYLES if minor else set())
+    focus = set(FOCUS_VALUES) - (youth_safety.REFUSED_FOCUS if minor else set())
     return {
         "contract_version": CONTRACT_VERSION,
         "fields": {
@@ -87,8 +94,8 @@ def preference_contract() -> dict:
             "kardiyo_gun": _integer_field(0, CARDIO_DAYS),
             "kardiyo_sure": _integer_field(20, CARDIO_DURATIONS),
             "kardiyo_yogunluk": _token_field("orta", CARDIO_INTENSITIES),
-            "antrenman_tarzi": _token_field("genel", STYLE_RULE_KEYS),
-            "odak_hedef": _token_field("genel", FOCUS_VALUES),
+            "antrenman_tarzi": _token_field("genel", styles),
+            "odak_hedef": _token_field("genel", focus),
             "injuries": {"type": "string", "default": ""},
         },
         "capability_constraints": public_capability_constraints(),

@@ -128,7 +128,9 @@ def create_training_plan():
 @bp.get("/training/preferences")
 @require_mobile_auth
 def training_preferences():
-    return jsonify(mobile_training.preference_contract())
+    from app.services.training_generation.youth_safety import is_minor
+    return jsonify(mobile_training.preference_contract(
+        minor=is_minor(getattr(g.mobile_user, "age", None))))
 
 
 @bp.get("/training/plans/current")
