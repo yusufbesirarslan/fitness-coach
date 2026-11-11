@@ -31,9 +31,9 @@ MIN_REPS = 6
 MAX_RPE = 7
 
 _NUM = r"(\d+(?:[.,]\d+)?)"
-# "RPE 8", "RPE: 9", "RPE ~8", "RPE 7-8" (the upper bound counts); "RPE 7/10"
-# names the scale, never a 7-10 range.
-_RPE = re.compile(r"\bRPE\s*[:~≈]?\s*" + _NUM + r"(?:\s*/\s*10\b)?(?:\s*[-–]\s*" + _NUM + r")?",
+# "RPE 8", "RPE: 9", "RPE ~8", "RPE 7-8" and "RPE 7/8" (the upper bound
+# counts); "RPE 7/10" names the scale, never a 7-10 range.
+_RPE = re.compile(r"\bRPE\s*[:~≈]?\s*" + _NUM + r"(?:\s*/\s*10\b)?(?:\s*[-–/]\s*" + _NUM + r")?",
                   re.IGNORECASE)
 # RPE <= 7 is roughly 3+ reps in reserve; RIR below that is near failure.
 _RIR = re.compile(r"\bRIR\s*[:~≈]?\s*" + _NUM, re.IGNORECASE)

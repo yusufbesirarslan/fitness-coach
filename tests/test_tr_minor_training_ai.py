@@ -167,7 +167,8 @@ def _plan(**exercise):
     {"tekrar": "2x4"}, {"not": "Tükenişe kadar çalışma"},
     {"not": "Not: son seti tükenişe kadar yap"}, {"not": "Go to failure with no rest"},
     {"not": "Max reps on the last set"}, {"not": "Maksimum tekrar yap"}, {"tekrar": "Max"},
-    {"not": "RIR 2"}, {"not": "RPE 8/10"},
+    {"not": "RIR 2"}, {"not": "RPE 8/10"}, {"not": "RPE 7/8"}, {"not": "RPE 6 / 8"},
+    {"not": "RPE 6/10-8/10"},
 ])
 def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, caplog):
     plan = _plan(**exercise)
@@ -188,6 +189,7 @@ def test_minor_output_outside_the_boundary_is_semantically_invalid(exercise, cap
     {"not": "Never train to failure"}, {"not": "max rep range 12"},
     {"not": "Maksimum tekrar: 12"}, {"not": "Max reps: 12"},
     {"not": "Tükenişe kadar gitmemelisin"}, {"not": "Tükenişe kadar gitmeden bitir"},
+    {"not": "RPE 6/7"}, {"not": "RPE 6/10-7/10"}, {"not": "RPE 5 / 10"},
 ])
 def test_minor_output_inside_the_boundary_passes(exercise):
     plan = _plan(**exercise)
