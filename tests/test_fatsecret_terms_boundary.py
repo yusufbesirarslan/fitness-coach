@@ -319,6 +319,7 @@ def test_fatsecret_advice_boundary_holds_with_all_d1_purposes_registered(app, ad
     context = context_builder.fetch_coach_context(
         user.id, question="nutrition", language="en", handoff="nutrition-day")
     assert sentinel not in context
+    assert fatsecret_boundary.notice("en") in context  # the handoff ran, not swallowed
 
     # QR: advice withheld (never zero), no ranking, no provider call, no number.
     payload = analyze()
@@ -338,6 +339,8 @@ def test_d1_coach_food_lookup_never_calls_fatsecret(app, monkeypatch):
 
 
 def test_nutrition_plan_generation_reads_no_ledger_or_provider():
+    # Static pin on the native generation path's own functions and the shared
+    # generator module; an indirect read through a new helper needs its own test.
     generation = (ROOT / "app" / "services" / "nutrition_plan_generation.py").read_text(
         encoding="utf-8")
     plan = ast.parse((ROOT / "app" / "services" / "nutrition_native" / "plan.py").read_text(
