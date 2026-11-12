@@ -255,12 +255,12 @@ def test_health_reports_unconfigured_without_failing(env_absent, client):
 
 # ── Path 1: diary totals. Closed only because AI is closed ─────────────────
 
-def test_ai_stays_closed_at_this_candidate():
-    """Failing here means D1 is being published: FatSecret advice must be decided first.
+def test_fatsecret_advice_purposes_stay_closed_at_this_candidate():
+    """Training registration must not open diary-derived Coach/Nutrition/QR advice.
 
-    docs/compliance/fatsecret-launch-boundary.md lists what that decision needs.
+    docs/compliance/fatsecret-launch-boundary.md retains those purpose gates.
     """
-    assert ai_consent.POLICIES == {} and ai_launch.APPROVED_SERVICE_COHORT_VERSION is None
+    assert not {"coach.conversation", "nutrition.plan", "qr_menu.analysis"} & {p.purpose for p in ai_consent.POLICIES.values()}
 
 
 def test_web_search_llm_fallback_stays_closed(env_absent, client, auth_user, monkeypatch):

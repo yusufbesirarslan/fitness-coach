@@ -570,7 +570,8 @@ def test_d1_cohort_and_runtime_gates_still_refuse_with_apple_off(app, execution_
     monkeypatch.setattr(launch_policy, "APPROVED_POLICY", app.config["AI_ALLOWANCE_POLICY"])
     monkeypatch.setattr(ai_spend_guard, "ENABLED", True)
     monkeypatch.setattr(ai_spend_guard, "_get_redis", lambda: object())
-    # Shipping source pins no service cohort: Apple off cannot open AI.
+    # Explicitly retire the approved source pin: Apple off cannot bypass it.
+    monkeypatch.setattr(ai_launch, "APPROVED_SERVICE_COHORT_VERSION", None)
     assert ai_launch.APPROVED_SERVICE_COHORT_VERSION is None
     with pytest.raises(ai_consent.ConsentDenied):
         ai_launch.require_runtime()

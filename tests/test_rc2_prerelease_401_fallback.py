@@ -19,7 +19,7 @@ from appstoreserverlibrary.signed_data_verifier import VerificationException, Ve
 from app.config import _prerelease_401_deadline, _utc_deadline
 from app.extensions import db
 from app.feature_flags import FeatureFlagConfigurationError, resolve_rollout_flags
-from app.models import AppleAccountAssociation, AppleSubscription, User
+from app.models import AIConsentState, AppleAccountAssociation, AppleSubscription, User
 from app.services import account_eligibility as policy, ai_consent, ai_launch
 from app.services import apple_reconciliation as r, subscriptions as s
 from app.services.apple_subscriptions import AppleAdapter, SubscriptionError
@@ -249,8 +249,12 @@ def test_named_subject_gets_a_sandbox_row_and_no_ai(world):
     assert ai_launch.premium_ready() is False
     with pytest.raises(ai_consent.ConsentDenied):
         ai_launch.require_runtime()
+    # Signed adult TR eligibility passes the approved cohort independently of
+    # the purchase. A verified purchase supplies neither runtime nor D1 authority.
+    ai_launch.require_cohort(db.session.get(User, world.ids["a"]))
+    assert AIConsentState.query.count() == 0
     with pytest.raises(ai_consent.ConsentDenied):
-        ai_launch.require_cohort(db.session.get(User, world.ids["a"]))
+        ai_launch.require_selected({"grants": {}}, "training_plan")
 
 
 def test_no_read_transaction_stays_open_across_apple_calls(world):

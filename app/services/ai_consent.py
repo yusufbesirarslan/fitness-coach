@@ -1,6 +1,6 @@
 """Durable consent authority. No runtime/config/client-defined policy registry.
 
-The registry intentionally contains no published legal disclosure. Adding one
+The source candidate registers only the existing Training contract. Adding one
 requires reviewed source with the exact disclosure digest, recipient/model set
 and purpose/category projection. Existing callers without a qualified binding
 are unavailable, including synthetic probes (no hidden system bypass).
@@ -42,9 +42,20 @@ class Disclosure:
     nested_features: tuple[str, ...] = ()
 
 
-# NO approved text, vendor terms or production recipient facts inferred here.
-POLICIES = MappingProxyType({})
-# Purpose projections only: no grant or published contract is installed here.
+# Source preparation authorized 2026-11-11. Deployment/production activation
+# remain separate. Other Launch V1 purposes are not opened by this candidate.
+POLICIES = MappingProxyType({
+    "d1-closure01-training-candidate": Disclosure(
+        version="d1-closure01-training-candidate",
+        purpose="training.plan",
+        categories=("fitness_preferences", "body_metrics", "health_constraints"),
+        recipients=(("bedrock", "eu.anthropic.claude-sonnet-5-5"),
+                    ("bedrock", "eu.anthropic.claude-haiku-5-5")),
+        texts=(("en", "467fc1fb54fca648cec3e737ad7a78fc969f4f74ae0ef735b223d018ab130054"),
+               ("tr", "062ae5123955dae849ef48f91aa60387443bb53e14e94b2a1eb53808ecd82b80")),
+    ),
+})
+# Purpose projections only: a binding is not a user grant.
 # New category tuples remain inert until exact source disclosures are approved.
 # Generic nutrition, memory and streaming stay unbound. Nested helpers require
 # explicit qualification in the original purpose's immutable disclosure.

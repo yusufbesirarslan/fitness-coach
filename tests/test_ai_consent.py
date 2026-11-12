@@ -8,8 +8,9 @@ from test_mobile_coach_api import bearer  # real opaque credential; synthetic Co
 from app.services import ai_consent as consent, ai_provider_call as calls
 
 
-def test_release_has_no_inferred_or_configured_disclosures():
-    assert dict(consent.POLICIES) == {}
+def test_source_candidate_registers_only_exact_training_disclosure():
+    assert set(consent.POLICIES) == {"d1-closure01-training-candidate"}
+    assert {p.purpose for p in consent.POLICIES.values()} == {"training.plan"}
     assert set(consent.BINDINGS) == {'coach', 'training_plan', 'nutrition_plan', 'vision', 'menu_extract'}
 
 

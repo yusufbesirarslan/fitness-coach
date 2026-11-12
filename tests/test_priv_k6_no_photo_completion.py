@@ -155,8 +155,8 @@ def test_k6a_ai_declined_user_completes_without_a_photo(
         client, owner, as_mobile, workout_ref, forbidden, body):
     from app.services import ai_consent
 
-    # The REAL D1 authority, untouched: no policy, no disclosure recipient.
-    assert dict(ai_consent.POLICIES) == {}
+    # The REAL D1 authority: no photo-purpose contract or user grant.
+    assert "pump_check.analysis" not in {p.purpose for p in ai_consent.POLICIES.values()}
     headers = as_mobile(owner)
     ref = _started(client, headers, workout_ref)
 

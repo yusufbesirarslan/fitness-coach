@@ -79,7 +79,7 @@ def assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient):
     assert set(consent.BINDINGS) == {"coach", "training_plan", "nutrition_plan", "vision", "menu_extract"}
     assert routes._CLOSED_ENDPOINTS
     assert app.config["AI_MEMORY_ENABLED"] is False
-    assert dict(consent.POLICIES) == {}
+    assert {p.purpose for p in consent.POLICIES.values()} == {"training.plan"}
     monkeypatch.setattr(consent, "generation", lambda owner: 0)
     sdk = Mock()
     for name in ("seam_owner_a", "seam_owner_b"):
@@ -113,6 +113,8 @@ def publish_synthetic_texts(monkeypatch, policies):
     from dataclasses import replace
     from hashlib import sha256
     from app.services import ai_consent_disclosures as disclosures
+    # Synthetic layer contracts select their own versions explicitly when needed.
+    monkeypatch.setattr(disclosures, "LAUNCH_VERSIONS", {})
     texts = {"en": "SYNTHETIC approved fixture", "tr": "SENTETİK onaylı test"}
     digests = tuple((k, sha256(v.encode()).hexdigest()) for k, v in texts.items())
     qualified = {key: replace(policy, texts=digests) for key, policy in policies.items()}

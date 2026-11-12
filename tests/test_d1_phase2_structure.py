@@ -1,4 +1,4 @@
-"""Inactive integration: no publication, provider or transaction changes."""
+"""Independent D1 purposes; only the approved Training source is published."""
 from datetime import datetime, timezone
 import pytest
 from app.services import ai_consent as consent
@@ -6,14 +6,19 @@ from app.services.ai_allowances import launch_policy
 from app.services.ai_allowances.policy import AllowancePolicy, ScopePolicy, SUPPORTED_FEATURES, PolicyError
 
 
-def test_five_independent_purposes_remain_unpublished():
+def test_five_independent_purposes_publish_only_the_training_candidate():
     assert {value[0] for value in consent.BINDINGS.values()} == {
         "coach.conversation", "training.plan", "nutrition.plan", "pump_check.analysis", "qr_menu.analysis"}
     assert len(consent.BINDINGS) == 5
-    assert not consent.POLICIES
+    version = "d1-closure01-training-candidate"
+    assert set(consent.POLICIES) == {version}
+    assert consent.POLICIES[version].purpose == "training.plan"
+    assert consent.POLICIES[version].external_scopes == ()
+    assert consent.POLICIES[version].nested_features == ()
     assert "nutrition" not in consent.BINDINGS
-    from app.services.ai_consent_disclosures import PUBLISHED_TEXTS
-    assert not PUBLISHED_TEXTS
+    from app.services.ai_consent_disclosures import PUBLISHED_TEXTS, LAUNCH_VERSIONS
+    assert dict(LAUNCH_VERSIONS) == {"training.plan": version}
+    assert set(PUBLISHED_TEXTS) == {(version, "en"), (version, "tr")}
 
 
 @pytest.mark.parametrize("original,nested", [("coach", "nutrition"), ("coach", "vision"),

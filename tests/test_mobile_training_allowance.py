@@ -617,6 +617,7 @@ def test_empty_d1_registry_blocks_route_before_allowance_or_provider(
     premium_row(mobile_user.id)
     provider = Mock()
     monkeypatch.setattr(generation_service, "generate_training_plan_candidate", provider)
+    monkeypatch.setattr(ai_consent, "POLICIES", {})
     assert dict(ai_consent.POLICIES) == {}
     response = _post(client, as_mobile, mobile_user, "d1-default-deny-native")
     assert response.status_code == 403
