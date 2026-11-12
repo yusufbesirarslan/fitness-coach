@@ -26,6 +26,15 @@ PURCHASE_COUNTRIES = frozenset({"TR"})
 # Only reviewed source may pin it; no env/config/client channel. None = closed.
 TR_MINOR_NOTICE_VERSION = "tr-minor-notice-v1"
 APPROVED_TR_MINOR_NOTICE_VERSION: str | None = None
+# AI *service* admission for the same TR 13-17 record, separate from purchase
+# eligibility (which stays adult-only). Training-plan generation only: no Coach,
+# Nutrition, Pump Check or QR Menu. It admits nothing by itself: the minor's own
+# F01 + D1 Training grants, the finite allowance and the runtime guards still
+# decide every request. Only reviewed source may pin it, after founder/counsel
+# authorization (see docs/TR_MINOR_ONBOARDING.md). None = closed.
+TR_MINOR_TRAINING_AI_VERSION = "tr-minor-training-ai-v1"
+APPROVED_TR_MINOR_TRAINING_AI_VERSION: str | None = None
+TR_MINOR_AI_FEATURES = frozenset({"training_plan"})
 
 
 class EligibilityDenied(Exception):
@@ -145,7 +154,8 @@ def _internal_capabilities(status, band, country=None):
     general_profile: the native profile/first-plan path with NO automated
       weight-target maths (account_profile teen branch).
     automated_weight_targets, body_photos, social: unchanged (adult/none).
-    AI admission is separate again (ai_launch.require_cohort, adult TR only).
+    AI admission is separate again (ai_launch.require_cohort ->
+    ai_service_eligible: adult TR, plus TR 13-17 Training only behind its pin).
     """
     caps = _capabilities(status, band)
     adult = status == "screen_passed" and band == "18_plus"
@@ -304,12 +314,43 @@ def purchase_eligible(user, now):
     client-writable status. Unknown/review schemas fail closed in _record.
     ``now`` is an aware UTC instant; a declaration dated after it is not one yet.
     """
+    return _adult_tr(user, now)
+
+
+def _adult_tr(user, now):
     record = _record(user)
     if (not user.cognito_sub or not record or record["age_band"] != "18_plus"
             or record["country"] not in PURCHASE_COUNTRIES):
         return False
+    return _declared_by(record, now)
+
+
+def _declared_by(record, now):
     checked = datetime.fromisoformat(record["checked_at"])
     return checked.tzinfo is not None and checked <= now
+
+
+def tr_minor_ai_open():
+    return APPROVED_TR_MINOR_TRAINING_AI_VERSION == TR_MINOR_TRAINING_AI_VERSION
+
+
+def ai_service_eligible(user, feature, now):
+    """AI service admission. NOT purchase eligibility and NOT a grant.
+
+    Adults: the existing adult-TR signed declaration (same rule as purchase).
+    TR 13-17: only a live minor record (notice pin + acknowledged notice), only
+    for TR_MINOR_AI_FEATURES, only under its own source pin, and only while the
+    canonical profile age agrees (13-17). Unknown features fail closed.
+    """
+    if _adult_tr(user, now):
+        return True
+    if feature not in TR_MINOR_AI_FEATURES or not tr_minor_ai_open():
+        return False
+    record = _record(user)
+    return (bool(user.cognito_sub) and bool(record)
+            and _tr_minor(record["age_band"], record["country"])
+            and type(user.age) is int and 13 <= user.age <= 17
+            and _declared_by(record, now))
 
 
 def require_capability(user, capability):

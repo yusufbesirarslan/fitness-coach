@@ -30,11 +30,19 @@ NATIVE_ENDPOINTS = {
 APPROVED_SERVICE_COHORT_VERSION: str | None = "age-screen-v1"
 
 
-def require_cohort(user):
+# Ledger allowance family -> native launch feature (the same names D1 binds).
+_ALLOWANCE_FEATURES = {"training_generation": "training_plan"}
+
+
+def require_cohort(user, feature=None):
     # The existing canonical subject-bound signed record is the authority.
     # Editable profile/client claims, a purchase or a D1 grant cannot promote it.
+    # AI *service* eligibility, not purchase eligibility: a TR 13-17 record can
+    # be admitted for Training only, behind its own source pin. ``feature=None``
+    # (a caller that cannot name the operation) stays adult-only.
     if (APPROVED_SERVICE_COHORT_VERSION != account_eligibility.VERSION
-            or not account_eligibility.purchase_eligible(user, datetime.now(timezone.utc))):
+            or not account_eligibility.ai_service_eligible(
+                user, feature, datetime.now(timezone.utc))):
         raise consent.ConsentDenied("AI_SERVICE_ELIGIBILITY_REQUIRED")
 
 
@@ -49,14 +57,14 @@ def require_runtime():
     execution.require_ready()
 
 
-def require_owner_within(conn, owner):
+def require_owner_within(conn, owner, feature=None):
     """Fresh canonical evidence in D1's existing account transaction/lock."""
     _, _, users = consent._tables()
     row = conn.execute(select(users.c.cognito_sub, users.c.age, users.c.user_metadata)
                        .where(users.c.id == owner)).mappings().one_or_none()
     if row is None:
         raise consent.ConsentDenied()
-    require_cohort(SimpleNamespace(**row))
+    require_cohort(SimpleNamespace(**row), feature)
 
 
 def _published(feature):
@@ -85,7 +93,7 @@ def require_selected(state, feature):
 def admit_endpoint(owner, feature):
     require_runtime()
     with consent._transaction(owner) as conn:
-        require_owner_within(conn, owner)
+        require_owner_within(conn, owner, feature)
         require_selected(consent._state(conn, owner), feature)
 
 
@@ -128,10 +136,14 @@ def check_operation_within(conn, state, authority):
     """
     if launch_policy.installed_policy() is not None:
         require_runtime()
-        require_owner_within(conn, authority.owner)
+        require_owner_within(conn, authority.owner, authority.feature)
         require_selected(state, authority.feature)
 
 
-def check_allocation(user):
+def check_allocation(user, feature=None):
+    """Allocation needs the same AI service cohort as dispatch, per feature.
+
+    ``feature`` is the ledger family; unknown or absent families stay adult-only
+    (a minor's Starter grant without a named feature is refused, not opened)."""
     if launch_policy.installed_policy() is not None:
-        require_cohort(user)
+        require_cohort(user, _ALLOWANCE_FEATURES.get(feature))
