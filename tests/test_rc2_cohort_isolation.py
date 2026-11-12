@@ -246,11 +246,17 @@ def test_ai_stays_closed_for_the_named_account_after_purchase_setup(client, wind
 
     assert ai_launch.premium_ready() is False
     assert ai_launch.APPROVED_SERVICE_COHORT_VERSION == "age-screen-v1"
-    assert dict(ai_consent_disclosures.LAUNCH_VERSIONS) == {"training.plan": "d1-closure01-training-candidate"}
+    assert dict(ai_consent_disclosures.LAUNCH_VERSIONS) == {
+        "training.plan": "d1-closure01-training-candidate",
+        "coach.conversation": "d1-closure02-coach-candidate-r2",
+        "nutrition.plan": "d1-closure02-nutrition-plan-candidate",
+        "pump_check.analysis": "d1-closure02-pump-check-candidate",
+        "qr_menu.analysis": "d1-closure02-qr-menu-candidate",
+    }
     with pytest.raises(ai_consent.ConsentDenied):
         ai_launch.require_runtime()
-    # The accepted signed adult TR record passes cohort only; runtime and
-    # Coach publication/grant remain independently closed.
+    # The accepted signed adult TR record passes cohort only; runtime and the
+    # Coach grant remain independently closed even with Coach text published.
     ai_launch.require_cohort(db.session.get(User, window.named))
 
     response = client.post("/api/v1/coach/messages", headers=NAMED, json={"message": "merhaba"})

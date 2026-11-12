@@ -1,7 +1,8 @@
 """Durable consent authority. No runtime/config/client-defined policy registry.
 
-The source candidate registers only the existing Training contract. Adding one
-requires reviewed source with the exact disclosure digest, recipient/model set
+The source candidate registers the existing Training contract and the four
+founder-content-approved (2026-11-12) Coach, Nutrition plan, Pump Check and
+QR Menu contracts. Adding one requires reviewed source with the exact disclosure digest, recipient/model set
 and purpose/category projection. Existing callers without a qualified binding
 are unavailable, including synthetic probes (no hidden system bypass).
 """
@@ -42,8 +43,9 @@ class Disclosure:
     nested_features: tuple[str, ...] = ()
 
 
-# Source preparation authorized 2026-11-11. Deployment/production activation
-# remain separate. Other Launch V1 purposes are not opened by this candidate.
+# Source preparation authorized 2026-11-11 (Training) and 2026-11-12 (Coach,
+# Nutrition plan, Pump Check, QR Menu; founder content approval, not counsel
+# sign-off). Deployment/production activation remain separate.
 POLICIES = MappingProxyType({
     "d1-closure01-training-candidate": Disclosure(
         version="d1-closure01-training-candidate",
@@ -53,6 +55,43 @@ POLICIES = MappingProxyType({
                     ("bedrock", "eu.anthropic.claude-haiku-5-5")),
         texts=(("en", "467fc1fb54fca648cec3e737ad7a78fc969f4f74ae0ef735b223d018ab130054"),
                ("tr", "062ae5123955dae849ef48f91aa60387443bb53e14e94b2a1eb53808ecd82b80")),
+    ),    "d1-closure02-coach-candidate-r2": Disclosure(
+        version="d1-closure02-coach-candidate-r2",
+        purpose="coach.conversation",
+        categories=("personal_free_text", "fitness_preferences", "training_history", "workout_state", "nutrition_activity", "nutrition_targets", "body_metrics", "recovery_ratings", "health_constraints", "tool_results", "fitness_image"),
+        recipients=(("bedrock", "eu.anthropic.claude-sonnet-5-5"),
+                    ("bedrock", "eu.anthropic.claude-haiku-5-5")),
+        texts=(("en", "4666f7fc249f0916ed9f861f7114193407fa2f394cec1556209fdadeb04650e7"),
+               ("tr", "1c93b22650a21c80e6b28a87eec41492cef9dfd307c6312bf387f58db85b9b9b")),
+        nested_features=("nutrition", "vision"),
+    ),
+    "d1-closure02-nutrition-plan-candidate": Disclosure(
+        version="d1-closure02-nutrition-plan-candidate",
+        purpose="nutrition.plan",
+        categories=("nutrition_targets", "food_preferences", "personal_free_text"),
+        recipients=(("bedrock", "eu.anthropic.claude-sonnet-5-5"),
+                    ("bedrock", "eu.anthropic.claude-haiku-5-5")),
+        texts=(("en", "6b51fe2dd8177ec2369aed2131da057850aad159b1b0e05a06c5bf2794017b75"),
+               ("tr", "0c1f84a3ecac79382d81dc223327f9fc5e01687585db8a1d1df2e0974b2e6bb8")),
+    ),
+    "d1-closure02-pump-check-candidate": Disclosure(
+        version="d1-closure02-pump-check-candidate",
+        purpose="pump_check.analysis",
+        categories=("fitness_image", "fitness_context", "personal_free_text"),
+        recipients=(("bedrock", "eu.anthropic.claude-sonnet-5-5"),
+                    ("bedrock", "eu.anthropic.claude-haiku-5-5")),
+        texts=(("en", "816f7a3af11fa48edebcac266278e821963bad59670510f503aebd1e5a4b9089"),
+               ("tr", "c67fbdfac82ba21fd57cf1b000ff46bac79e0668c6c3119d446cd4cb21bb0637")),
+    ),
+    "d1-closure02-qr-menu-candidate": Disclosure(
+        version="d1-closure02-qr-menu-candidate",
+        purpose="qr_menu.analysis",
+        categories=("menu_content", "food_descriptions"),
+        recipients=(("bedrock", "eu.anthropic.claude-sonnet-5-5"),
+                    ("bedrock", "eu.anthropic.claude-haiku-5-5")),
+        texts=(("en", "c143131cb0ac8ef8e82d795dff3b50d3260a7c646959f3d0ca57bd818c6d589c"),
+               ("tr", "fd2f0d2eb34a3d328aa4a12091b9e7b2f917a9d74657ab3ee28bcf9100e5a74f")),
+        external_scopes=("public_https_menu_source",),
     ),
 })
 # Purpose projections only: a binding is not a user grant.

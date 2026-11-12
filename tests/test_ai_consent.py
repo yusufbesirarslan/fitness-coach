@@ -8,9 +8,14 @@ from test_mobile_coach_api import bearer  # real opaque credential; synthetic Co
 from app.services import ai_consent as consent, ai_provider_call as calls
 
 
-def test_source_candidate_registers_only_exact_training_disclosure():
-    assert set(consent.POLICIES) == {"d1-closure01-training-candidate"}
-    assert {p.purpose for p in consent.POLICIES.values()} == {"training.plan"}
+def test_source_candidate_registers_exactly_the_five_approved_disclosures():
+    assert set(consent.POLICIES) == {
+        "d1-closure01-training-candidate", "d1-closure02-coach-candidate-r2",
+        "d1-closure02-nutrition-plan-candidate", "d1-closure02-pump-check-candidate",
+        "d1-closure02-qr-menu-candidate"}
+    assert {p.purpose for p in consent.POLICIES.values()} == {
+        "training.plan", "coach.conversation", "nutrition.plan", "pump_check.analysis",
+        "qr_menu.analysis"}
     assert set(consent.BINDINGS) == {'coach', 'training_plan', 'nutrition_plan', 'vision', 'menu_extract'}
 
 

@@ -93,7 +93,7 @@ def test_exact_source_fresh_registration_profile_training_and_stop(candidate, lo
     app, client, sdk = candidate
     assert ai_launch.APPROVED_SERVICE_COHORT_VERSION == 'age-screen-v1'
     assert health_disclosure.APPROVED_VERSION == 'health-fitness-v2-review'
-    assert set(ai_consent.POLICIES) == {'d1-closure01-training-candidate'}
+    assert 'd1-closure01-training-candidate' in ai_consent.POLICIES
     declaration = call(client, 'post', '/api/v1/auth/eligibility', json={'age': 30, 'country': 'TR'})
     call(client, 'post', '/api/v1/auth/register', status=201, json={
         'username': 'sourcecandidate', 'email': 'source-candidate@example.invalid',
@@ -120,7 +120,7 @@ def test_exact_source_fresh_registration_profile_training_and_stop(candidate, lo
     assert blocked['error']['code'] == 'AI_CONSENT_REQUIRED'
     assert sdk == []
     status = call(client, 'get', '/api/v1/ai-consent', headers=headers)
-    disclosure, = status['available_disclosures']
+    disclosure, = [d for d in status['available_disclosures'] if d['purpose'] == 'training.plan']
     assert disclosure['purpose'] == 'training.plan'
     assert disclosure['localized_texts'][locale] == ai_consent_disclosures.PUBLISHED_TEXTS[(disclosure['version'], locale)]
     grant = dict(action='affirmative_grant', purpose='training.plan',
