@@ -15,11 +15,11 @@ def test_f01_source_pin_retains_exact_founder_approved_texts():
     }
 
 
-def test_only_existing_training_contract_is_registered_with_exact_r1_r2_copy():
+def test_training_contract_is_registered_unchanged_with_exact_r1_r2_copy():
     version = 'd1-closure01-training-candidate'
     assert isinstance(ai_consent.POLICIES, MappingProxyType)
-    assert set(ai_consent.POLICIES) == {version}
-    assert dict(ai_consent_disclosures.LAUNCH_VERSIONS) == {'training.plan': version}
+    assert version in ai_consent.POLICIES
+    assert ai_consent_disclosures.LAUNCH_VERSIONS['training.plan'] == version
     policy = ai_consent.POLICIES[version]
     assert policy.external_scopes == policy.nested_features == ()
     assert policy.categories == ai_consent.BINDINGS['training_plan'][1]

@@ -20,12 +20,17 @@ def synthetic_policy(monkeypatch):
     return policy, texts
 
 
-def test_source_registry_publishes_only_training_and_does_not_open_coach():
-    assert set(copy.PUBLISHED_TEXTS) == {("d1-closure01-training-candidate", locale) for locale in ("en", "tr")}
-    assert set(consent.POLICIES) == {"d1-closure01-training-candidate"}
-    assert dict(copy.LAUNCH_VERSIONS) == {"training.plan": "d1-closure01-training-candidate"}
-    disclosure, = copy.available_disclosures()
-    assert disclosure["purpose"] == "training.plan"
+def test_source_registry_publishes_exactly_the_five_approved_disclosures():
+    assert set(copy.PUBLISHED_TEXTS) == {(v, locale) for v in consent.POLICIES for locale in ("en", "tr")}
+    assert dict(copy.LAUNCH_VERSIONS) == {
+        "training.plan": "d1-closure01-training-candidate",
+        "coach.conversation": "d1-closure02-coach-candidate-r2",
+        "nutrition.plan": "d1-closure02-nutrition-plan-candidate",
+        "pump_check.analysis": "d1-closure02-pump-check-candidate",
+        "qr_menu.analysis": "d1-closure02-qr-menu-candidate",
+    }
+    assert {d["purpose"] for d in copy.available_disclosures()} == {
+        "training.plan", "coach.conversation", "nutrition.plan", "pump_check.analysis", "qr_menu.analysis"}
     assert consent.BINDINGS["coach"][0] == "coach.conversation"
 
 
