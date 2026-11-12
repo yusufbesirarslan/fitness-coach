@@ -130,7 +130,8 @@ def test_exact_source_fresh_registration_profile_training_and_stop(candidate, lo
     call(client, 'post', '/api/v1/ai-consent', headers=headers, json=grant)
     # Keep final authorities real: change one runtime/publication input at a
     # time and prove no SDK call or canonical result under the valid user grant.
-    for fault in ('publication', 'redis', 'cohort', 'recipient'):
+    for fault in ('publication', 'redis', 'cohort', 'recipient', 'ledger',
+                  'training_enforcement', 'premium_enforcement'):
         with monkeypatch.context() as control:
             if fault == 'publication':
                 control.setattr(ai_consent_disclosures, 'PUBLISHED_TEXTS', {})
@@ -139,10 +140,18 @@ def test_exact_source_fresh_registration_profile_training_and_stop(candidate, lo
                 control.setattr(extensions, 'redis_client', None)
             elif fault == 'cohort':
                 control.setattr(ai_launch, 'APPROVED_SERVICE_COHORT_VERSION', None)
-            else:
+            elif fault == 'recipient':
                 from app import config
                 control.setattr(config, 'BEDROCK_SONNET55_MODEL', 'global.anthropic.claude-sonnet-5-5')
-            call(client, 'post', '/api/v1/training/plans', status=403,
+            else:
+                key = {
+                    'ledger': 'AI_ALLOWANCE_LEDGER_ENABLED',
+                    'training_enforcement': 'AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED',
+                    'premium_enforcement': 'AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED',
+                }[fault]
+                control.setitem(app.config, key, False)
+            expected_status = 503 if fault in ('ledger', 'training_enforcement') else 403
+            call(client, 'post', '/api/v1/training/plans', status=expected_status,
                  headers={**headers, 'Idempotency-Key': 'source-fault-' + fault}, json=CANONICAL)
             assert sdk == []
             with app.app_context():
