@@ -62,7 +62,7 @@ def _admits(app, owner, feature):
             return error.code
 
 
-def test_each_new_purpose_is_independent_granted_and_revocable(candidate):  # noqa: F811
+def test_each_new_purpose_is_independent_granted_and_revocable(candidate, monkeypatch):  # noqa: F811
     app, client, sdk = candidate
     headers = _adult(client)
     with app.app_context():
@@ -85,8 +85,20 @@ def test_each_new_purpose_is_independent_granted_and_revocable(candidate):  # no
         _act(client, headers, purpose, 'revoke', f'four-revoke-{feature}')
         assert _admits(app, owner, feature) == 'AI_CONSENT_REQUIRED'
 
-    # AI Memory stays unavailable whatever is granted; no provider was called.
+    # Negative controls: a valid grant never bypasses runtime or cohort.
     _act(client, headers, 'coach.conversation', 'affirmative_grant', 'four-coach-again')
+    assert _admits(app, owner, 'coach') is True
+    with monkeypatch.context() as control:
+        control.setitem(app.config, 'AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED', False)
+        assert _admits(app, owner, 'coach') == 'AI_CONSENT_DISCLOSURE_UNAVAILABLE'
+    with monkeypatch.context() as control:
+        control.setattr(ai_launch, 'APPROVED_SERVICE_COHORT_VERSION', None)
+        assert _admits(app, owner, 'coach') == 'AI_CONSENT_DISCLOSURE_UNAVAILABLE'
     with app.app_context():
-        assert ai_consent.memory_available(owner) is False
+        user = db.session.get(User, owner)
+        signed = dict(user.user_metadata or {})
+        user.user_metadata = {k: v for k, v in signed.items() if k != '_account_eligibility_v1'}
+        db.session.commit()
+    # No signed adult TR evidence: refused before any grant is consulted.
+    assert _admits(app, owner, 'coach') == 'AI_SERVICE_ELIGIBILITY_REQUIRED'
     assert sdk == []

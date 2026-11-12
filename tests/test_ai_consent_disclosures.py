@@ -20,7 +20,7 @@ def synthetic_policy(monkeypatch):
     return policy, texts
 
 
-def test_source_registry_publishes_the_five_approved_disclosures_and_grants_nothing():
+def test_source_registry_publishes_exactly_the_five_approved_disclosures():
     assert set(copy.PUBLISHED_TEXTS) == {(v, locale) for v in consent.POLICIES for locale in ("en", "tr")}
     assert dict(copy.LAUNCH_VERSIONS) == {
         "training.plan": "d1-closure01-training-candidate",

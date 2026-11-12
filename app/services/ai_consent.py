@@ -2,8 +2,8 @@
 
 The source candidate registers the existing Training contract and the four
 founder-content-approved (2026-11-12) Coach, Nutrition plan, Pump Check and
-QR Menu contracts. Adding one requires reviewed source with the exact disclosure digest, recipient/model set
-and purpose/category projection. Existing callers without a qualified binding
+QR Menu contracts. Adding one requires reviewed source with the exact
+disclosure digest, recipient/model set and purpose/category projection. Existing callers without a qualified binding
 are unavailable, including synthetic probes (no hidden system bypass).
 """
 import contextvars
@@ -55,10 +55,14 @@ POLICIES = MappingProxyType({
                     ("bedrock", "eu.anthropic.claude-haiku-5-5")),
         texts=(("en", "467fc1fb54fca648cec3e737ad7a78fc969f4f74ae0ef735b223d018ab130054"),
                ("tr", "062ae5123955dae849ef48f91aa60387443bb53e14e94b2a1eb53808ecd82b80")),
-    ),    "d1-closure02-coach-candidate-r2": Disclosure(
+    ),
+    "d1-closure02-coach-candidate-r2": Disclosure(
         version="d1-closure02-coach-candidate-r2",
         purpose="coach.conversation",
-        categories=("personal_free_text", "fitness_preferences", "training_history", "workout_state", "nutrition_activity", "nutrition_targets", "body_metrics", "recovery_ratings", "health_constraints", "tool_results", "fitness_image"),
+        categories=("personal_free_text", "fitness_preferences", "training_history",
+                    "workout_state", "nutrition_activity", "nutrition_targets",
+                    "body_metrics", "recovery_ratings", "health_constraints",
+                    "tool_results", "fitness_image"),
         recipients=(("bedrock", "eu.anthropic.claude-sonnet-5-5"),
                     ("bedrock", "eu.anthropic.claude-haiku-5-5")),
         texts=(("en", "4666f7fc249f0916ed9f861f7114193407fa2f394cec1556209fdadeb04650e7"),

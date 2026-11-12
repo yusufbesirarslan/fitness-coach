@@ -17,7 +17,7 @@ from app.services.ai_allowances.policy import SUPPORTED_FEATURES
 SONNET = ("bedrock", "eu.anthropic.claude-sonnet-5-5")
 HAIKU = ("bedrock", "eu.anthropic.claude-haiku-5-5")
 
-# version -> (purpose, binding feature, en sha256, tr sha256, contract digest)
+# version -> (purpose, binding feature, en sha256, tr sha256)
 APPROVED = {
     "d1-closure02-coach-candidate-r2": (
         "coach.conversation", "coach",
