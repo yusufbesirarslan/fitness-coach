@@ -8,6 +8,7 @@ from sqlalchemy import event, select, text
 from app.config import LB_ALLTIME_KEY, LB_WEEKLY_KEY
 from app.extensions import db, redis_client
 from app.models import Activity, DailyQuest, User, UserQuestProgress, WeeklyResetLog, WeeklyWinner
+from app.services.public_ranking import rankable, rankable_clause
 from app.timeutil import app_now, app_today
 
 
@@ -35,7 +36,12 @@ def _ranking_snapshots(payloads):
     This independent connection also works from SQLAlchemy's after_commit.
     """
     if db.engine.dialect.name != "postgresql":
-        yield payloads
+        # No erasure fence here; still never publish a minor. Ages are read on
+        # an independent connection (safe from after_commit).
+        with db.engine.connect() as conn:
+            allowed = set(conn.execute(select(User.id).where(
+                User.id.in_(payloads), rankable_clause())).scalars())
+        yield {owner: data for owner, data in payloads.items() if owner in allowed}
         return
     from app.services import health_consent
     with db.engine.begin() as conn:
@@ -46,7 +52,8 @@ def _ranking_snapshots(payloads):
             'FROM public."user" WHERE id = ANY(:owners) ORDER BY id'),
             {"namespace": health_consent.LOCK_NAMESPACE, "owners": sorted(payloads)})
         rows = conn.execute(select(User.id, User.rank_points, User.weekly_xp,
-                                   User.streak_count).where(User.id.in_(payloads))).mappings()
+                                   User.streak_count).where(
+            User.id.in_(payloads), rankable_clause())).mappings()
         yield {row["id"]: row for row in rows}
 
 
@@ -149,9 +156,12 @@ def _sync_leaderboard_snapshot(user_id, payload):
     try:
         with _ranking_snapshots({user_id: payload}) as snapshots:
             current = snapshots.get(user_id)
-            if current is None:
-                return
             uid = str(user_id)
+            if current is None:
+                # Gone or not publicly rankable (minor): drop any cached entry.
+                redis_client.zrem(LB_ALLTIME_KEY, uid)
+                redis_client.zrem(LB_WEEKLY_KEY, uid)
+                return
             streak = current.get("streak_count") or 0
             redis_client.zadd(LB_ALLTIME_KEY, {uid: _lb_score(current.get("rank_points"), streak)})
             redis_client.zadd(LB_WEEKLY_KEY, {uid: _lb_score(current.get("weekly_xp"), streak)})
@@ -305,7 +315,7 @@ def run_weekly_rollover(now=None, force_week=None):
 
     wx = db.func.coalesce(User.weekly_xp, 0)
     sc = db.func.coalesce(User.streak_count, 0)
-    top = (User.query.filter(wx > 0)
+    top = (User.query.filter(wx > 0, rankable_clause())
                      .order_by(wx.desc(), sc.desc(), User.id.asc())
                      .limit(3).all())
 
@@ -440,7 +450,8 @@ def _redis_users_in_order(ids):
     if not ids:
         return []
     int_ids = [int(i) for i in ids]
-    users = {u.id: u for u in User.query.filter(User.id.in_(int_ids)).all()}
+    users = {u.id: u for u in User.query.filter(User.id.in_(int_ids),
+                                                rankable_clause()).all()}
     return [users[i] for i in int_ids if i in users]
 
 
@@ -500,7 +511,9 @@ def _leaderboard_via_redis(scope, timeframe, key):
     in_list = any(e["is_me"] for e in entries)
     me = next((e for e in entries if e["is_me"]), None)
     if not in_list:
-        if scope == "friends":
+        if not rankable(current_user.age):
+            my_rank = None  # not publicly ranked: own XP, no position
+        elif scope == "friends":
             my_rank = next((i + 1 for i, (uid, _) in enumerate(ranked)
                             if uid == current_user.id), len(ranked) + 1)
         else:
@@ -525,9 +538,9 @@ def _leaderboard_via_postgres(scope, timeframe):
             return jsonify({"scope": scope, "timeframe": timeframe, "entries": [],
                             "me": None, "in_list": False, "no_friends": True})
         ids = fids | {current_user.id}  # include self in the friends board
-        base = User.query.filter(User.id.in_(ids))
+        base = User.query.filter(User.id.in_(ids), rankable_clause())
     else:
-        base = User.query
+        base = User.query.filter(rankable_clause())
 
     top = base.order_by(*order).limit(LEADERBOARD_TOP_N).all()
     entries = [_lb_serialize(u, i + 1, timeframe) for i, u in enumerate(top)]
@@ -541,7 +554,8 @@ def _leaderboard_via_postgres(scope, timeframe):
             xpc > my_xp,
             db.and_(xpc == my_xp, sc > my_sc),
             db.and_(xpc == my_xp, sc == my_sc, User.id < current_user.id))
-        my_rank = base.filter(ahead).count() + 1
+        my_rank = (base.filter(ahead).count() + 1
+                   if rankable(current_user.age) else None)
         me = _lb_serialize(current_user, my_rank, timeframe)
 
     return jsonify({"scope": scope, "timeframe": timeframe, "entries": entries,

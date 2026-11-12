@@ -141,7 +141,8 @@ def register():
     try:
         account = account_registration.register_account(
             username, email, password, language=language,
-            eligibility_token=data.get("eligibility_token"))
+            eligibility_token=data.get("eligibility_token"),
+            minor_notice=data.get("minor_notice_version"))
     except RegistrationFailure as failure:
         return _failure_response(failure)
     response = jsonify({"registration": {

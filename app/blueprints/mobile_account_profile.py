@@ -130,6 +130,11 @@ def put_account_profile():
     try:
         account_profile.complete_onboarding(user, profile)
         payload = account_projection(user)
+    except ProfileRejected:
+        # The TR 13-17 branch refuses an adult-only value (weight-loss goal,
+        # target weight, age outside 13-17): a semantic refusal, nothing saved.
+        db.session.rollback()
+        return _invalid_value()
     except Exception as error:
         # Not an authentication outcome: answer with a profile-shaped,
         # retryable error instead of the blueprint's auth-flavoured handler,
