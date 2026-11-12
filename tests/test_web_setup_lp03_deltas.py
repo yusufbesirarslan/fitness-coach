@@ -202,7 +202,7 @@ def test_d_unknown_vocabulary_is_refused(client, auth_user, field, value, messag
     ("weight", 5, "Kilo 20 ile 500 kg arasında olmalıdır"),
     ("weight", 501, "Kilo 20 ile 500 kg arasında olmalıdır"),
     ("height", -1, "Kilo, boy ve yaş sayısal olmalıdır"),
-    ("age", -3, "Kilo, boy ve yaş sayısal olmalıdır"),
+    ("age", -3, "AxisAI, 18 yaş ve üzerindeki yetişkinler içindir."),
     ("weight", "nan", "Kilo, boy ve yaş sayısal olmalıdır"),
     ("height", "inf", "Kilo, boy ve yaş sayısal olmalıdır"),
     ("age", [30], "Kilo, boy ve yaş sayısal olmalıdır"),

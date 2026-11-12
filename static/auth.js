@@ -410,7 +410,13 @@
 
   window.nextStep = function (from) {
     if (from === 0) {
-      if (!validNumber("s-weight", 30, 300) || !validNumber("s-height", 100, 240) || !validNumber("s-age", 13, 100)) {
+      var age = Number((qs("s-age") || {}).value);
+      if (Number.isInteger(age) && age < 18) {
+        showNotice("error", tr("setup.adults_only"));
+        return;
+      }
+      if (!validNumber("s-weight", 30, 300) || !validNumber("s-height", 100, 240) ||
+          !validNumber("s-age", 18, 100) || !Number.isInteger(age)) {
         showNotice("error", tr("setup.fill_all"));
         return;
       }
