@@ -153,10 +153,12 @@ def _completed_photo_free(xp=10):
 ], ids=["no_body", "empty_json", "json_without_photo_fields", "empty_bytes"])
 def test_k6a_ai_declined_user_completes_without_a_photo(
         client, owner, as_mobile, workout_ref, forbidden, body):
-    from app.services import ai_consent
+    from app.models import AIConsentEvent, AIConsentState
 
-    # The REAL D1 authority: no photo-purpose contract or user grant.
-    assert "pump_check.analysis" not in {p.purpose for p in ai_consent.POLICIES.values()}
+    # The REAL D1 authority: the approved Pump Check contract may be published,
+    # but this owner never granted it (no consent state or event at all).
+    assert AIConsentState.query.filter_by(owner_id=owner.id).count() == 0
+    assert AIConsentEvent.query.filter_by(owner_id=owner.id).count() == 0
     headers = as_mobile(owner)
     ref = _started(client, headers, workout_ref)
 

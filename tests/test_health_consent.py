@@ -28,7 +28,7 @@ def test_source_candidate_publishes_exact_f01_separate_from_d1():
     assert disclosure.published()["text_digests"] == dict(disclosure.DIGESTS)
     assert len(disclosure.TEXTS) == 2
     assert disclosure.PURPOSE not in {purpose for purpose, _ in ai_consent.BINDINGS.values()}
-    assert {p.purpose for p in ai_consent.POLICIES.values()} == {"training.plan"}
+    assert {p.purpose for p in ai_consent.POLICIES.values()} == {"training.plan", "coach.conversation", "nutrition.plan", "pump_check.analysis", "qr_menu.analysis"}
 
 
 @pytest.mark.parametrize("locale", ["en", "tr"])
@@ -165,7 +165,7 @@ def test_health_grant_does_not_publish_or_grant_any_d1_purpose(client, make_user
     headers = principal(owner)
     client.post(PATH, headers=headers, json=command())
     assert AIConsentState.query.count() == AIConsentEvent.query.count() == 0
-    assert {p.purpose for p in ai_consent.POLICIES.values()} == {"training.plan"}
+    assert {p.purpose for p in ai_consent.POLICIES.values()} == {"training.plan", "coach.conversation", "nutrition.plan", "pump_check.analysis", "qr_menu.analysis"}
     assert {purpose for purpose, _ in ai_consent.BINDINGS.values()} == {
         "coach.conversation", "training.plan", "nutrition.plan", "pump_check.analysis", "qr_menu.analysis"}
     response = client.post("/api/v1/coach/messages", headers=headers, json={"message": "synthetic"})

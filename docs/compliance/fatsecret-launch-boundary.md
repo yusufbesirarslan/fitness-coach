@@ -26,7 +26,7 @@ Read from the public pages on 2026-11-06. They state no effective date.
 | FatSecret macros in the shared Redis and L1 cache | **Not written:** search, social and menu analysis. Old `food:macros:v1:*` isn't read and expires on `FOODCACHE_REDIS_TTL` (3 days by default; the production value is unverified) | Closed. The cache can't feed provider values to QR or Coach |
 | Name-to-`food_id` map in process memory (`_cache_food_id`) | Unchanged. Holds a food name as its key, bounded, no TTL, never persisted | Low-impact; the value is an ID |
 | Direct Coach and QR lookups inside D1 | No request, since #486 | Closed |
-| Diary totals to Coach tools, Coach context, the nutrition-day handoff and the QR budget | Unchanged. `MealLog` has no reliable lineage | **OPEN.** Unreachable only while AI is closed |
+| Diary totals to Coach tools, Coach context, the nutrition-day handoff and the QR budget | **#497:** any `MealLog` row today makes the day unproven (`fatsecret_boundary.intake_unproven`); Coach gets no remaining budget, the calorie tool is unsupported, context carries the notice, QR advice is null (never zero) with no ranking | Closed (the #485 boundary, shipped as #497) |
 | Logged values kept past 24 hours: `MealLog`, `CustomMealItem`, `PendingAction`, Coach content | Unchanged | **OPEN.** Rights required, no small source fix |
 | `BarcodeFoodCache` rows and old Redis keys at rest | Not purged; no purge authorized | **OPEN**, retention decision |
 | Web `/meal-log/today` `targets` and `remaining` over logged totals; the native nutrition day's calorie target beside its totals | Unchanged and reachable today. Arithmetic, no recommendation text | **OPEN**, founder or counsel judgement on whether numeric target comparison is "guidance" |
@@ -37,10 +37,11 @@ The diary and Coach paths can't be solved by filtering: a partial total isn't th
 
 ## Before AI opens with FatSecret configured
 
-`tests/test_fatsecret_terms_boundary.py` fails when `POLICIES` is populated, and it keeps a strict expected failure for the diary path. One of these must hold first:
+The gate required one of: (1) FatSecret's written permission covering this use, or (2) the #485 boundary. **(2) is met by #497** (merged 2026-11-09), which closed the former strict expected failure for the diary path. Founder decision G1, 2026-11-12, records this basis for registering the D1 purposes; it relies on no FatSecret email.
 
-1. FatSecret's written permission covers this use.
-2. The #485 boundary ships. It removes logged-intake personalization and budget-based QR ranking on days with unproven rows, and that regression needs founder approval.
+`tests/test_fatsecret_terms_boundary.py::test_fatsecret_advice_boundary_holds_with_all_d1_purposes_registered` runs with all five D1 purposes registered. It fails if the registry changes, or if a FatSecret-sourced row's value reaches the probed surfaces: the Coach remaining budget, the calorie tool projection, the nutrition-day context (which must carry the notice) and the web QR analysis payload. Companion tests pin that D1 Coach food lookup makes no FatSecret call, and statically that the native Nutrition Plan generation functions and the shared generator reference no ledger or provider data. Weekly nudges, past-range tools and the native QR DTO are covered by `test_fatsecret_advice_fallback.py` and `test_fatsecret_launch_qualification.py`, not by this gate.
+
+What this boundary costs, unchanged since #497: on a day with any logged meal, Coach has no logged-intake budget and QR has no budget ranking. Restoring either needs a separate, permission-backed change (real-time totals only), with this gate retargeted to that exact scope.
 
 ## Before public launch with FatSecret configured
 

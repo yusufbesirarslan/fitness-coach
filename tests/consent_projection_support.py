@@ -79,7 +79,7 @@ def assert_default_deny_at_sdk(app, make_user, monkeypatch, recipient):
     assert set(consent.BINDINGS) == {"coach", "training_plan", "nutrition_plan", "vision", "menu_extract"}
     assert routes._CLOSED_ENDPOINTS
     assert app.config["AI_MEMORY_ENABLED"] is False
-    assert {p.purpose for p in consent.POLICIES.values()} == {"training.plan"}
+    assert {p.purpose for p in consent.POLICIES.values()} == {"training.plan", "coach.conversation", "nutrition.plan", "pump_check.analysis", "qr_menu.analysis"}
     monkeypatch.setattr(consent, "generation", lambda owner: 0)
     sdk = Mock()
     for name in ("seam_owner_a", "seam_owner_b"):
