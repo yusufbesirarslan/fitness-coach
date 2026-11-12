@@ -64,6 +64,7 @@ def test_manual_meal_and_first_party_reads_work_with_empty_registry(client, auth
     from app.services import ai_consent
     provider = Mock(side_effect=AssertionError('manual tracking must not invoke AI'))
     monkeypatch.setattr(meallog, '_openai_chat', provider)
+    monkeypatch.setattr(ai_consent, "POLICIES", {})
     assert dict(ai_consent.POLICIES) == {}
     response = client.post('/meal-log', json={
         'ogun': 'Akşam', 'yemekler': 'SYNTHETIC',

@@ -18,6 +18,23 @@ REGISTRATION_TTL_SECONDS = 600  # Credential lifetime, not a data-retention rule
 # No age-of-record purchase expiry: nothing renews an existing record (review is
 # one-time), so one would strand renewing subscribers. Profile age never renews it.
 PURCHASE_COUNTRIES = frozenset({"TR"})
+# TR 13-17 registration under the minors' Terms section (obligation-free use).
+# The minor's own acknowledgment of this notice is bound into the signed record.
+# It is information + Terms acceptance by the minor, NOT parental consent, NOT
+# age/capacity assurance and NOT health, AI, photo or weight-target permission:
+# every restricted capability stays adult-only (_capabilities, purchase_eligible).
+# Only reviewed source may pin it; no env/config/client channel. None = closed.
+TR_MINOR_NOTICE_VERSION = "tr-minor-notice-v1"
+APPROVED_TR_MINOR_NOTICE_VERSION: str | None = None
+# AI *service* admission for the same TR 13-17 record, separate from purchase
+# eligibility (which stays adult-only). Training-plan generation only: no Coach,
+# Nutrition, Pump Check or QR Menu. It admits nothing by itself: the minor's own
+# F01 + D1 Training grants, the finite allowance and the runtime guards still
+# decide every request. Only reviewed source may pin it, after founder/counsel
+# authorization (see docs/TR_MINOR_ONBOARDING.md). None = closed.
+TR_MINOR_TRAINING_AI_VERSION = "tr-minor-training-ai-v1"
+APPROVED_TR_MINOR_TRAINING_AI_VERSION: str | None = None
+TR_MINOR_AI_FEATURES = frozenset({"training_plan"})
 
 
 class EligibilityDenied(Exception):
@@ -28,6 +45,14 @@ class EligibilityDenied(Exception):
 
 def enabled():
     return current_app.config.get("ACCOUNT_ELIGIBILITY_ENABLED") is True
+
+
+def tr_minor_open():
+    return APPROVED_TR_MINOR_NOTICE_VERSION == TR_MINOR_NOTICE_VERSION
+
+
+def _tr_minor(age_band, country):
+    return age_band == "13_17" and country == "TR"
 
 
 def qualification_open():
@@ -97,11 +122,13 @@ def evaluate(data):
         status, reason = "ineligible", "UNDER_MINIMUM_AGE"
     elif country not in COUNTRIES:
         status, reason = "ineligible", "MARKET_NOT_SUPPORTED"
-    elif ((country == "TR" and age < 18)
+    elif ((country == "TR" and age < 18 and not tr_minor_open())
           or (country == "CA" and age < 14)
           or (country == "AU" and age < 15)):
         # Concrete unresolved social-scope/guardian/capacity qualification.
-        # No client checkbox, invented guardian proof or blanket 18+ rule.
+        # No invented guardian proof or blanket 18+ rule. TR 13-17 opens only
+        # by the reviewed source pin, and only to registration: the minor's own
+        # notice acknowledgment is never parental consent or a capability.
         status, reason = "qualification_required", "MARKET_QUALIFICATION_REQUIRED"
     band = None if age < 13 else "13_17" if age < 18 else "18_plus"
     return {"status": status, "age_band": band, "country": country,
@@ -109,11 +136,64 @@ def evaluate(data):
 
 
 def _capabilities(status, band):
+    """Published wire projection; its key set is a shipped mobile contract."""
     adult = status == "screen_passed" and band == "18_plus"
     # Social stays absent for the entire private v1 surface: merely denying
     # teen senders would leave adult discovery/messages to minors possible.
     return {"body_photos": adult, "automated_weight_targets": adult,
             "social": False}
+
+
+def _internal_capabilities(status, band, country=None):
+    """Server-only gates, never published on the wire.
+
+    health_data: first-party health processing (F01 grant), separate from
+      automated weight targets. Adults, plus a source-admitted TR 13-17 record
+      (Terms §3 + the counsel-qualified F01 text; the grant itself is still the
+      minor's own explicit F01 decision, never this record or the notice).
+    general_profile: the native profile/first-plan path with NO automated
+      weight-target maths (account_profile teen branch).
+    automated_weight_targets, body_photos, social: unchanged (adult/none).
+    AI admission is separate again (ai_launch.require_cohort ->
+    ai_service_eligible: adult TR, plus TR 13-17 Training only behind its pin).
+    """
+    caps = _capabilities(status, band)
+    adult = status == "screen_passed" and band == "18_plus"
+    teen = status == "screen_passed" and _tr_minor(band, country)
+    caps["health_data"] = adult or teen
+    caps["general_profile"] = adult or teen
+    return caps
+
+
+def tr_minor_profile(user):
+    """A live TR 13-17 record under the source pin: teen profile rules apply.
+
+    Decided from the signed record alone, like purchase_eligible: an
+    ACCOUNT_ELIGIBILITY_ENABLED flip must never hand a registered minor the
+    adult profile maths."""
+    record = _record(user)
+    return bool(record) and _tr_minor(record["age_band"], record["country"])
+
+
+def _signed_minor(user):
+    """A valid subject-bound declaration in the 13-17 band, pin or not.
+
+    Only accounts registered under eligibility carry one (no legacy row does),
+    so the negative boundary keeps applying to them when the rollout flag is
+    off: the flag is not a channel that opens a minor's adult-only lanes."""
+    try:
+        raw = (user.user_metadata or {}).get(METADATA_KEY)
+        if not isinstance(raw, str) or len(raw) > 2048:
+            return False
+        envelope = _signer(account=True).loads(raw)
+        return (envelope.get("subject") == user.cognito_sub
+                and envelope.get("record", {}).get("age_band") == "13_17")
+    except (AttributeError, BadSignature, ValueError, TypeError):
+        return False
+
+
+def _enforced(user):
+    return enabled() or _signed_minor(user)
 
 
 def preview(data):
@@ -135,11 +215,11 @@ def preview(data):
     return {"eligibility": result}
 
 
-def registration_record(token):
-    return _ticket_record(token) if enabled() else None
+def registration_record(token, minor_notice=None):
+    return _ticket_record(token, minor_notice) if enabled() else None
 
 
-def _ticket_record(token):
+def _ticket_record(token, minor_notice=None):
     try:
         if not isinstance(token, str) or not token or len(token) > 1024:
             raise ValueError()
@@ -151,11 +231,19 @@ def _ticket_record(token):
         result = evaluate({"age": payload["age"], "country": payload["country"]})
         if result["status"] != "screen_passed":
             raise ValueError()
+        # The notice acknowledgment belongs to exactly the TR minor cohort.
+        expected = (TR_MINOR_NOTICE_VERSION
+                    if _tr_minor(result["age_band"], result["country"]) else None)
+        if minor_notice != expected:
+            raise ValueError()
     except (BadSignature, ValueError, TypeError, EligibilityDenied):
         raise EligibilityDenied() from None
-    return {"version": VERSION, "age_band": result["age_band"], "_age": payload["age"],
-            "country": result["country"], "source": "self_declared",
-            "checked_at": datetime.now(timezone.utc).isoformat()}
+    record = {"version": VERSION, "age_band": result["age_band"], "_age": payload["age"],
+              "country": result["country"], "source": "self_declared",
+              "checked_at": datetime.now(timezone.utc).isoformat()}
+    if expected is not None:
+        record["minor_notice"] = expected
+    return record
 
 
 def attach(user, record):
@@ -184,21 +272,27 @@ def _record(user):
         if set(envelope) != {"subject", "record"} or envelope["subject"] != user.cognito_sub:
             return None
         record = envelope["record"]
+        base = {"version", "age_band", "country", "source", "checked_at"}
+        tr_minor = isinstance(record, dict) and _tr_minor(
+            record.get("age_band"), record.get("country"))
         if (not isinstance(record, dict)
-                or set(record) != {"version", "age_band", "country", "source", "checked_at"}
+                or set(record) != (base | {"minor_notice"} if tr_minor else base)
                 or record["version"] != VERSION or record["source"] != "self_declared"
                 or record["country"] not in COUNTRIES
                 or record["age_band"] not in {"13_17", "18_plus"}
                 or not isinstance(record["checked_at"], str)):
             return None
-        if record["age_band"] == "13_17" and record["country"] == "TR":
+        # A TR minor record needs the acknowledged notice AND a still-pinned
+        # source approval; removing the pin returns it to review_required.
+        if tr_minor and (not tr_minor_open()
+                         or record["minor_notice"] != TR_MINOR_NOTICE_VERSION):
             return None
         datetime.fromisoformat(record["checked_at"])
         # A contradictory legacy/profile signal can only restrict access.
         if type(user.age) is int and (user.age < 13 or
                 (user.age < 18 and record["age_band"] == "18_plus")):
             return None
-        return record
+        return {key: record[key] for key in base}
     except (AttributeError, BadSignature, ValueError, TypeError, KeyError):
         return None
 
@@ -220,16 +314,53 @@ def purchase_eligible(user, now):
     client-writable status. Unknown/review schemas fail closed in _record.
     ``now`` is an aware UTC instant; a declaration dated after it is not one yet.
     """
+    return _adult_tr(user, now)
+
+
+def _adult_tr(user, now):
     record = _record(user)
     if (not user.cognito_sub or not record or record["age_band"] != "18_plus"
             or record["country"] not in PURCHASE_COUNTRIES):
         return False
+    return _declared_by(record, now)
+
+
+def _declared_by(record, now):
     checked = datetime.fromisoformat(record["checked_at"])
     return checked.tzinfo is not None and checked <= now
 
 
+def tr_minor_ai_open():
+    return APPROVED_TR_MINOR_TRAINING_AI_VERSION == TR_MINOR_TRAINING_AI_VERSION
+
+
+def ai_service_eligible(user, feature, now):
+    """AI service admission. NOT purchase eligibility and NOT a grant.
+
+    Adults: the existing adult-TR signed declaration (same rule as purchase).
+    TR 13-17: only a live minor record (notice pin + acknowledged notice), only
+    for TR_MINOR_AI_FEATURES, only under its own source pin, and only while the
+    canonical profile age agrees (13-17). Unknown features fail closed.
+    """
+    if _adult_tr(user, now):
+        return True
+    if feature not in TR_MINOR_AI_FEATURES or not tr_minor_ai_open():
+        return False
+    record = _record(user)
+    return (bool(user.cognito_sub) and bool(record)
+            and _tr_minor(record["age_band"], record["country"])
+            and type(user.age) is int and 13 <= user.age <= 17
+            and _declared_by(record, now))
+
+
 def require_capability(user, capability):
-    if enabled() and not projection(user)["capabilities"].get(capability, False):
+    if not _enforced(user):
+        return
+    record = _record(user)
+    status = "screen_passed" if record else "review_required"
+    band = record["age_band"] if record else None
+    country = record["country"] if record else None
+    if not _internal_capabilities(status, band, country).get(capability, False):
         raise EligibilityDenied("ELIGIBILITY_FEATURE_UNAVAILABLE", 403)
 
 
@@ -264,7 +395,7 @@ def enforce_request(user):
     This is the v1 negative feature boundary, not first-party health consent.
     Neutral teen onboarding and the actual permission/AI lanes remain required.
     """
-    if not enabled():
+    if not _enforced(user):
         return
     endpoint = request.endpoint or ""
     if endpoint.startswith("social."):
@@ -290,11 +421,13 @@ def enforce_request(user):
             if _photo_evidence_submitted():
                 require_capability(user, "body_photos")
     # Every current profile goal is weight loss/gain; a numeric minimum change
-    # would still run adult calculations. Refuse before reading health input
-    # until an independently qualified neutral teen profile is composed.
+    # would still run adult calculations. Refuse before reading health input.
+    # The native profile write alone has a teen branch with no weight-target
+    # maths (account_profile), so it needs only general_profile here.
     if request.method in {"POST", "PUT", "PATCH"} and endpoint in {
         "profile.setup", "profile.edit_profile", "tracking.checkin",
-        "tracking.update_weight", "mobile_api.put_account_profile",
-        "mobile_api.create_check_in", "coach.chat",
+        "tracking.update_weight", "mobile_api.create_check_in", "coach.chat",
     }:
         require_capability(user, "automated_weight_targets")
+    if request.method in {"POST", "PUT", "PATCH"} and endpoint == "mobile_api.put_account_profile":
+        require_capability(user, "general_profile")

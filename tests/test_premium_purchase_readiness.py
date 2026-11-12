@@ -46,7 +46,9 @@ def launch_ready(app, contracts, approved_cohort, source_policy, monkeypatch):  
 
 
 def test_shipping_source_refuses_new_purchase_without_association(client, production, approved_launch_policy):
-    assert launch_policy.APPROVED_POLICY is not None and ai_launch.APPROVED_SERVICE_COHORT_VERSION is None
+    assert launch_policy.APPROVED_POLICY is not None
+    assert ai_launch.APPROVED_SERVICE_COHORT_VERSION == "age-screen-v1"
+    assert ai_launch.premium_ready() is False  # Other native benefits remain unqualified.
     response = client.get(PATH + "purchase-context", headers=HEADERS)
     assert response.status_code == 403
     assert response.json["error"]["code"] == "SUBSCRIPTION_PURCHASE_UNAVAILABLE"

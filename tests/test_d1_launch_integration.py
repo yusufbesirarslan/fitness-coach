@@ -237,8 +237,9 @@ def test_only_five_native_views_can_pass_source_gate(client, app, make_user, bea
     assert sink.call_count == 1
 
 
-def test_signed_declaration_alone_cannot_satisfy_unapproved_service_authority(app, make_user):
+def test_signed_declaration_alone_cannot_satisfy_unapproved_service_authority(app, make_user, monkeypatch):
     user = adult_account(make_user("unapproved-cohort"))
+    monkeypatch.setattr(ai_launch, "APPROVED_SERVICE_COHORT_VERSION", None)
     assert ai_launch.APPROVED_SERVICE_COHORT_VERSION is None
     with pytest.raises(consent.ConsentDenied) as error:
         ai_launch.require_cohort(user)

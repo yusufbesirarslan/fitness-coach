@@ -7,7 +7,7 @@ from types import MappingProxyType
 
 PURPOSE = "first_party.health_fitness"
 VERSION = "health-fitness-v2-review"  # v2: A1 = O2-B withdrawal erasure
-APPROVED_VERSION = None  # Founder/privacy review and legal substantiation pending.
+APPROVED_VERSION = VERSION  # Founder-approved source candidate; no production activation.
 TEXTS = MappingProxyType({
     "en": (
         "I explicitly consent to AxisAI processing the health information I choose to provide "

@@ -570,6 +570,7 @@ def test_premium_allowance_dispatch_never_substitutes_for_d1_consent(
     app.config["AI_ALLOWANCE_POLICY"] = AllowancePolicy(
         version="synthetic-premium-d1", premium=ScopePolicy(
             "MONTHLY", {"training_generation": 2}, 0))
+    monkeypatch.setattr(ai_consent, "POLICIES", {})
     assert dict(ai_consent.POLICIES) == {}
     if registry_present:
         purpose, categories = ai_consent.BINDINGS["training_plan"]

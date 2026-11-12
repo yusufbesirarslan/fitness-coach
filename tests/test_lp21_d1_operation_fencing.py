@@ -16,8 +16,9 @@ def _authority(owner=7, feature="training_plan", generation=3, version="syntheti
     return OperationAuthority(owner, feature, generation, version)
 
 
-def test_shipping_policies_stay_empty_and_five_bindings_are_exact():
-    assert isinstance(ai_consent.POLICIES, MappingProxyType) and dict(ai_consent.POLICIES) == {}
+def test_source_training_policy_is_immutable_and_five_bindings_are_exact():
+    assert isinstance(ai_consent.POLICIES, MappingProxyType)
+    assert {p.purpose for p in ai_consent.POLICIES.values()} == {"training.plan", "coach.conversation", "nutrition.plan", "pump_check.analysis", "qr_menu.analysis"}
     assert dict(ai_consent.BINDINGS) == {
         "coach": ("coach.conversation", ("personal_free_text", "fitness_preferences",
             "training_history", "workout_state", "nutrition_activity", "nutrition_targets",

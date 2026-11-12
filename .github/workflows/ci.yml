@@ -503,8 +503,11 @@ jobs:
           tests/test_health_erasure_pg.py
           tests/test_f01_activation_monitoring_pg.py
           tests/test_d1_launch_integration_pg.py
+          tests/test_f01_training_source_candidate_pg.py
+          tests/test_d1_four_purpose_registration_pg.py
           tests/test_launch_usable_result_pg.py
           tests/test_lp21_d1_operation_fencing_pg.py
+          tests/test_tr_minor_training_ai_pg.py
           tests/test_coach_consent_boundaries_pg.py
           tests/test_coach_publication_transport_pg.py
           tests/test_training_plan_replacement_pg.py

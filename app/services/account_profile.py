@@ -283,6 +283,22 @@ def _lock_owner(user_id):
     db.session.query(User.id).filter_by(id=user_id).with_for_update().first()
 
 
+# TR 13-17 profile (account_eligibility.tr_minor_profile): no BMR/TDEE/calorie
+# target, no target weight, no nutrition plan text, strength/fitness goal only.
+MINOR_AGE_MIN, MINOR_AGE_MAX = 13, 17
+MINOR_GOALS = (GOAL_BUILD_MUSCLE,)
+
+
+def _require_minor_profile(profile):
+    """The teen branch's own refusals; values are never named."""
+    if not MINOR_AGE_MIN <= profile.age <= MINOR_AGE_MAX:
+        raise ProfileRejected(AGE, REASON_RANGE)
+    if profile.goal not in MINOR_GOALS:
+        raise ProfileRejected(GOAL, REASON_VOCABULARY)
+    if profile.target_weight is not None:
+        raise ProfileRejected(TARGET_WEIGHT, REASON_VOCABULARY)
+
+
 def require_weight_target_eligibility(user):
     """Require the canonical negative boundary before adult target work.
 
@@ -306,17 +322,27 @@ def complete_onboarding(user, profile):
     they are: the row keeps its place in history and nothing a user already
     saw is erased.
     """
-    require_weight_target_eligibility(user)
+    from app.services.account_eligibility import tr_minor_profile
+    minor = tr_minor_profile(user)
+    if not minor:
+        require_weight_target_eligibility(user)
     if not isinstance(profile, OnboardingProfile):
         raise TypeError("profile must be an OnboardingProfile")
+    if minor:
+        # No adult weight-target maths for a minor: absence stays NULL, which
+        # every target reader already treats as "no target" (never 0).
+        _require_minor_profile(profile)
 
     stored_goal = _GOAL_STORED[profile.goal]
-    bmr = calculate_bmr(profile.weight, profile.height, profile.age,
-                        profile.gender)
-    tdee = calculate_tdee(bmr, profile.current_activity)
-    target_calories = calculate_target(tdee, stored_goal)
+    if minor:
+        bmr = tdee = target_calories = nutrition_plan = None
+    else:
+        bmr = calculate_bmr(profile.weight, profile.height, profile.age,
+                            profile.gender)
+        tdee = calculate_tdee(bmr, profile.current_activity)
+        target_calories = calculate_target(tdee, stored_goal)
+        nutrition_plan = generate_nutrition_plan(stored_goal, target_calories)
     training_plan = generate_training_plan(stored_goal, profile.fitness_level)
-    nutrition_plan = generate_nutrition_plan(stored_goal, target_calories)
 
     try:
         _lock_owner(user.id)
