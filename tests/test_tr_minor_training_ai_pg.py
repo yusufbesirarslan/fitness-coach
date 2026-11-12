@@ -145,8 +145,9 @@ def _onboard(teen_ai, age, name, locale="tr"):
 
 def _grant_training(teen_ai, headers, name, locale="tr"):
     status = teen_ai.call("get", "/api/v1/ai-consent", 200, headers)
-    disclosure, = status["available_disclosures"]
-    assert disclosure["purpose"] == "training.plan"
+    # The catalog publishes every registered D1 purpose; select Training's.
+    disclosure, = [d for d in status["available_disclosures"]
+                   if d["purpose"] == "training.plan"]
     grant = dict(action="affirmative_grant", purpose="training.plan",
                  version=disclosure["version"], locale=locale,
                  text_digest=disclosure["texts"][locale],
@@ -219,6 +220,29 @@ def test_teen_other_ai_purposes_stay_closed(teen_ai, path, body):
     response = teen_ai.call("post", path, 403, headers, json=body)
     # The cohort refuses before any disclosure/grant lookup.
     assert response["error"]["code"] == "AI_SERVICE_ELIGIBILITY_REQUIRED"
+    assert teen_ai.sdk == []
+
+
+@pytest.mark.parametrize("purpose,path,code", [
+    ("coach.conversation", "/api/v1/coach/messages", "AI_SERVICE_ELIGIBILITY_REQUIRED"),
+    ("nutrition.plan", "/api/v1/nutrition/plan/generate", "AI_SERVICE_ELIGIBILITY_REQUIRED"),
+    # Adult-only body_photos capability refuses a minor before AI admission.
+    ("pump_check.analysis", "/api/v1/pump-checks", "ELIGIBILITY_FEATURE_UNAVAILABLE"),
+    ("qr_menu.analysis", "/api/v1/nutrition/menu/analyze", "AI_SERVICE_ELIGIBILITY_REQUIRED"),
+])
+def test_teen_grant_of_another_published_purpose_never_opens_it(teen_ai, purpose, path, code):
+    # With all five D1 purposes published, a minor may record another
+    # purpose's grant; only the cohort decides admission, and it stays closed.
+    owner, headers = _onboard(teen_ai, 15, "teengrant")
+    status = teen_ai.call("get", "/api/v1/ai-consent", 200, headers)
+    disclosure, = [d for d in status["available_disclosures"] if d["purpose"] == purpose]
+    teen_ai.call("post", "/api/v1/ai-consent", 200, headers, json=dict(
+        action="affirmative_grant", purpose=purpose, version=disclosure["version"],
+        locale="tr", text_digest=disclosure["texts"]["tr"],
+        contract_digest=disclosure["contract_digest"],
+        expected_generation=status["generation"], request_id="teengrant-other"))
+    response = teen_ai.call("post", path, 403, headers, json={})
+    assert response["error"]["code"] == code
     assert teen_ai.sdk == []
 
 
