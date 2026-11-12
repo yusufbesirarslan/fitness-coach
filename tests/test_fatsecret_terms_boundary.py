@@ -3,8 +3,8 @@
 Terms 1.5 allows only IDs past 24 hours and 1.7(iii) prohibits advice from the API.
 Reuses the PR #485 trace. Everything is synthetic and no request leaves the process.
 
-The strict expected failure records the input this candidate does not close: diary
-totals reach Coach once AI opens. It is unreachable while AI stays closed.
+Path 1 (diary totals reaching AI advice) was closed by #497, which shipped the #485
+boundary. Its gate below runs with every approved D1 purpose registered.
 """
 import ast
 import json
@@ -18,7 +18,7 @@ from app.blueprints import food as food_bp
 from app.extensions import db
 from app.models import BarcodeFoodCache, CustomMeal, CustomMealItem, MealLog, UserSession
 from app.services import ai_coach, ai_consent, ai_launch, barcode, coach_privacy, fatsecret, foodcache
-from app.services import menu_analysis, mobile_auth
+from app.services import context_builder, fatsecret_boundary, menu_analysis, mobile_auth
 from app.timeutil import day_key
 
 CODE = "5000159407236"
@@ -253,14 +253,104 @@ def test_health_reports_unconfigured_without_failing(env_absent, client):
     assert client.get("/health?deep=1").get_json()["fatsecret_proxy"] == "unconfigured"
 
 
-# ── Path 1: diary totals. Closed only because AI is closed ─────────────────
+# ── Path 1: diary totals. Closed by the #497 advice boundary ───────────────
+# This gate does NOT rely on AI being closed. It runs against the real D1
+# registry with every approved purpose published, and proves the fail-closed
+# rule directly. docs/compliance/fatsecret-launch-boundary.md records the basis.
 
-def test_fatsecret_advice_purposes_stay_closed_at_this_candidate():
-    """Training registration must not open diary-derived Coach/Nutrition/QR advice.
+D1_PURPOSES = {"training.plan", "coach.conversation", "nutrition.plan",
+               "pump_check.analysis", "qr_menu.analysis"}
 
-    docs/compliance/fatsecret-launch-boundary.md retains those purpose gates.
+
+def _no_provider(*_a, **_k):
+    raise AssertionError("FatSecret call from an AI advice path")
+
+
+@pytest.fixture
+def advice_probe(app, make_user, monkeypatch):
+    user = make_user("fs-terms-advice")
+    db.session.add(UserSession(user_id=user.id, target_calories=2000, goal="kas kazanma"))
+    db.session.commit()
+    monkeypatch.setattr(foodcache, "_macro_cache", {"per_100g": {}, "per_serving": {}})
+    monkeypatch.setattr(foodcache, "_get_redis", lambda: None)
+    monkeypatch.setattr(menu_analysis, "redis_client", None)
+    monkeypatch.setattr(menu_analysis, "_extract_categorized_items",
+                        lambda *a, **k: {"Main": ["Independent dish"]})
+    monkeypatch.setattr(menu_analysis, "_estimate_macros_llm", lambda names, *a, **k: {
+        n: {"calories": 330., "protein": 30., "carbs": 25., "fat": 12.} for n in names})
+    monkeypatch.setattr(menu_analysis, "_get_fatsecret_token", _no_provider)
+    monkeypatch.setattr(menu_analysis, "_lookup_macros_fatsecret", _no_provider)
+    monkeypatch.setattr(ai_coach, "_food_search_fatsecret", _no_provider)
+
+    def analyze():
+        authority = ai_consent.OperationAuthority(user.id, "menu_extract", 1, "menu_extract")
+        with app.test_request_context(), ai_consent.operation_scope(authority):
+            return menu_analysis.web_analysis_payload(
+                menu_analysis._analyze_menu_text(user.id, "Independent restaurant menu text"))
+    return user, analyze
+
+
+def test_fatsecret_advice_boundary_holds_with_all_d1_purposes_registered(app, advice_probe):
+    """With all five D1 purposes published, no FatSecret-derived value reaches AI advice.
+
+    A new or removed purpose fails here first: re-decide the FatSecret basis for it.
     """
-    assert not {"coach.conversation", "nutrition.plan", "qr_menu.analysis"} & {p.purpose for p in ai_consent.POLICIES.values()}
+    assert {p.purpose for p in ai_consent.POLICIES.values()} == D1_PURPOSES
+    user, analyze = advice_probe
+
+    # Measured-empty day: the existing personal budget is unchanged (no reduction).
+    empty = analyze()
+    assert empty["advice_available"] is True and empty["remaining"] is not None
+    assert ai_coach._remaining_macros_for_user(user.id) is not None
+
+    # A FatSecret-sourced row today makes the whole day unproven for advice.
+    db.session.add(MealLog(user_id=user.id, ogun="Lunch", yemekler="Provider food",
+                           kalori=PROVIDER_KCAL, protein=21, karb=23, yag=6,
+                           tarih=day_key(), source="search"))
+    db.session.commit()
+    sentinel = str(int(PROVIDER_KCAL))
+    assert fatsecret_boundary.intake_unproven(user.id)
+
+    # Coach: no remaining budget, no calorie tool value, no number in context.
+    assert ai_coach._remaining_macros_for_user(user.id) is None
+    raw = ai_coach._tool_query_fitx_metrics(user.id, "calories", "today")
+    assert json.loads(coach_privacy.tool_result("query_fitx_metrics", raw)) == {
+        "status": "unsupported", "metric_type": "calories"}
+    context = context_builder.fetch_coach_context(
+        user.id, question="nutrition", language="en", handoff="nutrition-day")
+    assert sentinel not in context
+
+    # QR: advice withheld (never zero), no ranking, no provider call, no number.
+    payload = analyze()
+    assert payload["advice_available"] is False
+    assert payload["consumed"] is None and payload["remaining"] is None
+    assert payload["coach_picks"] == []
+    assert sentinel not in json.dumps(payload)
+
+
+def test_d1_coach_food_lookup_never_calls_fatsecret(app, monkeypatch):
+    monkeypatch.setattr(ai_coach, "_food_search_fatsecret", _no_provider)
+    monkeypatch.setattr(ai_coach, "_food_search_static", lambda _q: [])
+    monkeypatch.setattr(ai_coach, "_food_search_llm", lambda _q: [{"name": "estimate"}])
+    authority = ai_consent.OperationAuthority(1, "coach", 1, "coach")
+    with app.test_request_context(), ai_consent.operation_scope(authority):
+        assert ai_coach._coach_search_food("tavuk") == [{"name": "estimate"}]
+
+
+def test_nutrition_plan_generation_reads_no_ledger_or_provider():
+    generation = (ROOT / "app" / "services" / "nutrition_plan_generation.py").read_text(
+        encoding="utf-8")
+    plan = ast.parse((ROOT / "app" / "services" / "nutrition_native" / "plan.py").read_text(
+        encoding="utf-8"))
+    path = {"generate_proposals", "_generate_authorized_proposals", "_generation_target"}
+    names = {n.id if isinstance(n, ast.Name) else n.attr
+             for fn in ast.walk(plan) if isinstance(fn, ast.FunctionDef) and fn.name in path
+             for n in ast.walk(fn) if isinstance(n, (ast.Name, ast.Attribute))}
+    forbidden = {"MealLog", "fatsecret", "fatsecret_boundary", "provider_retention",
+                 "CustomMealItem", "BarcodeFoodCache"}
+    assert len(path & {fn.name for fn in ast.walk(plan) if isinstance(fn, ast.FunctionDef)}) == 3
+    assert not names & forbidden
+    assert not [w for w in forbidden if w in generation]
 
 
 def test_web_search_llm_fallback_stays_closed(env_absent, client, auth_user, monkeypatch):
