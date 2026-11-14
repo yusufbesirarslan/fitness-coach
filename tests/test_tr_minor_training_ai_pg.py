@@ -230,17 +230,29 @@ def test_teen_other_ai_purposes_stay_closed(teen_ai, path, body):
     ("pump_check.analysis", "/api/v1/pump-checks", "ELIGIBILITY_FEATURE_UNAVAILABLE"),
     ("qr_menu.analysis", "/api/v1/nutrition/menu/analyze", "AI_SERVICE_ELIGIBILITY_REQUIRED"),
 ])
-def test_teen_grant_of_another_published_purpose_never_opens_it(teen_ai, purpose, path, code):
-    # With all five D1 purposes published, a minor may record another
-    # purpose's grant; only the cohort decides admission, and it stays closed.
+def test_teen_grant_of_another_published_purpose_never_opens_it(teen_ai, monkeypatch, purpose, path, code):
+    # F-QR-W1: the consent WRITE refuses a minor's non-Training grant before
+    # any event/generation change. A grant recorded by the pre-fix write path
+    # (historical, e.g. staging window 1) still never opens admission: the
+    # cohort decides that, independently of the write gate.
+    from app.services import ai_consent as consent
     owner, headers = _onboard(teen_ai, 15, "teengrant")
     status = teen_ai.call("get", "/api/v1/ai-consent", 200, headers)
     disclosure, = [d for d in status["available_disclosures"] if d["purpose"] == purpose]
-    teen_ai.call("post", "/api/v1/ai-consent", 200, headers, json=dict(
+    grant = dict(
         action="affirmative_grant", purpose=purpose, version=disclosure["version"],
         locale="tr", text_digest=disclosure["texts"]["tr"],
         contract_digest=disclosure["contract_digest"],
-        expected_generation=status["generation"], request_id="teengrant-other"))
+        expected_generation=status["generation"], request_id="teengrant-other")
+    events = AIConsentEvent.query.filter_by(owner_id=owner).count()
+    refused = teen_ai.call("post", "/api/v1/ai-consent", 403, headers, json=grant)
+    assert refused["error"]["code"] == "AI_CONSENT_PURPOSE_UNAVAILABLE_FOR_ACCOUNT"
+    assert teen_ai.call("get", "/api/v1/ai-consent", 200, headers)["generation"] == status["generation"]
+    db.session.remove()
+    assert AIConsentEvent.query.filter_by(owner_id=owner).count() == events
+    with monkeypatch.context() as legacy:
+        legacy.setattr(consent, "_require_grant_cohort", lambda *a, **k: None)
+        teen_ai.call("post", "/api/v1/ai-consent", 200, headers, json=grant)
     response = teen_ai.call("post", path, 403, headers, json={})
     assert response["error"]["code"] == code
     assert teen_ai.sdk == []
