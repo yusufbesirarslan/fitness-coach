@@ -11,6 +11,16 @@ rows, the storage keys) is re-derived here from that server-side state.
 
 ORDER — and why (docs/MOBILE_ACCOUNT_DELETION.md §4):
 
+0. Legal hold (docs/ACCOUNT_DELETION_AUDIT.md). The whole lifecycle below
+   runs under the owner's EXCLUSIVE health authority, the same lock
+   `health-legal-hold-add`, withdrawal and erasure take. Under it, before the
+   provider is called, an unreleased `HealthLegalHold` refuses the deletion
+   (`DeletionUnavailable("legal_hold")`): nothing is deleted and the account
+   stays usable. No hold can be placed until this request ends, so the storage
+   release and the purge cannot destroy held records. Step 4 checks again
+   under the owner row lock, and `_purge_user` itself refuses a held owner.
+   The authority is a transaction-scoped advisory lock on its own
+   connection, not a row lock and not the ORM transaction.
 1. Preflight, no side effect. Re-check the principal is coherent, decrypt the
    family's stored provider access token, and read the storage inventory. If
    the account owns objects but the object store is not configured here, stop:
@@ -39,12 +49,15 @@ ORDER — and why (docs/MOBILE_ACCOUNT_DELETION.md §4):
    row again) and run the canonical `_purge_user` — the same primitive the
    operator `cleanup-test-users` command uses — which deletes every row that
    references the user, including every mobile session family (their
-   credentials cascade) and every web `CognitoSession`; then commit. The
-   tombstone and the sessions therefore end in the same commit as the
-   account; there is no separate step that could fail on its own.
+   credentials cascade) and every web `CognitoSession`; then add the durable
+   destruction record (`deletion_audit.record`: operation reference, time,
+   path, row and object counts, the tombstone fingerprint, no content); then
+   commit. The tombstone, the record and the sessions therefore end in the
+   same commit as the account; there is no separate step that could fail on
+   its own, and a purge that fails leaves no "completed" record.
 5. Derived cache, best effort: drop the user from the Redis leaderboards.
 
-Nothing here holds a database transaction or a row lock across a network call.
+Nothing here holds the ORM transaction or a row lock across a network call.
 
 The three failures a caller can see, and what each one means for the account:
 
@@ -63,6 +76,7 @@ Logs carry the request id, a stage and an exception TYPE. Only the
 `incomplete` line names the internal user id, because an operator must be able
 to finish that account. Never tokens, keys, e-mail or provider text.
 """
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 
 from flask import current_app
@@ -72,7 +86,8 @@ from app.extensions import db
 from app.models import MealLog, MealPhotoCleanup, PumpCheck, User
 from app.observability import current_request_id
 from app.services import (
-    cognito_service, deleted_identity, gamification, session_store,
+    cognito_service, deleted_identity, deletion_audit, gamification,
+    health_erasure, session_store,
 )
 from app.services.ai_gate import (
     BlockingConcurrencyLimit, blocking_concurrency_slot,
@@ -206,7 +221,45 @@ def _preflight(user, family, claims):
     return user_id, sub, provider_access, inventory
 
 
+@contextmanager
+def _hold_fence(user_id):
+    """Exclusive health authority for the owner: no legal hold can be placed,
+    and no erasure or consent decision can run, until the deletion ends."""
+    from app.services import health_consent
+    stack = ExitStack()
+    try:
+        stack.enter_context(health_consent._authority(user_id, exclusive=True))
+    except Exception as exc:
+        # Busy (another request of this owner holds it) or unavailable.
+        # Nothing has been deleted yet.
+        raise DeletionUnavailable("hold_authority") from exc
+    try:
+        yield
+    finally:
+        try:
+            stack.close()
+        except Exception:
+            # Releasing a lock cannot undo a purge that already committed.
+            pass
+
+
+def _refuse_if_held(user_id):
+    """Before the provider call, under the fence: a held account is refused."""
+    try:
+        held = health_erasure.active_hold(user_id)
+    except Exception as exc:
+        raise DeletionUnavailable("preflight") from exc
+    finally:
+        db.session.rollback()
+    if held:
+        # The controller must learn that a held owner asked for deletion: the
+        # request is theirs to answer and to honour once the hold is released.
+        _event("refused", "legal_hold", "-", "warning", user_id)
+        raise DeletionUnavailable("legal_hold")
+
+
 def _delete_identity(provider_access):
+    """Returns what happened at the provider: 'deleted' or 'already_absent'."""
     try:
         with blocking_concurrency_slot():
             cognito_service.delete_user(provider_access)
@@ -215,12 +268,13 @@ def _delete_identity(provider_access):
     except cognito_service.CognitoServiceError as exc:
         if exc.code == _IDENTITY_ABSENT:
             _event("identity_already_absent", "identity")
-            return
+            return "already_absent"
         if exc.code == _SESSION_REJECTED:
             raise ProviderSessionRejected("identity") from exc
         raise DeletionUnavailable("identity") from exc
     except Exception as exc:
         raise DeletionUnavailable("identity") from exc
+    return "deleted"
 
 
 def _release(user_id, kind, key):
@@ -234,7 +288,7 @@ def _release(user_id, kind, key):
         raise s3_helper.S3Error("managed object not released")
 
 
-def _purge_if_released(user_id, sub, released):
+def _purge_if_released(user_id, sub, released, identity_step):
     """Step 4. Returns None when purged (or already gone), else the inventory
     that appeared under the lock and still needs releasing."""
     from app.cli import _purge_user
@@ -255,25 +309,43 @@ def _purge_if_released(user_id, sub, released):
     if not inventory.objects <= released:
         db.session.rollback()
         return inventory
+    if health_erasure.active_hold(user_id):
+        # Unreachable while the fence is held; kept because the owner row
+        # lock is the one place a hold INSERT must also pass (its foreign key).
+        db.session.rollback()
+        raise DeletionIncomplete("legal_hold")
     # The anti-resurrection tombstone commits WITH the purge or not at all:
     # "user row gone, no tombstone" never exists (deleted_identity module doc).
     deleted_identity.record(sub)
     # Storage inventory was proved released above; close only these O2 debts.
     from app.health_consent_models import HealthErasure
     from datetime import datetime
-    HealthErasure.query.filter_by(owner_id=user_id, completed_at=None).update(
+    closed = HealthErasure.query.filter_by(owner_id=user_id, completed_at=None).update(
         {"completed_at": datetime.utcnow(), "summary": {"account_deleted": True}},
         synchronize_session=False)
-    _purge_user(owner)
+    rows = _purge_user(owner)
+    # The destruction record commits WITH the purge or not at all.
+    audit = deletion_audit.receipt(deletion_audit.record(
+        channel=deletion_audit.SELF_SERVICE, identity_step=identity_step,
+        subject=sub, request_id=current_request_id(),
+        counts={"rows": rows, "objects_released": len(released),
+                "unmanaged_references": inventory.unmanaged,
+                "health_erasures_closed": closed}))
     db.session.commit()
+    deletion_audit.announce(audit)
     return None
 
 
 def delete_account(user, family, claims):
     """Delete the authenticated account. Returns None only when it is gone."""
     user_id, sub, provider_access, inventory = _preflight(user, family, claims)
+    with _hold_fence(user_id):
+        _refuse_if_held(user_id)
+        _delete_and_purge(user_id, sub, provider_access, inventory)
 
-    _delete_identity(provider_access)
+
+def _delete_and_purge(user_id, sub, provider_access, inventory):
+    identity_step = _delete_identity(provider_access)
     # From here on the Cognito identity is gone: every failure is incomplete.
 
     released = set()
@@ -285,7 +357,7 @@ def delete_account(user, family, claims):
                 _release(user_id, kind, key)
                 released.add((kind, key))
             stage = "local_purge"
-            remaining = _purge_if_released(user_id, sub, released)
+            remaining = _purge_if_released(user_id, sub, released, identity_step)
             if remaining is None:
                 break
             inventory = remaining

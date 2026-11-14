@@ -192,7 +192,22 @@ def _purge_user(user):
     zorlamaz (PRAGMA foreign_keys kapalı), ve açık silme niyeti belirsizliğe yer
     bırakmaz. Bu kullanıcının davet ettiği kişilerin referred_by_id'si NULL'a
     çekilir (FK'de SET NULL olsa da burada da açıkça yapılır).
+
+    Returns {table name: rows deleted} for the destruction record
+    (`deletion_audit`): only rows this function deletes itself, so rows a
+    database cascade removes are not counted. Refuses (`LegalHoldActive`,
+    before any delete) an owner with an unreleased legal hold; the caller holds
+    the owner row lock, which a hold INSERT's foreign key must also pass.
     """
+    from app.services import health_erasure
+    if health_erasure.active_hold(user.id):
+        raise health_erasure.LegalHoldActive()
+    counts = {}
+
+    def _deleted(model, rows):
+        name = model if isinstance(model, str) else model.__tablename__
+        counts[name] = counts.get(name, 0) + (rows or 0)
+
     from app.models import (AIConsentEvent, AIConsentState, CoachConversation, CoachMessage, CustomMeal,
                             CustomMealItem, Friendship, Message, Notification,
                             PumpCheck, PumpCheckComment, PumpCheckLike, User)
@@ -201,23 +216,23 @@ def _purge_user(user):
     # Bildirimler iki yönden bağlı: kullanıcının ALDIKLARI (user_id — aşağıdaki
     # child-model döngüsü siler) VE tetiklediği (actor_id) — actor tarafı burada
     # açıkça süpürülür (SQLite FK cascade zorlamaz).
-    Notification.query.filter(Notification.actor_id == uid).delete(
-        synchronize_session=False)
+    _deleted(Notification, Notification.query.filter(Notification.actor_id == uid).delete(
+        synchronize_session=False))
 
     # CustomMealItem yalnızca custom_meal üzerinden user'a bağlı.
     meal_ids = [m.id for m in CustomMeal.query.filter_by(user_id=uid).all()]
     if meal_ids:
-        CustomMealItem.query.filter(
+        _deleted(CustomMealItem, CustomMealItem.query.filter(
             CustomMealItem.custom_meal_id.in_(meal_ids)
-        ).delete(synchronize_session=False)
+        ).delete(synchronize_session=False))
 
     # CoachMessage de yalnızca coach_conversation üzerinden user'a bağlı
     # (user_id taşımaz) — konuşmalar aşağıdaki döngüde silinmeden ÖNCE süpürülür.
     conv_ids = [c.id for c in CoachConversation.query.filter_by(user_id=uid).all()]
     if conv_ids:
-        CoachMessage.query.filter(
+        _deleted(CoachMessage, CoachMessage.query.filter(
             CoachMessage.conversation_id.in_(conv_ids)
-        ).delete(synchronize_session=False)
+        ).delete(synchronize_session=False))
 
     # Like/yorumlar iki yönden bağlı: kullanıcının kendi bıraktıkları (user_id)
     # VE başkalarının bu kullanıcının pump check'lerine bıraktıkları
@@ -228,10 +243,10 @@ def _purge_user(user):
     if pump_ids:
         pump_child_filter.append(PumpCheckLike.pump_check_id.in_(pump_ids))
         comment_child_filter.append(PumpCheckComment.pump_check_id.in_(pump_ids))
-    PumpCheckLike.query.filter(db.or_(*pump_child_filter)).delete(
-        synchronize_session=False)
-    PumpCheckComment.query.filter(db.or_(*comment_child_filter)).delete(
-        synchronize_session=False)
+    _deleted(PumpCheckLike, PumpCheckLike.query.filter(db.or_(*pump_child_filter)).delete(
+        synchronize_session=False))
+    _deleted(PumpCheckComment, PumpCheckComment.query.filter(db.or_(*comment_child_filter)).delete(
+        synchronize_session=False))
 
     # Feed V2 (Sprint 5 PR2): FeedItem like/yorumları iki yönden bağlı —
     # kullanıcının kendi bıraktıkları (user_id, döngü siler) VE başkalarının bu
@@ -250,38 +265,44 @@ def _purge_user(user):
     if all_item_ids:
         fi_like_filter.append(FeedItemLike.feed_item_id.in_(all_item_ids))
         fi_comment_filter.append(FeedItemComment.feed_item_id.in_(all_item_ids))
-    FeedItemLike.query.filter(db.or_(*fi_like_filter)).delete(synchronize_session=False)
-    FeedItemComment.query.filter(db.or_(*fi_comment_filter)).delete(synchronize_session=False)
+    _deleted(FeedItemLike, FeedItemLike.query.filter(
+        db.or_(*fi_like_filter)).delete(synchronize_session=False))
+    _deleted(FeedItemComment, FeedItemComment.query.filter(
+        db.or_(*fi_comment_filter)).delete(synchronize_session=False))
     if ref_item_ids:
-        FeedItem.query.filter(FeedItem.id.in_(ref_item_ids)).delete(synchronize_session=False)
+        _deleted(FeedItem, FeedItem.query.filter(
+            FeedItem.id.in_(ref_item_ids)).delete(synchronize_session=False))
 
     # D1 authority/evidence use owner_id, so the user_id loop cannot cover
     # them. Preserve explicit erasure on local databases without FK actions.
+    # Only RELEASED holds can remain here: an active one was refused above.
     from app.health_consent_models import HealthConsentEvent, HealthConsentState, HealthLegalHold
     for Model in (AIConsentEvent, AIConsentState, HealthConsentEvent, HealthConsentState,
                   HealthLegalHold):
-        Model.query.filter_by(owner_id=uid).delete(synchronize_session=False)
+        _deleted(Model, Model.query.filter_by(owner_id=uid).delete(synchronize_session=False))
 
     # Production's unmapped legacy activity_clap has NO ACTION FKs to both
     # user and activity; clear the rows that point at this user before the
     # loop below deletes their activities and the user (no-op without it).
     from app.services import legacy_activity_clap
-    legacy_activity_clap.delete_for_user(uid)
+    _deleted("activity_clap", legacy_activity_clap.delete_for_user(uid))
 
     for Model in _USER_CHILD_MODELS:
-        Model.query.filter_by(user_id=uid).delete(synchronize_session=False)
+        _deleted(Model, Model.query.filter_by(user_id=uid).delete(synchronize_session=False))
 
-    Friendship.query.filter(
+    _deleted(Friendship, Friendship.query.filter(
         db.or_(Friendship.sender_id == uid, Friendship.receiver_id == uid)
-    ).delete(synchronize_session=False)
-    Message.query.filter(
+    ).delete(synchronize_session=False))
+    _deleted(Message, Message.query.filter(
         db.or_(Message.sender_id == uid, Message.receiver_id == uid)
-    ).delete(synchronize_session=False)
+    ).delete(synchronize_session=False))
 
     User.query.filter_by(referred_by_id=uid).update(
         {"referred_by_id": None}, synchronize_session=False)
 
     db.session.delete(user)
+    _deleted(User, 1)
+    return counts
 
 
 @click.option("--username", default=None,
@@ -297,8 +318,13 @@ def cleanup_test_users(username, pattern, yes):
         flask --app starter cleanup-test-users                 # önizleme
         flask --app starter cleanup-test-users --yes           # sil
         flask --app starter cleanup-test-users --username test --yes
+
+    An account with an unreleased legal hold is never deleted: the whole run
+    is refused (exit 2, nothing deleted) until the hold is released. Every
+    account this deletes leaves one destruction record (`deletion_audit`).
     """
     from app.models import User
+    from app.services import deletion_audit, health_erasure
 
     if username:
         users = User.query.filter(
@@ -314,15 +340,46 @@ def cleanup_test_users(username, pattern, yes):
     click.echo(f"{len(users)} kullanıcı eşleşti:")
     for u in users:
         click.echo(f"  - id={u.id}  username={u.username!r}  email={u.email}  "
-                   f"xp={u.rank_points or 0}")
+                   f"xp={u.rank_points or 0}"
+                   + ("  LEGAL HOLD" if health_erasure.active_hold(u.id) else ""))
 
     if not yes:
         click.echo("\nKURU ÇALIŞMA — hiçbir şey silinmedi. Silmek için --yes ekleyin.")
+        db.session.rollback()
         return
 
-    for u in users:
-        _purge_user(u)
-    db.session.commit()
+    # Lock every owner row first (id order), then decide. A hold INSERT needs
+    # a key-share lock on the same row, so it either committed before (and is
+    # seen here) or waits and fails its foreign key after this commit.
+    ids = sorted(u.id for u in users)
+    db.session.rollback()
+    users = (User.query.filter(User.id.in_(ids)).order_by(User.id)
+             .populate_existing().with_for_update().all())
+    held = [u.id for u in users if health_erasure.active_hold(u.id)]
+    if held:
+        db.session.rollback()
+        click.echo("\nREFUSED — legal hold on user id(s): "
+                   + ", ".join(str(i) for i in held)
+                   + ". Nothing was deleted. Release the hold first "
+                     "(health-legal-hold-release).")
+        raise SystemExit(2)
+    audits = []
+    try:
+        for u in users:
+            subject = u.cognito_sub
+            rows = _purge_user(u)
+            audits.append(deletion_audit.receipt(deletion_audit.record(
+                channel=deletion_audit.OPERATOR_CLEANUP,
+                identity_step="not_attempted", subject=subject,
+                counts={"rows": rows, "objects_released": None,
+                        "unmanaged_references": None,
+                        "health_erasures_closed": None})))
+        db.session.commit()
+    except BaseException:
+        db.session.rollback()
+        raise
+    for audit in audits:
+        deletion_audit.announce(audit)
 
     # Liderlik sorted set'lerinden de düşsünler.
     try:
@@ -332,6 +389,63 @@ def cleanup_test_users(username, pattern, yes):
         pass
 
     click.echo(f"\n✓ {len(users)} kullanıcı ve ilişkili kayıtları silindi.")
+
+
+def account_deletion_audit_verify_cmd():
+    """Read only: check every destruction record's integrity MAC and count
+    tombstones that have no record. Exit 2 on any failure."""
+    from app.services import deletion_audit
+    result = deletion_audit.verify()
+    click.echo(json.dumps(result, sort_keys=True))
+    if result["integrity_failures"] or result["tombstones_without_record"]:
+        raise SystemExit(2)
+
+
+@click.option("--since", default=None,
+              help="Only records completed at or after this UTC date (YYYY-MM-DD).")
+def account_deletion_audit_export_cmd(since):
+    """Read only: print destruction records as JSON lines (no name, e-mail,
+    user id or content) for a copy kept OUTSIDE this database. Storing that
+    copy is an operator step (docs/BACKUP_RESTORE_REDELETION_RUNBOOK.md)."""
+    from app.services import deletion_audit
+    try:
+        when = datetime.strptime(since, "%Y-%m-%d") if since else None
+    except ValueError:
+        raise click.UsageError("--since must be YYYY-MM-DD")
+    for values in deletion_audit.export(when):
+        click.echo(json.dumps(values, sort_keys=True))
+
+
+def account_deletion_reconcile_cmd():
+    """Read only, after a database restore: read an earlier
+    `account-deletion-audit-export` (JSON lines on stdin) and list the local
+    accounts whose deletion it records but which exist again here. Rows whose
+    MAC does not verify are refused. Deletes nothing
+    (docs/BACKUP_RESTORE_REDELETION_RUNBOOK.md)."""
+    import sys
+    from app.models import User
+    from app.services import deletion_audit, health_erasure
+    fingerprints = []
+    for number, line in enumerate(sys.stdin.read().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            values = json.loads(line)
+        except ValueError:
+            raise click.UsageError(f"line {number} is not JSON")
+        if not isinstance(values, dict) or not deletion_audit.sealed(values):
+            raise click.UsageError(f"line {number} fails its integrity check")
+        if values.get("subject_fingerprint"):
+            fingerprints.append(values["subject_fingerprint"])
+    try:
+        found = deletion_audit.match_subjects(fingerprints)
+    except deletion_audit.InvalidDeletionRecord as error:
+        raise click.UsageError(str(error))
+    for user_id, value in found:
+        username = db.session.query(User.username).filter(User.id == user_id).scalar()
+        click.echo(json.dumps({"user_id": user_id, "username": username,
+                               "legal_hold": health_erasure.active_hold(user_id)}))
+    db.session.rollback()
 
 
 @click.option("--limit", default=None, type=int,
@@ -712,6 +826,9 @@ def register_cli(app):
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)
     app.cli.command("cleanup-test-users")(cleanup_test_users)
+    app.cli.command("account-deletion-audit-verify")(account_deletion_audit_verify_cmd)
+    app.cli.command("account-deletion-audit-export")(account_deletion_audit_export_cmd)
+    app.cli.command("account-deletion-reconcile")(account_deletion_reconcile_cmd)
     app.cli.command("health-erasure-run")(health_erasure_run_cmd)
     app.cli.command("health-legal-hold-add")(health_legal_hold_add_cmd)
     app.cli.command("health-legal-hold-release")(health_legal_hold_release_cmd)
