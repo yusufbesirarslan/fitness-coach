@@ -580,6 +580,62 @@ arrives from the Docker gateway, which is not a deep-health trusted source.
 The deep check may make the existing cached, bounded Bedrock probe. There is
 no polling loop.
 
+### V1 request admission during R6 overlap
+
+R6 requires the actual serving deep-health flag
+`ACCOUNT_ELIGIBILITY_ENABLED` to be the JSON boolean `true` on both the
+previous web and the candidate. The slot helper's optional
+`verify --require-eligibility` makes this explicit; R6 always supplies it,
+including when verifying a retained previous slot. The legacy deep-health
+reader applies the same check. Missing, false or malformed proof refuses.
+Only this boolean is projected; this is an existing effectful readiness probe,
+not a new passive configuration reader or permission to make provider calls.
+
+Rollback verifies the previous web **before** restoring its route, inside
+the existing route-restore deadline, and retains post-restore verification.
+An unproven previous web is not reopened; report incomplete recovery and
+retain the candidate. Neither timeout budgets nor completion-floor gates
+are relaxed. Trusted operators must serialize configuration and lifecycle
+changes with the existing production lock throughout release/rollback.
+
+This is not a request maintenance mode. For the V1 transition from exact
+`94a3f170bff544d68b3e7f656a92ba896b097b37`, its F01 publication is closed
+and D1 disclosure registry empty; with loaded eligibility ON it cannot admit
+new affirmative grants and it enforces registration/screening. The corrected
+successor must retain #515's unconditional D1 cohort gate, published F01
+eligibility gate and closed minor pins. The operator must bind that exact
+source/image baseline and every ingress to the canonical route. An unknown
+revision or alternate serving origin is HOLD, not an admission waiver.
+
+If the old web does not already enforce eligibility, a separately authorized
+human configuration operation is required **before** protected deployment.
+The existing slot primitives permit a fail-closed stop/start preparation:
+remove the exact active old slot, prove no obsolete web survives, leave nginx
+pointing to its now-empty port, set only the approved eligibility delta, start
+the same retained immutable old image in the inactive slot, prove its loaded
+eligibility and closed publication, then switch the canonical route. This
+intentionally causes an API interruption, including account controls, and
+needs explicit founder outage/configuration authority. In-flight requests
+have the existing 30-second Gunicorn grace and 45-second Docker stop bound;
+an interrupted response can have committed and must not be assumed undone.
+Never restart an eligibility-OFF web to restore availability. Preparation is
+not source deployment and does not bypass the protected exact-SHA workflow.
+No such preparation, flag change, HTTP probe or production access is
+authorized by source merge.
+
+The operator's ingress receipt must cover nginx generations as well as
+backend sockets. Before the first inactive-slot start, prove the current
+canonical mapping and no unresolved older generation referencing either
+slot. If unavailable, HOLD until a separately authorized same-configuration
+reload and generation barrier establishes it. Under the production lock,
+record every live nginx worker's PID and process start time before each
+route reload. Do not reuse a vacated backend port until canonical route
+proof succeeds and every recorded worker identity has exited. Master drift,
+unexplained generations, alternate origins or timeout mean HOLD; do not
+force-kill workers or automatically reuse the port. Apply the barrier again
+before any future reuse of the retired slot. A request body still buffering
+in nginx has no backend socket and is invisible to R6's `ss` drain count.
+
 **`/health` limiter budget.** The default limit (`600 per hour`) is counted per
 client key per endpoint in the shared Redis. Every in-container probe is keyed
 `ip:127.0.0.1`, so all web containers share one `/health` budget. Host-side

@@ -155,8 +155,10 @@ _DEEP_PROBE_CODE = (
     "import json,urllib.request\n"
     "r=urllib.request.urlopen('http://127.0.0.1:5000/health?deep=1',timeout=5)\n"
     "p=json.load(r)\n"
+    "f=p.get('flags')\n"
     "print(json.dumps({'http':r.status,'status':p.get('status'),"
-    "'revision':p.get('revision')}))\n"
+    "'revision':p.get('revision'),'eligibility_enforced':"
+    "f.get('ACCOUNT_ELIGIBILITY_ENABLED') if isinstance(f,dict) else None}))\n"
 )
 
 
@@ -650,7 +652,8 @@ class SlotRuntime:
                 f"slot {slot} has {len(containers)} containers, expected 1")
         return containers[0]
 
-    def verify(self, slot, revision, *, allow_existing_files=False):
+    def verify(self, slot, revision, *, allow_existing_files=False,
+               require_eligibility=False):
         validate_revision(revision)
         info = None
         for _ in range(HEALTH_WAIT_POLLS):
@@ -671,16 +674,20 @@ class SlotRuntime:
         baked = self._docker("exec", cid, "cat", "/app/BUILD_REVISION")
         if baked.stdout.strip() != revision:
             raise VerificationFailed("baked BUILD_REVISION mismatch")
-        deep = self._retry(DEEP_PROBE_ATTEMPTS, lambda: self._deep_probe(cid, revision))
+        deep = self._retry(DEEP_PROBE_ATTEMPTS, lambda: self._deep_probe(
+            cid, revision, require_eligibility=require_eligibility))
         if not deep:
             raise VerificationFailed("in-container deep health never proved "
                                      "the expected revision")
         host = self._retry(HOST_PROBE_ATTEMPTS, lambda: self._host_probe(slot))
         if not host:
             raise VerificationFailed("candidate loopback port never answered 200")
-        return {"action": "verified", "container": info,
+        result = {"action": "verified", "container": info,
                 "deep_health_revision": revision,
                 "host_health": f"http://{LOOPBACK}:{slot_port(slot)}/health"}
+        if require_eligibility:
+            result["eligibility_enforced"] = True
+        return result
 
     def _retry(self, attempts, probe):
         for attempt in range(attempts):
@@ -690,7 +697,7 @@ class SlotRuntime:
                 self._sleep(PROBE_DELAY_SECONDS)
         return False
 
-    def _deep_probe(self, cid, revision):
+    def _deep_probe(self, cid, revision, *, require_eligibility=False):
         result = self._docker("exec", cid, "python3", "-c", _DEEP_PROBE_CODE, ok=False)
         if result.returncode != 0:
             return False
@@ -699,7 +706,9 @@ class SlotRuntime:
         except (ValueError, IndexError):
             return False
         return (payload.get("http") == 200 and payload.get("status") == "ok"
-                and payload.get("revision") == revision)
+                and payload.get("revision") == revision
+                and (not require_eligibility
+                     or payload.get("eligibility_enforced") is True))
 
     def _host_probe(self, slot):
         try:
@@ -740,6 +749,7 @@ def main(argv=None):
         command.add_argument("--revision", required=True)
         if name == "verify":
             command.add_argument("--allow-existing-files", action="store_true")
+            command.add_argument("--require-eligibility", action="store_true")
         if name in ("preflight", "start"):
             command.add_argument("--host-reserve-mib")
     sub.add_parser("admission").add_argument("--host-reserve-mib")
@@ -763,7 +773,8 @@ def main(argv=None):
             out = runtime.start(args.slot, args.revision, reserve)
         elif args.command == "verify":
             out = runtime.verify(validate_slot(args.slot), args.revision,
-                                 allow_existing_files=args.allow_existing_files)
+                                 allow_existing_files=args.allow_existing_files,
+                                 require_eligibility=args.require_eligibility)
         elif args.command == "inspect":
             out = runtime.inspect(validate_slot(args.slot))
         else:
