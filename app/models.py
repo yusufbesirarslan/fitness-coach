@@ -996,6 +996,49 @@ class DeletedIdentityTombstone(db.Model):
     deleted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
 
+class AccountDeletionRecord(db.Model):
+    """Destruction record of one completed account deletion
+    (app/services/deletion_audit.py, docs/ACCOUNT_DELETION_AUDIT.md).
+
+    Written in the same transaction that purges the account and kept at least
+    three years (`retain_until`). It says THAT an account was destroyed, when,
+    through which path and how many rows and objects went with it. It holds no
+    health data, consent payload, name, e-mail, username, internal user id or
+    Cognito subject: the only link to the person is the tombstone's keyed
+    one-way fingerprint. Deliberately no user foreign key, so neither the purge
+    nor a cascade can remove it. `integrity` is a keyed MAC over every other
+    field. Only `deletion_audit` may construct or delete rows (AST gate).
+    """
+    __tablename__ = "account_deletion_record"
+
+    id = db.Column(db.Integer, primary_key=True)
+    operation_ref = db.Column(db.String(32), nullable=False)
+    request_id = db.Column(db.String(80), nullable=True)
+    channel = db.Column(db.String(24), nullable=False)
+    outcome = db.Column(db.String(24), nullable=False)
+    identity_step = db.Column(db.String(24), nullable=False)
+    subject_fingerprint = db.Column(db.String(64), nullable=True)
+    scope = db.Column(db.String(24), nullable=False)
+    counts = db.Column(db.JSON, nullable=False)
+    completed_at = db.Column(db.DateTime, nullable=False)
+    retain_until = db.Column(db.DateTime, nullable=False)
+    integrity = db.Column(db.String(64), nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint("operation_ref", name="uq_account_deletion_operation"),
+        db.CheckConstraint("channel IN ('self_service', 'operator_cleanup')",
+                           name="ck_account_deletion_channel"),
+        db.CheckConstraint("outcome IN ('completed')",
+                           name="ck_account_deletion_outcome"),
+        db.CheckConstraint(
+            "identity_step IN ('deleted', 'already_absent', 'not_attempted')",
+            name="ck_account_deletion_identity_step"),
+        db.CheckConstraint("scope IN ('full_account')",
+                           name="ck_account_deletion_scope"),
+        db.CheckConstraint("retain_until > completed_at",
+                           name="ck_account_deletion_retention"),
+    )
+
+
 class BarcodeFoodCache(db.Model):
     """Normalized packaged-food cache keyed by barcode.
 

@@ -216,6 +216,22 @@ Same identity-first order, same `_purge_user`, same session removal. Difference:
 `cleanup-test-users` still does no object-store I/O (recorded debt); the native
 lifecycle releases media before purging.
 
+## 7a. Destruction record and legal hold (2026-11-14)
+
+Two additions to the lifecycle above; the HTTP contract is unchanged.
+Authority: `docs/ACCOUNT_DELETION_AUDIT.md`.
+
+- **Destruction record.** The purge transaction also writes one
+  `account_deletion_record` row (operation reference, time, path, counts,
+  tombstone fingerprint, MAC; no content, no foreign key), kept three years.
+  `cleanup-test-users` writes one per account too.
+- **Legal hold.** The lifecycle runs under the owner's exclusive health
+  authority. An account with an unreleased `HealthLegalHold` is refused before
+  the Cognito call with the existing 503 `ACCOUNT_DELETION_UNAVAILABLE`;
+  `cleanup-test-users` refuses the whole run (exit 2). `_purge_user` no longer
+  deletes an active hold: it refuses.
+- **Backups.** `docs/BACKUP_RESTORE_REDELETION_RUNBOOK.md`.
+
 ## 8. Tests
 
 - `tests/test_mobile_account_deletion_api.py` — contract, A/B isolation on fully

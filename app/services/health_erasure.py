@@ -58,6 +58,24 @@ class ErasureUnavailable(Exception):
     """Erasure is incomplete; keep the obligation pending and retry safely."""
 
 
+class LegalHoldActive(Exception):
+    """The owner has an unreleased legal hold; their account must not be purged."""
+
+
+def active_hold(owner):
+    """True while ANY legal hold of `owner` is unreleased.
+
+    Account deletion and operator cleanup destroy the whole account, so one
+    held category is enough to refuse (docs/ACCOUNT_DELETION_AUDIT.md). The
+    answer is only final when the caller holds the owner row lock or the
+    exclusive health authority: `health-legal-hold-add` needs both.
+    """
+    from app.health_consent_models import HealthLegalHold
+    return db.session.query(HealthLegalHold.id).filter(
+        HealthLegalHold.owner_id == owner,
+        HealthLegalHold.released_at.is_(None)).first() is not None
+
+
 def _tables():
     from app.health_consent_models import HealthErasure, HealthLegalHold
     return HealthErasure.__table__, HealthLegalHold.__table__

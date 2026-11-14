@@ -78,6 +78,13 @@ def record(sub):
         db.session.flush()
 
 
+def fingerprints_since(when):
+    """Fingerprints of tombstones written at or after `when` (audit verify)."""
+    return [value for (value,) in db.session.query(
+        DeletedIdentityTombstone.fingerprint).filter(
+            DeletedIdentityTombstone.deleted_at >= when)]
+
+
 def refuse_if_deleted(sub):
     """Raise `IdentityDeleted` when `sub` was deleted.
 

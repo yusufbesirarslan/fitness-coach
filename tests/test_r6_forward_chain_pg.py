@@ -1,15 +1,17 @@
-"""Historical R6 chain plus the additive M4 monitoring successor.
+"""Historical R6 chain plus its additive successors.
 
 The historical R6 baseline was ``c6f8b0d2e4a1`` (restore receipt, 2026-11-09).
 Preserve its four reviewed forward migrations as a frozen prefix, then add
-only the source-qualified M4 monitoring revision:
+only the source-qualified M4 monitoring revision and the account-deletion
+destruction record (one empty table, no foreign key, no backfill):
 
-    c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002 -> f01a4e000003
+    c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
+        -> f01a4e000003 -> ad17de1e0001
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
 
-* the graph is exactly that frozen prefix plus one successor, linear, one head;
+* the graph is exactly that frozen prefix plus those successors, linear, one head;
 * the schema the Alembic history builds at ``c6f8b0d2e4a1``, plus production's
   itemized legacy differences (the ``activity_clap`` table, NOT NULL on
   ``user.rank_points`` and ``user.streak_count``, six server-side column
@@ -70,7 +72,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
-CHAIN = R6_CHAIN + ("f01a4e000003",)
+CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -81,7 +83,8 @@ SEEDED = ("user", "meal_log", "custom_meal", "custom_meal_item", "weekly_check_i
           "pump_check", "workout_log", "workout_completion_day", "ai_allowance_bucket",
           "completion_capability_floor", "activity", "activity_clap")
 NEW_TABLES = ("health_consent_state", "health_consent_event", "meal_log_retained_total",
-              "health_erasure", "health_legal_hold", "health_erasure_retry")
+              "health_erasure", "health_legal_hold", "health_erasure_retry",
+              "account_deletion_record")
 PROVIDER_COLUMNS = {"meal_log": ("provider_items", "provider_acquired_at", "provider_expired_at"),
                     "custom_meal_item": ("provider_acquired_at", "provider_expired_at")}
 
@@ -276,7 +279,7 @@ def test_release_chain_preserves_reviewed_r6_prefix_and_adds_only_m4():
     from alembic.script import ScriptDirectory
     script = ScriptDirectory(str(ROOT / "migrations"))
     assert script.get_heads() == [HEAD]
-    assert CHAIN[:-1] == R6_CHAIN
+    assert CHAIN[:len(R6_CHAIN)] == R6_CHAIN
     walked = [rev.revision for rev in script.iterate_revisions(HEAD, LIVE_HEAD)]
     assert tuple(reversed(walked)) == CHAIN
     parent = LIVE_HEAD
@@ -484,7 +487,8 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
     assert all(_has_tables(chain_url, NEW_TABLES).values())
     # Nothing retroactively authorized or erased; no retained totals invented.
     for table in ("health_consent_state", "health_consent_event", "health_erasure",
-                  "health_legal_hold", "meal_log_retained_total"):
+                  "health_legal_hold", "meal_log_retained_total",
+                  "account_deletion_record"):
         assert _sql(chain_url, f"SELECT count(*) FROM {table}")[0][0] == 0, table
     definition, valid = _bucket_scope(chain_url)
     assert valid is True and "'LAUNCH_FREE'" in definition and "'STARTER'" in definition

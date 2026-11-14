@@ -213,11 +213,26 @@ def test_unproven_account_purge_keeps_storage_debt_pending(world):
     assert world.a_keys["pump"] in world.s3.objects
 
 
-def test_account_deletion_purges_legal_holds(world):
+def test_account_purge_refuses_an_active_legal_hold(world):
+    """An unreleased hold stops the canonical purge before any delete."""
     from app.cli import _purge_user
     db.session.add(HealthLegalHold(owner_id=world.a_id, categories=["coach"], matter_ref="M",
                                    created_at=datetime.utcnow(),
                                    review_at=datetime.utcnow() + timedelta(days=1)))
+    db.session.commit()
+    with pytest.raises(health_erasure.LegalHoldActive):
+        _purge_user(db.session.get(User, world.a_id))
+    db.session.rollback()
+    assert db.session.get(User, world.a_id) is not None
+    assert HealthLegalHold.query.count() == 1
+
+
+def test_account_purge_removes_released_legal_holds(world):
+    from app.cli import _purge_user
+    db.session.add(HealthLegalHold(owner_id=world.a_id, categories=["coach"], matter_ref="M",
+                                   created_at=datetime.utcnow(),
+                                   review_at=datetime.utcnow() + timedelta(days=1),
+                                   released_at=datetime.utcnow()))
     db.session.commit()
     _purge_user(db.session.get(User, world.a_id))
     db.session.commit()

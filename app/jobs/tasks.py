@@ -152,7 +152,8 @@ def run_daily_maintenance(now_iso):
 
     def _body():
         from app.extensions import db
-        from app.services import health_erasure, mobile_auth, notifications, session_store
+        from app.services import (
+            deletion_audit, health_erasure, mobile_auth, notifications, session_store)
 
         results = {}
         for name, operation in (
@@ -162,6 +163,8 @@ def run_daily_maintenance(now_iso):
             ("fatsecret_proxy", sample_fatsecret_proxy),
             ("provider_retention", _provider_retention_pass),
             ("health_erasure", health_erasure.run_pending),
+            # Destruction records past their three-year (or extended) retention.
+            ("deletion_audit", deletion_audit.purge_expired),
         ):
             try:
                 results[name] = operation()
