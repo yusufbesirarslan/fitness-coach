@@ -57,6 +57,8 @@ def isolated(monkeypatch):
                 expected_generation=0, request_id='synthetic-health-grant'))
         premium_row(1)
         premium_row(2, original_id='901')
+        from d1_screened_support import screen_adult_tr
+        screen_adult_tr(1, 2)  # a NEW D1 grant needs the canonical screened cohort
         for feature in bindings:
             state = C.status(1)
             policy = C.POLICIES[f'synthetic-{feature}']

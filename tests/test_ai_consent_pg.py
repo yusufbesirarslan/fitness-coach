@@ -46,6 +46,8 @@ def pg_app(monkeypatch):
         db.session.add_all([User(username='synthetic-a', email='a@example.invalid'),
                             User(username='synthetic-b', email='b@example.invalid')])
         db.session.commit()
+        from d1_screened_support import screen_adult_tr
+        screen_adult_tr(1, 2)  # a NEW D1 grant needs the canonical screened cohort
     yield app
     with app.app_context():
         db.session.remove()
@@ -105,7 +107,8 @@ def test_actual_nutrition_builder_to_openai_sdk_excludes_social_profile(pg_app, 
     with pg_app.app_context(), ai_spend_guard.subject_scope(1):
         user = db.session.get(User, 1)
         user.full_name = 'EXCLUDED_OWNER_IDENTITY'
-        user.user_metadata = {'friend': 'THIRD_PARTY_SOCIAL_CANARY'}
+        # Keep the screened-cohort record the grant needs; add the canary beside it.
+        user.user_metadata = dict(user.user_metadata or {}, friend='THIRD_PARTY_SOCIAL_CANARY')
         db.session.commit()
         consent.mutate(1, command('nutrition_plan'))
         assert generate_plan_options(ai._openai_chat, 'en', 2100, 'fitness', ['eggs'], ['rice'], ['olive oil'], []) == []

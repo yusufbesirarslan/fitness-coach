@@ -353,6 +353,35 @@ def ai_service_eligible(user, feature, now):
             and _declared_by(record, now))
 
 
+D1_GRANT_ADULT_TR = "adult_tr"
+D1_GRANT_TR_MINOR = "tr_minor"
+
+
+def d1_grant_cohort(user, now):
+    """Affirmative screened cohort for a NEW D1 consent grant, or None.
+
+    Consent-WRITE authority only: never provider admission (ai_service_eligible
+    still decides every request, behind its own pins and runtime guards) and
+    independent of ACCOUNT_ELIGIBILITY_ENABLED, like purchase_eligible.
+    Requires the canonical subject-bound signed record (_record: exact schema,
+    version, signature, subject, live TR minor notice pin, no contradicting
+    profile age) declared by ``now``:
+      adult_tr  -- an 18_plus TR record (the purchase/AI adult rule);
+      tr_minor  -- a 13_17 TR record whose profile age agrees (13-17).
+    Anything else (no record, malformed, foreign subject, unpinned minor,
+    non-TR market, contradicted or unknown profile age) is None: fail closed.
+    """
+    if _adult_tr(user, now):
+        return D1_GRANT_ADULT_TR
+    record = _record(user)
+    if (bool(user.cognito_sub) and bool(record)
+            and _tr_minor(record["age_band"], record["country"])
+            and type(user.age) is int and 13 <= user.age <= 17
+            and _declared_by(record, now)):
+        return D1_GRANT_TR_MINOR
+    return None
+
+
 def minority_signal(user):
     """Any canonical minority signal: a signed 13-17 record (pin or not) or a
     profile age under 18. Restrict-only: it narrows the D1 purposes an account

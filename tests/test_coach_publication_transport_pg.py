@@ -46,6 +46,9 @@ def server_rig(pg_generation_app, request):
     from consent_projection_support import publish_synthetic_texts
 
     app, owners, patch = pg_generation_app
+    from d1_screened_support import screen_adult_tr
+    with app.app_context():
+        screen_adult_tr(*owners)  # a NEW D1 grant needs the canonical screened cohort
     if request.param:
         from ai_allowance_support import enable_subscriptions, premium_row
         from app.services.ai_allowances import execution

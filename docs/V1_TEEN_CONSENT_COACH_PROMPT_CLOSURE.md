@@ -28,6 +28,10 @@ validation and before any state or event write. It refuses with
 - the purpose is outside the minor purposes. These are derived from
   `TR_MINOR_AI_FEATURES` through `BINDINGS`, which gives exactly `training.plan`.
 
+(2026-11-14: superseded in part by `docs/V1_D1_SCREENED_GRANT_CLOSURE.md`. A new
+grant now also requires an affirmative screened cohort, so unscreened adults are
+refused too.)
+
 The check is restrict-only. It is deliberately not `ai_service_eligible`,
 because that requires a signed adult record, and using it would change grant
 behaviour for unscreened adult accounts. Admission is unchanged, and passing
