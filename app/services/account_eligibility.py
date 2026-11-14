@@ -353,6 +353,14 @@ def ai_service_eligible(user, feature, now):
             and _declared_by(record, now))
 
 
+def minority_signal(user):
+    """Any canonical minority signal: a signed 13-17 record (pin or not) or a
+    profile age under 18. Restrict-only: it narrows the D1 purposes an account
+    may newly grant (ai_consent.mutate) and never admits anything. Not
+    provider admission (ai_service_eligible) and not purchase eligibility."""
+    return _signed_minor(user) or (type(user.age) is int and user.age < 18)
+
+
 def require_capability(user, capability):
     if not _enforced(user):
         return

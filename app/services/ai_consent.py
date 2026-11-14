@@ -201,6 +201,32 @@ def _record_valid(purpose, record):
                 and record["action"] == "affirmative_grant")
 
 
+def _minor_grant_purposes():
+    # The D1 purposes behind the minor AI-service features (Training only).
+    from app.services.account_eligibility import TR_MINOR_AI_FEATURES
+    return frozenset(BINDINGS[feature][0] for feature in TR_MINOR_AI_FEATURES)
+
+
+def _require_grant_cohort(conn, owner, purpose):
+    """Consent-WRITE cohort gate, inside the owner-locked transaction.
+
+    Independent of provider admission (ai_launch.require_cohort), which still
+    decides every request: passing here admits nothing. An account carrying
+    any minority signal may newly grant only its cohort's purposes; it is
+    refused before any state/event write. Revocation, status and existing
+    (historical) grants are untouched.
+    """
+    from types import SimpleNamespace
+    from app.services.account_eligibility import minority_signal
+    _, _, users = _tables()
+    row = conn.execute(select(users.c.cognito_sub, users.c.age, users.c.user_metadata)
+                       .where(users.c.id == owner)).mappings().one_or_none()
+    if row is None:
+        raise ConsentDenied()
+    if minority_signal(SimpleNamespace(**row)) and purpose not in _minor_grant_purposes():
+        raise ConsentDenied("AI_CONSENT_PURPOSE_UNAVAILABLE_FOR_ACCOUNT", 403)
+
+
 def mutate(owner, data):
     required = {"action", "purpose", "version", "locale", "text_digest", "contract_digest", "expected_generation", "request_id"}
     if (not isinstance(data, dict) or set(data) != required
@@ -233,6 +259,7 @@ def mutate(owner, data):
                     or dict(policy.texts).get(data["locale"]) != data["text_digest"]
                     or data["contract_digest"] != contract_digest(policy)):
                 raise ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE", 403)
+            _require_grant_cohort(conn, owner, data["purpose"])
         elif data["purpose"] not in grants:
             raise ConsentDenied("AI_CONSENT_INVALID_REQUEST", 400)
         now = datetime.utcnow()
