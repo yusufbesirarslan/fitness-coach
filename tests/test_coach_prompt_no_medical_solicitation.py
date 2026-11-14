@@ -53,3 +53,19 @@ def test_built_coach_system_prompt_carries_the_fix(language):
         built = prompt_builder.build_coach_system(language, adaptive_plan_context=adaptive)
         assert "Menisküs, Kifoz, Skolyoz gibi bir durumun var mı" not in built
         assert "Sakatlık, hastalık, teşhis veya tıbbi geçmiş SORMA" in built
+
+
+def test_memory_tool_description_does_not_solicit_medical_history():
+    from app.services import ai_coach
+    tool, = [t for t in ai_coach._COACH_TOOL_DEFS if t["name"] == "manage_user_memory"]
+    description = tool["description"]
+    assert "yoksa kullanıcıya sor" not in description
+    assert "tıbbi durumlar" not in description
+    assert "sakatlık veya tıbbi durum SORMA" in description
+
+
+def test_prompt_does_not_offer_to_save_through_an_unoffered_tool():
+    # manage_user_memory is never offered to the model (unqualified D1 tool).
+    from app.services import ai_coach
+    assert "manage_user_memory" in ai_coach._UNQUALIFIED_D1_TOOLS
+    assert 'action="update", key="injuries"' not in system.COACH_SYSTEM_PROMPT

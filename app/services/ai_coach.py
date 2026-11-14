@@ -929,10 +929,10 @@ _COACH_TOOL_DEFS = [
     {
         "name": "manage_user_memory",
         "description": (
-            "Kullanıcının uzun süreli metadata'sını (sakatlıklar/tıbbi durumlar, hedefler, "
-            "ekipman, tercihler) oku veya yaz. Antrenman planı/önerisi vermeden ÖNCE "
-            "action='get', key='injuries' ile sakatlık verisini kontrol et; yoksa kullanıcıya "
-            "sor ve action='update' ile kaydet."
+            "Kullanıcının uzun süreli metadata'sını (hareket kısıtları, hedefler, ekipman, "
+            "tercihler) oku veya yaz. Antrenman önerisi vermeden önce action='get', "
+            "key='injuries' ile kayıtlı hareket kısıtlarını kontrol edebilirsin; sakatlık "
+            "veya tıbbi durum SORMA. Yalnızca kullanıcı açıkça isterse kaydet."
         ),
         "parameters": {
             "type": "object",

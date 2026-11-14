@@ -57,13 +57,18 @@ disclosures for minors, are mobile follow-ups.
 
 Steps 1–3 now:
 - tell the model not to ask about, or invite disclosure of, injuries, illness,
-  diagnoses or medical history;
+  diagnoses or medical history, and not to make advice wait on that
+  information;
 - apply stored `banned_movements` as protective restrictions, without asking
   the user to confirm them;
+- with no stored restriction, plan normally;
 - when the user volunteers pain, injury or a condition: stay general and low
   risk, ask for no details, and refer the user to a doctor or physiotherapist.
-  Acute symptoms mean stop and seek medical help;
-- allow saving a movement restriction only when the user explicitly asks.
+  Acute symptoms mean stop and seek medical help.
+
+The old "save the answer" step is removed. `manage_user_memory` is an
+unqualified D1 tool, so it is never offered to the model. Its description
+(`ai_coach.py`) no longer says "ask the user, then save".
 
 Step 4 is unchanged byte for byte, because the adaptive variant substitutes it
 by exact match. "Tıbbi teşhis veya reçete VERME" is kept.
@@ -89,3 +94,8 @@ Scenarios:
 - open teen pins do not widen grants.
 
 Without the fix, 4 consent scenarios and 6 of 7 prompt tests fail.
+
+`tests/test_tr_minor_training_ai_pg.py::test_teen_grant_of_another_published_purpose_never_opens_it`
+previously expected a minor's non-Training grant to succeed. It now asserts the
+403 refusal (no event, no generation change). It then seeds a grant through
+the pre-fix path and proves admission still refuses it.
