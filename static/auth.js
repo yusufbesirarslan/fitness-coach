@@ -142,10 +142,10 @@
   window.checkEligibility = async function (el) {
     window.resetEligibility();
     var revision = eligibilityRevision;
-    var ageText = normalizedValue("eligibility-age");
-    var age = Number(ageText);
+    // The server computes the age from the date of birth; nothing here is authority.
+    var birthDate = normalizedValue("eligibility-birth-date");
     var country = normalizedValue("eligibility-country");
-    if (!ageText || !Number.isInteger(age) || age <= 0 || !country) {
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(birthDate) || !country) {
       showNotice("error", tr("eligibility.required"));
       return;
     }
@@ -153,18 +153,17 @@
     try {
       var response = await fetch("/eligibility", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ age: age, country: country })
+        body: JSON.stringify({ birth_date: birthDate, country: country })
       });
       var data = await response.json();
       if (revision !== eligibilityRevision) return;
       var result = data && data.eligibility;
       var caps = result && result.capabilities;
       if (!response.ok || !result || result.status !== "screen_passed" ||
-          result.country !== country || result.reason !== null || age < 13 ||
-          result.age_band !== (age < 18 ? "13_17" : "18_plus") ||
+          result.country !== country || result.reason !== null ||
+          result.age_band !== "18_plus" ||
           !caps || typeof caps.body_photos !== "boolean" ||
           typeof caps.automated_weight_targets !== "boolean" || caps.social !== false ||
-          (age < 18 && (caps.body_photos || caps.automated_weight_targets)) ||
           typeof result.registration_token !== "string" || !result.registration_token ||
           result.registration_token.length > 1024) {
         showNotice("error", tr(result && result.status === "ineligible" ?

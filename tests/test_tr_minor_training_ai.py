@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from eligibility_support import declaration, legacy_minor_record
+
 from app.extensions import db
 from app.services import account_eligibility as policy, ai_launch
 from app.services.training_generation import youth_safety
@@ -32,7 +34,7 @@ def pins(monkeypatch):
 
 
 def _ticket(age, country="TR"):
-    return policy.preview({"age": age, "country": country})["eligibility"]["registration_token"]
+    return policy.preview(declaration(age, country))["eligibility"]["registration_token"]
 
 
 def _user(make_user, age, name):
@@ -88,8 +90,8 @@ def test_adult_ai_eligibility_is_unchanged(app, make_user, pins):
 def test_teen_ai_fails_closed(app, make_user, pins, monkeypatch, change):
     if change == "foreign_teen":
         teen = make_user("teengb")
-        # GB 13-17 is screen_passed but never a TR minor record.
-        policy.attach(teen, policy.registration_record(_ticket(16, "GB")))
+        # A GB 13-17 record (pre-FDO-AGE18) is never a TR minor record.
+        legacy_minor_record(teen, 16, "GB")
         db.session.commit()
     else:
         teen = _user(make_user, 16, "teenfail")

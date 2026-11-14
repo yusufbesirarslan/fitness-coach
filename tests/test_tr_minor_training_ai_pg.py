@@ -12,6 +12,8 @@ from types import SimpleNamespace
 import fakeredis
 import pytest
 
+from eligibility_support import declaration
+
 from app.extensions import db
 from app.models import (AIConsentEvent, AiUsageReservation, TrainingPlan,
                         TrainingPlanGenerationOperation, User)
@@ -105,8 +107,7 @@ def teen_ai(app, monkeypatch, pins):
     def register(age, name):
         monkeypatch.setattr(cognito_service, "sign_up", lambda **_: f"sub-{name}")
         body = {"username": name, "email": f"{name}@example.invalid", "password": "Sifre123",
-                "eligibility_token": client.post("/api/v1/auth/eligibility", json={
-                    "age": age, "country": "TR"}).json["eligibility"]["registration_token"]}
+                "eligibility_token": client.post("/api/v1/auth/eligibility", json=declaration(age)).json["eligibility"]["registration_token"]}
         if age < 18:
             body["minor_notice_version"] = NOTICE
         assert client.post("/api/v1/auth/register", json=body).status_code == 201
