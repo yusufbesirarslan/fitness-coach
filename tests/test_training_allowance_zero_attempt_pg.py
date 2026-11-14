@@ -52,6 +52,9 @@ def chain(pg_generation_app):
     from ai_allowance_support import fixture_policy
     from app.services import ai, ai_consent, ai_provider_call, ai_recovery, ai_spend_guard
     app, owners, monkeypatch = pg_generation_app
+    from d1_screened_support import screen_adult_tr
+    with app.app_context():
+        screen_adult_tr(*owners)  # a NEW D1 grant needs the canonical screened cohort
     app.config.update(
         AI_ALLOWANCE_LEDGER_ENABLED=True,
         AI_TRAINING_ALLOWANCE_ENFORCEMENT_ENABLED=True,

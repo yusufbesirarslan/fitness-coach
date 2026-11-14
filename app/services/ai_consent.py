@@ -210,20 +210,30 @@ def _minor_grant_purposes():
 def _require_grant_cohort(conn, owner, purpose):
     """Consent-WRITE cohort gate, inside the owner-locked transaction.
 
+    A NEW affirmative grant needs an affirmative screened cohort from the
+    canonical signed record (account_eligibility.d1_grant_cohort), whatever
+    ACCOUNT_ELIGIBILITY_ENABLED says: a qualified adult TR account may grant
+    any launch purpose, a qualified TR 13-17 account only its cohort's
+    purposes (Training), and everything else is refused before any
+    state/event write. Any minority signal still restricts on top.
     Independent of provider admission (ai_launch.require_cohort), which still
-    decides every request: passing here admits nothing. An account carrying
-    any minority signal may newly grant only its cohort's purposes; it is
-    refused before any state/event write. Revocation, status and existing
-    (historical) grants are untouched.
+    decides every request: passing here admits nothing. Revocation, status,
+    replay and existing (historical) grants are untouched.
     """
+    from datetime import timezone
     from types import SimpleNamespace
-    from app.services.account_eligibility import minority_signal
+    from app.services.account_eligibility import (
+        D1_GRANT_ADULT_TR, D1_GRANT_TR_MINOR, d1_grant_cohort, minority_signal)
     _, _, users = _tables()
     row = conn.execute(select(users.c.cognito_sub, users.c.age, users.c.user_metadata)
                        .where(users.c.id == owner)).mappings().one_or_none()
     if row is None:
         raise ConsentDenied()
-    if minority_signal(SimpleNamespace(**row)) and purpose not in _minor_grant_purposes():
+    account = SimpleNamespace(**row)
+    cohort = d1_grant_cohort(account, datetime.now(timezone.utc))
+    allowed = ((cohort == D1_GRANT_ADULT_TR and not minority_signal(account))
+               or (cohort == D1_GRANT_TR_MINOR and purpose in _minor_grant_purposes()))
+    if not allowed:
         raise ConsentDenied("AI_CONSENT_PURPOSE_UNAVAILABLE_FOR_ACCOUNT", 403)
 
 
