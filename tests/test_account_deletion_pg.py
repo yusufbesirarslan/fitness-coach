@@ -202,7 +202,7 @@ def test_writer_blocked_by_purge_lock_fails_its_foreign_key(
     def slow_purge(user):
         locked.set()
         assert _wait_for_lock_waiter(app)  # the writer is blocked on our lock
-        real_purge(user)
+        return real_purge(user)            # the counts feed the destruction record
     monkeypatch.setattr(cli, "_purge_user", slow_purge)
     outcome = {}
 
@@ -330,10 +330,11 @@ def test_login_create_racing_the_purge_waits_for_it_then_sees_the_tombstone(
     real_purge = cli._purge_user
 
     def purge_and_hold(user):
-        real_purge(user)
+        rows = real_purge(user)
         db.session.flush()               # tombstone + purge written, not committed
         purged.set()
         go_commit.wait(timeout=10)
+        return rows                      # the counts feed the destruction record
     monkeypatch.setattr(cli, "_purge_user", purge_and_hold)
 
     def login():

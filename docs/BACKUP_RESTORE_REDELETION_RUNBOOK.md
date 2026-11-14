@@ -60,7 +60,8 @@ Keep the application closed to users until step 6 is done.
    - With an export (section 2): feed every export line with
      `completed_at >= T` to `flask account-deletion-reconcile` (stdin). It
      verifies each line's MAC, prints the local accounts that exist again
-     (`user_id`, `username`, `legal_hold`) and deletes nothing.
+     (`user_id`, `username`, `legal_hold`) and deletes nothing. Feed the
+     export from a file; do not paste it into a logged session.
    - Without an export: count `account_deletion_audit event=recorded` log
      lines after T. That gives the number of lost deletions and their
      operation references, not the accounts. Use section 4 for candidates. If
@@ -69,7 +70,9 @@ Keep the application closed to users until step 6 is done.
 4. **Review the list.** Two people. Any account with `legal_hold: true` is
    not deleted; it goes to the controller.
 5. **Re-delete** each confirmed account with the operator path:
-   `flask cleanup-test-users --username <exact username> --yes`. It refuses a
+   `flask cleanup-test-users --username <username>` first WITHOUT `--yes`:
+   the match is case-insensitive, so confirm the dry run lists exactly the one
+   reviewed user id. Then repeat with `--yes`. It refuses a
    held account, purges in one transaction and writes a new
    `operator_cleanup` destruction record. Media was already released by the
    original deletion; whether the bucket keeps old object versions is
@@ -91,6 +94,8 @@ pool is a **candidate** for "deleted after T". It is not proof:
   same and is a legitimate pending state the user can still finish;
 - an identity can be missing for other reasons (administrative removal, a
   pool-side fault, an account created by seed or test tooling);
+- an account whose first deletion attempt ended incomplete and was then put
+  under a legal hold looks the same and must not be deleted;
 - the reverse also fails: operator cleanup does not delete the Cognito user,
   so an operator-deleted account still has an identity and is not found this
   way.

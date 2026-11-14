@@ -444,7 +444,6 @@ def account_deletion_reconcile_cmd():
     for user_id, value in found:
         username = db.session.query(User.username).filter(User.id == user_id).scalar()
         click.echo(json.dumps({"user_id": user_id, "username": username,
-                               "subject_fingerprint": value,
                                "legal_hold": health_erasure.active_hold(user_id)}))
     db.session.rollback()
 

@@ -161,7 +161,7 @@ def announce(values):
     """The copy outside the database. Never raises: the purge has committed.
 
     The tombstone fingerprint is deliberately NOT logged (LP-11 invariant:
-    it never leaves the database). The line therefore proves THAT an
+    the application never logs it; only the operator export prints it). The line therefore proves THAT an
     operation completed and seals the row (the MAC covers the fingerprint),
     but does not say WHICH account; see the restore runbook."""
     try:

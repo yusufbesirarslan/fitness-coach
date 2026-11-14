@@ -63,9 +63,12 @@ a future caller. There is no foreign key to `user`.
   (`axisai/account-deletion-record/v1`). `flask account-deletion-audit-verify`
   (read only, exit 2 on failure) recomputes every MAC and counts tombstones
   written since the first record that have no record. A changed row is
-  detected. A removed row is detected only through its tombstone. A row
-  removed together with its tombstone, or a restore, is not detectable from
-  inside the database.
+  detected. A removed `self_service` row is detected only through its
+  tombstone. Not detectable from inside the database: a row removed together
+  with its tombstone, a removed `operator_cleanup` row (that path writes no
+  tombstone), and a restore. Known false positive: if the oldest row has an
+  extended `retain_until`, younger rows that expire normally leave tombstones
+  that `verify` then counts as uncovered.
 - **Key rotation.** Rotating `SECRET_KEY` makes old MACs and old fingerprints
   unverifiable. Keep the previous key available for verification.
 - **Access.** No HTTP route reads or writes the table. The read-only operator
@@ -98,12 +101,13 @@ point. Two things exist outside it:
 1. After the commit, one log line:
    `account_deletion_audit event=recorded operation_ref=… channel=…
    identity_step=… completed_at=… retain_until=… integrity=… request_id=…`.
-   It deliberately carries no subject fingerprint (the fingerprint never
-   leaves the database, an LP-11 invariant with its own test). It proves that
+   It deliberately carries no subject fingerprint (the application never
+   logs it, an LP-11 invariant with its own test). It proves that
    an operation completed and seals the row, for as long as the log group
    keeps it (30 days configured, live value unverified).
 2. `flask account-deletion-audit-export [--since YYYY-MM-DD]` prints the
-   sealed rows as JSON lines. This is the minimum independent preservation
+   sealed rows as JSON lines, fingerprints included, so its output must not
+   be left in a session or command log. This is the minimum independent preservation
    mechanism: an export kept somewhere other than the database and its
    snapshots survives a restore, and `account-deletion-reconcile` reads it
    back. **Where that export is stored, how often it is taken and who may
@@ -132,8 +136,11 @@ deletion destroys everything.
 5. The purge transaction checks again after locking the owner row
    (`DeletionIncomplete("legal_hold")`), and `_purge_user` itself refuses a
    held owner before its first delete (`LegalHoldActive`). Both are backstops
-   for a writer that skips the authority; with the real lock they are
-   unreachable.
+   for a writer that skips the authority, and for the one case the lock does
+   not cover: if the authority's database connection is terminated mid-deletion
+   (failover, an idle-in-transaction timeout), the lock is released silently.
+   A hold placed in that gap still stops the row purge (`INCOMPLETE`), but
+   storage objects released before it are gone. Not hardened in this PR.
 
 **Operator cleanup (`cleanup-test-users`)**
 
@@ -177,9 +184,24 @@ hold is disclosed. Limits of keeping the generic 503:
 3. When the hold is released, complete the pending deletion (the user retries
    in the app, or the operator path is used on their written request).
 
-A second 503 cause introduced here: another request of the same user holding
-the shared health lock for more than two seconds (a long AI call, for
-example) also yields `ACCOUNT_DELETION_UNAVAILABLE`. A retry succeeds.
+Two more 503 causes introduced here, both `ACCOUNT_DELETION_UNAVAILABLE`:
+
+- another request of the same user holds the shared health lock for more than
+  two seconds (a long AI call, for example). A retry succeeds;
+- a duplicate deletion request arrives while the first is still working for
+  more than two seconds. The first completes; the duplicate's retry is 401.
+
+One state where that 503 understates what happened: a first attempt ended
+`ACCOUNT_DELETION_INCOMPLETE` (identity deleted, some media released), a hold
+was then placed, and the retry is refused. The 503 says "nothing deleted",
+which is true of that request only. The user cannot sign in again. No held
+row is purged and nothing is reported as success. The controller owns this
+account until the hold is released and an operator completes the deletion.
+
+Rollback note: reverting to the code before this change restores a
+`_purge_user` that deletes active holds. Place no hold while that code runs.
+Operator cleanup's post-lock hold check relies on the session's READ COMMITTED
+default (no engine-level isolation override exists today).
 
 ## 7. What this does not prove
 
