@@ -623,6 +623,19 @@ not source deployment and does not bypass the protected exact-SHA workflow.
 No such preparation, flag change, HTTP probe or production access is
 authorized by source merge.
 
+The operator's ingress receipt must cover nginx generations as well as
+backend sockets. Before the first inactive-slot start, prove the current
+canonical mapping and no unresolved older generation referencing either
+slot. If unavailable, HOLD until a separately authorized same-configuration
+reload and generation barrier establishes it. Under the production lock,
+record every live nginx worker's PID and process start time before each
+route reload. Do not reuse a vacated backend port until canonical route
+proof succeeds and every recorded worker identity has exited. Master drift,
+unexplained generations, alternate origins or timeout mean HOLD; do not
+force-kill workers or automatically reuse the port. Apply the barrier again
+before any future reuse of the retired slot. A request body still buffering
+in nginx has no backend socket and is invisible to R6's `ss` drain count.
+
 **`/health` limiter budget.** The default limit (`600 per hour`) is counted per
 client key per endpoint in the shared Redis. Every in-container probe is keyed
 `ip:127.0.0.1`, so all web containers share one `/health` budget. Host-side
