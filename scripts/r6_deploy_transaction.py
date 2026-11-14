@@ -180,8 +180,10 @@ _DEEP_PROBE_CODE = (
     "import json,urllib.request\n"
     "r=urllib.request.urlopen('http://127.0.0.1:5000/health?deep=1',timeout=5)\n"
     "p=json.load(r)\n"
+    "f=p.get('flags')\n"
     "print(json.dumps({'http':r.status,'status':p.get('status'),"
-    "'revision':p.get('revision')}))\n"
+    "'revision':p.get('revision'),'eligibility_enforced':"
+    "f.get('ACCOUNT_ELIGIBILITY_ENABLED') if isinstance(f,dict) else None}))\n"
 )
 
 
@@ -627,6 +629,8 @@ class HostOps:
             raise OpError("deep health returned no JSON") from exc
         if payload.get("http") != 200 or payload.get("status") != "ok":
             raise OpError("deep health is not ok")
+        if payload.get("eligibility_enforced") is not True:
+            raise OpError("loaded account eligibility enforcement is unproven")
         return payload.get("revision")
 
     # slots (web_slot_runtime.py owns every slot Docker rule)
@@ -649,10 +653,13 @@ class HostOps:
     def slot_verify(self, slot, revision, timeout):
         # Previous releases may predate injection or use the prior mode.
         # Candidate verification always requires this deployment's exact mode.
-        flags = ["--allow-existing-files"] if revision != self.deploy_sha else []
+        flags = ["--require-eligibility"]
+        if revision != self.deploy_sha:
+            flags.append("--allow-existing-files")
         rc, payload = self._slot(timeout, "verify", "--slot", slot,
                                  "--revision", revision, *flags)
-        if rc != 0 or payload.get("deep_health_revision") != revision:
+        if (rc != 0 or payload.get("deep_health_revision") != revision
+                or payload.get("eligibility_enforced") is not True):
             raise OpError(f"slot {slot} verify failed (exit {rc}): {payload}")
         if revision == self.deploy_sha and self.environ.get("AXISAI_WEB_SLOT_APPLE_FILES", "0") == "1":
             scheduler = _load_sibling("apple_release_scheduler")
@@ -1136,7 +1143,7 @@ class Transaction:
         if revision != self.previous_commit:
             raise StepFailed("serving revision differs from the checkout HEAD")
         self.previous_revision = revision
-        self._event("serving-revision", revision=revision)
+        self._event("serving-revision", revision=revision, eligibility="enforced")
 
         workers = self._call(deadline, "worker baseline", self.ops.worker)
         if (len(workers) != 1 or workers[0].status != "running"
@@ -1533,7 +1540,7 @@ class Transaction:
         self._call(deadline, "candidate start",
                    self.ops.slot_start, self.target_slot, self.deploy_sha)
         self._verify_candidate(self._step_deadline("candidate_verify"))
-        self._event("candidate-verified", slot=self.target_slot)
+        self._event("candidate-verified", slot=self.target_slot, eligibility="enforced")
 
     def _verify_candidate(self, deadline):
         # The slot authority proves slot/revision/readiness. Bind its container
@@ -1778,6 +1785,12 @@ class Transaction:
         return EXIT_ROLLBACK_INCOMPLETE
 
     def _restore_route(self, deadline):
+        # A retained web may have died or been replaced since baseline.
+        # Prove its loaded boundary BEFORE a route change can reopen it.
+        # This shares the existing route_restore deadline; no budget grows.
+        if not self._verify_previous(deadline):
+            self.log("route restore refused: previous web admission unproven")
+            return False
         try:
             route = self.ops.route_status(self._time_left(deadline))
             if route.state == self.previous_route:

@@ -1218,7 +1218,7 @@ def test_release_prepare_timeout_removes_the_one_off_container(tmp_path):
 def test_slot_operations_go_through_the_slot_runtime_only(tmp_path):
     recorder = Recorder({
         " start ": (0, json.dumps({"action": "started"}), ""),
-        " verify ": (0, json.dumps({"deep_health_revision": CAND}), ""),
+        " verify ": (0, json.dumps({"deep_health_revision": CAND, "eligibility_enforced": True}), ""),
         " remove ": (0, json.dumps({"action": "removed"}), "")})
     ops = host(tmp_path, recorder)
     ops.slot_start("blue", CAND, 60)
@@ -1228,7 +1228,7 @@ def test_slot_operations_go_through_the_slot_runtime_only(tmp_path):
               "--deploy-dir", str(ops.context), "--main-project", "fitness-coach"]
     assert recorder.calls == [
         prefix + ["start", "--slot", "blue", "--revision", CAND],
-        prefix + ["verify", "--slot", "blue", "--revision", CAND],
+        prefix + ["verify", "--slot", "blue", "--revision", CAND, "--require-eligibility"],
         prefix + ["remove", "--slot", "blue", "--expected-revision", CAND]]
 
 
@@ -1566,11 +1566,11 @@ def test_missing_docker_socket_cannot_prove_migrator_absence(tmp_path):
 
 
 def test_previous_slot_verify_allows_only_existing_allowlisted_files(tmp_path):
-    recorder = Recorder({" verify ": (0, json.dumps({"deep_health_revision": PREV}), "")})
+    recorder = Recorder({" verify ": (0, json.dumps({"deep_health_revision": PREV, "eligibility_enforced": True}), "")})
     ops = host(tmp_path, recorder)
     ops.slot_verify("blue", PREV, 60)
     assert recorder.calls[-1][-1] == "--allow-existing-files"
-    assert recorder.calls[-1][-3:-1] == ["--revision", PREV]
+    assert recorder.calls[-1][-4:-1] == ["--revision", PREV, "--require-eligibility"]
 
 
 # ASN release scheduler: pure host command model, no schedule installation.
@@ -1951,7 +1951,7 @@ def test_apple_candidate_readiness_is_bound_to_verified_container_and_revision(t
     ops.environ['AXISAI_WEB_SLOT_APPLE_FILES'] = '1'
     monkeypatch.setattr(tx, '_load_sibling', lambda name: scheduler)
     monkeypatch.setattr(scheduler, 'trusted_file', lambda *args: b'{"protocol":1,"deploy_dir":"/srv/app","limit":25}')
-    monkeypatch.setattr(ops, '_slot', lambda *args: (0, {'deep_health_revision': CAND, 'container': {'id': 'd' * 12}}))
+    monkeypatch.setattr(ops, '_slot', lambda *args: (0, {'deep_health_revision': CAND, 'eligibility_enforced': True, 'container': {'id': 'd' * 12}}))
     ops.slot_verify('blue', CAND, 30)
     assert recorder.calls[-1][-5:] == ['python', scheduler.PASS, CAND, '25', '--check']
     assert 'FITX_STARTUP_MODE=read-only' in recorder.calls[-1]
@@ -1959,7 +1959,7 @@ def test_apple_candidate_readiness_is_bound_to_verified_container_and_revision(t
     with pytest.raises(tx.OpError, match='readiness'):
         ops.slot_verify('blue', CAND, 30)
     # Retained previous releases are verified by their existing runtime contract.
-    monkeypatch.setattr(ops, '_slot', lambda *args: (0, {'deep_health_revision': PREV}))
+    monkeypatch.setattr(ops, '_slot', lambda *args: (0, {'deep_health_revision': PREV, 'eligibility_enforced': True}))
     prior = len(recorder.calls)
     ops.slot_verify('green', PREV, 30)
     assert len(recorder.calls) == prior
