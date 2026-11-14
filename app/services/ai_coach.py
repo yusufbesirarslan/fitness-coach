@@ -942,7 +942,7 @@ _COACH_TOOL_DEFS = [
                 "key": {"type": "string",
                         "description": "Veri anahtarı. Ör: 'injuries', 'fitness_goals', 'equipment_available', 'dietary_restrictions', 'preferences'."},
                 "value": {"type": "string",
-                          "description": "action='update' için saklanacak değer (ör. 'Menisküs' veya 'Hiçbiri'). 'get' için gerekmez."},
+                          "description": "action='update' için saklanacak değer (ör. 'diz: derin squat yok' veya 'Hiçbiri'). 'get' için gerekmez."},
             },
             "required": ["action", "key"],
         },

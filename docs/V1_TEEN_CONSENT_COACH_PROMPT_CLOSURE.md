@@ -73,7 +73,7 @@ unqualified D1 tool, so it is never offered to the model. Its description
 Step 4 is unchanged byte for byte, because the adaptive variant substitutes it
 by exact match. "Tıbbi teşhis veya reçete VERME" is kept.
 
-Unchanged: routing, allowance, D1 policy, tools and the memory summarizer.
+Unchanged: routing, allowance, D1 policy, the tool set and its execution, and the memory summarizer. Only the `manage_user_memory` descriptions changed.
 
 ## Tests
 
