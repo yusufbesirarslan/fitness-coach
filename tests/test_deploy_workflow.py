@@ -896,7 +896,15 @@ def test_deploy_gate_uses_deep_health():
     assert "container_deep_health_revision" in engine
     assert "self.ops.slot_verify" in engine
     assert "in-container deep health never proved" in slots
-    assert "_deep_probe(cid, revision)" in slots
+    verify = next(node for node in ast.walk(ast.parse(slots))
+                  if isinstance(node, ast.FunctionDef) and node.name == "verify")
+    probes = [node for node in ast.walk(verify)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and node.func.attr == "_deep_probe"]
+    assert len(probes) == 1
+    assert [ast.unparse(arg) for arg in probes[0].args] == ["cid", "revision"]
+    assert {kw.arg: ast.unparse(kw.value) for kw in probes[0].keywords} == {
+        "require_eligibility": "require_eligibility"}
 
 
 
