@@ -228,7 +228,13 @@ def socket_coverage(master,workers,ports,application_port=None):
     owned=set()
     for x in [master,*workers]:
         for f in Path('/proc',str(x['pid']),'fd').iterdir():
-            target=os.readlink(f)
+            try:
+                target=os.readlink(f)
+            except FileNotFoundError:
+                # Accepted client sockets close normally during enumeration.
+                # Missing listening ownership still fails the coverage below;
+                # process lineage / directory / permission errors remain fatal.
+                continue
             m=re.fullmatch(r"socket:\[([0-9]+)\]",target)
             if m: owned.add(int(m[1]))
     actual=set()

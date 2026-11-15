@@ -82,3 +82,35 @@ def test_readonly_snapshot_does_not_reload(config, monkeypatch, capsys):
     monkeypatch.setattr(ingress, "socket_coverage", lambda *a: None)
     assert ingress.main() == 0
     assert json.loads(capsys.readouterr().out)["workers"] == [[2, 20]]
+
+
+@pytest.mark.parametrize("missing_listener", [False, True])
+def test_client_fd_churn_does_not_hide_missing_listener_ownership(monkeypatch, missing_listener):
+    class ProcPath:
+        def __init__(self, *parts):
+            self.parts = parts
+        def iterdir(self):
+            # Only master keeps listener FDs; the worker has a transient client.
+            if self.parts[1] == "1":
+                return iter((["https", "provider"] if missing_listener else
+                             ["http", "https", "provider"]) + ["closed-client"])
+            return iter(["closed-client"])
+        def read_text(self):
+            header = "sl local_address remote_address st tx_queue timer retr uid timeout inode\n"
+            if self.parts[0].endswith("tcp6"):
+                return header
+            return header + "".join(
+                f"0: {address}:{port:04X} 00000000:0000 0A 0:0 0:0 0 0 0 {inode}\n"
+                for address, port, inode in [("00000000",80,99), ("00000000",443,100),
+                                              ("0100007F",3000,101)])
+    def readlink(fd):
+        if fd == "closed-client":
+            raise FileNotFoundError("client closed")
+        return "socket:[" + str({"http":99, "https":100, "provider":101}[fd]) + "]"
+    monkeypatch.setattr(ingress, "Path", ProcPath)
+    monkeypatch.setattr(ingress.os, "readlink", readlink)
+    if missing_listener:
+        with pytest.raises(ingress.Hold, match="ALTERNATE_PUBLIC_TCP_INGRESS"):
+            ingress.socket_coverage({"pid":1}, [{"pid":2}], {80,443,3000})
+    else:
+        ingress.socket_coverage({"pid":1}, [{"pid":2}], {80,443,3000})
