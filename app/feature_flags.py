@@ -789,6 +789,9 @@ OPERATIONAL_BOOLEAN_KEYS = {
     "FLASK_DEBUG": CATEGORY_ENVIRONMENT,
     "FLASK_ENV": CATEGORY_ENVIRONMENT,
     "FITX_SKIP_DB_INIT": CATEGORY_ENVIRONMENT,
+    # Protected controller-owned boot/admission modes, not rollout switches.
+    "R6_REGISTRATION_ADMISSION": CATEGORY_ENVIRONMENT,
+    "R6_RUNTIME_ADMISSION": CATEGORY_ENVIRONMENT,
     # Escape hatches: each one deliberately disables a safety property, and each
     # exists for a documented incident procedure. They must never be staged,
     # rolled out, or "enabled to see what happens".
