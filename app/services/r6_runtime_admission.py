@@ -35,8 +35,14 @@ def install(app):
         # Both canonical web/mobile account creation endpoints. Checking the
         # resolved endpoint covers aliases without parsing user-controlled URLs.
         if request.endpoint in ("auth.register", "mobile_api.register") and not is_open():
-            return {"error": {"code": "REGISTRATION_TEMPORARILY_CLOSED",
-                              "retryable": True}}, 503
+            if request.endpoint == "mobile_api.register":
+                from app.blueprints.mobile_api import mobile_error
+                from app.mobile_auth_middleware import _safe_message
+                code = "AUTH_TEMPORARILY_UNAVAILABLE"
+                return mobile_error(code, _safe_message(code), 503, True)
+            from flask import jsonify
+            from app.i18n import t
+            return jsonify({"error": t("auth.login_unavailable")}), 503
 
 
 def is_open():

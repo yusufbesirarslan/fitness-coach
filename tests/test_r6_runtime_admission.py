@@ -1,5 +1,6 @@
 """Loaded runtime admission failures never collapse into truthy PASS."""
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -138,3 +139,19 @@ def test_stopped_recovery_candidate_needs_no_exec_but_proves_absence(tmp_path, s
         with pytest.raises(tx.OpError, match="absence unproven"):
             ops.registration_latch("green", CAND, "close", 20)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("path", ["/register", "/api/v1/auth/register"])
+def test_closed_registration_preserves_transport_error_contract(app, path):
+    app.config.update(R6_REGISTRATION_CLOSED=True, R6_ADMISSION_BOOT="never-opened")
+    response = app.test_client().post(path, data="not-json", content_type="application/json")
+    assert response.status_code == 503
+    error = response.get_json()["error"]
+    if path == "/register":
+        assert isinstance(error, str) and error
+    else:
+        assert set(error) == {"code", "message", "retryable", "request_id"}
+        assert error["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
+        assert isinstance(error["message"], str) and error["message"]
+        assert error["retryable"] is True
+        assert re.fullmatch("[0-9a-f]{16}", error["request_id"])

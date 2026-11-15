@@ -189,7 +189,6 @@ def create_app():
 
     register_blueprints(app)
     from app.services import r6_runtime_admission
-    r6_runtime_admission.install(app)
     register_cognito(app)
 
     @app.route("/health")
@@ -306,6 +305,7 @@ def create_app():
     app.before_request(start_request_timer)
     app.before_request(assign_request_id)
     app.before_request(generate_csp_nonce)
+    r6_runtime_admission.install(app)
     # Launch V1: social surfaces are closed before CSRF, auth, limits and views.
     from app.services.launch_social import install as install_social_boundary
     install_social_boundary(app)

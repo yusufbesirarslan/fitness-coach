@@ -183,15 +183,15 @@ def test_loaded_latch_blocks_both_registration_routes(app, monkeypatch, tmp_path
                       BUILD_REVISION=CAND)
     marker = tmp_path / "open.json"
     monkeypatch.setattr(a, "WEB_RECEIPT", str(marker))
+    endpoint = "auth.register" if path == "/register" else "mobile_api.register"
+    monkeypatch.setitem(app.view_functions, endpoint, lambda: ({}, 204))
     client = app.test_client()
     # Boundary precedes view/body processing, even for malformed requests.
     assert client.post(path, data="bad", content_type="application/json").status_code == 503
     marker.write_text(json.dumps({"boot": "stale", "revision": CAND}))
     assert client.post(path, json={}).status_code == 503
     marker.write_text(json.dumps({"boot": "boot", "revision": CAND}))
-    response = client.post(path, json={})
-    error = (response.get_json() or {}).get("error")
-    assert not isinstance(error, dict) or error.get("code") != "REGISTRATION_TEMPORARILY_CLOSED"
+    assert client.post(path, json={}).status_code == 204
 
 
 def test_slot_source_pins_closed_admission():
