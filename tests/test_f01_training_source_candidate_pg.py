@@ -94,7 +94,7 @@ def test_exact_source_fresh_registration_profile_training_and_stop(candidate, lo
     assert ai_launch.APPROVED_SERVICE_COHORT_VERSION == 'age-screen-v1'
     assert health_disclosure.APPROVED_VERSION == 'health-fitness-v2-review'
     assert 'd1-closure01-training-candidate' in ai_consent.POLICIES
-    declaration = call(client, 'post', '/api/v1/auth/eligibility', json={'age': 30, 'country': 'TR'})
+    declaration = call(client, 'post', '/api/v1/auth/eligibility', json={'birth_date': '1990-01-01', 'country': 'TR'})
     call(client, 'post', '/api/v1/auth/register', status=201, json={
         'username': 'sourcecandidate', 'email': 'source-candidate@example.invalid',
         'password': 'Synthetic123',

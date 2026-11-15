@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from eligibility_support import declaration
+
 from app.extensions import db
 from app.models import TrainingPlan, User, UserSession
 from app.services import (
@@ -37,8 +39,7 @@ def journey(app, monkeypatch):
 
     def register(age, name):
         monkeypatch.setattr(cognito_service, "sign_up", lambda **_: f"sub-{name}")
-        token = client.post("/api/v1/auth/eligibility", json={
-            "age": age, "country": "TR"}).json["eligibility"]["registration_token"]
+        token = client.post("/api/v1/auth/eligibility", json=declaration(age)).json["eligibility"]["registration_token"]
         body = {"username": name, "email": f"{name}@example.invalid",
                 "password": "Sifre123", "eligibility_token": token}
         if age < 18:
@@ -65,8 +66,7 @@ def journey(app, monkeypatch):
 
 
 def test_tr_12_is_refused_before_any_ticket(journey):
-    result = journey.client.post("/api/v1/auth/eligibility", json={
-        "age": 12, "country": "TR"}).json["eligibility"]
+    result = journey.client.post("/api/v1/auth/eligibility", json=declaration(12)).json["eligibility"]
     assert (result["status"], result["reason"], result["registration_token"]) == (
         "ineligible", "UNDER_MINIMUM_AGE", None)
 

@@ -27,7 +27,7 @@ FOUR = {
 
 
 def _adult(client):
-    declaration = call(client, 'post', '/api/v1/auth/eligibility', json={'age': 30, 'country': 'TR'})
+    declaration = call(client, 'post', '/api/v1/auth/eligibility', json={'birth_date': '1990-01-01', 'country': 'TR'})
     call(client, 'post', '/api/v1/auth/register', status=201, json={
         'username': 'sourcecandidate', 'email': 'source-candidate@example.invalid',
         'password': 'Synthetic123',

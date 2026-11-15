@@ -9,6 +9,7 @@ from app.extensions import db
 from app.models import User
 from app.services import account_eligibility as policy, account_registration, ai_launch
 from app.services.ai_consent import ConsentDenied
+from eligibility_support import declaration
 
 NOTICE = policy.TR_MINOR_NOTICE_VERSION
 WIRE_CAPS = {"body_photos": False, "automated_weight_targets": False, "social": False}
@@ -27,7 +28,7 @@ def pinned(monkeypatch):
 
 
 def ticket(age, country="TR"):
-    return policy.preview({"age": age, "country": country})["eligibility"]["registration_token"]
+    return policy.preview(declaration(age, country))["eligibility"]["registration_token"]
 
 
 def teen_user(make_user, age=15, name="trteen"):
@@ -43,20 +44,22 @@ def test_source_pin_is_closed_by_default():
 
 
 @pytest.mark.parametrize("age", [13, 15, 17])
-def test_default_keeps_tr_minors_in_qualification_required(age):
-    result = policy.preview({"age": age, "country": "TR"})["eligibility"]
-    assert (result["status"], result["reason"]) == (
-        "qualification_required", "MARKET_QUALIFICATION_REQUIRED")
+def test_default_refuses_tr_minors_as_under_the_adult_minimum(age):
+    # V1 adult-only (FDO-AGE18): with the pin closed a TR minor is ineligible.
+    result = policy.preview(declaration(age))["eligibility"]
+    assert (result["status"], result["reason"]) == ("ineligible", "UNDER_MINIMUM_AGE")
     assert result["registration_token"] is None and result["capabilities"] == WIRE_CAPS
 
 
 @pytest.mark.parametrize("age,country,status,band", [
     (12, "TR", "ineligible", None), (13, "TR", "screen_passed", "13_17"),
     (17, "TR", "screen_passed", "13_17"), (18, "TR", "screen_passed", "18_plus"),
-    (13, "CA", "qualification_required", "13_17"), (14, "AU", "qualification_required", "13_17"),
+    # The pin opens the TR cohort only; every other market stays adult-only.
+    (13, "CA", "ineligible", "13_17"), (14, "AU", "ineligible", "13_17"),
+    (17, "GB", "ineligible", "13_17"), (17, "US", "ineligible", "13_17"),
 ])
 def test_pin_opens_only_tr_13_17_registration_with_no_capability(pinned, age, country, status, band):
-    result = policy.evaluate({"age": age, "country": country})
+    result = policy.evaluate(declaration(age, country))
     assert (result["status"], result["age_band"]) == (status, band)
     if band == "13_17":
         assert result["capabilities"] == WIRE_CAPS
@@ -74,7 +77,7 @@ def test_tr_minor_registration_requires_exact_acknowledged_notice(app, monkeypat
     assert User.query.count() == 0
 
 
-@pytest.mark.parametrize("age,country", [(18, "TR"), (16, "GB"), (30, "US")])
+@pytest.mark.parametrize("age,country", [(18, "TR"), (30, "GB"), (30, "US")])
 def test_notice_is_refused_outside_the_tr_minor_cohort(pinned, age, country):
     with pytest.raises(policy.EligibilityDenied):
         policy.registration_record(ticket(age, country), NOTICE)

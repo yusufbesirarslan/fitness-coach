@@ -232,7 +232,7 @@ def _ready(app, user):
     _seed_plan(user)
     if app.config["ACCOUNT_ELIGIBILITY_ENABLED"]:
         from app.services import account_eligibility as policy
-        token = policy.preview({"age": 30, "country": "GB"})["eligibility"]["registration_token"]
+        token = policy.preview({"birth_date": "1990-01-01", "country": "GB"})["eligibility"]["registration_token"]
         policy.attach(user, policy.registration_record(token))
         db.session.commit()
 

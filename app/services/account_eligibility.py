@@ -4,9 +4,18 @@ The registration ticket proves only that this server evaluated a declaration.
 It is not age assurance, guardianship, a health legal basis or AI permission.
 The reserved signed metadata record cannot be edited through profile/memory
 fields and never promotes a teen because their editable profile age changed.
-No DOB, identity document, address, IP or guardian assertion is retained here.
+No identity document, address, IP or guardian assertion is retained here.
+
+V1 is adult-only (founder decision FDO-AGE18-20261114). The screen takes a
+complete date of birth and the server works out the age itself, on the app's
+calendar day (Europe/Istanbul): the 18th birthday is the first eligible day in
+every supported market. The date of birth is read from the request only for
+that calculation: it is not put in the ticket, the signed record, a column or
+a log line here. What is kept is what was kept before: the derived whole-year
+age in ``User.age`` and the age band in the signed record.
 """
-from datetime import datetime, timezone
+import re
+from datetime import date, datetime, timezone
 
 from flask import current_app, request
 from itsdangerous import BadSignature, URLSafeSerializer, URLSafeTimedSerializer
@@ -15,6 +24,10 @@ VERSION = "age-screen-v1"
 METADATA_KEY = "_account_eligibility_v1"
 COUNTRIES = frozenset({"TR", "US", "GB", "CA", "AU"})
 REGISTRATION_TTL_SECONDS = 600  # Credential lifetime, not a data-retention rule.
+ADULT_AGE = 18
+# A plausibility bound for a typed/forged date, not a product rule.
+MAX_AGE = 120
+_BIRTH_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 # No age-of-record purchase expiry: nothing renews an existing record (review is
 # one-time), so one would strand renewing subscribers. Profile age never renews it.
 PURCHASE_COUNTRIES = frozenset({"TR"})
@@ -24,6 +37,10 @@ PURCHASE_COUNTRIES = frozenset({"TR"})
 # age/capacity assurance and NOT health, AI, photo or weight-target permission:
 # every restricted capability stays adult-only (_capabilities, purchase_eligible).
 # Only reviewed source may pin it; no env/config/client channel. None = closed.
+# V1 is adult-only (FDO-AGE18-20261114): this pin and the Training one below
+# stay None. They are the ONLY way any under-18 declaration can pass the screen
+# or a signed 13-17 record can be read; a future 13-17 phase needs its own
+# founder decision before either is set.
 TR_MINOR_NOTICE_VERSION = "tr-minor-notice-v1"
 APPROVED_TR_MINOR_NOTICE_VERSION: str | None = None
 # AI *service* admission for the same TR 13-17 record, separate from purchase
@@ -111,26 +128,58 @@ def _signer(*, account=False):
                 salt="axisai-account-cohort-v1" if account else "axisai-age-screen-v1")
 
 
-def evaluate(data):
-    if (not isinstance(data, dict) or set(data) != {"age", "country"}
-            or type(data["age"]) is not int or not 1 <= data["age"] <= 2147483647
+def _today():
+    from app.timeutil import app_today
+    return app_today()
+
+
+def age_on(birth_date, today):
+    """Completed whole years on ``today``. A 29 February birthday completes
+    its year on 1 March in a common year (never a day early)."""
+    years = today.year - birth_date.year
+    if (today.month, today.day) < (birth_date.month, birth_date.day):
+        years -= 1
+    return years
+
+
+def _declared_age(data):
+    """The server-computed age for an exact ``{birth_date, country}`` request.
+
+    The old ``{age, country}`` contract is refused like any other unknown
+    shape: a client-supplied age is never an input to this screen.
+    """
+    if (not isinstance(data, dict) or set(data) != {"birth_date", "country"}
+            or not isinstance(data["birth_date"], str)
+            or not _BIRTH_DATE.fullmatch(data["birth_date"])
             or not isinstance(data["country"], str) or len(data["country"]) != 2):
         raise EligibilityDenied("AUTH_ELIGIBILITY_INVALID_REQUEST", 400)
-    age, country = data["age"], data["country"]
+    try:
+        born = date.fromisoformat(data["birth_date"])
+    except ValueError:
+        raise EligibilityDenied("AUTH_ELIGIBILITY_INVALID_REQUEST", 400) from None
+    today = _today()
+    age = age_on(born, today)
+    # Today or later is not a date of birth; neither is an implausible one.
+    if born >= today or age > MAX_AGE:
+        raise EligibilityDenied("AUTH_ELIGIBILITY_INVALID_REQUEST", 400)
+    return age
+
+
+def evaluate(data):
+    return _evaluate_age(_declared_age(data), data["country"])
+
+
+def _evaluate_age(age, country):
+    if type(age) is not int or not 0 <= age <= MAX_AGE or not isinstance(country, str):
+        raise EligibilityDenied("AUTH_ELIGIBILITY_INVALID_REQUEST", 400)
     status, reason = "screen_passed", None
-    if age < 13:
+    # Adult-only in every market. The one exception is the source-pinned TR
+    # 13-17 cohort, closed for V1 (APPROVED_TR_MINOR_NOTICE_VERSION is None).
+    if age < ADULT_AGE and not (age >= 13 and country == "TR" and tr_minor_open()):
         status, reason = "ineligible", "UNDER_MINIMUM_AGE"
     elif country not in COUNTRIES:
         status, reason = "ineligible", "MARKET_NOT_SUPPORTED"
-    elif ((country == "TR" and age < 18 and not tr_minor_open())
-          or (country == "CA" and age < 14)
-          or (country == "AU" and age < 15)):
-        # Concrete unresolved social-scope/guardian/capacity qualification.
-        # No invented guardian proof or blanket 18+ rule. TR 13-17 opens only
-        # by the reviewed source pin, and only to registration: the minor's own
-        # notice acknowledgment is never parental consent or a capability.
-        status, reason = "qualification_required", "MARKET_QUALIFICATION_REQUIRED"
-    band = None if age < 13 else "13_17" if age < 18 else "18_plus"
+    band = None if age < 13 else "13_17" if age < ADULT_AGE else "18_plus"
     return {"status": status, "age_band": band, "country": country,
             "reason": reason, "capabilities": _capabilities(status, band)}
 
@@ -204,13 +253,14 @@ def preview(data):
     if window_only and not (qualification_open()
                             and request.endpoint == "mobile_api.eligibility_preview"):
         raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
-    result = evaluate(data)
+    age = _declared_age(data)
+    result = _evaluate_age(age, data["country"])
     # With the flag off nothing would record a minor's declaration or restrict the
     # account, so the window must not open sign-up for one.
     if window_only and result["status"] == "screen_passed" and result["age_band"] != "18_plus":
         raise EligibilityDenied("AUTH_ELIGIBILITY_UNAVAILABLE", 503)
     result["registration_token"] = (_signer().dumps({
-        "version": VERSION, "age": data["age"], "country": data["country"]})
+        "version": VERSION, "age": age, "country": data["country"]})
         if result["status"] == "screen_passed" else None)
     return {"eligibility": result}
 
@@ -228,7 +278,8 @@ def _ticket_record(token, minor_notice=None):
             raise ValueError()
         if payload["version"] != VERSION:
             raise ValueError()
-        result = evaluate({"age": payload["age"], "country": payload["country"]})
+        # Re-screened under the current rule: a ticket is never older authority.
+        result = _evaluate_age(payload["age"], payload["country"])
         if result["status"] != "screen_passed":
             raise ValueError()
         # The notice acknowledgment belongs to exactly the TR minor cohort.
@@ -281,6 +332,11 @@ def _record(user):
                 or record["country"] not in COUNTRIES
                 or record["age_band"] not in {"13_17", "18_plus"}
                 or not isinstance(record["checked_at"], str)):
+            return None
+        # Adult-only: a 13-17 record from any other market (issued before
+        # FDO-AGE18) is no longer a record. It stays a minority signal
+        # (_signed_minor) and can only restrict.
+        if record["age_band"] == "13_17" and not tr_minor:
             return None
         # A TR minor record needs the acknowledged notice AND a still-pinned
         # source approval; removing the pin returns it to review_required.

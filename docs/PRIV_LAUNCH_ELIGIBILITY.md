@@ -1,5 +1,11 @@
 # PRIV-LAUNCH — five-market eligibility boundary
 
+> **Superseded in part (2026-11-14, FDO-AGE18).** V1 is adult-only. The request
+> is now `{birth_date, country}`, the server computes the age, and every
+> under-18 declaration is `ineligible`. The 13+ target, the integer-age body
+> and the per-market teen table below are historical. Current contract:
+> [`V1_ADULT_ONLY_DOB_ELIGIBILITY.md`](V1_ADULT_ONLY_DOB_ELIGIBILITY.md).
+
 Source implementation for TR/US/GB/CA/AU. **Not activated or launch-qualified.** Target content rating remains 13+; this is not an 18+ policy or proof of legal consent. Existing D1/AI and StoreKit lanes retain their work. HOLD #127/#460 are not reused.
 
 ## Contract

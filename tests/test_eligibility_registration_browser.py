@@ -2,6 +2,7 @@
 import json
 
 import pytest
+from eligibility_support import born
 from ux4_gate_support import gate  # noqa: F401
 
 
@@ -14,16 +15,16 @@ def test_contacts_appear_only_after_screen_and_are_removed_on_age_change(app, cl
     page = gate.page
     assert page.locator("#email").count() == 0
     assert page.locator("#password").count() == 0
-    page.locator("#eligibility-age").fill("12")
+    page.locator("#eligibility-birth-date").fill(born(17))
     page.locator("#eligibility-country").select_option("GB")
     page.locator('[data-action="checkEligibility"]').click()
     page.wait_for_function("document.querySelector('#error-msg').classList.contains('show')")
     assert page.locator("#email").count() == 0
-    page.locator("#eligibility-age").fill("13")
+    page.locator("#eligibility-birth-date").fill(born(18))
     page.locator('[data-action="checkEligibility"]').click()
     page.locator("#email").wait_for()
     page.locator("#email").fill("fixture@example.invalid")
-    page.locator("#eligibility-age").fill("12")
+    page.locator("#eligibility-birth-date").fill(born(17))
     assert page.locator("#email").count() == 0
     page.evaluate("window.register(null)")
     assert not any(path == "/register" and method == "POST" for path, method, _ in gate.traffic)
@@ -39,7 +40,7 @@ def test_expired_ticket_returns_to_precontact_without_retransmitting(app, gate):
     gate.overrides.pop("/register")
     gate.visit("/register")
     page = gate.page
-    page.locator("#eligibility-age").fill("18")
+    page.locator("#eligibility-birth-date").fill(born(30))
     page.locator("#eligibility-country").select_option("GB")
     page.locator('[data-action="checkEligibility"]').click()
     page.locator("#email").wait_for()
@@ -66,11 +67,11 @@ def test_late_preview_for_previous_inputs_cannot_expose_contact_form(app, gate):
         ? new Promise(resolve => { window.resolveEligibility = resolve; })
         : original(url, init);
     }""")
-    page.locator("#eligibility-age").fill("18")
+    page.locator("#eligibility-birth-date").fill(born(30))
     page.locator("#eligibility-country").select_option("GB")
     page.locator('[data-action="checkEligibility"]').click()
     page.wait_for_function("window.resolveEligibility !== null")
-    page.locator("#eligibility-age").fill("12")
+    page.locator("#eligibility-birth-date").fill(born(17))
     page.evaluate("""() => window.resolveEligibility(new Response(JSON.stringify({
       eligibility: {status:'screen_passed',age_band:'18_plus',country:'GB',reason:null,
       capabilities:{body_photos:true,automated_weight_targets:true,social:false},

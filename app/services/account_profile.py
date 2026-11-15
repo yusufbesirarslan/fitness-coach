@@ -286,6 +286,7 @@ def _lock_owner(user_id):
 # TR 13-17 profile (account_eligibility.tr_minor_profile): no BMR/TDEE/calorie
 # target, no target weight, no nutrition plan text, strength/fitness goal only.
 MINOR_AGE_MIN, MINOR_AGE_MAX = 13, 17
+ADULT_AGE_MIN = 18
 MINOR_GOALS = (GOAL_BUILD_MUSCLE,)
 
 
@@ -332,6 +333,11 @@ def complete_onboarding(user, profile):
         # No adult weight-target maths for a minor: absence stays NULL, which
         # every target reader already treats as "no target" (never 0).
         _require_minor_profile(profile)
+    elif profile.age < ADULT_AGE_MIN:
+        # V1 is adult-only (FDO-AGE18). An adult account's editable profile age
+        # is never authority, and a value under 18 would only contradict its
+        # signed record and lock the account out; refuse it as out of range.
+        raise ProfileRejected(AGE, REASON_RANGE)
 
     stored_goal = _GOAL_STORED[profile.goal]
     if minor:

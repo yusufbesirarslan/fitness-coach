@@ -9,6 +9,7 @@ from itsdangerous import TimestampSigner
 from app.extensions import db
 from app.models import User, UserSession
 from app.services import account_eligibility as policy, account_registration
+from eligibility_support import born, declaration, legacy_minor_record
 
 
 @pytest.fixture(autouse=True)
@@ -16,44 +17,196 @@ def enable(app):
     app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = True
 
 
-def ticket(age=17, country="GB"):
-    return policy.preview({"age": age, "country": country})["eligibility"]["registration_token"]
+def ticket(age=30, country="GB"):
+    return policy.preview(declaration(age, country))["eligibility"]["registration_token"]
 
 
-def record_user(make_user, age=17, country="GB"):
-    user = make_user(f"age{age}{country}")
-    policy.attach(user, policy.registration_record(ticket(age, country)))
+def attach_record(user, age, country="GB"):
+    """An adult declaration through the screen; under 18 only as the legacy
+    signed record a pre-FDO-AGE18 account could hold (never issued now)."""
+    if age < 18:
+        legacy_minor_record(user, age, country)
+    else:
+        policy.attach(user, policy.registration_record(ticket(age, country)))
     db.session.commit()
     return user
 
 
-@pytest.mark.parametrize("age,country,status", [
-    (12, "US", "ineligible"), (13, "US", "screen_passed"),
-    (17, "US", "screen_passed"), (18, "US", "screen_passed"),
-    (13, "GB", "screen_passed"), (17, "GB", "screen_passed"),
-    (13, "CA", "qualification_required"), (14, "CA", "screen_passed"),
-    (13, "AU", "qualification_required"), (14, "AU", "qualification_required"),
-    (15, "AU", "screen_passed"), (13, "TR", "qualification_required"),
-    (17, "TR", "qualification_required"), (18, "TR", "screen_passed"),
-    (18, "DE", "ineligible"), (150, "GB", "screen_passed"),
-])
-def test_five_markets_and_real_pending_cohorts(age, country, status):
-    result = policy.preview({"age": age, "country": country})["eligibility"]
+def record_user(make_user, age=17, country="GB"):
+    return attach_record(make_user(f"age{age}{country}"), age, country)
+
+
+@pytest.mark.parametrize("country", sorted(policy.COUNTRIES))
+@pytest.mark.parametrize("age,status", [
+    (5, "ineligible"), (12, "ineligible"), (13, "ineligible"), (14, "ineligible"),
+    (15, "ineligible"), (17, "ineligible"), (18, "screen_passed"),
+    (30, "screen_passed"), (120, "screen_passed")])
+def test_adult_only_in_every_supported_market(age, status, country):
+    result = policy.preview(declaration(age, country))["eligibility"]
     assert result["status"] == status
+    assert result["reason"] == (None if status == "screen_passed" else "UNDER_MINIMUM_AGE")
     assert bool(result["registration_token"]) == (status == "screen_passed")
-    assert result["capabilities"]["social"] is False
-    assert result["capabilities"]["body_photos"] == (status == "screen_passed" and age >= 18)
-    assert result["capabilities"]["automated_weight_targets"] == (status == "screen_passed" and age >= 18)
+    assert result["capabilities"] == {"social": False,
+        "body_photos": status == "screen_passed",
+        "automated_weight_targets": status == "screen_passed"}
 
 
-@pytest.mark.parametrize("data", [None, {}, [], {"age": True, "country": "GB"},
-    {"age": "18", "country": "GB"}, {"age": 18.0, "country": "GB"},
-    {"age": 0, "country": "GB"}, {"age": 18, "country": []},
-    {"age": 18, "country": "GB", "approved": True}])
+def test_unsupported_market_and_v1_minor_pins_are_closed():
+    result = policy.preview(declaration(30, "DE"))["eligibility"]
+    assert (result["status"], result["reason"]) == ("ineligible", "MARKET_NOT_SUPPORTED")
+    assert result["registration_token"] is None
+    # FDO-AGE18: the only under-18 admission channels stay closed in source.
+    assert policy.APPROVED_TR_MINOR_NOTICE_VERSION is None
+    assert policy.APPROVED_TR_MINOR_TRAINING_AI_VERSION is None
+    assert policy.ADULT_AGE == 18
+
+
+@pytest.mark.parametrize("today,birth_date,passes", [
+    ("2026-11-14", "2008-11-14", True),    # 18th birthday today
+    ("2026-11-14", "2008-11-15", False),   # 18th birthday tomorrow
+    ("2026-11-14", "2008-11-13", True),
+    ("2026-11-14", "2008-12-31", False),   # right birth year, not yet 18
+    ("2026-01-01", "2008-01-01", True), ("2026-12-31", "2009-01-01", False),
+    ("2026-02-28", "2008-02-29", False),   # leap-day birthday: 1 March
+    ("2026-03-01", "2008-02-29", True),
+    ("2028-02-29", "2010-02-28", True), ("2028-02-29", "2010-03-01", False),
+])
+def test_exact_eighteenth_birthday_boundary(today, birth_date, passes):
+    from datetime import datetime
+    from app.timeutil import APP_TZ, audit_clock
+    with audit_clock(datetime.fromisoformat(today + "T12:00:00").replace(tzinfo=APP_TZ)):
+        result = policy.preview({"birth_date": birth_date, "country": "TR"})["eligibility"]
+    assert (result["status"] == "screen_passed") is passes
+    assert bool(result["registration_token"]) is passes
+
+
+def test_the_day_is_the_istanbul_calendar_day_not_utc():
+    from datetime import datetime, timezone
+    from app.timeutil import audit_clock
+    # 21:30 UTC on the 13th is already the 14th in Istanbul: the birthday.
+    with audit_clock(datetime(2026, 11, 13, 21, 30, tzinfo=timezone.utc)):
+        assert policy.evaluate({"birth_date": "2008-11-14", "country": "TR"})[
+            "status"] == "screen_passed"
+    with audit_clock(datetime(2026, 11, 13, 20, 30, tzinfo=timezone.utc)):
+        assert policy.evaluate({"birth_date": "2008-11-14", "country": "TR"})[
+            "status"] == "ineligible"
+
+
+@pytest.mark.parametrize("data", [None, {}, [], "2000-01-01",
+    # The retired integer-age contract, in every shape an old client can send.
+    {"age": 18, "country": "GB"}, {"age": 30, "country": "TR"},
+    {"age": 30, "birth_date": "1990-01-01", "country": "TR"},
+    {"birth_date": "1990-01-01", "country": "TR", "approved": True},
+    {"birth_date": "1990-01-01"}, {"birth_date": "1990-01-01", "country": []},
+    {"birth_date": "1990-01-01", "country": "TUR"},
+    {"birth_date": 19900101, "country": "TR"}, {"birth_date": None, "country": "TR"},
+    {"birth_date": "1990-1-1", "country": "TR"}, {"birth_date": "01-01-1990", "country": "TR"},
+    {"birth_date": "1990-01-01T00:00:00", "country": "TR"},
+    {"birth_date": " 1990-01-01", "country": "TR"},
+    {"birth_date": "1990-02-30", "country": "TR"}, {"birth_date": "1990-13-01", "country": "TR"},
+    {"birth_date": "0000-01-01", "country": "TR"}, {"birth_date": "1800-01-01", "country": "TR"},
+    {"birth_date": "9999-01-01", "country": "TR"}])
 def test_bad_types_and_client_authority_are_not_declarations(data):
     with pytest.raises(policy.EligibilityDenied) as caught:
         policy.preview(data)
     assert caught.value.code == "AUTH_ELIGIBILITY_INVALID_REQUEST"
+    assert caught.value.status == 400
+
+
+@pytest.mark.parametrize("days", [0, 1, 400])
+def test_today_or_a_future_date_is_not_a_date_of_birth(days):
+    with pytest.raises(policy.EligibilityDenied) as caught:
+        policy.preview({"birth_date": born(0, days=days), "country": "TR"})
+    assert caught.value.code == "AUTH_ELIGIBILITY_INVALID_REQUEST"
+
+
+@pytest.mark.parametrize("route", ["/api/v1/auth/eligibility", "/eligibility"])
+def test_old_integer_age_clients_get_no_ticket_on_either_transport(app, route):
+    client = app.test_client()
+    response = client.post(route, json={"age": 30, "country": "TR"})
+    assert response.status_code == 400
+    assert "registration_token" not in response.get_data(as_text=True)
+    response = client.post(route, json=declaration(30))
+    assert response.status_code == 200
+    assert response.json["eligibility"]["registration_token"]
+
+
+@pytest.mark.parametrize("age,country", [(13, "US"), (17, "GB"), (14, "CA"),
+                                         (15, "AU"), (17, "TR"), (12, "TR")])
+def test_a_ticket_issued_under_the_old_rule_no_longer_registers(app, monkeypatch, age, country):
+    """A still-live ticket minted before this rule (old slot, old cohort) is
+    re-screened: it creates no provider account and no local row."""
+    from app.services import cognito_service
+    monkeypatch.setattr(cognito_service, "sign_up", lambda **_: pytest.fail("provider called"))
+    stale = policy._signer().dumps({"version": policy.VERSION, "age": age, "country": country})
+    with pytest.raises(policy.EligibilityDenied):
+        policy.registration_record(stale)
+    with pytest.raises(account_registration.RegistrationFailure) as caught:
+        account_registration.register_account("staleuser", "fixture@example.invalid", "Sifre123",
+                                             eligibility_token=stale)
+    assert caught.value.outcome == account_registration.Outcome.ELIGIBILITY_REQUIRED
+    assert User.query.count() == 0
+
+
+def test_date_of_birth_is_not_carried_into_the_ticket_or_the_account(app, monkeypatch):
+    from app.services import cognito_service
+    monkeypatch.setattr(cognito_service, "sign_up", lambda **_: "sub-dob")
+    birth_date = born(30, days=-200)
+    token = policy.preview({"birth_date": birth_date, "country": "TR"})[
+        "eligibility"]["registration_token"]
+    assert policy._signer().loads(token) == {
+        "version": policy.VERSION, "age": 30, "country": "TR"}
+    account_registration.register_account("dobuser", "fixture@example.invalid", "Sifre123",
+                                         eligibility_token=token)
+    user = User.query.one()
+    envelope = policy._signer(account=True).loads(user.user_metadata[policy.METADATA_KEY])
+    assert set(envelope["record"]) == {"version", "age_band", "country", "source", "checked_at"}
+    assert user.age == 30
+    stored = repr({c.name: getattr(user, c.name) for c in User.__table__.columns}) + repr(envelope)
+    assert birth_date not in stored and birth_date.replace("-", "") not in stored
+
+
+@pytest.mark.parametrize("flag", [True, False])
+@pytest.mark.parametrize("country", ["GB", "US", "TR"])
+def test_legacy_signed_minor_record_stays_closed_whatever_the_flag_says(
+        app, make_user, flag, country):
+    from datetime import datetime, timezone
+    app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = flag
+    user = make_user("legacyminor")
+    legacy_minor_record(user, 17, country)
+    db.session.commit()
+    now = datetime.now(timezone.utc)
+    assert policy._record(user) is None
+    assert policy.projection(user)["status"] == "review_required"
+    assert not any(policy.projection(user)["capabilities"].values())
+    assert policy.minority_signal(user) is True
+    assert policy.d1_grant_cohort(user, now) is None
+    assert policy.purchase_eligible(user, now) is False
+    for feature in [None, "training_plan", "coach"]:
+        assert policy.ai_service_eligible(user, feature, now) is False
+    for capability in ["health_data", "general_profile", "automated_weight_targets",
+                       "body_photos", "social"]:
+        with pytest.raises(policy.EligibilityDenied):
+            policy.require_capability(user, capability)
+    # Growing the editable profile age is not a declaration either.
+    user.age = 30
+    assert policy._record(user) is None
+    with pytest.raises(policy.EligibilityDenied):
+        policy.require_capability(user, "health_data")
+
+
+def test_adult_profile_age_under_eighteen_is_refused_not_stored(app, make_user):
+    from app.services import account_profile
+    user = record_user(make_user, 30)
+    def profile(age):
+        return account_profile.OnboardingProfile(
+            weight=80, height=180, age=age, gender="male", goal="build_muscle",
+            fitness_level="beginner", current_activity="sedentary")
+    with pytest.raises(account_profile.ProfileRejected) as caught:
+        account_profile.complete_onboarding(user, profile(17))
+    assert (caught.value.field, caught.value.reason) == ("age", "range")
+    assert user.age == 30 and UserSession.query.count() == 0
+    assert policy.projection(user)["age_band"] == "18_plus"
 
 
 @pytest.mark.parametrize("value", [None, "", "bogus", "a" * 1025])
@@ -73,7 +226,8 @@ def test_expired_and_other_purpose_tickets_do_not_register(app, monkeypatch):
     monkeypatch.setattr(TimestampSigner, "get_timestamp", lambda _: now - 601)
     expired = ticket()
     monkeypatch.setattr(TimestampSigner, "get_timestamp", original)
-    for value in [expired, policy._signer(account=True).dumps({"age": 18, "country": "GB"})]:
+    for value in [expired, policy._signer(account=True).dumps(
+            {"version": policy.VERSION, "age": 18, "country": "GB"})]:
         with pytest.raises(policy.EligibilityDenied):
             policy.registration_record(value)
 
@@ -84,10 +238,10 @@ def test_registration_persists_bound_cohort_not_a_consent(app, monkeypatch):
     account_registration.register_account("declared", "fixture@example.invalid", "Sifre123",
                                          eligibility_token=ticket())
     user = User.query.one()
-    assert user.age == 17 and user.profile_complete is False
-    assert policy.projection(user) == {"status": "screen_passed", "age_band": "13_17",
+    assert user.age == 30 and user.profile_complete is False
+    assert policy.projection(user) == {"status": "screen_passed", "age_band": "18_plus",
         "country": "GB", "source": "self_declared", "capabilities": {
-            "body_photos": False, "automated_weight_targets": False, "social": False}}
+            "body_photos": True, "automated_weight_targets": True, "social": False}}
     from app.models import AIConsentState
     assert AIConsentState.query.count() == 0
     assert UserSession.query.count() == 0
@@ -102,7 +256,8 @@ def test_profile_age_and_copied_record_cannot_promote_minority(app, make_user):
     assert policy.projection(other)["status"] == "review_required"
     with pytest.raises(policy.EligibilityDenied):
         policy.review_existing(teen, ticket(30))
-    assert policy.projection(teen)["age_band"] == "13_17"
+    assert policy.projection(teen)["status"] == "review_required"
+    assert policy.minority_signal(teen) is True
 
 
 def test_missing_corrupt_and_legacy_records_never_default_adult(app, make_user):
@@ -146,7 +301,7 @@ def test_business_authorities_refuse_before_weight_math_or_mutation(app, make_us
 def test_mode_off_is_not_an_eligibility_approval(app):
     app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = False
     with pytest.raises(policy.EligibilityDenied) as caught:
-        policy.preview({"age": 18, "country": "GB"})
+        policy.preview(declaration(18, "GB"))
     assert caught.value.status == 503
 
 
@@ -163,8 +318,9 @@ def bearer(app, make_user, monkeypatch):
 def test_preauth_contract_no_credentials_or_storage(app):
     client = app.test_client()
     for age in [12, 13, 17, 18]:
-        response = client.post("/api/v1/auth/eligibility", json={"age": age, "country": "GB"})
+        response = client.post("/api/v1/auth/eligibility", json=declaration(age, "GB"))
         assert response.status_code == 200
+        assert (response.json["eligibility"]["status"] == "screen_passed") is (age >= 18)
         assert response.headers["Cache-Control"] == "no-store"
         assert not response.headers.getlist("Set-Cookie")
     assert User.query.count() == 0
@@ -191,15 +347,13 @@ def test_native_existing_account_review_uses_authenticated_owner(app, bearer, ma
     assert response.status_code == 200
     assert response.json == {"eligibility": policy.projection(user)}
     assert response.headers["Cache-Control"] == "no-store"
-    response = client.post("/api/v1/account/eligibility", headers=headers,
-                           json={"eligibility_token": ticket()})
-    assert response.status_code == 200
-    assert response.json == {"eligibility": policy.projection(user)}
+    # A held (legacy) minor record is never replaced by an adult declaration.
     response = client.post("/api/v1/account/eligibility", headers=headers,
                            json={"eligibility_token": ticket(30)})
     assert response.status_code == 409
     assert response.json["error"]["code"] == "ELIGIBILITY_REVIEW_REQUIRED"
-    assert policy.projection(user)["age_band"] == "13_17"
+    assert policy.projection(user)["status"] == "review_required"
+    assert policy.minority_signal(user) is True
     assert policy.projection(other)["status"] == "review_required"
 
 
@@ -265,7 +419,8 @@ def test_web_social_is_closed_for_adult_senders_too(app, client, auth_user):
 def test_web_registration_contact_controls_stay_in_inert_template(app, client):
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(client.get("/register").data, "html.parser")
-    assert soup.select_one("#eligibility-age") and soup.select_one("#eligibility-country")
+    assert soup.select_one("#eligibility-birth-date") and soup.select_one("#eligibility-country")
+    assert not soup.select_one("#eligibility-age")
     # A template's contents are its own fragment, not document descendants
     # (soupsieve >= 4.0 follows the HTML spec), so select from the template.
     template = soup.select_one("template#eligible-contact-template")
@@ -308,8 +463,7 @@ def test_restricted_and_signed_cohorts_keep_real_account_erasure(
     cognito, _ = install_fakes(monkeypatch)
     user = make_user("eligibility_erasure")
     if age is not None:
-        policy.attach(user, policy.registration_record(ticket(age)))
-        db.session.commit()
+        attach_record(user, age)
     user_id = user.id
     headers = issue_bearer(cognito, user)
     response = app.test_client().delete("/api/v1/account", headers=headers)

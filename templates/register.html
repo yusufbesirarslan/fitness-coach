@@ -39,8 +39,8 @@
             <div class="auth-form" id="eligibility-stage">
                 <h2>{{ t('eligibility.title') }}</h2>
                 <p>{{ t('eligibility.note') }}</p>
-                <label for="eligibility-age">{{ t('eligibility.age') }}</label>
-                <input id="eligibility-age" type="number" inputmode="numeric" min="1" step="1" autocomplete="off" data-action-input="resetEligibility">
+                <label for="eligibility-birth-date">{{ t('eligibility.age') }}</label>
+                <input id="eligibility-birth-date" type="date" autocomplete="off" data-action-input="resetEligibility">
                 <label for="eligibility-country">{{ t('eligibility.country') }}</label>
                 <select id="eligibility-country" data-action-change="resetEligibility">
                     <option value="">{{ t('eligibility.choose') }}</option>

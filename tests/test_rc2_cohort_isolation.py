@@ -16,6 +16,7 @@ from app.services import account_registration, ai_consent, ai_consent_disclosure
 from app.services import mobile_auth, subscriptions as s
 from app.services.apple_subscriptions import SubscriptionError
 from subscription_support import adult_account, evidence
+from eligibility_support import declaration
 
 NAMED_SUBJECT = "11111111-2222-3333-4444-555555555555"
 OTHER_SUBJECT = "99999999-8888-7777-6666-555555555555"
@@ -47,7 +48,7 @@ def window(app, make_user, monkeypatch):
 
 
 def _ticket(client, age=30, country="TR"):
-    response = client.post(PREVIEW, json={"age": age, "country": country})
+    response = client.post(PREVIEW, json=declaration(age, country))
     assert response.status_code == 200
     return response.json["eligibility"]["registration_token"]
 
@@ -155,19 +156,20 @@ def test_subject_in_both_lists_is_a_control(app, client, window):
 
 @pytest.mark.parametrize("age,country", [(13, "US"), (17, "GB"), (14, "CA"), (15, "AU")])
 def test_window_opens_no_sign_up_for_a_declared_minor(app, client, window, age, country):
-    """With the flag off nothing would record the declaration or restrict the account."""
-    response = client.post(PREVIEW, json={"age": age, "country": country})
-    assert response.status_code == 503
-    assert response.json["error"]["code"] == "AUTH_ELIGIBILITY_UNAVAILABLE"
+    """Adult-only (FDO-AGE18): a minor gets no ticket, window or flag."""
+    response = client.post(PREVIEW, json=declaration(age, country))
+    assert response.status_code == 200
+    assert response.json["eligibility"]["status"] == "ineligible"
+    assert response.json["eligibility"]["registration_token"] is None
 
     app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = True
-    assert _ticket(client, age, country)
+    assert _ticket(client, age, country) is None
 
 
 @pytest.mark.parametrize("age,country,status", [
-    (12, "US", "ineligible"), (30, "ZZ", "ineligible"), (17, "TR", "qualification_required")])
+    (12, "US", "ineligible"), (30, "ZZ", "ineligible"), (17, "TR", "ineligible")])
 def test_window_keeps_the_ticketless_answers(client, window, age, country, status):
-    response = client.post(PREVIEW, json={"age": age, "country": country})
+    response = client.post(PREVIEW, json=declaration(age, country))
     assert response.status_code == 200
     assert response.json["eligibility"]["status"] == status
     assert response.json["eligibility"]["registration_token"] is None
@@ -177,7 +179,7 @@ def test_control_list_alone_opens_nothing(app, client, window):
     app.config.update(APPLE_PURCHASE_QUALIFICATION_SUBJECTS=frozenset(),
                       APPLE_QUALIFICATION_CONTROL_SUBJECTS=frozenset({OTHER_SUBJECT}))
     assert client.get(REVIEW, headers=OTHER).status_code == 503
-    assert client.post(PREVIEW, json={"age": 30, "country": "TR"}).status_code == 503
+    assert client.post(PREVIEW, json=declaration(30)).status_code == 503
 
 
 def test_list_does_not_restrict_any_account(client, window):
@@ -204,7 +206,7 @@ def test_ticket_stays_inert_at_registration(client, window, monkeypatch):
 
 
 def test_web_preview_stays_closed(client, window):
-    assert client.post("/eligibility", json={"age": 30, "country": "TR"}).status_code == 503
+    assert client.post("/eligibility", json=declaration(30)).status_code == 503
 
 
 @pytest.mark.parametrize("change", [
@@ -228,14 +230,14 @@ def test_any_missing_window_condition_closes_the_named_account(app, client, wind
 ])
 def test_preview_is_closed_without_a_complete_window(app, client, window, change):
     app.config.update(change)
-    assert client.post(PREVIEW, json={"age": 30, "country": "TR"}).status_code == 503
+    assert client.post(PREVIEW, json=declaration(30)).status_code == 503
 
 
 def test_flag_on_ignores_the_list_for_other_accounts(app, client, window):
     """The seam only ever adds the named account. Flag behaviour is the existing one."""
     app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = True
     assert client.get(ME, headers=OTHER).json["user"]["eligibility"]["status"] == "review_required"
-    assert client.post("/eligibility", json={"age": 30, "country": "TR"}).status_code == 200
+    assert client.post("/eligibility", json=declaration(30)).status_code == 200
     with pytest.raises(policy.EligibilityDenied):
         policy.require_capability(db.session.get(User, window.other), "body_photos")
 
