@@ -65,7 +65,7 @@ def database_proof():
             tx = conn.begin()
             try:
                 conn.exec_driver_sql("SET TRANSACTION READ ONLY")
-                if conn.exec_driver_sql("SHOW TIME ZONE").scalar() != "UTC":
+                if conn.exec_driver_sql("SHOW TIME ZONE").scalar() not in ("UTC", "Etc/UTC"):
                     raise RuntimeError("R6_POOLED_UTC_REQUIRED")
                 table = conn.execute(text(
                     "SELECT to_regclass('public.account_deletion_record') IS NOT NULL"

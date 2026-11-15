@@ -30,7 +30,7 @@ def test_serving_runtime_accepts_only_complete_loaded_proof(tmp_path):
     assert ops._adult_web_proof("cid", 10) == proof
 
 
-@pytest.mark.parametrize("timezone", ["UTC", "Europe/Istanbul", None])
+@pytest.mark.parametrize("timezone", ["UTC", "Etc/UTC", "Europe/Istanbul", None])
 def test_pool_checkout_rejects_and_invalidates_non_utc(timezone):
     from app.extensions import _require_postgres_pool_utc
     class Cursor:
@@ -50,7 +50,7 @@ def test_pool_checkout_rejects_and_invalidates_non_utc(timezone):
             pass
     invalidated = []
     record = SimpleNamespace(invalidate=lambda: invalidated.append(True))
-    if timezone == "UTC":
+    if timezone in ("UTC", "Etc/UTC"):
         _require_postgres_pool_utc(Connection(), record, None)
         assert not invalidated
     else:

@@ -50,6 +50,7 @@ def test_all_origin_binding_allows_only_canonical_route_delta(config):
 @pytest.mark.parametrize("extra", [
     b"server { listen 443; location /auth/register { proxy_pass http://127.0.0.1:5000; } }",
     b"server { listen 8443; location / { proxy_pass http://axisai_web; } }",
+    b"server { listen 443 quic; location / { proxy_pass http://axisai_web; } }",
     b"server { listen 443; location / { proxy_pass http://foreign; } }",
     b"server { listen 443; location / { fastcgi_pass 127.0.0.1:9000; } }",
     b"server { listen 443; location / { content_by_lua 'return'; } }",

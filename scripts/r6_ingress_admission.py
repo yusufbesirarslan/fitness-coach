@@ -158,6 +158,8 @@ def configuration(state):
         require(listens, "IMPLICIT_LISTENER_AMBIGUOUS")
         fs = all(x[0]=="127.0.0.1:3000" for x in listens)
         for x in listens:
+            require(not any(option in ("quic", "udp") for option in x[1:]),
+                    "UNREVIEWED_UDP_INGRESS")
             token = x[0]
             require(re.fullmatch(r"(?:(?:\*|0\.0\.0\.0|127\.0\.0\.1|\[::\]|\[::1\]):)?(?:80|443|3000)",token),
                     "UNEXPECTED_LISTENER")

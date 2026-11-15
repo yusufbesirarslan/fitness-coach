@@ -28,7 +28,7 @@ def _require_postgres_pool_utc(dbapi_connection, connection_record, connection_p
     try:
         with dbapi_connection.cursor() as cursor:
             cursor.execute("SHOW TIME ZONE")
-            utc = cursor.fetchone() == ("UTC",)
+            utc = cursor.fetchone() in (("UTC",), ("Etc/UTC",))
         dbapi_connection.rollback()
         if not utc:
             raise RuntimeError("R6_POOLED_UTC_REQUIRED")

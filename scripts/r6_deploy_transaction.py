@@ -2053,7 +2053,7 @@ class Transaction:
                 self.budget.deadline(steps["route_restore"]))).state
         except (StepFailed, OpError):
             route = "unknown"
-        if not (self.release_prepared or self.candidate_started
+        if not (self.registration_closure_attempted or self.release_prepared or self.candidate_started
                 or self.route_switch_attempted or self.worker_attempted):
             manual.insert(0, "FORWARD_RECOVERY_REFUSED: stopped before release-prepare, "
                              "candidate start, switch or worker change; route, slots, "
@@ -2068,6 +2068,7 @@ class Transaction:
                                           "and is never restored")
                              + "; fix forward under a new attempt-bound authorization")
         manual.append(f"route={route} candidate={self.target_slot} "
+                      f"registration_closure_proven={'yes' if self.registration_closed else 'no'} "
                       f"candidate_started={'yes' if self.candidate_started else 'no'} "
                       f"release_prepared={'yes' if self.release_prepared else 'no'} "
                       f"worker_replaced={'attempted' if self.worker_attempted else 'no'}")

@@ -62,7 +62,7 @@ def test_existing_pooled_session_timezone_drift_is_fenced(pg_url):
                 db.engine.connect()
             # Invalid connection was discarded; a fresh UTC connection is admissible.
             with db.engine.connect() as c:
-                assert c.exec_driver_sql("SHOW TIME ZONE").scalar() == "UTC"
+                assert c.exec_driver_sql("SHOW TIME ZONE").scalar() in ("UTC", "Etc/UTC")
         finally:
             db.session.remove()
             db.engine.dispose()
