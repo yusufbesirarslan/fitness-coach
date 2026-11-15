@@ -21,6 +21,22 @@ from app.config import (
 db = SQLAlchemy()
 
 
+def _require_postgres_pool_utc(dbapi_connection, connection_record, connection_proxy):
+    """Fence every future web/work-horse pool checkout, not a fresh reader only."""
+    if type(dbapi_connection).__module__.split(".")[0] not in ("psycopg2", "psycopg"):
+        return
+    try:
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute("SHOW TIME ZONE")
+            utc = cursor.fetchone() in (("UTC",), ("Etc/UTC",))
+        dbapi_connection.rollback()
+        if not utc:
+            raise RuntimeError("R6_POOLED_UTC_REQUIRED")
+    except Exception:
+        connection_record.invalidate()
+        raise RuntimeError("R6_POOLED_UTC_REQUIRED") from None
+
+
 @event.listens_for(Engine, "connect")
 def _enforce_sqlite_foreign_keys(dbapi_connection, connection_record):
     """SQLite'ta yabancı anahtar kısıtlarını zorla (varsayılan KAPALI).

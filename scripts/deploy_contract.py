@@ -75,6 +75,9 @@ RELEASE_FORWARD_STEP_SECONDS = MappingProxyType({
     # PRIV-K6 Layer B: capability manifests from the exact images + reviewed
     # sources, and the completion-floor status probe (also re-read pre-switch).
     "capability_admission": 150,
+    "adult_closure": 150,     # existing revision-guarded removal + absence proof
+    "adult_admission": 90,    # loaded web/worker pools, ACLs and latch
+    "generation_retirement": 150,  # 2 s observation, no reload/retry/kill
     "release_prepare": 150,    # exactly once, before any candidate boots
     "candidate_start": 180,    # web_slot_runtime.py start (admission inside)
     "candidate_verify": 240,   # web_slot_runtime.py verify

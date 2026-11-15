@@ -50,6 +50,7 @@ import secrets
 from datetime import datetime
 
 from flask import current_app
+from sqlalchemy import text
 
 from app.extensions import db
 from app.models import AccountDeletionRecord, User
@@ -258,3 +259,29 @@ def match_subjects(fingerprints):
         return found
     finally:
         db.session.rollback()
+
+
+def verify_runtime_privileges(connection):
+    """R6 read-only catalog/ACL admission; this module remains the table owner.
+
+    The caller owns a PostgreSQL READ ONLY transaction on its actual runtime
+    pool. No records are read or written and no privileges are changed.
+    """
+    table = connection.execute(text(
+        "SELECT to_regclass('public.account_deletion_record') IS NOT NULL"
+    )).scalar()
+    if table is not True:
+        raise RuntimeError("R6_DELETION_TABLE_REQUIRED")
+    acl = connection.execute(text("""
+        SELECT has_table_privilege(current_user,
+                   'public.account_deletion_record', 'SELECT')
+           AND has_table_privilege(current_user,
+                   'public.account_deletion_record', 'INSERT')
+           AND has_table_privilege(current_user,
+                   'public.account_deletion_record', 'DELETE')
+           AND COALESCE(has_sequence_privilege(current_user,
+                   pg_get_serial_sequence('public.account_deletion_record', 'id'),
+                   'USAGE'), false)
+    """)).scalar()
+    if acl is not True:
+        raise RuntimeError("R6_DELETION_ACL_REQUIRED")

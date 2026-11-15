@@ -179,10 +179,16 @@ def create_app():
     init_sentry(app)  # SENTRY_DSN yoksa no-op
 
     db.init_app(app)
+    with app.app_context():
+        if db.engine.dialect.name == "postgresql":
+            from sqlalchemy import event
+            from app.extensions import _require_postgres_pool_utc
+            event.listen(db.engine, "checkout", _require_postgres_pool_utc)
     migrate.init_app(app, db)
     login_manager.init_app(app)
 
     register_blueprints(app)
+    from app.services import r6_runtime_admission
     register_cognito(app)
 
     @app.route("/health")
@@ -255,6 +261,14 @@ def create_app():
             # boolean; sır/bağlantı dizesi/anahtar ASLA. Zaten iç-ağ sınırlı.
             import app.config as _config_mod
             body["flags"] = _config_mod.feature_flag_state(app)
+            if app.config.get("R6_REGISTRATION_CLOSED"):
+                try:
+                    body["r6_admission"] = r6_runtime_admission.web_proof()
+                except Exception:
+                    # Never include SQL exceptions, identities or connection strings.
+                    body["r6_admission"] = {"ready": False}
+                    body["status"] = "error"
+                    status = 503
             # Kimlik doğrulama sözleşmesinin O ANKİ hâli — bayraklarla aynı
             # gerekçe: leeway host .env'inde yaşar, repodan okunamaz. Yalnızca
             # ad + tamsayı; token/başlık/kullanıcı ASLA (docs/AUTH_CONTRACT.md).
@@ -291,6 +305,7 @@ def create_app():
     app.before_request(start_request_timer)
     app.before_request(assign_request_id)
     app.before_request(generate_csp_nonce)
+    r6_runtime_admission.install(app)
     # Launch V1: social surfaces are closed before CSRF, auth, limits and views.
     from app.services.launch_social import install as install_social_boundary
     install_social_boundary(app)
