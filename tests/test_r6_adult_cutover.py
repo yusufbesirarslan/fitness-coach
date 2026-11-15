@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from tests.test_r6_deploy_transaction import (
-    CAND, PREV, IMG, FakeOps, slot_world, run, tx, names,
+    CAND, PREV, IMG, Box, FakeOps, slot_world, run, tx, names,
 )
 
 
@@ -143,6 +143,37 @@ def test_postcommit_failure_never_rolls_back(adult, monkeypatch):
     assert code == tx.EXIT_COMMITTED_RESIDUE
     assert adult.registration_open and adult.head == CAND
     assert not any(c[:2] == ("worker_up", "previous") for c in adult.calls)
+
+
+def test_authorized_forward_recovery_recreates_stopped_exact_candidate(adult):
+    adult.slots.pop("blue")
+    adult.worker = None
+    adult.db_heads = frozenset({tx.ADULT_MIGRATION})
+    adult.slots["green"] = Box(id="stopped", image_id=IMG[CAND], revision=CAND,
+        app_revision=CAND, status="exited", health=None)
+    code, transaction = run(adult, mode="forward-recovery")
+    assert code == tx.EXIT_OK
+    assert adult.registration_open and adult.worker.revision == CAND
+    assert any(e[0] == "recovery-schema-evidence" for e in transaction.events)
+    assert ("slot_remove", "green", CAND) in adult.calls
+
+
+def test_forward_recovery_never_inferred_from_pre_migration_head(adult):
+    adult.db_heads = frozenset({"d7e3a9c1f5b8"})
+    code, transaction = run(adult, mode="forward-recovery")
+    assert code == tx.EXIT_ROLLED_BACK  # proven untouched baseline; recovery refused
+    assert not transaction.registration_closure_attempted
+    assert "release_prepare" not in names(adult)
+
+
+def test_partial_closure_failure_never_claims_processes_unchanged(adult):
+    adult.faults["worker_close"] = True
+    code, transaction = run(adult)
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert "blue" not in adult.slots
+    outcome = next(e[1]["manual"] for e in transaction.events if e[0] == "rollback-incomplete")
+    assert "FORWARD_RECOVERY_INCOMPLETE" in outcome
+    assert "slots, worker and schema unchanged" not in outcome
 
 
 @pytest.mark.parametrize("path", ["/register", "/api/v1/auth/register"])

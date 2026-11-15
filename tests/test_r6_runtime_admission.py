@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests.test_r6_deploy_transaction import CAND, Recorder, host, tx
+from tests.test_r6_deploy_transaction import CAND, PREV, Recorder, host, tx
 
 
 @pytest.mark.parametrize("key,value", [
@@ -94,3 +94,47 @@ def test_loaded_adult_policy_requires_exact_enabled_boolean(app, monkeypatch, va
     app.config["ACCOUNT_ELIGIBILITY_ENABLED"] = value
     with app.app_context():
         assert a.web_proof()["policy"] == (a.POLICY if value is True else None)
+
+
+@pytest.mark.parametrize("published", [False, True])
+def test_worker_exposed_port_is_not_a_direct_origin(tmp_path, published):
+    ops = host(tmp_path, Recorder())
+    worker = "1"*64
+    web = "2"*64
+    rows = [
+        [worker, {"com.docker.compose.service": "worker"},
+         {"5000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "5000"}] if published else None}],
+        [web, {"com.docker.compose.service": "web", "com.docker.compose.project": "axisai-web-blue"},
+         {"5000/tcp": [{"HostIp": "127.0.0.1", "HostPort": "5001"}]}],
+    ]
+    def docker(timeout, *args, **kwargs):
+        if args[0] == "ps":
+            return worker + "\n" + web
+        if args[0] == "inspect":
+            return "\n".join(json.dumps(row) for row in rows)
+        raise AssertionError(args)
+    ops._docker = docker
+    ops.container_build_revision = lambda *a: PREV
+    if published:
+        with pytest.raises(tx.OpError, match="foreign application"):
+            ops.adult_web_inventory("blue", PREV, "green", CAND, False, 20)
+    else:
+        assert ops.adult_web_inventory("blue", PREV, "green", CAND, False, 20)
+
+
+@pytest.mark.parametrize("state", [[False, 0], [False, 21], [True, 21]])
+def test_stopped_recovery_candidate_needs_no_exec_but_proves_absence(tmp_path, state):
+    ops = host(tmp_path, Recorder())
+    ops.slot_inspect = lambda *a: [{"id": "candidate", "app_revision": CAND, "status": "exited"}]
+    calls = []
+    def docker(timeout, *args, **kwargs):
+        calls.append(args)
+        assert args[0] == "inspect"  # no exec into a stopped container
+        return json.dumps(state)
+    ops._docker = docker
+    if state == [False, 0]:
+        ops.registration_latch("green", CAND, "close", 20)
+    else:
+        with pytest.raises(tx.OpError, match="absence unproven"):
+            ops.registration_latch("green", CAND, "close", 20)
+    assert len(calls) == 1

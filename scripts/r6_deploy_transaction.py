@@ -839,7 +839,7 @@ class HostOps:
                     if binding.get("HostIp") not in ("127.0.0.1", "::1"):
                         raise OpError("direct public container ingress")
             if service != "web":
-                if "5000/tcp" in ports or any(
+                if ports.get("5000/tcp") or any(
                     b.get("HostPort") in ("5000", "5001", "5002")
                     for bindings in ports.values() for b in bindings or []):
                     raise OpError("foreign application origin")
@@ -927,7 +927,21 @@ class HostOps:
 
     @_host_operation
     def registration_latch(self, slot, revision, action, timeout):
-        cid = self._adult_cid(slot, revision, timeout)
+        if action == "close":
+            found = self.slot_inspect(slot, timeout)
+            if not found:
+                return  # absence is closed; a future boot starts latched
+            if len(found) != 1 or found[0].get("app_revision") != revision:
+                raise OpError("registration closure container identity unproven")
+            cid = found[0]["id"]
+            if found[0].get("status") != "running":
+                state = json.loads(self._docker(timeout, "inspect", "--format",
+                    "[{{json .State.Running}},{{json .State.Pid}}]", cid))
+                if state != [False, 0]:
+                    raise OpError("nonrunning registration process absence unproven")
+                return  # existing stale-candidate cleanup owns recreation
+        else:
+            cid = self._adult_cid(slot, revision, timeout)
         path = "/tmp/axisai-r6-registration-open.json"
         if action == "close":
             code = ("from pathlib import Path; p=Path(" + repr(path) + "); "
