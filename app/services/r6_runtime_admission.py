@@ -10,7 +10,6 @@ import uuid
 from pathlib import Path
 
 from flask import current_app
-from sqlalchemy import text
 
 WEB_RECEIPT = "/tmp/axisai-r6-registration-open.json"
 WORKER_RECEIPT = "/tmp/axisai-r6-worker-ready.json"
@@ -73,24 +72,8 @@ def database_proof():
                 conn.exec_driver_sql("SET TRANSACTION READ ONLY")
                 if conn.exec_driver_sql("SHOW TIME ZONE").scalar() not in ("UTC", "Etc/UTC"):
                     raise RuntimeError("R6_POOLED_UTC_REQUIRED")
-                table = conn.execute(text(
-                    "SELECT to_regclass('public.account_deletion_record') IS NOT NULL"
-                )).scalar()
-                if table is not True:
-                    raise RuntimeError("R6_DELETION_TABLE_REQUIRED")
-                acl = conn.execute(text("""
-                    SELECT has_table_privilege(current_user,
-                               'public.account_deletion_record', 'SELECT')
-                       AND has_table_privilege(current_user,
-                               'public.account_deletion_record', 'INSERT')
-                       AND has_table_privilege(current_user,
-                               'public.account_deletion_record', 'DELETE')
-                       AND COALESCE(has_sequence_privilege(current_user,
-                               pg_get_serial_sequence('public.account_deletion_record', 'id'),
-                               'USAGE'), false)
-                """)).scalar()
-                if acl is not True:
-                    raise RuntimeError("R6_DELETION_ACL_REQUIRED")
+                from app.services import deletion_audit
+                deletion_audit.verify_runtime_privileges(conn)
             finally:
                 tx.rollback()
     return {"deletion_acl": True, "pooled_utc": True}
