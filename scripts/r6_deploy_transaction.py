@@ -7,7 +7,7 @@ materializes ``git archive DEPLOY_SHA`` into a private context directory and
 runs THIS file from that context. Nothing in here is reached by a command that
 failed those proofs.
 
-The transaction (every arrow is a gate; the old backend serves throughout):
+The historical transaction (every arrow is a gate):
 
     baseline: canonical route status (legacy|blue|green), control-plane
       parity, serving revision proven from the running container, exact
@@ -33,6 +33,19 @@ Any failure before the commit point rolls back in the order route, previous
 web proof, exact previous worker, candidate removal, checkout. A backend is
 only ever removed once the route is PROVEN to point elsewhere. Database
 migrations are never rolled back (expand-only by the gate).
+
+ADULT CUTOVER: any candidate graph carrying ad17de1e0001 takes the additional
+fail-closed admission path. After image/floor admission, remove/prove the old
+web absent BEFORE release-prepare. Its port stays empty. Slot web registration
+starts closed with a boot-bound local latch. Route/public proof and worker
+replacement occur while that latch is CLOSED. Prove nginx old-generation
+retirement, unchanged all-origin configuration, exact adult web/worker,
+deletion-table/sequence ACLs, pooled UTC and full fence/floor before checkout
+and registration reopening. Crossing the closure boundary disables ALL old
+route/worker restoration, even on uncertain migration completion. Failures
+keep the candidate and close its latch, report incomplete recovery, and require
+the existing separately authorized recovery path. This path intentionally
+interrupts web availability; it is not the historical overlap-safe rollout.
 
 FORWARD RECOVERY (``--mode forward-recovery``; R6-R1-28). release-prepare
 moves the schema past the previous revision, whose read-only boot then refuses
@@ -159,6 +172,7 @@ CAPABILITY_PROBE_SECONDS = 60
 # bounded share of the baseline step so a dying web that never turns healthy
 # cannot starve the worker/Redis identity proofs that follow.
 RECOVERY_PREVIOUS_WEB_PROBE_SECONDS = 25
+ADULT_MIGRATION = "ad17de1e0001"
 _FLOOR_STATES = {"raised", "absent"}
 _FENCE_STATES = {"verified", "absent", "invalid"}
 
@@ -769,7 +783,8 @@ class HostOps:
             f"    image: '{image_tag}'\n"
             "    pull_policy: never\n"
             "    environment:\n"
-            f"      APP_REVISION: '{revision}'\n", encoding="utf-8")
+            f"      APP_REVISION: '{revision}'\n"
+            "      R6_RUNTIME_ADMISSION: 'required'\n", encoding="utf-8")
         self._compose(timeout, compose, override, "up", "-d", "--no-deps",
                       "--no-build", "--pull", "never", "worker")
 
@@ -786,6 +801,156 @@ class HostOps:
         self._docker(timeout, "stop", "--time", str(LEGACY_STOP_GRACE_SECONDS),
                      container_id)
         self._docker(timeout, "rm", container_id)
+
+    @_host_operation
+    def ingress_snapshot(self, state, candidate_slot, timeout):
+        out = self._ok(["sudo", "-n", "/usr/bin/python3", "-I",
+            str(self.context / "scripts/r6_ingress_admission.py"), state,
+            candidate_slot or "any"], timeout, "ingress proof")
+        try:
+            proof = json.loads(out)
+            if (not re.fullmatch("[0-9a-f]{64}", proof["configuration"])
+                    or len(proof["master"]) != 2 or not proof["workers"]):
+                raise ValueError()
+            return proof
+        except (KeyError, ValueError, TypeError) as exc:
+            raise OpError("ingress proof malformed") from exc
+
+    @_host_operation
+    def adult_web_inventory(self, old_slot, old_revision, new_slot, revision, closed, timeout):
+        ids = self._docker(timeout, "ps", "-q", "--no-trunc").split()
+        if not ids:
+            raise OpError("container inventory empty")
+        fmt = "[{{json .Id}},{{json .Config.Labels}},{{json .NetworkSettings.Ports}}]"
+        rows = self._docker(timeout, "inspect", "--format", fmt, *ids).splitlines()
+        if len(rows) != len(ids):
+            raise OpError("container inventory incomplete")
+        seen = set()
+        for line in rows:
+            cid, labels, ports = json.loads(line)
+            if cid not in ids or cid in seen:
+                raise OpError("container identity ambiguous")
+            seen.add(cid)
+            labels, ports = labels or {}, ports or {}
+            service = labels.get("com.docker.compose.service")
+            project = labels.get("com.docker.compose.project")
+            for bindings in ports.values():
+                for binding in bindings or []:
+                    if binding.get("HostIp") not in ("127.0.0.1", "::1"):
+                        raise OpError("direct public container ingress")
+            if service != "web":
+                if "5000/tcp" in ports or any(
+                    b.get("HostPort") in ("5000", "5001", "5002")
+                    for bindings in ports.values() for b in bindings or []):
+                    raise OpError("foreign application origin")
+                continue
+            allowed = {f"axisai-web-{new_slot}": (revision, new_slot)}
+            if not closed:
+                allowed[self.main if old_slot == "legacy" else f"axisai-web-{old_slot}"] = (
+                    old_revision or self.previous_commit, old_slot)
+            if project not in allowed:
+                raise OpError("obsolete or foreign web survives closure")
+            expected_revision, slot = allowed[project]
+            port = ROUTE_BACKENDS[slot].rsplit(":", 1)[1]
+            if ports != {"5000/tcp": [{"HostIp": "127.0.0.1", "HostPort": port}]}:
+                raise OpError("web origin binding mismatch")
+            if self.container_build_revision(cid, timeout) != expected_revision:
+                raise OpError("web origin revision mismatch")
+        return True
+
+    def _adult_cid(self, slot, revision, timeout):
+        found = self.slot_inspect(slot, timeout)
+        if len(found) != 1 or found[0].get("app_revision") != revision:
+            raise OpError("adult candidate container identity unproven")
+        return found[0]["id"]
+
+    @_host_operation
+    def close_old_worker(self, old_revision, timeout):
+        workers = self.worker(timeout)
+        if len(workers) > 1:
+            raise OpError("worker closure identity ambiguous")
+        if not workers or workers[0].app_revision == self.deploy_sha:
+            return  # recovery already has no old worker
+        worker = workers[0]
+        if worker.app_revision != old_revision:
+            raise OpError("foreign worker at closure")
+        baked = self._docker(timeout, "run", "--rm", "--pull", "never", "--network", "none",
+                             "--entrypoint", "cat", worker.image_id, "/app/BUILD_REVISION").strip()
+        if baked != old_revision:
+            raise OpError("old worker immutable revision unproven")
+        self.stop_and_remove(worker.id, timeout)
+        if self.container(worker.id, timeout) is not None:
+            raise OpError("old worker removal unproven")
+
+    def _adult_web_proof(self, cid, timeout):
+        out = self._docker(timeout, "exec", cid, "python3", "-c",
+            "import json,urllib.request; "
+            "r=urllib.request.urlopen('http://127.0.0.1:5000/health?deep=1',timeout=5); "
+            "p=json.load(r); print(json.dumps(p.get('r6_admission')))")
+        try:
+            p = json.loads(out)
+            if (not isinstance(p, dict) or p.get("revision") != self.deploy_sha
+                    or p.get("policy") != "dob_18_plus_v1"
+                    or p.get("deletion_acl") is not True or p.get("pooled_utc") is not True
+                    or not re.fullmatch("[0-9a-f]{32}", p.get("boot", ""))):
+                raise ValueError()
+            return p
+        except (ValueError, TypeError) as exc:
+            raise OpError("loaded adult web/ACL/pool proof missing") from exc
+
+    def adult_candidate_closed(self, slot, revision, timeout):
+        cid = self._adult_cid(slot, revision, timeout)
+        if self._adult_web_proof(cid, timeout).get("closed") is not True:
+            raise OpError("candidate registration latch missing or open")
+
+    @_host_operation
+    def adult_runtime_proof(self, slot, revision, timeout):
+        cid = self._adult_cid(slot, revision, timeout)
+        if self._adult_web_proof(cid, timeout).get("closed") is not True:
+            raise OpError("candidate registration is not closed")
+        workers = self.worker(timeout)
+        if len(workers) != 1 or workers[0].app_revision != revision:
+            raise OpError("candidate worker identity unproven")
+        # Receipt WRITTEN BY the real worker, never by this docker-exec.
+        code = (
+            "import json,pathlib; "
+            "p=json.loads(pathlib.Path('/tmp/axisai-r6-worker-ready.json').read_text()); "
+            "s=pathlib.Path('/proc',str(p['pid'])); "
+            "assert int(s.joinpath('stat').read_text().split(') ',1)[1].split()[19])==p['start_ticks']; "
+            "assert b'worker.py' in s.joinpath('cmdline').read_bytes(); "
+            "print(json.dumps(p))")
+        p = json.loads(self._docker(timeout, "exec", workers[0].id, "python3", "-c", code))
+        if (p.get("revision") != revision or p.get("deletion_acl") is not True
+                or p.get("pooled_utc") is not True):
+            raise OpError("worker process ACL/pool proof missing")
+        return True
+
+    @_host_operation
+    def registration_latch(self, slot, revision, action, timeout):
+        cid = self._adult_cid(slot, revision, timeout)
+        path = "/tmp/axisai-r6-registration-open.json"
+        if action == "close":
+            code = ("from pathlib import Path; p=Path(" + repr(path) + "); "
+                    "p.unlink(missing_ok=True); assert not p.exists()")
+            self._docker(timeout, "exec", cid, "python3", "-c", code)
+            return
+        if action != "open":
+            raise OpError("unknown registration latch operation")
+        p = self._adult_web_proof(cid, timeout)
+        if p.get("closed") is not True:
+            raise OpError("registration opening requires a closed boot")
+        receipt = json.dumps({"boot": p["boot"], "revision": revision})
+        code = ("from pathlib import Path; p=Path(" + repr(path) + "); "
+                "t=p.with_suffix('.tmp'); t.write_text(" + repr(receipt) + "); t.replace(p)")
+        self._docker(timeout, "exec", cid, "python3", "-c", code)
+        after = self._adult_web_proof(cid, timeout)
+        if after.get("boot") != p["boot"] or after.get("closed") is not False:
+            raise OpError("registration open readback unproven")
+
+    def reload_generation(self, slot, timeout):
+        self._ok(["sudo", "-n", "/usr/bin/python3", "-I",
+            str(self.context / "scripts/r6_ingress_admission.py"), slot, slot, "reload"],
+            timeout, "unchanged route generation barrier")
 
     # completion capability (PRIV-K6 rollback gate Layer B)
     def image_capability_manifest(self, image_id, timeout):
@@ -1015,6 +1180,11 @@ class Transaction:
         self.worker_attempted = False
         self.checkout_attempted = False
         self.events = []
+        self.adult_transition = False
+        self.registration_closure_attempted = False
+        self.registration_closed = False
+        self.admission_open_attempted = False
+        self.ingress_before = None
 
     # helpers
     def _event(self, name, **detail):
@@ -1049,6 +1219,8 @@ class Transaction:
             if self.forward_recovery:
                 self._recovery_schema_gate(admission)
             self._admit_capability(admission)
+            if self.adult_transition:
+                self._close_old_registration()
             self._release_prepare()
             self._start_candidate()
             self._admit_before_switch()
@@ -1056,7 +1228,15 @@ class Transaction:
             self._switch()
             self._post_switch()
             self._update_worker()
+            if self.adult_transition:
+                self._adult_reopen_ready()
             self._checkout()
+            if self.adult_transition:
+                self.admission_open_attempted = True
+                self._call(self._step_deadline("adult_admission"), "registration open",
+                           self.ops.registration_latch, self.target_slot,
+                           self.deploy_sha, "open")
+                self._event("adult-registration-open", revision=self.deploy_sha)
         except Exception as failure:  # noqa: BLE001 - any surprise rolls back
             self._event("release-failed", reason=f"{type(failure).__name__}: {failure}")
             try:
@@ -1343,6 +1523,10 @@ class Transaction:
                                      "migration gate", self.ops.migration_delta)
         self.delta = delta
         self._event("migration-delta", **{rev: cls for rev, cls in delta.items()})
+        revisions = self._call(self._step_deadline("migration_gate"),
+                               "candidate migration graph",
+                               self.ops.source_migration_revisions, "candidate")
+        self.adult_transition = ADULT_MIGRATION in revisions
         if problems:
             raise StepFailed("migration overlap gate refused before any database "
                              "mutation: " + "; ".join(problems))
@@ -1532,6 +1716,79 @@ class Transaction:
             raise StepFailed(f"release-prepare: {exc}") from exc
         self._event("release-prepared")
 
+    def _close_old_registration(self):
+        deadline = self._step_deadline("adult_closure")
+        # Fail before the interruption on unknown/direct/foreign ingress.
+        active = self.target_slot if self.already_switched else self.previous_route
+        self.ingress_before = self._call(deadline, "all-origin ingress",
+            self.ops.ingress_snapshot, active, None)
+        self._call(deadline, "web inventory", self.ops.adult_web_inventory,
+                   self.previous_route, self.previous_revision,
+                   self.target_slot, self.deploy_sha, False)
+        self.registration_closure_attempted = True
+        # A recovery may already hold the candidate. Its boot latch closes
+        # independently of readiness; it is never replaced by an old process.
+        candidate = self._call(deadline, "candidate inspection", self.ops.slot_inspect,
+                               self.target_slot)
+        if candidate:
+            self._call(deadline, "candidate registration close",
+                       self.ops.registration_latch, self.target_slot,
+                       self.deploy_sha, "close")
+        if self.previous_route == "legacy":
+            if self.legacy_web is not None:
+                self._call(deadline, "old web close", self.ops.stop_and_remove,
+                           self.legacy_web.id)
+        else:
+            outcome = self._call(deadline, "old web close", self.ops.slot_remove,
+                                 self.previous_route, self.previous_revision or self.previous_commit)
+            if outcome not in ("removed", "absent"):
+                raise StepFailed("old web closure identity unproven")
+        self._call(deadline, "old worker retirement", self.ops.close_old_worker,
+                   self.previous_commit)
+        self._call(deadline, "old web absence", self.ops.adult_web_inventory,
+                   self.previous_route, self.previous_revision,
+                   self.target_slot, self.deploy_sha, True)
+        if self._call(deadline, "old request drain", self.ops.established_connections,
+                      self.previous_backend) != 0:
+            raise StepFailed("old request sockets remain after process closure")
+        # Process removal completes/cuts already-admitted requests; neither
+        # their effects nor a graceful timeout are described as undone.
+        self.registration_closed = True
+        self.previous_proven = False
+        self._event("old-registration-closed", old=self.previous_commit,
+                    inflight="terminated-with-old-processes", old_port="never-reused")
+
+    def _adult_reopen_ready(self):
+        deadline = self._step_deadline("generation_retirement")
+        old_workers = {tuple(x) for x in self.ingress_before["workers"]}
+        stable_workers = None
+        while True:
+            current = self._call(deadline, "loaded generation",
+                self.ops.ingress_snapshot, self.target_slot, self.target_slot)
+            if current["master"] != self.ingress_before["master"]:
+                raise StepFailed("nginx master changed during adult cutover")
+            if current["configuration"] != self.ingress_before["configuration"]:
+                raise StepFailed("nginx configuration changed beyond canonical route")
+            workers = {tuple(x) for x in current["workers"]}
+            if not old_workers.intersection(workers):
+                if workers == stable_workers:
+                    break
+                stable_workers = workers
+            else:
+                stable_workers = None
+            if self.clock() + 2 >= deadline:
+                raise StepFailed("old nginx generation retirement unproven at 150s")
+            self.sleep(2)
+        self._call(self._step_deadline("adult_admission"), "isolated adult web inventory",
+                   self.ops.adult_web_inventory, self.previous_route,
+                   self.previous_revision, self.target_slot, self.deploy_sha, True)
+        self._verify_candidate(self._step_deadline("candidate_verify"))
+        self._call(self._step_deadline("adult_admission"), "loaded adult runtime",
+                   self.ops.adult_runtime_proof, self.target_slot, self.deploy_sha)
+        self._admit_before_switch()
+        self._event("adult-reopen-ready", generation="retired", acl="accepted",
+                    web_worker_pools="UTC", admission="still-closed")
+
     def _start_candidate(self):
         self.candidate_started = True
         deadline = self._step_deadline("candidate_start")
@@ -1556,9 +1813,21 @@ class Transaction:
                 or current.image_id != self.candidate_image_id
                 or current.app_revision != self.deploy_sha):
             raise StepFailed("candidate does not run the exact built image")
+        if self.adult_transition and not self.admission_open_attempted:
+            self._call(deadline, "closed adult candidate", self.ops.adult_candidate_closed,
+                       self.target_slot, self.deploy_sha)
 
     def _pre_switch(self):
         deadline = self._step_deadline("pre_switch_verify")
+        if self.adult_transition:
+            active = self.target_slot if self.already_switched else self.previous_route
+            current = self._call(deadline, "pre-switch ingress",
+                                 self.ops.ingress_snapshot, active, self.target_slot)
+            if (current["master"] != self.ingress_before["master"]
+                    or current["configuration"] != self.ingress_before["configuration"]):
+                raise StepFailed("ingress changed before switch")
+            self.ingress_before["workers"] = list({tuple(x) for x in
+                self.ingress_before["workers"] + current["workers"]})
         self._verify_candidate(deadline)
         route = self._call(deadline, "route re-read", self.ops.route_status)
         expected = self.target_slot if self.already_switched else self.previous_route
@@ -1567,6 +1836,9 @@ class Transaction:
 
     def _switch(self):
         if self.already_switched:
+            if self.adult_transition:
+                self._call(self._step_deadline("route_switch"), "recovery generation",
+                           self.ops.reload_generation, self.target_slot)
             # The helper refuses a switch to the active slot; the post-switch
             # proof below still decides whether the candidate serves.
             self._event("route-already-candidate", route=self.target_slot)
@@ -1676,6 +1948,24 @@ class Transaction:
         steps = contract.RELEASE_ROLLBACK_STEP_SECONDS
         manual = (["release-prepare container cleanup unproven"]
                   if self.release_prepare_cleanup_unproven else [])
+        if self.registration_closure_attempted:
+            self._event("adult-failure-disposition", closure_proven=self.registration_closed,
+                        migration_attempted=self.release_prepared,
+                        schema_outcome="not-inferred", old_restart="forbidden")
+            # Irreversible admission boundary: neither a timeout nor an
+            # additive migration establishes old-image restart compatibility.
+            # Close a surviving candidate first, including an ambiguous open.
+            if self.candidate_started or self.already_switched:
+                try:
+                    self.ops.registration_latch(self.target_slot, self.deploy_sha,
+                                                "close", self._time_left(
+                        self.budget.deadline(steps["route_restore"])))
+                except Exception:
+                    manual.append("candidate registration closure UNPROVEN")
+            self.previous_proven = False
+            return self._forward_only_failure(manual, steps, reason=(
+                "adult closure crossed; no automatic old route/worker restoration; "
+                "schema unchanged is never inferred from a failed migration"))
         if not self.previous_proven:
             return self._forward_only_failure(manual, steps)
         if (self.forward_recovery and self.previous_worker is None
@@ -1868,11 +2158,13 @@ class Transaction:
         self.budget.enter(contract.HOST_PHASE_SECONDS["retirement"],
                           contract.HOST_SUCCESS_TAIL_SECONDS)
         steps = contract.RETIREMENT_STEP_SECONDS
-        self._drain(self.budget.deadline(steps["drain"]))
+        if not self.registration_closed:
+            self._drain(self.budget.deadline(steps["drain"]))
         status = EXIT_OK
         deadline = self.budget.deadline(steps["backend_retirement"])
         try:
-            self._retire_old_backend(deadline)
+            if not self.registration_closed:
+                self._retire_old_backend(deadline)
         except (StepFailed, OpError) as exc:
             self._event("retirement-incomplete", backend=self.previous_route,
                         reason=str(exc))

@@ -339,6 +339,10 @@ def validate_rendered(doc, slot, revision, network, *, apple_files=False):
         problems.append("Apple file environment")
     if env.get("FITX_STARTUP_MODE") != CANDIDATE_STARTUP_MODE:
         problems.append("FITX_STARTUP_MODE")
+    if env.get("R6_REGISTRATION_ADMISSION") != "closed":
+        problems.append("R6_REGISTRATION_ADMISSION")
+    if str(env.get("FITX_WEB_WORKERS")) != "1":
+        problems.append("FITX_WEB_WORKERS")
     if env.get("APP_REVISION") != revision:
         problems.append("APP_REVISION")
     if "FITX_SKIP_DB_INIT" in env:
@@ -366,7 +370,8 @@ def validate_rendered(doc, slot, revision, network, *, apple_files=False):
     return True
 
 
-SLOT_OWNED_ENVIRONMENT = ("FITX_STARTUP_MODE", "APP_REVISION")
+SLOT_OWNED_ENVIRONMENT = ("FITX_STARTUP_MODE", "APP_REVISION", "R6_REGISTRATION_ADMISSION",
+                        "FITX_WEB_WORKERS")
 
 
 def redact_rendered_environment(doc):

@@ -177,6 +177,30 @@ def main():
     WorkerCls = rq.SimpleWorker if use_simple else rq.Worker
     queue = rq.Queue(QUEUE_NAME, connection=conn)
 
+    if os.environ.get("R6_RUNTIME_ADMISSION") == "required":
+        # Use the SAME cached task app/factory as real work horses. Dispose
+        # before any fork: parent connections must never cross that boundary.
+        import json
+        from pathlib import Path
+        from app.jobs.tasks import _in_app_context
+        from app.services import r6_runtime_admission as admission
+
+        def prove():
+            from flask import current_app
+            from app.extensions import db
+            try:
+                return {**admission.process_identity(), **admission.database_proof(),
+                        "revision": current_app.config["BUILD_REVISION"]}
+            finally:
+                db.session.remove()
+                db.engine.dispose()
+
+        proof = _in_app_context(prove)
+        target = Path(admission.WORKER_RECEIPT)
+        temporary = target.with_suffix(".tmp")
+        temporary.write_text(json.dumps(proof))
+        temporary.replace(target)
+
     _start_heartbeat()
     _log.info("FitX worker basliyor (queue=%s, worker=%s)", QUEUE_NAME, WorkerCls.__name__)
     worker = WorkerCls([queue], connection=conn)

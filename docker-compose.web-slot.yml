@@ -41,6 +41,8 @@ services:
       - .env
     environment:
       FITX_STARTUP_MODE: read-only
+      R6_REGISTRATION_ADMISSION: closed
+      FITX_WEB_WORKERS: '1'
       APP_REVISION: ${AXISAI_WEB_SLOT_REVISION:?AXISAI_WEB_SLOT_REVISION must be the exact 40-hex revision}
     # Same rotation as the main web. The extra project label puts the slot
     # identity (axisai-web-blue/green) on every shipped line, so overlapping

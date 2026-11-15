@@ -312,7 +312,8 @@ def _rendered(slot, revision, network="fitness-coach_default"):
             "image": f"axisai-web:{revision}", "pull_policy": "never",
             "mem_limit": str(rt.SLOT_MEM_LIMIT_MIB * MiB * MiB),
             "stop_grace_period": "45s",
-            "environment": {"FITX_STARTUP_MODE": "read-only", "APP_REVISION": revision},
+            "environment": {"FITX_STARTUP_MODE": "read-only", "APP_REVISION": revision,
+                            "R6_REGISTRATION_ADMISSION": "closed", "FITX_WEB_WORKERS": "1"},
             "logging": {"driver": "json-file", "options": {
                 "labels": "com.docker.compose.service,com.docker.compose.project"}},
             "networks": {"shared": None},
@@ -528,6 +529,8 @@ def test_missing_image_or_mismatched_baked_revision_fails_closed(deploy_dir):
     lambda d: d["services"]["web"].update(mem_limit="1073741824"),
     lambda d: d["services"]["web"].update(stop_grace_period="10s"),
     lambda d: d["services"]["web"]["environment"].update(FITX_STARTUP_MODE="self-migrating"),
+    lambda d: d["services"]["web"]["environment"].update(R6_REGISTRATION_ADMISSION="open"),
+    lambda d: d["services"]["web"]["environment"].update(FITX_WEB_WORKERS="2"),
     lambda d: d["services"]["web"]["environment"].update(FITX_SKIP_DB_INIT="1"),
     lambda d: d["services"]["web"]["environment"].update(APP_REVISION="b" * 40),
     lambda d: d["services"]["web"]["ports"][0].update(host_ip="0.0.0.0"),
@@ -652,7 +655,8 @@ def test_real_compose_render_passes_the_contract_and_ignores_env_file_values(
     # slot-owned keys ever leaves the helper.
     assert "never-rendered" not in json.dumps(doc)
     assert doc["services"]["web"]["environment"] == {
-        "FITX_STARTUP_MODE": "read-only", "APP_REVISION": REV_A}
+        "FITX_STARTUP_MODE": "read-only", "APP_REVISION": REV_A,
+        "R6_REGISTRATION_ADMISSION": "closed", "FITX_WEB_WORKERS": "1"}
 
 
 def test_real_compose_render_without_revision_refuses(deploy_dir):
