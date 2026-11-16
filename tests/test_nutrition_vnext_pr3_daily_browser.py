@@ -721,9 +721,12 @@ def test_responsive_widths_keep_today_usable(app, auth_user, training_page, lang
         assert g['clipped'] == [], (width, g)
         assert page.locator('.tab-bar').evaluate('e => e.scrollWidth <= e.clientWidth + 1'), width
         for control in ('#log-food-btn', '#qab-water', '#nutrition-tab-today', '#nutrition-tab-plan',
-                        '.mc-edit', '.mc-del', '.slot-empty', '#nutrition-tab-history'):
+                        '.mc-del', '#nutrition-tab-history'):
             box = page.locator(control).first.bounding_box()
             assert box and box['height'] >= 43.5 and box['width'] >= 43.5, (width, control, box)
+        # V1 excludes provider search entry; hidden controls are not touch targets.
+        expect(page.locator('.mc-edit').first).to_be_hidden()
+        expect(page.locator('.slot-empty').first).to_be_hidden()
 
 
 def test_keyboard_and_focus(app, auth_user, training_page):

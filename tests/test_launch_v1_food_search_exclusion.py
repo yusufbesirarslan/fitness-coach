@@ -133,3 +133,31 @@ def test_identifiable_provider_copy_cannot_become_new_manual_import(app, make_us
     with pytest.raises(ProviderPersistenceHeld):
         mobile_log_food.log_food(user.id, "held-copy-fixture", command)
     assert MealLog.query.filter_by(user_id=user.id).count() == 0
+
+
+from test_training_execution_boundary import training_page  # noqa: F401
+
+
+@pytest.mark.parametrize("language", ["en", "tr"])
+def test_browser_shows_no_provider_controls_or_automatic_serving_refresh(
+        app, auth_user, training_page, language):
+    from playwright.sync_api import expect
+    from test_nutrition_vnext_pr3_daily_browser import seed, open_today
+    seed(app, auth_user.id, language)
+    page, traffic, _, _ = training_page
+    open_today(page)
+    page.locator("#log-food-btn").click()
+    for method in ("search", "barcode", "build-meal"):
+        expect(page.locator(f'#log-sheet [data-method="{method}"]')).to_be_hidden()
+        expect(page.locator(f'#log-sheet [data-method="{method}"]')).to_be_disabled()
+    expect(page.locator('#log-sheet [data-method="menu"]')).to_be_visible()
+    expect(page.locator('#food-search-input')).to_be_disabled()
+    page.evaluate("""() => renderDiary({meals: [{id: 1, meal_name: 'Kahvaltı',
+      is_logged: false, totals: {calories: 10, protein: 0, carbs: 1, fat: 0},
+      items: [{id: 1, food_name: 'Recorded provider item', fatsecret_food_id: 'fixture',
+        serving_id: 's1', serving_quantity: 1, serving_description: 'Recorded serving',
+        calories: 10, protein: 0, carbs: 1, fat: 0}]}],
+      totals: {calories: 10, protein: 0, carbs: 1, fat: 0}})""")
+    assert page.locator('.diary-serving-select, .diary-qty-input').count() == 0
+    assert page.locator('.diary-food-search:enabled').count() == 0
+    assert not [url for url, _, _ in traffic if '/api/food/' in url]
