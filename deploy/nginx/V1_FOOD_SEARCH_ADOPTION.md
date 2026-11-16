@@ -63,7 +63,7 @@ For the owner's already retained FILE3 bytes, offline preparation is:
 
 ```sh
 umask 077
-python3 -I scripts/r6_food_search_adoption.py \
+python3 -I -B scripts/r6_food_search_adoption.py \
   < PRIVATE_ACCEPTED_FILE3 > PRIVATE_CANDIDATE_FILE3
 # Proceed only on exit0; a refused command can leave an empty redirected file.
 sha256sum PRIVATE_ACCEPTED_FILE3 PRIVATE_CANDIDATE_FILE3
