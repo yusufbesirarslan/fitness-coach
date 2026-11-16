@@ -293,7 +293,7 @@ def test_storage_failure_rolls_back_and_logs_only_metadata(app, raw_client, owne
 
 
 @pytest.mark.parametrize('first_kind', ['menu', 'manual', 'provider_backed'])
-def test_cross_command_conflict(app, raw_client, owner, headers, monkeypatch, first_kind):
+def test_cross_command_conflict(app, raw_client, owner, headers, monkeypatch, first_kind, food_search_reopened):
     from test_mobile_log_food_api import manual_command, provider_command
     from app.services.mobile_log_food import service
     monkeypatch.setattr(service, 'resolve_provider_food', lambda *a: SimpleNamespace(

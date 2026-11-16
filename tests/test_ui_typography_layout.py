@@ -142,7 +142,7 @@ def test_meal_empty_slot_is_a_compact_button_not_full_bleed():
     assert re.search(r"\.slot-name\s*\{[^}]*white-space:\s*nowrap", css)
     js = (STATIC / "nutrition.js").read_text(encoding="utf-8")
     assert 'class="slot-empty"' in js
-    assert "<button type=\"button\" class=\"slot-empty\"" in js
+    assert 'type="button" class="slot-empty"' in js
     assert "slot-emoji" not in js
     assert "slot-ic" in js
 

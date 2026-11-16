@@ -158,7 +158,7 @@ def _menu(app, user_id, *, quantity=1):
 
 
 @pytest.mark.parametrize('case', ['same', 'different', 'manual', 'provider'])
-def test_menu_confirmation_unique_key_races(pg_log_food_app, monkeypatch, case):
+def test_menu_confirmation_unique_key_races(pg_log_food_app, monkeypatch, case, food_search_reopened):
     """Both independent PG sessions pass the empty preflight before INSERT.
 
     Barrier is at the read boundary, not a timer: every case actually exercises

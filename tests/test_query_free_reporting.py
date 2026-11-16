@@ -90,7 +90,7 @@ def _authenticate(monkeypatch, make_user):
 ])
 def test_food_lookup_failure_envelope_has_no_query_text(
         app, raw_client, make_user, monkeypatch, reporting, loopback_provider,  # noqa: F811
-        route, params, provider_params, secret):
+        route, params, provider_params, secret, food_search_reopened):
     from app.services import mobile_food_discovery
     _authenticate(monkeypatch, make_user)
 

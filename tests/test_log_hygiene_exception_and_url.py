@@ -120,7 +120,7 @@ def test_analyze_photo_fetch_failure_logs_the_type_only(app, monkeypatch, caplog
     assert SECRET not in json.dumps(out)
 
 
-def test_servings_by_name_failure_logs_the_type_only(client, auth_user, monkeypatch, caplog):
+def test_servings_by_name_failure_logs_the_type_only(client, auth_user, monkeypatch, caplog, food_search_reopened):
     monkeypatch.setattr(food_bp, "_get_fatsecret_token", lambda: "tok")
 
     def boom(*args, **kwargs):
