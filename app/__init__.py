@@ -251,7 +251,10 @@ def create_app():
             # Arka-plan örnekleyicisinin önbelleğini okuyan BİLGİLENDİRİCİ alan:
             # hata deploy gate'ini düşürmez; örnek yoksa/stale ise "unknown".
             import app.config as config_mod
-            if not config_mod.FATSECRET_BASE_URL:
+            from app.services import launch_food_search
+            if not launch_food_search.available():
+                body["fatsecret_proxy"] = "disabled"
+            elif not config_mod.FATSECRET_BASE_URL:
                 body["fatsecret_proxy"] = "unconfigured"
             else:
                 body["fatsecret_proxy"] = fatsecret_status() or "unknown"

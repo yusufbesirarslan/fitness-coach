@@ -161,3 +161,33 @@ def test_browser_shows_no_provider_controls_or_automatic_serving_refresh(
     assert page.locator('.diary-serving-select, .diary-qty-input').count() == 0
     assert page.locator('.diary-food-search:enabled').count() == 0
     assert not [url for url, _, _ in traffic if '/api/food/' in url]
+
+
+def test_worker_probe_disabled_but_heartbeat_and_retention_continue(app, monkeypatch):
+    import worker
+    import app.jobs as jobs
+    from app.jobs import tasks
+    import app.config as config_mod
+    from app.services import provider_retention
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://fatsecret.invalid")
+    monkeypatch.setattr("requests.get", forbidden)
+    monkeypatch.setattr(jobs, "record_fatsecret_status", forbidden)
+    assert tasks.sample_fatsecret_proxy() == "disabled"
+    ticks = []
+    monkeypatch.setattr(jobs, "record_worker_heartbeat", lambda: ticks.append("heartbeat"))
+    assert worker._heartbeat_tick(0, 601) == 601
+    assert ticks == ["heartbeat"]
+    # The independent historical expiry operation must not inherit the market
+    # availability gate. Its existing retention algorithm is not rewritten.
+    monkeypatch.setattr(provider_retention, "expire_due", lambda: SimpleNamespace(folded_entries=7))
+    assert tasks._provider_retention_pass() == 7
+
+
+def test_deep_health_reports_disabled_without_outbound_or_stale_cache(app, client, monkeypatch):
+    import app.jobs as jobs
+    import app.config as config_mod
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://fatsecret.invalid")
+    monkeypatch.setattr(jobs, "fatsecret_status", forbidden)
+    monkeypatch.setattr("requests.get", forbidden)
+    response = client.get("/health?deep=1")
+    assert response.json["fatsecret_proxy"] == "disabled"
