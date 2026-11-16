@@ -772,3 +772,12 @@ def test_account_erasure_covers_the_retained_total(app, make_user):
     from app.cli import _user_child_models
     assert MealLogRetainedTotal in tuple(_user_child_models())
     assert BarcodeFoodCache.__tablename__ == "barcode_food_cache"
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

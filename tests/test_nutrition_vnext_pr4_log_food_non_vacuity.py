@@ -28,8 +28,12 @@ import test_nutrition_vnext_pr4_log_food_contract as contract
 from test_nutrition_vnext_pr4_log_food_browser import provider  # noqa: F401
 
 
+# Test-only dormant provider mechanics, not V1 availability.
+pytestmark = pytest.mark.usefixtures("provider_persistence_permitted")
+
+
 def _drop_button(method):
-    pattern = re.compile(r'      <button class="log-sheet-opt[^"]*" type="button" data-method="'
+    pattern = re.compile(r'      <button [^\n]*data-method="'
                          + method + r'".*?</button>\n', re.S)
     return lambda s: pattern.sub('', s, count=1)
 

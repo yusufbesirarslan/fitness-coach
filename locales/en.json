@@ -1,4 +1,5 @@
 {
+  "nutrition.food_search_excluded": "Food database search is not available in this version.",
   "lang.aria": "Language",
   "lang.switch_failed": "Could not switch language. Please try again.",
   "theme.aria": "Toggle theme",

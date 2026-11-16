@@ -79,6 +79,12 @@ def summarize_conversation(conversation_id, health_generation=None):
 
 def sample_fatsecret_proxy():
     """Probe the optional local proxy outside request handling and cache status."""
+    # V1 excludes this provider entirely, including credential-free health
+    # requests. Keep heartbeat/maintenance/retention running; do not cache a
+    # fabricated successful probe or consult retained provider configuration.
+    from app.services import launch_food_search
+    if not launch_food_search.available():
+        return "disabled"
     import app.config as config_mod
     if not config_mod.FATSECRET_BASE_URL:
         return "unconfigured"

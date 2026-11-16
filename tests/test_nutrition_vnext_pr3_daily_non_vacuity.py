@@ -119,6 +119,7 @@ def test_m4_meal_failure_as_zero_is_detected(app, auth_user, client, training_pa
         browser.test_meal_read_failure_is_unknown_not_empty(app, auth_user, client, training_page, 'en')
 
 
+@pytest.mark.usefixtures("food_search_reopened")
 def test_m5_stale_totals_after_log_are_detected(app, auth_user, client, training_page,
                                                stub_meal_macro_provider):
     page, _, _, _ = training_page

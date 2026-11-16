@@ -693,7 +693,7 @@ def _saturated_blocking_capacity():
     "/api/food/servings-by-name?name=yumurta",
 ])
 def test_fatsecret_food_routes_shed_load_instead_of_parking_threads(
-        client, auth_user, path):
+        client, auth_user, path, food_search_reopened):
     with _saturated_blocking_capacity():
         response = client.get(path)
     assert response.status_code == 503, (

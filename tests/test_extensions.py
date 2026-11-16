@@ -9,6 +9,7 @@ migration, CLI) import'ta patlamamalı; anahtar yalnızca gerçek bir AI
 import os
 import subprocess
 import sys
+import pytest
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -113,6 +114,7 @@ def test_deep_health_reports_login_redis_and_bedrock(app):
     assert body["bedrock"]["reachable"] is False
 
 
+@pytest.mark.usefixtures("food_search_reopened")
 def test_deep_health_reports_fatsecret_proxy(app, monkeypatch):
     # I4: derin görünüm FatSecret proxy'sini de raporlar — BİLGİLENDİRİCİ alan
     # (proxy düşükken deploy rollback'i tetiklenmez, yalnızca izleme görür).
@@ -132,6 +134,7 @@ def test_deep_health_reports_fatsecret_proxy(app, monkeypatch):
     assert resp.status_code == 200                       # bilgilendirici: gate'i düşürmez
 
 
+@pytest.mark.usefixtures("food_search_reopened")
 def test_deep_health_reports_unknown_without_cached_fatsecret_sample(app, monkeypatch):
     import app.config as config_mod
     import app.jobs as jobs

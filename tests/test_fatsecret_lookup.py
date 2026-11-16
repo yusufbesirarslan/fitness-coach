@@ -178,3 +178,12 @@ def test_lookup_accepts_legit_burger_with_carbs(app, monkeypatch):
          "food_description": _desc("Per 1 serving", 620, 35, 40, 30)}]})
     per_serving, _ = fatsecret._lookup_macros_fatsecret(["Cheeseburger"], "tok")
     assert per_serving["Cheeseburger"]["calories"] == 620.0
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

@@ -289,6 +289,7 @@ def test_fatsecret_status_cache_roundtrip(monkeypatch):
     assert jobs.fatsecret_status(now=2000.0, max_age=900) is None
 
 
+@pytest.mark.usefixtures("food_search_reopened")
 def test_fatsecret_sampler_records_result_without_raising(monkeypatch):
     from app.jobs import tasks
     import app.config as config_mod
@@ -402,6 +403,7 @@ def test_worker_heartbeat_protocol_is_unchanged(monkeypatch):
     assert r.ttls[jobs.WORKER_HEARTBEAT_KEY] == jobs.WORKER_HEARTBEAT_TTL
 
 
+@pytest.mark.usefixtures("food_search_reopened")
 def test_fatsecret_probe_does_not_follow_redirects(monkeypatch):
     """A 3xx must classify THIS proxy, not whatever the hop points at."""
     import app.config as config_mod

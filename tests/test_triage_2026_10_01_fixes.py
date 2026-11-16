@@ -216,7 +216,7 @@ def test_auth_js_theme_survives_blocked_storage():
 # selectable item (the NUTR-PR4 "search unavailable" invariant still holds)
 # ---------------------------------------------------------------------------
 
-def test_search_refusal_shows_busy_status_not_no_result(app, auth_user, training_page):
+def test_search_refusal_shows_busy_status_not_no_result(app, auth_user, training_page, food_search_reopened):
     from playwright.sync_api import expect
     from test_nutrition_vnext_pr4_log_food_browser import canned, choose, start
 

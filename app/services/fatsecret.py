@@ -4,7 +4,7 @@ import re
 import threading
 import time
 import requests as http_requests_lib
-from app.services import nutrition_pipeline
+from app.services import launch_food_search, nutrition_pipeline
 from concurrent.futures import ThreadPoolExecutor
 from flask import current_app
 from requests.adapters import HTTPAdapter
@@ -41,12 +41,14 @@ def _get_fs_session():
 
 def _fs_get(url, **kwargs):
     """GET request to FatSecret API."""
+    launch_food_search.require_available()
     kwargs.setdefault("timeout", 10)
     return _get_fs_session().get(url, **kwargs)
 
 
 def _fs_post(url, **kwargs):
     """POST request to FatSecret API."""
+    launch_food_search.require_available()
     kwargs.setdefault("timeout", 10)
     return _get_fs_session().post(url, **kwargs)
 
@@ -58,6 +60,7 @@ _fs_token_cache = {"token": None, "expires_at": 0}
 
 
 def _get_fatsecret_token() -> str:
+    launch_food_search.require_available()  # before even a warm token cache
     # Kilit, getirme dahil tüm kritik bölümü kapsar: soğuk önbellekte eşzamanlı
     # çağrılar her biri ayrı token alıp thundering-herd yapmasın; ilk çağrı
     # önbelleği doldurur, bekleyenler tekrar kontrolde önbelleği bulur (F13).

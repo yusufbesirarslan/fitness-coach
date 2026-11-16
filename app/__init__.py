@@ -251,7 +251,10 @@ def create_app():
             # Arka-plan örnekleyicisinin önbelleğini okuyan BİLGİLENDİRİCİ alan:
             # hata deploy gate'ini düşürmez; örnek yoksa/stale ise "unknown".
             import app.config as config_mod
-            if not config_mod.FATSECRET_BASE_URL:
+            from app.services import launch_food_search
+            if not launch_food_search.available():
+                body["fatsecret_proxy"] = "disabled"
+            elif not config_mod.FATSECRET_BASE_URL:
                 body["fatsecret_proxy"] = "unconfigured"
             else:
                 body["fatsecret_proxy"] = fatsecret_status() or "unknown"
@@ -309,6 +312,8 @@ def create_app():
     # Launch V1: social surfaces are closed before CSRF, auth, limits and views.
     from app.services.launch_social import install as install_social_boundary
     install_social_boundary(app)
+    from app.services.launch_food_search import install as install_food_search_boundary
+    install_food_search_boundary(app)
     app.before_request(_csrf_protect)
     app.before_request(bind_mobile_request_principal)
     from app.health_boundary import install as install_health_boundary

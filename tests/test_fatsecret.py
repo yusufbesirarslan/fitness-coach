@@ -491,3 +491,12 @@ def test_food_search_batches_serving_weight_estimates(monkeypatch):
 
     assert calls == [["Pilav", "Çorba"]]
     assert [r["per_100g"]["calories"] for r in results] == [150.0, 100.0, 150.0]
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

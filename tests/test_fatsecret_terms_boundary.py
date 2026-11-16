@@ -370,3 +370,12 @@ def test_provider_derived_diary_calories_must_not_enter_coach_tools(app, make_us
     db.session.commit()
     raw = ai_coach._tool_query_fitx_metrics(user.id, "calories", "today")
     assert "731" not in json.dumps(json.loads(coach_privacy.tool_result("query_fitx_metrics", raw)))
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

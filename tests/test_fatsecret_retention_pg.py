@@ -167,3 +167,12 @@ def test_native_history_retained_totals_sql_runs_on_postgresql(app, make_user):
             expected[(users[0].id, day)])
         assert all(m["nutrition"]["energy_kcal"] is None for m in by_day[day]["meals"])
     db.session.rollback()
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

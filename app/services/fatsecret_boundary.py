@@ -12,7 +12,7 @@ import time
 from flask import current_app
 
 from app.models import MealLog
-from app.services import foodcache
+from app.services import foodcache, launch_food_search
 from app.timeutil import day_key
 
 PROOF = "_independent_nutrition_v1"
@@ -35,12 +35,12 @@ UNCOVERED_PROVIDER_PERSISTENCE_REF = None
 
 def provider_persistence_allowed():
     ref = PROVIDER_PERSISTENCE_PERMISSION_REF
-    return isinstance(ref, str) and bool(ref.strip())
+    return launch_food_search.available() and isinstance(ref, str) and bool(ref.strip())
 
 
 def uncovered_provider_persistence_allowed():
     ref = UNCOVERED_PROVIDER_PERSISTENCE_REF
-    return isinstance(ref, str) and bool(ref.strip())
+    return launch_food_search.available() and isinstance(ref, str) and bool(ref.strip())
 CACHE_PREFIX = "food:independent-menu:v1:per_serving:"
 CACHE_TTL = 3 * 24 * 3600
 

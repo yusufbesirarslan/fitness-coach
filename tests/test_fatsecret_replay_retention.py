@@ -239,3 +239,12 @@ def test_replay_key_never_reaches_another_owners_row(
     assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
     db.session.refresh(theirs)
     assert theirs.kalori == SENTINEL and theirs.user_id == other.id
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

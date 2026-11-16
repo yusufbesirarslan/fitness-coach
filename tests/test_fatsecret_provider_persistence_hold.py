@@ -246,3 +246,12 @@ def test_browser_never_copies_a_provider_result_into_a_manual_entry():
         import json
         catalog = json.loads((Path(__file__).resolve().parent.parent / "locales" / f"{locale}.json").read_text(encoding="utf-8"))
         assert catalog["nutrition.provider_logging_unavailable"]
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

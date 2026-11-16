@@ -66,6 +66,7 @@ class Backend:
 
     def __init__(self, name):
         self.name = name
+        self.requests = []
         backend = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -75,6 +76,7 @@ class Backend:
                 pass
 
             def _handle(self):
+                backend.requests.append((self.command, self.path))
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length) if length else b""
                 if self.path.startswith("/slow"):
@@ -607,3 +609,25 @@ def test_certbot_parser_sees_identical_vhosts_after_transformation(tmp_path):
     with pytest.raises(boot.BootError) as exc:
         boot.certbot_gate(broken, bcfg)
     assert exc.value.result == "certbot-gate-failed"
+
+
+# New V1 candidate proof. Historical R6/bootstrap fixtures above stay intact.
+def test_v1_provider_frontdoor_denies_without_contacting_upstream(nginx, backends):
+    pattern = rb"    location = /fatsecret/rest/server\.api \{[^}]*\}"
+    source = (ROOT / "nginx.conf").read_bytes()
+    block = re.search(pattern, source)
+    assert block is not None
+    candidate, count = re.subn(pattern, lambda _: block.group(0), LIVE)
+    assert count == 1
+    nginx.write_include(nginx.ports["legacy"])
+    nginx.write_site(boot.transform(candidate, sw.INCLUDE_PATH, 5000))
+    nginx.start()
+    for method in ("GET", "POST"):
+        status, headers, _ = request(nginx, method,
+            "/fatsecret/rest/server.api?method=foods.search&search_expression=synthetic",
+            None, {"Authorization": "Bearer synthetic-not-a-real-token"})
+        assert status == 404
+        assert headers.get("cache-control") == "no-store"
+        assert headers.get("x-backend") is None
+    assert backends["fatsecret"].requests == []
+    assert backend_of(nginx) == "legacy"  # ordinary application routing remains

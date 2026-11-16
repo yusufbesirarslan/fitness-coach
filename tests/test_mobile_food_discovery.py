@@ -208,3 +208,12 @@ def test_raw_barcode_resolution_never_logs_the_value(app, monkeypatch, caplog):
         assert fatsecret._food_find_id_by_barcode_raw(barcode) == "food-77"
 
     assert barcode not in caplog.text
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

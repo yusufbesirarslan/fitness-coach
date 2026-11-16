@@ -279,7 +279,7 @@ def _log_meal(user_id):
     ".mc-edit", ".mc-del", ".qab", "#log-food-btn", ".slot-empty",
 ])
 def test_known_focus_erasing_controls_are_repaired(
-        app, auth_user, surface, selector):
+        app, auth_user, surface, selector, food_search_reopened):
     """The controls F-03 measured at ``outline-style: none`` under a real
     ``Tab`` - including "delete a logged meal", which a keyboard user could
     land on with no indication at all."""

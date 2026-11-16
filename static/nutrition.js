@@ -1,3 +1,5 @@
+// Source-owned V1 gate, injected by the server; missing also means closed.
+const FOOD_SEARCH_AVAILABLE = window.AXISAI_FOOD_SEARCH_AVAILABLE === true;
 
 function newIdempotencyKey() {
   return (window.crypto && window.crypto.randomUUID)
@@ -515,7 +517,7 @@ function mealCardHTML(m) {
       (time ? '<div class="mc-time">' + time + '</div>' : '') +
     '</div>' +
     '<div class="mc-side">' +
-      '<button class="mc-edit" data-action="quickEditMeal" data-args=\'["' + esc(m.ogun) + '"]\' aria-label="' + __t('nutrition.quick_edit') + '">' +
+      '<button ' + (FOOD_SEARCH_AVAILABLE ? '' : 'hidden disabled style="display:none" ') + 'class="mc-edit" data-action="quickEditMeal" data-args=\'["' + esc(m.ogun) + '"]\' aria-label="' + __t('nutrition.quick_edit') + '">' +
         '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>' +
       '</button>' + del +
     '</div></div>';
@@ -586,7 +588,7 @@ function renderTimeline(meals) {
     '<p class="nut-ledger-note">' + esc(__t('nutrition.empty_today_title')) + '</p>';
   box.innerHTML = note + SLOTS.map(function (slot) {
     var items = bySlot[slot.key] || [];
-    var add = '<button type="button" class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
+    var add = '<button ' + (FOOD_SEARCH_AVAILABLE ? '' : 'hidden disabled style="display:none" ') + 'type="button" class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
           '"]\'>+ ' + __t('nutrition.add_to_meal') + '</button>';
     var kcal = items.reduce(function (a, m) { return a + (m.kalori || 0); }, 0);
     var head = '<div class="slot-head"><span class="slot-ic" aria-hidden="true">' + (slot.icon || '') +
@@ -747,6 +749,7 @@ document.addEventListener('keydown', function (e) {
 /* ── SEARCH FOOD SHEET ── */
 var _manualOpener = null;
 function openManualSheet()  {
+  if (!FOOD_SEARCH_AVAILABLE) return;
   var fromChooser = document.getElementById('log-sheet').classList.contains('open');
   _manualOpener = fromChooser ? _logFoodButton() : document.activeElement;
   closeLogSheet();
@@ -908,7 +911,8 @@ function _suggestOgunByHour() {
   return h < 11 ? 'Kahvaltı' : h < 16 ? 'Öğle' : h < 22 ? 'Akşam' : 'Ara Öğün';
 }
 
-function logScanBarcode() { closeLogSheet(); openScanOverlay(); }
+function logScanBarcode() {
+  if (!FOOD_SEARCH_AVAILABLE) return; closeLogSheet(); openScanOverlay(); }
 
 function openScanOverlay() {
   var ov = document.getElementById('scan-overlay');
@@ -2182,6 +2186,7 @@ document.getElementById('food-search-input').addEventListener('input', function(
 });
 
 async function searchFood(query) {
+  if (!FOOD_SEARCH_AVAILABLE) return;
   const dropdown = document.getElementById('food-autocomplete-dropdown');
   if (acController) acController.abort();
   acController = new AbortController();
@@ -2303,6 +2308,7 @@ document.addEventListener('click', e => {
 /* ── SERVINGS CACHE ── */
 const _servingsCache = {};
 async function fetchServings(foodIdOrName) {
+  if (!FOOD_SEARCH_AVAILABLE) return null;
   if (_servingsCache[foodIdOrName]) return _servingsCache[foodIdOrName];
   try {
     let url, data;
@@ -2396,7 +2402,9 @@ function renderDiary(data) {
     const itemsHtml = items.map(item => {
       let unitHtml;
       const cached = item.fatsecret_food_id ? _servingsCache[item.fatsecret_food_id] : null;
-      if (item.serving_id && cached) {
+      if (!FOOD_SEARCH_AVAILABLE && (item.fatsecret_food_id || item.serving_id)) {
+        unitHtml = `<span class="diary-serving-label">${esc(item.serving_description || "")} — ${esc(__t("nutrition.food_search_excluded"))}</span>`;
+      } else if (item.serving_id && cached) {
         const opts = cached.map(s =>
           `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${esc(formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk))}</option>`
         ).join('');
@@ -2409,7 +2417,7 @@ function renderDiary(data) {
         unitHtml = `<span class="diary-serving-label">${esc(item.serving_description || '')}</span>
           <input type="number" class="diary-qty-input" value="${qVal}" min="0.5" step="0.5"
             data-action-change="fxUpdateDiaryServingQtyOnly" data-item-id="${item.id}" ${isLogged ? 'disabled' : ''}>`;
-        if (item.fatsecret_food_id && !isLogged) {
+        if (FOOD_SEARCH_AVAILABLE && item.fatsecret_food_id && !isLogged) {
           fetchServings(item.fatsecret_food_id).then(s => { if (s) loadDiary(); });
         }
       } else {
@@ -2438,12 +2446,12 @@ function renderDiary(data) {
         </div>
         <div class="diary-items-list">${itemsHtml}</div>
         ${!isLogged ? `
-        <div class="diary-search-wrap">
-          <input class="fc-input diary-food-search" placeholder="${__t('nutrition.search_short')}"
+        <div class="diary-search-wrap" ${FOOD_SEARCH_AVAILABLE ? "" : 'hidden style="display:none"'}>
+          <input class="fc-input diary-food-search" ${FOOD_SEARCH_AVAILABLE ? "" : "disabled"} placeholder="${__t('nutrition.search_short')}"
             data-action-input="fxDiaryFoodSearch" data-meal="${dm.key}" autocomplete="off">
           <div class="autocomplete-dropdown diary-ac" style="display:none;"></div>
         </div>
-        <button class="btn-volt w-full diary-log-btn" data-action="logDiaryMeal" data-args='["${dm.key}"]'>${__t('nutrition.log_this_meal')}</button>
+        <button class="btn-volt w-full diary-log-btn" ${!FOOD_SEARCH_AVAILABLE && items.some(i => i.fatsecret_food_id || i.serving_id) ? "disabled" : ""} data-action="logDiaryMeal" data-args='["${dm.key}"]'>${__t('nutrition.log_this_meal')}</button>
         ` : `
         <div class="diary-logged">${__t('nutrition.logged')}</div>
         `}
@@ -2469,6 +2477,7 @@ function updateDiaryTotals(totals) {
 let diaryAcTimeout = null;
 let diaryAcController = null;
 function diaryFoodSearch(input, mealName) {
+  if (!FOOD_SEARCH_AVAILABLE) return;
   clearTimeout(diaryAcTimeout);
   const q = input.value.trim();
   const dropdown = input.nextElementSibling;
