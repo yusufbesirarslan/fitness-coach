@@ -2,7 +2,7 @@
 import math
 
 from app.models import BarcodeFoodCache
-from app.services import fatsecret
+from app.services import fatsecret, launch_food_search
 from app.services.ai_gate import blocking_concurrency_slot
 from app.services.barcode import normalize_barcode
 
@@ -98,6 +98,7 @@ def project_food(food_id, raw_food):
 
 
 def search(query):
+    launch_food_search.require_available()
     # FatSecret turları senkron ve bloklayıcıdır; rezerv-sayılan slot olmadan
     # sağlayıcı gecikmesinde 8 web thread'inin hepsi park edebilir (triage
     # 2026-08-07 #2 — web food route'larıyla AYNI sınıf; bu mobil yüzey denetimden
@@ -115,12 +116,14 @@ def search(query):
 
 
 def servings(food_id):
+    launch_food_search.require_available()
     with blocking_concurrency_slot():
         raw = fatsecret._food_get_raw(food_id, strict=True)
     return project_food(food_id, raw) if raw else None
 
 
 def barcode_lookup(code):
+    launch_food_search.require_available()
     if not isinstance(code, str) or not code.isascii() or not code.isdigit():
         return None
     normalized = normalize_barcode(code)

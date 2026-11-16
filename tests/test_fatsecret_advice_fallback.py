@@ -277,3 +277,12 @@ def test_attested_coach_meal_still_stages_and_commits(auth_user, monkeypatch):
     assert committed["status"] == "committed" and committed["today_totals"] is None
     row = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert row.kalori == 330 and row.source == "coach" and row.tarih == day_key()
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

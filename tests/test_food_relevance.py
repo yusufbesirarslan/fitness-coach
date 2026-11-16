@@ -115,3 +115,12 @@ def test_specific_match_dish_type_must_agree():
 
 def test_specific_match_no_tokens_does_not_overfilter():
     assert _is_specific_match("2 adet", "Anything At All") is True
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

@@ -200,3 +200,12 @@ def test_barcode_add_idempotency_writes_one_row(client, auth_user, monkeypatch):
     assert second.get_json()["nutrients"] == {
         "kalori": None, "protein": None, "karb": None, "yag": None}
     assert MealLog.query.filter_by(user_id=auth_user.id, source="barcode").count() == 1
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

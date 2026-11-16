@@ -404,11 +404,11 @@
     </div>
     <p class="log-sheet-lead" id="log-sheet-lead">{{ t('nutrition.log_food_prompt') }}</p>
     <div class="log-sheet-grid">
-      <button class="log-sheet-opt" type="button" data-method="search" data-action="logManual">
+      <button {% if not food_search_available %}hidden disabled style="display:none"{% endif %} class="log-sheet-opt" type="button" data-method="search" data-action="logManual">
         <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg></span>
         <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_manual') }}</span><span class="lso-sub">{{ t('nutrition.log_manual_sub') }}</span></span>
       </button>
-      <button class="log-sheet-opt" type="button" data-method="barcode" data-action="logScanBarcode">
+      <button {% if not food_search_available %}hidden disabled style="display:none"{% endif %} class="log-sheet-opt" type="button" data-method="barcode" data-action="logScanBarcode">
         <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5v14M7 5v14M11 5v14M15 5v10M19 5v14M23 5v14" stroke-width="1.6"/></svg></span>
         <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_barcode') }}</span><span class="lso-sub">{{ t('nutrition.log_barcode_sub') }}</span></span>
       </button>
@@ -420,7 +420,7 @@
         <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg></span>
         <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_quick_add') }}</span><span class="lso-sub" id="lso-quick-add-sub">{{ t('nutrition.log_quick_add_loading') }}</span></span>
       </button>
-      <button class="log-sheet-opt" type="button" data-method="build-meal" data-action="logBuildMeal">
+      <button {% if not food_search_available %}hidden disabled style="display:none"{% endif %} class="log-sheet-opt" type="button" data-method="build-meal" data-action="logBuildMeal">
         <span class="lso-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><line x1="17.5" y1="14" x2="17.5" y2="21"/><line x1="14" y1="17.5" x2="21" y2="17.5"/></svg></span>
         <span class="lso-txt"><span class="lso-title">{{ t('nutrition.log_build_meal') }}</span><span class="lso-sub">{{ t('nutrition.log_build_meal_sub') }}</span></span>
       </button>
@@ -449,7 +449,7 @@
     </div>
 
     <div style="position:relative;margin-bottom:12px;">
-      <input class="fc-input" id="food-search-input" placeholder="{{ t('nutrition.search_ph') }}" autocomplete="off">
+      <input class="fc-input" id="food-search-input" {% if not food_search_available %}disabled{% endif %} placeholder="{{ t('nutrition.search_ph') }}" autocomplete="off">
       <div id="food-autocomplete-dropdown" class="autocomplete-dropdown" style="display:none;"></div>
     </div>
 
@@ -480,7 +480,7 @@
   <div class="scan-manual">
     <div class="scan-manual-lbl">{{ t('nutrition.barcode_manual_hint') }}</div>
     <div class="scan-manual-row">
-      <input class="fc-input" id="barcode-manual-input" inputmode="numeric" placeholder="{{ t('nutrition.barcode_manual_ph') }}" autocomplete="off">
+      <input class="fc-input" id="barcode-manual-input" {% if not food_search_available %}disabled{% endif %} inputmode="numeric" placeholder="{{ t('nutrition.barcode_manual_ph') }}" autocomplete="off">
       <button class="btn-volt" data-action="onBarcodeManual">{{ t('nutrition.barcode_lookup') }}</button>
     </div>
   </div>
@@ -544,6 +544,7 @@
 <!-- ══════════════════════════════════════════════════
      JAVASCRIPT
 ══════════════════════════════════════════════════ -->
+<script nonce="{{ csp_nonce }}">window.AXISAI_FOOD_SEARCH_AVAILABLE = {{ food_search_available|tojson }};</script>
 <script src="/static/nutrition.js?v={{ _v }}"></script>
 <script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>

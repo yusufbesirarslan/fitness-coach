@@ -379,3 +379,12 @@ def test_diary_builder_rejects_serving_without_provider_food_identity(
     assert response.status_code == 400
     assert CustomMealItem.query.filter_by(custom_meal_id=meal_id).count() == 0
     assert CustomMeal.query.get(meal_id).user_id == auth_user.id
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

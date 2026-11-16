@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from app.extensions import db
 from app.models import MealLog
-from app.services import meal_idempotency, provider_retention
+from app.services import meal_idempotency, provider_retention, launch_food_search
 from app.services.provider_food_snapshot import (
     ProviderFoodNotFound,
     ProviderPersistenceHeld,
@@ -48,6 +48,9 @@ def _existing_or_conflict(user_id, key, fingerprint):
 
 
 def log_food(user_id, key, command):
+    # Reject new imports and command replays before reading historical entries.
+    if isinstance(command, ProviderBackedLogFoodCommand) and not launch_food_search.available():
+        raise ProviderPersistenceHeld
     fingerprint = semantic_fingerprint(command)
     existing = _existing_or_conflict(user_id, key, fingerprint)
     if existing:
@@ -83,6 +86,8 @@ def log_food(user_id, key, command):
         # the copy keeps the original deadline instead of escaping it.
         provenance = provider_retention.copied_provenance(
             user_id, description, nutrition)
+        if provenance is not None and not launch_food_search.available():
+            raise ProviderPersistenceHeld  # no import disguised as a repeat
         db.session.rollback()  # close the read before the write transaction
     else:  # pragma: no cover - typed parser is the only caller
         raise TypeError("unsupported command")

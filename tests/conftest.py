@@ -423,7 +423,7 @@ def legacy_browser_plan_saves(app, monkeypatch):
 
 
 @pytest.fixture
-def provider_persistence_permitted(monkeypatch):
+def provider_persistence_permitted(monkeypatch, food_search_reopened):
     """TEST-ONLY stand-in for a future verified written FatSecret retention
     permission (D-B2). Production keeps PROVIDER_PERSISTENCE_PERMISSION_REF=None,
     so new provider-backed diary/saved-meal persistence is held. Opt in only in
@@ -437,3 +437,16 @@ def provider_persistence_permitted(monkeypatch):
     # production hold is pinned in tests/test_fatsecret_provider_persistence_hold.py.
     monkeypatch.setattr(fatsecret_boundary, "UNCOVERED_PROVIDER_PERSISTENCE_REF",
                         "TEST-ONLY-not-a-real-permission")
+
+
+@pytest.fixture
+def food_search_reopened(monkeypatch):
+    """TEST ONLY: characterize dormant provider code, never release availability.
+
+    Default-closed launch tests must not request this fixture. There is no
+    production config/environment equivalent; reopening needs a source release.
+    """
+    from app.services import launch_food_search
+    monkeypatch.setattr(launch_food_search, "FOOD_SEARCH_AVAILABLE", True)
+    from app.services import foodcache
+    monkeypatch.setattr(foodcache, "_macro_cache", {"per_100g": {}, "per_serving": {}})

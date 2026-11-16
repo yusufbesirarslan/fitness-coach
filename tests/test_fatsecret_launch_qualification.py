@@ -177,3 +177,12 @@ def test_independent_estimate_menu_without_diary_still_works(menu_probe):
     assert observed and result["coach_picks"]
     assert result["coach_picks"][0]["macro_source"] == "llm"
     assert result["coach_picks"][0]["macros"]["calories"] == 330
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

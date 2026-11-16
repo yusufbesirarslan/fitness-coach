@@ -211,3 +211,12 @@ def test_servings_by_name_token_failure_returns_empty(client, auth_user, monkeyp
 def test_food_routes_require_login(client):
     assert client.get("/api/food/search?q=muz").status_code == 302
     assert client.get("/api/food/42/servings").status_code == 302
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass

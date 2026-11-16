@@ -106,3 +106,12 @@ def test_route_requires_login(raw_client):
     # Girişsiz istek login'e yönlenir (302) veya 401 — 200 OLMAMALI.
     r = raw_client.get("/api/food/barcode?code=5000159407236")
     assert r.status_code != 200
+
+
+# Dormant provider behavior; default-closed V1 is tested separately.
+from pytest import fixture as _fixture
+
+
+@_fixture(autouse=True)
+def _dormant_food_search(food_search_reopened):
+    pass
