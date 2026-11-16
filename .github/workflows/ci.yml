@@ -308,6 +308,7 @@ jobs:
           python -m pytest -v -p no:cacheprovider --noconftest -o addopts=
           tests/test_r6_nginx_integration.py tests/test_r6_nginx_route_control.py
           tests/test_r6_nginx_bootstrap.py tests/test_r6_nginx_slot_contract.py
+          tests/test_r6_food_search_adoption.py
           tests/test_priv_log_01_nginx_integration.py tests/test_priv_log_01_nginx_access_log.py
           tests/test_priv_log_01_r1.py tests/test_priv_log_01_hf01.py
           tests/test_priv_log_01_hf01_nginx.py

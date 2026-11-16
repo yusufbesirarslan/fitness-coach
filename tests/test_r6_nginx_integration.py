@@ -631,3 +631,77 @@ def test_v1_provider_frontdoor_denies_without_contacting_upstream(nginx, backend
         assert headers.get("x-backend") is None
     assert backends["fatsecret"].requests == []
     assert backend_of(nginx) == "legacy"  # ordinary application routing remains
+
+
+@pytest.mark.parametrize("state", ["blue", "green"])
+def test_v1_adoption_covers_public_redirect_default_and_alias_vhosts(
+        nginx, backends, monkeypatch, state):
+    import r6_food_search_adoption as adoption
+
+    # Structural counterpart of the accepted two-name TLS / one-name HTTP
+    # catalog, NOT a claim to possess its private hash-bound preimage.
+    counterpart = boot.transform(LIVE, sw.INCLUDE_PATH, 5000).replace(
+        f"server_name {HOST};".encode(),
+        f"server_name {HOST} alias.example.invalid;".encode(), 1)
+    candidate = adoption._transform(counterpart)
+    original = runnable_site
+
+    def with_ipv6(*args):
+        return original(*args).replace(
+            b"# (ipv6 listen removed for the disposable test)",
+            f"listen [::1]:{nginx.ports['https']} ssl ipv6only=on;".encode(), 1).replace(
+            b"# (ipv6 listen removed for the disposable test)",
+            f"listen [::1]:{nginx.ports['http']} ipv6only=on;".encode(), 1)
+
+    monkeypatch.setattr(sys.modules[__name__], "runnable_site", with_ipv6)
+    nginx.write_include(nginx.ports[state])
+    nginx.write_site(candidate)
+    if os.environ.get("FITX_R6_CERTBOT_GATE") == "1":
+        before = with_ipv6(counterpart, nginx.ports, nginx.cert, nginx.key,
+                           nginx.options, nginx.include)
+        nginx.site.write_bytes(before)
+        backup = nginx.tmp / "certbot-backup"
+        backup.mkdir()
+        bcfg = boot.BootConfig(sw=sw.Config(site_path=str(nginx.site)),
+            sites_enabled=str(nginx.root / "sites-enabled"), nginx_root=str(nginx.root),
+            backup_dir=str(backup))
+        boot.certbot_gate(with_ipv6(candidate, nginx.ports, nginx.cert, nginx.key,
+                                   nginx.options, nginx.include), bcfg)
+        nginx.write_site(candidate)
+    nginx.start()
+    for address in ("127.0.0.1", "::1"):
+        for tls in (False, True):
+            for host in (HOST, "alias.example.invalid", "unmatched.example.invalid",
+                         "[::1]" if address == "::1" else address):
+                def exchange(method, path):
+                    cls = http.client.HTTPSConnection if tls else http.client.HTTPConnection
+                    kw = {"context": _ctx()} if tls else {}
+                    conn = cls(address, nginx.ports["https" if tls else "http"], timeout=5, **kw)
+                    try:
+                        if tls:
+                            conn.sock = _ctx().wrap_socket(
+                                socket.create_connection((address, nginx.ports["https"]), timeout=5),
+                                server_hostname=host.strip("[]"))
+                        conn.request(method, path, headers={"Host": host})
+                        resp = conn.getresponse()
+                        resp.read()
+                        return resp.status, dict((k.lower(), v) for k, v in resp.getheaders())
+                    finally:
+                        conn.close()
+
+                for method in ("GET", "POST"):
+                    for path in ("/fatsecret/rest/server.api", "/fatsecret/rest/server.api?r6_exclusion_probe=1"):
+                        code, headers = exchange(method, path)
+                        assert code == 404
+                        assert headers.get("cache-control") == "no-store"
+                        assert "location" not in headers and "x-backend" not in headers
+                code, headers = exchange("GET", "/health?unrelated=1")
+                if tls:
+                    assert code == 200 and headers["x-backend"] == state
+                elif host == HOST:
+                    assert code == 301
+                    assert headers["location"] == f"https://{HOST}/health?unrelated=1"
+                else:
+                    assert code == 404
+                assert "cache-control" not in headers
+    assert backends["fatsecret"].requests == []
