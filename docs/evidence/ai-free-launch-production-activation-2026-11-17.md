@@ -40,14 +40,18 @@ allowance flags unset in the host `.env`, the blue slot web and the worker.
   - The teen pins stay `None`.
 - The runtime role needs invoke permission on the two EU inference profiles before
   this deployment. Without it, the candidate's Bedrock deep-health check would fail
-  after closure. The policy document is identical to the staging policy qualified on
-  2026-11-03.
+  after closure. A read-only check on 2026-11-17 found that the role already carries
+  an inline policy, `AxisAIProdClaude55EuInvoke`, added on 2026-11-08. It allows only
+  the two EU 5.5 profiles and their 12 EU destination models, each model bound to its
+  own profile, with no wildcard. Simulation allows all 28 required decisions and
+  denies the direct-model, global-profile and US-profile controls.
 
 ## Rollback
 
-1. Emergency stop with no deployment: detach the EU 5.5 invoke policy from the
-   runtime role. Every provider attempt is then refused, and no OpenAI fallback exists
-   under `claude55`.
+1. Emergency stop with no deployment: delete that inline policy from the runtime
+   role, after saving its document. Every provider attempt is then refused, and no
+   OpenAI fallback exists under `claude55`. The next deployment must carry the
+   configuration rollback below, or the policy must be restored first.
 2. Configuration rollback: remove the seven `.env` lines with the reviewed block
    writer (rollback mode). Then run the next protected deployment, which brings the
    service back to today's closed admission.
