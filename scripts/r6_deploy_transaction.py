@@ -634,7 +634,9 @@ class HostOps:
         return self._docker(timeout, "exec", container_id, "cat",
                             "/app/BUILD_REVISION").strip()
 
-    def container_deep_health_revision(self, container_id, timeout):
+    def container_deep_health_revision(self, container_id, timeout, *, require_eligibility=True):
+        # Legacy (main-project) PREVIOUS web only; candidates are always verified
+        # through slot_verify, which refuses an eligibility waiver for deploy_sha.
         out = self._docker(timeout, "exec", container_id, "python3", "-c",
                            _DEEP_PROBE_CODE)
         try:
@@ -643,7 +645,7 @@ class HostOps:
             raise OpError("deep health returned no JSON") from exc
         if payload.get("http") != 200 or payload.get("status") != "ok":
             raise OpError("deep health is not ok")
-        if payload.get("eligibility_enforced") is not True:
+        if require_eligibility and payload.get("eligibility_enforced") is not True:
             raise OpError("loaded account eligibility enforcement is unproven")
         return payload.get("revision")
 
@@ -664,16 +666,20 @@ class HostOps:
             raise OpError(f"slot {slot} start refused (exit {rc}): {payload}")
         return payload
 
-    def slot_verify(self, slot, revision, timeout):
+    def slot_verify(self, slot, revision, timeout, *, require_eligibility=True):
         # Previous releases may predate injection or use the prior mode.
         # Candidate verification always requires this deployment's exact mode.
-        flags = ["--require-eligibility"]
+        # Only a PREVIOUS release's eligibility proof may be deferred (first
+        # adult transition, see Transaction._previous_eligibility_gate).
+        if revision == self.deploy_sha and not require_eligibility:
+            raise OpError("candidate eligibility proof cannot be waived")
+        flags = ["--require-eligibility"] if require_eligibility else []
         if revision != self.deploy_sha:
             flags.append("--allow-existing-files")
         rc, payload = self._slot(timeout, "verify", "--slot", slot,
                                  "--revision", revision, *flags)
         if (rc != 0 or payload.get("deep_health_revision") != revision
-                or payload.get("eligibility_enforced") is not True):
+                or (require_eligibility and payload.get("eligibility_enforced") is not True)):
             raise OpError(f"slot {slot} verify failed (exit {rc}): {payload}")
         if revision == self.deploy_sha and self.environ.get("AXISAI_WEB_SLOT_APPLE_FILES", "0") == "1":
             scheduler = _load_sibling("apple_release_scheduler")
@@ -1195,6 +1201,8 @@ class Transaction:
         self.checkout_attempted = False
         self.events = []
         self.adult_transition = False
+        # True only after the previous release's loaded eligibility was proven.
+        self.previous_eligibility_proven = False
         self.registration_closure_attempted = False
         self.registration_closed = False
         self.admission_open_attempted = False
@@ -1228,6 +1236,8 @@ class Transaction:
                        self.ops.prepare_workspace)
             self._baseline()
             self._migration_gate()
+            if not self.forward_recovery:
+                self._previous_eligibility_gate()
             self._build_and_prove_image()
             admission = self._step_deadline("capability_admission")
             if self.forward_recovery:
@@ -1305,7 +1315,8 @@ class Transaction:
             revision = self._call(deadline, "legacy BUILD_REVISION",
                                   self.ops.container_build_revision, web.id)
             deep = self._call(deadline, "legacy deep health",
-                              self.ops.container_deep_health_revision, web.id)
+                              lambda t: self.ops.container_deep_health_revision(
+                                  web.id, t, require_eligibility=False))
             if deep != revision:
                 raise StepFailed("legacy deep-health revision differs from its "
                                  "baked BUILD_REVISION")
@@ -1322,8 +1333,9 @@ class Transaction:
             revision = slot[0]["app_revision"]
             if not _SHA.fullmatch(revision or ""):
                 raise StepFailed("active slot revision is not 40-hex")
-            proof = self._call(deadline, "active slot verify", self.ops.slot_verify,
-                               route.state, revision)
+            proof = self._call(deadline, "active slot verify",
+                               lambda t: self.ops.slot_verify(
+                                   route.state, revision, t, require_eligibility=False))
             identity = (proof.get("container") or {}).get("id") if isinstance(
                 proof, dict) else None
             serving = (self._call(deadline, "active slot image", self.ops.container,
@@ -1337,7 +1349,9 @@ class Transaction:
         if revision != self.previous_commit:
             raise StepFailed("serving revision differs from the checkout HEAD")
         self.previous_revision = revision
-        self._event("serving-revision", revision=revision, eligibility="enforced")
+        # Loaded eligibility of the previous release is decided after the migration
+        # gate (_previous_eligibility_gate), still before any mutation.
+        self._event("serving-revision", revision=revision, eligibility="deferred")
 
         workers = self._call(deadline, "worker baseline", self.ops.worker)
         if (len(workers) != 1 or workers[0].status != "running"
@@ -1432,6 +1446,8 @@ class Transaction:
                            if isinstance(identity, str) and identity else None)
                 self.previous_web_image_id = serving.image_id if serving else None
                 web_proven = True
+                # Proven with the default strict eligibility: rollback keeps that level.
+                self.previous_eligibility_proven = True
             except (OpError, StepFailed) as exc:
                 self._event("previous-web-unproven", slot=route.state,
                             reason=str(exc)[:200])
@@ -1544,6 +1560,35 @@ class Transaction:
         if problems:
             raise StepFailed("migration overlap gate refused before any database "
                              "mutation: " + "; ".join(problems))
+
+    def _previous_eligibility_gate(self):
+        """Prove the previous release's loaded eligibility, or record why it is
+        not required. Runs after the migration gate and before any mutation.
+
+        Only the FIRST adult transition is exempt: the previous release's source
+        predates ADULT_MIGRATION, so it cannot carry the adult rules, and this
+        transaction removes its web and worker (closing its registration) before
+        migration and never restores them. Requiring its loaded eligibility would
+        mean enabling legacy (pre-18+) rules on it first. Every other transition,
+        including every later adult-graph release, still requires it.
+        """
+        deadline = self._step_deadline("baseline")
+        if ADULT_MIGRATION in self.delta:
+            if not self.adult_transition:
+                raise StepFailed("adult migration pending outside an adult transition")
+            self._event("previous-eligibility-not-required", revision=self.previous_revision,
+                        reason="first-adult-transition-closes-old-registration")
+            return
+        if self.legacy_web is not None:
+            deep = self._call(deadline, "previous eligibility", self.ops.container_deep_health_revision,
+                              self.legacy_web.id)
+            if deep != self.previous_revision:
+                raise StepFailed("legacy deep-health revision differs from its baked BUILD_REVISION")
+        else:
+            self._call(deadline, "previous eligibility", self.ops.slot_verify,
+                       self.previous_route, self.previous_revision)
+        self.previous_eligibility_proven = True
+        self._event("previous-eligibility", revision=self.previous_revision, eligibility="enforced")
 
     def _build_and_prove_image(self):
         tag = f"{IMAGE_REPO}:{self.deploy_sha}"
@@ -2127,9 +2172,11 @@ class Transaction:
                         current.id, self._time_left(deadline)) != self.previous_revision:
                     return False
                 return self.ops.container_deep_health_revision(
-                    current.id, self._time_left(deadline)) == self.previous_revision
+                    current.id, self._time_left(deadline),
+                    require_eligibility=self.previous_eligibility_proven) == self.previous_revision
             self.ops.slot_verify(self.previous_route, self.previous_revision,
-                                 self._time_left(deadline))
+                                 self._time_left(deadline),
+                                 require_eligibility=self.previous_eligibility_proven)
             return True
         except (StepFailed, OpError) as exc:
             self.log(f"previous web verification failed: {exc}")

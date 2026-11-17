@@ -198,3 +198,122 @@ def test_slot_source_pins_closed_admission():
     import yaml
     doc = yaml.safe_load(Path("docker-compose.web-slot.yml").read_text())
     assert doc["services"]["web"]["environment"]["R6_REGISTRATION_ADMISSION"] == "closed"
+
+
+# ── First adult transition from a pre-adult previous release (R6 first-adult baseline fix) ──
+# Production shape: the serving release predates ad17de1e0001 and its loaded
+# ACCOUNT_ELIGIBILITY_ENABLED is unset. Enabling it there would switch on the
+# legacy (pre-18+) rules, so the transaction must not require it — but only for
+# the first adult transition, and never for the candidate.
+MUTATIONS = ("slot_remove", "close_old_worker", "release_prepare", "slot_start",
+             "route_switch", "registration_latch", "build_image")
+
+
+def first_adult(adult):
+    adult.faults["delta"] = {tx.ADULT_MIGRATION: "expand"}
+    adult.ineligible_revisions.add(PREV)
+    return adult
+
+
+def test_first_adult_transition_needs_no_legacy_eligibility_and_opens_only_verified_candidate(adult):
+    code, transaction = run(first_adult(adult))
+    assert code == tx.EXIT_OK
+    prev_checks = [c for c in adult.eligibility_checks if c[1] == PREV]
+    cand_checks = [c for c in adult.eligibility_checks if c[1] == CAND]
+    assert prev_checks and all(required is False for _, _, required in prev_checks)
+    assert cand_checks and all(required is True for _, _, required in cand_checks)
+    events = [e[0] for e in transaction.events]
+    assert "previous-eligibility-not-required" in events and "previous-eligibility" not in events
+    assert events.index("previous-eligibility-not-required") < events.index("old-registration-closed")
+    # Old registration is closed before migration and only the verified candidate opens.
+    assert adult.migration_attempts == [(None, False)]
+    n = names(adult)
+    assert n.index("slot_remove") < n.index("release_prepare")
+    assert adult.registration_open and adult.calls.index(("registration_latch", "open")) > n.index("checkout_reset")
+    assert transaction.previous_eligibility_proven is False
+
+
+def test_first_adult_transition_still_refuses_an_ineligible_candidate_after_closure(adult):
+    first_adult(adult).ineligible_revisions.add(CAND)
+    code, _ = run(adult)
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert_no_old_recovery(adult)
+
+
+@pytest.mark.parametrize("delta", [{"e3f4a5b6c7d8": "expand"}, {}])
+def test_later_adult_release_still_requires_previous_eligibility_before_any_mutation(adult, delta):
+    # ad17de1e0001 is already in the previous source: not the first adult transition.
+    adult.faults["delta"] = delta
+    adult.ineligible_revisions.add(PREV)
+    code, transaction = run(adult)
+    assert code == tx.EXIT_ROLLED_BACK
+    assert not set(MUTATIONS) & set(names(adult))
+    assert "blue" in adult.slots and adult.slots["blue"].revision == PREV
+    assert not any(e[0] == "previous-eligibility-not-required" for e in transaction.events)
+
+
+def test_non_adult_candidate_with_ineligible_previous_refuses_before_any_mutation():
+    from tests.test_r6_completion_capability import capable_candidate, capable_previous, raised
+    w = slot_world("blue")
+    raised(capable_previous(capable_candidate(w)))
+    w.ineligible_revisions.add(PREV)
+    code, transaction = run(w)
+    assert code == tx.EXIT_ROLLED_BACK
+    assert not set(MUTATIONS) & set(names(w))
+    assert transaction.adult_transition is False
+
+
+def test_first_adult_failure_before_closure_rolls_back_cleanly_without_demanding_legacy_eligibility(adult):
+    first_adult(adult).faults["direct_origin"] = True
+    code, transaction = run(adult)
+    assert code == tx.EXIT_ROLLED_BACK
+    assert "release_prepare" not in names(adult) and "slot_remove" not in names(adult)
+    assert adult.slots["blue"].revision == PREV
+    assert all(required is False for _, rev, required in adult.eligibility_checks if rev == PREV)
+
+
+def test_adult_delta_outside_adult_graph_is_refused(adult):
+    adult.faults["delta"] = {tx.ADULT_MIGRATION: "expand"}
+    adult.source_revisions["candidate"].discard(tx.ADULT_MIGRATION)
+    code, _ = run(adult)
+    assert code == tx.EXIT_ROLLED_BACK
+    assert not set(MUTATIONS) & set(names(adult))
+
+
+def test_host_slot_verify_never_waives_candidate_and_omits_flag_only_for_previous(tmp_path):
+    from tests.test_r6_deploy_transaction import Recorder, host
+    recorder = Recorder({" verify ": (0, json.dumps({"deep_health_revision": PREV}), "")})
+    ops = host(tmp_path, recorder)
+    ops.slot_verify("blue", PREV, 60, require_eligibility=False)
+    assert "--require-eligibility" not in recorder.calls[-1]
+    assert recorder.calls[-1][-1] == "--allow-existing-files"
+    with pytest.raises(tx.OpError, match="verify failed"):
+        ops.slot_verify("blue", PREV, 60)            # default still requires eligibility_enforced
+    calls = len(recorder.calls)
+    with pytest.raises(tx.OpError, match="cannot be waived"):
+        ops.slot_verify("green", CAND, 60, require_eligibility=False)
+    assert len(recorder.calls) == calls              # refused before any host command
+
+
+def test_non_adult_legacy_route_with_ineligible_previous_refuses_before_any_mutation():
+    from tests.test_r6_deploy_transaction import first_cutover_world
+    w = first_cutover_world()
+    w.ineligible_revisions.add(PREV)
+    code, transaction = run(w)
+    assert code == tx.EXIT_ROLLED_BACK
+    assert not set(MUTATIONS) & set(names(w))
+    assert transaction.previous_eligibility_proven is False
+    assert any(c[0] == "container_deep_health_revision" for c in w.calls)
+
+
+def test_non_adult_rollback_reverifies_previous_with_eligibility():
+    from tests.test_r6_completion_capability import capable_candidate, capable_previous, raised
+    w = slot_world("blue", public=True)
+    raised(capable_previous(capable_candidate(w)))
+    w.faults["verify_fail_on"] = ("green", 2)          # candidate fails after switch
+    code, transaction = run(w)
+    assert code == tx.EXIT_ROLLED_BACK and w.route == "blue"
+    assert transaction.previous_eligibility_proven is True
+    prev = [required for _, rev, required in w.eligibility_checks if rev == PREV]
+    # baseline identity proof (deferred) -> strict gate -> strict rollback re-verifies
+    assert prev[0] is False and len(prev) >= 3 and all(prev[1:])

@@ -146,6 +146,16 @@ def test_a_recovery_with_a_healthy_previous_keeps_the_full_rollback():
     assert world.worker.revision == PREV and "blue" not in world.slots
 
 
+def test_a_recovery_rollback_keeps_strict_previous_eligibility():
+    """The recovery baseline proves the previous web WITH eligibility, so every
+    rollback re-verify of it must still require eligibility (first-adult fix)."""
+    world = migrated(r1_world(worker_unhealthy=True))
+    code, transaction = recover(world)
+    assert code == tx.EXIT_ROLLED_BACK and transaction.previous_eligibility_proven
+    prev = [required for _, rev, required in world.eligibility_checks if rev == PREV]
+    assert len(prev) >= 2 and all(prev)
+
+
 # ── B. green dies BEFORE migration ──────────────────────────────────────────
 
 def test_b_normal_run_refuses_a_dead_previous_before_any_mutation():
