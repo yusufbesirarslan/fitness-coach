@@ -635,6 +635,8 @@ class HostOps:
                             "/app/BUILD_REVISION").strip()
 
     def container_deep_health_revision(self, container_id, timeout, *, require_eligibility=True):
+        # Legacy (main-project) PREVIOUS web only; candidates are always verified
+        # through slot_verify, which refuses an eligibility waiver for deploy_sha.
         out = self._docker(timeout, "exec", container_id, "python3", "-c",
                            _DEEP_PROBE_CODE)
         try:
@@ -1444,6 +1446,8 @@ class Transaction:
                            if isinstance(identity, str) and identity else None)
                 self.previous_web_image_id = serving.image_id if serving else None
                 web_proven = True
+                # Proven with the default strict eligibility: rollback keeps that level.
+                self.previous_eligibility_proven = True
             except (OpError, StepFailed) as exc:
                 self._event("previous-web-unproven", slot=route.state,
                             reason=str(exc)[:200])

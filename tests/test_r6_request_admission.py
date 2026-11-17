@@ -124,7 +124,8 @@ def test_concurrent_retained_web_drift_cannot_be_reopened(monkeypatch, active):
         return real_get(self, url, timeout)
 
     def verify(self, slot, revision, timeout, **kw):
-        if revision == PREV and unsafe["value"]:
+        # Eligibility drift only: a verify that does not require it still passes.
+        if revision == PREV and unsafe["value"] and kw.get("require_eligibility", True):
             raise tx.OpError("retained loaded eligibility off")
         return real_verify(self, slot, revision, timeout, **kw)
 
@@ -148,7 +149,7 @@ def test_legacy_rollback_reverifies_before_route_restore(monkeypatch):
     real_verify = FakeOps.container_deep_health_revision
 
     def verify(self, cid, timeout, **kw):
-        if world.route == "blue":
+        if world.route == "blue" and kw.get("require_eligibility", True):
             raise tx.OpError("retained loaded eligibility off")
         return real_verify(self, cid, timeout, **kw)
 

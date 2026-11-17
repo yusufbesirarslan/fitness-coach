@@ -293,3 +293,26 @@ def test_host_slot_verify_never_waives_candidate_and_omits_flag_only_for_previou
     with pytest.raises(tx.OpError, match="cannot be waived"):
         ops.slot_verify("green", CAND, 60, require_eligibility=False)
     assert len(recorder.calls) == calls              # refused before any host command
+
+
+def test_non_adult_legacy_route_with_ineligible_previous_refuses_before_any_mutation():
+    from tests.test_r6_deploy_transaction import first_cutover_world
+    w = first_cutover_world()
+    w.ineligible_revisions.add(PREV)
+    code, transaction = run(w)
+    assert code == tx.EXIT_ROLLED_BACK
+    assert not set(MUTATIONS) & set(names(w))
+    assert transaction.previous_eligibility_proven is False
+    assert any(c[0] == "container_deep_health_revision" for c in w.calls)
+
+
+def test_non_adult_rollback_reverifies_previous_with_eligibility():
+    from tests.test_r6_completion_capability import capable_candidate, capable_previous, raised
+    w = slot_world("blue", public=True)
+    raised(capable_previous(capable_candidate(w)))
+    w.faults["verify_fail_on"] = ("green", 2)          # candidate fails after switch
+    code, transaction = run(w)
+    assert transaction.previous_eligibility_proven is True
+    prev = [required for _, rev, required in w.eligibility_checks if rev == PREV]
+    # baseline identity proof (deferred) -> strict gate -> strict rollback re-verifies
+    assert prev[0] is False and len(prev) >= 3 and all(prev[1:])
