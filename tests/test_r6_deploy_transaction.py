@@ -79,6 +79,10 @@ class World:
     now: float = 1000.0
     calls: list = field(default_factory=list)
     faults: dict = field(default_factory=dict)
+    # Revisions whose loaded web reports eligibility_enforced != True, and every
+    # (slot, revision, require_eligibility) verification the transaction made.
+    ineligible_revisions: set = field(default_factory=set)
+    eligibility_checks: list = field(default_factory=list)
     counter: int = 0
     events: list = field(default_factory=list)
     # PRIV-K6 Layer B: image id -> baked manifest; "candidate"/"previous" ->
@@ -252,11 +256,13 @@ class FakeOps:
             raise tx.OpError("container is not running")
         return box.revision
 
-    def container_deep_health_revision(self, container_id, timeout):
+    def container_deep_health_revision(self, container_id, timeout, *, require_eligibility=True):
         self._rec("container_deep_health_revision", container_id, timeout=timeout)
         box = self._box(container_id)
         if box is None or not box.deep_ok or self.w.fault("legacy_deep"):
             raise tx.OpError("deep health is not ok")
+        if require_eligibility and box.revision in self.w.ineligible_revisions:
+            raise tx.OpError("loaded account eligibility enforcement is unproven")
         return box.revision
 
     def slot_start(self, slot, revision, timeout):
@@ -280,8 +286,9 @@ class FakeOps:
         self.w.slots[slot] = box
         return {"action": "started"}
 
-    def slot_verify(self, slot, revision, timeout):
+    def slot_verify(self, slot, revision, timeout, *, require_eligibility=True):
         self._rec("slot_verify", slot, revision, timeout=timeout)
+        self.w.eligibility_checks.append((slot, revision, require_eligibility))
         box = self.w.slots.get(slot)
         n = len([c for c in self.w.calls if c[:2] == ("slot_verify", slot)])
         if box is None or box.revision != revision or box.status != "running" \
@@ -289,6 +296,8 @@ class FakeOps:
             raise tx.OpError("verify failed (exit 4)")
         if self.w.faults.get("verify_fail_on") == (slot, n):
             raise tx.OpError("verify failed (exit 4)")
+        if require_eligibility and revision in self.w.ineligible_revisions:
+            raise tx.OpError("verify failed (exit 4): eligibility unproven")
         return {"deep_health_revision": revision, "container": {"id": box.id}}
 
     def slot_inspect(self, slot, timeout):
@@ -783,10 +792,10 @@ def test_previous_web_failing_re_verification_keeps_the_candidate():
     world = first_cutover_world(public=True)
     original = FakeOps.container_deep_health_revision
 
-    def flaky(self, container_id, timeout):
+    def flaky(self, container_id, timeout, **kw):
         if ("route_switch", "legacy") in self.w.calls:
             raise tx.OpError("deep health is not ok")
-        return original(self, container_id, timeout)
+        return original(self, container_id, timeout, **kw)
 
     FakeOps.container_deep_health_revision = flaky
     try:

@@ -287,8 +287,8 @@ def test_previous_with_an_unknown_image_identity_is_never_capable():
     world = raised(capable_previous(capable_candidate(slot_world("blue", public=True))))
 
     class NoIdentity(FenceOps):
-        def slot_verify(self, slot, revision, timeout):
-            proof = super().slot_verify(slot, revision, timeout)
+        def slot_verify(self, slot, revision, timeout, **kw):
+            proof = super().slot_verify(slot, revision, timeout, **kw)
             return {**proof, "container": {}} if slot == "blue" and \
                 "build_image" not in names(self.w) else proof
 

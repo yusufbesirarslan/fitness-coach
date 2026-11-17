@@ -15,6 +15,18 @@ helper parity, overlap classification, immutable images and capability gates.
 1. Prove the normal existing loaded baseline, or the existing independently
    authorized forward-recovery baseline/schema predicates. Build/prove the
    exact candidate and pin the old worker image before the interruption.
+   The previous release's LOADED eligibility is proven after the migration
+   gate and before any mutation, except on the FIRST adult transition
+   (`ad17de1e0001` is in the migration delta, i.e. the previous source predates
+   it): that release cannot carry the adult rules, enabling the flag there would
+   switch on its legacy pre-18+ rules, and this sequence removes its web and
+   worker before migration and never restores them. Its identity/health/revision
+   is still proven; only `--require-eligibility` is deferred for it and the
+   transaction records `previous-eligibility-not-required`. The candidate's
+   eligibility proof can never be waived, and every later release (adult graph
+   already in the previous source) and every non-adult release still require
+   the previous release's loaded eligibility. Rollback before closure verifies
+   the previous web only to the level the baseline proved.
 2. Inspect the complete nginx include tree and all public TCP listeners,
    canonical app proxies (all hostnames, IP/IPv6 and paths), container
    published ports and web identities. Unknown/direct origins refuse before

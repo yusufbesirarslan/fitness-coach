@@ -76,10 +76,10 @@ def test_unqualified_previous_refuses_before_image_or_release_preparation(monkey
     world = slot_world(active)
     real_verify = FakeOps.slot_verify
 
-    def verify(self, slot, revision, timeout):
-        if revision == PREV:
+    def verify(self, slot, revision, timeout, *, require_eligibility=True):
+        if revision == PREV and require_eligibility:
             raise tx.OpError("loaded eligibility off")
-        return real_verify(self, slot, revision, timeout)
+        return real_verify(self, slot, revision, timeout, require_eligibility=require_eligibility)
 
     monkeypatch.setattr(FakeOps, "slot_verify", verify)
     code, _ = run(world)
@@ -93,10 +93,10 @@ def test_unqualified_candidate_never_gets_a_route(monkeypatch, active):
     world = slot_world(active)
     real_verify = FakeOps.slot_verify
 
-    def verify(self, slot, revision, timeout):
+    def verify(self, slot, revision, timeout, **kw):
         if revision == CAND:
             raise tx.OpError("loaded eligibility off")
-        return real_verify(self, slot, revision, timeout)
+        return real_verify(self, slot, revision, timeout, **kw)
 
     monkeypatch.setattr(FakeOps, "slot_verify", verify)
     code, _ = run(world)
@@ -123,10 +123,10 @@ def test_concurrent_retained_web_drift_cannot_be_reopened(monkeypatch, active):
             assert drifted.wait(5)
         return real_get(self, url, timeout)
 
-    def verify(self, slot, revision, timeout):
+    def verify(self, slot, revision, timeout, **kw):
         if revision == PREV and unsafe["value"]:
             raise tx.OpError("retained loaded eligibility off")
-        return real_verify(self, slot, revision, timeout)
+        return real_verify(self, slot, revision, timeout, **kw)
 
     monkeypatch.setattr(FakeOps, "http_get", get)
     monkeypatch.setattr(FakeOps, "slot_verify", verify)
@@ -147,10 +147,10 @@ def test_legacy_rollback_reverifies_before_route_restore(monkeypatch):
     world = first_cutover_world(public=True)
     real_verify = FakeOps.container_deep_health_revision
 
-    def verify(self, cid, timeout):
+    def verify(self, cid, timeout, **kw):
         if world.route == "blue":
             raise tx.OpError("retained loaded eligibility off")
-        return real_verify(self, cid, timeout)
+        return real_verify(self, cid, timeout, **kw)
 
     monkeypatch.setattr(FakeOps, "container_deep_health_revision", verify)
     code, _ = run(world)
