@@ -312,6 +312,7 @@ def test_non_adult_rollback_reverifies_previous_with_eligibility():
     raised(capable_previous(capable_candidate(w)))
     w.faults["verify_fail_on"] = ("green", 2)          # candidate fails after switch
     code, transaction = run(w)
+    assert code == tx.EXIT_ROLLED_BACK and w.route == "blue"
     assert transaction.previous_eligibility_proven is True
     prev = [required for _, rev, required in w.eligibility_checks if rev == PREV]
     # baseline identity proof (deferred) -> strict gate -> strict rollback re-verifies
