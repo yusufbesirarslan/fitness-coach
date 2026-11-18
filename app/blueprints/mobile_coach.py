@@ -38,7 +38,8 @@ from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services import (
-    ai, ai_consent, ai_provider_call, ai_recovery, coach_plan_tools, mobile_coach,
+    ai, ai_consent, ai_provider_call, ai_recovery, coach_confirmation,
+    coach_plan_tools, mobile_coach,
 )
 from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services.ai_pipeline import generate_answer
@@ -247,6 +248,63 @@ def _send_authorized_turn(user, question, handoff):
         plan_effects=coach_plan_tools.turn_plan_effects(user_id))
     from app.consent_publication import protect_response
     return protect_response(_with_deferred_summary(jsonify(payload), result))
+
+
+_CONFIRMATION_KEYS = frozenset({"proposal_id", "decision"})
+#: Deterministic and provider-free, so not the AI ceilings: generous enough
+#: for a double-tap and a retry, small enough to make id-guessing pointless.
+PLAN_CONFIRMATION_RATELIMIT = "20 per minute"
+_CONFIRMATION_ERRORS = {
+    400: ("COACH_INVALID_REQUEST", "Invalid request.", False),
+    404: ("COACH_PLAN_CONFIRMATION_UNAVAILABLE",
+          "Plan changes are not available.", False),
+    409: ("COACH_PLAN_CONFIRMATION_STALE",
+          "This change is no longer waiting for confirmation.", False),
+    503: ("COACH_PLAN_CONFIRMATION_FAILED",
+          "The change could not be completed. Try again.", True),
+}
+
+
+@bp.post("/coach/plan-confirmation")
+@require_mobile_auth
+def resolve_plan_confirmation():
+    """The native Confirm/Cancel button for ONE pending training-plan change.
+
+    Adaptive Coach Foundation B2. No model, no Coach turn, no chat allowance,
+    no cooldown: the user's answer is structural, and the server already owns
+    what it applies. The write runs under the D1 authority that PROPOSED the
+    change (``coach_plan_tools.execute_direct_confirmation``), so a revoked or
+    changed Coach permission refuses it exactly as a typed "yes" would.
+    """
+    after_this_request(_discard_cookie_session_writes)
+    user = g.mobile_user
+    try:
+        with limiter.limit(PLAN_CONFIRMATION_RATELIMIT, key_func=_owner_key,
+                           scope="coach_plan_confirmation"):
+            pass
+    except RateLimitExceeded as error:
+        return mobile_error(
+            "COACH_RATE_LIMITED", "Too many requests.", 429, True,
+            retry_after=error.limit.limit.get_expiry())
+    data = request.get_json(silent=True)
+    if (not isinstance(data, dict) or set(data) != _CONFIRMATION_KEYS
+            or not isinstance(data["proposal_id"], str)
+            or not isinstance(data["decision"], str)):
+        return mobile_error(
+            "COACH_INVALID_REQUEST", "Invalid request.", 400, False)
+    try:
+        result = coach_plan_tools.execute_direct_confirmation(
+            user.id, data["proposal_id"], data["decision"])
+    except ai_consent.ConsentDenied as error:
+        db.session.rollback()
+        return consent_error_response(error)
+    message = coach_confirmation.direct_resolution_reply(result, user.language)
+    body, status = mobile_coach.direct_confirmation_response(
+        result, message, coach_plan_tools.turn_plan_effects(user.id))
+    if body is not None:
+        return jsonify(body)
+    code, text, retryable = _CONFIRMATION_ERRORS[status]
+    return mobile_error(code, text, status, retryable)
 
 
 @bp.get("/coach/history")

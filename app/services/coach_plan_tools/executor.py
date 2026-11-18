@@ -43,6 +43,7 @@ from app.services.coach_plan_policy import (
 )
 from app.services.plan_confirmation import (
     STATUS_APPLIED,
+    STATUS_CANCELLED,
     STATUS_PENDING,
     STATUS_STALE,
     PendingConfirmationConflict,
@@ -131,6 +132,10 @@ _PROPOSAL_ATTR = "_coach_plan_proposal_created"
 _NEW_PROPOSAL_ATTR = "_coach_plan_new_proposal_created"
 _INTENT_ATTR = "_coach_plan_confirmation_intent"
 _PLAN_TOOL_ATTEMPTED_ATTR = "_coach_plan_tool_attempted"
+#: B2: the exact proposal a native Confirm/Cancel button names. Set only by
+#: ``execute_direct_confirmation``; its presence also means "no Coach turn, no
+#: active operation — re-enter the proposing authority before any write".
+_DIRECT_PROPOSAL_ATTR = "_coach_plan_direct_proposal"
 
 
 _USER_MSG_ATTR = "_coach_plan_user_message"
@@ -438,6 +443,54 @@ def execute_plan_tool(user_id, name, arguments):
     return payload
 
 
+#: The two answers a native client may send. Anything else is refused before
+#: any read.
+DIRECT_CONFIRM = "confirm"
+DIRECT_CANCEL = "cancel"
+_DIRECT_INTENTS = {DIRECT_CONFIRM: CONFIRM, DIRECT_CANCEL: CANCEL}
+_PROPOSAL_ID_MAX = 64  # TrainingPlanConfirmationProposal.public_id column
+
+
+def execute_direct_confirmation(user_id, proposal_id, decision):
+    """Confirm or cancel ONE named pending proposal without a Coach turn.
+
+    Adaptive Coach Foundation B2. The app's Confirm/Cancel button is the
+    user's structural answer, so it needs no model to interpret it and spends
+    no chat allowance. It runs the same confirm/cancel code as a typed "evet"
+    — proposal-row lock, journal replay, stale binding, undo — with two
+    differences: the decision comes from the request, not parsed prose, and
+    the proposal is the one the client names. A retry after success replays
+    the journal row; a superseded or foreign id is never resolved.
+    """
+    intent = _DIRECT_INTENTS.get(decision) if isinstance(decision, str) else None
+    if (intent is None or not isinstance(proposal_id, str) or not proposal_id
+            or len(proposal_id) > _PROPOSAL_ID_MAX):
+        return results.error_result(
+            results.ERROR_INVALID_ARGUMENTS, "geçersiz onay isteği")
+    _begin_direct_turn(user_id, intent, proposal_id)
+    name = CONFIRM_TOOL if intent == CONFIRM else CANCEL_PENDING_TOOL
+    return execute_plan_tool(user_id, name, {})
+
+
+def _begin_direct_turn(user_id, intent, proposal_id):
+    """``begin_turn`` minus prose grounding: there is no user message."""
+    setattr(g, _BUDGET_ATTR, [])
+    setattr(g, _CHANGED_ATTR, False)
+    setattr(g, _PROPOSAL_ATTR, False)
+    setattr(g, _NEW_PROPOSAL_ATTR, False)
+    setattr(g, _INTENT_ATTR, intent)
+    setattr(g, _PLAN_TOOL_ATTEMPTED_ATTR, False)
+    setattr(g, _USER_ID_ATTR, user_id)
+    setattr(g, _DIRECT_PROPOSAL_ATTR, proposal_id)
+
+
+def _direct_proposal_id():
+    try:
+        return getattr(g, _DIRECT_PROPOSAL_ATTR, None)
+    except RuntimeError:
+        return None
+
+
 def _mark_plan_changed(payload):
     """Record that persisted plan state moved, for the degraded-turn wording.
 
@@ -674,10 +727,13 @@ def _confirm_pending(user_id):
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
     if new_proposal_created_this_turn():
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
-    pending = get_pending(user_id)
-    if pending is None:
-        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
-    row = lock_proposal(user_id, pending.public_id)
+    public_id = _direct_proposal_id()
+    if public_id is None:
+        pending = get_pending(user_id)
+        if pending is None:
+            return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
+        public_id = pending.public_id
+    row = lock_proposal(user_id, public_id)
     if row is None:
         return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     key = confirmation_operation_key(row.public_id)
@@ -763,8 +819,12 @@ def _cancel_pending(user_id):
     """
     if current_confirmation_intent() != CANCEL:
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
-    row = lock_latest_proposal(user_id)
+    named = _direct_proposal_id()
+    row = (lock_latest_proposal(user_id) if named is None
+           else lock_proposal(user_id, named))
     if row is None:
+        if named is not None:
+            return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
         return results.cancelled_pending_result()
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
@@ -779,17 +839,34 @@ def _cancel_pending(user_id):
                 # proposal is never executable, even through idempotent PMS.
                 return _resolved_replay_result(row, already)
             db.session.rollback()
-            return results.cancelled_pending_result()
+            return _resolved_cancel_result(row, named)
         if row.status == STATUS_PENDING:
             mark_applied(user_id, row.public_id)
+            if named is not None:
+                # Its change already committed: "cancelled" would be false.
+                return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
         else:
             db.session.rollback()
+            return _resolved_cancel_result(row, named)
         return results.cancelled_pending_result()
     if row.status != STATUS_PENDING:
         db.session.rollback()
-        return results.cancelled_pending_result()
+        return _resolved_cancel_result(row, named)
     cancel_pending(user_id)
     return results.cancelled_pending_result()
+
+
+def _resolved_cancel_result(row, named):
+    """A cancel that found the proposal already resolved.
+
+    The typed path keeps its "nothing pending to cancel" answer. A button that
+    named THIS proposal is told "cancelled" only if it really was cancelled
+    (a replayed tap); applied, stale or superseded is a 409, never a claim
+    that the plan was left unchanged.
+    """
+    if named is None or row.status == STATUS_CANCELLED:
+        return results.cancelled_pending_result()
+    return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
 
 
 def _apply_confirmed(user_id, pending):
@@ -797,9 +874,11 @@ def _apply_confirmed(user_id, pending):
 
     Inside an AI operation the command is applied under the authority that
     PROPOSED it (D1 LP21): revoke -> regrant between proposal and "yes" never
-    revives it, and a proposal without that authority is stale.
+    revives it, and a proposal without that authority is stale. The native
+    button (B2) has no operation of its own, so it ALWAYS takes this path:
+    no stored authority, no write.
     """
-    if ai_consent.current_operation() is None:
+    if ai_consent.current_operation() is None and _direct_proposal_id() is None:
         return _apply_confirmed_now(user_id, pending)
     if find_by_key(user_id, confirmation_operation_key(pending.public_id)) is not None:
         # Already committed (crash before mark_applied): reconcile through the

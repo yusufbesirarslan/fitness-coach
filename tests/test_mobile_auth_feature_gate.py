@@ -74,6 +74,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("put", "/api/v1/account/language"),
         ("post", "/api/v1/coach/messages"),
         ("get", "/api/v1/coach/history"),
+        ("post", "/api/v1/coach/plan-confirmation"),
         ("delete", "/api/v1/account"),
         ("get", "/api/v1/nutrition/diary/today"),
         ("get", "/api/v1/nutrition/day-view"),
@@ -233,6 +234,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # on this blueprint for its gate, envelope and no-store.
             ("/api/v1/coach/messages", ("POST",)),
             ("/api/v1/coach/history", ("GET",)),
+            # Adaptive Coach B2: deterministic Confirm/Cancel of the one
+            # pending plan change. No model, no allowance; same gate/envelope.
+            ("/api/v1/coach/plan-confirmation", ("POST",)),
             # Sprint 12 PR3. Canonical Today read; on this blueprint so it cannot
             # become an ungated parallel mobile surface.
             ("/api/v1/today", ("GET",)),
