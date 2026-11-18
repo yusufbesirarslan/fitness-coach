@@ -156,7 +156,10 @@ def test_name_is_html_escaped_in_every_language(kind, lang):
     # Tek <img> statik marka işaretidir; saldırgan isim asla etiket olmaz.
     assert "<img src=x" not in html and "onerror=alert(1)>" not in html
     assert html.count("<img") == 1
-    assert "&lt;img" in html
+    if kind == "verification":
+        assert "&lt;img" not in html  # neutral greeting; no supplied name is rendered
+    else:
+        assert "&lt;img" in html
 
 
 @pytest.mark.parametrize("lang", ["en", "tr"])

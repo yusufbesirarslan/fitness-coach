@@ -9,7 +9,9 @@ lib/app/theme/axisai_tokens.dart): renkler AxisAiPalette'in açık/koyu
 token'larının birebir değerleridir. Eski Aurora Axis (mor/camgöbeği, "AXIS·AI")
 paleti emekliye ayrıldı (BRAND-1). Açık tema satır-içi varsayılandır; koyu tema
 `prefers-color-scheme` destekleyen istemcilerde (Apple Mail, iOS Mail) <style>
-ile gelir, desteklemeyen istemci okunaklı açık temada kalır. Tüm temel stiller
+ile gelir, desteklemeyen istemci okunaklı açık temada kalır. Doğrulama e-postası
+her iki modda da mobil token'larıyla koyu kart kullanır; diğer şablonlar değişmez.
+Tüm temel stiller
 e-posta istemcisi uyumluluğu için satır içidir. Her şablon (subject, html, text)
 döndürür; düz-metin alternatifi HTML ile daima birlikte gider.
 
@@ -136,11 +138,14 @@ def _preheader(text):
 
 
 def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
-                         language=DEFAULT_LANGUAGE, preheader=""):
+                         language=DEFAULT_LANGUAGE, preheader="", *, verification=False):
     """İçeriği ortak AxisAI kabuğuna sar; tam HTML dokümanı döndürür."""
+    surface = _DARK_SURFACE if verification else _SURFACE
+    text = _DARK_TEXT if verification else _TEXT
+    muted = _DARK_MUTED if verification else _MUTED
     social = " &nbsp;&middot;&nbsp; ".join(
         '<a class="ax-muted" href="%s" style="color:%s;text-decoration:underline">%s</a>'
-        % (url, _MUTED, name)
+        % (url, muted, name)
         for name, url in _SOCIAL_LINKS
     )
     return (
@@ -165,10 +170,10 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
         ' border="0"><tr><td><![endif]-->'
         '<table role="presentation" class="ax-card" width="100%%" cellpadding="0"'
         ' cellspacing="0" border="0" bgcolor="%(surface)s" style="max-width:560px;'
-        'background-color:%(surface)s;border:1px solid %(border)s;border-radius:24px;'
+        'background-color:%(surface)s;border:%(card_border)s;border-radius:24px;'
         'font-family:%(font)s">'
         # Marka kilidi: işaret + ad, aradaki boşluk işaretin 0.2 katı (BrandMark).
-        '<tr><td class="ax-pad" style="padding:32px 32px 8px">'
+        '<tr><td class="ax-pad" style="padding:%(brand_pad)s">'
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
         '<td style="vertical-align:middle;padding:0 8px 0 0">'
         '<img src="%(mark)s" width="40" height="40" alt=""'
@@ -178,21 +183,21 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
         'color:%(text)s">AxisAI</td>'
         '</tr></table>'
         '</td></tr>'
-        '<tr><td class="ax-pad ax-text" style="padding:24px 32px 8px;color:%(text)s;'
+        '<tr><td class="ax-pad ax-text" style="padding:%(body_pad)s;color:%(text)s;'
         'font-family:%(font)s;font-size:16px;line-height:24px">'
         '%(body)s'
         '</td></tr>'
-        '<tr><td class="ax-pad" style="padding:8px 32px 32px">'
-        '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
+        '<tr><td class="ax-pad" style="padding:%(cta_pad)s">'
+        '<table role="presentation"%(cta_width)s cellpadding="0" cellspacing="0" border="0"><tr>'
         '<td bgcolor="%(axis)s" style="border-radius:16px;background-color:%(axis)s;'
         'mso-padding-alt:15px 28px">'
-        '<a href="%(cta_url)s" style="display:inline-block;padding:15px 28px;'
+        '<a href="%(cta_url)s" style="display:%(cta_display)s;padding:15px 28px;%(cta_align)s'
         'font-family:%(font)s;font-size:16px;line-height:22px;font-weight:600;'
         'color:%(on_axis)s;text-decoration:none;border-radius:16px">%(cta_label)s</a>'
         '</td></tr></table>'
         '</td></tr>'
-        '<tr><td class="ax-pad ax-muted ax-rule" style="padding:24px 32px 32px;'
-        'border-top:1px solid %(border)s;color:%(muted)s;font-family:%(font)s;'
+        '<tr><td class="ax-pad ax-muted ax-rule" style="padding:%(footer_pad)s;'
+        'border-top:%(rule)s;color:%(muted)s;font-family:%(font)s;'
         'font-size:13px;line-height:20px">'
         '%(footer_extra)s'
         '<div>%(social)s</div>'
@@ -202,8 +207,17 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
         '<!--[if mso]></td></tr></table><![endif]-->'
         '</td></tr></table></body></html>'
     ) % {
-        "canvas": _CANVAS, "surface": _SURFACE, "border": _BORDER, "text": _TEXT,
-        "muted": _MUTED, "axis": _AXIS, "on_axis": _ON_AXIS, "font": _FONT,
+        "canvas": _CANVAS, "surface": surface, "text": text,
+        "muted": muted, "axis": _AXIS, "on_axis": _ON_AXIS, "font": _FONT,
+        "card_border": "0" if verification else "1px solid " + _BORDER,
+        "rule": "0" if verification else "1px solid " + _BORDER,
+        "brand_pad": "40px 40px 8px" if verification else "32px 32px 8px",
+        "body_pad": "24px 40px 8px" if verification else "24px 32px 8px",
+        "cta_pad": "0 40px 24px" if verification else "8px 32px 32px",
+        "footer_pad": "0 40px 32px" if verification else "24px 32px 32px",
+        "cta_width": ' width="100%"' if verification else "",
+        "cta_display": "block" if verification else "inline-block",
+        "cta_align": "text-align:center;" if verification else "",
         "mark": BRAND_MARK_URL, "head_styles": _HEAD_STYLES,
         "preheader": _preheader(preheader), "body": body_html,
         "cta_label": cta_label, "cta_url": cta_url,
@@ -212,19 +226,26 @@ def render_branded_email(body_html, cta_label, cta_url, footer_extra_html="",
     }
 
 
-def _code_block(code, label):
+def _code_block(code, label, *, verification=False):
     """Tek kullanımlık kodu belirgin göster: büyük, aralıklı, eş-aralıklı rakamlar."""
     return (
         '<div class="ax-code" style="margin:0 0 20px;background-color:%(surface_2)s;'
-        'border:1px solid %(border)s;border-radius:16px;padding:16px 20px;'
+        'border:%(border)s;border-radius:16px;padding:%(padding)s;'
         'text-align:center">'
         '<div class="ax-muted" style="color:%(muted)s;font-size:13px;line-height:18px;'
         'font-weight:500">%(label)s</div>'
         # padding-left = letter-spacing: son rakamın ardındaki boşluğu dengeler.
-        '<div class="ax-text ax-digits" style="padding:6px 0 0 8px;font-family:%(mono)s;font-size:32px;'
-        'line-height:40px;letter-spacing:8px;font-weight:700;color:%(text)s">%(code)s</div>'
+        '<div class="ax-text ax-digits" style="padding:6px 0 0 %(tracking)s;font-family:%(mono)s;font-size:%(size)s;'
+        'line-height:%(line)s;letter-spacing:%(tracking)s;font-weight:700;color:%(text)s">%(code)s</div>'
         '</div>'
-    ) % {"surface_2": _SURFACE_2, "border": _BORDER, "muted": _MUTED, "text": _TEXT,
+    ) % {"surface_2": _DARK_SURFACE_2 if verification else _SURFACE_2,
+         "border": "0" if verification else "1px solid " + _BORDER,
+         "padding": "24px 8px" if verification else "16px 20px",
+         "muted": _DARK_MUTED if verification else _MUTED,
+         "text": _DARK_TEXT if verification else _TEXT,
+         "size": "40px" if verification else "32px",
+         "line": "48px" if verification else "40px",
+         "tracking": "6px" if verification else "8px",
          "mono": _MONO, "label": label, "code": _html.escape(str(code))}
 
 
@@ -390,7 +411,25 @@ def _code_email(kind, name, code, language, path):
 
 def verification_code_email(name, code, language=None):
     """Kayıt/yeniden-gönderim doğrulama kodu e-postası. (subject, html, text) döndürür."""
-    return _code_email("verification", name, code, language, "/verify")
+    lang = _lang(language)
+    copy = _COPY[lang]["verification"]
+    # Before onboarding, Cognito's name/userName can be an internal identifier.
+    # A neutral greeting avoids exposing it without changing account attributes.
+    greet = _COPY[lang]["greet"]
+    lead = "%s %s" % (greet, copy["intro"])
+    text = copy["text"] % {"greet": greet, "code": code, "base": APP_BASE_URL}
+    body_html = (
+        '<h1 class="ax-text ax-h1" style="margin:0 0 16px;font-family:%s;'
+        'font-size:28px;line-height:34px;font-weight:700;letter-spacing:-0.2px;'
+        'color:%s">%s</h1>' % (_FONT, _DARK_TEXT, copy["title"])
+        + _P % lead + _code_block(code, copy["code_label"], verification=True)
+    )
+    note = ('<p class="ax-muted" style="margin:0 0 20px;color:%s;'
+            'font-size:14px;line-height:20px">%s</p>' % (_DARK_MUTED, copy["note"]))
+    html = render_branded_email(
+        body_html, copy["cta"], _html.escape(APP_BASE_URL + "/verify", quote=True),
+        footer_extra_html=note, language=lang, preheader=lead, verification=True)
+    return copy["subject"], html, text
 
 
 def reset_code_email(name, code, language=None):

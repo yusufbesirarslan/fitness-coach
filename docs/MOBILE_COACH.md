@@ -181,11 +181,29 @@ persistence and failure semantics are unchanged. See `docs/NUTRITION_VNEXT_PR7.m
 ## Plan effects (Adaptive Coach Foundation V1, additive)
 
 `POST /api/v1/coach/messages` 200 bodies carry
-`plan_effects: {"training_plan": {"changed": bool, "pending_confirmation": bool|null}}`.
+`plan_effects: {"training_plan": {"changed": bool, "pending_confirmation": bool|null, "proposal_id": str|null}}`.
 `changed` = this request applied/replayed a plan tool; `pending_confirmation`
 = a fresh owner-scoped read of the one PENDING proposal (`null` = could not
 be read, never "nothing pending"; always `false` with
-`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` OFF). Booleans only — never plan
-content, lineage, version or proposal id. `contract_version` stays 1; v1
-clients ignore the key. History is unchanged. See
+`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` OFF). `proposal_id` (B2) is the
+pending proposal's opaque owner-scoped public id, present only while
+`pending_confirmation` is `true`. Never plan content, lineage or version.
+`contract_version` stays 1; v1 clients ignore the key. History is unchanged.
+
+### Direct Confirm/Cancel (B2)
+
+`POST /api/v1/coach/plan-confirmation`, body exactly
+`{"proposal_id": str, "decision": "confirm"|"cancel"}`. No model, no Coach
+turn, no chat allowance, no cooldown; `20 per minute` per owner. It runs the
+same `coach_plan_tools` confirm/cancel code a typed "evet" runs (proposal row
+lock, journal replay, stale binding) for the NAMED proposal only, and a
+confirm applies under the D1 authority stored when the change was proposed:
+no stored authority, or a revoked/changed grant → the D1 refusal envelope
+(403/409/503) and nothing is written. 200 `{contract_version, outcome:
+applied|unchanged|cancelled, message, plan_effects}`; a repeated confirm
+replays (`applied`), never applies twice. 409
+`COACH_PLAN_CONFIRMATION_STALE` (gone/superseded/foreign id), 404
+`COACH_PLAN_CONFIRMATION_UNAVAILABLE` (flag OFF), 400
+`COACH_INVALID_REQUEST`, 503 `COACH_PLAN_CONFIRMATION_FAILED` (retryable).
+Typed answers in chat keep working unchanged. See
 docs/ADAPTIVE_COACH_FOUNDATION_V1.md.

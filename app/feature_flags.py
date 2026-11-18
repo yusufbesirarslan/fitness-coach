@@ -639,7 +639,11 @@ ROLLOUT_FLAGS = (
             "proposal writes."),
         owner=_OWNER,
         default=False,
-        depends_on=("AI_ADAPTIVE_PLAN_CONTEXT",),
+        # B2: independent. build_coach_system appends PLAN_MUTATION_POLICY to
+        # whichever base prompt is active, and nothing in the tool, read or
+        # confirmation path reads AI_ADAPTIVE_PLAN_CONTEXT
+        # (tests/test_adaptive_coach_b2.py pins the OFF/ON composition).
+        depends_on=(),
         observability=(
             "[COACH][PLAN_TOOL] request_id=... tool=... outcome={applied|no_op|"
             "replayed|<bounded error code>} — one PII-free line per tool call "
@@ -656,10 +660,10 @@ ROLLOUT_FLAGS = (
             "repeat delivery in one turn, undo, and a provider fallback after "
             "a tool has run",
             "RUNTIME_METRICS_ENABLED=1 with an AI provider baseline",
-            "a decision on AI_ADAPTIVE_PLAN_CONTEXT first — it owns which "
-            "system prompt the Coach runs, and the plan-mutation policy block "
-            "is appended to whichever one is active, so activating both in one "
-            "window makes a bad answer impossible to attribute",
+            "do not activate it in the same window as AI_ADAPTIVE_PLAN_CONTEXT: "
+            "the plan-mutation policy is appended to whichever base prompt is "
+            "active, so flipping both at once makes a bad answer impossible to "
+            "attribute (either order is valid; neither requires the other)",
         ),
         success_signals=(
             "no MUTATION_BUDGET_EXHAUSTED or IDEMPOTENCY_CONFLICT outcomes — "

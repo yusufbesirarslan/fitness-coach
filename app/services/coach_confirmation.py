@@ -399,6 +399,21 @@ def _asks_for_plan_confirmation(text):
     )
 
 
+def direct_resolution_reply(result, language="tr"):
+    """Server copy for a native Confirm/Cancel button result (B2).
+
+    The same sentences a typed "evet"/"hayır" produces, so both answers read
+    alike. Only resolved outcomes have copy; refusals are typed errors.
+    """
+    status = result.get("status")
+    if status in (results.STATUS_APPLIED, results.STATUS_REPLAYED,
+                  results.STATUS_NO_OP):
+        return str(_format_plan_applied(result, language))
+    if status == results.STATUS_CANCELLED:
+        return t("coach.confirm.cancelled", locale=language)
+    return None
+
+
 def _plan_pending(user_id):
     try:
         return plan_confirmation.get_pending(user_id)

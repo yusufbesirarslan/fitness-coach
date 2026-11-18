@@ -17,25 +17,31 @@ from .executor import (
 
 
 def turn_plan_effects(user_id):
-    """``{"changed": bool, "pending_confirmation": bool | None}``.
+    """``{"changed", "pending_confirmation", "proposal_id"}``.
 
     ``changed`` is this request's own durable evidence (applied/replayed only;
     fail-safe False). ``pending_confirmation`` is a fresh owner-scoped read of
     the one PENDING proposal: ``None`` when it cannot be read (unknown is never
     reported as "nothing pending"); always False with the flag OFF, because
     OFF writes no proposals and publishes no confirmation tools.
+    ``proposal_id`` (B2) is that proposal's opaque owner-scoped public id, the
+    only handle the native Confirm/Cancel button may send; ``None`` otherwise.
     """
     changed = plan_changed_this_turn()
     if not plan_mutation_tools_enabled():
-        return {"changed": changed, "pending_confirmation": False}
+        return {"changed": changed, "pending_confirmation": False,
+                "proposal_id": None}
     try:
-        pending = get_pending(user_id) is not None
+        row = get_pending(user_id)
+        pending = row is not None
+        proposal_id = row.public_id if pending else None
     except Exception:
         try:
             db.session.rollback()
         except Exception:
             pass
-        pending = None
+        pending, proposal_id = None, None
     finally:
         _settle_transaction()
-    return {"changed": changed, "pending_confirmation": pending}
+    return {"changed": changed, "pending_confirmation": pending,
+            "proposal_id": proposal_id}

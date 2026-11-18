@@ -46,6 +46,12 @@ yazı tipi). Gizli preheader HTML gelen-kutusu önizlemesini doldurur; HTML'den 
 çıkaran istemcide kod önizleme satırına düşmez (düz-metin parçası değişmedi). Eski Aurora Axis mor/camgöbeği paleti ve "AXIS·AI" wordmark'ı
 BRAND-1 (2026-10-26) ile emekliye ayrıldı.
 
+Doğrulama e-postası her iki modda da koyu mobil kartını kullanır; altı haneli
+kod daha büyük, CTA tam genişliktedir. Cognito'nun onboarding öncesi ad alanı
+dahili kullanıcı adı olabileceğinden HTML ve düz metinde nötr selamlama
+kullanılır. Diğer şablonların çıktısı değişmez. Önce/sonra önizlemeleri ve
+istemci doğrulama sınırları: [tasarım incelemesi](design/verification-email/README.md).
+
 ## Şifre sıfırlama akışı (Sprint 3'te eklendi)
 
 - `GET/POST /forgot-password` — kullanıcı adı alır, `cognito_service.forgot_password`
