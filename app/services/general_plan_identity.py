@@ -10,8 +10,8 @@ Two versioned templates exist. Neither changes the other's meaning:
 
 * ``general_full_body_v1`` — strength only: ``template``, ``gun_sayisi``,
   ``ekipman``. Its request body, fingerprint and content are unchanged.
-* ``general_full_body_cardio_v1`` — the same strength week plus dedicated
-  cardio days, adding the four canonical cardio preferences. Cardio is never
+* ``general_full_body_cardio_v1`` — the same strength week plus independent
+  cardio sessions, adding the four canonical cardio preferences. Cardio is never
   "none" here: a strength-only week is the v1 template, not this one.
 
 A receipt stores only the request fingerprint, never the template. Both
@@ -42,9 +42,8 @@ CARDIO_TYPES = frozenset({
 CARDIO_DURATIONS = frozenset({15, 20, 30, 45})
 CARDIO_INTENSITIES = frozenset({"dusuk", "orta", "yuksek", "karisik"})
 
-# A non-personalized template always keeps at least one full rest day, so
-# strength + cardio never fills the week (the AI matrix's ceiling is seven).
-MIN_REST_DAYS = 1
+# Cardio frequency is independent of strength, using the canonical 1..6 range.
+CARDIO_DAYS = tuple(range(1, 7))
 
 V1_FIELDS = frozenset({"template", "gun_sayisi", "ekipman"})
 CARDIO_FIELDS = V1_FIELDS | frozenset({
@@ -58,8 +57,8 @@ FINGERPRINT_DOMAIN = b"axisai:training-plan-general:v1\0"
 
 
 def cardio_day_choices(strength_days: int) -> tuple[int, ...]:
-    """The cardio day counts a strength week of this size can hold."""
-    return tuple(range(1, 7 - MIN_REST_DAYS - strength_days + 1))
+    """Independent cardio choices; unsupported strength templates remain closed."""
+    return CARDIO_DAYS if strength_days in STRENGTH_DAYS else ()
 
 
 def fingerprint(normalized: dict) -> str:

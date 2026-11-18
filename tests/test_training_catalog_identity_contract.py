@@ -425,15 +425,16 @@ def test_equipment_is_rechecked_even_for_a_member_id():
 # ── 8. Cardio placement ──────────────────────────────────────────────────────
 
 
-def test_cardio_id_on_a_training_day_is_refused_by_placement():
+def test_cardio_id_on_a_training_day_is_accepted_alongside_strength():
     context = ExerciseContext(equipment_context="ev", cardio_type="yuruyus")
-    week = _provider_week(exercises=[
-        _provider_exercise("ex_push_up"), _provider_exercise("ex_brisk_walk")])
-    validated, _ = validate_generated_plan(week, _prefs())
-
-    with pytest.raises(GenerationExerciseIncompatibleError) as caught:
-        canonicalize_generated_exercises(validated, compatible_exercise_choices(context))
-    assert caught.value.resolution_category == "cardio_placement"
+    prefs = _prefs(ekipman="ev", kardiyo_tipi="yuruyus", kardiyo_gun=3)
+    cardio = {**_provider_exercise("ex_brisk_walk", 1), "tekrar": "20 dk"}
+    week = _provider_week(exercises=[_provider_exercise("ex_push_up"), cardio],
+                          duration=65)
+    validated, _ = validate_generated_plan(week, prefs)
+    canonical = canonicalize_generated_exercises(
+        validated, compatible_exercise_choices(context))
+    assert canonical["program"][0]["egzersizler"][1]["isim"] == "Brisk Walk"
 
 
 def test_cardio_id_on_a_cardio_day_is_accepted_and_named_by_the_catalog():

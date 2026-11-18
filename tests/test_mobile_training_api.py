@@ -215,16 +215,6 @@ def test_preferences_publish_the_exact_canonical_rendering_contract(
                     "kardiyo_gun": [1, 2, 3, 4, 5, 6],
                 }],
             },
-            {
-                "status": "conflicting",
-                "reason": "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS",
-                "when_any": [
-                    {"gun_sayisi": [3], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [5, 6]},
-                    {"gun_sayisi": [4], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [4, 5, 6]},
-                    {"gun_sayisi": [5], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [3, 4, 5, 6]},
-                    {"gun_sayisi": [6], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [2, 3, 4, 5, 6]},
-                ],
-            },
         ],
     }
 
