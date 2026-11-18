@@ -43,6 +43,7 @@ from app.services.coach_plan_policy import (
 )
 from app.services.plan_confirmation import (
     STATUS_APPLIED,
+    STATUS_CANCELLED,
     STATUS_PENDING,
     STATUS_STALE,
     PendingConfirmationConflict,
@@ -838,17 +839,34 @@ def _cancel_pending(user_id):
                 # proposal is never executable, even through idempotent PMS.
                 return _resolved_replay_result(row, already)
             db.session.rollback()
-            return results.cancelled_pending_result()
+            return _resolved_cancel_result(row, named)
         if row.status == STATUS_PENDING:
             mark_applied(user_id, row.public_id)
+            if named is not None:
+                # Its change already committed: "cancelled" would be false.
+                return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
         else:
             db.session.rollback()
+            return _resolved_cancel_result(row, named)
         return results.cancelled_pending_result()
     if row.status != STATUS_PENDING:
         db.session.rollback()
-        return results.cancelled_pending_result()
+        return _resolved_cancel_result(row, named)
     cancel_pending(user_id)
     return results.cancelled_pending_result()
+
+
+def _resolved_cancel_result(row, named):
+    """A cancel that found the proposal already resolved.
+
+    The typed path keeps its "nothing pending to cancel" answer. A button that
+    named THIS proposal is told "cancelled" only if it really was cancelled
+    (a replayed tap); applied, stale or superseded is a 409, never a claim
+    that the plan was left unchanged.
+    """
+    if named is None or row.status == STATUS_CANCELLED:
+        return results.cancelled_pending_result()
+    return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
 
 
 def _apply_confirmed(user_id, pending):

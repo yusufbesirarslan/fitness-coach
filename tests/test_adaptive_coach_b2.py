@@ -148,6 +148,25 @@ def test_cancel_leaves_the_plan_and_a_later_confirm_is_stale(
     assert _monday(alice) == before and _journal(alice) == 0
 
 
+def test_a_repeated_cancel_replays_and_a_cancel_after_apply_is_stale(
+        app, mobile, alice, bearer, tools_on, fences, authority):
+    _seed(alice)
+    headers = bearer(alice)
+    cancelled = _stage(app, alice, authority)
+    for _ in range(2):  # a lost response retried: same truthful answer
+        again = _answer(mobile, headers, cancelled, "cancel")
+        assert again.status_code == 200
+        assert again.get_json()["outcome"] == "cancelled"
+
+    applied = _stage(app, alice, authority)
+    assert _answer(mobile, headers, applied, "confirm").status_code == 200
+    late = _answer(mobile, headers, applied, "cancel")
+    # Never "cancelled, plan unchanged" for a change that was applied.
+    assert late.status_code == 200
+    assert late.get_json()["outcome"] == "applied"
+    assert _journal(alice) == 1
+
+
 def test_another_users_proposal_id_resolves_nothing(
         app, mobile, alice, bob, bearer, tools_on, fences):
     _seed(alice)
@@ -172,6 +191,9 @@ def test_a_superseded_id_never_resolves_the_current_proposal(
 
     response = _answer(mobile, bearer(alice), first, "confirm")
     assert response.status_code == 409
+    # Re-cancelling the old card replays ITS cancel; the current one stays.
+    again = _answer(mobile, bearer(alice), first, "cancel")
+    assert again.get_json()["outcome"] == "cancelled"
     assert _proposal(alice).public_id == current
     assert _proposal(alice).status == "pending"
     assert "Shoulder Press" in _monday(alice)
