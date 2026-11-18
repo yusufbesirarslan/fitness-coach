@@ -39,8 +39,8 @@ Prompt only (`PROMPT_BODY` in `app/services/mobile_pump_checks/analysis.py`):
 
 Unchanged: schema `pump-check-analysis/v1`, quality tokens, validator, the
 single call, `max_tokens=600`, image preparation, model routing, consent,
-allowance, storage, comparison and mobile code. Cost: roughly 450 more input
-tokens per call (prompt about 1.5k → 3.5k characters), well inside the
+allowance, storage, comparison and mobile code. Cost: roughly 700 more input
+tokens per call (measured) (prompt about 1.5k → 3.5k characters), well inside the
 `pump_check` physical reservation (12,000 input tokens per attempt).
 
 ## Evidence
@@ -50,10 +50,19 @@ tokens per call (prompt about 1.5k → 3.5k characters), well inside the
   empty lists) pass the unchanged validator. This is **not** quality evidence.
 - Mobile: those answer shapes rendered through the shipped DTO, mapper and
   `PumpCheckAnalysisView`, with no mobile change.
-- Live quality A/B, main prompt against this one: 8 cases × EN/TR, 32 bounded
-  Sonnet calls on staging. Its harness is outside the repo
-  (`~/axisai-pump-check-response-quality-01/harness`) and needs an authorized
-  staging window plus authorized base photos. Quality is not claimed until it has run.
+- Live quality A/B, run 2026-11-18 on staging (Sonnet 5.5, claude55 routing, real D1 consent and spend guard). The comparison is main's prompt against this one, on identical images and settings: 8 cases × EN/TR. The images are two public-domain US-government photos plus derived variants and one synthetic image; they are not in the repo. Round 1 found two problems. Turkish answers hit the unchanged `max_tokens=600` cap (4 of 8 invalid). And a clear-photo English answer was refused by the validator for "so it shows". Both were fixed in the prompt only (length budget; naming the refused constructions) and retested.
+
+  | Final, 16 pairs | main prompt | this prompt |
+  |---|---|---|
+  | Valid JSON | 15/16 (1 Turkish truncation) | 16/16 |
+  | Expected quality | 11/15 (clear photos rated `limited`) | 16/16 |
+  | Invented items on unusable photos | 4 of 4 answers | 0 |
+  | `max_tokens` stops | 1 | 0 |
+  | Median latency, EN / TR | 3.9 s / 6.2 s | 3.5 s / 5.3 s |
+  | Median tokens in / out, EN | 1,504 / 351 | 2,198 / 330 |
+  | Median tokens in / out, TR | 1,507 / 565 | 2,201 / 439 |
+
+  On a manual read, this prompt gives the more useful answer in 16 of 16 pairs. The main prompt mostly reviews exercise form and asks for videos or other angles even on clear photos.
 
 ## Residual risk
 
