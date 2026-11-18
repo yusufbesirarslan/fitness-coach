@@ -34,14 +34,15 @@ Prompt only (`PROMPT_BODY` in `app/services/mobile_pump_checks/analysis.py`):
 - One role per field. `focus_areas` are visible body areas, not photo tips; `limitations` are specific, with no general disclaimers; the same point is never repeated in two fields; an empty list beats an invented item.
 - Focus on the tagged `body_region`.
 - Natural, direct second-person language (informal `sen` in Turkish), with no motivational filler or negative body judgments.
-- It recommends direct "is visible" wording over "this shows/suggests", which the validator refuses.
-- Every existing safety rule and the untrusted-context fence stay word for word. The body is language-neutral; only `content_language_instruction` differs between EN and TR.
+- It recommends direct "is visible" wording and names the common constructions the validator refuses ("it/this shows|suggests|indicates|looks like", "you have", "signs of"); the validator also refuses "you may/appear to have" and "evidence of", which the prompt does not name.
+- Every existing safety rule and the untrusted-context fence stay word for word. The body is shared by EN and TR (it carries the Turkish `sen` note in both); only `content_language_instruction` differs.
 
 Unchanged: schema `pump-check-analysis/v1`, quality tokens, validator, the
 single call, `max_tokens=600`, image preparation, model routing, consent,
 allowance, storage, comparison and mobile code. Cost: roughly 700 more input
-tokens per call (measured) (prompt about 1.5k → 3.5k characters), well inside the
-`pump_check` physical reservation (12,000 input tokens per attempt).
+tokens per call (measured) (prompt about 1.4k → 3.7k characters), well inside the
+`vision` physical reservation in `ai_input_budget` (12,000 input tokens per
+attempt).
 
 ## Evidence
 
