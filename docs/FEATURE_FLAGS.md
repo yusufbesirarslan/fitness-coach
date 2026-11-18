@@ -477,3 +477,16 @@ enables only that read-only Bearer projection of the LP17 read model
 state. No migration, no write path, no provider call. Owner:
 @yusufbesirarslan; review by 2026-11-10. Rollback: set the flag to 0; nothing
 to clean up. See [LP17-B1](LP17_B1_NATIVE_TODAY_GUIDANCE_HTTP.md).
+
+`FITX_FOOD_SEARCH_ENABLED` (default OFF, staging_only) reopens only the native
+FatSecret text-search journey: `GET /api/v1/nutrition/foods/search`,
+`GET /api/v1/nutrition/foods/fatsecret/<id>/servings` and provider-backed
+`POST /api/v1/nutrition/logs`. `launch_food_search.available()` is true only
+when the flag is ON **and** the current request endpoint is one of those three,
+so barcode lookup, the browser `food` blueprint and diary builder, Coach, QR
+Menu, social suggestions and workers keep refusing FatSecret at the HTTP/token
+layer. The worker and `/health?deep=1` proxy probe follow the flag itself
+(`launch_food_search.released()`). Prerequisites: host FatSecret key, an https
+`FATSECRET_BASE_URL` with allowlisted egress, staging E2E, and a mobile build
+compiled with `--dart-define=AXISAI_FOOD_SEARCH_ENABLED=true`. Owner:
+@yusufbesirarslan; review by 2026-12-18. Rollback: set the flag to 0.
