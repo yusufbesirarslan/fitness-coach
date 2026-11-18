@@ -252,7 +252,7 @@ def create_app():
             # hata deploy gate'ini düşürmez; örnek yoksa/stale ise "unknown".
             import app.config as config_mod
             from app.services import launch_food_search
-            if not launch_food_search.available():
+            if not launch_food_search.released():
                 body["fatsecret_proxy"] = "disabled"
             elif not config_mod.FATSECRET_BASE_URL:
                 body["fatsecret_proxy"] = "unconfigured"

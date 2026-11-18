@@ -410,3 +410,13 @@ is green. Abort on any cross-account fact, unexpected
 registered, so the shared before-request Bearer processing, rate limiting
 (429), OPTIONS and 405 for other methods still apply. There is no schema or
 data to clean up. LP17-B1 does not authorize activation in any environment.
+
+`FITX_FOOD_SEARCH_ENABLED=0` is the default. It requires `MOBILE_AUTH_ENABLED=1`.
+Enable on staging first with the staging FatSecret key and allowlisted egress;
+production enablement must be paired with a mobile release compiled with
+`AXISAI_FOOD_SEARCH_ENABLED=true` (a build without that define never calls the
+routes, so the server flag alone changes nothing for it). Abort on sustained
+`FOOD_PROVIDER_UNAVAILABLE`, or on any FatSecret request from Coach, QR Menu or
+barcode paths. Rollback: set the flag to 0 — the three routes answer 404
+`FOOD_SEARCH_UNAVAILABLE` and the app falls back to manual logging; logged rows
+stay and the 24h provider-retention worker keeps expiring them.
