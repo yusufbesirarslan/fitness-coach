@@ -60,7 +60,7 @@ it does not itself undo changes already saved.
 
 ### Koç'un planınızı düzenlemesine izin verin
 
-Koç'tan kayıtlı Antrenman Planınızı değiştirmenizi istediğinizde AxisAI,
+Koç'tan kayıtlı Antrenman Planınızı değiştirmesini istediğinizde AxisAI,
 istediğiniz belirli değişikliği plan hizmetleri üzerinden uygulayabilir ve
 neyin değiştiğini açıklayabilir. Açıkça istediğiniz küçük ve geri alınabilir
 düzenlemeler hemen kaydedilebilir. Daha büyük etkisi olan, içerik silen veya
