@@ -607,21 +607,31 @@ def test_language_never_changes_the_decrypt_input_or_the_code(lam, lang):
 @pytest.mark.parametrize("trigger", ["CustomEmailSender_SignUp",
                                      "CustomEmailSender_ResendCode",
                                      "CustomEmailSender_ForgotPassword"])
-def test_code_and_name_stay_html_escaped_in_every_language(lam, monkeypatch,
-                                                           trigger, lang):
+def test_code_is_escaped_and_name_is_omitted_or_escaped_in_every_language(
+        lam, monkeypatch, trigger, lang):
     monkeypatch.setattr(lam["handler"], "_decrypt_code",
                         lambda ciphertext: "<b>1</b>")
     lam["handler"].handler(_event(trigger, metadata={"language": lang},
                                   locale=lang, name="<img src=x>"), None)
-    _, html, _ = _sent(lam)
+    _, html, text = _sent(lam)
     assert "<b>1</b>" not in html and "&lt;b&gt;1&lt;/b&gt;" in html
-    assert "<img src=x>" not in html and "&lt;img src=x&gt;" in html
+    assert "<img src=x>" not in html
+    if _KIND[trigger] == "verification":
+        assert "&lt;img src=x&gt;" not in html
+        assert "img src=x" not in text
+    else:
+        assert "&lt;img src=x&gt;" in html
 
 
-def test_greeting_falls_back_to_the_cognito_username(lam):
-    lam["handler"].handler(_event("CustomEmailSender_ResendCode", locale="en",
-                                  name=None), None)
-    assert _sent(lam) == _expected("verification", "en", name="ali")
+@pytest.mark.parametrize("lang,greeting", [("en", "Hi,"), ("tr", "Merhaba,")])
+def test_verification_greeting_never_falls_back_to_the_cognito_username(lam, lang, greeting):
+    event_ = _event("CustomEmailSender_ResendCode", locale=lang, name=None)
+    event_["userName"] = "internal-account-identifier"
+    lam["handler"].handler(event_, None)
+    subject, html, text = _sent(lam)
+    assert (subject, html, text) == _expected("verification", lang, name=None)
+    assert greeting in html and text.startswith(greeting + "\n\n")
+    assert "internal-account-identifier" not in html + text
 
 
 def test_logs_carry_only_the_allow_listed_language(lam, caplog):
