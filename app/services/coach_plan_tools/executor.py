@@ -390,6 +390,34 @@ def invalid_arguments_result(detail):
     return results.error_result(results.ERROR_INVALID_ARGUMENTS, detail)
 
 
+def execute_plan_read(user_id):
+    """Run the read-only ``get_current_training_plan`` tool (Foundation V1 B1).
+
+    Same gate as the write family: OFF means the tool is neither published nor
+    executable. Never raises for a storage fault — the model is told the plan is
+    unreadable instead of being handed a guess — and never leaves a read
+    transaction open across the provider call that follows.
+    """
+    from .plan_read import ERROR_PLAN_UNREADABLE, READ_PLAN_TOOL, read_current_training_plan
+
+    if not plan_mutation_tools_enabled():
+        payload = results.error_result(results.ERROR_CAPABILITY_DISABLED)
+    else:
+        try:
+            payload = read_current_training_plan(user_id)
+        except Exception:
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            payload = {"status": results.STATUS_ERROR,
+                       "error": ERROR_PLAN_UNREADABLE}
+        finally:
+            _settle_transaction()
+    _log(READ_PLAN_TOOL, _outcome_of(payload))
+    return payload
+
+
 def execute_plan_tool(user_id, name, arguments):
     """Run one plan-mutation tool call and return its bounded result.
 

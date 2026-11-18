@@ -82,13 +82,27 @@ def unsaved_message(role, text):
             "interrupted": False}
 
 
-def turn_payload(recorded_turn, question, answer, user_id, secret):
+def turn_payload(recorded_turn, question, answer, user_id, secret,
+                 plan_effects=None):
     if recorded_turn is None:
         messages = [unsaved_message("user", question),
                     unsaved_message("assistant", answer)]
     else:
         messages = [project_message(row, user_id, secret) for row in recorded_turn]
-    return {"contract_version": CONTRACT_VERSION, "messages": messages}
+    payload = {"contract_version": CONTRACT_VERSION, "messages": messages}
+    if plan_effects is not None:
+        # Adaptive Coach Foundation V1 (additive; v1 clients ignore unknown
+        # keys). Only bounded booleans/null — never plan content, a lineage, a
+        # version or a proposal id. See docs/MOBILE_COACH.md §Plan effects.
+        payload["plan_effects"] = {
+            "training_plan": {
+                "changed": plan_effects.get("changed") is True,
+                "pending_confirmation": (
+                    None if plan_effects.get("pending_confirmation") is None
+                    else plan_effects.get("pending_confirmation") is True),
+            },
+        }
+    return payload
 
 
 def history_payload(user_id, secret):
