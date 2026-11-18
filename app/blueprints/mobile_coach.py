@@ -243,7 +243,8 @@ def _send_authorized_turn(user, question, handoff):
     ai_recovery.clear_ai_failures(user_id)
     payload = mobile_coach.turn_payload(
         result.get("recorded_turn"), question, result["answer"], user_id,
-        current_app.config["SECRET_KEY"])
+        current_app.config["SECRET_KEY"],
+        plan_effects=coach_plan_tools.turn_plan_effects(user_id))
     from app.consent_publication import protect_response
     return protect_response(_with_deferred_summary(jsonify(payload), result))
 

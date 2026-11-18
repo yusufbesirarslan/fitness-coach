@@ -43,6 +43,7 @@ from .executor import (
     MAX_PLAN_OPERATIONS_PER_TURN,
     begin_turn,
     current_confirmation_intent,
+    execute_plan_read,
     execute_plan_tool,
     invalid_arguments_result,
     plan_changed_this_turn,
@@ -52,6 +53,8 @@ from .executor import (
     published_plan_tool_defs,
     set_turn_history,
 )
+from .turn_effects import turn_plan_effects
+from .plan_read import READ_PLAN_TOOL, READ_PLAN_TOOL_DEF
 from .schemas import (
     CANCEL_PENDING_TOOL,
     CONFIRM_TOOL,
@@ -72,8 +75,11 @@ __all__ = [
     "PLAN_MUTATION_TOOL_DEFS",
     "PLAN_MUTATION_TOOL_NAMES",
     "PLAN_WRITE_TOOL_NAMES",
+    "READ_PLAN_TOOL",
+    "READ_PLAN_TOOL_DEF",
     "begin_turn",
     "current_confirmation_intent",
+    "execute_plan_read",
     "execute_plan_tool",
     "invalid_arguments_result",
     "plan_changed_this_turn",
@@ -82,4 +88,5 @@ __all__ = [
     "proposal_created_this_turn",
     "published_plan_tool_defs",
     "set_turn_history",
+    "turn_plan_effects",
 ]

@@ -177,3 +177,15 @@ The request body may carry ONE optional key besides `message`: `"handoff":
 re-derives the PR6 NutritionDayView for the Bearer owner and adds it as model
 context (not user speech); an unreadable intake adds no context. Gates, quota,
 persistence and failure semantics are unchanged. See `docs/NUTRITION_VNEXT_PR7.md` §18.
+
+## Plan effects (Adaptive Coach Foundation V1, additive)
+
+`POST /api/v1/coach/messages` 200 bodies carry
+`plan_effects: {"training_plan": {"changed": bool, "pending_confirmation": bool|null}}`.
+`changed` = this request applied/replayed a plan tool; `pending_confirmation`
+= a fresh owner-scoped read of the one PENDING proposal (`null` = could not
+be read, never "nothing pending"; always `false` with
+`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` OFF). Booleans only — never plan
+content, lineage, version or proposal id. `contract_version` stays 1; v1
+clients ignore the key. History is unchanged. See
+docs/ADAPTIVE_COACH_FOUNDATION_V1.md.
