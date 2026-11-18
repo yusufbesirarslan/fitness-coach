@@ -223,7 +223,7 @@ def _erase_rows(user, held):
         changed = sum(_delete(model, model.user_id == uid) for model in (
             m.PlanMutationRecord, m.TrainingPlanConfirmationProposal,
             m.TrainingPlanReplacementReceipt, m.TrainingPlanReplacementProposal,
-            m.TrainingPlan, m.NutritionPlan))
+            m.TrainingPlan, m.NutritionPlanMutationRecord, m.NutritionPlan))
         # Generation ledgers stay (idempotency and AI allowance accounting are
         # ordinary records); only the plan content they carry is removed.
         changed += m.TrainingPlanGenerationOperation.query.filter(

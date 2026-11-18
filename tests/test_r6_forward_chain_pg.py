@@ -2,11 +2,13 @@
 
 The historical R6 baseline was ``c6f8b0d2e4a1`` (restore receipt, 2026-11-09).
 Preserve its four reviewed forward migrations as a frozen prefix, then add
-only the source-qualified M4 monitoring revision and the account-deletion
-destruction record (one empty table, no foreign key, no backfill):
+only the source-qualified M4 monitoring revision, the account-deletion
+destruction record (one empty table, no foreign key, no backfill) and the
+Adaptive Coach C1 nutrition edit journal (two additive nutrition_plan columns,
+one empty table, no backfill):
 
     c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
-        -> f01a4e000003 -> ad17de1e0001
+        -> f01a4e000003 -> ad17de1e0001 -> c1a0d2e3f4a5
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -72,7 +74,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
-CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001")
+CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "c1a0d2e3f4a5")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40

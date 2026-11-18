@@ -38,6 +38,7 @@ from app.services import nutrition_plan_generation as generation
 from app.services.mobile_log_food import response_meal
 from app.services.nutrition_pipeline import clamp_serving_macros
 from app.services.nutrition_plan_schema import (
+    ESTIMATED_KEY,
     ITEMS_KEY,
     MEAL_KEYS,
     MEAL_MACRO_KEYS,
@@ -172,6 +173,10 @@ def project_plan_row(row, secret):
         canonical = document[meal["slot"]]
         meal["id"] = planned_meal_id(secret, row.user_id, row.id, meal["slot"])
         meal["loggable"] = is_loggable(canonical)
+        # Additive (C1), saved-plan read only: the server re-estimated these
+        # values after an edit. Proposals never carry it (the save parser
+        # takes a closed meal key set back).
+        meal["estimated"] = canonical.get(ESTIMATED_KEY) is True
     score = row.score
     food_rating = (float(score) if isinstance(score, (int, float))
                    and not isinstance(score, bool) and math.isfinite(score)

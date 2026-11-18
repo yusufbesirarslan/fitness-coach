@@ -534,14 +534,80 @@ class WeeklyCheckIn(db.Model):
 
 
 class NutritionPlan(db.Model):
+    """The saved Nutrition Plan. ``plan_data`` is the one authority on its state.
+
+    ``lineage_id`` / ``mutation_version`` (Adaptive Coach C1) mirror
+    ``TrainingPlan``: a replacement inserts a new row and so a new lineage, and
+    a targeted meal edit moves the version forward by one, an undo included.
+    """
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     plan_data  = db.Column(db.Text, nullable=False)  # JSON olarak sakla
     score      = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # NULLABLE on purpose (expand-only migration c1a0d2e3f4a5): a row written
+    # by the previous revision has none; the edit service assigns one under the
+    # plan lock on the first targeted edit. NULL = never edited, no history.
+    lineage_id = db.Column(
+        db.String(64), nullable=True, default=lambda: _new_plan_lineage_id())
+    mutation_version = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0")
 
     def __repr__(self):
         return f"<NutritionPlan {self.user_id} - {self.created_at}>"
+
+
+class NutritionPlanMutationRecord(db.Model):
+    """One entry of the Nutrition Plan edit journal (Adaptive Coach C1).
+
+    Same contract as ``PlanMutationRecord``: evidence, never authority; exact
+    ``plan_data`` bytes on both sides so an undo restores what really was; one
+    row per ``(user_id, idempotency_key)`` and at most one undo per entry, both
+    enforced by the database. ``provenance`` records where recalculated values
+    came from (the server estimator, per item) — a fact about this entry, never
+    read back as nutrient data.
+    """
+    __tablename__ = "nutrition_plan_mutation_record"
+
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(
+        db.String(64), nullable=False, default=lambda: _new_mutation_public_id())
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    plan_lineage_id = db.Column(db.String(64), nullable=False)
+    operation_kind = db.Column(db.String(20), nullable=False)
+    command_type = db.Column(db.String(60), nullable=False)
+    command_fingerprint = db.Column(db.String(64), nullable=False)
+    actor = db.Column(db.String(20), nullable=False)
+    reason = db.Column(db.String(200), nullable=True)
+    outcome = db.Column(db.String(20), nullable=False)
+    before_version = db.Column(db.Integer, nullable=False)
+    after_version = db.Column(db.Integer, nullable=False)
+    before_snapshot = db.Column(db.Text, nullable=False)
+    after_snapshot = db.Column(db.Text, nullable=False)
+    before_fingerprint = db.Column(db.String(64), nullable=False)
+    after_fingerprint = db.Column(db.String(64), nullable=False)
+    provenance = db.Column(db.Text, nullable=True)
+    idempotency_key = db.Column(db.String(64), nullable=False)
+    reverts_mutation_id = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "public_id", name="uq_nutrition_mutation_public_id"),
+        db.UniqueConstraint(
+            "user_id", "idempotency_key", name="uq_nutrition_mutation_user_key"),
+        db.UniqueConstraint(
+            "reverts_mutation_id", name="uq_nutrition_mutation_reverts"),
+        db.Index(
+            "ix_nutrition_mutation_lineage",
+            "user_id", "plan_lineage_id", "id"),
+    )
+
+    def __repr__(self):
+        return f"<NutritionPlanMutationRecord {self.operation_kind} {self.outcome}>"
 
 
 def _new_plan_lineage_id():
