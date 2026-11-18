@@ -282,3 +282,86 @@ def test_analysis_adapter_never_returns_raw_invalid_provider_output():
             {"body_region": "full_body", "environment": "home", "description": ""},
             provider=lambda *args, **kwargs: '{"summary":"raw"}',
         )
+
+
+# ── Turkish safety parity (the English patterns only knew English words) ────
+
+TR_PROHIBITED = [
+    # medical / injury / diagnosis
+    ("Sol omzunda bir sakatlık olabilir.", "safety policy"),
+    ("Dizde iltihap görünüyor.", "safety policy"),
+    ("Bel fıtığı riski var.", "safety policy"),
+    ("Kasında yırtığa benzer bir iz var.", "safety policy"),
+    ("TEŞHİS koymak için doktora git.", "safety policy"),
+    ("Omuz çıkığı gibi duruyor.", "safety policy"),
+    ("Bu duruş skolyoz olabilir.", "safety policy"),
+    ("Hormon dengesizliğine bağlı olabilir.", "safety policy"),
+    ("Tendinit izi var.", "safety policy"),
+    ("Iltihap belirgin.", "safety policy"),          # dotless capital I
+    ("Sakatlik riski var.", "safety policy"),        # written without Turkish letters
+    # diagnostic inference
+    ("Yüz ifaden yorgunluğun belirtisi.", "safety policy"),
+    ("Bu, yüksek efor olduğunu düşündürüyor.", "safety policy"),
+    ("Omuz hattı bir soruna işaret ediyor.", "safety policy"),
+    # body claims
+    ("Vücut yağ oranın düşük görünüyor.", "body claim"),
+    ("Yağ yüzden azalmış.", "body claim"),
+    ("Kas kütlen artmış.", "body claim"),
+    ("Yağsız kütle iyi korunmuş.", "body claim"),
+    ("Kollarında asimetri var.", "body claim"),
+    ("Kas büyümesi belirgin.", "body claim"),
+    ("Gelişim hızın çok iyi.", "body claim"),
+    ("Kol çevresi ölçüsü büyümüş.", "body claim"),
+    # image-derived numbers
+    ("Vücut yağın yaklaşık %15.", "body claim"),
+    ("Yaklaşık %15 civarında görünüyor.", "false precision"),
+    ("Yüzde on beş daha belirgin.", "false precision"),
+    ("Kolların iki santim kalınlaşmış.", "false precision"),
+    ("Beş kilo vermiş gibisin.", "false precision"),
+    ("Bel 80 santimetre civarında.", "false precision"),
+]
+
+
+@pytest.mark.parametrize("text,reason", TR_PROHIBITED)
+def test_turkish_prohibited_claims_are_refused_like_their_english_equivalents(text, reason):
+    for field in ("summary", "observations"):
+        value = _valid(**{field: text if field == "summary" else [text]})
+        with pytest.raises(InvalidAnalysis, match=reason):
+            parse_analysis(json.dumps(value, ensure_ascii=False))
+
+
+TR_ORDINARY = [
+    # Verbatim from the 2026-11-18 real-model staging A/B (Sonnet 5.5) …
+    "Omuz hatların geniş ve belirgin, deltoid çevresi ışıkta net seçiliyor.",
+    "Pazı ve ön kol konturların kasılı pozda net, damarlı çizgiler görünüyor.",
+    "Sırt ve arka kollar bu açıdan görünmüyor, o yüzden bu bölgeler yorumlanamıyor.",
+    "Parlak, yağlı ciltle güçlü yan ışık kas hatlarını iyi vurguluyor.",
+    "Bir sonraki karede aynı açıyı ve ışığı koru, kadrajı bele kadar genişlet.",
+    "Fotoğraf neredeyse tamamen siyah ve bulanık; üst vücut bölgesinden hiçbir kontur seçilemiyor.",
+    # … and everyday words next to the blocked stems.
+    "Kollar kasılmış gibi görünüyor.",
+    "Fotoğraf üst vücudunu önden gösteriyor.",
+    "Yüzde belirgin bir gerginlik var.",
+    "Kolun altı gölgede kalıyor.",
+    "Kırık beyaz atletin göğsü örtüyor.",
+    "Belirtilen bölge net görünüyor.",
+    "Arka planda bir grup ekipman var.",
+    "Sende belirgin bir omuz hattı var.",
+    "On kolun ve bileklerin net.",
+    "İki kolun da aynı pozisyonda.",
+    "İlk fotoğrafa göre aynı ışığı kullan.",
+]
+
+
+@pytest.mark.parametrize("text", TR_ORDINARY)
+def test_ordinary_turkish_descriptions_are_not_refused(text):
+    parsed = parse_analysis(json.dumps(
+        _valid(summary=text, observations=[text]), ensure_ascii=False))
+    assert parsed["summary"] == text
+
+
+def test_english_validation_is_unchanged_by_turkish_parity():
+    assert parse_analysis(json.dumps(_valid()))
+    for text in ("You have tendonitis.", "Body fat looks lower.", "About 15% leaner."):
+        with pytest.raises(InvalidAnalysis):
+            parse_analysis(json.dumps(_valid(summary=text)))

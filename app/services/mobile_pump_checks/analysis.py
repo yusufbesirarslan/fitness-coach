@@ -66,6 +66,43 @@ _IMPERIAL_MEASUREMENT_RE = re.compile(
 )
 
 
+# Turkish equivalents of the English-only patterns above. They run on a
+# Turkish-aware, accent-folded copy of the text: re.IGNORECASE does not map
+# dotted/dotless capitals (TEŞHİS vs teşhis), and the folding also catches
+# answers written without Turkish letters. Ambiguous everyday words are left
+# out on purpose: "gösteriyor" (shows), "yüzde" without a number (on the
+# face), bare "çevresi" (around), "kırık beyaz" (off-white), "sende ... var"
+# (ordinary possessive; the conditions themselves are blocked).
+_TR_FOLD = str.maketrans({"İ": "i", "I": "i", "ı": "i", "ş": "s", "Ş": "s",
+                          "ğ": "g", "Ğ": "g", "ü": "u", "Ü": "u", "ö": "o",
+                          "Ö": "o", "ç": "c", "Ç": "c", "â": "a", "î": "i",
+                          "û": "u"})
+_TR_MEDICAL_RE = re.compile(
+    r"(?:teshis|\btani (?:kon|koy)|sakatl|yaralan|yirti[klg]|kemik kir|"
+    r"\bkirig|fraktur|hastali[kg]|iltihap|\bodem(?:i|in)?\b|fiti[kg]|"
+    r"disk kaymas|tendinit|menisk|kanser|tumor|artrit|kirecl|skolyoz|"
+    r"osteopor|kemik erime|enfeksiyon|burkul|hormon|yeme bozuklu|anoreks|"
+    r"sendrom|klinik|"
+    r"\b(?:omuz|eklem|kalca|diz|dirsek|bilek) cik(?:ig|ik|mas)|"
+    r"(?:postur|durus) bozuklu|"
+    r"iskelet (?:bozuklu|anomali|patoloji|sorun))")
+_TR_DIAGNOSTIC_RE = re.compile(
+    r"(?:\bbelirti(?:si|leri|ler)?\b|isaret ed|dusundur|\bkanit|muzdarip)")
+_TR_BODY_CLAIM_RE = re.compile(
+    r"(?:yag oran|yag yuzde|vucut yag|yagsiz (?:kutle|kas|vucut)|kas kutle|"
+    r"kas buyume|cevre olcu|cevresi olcu|asimetr|"
+    r"(?:buyume|gelisim|kazanim|hipertrofi|artis) (?:hiz|oran))")
+_TR_NUMBER = (r"(?:\d+(?:[.,]\d+)?|bir|iki|uc|dort|bes|alti|yedi|sekiz|"
+              r"dokuz|on|yirmi|otuz|kirk|elli|altmis|yetmis|seksen|doksan|yuz)")
+_TR_MEASUREMENT_RE = re.compile(
+    r"(?:%\s*\d|\byuzde\s*" + _TR_NUMBER + r"\b|\b" + _TR_NUMBER
+    + r"\s*(?:kilo\w*|kg|santim\w*|cm|milim\w*|mm|gram\w*|gr)\b)")
+
+
+def _tr_folded(value):
+    return " ".join(value.translate(_TR_FOLD).lower().split())
+
+
 class InvalidAnalysis(ValueError):
     """Provider output does not satisfy the public Pump Check contract."""
 
@@ -83,6 +120,13 @@ def _plain_text(value, maximum, field):
     if _BODY_CLAIM_RE.search(value):
         raise InvalidAnalysis("analysis contains a prohibited body claim")
     if _MEASUREMENT_RE.search(value) or _IMPERIAL_MEASUREMENT_RE.search(value):
+        raise InvalidAnalysis("analysis contains image-derived false precision")
+    folded = _tr_folded(value)
+    if _TR_MEDICAL_RE.search(folded) or _TR_DIAGNOSTIC_RE.search(folded):
+        raise InvalidAnalysis("analysis text violates safety policy")
+    if _TR_BODY_CLAIM_RE.search(folded):
+        raise InvalidAnalysis("analysis contains a prohibited body claim")
+    if _TR_MEASUREMENT_RE.search(folded):
         raise InvalidAnalysis("analysis contains image-derived false precision")
     return value
 
