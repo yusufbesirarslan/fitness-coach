@@ -39,10 +39,13 @@ Default OFF behind ``AI_COACH_PLAN_MUTATION_TOOLS_ENABLED``: with the flag off
 the tools are absent from both provider schemas AND refused at execution.
 """
 from .executor import (
+    DIRECT_CANCEL,
+    DIRECT_CONFIRM,
     FLAG_KEY,
     MAX_PLAN_OPERATIONS_PER_TURN,
     begin_turn,
     current_confirmation_intent,
+    execute_direct_confirmation,
     execute_plan_read,
     execute_plan_tool,
     invalid_arguments_result,
@@ -70,6 +73,8 @@ __all__ = [
     "CONFIRM_TOOL",
     "CONFIRMATION_TOOL_DEFS",
     "CONFIRMATION_TOOL_NAMES",
+    "DIRECT_CANCEL",
+    "DIRECT_CONFIRM",
     "FLAG_KEY",
     "MAX_PLAN_OPERATIONS_PER_TURN",
     "PLAN_MUTATION_TOOL_DEFS",
@@ -79,6 +84,7 @@ __all__ = [
     "READ_PLAN_TOOL_DEF",
     "begin_turn",
     "current_confirmation_intent",
+    "execute_direct_confirmation",
     "execute_plan_read",
     "execute_plan_tool",
     "invalid_arguments_result",
