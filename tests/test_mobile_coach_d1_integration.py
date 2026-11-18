@@ -69,9 +69,9 @@ def test_one_original_authority_spans_quota_context_provider_and_projection(
         observe("context")
         return original_context(*args, **kwargs)
 
-    def project(*args):
+    def project(*args, **kwargs):
         observe("projection")
-        return original_project(*args)
+        return original_project(*args, **kwargs)
 
     monkeypatch.setattr(consent, "begin_operation", capture)
     monkeypatch.setattr(route, "reserve_ai_quota", reserve)

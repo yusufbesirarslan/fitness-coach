@@ -1176,3 +1176,14 @@ because there identity is the `exercise_id`. Pinned by
 semantics; unknown-exercise fail-closed behaviour; equipment and placement
 gates; the journal, the confirmation flow, the rollout flags, the schema
 (Alembic head unchanged) and every existing tool schema.
+
+## 34. Foundation V1 B1 — the Coach can read the plan it edits
+
+`get_current_training_plan` (argument-free, read-only, same flag) closes the
+gap that the Coach could write a plan it could not see. Owner = server
+principal; one `get_active_plan` + `parse_plan_document`; closed projection
+(weekday, kind, catalog-vouched name or `null`, sets, reps); re-projected by
+`coach_privacy.tool_result`; published even while a proposal is pending; not
+in `PLAN_WRITE_TOOL_NAMES`, so it never spends the mutation budget. Policy:
+read before naming, never describe the plan from memory. Record, gap map,
+consent assessment and next phases: docs/ADAPTIVE_COACH_FOUNDATION_V1.md.

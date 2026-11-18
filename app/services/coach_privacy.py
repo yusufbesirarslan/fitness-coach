@@ -80,6 +80,67 @@ _MACROS = ('calories', 'protein', 'carbs', 'fat')
 _WORKOUT = ('sets', 'reps', 'weight_kg', 'volume')
 
 
+_WEEKDAYS = ('Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar')
+_DAY_KINDS = ('antrenman', 'dinlenme', 'kardiyo')
+_PLAN_READ_ERRORS = ('PLAN_UNREADABLE', 'CAPABILITY_DISABLED')
+_MAX_PLAN_EXERCISES = 20
+
+
+def _plan_reps(value):
+    """A rep prescription rebuilt from a closed grammar, else None.
+
+    Digits, an optional range and an optional time unit ("8-12", "5",
+    "30 sn", "45 sec"). Anything else is stored prose and fails closed.
+    """
+    if not isinstance(value, str) or len(value) > 16:
+        return None
+    count, _, unit = value.strip().partition(' ')
+    if unit and unit not in ('sn', 'dk', 'sec', 'min', 's'):
+        return None
+    parts = count.split('-')
+    if not 1 <= len(parts) <= 2 or not all(
+            p.isascii() and p.isdigit() and len(p) <= 3 and 1 <= int(p) <= 500
+            for p in parts):
+        return None
+    return value.strip()
+
+
+def _training_plan_projection(source):
+    """Rebuild the plan read from tokens; never forward the domain dict."""
+    out = {}
+    if token(source.get('error'), _PLAN_READ_ERRORS):
+        out['error'] = source['error']
+    plan = source.get('plan')
+    days = plan.get('days') if isinstance(plan, dict) else None
+    if source.get('status') != 'ok' or not isinstance(days, list):
+        return out
+    projected = []
+    for day in days[:7]:
+        if not isinstance(day, dict) or not token(day.get('day'), _WEEKDAYS):
+            continue
+        exercises = []
+        raw = day.get('exercises') if isinstance(day.get('exercises'), list) else []
+        for exercise in raw[:_MAX_PLAN_EXERCISES]:
+            if not isinstance(exercise, dict):
+                continue
+            sets = exercise.get('sets')
+            label = exercise.get('name')
+            exercises.append({
+                # Catalog-vouched label only; unknown prose fails closed.
+                'name': label if isinstance(label, str) and len(label) <= 120
+                and exercise_name(label) else None,
+                'sets': sets if type(sets) is int and 1 <= sets <= 100 else None,
+                'reps': _plan_reps(exercise.get('reps')),
+            })
+        entry = {'day': day['day'], 'kind': token(day.get('kind'), _DAY_KINDS),
+                 'exercises': exercises}
+        if day.get('truncated') is True:
+            entry['truncated'] = True
+        projected.append(entry)
+    out['plan'] = {'days': projected}
+    return out
+
+
 def tool_result(name, raw, *, user_id=None):
     """Project immediately before insertion into *any* provider's next round.
 
@@ -145,6 +206,8 @@ def tool_result(name, raw, *, user_id=None):
                     out[key]['exercise_name'] = canonical
     elif name == 'cancel_pending_log':
         out.update(numeric_fields(source, ('removed',)))
+    elif name == 'get_current_training_plan':
+        out.update(_training_plan_projection(source))
     elif name == 'analyze_gym_photo':
         out.update(numeric_fields(source, ('form_rating', 'xp_awarded')))
         for key in ('is_gym', 'awarded'):

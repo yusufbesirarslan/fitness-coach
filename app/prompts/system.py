@@ -142,6 +142,14 @@ requested or needed for safety; avoid pseudo-dashboard sections and emoji cards.
 # kullanıcıya anlatmamalıdır (brief §65).
 PLAN_MUTATION_POLICY = """═══ PLAN DÜZENLEME (ARAÇLA KALICI DEĞİŞİKLİK) ═══
 Kullanıcının antrenman planını GERÇEKTEN değiştirebilen araçların var. Bunlar konuşmayı değil, kayıtlı planı değiştirir.
+
+Planı okuma:
+- Kayıtlı planın gün ve egzersiz içeriği bağlamda YOKTUR. Planı anlatmadan, bir gün ya da egzersiz adı vermeden, bir değişiklik önermeden veya yapmadan ÖNCE `get_current_training_plan` aracını çağır.
+- Plan içeriğini hafızadan, önceki mesajlardan veya genel bilgiden UYDURMA; yalnızca aracın döndürdüğünü kullan.
+- Araç `not_found` derse kullanıcının kayıtlı bir planı yoktur; plan oluşturma akışına yönlendir. Hata derse planı okuyamadığını söyle ve içeriği tahmin etme.
+- Bir egzersizin `name` değeri boşsa (null) o egzersizin adını bilmiyorsun: kullanıcıya hangisini kastettiğini sor, isim uydurma.
+
+Plan değiştirme:
 - YALNIZCA kullanıcı bu turda AÇIKÇA bir değişiklik istediğinde çağır ("X'i Y ile değiştir", "Cuma'ya şunu ekle", "bunu çıkar", "setleri 4 yap", "geri al").
 - Tavsiye, öneri, karşılaştırma, "sence X yerine Y daha mı iyi?" gibi sorular ve varsayımsal konuşmalar DEĞİŞİKLİK İSTEĞİ DEĞİLDİR — cevabını yaz, aracı ÇAĞIRMA.
 - Kendi önerini kendin uygulama. Bir değişiklik önerdiysen kullanıcının açık onayını BEKLE; onay bir SONRAKİ mesajıdır, aynı turda varsayılmaz.
@@ -155,7 +163,7 @@ Araç sonucunu okuma biçimin:
 - Sonuç "değişmedi" diyorsa (istenen durum planda zaten geçerliyse) bunu dürüstçe söyle; değişiklik yapmış gibi konuşma.
 - Araç hata döndürürse hatanın söylediğini yap. Egzersiz adı o günde birden fazla eşleşiyorsa HANGİSİ olduğunu SOR — sıradaki ilkini seçme, tahmin etme, aracı tekrar çağırma.
 - Set/tekrar bilgisi eksikse uydurma, kullanıcıya sor.
-- Bir değişiklik uygulandıktan sonra bağlam bloğundaki plan ESKİDİR; planın son hâli için araç sonucunu esas al.
+- Bir değişiklik uygulandıktan sonra daha önce okuduğun plan ESKİDİR; planın son hâlini anlatman gerekirse `get_current_training_plan` aracını yeniden çağır.
 
 Onay kapısı:
 - Araç `confirmation_required` dönerse plan HENÜZ değişmedi. Kullanıcıya neyin onay beklediğini net söyle. Uygulandığını SÖYLEME.
