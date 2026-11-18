@@ -470,6 +470,12 @@ def test_pending_plan_confirmation_is_reachable_only_from_the_coach_turn():
     no way to surface one. The invariant is asserted first, because it is the
     fact the report depends on; the exact set is asserted second, so that a
     third consumer has to be read before it is accepted.
+
+    Adaptive Coach Foundation V1 B1 read and accepted a third:
+    `coach_plan_tools/turn_effects.py` reports, at the END of the owner's own
+    Coach turn, whether that turn left a change waiting (native
+    `plan_effects`). Still Coach-turn machinery behind the same flag; Today
+    and every non-Coach service still cannot observe a proposal.
     """
     consumers = set()
     for path in (REPO_ROOT / "app").rglob("*.py"):
@@ -488,6 +494,7 @@ def test_pending_plan_confirmation_is_reachable_only_from_the_coach_turn():
     assert consumers == {
         "app/services/coach_confirmation.py",
         "app/services/coach_plan_tools/executor.py",
+        "app/services/coach_plan_tools/turn_effects.py",
     }, ("pending-proposal readers changed: %s" % sorted(consumers))
 
 
