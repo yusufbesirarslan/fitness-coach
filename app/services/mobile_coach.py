@@ -91,18 +91,30 @@ def turn_payload(recorded_turn, question, answer, user_id, secret,
         messages = [project_message(row, user_id, secret) for row in recorded_turn]
     payload = {"contract_version": CONTRACT_VERSION, "messages": messages}
     if plan_effects is not None:
-        # Adaptive Coach Foundation V1 (additive; v1 clients ignore unknown
-        # keys). Only bounded booleans/null — never plan content, a lineage, a
-        # version or a proposal id. See docs/MOBILE_COACH.md §Plan effects.
-        payload["plan_effects"] = {
-            "training_plan": {
-                "changed": plan_effects.get("changed") is True,
-                "pending_confirmation": (
-                    None if plan_effects.get("pending_confirmation") is None
-                    else plan_effects.get("pending_confirmation") is True),
-            },
-        }
+        payload["plan_effects"] = project_plan_effects(plan_effects)
     return payload
+
+
+def project_plan_effects(plan_effects):
+    """The additive native plan fact (Adaptive Coach Foundation V1).
+
+    v1 clients ignore unknown keys. Bounded booleans/null plus, only while a
+    change is pending, that proposal's opaque owner-scoped id (B2: the handle
+    the Confirm/Cancel button sends back). Never plan content, a lineage or a
+    version. See docs/MOBILE_COACH.md §Plan effects.
+    """
+    pending = plan_effects.get("pending_confirmation")
+    pending = None if pending is None else pending is True
+    proposal_id = plan_effects.get("proposal_id")
+    if not (pending and isinstance(proposal_id, str) and proposal_id):
+        proposal_id = None
+    return {
+        "training_plan": {
+            "changed": plan_effects.get("changed") is True,
+            "pending_confirmation": pending,
+            "proposal_id": proposal_id,
+        },
+    }
 
 
 def history_payload(user_id, secret):
@@ -117,3 +129,42 @@ def history_payload(user_id, secret):
         "contract_version": CONTRACT_VERSION,
         "messages": [project_message(row, user_id, secret) for row in rows],
     }
+
+
+# ── B2: the native Confirm/Cancel button ────────────────────────────────────
+#: Resolved tool statuses → the client's outcome. "replayed" is a retry of a
+#: confirm that already applied; to the user it is the same applied change.
+_DIRECT_OUTCOMES = {
+    "applied": "applied",
+    "replayed": "applied",
+    "no_op": "unchanged",
+    "cancelled": "cancelled",
+}
+#: The proposal is gone, superseded or no longer matches the plan: answering
+#: again cannot help, so these are 409 and not retryable.
+_DIRECT_STALE = frozenset({
+    "NO_PENDING_CONFIRMATION", "PENDING_CONFIRMATION_STALE",
+    "PLAN_STATE_CONFLICT", "UNDO_CONFLICT", "PLAN_NOT_FOUND",
+    "IDEMPOTENCY_CONFLICT",
+})
+
+
+def direct_confirmation_response(result, message, plan_effects):
+    """``(body, status)`` for a direct Confirm/Cancel; ``body`` is ``None``
+    for a refusal, which the route renders as its typed error envelope."""
+    outcome = _DIRECT_OUTCOMES.get(result.get("status"))
+    if outcome is not None and isinstance(message, str) and message:
+        return {
+            "contract_version": CONTRACT_VERSION,
+            "outcome": outcome,
+            "message": message,
+            "plan_effects": project_plan_effects(plan_effects),
+        }, 200
+    error = result.get("error")
+    if error == "CAPABILITY_DISABLED":
+        return None, 404
+    if error == "INVALID_ARGUMENTS":
+        return None, 400
+    if error in _DIRECT_STALE:
+        return None, 409
+    return None, 503
