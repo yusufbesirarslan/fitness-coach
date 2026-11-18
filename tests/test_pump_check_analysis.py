@@ -342,8 +342,16 @@ def test_prompt_steers_away_from_phrasing_the_validator_rejects():
     # analysis (invalid_output) instead of showing the user anything.
     assert parse_analysis(json.dumps(_valid(
         summary="Your shoulder outline is clearly visible.")))
+    prompt = _prompt()
+    assert 'followed by shows, suggests, indicates or looks like' in prompt
+    assert 'never "you have" or "signs of"' in prompt
+    # Real-model A/B (2026-11-18): "so it shows less definition" failed a
+    # clear-photo analysis; the prompt now names every refused construction.
     for discouraged in ("This shows clear shoulder contours.",
-                        "It suggests good arm definition."):
+                        "It suggests good arm definition.",
+                        "Your chest is covered, so it shows less definition.",
+                        "It looks like your arms are flexed.",
+                        "You have clear arm contours."):
         with pytest.raises(InvalidAnalysis):
             parse_analysis(json.dumps(_valid(summary=discouraged)))
 
