@@ -43,6 +43,8 @@ class FoodSearchExcluded(RuntimeError):
 
 def released():
     """The host rollout flag. Says nothing about the current call's scope."""
+    if FOOD_SEARCH_AVAILABLE is True:  # test-only characterization override
+        return True
     return has_app_context() and current_app.config.get(FLAG_KEY) is True
 
 
