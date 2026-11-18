@@ -58,7 +58,10 @@ password-changed output is byte-identical to baseline in both languages.
 
 ## Validation and client limits
 
-- 223 focused template, language, sender, sync, and Lambda-check tests pass.
+- 441 focused template, language, sender, sync, and Lambda-check tests pass,
+  including the full Cognito code-email language suite. Verification tests assert
+  name omission; reset tests continue to assert name escaping. Code escaping is
+  required for both.
 - 102 existing authentication, password-reset, and Cognito regression tests pass.
 - 40 browser layout checks pass: TR/EN × light/dark ×
   320/375/390/430/800px × normal/inline-only with images blocked.
