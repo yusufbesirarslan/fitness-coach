@@ -236,6 +236,9 @@ def test_lightweight_synthetic_images_keep_framing_contrast_and_schema(language,
     def provider(data, media, prompt, max_tokens):
         seen.update(bytes=len(data), max_tokens=max_tokens)
         assert 'at most 3 observations and 2 items' in prompt
+        # Real-model A/B (staging, 2026-11-18): Turkish answers reached the
+        # unchanged max_tokens=600 cap; the length budget keeps them whole.
+        assert 'under 900 characters in any language' in prompt
         with Image.open(BytesIO(data)) as prepared:
             assert prepared.size == (1024, canvas.height // 2)
             assert not prepared.getexif() and 'exif' not in prepared.info
@@ -313,7 +316,8 @@ def test_prompt_gives_each_field_one_role_so_advice_is_not_repeated():
     for field in ("summary", "observations", "strengths", "focus_areas",
                   "limitations", "next_check_guidance"):
         assert prompt.count(f"- {field}:") == 1
-    assert "Not photo tips." in prompt  # focus_areas is about the body
+    assert "Not photo tips;" in prompt  # focus_areas is about the body
+    assert "cannot be seen belongs only in limitations" in prompt
     assert "no general disclaimers about single photos" in prompt
     assert "never repeat the same point in two fields" in prompt
     assert "An empty list is better than a generic or invented item" in prompt
