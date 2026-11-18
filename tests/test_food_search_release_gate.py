@@ -98,11 +98,11 @@ def headers(monkeypatch, owner):
     return {"Authorization": "Bearer opaque-access-credential"}
 
 
-def _log(client, headers, key, quantity=1.5, serving="32978"):
+def _log(client, headers, key, quantity=1.5, serving="32978", source="search"):
     return client.post("/api/v1/nutrition/logs", json={
         "kind": "provider_backed", "provider": "fatsecret", "food_id": "33691",
         "serving_id": serving, "quantity": quantity, "slot": "kahvalti",
-        "discovery_source": "search",
+        "discovery_source": source,
     }, headers={**headers, "Idempotency-Key": key})
 
 
@@ -202,6 +202,29 @@ def test_unknown_serving_is_not_found_and_writes_nothing(raw_client, headers, pr
                                                          released):
     response = _log(raw_client, headers, "release-log-key-3", serving="missing")
     assert response.status_code == 404
+    assert MealLog.query.count() == 0
+
+
+def test_serving_missing_a_macro_is_not_found_not_retryable(raw_client, headers,
+                                                            provider, released,
+                                                            monkeypatch):
+    food = {"food": {**FOOD_PAYLOAD["food"], "servings": {"serving": [
+        {**FOOD_PAYLOAD["food"]["servings"]["serving"][0], "fat": None}]}}}
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Response(food))
+    response = _log(raw_client, headers, "release-log-key-5")
+    assert response.status_code == 404
+    assert response.json["error"]["code"] == "FOOD_NOT_FOUND"
+    assert MealLog.query.count() == 0
+
+
+def test_barcode_sourced_provider_log_stays_refused(raw_client, headers, provider,
+                                                   released):
+    response = _log(raw_client, headers, "release-log-key-6", source="barcode")
+    assert response.status_code == 503
+    assert response.json["error"] == {**response.json["error"],
+                                      "code": "FOOD_PROVIDER_UNAVAILABLE",
+                                      "retryable": False}
+    assert provider.calls == []
     assert MealLog.query.count() == 0
 
 

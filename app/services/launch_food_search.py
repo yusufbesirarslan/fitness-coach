@@ -36,6 +36,10 @@ NATIVE_RELEASE_ENDPOINTS = frozenset({
     "mobile_api.nutrition_log_food",
 })
 
+# Released provider-backed LogFood carries only the search journey's source;
+# a barcode-found identity stays refused with barcode itself.
+RELEASED_DISCOVERY_SOURCES = frozenset({"search"})
+
 
 class FoodSearchExcluded(RuntimeError):
     pass
@@ -57,6 +61,13 @@ def available():
     if FOOD_SEARCH_AVAILABLE is True:  # test-only characterization override
         return True
     return released() and _native_release_scope()
+
+
+def discovery_source_available(source):
+    """Whether a provider-backed log from this discovery source is released."""
+    if FOOD_SEARCH_AVAILABLE is True:  # test-only characterization override
+        return True
+    return source in RELEASED_DISCOVERY_SOURCES
 
 
 def require_available():
