@@ -303,7 +303,10 @@ def test_success_returns_this_turn_and_persists_it_once(
     assert response.headers["Cache-Control"] == "no-store"
     assert "Set-Cookie" not in response.headers
     body = response.get_json()
-    assert set(body) == {"contract_version", "messages"}
+    # Foundation V1: additive plan_effects; flag OFF -> nothing changed/pending.
+    assert set(body) == {"contract_version", "messages", "plan_effects"}
+    assert body["plan_effects"] == {
+        "training_plan": {"changed": False, "pending_confirmation": False}}
     assert body["contract_version"] == 1
 
     rows = _rows(alice.id)

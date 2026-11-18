@@ -1029,7 +1029,10 @@ def _coach_tool_defs_for_call(user_id=None):
             or _qualified_composite_tool(user_id, tool["name"])]
     if not coach_plan_tools.plan_mutation_tools_enabled():
         return defs
-    return defs + list(
+    # Foundation V1 B1: the read tool is published whenever the plan surface
+    # is ON — including while a confirmation is pending, because reading never
+    # changes anything and the model must describe the real plan.
+    return defs + [coach_plan_tools.READ_PLAN_TOOL_DEF] + list(
         coach_plan_tools.published_plan_tool_defs(user_id))
 
 
@@ -1067,6 +1070,17 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
     # için bozuk JSON'u boş nesneye katlamak, model hiç göndermediği bir çağrıyı
     # başarıyla yürütmek olurdu (brief §37/§38). Mevcut sekiz araç eski
     # davranışını (bozuk JSON → boş args) aynen korur.
+    if name == coach_plan_tools.READ_PLAN_TOOL:
+        # Read-only and argument-free: any supplied argument is refused, not
+        # ignored, so a model cannot believe it selected a user or a version.
+        if not arguments_parsed or not isinstance(args, dict) or args:
+            return json.dumps(
+                coach_plan_tools.invalid_arguments_result(
+                    "bu araç argüman almaz"),
+                ensure_ascii=False)
+        return json.dumps(
+            coach_plan_tools.execute_plan_read(user_id), ensure_ascii=False)
+
     if name in coach_plan_tools.PLAN_WRITE_TOOL_NAMES:
         if not arguments_parsed:
             return json.dumps(
