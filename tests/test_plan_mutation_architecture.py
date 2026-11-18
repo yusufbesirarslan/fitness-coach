@@ -175,7 +175,13 @@ def test_targeted_plan_writes_have_a_single_owner():
     and does not need to be: it constructs a brand-new ``TrainingPlan(...)``
     rather than assigning the attribute on a loaded row.
     """
-    approved = {Path("app/services/plan_mutation/service.py")}
+    approved = {
+        Path("app/services/plan_mutation/service.py"),
+        # Adaptive Coach C1: the ONE targeted writer of a different table
+        # (NutritionPlan), with its own single-owner gate in
+        # tests/test_nutrition_plan_mutation_c1.py. Never a TrainingPlan.
+        Path("app/services/nutrition_plan_mutation/service.py"),
+    }
     writers = []
     for path in APP_ROOT.rglob("*.py"):
         if path in approved:
@@ -233,7 +239,11 @@ def test_the_plan_version_has_a_single_writer():
     opinions about where history stands, and an undo standing on the wrong one
     restores a snapshot over state it does not explain.
     """
-    approved = {Path("app/services/plan_mutation/service.py")}
+    approved = {
+        Path("app/services/plan_mutation/service.py"),
+        # Adaptive Coach C1: NutritionPlan's own version (see above).
+        Path("app/services/nutrition_plan_mutation/service.py"),
+    }
     writers = []
     for path in APP_ROOT.rglob("*.py"):
         if path in approved:

@@ -36,7 +36,6 @@ from app.services.nutrition_plan_schema import (
     validate_nutrition_plan_for_save,
 )
 from app.services.nutrition_plan_store import newest_plan, newest_plan_query
-from app.services.plan_mutation import PLAN_MUTATION_ACTORS, MutationContext
 from app.services.plan_owner_lock import lock_plan_owner
 
 from .commands import apply_item_edit, command_type, semantic_fingerprint, validate_command
@@ -59,6 +58,23 @@ UNDO_COMMAND_TYPE = "undo_last_edit"
 _UNDO_FINGERPRINT = hashlib.sha256(b"nutrition-edit/v1\0undo").hexdigest()
 _KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 _FEATURE = "nutrition_plan"
+
+ACTOR_USER = "user"
+ACTOR_AI_COACH = "ai_coach"
+ACTOR_SYSTEM = "system"
+EDIT_ACTORS = frozenset({ACTOR_USER, ACTOR_AI_COACH, ACTOR_SYSTEM})
+
+
+@dataclass(frozen=True)
+class NutritionEditContext:
+    """Operation key + audit actor/reason. Never an authorization input.
+
+    Deliberately its own type rather than ``plan_mutation.MutationContext``:
+    the Training domain's consumers are an approved, closed set.
+    """
+    idempotency_key: str
+    actor: str = ACTOR_USER
+    reason: Optional[str] = None
 
 
 def snapshot_fingerprint(text):
@@ -125,19 +141,19 @@ class NutritionEditResult:
 
 
 def _validate_context(context):
-    if not isinstance(context, MutationContext):
+    if not isinstance(context, NutritionEditContext):
         raise InvalidNutritionEdit("a mutation context is required")
     key = context.idempotency_key
     if not isinstance(key, str) or not _KEY_RE.fullmatch(key):
         raise InvalidNutritionEdit("idempotency key is malformed")
-    if context.actor not in PLAN_MUTATION_ACTORS:
+    if context.actor not in EDIT_ACTORS:
         raise InvalidNutritionEdit("unsupported actor")
     reason = context.reason
     if reason is not None:
         if not isinstance(reason, str) or len(reason.strip()) > 200:
             raise InvalidNutritionEdit("reason out of bounds")
         reason = reason.strip() or None
-    return MutationContext(idempotency_key=key, actor=context.actor, reason=reason)
+    return NutritionEditContext(idempotency_key=key, actor=context.actor, reason=reason)
 
 
 def _parsed(text):

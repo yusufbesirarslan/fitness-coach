@@ -31,6 +31,10 @@ from .errors import (
 )
 from .estimate import ESTIMATOR_ID, server_estimator
 from .service import (
+    ACTOR_AI_COACH,
+    ACTOR_SYSTEM,
+    ACTOR_USER,
+    NutritionEditContext,
     OUTCOME_APPLIED,
     OUTCOME_NO_OP,
     NutritionEditResult,
@@ -41,6 +45,7 @@ from .service import (
 )
 
 __all__ = [
+    "ACTOR_AI_COACH", "ACTOR_SYSTEM", "ACTOR_USER", "NutritionEditContext",
     "ESTIMATOR_ID", "NUTRITION_EDIT_COMMANDS", "OUTCOME_APPLIED", "OUTCOME_NO_OP",
     "AddMealItemCommand", "AmbiguousMealItem", "EstimateUnavailable",
     "InvalidNutritionEdit", "MealItemAlreadyPresent", "MealItemNotFound",

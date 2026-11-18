@@ -366,8 +366,11 @@ def test_no_eager_generation_or_provider_call(app, client, auth_user, monkeypatc
 
 def test_no_schema_change_to_nutrition_plan():
     from app.models import NutritionPlan
+    # Adaptive Coach C1 adds the edit lineage + version (migration
+    # c1a0d2e3f4a5); PR5 itself changed nothing.
     assert {c.name for c in NutritionPlan.__table__.columns} == {
-        'id', 'user_id', 'plan_data', 'score', 'created_at'}
+        'id', 'user_id', 'plan_data', 'score', 'created_at',
+        'lineage_id', 'mutation_version'}
 
 
 # ── COPY ────────────────────────────────────────────────────────────────

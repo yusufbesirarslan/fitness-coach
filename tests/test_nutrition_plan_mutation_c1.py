@@ -19,7 +19,6 @@ from app.services.nutrition_plan_schema import (
     NutritionPlanInvalid,
     validate_nutrition_plan_for_save,
 )
-from app.services.plan_mutation import ACTOR_AI_COACH, MutationContext
 
 PLAN = {
     "isim": "Plan A",
@@ -76,7 +75,7 @@ def authority(owner):
 
 
 def ctx(key="edit-key-0001"):
-    return MutationContext(idempotency_key=key, actor=ACTOR_AI_COACH)
+    return npm.NutritionEditContext(idempotency_key=key, actor=npm.ACTOR_AI_COACH)
 
 
 def row(user):
@@ -371,3 +370,27 @@ def test_prepare_never_discards_a_callers_pending_work(owner):
     with pytest.raises(npm.InvalidNutritionEdit):
         npm.prepare_meal_edit(owner.id, REPLACE, estimator())
     db.session.rollback()
+
+
+def test_the_edit_service_is_the_only_targeted_nutrition_plan_writer():
+    """Single owner of a loaded NutritionPlan row's ``plan_data`` and
+    ``mutation_version`` (whole replacement constructs a new row instead)."""
+    import ast
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "app"
+    owner = root / "services" / "nutrition_plan_mutation" / "service.py"
+    writers = []
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if "NutritionPlan" not in path.read_text(encoding="utf-8"):
+            continue
+        for node in ast.walk(tree):
+            targets = (node.targets if isinstance(node, ast.Assign)
+                       else [node.target] if isinstance(node, (ast.AugAssign, ast.AnnAssign))
+                       else [])
+            for target in targets:
+                if (isinstance(target, ast.Attribute)
+                        and target.attr in ("plan_data", "mutation_version", "lineage_id")
+                        and path != owner and "plan_mutation/service.py" not in path.as_posix()):
+                    writers.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert writers == []
