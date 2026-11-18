@@ -18,6 +18,8 @@ and allowance it runs.
 """
 import math
 
+from app.services import ai_consent
+
 from app.services.nutrition_plan_schema import (
     ESTIMATED_KEY,
     ITEMS_KEY,
@@ -41,10 +43,18 @@ _ENERGY_TOLERANCE_KCAL = 60.0
 _ENERGY_TOLERANCE_RATIO = 0.25
 
 
+#: The D1 purpose the estimate runs under: the same purpose the edited plan
+#: was generated under, so ``apply_prepared_edit``'s ``nutrition_plan`` fence
+#: and the provider gate agree on ONE operation.
+ESTIMATE_FEATURE = "nutrition_plan"
+
+
 def server_estimator(names):
-    """The production estimator; the caller runs it inside its D1 operation."""
+    """The production estimator. The caller runs it inside the owner's
+    ``nutrition_plan`` D1 operation (``ai_consent.operation_scope``); a D1
+    refusal propagates as ``ConsentDenied``, never as "no estimate"."""
     from app.services.ai_nutrition import _estimate_macros_llm
-    return _estimate_macros_llm(list(names))
+    return _estimate_macros_llm(list(names), feature=ESTIMATE_FEATURE)
 
 
 def _value(raw, key):
@@ -80,6 +90,8 @@ def estimate_meal(items, estimate_items):
         distinct.setdefault(normalized(item), item)
     try:
         answer = estimate_items(list(distinct.values()))
+    except ai_consent.ConsentDenied:
+        raise  # a consent decision, typed by D1 — not an estimate failure
     except Exception as error:  # noqa: BLE001 — any estimator fault = no write
         raise EstimateUnavailable("estimator failed") from error
     if not isinstance(answer, dict):

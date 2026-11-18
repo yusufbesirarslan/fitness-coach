@@ -159,6 +159,10 @@ def prepare_meal_edit(user_id, command, estimate_items):
     snapshot is held across provider I/O.
     """
     command = validate_command(command)
+    if db.session.new or db.session.dirty or db.session.deleted:
+        # This function ends its own read transaction before the provider
+        # call; it must never discard a caller's pending work doing so.
+        raise InvalidNutritionEdit("caller has uncommitted work")
     try:
         row = newest_plan(user_id)
         if row is None:
@@ -246,6 +250,10 @@ def _record(*, user_id, lineage_id, context, kind, ctype, fingerprint, outcome,
 
 def apply_prepared_edit(user_id, prepared, context, *, authority):
     """Write a prepared edit atomically, or nothing.
+
+    ``prepared`` must come from server-side storage (C2 keeps it on the
+    confirmation row); it is schema-validated here, not re-derived, so it must
+    never round-trip through a client unsigned.
 
     ``authority`` is the D1 Nutrition Plan operation the estimate was made
     under; it is fenced under the owner lock in THIS transaction (``None`` is

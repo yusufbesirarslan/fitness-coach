@@ -12,7 +12,7 @@ import pytest
 
 from app.extensions import db
 from app.models import NutritionPlan, NutritionPlanMutationRecord
-from app.services import ai_consent
+from app.services import ai_consent, health_consent
 from app.services import nutrition_plan_mutation as npm
 from app.services.nutrition_native.plan import project_plan_row
 from app.services.nutrition_plan_schema import (
@@ -309,3 +309,65 @@ def test_another_users_plan_is_unreachable(owner, make_user):
     stranger = make_user("stranger")
     with pytest.raises(npm.NutritionPlanNotFound):
         npm.prepare_meal_edit(stranger.id, REPLACE, estimator())
+
+
+# ── production estimator wiring (review P2) ────────────────────────────────
+
+def test_the_server_estimator_runs_under_the_nutrition_plan_operation(
+        app, owner, authority, monkeypatch):
+    """The real estimate chain calls the model as ``nutrition_plan`` — the
+    purpose apply's fence requires — so the provider gate admits it inside the
+    owner's Nutrition Plan operation instead of failing closed."""
+    from app.services import ai_nutrition
+    seen = []
+
+    def fake_heavy_chat(*, messages, system_prompt, temperature, max_tokens, feature):
+        ai_consent.provider_binding(owner.id, feature)  # the real gate decision
+        seen.append(feature)
+        return json.dumps({name: {"calories": TABLE[name.casefold()]["calories"],
+                                  "protein": TABLE[name.casefold()]["protein"],
+                                  "carbs": TABLE[name.casefold()]["carbs"],
+                                  "fat": TABLE[name.casefold()]["fat"]}
+                           for name in ("Dana eti - 150 g", "Tam buğday ekmeği - 2 dilim")},
+                          ensure_ascii=False)
+
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", fake_heavy_chat)
+    with app.test_request_context(), health_consent.processing(owner.id), \
+            ai_consent.operation_scope(authority):
+        prepared = npm.prepare_meal_edit(owner.id, REPLACE, npm.server_estimator)
+    assert seen == ["nutrition_plan"]
+    assert prepared.document["kahvalti"]["kalori"] == 460
+
+
+def test_a_consent_refusal_is_typed_not_an_estimate_failure(
+        app, owner, authority, monkeypatch):
+    from app.services import ai_nutrition
+
+    def refused(**kwargs):
+        raise ai_consent.ConsentDenied("AI_CONSENT_REQUIRED")
+
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", refused)
+    with app.test_request_context(), health_consent.processing(owner.id), \
+            ai_consent.operation_scope(authority):
+        with pytest.raises(ai_consent.ConsentDenied):
+            npm.prepare_meal_edit(owner.id, REPLACE, npm.server_estimator)
+    assert row(owner).mutation_version == 0 and journal(owner) == 0
+
+
+def test_the_legacy_nutrition_estimator_still_swallows_failures(monkeypatch, app):
+    """Existing callers (menu analysis, diary) keep their {} contract."""
+    from app.services import ai_nutrition
+
+    def refused(**kwargs):
+        raise ai_consent.ConsentDenied("AI_CONSENT_REQUIRED")
+
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", refused)
+    with app.test_request_context("/"):
+        assert ai_nutrition._estimate_macros_llm_batch(["Elma"]) == {}
+
+
+def test_prepare_never_discards_a_callers_pending_work(owner):
+    db.session.add(NutritionPlan(user_id=owner.id, plan_data="{}", score=1.0))
+    with pytest.raises(npm.InvalidNutritionEdit):
+        npm.prepare_meal_edit(owner.id, REPLACE, estimator())
+    db.session.rollback()

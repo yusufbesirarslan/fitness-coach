@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import current_app
 
 from app.prompts import nutrition as nutrition_prompts
-from app.services import ai_cache, ai_spend_guard
+from app.services import ai_cache, ai_consent, ai_spend_guard
 from app.services.ai import _heavy_chat, _openai_chat
 from app.services.foodcache import _cache_macros
 
@@ -663,7 +663,13 @@ def _repair_truncated_json(raw_json):
     return trimmed
 
 
-def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
+def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None,
+                               feature="nutrition"):
+    """``feature`` is the D1 purpose the call runs under: "nutrition" for the
+    existing callers, "nutrition_plan" for the Nutrition Plan edit estimate
+    (Adaptive Coach C1), which only runs inside a Nutrition Plan operation. A
+    D1 refusal for that purpose is re-raised, never reported as "no estimate".
+    """
     if not batch_items:
         return {}
     category_map = category_map or {}
@@ -687,14 +693,17 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
         batch_items, items_str, has_grams_hint=bool(grams_hint))
 
     max_tok = min(300 + len(batch_items) * 65, 4000)
+    if feature not in ("nutrition", "nutrition_plan"):
+        raise ValueError("unsupported macro estimate feature")
+    call = dict(messages=[{"role": "user", "content": prompt}],
+                system_prompt=nutrition_prompts.MACRO_BATCH_SYSTEM,
+                temperature=0.0, max_tokens=max_tok)
     try:
-        raw = _heavy_chat(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt=nutrition_prompts.MACRO_BATCH_SYSTEM,
-            temperature=0.0,
-            max_tokens=max_tok,
-            feature="nutrition",
-        ).strip()
+        # Literal features only (provider inventory gate).
+        if feature == "nutrition_plan":
+            raw = _heavy_chat(**call, feature="nutrition_plan").strip()
+        else:
+            raw = _heavy_chat(**call, feature="nutrition").strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         if start < 0:
@@ -748,6 +757,10 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
                     results[name] = macros
 
         return results
+    except ai_consent.ConsentDenied:
+        if feature != "nutrition":
+            raise
+        current_app.logger.warning("[MACRO ENGINE] LLM BATCH ERROR: ConsentDenied")
     except Exception as e:
         current_app.logger.warning("[MACRO ENGINE] LLM BATCH ERROR: %s", type(e).__name__)
     return {}
@@ -761,7 +774,7 @@ _LLM_MACRO_BATCH_SIZE = 15
 _LLM_MACRO_MAX_WORKERS = 4
 
 
-def _estimate_macros_llm(items, category_map=None, grams_hint=None):
+def _estimate_macros_llm(items, category_map=None, grams_hint=None, feature="nutrition"):
     if not items:
         return {}
     current_app.logger.info(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE})")
@@ -780,6 +793,8 @@ def _estimate_macros_llm(items, category_map=None, grams_hint=None):
     def _run_batch(batch):
         with app.app_context():
             # grams_hint yoksa eski 2-argümanlı imza korunur (mevcut çağrı/mock'lar bozulmaz).
+            if feature != "nutrition":
+                return _estimate_macros_llm_batch(batch, category_map, feature=feature)
             if grams_hint:
                 batch_grams = {n: grams_hint[n] for n in batch if n in grams_hint}
                 return _estimate_macros_llm_batch(batch, category_map, grams_hint=batch_grams)
