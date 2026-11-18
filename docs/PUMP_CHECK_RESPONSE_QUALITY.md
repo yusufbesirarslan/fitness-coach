@@ -70,14 +70,20 @@ attempt).
 The validator used to know only English vocabulary, so Turkish answers relied
 on the prompt alone for medical, diagnostic, body-fat, asymmetry and numeric
 wording. `parse_analysis` now also checks an accent-folded copy of every text
-field (`_tr_folded`: İ/I/ı → i, ş/ğ/ü/ö/ç → s/g/u/o/c, so capitals and text
-typed without Turkish letters are covered) against four Turkish patterns:
+field (`_tr_folded`: NFKD, combining marks dropped, İ/I/ı → i, hyphens →
+spaces, so capitals, decomposed input and text typed without Turkish letters
+are covered) against four Turkish patterns:
 `_TR_MEDICAL_RE`, `_TR_DIAGNOSTIC_RE`, `_TR_BODY_CLAIM_RE` and
 `_TR_MEASUREMENT_RE`. A hit is refused with the same message as its English
-equivalent; English checks, schema and quality tokens are unchanged.
+equivalent; English checks, schema and quality tokens are unchanged. The
+Pump Check comparison validator reuses the same `_plain_text`, so comparisons
+get the same Turkish protection.
 
 Everyday words next to the blocked stems stay legal ("gösteriyor", "yüzde"
-as *on the face*, "kırık beyaz", "belirtilen"). Replaying the real staging
+as *on the face* — a percentage needs a digit, a tens word, or a single-digit
+word that ends the clause or is followed by a comparison/rate word —
+"kırık beyaz", "belirtilen", "tanıdık", "işaret parmağın"). Known residual
+(same blind spot as English): vague quantities such as "birkaç kilo". Replaying the real staging
 answers: all 8 Turkish answers from this prompt pass; 2 of 7 valid Turkish
 answers from the previous prompt are refused ("düşündürüyor", "asimetrik"),
 which is why the validator ships only together with or after this prompt.

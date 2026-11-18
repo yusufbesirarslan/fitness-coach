@@ -322,6 +322,27 @@ TR_PROHIBITED = [
     ("Kolların iki santim kalınlaşmış.", "false precision"),
     ("Beş kilo vermiş gibisin.", "false precision"),
     ("Bel 80 santimetre civarında.", "false precision"),
+    # independent review of #532: inflections and synonyms
+    ("Bu yorgunluğun belirtisidir.", "safety policy"),
+    ("Belirtileriyle uyumlu.", "safety policy"),
+    ("Bu aşırı antrenman işareti olabilir.", "safety policy"),
+    ("Bir soruna işaret etmekte.", "safety policy"),
+    ("Bu, yorgunluğun göstergesi olabilir.", "safety policy"),
+    ("Dirsekte inflamasyon görünüyor.", "safety policy"),
+    ("Enflamasyon var gibi.", "safety policy"),
+    ("Kas zedelenmesi olabilir.", "safety policy"),
+    ("Göğüste kas kopması var gibi.", "safety policy"),
+    ("Kesin tanı için doktora git.", "safety policy"),
+    ("İnfeksiyon var.", "safety policy"),
+    ("Omzun çıkık görünüyor.", "safety policy"),
+    ("Yağ-oranın düşük.", "body claim"),                        # hyphen
+    ("Kol çevren genişlemiş.", "body claim"),
+    ("Kas hacmin artmış.", "body claim"),
+    ("Yüzde onbeş daha belirgin.", "false precision"),
+    ("Yüzde beş daha net.", "false precision"),
+    ("Kolun 15 inç.", "false precision"),
+    ("TE\u0053\u0327H\u0130S i\u00e7in doktora git.", "safety policy"),   # NFD ş
+    ("I\u0307LTI\u0307HAP belirgin.", "safety policy"),            # NFD İ
 ]
 
 
@@ -353,6 +374,16 @@ TR_ORDINARY = [
     "On kolun ve bileklerin net.",
     "İki kolun da aynı pozisyonda.",
     "İlk fotoğrafa göre aynı ışığı kullan.",
+    # "yüzde" = on the face, "tanı-" / "işaret" in other senses
+    "Yüzde bir gerginlik var.",
+    "Yüzde bir gülümseme görünüyor.",
+    "Kollar yüzde bir miktar gölge bırakıyor.",
+    "Yüzde iki çizgi var.",
+    "Belirtilen alan net.",
+    "İşaret parmağın görünüyor.",
+    "Tanıdık bir poz, aynı açı korunmuş.",
+    "Omuz çevresi ışıkta net seçiliyor.",
+    "Bir incelik var: bel hattın gölgede kalıyor.",
 ]
 
 
@@ -361,6 +392,35 @@ def test_ordinary_turkish_descriptions_are_not_refused(text):
     parsed = parse_analysis(json.dumps(
         _valid(summary=text, observations=[text]), ensure_ascii=False))
     assert parsed["summary"] == text
+
+
+@pytest.mark.parametrize("field", ["strengths", "focus_areas", "limitations",
+                                   "next_check_guidance"])
+def test_turkish_checks_cover_every_text_field(field):
+    text = "Omzunda bir sakatlık olabilir."
+    value = _valid(**{field: text if field == "next_check_guidance" else [text]})
+    with pytest.raises(InvalidAnalysis, match="safety policy"):
+        parse_analysis(json.dumps(value, ensure_ascii=False))
+
+
+def test_turkish_checks_also_guard_pump_check_comparisons():
+    # The comparison validator reuses this _plain_text.
+    from app.services.mobile_pump_check_comparisons.analysis import (
+        InvalidComparisonAnalysis, parse_analysis as parse_comparison)
+    value = {
+        "summary": "Omuz hattın iki fotoğrafta da net seçiliyor.",
+        "observed_changes": ["Kas kütlen artmış."],
+        "stable_areas": ["Kamera mesafesi aynı görünüyor."],
+        "focus_areas": ["Göğüs bölgen gölgede kalıyor."],
+        "limitations": ["Sırt bu açıdan görünmüyor."],
+        "comparability_reasons": ["Bölge ve kadraj aynı."],
+        "next_check_guidance": "Aynı poz ve ışıkla tekrar çek.",
+        "comparability": "comparable",
+    }
+    with pytest.raises(InvalidComparisonAnalysis, match="body claim"):
+        parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
+    value["observed_changes"] = ["Omuz hattın B fotoğrafında daha net."]
+    assert parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
 
 
 def test_english_validation_is_unchanged_by_turkish_parity():

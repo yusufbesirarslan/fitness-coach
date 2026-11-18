@@ -1,6 +1,7 @@
 """Strict canonical schema and Bedrock adapter for Pump Check analysis."""
 import json
 import re
+import unicodedata
 
 from app.i18n import AVAILABLE_LOCALES, DEFAULT_LOCALE
 from app.services.vision_images import prepare_image_for_vision
@@ -67,40 +68,54 @@ _IMPERIAL_MEASUREMENT_RE = re.compile(
 
 
 # Turkish equivalents of the English-only patterns above. They run on a
-# Turkish-aware, accent-folded copy of the text: re.IGNORECASE does not map
-# dotted/dotless capitals (TEŞHİS vs teşhis), and the folding also catches
-# answers written without Turkish letters. Ambiguous everyday words are left
-# out on purpose: "gösteriyor" (shows), "yüzde" without a number (on the
-# face), bare "çevresi" (around), "kırık beyaz" (off-white), "sende ... var"
-# (ordinary possessive; the conditions themselves are blocked).
-_TR_FOLD = str.maketrans({"İ": "i", "I": "i", "ı": "i", "ş": "s", "Ş": "s",
-                          "ğ": "g", "Ğ": "g", "ü": "u", "Ü": "u", "ö": "o",
-                          "Ö": "o", "ç": "c", "Ç": "c", "â": "a", "î": "i",
-                          "û": "u"})
+# Turkish-aware, accent-folded copy of the text (_tr_folded): re.IGNORECASE
+# does not map dotted/dotless capitals (TEŞHİS vs teşhis), the NFKD step also
+# folds decomposed input and full-width digits, hyphens become spaces, and the
+# folding catches answers written without Turkish letters. Ambiguous everyday
+# words are left out on purpose: "gösteriyor" (shows), "yüzde" (on the face)
+# unless a quantity follows, bare "çevresi" (around), "kırık beyaz"
+# (off-white), "belirtilen" (stated), "sende ... var" (ordinary possessive;
+# the conditions themselves are blocked).
+_TR_FOLD = str.maketrans({"ı": "i", "I": "i", "-": " ", "‐": " ", "‑": " "})
 _TR_MEDICAL_RE = re.compile(
-    r"(?:teshis|\btani (?:kon|koy)|sakatl|yaralan|yirti[klg]|kemik kir|"
-    r"\bkirig|fraktur|hastali[kg]|iltihap|\bodem(?:i|in)?\b|fiti[kg]|"
-    r"disk kaymas|tendinit|menisk|kanser|tumor|artrit|kirecl|skolyoz|"
-    r"osteopor|kemik erime|enfeksiyon|burkul|hormon|yeme bozuklu|anoreks|"
-    r"sendrom|klinik|"
-    r"\b(?:omuz|eklem|kalca|diz|dirsek|bilek) cik(?:ig|ik|mas)|"
+    r"(?:teshis|\btani (?:kon|koy)|\btani(?:si|ya|yi|nin)?\b|sakatl|yaralan|"
+    r"zedelen|\b(?:kas|bag|tendon) kopma|yirti[klg]|kemik kir|\bkirig|"
+    r"fraktur|hastali[kg]|iltihap|[ie]nflamas|\bodem(?:i|in)?\b|fiti[kg]|"
+    r"herni|disk kaymas|tendinit|menisk|kanser|tumor|artrit|kirecl|"
+    r"skolyoz|osteopor|kemik erime|[ei]nfeksiyon|burkul|dislokas|hormon|"
+    r"yeme bozuklu|anoreks|sendrom|klinik|"
+    r"\b(?:omuz|omz\w*|eklem|kalca|diz|dirsek|bilek) cik(?:ig|ik|mas)|"
     r"(?:postur|durus) bozuklu|"
     r"iskelet (?:bozuklu|anomali|patoloji|sorun))")
 _TR_DIAGNOSTIC_RE = re.compile(
-    r"(?:\bbelirti(?:si|leri|ler)?\b|isaret ed|dusundur|\bkanit|muzdarip)")
+    r"(?:\bbelirti(?:\b|si|ler)|isaret(?:i|leri)? (?:olabilir|olarak|var)|"
+    r"isaret e[dt]|gosterge|dusundur|\bkanit|muzdarip)")
 _TR_BODY_CLAIM_RE = re.compile(
-    r"(?:yag oran|yag yuzde|vucut yag|yagsiz (?:kutle|kas|vucut)|kas kutle|"
-    r"kas buyume|cevre olcu|cevresi olcu|asimetr|"
-    r"(?:buyume|gelisim|kazanim|hipertrofi|artis) (?:hiz|oran))")
-_TR_NUMBER = (r"(?:\d+(?:[.,]\d+)?|bir|iki|uc|dort|bes|alti|yedi|sekiz|"
-              r"dokuz|on|yirmi|otuz|kirk|elli|altmis|yetmis|seksen|doksan|yuz)")
+    r"(?:yag oran|yag yuzde|yag seviye|vucut yag|yagsiz (?:kutle|kas|vucut)|"
+    r"kas kutle|kas hacm|kas buyume|cevre olcu|cevresi olcu|"
+    r"(?:bel|kol|gogus|baldir|kalca|uyluk|boyun|pazu) cevre(?:n|niz)\b|"
+    r"asimetr|(?:buyume|gelisim|kazanim|hipertrofi|artis) (?:hiz|oran))")
+_TR_UNIT_WORDS = "bir|iki|uc|dort|bes|alti|yedi|sekiz|dokuz"
+_TR_TEN_WORDS = "on|yirmi|otuz|kirk|elli|altmis|yetmis|seksen|doksan|yuz"
+_TR_UNITS = "(?:" + _TR_UNIT_WORDS + ")"
+_TR_TENS = "(?:" + _TR_TEN_WORDS + ")"
+_TR_NUMBER = (r"(?:\d+(?:[.,]\d+)?|" + _TR_UNIT_WORDS + "|" + _TR_TEN_WORDS
+              + ")")
 _TR_MEASUREMENT_RE = re.compile(
-    r"(?:%\s*\d|\byuzde\s*" + _TR_NUMBER + r"\b|\b" + _TR_NUMBER
-    + r"\s*(?:kilo\w*|kg|santim\w*|cm|milim\w*|mm|gram\w*|gr)\b)")
+    r"(?:%\s*\d|"
+    # "yüzde" is also "on the face": a digit or a tens word after it is a
+    # percentage, a single-digit word only when it ends the clause or is
+    # followed by a comparison or rate word ("yüzde bir gerginlik" stays legal).
+    r"\byuzde\s*(?:\d|" + _TR_TENS + r"|" + _TR_UNITS
+    + r"\s*(?:$|[.,;]|l[iu]k|daha|oran|civar|kadar|seviye|nispet))|"
+    r"\b" + _TR_NUMBER
+    + r"\s*(?:kilo\w*|kg|santim\w*|cm|milim\w*|mm|gram\w*|gr|inc|inch)\b)")
 
 
 def _tr_folded(value):
-    return " ".join(value.translate(_TR_FOLD).lower().split())
+    decomposed = unicodedata.normalize("NFKD", value)
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(stripped.translate(_TR_FOLD).lower().split())
 
 
 class InvalidAnalysis(ValueError):
