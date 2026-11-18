@@ -88,7 +88,7 @@ _TR_MEDICAL_RE = re.compile(
     r"(?:postur|durus) bozuklu|"
     r"iskelet (?:bozuklu|anomali|patoloji|sorun))")
 _TR_DIAGNOSTIC_RE = re.compile(
-    r"(?:\bbelirti(?:\b|si|ler)|isaret(?:i|leri)? (?:olabilir|olarak|var)|"
+    r"(?:\bbelirti(?:\b|si|ler)|isaret(?:i|leri) (?:olabilir|olarak)|"
     r"isaret e[dt]|gosterge|dusundur|\bkanit|muzdarip)")
 _TR_BODY_CLAIM_RE = re.compile(
     r"(?:yag oran|yag yuzde|yag seviye|vucut yag|yagsiz (?:kutle|kas|vucut)|"
@@ -102,12 +102,14 @@ _TR_TENS = "(?:" + _TR_TEN_WORDS + ")"
 _TR_NUMBER = (r"(?:\d+(?:[.,]\d+)?|" + _TR_UNIT_WORDS + "|" + _TR_TEN_WORDS
               + ")")
 _TR_MEASUREMENT_RE = re.compile(
-    r"(?:%\s*\d|"
-    # "yüzde" is also "on the face": a digit or a tens word after it is a
-    # percentage, a single-digit word only when it ends the clause or is
-    # followed by a comparison or rate word ("yüzde bir gerginlik" stays legal).
-    r"\byuzde\s*(?:\d|" + _TR_TENS + r"|" + _TR_UNITS
-    + r"\s*(?:$|[.,;]|l[iu]k|daha|oran|civar|kadar|seviye|nispet))|"
+    r"(?:%\s*\d|\d\s*%|"
+    # "yüzde" is also "on the face": a digit or a whole tens word ("on",
+    # "onbes", "otuzluk") after it is a percentage, a single-digit word only
+    # when it ends the clause or is followed by "-lik" or a comparison/rate
+    # word. "Yüzde bir gerginlik", "yüzde önemli", "yüzde yüzeysel" stay legal.
+    r"\byuzde\s*(?:\d|" + _TR_TENS + r"(?:\b|" + _TR_UNITS + r"\b|l[iu]k\b)|"
+    + _TR_UNITS
+    + r"\s*(?:$|[.,;]|l[iu]k\b|daha|oran|civar|kadar|seviye|nispet))|"
     r"\b" + _TR_NUMBER
     + r"\s*(?:kilo\w*|kg|santim\w*|cm|milim\w*|mm|gram\w*|gr|inc|inch)\b)")
 

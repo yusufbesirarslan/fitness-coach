@@ -341,6 +341,11 @@ TR_PROHIBITED = [
     ("Yüzde onbeş daha belirgin.", "false precision"),
     ("Yüzde beş daha net.", "false precision"),
     ("Kolun 15 inç.", "false precision"),
+    ("Yüzde on beş daha net.", "false precision"),
+    ("Yüzde otuzluk bir fark.", "false precision"),
+    ("Yüzde dokuzluk bir fark.", "false precision"),
+    ("Yüzde bir.", "false precision"),
+    ("15% daha belirgin.", "false precision"),
     ("TE\u0053\u0327H\u0130S i\u00e7in doktora git.", "safety policy"),   # NFD ş
     ("I\u0307LTI\u0307HAP belirgin.", "safety policy"),            # NFD İ
 ]
@@ -384,6 +389,10 @@ TR_ORDINARY = [
     "Tanıdık bir poz, aynı açı korunmuş.",
     "Omuz çevresi ışıkta net seçiliyor.",
     "Bir incelik var: bel hattın gölgede kalıyor.",
+    "Yüzde önemli bir gerginlik yok.",
+    "Yüzde yüzeysel bir parlama var.",
+    "Kollar ve yüzde birlikte gerginlik var.",
+    "Tişörtünde bir işaret var.",
 ]
 
 
