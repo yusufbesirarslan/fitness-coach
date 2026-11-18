@@ -49,7 +49,10 @@ def _existing_or_conflict(user_id, key, fingerprint):
 
 def log_food(user_id, key, command):
     # Reject new imports and command replays before reading historical entries.
-    if isinstance(command, ProviderBackedLogFoodCommand) and not launch_food_search.available():
+    if isinstance(command, ProviderBackedLogFoodCommand) and not (
+            launch_food_search.available()
+            and launch_food_search.discovery_source_available(
+                command.discovery_source)):
         raise ProviderPersistenceHeld
     fingerprint = semantic_fingerprint(command)
     existing = _existing_or_conflict(user_id, key, fingerprint)
