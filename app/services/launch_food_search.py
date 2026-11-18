@@ -1,32 +1,78 @@
-"""Türkiye V1 Food Search exclusion (founder decision, issue #520).
+"""Food Search release gate (founder decision 2026-11-18, supersedes #520).
 
-Source-controlled, closed for every account. Environment variables, cached
-credentials, consent, subscription and request parameters cannot reopen it.
-Manual logging, existing diary reads/deletes and independent QR estimates keep
-their own existing permissions and retention boundaries.
+Default closed. Reopening is limited to the native text-search journey:
+``/api/v1`` search → servings → provider-backed LogFood, and only when the
+``FITX_FOOD_SEARCH_ENABLED`` rollout flag is ``1`` on the host. The gate is
+scoped by request endpoint, so turning the flag on does NOT reopen:
+
+* barcode lookup (native or browser),
+* the browser ``food`` blueprint and the browser diary builder,
+* any other FatSecret caller (Coach, QR Menu, social suggestions, workers).
+
+Those keep refusing at the HTTP/token layer exactly as under the V1
+exclusion. Manual logging, diary reads/deletes and independent QR estimates
+keep their own permissions and retention boundaries.
 """
-from flask import jsonify, request
+from flask import current_app, has_app_context, has_request_context, jsonify, request
 
+FLAG_KEY = "FITX_FOOD_SEARCH_ENABLED"
+
+# TEST ONLY: the characterization fixture (tests/conftest.py
+# ``food_search_reopened``) flips this to exercise dormant provider code on every
+# surface. Production never sets it; release availability is FLAG_KEY.
 FOOD_SEARCH_AVAILABLE = False
+
 ERROR_CODE = "FOOD_SEARCH_UNAVAILABLE"
 DISCOVERY_ENDPOINTS = frozenset({
     "mobile_api.nutrition_food_search",
     "mobile_api.nutrition_food_servings",
     "mobile_api.nutrition_food_barcode",
 })
+# The only request endpoints the release flag can reopen. Barcode is excluded
+# on purpose; it needs its own entitlement/scope decision.
+NATIVE_RELEASE_ENDPOINTS = frozenset({
+    "mobile_api.nutrition_food_search",
+    "mobile_api.nutrition_food_servings",
+    "mobile_api.nutrition_log_food",
+})
+
+# Released provider-backed LogFood carries only the search journey's source;
+# a barcode-found identity stays refused with barcode itself.
+RELEASED_DISCOVERY_SOURCES = frozenset({"search"})
 
 
 class FoodSearchExcluded(RuntimeError):
     pass
 
 
+def released():
+    """The host rollout flag. Says nothing about the current call's scope."""
+    if FOOD_SEARCH_AVAILABLE is True:  # test-only characterization override
+        return True
+    return has_app_context() and current_app.config.get(FLAG_KEY) is True
+
+
+def _native_release_scope():
+    return has_request_context() and request.endpoint in NATIVE_RELEASE_ENDPOINTS
+
+
 def available():
-    return FOOD_SEARCH_AVAILABLE is True
+    """Whether THIS call may use FatSecret search/serving/persistence."""
+    if FOOD_SEARCH_AVAILABLE is True:  # test-only characterization override
+        return True
+    return released() and _native_release_scope()
+
+
+def discovery_source_available(source):
+    """Whether a provider-backed log from this discovery source is released."""
+    if FOOD_SEARCH_AVAILABLE is True:  # test-only characterization override
+        return True
+    return source in RELEASED_DISCOVERY_SOURCES
 
 
 def require_available():
     if not available():
-        raise FoodSearchExcluded("Food Search is excluded from V1")
+        raise FoodSearchExcluded("Food Search is not available for this call")
 
 
 def install(app):
@@ -48,4 +94,5 @@ def install(app):
 
     @app.context_processor
     def food_search_launch_context():
+        # Browser surfaces stay closed under the release flag.
         return {"food_search_available": available()}

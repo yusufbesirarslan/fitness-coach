@@ -59,7 +59,9 @@ def _nutrition(values, multiplier=Decimal("1")):
                 Decimal(str(values["carbohydrate_g"])) * multiplier),
             fat_g=Decimal(str(values["fat_g"])) * multiplier,
         )
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        # ArithmeticError: decimal.InvalidOperation for a missing (None) macro,
+        # which no retry can fix.
         raise ProviderFoodNotFound from None
 
 

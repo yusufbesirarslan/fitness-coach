@@ -1,4 +1,36 @@
-# Türkiye V1 Food Search exclusion
+# Food Search release gate (2026-11-18)
+
+Founder decision, 18 November 2026: restore text Food Search on the existing
+FatSecret Premier Free entitlement (US dataset, `scope=basic`). This
+supersedes the V1 exclusion below for one journey only, behind the default-OFF
+rollout flag `FITX_FOOD_SEARCH_ENABLED`:
+
+| Surface | Flag OFF (default) | Flag ON |
+|---|---|---|
+| `GET /api/v1/nutrition/foods/search` | 404 `FOOD_SEARCH_UNAVAILABLE` | FatSecret `foods.search` (8 results) |
+| `GET /api/v1/nutrition/foods/fatsecret/<id>/servings` | 404 | FatSecret `food.get*` projection |
+| provider-backed `POST /api/v1/nutrition/logs` (+ replay, provider-copy repeat) | 503 held | server re-resolves serving × quantity, stamps 24h provenance |
+| native/browser barcode, browser `food` blueprint, browser diary builder | closed | **closed** |
+| Coach, QR Menu, social suggestions, workers calling FatSecret | refused | **refused** |
+| worker / deep-health proxy probe | `disabled` | probes |
+
+`launch_food_search.available()` is true only when the flag is ON and the
+current request endpoint is in `NATIVE_RELEASE_ENDPOINTS`; every FatSecret
+HTTP/token call keeps calling `require_available()`, so a shared-client caller
+outside those endpoints still refuses. The 24h retention boundary
+(`provider_retention`), attribution and the #497 advice seam are unchanged.
+The mobile client is gated separately at compile time
+(`AXISAI_FOOD_SEARCH_ENABLED`, default false), so the build in App Review
+never calls these routes even if the server flag were ON.
+
+Activation (not authorized by this change): host FatSecret key, an https
+`FATSECRET_BASE_URL` with allowlisted egress (the public nginx
+`/fatsecret/rest/server.api` location stays closed), real staging E2E, and a
+mobile release built with the define.
+
+---
+
+# Türkiye V1 Food Search exclusion (historical, superseded in part above)
 
 Founder decision, 16 November 2026: [issue #520](https://github.com/yusufbesirarslan/fitness-coach/issues/520).
 
