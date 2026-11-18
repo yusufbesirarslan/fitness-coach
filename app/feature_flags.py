@@ -745,6 +745,55 @@ ROLLOUT_FLAGS = (
         # would be exactly the duplicate registry this PR avoids.
         parsed_by=PARSED_BY_MOBILE_CREDENTIALS,
     ),
+    FeatureFlag(
+        key="FITX_FOOD_SEARCH_ENABLED",
+        capability=(
+            "Reopens ONLY the native FatSecret text-search journey: "
+            "/api/v1/nutrition/foods/search, /foods/fatsecret/<id>/servings and "
+            "provider-backed POST /api/v1/nutrition/logs (incl. replay and the "
+            "provider-copy repeat). Scoped by request endpoint in "
+            "app/services/launch_food_search.py, so barcode lookup, the browser "
+            "food blueprint/diary builder, Coach, QR Menu, social suggestions "
+            "and workers keep refusing FatSecret exactly as with the flag OFF. "
+            "Also lets the worker/deep-health proxy probe run. The submitted "
+            "mobile build compiled without AXISAI_FOOD_SEARCH_ENABLED never "
+            "calls these routes."),
+        owner=_OWNER,
+        default=False,
+        depends_on=("MOBILE_AUTH_ENABLED",),
+        observability=(
+            "mobile_nutrition event=food_discovery_failed / log_food_failed "
+            "lines (error type + request id only, never the query, food or "
+            "macros); /health?deep=1 fatsecret_proxy ok|error|unconfigured "
+            "instead of disabled."),
+        prerequisites=(
+            "FATSECRET_CLIENT_ID/FATSECRET_CLIENT_SECRET present on the host "
+            "for the Premier Free key (scope=basic, US dataset)",
+            "FATSECRET_BASE_URL set to an https endpoint that reaches "
+            "platform.fatsecret.com from an allowlisted egress IP; the public "
+            "/fatsecret/rest/server.api nginx location stays closed (R6 #522)",
+            "staging E2E: real search → servings → log → diary/day totals, "
+            "replay idempotency, provider-down fallback to manual",
+            "mobile release built with --dart-define="
+            "AXISAI_FOOD_SEARCH_ENABLED=true",
+        ),
+        success_signals=(
+            "FOOD_PROVIDER_UNAVAILABLE 503 rate stays low on search/servings",
+            "provider_retention expire_due keeps folding provider rows at 22h",
+        ),
+        abort_signals=(
+            "sustained FOOD_PROVIDER_UNAVAILABLE (key/allowlist/quota)",
+            "any FatSecret call observed from Coach, QR Menu or barcode paths",
+        ),
+        rollback=(
+            "set FITX_FOOD_SEARCH_ENABLED=0 in the host .env and "
+            "`docker compose up -d`; routes return 404 FOOD_SEARCH_UNAVAILABLE "
+            "and clients fall back to manual logging. Already logged entries "
+            "stay, and the 24h retention worker keeps expiring them."),
+        lifecycle=LIFECYCLE_STAGING_ONLY,
+        review_by="2026-12-18",
+        decision=DECISION_ENABLE,
+    ),
 )
 
 # PR1's inventory, now DERIVED rather than hand-maintained. Import site
