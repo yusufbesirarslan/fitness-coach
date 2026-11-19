@@ -159,7 +159,7 @@ Resources:
   # Log grubunu BILEREK bir AWS::Logs::LogGroup kaynagi olarak TANIMLAMIYORUZ:
   # fonksiyon prod'da zaten calisti ve Lambda log grubunu OTOMATIK olusturdu;
   # simdi CFN ile tanimlamak "already exists" hatasiyla stack'i dusururdu.
-  # Metric filter grubu ADIYLA referanslar (DependsOn: fonksiyon).
+  # Metric filter grubu ADIYLA referanslar; !Sub fonksiyon bagimliligini kurar.
   #
   # Desen ASCII: Turkce karakterli mesaj metinlerine bagimli olmamak icin
   # Lambda Python runtime'inin seviye etiketlerini ([ERROR]/[WARNING]) ve
@@ -170,7 +170,6 @@ Resources:
   # Log grubu yalnizca BU fonksiyona ait, dolayisiyla her ERROR/WARNING bizimdir.
   EmailFailureMetricFilter:
     Type: AWS::Logs::MetricFilter
-    DependsOn: EmailSenderFunction
     Properties:
       LogGroupName: !Sub '/aws/lambda/${EmailSenderFunction}'
       FilterPattern: '?"[ERROR]" ?"[WARNING]" ?"RESEND_API_KEY"'
