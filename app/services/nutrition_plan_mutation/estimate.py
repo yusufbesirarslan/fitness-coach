@@ -140,3 +140,52 @@ def recompute(document, meal_key, estimates):
         "item_count": len(meal[ITEMS_KEY]),
     }
     return document, provenance
+
+
+def verify_reestimated(base, document, provenance):
+    """The F-3 invariants of a stored edit, checked again at the write.
+
+    ``base`` is the bound plan as it is now (exact bytes already matched) and
+    ``document`` the prepared result, both schema-validated. A stored payload
+    is data, not trust: anything but "one meal's items changed, that meal
+    re-estimated and labelled, totals = sum of meals" is refused.
+    Raises ``ValueError``; the caller maps it to a typed refusal.
+    """
+    if not isinstance(provenance, dict):
+        raise ValueError("provenance missing")
+    meal_key = provenance.get("meal")
+    if (meal_key not in MEAL_KEYS or provenance.get("source") != ESTIMATOR_ID
+            or provenance.get("method") != "whole_meal_reestimation"
+            or meal_key not in base or meal_key not in document):
+        raise ValueError("provenance does not describe a whole-meal estimate")
+    for key in set(base) | set(document):
+        if key == meal_key or key in TOTAL_KEYS:
+            continue
+        if base.get(key) != document.get(key):
+            raise ValueError("a part of the plan outside the edited meal changed")
+    meal, before = document[meal_key], base[meal_key]
+    if meal.get(ESTIMATED_KEY) is not True:
+        raise ValueError("the re-estimated meal is not labelled")
+    for key in set(meal) | set(before):
+        if key in MEAL_MACRO_KEYS or key in (ITEMS_KEY, ESTIMATED_KEY):
+            continue
+        if meal.get(key) != before.get(key):
+            raise ValueError("the edited meal changed outside its items and values")
+    items = provenance.get("items")
+    if (not isinstance(items, list) or provenance.get("item_count") != len(meal[ITEMS_KEY])
+            or [i.get("item") if isinstance(i, dict) else None for i in items]
+            != list(meal[ITEMS_KEY])):
+        raise ValueError("provenance does not cover exactly the meal's items")
+    # Values are the rounded sums of the per-item estimates (provenance keeps
+    # each to 0.1, so allow that rounding and no more).
+    slack = 0.5 + 0.05 * len(items)
+    for wire, key in _WIRE:
+        parts = [i.get(wire) for i in items]
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in parts):
+            raise ValueError("provenance value missing")
+        if abs(meal[key] - sum(parts)) > slack:
+            raise ValueError("the meal values are not the estimate")
+    for key, total_key in zip(MEAL_MACRO_KEYS, TOTAL_KEYS):
+        expected = sum(document[slot][key] for slot in MEAL_KEYS if slot in document)
+        if document.get(total_key) != int(round(expected)):
+            raise ValueError("daily totals are not the sum of the meals")

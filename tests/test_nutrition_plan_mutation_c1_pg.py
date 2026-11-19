@@ -154,8 +154,11 @@ def authority(owner, feature="nutrition_plan"):
     return ai_consent.begin_operation(owner, feature, "openai", ai.OPENAI_MODEL)
 
 
+auth_for = authority  # equal (owner, feature, generation, version) = the same operation
+
+
 def prepare(owner, command, table=TABLE):
-    return _npm().prepare_meal_edit(owner, command, estimator(table))
+    return _npm().prepare_meal_edit(owner, command, estimator(table), authority=auth_for(owner))
 
 
 def state(owner):
@@ -382,9 +385,17 @@ def test_p06_consent_revoked_or_regranted_after_prepare_writes_nothing(c1):
             npm.apply_prepared_edit(owner, prepared, ctx("edit-key-0001"), authority=auth)
         assert (state(owner).version, state(owner).journal, state(owner).data) == (0, 0, STORED)
 
-        # A fresh operation after the regrant may apply the same confirmed edit.
-        result = npm.apply_prepared_edit(owner, prepared, ctx("edit-key-0001"),
-                                         authority=authority(owner))
+        # Nor does a fresh operation revive the pre-revoke estimate: the edit
+        # is bound to the operation it was estimated under (LP21).
+        with pytest.raises(ConsentDenied):
+            npm.apply_prepared_edit(owner, prepared, ctx("edit-key-0001"),
+                                    authority=authority(owner))
+        assert (state(owner).version, state(owner).journal, state(owner).data) == (0, 0, STORED)
+
+        # Only a NEW estimate, prepared under the new operation, can be applied.
+        fresh = authority(owner)
+        again = npm.prepare_meal_edit(owner, replace_cmd(), estimator(), authority=fresh)
+        result = npm.apply_prepared_edit(owner, again, ctx("edit-key-0002"), authority=fresh)
         assert result.outcome == npm.OUTCOME_APPLIED
         assert (state(owner).version, state(owner).journal) == (1, 1)
 
@@ -439,12 +450,13 @@ def test_p08_a_failed_or_partial_estimate_writes_nothing(c1):
         before = state(owner)
         for estimate in (boom, estimator(partial), estimator(implausible), estimator({})):
             with pytest.raises(npm.EstimateUnavailable):
-                npm.prepare_meal_edit(owner, replace_cmd(), estimate)
+                npm.prepare_meal_edit(owner, replace_cmd(), estimate,
+                                      authority=authority(owner))
         # An unresolvable target never reaches the estimator or the plan
         # (ambiguity itself is covered on SQLite: it needs a doctored plan).
         with pytest.raises(npm.MealItemNotFound):
             npm.prepare_meal_edit(owner, npm.RemoveMealItemCommand("kahvalti", "e"),
-                                  estimator())
+                                  estimator(), authority=authority(owner))
         after = state(owner)
         assert (after.data, after.version, after.journal, after.lineage) == (
             STORED, 0, 0, before.lineage)

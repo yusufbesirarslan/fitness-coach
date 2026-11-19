@@ -735,6 +735,20 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None,
                     return float(match.group(1))
             return 0.0
 
+        # Plan edits (C1, F-3): a missing or non-numeric macro is "no
+        # estimate", never 0.0. The edit service refuses ``None`` values, so
+        # a dropped field can't pass the energy check as a zero.
+        _whole_number = _re.compile(r"\s*\d+(?:[.,]\d+)?\s*")
+        def _strict_float(v):
+            if isinstance(v, bool):
+                return None
+            if isinstance(v, (int, float)):
+                return float(v)
+            if isinstance(v, str) and _whole_number.fullmatch(v):
+                return float(v.replace(",", "."))
+            return None
+        _parse = _strict_float if feature == "nutrition_plan" else _safe_float
+
         llm_key_map = {k.strip().lower(): k for k in parsed.keys()}
         results = {}
         for name in batch_items:
@@ -747,13 +761,16 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None,
                     m = parsed[llm_key]
 
             if m:
-                macros = {
-                    "calories": _safe_float(m.get("calories", 0)),
-                    "protein": _safe_float(m.get("protein", 0)),
-                    "carbs": _safe_float(m.get("carbs", 0)),
-                    "fat": _safe_float(m.get("fat", 0)),
-                }
-                if macros["calories"] > 0:
+                if feature == "nutrition_plan":
+                    macros = {k: _parse(m.get(k)) for k in ("calories", "protein", "carbs", "fat")}
+                else:
+                    macros = {
+                        "calories": _safe_float(m.get("calories", 0)),
+                        "protein": _safe_float(m.get("protein", 0)),
+                        "carbs": _safe_float(m.get("carbs", 0)),
+                        "fat": _safe_float(m.get("fat", 0)),
+                    }
+                if macros["calories"] is not None and macros["calories"] > 0:
                     results[name] = macros
 
         return results

@@ -30,6 +30,8 @@ _PLAN = "nutrition_plan"
 _JOURNAL = "nutrition_plan_mutation_record"
 _JOURNAL_INDEXES = (
     "ix_nutrition_plan_mutation_record_user_id", "ix_nutrition_mutation_lineage")
+_REQUIRED_JOURNAL_UNIQUES = (
+    ("public_id",), ("user_id", "idempotency_key"), ("reverts_mutation_id",))
 _REQUIRED_JOURNAL_COLUMNS = {
     "id", "public_id", "user_id", "plan_lineage_id", "operation_kind",
     "command_type", "command_fingerprint", "actor", "reason", "outcome",
@@ -94,6 +96,17 @@ def upgrade():
                 "%s exists but is missing required column(s) %s; reconcile it "
                 "with app/models.py NutritionPlanMutationRecord."
                 % (_JOURNAL, sorted(missing)))
+        # The database is the replay/undo arbiter: an existing table without
+        # these uniques would admit double writes.
+        uniques = {tuple(u["column_names"]) for u in insp.get_unique_constraints(_JOURNAL)}
+        uniques |= {tuple(i["column_names"]) for i in insp.get_indexes(_JOURNAL)
+                    if i.get("unique")}
+        absent = [cols for cols in _REQUIRED_JOURNAL_UNIQUES if cols not in uniques]
+        if absent:
+            raise RuntimeError(
+                "%s exists but is missing required unique constraint(s) %s; "
+                "reconcile it with app/models.py NutritionPlanMutationRecord."
+                % (_JOURNAL, absent))
         existing = _index_names(insp, _JOURNAL)
 
     if "ix_nutrition_plan_mutation_record_user_id" not in existing:

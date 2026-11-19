@@ -38,7 +38,9 @@ from app.services.nutrition_plan_schema import (
 from app.services.nutrition_plan_store import newest_plan, newest_plan_query
 from app.services.plan_owner_lock import lock_plan_owner
 
-from .commands import apply_item_edit, command_type, semantic_fingerprint, validate_command
+from .commands import (
+    COMMAND_TYPES, apply_item_edit, command_type, semantic_fingerprint, validate_command,
+)
 from .errors import (
     InvalidNutritionEdit,
     NutritionIdempotencyConflict,
@@ -48,7 +50,7 @@ from .errors import (
     NutritionUndoConflict,
     NutritionUndoUnavailable,
 )
-from .estimate import estimate_meal, recompute
+from .estimate import estimate_meal, recompute, verify_reestimated
 
 KIND_EDIT = "edit"
 KIND_UNDO = "undo"
@@ -85,6 +87,40 @@ def _serialize(document):
     return json.dumps(document, ensure_ascii=False)
 
 
+def _canonical(document):
+    """Key-order independent form: the replay identity of a document."""
+    return json.dumps(document, ensure_ascii=False, sort_keys=True)
+
+
+_AUTHORITY_KEYS = ("owner", "feature", "generation", "version")
+
+
+def _authority_context(authority, user_id):
+    """The D1 operation an estimate is made under, as plain data.
+
+    A prepared edit is bound to it for life: applying requires the SAME
+    operation, so revoke -> regrant (a new generation) can never publish an
+    estimate made before the revoke (LP21 "regrant never re-authorizes").
+    """
+    if (not isinstance(authority, ai_consent.OperationAuthority)
+            or authority.owner != user_id or authority.feature != _FEATURE):
+        raise ai_consent.ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+    current = ai_consent.current_operation()
+    if current is not None and current != authority:
+        raise ai_consent.ConsentDenied("AI_CONSENT_CHANGED")
+    return authority.to_context()
+
+
+def _bound_authority(context):
+    if (not isinstance(context, dict) or set(context) != set(_AUTHORITY_KEYS)
+            or type(context["owner"]) is not int
+            or type(context["generation"]) is not int
+            or not isinstance(context["feature"], str)
+            or not isinstance(context["version"], str)):
+        raise InvalidNutritionEdit("unreadable prepared edit")
+    return ai_consent.OperationAuthority(**{k: context[k] for k in _AUTHORITY_KEYS})
+
+
 @dataclass(frozen=True)
 class PreparedMealEdit:
     """A fully computed edit, bound to the exact plan state it was made from.
@@ -101,30 +137,33 @@ class PreparedMealEdit:
     base_fingerprint: str
     changed: bool
     document: Any
+    authority: dict
     provenance: Optional[dict] = field(default=None)
 
     def to_payload(self):
         return {
-            "v": 1, "command_type": self.command_type,
+            "v": 2, "command_type": self.command_type,
             "command_fingerprint": self.command_fingerprint,
             "plan_id": self.plan_id, "lineage_id": self.lineage_id,
             "base_version": self.base_version,
             "base_fingerprint": self.base_fingerprint,
             "changed": self.changed, "document": self.document,
-            "provenance": self.provenance,
+            "authority": self.authority, "provenance": self.provenance,
         }
 
     @classmethod
     def from_payload(cls, payload):
-        if not isinstance(payload, dict) or payload.get("v") != 1:
+        if not isinstance(payload, dict) or payload.get("v") != 2:
             raise InvalidNutritionEdit("unreadable prepared edit")
         try:
-            return cls(**{k: payload[k] for k in (
+            prepared = cls(**{k: payload[k] for k in (
                 "command_type", "command_fingerprint", "plan_id", "lineage_id",
                 "base_version", "base_fingerprint", "changed", "document",
-                "provenance")})
+                "authority", "provenance")})
         except (KeyError, TypeError):
             raise InvalidNutritionEdit("unreadable prepared edit") from None
+        _bound_authority(prepared.authority)
+        return prepared
 
 
 @dataclass(frozen=True)
@@ -166,15 +205,19 @@ def _parsed(text):
 # ── prepare ────────────────────────────────────────────────────────────────
 
 
-def prepare_meal_edit(user_id, command, estimate_items):
+def prepare_meal_edit(user_id, command, estimate_items, *, authority):
     """Compute one meal edit for ``user_id``'s own plan. Writes nothing.
 
     ``estimate_items`` is the injected estimator (production:
-    ``estimate.server_estimator``, run by the caller inside its D1 operation).
-    The read transaction is closed BEFORE the estimator runs, so no lock or
-    snapshot is held across provider I/O.
+    ``estimate.server_estimator``). It runs inside ``authority``'s D1
+    ``nutrition_plan`` operation (the caller also holds
+    ``health_consent.processing``), and the result is bound to that operation:
+    only the same operation can apply it. The read transaction is closed
+    BEFORE the estimator runs, so no lock or snapshot is held across provider
+    I/O.
     """
     command = validate_command(command)
+    bound = _authority_context(authority, user_id)
     if db.session.new or db.session.dirty or db.session.deleted:
         # This function ends its own read transaction before the provider
         # call; it must never discard a caller's pending work doing so.
@@ -192,7 +235,8 @@ def prepare_meal_edit(user_id, command, estimate_items):
     edited, changed = apply_item_edit(document, command)
     provenance = None
     if changed:
-        estimates = estimate_meal(edited[command.meal]["yemekler"], estimate_items)
+        with ai_consent.operation_scope(authority):
+            estimates = estimate_meal(edited[command.meal]["yemekler"], estimate_items)
         edited, provenance = recompute(copy.deepcopy(edited), command.meal, estimates)
         try:
             edited = validate_nutrition_plan_for_save(edited)
@@ -204,7 +248,7 @@ def prepare_meal_edit(user_id, command, estimate_items):
         plan_id=plan_id, lineage_id=lineage_id, base_version=version,
         base_fingerprint=snapshot_fingerprint(base_text),
         changed=changed, document=edited if changed else document,
-        provenance=provenance,
+        authority=bound, provenance=provenance,
     )
 
 
@@ -271,21 +315,29 @@ def apply_prepared_edit(user_id, prepared, context, *, authority):
     confirmation row); it is schema-validated here, not re-derived, so it must
     never round-trip through a client unsigned.
 
-    ``authority`` is the D1 Nutrition Plan operation the estimate was made
-    under; it is fenced under the owner lock in THIS transaction (``None`` is
-    refused, as for ``replace_nutrition_plan``). The plan must still be the
-    exact prepared base — same row, lineage, version and bytes — else
-    ``NutritionPlanStateConflict`` and zero writes.
+    ``authority`` must be the SAME D1 Nutrition Plan operation the edit was
+    prepared (estimated) under — any other, a fresh one after revoke ->
+    regrant included, is refused with ``ConsentDenied`` — and is fenced under
+    the owner lock in THIS transaction. The plan must still be the exact
+    prepared base — same row, version and bytes (and lineage once it has
+    one) — else ``NutritionPlanStateConflict`` and zero writes. A changed
+    edit must still satisfy the F-3 invariants against that base.
     """
     if not isinstance(prepared, PreparedMealEdit):
         raise InvalidNutritionEdit("a prepared edit is required")
     context = _validate_context(context)
+    if type(prepared.changed) is not bool or prepared.command_type not in COMMAND_TYPES:
+        raise InvalidNutritionEdit("unreadable prepared edit")
+    bound = _bound_authority(prepared.authority)
+    if authority != bound:
+        raise ai_consent.ConsentDenied("AI_CONSENT_CHANGED")
     ctype = prepared.command_type
     # The replay identity covers the written result too: one key can never
-    # stand for two different estimates of the same edit.
+    # stand for two different estimates of the same edit. Key-order
+    # independent, so a re-read payload still replays.
     fingerprint = hashlib.sha256(
         (prepared.command_fingerprint + "\0"
-         + snapshot_fingerprint(_serialize(prepared.document))).encode()).hexdigest()
+         + snapshot_fingerprint(_canonical(prepared.document))).encode()).hexdigest()
 
     try:
         existing = _find(user_id, context.idempotency_key)
@@ -295,7 +347,7 @@ def apply_prepared_edit(user_id, prepared, context, *, authority):
             return result
 
         lock_plan_owner(user_id)
-        ai_consent.fence(authority, user_id, _FEATURE)
+        ai_consent.fence(bound, user_id, _FEATURE)
         row = _locked_plan(user_id)
 
         existing = _find(user_id, context.idempotency_key)
@@ -305,8 +357,11 @@ def apply_prepared_edit(user_id, prepared, context, *, authority):
             return result
 
         before = row.plan_data
+        # A lineage assigned since prepare (an earlier no-op's first journal
+        # entry) is not a change: row, version and bytes still bind it.
         if (row.id != prepared.plan_id
-                or row.lineage_id != prepared.lineage_id
+                or (prepared.lineage_id is not None
+                    and row.lineage_id != prepared.lineage_id)
                 or row.mutation_version != prepared.base_version
                 or snapshot_fingerprint(before) != prepared.base_fingerprint):
             raise NutritionPlanStateConflict("the plan changed since this edit was prepared")
@@ -320,7 +375,8 @@ def apply_prepared_edit(user_id, prepared, context, *, authority):
             # Re-validated at the write: a stored payload is data, not trust.
             try:
                 document = validate_nutrition_plan_for_save(prepared.document)
-            except NutritionPlanInvalid:
+                verify_reestimated(_parsed(before), document, prepared.provenance)
+            except (NutritionPlanInvalid, ValueError, TypeError, KeyError):
                 raise InvalidNutritionEdit("the prepared plan is not valid") from None
             after = _serialize(document)
             after_version = row.mutation_version + 1

@@ -63,6 +63,9 @@ _TYPES = {
 }
 
 
+COMMAND_TYPES = frozenset(_TYPES.values())
+
+
 def command_type(command):
     return _TYPES[type(command)]
 
