@@ -414,6 +414,21 @@ def test_tracked_samconfig_and_template_satisfy_the_contract():
     assert SENTINEL not in (SOURCE / "samconfig.toml").read_text(encoding="utf-8")
 
 
+def test_metric_filter_keeps_implicit_function_dependency_without_duplicate():
+    # Compose preserves CloudFormation tags without resolving parameters or
+    # contacting AWS. Fn::Sub's resource reference orders the filter after the
+    # function; an extra DependsOn trips W3005 in the mandatory SAM lint gate.
+    def fields(node):
+        return {key.value: value for key, value in node.value}
+
+    template = fields(deploy.yaml.compose((SOURCE / "template.yaml").read_text()))
+    metric_filter = fields(fields(template["Resources"])["EmailFailureMetricFilter"])
+    log_group = fields(metric_filter["Properties"])["LogGroupName"]
+    assert log_group.tag == "!Sub"
+    assert log_group.value == "/aws/lambda/${EmailSenderFunction}"
+    assert "DependsOn" not in metric_filter
+
+
 # --- 10: the secret never leaves argv ---------------------------------------
 
 @pytest.mark.parametrize("runner_factory", [
