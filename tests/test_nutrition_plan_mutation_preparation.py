@@ -73,7 +73,7 @@ def test_replace_reestimates_whole_meal_and_rebuilds_day_totals(document, estima
     assert target.items == ("Chicken - 100 g", "Bread - 60 g")
     prepared = finish_edit(target, estimate)
     after = json.loads(prepared.after.raw)
-    assert after["kahvalti"] == {"yemekler": list(target.items), **estimate}
+    assert after["kahvalti"] == {"yemekler": list(target.items), **estimate, "tahmini": True}
     assert after["aksam"] == document["aksam"]
     assert [after[k] for k in ("toplam_kalori", "toplam_protein", "toplam_karb", "toplam_yag")] == [650, 37, 78, 21]
     assert prepared.requires_confirmation is True

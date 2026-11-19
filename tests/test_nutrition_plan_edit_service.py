@@ -75,6 +75,11 @@ def test_quote_confirm_replay_and_exact_undo(edit_rig):
     doc = json.loads(applied.plan_data)
     assert doc["toplam_kalori"] == 650 and doc["toplam_protein"] == 37
     assert doc["aksam"] == DOCUMENT["aksam"]
+    assert doc["kahvalti"]["tahmini"] is True
+    from app.services.nutrition_native.plan import project_plan_row
+    db.session.remove()
+    reopened = project_plan_row(nutrition_plan_store.newest_plan(r.owner), "synthetic-secret")
+    assert {m["slot"]: m["estimated"] for m in reopened["meals"]} == {"kahvalti": True, "aksam": False}
     assert service.resolve_edit(r.owner, quote.proposal_id, "confirm").replayed
     assert service.resolve_edit(r.owner, quote.proposal_id, "cancel").status == "applied"
     assert prepare(r).mutation_id == applied.mutation_id
@@ -244,11 +249,45 @@ def test_training_actions_cannot_resolve_or_expose_nutrition(edit_rig, monkeypat
     assert service.resolve_edit(edit_rig.owner, q.proposal_id, "cancel").status == "cancelled"
 
 
-def test_release_gates_closed_without_mutating_ordinary_consent(app):
+def test_release_gates_closed_without_mutating_ordinary_consent(app, monkeypatch, make_user):
+    monkeypatch.setenv("AI_COACH_PLAN_MUTATION_TOOLS_ENABLED", "1")
+    app.config["AI_COACH_PLAN_MUTATION_TOOLS_ENABLED"] = True
+    owner = make_user("c1-source-hold").id
+    raw = json.dumps(DOCUMENT)
+    db.session.add(NutritionPlan(user_id=owner, plan_data=raw))
+    db.session.commit()
+    def unexpected_estimate(_): raise AssertionError("closed gate dispatched an estimate")
+    monkeypatch.setattr(service.estimation, "estimate_meal", unexpected_estimate)
     assert access.NUTRITION_EDITS_ENABLED is False
     assert not access.APPROVED_COACH_EDIT_DISCLOSURES
     with pytest.raises(EditError, match="nutrition_edit_unavailable"):
-        service.prepare_edit(1, EDIT, MutationContext("c1-gated-0001"), authorities=authorities(1))
+        service.prepare_edit(owner, EDIT, MutationContext("c1-gated-0001"), authorities=authorities(owner))
+    with pytest.raises(EditError, match="nutrition_edit_unavailable"):
+        service.resolve_edit(owner, "A" * 32, "confirm")
+    with pytest.raises(EditError, match="nutrition_edit_unavailable"):
+        service.undo_last_change(owner, MutationContext("c1-gated-undo"), authorities=authorities(owner))
+    # Even opening the operational source switch cannot bypass legal approval.
+    monkeypatch.setattr(access, "NUTRITION_EDITS_ENABLED", True)
+    with pytest.raises(EditError, match="nutrition_edit_unavailable"):
+        access.gate()
+    assert state(owner) == (raw, 0)
+    assert Operation.query.count() == Proposal.query.count() == Record.query.count() == 0
+
+
+def test_c2_routes_and_tools_remain_absent_with_coach_flag_enabled(app, monkeypatch):
+    from app.services import coach_plan_tools
+    monkeypatch.setenv("AI_COACH_PLAN_MUTATION_TOOLS_ENABLED", "1")
+    app.config["AI_COACH_PLAN_MUTATION_TOOLS_ENABLED"] = True
+    nutrition_tools = {"get_current_nutrition_plan", "replace_nutrition_plan_item",
+                       "add_nutrition_plan_item", "remove_nutrition_plan_item",
+                       "undo_nutrition_plan_change"}
+    exposed = {d["name"] for d in coach_plan_tools.PLAN_MUTATION_TOOL_DEFS}
+    assert not exposed & nutrition_tools
+    for rule in app.url_map.iter_rules():
+        view = app.view_functions[rule.endpoint]
+        assert "nutrition_plan_mutation" not in view.__module__
+        assert "nutrition" not in rule.rule or not any(
+            token in rule.rule for token in ("/confirmation", "/edit", "/undo", "/mutation"))
 
 
 @pytest.mark.parametrize("message", ["cancel", "yes", "How should I train today?"])
@@ -292,3 +331,79 @@ def test_pending_admission_exposes_only_an_owner_scoped_boolean(edit_rig, make_u
     assert has_pending(None) is False
     assert service.resolve_edit(edit_rig.owner, q.proposal_id, "cancel").status == "cancelled"
     assert has_pending(edit_rig.owner) is False
+
+
+@pytest.mark.parametrize("outcome", ["confirm", "cancel", "failure", "journal_failure"])
+def test_old_writer_null_lineage_is_adopted_only_in_atomic_confirmation(edit_rig, monkeypatch, outcome):
+    r = edit_rig
+    row = nutrition_plan_store.newest_plan(r.owner)
+    row.lineage_id = None
+    db.session.commit()
+    if outcome == "failure":
+        def fail(_): raise EditError("estimate_unavailable")
+        monkeypatch.setattr(service.estimation, "estimate_meal", fail)
+        with pytest.raises(EditError, match="estimate_unavailable"): prepare(r)
+        assert nutrition_plan_store.newest_plan(r.owner).lineage_id is None
+        assert state(r.owner) == (r.raw, 0)
+        assert Record.query.count() == Proposal.query.count() == 0
+        return
+    q = prepare(r)
+    assert nutrition_plan_store.newest_plan(r.owner).lineage_id is None
+    assert state(r.owner) == (r.raw, 0)
+    if outcome == "journal_failure":
+        from sqlalchemy import event
+        def fail(session, *_):
+            if any(isinstance(item, Record) for item in session.new):
+                raise RuntimeError("synthetic journal failure")
+        event.listen(db.session(), "before_flush", fail)
+        try:
+            with pytest.raises(RuntimeError, match="journal failure"):
+                service.resolve_edit(r.owner, q.proposal_id, "confirm")
+        finally:
+            event.remove(db.session(), "before_flush", fail)
+        assert nutrition_plan_store.newest_plan(r.owner).lineage_id is None
+        assert state(r.owner) == (r.raw, 0) and Record.query.count() == 0
+        return
+    service.resolve_edit(r.owner, q.proposal_id, outcome)
+    row = nutrition_plan_store.newest_plan(r.owner)
+    if outcome == "cancel":
+        assert row.lineage_id is None and state(r.owner) == (r.raw, 0)
+    else:
+        assert row.lineage_id == Operation.query.one().plan_lineage_id == Record.query.one().plan_lineage_id
+        assert service.resolve_edit(r.owner, q.proposal_id, "confirm").replayed
+        undone = service.undo_last_change(r.owner, MutationContext("c1-legacy-undo"), authorities=r.authorities)
+        assert undone.plan_data == r.raw and undone.plan_version == 2
+
+
+@pytest.mark.parametrize("field", ["plan_id", "base_lineage_id"])
+def test_incomplete_server_binding_cannot_confirm(edit_rig, field):
+    q = prepare(edit_rig)
+    op = Operation.query.one()
+    payload = dict(op.command_payload)
+    payload.pop(field)
+    op.command_payload = payload
+    db.session.commit()
+    with pytest.raises(EditError, match="plan_stale"):
+        service.resolve_edit(edit_rig.owner, q.proposal_id, "confirm")
+    assert state(edit_rig.owner) == (edit_rig.raw, 0) and Record.query.count() == 0
+
+
+@pytest.mark.parametrize("marker", [False, 0, 1, "true", None, {}])
+def test_estimate_marker_is_closed_and_typed(marker):
+    from app.services.nutrition_plan_schema import validate_nutrition_plan_for_save, NutritionPlanInvalid
+    doc = {**DOCUMENT, "kahvalti": {**DOCUMENT["kahvalti"], "tahmini": marker}}
+    with pytest.raises(NutritionPlanInvalid): validate_nutrition_plan_for_save(doc)
+
+
+def test_unrelated_estimate_label_survives_edit_and_exact_undo(edit_rig):
+    r = edit_rig
+    row = nutrition_plan_store.newest_plan(r.owner)
+    doc = json.loads(row.plan_data)
+    doc["aksam"]["tahmini"] = True
+    r.raw = row.plan_data = json.dumps(doc, indent=2)
+    db.session.commit()
+    q = prepare(r)
+    result = service.resolve_edit(r.owner, q.proposal_id, "confirm")
+    assert json.loads(result.plan_data)["aksam"] == doc["aksam"]
+    undo = service.undo_last_change(r.owner, MutationContext("c1-label-undo"), authorities=r.authorities)
+    assert undo.plan_data == r.raw

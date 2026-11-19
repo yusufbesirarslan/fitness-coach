@@ -2,9 +2,11 @@
 import json
 import os
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
+import sqlalchemy as sa
 
 if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
     pytest.skip("requires disposable PG_TEST_DATABASE_URL", allow_module_level=True)
@@ -185,3 +187,103 @@ def test_revoke_while_estimating_withholds_quote_and_plan(rig, monkeypatch):
         assert Operation.query.one().status == "failed"
         assert Proposal.query.count() == Record.query.count() == 0
         assert store.newest_plan(r.owner).mutation_version == 0
+
+
+def legacy_insert(r):
+    """Simulate the actual old writer's original column set after migration."""
+    with r.app.app_context():
+        NutritionPlan.query.filter_by(user_id=r.owner).delete()
+        db.session.execute(sa.text(
+            "INSERT INTO nutrition_plan (user_id, plan_data, created_at) "
+            "VALUES (:owner, :raw, CURRENT_TIMESTAMP)"),
+            {"owner": r.owner, "raw": json.dumps(DOCUMENT, indent=2)})
+        db.session.commit()
+        row = store.newest_plan(r.owner)
+        assert row.lineage_id is None and row.mutation_version == 0
+
+
+def test_old_column_insert_double_confirm_and_distinct_key_undo(rig):
+    r = rig
+    legacy_insert(r)
+    q = quote(r)
+    with r.app.app_context():
+        assert store.newest_plan(r.owner).lineage_id is None
+        assert store.newest_plan(r.owner).plan_data == json.dumps(DOCUMENT, indent=2)
+    out = run(r, [lambda: service.resolve_edit(r.owner, q.proposal_id, "confirm")] * 2)
+    assert all(not isinstance(x, Exception) and x.is_current for x in out), out
+    assert sorted(x.replayed for x in out) == [False, True]
+    def undo(key):
+        return lambda: service.undo_last_change(r.owner, MutationContext(key), authorities=r.authorities)
+    out = run(r, [undo("c1-old-undo-key1"), undo("c1-old-undo-key2")])
+    assert sum(not isinstance(x, Exception) for x in out) == 1, out
+    assert sum(isinstance(x, EditError) and str(x) == "undo_unavailable" for x in out) == 1, out
+    with r.app.app_context():
+        row = store.newest_plan(r.owner)
+        assert row.lineage_id == Operation.query.one().plan_lineage_id
+        assert row.plan_data == json.dumps(DOCUMENT, indent=2) and row.mutation_version == 2
+        assert Record.query.count() == 2
+    assert len(r.calls) == 1
+
+
+@pytest.mark.parametrize("change", ["targeted", "legacy_replacement"])
+def test_confirmation_observably_waits_for_owner_then_rejects_stale_state(rig, change):
+    from app.services.plan_owner_lock import lock_plan_owner
+    r = rig
+    legacy_insert(r)
+    q = quote(r)
+    ready = threading.Event()
+    worker_pid, out = [], []
+    def confirm():
+        with r.app.app_context():
+            try:
+                worker_pid.append(db.session.execute(sa.text("SELECT pg_backend_pid()")).scalar_one())
+                ready.set()
+                out.append(service.resolve_edit(r.owner, q.proposal_id, "confirm"))
+            except Exception as error:
+                out.append(error)
+            finally:
+                db.session.remove()
+    observer = sa.create_engine(os.environ["PG_TEST_DATABASE_URL"], poolclass=sa.pool.NullPool)
+    worker = threading.Thread(target=confirm, daemon=True)
+    try:
+        with r.app.app_context():
+            lock_plan_owner(r.owner)
+            holder_pid = db.session.execute(sa.text("SELECT pg_backend_pid()")).scalar_one()
+            plan = store.newest_plan_query(r.owner).with_for_update().one()
+            worker.start()
+            assert ready.wait(10)
+            deadline, observed = time.monotonic() + 15, False
+            while time.monotonic() < deadline:
+                with observer.connect() as conn:
+                    observed = conn.execute(sa.text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid=:pid "
+                        "AND wait_event_type='Lock' AND :holder=ANY(pg_blocking_pids(pid)))"),
+                        {"pid": worker_pid[0], "holder": holder_pid}).scalar_one()
+                if observed: break
+                time.sleep(0.02)
+            assert observed, "the confirming backend must actually wait on the holder"
+            if change == "targeted":
+                store.write_targeted_locked(plan, lineage_id=Operation.query.one().plan_lineage_id,
+                    before_lineage_id=None, version=0, before=plan.plan_data, after=plan.plan_data + " ")
+            else:
+                old_id = plan.id
+                db.session.delete(plan)
+                db.session.flush()
+                db.session.execute(sa.text(
+                    "INSERT INTO nutrition_plan (user_id, plan_data, created_at) "
+                    "VALUES (:owner, :raw, CURRENT_TIMESTAMP)"),
+                    {"owner": r.owner, "raw": json.dumps(DOCUMENT, indent=2)})
+                assert store.newest_plan(r.owner).id != old_id
+            db.session.commit()
+        worker.join(timeout=20)
+        assert not worker.is_alive(), out
+        assert len(out) == 1 and isinstance(out[0], EditError) and str(out[0]) == "plan_stale", out
+        with r.app.app_context():
+            assert Operation.query.one().status == Proposal.query.one().status == "stale"
+            assert Record.query.count() == 0
+            row = store.newest_plan(r.owner)
+            assert row.mutation_version == (1 if change == "targeted" else 0)
+            assert row.lineage_id is None if change == "legacy_replacement" else row.lineage_id is not None
+    finally:
+        if worker.ident is not None: worker.join(timeout=20)
+        observer.dispose()

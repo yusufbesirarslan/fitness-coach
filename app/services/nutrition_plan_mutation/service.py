@@ -15,6 +15,7 @@ from datetime import datetime
 import hashlib
 import json
 import re
+import secrets
 
 from app.extensions import db
 from app.models import NutritionPlanEditOperation as Operation, NutritionPlanMutationRecord as Record, TrainingPlanConfirmationProposal as Proposal
@@ -64,13 +65,27 @@ def _plan(owner):
     row = store.newest_plan_query(owner).populate_existing().with_for_update().first()
     if row is None:
         raise EditError("plan_not_found")
-    if not row.lineage_id or type(row.mutation_version) is not int or row.mutation_version < 0:
+    if ((row.lineage_id is not None and (not isinstance(row.lineage_id, str) or not row.lineage_id))
+            or type(row.mutation_version) is not int or row.mutation_version < 0):
         raise EditError("plan_history_unavailable")
     return row
 
 
 def _bound(plan, op):
-    return (plan.lineage_id == op.plan_lineage_id
+    # New claims bind the canonical row as well as its exact state. A row
+    # inserted by old code may lack lineage: allocate only in the claim and
+    # adopt it atomically at confirmation, never during a failed estimate.
+    payload = op.command_payload
+    if "plan_id" in payload or "base_lineage_id" in payload:
+        identity = (type(payload.get("plan_id")) is int
+                    and "base_lineage_id" in payload
+                    and (payload["base_lineage_id"] is None
+                         or isinstance(payload["base_lineage_id"], str))
+                    and plan.id == payload["plan_id"]
+                    and plan.lineage_id == payload["base_lineage_id"])
+    else:
+        identity = plan.lineage_id == op.plan_lineage_id
+    return (identity
             and plan.mutation_version == op.base_version and plan.plan_data == op.before_snapshot)
 
 
@@ -153,8 +168,9 @@ def prepare_edit(owner, edit, context, *, authorities):
         op = Operation(user_id=owner, idempotency_key=context.idempotency_key,
             command_fingerprint=fingerprint,
             command_payload={"edit": asdict(edit), "authorities": authorities.to_context(),
-                             "actor": context.actor, "reason": context.reason},
-            plan_lineage_id=plan.lineage_id, base_version=plan.mutation_version,
+                             "actor": context.actor, "reason": context.reason,
+                             "plan_id": plan.id, "base_lineage_id": plan.lineage_id},
+            plan_lineage_id=plan.lineage_id or secrets.token_urlsafe(32), base_version=plan.mutation_version,
             before_snapshot=plan.plan_data, after_snapshot=plan.plan_data if not target.changed else None,
             status="estimating" if target.changed else "no_op")
         db.session.add(op)
@@ -294,7 +310,8 @@ def resolve_edit(owner, proposal_id, decision):
             after_snapshot=op.after_snapshot, nutrient_source=SOURCE)
         db.session.add(record)
         store.write_targeted_locked(plan, lineage_id=op.plan_lineage_id,
-            version=op.base_version, before=op.before_snapshot, after=op.after_snapshot)
+            version=op.base_version, before=op.before_snapshot, after=op.after_snapshot,
+            before_lineage_id=op.command_payload.get("base_lineage_id", op.plan_lineage_id))
         op.status, proposal.status, proposal.resolved_at = "applied", "applied", datetime.utcnow()
         db.session.flush()
         result = _record_result(record, plan, False, op.public_id, proposal.public_id)

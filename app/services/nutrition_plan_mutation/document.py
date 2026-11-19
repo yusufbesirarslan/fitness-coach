@@ -11,7 +11,7 @@ import hashlib
 import json
 
 from app.services.nutrition_plan_schema import (
-    DOCUMENT_MAX_BYTES, ITEMS_KEY, ITEM_MAX, ITEMS_MAX, MEAL_KEYS,
+    DOCUMENT_MAX_BYTES, ESTIMATED_KEY, ITEMS_KEY, ITEM_MAX, ITEMS_MAX, MEAL_KEYS,
     MEAL_MACRO_KEYS, TOTAL_KEYS, NutritionPlanInvalid,
     validate_nutrition_plan_for_save,
 )
@@ -53,7 +53,7 @@ class PreparedEdit:
     after: Snapshot
     changed: bool
     requires_confirmation: bool
-    # Metadata belongs in the journal, outside the closed plan schema.
+    # Detailed provenance belongs in the journal; the plan retains its label.
     nutrient_source: str | None
 
 
@@ -177,7 +177,7 @@ def finish_edit(target, estimated_meal):
     document = _document(target.snapshot)
     updated = deepcopy(document)
     updated[target.edit.meal] = {
-        ITEMS_KEY: list(target.items), **estimated_meal,
+        ITEMS_KEY: list(target.items), **estimated_meal, ESTIMATED_KEY: True,
     }
     try:
         updated = validate_nutrition_plan_for_save(updated)

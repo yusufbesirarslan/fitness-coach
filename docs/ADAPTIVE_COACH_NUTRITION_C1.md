@@ -54,16 +54,25 @@ or 15% threshold is approved. FatSecret and the shared food cache are excluded.
   prevent duplicate undo. A full replacement creates a new lineage, so its
   predecessor's changes cannot be undone onto the replacement.
 - Account deletion and health erasure cover both new ledgers. Estimate source
-  and exact before/after snapshots live outside the closed Nutrition JSON.
+  and exact before/after snapshots live in the journal. The affected canonical
+  meal retains `tahmini: true`; saved native reads expose `estimated`, including
+  after reopening. Unaffected meal labels survive; exact undo restores labels
+  together with the original bytes. Generation/save proposal contracts stay
+  unchanged.
 
 ## Schema and recovery
 
 Migration `c1a9b7e5d301` adds nullable opaque Nutrition lineage, version zero with
 server default, and two separate operation/history tables. Existing plan bytes
 are untouched; old rows receive distinct random lineage tokens with no invented
-history. Old-code inserts still work during code rollback; unidentified rows
-fail closed for targeted edits. No production migration has been run by this
-work. Schema-shape verification refuses drift and supports create_all boots.
+history. Old-code inserts still work during code rollback. For rows inserted
+without lineage after migration, preparation binds the canonical row id,
+explicit null lineage, version and exact bytes, allocating identity only in the
+operation claim. Confirmation adopts it atomically with the plan and journal;
+failed/cancelled estimation does not change the plan or its identity. A new
+row with identical bytes cannot satisfy that binding. No production migration
+has been run by this work. Schema verification refuses drift and supports
+create_all boots.
 
 Preferred rollback: roll back code while retaining additive schema/history.
 A destructive downgrade refuses if either ledger contains records; empty-schema
@@ -84,3 +93,32 @@ targeted consent integration preserving ordinary chat, C2 transport/display of
 estimate metadata, staging qualification, and separate founder authorization
 for deployment and activation. F-2 selective confirmation remains unchanged for
 Training and any future reliably sourced low-impact edits.
+
+## Canonical reconciliation — PR #534 / #536
+
+Compared #534 at `4ebe83893a97c6cc96286a3f68effb7d0b55b038` and #536 at
+`ee1016681af5f37db44a1784f0e56e53ea5f3af1`. PR #534 is the canonical candidate;
+recommend closing #536 as superseded after founder acceptance. Its worktree
+contains separate uncommitted work, which this reconciliation leaves intact.
+
+The only missing functional safeguards carried into #534 are persistent
+estimate labels and safe adoption of old-writer null-lineage plans. Additional
+PostgreSQL coverage proves actual lock contention before stale rejection and
+distinct-key concurrent undo. Existing strict batch estimation, dual original
+authority fences, durable estimator claims, shared pending confirmation,
+atomic journal/replay/undo, privacy erasure and rollback checks are retained.
+Per-item audit estimates in #536 are not needed to restore exact snapshots or
+reproduce the complete persisted meal/day result, so no alternate journal is
+introduced.
+
+Exactly one C1 migration remains: `c1a9b7e5d301` after `ad17de1e0001`, with
+backfill, old-writer-compatible nullable lineage and history-preserving rollback.
+Do not merge alternate `c1a0d2e3f4a5`, copy its schema, or join the two heads.
+Current main, including #538's Istanbul date-test correction, is integrated.
+
+The last reported production Coach mutation flag is **1**. This is not a
+production flag-containment operation and does not claim Training mutations
+are disabled. C1 Nutrition remains unavailable independently: both its source
+activation constant and its empty legal disclosure allowlist must open, and no
+C2 route/tool is registered. Tests explicitly set the Coach flag to 1. No
+production configuration, deployment or App Store submission is changed.
