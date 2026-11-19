@@ -90,3 +90,52 @@ not refused ("işareti olabilir/olarak" and "işaret ediyor" are refused). Repla
 answers: all 8 Turkish answers from this prompt pass; 2 of 7 valid Turkish
 answers from the previous prompt are refused ("düşündürüyor", "asimetrik"),
 which is why the validator ships only together with or after this prompt.
+
+## Weight, judgment, physiology and comparison checks (validator only)
+
+Probes on main after #532 showed that wording the prompt forbids could still
+reach the client in both languages: weight or fat change ("birkaç kilo yağ
+kaybetmişsin", "You need to lose a few kilos"), weight-loss instructions
+("kilo vermelisin"), negative judgments about the body, physiological
+inferences (swelling, dehydration, overtraining) and physique comparisons that
+one photo cannot support ("Your arms are bigger than in your last photo").
+None of the 24 real staging answers contained them; the prompt is unchanged.
+
+`_plain_text` now also refuses, in EN (raw text, IGNORECASE) and TR
+(`_tr_folded`):
+
+| Check | EN / TR pattern | Message |
+|---|---|---|
+| Weight / body-fat change, weight-loss directives | `_WEIGHT_CHANGE_RE` / `_TR_WEIGHT_CHANGE_RE` | prohibited body claim |
+| Negative body judgment | `_NEGATIVE_BODY_RE` / `_TR_NEGATIVE_BODY_RE` | negative body judgment |
+| Medical / physiological inference | `_PHYSIOLOGICAL_RE` / `_TR_PHYSIOLOGICAL_RE` | safety policy |
+| Comparison with other people or norms | `_NORM_COMPARISON_RE` / `_TR_NORM_COMPARISON_RE` | unsupported comparison |
+
+`_single_image_text` (single-image `parse_analysis` only) also refuses a
+comparison with an earlier photo: a growth/shrink verb on the body
+(`_PHYSIQUE_CHANGE_RE`, `_TR_PHYSIQUE_CHANGE_RE`), or a past reference
+(`_PAST_REFERENCE_RE`, `_TR_PAST_REFERENCE_RE`) together with a physique
+comparative in the same item. The two-photo comparison validator reuses
+`_plain_text` and so gets the first four checks; it does not get this one,
+because describing an A-to-B difference is its job.
+
+Each pattern names the claim, not the word. These stay legal and are pinned by
+`EN_HARDENING_ORDINARY` / `TR_HARDENING_ORDINARY`: gym weights ("lower the
+weight", "drop the weight", "fat grips", "kilo düşür", "birkaç kilo daha
+ekle", "fazla kilolarla çalışma"); ordinary exercise advice ("stay hydrated",
+"hips are sagging" in a plank, "aşırı yüklenme", "kalçan sarkıyor"); neutral
+photo observations ("a lean, well-developed physique", "flat/soft light",
+"zayıf ışık", "yağlı cilt", "su şişesi", "sisli", "gelişmiş omuz hattı",
+"pumped"); and same-photo comparisons ("softer than your thighs", "diğer
+bölgelere göre daha az", "sağdakinden daha belirgin"). Guidance that only
+mentions an earlier photo ("same angle as your last photo", "İlk fotoğrafa
+göre aynı ışığı kullan") passes, because it makes no physique comparison.
+
+Replay of every stored staging answer (`~/axisai-pump-check-response-quality-01`,
+135 answers, including the 32 final A/B pairs, and all 435 distinct text
+items): no verdict changes against main.
+
+Known residuals: a weight claim without a body noun ("you dropped a few
+kilos" is legal, so that "drop a few kilos" stays legal as bar advice);
+judgments written as plain adjectives the patterns do not list; and a
+comparison that names neither an earlier photo nor other people.

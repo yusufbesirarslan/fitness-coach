@@ -114,6 +114,171 @@ _TR_MEASUREMENT_RE = re.compile(
     + r"\s*(?:kilo\w*|kg|santim\w*|cm|milim\w*|mm|gram\w*|gr|inc|inch)\b)")
 
 
+# ── Weight, judgment, physiology and comparison checks (EN + TR) ────────────
+# One still photo cannot support a weight or body-fat change, a weight-loss
+# instruction, a verdict on how the body looks, a physiological state, or a
+# comparison with an earlier photo or with other people. Each pattern names
+# the claim, not the bare word: "weight" (the bar), "fat grip", "lean"
+# (posture or a lean physique), "softer than your thighs" (same photo),
+# "weak light", "kilo" (plates), "yağlı cilt" (oily skin), "su şişesi" (a
+# water bottle) and "sisli" (hazy) stay legal. EN runs with IGNORECASE on the
+# raw text; TR runs on _tr_folded, like the Turkish checks above.
+_BODY_AMOUNT = (
+    r"(?:(?:some|more|extra|a\s+(?:little|bit|lot|few|couple)|a\s+couple|"
+    r"several)\s+(?:of\s+)?)?")
+_WEIGHT_CHANGE_RE = re.compile(
+    r"\b(?:los[et]|loses|losing|gain(?:ed|ing|s)?|put(?:s|ting)?\s+on|"
+    r"shed(?:s|ding)?)\s+" + _BODY_AMOUNT
+    + r"(?:body\s*)?(?:weight|fat|kilos?|kilograms?|pounds?|lbs|stone|inches"
+    r"|muscle|mass)\b|"
+    r"\b(?:gained|lost|built)\s+" + _BODY_AMOUNT + r"size\b|"
+    r"\bburn(?:s|ed|t|ing)?\s+(?:off\s+)?(?:\w+\s+)?fat\b|"
+    r"\b(?:weight|fat)[ -]?(?:loss|gain|reduction)\b|"
+    r"\b(?:less|more|extra|excess|stubborn|belly|visceral|subcutaneous|"
+    r"abdominal)\s+(?:body\s*)?fat\b(?!\s*grip)|"
+    r"\bfat\s+(?:around|on\s+(?:your|the)|deposits?|stores?|layers?|levels?|"
+    r"percentage|mass)\b|"
+    r"\b(?:over|under)weight\b|\bobes(?:e|ity)\b|\bwater\s+weight\b|"
+    r"\b(?:leaner|slimmer|skinnier|fatter|chubbier)\b|"
+    r"\byou(?:'re|\s+are|\s+look|\s+seem|\s+appear|'ve\s+gotten|"
+    r"\s+have\s+gotten|\s+got)\s+(?:a\s+(?:bit|little|lot)\s+|much\s+|"
+    r"slightly\s+|noticeably\s+|visibly\s+|clearly\s+|definitely\s+)?"
+    r"(?:thinner|heavier|lighter)\b|"
+    r"\b(?:slim(?:med|ming)?|trim(?:med|ming)?)\s+down\b|"
+    r"\blean(?:ed|ing)?\s+out\b|\bbulk(?:ed|ing)?\s+up\b|"
+    r"\b(?:calorie|caloric)\s+deficit\b|\b(?:go|going)\s+on\s+a\s+diet\b|"
+    r"\b(?:eat|eating)\s+less\b|\bcut(?:ting)?\s+(?:back\s+on\s+)?calories\b|"
+    r"\bcount(?:ing)?\s+calories\b",
+    re.IGNORECASE,
+)
+_NEGATIVE_BODY_RE = re.compile(
+    r"\b(?:flabby|flab|saggy|chubby|pudgy|scrawny|puny|skinny|unattractive|"
+    r"ugly|unsightly|out\s+of\s+shape|unfit|love\s+handles|muffin\s+top|"
+    r"(?:beer|pot)\s+belly|man\s+boobs|moobs|cellulite|double\s+chin|"
+    r"dad\s+bod|underdeveloped|undeveloped)\b|"
+    r"\b(?:look|looks|looking|appear|appears|seem|seems|are|is|'re)\s+"
+    r"(?:a\s+(?:bit|little)\s+|quite\s+|very\s+|too\s+|kind\s+of\s+|"
+    r"rather\s+|slightly\s+|somewhat\s+)?(?:fat|overweight)\b",
+    re.IGNORECASE,
+)
+_PHYSIOLOGICAL_RE = re.compile(
+    r"\b(?:swell(?:ing|s)?|swollen|puffiness|puffy\s+(?:face|eyes|cheeks|"
+    r"skin)|bloat(?:ed|ing)?|water\s+retention|retain(?:s|ing)?\s+water|"
+    r"holding\s+(?:onto\s+)?water|fluid\s+retention|dehydrat\w*|"
+    r"over-?train\w*|overreach\w*|under-?recover\w*|poor(?:ly)?\s+recover\w*|"
+    r"glycogen|electrolytes?|cortisol|testosterone|o?estrogen|steroids?|"
+    r"inflamed|muscle\s+(?:strain|cramps?|damage|breakdown)|"
+    r"strained\s+(?:muscles?|tendons?|ligaments?)|exhaust(?:ed|ion)|"
+    r"fatigued|lethargic|malnourish\w*|undernourish\w*|"
+    r"nutrient\s+deficien\w*)\b|"
+    r"\b(?:look|looks|looking|appear|appears|seem|seems)\s+"
+    r"(?:a\s+(?:bit|little)\s+|quite\s+|very\s+|slightly\s+|rather\s+)?"
+    r"(?:tired|drained|run[ -]down|unwell|stressed|sleep[ -]deprived|"
+    r"depleted)\b",
+    re.IGNORECASE,
+)
+_NORM_COMPARISON_RE = re.compile(
+    r"\b(?:than|compared\s+(?:to|with)|relative\s+to)\s+(?:most|many|other|"
+    r"typical|the\s+average|average|the\s+typical)\s+(?:people|persons?|"
+    r"lifters?|men|women|guys|athletes?|gym[ -]?goers?|trainees?|"
+    r"bodybuilders?|users?|beginners?)\b|"
+    r"\bthan\s+(?:the\s+)?average\b|\b(?:above|below)[ -]average\b|"
+    r"\bfor\s+(?:your|someone\s+your|a\s+(?:man|woman|person)\s+(?:of\s+)?"
+    r"your)\s+age\b|"
+    r"\b(?:stage|competition|contest|show)[ -]ready\b|"
+    r"\b(?:like|as)\s+(?:a\s+)?(?:pro(?:fessional)?\s+)?(?:bodybuilder|"
+    r"fitness\s+model|physique\s+competitor)\b|"
+    r"\b(?:elite|world[ -]class|pro[ -]level|competition[ -]level|"
+    r"top[ -]tier)\s+(?:physique|build|body)\b",
+    re.IGNORECASE,
+)
+# Single-image only (the two-photo comparison contract exists to describe
+# A-to-B differences): this photo has no earlier photo to compare with.
+_PAST_REFERENCE_RE = re.compile(
+    r"\b(?:than|since|compared\s+(?:to|with)|versus|vs\.?|relative\s+to)\s+"
+    r"(?:before|ever|last\s+(?:time|week|month)|previously|earlier|"
+    r"(?:in\s+)?(?:your|the|my)\s+(?:last|previous|prior|earlier|first|"
+    r"older?|past)\b|(?:a\s+)?(?:few\s+|couple\s+(?:of\s+)?)?(?:\w+\s+)?"
+    r"(?:days?|weeks?|months?|years?)\s+ago)|"
+    r"\b(?:used\s+to\s+be|it\s+used\s+to|they\s+used\s+to|these\s+days|"
+    r"lately|recently|now\b|over\s+time|so\s+far)",
+    re.IGNORECASE,
+)
+_PHYSIQUE_COMPARATIVE_RE = re.compile(
+    r"\b(?:bigger|larger|smaller|thicker|thinner|wider|narrower|broader|"
+    r"fuller|bulkier|leaner|slimmer|heavier|lighter|stronger|weaker|tighter|"
+    r"harder|softer|rounder|flatter|grown|grew|growing|improved|"
+    r"(?:has|have)\s+progressed|"
+    r"more\s+(?:muscular|defined|developed|toned|vascular|ripped|shredded|"
+    r"cut|separated|definition|muscle|mass|size)|"
+    r"less\s+(?:muscular|defined|developed|toned|definition|muscle|mass|"
+    r"size|fat))\b",
+    re.IGNORECASE,
+)
+_PHYSIQUE_CHANGE_RE = re.compile(
+    r"\b(?:have|has|'ve|'s)\s+(?:really\s+|clearly\s+|definitely\s+|"
+    r"visibly\s+|noticeably\s+|already\s+)?(?:grown|gotten\s+(?:bigger|"
+    r"larger|thicker|wider|broader|leaner|slimmer|thinner|smaller|fuller)|"
+    r"thickened|widened|shrunk(?:en)?|filled\s+in)\b|"
+    r"\b(?:got|getting|grew|growing)\s+(?:much\s+|a\s+lot\s+|a\s+bit\s+|"
+    r"noticeably\s+)?(?:bigger|larger|thicker|wider|broader|smaller|fuller)\b|"
+    r"\byou(?:'re|\s+are|\s+look|\s+seem|\s+appear)\s+(?:a\s+(?:bit|little|"
+    r"lot)\s+|much\s+|slightly\s+|noticeably\s+|visibly\s+|clearly\s+)?"
+    r"(?:bigger|smaller|larger|bulkier)\b",
+    re.IGNORECASE,
+)
+
+# Turkish (folded: ş→s, ğ→g, ü→u, ö→o, ç→c, ı/İ→i). "kilo düşür" (take
+# weight off the bar), "birkaç kilo daha ekle", "fazla kilolarla çalışma",
+# "aşırı yüklenme" (form advice), "kalçan sarkıyor" (plank form), "zayıf
+# ışık" and "gelişmiş omuz hattı" are deliberately not matched.
+_TR_WEIGHT_CHANGE_RE = re.compile(
+    r"\bkilo (?:ver|kayb|kaybet|artis|fazla)\w*|"
+    r"\bkilo al(?:mis|din|di\b|ma|mak|abilir|man|irsan|iyor)\w*|"
+    r"\bfazla kilo(?:n|nu|nuz|larin|larindan|dan kurtul)\b|"
+    r"\bzayifla\w*|\bincel(?:mis|din|dim|di\b|meli|meye|mek|men)\w*|"
+    r"\byag (?:kayb|kaybet|yak|at(?:mis|ma|man|tin|ti\b|abilir)|birik|bagla|"
+    r"topla|tabaka|katman|doku|depo)\w*|"
+    r"\b(?:fazla|ekstra|fazlalik) yag(?:\b|in\b|lar|dan|i\b)|"
+    r"\byag(?:in|lar|larin)? (?:azal|erim|eri|git)\w*|"
+    r"\bkas (?:kazanmis|kaybetmis)\w*|"
+    r"\bdiyet(?:e\b| yap| uygula| program)|\bkalori (?:acig|kisit|azalt)\w*|"
+    r"\b(?:daha )?az ye(?:\b|meli|rsen)")
+_TR_NEGATIVE_BODY_RE = re.compile(
+    r"\b(?:sisman|tombul|obez|obezite|kilolu|gobekli|gobeklen\w*|sarkik|"
+    r"selulit|cirkin|bicimsiz|formsuz|ciliz|siska|celimsiz|gelismemis)\b|"
+    r"\bgobek (?:yap|at|buyu|olus|cik)\w*|"
+    r"\bgobeg(?:in|iniz) (?:var|cik|buyu)\w*|\bformdan dus\w*")
+_TR_PHYSIOLOGICAL_RE = re.compile(
+    r"\b(?:sismis|siskin|sismes)\w*|\bsu tutulum\w*|\bsu tutma(?:si|n|nin)?\b|"
+    r"\b(?:vucud\w*|kaslar\w*|fazla|asiri) su tut\w*|\bdehidrat\w*|"
+    r"\bsusuz (?:kal|gorun)\w*|\bsivi (?:kayb|eksik|tutulum)\w*|"
+    r"\basiri antrenman|\btoparlana(?:ma|mi)\w*|\byetersiz toparlanma|"
+    r"\byorgun (?:gorun|dus|gozuk)\w*|\b(?:bitkin|halsiz|tukenmis)\w*|"
+    r"\b(?:glikojen|elektrolit|kortizol|testosteron|ostrojen|steroid)\w*|"
+    r"\bkas (?:hasar|yikim|kramp)\w*")
+_TR_NORM_COMPARISON_RE = re.compile(
+    r"\b(?:cogu|bircok|diger|ortalama) (?:insan|kisi|sporcu|erkek|kadin|"
+    r"adam|kullanici)\w*|\bortalama(?:nin)? (?:ust|alt)\w*|\bortalamadan\b|"
+    r"\byasin(?:a|iza) gore|"
+    r"\b(?:vucut gelistirmeci|fitness modeli|yarismaci|profesyonel sporcu)"
+    r"(?:ler)? gibi|\b(?:sahneye|yarismaya) hazir|"
+    r"\belit (?:fizik|vucut)\w*")
+_TR_PAST_REFERENCE_RE = re.compile(
+    r"\b(?:son|onceki|gecen|eski|ilk)\s+(?:fotograf|foto|kontrol|cekim|kare|"
+    r"resim|sefer|hafta|ay|pump)\w*|"
+    r"\b(?:oncekin|eskisin|oncesin|gecen seferkin)\w*|\beskiye gore|"
+    r"\beskiden\b|\beskisi gibi|\bartik\b|\bgiderek\b|\bzamanla\b|"
+    r"\bson zamanlarda")
+_TR_PHYSIQUE_COMPARATIVE_RE = re.compile(
+    r"\bdaha (?:buyuk|iri|kalin|genis|dolgun|belirgin|tanimli|kasli|ince|"
+    r"zayif|kucuk|dar|siki|hacimli|guclu|yagsiz|keskin|dolu|yuvarlak)\w*|"
+    r"\b(?:belirginlesmis|netlesmis|gelismis|artmis|azalmis|gelisme|"
+    r"ilerleme)\w*")
+_TR_PHYSIQUE_CHANGE_RE = re.compile(
+    r"\b(?:buyumus|kalinlasmis|genislemis|kuculmus|irilesmis|dolgunlasmis)\w*")
+
+
 def _tr_folded(value):
     decomposed = unicodedata.normalize("NFKD", value)
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
@@ -145,13 +310,36 @@ def _plain_text(value, maximum, field):
         raise InvalidAnalysis("analysis contains a prohibited body claim")
     if _TR_MEASUREMENT_RE.search(folded):
         raise InvalidAnalysis("analysis contains image-derived false precision")
+    if _PHYSIOLOGICAL_RE.search(value) or _TR_PHYSIOLOGICAL_RE.search(folded):
+        raise InvalidAnalysis("analysis text violates safety policy")
+    if _WEIGHT_CHANGE_RE.search(value) or _TR_WEIGHT_CHANGE_RE.search(folded):
+        raise InvalidAnalysis("analysis contains a prohibited body claim")
+    if _NEGATIVE_BODY_RE.search(value) or _TR_NEGATIVE_BODY_RE.search(folded):
+        raise InvalidAnalysis("analysis contains a negative body judgment")
+    if (_NORM_COMPARISON_RE.search(value)
+            or _TR_NORM_COMPARISON_RE.search(folded)):
+        raise InvalidAnalysis("analysis contains an unsupported comparison")
+    return value
+
+
+def _single_image_text(value, maximum, field):
+    """_plain_text plus the checks that only make sense for one photo."""
+    value = _plain_text(value, maximum, field)
+    folded = _tr_folded(value)
+    if (_PHYSIQUE_CHANGE_RE.search(value)
+            or _TR_PHYSIQUE_CHANGE_RE.search(folded)
+            or (_PAST_REFERENCE_RE.search(value)
+                and _PHYSIQUE_COMPARATIVE_RE.search(value))
+            or (_TR_PAST_REFERENCE_RE.search(folded)
+                and _TR_PHYSIQUE_COMPARATIVE_RE.search(folded))):
+        raise InvalidAnalysis("analysis contains an unsupported comparison")
     return value
 
 
 def _text_list(value, maximum_count, field):
     if not isinstance(value, list) or len(value) > maximum_count:
         raise InvalidAnalysis("analysis list is outside bounds")
-    return [_plain_text(item, ITEM_MAX, field) for item in value]
+    return [_single_image_text(item, ITEM_MAX, field) for item in value]
 
 
 def parse_analysis(raw):
@@ -167,7 +355,7 @@ def parse_analysis(raw):
     if not isinstance(quality, str) or quality not in QUALITY_VALUES:
         raise InvalidAnalysis("analysis quality is invalid")
     return {
-        "summary": _plain_text(value["summary"], SUMMARY_MAX, "summary"),
+        "summary": _single_image_text(value["summary"], SUMMARY_MAX, "summary"),
         "observations": _text_list(
             value["observations"], OBSERVATIONS_MAX, "observations"),
         "strengths": _text_list(value["strengths"], LIST_MAX, "strengths"),
@@ -175,7 +363,7 @@ def parse_analysis(raw):
             value["focus_areas"], LIST_MAX, "focus_areas"),
         "limitations": _text_list(
             value["limitations"], LIST_MAX, "limitations"),
-        "next_check_guidance": _plain_text(
+        "next_check_guidance": _single_image_text(
             value["next_check_guidance"], GUIDANCE_MAX, "next_check_guidance"),
         "quality": quality,
     }
