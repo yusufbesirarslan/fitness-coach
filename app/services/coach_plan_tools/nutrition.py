@@ -46,6 +46,7 @@ from .identity import (
 )
 
 DOMAIN = "nutrition_plan"
+COMMAND = service.COMMAND
 
 READ_TOOL = "get_current_nutrition_plan"
 REPLACE_TOOL = "replace_nutrition_plan_item"
@@ -530,7 +531,7 @@ def release_stranded(user_id, proposal_id=None):
         result = service.release_unavailable(user_id, quote.proposal_id)
         return result.status == "cancelled"
     except Exception:
-        _rollback()
+        # C1 owns its own rollback; never discard a caller's pending work.
         return False
     finally:
         executor._settle_transaction()

@@ -516,13 +516,16 @@ def execute_direct_confirmation(user_id, proposal_id, decision):
         # C2: a named Nutrition quote resolves through C1 only, under its
         # stored original authorities. Training ids never reach this branch.
         return nutrition.execute_resolution(user_id, proposal_id, decision)
+    name = CONFIRM_TOOL if intent == CONFIRM else CANCEL_PENDING_TOOL
+    result = execute_plan_tool(user_id, name, {})
     if (intent == CANCEL and plan_mutation_tools_enabled()
+            and result.get("error") == results.ERROR_NO_PENDING_CONFIRMATION
             and nutrition.release_stranded(user_id, proposal_id)):
         # Closed boundary: an owned Nutrition quote can still be cancelled,
-        # never applied, so it cannot hold the shared pending slot forever.
+        # never applied (only after the Training path found nothing, so a
+        # Training cancel pays no extra read).
         return nutrition.cancelled_result()
-    name = CONFIRM_TOOL if intent == CONFIRM else CANCEL_PENDING_TOOL
-    return execute_plan_tool(user_id, name, {})
+    return result
 
 
 def _begin_direct_turn(user_id, intent, proposal_id):

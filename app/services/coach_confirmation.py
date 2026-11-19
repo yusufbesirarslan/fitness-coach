@@ -152,7 +152,12 @@ def resolve_pending_turn(user_id, language="tr"):
     n = (int(plan_pending is not None) + int(nutrition_pending is not None)
          + int(log_pending is not None))
     if n == 0:
-        if intent == CANCEL and coach_plan_tools.nutrition.release_stranded(user_id):
+        # Closed gate only: reuse the row _plan_pending already loaded (no
+        # extra read); release a stranded Nutrition quote on a typed cancel.
+        stranded = _raw_pending(user_id)
+        if (intent == CANCEL and stranded is not None
+                and stranded.command_type == coach_plan_tools.nutrition.COMMAND
+                and coach_plan_tools.nutrition.release_stranded(user_id, stranded.public_id)):
             return t("coach.confirm.cancelled", locale=language)
         return _complete_grounded_followup(user_id, language)
     if n > 1:
@@ -438,9 +443,26 @@ def direct_resolution_reply(result, language="tr"):
     return None
 
 
+def _raw_pending(user_id):
+    """The one pending row of any plan domain (request-cached on ``g``)."""
+    try:
+        cache = getattr(g, "_coach_raw_pending_cache", None)
+        if cache is not None and cache[0] == user_id:
+            return cache[1]
+        row = plan_confirmation.get_pending(user_id)
+        g._coach_raw_pending_cache = (user_id, row)
+        return row
+    except Exception:
+        return None
+
+
 def _plan_pending(user_id):
     try:
         row = plan_confirmation.get_pending(user_id)
+        try:
+            g._coach_raw_pending_cache = (user_id, row)
+        except RuntimeError:
+            pass
         return row if is_training_proposal(row) else None
     except Exception:
         return None
