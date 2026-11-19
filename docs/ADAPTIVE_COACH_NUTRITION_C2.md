@@ -68,6 +68,22 @@ Logging is the single `[COACH][PLAN_TOOL] request_id tool outcome` line.
 - Cancel after an applied change answers 409, never "cancelled".
 - Estimator claims left by an interrupted request (> 15 min) are released via
   C1 `cancel_preparation` before a new edit — never retried.
+- A live claim (< 15 min) answers `PREPARATION_IN_PROGRESS`.
+- A yes/no-form turn never starts a new Nutrition change (Training parity).
+- Typed-confirm and applied copy is `DisplayOnlyReply`: saved food/macro text
+  never becomes model-visible conversation memory.
+- Nutrition refusals/clarifications are left to the model, guided by the
+  server instruction; they never fall into Training clarification copy.
+
+## Closed-gate rollback (stranded quotes)
+
+If the boundary is closed while a quote is pending, it can no longer be
+confirmed (B2 confirm → 409; ordinary chat is not blocked), but the owner can
+still CANCEL it — B2 cancel with its id, or a typed "hayır"/"cancel" — through
+C1 `release_unavailable`: owner-scoped, proposal→owner lock order, needs no AI
+authority (like `cancel_preparation`), never writes a plan or journal, and
+refuses while the boundary is open. This frees the shared one-pending slot so
+Training proposals are not blocked. B2 keeps its flag-OFF 404.
 
 ## Decision for the founder (not assumed)
 

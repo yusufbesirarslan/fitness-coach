@@ -152,6 +152,8 @@ def resolve_pending_turn(user_id, language="tr"):
     n = (int(plan_pending is not None) + int(nutrition_pending is not None)
          + int(log_pending is not None))
     if n == 0:
+        if intent == CANCEL and coach_plan_tools.nutrition.release_stranded(user_id):
+            return t("coach.confirm.cancelled", locale=language)
         return _complete_grounded_followup(user_id, language)
     if n > 1:
         if intent == CANCEL:
@@ -192,7 +194,10 @@ def reply_after_tools(user_id, language="tr", tool_results=None):
     applied = []
     clarifications = []
     for payload in tool_results or ():
-        if not isinstance(payload, dict):
+        if (not isinstance(payload, dict)
+                or payload.get("domain") == coach_plan_tools.nutrition.DOMAIN):
+            # C2: Nutrition refusals/clarifications are the model's to ask,
+            # guided by the server instruction in the tool result.
             continue
         if payload.get("status") in (
                 results.STATUS_APPLIED, results.STATUS_REPLAYED):
@@ -454,12 +459,18 @@ def _resolve_nutrition(user_id, proposal_id, decision, language):
             user_id, proposal_id, decision)
     except ai_consent.ConsentDenied as denied:
         # C1 already retired a definitively unusable quote; an outage keeps it.
-        key = ("coach.nutrition.confirm_unavailable" if denied.status < 500
-               else "coach.nutrition.confirm_failed")
-        return t(key, locale=language)
-    reply = direct_resolution_reply(result, language)
-    if reply:
-        return reply
+        if denied.status >= 500:
+            return t("coach.nutrition.confirm_failed", locale=language)
+        if decision == "cancel":
+            return t("coach.confirm.cancelled", locale=language)
+        return t("coach.nutrition.confirm_unavailable", locale=language)
+    status = result.get("status")
+    if status in (results.STATUS_APPLIED, results.STATUS_REPLAYED):
+        # Display-only, like Training's typed confirm: saved plan content in
+        # this copy must never become model-visible conversation memory.
+        return _format_nutrition_applied(result, language)
+    if status == results.STATUS_CANCELLED:
+        return t("coach.confirm.cancelled", locale=language)
     if result.get("error") in ("NO_PENDING_CONFIRMATION", "PENDING_CONFIRMATION_STALE"):
         return t("coach.nutrition.confirm_unavailable", locale=language)
     return t("coach.nutrition.confirm_failed", locale=language)
@@ -594,10 +605,13 @@ def _cancel_all(user_id, language):
     nutrition_pending = coach_plan_tools.nutrition.pending_quote(user_id)
     if nutrition_pending is not None:
         try:
-            coach_plan_tools.nutrition.execute_resolution(
+            outcome = coach_plan_tools.nutrition.execute_resolution(
                 user_id, nutrition_pending.proposal_id, "cancel")
-        except ai_consent.ConsentDenied:
-            pass
+        except ai_consent.ConsentDenied as denied:
+            # < 500: C1 retired it (cannot apply). >= 500: still pending.
+            outcome = {"status": "error" if denied.status >= 500 else "cancelled"}
+        if outcome.get("status") != results.STATUS_CANCELLED:
+            return t("coach.nutrition.confirm_failed", locale=language)
     if active_log_pending(user_id) is not None:
         ai_coach._tool_cancel_pending_log(user_id)
     return t("coach.confirm.cancelled", locale=language)

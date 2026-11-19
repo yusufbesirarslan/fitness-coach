@@ -188,8 +188,8 @@ def test_withdrawal_after_quote_refuses_and_regrant_cannot_revive(rig):
         resolve(r, "confirm", proposal_id)
     with r.app.app_context():
         consent(r.owner, r.policies["nutrition_plan"], "affirmative_grant", "c2-regrant")
-    again = resolve(r, "confirm", proposal_id)
-    assert again["status"] == "error"
+    with pytest.raises(ai_consent.ConsentDenied):
+        resolve(r, "confirm", proposal_id)  # the stored generation stays stale
     raw, version, records, proposals = state(r)
     assert version == 0 and records == 0 and proposals == ["stale"]
     assert raw == json.dumps(DOCUMENT, indent=2)

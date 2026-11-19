@@ -302,6 +302,44 @@ def find_quote(owner, proposal_id=None):
                  op.before_snapshot, op.after_snapshot)
 
 
+def release_unavailable(owner, proposal_id):
+    """Owner-only cancel of a quote stranded while the boundary is CLOSED.
+
+    Rollback hazard: closing the source gate would otherwise leave a pending
+    quote holding the shared one-pending slot (blocking Training proposals)
+    with no way to answer it. Like ``cancel_preparation``, releasing private
+    unapplied work needs no AI authority; this never writes a plan or journal
+    and refuses while the boundary is open (``resolve_edit`` owns that case).
+    """
+    if type(owner) is not int or owner <= 0:
+        raise EditError("invalid_owner")
+    if access.NUTRITION_EDITS_ENABLED and access.APPROVED_COACH_EDIT_DISCLOSURES:
+        raise EditError("proposal_unavailable")
+    if db.session.new or db.session.dirty or db.session.deleted:
+        raise EditError("transaction_busy")
+    try:
+        proposal = lock_proposal(owner, proposal_id)
+        if proposal is None or proposal.command_type != COMMAND:
+            raise EditError("proposal_unavailable")
+        lock_plan_owner(owner)
+        op = _operation(owner, public_id=proposal.command_payload.get("operation_id"))
+        if op is None or op.proposal_public_id != proposal.public_id:
+            raise EditError("proposal_unavailable")
+        if op.status == "cancelled" and proposal.status == "cancelled":
+            result = _result(op, True)
+            db.session.rollback()
+            return result
+        if op.status != "prepared" or proposal.status != "pending":
+            raise EditError("proposal_unavailable")
+        op.status, proposal.status, proposal.resolved_at = "cancelled", "cancelled", datetime.utcnow()
+        result = _result(op)
+        db.session.commit()
+        return result
+    except Exception:
+        db.session.rollback()
+        raise
+
+
 def interrupted_preparations(owner, started_before):
     """Public ids of this owner's estimator claims started before a bound.
 

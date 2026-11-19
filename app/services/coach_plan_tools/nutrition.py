@@ -270,7 +270,10 @@ def turn_authorities(user_id):
             nutrition = ai_consent.begin_independent_operation(
                 user_id, "nutrition_plan", *ai.heavy_primary_route())
             authorities = access.Authorities(coach, nutrition)
-        except ai_consent.ConsentDenied:
+        except Exception:
+            # Missing grant, outage or launch refusal: fail closed, ordinary
+            # chat continues without Nutrition tools.
+            _rollback()
             authorities = None
         finally:
             executor._settle_transaction()
@@ -334,6 +337,9 @@ def _execute(user_id, name, arguments):
         return _error("CAPABILITY_DISABLED")
     if type(user_id) is not int or user_id <= 0:
         return _error("INTERNAL_ERROR")
+    if (name in WRITE_TOOL_NAMES and executor.current_confirmation_intent()
+            in (executor.CONFIRM, executor.CANCEL)):
+        return _error("NO_PENDING_CONFIRMATION")
     authorities = turn_authorities(user_id)
     if authorities is None:
         return _error("PERMISSION_UNAVAILABLE")
@@ -438,6 +444,10 @@ def _ground(user_id, edit):
 
 def _prepare(user_id, edit, authorities):
     _release_interrupted(user_id)
+    in_flight = service.interrupted_preparations(user_id, datetime.utcnow())
+    executor._settle_transaction()
+    if in_flight:
+        return _error("PREPARATION_IN_PROGRESS")
     _ground(user_id, edit)
     key = nutrition_edit_operation_key(edit)
     if not executor._charge_budget(key):
@@ -492,6 +502,33 @@ def owns_proposal(user_id, proposal_id):
     """Whether the named id is THIS owner's Nutrition quote (any state)."""
     try:
         return service.find_quote(user_id, proposal_id) is not None
+    except Exception:
+        _rollback()
+        return False
+    finally:
+        executor._settle_transaction()
+
+
+def cancelled_result():
+    return {"domain": DOMAIN, "operation": "cancel", "status": STATUS_CANCELLED}
+
+
+def release_stranded(user_id, proposal_id=None):
+    """Closed gate only: release the owner's stranded quote. True if released.
+
+    Never applies anything and needs no AI authority (C1 refuses while open).
+    With no id, targets the owner's one pending quote; reads nothing when the
+    boundary is open.
+    """
+    if tools_enabled() or type(user_id) is not int or user_id <= 0:
+        return False
+    try:
+        quote = service.find_quote(user_id, proposal_id)
+        executor._settle_transaction()
+        if quote is None:
+            return False
+        result = service.release_unavailable(user_id, quote.proposal_id)
+        return result.status == "cancelled"
     except Exception:
         _rollback()
         return False

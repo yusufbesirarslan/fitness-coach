@@ -379,7 +379,7 @@ def test_recent_in_flight_claim_blocks_instead_of_double_dispatch(c2):
     db.session.commit()
     with Turn(c2) as turn:
         result, _ = turn.call(nutrition.REPLACE_TOOL, REPLACE)
-    assert result["error"] == "PENDING_CONFIRMATION_EXISTS" and not c2["calls"]
+    assert result["error"] == "PREPARATION_IN_PROGRESS" and not c2["calls"]
 
 
 # ── Deterministic Confirm/Cancel (B2 endpoint) ───────────────────────────────
@@ -582,3 +582,80 @@ def test_bridge_module_has_no_storage_query_or_logging():
     for node in ast.walk(ast.parse(source)):
         name = getattr(node, "attr", None) or getattr(node, "id", None)
         assert name not in {"logger", "print", "current_app"}, node.lineno
+
+
+# ── Review fixes (independent review of #542) ────────────────────────────────
+
+def test_typed_confirm_copy_is_display_only_never_memory(c2):
+    from app.services.coach_memory_provenance import DisplayOnlyReply
+    _stage(c2)
+    with Turn(c2, "yes"):
+        reply = coach_confirmation.resolve_pending_turn(c2["owner"], "en")
+    assert isinstance(reply, DisplayOnlyReply) and "Chicken - 100 g" in reply
+
+
+@pytest.mark.parametrize("args", [
+    {"meal": "kahvalti", "item": "Eggs - 2 adet", "replacement": "Tofu"},
+    {"meal": "kahvalti", "item": "Egg", "replacement": "Tofu - 100 g"},
+    {"meal": "ogle", "item": "Eggs - 2 adet", "replacement": "Tofu - 100 g"}])
+def test_nutrition_clarifications_never_get_training_copy(c2, args):
+    with Turn(c2) as turn:
+        result, _ = turn.call(nutrition.REPLACE_TOOL, args)
+        owned = coach_confirmation.reply_after_tools(c2["owner"], "en", [result])
+    assert result["status"] == "needs_user_input" and owned is None
+
+
+def test_yes_no_turn_never_starts_a_nutrition_change(c2):
+    with Turn(c2, "yes") as turn:
+        assert not set(turn.names()) & nutrition.WRITE_TOOL_NAMES
+        result, _ = turn.call(nutrition.REPLACE_TOOL, REPLACE)
+    assert result["error"] == "NO_PENDING_CONFIRMATION" and not c2["calls"]
+
+
+def test_authority_capture_fault_fails_closed_and_keeps_chat(c2, monkeypatch):
+    def broken(*_):
+        raise RuntimeError("launch table unavailable")
+    monkeypatch.setattr(ai_consent, "begin_independent_operation", broken)
+    with Turn(c2) as turn:
+        names = turn.names()
+        result, _ = turn.call(nutrition.READ_TOOL)
+    assert "query_fitx_metrics" in names and not set(names) & nutrition.TOOL_NAMES
+    assert result["error"] == "PERMISSION_UNAVAILABLE"
+
+
+def test_closed_gate_never_resolves_but_releases_a_stranded_quote(c2, mobile, bearer, alice, monkeypatch):
+    proposal_id = _stage(c2)
+    monkeypatch.setattr(access, "NUTRITION_EDITS_ENABLED", False)  # gate closed later
+    headers = bearer(alice)
+    confirm = _answer(mobile, headers, proposal_id)
+    assert confirm.status_code == 409
+    assert _proposal(alice.id).status == "pending" and _plan(alice.id) == (c2["raw"], 0)
+    with Turn(c2, "How should I train today?"):
+        assert coach_confirmation.resolve_pending_turn(alice.id, "en") is None  # chat not blocked
+    cancel = _answer(mobile, headers, proposal_id, "cancel")
+    assert cancel.status_code == 200 and cancel.get_json()["outcome"] == "cancelled"
+    assert "nutrition_plan" not in cancel.get_json()["plan_effects"]
+    assert _proposal(alice.id).status == "cancelled" and _plan(alice.id) == (c2["raw"], 0)
+    assert Record.query.count() == 0
+    _seed_training(alice)
+    with Turn(c2):
+        staged = coach_plan_tools.execute_plan_tool(
+            alice.id, "remove_training_plan_exercise",
+            {"day": "Pazartesi", "exercise": "Shoulder Press"})
+    assert staged["status"] == "confirmation_required"  # shared slot freed
+
+
+def test_closed_gate_typed_cancel_releases_a_stranded_quote(c2, monkeypatch):
+    _stage(c2)
+    monkeypatch.setattr(access, "APPROVED_COACH_EDIT_DISCLOSURES", frozenset())
+    with Turn(c2, "cancel"):
+        reply = coach_confirmation.resolve_pending_turn(c2["owner"], "en")
+    assert "cancelled" in reply and _proposal(c2["owner"]).status == "cancelled"
+    assert _plan(c2["owner"]) == (c2["raw"], 0)
+
+
+def test_release_refuses_while_the_boundary_is_open(c2):
+    proposal_id = _stage(c2)
+    with pytest.raises(EditError, match="proposal_unavailable"):
+        service.release_unavailable(c2["owner"], proposal_id)
+    assert _proposal(c2["owner"]).status == "pending"
