@@ -834,6 +834,14 @@ REVIEW_PROHIBITED = [
     ("Kolların büyüdüğü belli.", COMPARISON),
     ("Omuzlarının genişlediği görülüyor.", COMPARISON),
     ("Your waist slimmed.", BODY),
+    # round 4 (P3)
+    ("Kolların geçen seferden daha dolgun görünmesi güzel.", COMPARISON),
+    ("Omuzlarının önceki fotoğrafa göre daha geniş görünmesi dikkat çekiyor.", COMPARISON),
+    ("Geçen sefere göre ışık altında trapezlerin daha belirgin.", COMPARISON),
+    ("Önceki fotoğrafa göre ışık altında deltoidlerin daha dolgun.", COMPARISON),
+    ("Son fotoğrafa göre kamera latların daha geniş.", COMPARISON),
+    ("Geçen sefere göre ışık karnın daha belirgin.", COMPARISON),
+    ("Önceki fotoğrafa göre bu açı fiziğin daha geniş olduğunu ortaya koyuyor.", COMPARISON),
 ]
 
 
@@ -980,6 +988,10 @@ REVIEW_ORDINARY = [
     "Kaslar kalınlaştıkça aynı açıyı korumak karşılaştırmayı kolaylaştırır.",
     "Görüntü büyüdüğünde netlik azalıyor.",
     "Işık daha yumuşak olsun, son fotoğraftaki gibi.",
+    # round 4 (P3)
+    "Kaslar büyüdüğü zaman aynı açıyı kullan.",
+    "Kollarının büyüdüğünü görmek için her seferinde aynı ışığı kullan.",
+    "Kaslar büyüdükten sonra da aynı pozu koru.",
 ]
 
 

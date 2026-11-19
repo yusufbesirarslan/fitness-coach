@@ -358,13 +358,16 @@ _TR_PHYSIQUE_COMPARATIVE_RE = re.compile(
 _TR_SETUP_NOUNS = (r"(?:kadraj(?:i|ini)?|isik|isigi|isigin|mesafe(?:yi)?|"
                    r"kamera(?:yi)?|arka plan(?:i)?|zoom|aci|aciyi)\b")
 _TR_BODY_NOUNS = (r"(?:omuz|omz|kol|gogus|gogs|sirt|bacak|baldir|pazu|kas|"
-                  r"karin|bel|gobek|gobeg|vucud|vucut|fizik|gogs)")
+                  r"karin|karn|bel|gobek|gobeg|vucud|vucut|fizik|fizig|"
+                  r"trapez|deltoid|lat|kanat|kalca|boyn)")
 _TR_PHOTO_SETUP_PHRASE_RE = re.compile(
     r"\bdaha \w+ (?:bir )?" + _TR_SETUP_NOUNS + r"|"
     r"\b" + _TR_SETUP_NOUNS + r" (?:(?!" + _TR_BODY_NOUNS
     + r")\w+ ){0,2}daha \w+|"
     # purpose clauses are advice: "daha belirgin görünsün diye ışık al"
-    r"\bdaha \w+ gorun(?:sun|mesi|mek|ecek)\w*(?: (?:icin|diye))?")
+    # ("daha dolgun görünmesi güzel" without için/diye is a claim)
+    r"\bdaha \w+ gorun(?:sun\w*(?: (?:icin|diye))?|(?:mesi|mek|ecek)\w* "
+    r"(?:icin|diye))")
 # -mış forms with any ending; -di forms only as finite verbs, so that
 # "büyüdükçe" (as … grows) and "büyüdüğünde" stay legal.
 _TR_PHYSIQUE_CHANGE_RE = re.compile(
@@ -374,7 +377,8 @@ _TR_PHYSIQUE_CHANGE_RE = re.compile(
     r"(?:n|nuz|niz|k|ler|lar)?\b(?! m[iu]\b)|"
     # nominalized -dIk ("büyüdüğünü görüyorum"), but not "-dikçe"/"-diğinde"
     r"\b(?:buyudu|kalinlasti|genisledi|kuculdu|irilesti|dolgunlasti)[gk]"
-    r"(?!(?:ce|ca|unde|inde|unda|inda)\b)\w*|"
+    r"(?!(?:ce|ca|unde|inde|unda|inda|u zaman|i zaman|ten sonra|tan sonra|"
+    r"unu gormek|ini gormek)\b)\w*|"
     r"\bkas yap(?:mis|tin|tiniz)\w*")
 
 
