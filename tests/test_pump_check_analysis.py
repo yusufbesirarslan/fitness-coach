@@ -735,7 +735,7 @@ TR_HARDENING_PROHIBITED = [
     ("Kolların büyümüş.", COMPARISON),
     ("Sırtın genişlemiş görünüyor.", COMPARISON),
     ("Pazuların kalınlaşmış.", COMPARISON),
-    ("Göğsün artık daha dolgun.", COMPARISON),
+    ("Göğsün eskisinden daha dolgun.", COMPARISON),
     # büyük harf, Türkçe harfsiz yazım ve ayrışık (NFD) girdi
     ("KİLO VERMELİSİN.", BODY),
     ("kilo vermelisin", BODY),
@@ -791,6 +791,35 @@ REVIEW_PROHIBITED = [
     ("Diğerlerinden daha iri görünüyorsun.", COMPARISON),
     ("You look dehy\u00addrated from over\u00adtraining.", SAFETY),   # soft hyphens
     ("KOLLARDA ŞİŞLİK VAR.", SAFETY),
+    # round 2: a setup word elsewhere in the item no longer exempts it
+    ("Your arms look bigger than in your last shot.", COMPARISON),
+    ("Your chest is fuller than last time; focus on the upper chest next.", COMPARISON),
+    ("Your shoulders look broader than before from this angle.", COMPARISON),
+    ("Your abs are more defined than before, and well lit.", COMPARISON),
+    ("Kolların son fotoğrafa göre daha büyük; ışık da iyi.", COMPARISON),
+    ("Karın kasların geçen seferden daha belirgin, kadraj iyi.", COMPARISON),
+    ("Sırtın eskiye göre daha geniş; odak noktası net.", COMPARISON),
+    ("Your arms are bigger than they were.", COMPARISON),
+    ("Your midsection looks fuller now than in earlier checks.", COMPARISON),
+    ("Your shoulders have developed nicely over the past weeks.", COMPARISON),
+    ("Göbeğin eridi.", BODY),
+    ("Göbeğin azalmış.", BODY),
+    ("Çoğu kişiye göre omuzların daha geniş.", COMPARISON),
+    ("Lower your calories a bit so the obliques show.", BODY),
+    ("Impressive chest development for a beginner.", COMPARISON),
+    ("Daha az kalori al.", BODY),
+    ("Fazla antrenman yapmışsın gibi duruyor.", SAFETY),
+    ("The quads look sore after the session.", SAFETY),
+    ("Your chest displays fatigue.", SAFETY),
+    ("Your shoulders are broader than most other lifters.", COMPARISON),
+    ("In\u00adjury risk is visible.", SAFETY),   # soft hyphen, pre-existing check
+    ("Geçen seferden beri omuzların dolmuş.", COMPARISON),
+    ("The arms are thin and lack muscle.", JUDGMENT),
+    ("Your belly sticks out a little.", JUDGMENT),
+    ("Your gut hides the abs.", JUDGMENT),
+    ("You seem short on sleep.", SAFETY),
+    ("You are carrying a little extra around the waist.", BODY),
+    ("Zayıf görünüyorsun, biraz kas yapmalısın.", JUDGMENT),
 ]
 
 
@@ -906,6 +935,28 @@ REVIEW_ORDINARY = [
     "Pick a weight you can control for most of the set.",
     "Brighter than most of the frame, your shoulders stand out.",
     "You\u2019re facing the camera with both arms raised.",
+    # round 2
+    "Use a wider frame than in your last photo so the legs fit.",
+    "The light is softer than before, so keep the lamp where it is.",
+    "Kadrajı son fotoğraftakinden daha geniş tut.",
+    "Your shoulders catch more light than most other areas in this photo.",
+    "The upper chest is sharper than most areas of the image.",
+    "Cildin yağlanmış görünüyor, bu da parlama yapıyor.",
+    "Yağlanmış ten sahne ışığında parlıyor.",
+    "Artık her sette daha güçlü bir sıkıştırma yap.",
+    "Artık sırtın daha belirgin görünmesi için kanatları aç.",
+    "Kaslar büyüdükçe aynı pozu korumak karşılaştırmayı kolaylaştırır.",
+    "Görüntü büyüdüğünde netlik azalıyor.",
+    "Kolay bir poz seç, sırt dolmuş görünsün diye nefesini tut.",
+    "Kasılı tutarken sırt dolmuş görünüyor.",
+    "The battery icon on the mirror looks depleted, but it does not affect the photo.",
+    "Slimmed-down framing would keep the focus on the torso.",
+    "Göğsün sarkık değil, dik duruyorsun.",
+    "For a beginner, keep the weight light and the pose simple.",
+    "Zayıf ışık gövdeni gölgede bırakıyor.",
+    "Işık zayıf görünüyor, lambaya dön.",
+    "The torso lacks contrast in this light.",
+    "Sleep well before your next session.",
 ]
 
 
