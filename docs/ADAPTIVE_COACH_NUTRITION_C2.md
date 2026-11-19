@@ -87,17 +87,19 @@ Training proposals are not blocked. B2 keeps its flag-OFF 404.
 
 Cost and order (pinned by tests):
 
-- Typed turn, boundary closed (production): `_plan_pending` reads the shared proposal table once per turn
-  and caches that row on `g`. Only a cancel-intent turn with nothing pending
-  looks at the cached row; every other turn (including a plain "no" with
-  nothing stranded) does exactly one proposal read, as before C2. A failed
+- Typed turn, boundary closed (production): `resolve_pending_turn` reads the
+  shared proposal table once (`_plan_pending`) and caches that row on `g`, keyed
+  by owner. Only a cancel-intent turn with nothing pending looks at the cached
+  row; every other turn (including a plain "no" with nothing stranded) adds no
+  proposal read. The later per-turn checks (tool publication, staging/plan
+  guards) read exactly as on main before C2; C2 adds no read to a turn. A failed
   pending read drops the cache, so no stale row survives it.
 - B2 cancel: the Training path runs first, unchanged; only if it finds no
   Training proposal is the named id tried as a stranded Nutrition quote.
 - A found stranded quote logs its real outcome as one closed-vocabulary line
   `tool=nutrition_plan_stranded_release outcome=<cancelled|ERROR_CODE>` (no
-  ids, text or amounts), after the Training line that only says no Training
-  proposal was pending.
+  ids, text or amounts). On B2 it follows the Training line that only says no
+  Training proposal was pending; a typed cancel logs the stranded line alone.
 
 ## Undo (founder decision: explicit Undo, no second confirmation)
 

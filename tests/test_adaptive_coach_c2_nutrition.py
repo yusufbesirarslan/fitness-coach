@@ -786,6 +786,21 @@ def test_failed_pending_lookup_invalidates_the_request_cache(c2, monkeypatch):
     assert _proposal(c2["owner"]).status == "pending"
 
 
+def test_request_cache_is_keyed_by_owner(c2, monkeypatch):
+    # A row cached for another owner is never returned; it is read afresh.
+    from flask import g
+    reads = []
+    real = coach_confirmation.plan_confirmation.get_pending
+    monkeypatch.setattr(coach_confirmation.plan_confirmation, "get_pending",
+                        lambda owner: reads.append(owner) or real(owner))
+    foreign = object()
+    with Turn(c2, "cancel"):
+        g._coach_raw_pending_cache = (c2["owner"] + 10_000, foreign)
+        assert coach_confirmation._raw_pending(c2["owner"]) is not foreign
+        assert reads == [c2["owner"]]
+        assert g._coach_raw_pending_cache[0] == c2["owner"]
+
+
 def test_successful_lookup_refreshes_the_request_cache(c2, monkeypatch):
     from flask import g
     _close_gate(monkeypatch)
