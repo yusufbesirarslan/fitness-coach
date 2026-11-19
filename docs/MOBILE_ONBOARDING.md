@@ -204,13 +204,18 @@ Searched for existing backend rules before adding any:
   refuses anything outside 20–500 kg. Onboarding weight and target weight now
   use the same constant (`account_profile.BODY_WEIGHT_MIN_KG/MAX_KG`), and the
   weight log imports it — one number, one owner.
-- **Height, age** — no backend rule exists. The only bounds in the repository
-  are the browser wizard's client-side `min`/`max` hints (height 100–240, age
-  13–100), which are presentation, not authority. LP-03 enforces only the
-  structural minimum: finite and positive, age a whole number. That is what
-  keeps the BMR formula and the stored row meaningful (the old route crashed
-  on `inf`/`nan` after marking the profile complete). **Follow-up:** a
-  product-owned range policy for height and age.
+- **Height** — finite and positive; browser hints remain 100–240 cm.
+- **Age** — PRIV-LAUNCH-02 aligns onboarding with the existing adult-only
+  Terms: the canonical `OnboardingProfile` accepts only whole years >=18.
+  Both web `/setup` and native `PUT /account/profile` use this authority;
+  native underage values return existing `PROFILE_INVALID_VALUE` (422), and
+  browser failures show the EN/TR adult-only sentence. No maximum age is
+  invented server-side (browser presentation remains capped at 100).
+  This is self-declared age at profile submission, not verified identity or
+  age. Registration does not collect an age; legacy stored underage accounts
+  are not migrated or automatically disabled by this change. Qualify those
+  accounts and any wider service eligibility before claiming universal 18+
+  enforcement in a disclosure.
 
 ## 6. Browser `/setup` — kept, and two intentional integrity fixes
 
