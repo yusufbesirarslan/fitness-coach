@@ -54,6 +54,8 @@ def write_targeted_locked(row, *, lineage_id, version, before, after):
     No provider I/O or commit here. Whole replacement uses the same owner lock.
     """
     from app.services.nutrition_plan_mutation.document import EditError, parse_snapshot
+    if not isinstance(row, NutritionPlan):
+        raise EditError("invalid_plan_domain")
     if (row.lineage_id != lineage_id or row.mutation_version != version
             or row.plan_data != before):
         raise EditError("plan_stale")

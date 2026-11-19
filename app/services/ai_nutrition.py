@@ -694,13 +694,14 @@ def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None, 
 
     max_tok = min(300 + len(batch_items) * 65, 4000)
     try:
-        raw = _heavy_chat(
-            messages=[{"role": "user", "content": prompt}],
-            system_prompt=nutrition_prompts.MACRO_BATCH_SYSTEM,
-            temperature=0.0,
-            max_tokens=max_tok,
-            feature="nutrition_plan" if strict else "nutrition",
-        ).strip()
+        request_args = dict(messages=[{"role": "user", "content": prompt}],
+                            system_prompt=nutrition_prompts.MACRO_BATCH_SYSTEM,
+                            temperature=0.0, max_tokens=max_tok)
+        # Static feature bindings keep provider inventory/admission auditable.
+        if strict:
+            raw = _heavy_chat(**request_args, feature="nutrition_plan").strip()
+        else:
+            raw = _heavy_chat(**request_args, feature="nutrition").strip()
         if strict:
             from app.services.nutrition_plan_mutation.estimation import strict_response
             return strict_response(raw, batch_items)

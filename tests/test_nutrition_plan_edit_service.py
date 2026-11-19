@@ -263,3 +263,32 @@ def test_coach_turn_never_intercepts_nutrition_pending_as_training(edit_rig, app
         assert executor.published_plan_tool_defs(edit_rig.owner) == ()
     assert Proposal.query.one().status == "pending" and Operation.query.one().status == "prepared"
     assert service.resolve_edit(edit_rig.owner, q.proposal_id, "cancel").status == "cancelled"
+
+
+def test_nutrition_store_cannot_mutate_a_training_row_even_with_matching_binding(edit_rig):
+    from app.models import TrainingPlan
+    r = edit_rig
+    # Deliberately give a Training row valid Nutrition bytes and every matching
+    # precondition. Schema/binding alone cannot distinguish persistence domains.
+    row = TrainingPlan(user_id=r.owner, plan_data=r.raw)
+    db.session.add(row)
+    db.session.commit()
+    before = row.plan_data, row.mutation_version
+    with pytest.raises(EditError, match="invalid_plan_domain"):
+        nutrition_plan_store.write_targeted_locked(row, lineage_id=row.lineage_id,
+            version=row.mutation_version, before=row.plan_data,
+            after=json.dumps({**DOCUMENT, "isim": "Would corrupt training"}))
+    assert (row.plan_data, row.mutation_version) == before
+    assert row not in db.session.dirty
+
+
+def test_pending_admission_exposes_only_an_owner_scoped_boolean(edit_rig, make_user):
+    from app.services.plan_confirmation import has_pending
+    stranger = make_user("c1-pending-foreign").id
+    q = prepare(edit_rig)
+    assert has_pending(edit_rig.owner) is True
+    assert has_pending(stranger) is False
+    assert has_pending(True) is False
+    assert has_pending(None) is False
+    assert service.resolve_edit(edit_rig.owner, q.proposal_id, "cancel").status == "cancelled"
+    assert has_pending(edit_rig.owner) is False

@@ -21,7 +21,7 @@ from app.models import NutritionPlanEditOperation as Operation, NutritionPlanMut
 from app.services import ai_consent, nutrition_plan_store as store
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.plan_mutation.context import validate_context
-from app.services.plan_confirmation import get_pending, lock_proposal
+from app.services.plan_confirmation import has_pending, lock_proposal
 from . import access, estimation
 from .access import Authorities
 from .document import Edit, EditError, finish_edit, parse_snapshot, target_edit
@@ -145,7 +145,7 @@ def prepare_edit(owner, edit, context, *, authorities):
         access.fence(owner, authorities)
         if _record(owner, context.idempotency_key) is not None:
             raise EditError("idempotency_conflict")
-        if get_pending(owner) is not None or Operation.query.filter(
+        if has_pending(owner) or Operation.query.filter(
                 Operation.user_id == owner, Operation.status.in_(("estimating", "prepared"))).first():
             raise EditError("pending_change_exists")
         plan = _plan(owner)
@@ -205,7 +205,7 @@ def _publish(owner, public_id, prepared):
         plan = _plan(owner)
         if not _bound(plan, op) or prepared.before.raw != op.before_snapshot:
             raise EditError("plan_stale")
-        if get_pending(owner) is not None:
+        if has_pending(owner):
             raise EditError("pending_change_exists")
         proposal = Proposal(user_id=owner, plan_lineage_id=op.plan_lineage_id,
             base_mutation_version=op.base_version,
