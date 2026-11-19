@@ -135,7 +135,30 @@ Replay of every stored staging answer (`~/axisai-pump-check-response-quality-01`
 135 answers, including the 32 final A/B pairs, and all 435 distinct text
 items): no verdict changes against main.
 
-Known residuals: a weight claim without a body noun ("you dropped a few
-kilos" is legal, so that "drop a few kilos" stays legal as bar advice);
-judgments written as plain adjectives the patterns do not list; and a
-comparison that names neither an earlier photo nor other people.
+EN checks run on `_en_normalized` (curly apostrophes → `'`, Unicode format
+characters such as soft hyphens dropped); `_tr_folded` drops format
+characters too. "şişlik" (swelling) folds to "sislik" (haziness), so it is
+matched on a Turkish-lowercased copy that keeps the letters
+(`_TR_LETTER_PHYSIOLOGICAL_RE`). The earlier-photo check needs an explicit
+earlier reference ("than before", "since your last photo", "önceki
+fotoğrafa göre", "geçen seferden", "artık"; not bare "now", "recently",
+"zamanla"), a body comparative, and no photo-setup noun (frame, crop, light,
+angle; kadraj, ışık, açı), so "a wider frame than in your last photo" stays
+legal. Turkish change verbs are matched in both -mış and -di forms
+("büyümüş", "büyüdü").
+
+Independent review round 1 (REQUEST_CHANGES) found Turkish -di bypasses,
+curly-apostrophe and soft-hyphen bypasses, and refused guidance such as
+"Zamanla ilerlemeyi görmek için…", "Kademeli kilo artışı…", "Keep training to
+gain muscle…", "Birçok kişi bu pozda…". All of them are now pinned in
+`REVIEW_PROHIBITED` / `REVIEW_ORDINARY`.
+
+Known residuals:
+- an earlier-photo comparison that also names the photo setup ("your
+  shoulders look wider than before in this light");
+- "sislik" written without Turkish letters (indistinguishable from haziness);
+- praise relative to a group the patterns do not list ("for a beginner",
+  which is also ordinary advice);
+- pump wording that uses "swollen"/"şişmiş" is refused, as specified; watch
+  for it in real outputs, since this product is called Pump Check;
+- judgments written as adjectives the patterns do not list.
