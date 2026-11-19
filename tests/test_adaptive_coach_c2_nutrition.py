@@ -484,6 +484,30 @@ def test_undo_restores_exact_bytes_without_estimation(c2, mobile, bearer, alice)
     assert none_left["error"] == "UNDO_UNAVAILABLE"
 
 
+def test_undo_contract_explicit_single_step_no_proposal_no_estimate(c2, mobile, bearer, alice):
+    # Founder decision: explicit Undo applies without a second confirmation,
+    # never on a yes/no answer, never over a pending quote, no estimator call.
+    _answer(mobile, bearer(alice), _stage(c2))
+    applied = _plan(alice.id)
+    proposals = Proposal.query.filter_by(user_id=alice.id).count()
+    for answer in ("yes", "no", "evet", "hayır"):
+        with Turn(c2, answer) as turn:
+            refused, _ = turn.call(nutrition.UNDO_TOOL)
+        assert refused["error"] == "NO_PENDING_CONFIRMATION"
+    assert _plan(alice.id) == applied
+    _stage(c2, {"meal": "aksam", "item": "Salad - 80 g"}, nutrition.ADD_TOOL)
+    with Turn(c2, "undo my last change") as turn:
+        blocked, _ = turn.call(nutrition.UNDO_TOOL)
+    assert blocked["error"] == "PENDING_CONFIRMATION_EXISTS" and _plan(alice.id) == applied
+    _answer(mobile, bearer(alice), _proposal(alice.id).public_id, "cancel")
+    calls = len(c2["calls"])
+    with Turn(c2, "undo my last change") as turn:
+        done, _ = turn.call(nutrition.UNDO_TOOL)
+    assert done["status"] == "applied" and _plan(alice.id) == (c2["raw"], 2)
+    assert len(c2["calls"]) == calls  # no estimate
+    assert Proposal.query.filter_by(user_id=alice.id).count() == proposals + 1  # only the cancelled add
+
+
 def test_add_and_remove_round_trip(c2, mobile, bearer, alice):
     _answer(mobile, bearer(alice), _stage(
         c2, {"meal": "aksam", "item": "Salad - 80 g"}, nutrition.ADD_TOOL))
@@ -659,3 +683,157 @@ def test_release_refuses_while_the_boundary_is_open(c2):
     with pytest.raises(EditError, match="proposal_unavailable"):
         service.release_unavailable(c2["owner"], proposal_id)
     assert _proposal(c2["owner"]).status == "pending"
+
+
+# ── Final P3 hardening: query count, cache, B2 order, logging ────────────────
+
+PROPOSAL_TABLE = Proposal.__tablename__
+
+
+def _proposal_reads(fn):
+    """``fn()`` and the statements it sent that touch the shared proposal table."""
+    from sqlalchemy import event
+    seen = []
+
+    def record(_conn, _cursor, statement, *_):
+        if PROPOSAL_TABLE in statement:
+            seen.append(statement.split(None, 1)[0].upper())
+
+    event.listen(db.engine, "before_cursor_execute", record)
+    try:
+        return fn(), seen
+    finally:
+        event.remove(db.engine, "before_cursor_execute", record)
+
+
+def _spy(monkeypatch, target, name, log):
+    real = getattr(target, name)
+
+    def spy(*args, **kwargs):
+        log.append(name)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(target, name, spy)
+
+
+def _close_gate(monkeypatch):
+    monkeypatch.setattr(access, "NUTRITION_EDITS_ENABLED", False)  # production state
+
+
+@pytest.mark.parametrize("message", ["How should I train today?", "no", "hayır", "cancel"])
+def test_closed_gate_turn_reads_the_proposal_table_exactly_once(c2, monkeypatch, message):
+    # P1 regression + P3-1/P3-3: nothing pending → one proposal read, whether
+    # or not the turn is a plain no/cancel, and no stranded release attempt.
+    _close_gate(monkeypatch)
+    calls = []
+    _spy(monkeypatch, nutrition, "release_stranded", calls)
+    monkeypatch.setattr(coach_confirmation, "_complete_grounded_followup", lambda *_: None)
+    with Turn(c2, message):
+        reply, reads = _proposal_reads(
+            lambda: coach_confirmation.resolve_pending_turn(c2["owner"], "en"))
+    assert reply is None and reads == ["SELECT"] and calls == []
+
+
+def test_ordinary_turn_never_looks_for_a_stranded_quote(c2, monkeypatch):
+    # P3-1: the stranded lookup sits behind the cancel intent.
+    _stage(c2)
+    _close_gate(monkeypatch)
+    calls = []
+    _spy(monkeypatch, coach_confirmation, "_raw_pending", calls)
+    _spy(monkeypatch, nutrition, "release_stranded", calls)
+    monkeypatch.setattr(coach_confirmation, "_complete_grounded_followup", lambda *_: None)
+    with Turn(c2, "How should I train today?"):
+        reply, reads = _proposal_reads(
+            lambda: coach_confirmation.resolve_pending_turn(c2["owner"], "en"))
+    assert reply is None and reads == ["SELECT"] and calls == []
+    assert _proposal(c2["owner"]).status == "pending"
+
+
+def test_typed_cancel_of_a_stranded_quote_reuses_the_loaded_row(c2, monkeypatch):
+    proposal_id = _stage(c2)
+    _close_gate(monkeypatch)
+    real_get = coach_confirmation.plan_confirmation.get_pending
+    gets = []
+    monkeypatch.setattr(coach_confirmation.plan_confirmation, "get_pending",
+                        lambda owner: gets.append(owner) or real_get(owner))
+    with Turn(c2, "cancel"):
+        reply = coach_confirmation.resolve_pending_turn(c2["owner"], "en")
+    assert "cancelled" in reply and gets == [c2["owner"]]  # no second pending read
+    assert _proposal(c2["owner"]).public_id == proposal_id
+    assert _proposal(c2["owner"]).status == "cancelled"
+
+
+def test_failed_pending_lookup_invalidates_the_request_cache(c2, monkeypatch):
+    # P3-2: a stale row from an earlier read in the same app context must not
+    # survive a failed lookup and be released on a later cancel.
+    from flask import g
+    proposal_id = _stage(c2)
+    _close_gate(monkeypatch)
+    stale = _proposal(c2["owner"])
+    released = []
+    monkeypatch.setattr(nutrition, "release_stranded",
+                        lambda owner, pid=None: released.append(pid) or True)
+
+    def broken(_owner):
+        raise RuntimeError("database unavailable")
+    with Turn(c2, "cancel"):
+        g._coach_raw_pending_cache = (c2["owner"], stale)
+        monkeypatch.setattr(coach_confirmation.plan_confirmation, "get_pending", broken)
+        assert coach_confirmation._plan_pending(c2["owner"]) is None
+        assert "_coach_raw_pending_cache" not in g
+        reply = coach_confirmation.resolve_pending_turn(c2["owner"], "en")
+    assert released == [] and "cancelled" not in (reply or "")
+    assert _proposal(c2["owner"]).public_id == proposal_id
+    assert _proposal(c2["owner"]).status == "pending"
+
+
+def test_successful_lookup_refreshes_the_request_cache(c2, monkeypatch):
+    from flask import g
+    _close_gate(monkeypatch)
+    with Turn(c2, "cancel"):
+        g._coach_raw_pending_cache = (c2["owner"], object())
+        assert coach_confirmation._plan_pending(c2["owner"]) is None
+        assert g._coach_raw_pending_cache == (c2["owner"], None)
+
+
+def test_b2_cancel_checks_training_before_nutrition(c2, mobile, bearer, alice, monkeypatch):
+    # P3-3: a Training cancel resolves on the Training path and never reaches
+    # the Nutrition release; a stranded Nutrition id is tried there only after
+    # the Training path found nothing.
+    _seed_training(alice)
+    with Turn(c2):
+        staged = coach_plan_tools.execute_plan_tool(
+            alice.id, "remove_training_plan_exercise",
+            {"day": "Pazartesi", "exercise": "Shoulder Press"})
+    assert staged["status"] == "confirmation_required"
+    training_id = _proposal(alice.id).public_id
+    _close_gate(monkeypatch)
+    order = []
+    _spy(monkeypatch, coach_plan_tools.executor, "execute_plan_tool", order)
+    _spy(monkeypatch, nutrition, "release_stranded", order)
+    response = _answer(mobile, bearer(alice), training_id, "cancel")
+    assert response.status_code == 200 and response.get_json()["outcome"] == "cancelled"
+    assert order == ["execute_plan_tool"]
+    assert _proposal(alice.id).status == "cancelled"
+
+    monkeypatch.setattr(access, "NUTRITION_EDITS_ENABLED", True)
+    proposal_id = _stage(c2)
+    _close_gate(monkeypatch)
+    order.clear()
+    response = _answer(mobile, bearer(alice), proposal_id, "cancel")
+    assert response.status_code == 200 and response.get_json()["outcome"] == "cancelled"
+    assert order == ["execute_plan_tool", "release_stranded"]
+    assert _proposal(alice.id).status == "cancelled" and _plan(alice.id) == (c2["raw"], 0)
+
+
+def test_b2_stranded_cancel_logs_its_real_outcome_without_content(c2, mobile, bearer, alice, monkeypatch):
+    # P3-4: the release logs its own closed-vocabulary outcome.
+    proposal_id = _stage(c2)
+    _close_gate(monkeypatch)
+    lines = []
+    monkeypatch.setattr(coach_plan_tools.executor, "_log",
+                        lambda name, outcome: lines.append((name, outcome)))
+    response = _answer(mobile, bearer(alice), proposal_id, "cancel")
+    assert response.status_code == 200 and response.get_json()["outcome"] == "cancelled"
+    assert lines[-1] == (nutrition.STRANDED_RELEASE_LOG, "cancelled")
+    text = repr(lines)
+    assert proposal_id not in text and "Eggs" not in text and "Chicken" not in text

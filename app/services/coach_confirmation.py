@@ -152,13 +152,15 @@ def resolve_pending_turn(user_id, language="tr"):
     n = (int(plan_pending is not None) + int(nutrition_pending is not None)
          + int(log_pending is not None))
     if n == 0:
-        # Closed gate only: reuse the row _plan_pending already loaded (no
-        # extra read); release a stranded Nutrition quote on a typed cancel.
-        stranded = _raw_pending(user_id)
-        if (intent == CANCEL and stranded is not None
-                and stranded.command_type == coach_plan_tools.nutrition.COMMAND
-                and coach_plan_tools.nutrition.release_stranded(user_id, stranded.public_id)):
-            return t("coach.confirm.cancelled", locale=language)
+        if intent == CANCEL:
+            # Closed gate only: a typed cancel releases a stranded Nutrition
+            # quote, reusing the row _plan_pending just loaded. Any other turn
+            # never looks at it.
+            stranded = _raw_pending(user_id)
+            if (stranded is not None
+                    and stranded.command_type == coach_plan_tools.nutrition.COMMAND
+                    and coach_plan_tools.nutrition.release_stranded(user_id, stranded.public_id)):
+                return t("coach.confirm.cancelled", locale=language)
         return _complete_grounded_followup(user_id, language)
     if n > 1:
         if intent == CANCEL:
@@ -443,29 +445,45 @@ def direct_resolution_reply(result, language="tr"):
     return None
 
 
+_RAW_PENDING_CACHE = "_coach_raw_pending_cache"
+
+
 def _raw_pending(user_id):
-    """The one pending row of any plan domain (request-cached on ``g``)."""
+    """The one pending row of any plan domain (request-cached on ``g``).
+
+    The cache only ever holds the result of the latest successful
+    ``_plan_pending`` read; after a failed read it is absent and this reads
+    afresh (or answers ``None`` on a broken session) — never a stale row.
+    """
     try:
-        cache = getattr(g, "_coach_raw_pending_cache", None)
+        cache = getattr(g, _RAW_PENDING_CACHE, None)
         if cache is not None and cache[0] == user_id:
             return cache[1]
         row = plan_confirmation.get_pending(user_id)
-        g._coach_raw_pending_cache = (user_id, row)
+        setattr(g, _RAW_PENDING_CACHE, (user_id, row))
         return row
     except Exception:
         return None
 
 
+def _invalidate_raw_pending():
+    try:
+        g.pop(_RAW_PENDING_CACHE, None)
+    except RuntimeError:  # no app context
+        pass
+
+
 def _plan_pending(user_id):
+    _invalidate_raw_pending()  # a failed read below must not leave an old row
     try:
         row = plan_confirmation.get_pending(user_id)
-        try:
-            g._coach_raw_pending_cache = (user_id, row)
-        except RuntimeError:
-            pass
-        return row if is_training_proposal(row) else None
     except Exception:
         return None
+    try:
+        setattr(g, _RAW_PENDING_CACHE, (user_id, row))
+    except RuntimeError:
+        pass
+    return row if is_training_proposal(row) else None
 
 
 def _any_plan_pending(user_id):

@@ -510,6 +510,10 @@ def owns_proposal(user_id, proposal_id):
         executor._settle_transaction()
 
 
+#: Log name of a closed-gate stranded-quote release (typed or B2 cancel).
+STRANDED_RELEASE_LOG = "nutrition_plan_stranded_release"
+
+
 def cancelled_result():
     return {"domain": DOMAIN, "operation": "cancel", "status": STATUS_CANCELLED}
 
@@ -528,8 +532,17 @@ def release_stranded(user_id, proposal_id=None):
         executor._settle_transaction()
         if quote is None:
             return False
-        result = service.release_unavailable(user_id, quote.proposal_id)
-        return result.status == "cancelled"
+        try:
+            released = service.release_unavailable(user_id, quote.proposal_id).status == STATUS_CANCELLED
+            outcome = STATUS_CANCELLED if released else "NO_PENDING_CONFIRMATION"
+        except EditError as error:
+            released, outcome = False, _BY_EDIT_ERROR.get(str(error), "INTERNAL_ERROR")
+        except Exception:
+            released, outcome = False, "INTERNAL_ERROR"
+        # The real outcome of a found quote, closed vocabulary only (a B2
+        # cancel's preceding Training line only says no Training proposal).
+        executor._log(STRANDED_RELEASE_LOG, outcome)
+        return released
     except Exception:
         # C1 owns its own rollback; never discard a caller's pending work.
         return False

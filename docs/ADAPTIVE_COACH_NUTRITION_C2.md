@@ -85,12 +85,36 @@ authority (like `cancel_preparation`), never writes a plan or journal, and
 refuses while the boundary is open. This frees the shared one-pending slot so
 Training proposals are not blocked. B2 keeps its flag-OFF 404.
 
-## Decision for the founder (not assumed)
+Cost and order (pinned by tests):
 
-`undo_last_nutrition_plan_change` applies on the user's explicit request
-without a second confirmation, mirroring Training undo: it restores exact prior
-bytes with no estimate. F-3 requires confirmation for re-estimated edits; if
-undo must also be confirmed, C1 needs an undo proposal kind (separate change).
+- Typed turn, boundary closed (production): `_plan_pending` reads the shared proposal table once per turn
+  and caches that row on `g`. Only a cancel-intent turn with nothing pending
+  looks at the cached row; every other turn (including a plain "no" with
+  nothing stranded) does exactly one proposal read, as before C2. A failed
+  pending read drops the cache, so no stale row survives it.
+- B2 cancel: the Training path runs first, unchanged; only if it finds no
+  Training proposal is the named id tried as a stranded Nutrition quote.
+- A found stranded quote logs its real outcome as one closed-vocabulary line
+  `tool=nutrition_plan_stranded_release outcome=<cancelled|ERROR_CODE>` (no
+  ids, text or amounts), after the Training line that only says no Training
+  proposal was pending.
+
+## Undo (founder decision: explicit Undo, no second confirmation)
+
+`undo_last_nutrition_plan_change` applies on the user's explicit request with
+no second confirmation, mirroring Training undo. No C1 undo proposal kind.
+
+- C1 `undo_last_change`: exact prior bytes, owner-scoped, same lineage, new
+  increasing version, dual original-authority fence, journal replay (a repeat
+  in the same turn replays, never undoes an older change).
+- No estimator call, no proposal, no extra model call or Coach allowance (it
+  runs inside the user's own Coach turn).
+- Refused on a yes/no-form turn, while any quote is pending, and beyond the
+  shared per-turn budget.
+- "Explicit request" is enforced as for Training undo: the tool description
+  and the Coach plan-mutation policy restrict it to an explicit user ask; the
+  server guards above stop it on answers and over pending quotes. There is no
+  server-side parser of the user's wording (Training parity).
 
 ## Native transport and mobile handoff
 
@@ -101,6 +125,22 @@ send Confirm/Cancel with its `proposal_id`, re-read the Nutrition Plan when
 `changed` is true or after an `applied` answer, and show the C1 `estimated`
 meal label on the Plan screen. 101119 ignores the key and the closed gate
 never emits it.
+
+## R1 containment dependency (C2 merge sequence)
+
+R1 production containment (draft #543) temporarily reverts C1 #534 and #537 on
+backend main and owns main integration. C2 #542 is based on main with C1 and
+is NOT rebased onto the revert candidate. Required order:
+
+1. R1 runtime containment completes (R1 owns it; C2 does not touch #543/main).
+2. C1 is restored on main by a revert-of-the-revert, with its own CI.
+3. C2 is rebased onto that main, hosted CI re-run on the exact new head
+   (incl. PostgreSQL jobs), delta re-reviewed for P0–P2.
+4. Founder source-merge decision for C2 (still closed; activation separate).
+
+If C1 is restored with changes (not a byte-exact revert-of-revert), the C1
+helpers C2 adds (`find_quote`, `release_unavailable`,
+`interrupted_preparations`) and the C2 PG suite must be requalified against it.
 
 ## Release dependencies (all open)
 
@@ -117,4 +157,5 @@ estimation failure, replay, confirm/cancel/undo, stale, foreign/tampered ids,
 Training isolation, purge, schema/shape guards) and the CI-listed real
 PostgreSQL `tests/test_adaptive_coach_c2_nutrition_pg.py` (real D1 capture,
 parallel confirm/cancel, double confirm, withdrawal + regrant, Coach regrant,
-cross-account). Synthetic estimator only.
+cross-account). Synthetic estimator only. Query-count, cache, B2-order,
+logging and undo-contract regressions are pinned in the unit module.
