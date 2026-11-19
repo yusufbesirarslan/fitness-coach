@@ -1,64 +1,86 @@
-# Adaptive Coach Nutrition — C1 preparation
+# Adaptive Coach Nutrition — C1 foundation
 
-Source only. No route, Coach tool, provider call, saved-plan write, migration
-or production activation. This PR prepares the pure document boundary before
-the separate atomic persistence and consent integration.
+Internal server services only. No route, Coach tool or mobile Nutrition action
+is exposed. Nutrition editing is source-gated OFF; the approved Coach editing
+disclosure set is empty. Neither environment flags nor existing r2 consent can
+open this boundary. PR #533 remains a separate legal-gated disclosure draft.
+Ordinary permitted Coach chat is unchanged. Deploy and activation remain HOLD.
 
 ## Founder F-3 decision — 2026-11-18
 
-Approved: when independent per-item nutrients are not reliable, re-estimate
-the **entire affected meal** using the existing independent server estimation
-path. Tell the user that these are estimates, including unchanged items whose
-estimates can move. Rebuild day totals from canonical meal totals. Every such
-re-estimation requires confirmation in this first slice because the old item
-contribution is uncertain. This is a bounded fallback policy, not a universal
-confirm-all policy for reliably sourced low-impact edits. No 200 kcal/15%
-threshold was approved. Failed/ambiguous calculation writes nothing.
+When reliable independent item nutrients are missing, re-estimate the **entire
+affected meal** using the existing independent server estimator. Every such
+re-estimation requires explicit confirmation in this first slice. Return and
+persist estimate provenance, and explain that unchanged foods in that meal may
+also receive updated estimates. Rebuild day totals from canonical meals. Never
+subtract guessed old-item nutrients from stored totals. No universal 200 kcal
+or 15% threshold is approved. FatSecret and the shared food cache are excluded.
 
-FatSecret Food Search is not a nutrient authority for Coach. No provider data,
-shared food cache, or inferred old-item contribution enters this boundary.
+## Implemented boundary
 
-## Implemented preparation
+- Canonical owner-scoped current-plan reads and exact unique item targeting for
+  replace/add/remove. Missing, duplicate, ambiguous and invalid references, and
+  removal of the last item, refuse. An exact no-op preserves bytes without AI.
+- A bounded initial quantity grammar requires `Food - number unit` for EVERY
+  item in the affected meal, including unchanged items. Units: g/gr/gram/grams,
+  kg, ml/l, adet/piece/pieces; positive bounded amounts only. Unspecified or
+  ambiguous legacy portions refuse before dispatch. This intentionally favors
+  refusal over inventing a serving. Food/preparation ambiguity also requires
+  estimator refusal; model estimates are not independently measured facts.
+- One existing macro batch call re-estimates all affected foods. Strict mode
+  uses the existing Nutrition authority/provider/admission path and rejects
+  incomplete, repaired, nonnumeric, inconsistent or physically invalid output.
+  Legacy estimator callers retain their existing behavior. No provider call
+  occurs with an open SQL transaction. Canonical day totals use Decimal sums.
+- `service.prepare_edit` commits a durable operation claim before estimation,
+  then persists one exact quote and one proposal. Same-key retries never
+  dispatch another estimate. A crash leaves an uncertain `estimating` claim;
+  explicit `cancel_preparation` releases it, without retrying uncertain AI work.
+  Failed estimates write only failure bookkeeping, no plan/proposal/journal.
+- `service.resolve_edit` confirms/cancels one opaque owner-scoped proposal with
+  no model call or Coach allowance. The original Coach editing authority AND
+  original Nutrition permission are rechecked before application. Regranting
+  cannot revive old work. Definitive refusal retires unusable proposals; an
+  authority outage keeps them recoverable. Cancellation never applies a plan.
+- The existing one-pending-proposal constraint covers Training and Nutrition.
+  Training confirmation handlers and transport effects reject/hide other
+  domains. This does not wire Nutrition into B2 or publish C2 tools.
+- Confirmation atomically commits the complete meal/day document, increasing
+  version, operation/proposal state and append-only journal. Exact lineage,
+  version and before-bytes checks reject stale/concurrent writes. Full-plan
+  replacement and targeted edits share the canonical owner lock.
+- `service.undo_last_change` restores exact historical bytes at a new increasing
+  version, without estimation. Replay keys and a unique revert constraint
+  prevent duplicate undo. A full replacement creates a new lineage, so its
+  predecessor's changes cannot be undone onto the replacement.
+- Account deletion and health erasure cover both new ledgers. Estimate source
+  and exact before/after snapshots live outside the closed Nutrition JSON.
 
-- `read_current_plan(owner)` reuses `nutrition_plan_store.newest_plan`, including
-  its owner scope and newest-row/tie-break ordering; detached exact snapshots.
-- Replace/add/remove target only the requested meal and a unique exact item
-  (trim/casefold comparison). Ambiguous, missing, duplicate, invalid and
-  last-item removal requests refuse before any estimation call.
-- A pure preparation step accepts complete numeric whole-meal facts, replaces
-  the affected meal atomically **in memory**, and rebuilds all daily nutrients.
-  It never subtracts anything from stored day totals. Missing other-meal
-  nutrients refuse; missing is never zero. Exact no-ops preserve bytes and need
-  no estimation or confirmation. Decimal sums avoid binary accumulation drift.
-- Estimate metadata is separate from the existing closed plan schema; the
-  eventual journal/response must retain and display it. This PR changes no UI.
+## Schema and recovery
 
-## Remaining before C1 can persist, and before C2
+Migration `c1a9b7e5d301` adds nullable opaque Nutrition lineage, version zero with
+server default, and two separate operation/history tables. Existing plan bytes
+are untouched; old rows receive distinct random lineage tokens with no invented
+history. Old-code inserts still work during code rollback; unidentified rows
+fail closed for targeted edits. No production migration has been run by this
+work. Schema-shape verification refuses drift and supports create_all boots.
 
-1. Independent whole-meal estimator adapter with strict input/output validation,
-   bounded quantities, explicit failure on incomplete/ambiguous estimates and
-   server-attested provenance tied to owner, exact before-state and proposed
-   items. The existing `_estimate_macros_llm_batch` is **not** safe to call
-   unwrapped: it coerces absent/invalid nutrients to zero and repairs partial
-   JSON. Reuse its provider/prompt path, not those permissive success rules.
-2. Keep database transactions closed across provider I/O. On confirmation,
-   atomically recheck owner, original Coach authority, nutrition permission,
-   legal-approved editing disclosure and exact canonical before-state.
-3. Extend the existing Nutrition store with lineage/version and a durable
-   append-only mutation journal. One owner lock must serialize whole replacement
-   and targeted edits; journal, plan and increasing version commit together.
-   Exact before/after snapshots enable byte-precondition undo, not re-estimation.
-4. Persist one prepared result per operation key before confirmation. Retries
-   reuse those nutrients with no second AI call; replay returns original durable
-   evidence. Replacing the entire plan invalidates old pending edits and undo.
-5. Share one active pending training-or-nutrition proposal, then adapt B2 named
-   Confirm/Cancel without a Coach turn/allowance. Recheck stale/cancel/revoke,
-   concurrent replacement/edit and double-confirm on PostgreSQL.
-6. F-1/F-1b targeted capability re-consent remains a separate legal-gated PR.
-   Ordinary r2 Coach chat must remain available. No C2 tool is published until
-   the above guarantees exist. Production mutation flags remain OFF.
+Preferred rollback: roll back code while retaining additive schema/history.
+A destructive downgrade refuses if either ledger contains records; empty-schema
+downgrade is tested. Historical snapshots remain available for exact recovery.
 
-Tests: `tests/test_nutrition_plan_mutation_preparation.py` covers ownership,
-unreadable storage, targeting, no-op, complete meal/day arithmetic, missing
-facts, estimate validation and forged target rejection. This is not durable
-mutation, provider, PostgreSQL race or real-device qualification.
+## Qualification and release gates
+
+Focused tests cover targeting/arithmetic, strict estimation, atomic rollback,
+replay, stale state, interrupted work, authority outage/withdrawal cleanup,
+Training proposal isolation, schema compatibility and drift. Dedicated real
+PostgreSQL tests cover same-key claims/conflicts, double confirmation,
+confirm/cancel, full replacement, duplicate undo, and original D1 revoke/regrant
+(including withdrawal during estimation). Hosted CI remains the full-suite
+qualification signal; synthetic providers only, no real-user/device QA.
+
+C2 remains unavailable. Before release: legal-approved editing/nutrition scope,
+targeted consent integration preserving ordinary chat, C2 transport/display of
+estimate metadata, staging qualification, and separate founder authorization
+for deployment and activation. F-2 selective confirmation remains unchanged for
+Training and any future reliably sourced low-impact edits.

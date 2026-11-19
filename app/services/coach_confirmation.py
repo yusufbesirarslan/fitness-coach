@@ -19,6 +19,7 @@ from app.services import coach_plan_tools, plan_confirmation
 from app.services.coach_memory_provenance import display_only_reply
 from app.services.coach_plan_policy import CANCEL, CONFIRM, NONE
 from app.services.coach_plan_tools import results
+from app.services.coach_plan_tools.proposals import is_training_proposal
 from app.services.coach_plan_tools import clarifications as clar_mod
 from app.services.coach_plan_tools.grounding import (
     PROPOSED_REPS,
@@ -416,7 +417,8 @@ def direct_resolution_reply(result, language="tr"):
 
 def _plan_pending(user_id):
     try:
-        return plan_confirmation.get_pending(user_id)
+        row = plan_confirmation.get_pending(user_id)
+        return row if is_training_proposal(row) else None
     except Exception:
         return None
 

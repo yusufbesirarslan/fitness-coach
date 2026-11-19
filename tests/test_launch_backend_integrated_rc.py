@@ -12,10 +12,10 @@ from test_mobile_log_food_api import as_mobile, manual_command, provider_command
 def test_f01_expansion_follows_the_existing_launch_free_revision():
     from pathlib import Path
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / "migrations"))
-    assert scripts.get_heads() == ["ad17de1e0001"]  # FatSecret retention follows F01
+    assert scripts.get_heads() == ["c1a9b7e5d301"]  # C1 follows the account-deletion destruction record
     assert scripts.get_revision("f01c0a1e0001").down_revision == "d8f1a3c5e7b9"
     assert scripts.get_revision("d8f1a3c5e7b9").down_revision == "c6f8b0d2e4a1"
-    assert len(list(scripts.walk_revisions())) == 66
+    assert len(list(scripts.walk_revisions())) == 67
 
 
 @pytest.mark.parametrize("eligibility", [False, True])

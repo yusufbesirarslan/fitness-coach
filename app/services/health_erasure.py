@@ -222,6 +222,7 @@ def _erase_rows(user, held):
     if "plans" not in held:
         changed = sum(_delete(model, model.user_id == uid) for model in (
             m.PlanMutationRecord, m.TrainingPlanConfirmationProposal,
+            m.NutritionPlanEditOperation, m.NutritionPlanMutationRecord,
             m.TrainingPlanReplacementReceipt, m.TrainingPlanReplacementProposal,
             m.TrainingPlan, m.NutritionPlan))
         # Generation ledgers stay (idempotency and AI allowance accounting are

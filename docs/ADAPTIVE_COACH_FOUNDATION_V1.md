@@ -11,8 +11,8 @@ with targeted re-consent preserving ordinary chat. F-2 remains selective,
 server-owned confirmation. B2 decouples the prompts and provides deterministic
 Confirm/Cancel. F-3 is now approved for independent whole-meal re-estimation
 when reliable per-item facts are absent, with explicit estimates and first-slice
-confirmation. See [C1 preparation](ADAPTIVE_COACH_NUTRITION_C1.md) for exact
-scope and remaining work. The architecture/decision questions below are the
+confirmation. See [C1 foundation](ADAPTIVE_COACH_NUTRITION_C1.md) for exact
+scope and release gates. The architecture/decision questions below are the
 historical B1 record, not superseding these decisions.
 
 This document has two parts: the architecture and gap map (deliverable A),

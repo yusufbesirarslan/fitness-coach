@@ -1,9 +1,8 @@
-"""C1 preparation only: canonical reads and pure, deterministic meal edits.
+"""C1 Nutrition domain; internal services remain legal/release gated OFF.
 
-No provider call, persistence, public route or Coach tool is exposed here.
-The caller supplies a server-resolved owner, never a model-supplied plan id.
-Consent and the atomic journal/confirmation boundary must precede any future
-provider-facing or write consumer. See docs/ADAPTIVE_COACH_NUTRITION_C1.md.
+Canonical read/pure targeting exports are unchanged. Durable preparation,
+confirmation and undo live in .service; no public route or C2 tool is wired.
+See docs/ADAPTIVE_COACH_NUTRITION_C1.md for consent and recovery boundaries.
 """
 
 from .document import (

@@ -23,7 +23,7 @@ class EditError(ValueError):
 
 @dataclass(frozen=True)
 class Snapshot:
-    # Exact bytes are preserved for the future byte-precondition undo journal.
+    # Exact bytes are preserved for the byte-precondition undo journal.
     raw: str
 
     @property
@@ -53,7 +53,7 @@ class PreparedEdit:
     after: Snapshot
     changed: bool
     requires_confirmation: bool
-    # Metadata belongs in the future journal, outside the closed plan schema.
+    # Metadata belongs in the journal, outside the closed plan schema.
     nutrient_source: str | None
 
 
@@ -154,7 +154,7 @@ def finish_edit(target, estimated_meal):
     """Prepare the complete new document from a trusted server meal estimate.
 
     ``estimated_meal`` is exactly {kalori, protein, karb, yag} for ALL target
-    items together. It must come from a future consent-gated independent
+    items together. It must come from the consent-gated independent
     estimator adapter, never directly from request/tool arguments. This pure
     function establishes neither provenance nor authorization to persist.
     """
