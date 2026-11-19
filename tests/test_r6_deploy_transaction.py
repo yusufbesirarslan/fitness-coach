@@ -90,6 +90,7 @@ class World:
     manifests: dict = field(default_factory=dict)
     source_manifests: dict = field(default_factory=dict)
     source_revisions: dict = field(default_factory=dict)
+    same_head_receipt: tx.SameHeadReceipt | None = None
     floor: dict = field(default_factory=lambda: {
         "result": "ok", "capability": "workout_completion_claims_v1",
         "floor": "absent", "fence": "absent", "claims_present": False,
@@ -171,6 +172,18 @@ class FakeOps:
 
     def prepare_workspace(self, timeout):
         self._rec("prepare_workspace", timeout=timeout)
+
+    def read_same_head_receipt(self, timeout):
+        self._rec("read_same_head_receipt", timeout=timeout)
+        return self.w.same_head_receipt
+
+    def write_same_head_receipt(self, receipt, timeout):
+        self._rec("write_same_head_receipt", receipt, timeout=timeout)
+        self._fail("receipt_write")
+        self.w.same_head_receipt = receipt
+
+    def use_recovery_previous(self, previous, timeout):
+        self._rec("use_recovery_previous", previous, timeout=timeout)
 
     def link_context_env(self, timeout):
         self._rec("link_context_env", timeout=timeout)
@@ -405,9 +418,11 @@ class FakeOps:
         self._rec("source_migration_revisions", which, timeout=timeout)
         return frozenset(self.w.source_revisions.get(which, ()))
 
-    def schema_heads(self, image_id, revision, timeout):
+    def schema_heads(self, image_id, revision, timeout, *, require_at_head=False):
         self._rec("schema_heads", image_id, timeout=timeout)
         self._fail("schema_heads")
+        if require_at_head and self.w.db_heads != self.w.candidate_heads:
+            raise tx.OpError("not_at_exact_head")
         if self.w.db_heads is None:
             return {"result": "ok", "has_table": False, "current": []}
         return {"result": "ok", "has_table": True, "current": sorted(self.w.db_heads)}
@@ -442,7 +457,8 @@ def run(world, **kwargs):
     clock = Clock(world)
     budget = tx.Budget(clock, clock() + contract.HOST_PHASE_SECONDS["release_forward"])
     transaction = tx.Transaction(
-        FakeOps(world), deploy_sha=CAND, previous_commit=PREV, public_health_url=URL,
+        FakeOps(world), deploy_sha=kwargs.pop("deploy_sha", CAND),
+        previous_commit=kwargs.pop("previous_commit", PREV), public_health_url=URL,
         clock=clock, sleep=clock.sleep, log=world.events.append, budget=budget,
         **kwargs)
     code = transaction.run()
@@ -1417,7 +1433,6 @@ GOOD_ARGS = ["run", "--deploy-sha", CAND, "--previous-commit", PREV,
     {"--public-health-url": "https://user:pw@fitx.example/health"},
     {"--transaction-epoch": "-5"}, {"--deploy-dir": "/home/ubuntu/axisai-web-blue"},
     {"--mode": "skip-health-check"}, {"--mode": ""}, {"--mode": "Forward-Recovery"},
-    {"--mode": "forward-recovery", "--previous-commit": CAND},
 ])
 def test_cli_rejects_invalid_invocations_before_anything(change):
     args = list(GOOD_ARGS)

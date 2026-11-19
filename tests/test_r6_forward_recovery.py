@@ -462,11 +462,16 @@ def test_h_two_workers_are_ambiguous(monkeypatch):
     assert "build_image" not in names(world)
 
 
-def test_h_cli_refuses_recovery_of_an_already_committed_candidate():
+def test_h_cli_refuses_candidate_checkout_without_a_pending_same_head_receipt(monkeypatch, capsys):
     args = list(GOOD_ARGS)
     args[args.index("--mode") + 1] = "forward-recovery"
     args[args.index("--previous-commit") + 1] = CAND
-    assert tx.main(args, environ=contract.host_timeout_environment()) == tx.EXIT_USAGE
+    world = slot_world("blue")
+    args[args.index("--transaction-epoch") + 1] = str(int(tx.time.monotonic()))
+    monkeypatch.setattr(tx, "HostOps", lambda **kwargs: FakeOps(world))
+    assert tx.main(args, environ=contract.host_timeout_environment()) == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert "uncommitted candidate or an exact pending receipt" in capsys.readouterr().err
+    assert "prepare_workspace" not in names(world)
 
 
 # ── I. the old writer is never resurrected ──────────────────────────────────
@@ -567,12 +572,13 @@ def test_completion_floor_argv_and_override_are_unchanged_by_the_refactor(tmp_pa
         "      options: {max-size: '10m', max-file: '3'}\n")
 
 
-def test_schema_heads_runs_read_only_tool_in_the_exact_image(tmp_path):
+@pytest.mark.parametrize("require_at_head", [False, True])
+def test_schema_heads_runs_read_only_tool_in_the_exact_image(tmp_path, require_at_head):
     payload = {"result": "ok", "has_table": True, "current": ["c1"]}
     recorder = Recorder({"schema-heads": _one_off_reply("schema-heads: ", payload)})
     ops = host(tmp_path, recorder)
     image = "sha256:" + "b" * 64
-    assert ops.schema_heads(image, CAND, 60) == payload
+    assert ops.schema_heads(image, CAND, 60, require_at_head=require_at_head) == payload
     (argv,) = recorder.calls
     assert argv == ["docker", "compose", "--project-directory", str(ops.deploy_dir),
                     "-p", "fitness-coach", "-f", str(ops.context / "docker-compose.yml"),
@@ -581,7 +587,10 @@ def test_schema_heads_runs_read_only_tool_in_the_exact_image(tmp_path):
     override = (ops.work / "schema-heads.yml").read_text(encoding="utf-8")
     assert f"    image: '{image}'\n" in override                # immutable ID, never a tag
     assert "      FITX_SKIP_DB_INIT: '1'\n" in override           # no startup DB work
-    assert '["flask", "--app", "starter", "schema-heads"]' in override
+    expected = '["flask", "--app", "starter", "schema-heads"'
+    if require_at_head:
+        expected += ', "--require-at-head"'
+    assert expected + ']' in override
 
 
 @pytest.mark.parametrize("reply", [

@@ -280,11 +280,6 @@ if ! run_external git merge-base --is-ancestor "$PREV_COMMIT" "$DEPLOY_SHA"; the
   echo "deployment candidate is older than or divergent from production" >&2
   exit 1
 fi
-if [[ "$TRANSACTION_MODE" == "forward-recovery" && "$PREV_COMMIT" == "$DEPLOY_SHA" ]]; then
-  echo "forward recovery refused: the checkout already runs DEPLOY_SHA" >&2
-  exit 1
-fi
-
 # The exact candidate tree, from git objects only: untracked or ignored host
 # files can never enter the image build or the transaction engine. The
 # checkout itself is not touched here; the engine moves it to DEPLOY_SHA only

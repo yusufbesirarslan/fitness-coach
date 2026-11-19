@@ -671,7 +671,8 @@ def completion_floor_raise_cmd(revision):
 SCHEMA_HEADS_PREFIX = "schema-heads: "
 
 
-def schema_heads_cmd():
+@click.option("--require-at-head", is_flag=True)
+def schema_heads_cmd(require_at_head=False):
     """R6-R1-28 forward recovery: the database's current Alembic heads, read-only.
 
     One machine line; the deploy transaction parses exactly this prefix and
@@ -679,9 +680,15 @@ def schema_heads_cmd():
 
         FITX_SKIP_DB_INIT=1 flask --app starter schema-heads
     """
-    from app.schema_safety import _read_current_heads
+    from flask import current_app
+
+    from app.schema_safety import _read_current_heads, expected_heads
     try:
         has_table, current = _read_current_heads(db.engine)
+        if require_at_head and (not has_table or current != expected_heads(current_app)):
+            _emit_machine_line(SCHEMA_HEADS_PREFIX,
+                               {"result": "error", "reason": "not_at_exact_head"},
+                               failed=True)
     except Exception as exc:  # noqa: BLE001 - unknown is reported, never guessed
         _emit_machine_line(SCHEMA_HEADS_PREFIX,
                            {"result": "error", "reason": type(exc).__name__},

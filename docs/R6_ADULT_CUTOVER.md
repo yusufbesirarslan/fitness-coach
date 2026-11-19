@@ -40,6 +40,11 @@ helper parity, overlap classification, immutable images and capability gates.
    Existing graceful-stop bounds apply; a request can finish before closure
    or disconnect during shutdown. Completed external/database effects are
    never described as cancelled or undone. A failed absence proof stops.
+   For a blue/green release with an unchanged adult migration graph, first
+   prove the actual Alembic heads equal the archived graph's full head set.
+   Persist the previous SHA, candidate SHA, old slot and candidate image ID
+   in the deploy checkout's Git metadata before attempting closure. This
+   private mode-0600 receipt survives checkout resets and command cleanup.
 4. Run the existing `release-prepare` once. Start the exact candidate in
    read-only mode with literal `R6_REGISTRATION_ADMISSION=closed` and one
    Gunicorn worker. A boot-random local receipt gates both web and mobile
@@ -63,7 +68,8 @@ helper parity, overlap classification, immutable images and capability gates.
    and the full floor/fence again while registration stays closed. Checkout
    commits to the exact candidate. Only then atomically write the boot/revision
    registration receipt and verify it through the actual loaded process.
-   Record `adult-registration-open`, then the existing release commit event.
+   Record `adult-registration-open`, durably mark any same-head receipt as
+   committed, then emit the release commit event.
 
 This intentionally interrupts web/worker availability during preparation.
 The founder's later exact-source/run/attempt/window deployment GO must accept
@@ -95,20 +101,39 @@ registration reopening and cutover acceptance.
 | Phase | Disposition |
 |---|---|
 | Before closure attempted | Existing failure behavior preserves the proven baseline. No migration has begun. |
-| Closure attempted but not proved | Stop, report `closure_proven=false`, no migration. No automatic restart or repair. Reconcile the existing operation under incident ownership. |
-| Closure proved, migration not begun | Keep admission closed and report incomplete recovery. Do not automatically recreate old images merely to end the interruption. If the DB remains at the previous head, existing post-migration forward recovery is inapplicable; recovery owner/founder must separately disposition this outage. No new recovery mode is invented here. |
+| Closure attempted but not proved | Stop and report `closure_proven=false`. An exact pending same-head receipt allows a separately authorized retry to finish and prove closure. |
+| Closure proved, migration not begun | Keep admission closed and report incomplete recovery. Use the pending same-head receipt with a new protected authorization for the exact candidate. |
 | Migration failed/timed out | Keep closure; report schema outcome as not inferred, and migrator-cleanup ambiguity where applicable. No automatic old route/worker restoration, schema downgrade or assumed transaction rollback. |
 | Candidate preparation / switch / worker / pre-open failure | Keep the candidate, remove its open receipt if present, preserve the empty old port, and report incomplete recovery. Never remove the sole candidate or restore old images. |
 | Ambiguous registration-open result before release commit | Close the candidate latch, retain the candidate pair, report incomplete recovery. If closure itself is unproved, explicitly escalate that fact. All mandatory gates precede the open attempt. |
-| After release commit | Existing fix-forward only. Retirement/floor/housekeeping residue cannot trigger old-image rollback. |
+| After release commit | Fix forward under a separately authorized successor. Keep the established route, processes and registration state. A committed same-head receipt refuses replay of that release. |
 
-After closure, **even a healthy pinned old image or compatible completion
-manifest is not rollback authority**. Existing forward recovery still requires
-actual current heads all in the candidate graph and at least one outside the
-previous graph, compatible partial route/container state, all existing gates,
-and separate exact `forward-recovery:<sha>:<run>:<attempt>` founder authorization.
-The accepted pre-migration `f01a4e000003` head does not satisfy that predicate.
-No blanket availability/restart compatibility is claimed for old `94a3f170`.
+Both recovery paths require a separate exact
+`forward-recovery:<sha>:<run>:<attempt>` founder authorization, the protected
+controller's snapshot and freshness checks, the host lock and route authority,
+and the full pre-open checks above. Recovery without a pending receipt still
+requires actual current heads all in the candidate graph and at least one
+outside the previous graph. The pre-migration `f01a4e000003` head does not
+satisfy that predicate.
+
+Same-head recovery uses the old slot and immutable image from the pending
+receipt. A retry requires the unchanged adult graph, exact live heads, absence
+of the identified release-preparation container, and compatible checkout, route,
+slot and worker identities. It reuses the original image and reruns preparation
+only when success was never durably recorded. Preparation is idempotent and
+still runs only after old process and socket absence. A crash after checkout,
+including after an open write, may resume while the receipt remains pending.
+The retry closes the candidate latch and repeats the pre-open proofs. A commit
+receipt I/O error preserves the verified open candidate and reports incomplete
+recovery. Inspect the durable receipt to determine retry eligibility.
+
+Hold changes to `origin/main` throughout this release and any same-head retry.
+The controller still requires the exact current main SHA. An advanced main ref,
+missing pinned image, surviving preparation container, unclassifiable nginx
+route or a running unusable routed candidate requires incident reconciliation
+before retry. Preserve the Git metadata receipt and its image during incident
+handling. A same-head interruption predating the receipt has no automatic
+same-head recovery authority.
 
 A later app-process restart invalidates its open receipt and fails closed.
 Reopening requires a separately authorized protected release/recovery action;
@@ -116,7 +141,10 @@ restarting a process is never treated as carrying its old admission proof.
 
 ## Focused qualification
 
-Hermetic adverse-order tests cover old registration during migration,
+Hermetic adverse-order tests cover the same-head preparation outage in both slot
+directions, durable retry across checkout, phase and image identity refusal,
+lock and schema gate behavior, and post-commit replay refusal. They also cover
+old registration during migration,
 buffered-generation timeout, missing/false loaded eligibility/latch, uncertain
 migration completion, post-migration rollback refusal, ACL/pool refusal,
 successful last-step opening and post-commit fix-forward. All-origin parser
