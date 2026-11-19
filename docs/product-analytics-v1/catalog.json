@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "purpose": "product_analytics",
+  "consent_version": "1",
+  "events": {
+    "axis_v1_app_opened": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_app_resumed": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_signup_started": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_onboarding_started": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_training_plan_requested": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_coach_interaction_requested": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_workout_start_requested": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_workout_complete_requested": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_food_log_requested": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_nutrition_plan_requested": {
+      "source": "client",
+      "properties": {}
+    },
+    "axis_v1_signup_completed": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_onboarding_completed": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_training_plan_succeeded": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_coach_interaction_succeeded": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_workout_started": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_workout_completed": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_workout_abandoned": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_food_log_succeeded": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_nutrition_plan_succeeded": {
+      "source": "server",
+      "properties": {}
+    },
+    "axis_v1_screen_viewed": {
+      "source": "client",
+      "properties": {
+        "screen": [
+          "today",
+          "plan",
+          "plan_create",
+          "coach",
+          "workout",
+          "nutrition",
+          "nutrition_plan",
+          "progress",
+          "onboarding",
+          "settings"
+        ]
+      }
+    },
+    "axis_v1_onboarding_step_completed": {
+      "source": "client",
+      "properties": {
+        "step": [
+          "welcome",
+          "preferences",
+          "review"
+        ]
+      }
+    },
+    "axis_v1_feature_failed": {
+      "source": "client",
+      "properties": {
+        "feature": [
+          "onboarding",
+          "training_plan",
+          "coach",
+          "workout",
+          "nutrition_log",
+          "nutrition_plan"
+        ],
+        "failure": [
+          "offline",
+          "timeout",
+          "unavailable",
+          "validation",
+          "permission",
+          "conflict",
+          "unknown"
+        ]
+      }
+    },
+    "axis_v1_feature_failed_authoritative": {
+      "source": "server",
+      "properties": {
+        "feature": [
+          "onboarding",
+          "training_plan",
+          "coach",
+          "workout",
+          "nutrition_log",
+          "nutrition_plan"
+        ],
+        "failure": [
+          "offline",
+          "timeout",
+          "unavailable",
+          "validation",
+          "permission",
+          "conflict",
+          "unknown"
+        ]
+      }
+    },
+    "axis_v1_feature_recovered": {
+      "source": "server",
+      "properties": {
+        "feature": [
+          "onboarding",
+          "training_plan",
+          "coach",
+          "workout",
+          "nutrition_log",
+          "nutrition_plan"
+        ]
+      }
+    },
+    "axis_v1_analytics_enrolled": {
+      "source": "server",
+      "properties": {
+        "cohort": [
+          "new_user",
+          "existing_user"
+        ]
+      }
+    }
+  }
+}
