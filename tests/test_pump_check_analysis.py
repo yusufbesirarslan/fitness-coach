@@ -287,10 +287,163 @@ def test_analysis_adapter_never_returns_raw_invalid_provider_output():
         )
 
 
+# ── Turkish safety parity (the English patterns only knew English words) ────
+
+TR_PROHIBITED = [
+    # medical / injury / diagnosis
+    ("Sol omzunda bir sakatlık olabilir.", "safety policy"),
+    ("Dizde iltihap görünüyor.", "safety policy"),
+    ("Bel fıtığı riski var.", "safety policy"),
+    ("Kasında yırtığa benzer bir iz var.", "safety policy"),
+    ("TEŞHİS koymak için doktora git.", "safety policy"),
+    ("Omuz çıkığı gibi duruyor.", "safety policy"),
+    ("Bu duruş skolyoz olabilir.", "safety policy"),
+    ("Hormon dengesizliğine bağlı olabilir.", "safety policy"),
+    ("Tendinit izi var.", "safety policy"),
+    ("Iltihap belirgin.", "safety policy"),          # dotless capital I
+    ("Sakatlik riski var.", "safety policy"),        # written without Turkish letters
+    # diagnostic inference
+    ("Yüz ifaden yorgunluğun belirtisi.", "safety policy"),
+    ("Bu, yüksek efor olduğunu düşündürüyor.", "safety policy"),
+    ("Omuz hattı bir soruna işaret ediyor.", "safety policy"),
+    # body claims
+    ("Vücut yağ oranın düşük görünüyor.", "body claim"),
+    ("Yağ yüzden azalmış.", "body claim"),
+    ("Kas kütlen artmış.", "body claim"),
+    ("Yağsız kütle iyi korunmuş.", "body claim"),
+    ("Kollarında asimetri var.", "body claim"),
+    ("Kas büyümesi belirgin.", "body claim"),
+    ("Gelişim hızın çok iyi.", "body claim"),
+    ("Kol çevresi ölçüsü büyümüş.", "body claim"),
+    # image-derived numbers
+    ("Vücut yağın yaklaşık %15.", "body claim"),
+    ("Yaklaşık %15 civarında görünüyor.", "false precision"),
+    ("Yüzde on beş daha belirgin.", "false precision"),
+    ("Kolların iki santim kalınlaşmış.", "false precision"),
+    ("Beş kilo vermiş gibisin.", "false precision"),
+    ("Bel 80 santimetre civarında.", "false precision"),
+    # independent review of #532: inflections and synonyms
+    ("Bu yorgunluğun belirtisidir.", "safety policy"),
+    ("Belirtileriyle uyumlu.", "safety policy"),
+    ("Bu aşırı antrenman işareti olabilir.", "safety policy"),
+    ("Bir soruna işaret etmekte.", "safety policy"),
+    ("Bu, yorgunluğun göstergesi olabilir.", "safety policy"),
+    ("Dirsekte inflamasyon görünüyor.", "safety policy"),
+    ("Enflamasyon var gibi.", "safety policy"),
+    ("Kas zedelenmesi olabilir.", "safety policy"),
+    ("Göğüste kas kopması var gibi.", "safety policy"),
+    ("Kesin tanı için doktora git.", "safety policy"),
+    ("İnfeksiyon var.", "safety policy"),
+    ("Omzun çıkık görünüyor.", "safety policy"),
+    ("Yağ-oranın düşük.", "body claim"),                        # hyphen
+    ("Kol çevren genişlemiş.", "body claim"),
+    ("Kas hacmin artmış.", "body claim"),
+    ("Yüzde onbeş daha belirgin.", "false precision"),
+    ("Yüzde beş daha net.", "false precision"),
+    ("Kolun 15 inç.", "false precision"),
+    ("Yüzde on beş daha net.", "false precision"),
+    ("Yüzde otuzluk bir fark.", "false precision"),
+    ("Yüzde dokuzluk bir fark.", "false precision"),
+    ("Yüzde bir.", "false precision"),
+    ("15% daha belirgin.", "false precision"),
+    ("TE\u0053\u0327H\u0130S i\u00e7in doktora git.", "safety policy"),   # NFD ş
+    ("I\u0307LTI\u0307HAP belirgin.", "safety policy"),            # NFD İ
+]
+
+
+@pytest.mark.parametrize("text,reason", TR_PROHIBITED)
+def test_turkish_prohibited_claims_are_refused_like_their_english_equivalents(text, reason):
+    for field in ("summary", "observations"):
+        value = _valid(**{field: text if field == "summary" else [text]})
+        with pytest.raises(InvalidAnalysis, match=reason):
+            parse_analysis(json.dumps(value, ensure_ascii=False))
+
+
+TR_ORDINARY = [
+    # Verbatim from the 2026-11-18 real-model staging A/B (Sonnet 5.5) …
+    "Omuz hatların geniş ve belirgin, deltoid çevresi ışıkta net seçiliyor.",
+    "Pazı ve ön kol konturların kasılı pozda net, damarlı çizgiler görünüyor.",
+    "Sırt ve arka kollar bu açıdan görünmüyor, o yüzden bu bölgeler yorumlanamıyor.",
+    "Parlak, yağlı ciltle güçlü yan ışık kas hatlarını iyi vurguluyor.",
+    "Bir sonraki karede aynı açıyı ve ışığı koru, kadrajı bele kadar genişlet.",
+    "Fotoğraf neredeyse tamamen siyah ve bulanık; üst vücut bölgesinden hiçbir kontur seçilemiyor.",
+    # … and everyday words next to the blocked stems.
+    "Kollar kasılmış gibi görünüyor.",
+    "Fotoğraf üst vücudunu önden gösteriyor.",
+    "Yüzde belirgin bir gerginlik var.",
+    "Kolun altı gölgede kalıyor.",
+    "Kırık beyaz atletin göğsü örtüyor.",
+    "Belirtilen bölge net görünüyor.",
+    "Arka planda bir grup ekipman var.",
+    "Sende belirgin bir omuz hattı var.",
+    "On kolun ve bileklerin net.",
+    "İki kolun da aynı pozisyonda.",
+    "İlk fotoğrafa göre aynı ışığı kullan.",
+    # "yüzde" = on the face, "tanı-" / "işaret" in other senses
+    "Yüzde bir gerginlik var.",
+    "Yüzde bir gülümseme görünüyor.",
+    "Kollar yüzde bir miktar gölge bırakıyor.",
+    "Yüzde iki çizgi var.",
+    "Belirtilen alan net.",
+    "İşaret parmağın görünüyor.",
+    "Tanıdık bir poz, aynı açı korunmuş.",
+    "Omuz çevresi ışıkta net seçiliyor.",
+    "Bir incelik var: bel hattın gölgede kalıyor.",
+    "Yüzde önemli bir gerginlik yok.",
+    "Yüzde yüzeysel bir parlama var.",
+    "Kollar ve yüzde birlikte gerginlik var.",
+    "Tişörtünde bir işaret var.",
+]
+
+
+@pytest.mark.parametrize("text", TR_ORDINARY)
+def test_ordinary_turkish_descriptions_are_not_refused(text):
+    parsed = parse_analysis(json.dumps(
+        _valid(summary=text, observations=[text]), ensure_ascii=False))
+    assert parsed["summary"] == text
+
+
+@pytest.mark.parametrize("field", ["strengths", "focus_areas", "limitations",
+                                   "next_check_guidance"])
+def test_turkish_checks_cover_every_text_field(field):
+    text = "Omzunda bir sakatlık olabilir."
+    value = _valid(**{field: text if field == "next_check_guidance" else [text]})
+    with pytest.raises(InvalidAnalysis, match="safety policy"):
+        parse_analysis(json.dumps(value, ensure_ascii=False))
+
+
+def test_turkish_checks_also_guard_pump_check_comparisons():
+    # The comparison validator reuses this _plain_text.
+    from app.services.mobile_pump_check_comparisons.analysis import (
+        InvalidComparisonAnalysis, parse_analysis as parse_comparison)
+    value = {
+        "summary": "Omuz hattın iki fotoğrafta da net seçiliyor.",
+        "observed_changes": ["Kas kütlen artmış."],
+        "stable_areas": ["Kamera mesafesi aynı görünüyor."],
+        "focus_areas": ["Göğüs bölgen gölgede kalıyor."],
+        "limitations": ["Sırt bu açıdan görünmüyor."],
+        "comparability_reasons": ["Bölge ve kadraj aynı."],
+        "next_check_guidance": "Aynı poz ve ışıkla tekrar çek.",
+        "comparability": "comparable",
+    }
+    with pytest.raises(InvalidComparisonAnalysis, match="body claim"):
+        parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
+    value["observed_changes"] = ["Omuz hattın B fotoğrafında daha net."]
+    assert parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
+
+
+def test_english_validation_is_unchanged_by_turkish_parity():
+    assert parse_analysis(json.dumps(_valid()))
+    for text in ("You have tendonitis.", "Body fat looks lower.", "About 15% leaner."):
+        with pytest.raises(InvalidAnalysis):
+            parse_analysis(json.dumps(_valid(summary=text)))
+
+
 # --- Response-quality prompt contract (PUMP-CHECK-RESPONSE-QUALITY-01) ------
 # These pin the instruction contract and prove that the intended answer shapes
-# survive the unchanged validator. They are not model-quality evidence: that
-# needs real provider output (see docs/PUMP_CHECK_RESPONSE_QUALITY.md).
+# survive the v1 validator, English and Turkish patterns included. They are not
+# model-quality evidence: that needs real provider output (see
+# docs/PUMP_CHECK_RESPONSE_QUALITY.md).
 
 def _prompt(language="en"):
     return build_prompt(
@@ -437,7 +590,7 @@ SPECIFIC_RESULTS = [
 
 @pytest.mark.parametrize("result", SPECIFIC_RESULTS,
                          ids=lambda r: r["quality"] + ":" + r["summary"][:12])
-def test_specific_answer_shapes_pass_the_unchanged_v1_validator(result):
+def test_specific_answer_shapes_pass_the_v1_validator(result):
     # Empty lists were always legal in v1; insufficient results keep only the
     # obstacle and one retake instruction, which existing clients render.
     assert parse_analysis(json.dumps(result, ensure_ascii=False)) == result

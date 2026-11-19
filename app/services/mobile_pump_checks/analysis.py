@@ -1,6 +1,7 @@
 """Strict canonical schema and Bedrock adapter for Pump Check analysis."""
 import json
 import re
+import unicodedata
 
 from app.i18n import AVAILABLE_LOCALES, DEFAULT_LOCALE
 from app.services.vision_images import prepare_image_for_vision
@@ -66,6 +67,59 @@ _IMPERIAL_MEASUREMENT_RE = re.compile(
 )
 
 
+# Turkish equivalents of the English-only patterns above. They run on a
+# Turkish-aware, accent-folded copy of the text (_tr_folded): re.IGNORECASE
+# does not map dotted/dotless capitals (TEŞHİS vs teşhis), the NFKD step also
+# folds decomposed input and full-width digits, hyphens become spaces, and the
+# folding catches answers written without Turkish letters. Ambiguous everyday
+# words are left out on purpose: "gösteriyor" (shows), "yüzde" (on the face)
+# unless a quantity follows, bare "çevresi" (around), "kırık beyaz"
+# (off-white), "belirtilen" (stated), "sende ... var" (ordinary possessive;
+# the conditions themselves are blocked).
+_TR_FOLD = str.maketrans({"ı": "i", "I": "i", "-": " ", "‐": " ", "‑": " "})
+_TR_MEDICAL_RE = re.compile(
+    r"(?:teshis|\btani (?:kon|koy)|\btani(?:si|ya|yi|nin)?\b|sakatl|yaralan|"
+    r"zedelen|\b(?:kas|bag|tendon) kopma|yirti[klg]|kemik kir|\bkirig|"
+    r"fraktur|hastali[kg]|iltihap|[ie]nflamas|\bodem(?:i|in)?\b|fiti[kg]|"
+    r"herni|disk kaymas|tendinit|menisk|kanser|tumor|artrit|kirecl|"
+    r"skolyoz|osteopor|kemik erime|[ei]nfeksiyon|burkul|dislokas|hormon|"
+    r"yeme bozuklu|anoreks|sendrom|klinik|"
+    r"\b(?:omuz|omz\w*|eklem|kalca|diz|dirsek|bilek) cik(?:ig|ik|mas)|"
+    r"(?:postur|durus) bozuklu|"
+    r"iskelet (?:bozuklu|anomali|patoloji|sorun))")
+_TR_DIAGNOSTIC_RE = re.compile(
+    r"(?:\bbelirti(?:\b|si|ler)|isaret(?:i|leri) (?:olabilir|olarak)|"
+    r"isaret e[dt]|gosterge|dusundur|\bkanit|muzdarip)")
+_TR_BODY_CLAIM_RE = re.compile(
+    r"(?:yag oran|yag yuzde|yag seviye|vucut yag|yagsiz (?:kutle|kas|vucut)|"
+    r"kas kutle|kas hacm|kas buyume|cevre olcu|cevresi olcu|"
+    r"(?:bel|kol|gogus|baldir|kalca|uyluk|boyun|pazu) cevre(?:n|niz)\b|"
+    r"asimetr|(?:buyume|gelisim|kazanim|hipertrofi|artis) (?:hiz|oran))")
+_TR_UNIT_WORDS = "bir|iki|uc|dort|bes|alti|yedi|sekiz|dokuz"
+_TR_TEN_WORDS = "on|yirmi|otuz|kirk|elli|altmis|yetmis|seksen|doksan|yuz"
+_TR_UNITS = "(?:" + _TR_UNIT_WORDS + ")"
+_TR_TENS = "(?:" + _TR_TEN_WORDS + ")"
+_TR_NUMBER = (r"(?:\d+(?:[.,]\d+)?|" + _TR_UNIT_WORDS + "|" + _TR_TEN_WORDS
+              + ")")
+_TR_MEASUREMENT_RE = re.compile(
+    r"(?:%\s*\d|\d\s*%|"
+    # "yüzde" is also "on the face": a digit or a whole tens word ("on",
+    # "onbes", "otuzluk") after it is a percentage, a single-digit word only
+    # when it ends the clause or is followed by "-lik" or a comparison/rate
+    # word. "Yüzde bir gerginlik", "yüzde önemli", "yüzde yüzeysel" stay legal.
+    r"\byuzde\s*(?:\d|" + _TR_TENS + r"(?:\b|" + _TR_UNITS + r"\b|l[iu]k\b)|"
+    + _TR_UNITS
+    + r"\s*(?:$|[.,;]|l[iu]k\b|daha|oran|civar|kadar|seviye|nispet))|"
+    r"\b" + _TR_NUMBER
+    + r"\s*(?:kilo\w*|kg|santim\w*|cm|milim\w*|mm|gram\w*|gr|inc|inch)\b)")
+
+
+def _tr_folded(value):
+    decomposed = unicodedata.normalize("NFKD", value)
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(stripped.translate(_TR_FOLD).lower().split())
+
+
 class InvalidAnalysis(ValueError):
     """Provider output does not satisfy the public Pump Check contract."""
 
@@ -83,6 +137,13 @@ def _plain_text(value, maximum, field):
     if _BODY_CLAIM_RE.search(value):
         raise InvalidAnalysis("analysis contains a prohibited body claim")
     if _MEASUREMENT_RE.search(value) or _IMPERIAL_MEASUREMENT_RE.search(value):
+        raise InvalidAnalysis("analysis contains image-derived false precision")
+    folded = _tr_folded(value)
+    if _TR_MEDICAL_RE.search(folded) or _TR_DIAGNOSTIC_RE.search(folded):
+        raise InvalidAnalysis("analysis text violates safety policy")
+    if _TR_BODY_CLAIM_RE.search(folded):
+        raise InvalidAnalysis("analysis contains a prohibited body claim")
+    if _TR_MEASUREMENT_RE.search(folded):
         raise InvalidAnalysis("analysis contains image-derived false precision")
     return value
 

@@ -79,6 +79,21 @@ def test_forgot_password_sends_reset_template(lambda_env):
     assert "şifren değişmedi" in payload["text"]
 
 
+@pytest.mark.parametrize("trigger", ["CustomEmailSender_SignUp", "CustomEmailSender_ResendCode"])
+@pytest.mark.parametrize("name", ["onboarding", None])
+def test_verification_does_not_greet_with_cognito_name_or_username(lambda_env, trigger, name):
+    event = _event(trigger, name=name)
+    event["userName"] = "internal-account-identifier"
+    assert handler.handler(event, None) is event
+    payload = lambda_env[0]["payload"]
+    for part in ("html", "text"):
+        assert "onboarding" not in payload[part]
+        assert "internal-account-identifier" not in payload[part]
+        assert "Merhaba," in payload[part]
+        assert _CODE in payload[part]
+    assert 'href="https://www.axisaiapp.com/verify"' in payload["html"]
+
+
 def test_auth_headers_and_user_agent(lambda_env):
     handler.handler(_event("CustomEmailSender_SignUp"), None)
     headers = lambda_env[0]["headers"]
