@@ -13,12 +13,12 @@ from .proposals import is_training_proposal
 
 from .executor import (
     _settle_transaction,
-    plan_changed_this_turn,
     plan_mutation_tools_enabled,
+    training_plan_changed_this_turn,
 )
 
 
-def turn_plan_effects(user_id):
+def turn_plan_effects(user_id, language=None):
     """``{"changed", "pending_confirmation", "proposal_id"}``.
 
     ``changed`` is this request's own durable evidence (applied/replayed only;
@@ -29,7 +29,7 @@ def turn_plan_effects(user_id):
     ``proposal_id`` (B2) is that proposal's opaque owner-scoped public id, the
     only handle the native Confirm/Cancel button may send; ``None`` otherwise.
     """
-    changed = plan_changed_this_turn()
+    changed = training_plan_changed_this_turn()
     if not plan_mutation_tools_enabled():
         return {"changed": changed, "pending_confirmation": False,
                 "proposal_id": None}
@@ -45,5 +45,12 @@ def turn_plan_effects(user_id):
         pending, proposal_id = None, None
     finally:
         _settle_transaction()
-    return {"changed": changed, "pending_confirmation": pending,
-            "proposal_id": proposal_id}
+    effects = {"changed": changed, "pending_confirmation": pending,
+               "proposal_id": proposal_id}
+    # C2: additive, and present ONLY while the Nutrition boundary is available
+    # (closed in this source), so the production wire is unchanged.
+    from .nutrition import turn_effects as nutrition_effects
+    nutrition = nutrition_effects(user_id, language)
+    if nutrition is not None:
+        effects["nutrition_plan"] = nutrition
+    return effects

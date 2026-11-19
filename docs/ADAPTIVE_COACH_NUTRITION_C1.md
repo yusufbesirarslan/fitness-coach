@@ -1,5 +1,9 @@
 # Adaptive Coach Nutrition — C1 foundation
 
+> C2 (Coach tools + B2 confirmation over these services) is described in
+> [ADAPTIVE_COACH_NUTRITION_C2.md](ADAPTIVE_COACH_NUTRITION_C2.md). It stays
+> unavailable behind the same closed source gate and legal disclosure set.
+
 Internal server services only. No route, Coach tool or mobile Nutrition action
 is exposed. Nutrition editing is source-gated OFF; the approved Coach editing
 disclosure set is empty. Neither environment flags nor existing r2 consent can

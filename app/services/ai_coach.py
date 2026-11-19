@@ -1032,8 +1032,12 @@ def _coach_tool_defs_for_call(user_id=None):
     # Foundation V1 B1: the read tool is published whenever the plan surface
     # is ON — including while a confirmation is pending, because reading never
     # changes anything and the model must describe the real plan.
+    # C2: Nutrition tools appear only when the C1 source gate, the approved
+    # Coach editing disclosure AND the owner's nutrition.plan grant all hold
+    # (``coach_plan_tools.nutrition``); this flag alone never publishes them.
     return defs + [coach_plan_tools.READ_PLAN_TOOL_DEF] + list(
-        coach_plan_tools.published_plan_tool_defs(user_id))
+        coach_plan_tools.published_plan_tool_defs(user_id)) + list(
+        coach_plan_tools.nutrition.published_tool_defs(user_id))
 
 
 def _openai_tools_for_call(user_id=None):
@@ -1080,6 +1084,17 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
                 ensure_ascii=False)
         return json.dumps(
             coach_plan_tools.execute_plan_read(user_id), ensure_ascii=False)
+
+    if name in coach_plan_tools.nutrition.TOOL_NAMES:
+        # C2: unparsable arguments are refused, never folded into {}.
+        if not arguments_parsed:
+            return json.dumps(
+                coach_plan_tools.invalid_arguments_result(
+                    "araç argümanları okunamadı"),
+                ensure_ascii=False)
+        return json.dumps(
+            coach_plan_tools.nutrition.execute(user_id, name, args),
+            ensure_ascii=False)
 
     if name in coach_plan_tools.PLAN_WRITE_TOOL_NAMES:
         if not arguments_parsed:

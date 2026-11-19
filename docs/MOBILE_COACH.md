@@ -207,3 +207,27 @@ replays (`applied`), never applies twice. 409
 `COACH_INVALID_REQUEST`, 503 `COACH_PLAN_CONFIRMATION_FAILED` (retryable).
 Typed answers in chat keep working unchanged. See
 docs/ADAPTIVE_COACH_FOUNDATION_V1.md.
+
+### Nutrition plan effects and Confirm/Cancel (Adaptive Coach C2, additive)
+
+Present ONLY while the C2 Nutrition boundary is available (C1 source gate +
+approved Coach editing disclosure + flag; closed in this source, so today's
+wire is byte-identical): `plan_effects.nutrition_plan = {changed: bool,
+pending_confirmation: bool|null, proposal_id: str|null, proposal: object|null}`.
+`proposal` is the persisted C1 quote, never model text: `{proposal_id,
+change: {kind: replace|add|remove, meal: kahvalti|ogle|aksam|ara_ogun, item,
+replacement|null}, before, after` (each the native meal shape `{slot, items,
+nutrition: {energy_kcal, protein_g, carbohydrate_g, fat_g}, estimated}`, unknown
+= null, never 0), `totals: {before, after}` (native totals shape), `estimate:
+{source: "independent_whole_meal_estimate", whole_meal_reestimated: true,
+unchanged_foods_may_change: true, notice}}` (`notice` in the account
+language). `training_plan.changed` never reports a Nutrition change.
+
+The same `POST /api/v1/coach/plan-confirmation` body resolves a Nutrition
+`proposal_id`: dispatched by an owner-scoped lookup to C1 `resolve_edit`
+(both stored original authorities re-fenced, exact lineage/version/bytes,
+proposal-row lock). Same outcomes and errors as B2: a repeated confirm replays
+`applied`; Cancel after an applied change is 409 (never "cancelled"); a stale,
+foreign or tampered id is 409; a withdrawn permission is the D1 envelope and
+retires the quote (a regrant never revives it). No model, turn or allowance.
+See docs/ADAPTIVE_COACH_NUTRITION_C2.md.

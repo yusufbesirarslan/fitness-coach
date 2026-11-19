@@ -1,6 +1,7 @@
 """C1 unit-of-work owner: durable preparation, confirmation, replay and undo.
 
-No route/tool registration. No public nutrient or arbitrary plan input. Callers
+No route/tool registration here; the C2 Coach bridge
+(``coach_plan_tools.nutrition``) is the only caller. No public nutrient or arbitrary plan input. Callers
 derive owner and both authorities server-side. One estimate per operation key;
 ambiguous/crashed dispatch is never automatically retried. Cancel preparation
 explicitly to release an interrupted claim. Failed estimation never writes a
@@ -260,6 +261,96 @@ def cancel_preparation(owner, operation_id):
     except Exception:
         db.session.rollback()
         raise
+
+
+@dataclass(frozen=True)
+class Quote:
+    """Detached read of one owner-scoped quote (C2 display/dispatch only)."""
+    proposal_id: str
+    status: str
+    edit: dict
+    before: str
+    after: str
+
+
+def find_quote(owner, proposal_id=None):
+    """The owner's PENDING quote, or the named quote in any state; else None.
+
+    Read-only; the caller settles its read transaction. Owner-scoped by query
+    and the proposal/operation pair must agree exactly, so a foreign, Training
+    or tampered id is simply absent.
+    """
+    if type(owner) is not int or owner <= 0:
+        return None
+    filters = {"user_id": owner, "command_type": COMMAND}
+    if proposal_id is None:
+        filters["status"] = "pending"
+    elif isinstance(proposal_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{20,64}", proposal_id):
+        filters["public_id"] = proposal_id
+    else:
+        return None
+    proposal = Proposal.query.filter_by(**filters).first()
+    if proposal is None or not isinstance(proposal.command_payload, dict):
+        return None
+    op = _operation(owner, proposal_public_id=proposal.public_id)
+    if (op is None or op.after_snapshot is None
+            or proposal.command_payload.get("operation_id") != op.public_id
+            or not isinstance(op.command_payload.get("edit"), dict)
+            or (proposal_id is None and op.status != "prepared")):
+        return None
+    return Quote(proposal.public_id, proposal.status, dict(op.command_payload["edit"]),
+                 op.before_snapshot, op.after_snapshot)
+
+
+def release_unavailable(owner, proposal_id):
+    """Owner-only cancel of a quote stranded while the boundary is CLOSED.
+
+    Rollback hazard: closing the source gate would otherwise leave a pending
+    quote holding the shared one-pending slot (blocking Training proposals)
+    with no way to answer it. Like ``cancel_preparation``, releasing private
+    unapplied work needs no AI authority; this never writes a plan or journal
+    and refuses while the boundary is open (``resolve_edit`` owns that case).
+    """
+    if type(owner) is not int or owner <= 0:
+        raise EditError("invalid_owner")
+    if access.NUTRITION_EDITS_ENABLED and access.APPROVED_COACH_EDIT_DISCLOSURES:
+        raise EditError("proposal_unavailable")
+    if db.session.new or db.session.dirty or db.session.deleted:
+        raise EditError("transaction_busy")
+    try:
+        proposal = lock_proposal(owner, proposal_id)
+        if proposal is None or proposal.command_type != COMMAND:
+            raise EditError("proposal_unavailable")
+        lock_plan_owner(owner)
+        op = _operation(owner, public_id=proposal.command_payload.get("operation_id"))
+        if op is None or op.proposal_public_id != proposal.public_id:
+            raise EditError("proposal_unavailable")
+        if op.status == "cancelled" and proposal.status == "cancelled":
+            result = _result(op, True)
+            db.session.rollback()
+            return result
+        if op.status != "prepared" or proposal.status != "pending":
+            raise EditError("proposal_unavailable")
+        op.status, proposal.status, proposal.resolved_at = "cancelled", "cancelled", datetime.utcnow()
+        result = _result(op)
+        db.session.commit()
+        return result
+    except Exception:
+        db.session.rollback()
+        raise
+
+
+def interrupted_preparations(owner, started_before):
+    """Public ids of this owner's estimator claims started before a bound.
+
+    Estimation runs inside one bounded request; a claim older than that bound
+    is an interrupted request, released only via ``cancel_preparation``.
+    """
+    if type(owner) is not int or owner <= 0:
+        return []
+    return [op.public_id for op in Operation.query.filter(
+        Operation.user_id == owner, Operation.status == "estimating",
+        Operation.created_at < started_before)]
 
 
 def resolve_edit(owner, proposal_id, decision):
