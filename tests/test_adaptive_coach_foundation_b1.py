@@ -254,7 +254,7 @@ def test_read_then_edit_changes_exactly_one_field_through_the_real_loop(
 def test_turn_effects_report_a_change_and_a_pending_proposal(
         app, planned_user, tools_on, turn):
     assert coach_plan_tools.turn_plan_effects(planned_user.id) == {
-        "changed": False, "pending_confirmation": False}
+        "changed": False, "pending_confirmation": False, "proposal_id": None}
 
     coach_plan_tools.execute_plan_tool(
         planned_user.id, PRESCRIBE,
@@ -264,8 +264,11 @@ def test_turn_effects_report_a_change_and_a_pending_proposal(
     coach_plan_tools.execute_plan_tool(
         planned_user.id, "remove_training_plan_exercise",
         {"day": "Pazartesi", "exercise": "Shoulder Press"})
+    from app.services.plan_confirmation import get_pending
+
     assert coach_plan_tools.turn_plan_effects(planned_user.id) == {
-        "changed": True, "pending_confirmation": True}
+        "changed": True, "pending_confirmation": True,
+        "proposal_id": get_pending(planned_user.id).public_id}
 
 
 def test_turn_effects_report_unknown_rather_than_nothing_on_a_fault(
@@ -277,7 +280,7 @@ def test_turn_effects_report_unknown_rather_than_nothing_on_a_fault(
 
     monkeypatch.setattr(turn_effects, "get_pending", boom)
     assert coach_plan_tools.turn_plan_effects(planned_user.id) == {
-        "changed": False, "pending_confirmation": None}
+        "changed": False, "pending_confirmation": None, "proposal_id": None}
     assert open_transaction() is False
 
 
@@ -287,7 +290,9 @@ def test_the_wire_shape_is_bounded_booleans_only(app):
     payload = mobile_coach.turn_payload(
         None, "q", "a", 1, "secret",
         plan_effects={"changed": "yes", "pending_confirmation": None,
-                      "lineage_id": "x"})
+                      "proposal_id": "p", "lineage_id": "x"})
+    # B2: a proposal id is published only while a change is pending.
     assert payload["plan_effects"] == {
-        "training_plan": {"changed": False, "pending_confirmation": None}}
+        "training_plan": {"changed": False, "pending_confirmation": None,
+                          "proposal_id": None}}
     assert "plan_effects" not in mobile_coach.turn_payload(None, "q", "a", 1, "s")

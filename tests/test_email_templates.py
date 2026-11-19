@@ -105,7 +105,10 @@ def test_code_in_body_and_text_never_in_subject(build):
 @pytest.mark.parametrize("build", _CODE_TEMPLATES)
 def test_code_block_is_prominent(build):
     _, html, _ = build(_NAME, _CODE)
-    assert "font-size:32px" in html and "letter-spacing:8px" in html  # büyük, aralıklı
+    if build is email_templates.verification_code_email:
+        assert "font-size:40px" in html and "letter-spacing:6px" in html
+    else:
+        assert "font-size:32px" in html and "letter-spacing:8px" in html
     assert email_templates._MONO in html
     assert 'class="ax-code"' in html
 
@@ -133,7 +136,10 @@ def test_name_is_html_escaped(label, build):
     # Tek <img> statik marka işaretidir; saldırgan isim asla etiket olmaz.
     assert "<img src=x" not in html and "onerror=alert(1)>" not in html
     assert html.count("<img") == 1
-    assert "&lt;img" in html
+    if label == "verification":
+        assert "&lt;img" not in html  # verification always uses a neutral greeting
+    else:
+        assert "&lt;img" in html
 
 
 @pytest.mark.parametrize("label,build", [
@@ -162,3 +168,33 @@ def test_reset_email_says_password_unchanged_if_not_requested():
     _, html, text = email_templates.reset_code_email(_NAME, _CODE)
     assert "şifren değişmedi" in html
     assert "şifren değişmedi" in text
+
+
+@pytest.mark.parametrize("language,greeting", [("tr", "Merhaba,"), ("en", "Hi,")])
+@pytest.mark.parametrize("name", ["onboarding", "onboarding_abc123", "user@example.com",
+                                 "123e4567-e89b-12d3-a456-426614174000", "İpek", None])
+def test_verification_never_uses_an_account_identifier_as_a_display_name(name, language, greeting):
+    result = email_templates.verification_code_email(name, "012345", language=language)
+    assert result == email_templates.verification_code_email(None, "012345", language=language)
+    subject, html, text = result
+    assert greeting in html and text.startswith(greeting + "\n\n")
+    assert "012345" in html and "012345" in text and "012345" not in subject
+
+
+def test_verification_escapes_the_configured_cta_url_without_changing_its_destination(monkeypatch):
+    from html.parser import HTMLParser
+
+    links = []
+
+    class Links(HTMLParser):
+        def handle_starttag(self, tag, attrs):
+            if tag == "a":
+                links.append(dict(attrs))
+
+    base = 'https://example.com/a?x="quoted"&y=1'
+    monkeypatch.setattr(email_templates, "APP_BASE_URL", base)
+    _, html, text = email_templates.verification_code_email("onboarding", _CODE)
+    Links().feed(html)
+    cta = next(link for link in links if link["href"] == base + "/verify")
+    assert set(cta) == {"href", "style"}
+    assert base + "/verify" in text

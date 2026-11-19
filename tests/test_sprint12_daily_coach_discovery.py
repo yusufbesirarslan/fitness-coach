@@ -141,6 +141,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # LP-09 native Coach (owner = bearer principal; web Coach pipeline).
         "/api/v1/coach/messages",
         "/api/v1/coach/history",
+        # Adaptive Coach B2: deterministic Confirm/Cancel of the one pending
+        # plan change the owner's own Coach turn staged (no model/allowance).
+        "/api/v1/coach/plan-confirmation",
         # LP-11 native account deletion (owner = bearer principal).
         "/api/v1/account",
         "/api/v1/nutrition/diary/today",
@@ -236,6 +239,11 @@ _APPROVED_PROGRESS_PATHS = {
 _APPROVED_COACH_PATHS = {
     "/api/v1/coach/messages",
     "/api/v1/coach/history",
+    # Adaptive Coach B2: the native Confirm/Cancel button. It resolves ONE
+    # named proposal through the same coach_plan_tools confirm/cancel code a
+    # typed "yes" runs, under the proposing D1 authority; it composes no
+    # Daily-Coach aggregate and has no plan authority of its own.
+    "/api/v1/coach/plan-confirmation",
 }
 
 # NUTR-PR7: the native Nutrition Plan transport. It projects the saved

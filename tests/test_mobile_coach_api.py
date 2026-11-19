@@ -306,7 +306,8 @@ def test_success_returns_this_turn_and_persists_it_once(
     # Foundation V1: additive plan_effects; flag OFF -> nothing changed/pending.
     assert set(body) == {"contract_version", "messages", "plan_effects"}
     assert body["plan_effects"] == {
-        "training_plan": {"changed": False, "pending_confirmation": False}}
+        "training_plan": {"changed": False, "pending_confirmation": False,
+                          "proposal_id": None}}
     assert body["contract_version"] == 1
 
     rows = _rows(alice.id)
