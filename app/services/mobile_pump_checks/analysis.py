@@ -153,6 +153,8 @@ _WEIGHT_CHANGE_RE = re.compile(
     r"\b(?:over|under)weight\b|\bobes(?:e|ity)\b|\bwater\s+weight\b|"
     r"\b(?:leaner|skinnier|fatter|chubbier)\b|"
     r"\b(?:has|have|'ve|'s)\s+(?:\w+\s+)?slimmed\b|"
+    r"\b(?:waist|face|arms?|legs?|belly|stomach|midsection|thighs|hips)\s+"
+    r"slimmed\b|"
     r"\bslimmer\b(?!\s+(?:stance|grip|profile))|"
     r"\byou(?:'re|\s+are|\s+look|\s+seem|\s+appear|'ve\s+gotten|"
     r"\s+have\s+gotten|\s+got)\s+(?:a\s+(?:bit|little|lot)\s+|much\s+|"
@@ -173,9 +175,9 @@ _NEGATIVE_BODY_RE = re.compile(
     r"ugly|unsightly|out\s+of\s+shape|unfit|love\s+handles|muffin\s+top|"
     r"(?:beer|pot)\s+belly|man\s+boobs|moobs|cellulite|double\s+chin|"
     r"dad\s+bod|underdeveloped|undeveloped)\b|"
-    r"\b(?:lacks?|lacking)\s+(?:muscle|mass|size)\b|"
+    r"\b(?:lacks?|lacking)\s+(?:muscle|mass)\b|"
     r"\b(?:belly|gut|stomach)\s+(?:sticks|hangs|pokes)\s+out\b|"
-    r"\byour\s+gut\b|"
+    r"(?<!trust )\byour\s+gut\b|"
     r"\b(?:look|looks|looking|appear|appears|seem|seems|are|is|'re)\s+"
     r"(?:a\s+(?:bit|little)\s+|quite\s+|very\s+|too\s+|kind\s+of\s+|"
     r"rather\s+|slightly\s+|somewhat\s+)?(?:fat|overweight)\b(?!\s*grip)",
@@ -260,7 +262,8 @@ _SETUP_NOUNS = (r"(?:frame|framing|crop|shot|light|lighting|angle|distance|"
                 r"camera|background|exposure|zoom|lens|view)")
 _PHOTO_SETUP_PHRASE_RE = re.compile(
     r"\b(?:bigger|larger|smaller|thicker|thinner|wider|broader|fuller|"
-    r"tighter)\s+(?:\w+\s+)?" + _SETUP_NOUNS + r"s?\b|"
+    r"tighter)\s+(?:a\s+|an\s+|the\s+|much\s+|slightly\s+)?"
+    + _SETUP_NOUNS + r"s?\b|"
     r"\b" + _SETUP_NOUNS + r"s?\s+(?:is|looks?|seems?|was)\s+(?:\w+\s+)?"
     r"(?:bigger|larger|smaller|wider|broader|fuller|tighter)\b",
     re.IGNORECASE,
@@ -300,7 +303,8 @@ _TR_WEIGHT_CHANGE_RE = re.compile(
     r"\b(?:gobeg|gobek|yag|bel)\w* erit\w*|"
     r"\bgobeg\w* (?:eri|azal|kucul|incel)\w*|"
     # "yağlanmış cilt/ten" is stage oil; fat gain is tied to a body region.
-    r"\b(?:bel|karin|gobek|gobeg|kalca|basen|yan)\w* (?:\w+ )?yaglan\w*|"
+    r"\b(?:(?:bel|karin|gobek|gobeg|kalca|basen)\w*|yan(?:lar|lari|larin|"
+    r"larinda)?) (?:\w+ )?yaglan\w*|"
     r"\byaglanmis(?:sin|siniz)\b|"
     r"\bkas (?:kazanmis|kaybetmis)\w*|"
     r"\bdiyet(?:e\b| yap| uygula| program)|\bkalori (?:acig|kisit|azalt)\w*|"
@@ -348,18 +352,30 @@ _TR_PAST_REFERENCE_RE = re.compile(
 _TR_PHYSIQUE_COMPARATIVE_RE = re.compile(
     r"\bdaha (?:buyuk|iri|kalin|genis|dolgun|belirgin|tanimli|kasli|ince|"
     r"zayif|kucuk|hacimli|guclu|yagsiz)\w*|\bbelirginles\w*|\bdolmus\w*")
-_TR_SETUP_NOUNS = (r"(?:kadraj|isik|isig|mesafe|kamera|arka plan|zoom|"
-                   r"aci(?:\b|yi|ya|si|sin|dan|nin|lar))\w*")
+# Bare or object forms only ("kadrajı daha geniş tut", "daha geniş bir
+# kadraj"): a locative/ablative setup word ("ışıkta", "bu açıdan") is a
+# circumstance, not the thing compared, and no body noun may sit between.
+_TR_SETUP_NOUNS = (r"(?:kadraj(?:i|ini)?|isik|isigi|isigin|mesafe(?:yi)?|"
+                   r"kamera(?:yi)?|arka plan(?:i)?|zoom|aci|aciyi)\b")
+_TR_BODY_NOUNS = (r"(?:omuz|omz|kol|gogus|gogs|sirt|bacak|baldir|pazu|kas|"
+                  r"karin|bel|gobek|gobeg|vucud|vucut|fizik|gogs)")
 _TR_PHOTO_SETUP_PHRASE_RE = re.compile(
-    r"\bdaha \w+ (?:\w+ )?" + _TR_SETUP_NOUNS + r"|"
-    r"\b" + _TR_SETUP_NOUNS + r" (?:\w+ ){0,2}daha \w+")
+    r"\bdaha \w+ (?:bir )?" + _TR_SETUP_NOUNS + r"|"
+    r"\b" + _TR_SETUP_NOUNS + r" (?:(?!" + _TR_BODY_NOUNS
+    + r")\w+ ){0,2}daha \w+|"
+    # purpose clauses are advice: "daha belirgin görünsün diye ışık al"
+    r"\bdaha \w+ gorun(?:sun|mesi|mek|ecek)\w*(?: (?:icin|diye))?")
 # -mış forms with any ending; -di forms only as finite verbs, so that
 # "büyüdükçe" (as … grows) and "büyüdüğünde" stay legal.
 _TR_PHYSIQUE_CHANGE_RE = re.compile(
     r"\b(?:buyumus|kalinlasmis|genislemis|kuculmus|irilesmis|"
     r"dolgunlasmis)\w*|"
     r"\b(?:buyudu|kalinlasti|genisledi|kuculdu|irilesti|dolgunlasti)"
-    r"(?:n|nuz|niz|k|ler|lar)?\b|\bkas yap(?:mis|tin|tiniz)\w*")
+    r"(?:n|nuz|niz|k|ler|lar)?\b(?! m[iu]\b)|"
+    # nominalized -dIk ("büyüdüğünü görüyorum"), but not "-dikçe"/"-diğinde"
+    r"\b(?:buyudu|kalinlasti|genisledi|kuculdu|irilesti|dolgunlasti)[gk]"
+    r"(?!(?:ce|ca|unde|inde|unda|inda)\b)\w*|"
+    r"\bkas yap(?:mis|tin|tiniz)\w*")
 
 
 def _without_format_chars(value):

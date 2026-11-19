@@ -820,6 +820,20 @@ REVIEW_PROHIBITED = [
     ("You seem short on sleep.", SAFETY),
     ("You are carrying a little extra around the waist.", BODY),
     ("Zayıf görünüyorsun, biraz kas yapmalısın.", JUDGMENT),
+    # round 3: setup words next to a body comparative no longer exempt it
+    ("Your shoulders look wider in frame than in your last photo.", COMPARISON),
+    ("Your arms look bigger in frame than last time.", COMPARISON),
+    ("Your arms look bigger on camera than before.", COMPARISON),
+    ("Your chest looks fuller on camera than in your previous check.", COMPARISON),
+    ("Işıkta omuzların daha geniş, geçen sefere göre.", COMPARISON),
+    ("Bu açıdan kolların daha büyük, son fotoğrafa göre.", COMPARISON),
+    ("Kamerada kolların daha büyük görünüyor; önceki fotoğrafa göre.", COMPARISON),
+    ("Kolların son fotoğrafa göre daha büyük ışıkta.", COMPARISON),
+    ("Kolların geçen seferden daha kalın kadrajda.", COMPARISON),
+    ("Kolların büyüdüğünü görüyorum.", COMPARISON),
+    ("Kolların büyüdüğü belli.", COMPARISON),
+    ("Omuzlarının genişlediği görülüyor.", COMPARISON),
+    ("Your waist slimmed.", BODY),
 ]
 
 
@@ -957,6 +971,15 @@ REVIEW_ORDINARY = [
     "Işık zayıf görünüyor, lambaya dön.",
     "The torso lacks contrast in this light.",
     "Sleep well before your next session.",
+    # round 3
+    "The frame lacks size reference, so scale is unclear.",
+    "Trust your gut on how hard to push the last set.",
+    "Yanındaki havlu yağlanmış görünüyor.",
+    "Kollar büyüdü mü emin olmak için aynı açıyı kullan.",
+    "Ilk fotoğraftaki gibi kollar daha belirgin görünsün diye yandan ışık al.",
+    "Kaslar kalınlaştıkça aynı açıyı korumak karşılaştırmayı kolaylaştırır.",
+    "Görüntü büyüdüğünde netlik azalıyor.",
+    "Işık daha yumuşak olsun, son fotoğraftaki gibi.",
 ]
 
 
