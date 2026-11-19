@@ -242,8 +242,13 @@ def test_training_actions_cannot_resolve_or_expose_nutrition(edit_rig, monkeypat
     q = prepare(edit_rig)
     monkeypatch.setattr(executor, "plan_mutation_tools_enabled", lambda: True)
     monkeypatch.setattr(turn_effects, "plan_mutation_tools_enabled", lambda: True)
-    result = executor.execute_direct_confirmation(edit_rig.owner, q.proposal_id, decision)
-    assert result["status"] != "applied"
+    # C2 routes a named Nutrition id to C1 at the B2 entrypoint; the Training
+    # confirm/cancel tool code itself must still never resolve it.
+    intent = executor.CONFIRM if decision == "confirm" else executor.CANCEL
+    executor._begin_direct_turn(edit_rig.owner, intent, q.proposal_id)
+    tool = executor.CONFIRM_TOOL if decision == "confirm" else executor.CANCEL_PENDING_TOOL
+    result = executor.execute_plan_tool(edit_rig.owner, tool, {})
+    assert result["status"] != "applied" and result.get("domain") is None
     assert turn_effects.turn_plan_effects(edit_rig.owner)["proposal_id"] is None
     assert Proposal.query.one().status == "pending" and Operation.query.one().status == "prepared"
     assert service.resolve_edit(edit_rig.owner, q.proposal_id, "cancel").status == "cancelled"
@@ -290,18 +295,25 @@ def test_c2_routes_and_tools_remain_absent_with_coach_flag_enabled(app, monkeypa
             token in rule.rule for token in ("/confirmation", "/edit", "/undo", "/mutation"))
 
 
-@pytest.mark.parametrize("message", ["cancel", "yes", "How should I train today?"])
-def test_coach_turn_never_intercepts_nutrition_pending_as_training(edit_rig, app, monkeypatch, message):
+@pytest.mark.parametrize("message,expected", [
+    ("cancel", "cancelled"), ("yes", "applied"), ("How should I train today?", "pending")])
+def test_coach_turn_resolves_nutrition_pending_only_through_c1(edit_rig, app, monkeypatch, message, expected):
+    """C2: a typed yes/no answers the Nutrition quote via C1 before any model
+    call; anything else asks for an answer. Training tools never see it."""
     from app.services import ai_coach, coach_confirmation
     from app.services.coach_plan_tools import executor
     q = prepare(edit_rig)
     monkeypatch.setattr(executor, "plan_mutation_tools_enabled", lambda: True)
     with app.test_request_context("/synthetic-coach", method="POST"):
         ai_coach._begin_coach_turn(message, user_id=edit_rig.owner)
-        assert coach_confirmation.resolve_pending_turn(edit_rig.owner, "en") is None
         assert executor.published_plan_tool_defs(edit_rig.owner) == ()
-    assert Proposal.query.one().status == "pending" and Operation.query.one().status == "prepared"
-    assert service.resolve_edit(edit_rig.owner, q.proposal_id, "cancel").status == "cancelled"
+        reply = coach_confirmation.resolve_pending_turn(edit_rig.owner, "en")
+    assert reply
+    db.session.expire_all()
+    assert Proposal.query.one().status == expected
+    if expected == "pending":
+        assert service.resolve_edit(edit_rig.owner, q.proposal_id, "cancel").status == "cancelled"
+    assert len(edit_rig.calls) == 1
 
 
 def test_nutrition_store_cannot_mutate_a_training_row_even_with_matching_binding(edit_rig):

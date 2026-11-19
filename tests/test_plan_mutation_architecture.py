@@ -121,6 +121,9 @@ def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
         # Foundation V1 B1: read-only plan projection (parser + bounds only).
         Path("app/services/coach_plan_tools/plan_read.py"),
         Path("app/services/coach_plan_policy/decisions.py"),
+        # Adaptive Coach C2: only the audit envelope (MutationContext/actor)
+        # for C1 Nutrition calls; never Training commands or entrypoints.
+        Path("app/services/coach_plan_tools/nutrition.py"),
     }
     consumers = set()
     for path in APP_ROOT.rglob("*.py"):

@@ -519,6 +519,7 @@ jobs:
           tests/test_lp18_b1_pg.py
           tests/test_plan_confirmation_pg.py
           tests/test_nutrition_plan_edit_pg.py
+          tests/test_adaptive_coach_c2_nutrition_pg.py
           tests/test_diary_provider_truth_pg.py
           tests/test_fatsecret_retention_pg.py
           tests/test_mobile_workout_sessions_pg.py
