@@ -539,9 +539,70 @@ class NutritionPlan(db.Model):
     plan_data  = db.Column(db.Text, nullable=False)  # JSON olarak sakla
     score      = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Nullable for old-code inserts during rollback; targeted edits fail closed
+    # on an unidentified legacy row. New ORM writes mint a fresh lineage.
+    lineage_id = db.Column(db.String(64), nullable=True,
+                           default=lambda: secrets.token_urlsafe(32))
+    mutation_version = db.Column(db.Integer, nullable=False, default=0,
+                                 server_default="0")
 
     def __repr__(self):
         return f"<NutritionPlan {self.user_id} - {self.created_at}>"
+
+
+class NutritionPlanEditOperation(db.Model):
+    """Durable estimator claim/result; never a second canonical plan authority."""
+    __tablename__ = "nutrition_plan_edit_operation"
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(64), nullable=False,
+                          default=lambda: secrets.token_urlsafe(32), unique=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    idempotency_key = db.Column(db.String(64), nullable=False)
+    command_fingerprint = db.Column(db.String(64), nullable=False)
+    command_payload = db.Column(db.JSON, nullable=False)
+    plan_lineage_id = db.Column(db.String(64), nullable=False)
+    base_version = db.Column(db.Integer, nullable=False)
+    before_snapshot = db.Column(db.Text, nullable=False)
+    after_snapshot = db.Column(db.Text)
+    status = db.Column(db.String(20), nullable=False)
+    proposal_public_id = db.Column(db.String(64))
+    failure_code = db.Column(db.String(64))
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "idempotency_key", name="uq_nutrition_edit_user_key"),
+        db.Index("ix_nutrition_edit_owner", "user_id"),
+        db.Index("uq_nutrition_edit_active_owner", "user_id", unique=True,
+                 sqlite_where=text("status IN ('estimating', 'prepared')"),
+                 postgresql_where=text("status IN ('estimating', 'prepared')")),
+        db.CheckConstraint("status IN ('estimating','prepared','failed','applied','cancelled','stale','no_op')",
+                           name="ck_nutrition_edit_status"),
+    )
+
+
+class NutritionPlanMutationRecord(db.Model):
+    """Append-only applied/undo evidence. Soft plan/self references survive replacement."""
+    __tablename__ = "nutrition_plan_mutation_record"
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(64), nullable=False,
+                          default=lambda: secrets.token_urlsafe(32), unique=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    plan_lineage_id = db.Column(db.String(64), nullable=False)
+    idempotency_key = db.Column(db.String(64), nullable=False)
+    command_fingerprint = db.Column(db.String(64), nullable=False)
+    operation_kind = db.Column(db.String(20), nullable=False)
+    before_version = db.Column(db.Integer, nullable=False)
+    after_version = db.Column(db.Integer, nullable=False)
+    before_snapshot = db.Column(db.Text, nullable=False)
+    after_snapshot = db.Column(db.Text, nullable=False)
+    nutrient_source = db.Column(db.String(64))
+    reverts_mutation_id = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "idempotency_key", name="uq_nutrition_mutation_user_key"),
+        db.UniqueConstraint("reverts_mutation_id", name="uq_nutrition_mutation_reverts"),
+        db.Index("ix_nutrition_mutation_lineage", "user_id", "plan_lineage_id", "id"),
+        db.CheckConstraint("operation_kind IN ('mutation','undo')", name="ck_nutrition_mutation_kind"),
+    )
 
 
 def _new_plan_lineage_id():

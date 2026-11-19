@@ -364,10 +364,14 @@ def test_no_eager_generation_or_provider_call(app, client, auth_user, monkeypatc
         assert forbidden_timer not in script
 
 
-def test_no_schema_change_to_nutrition_plan():
+def test_legacy_nutrition_fields_retained_with_additive_c1_history():
     from app.models import NutritionPlan
     assert {c.name for c in NutritionPlan.__table__.columns} == {
-        'id', 'user_id', 'plan_data', 'score', 'created_at'}
+        'id', 'user_id', 'plan_data', 'score', 'created_at',
+        'lineage_id', 'mutation_version'}
+    # C1 adds recovery identity/version; legacy payload fields stay intact.
+    assert NutritionPlan.__table__.c.lineage_id.nullable
+    assert NutritionPlan.__table__.c.mutation_version.server_default.arg == '0'
 
 
 # ── COPY ────────────────────────────────────────────────────────────────
