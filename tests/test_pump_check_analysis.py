@@ -673,7 +673,7 @@ EN_HARDENING_PROHIBITED = [
     ("Your back has gotten wider.", COMPARISON),
     ("Your chest is getting bigger.", COMPARISON),
     ("You look bigger.", COMPARISON),
-    ("Your shoulders look fuller now.", COMPARISON),
+    ("Your shoulders look fuller than they used to.", COMPARISON),
     ("Your definition has improved since your last check.", COMPARISON),
     ("Your arms are thicker compared to your previous photo.", COMPARISON),
     ("Your legs look stronger than a few weeks ago.", COMPARISON),
@@ -705,7 +705,7 @@ TR_HARDENING_PROHIBITED = [
     ("Göbek yapmışsın.", JUDGMENT),
     ("Kolların cılız.", JUDGMENT),
     ("Sıska görünüyorsun.", JUDGMENT),
-    ("Kollarında sarkık bir görünüm var.", JUDGMENT),
+    ("Göğsün sarkık görünüyor.", JUDGMENT),
     ("Kilolu görünüyorsun.", JUDGMENT),
     ("Baldırların gelişmemiş.", JUDGMENT),
     ("Formdan düşmüşsün.", JUDGMENT),
@@ -753,7 +753,49 @@ TR_HARDENING_PROHIBITED = [
 ]
 
 
-@pytest.mark.parametrize("text,reason", EN_HARDENING_PROHIBITED + TR_HARDENING_PROHIBITED)
+# Independent review of #539 (round 1): Turkish -di past tense, curly
+# apostrophes, soft hyphens and the bypass phrasings it found.
+REVIEW_PROHIBITED = [
+    ("Kolların büyüdü.", COMPARISON),
+    ("Omuzların genişledi.", COMPARISON),
+    ("Önceki halinden daha kaslı görünüyorsun.", COMPARISON),
+    ("Geçen seferden beri omuzların dolmuş.", COMPARISON),
+    ("You\u2019re heavier through the midsection.", BODY),
+    ("You\u2019ve gotten bigger through the shoulders.", COMPARISON),
+    ("You've dropped a few pounds since your last check.", BODY),
+    ("Your waist has slimmed.", BODY),
+    ("You've put on size in the shoulders.", BODY),
+    ("Your arms grew.", COMPARISON),
+    ("Your chest has improved a lot.", COMPARISON),
+    ("Reduce your calorie intake to reveal the abs.", BODY),
+    ("Consider a short diet phase.", BODY),
+    ("Dropping a little fat would show more ab definition.", BODY),
+    ("You're carrying extra weight around the midsection.", BODY),
+    ("The muscles look flat and depleted.", SAFETY),
+    ("Your hydration looks low.", SAFETY),
+    ("Your recovery looks incomplete.", SAFETY),
+    ("Your arms are bigger than most.", COMPARISON),
+    ("Your shoulders are wider than a typical lifter's.", COMPARISON),
+    ("Kollarda hafif şişlik var.", SAFETY),
+    ("Kaslarda yorgunluk görülüyor.", SAFETY),
+    ("Ciltte susuzluk belirgin.", SAFETY),
+    ("Bel bölgesinde yağlanma var.", BODY),
+    ("Göğüs sarkmış görünüyor.", JUDGMENT),
+    ("Göbeğini eritmelisin.", BODY),
+    ("Belini inceltmelisin.", BODY),
+    ("Kalori alımını azalt.", BODY),
+    ("Kilolarından kurtulmalısın.", BODY),
+    ("Ortalama bir erkekten daha geniş omuzların var.", COMPARISON),
+    ("Yaşıtlarına göre iyi görünüyorsun.", COMPARISON),
+    ("Akranlarına göre kaslısın.", COMPARISON),
+    ("Diğerlerinden daha iri görünüyorsun.", COMPARISON),
+    ("You look dehy\u00addrated from over\u00adtraining.", SAFETY),   # soft hyphens
+    ("KOLLARDA ŞİŞLİK VAR.", SAFETY),
+]
+
+
+@pytest.mark.parametrize("text,reason", EN_HARDENING_PROHIBITED + TR_HARDENING_PROHIBITED
+                         + REVIEW_PROHIBITED)
 def test_unsupported_weight_judgment_physiology_and_comparison_claims_are_refused(text, reason):
     for field in ("summary", "observations", "strengths", "focus_areas",
                   "limitations", "next_check_guidance"):
@@ -836,7 +878,39 @@ TR_HARDENING_ORDINARY = [
 ]
 
 
-@pytest.mark.parametrize("text", EN_HARDENING_ORDINARY + TR_HARDENING_ORDINARY)
+REVIEW_ORDINARY = [
+    "Zamanla ilerlemeyi görmek için aynı ışıkta ve aynı açıdan tekrar çek.",
+    "Gelişmeyi zamanla takip etmek için aynı mesafeden fotoğraf çek.",
+    "Bir sonraki çekimi antrenman öncesinde yap; ışık daha keskin olsun.",
+    "Now retake with softer, more even light from the front.",
+    "For now, keep the same angle; a tighter crop would show the shoulders better.",
+    "So far the lighting is good; a harder side light would add contrast.",
+    "If you trained recently, the pump can make the arms look fuller than at rest.",
+    "Birçok kişi bu pozda omuzlarını öne düşürür; göğsünü aç.",
+    "Çoğu kişi için en iyi ışık pencereden gelen doğal ışıktır.",
+    "Kademeli kilo artışı ile çalışmaya devam et.",
+    "Bu hareket için kilo fazla geliyorsa setleri hafiflet.",
+    "Kilo almadan önce formuna odaklan.",
+    "Keep training to gain muscle in the upper chest with incline presses.",
+    "Omuzlar hafif sarkık görünüyor; dik durup göğsü aç.",
+    "Sarkık omuz duruşu yerine göğsünü aç.",
+    "Omuzlarını dik tut, formdan düşmeden tekrarı tamamla.",
+    "This is fat grip work, so your forearms are tense.",
+    "Use a slimmer stance next time to keep the bar path straight.",
+    "Avoid training to exhaustion on every set.",
+    "Son fotoğraftaki açıyı koru, kadrajı daha geniş tut.",
+    "Use a wider frame than in your last photo so the legs fit.",
+    "Işık sayesinde kas hatların belirginleşmiş.",
+    "Kolların yana sarkık duruyor, omuzların rahat.",
+    "Yağlanmış cilt ışığı yansıtıyor.",
+    "Pick a weight you can control for most of the set.",
+    "Brighter than most of the frame, your shoulders stand out.",
+    "You\u2019re facing the camera with both arms raised.",
+]
+
+
+@pytest.mark.parametrize("text", EN_HARDENING_ORDINARY + TR_HARDENING_ORDINARY
+                         + REVIEW_ORDINARY)
 def test_gym_weights_exercise_advice_and_neutral_observations_are_not_refused(text):
     value = _valid(summary=text, observations=[text], strengths=[text],
                    focus_areas=[text], limitations=[text],
@@ -881,7 +955,7 @@ def test_shared_checks_also_guard_pump_check_comparisons(text, reason):
     # The comparison contract exists to describe A-to-B differences, so the
     # earlier-photo check is single-image only.
     "Your shoulders look broader than in your previous photo.",
-    "Your arms look fuller now in Image B.",
+    "Your arms look fuller in Image B than they used to in Image A.",
     "Omuzların B fotoğrafında önceki fotoğrafa göre daha geniş görünüyor.",
     "Kolların B fotoğrafında büyümüş gibi duruyor.",
 ])
@@ -892,6 +966,22 @@ def test_earlier_photo_comparison_check_stays_out_of_the_comparison_contract(tex
     assert parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
     with pytest.raises(InvalidAnalysis, match=COMPARISON):
         parse_analysis(json.dumps(_valid(observations=[text]), ensure_ascii=False))
+
+
+@pytest.mark.parametrize("text", [
+    "Your shoulder outline reads more clearly in Image B.",
+    "Image B uses a wider frame, so more of the legs is visible.",
+    "The lighting in Image A is softer than in Image B.",
+    "Keep the weight you lift out of frame next time.",
+    "B fotoğrafında omuz hattın daha net seçiliyor.",
+    "A fotoğrafında ışık daha yumuşak, B'de kontrast daha yüksek.",
+    "Pump sonrası kasların iki fotoğrafta da dolgun görünüyor.",
+])
+def test_ordinary_comparison_wording_passes_the_shared_checks(text):
+    from app.services.mobile_pump_check_comparisons.analysis import (
+        parse_analysis as parse_comparison)
+    value = _comparison(observed_changes=[text], summary=text)
+    assert parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
 
 
 def test_hardening_leaves_the_prompt_untouched():
