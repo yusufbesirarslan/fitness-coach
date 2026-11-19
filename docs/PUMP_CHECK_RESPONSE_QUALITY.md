@@ -140,22 +140,32 @@ characters such as soft hyphens dropped); `_tr_folded` drops format
 characters too. "şişlik" (swelling) folds to "sislik" (haziness), so it is
 matched on a Turkish-lowercased copy that keeps the letters
 (`_TR_LETTER_PHYSIOLOGICAL_RE`). The earlier-photo check needs an explicit
-earlier reference ("than before", "since your last photo", "önceki
-fotoğrafa göre", "geçen seferden", "artık"; not bare "now", "recently",
-"zamanla"), a body comparative, and no photo-setup noun (frame, crop, light,
-angle; kadraj, ışık, açı), so "a wider frame than in your last photo" stays
-legal. Turkish change verbs are matched in both -mış and -di forms
-("büyümüş", "büyüdü").
+earlier reference ("than before", "than they were", "since your last
+photo", "over the past weeks", "önceki fotoğrafa göre", "geçen seferden";
+not bare "now", "recently", "zamanla", "artık") and a body comparative. A
+comparative that describes the photo setup itself ("a wider frame than in
+your last photo", "the light is softer than before", "kadrajı daha geniş
+tut") is removed before that check (`_PHOTO_SETUP_PHRASE_RE`,
+`_TR_PHOTO_SETUP_PHRASE_RE`); a setup word elsewhere in the item does not
+exempt it ("bigger than in your last shot", "…; focus on the chest next" are
+refused). Turkish change verbs are matched as -mış forms and as finite -di
+forms ("büyümüş", "büyüdü"; not "büyüdükçe", "büyüdüğünde"). All English
+checks, including the pre-existing ones, run on `_en_normalized`.
 
-Independent review round 1 (REQUEST_CHANGES) found Turkish -di bypasses,
+Independent review rounds 1 and 2 (REQUEST_CHANGES) found Turkish -di bypasses,
 curly-apostrophe and soft-hyphen bypasses, and refused guidance such as
 "Zamanla ilerlemeyi görmek için…", "Kademeli kilo artışı…", "Keep training to
-gain muscle…", "Birçok kişi bu pozda…". All of them are now pinned in
-`REVIEW_PROHIBITED` / `REVIEW_ORDINARY`.
+gain muscle…", "Birçok kişi bu pozda…"; round 2 found that a setup word
+anywhere in the item exempted it, "artık" and "than most other areas"
+false positives, and stem collisions ("büyüdükçe", "kolay", "sırt dolmuş").
+All of them are now pinned in `REVIEW_PROHIBITED` / `REVIEW_ORDINARY`.
 
 Known residuals:
-- an earlier-photo comparison that also names the photo setup ("your
-  shoulders look wider than before in this light");
+- an earlier-photo comparison written as a setup phrase ("a bigger frame
+  than last time" is treated as setup);
+- soft adjectives and idioms the patterns do not list ("the midsection is
+  soft", "yeni başlayan biri için kaslısın", "for a beginner" praise other
+  than impressive/great/good/solid/strong/excellent);
 - "sislik" written without Turkish letters (indistinguishable from haziness);
 - praise relative to a group the patterns do not list ("for a beginner",
   which is also ordinary advice);
