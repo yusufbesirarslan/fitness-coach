@@ -58,6 +58,7 @@ def build_training_prompt(
     few_shot = load_few_shot(preferences.antrenman_tarzi)
     injury_text = injury_constraints.build_injury_directive(preferences.injuries)
     cardio_days = preferences.kardiyo_gun if preferences.kardiyo_tipi != "yok" else 0
+    dinlenme_gun = 7 - preferences.gun_sayisi - cardio_days
     if language == "en":
         lang_rule = ("İçerik dili: ENGLISH; ama gun ve tip kanonik Türkçe kalacak; "
                      "exercise_id opak kimliktir, çevrilmez.")
@@ -170,7 +171,7 @@ STYLE FEW-SHOT REFERENCE
 {injury_text}
 
 PROGRAM RULES
-1. Haftanın tam 7 takvim günü için plan yap: {preferences.gun_sayisi} kuvvet seansı ve bağımsız {cardio_days} kardiyo seansı. Aynı gün ikisi de olabilir; zorunlu dinlenme günü yok. Her modalite aynı gün en fazla bir seans olsun. Kardiyoyu kuvvetten önce/sonra veya ayrı saatte aynı güne ya da ayrı güne yerleştirebilirsin.
+1. Haftanın tam 7 günü için plan yap: {preferences.gun_sayisi} antrenman günü + {cardio_days} kardiyo günü + {dinlenme_gun} dinlenme/aktif toparlanma günü.
 2. "gun" alanı sadece şu değerlerden biri olsun: Pazartesi, Salı, Çarşamba, Perşembe, Cuma, Cumartesi, Pazar.
 3. "tip" alanı sadece antrenman, dinlenme veya kardiyo olsun.
 4. Aynı ağır pattern iki gün üst üste gelmesin; recovery factor düşükse hacim ve RPE azalt.
@@ -180,7 +181,7 @@ PROGRAM RULES
 8. Yalnızca şemadaki anahtarları kullan; ekstra anahtar ekleme.
 9. Egzersiz nesnesi tam olarak exercise_id, set, tekrar, dinlenme, not içersin; exercise_id EXERCISE CHOICES listesinden birebir kopyalanır, "isim" alanı yazılmaz.
 10. set bir tamsayı olsun; sure_dk ve tahmini_kalori tamsayı olsun.
-11. Yalnız kardiyo olan gün tip="kardiyo"; kuvvet+kardiyo aynı günse tip="antrenman" ve egzersizler listesinde her iki seans olsun. Bu günün odak alanında iki seansı da belirt. Aynı gün kardiyo reçetesi set=1, tekrar="{preferences.kardiyo_sure} dk" olsun; sure_dk kuvvet ve kardiyo sürelerinin toplamı olsun. Kardiyo hareketleri kuvvet egzersizi minimumuna sayılmaz. İki seans da yoksa tip="dinlenme".
+11. Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) SADECE tip="kardiyo" günlerine yazılsın; tip="antrenman" gününe kardiyo egzersizi koyma.
 12. tip="dinlenme" günü HİÇBİR egzersiz içermez: "egzersizler": [] olmalı. Aktif toparlanma önerisini o günün "odak" alanına yaz; yürüyüş/esneme/mobilite dahil hiçbir hareketi dinlenme gününün egzersiz listesine ekleme.
 
 JSON FORMAT

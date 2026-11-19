@@ -48,18 +48,6 @@ def get_pending(user_id):
     )
 
 
-def has_pending(user_id):
-    """Owner-scoped admission fact; exposes no proposal identity or content.
-
-    Other plan domains need only block a second pending change, not read or
-    publish a Training proposal. Keep that narrower contract separate.
-    """
-    if type(user_id) is not int or user_id <= 0:
-        return False
-    return db.session.query(TrainingPlanConfirmationProposal.id).filter_by(
-        user_id=user_id, status=STATUS_PENDING).first() is not None
-
-
 def lock_proposal(user_id, public_id):
     """Owner-scoped ``SELECT … FOR UPDATE`` of one proposal by public id.
 

@@ -155,30 +155,25 @@ def _resolve_plan_exercise(
     return _resolve_generated_name(exercise["isim"], catalog, cache)
 
 
-def check_placement(
-    exercise: ExerciseDefinition, day: dict, *, allow_overlap: bool = False,
-) -> None:
-    """Allow cardio on a cardio day or alongside real strength on new plans.
+def check_placement(exercise: ExerciseDefinition, day: dict) -> None:
+    """Bind a cardio-movement entry to a cardio day, fail-closed otherwise.
 
-    Equipment and cardio-type checks run independently before this check.
-    Mutation callers keep their existing placement policy by default.
+    ``is_exercise_compatible`` deliberately gates cardio by the declared
+    ``cardio_type`` and not by ``equipment_context`` — a home user who runs
+    outdoors is a real product case. That carve-out is only sound while a
+    cardio entry can only land on a ``kardiyo`` day: without this rule a
+    ``ekipman="ev"`` plan could prescribe swimming inside a strength day and
+    still persist under ``equipment_context: "ev"``, i.e. the equipment gate
+    would be bypassable purely by placement.
+
+    Deliberately one-directional. Forbidding a non-cardio exercise on a
+    cardio day is a plan-quality opinion, not an authority question, and this
+    boundary only answers authority questions.
     """
-    if exercise.movement != CARDIO_MOVEMENT or day.get("tip") == CARDIO_TIP:
-        return
-    if allow_overlap and day.get("tip") == "antrenman":
-        catalog = load_exercise_catalog()
-        for item in day["egzersizler"]:
-            try:
-                entry = resolve_exercise(
-                    exercise_id=item.get(EXERCISE_ID_KEY),
-                    name=item.get("isim"), catalog=catalog)
-            except ExerciseResolutionError:
-                continue  # The identity gate rejects this item independently.
-            if entry.movement != CARDIO_MOVEMENT:
-                return
-    raise GenerationExerciseIncompatibleError(
-        "cardio exercise requires a cardio day or a strength session",
-        resolution_category="cardio_placement")
+    if exercise.movement == CARDIO_MOVEMENT and day.get("tip") != CARDIO_TIP:
+        raise GenerationExerciseIncompatibleError(
+            "cardio exercise is placed on a day that is not a cardio day",
+            resolution_category="cardio_placement")
 
 
 def _resolve_chosen_id(
@@ -247,7 +242,7 @@ def canonicalize_generated_exercises(
                     "generated exercise is not compatible with the accepted "
                     "equipment context",
                     resolution_category="equipment")
-            check_placement(resolved, day, allow_overlap=True)
+            check_placement(resolved, day)
             canonical_exercises.append({
                 "isim": resolved.canonical_name,
                 "set": exercise["set"],
@@ -294,7 +289,7 @@ def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
                     "generated exercise is not compatible with the accepted "
                     "equipment context",
                     resolution_category="equipment")
-            check_placement(resolved, day, allow_overlap=True)
+            check_placement(resolved, day)
             canonical_exercises.append({
                 **exercise,
                 "isim": resolved.canonical_name,
