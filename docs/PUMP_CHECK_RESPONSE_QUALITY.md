@@ -148,11 +148,16 @@ your last photo", "the light is softer than before", "kadrajı daha geniş
 tut") is removed before that check (`_PHOTO_SETUP_PHRASE_RE`,
 `_TR_PHOTO_SETUP_PHRASE_RE`); a setup word elsewhere in the item does not
 exempt it ("bigger than in your last shot", "…; focus on the chest next" are
-refused). Turkish change verbs are matched as -mış forms and as finite -di
-forms ("büyümüş", "büyüdü"; not "büyüdükçe", "büyüdüğünde"). All English
+refused). Only an article or adverb may sit between the comparative and
+the setup noun ("bigger in frame", "fuller on camera" are not setup), and in
+Turkish only bare/object setup forms count ("kadrajı", "ışık"; not "ışıkta",
+"bu açıdan") with no body noun in between; a purpose clause ("daha belirgin
+görünsün diye") is advice. Turkish change verbs are matched as -mış forms,
+finite -di forms (not questions: "büyüdü mü") and nominalized -dIk forms
+("büyüdüğünü"), but not "büyüdükçe"/"büyüdüğünde". All English
 checks, including the pre-existing ones, run on `_en_normalized`.
 
-Independent review rounds 1 and 2 (REQUEST_CHANGES) found Turkish -di bypasses,
+Independent review rounds 1–3 (REQUEST_CHANGES) found Turkish -di bypasses,
 curly-apostrophe and soft-hyphen bypasses, and refused guidance such as
 "Zamanla ilerlemeyi görmek için…", "Kademeli kilo artışı…", "Keep training to
 gain muscle…", "Birçok kişi bu pozda…"; round 2 found that a setup word
