@@ -6,7 +6,7 @@ Pump Check kapılı antrenman tamamlama ve su sayacı.
     python -m pytest tests/test_training_routes.py -v
 """
 import json
-from datetime import date
+from datetime import datetime
 
 import pytest
 
@@ -17,6 +17,7 @@ from app.services.exercise_catalog import ExerciseContext, load_exercise_catalog
 from app.services.training_generation.exercise_context_token import (
     sign_exercise_context,
 )
+from app.timeutil import UTC, app_today, audit_clock
 from tests.test_validators import _image_data_url
 from tests.training_provider_support import as_provider_document
 from tests.test_workout_state import assert_valid_state_contract
@@ -448,7 +449,7 @@ def test_pump_check_day_unique_constraint(client, auth_user):
     # uq_pump_check_day: aynı kullanıcı + gün için ikinci PumpCheck DB seviyesinde
     # reddedilir → eşzamanlı 'antrenmanı tamamla' yarışında çift XP'yi engeller.
     from sqlalchemy.exc import IntegrityError
-    today = date.today().isoformat()
+    today = app_today().isoformat()
     db.session.add(PumpCheck(user_id=auth_user.id, valid=True, date_key=today))
     db.session.commit()
     db.session.add(PumpCheck(user_id=auth_user.id, valid=True, date_key=today))
@@ -472,7 +473,7 @@ def test_workout_status_flips_after_completion(client, workout_ready, monkeypatc
     assert before["state"]["completed_today"] is False    # snapshot mirrors legacy field
 
     db.session.add(PumpCheck(user_id=workout_ready.id, valid=True,
-                             date_key=date.today().isoformat()))
+                             date_key=app_today().isoformat()))
     db.session.commit()
 
     after = client.get("/workout/status").get_json()
@@ -492,13 +493,41 @@ def test_workout_status_true_even_without_seeded_quest(client, auth_user):
     assert before["completed"] is False
     assert_valid_state_contract(before["state"])
     db.session.add(PumpCheck(user_id=auth_user.id, valid=True,
-                             date_key=date.today().isoformat()))
+                             date_key=app_today().isoformat()))
     db.session.commit()
     after = client.get("/workout/status").get_json()
     assert set(after) == {"completed", "state"}
     assert after["completed"] is True
     assert_valid_state_contract(after["state"])
     assert after["state"]["completed_today"] is True
+
+
+# 21:00–24:00 UTC is already the next calendar day in Europe/Istanbul (UTC+3).
+# The status route reads the Istanbul day (app_today); seeding with the server's
+# UTC date.today() made the tests above fail on CI in that window every night.
+ISTANBUL_DAY_AFTER_UTC_EVENING = datetime(2026, 11, 18, 22, 30, tzinfo=UTC)
+
+
+def test_workout_status_uses_istanbul_day_across_utc_midnight(client, auth_user):
+    with audit_clock(ISTANBUL_DAY_AFTER_UTC_EVENING):
+        istanbul_day = app_today().isoformat()
+        utc_day = ISTANBUL_DAY_AFTER_UTC_EVENING.date().isoformat()
+        assert (utc_day, istanbul_day) == ("2026-11-18", "2026-11-19")
+
+        # A PumpCheck keyed to the UTC date is yesterday in Istanbul: not completed.
+        db.session.add(PumpCheck(user_id=auth_user.id, valid=True, date_key=utc_day))
+        db.session.commit()
+        before = client.get("/workout/status").get_json()
+        assert before["completed"] is False
+        assert before["state"]["completed_today"] is False
+
+        db.session.add(PumpCheck(user_id=auth_user.id, valid=True,
+                                 date_key=istanbul_day))
+        db.session.commit()
+        after = client.get("/workout/status").get_json()
+        assert after["completed"] is True
+        assert_valid_state_contract(after["state"])
+        assert after["state"]["completed_today"] is True
 
 
 # ---------------------------------------------------------------------------
