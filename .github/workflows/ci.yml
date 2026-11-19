@@ -527,6 +527,7 @@ jobs:
           tests/test_completion_fence_pg.py
           tests/test_workout_session_pg.py
           tests/test_nutrition_vnext_pr7_pg.py
+          tests/test_nutrition_plan_mutation_c1_pg.py
           tests/test_account_deletion_pg.py
           tests/test_account_deletion_audit_pg.py
           tests/test_progress_pump_check_completion_pg.py

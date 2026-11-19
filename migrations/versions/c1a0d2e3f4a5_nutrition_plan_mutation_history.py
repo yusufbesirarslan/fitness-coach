@@ -108,6 +108,13 @@ def downgrade():
     bind = op.get_bind()
     insp = sa.inspect(bind)
     if insp.has_table(_JOURNAL):
+        # Edit history is the only record of what an edit or undo changed;
+        # a schema rollback must never erase it silently. Code rollback keeps
+        # the table (expand-only); only an empty ledger may be dropped.
+        if bind.execute(sa.text(f"SELECT 1 FROM {_JOURNAL} LIMIT 1")).first() is not None:
+            raise RuntimeError(
+                "refusing to downgrade c1a0d2e3f4a5: nutrition plan edit history "
+                "exists; roll back the code only (the schema is additive)")
         existing = _index_names(insp, _JOURNAL)
         for name in _JOURNAL_INDEXES:
             if name in existing:
