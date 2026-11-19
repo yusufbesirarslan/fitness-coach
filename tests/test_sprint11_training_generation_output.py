@@ -1519,7 +1519,7 @@ def test_cardio_type_yok_still_refuses_a_cardio_exercise_on_a_cardio_day(
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_generation_fails_closed_when_the_provider_puts_cardio_on_a_training_day(
+def test_generation_refuses_unrequested_cardio_on_a_training_day(
         client, auth_user, monkeypatch):
     _session(auth_user)
     monkeypatch.setattr(
@@ -1534,7 +1534,7 @@ def test_generation_fails_closed_when_the_provider_puts_cardio_on_a_training_day
     })
 
     assert response.status_code == 500
-    assert response.get_json()["code"] == CODE_GENERATION_EXERCISE_INCOMPATIBLE
+    assert response.get_json()["code"] == CODE_GENERATION_SEMANTICALLY_INVALID
     assert TrainingPlan.query.count() == 0
 
 
@@ -1835,3 +1835,130 @@ def test_only_one_resolution_path_exists_for_plan_exercises():
         if "resolve_exercise(" in path.read_text(encoding="utf-8")
     ]
     assert resolvers == ["exercise_resolution.py"]
+
+
+# Issue #530: independent modality frequencies in the existing v1 day schema.
+def _independent_week(strength, cardio, overlap=None):
+    dedicated = min(cardio, 7 - strength) if overlap is None else cardio - overlap
+    plan = _provider_week(training_days=strength, cardio_days=dedicated,
+                          exercises=[_provider_exercise("ex_push_up")],
+                          cardio_exercises=[_provider_exercise("ex_outdoor_run", 1)])
+    for day in plan["program"][:cardio - dedicated]:
+        day["egzersizler"].append({**_provider_exercise("ex_outdoor_run", 1),
+                                  "tekrar": "20 dk"})
+        day["sure_dk"] += 20
+    return plan
+
+
+@pytest.mark.parametrize("strength,cardio,overlap", [
+    (5, 3, None), (6, 2, None), (6, 6, None),
+    (3, 0, None), (3, 2, None), (4, 3, None), (3, 2, 2),
+])
+def test_independent_frequencies_generate_save_and_project_v1(
+        auth_user, strength, cardio, overlap):
+    from app.services.mobile_training import _project_plan
+    from app.services.training_generation.scheduling import cardio_exercises
+    from datetime import datetime, timezone
+
+    _session(auth_user)
+    prefs = _prefs(gun_sayisi=strength, kardiyo_tipi="kosu" if cardio else "yok",
+                   kardiyo_gun=cardio, ekipman="ev")
+    raw = _independent_week(strength, cardio, overlap)
+    original = json.dumps(raw)
+    calls = []
+
+    def chat(**kwargs):
+        calls.append(kwargs)
+        return original
+
+    payload = generate_training_plan_payload(auth_user, None, vars(prefs), chat)
+    assert len(calls) == 1
+    assert json.dumps(raw) == original
+    program = payload["program"]
+    assert len(program) == len({day["gun"] for day in program}) == 7
+    assert sum(day["tip"] == "antrenman" for day in program) == strength
+    assert sum(day["tip"] == "kardiyo" or bool(cardio_exercises(day))
+               for day in program) == cardio
+    assert sum(day["tip"] == "dinlenme" for day in program) == (
+        7 - strength - cardio + (overlap if overlap is not None
+                                 else max(0, strength + cardio - 7)))
+    context = ExerciseContext(equipment_context="ev", cardio_type=prefs.kardiyo_tipi)
+    saved = validate_plan_for_save({"program": program}, context)
+    projected = _project_plan(SimpleNamespace(
+        lineage_id="independent-test", mutation_version=0,
+        created_at=datetime.now(timezone.utc), score=None,
+        plan_data=json.dumps(saved)), auth_user.id, "test-key")
+    assert len(projected["days"]) == 7
+    assert [day["slot"] for day in projected["days"]] == list(range(7))
+    assert all(set(day) == {"slot", "weekday", "kind", "focus",
+                           "duration_minutes", "estimated_calories",
+                           "workout_ref", "exercises"}
+               for day in projected["days"])
+    assert sum(len(day["exercises"]) for day in projected["days"]) == strength + cardio
+
+
+@pytest.mark.parametrize("change", ["missing_cardio", "extra_cardio", "short_strength",
+                                 "short_cardio", "bad_time", "bad_sets", "no_strength"])
+def test_invalid_overlapping_schedule_is_refused(change):
+    plan = _independent_week(5, 3)
+    day = plan["program"][0]
+    prefs = _prefs(gun_sayisi=5, kardiyo_tipi="kosu", kardiyo_gun=3)
+    if change == "missing_cardio":
+        day["egzersizler"].pop()
+    elif change == "extra_cardio":
+        plan["program"][1]["egzersizler"].append(dict(day["egzersizler"][-1]))
+    elif change == "short_strength":
+        day["sure_dk"] = 25
+    elif change == "short_cardio":
+        day["egzersizler"][-1]["tekrar"] = "1 dk"
+    elif change == "bad_time":
+        day["egzersizler"][-1]["tekrar"] = "20 reps"
+    elif change == "bad_sets":
+        day["egzersizler"][-1]["set"] = 3
+    elif change == "no_strength":
+        day["egzersizler"].pop(0)
+    with pytest.raises(SemanticInvalidError):
+        validate_generated_plan(plan, prefs)
+
+
+def test_cardio_cannot_satisfy_bodybuilding_strength_minimum():
+    plan = _independent_week(5, 3)
+    for day in plan["program"][:5]:
+        day["egzersizler"] = [dict(day["egzersizler"][0]) for _ in range(3)] + [
+            {**_provider_exercise("ex_outdoor_run", 1), "tekrar": "20 dk"}]
+        day["sure_dk"] = 65
+    prefs = _prefs(gun_sayisi=5, kardiyo_tipi="kosu", kardiyo_gun=5,
+                   antrenman_tarzi="bodybuilding")
+    with pytest.raises(SemanticInvalidError):
+        validate_generated_plan(plan, prefs)
+
+
+def test_native_v1_contract_fixture_matches_backend():
+    """The mobile regression consumes this exact exported backend contract."""
+    from datetime import datetime, timezone
+    from app.services.mobile_training import _project_plan, preference_contract
+    from app.services.training_generation.exercise_choices import compatible_exercise_choices
+    from app.services.general_training_plan import parse_general_request
+    from app.services.general_training_plan.service import canonical_document
+
+    fixture = json.loads(Path("tests/fixtures/independent_scheduling_v1.json").read_text())
+    assert fixture["preferences"] == preference_contract()
+    for strength, cardio in ((5, 3), (6, 2)):
+        prefs = _prefs(gun_sayisi=strength, kardiyo_tipi="kosu", kardiyo_gun=cardio)
+        structured, _ = validate_generated_plan(_independent_week(strength, cardio), prefs)
+        context = ExerciseContext(equipment_context="ev", cardio_type="kosu")
+        canonical = exercise_resolution.canonicalize_generated_exercises(
+            structured, compatible_exercise_choices(context))
+        key = f"ai_{strength}_{cardio}"
+        row = SimpleNamespace(lineage_id=key, mutation_version=0,
+            created_at=datetime(2026, 11, 18, tzinfo=timezone.utc), score=None,
+            plan_data=json.dumps(canonical))
+        assert fixture["plans"][key] == {"plan": _project_plan(row, 1, "synthetic-contract-key")}
+    request = parse_general_request({
+        "template": "general_full_body_cardio_v1", "gun_sayisi": 4, "ekipman": "ev",
+        "kardiyo_tipi": "kosu", "kardiyo_gun": 6, "kardiyo_sure": 20,
+        "kardiyo_yogunluk": "orta"})
+    row = SimpleNamespace(lineage_id="general_4_6", mutation_version=0,
+        created_at=datetime(2026, 11, 18, tzinfo=timezone.utc), score=None,
+        plan_data=canonical_document(request, "en"))
+    assert fixture["plans"]["general_4_6"] == {"plan": _project_plan(row, 1, "synthetic-contract-key")}

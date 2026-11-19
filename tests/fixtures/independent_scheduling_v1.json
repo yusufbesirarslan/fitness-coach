@@ -1,0 +1,896 @@
+{
+  "preferences": {
+    "contract_version": 1,
+    "fields": {
+      "gun_sayisi": {
+        "type": "integer",
+        "default": 3,
+        "choices": [
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "ekipman": {
+        "type": "token",
+        "default": "spor_salonu",
+        "choices": [
+          "ev",
+          "minimal",
+          "spor_salonu"
+        ]
+      },
+      "odak": {
+        "type": "token",
+        "default": "tum_vucut",
+        "choices": [
+          "alt_vucut",
+          "core",
+          "sirt",
+          "tum_vucut",
+          "ust_vucut"
+        ]
+      },
+      "sure": {
+        "type": "integer",
+        "default": 45,
+        "choices": [
+          30,
+          45,
+          60,
+          90
+        ]
+      },
+      "kardiyo_tipi": {
+        "type": "token",
+        "default": "yok",
+        "choices": [
+          "bisiklet",
+          "ip_atlama",
+          "karisik",
+          "kosu",
+          "yok",
+          "yuruyus",
+          "yuzme"
+        ]
+      },
+      "kardiyo_gun": {
+        "type": "integer",
+        "default": 0,
+        "choices": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      },
+      "kardiyo_sure": {
+        "type": "integer",
+        "default": 20,
+        "choices": [
+          15,
+          20,
+          30,
+          45
+        ]
+      },
+      "kardiyo_yogunluk": {
+        "type": "token",
+        "default": "orta",
+        "choices": [
+          "dusuk",
+          "karisik",
+          "orta",
+          "yuksek"
+        ]
+      },
+      "antrenman_tarzi": {
+        "type": "token",
+        "default": "genel",
+        "choices": [
+          "bodybuilding",
+          "calisthenics",
+          "crossfit",
+          "fonksiyonel",
+          "genel",
+          "powerlifting"
+        ]
+      },
+      "odak_hedef": {
+        "type": "token",
+        "default": "genel",
+        "choices": [
+          "esneklik",
+          "genel",
+          "guc",
+          "kas_kutlesi",
+          "kondisyon",
+          "yag_yakimi"
+        ]
+      },
+      "injuries": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "capability_constraints": [
+      {
+        "status": "unsupported",
+        "reason": "CROSSFIT_SCHEMA_UNSUPPORTED",
+        "when_any": [
+          {
+            "antrenman_tarzi": [
+              "crossfit"
+            ]
+          }
+        ]
+      },
+      {
+        "status": "unsupported",
+        "reason": "POWERLIFTING_REQUIRES_GYM_EQUIPMENT",
+        "when_any": [
+          {
+            "antrenman_tarzi": [
+              "powerlifting"
+            ],
+            "ekipman": [
+              "ev",
+              "minimal"
+            ]
+          }
+        ]
+      },
+      {
+        "status": "conflicting",
+        "reason": "CARDIO_DAYS_WITHOUT_TYPE",
+        "when_any": [
+          {
+            "kardiyo_tipi": [
+              "yok"
+            ],
+            "kardiyo_gun": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "plans": {
+    "ai_5_3": {
+      "plan": {
+        "plan_lineage": "ai_5_3",
+        "mutation_version": 0,
+        "created_at": "2026-11-18T00:00:00Z",
+        "score": null,
+        "current_workout_ref": null,
+        "days": [
+          {
+            "slot": 0,
+            "weekday": "Pazartesi",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 65,
+            "estimated_calories": 300,
+            "workout_ref": "eXyoeppZY9JekEw1aopVfv7a",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              },
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 1,
+            "weekday": "Salı",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "fA22oDFh1CSPI7Ap4qUm-vOg",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 2,
+            "weekday": "Çarşamba",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "ssOJFkolIJG1w38YfM9-Z5FR",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 3,
+            "weekday": "Perşembe",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "8dDfxTuYa5CdNK1ndEyUqXn2",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 4,
+            "weekday": "Cuma",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "uGhYozUPUOadSQFfR0Rgr37d",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 5,
+            "weekday": "Cumartesi",
+            "kind": "cardio",
+            "focus": "Kondisyon",
+            "duration_minutes": 20,
+            "estimated_calories": 200,
+            "workout_ref": "VColrty1YbkpAqcLvUnR8o2H",
+            "exercises": [
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 6,
+            "weekday": "Pazar",
+            "kind": "cardio",
+            "focus": "Kondisyon",
+            "duration_minutes": 20,
+            "estimated_calories": 200,
+            "workout_ref": "GS-dfHlcvhRER4yQoOLV8vrI",
+            "exercises": [
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "ai_6_2": {
+      "plan": {
+        "plan_lineage": "ai_6_2",
+        "mutation_version": 0,
+        "created_at": "2026-11-18T00:00:00Z",
+        "score": null,
+        "current_workout_ref": null,
+        "days": [
+          {
+            "slot": 0,
+            "weekday": "Pazartesi",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 65,
+            "estimated_calories": 300,
+            "workout_ref": "HeMowjBxUaurd3b-yrp4NMoV",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              },
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 1,
+            "weekday": "Salı",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "lgivpxFzAG_RVhR3VsohdUPP",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 2,
+            "weekday": "Çarşamba",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "UOpA4LxXzd4IQD844zQlPxUM",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 3,
+            "weekday": "Perşembe",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "LlIznjPoR4UgB_qc7i4yM_ez",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 4,
+            "weekday": "Cuma",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "xbBZLLM9EKrNScpvu1JJboqV",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 5,
+            "weekday": "Cumartesi",
+            "kind": "training",
+            "focus": "Full Body",
+            "duration_minutes": 45,
+            "estimated_calories": 300,
+            "workout_ref": "BTZMTNysyvPYRnnSsOsQ1x6c",
+            "exercises": [
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          },
+          {
+            "slot": 6,
+            "weekday": "Pazar",
+            "kind": "cardio",
+            "focus": "Kondisyon",
+            "duration_minutes": 20,
+            "estimated_calories": 200,
+            "workout_ref": "d-gFSr28YGtTEDBpwlXwC399",
+            "exercises": [
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": "kontrollü"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "general_4_6": {
+      "plan": {
+        "plan_lineage": "general_4_6",
+        "mutation_version": 0,
+        "created_at": "2026-11-18T00:00:00Z",
+        "score": null,
+        "current_workout_ref": null,
+        "days": [
+          {
+            "slot": 0,
+            "weekday": "Pazartesi",
+            "kind": "training",
+            "focus": "General Full Body A · Cardio",
+            "duration_minutes": 65,
+            "estimated_calories": 0,
+            "workout_ref": "hyIo60O6WIjfQ2I7viOvjTYq",
+            "exercises": [
+              {
+                "exercise_id": "ex_bodyweight_squat",
+                "display_name": "Bodyweight Squat",
+                "sets": 3,
+                "reps": "12-15",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_glute_bridge",
+                "display_name": "Glute Bridge",
+                "sets": 3,
+                "reps": "12-15",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_inverted_row",
+                "display_name": "Inverted Row",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_plank",
+                "display_name": "Plank",
+                "sets": 3,
+                "reps": "30 sn",
+                "rest": {
+                  "display_text": "60 sn",
+                  "seconds": 60
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "0 sn",
+                  "seconds": 0
+                },
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "slot": 1,
+            "weekday": "Salı",
+            "kind": "training",
+            "focus": "General Full Body B · Cardio",
+            "duration_minutes": 65,
+            "estimated_calories": 0,
+            "workout_ref": "hyLAuY36wOBIz0Dhb3z4oaUy",
+            "exercises": [
+              {
+                "exercise_id": "ex_walking_lunge",
+                "display_name": "Walking Lunge",
+                "sets": 3,
+                "reps": "10-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_pike_push_up",
+                "display_name": "Pike Push-Up",
+                "sets": 3,
+                "reps": "6-10",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_glute_bridge",
+                "display_name": "Glute Bridge",
+                "sets": 3,
+                "reps": "12-15",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_inverted_row",
+                "display_name": "Inverted Row",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_dead_bug",
+                "display_name": "Dead Bug",
+                "sets": 3,
+                "reps": "10-12",
+                "rest": {
+                  "display_text": "60 sn",
+                  "seconds": 60
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "0 sn",
+                  "seconds": 0
+                },
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "slot": 2,
+            "weekday": "Çarşamba",
+            "kind": "cardio",
+            "focus": "Cardio · Running · Moderate intensity",
+            "duration_minutes": 20,
+            "estimated_calories": 0,
+            "workout_ref": "0793XjNOngTCBquuBEL_fEl7",
+            "exercises": [
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "0 sn",
+                  "seconds": 0
+                },
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "slot": 3,
+            "weekday": "Perşembe",
+            "kind": "training",
+            "focus": "General Full Body A · Cardio",
+            "duration_minutes": 65,
+            "estimated_calories": 0,
+            "workout_ref": "lXLl6cDXg4cupkkz4fziPnBI",
+            "exercises": [
+              {
+                "exercise_id": "ex_bodyweight_squat",
+                "display_name": "Bodyweight Squat",
+                "sets": 3,
+                "reps": "12-15",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_push_up",
+                "display_name": "Push-Up",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_glute_bridge",
+                "display_name": "Glute Bridge",
+                "sets": 3,
+                "reps": "12-15",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_inverted_row",
+                "display_name": "Inverted Row",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_plank",
+                "display_name": "Plank",
+                "sets": 3,
+                "reps": "30 sn",
+                "rest": {
+                  "display_text": "60 sn",
+                  "seconds": 60
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "0 sn",
+                  "seconds": 0
+                },
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "slot": 4,
+            "weekday": "Cuma",
+            "kind": "training",
+            "focus": "General Full Body B",
+            "duration_minutes": 45,
+            "estimated_calories": 0,
+            "workout_ref": "PJN3VVZ08oWTu7XzGUI7JUkx",
+            "exercises": [
+              {
+                "exercise_id": "ex_walking_lunge",
+                "display_name": "Walking Lunge",
+                "sets": 3,
+                "reps": "10-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_pike_push_up",
+                "display_name": "Pike Push-Up",
+                "sets": 3,
+                "reps": "6-10",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_glute_bridge",
+                "display_name": "Glute Bridge",
+                "sets": 3,
+                "reps": "12-15",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_inverted_row",
+                "display_name": "Inverted Row",
+                "sets": 3,
+                "reps": "8-12",
+                "rest": {
+                  "display_text": "90 sn",
+                  "seconds": 90
+                },
+                "notes": ""
+              },
+              {
+                "exercise_id": "ex_dead_bug",
+                "display_name": "Dead Bug",
+                "sets": 3,
+                "reps": "10-12",
+                "rest": {
+                  "display_text": "60 sn",
+                  "seconds": 60
+                },
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "slot": 5,
+            "weekday": "Cumartesi",
+            "kind": "cardio",
+            "focus": "Cardio · Running · Moderate intensity",
+            "duration_minutes": 20,
+            "estimated_calories": 0,
+            "workout_ref": "VBtCltu74CJQ9dcmuAMU6ftn",
+            "exercises": [
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "0 sn",
+                  "seconds": 0
+                },
+                "notes": ""
+              }
+            ]
+          },
+          {
+            "slot": 6,
+            "weekday": "Pazar",
+            "kind": "cardio",
+            "focus": "Cardio · Running · Moderate intensity",
+            "duration_minutes": 20,
+            "estimated_calories": 0,
+            "workout_ref": "KUlztgewmdfOe2v8xHpbmJ9F",
+            "exercises": [
+              {
+                "exercise_id": "ex_outdoor_run",
+                "display_name": "Outdoor Run",
+                "sets": 1,
+                "reps": "20 dk",
+                "rest": {
+                  "display_text": "0 sn",
+                  "seconds": 0
+                },
+                "notes": ""
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

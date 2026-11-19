@@ -39,13 +39,13 @@ Or, for strength plus cardio (LP21 cardio launch closure):
 {"template": "general_full_body_cardio_v1", "gun_sayisi": 3 | 4,
  "ekipman": "ev" | "minimal" | "spor_salonu",
  "kardiyo_tipi": "kosu" | "bisiklet" | "yuzme" | "ip_atlama" | "yuruyus" | "karisik",
- "kardiyo_gun": 1..(6 - gun_sayisi), "kardiyo_sure": 15 | 20 | 30 | 45,
+ "kardiyo_gun": 1..6, "kardiyo_sure": 15 | 20 | 30 | 45,
  "kardiyo_yogunluk": "dusuk" | "orta" | "yuksek" | "karisik"}
 ```
 
 Each template has its own closed key set. Any other key (injuries, goal, plan,
 …), a v1 body carrying a cardio key, a cardio body missing one, `kardiyo_tipi:
-"yok"` on the cardio template, a week that leaves no rest day, a bool or float
+"yok"` on the cardio template, an out-of-range count, a bool or float
 count, or an unknown template/equipment/cardio token is
 `422 TRAINING_PLAN_INVALID_REQUEST`.
 Nothing is coerced. The only account value read is `User.language`, which picks
@@ -83,13 +83,15 @@ the day labels (`tr` default, `en`).
 template: `general_full_body_v1` is unchanged (same body, fingerprint and
 content, pinned by tests).
 
-* The strength days are `build_program`'s, byte for byte. Only rest slots
-  become cardio days, in a fixed order:
-  * three strength days: Saturday, then Tuesday, then Thursday (1–3 cardio days);
-  * four strength days: Saturday, then Wednesday (1–2 cardio days).
-* Sunday is always a rest day. A non-personalized template keeps at least one
-  full rest day, so strength + cardio is at most six (the AI matrix's ceiling
-  is seven).
+* Strength prescriptions remain `build_program`'s. Cardio uses rest slots first:
+  * three strength days: Saturday, Tuesday, Thursday, Sunday, Monday, Wednesday;
+  * four strength days: Saturday, Wednesday, Sunday, Monday, Tuesday, Thursday.
+* The first existing 1–3 / 1–2 cardio placements retain their exact content.
+  Additional sessions can use Sunday and then overlap strength. There is no
+  mandatory rest day or combined ceiling. Strength choices remain 3/4 days.
+* On overlap, `tip` remains `antrenman`, cardio follows strength in
+  `egzersizler`, `odak` includes Cardio/Kardiyo, and `sure_dk` totals both
+  sessions. The v1 native day/workout schema and references remain unchanged.
 * Each cardio day (`tip: "kardiyo"`) holds one active catalog cardio entry for
   the chosen type, `set` 1, `tekrar` "<minutes> dk", `dinlenme` "0 sn", empty
   note; `sure_dk` is the chosen minutes and `tahmini_kalori` is 0.
@@ -274,7 +276,7 @@ created, not whether its content has changed since; a client that needs to
 know about edits reads `mutation_version`.
 
 **Template id.** A receipt stores only the request fingerprint, not the
-template. Both templates' request spaces are small and closed (6 + 1,440
+template. Both templates' request spaces are small and closed (6 + 3,456
 bodies), so `app/services/general_plan_identity.py` (standard library only)
 enumerates them once and maps each fingerprint back to its template. That is
 durable server evidence, not content. A general receipt whose fingerprint is

@@ -4,7 +4,7 @@ A parsed preference object is:
 
 - supported — the 7-day schema can faithfully represent the request
 - unsupported — recognized preferences AxisAI cannot currently combine
-- conflicting — internally contradictory (e.g. more allocated days than 7)
+- conflicting — internally contradictory (e.g. cardio days without a type)
 
 Invalid input is rejected by the preference contract before this module runs.
 """
@@ -15,8 +15,6 @@ from dataclasses import dataclass
 from app.services.training_generation.models import TrainingPreferences
 from app.services.training_generation.preference_contract import (
     CARDIO_DAYS,
-    CARDIO_TYPES,
-    DAY_COUNTS,
     EQUIPMENT_VALUES,
     PreferenceContractError,
     STYLE_RULE_KEYS,
@@ -42,18 +40,6 @@ SUPPORTED_EQUIPMENT_BY_STYLE = {
 
 def public_capability_constraints() -> list[dict]:
     """Return an ordered, field-only projection of the canonical matrix."""
-    active_cardio = sorted(CARDIO_TYPES - {"yok"})
-    weekly_overflow = []
-    for training_days in sorted(DAY_COUNTS):
-        invalid_cardio_days = sorted(
-            days for days in CARDIO_DAYS if training_days + days > 7
-        )
-        if invalid_cardio_days:
-            weekly_overflow.append({
-                "gun_sayisi": [training_days],
-                "kardiyo_tipi": active_cardio,
-                "kardiyo_gun": invalid_cardio_days,
-            })
     def styles(rule):
         return sorted(
             token for token, target in STYLE_RULE_KEYS.items() if target == rule
@@ -83,11 +69,6 @@ def public_capability_constraints() -> list[dict]:
                 "kardiyo_gun": sorted(CARDIO_DAYS - {0}),
             }],
         },
-        {
-            "status": STATUS_CONFLICTING,
-            "reason": "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS",
-            "when_any": weekly_overflow,
-        },
     ]
 
 
@@ -113,12 +94,8 @@ def evaluate_capability(preferences: TrainingPreferences) -> CapabilityResult:
         return CapabilityResult(
             STATUS_UNSUPPORTED, "STYLE_EQUIPMENT_UNSUPPORTED")
 
-    cardio_days = preferences.kardiyo_gun if preferences.kardiyo_tipi != "yok" else 0
     if preferences.kardiyo_tipi == "yok" and preferences.kardiyo_gun > 0:
         return CapabilityResult(STATUS_CONFLICTING, "CARDIO_DAYS_WITHOUT_TYPE")
-    if preferences.gun_sayisi + cardio_days > 7:
-        return CapabilityResult(
-            STATUS_CONFLICTING, "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS")
     return CapabilityResult(STATUS_SUPPORTED, "SUPPORTED")
 
 
