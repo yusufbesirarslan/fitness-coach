@@ -594,3 +594,484 @@ def test_specific_answer_shapes_pass_the_v1_validator(result):
     # Empty lists were always legal in v1; insufficient results keep only the
     # obstacle and one retake instruction, which existing clients render.
     assert parse_analysis(json.dumps(result, ensure_ascii=False)) == result
+
+
+# --- Weight, judgment, physiology and comparison hardening (EN + TR) --------
+# A single photo cannot support a weight or body-fat change, a weight-loss
+# instruction, a verdict on how the body looks, a physiological state, or a
+# comparison with an earlier photo or with other people. Every pattern names
+# the claim, not the word, so gym weights, ordinary exercise advice, neutral
+# photo observations and same-photo comparisons stay legal (ORDINARY lists).
+
+BODY = "prohibited body claim"
+JUDGMENT = "negative body judgment"
+SAFETY = "safety policy"
+COMPARISON = "unsupported comparison"
+
+EN_HARDENING_PROHIBITED = [
+    # weight / body-fat change over time
+    ("You need to lose a few kilos.", BODY),
+    ("You've lost some weight since last month.", BODY),
+    ("You gained a little fat around the waist.", BODY),
+    ("You put on weight.", BODY),
+    ("You've shed a couple of pounds.", BODY),
+    ("Your fat loss is clear.", BODY),
+    ("There is less body fat on your midsection.", BODY),
+    ("There is some belly fat visible.", BODY),
+    ("Fat around your waist stands out.", BODY),
+    ("You look leaner.", BODY),
+    ("Your waist looks slimmer.", BODY),
+    ("You look thinner.", BODY),
+    ("You're a bit heavier.", BODY),
+    ("You gained muscle.", BODY),
+    ("You lost size in your arms.", BODY),
+    ("Water weight may hide definition.", BODY),
+    ("You are overweight.", BODY),
+    # weight-loss directives
+    ("Slim down before the next check.", BODY),
+    ("Burn off that fat with cardio.", BODY),
+    ("Lean out to show more definition.", BODY),
+    ("A calorie deficit would sharpen your abs.", BODY),
+    ("Go on a diet for a few weeks.", BODY),
+    ("Eat less to reveal your abs.", BODY),
+    ("Cut calories to show your obliques.", BODY),
+    # negative body judgments
+    ("Your midsection looks flabby.", JUDGMENT),
+    ("Love handles are visible at the sides.", JUDGMENT),
+    ("Your arms look skinny.", JUDGMENT),
+    ("Your calves are underdeveloped.", JUDGMENT),
+    ("You look a bit fat here.", JUDGMENT),
+    ("You look out of shape.", JUDGMENT),
+    ("Your chest looks saggy.", JUDGMENT),
+    # medical / physiological inference
+    ("Your arms look swollen.", SAFETY),
+    ("Some swelling is visible around the knee.", SAFETY),
+    ("Your face looks puffy... puffy face from water.", SAFETY),
+    ("Your stomach looks bloated.", SAFETY),
+    ("You may be retaining water.", SAFETY),
+    ("You look dehydrated.", SAFETY),
+    ("You might be overtraining your shoulders.", SAFETY),
+    ("Your muscles look over-trained.", SAFETY),
+    ("You look tired.", SAFETY),
+    ("Your face looks a bit drained.", SAFETY),
+    ("Glycogen depletion flattens your muscles.", SAFETY),
+    ("Testosterone levels drive this shape.", SAFETY),
+    ("This could be a muscle strain.", SAFETY),
+    ("You look exhausted after the set.", SAFETY),
+    # unsupported comparisons with other people or norms (both contracts)
+    ("Your shoulders are wider than most lifters.", COMPARISON),
+    ("Your definition is above average.", COMPARISON),
+    ("That is impressive for your age.", COMPARISON),
+    ("You look stage-ready.", COMPARISON),
+    ("You look like a bodybuilder.", COMPARISON),
+    ("This is an elite physique.", COMPARISON),
+    # unsupported comparisons with an earlier photo (single image only)
+    ("Your arms are bigger than in your last photo.", COMPARISON),
+    ("Your shoulders look broader than before.", COMPARISON),
+    ("Your abs are more defined than last time.", COMPARISON),
+    ("Your arms have grown.", COMPARISON),
+    ("Your back has gotten wider.", COMPARISON),
+    ("Your chest is getting bigger.", COMPARISON),
+    ("You look bigger.", COMPARISON),
+    ("Your shoulders look fuller than they used to.", COMPARISON),
+    ("Your definition has improved since your last check.", COMPARISON),
+    ("Your arms are thicker compared to your previous photo.", COMPARISON),
+    ("Your legs look stronger than a few weeks ago.", COMPARISON),
+]
+
+
+TR_HARDENING_PROHIBITED = [
+    # kilo / yağ değişimi
+    ("Birkaç kilo yağ kaybetmişsin.", BODY),
+    ("Kilo vermelisin.", BODY),
+    ("Kilo vermişsin gibi duruyor.", BODY),
+    ("Biraz kilo almışsın.", BODY),
+    ("Zayıflamışsın.", BODY),
+    ("Belin incelmiş.", BODY),
+    ("Yağ yakmışsın, karın daha net.", BODY),
+    ("Yağ atmışsın.", BODY),
+    ("Karın bölgende yağ birikmiş.", BODY),
+    ("Fazla yağın var.", BODY),
+    ("Yağların erimiş.", BODY),
+    ("Kas kazanmışsın.", BODY),
+    ("Fazla kilonu vermen gerek.", BODY),
+    # kilo verme yönlendirmesi
+    ("Diyete başlamalısın.", BODY),
+    ("Kalori açığı ile karın kasların çıkar.", BODY),
+    ("Daha az ye.", BODY),
+    # olumsuz beden yargısı
+    ("Şişman görünüyorsun.", JUDGMENT),
+    ("Göbeklenmişsin.", JUDGMENT),
+    ("Göbek yapmışsın.", JUDGMENT),
+    ("Kolların cılız.", JUDGMENT),
+    ("Sıska görünüyorsun.", JUDGMENT),
+    ("Göğsün sarkık görünüyor.", JUDGMENT),
+    ("Kilolu görünüyorsun.", JUDGMENT),
+    ("Baldırların gelişmemiş.", JUDGMENT),
+    ("Formdan düşmüşsün.", JUDGMENT),
+    # tıbbi / fizyolojik çıkarım
+    ("Kolların şişmiş görünüyor.", SAFETY),
+    ("Yüzün şişkin.", SAFETY),
+    ("Vücudun su tutuyor.", SAFETY),
+    ("Su tutulumu kas hatlarını gizliyor.", SAFETY),
+    ("Dehidrate görünüyorsun.", SAFETY),
+    ("Susuz kalmış gibisin.", SAFETY),
+    ("Aşırı antrenman yapıyorsun.", SAFETY),
+    ("Kasların toparlanamıyor.", SAFETY),
+    ("Yorgun görünüyorsun.", SAFETY),
+    ("Bitkin bir ifaden var.", SAFETY),
+    ("Kortizol yüksek olabilir.", SAFETY),
+    # başkalarıyla / normla karşılaştırma
+    ("Omuzların çoğu insandan geniş.", COMPARISON),
+    ("Tanımın ortalamanın üstünde.", COMPARISON),
+    ("Yaşına göre çok iyi.", COMPARISON),
+    ("Vücut geliştirmeci gibi görünüyorsun.", COMPARISON),
+    ("Sahneye hazır görünüyorsun.", COMPARISON),
+    # önceki fotoğrafla karşılaştırma (yalnız tek fotoğraf)
+    ("Kolların son fotoğrafına göre daha büyük.", COMPARISON),
+    ("Omuzların önceki fotoğrafa göre daha geniş.", COMPARISON),
+    ("Karın kasların geçen seferden daha belirgin.", COMPARISON),
+    ("Omuzların öncekinden daha dolgun.", COMPARISON),
+    ("Kolların büyümüş.", COMPARISON),
+    ("Sırtın genişlemiş görünüyor.", COMPARISON),
+    ("Pazuların kalınlaşmış.", COMPARISON),
+    ("Göğsün eskisinden daha dolgun.", COMPARISON),
+    # büyük harf, Türkçe harfsiz yazım ve ayrışık (NFD) girdi
+    ("KİLO VERMELİSİN.", BODY),
+    ("kilo vermelisin", BODY),
+    ("ZAYIFLAMIŞSIN.", BODY),
+    ("zayiflamissin", BODY),
+    ("SİSMAN gorunuyorsun", JUDGMENT),
+    ("S\u0327I\u0307S\u0327MAN görünüyorsun.", JUDGMENT),  # NFD Ş/İ
+    ("KOLLARIN ŞİŞMİŞ.", SAFETY),
+    ("Kollarin sismis gorunuyor.", SAFETY),
+    ("Yorgun gorunuyorsun.", SAFETY),
+    ("Zay\u0131flam\u0131s\u0327s\u0131n.", BODY),  # NFD ş
+    ("KOLLARIN BÜYÜMÜŞ.", COMPARISON),
+    ("kollarin buyumus", COMPARISON),
+    ("ÇOĞU İNSANDAN GENİŞ.", COMPARISON),
+]
+
+
+# Independent review of #539 (round 1): Turkish -di past tense, curly
+# apostrophes, soft hyphens and the bypass phrasings it found.
+REVIEW_PROHIBITED = [
+    ("Kolların büyüdü.", COMPARISON),
+    ("Omuzların genişledi.", COMPARISON),
+    ("Önceki halinden daha kaslı görünüyorsun.", COMPARISON),
+    ("Geçen seferden beri omuzların dolmuş.", COMPARISON),
+    ("You\u2019re heavier through the midsection.", BODY),
+    ("You\u2019ve gotten bigger through the shoulders.", COMPARISON),
+    ("You've dropped a few pounds since your last check.", BODY),
+    ("Your waist has slimmed.", BODY),
+    ("You've put on size in the shoulders.", BODY),
+    ("Your arms grew.", COMPARISON),
+    ("Your chest has improved a lot.", COMPARISON),
+    ("Reduce your calorie intake to reveal the abs.", BODY),
+    ("Consider a short diet phase.", BODY),
+    ("Dropping a little fat would show more ab definition.", BODY),
+    ("You're carrying extra weight around the midsection.", BODY),
+    ("The muscles look flat and depleted.", SAFETY),
+    ("Your hydration looks low.", SAFETY),
+    ("Your recovery looks incomplete.", SAFETY),
+    ("Your arms are bigger than most.", COMPARISON),
+    ("Your shoulders are wider than a typical lifter's.", COMPARISON),
+    ("Kollarda hafif şişlik var.", SAFETY),
+    ("Kaslarda yorgunluk görülüyor.", SAFETY),
+    ("Ciltte susuzluk belirgin.", SAFETY),
+    ("Bel bölgesinde yağlanma var.", BODY),
+    ("Göğüs sarkmış görünüyor.", JUDGMENT),
+    ("Göbeğini eritmelisin.", BODY),
+    ("Belini inceltmelisin.", BODY),
+    ("Kalori alımını azalt.", BODY),
+    ("Kilolarından kurtulmalısın.", BODY),
+    ("Ortalama bir erkekten daha geniş omuzların var.", COMPARISON),
+    ("Yaşıtlarına göre iyi görünüyorsun.", COMPARISON),
+    ("Akranlarına göre kaslısın.", COMPARISON),
+    ("Diğerlerinden daha iri görünüyorsun.", COMPARISON),
+    ("You look dehy\u00addrated from over\u00adtraining.", SAFETY),   # soft hyphens
+    ("KOLLARDA ŞİŞLİK VAR.", SAFETY),
+    # round 2: a setup word elsewhere in the item no longer exempts it
+    ("Your arms look bigger than in your last shot.", COMPARISON),
+    ("Your chest is fuller than last time; focus on the upper chest next.", COMPARISON),
+    ("Your shoulders look broader than before from this angle.", COMPARISON),
+    ("Your abs are more defined than before, and well lit.", COMPARISON),
+    ("Kolların son fotoğrafa göre daha büyük; ışık da iyi.", COMPARISON),
+    ("Karın kasların geçen seferden daha belirgin, kadraj iyi.", COMPARISON),
+    ("Sırtın eskiye göre daha geniş; odak noktası net.", COMPARISON),
+    ("Your arms are bigger than they were.", COMPARISON),
+    ("Your midsection looks fuller now than in earlier checks.", COMPARISON),
+    ("Your shoulders have developed nicely over the past weeks.", COMPARISON),
+    ("Göbeğin eridi.", BODY),
+    ("Göbeğin azalmış.", BODY),
+    ("Çoğu kişiye göre omuzların daha geniş.", COMPARISON),
+    ("Lower your calories a bit so the obliques show.", BODY),
+    ("Impressive chest development for a beginner.", COMPARISON),
+    ("Daha az kalori al.", BODY),
+    ("Fazla antrenman yapmışsın gibi duruyor.", SAFETY),
+    ("The quads look sore after the session.", SAFETY),
+    ("Your chest displays fatigue.", SAFETY),
+    ("Your shoulders are broader than most other lifters.", COMPARISON),
+    ("In\u00adjury risk is visible.", SAFETY),   # soft hyphen, pre-existing check
+    ("Geçen seferden beri omuzların dolmuş.", COMPARISON),
+    ("The arms are thin and lack muscle.", JUDGMENT),
+    ("Your belly sticks out a little.", JUDGMENT),
+    ("Your gut hides the abs.", JUDGMENT),
+    ("You seem short on sleep.", SAFETY),
+    ("You are carrying a little extra around the waist.", BODY),
+    ("Zayıf görünüyorsun, biraz kas yapmalısın.", JUDGMENT),
+    # round 3: setup words next to a body comparative no longer exempt it
+    ("Your shoulders look wider in frame than in your last photo.", COMPARISON),
+    ("Your arms look bigger in frame than last time.", COMPARISON),
+    ("Your arms look bigger on camera than before.", COMPARISON),
+    ("Your chest looks fuller on camera than in your previous check.", COMPARISON),
+    ("Işıkta omuzların daha geniş, geçen sefere göre.", COMPARISON),
+    ("Bu açıdan kolların daha büyük, son fotoğrafa göre.", COMPARISON),
+    ("Kamerada kolların daha büyük görünüyor; önceki fotoğrafa göre.", COMPARISON),
+    ("Kolların son fotoğrafa göre daha büyük ışıkta.", COMPARISON),
+    ("Kolların geçen seferden daha kalın kadrajda.", COMPARISON),
+    ("Kolların büyüdüğünü görüyorum.", COMPARISON),
+    ("Kolların büyüdüğü belli.", COMPARISON),
+    ("Omuzlarının genişlediği görülüyor.", COMPARISON),
+    ("Your waist slimmed.", BODY),
+    # round 4 (P3)
+    ("Kolların geçen seferden daha dolgun görünmesi güzel.", COMPARISON),
+    ("Omuzlarının önceki fotoğrafa göre daha geniş görünmesi dikkat çekiyor.", COMPARISON),
+    ("Geçen sefere göre ışık altında trapezlerin daha belirgin.", COMPARISON),
+    ("Önceki fotoğrafa göre ışık altında deltoidlerin daha dolgun.", COMPARISON),
+    ("Son fotoğrafa göre kamera latların daha geniş.", COMPARISON),
+    ("Geçen sefere göre ışık karnın daha belirgin.", COMPARISON),
+    ("Önceki fotoğrafa göre bu açı fiziğin daha geniş olduğunu ortaya koyuyor.", COMPARISON),
+]
+
+
+@pytest.mark.parametrize("text,reason", EN_HARDENING_PROHIBITED + TR_HARDENING_PROHIBITED
+                         + REVIEW_PROHIBITED)
+def test_unsupported_weight_judgment_physiology_and_comparison_claims_are_refused(text, reason):
+    for field in ("summary", "observations", "strengths", "focus_areas",
+                  "limitations", "next_check_guidance"):
+        value = _valid(**{field: text if field in ("summary", "next_check_guidance")
+                          else [text]})
+        with pytest.raises(InvalidAnalysis, match=reason):
+            parse_analysis(json.dumps(value, ensure_ascii=False))
+
+
+EN_HARDENING_ORDINARY = [
+    # verbatim from the 2026-11-18 real-model staging A/B (Sonnet 5.5)
+    "A full-body stage pose under dramatic lighting shows a lean, well-developed physique in a side-chest-style stance.",
+    "Your lower legs sit in shadow, so they read a bit softer than your thighs.",
+    "Your upper thighs are only partly lit, so their definition looks softer than your midsection.",
+    "Your lower legs and calves fall into shadow, so they look less defined than your thighs in this shot.",
+    "Your chest sits under the tank top, so its outline stays less visible than your arms.",
+    "Chest definition is harder to see here than your shoulders and arms.",
+    "Your far arm is mostly hidden behind your body, so it's harder to read than the raised one.",
+    "Lifter performs a high-effort cable exercise in a gym, framed front-on from the waist up.",
+    # gym equipment weights and ordinary exercise advice
+    "You are holding a heavy dumbbell in each hand.",
+    "The weight plates on the bar are visible behind you.",
+    "Lower the weight slightly to keep your elbows tucked.",
+    "Add weight gradually across your sets.",
+    "Drop the weight if your form breaks down.",
+    "Fat grips on the bar make your forearms work harder.",
+    "Use a weight belt only for your heaviest sets.",
+    "Stay hydrated and rest between sets as usual.",
+    "Your hips are sagging slightly in this plank.",
+    "Lean forward a little more on the next cable fly.",
+    "Muscle fatigue builds over a set, so pick a weight you control.",
+    # neutral photographic observations
+    "Your shoulders look broad and well lit from the front.",
+    "Your raised arm looks bigger in frame because it is closer to the camera.",
+    "The lighting is flat, so separation lines are faint.",
+    "The light looks soft and even across your torso.",
+    "The photo is slightly soft overall, but the contours still read well.",
+    "You appear small in the frame, so detail is limited.",
+    "Your arms are clearly visible now that you face the light.",
+    "Use the same angle as your last photo for a consistent comparison.",
+    "Keep the same lighting next time so changes over time are easier to see.",
+    "Your back is turned away, so it is less visible than your front.",
+    "A puffer jacket covers your torso.",
+    "You look focused, with a strong effort expression.",
+    "Your muscles look pumped after the set.",
+]
+
+
+TR_HARDENING_ORDINARY = [
+    # 2026-11-18 staging A/B çıktılarından (birebir)
+    "Parlak, yağlı ciltle güçlü yan ışık kas hatlarını iyi vurguluyor.",
+    "Güçlü sahne ışığı ve yağlı parlaklık gölgeleri değiştirerek kas hatlarının algısını etkiliyor.",
+    "Sahne ışığı ve yağ/bronzlaştırıcı parlaması gölgeleri ve kas görünümünü abartabilir.",
+    "Alt bacaklar ve ayaklar ışığın dışında kalıp daha silik görünüyor.",
+    "Göğüs ve karın bölgesi kıyafet nedeniyle diğer alanlara göre daha az görünür.",
+    "Bir sonraki karede aynı açıyı ve ışığı koru, mümkünse biraz daha aydınlık bir noktada çek ki karşılaştırma tutarlı olsun.",
+    # ağırlık / egzersiz önerisi
+    "Elinde ağır bir dambıl var.",
+    "Formun bozulursa biraz kilo düşür.",
+    "Bir sonraki sette birkaç kilo daha ekleyebilirsin.",
+    "Fazla kilolarla çalışma, formunu koru.",
+    "Aşırı yüklenme, hareketi kontrollü yap.",
+    "Plankta kalçan biraz sarkıyor.",
+    "Setler arasında su iç ve dinlen.",
+    "Arka planda bir su şişesi duruyor.",
+    "Kas yorgunluğu set boyunca artar, kontrol edebildiğin bir ağırlık seç.",
+    # nötr fotoğraf gözlemi
+    "Zayıf ışık gövdendeki detayları gizliyor.",
+    "Gelişmiş bir omuz hattı ışıkta net seçiliyor.",
+    "Fotoğrafta hafif bir sislik var ama hatlar seçiliyor.",
+    "Sisli bir arka plan önünde poz veriyorsun.",
+    "Kaldırdığın kol kameraya yakın olduğu için daha büyük görünüyor.",
+    "İlk fotoğrafa göre aynı ışığı kullan.",
+    "Son fotoğraftaki açıyı koru, ışığı da aynı tut.",
+    "Pump sonrası kasların dolgun ve belirgin görünüyor.",
+    "Sol omzun bu açıdan sağdakinden daha belirgin.",
+    "İnceleme için gövdenin tamamı kadrajda olsun.",
+    "Kollar diğer bölgelere göre daha az aydınlık.",
+    "Formun iyi görünüyor, dirseklerin sabit.",
+]
+
+
+REVIEW_ORDINARY = [
+    "Zamanla ilerlemeyi görmek için aynı ışıkta ve aynı açıdan tekrar çek.",
+    "Gelişmeyi zamanla takip etmek için aynı mesafeden fotoğraf çek.",
+    "Bir sonraki çekimi antrenman öncesinde yap; ışık daha keskin olsun.",
+    "Now retake with softer, more even light from the front.",
+    "For now, keep the same angle; a tighter crop would show the shoulders better.",
+    "So far the lighting is good; a harder side light would add contrast.",
+    "If you trained recently, the pump can make the arms look fuller than at rest.",
+    "Birçok kişi bu pozda omuzlarını öne düşürür; göğsünü aç.",
+    "Çoğu kişi için en iyi ışık pencereden gelen doğal ışıktır.",
+    "Kademeli kilo artışı ile çalışmaya devam et.",
+    "Bu hareket için kilo fazla geliyorsa setleri hafiflet.",
+    "Kilo almadan önce formuna odaklan.",
+    "Keep training to gain muscle in the upper chest with incline presses.",
+    "Omuzlar hafif sarkık görünüyor; dik durup göğsü aç.",
+    "Sarkık omuz duruşu yerine göğsünü aç.",
+    "Omuzlarını dik tut, formdan düşmeden tekrarı tamamla.",
+    "This is fat grip work, so your forearms are tense.",
+    "Use a slimmer stance next time to keep the bar path straight.",
+    "Avoid training to exhaustion on every set.",
+    "Son fotoğraftaki açıyı koru, kadrajı daha geniş tut.",
+    "Use a wider frame than in your last photo so the legs fit.",
+    "Işık sayesinde kas hatların belirginleşmiş.",
+    "Kolların yana sarkık duruyor, omuzların rahat.",
+    "Yağlanmış cilt ışığı yansıtıyor.",
+    "Pick a weight you can control for most of the set.",
+    "Brighter than most of the frame, your shoulders stand out.",
+    "You\u2019re facing the camera with both arms raised.",
+    # round 2
+    "Use a wider frame than in your last photo so the legs fit.",
+    "The light is softer than before, so keep the lamp where it is.",
+    "Kadrajı son fotoğraftakinden daha geniş tut.",
+    "Your shoulders catch more light than most other areas in this photo.",
+    "The upper chest is sharper than most areas of the image.",
+    "Cildin yağlanmış görünüyor, bu da parlama yapıyor.",
+    "Yağlanmış ten sahne ışığında parlıyor.",
+    "Artık her sette daha güçlü bir sıkıştırma yap.",
+    "Artık sırtın daha belirgin görünmesi için kanatları aç.",
+    "Kaslar büyüdükçe aynı pozu korumak karşılaştırmayı kolaylaştırır.",
+    "Görüntü büyüdüğünde netlik azalıyor.",
+    "Kolay bir poz seç, sırt dolmuş görünsün diye nefesini tut.",
+    "Kasılı tutarken sırt dolmuş görünüyor.",
+    "The battery icon on the mirror looks depleted, but it does not affect the photo.",
+    "Slimmed-down framing would keep the focus on the torso.",
+    "Göğsün sarkık değil, dik duruyorsun.",
+    "For a beginner, keep the weight light and the pose simple.",
+    "Zayıf ışık gövdeni gölgede bırakıyor.",
+    "Işık zayıf görünüyor, lambaya dön.",
+    "The torso lacks contrast in this light.",
+    "Sleep well before your next session.",
+    # round 3
+    "The frame lacks size reference, so scale is unclear.",
+    "Trust your gut on how hard to push the last set.",
+    "Yanındaki havlu yağlanmış görünüyor.",
+    "Kollar büyüdü mü emin olmak için aynı açıyı kullan.",
+    "Ilk fotoğraftaki gibi kollar daha belirgin görünsün diye yandan ışık al.",
+    "Kaslar kalınlaştıkça aynı açıyı korumak karşılaştırmayı kolaylaştırır.",
+    "Görüntü büyüdüğünde netlik azalıyor.",
+    "Işık daha yumuşak olsun, son fotoğraftaki gibi.",
+    # round 4 (P3)
+    "Kaslar büyüdüğü zaman aynı açıyı kullan.",
+    "Kollarının büyüdüğünü görmek için her seferinde aynı ışığı kullan.",
+    "Kaslar büyüdükten sonra da aynı pozu koru.",
+]
+
+
+@pytest.mark.parametrize("text", EN_HARDENING_ORDINARY + TR_HARDENING_ORDINARY
+                         + REVIEW_ORDINARY)
+def test_gym_weights_exercise_advice_and_neutral_observations_are_not_refused(text):
+    value = _valid(summary=text, observations=[text], strengths=[text],
+                   focus_areas=[text], limitations=[text],
+                   next_check_guidance=text[:300])
+    assert parse_analysis(json.dumps(value, ensure_ascii=False))["summary"] == text
+
+
+def _comparison(**changes):
+    value = {
+        "summary": "Your shoulders are clearly visible in both photos.",
+        "observed_changes": ["Your shoulder outline reads more clearly in Image B."],
+        "stable_areas": ["Camera distance looks the same."],
+        "focus_areas": ["Your chest sits in shadow in both photos."],
+        "limitations": ["Your back is not visible from this angle."],
+        "comparability_reasons": ["Same region and framing."],
+        "next_check_guidance": "Repeat the same pose and lighting next time.",
+        "comparability": "comparable",
+    }
+    value.update(changes)
+    return value
+
+
+@pytest.mark.parametrize("text,reason", [
+    ("You lost weight between the two photos.", BODY),
+    ("You look leaner in Image B.", BODY),
+    ("Kilo vermişsin.", BODY),
+    ("Your stomach looks bloated in Image A.", SAFETY),
+    ("Kolların B fotoğrafında şişmiş.", SAFETY),
+    ("Your midsection looks flabby in Image A.", JUDGMENT),
+    ("Your shoulders are wider than most lifters.", COMPARISON),
+    ("Yaşına göre çok iyi.", COMPARISON),
+])
+def test_shared_checks_also_guard_pump_check_comparisons(text, reason):
+    from app.services.mobile_pump_check_comparisons.analysis import (
+        InvalidComparisonAnalysis, parse_analysis as parse_comparison)
+    value = _comparison(observed_changes=[text])
+    with pytest.raises(InvalidComparisonAnalysis, match=reason):
+        parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
+
+
+@pytest.mark.parametrize("text", [
+    # The comparison contract exists to describe A-to-B differences, so the
+    # earlier-photo check is single-image only.
+    "Your shoulders look broader than in your previous photo.",
+    "Your arms look fuller in Image B than they used to in Image A.",
+    "Omuzların B fotoğrafında önceki fotoğrafa göre daha geniş görünüyor.",
+    "Kolların B fotoğrafında büyümüş gibi duruyor.",
+])
+def test_earlier_photo_comparison_check_stays_out_of_the_comparison_contract(text):
+    from app.services.mobile_pump_check_comparisons.analysis import (
+        parse_analysis as parse_comparison)
+    value = _comparison(observed_changes=[text])
+    assert parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
+    with pytest.raises(InvalidAnalysis, match=COMPARISON):
+        parse_analysis(json.dumps(_valid(observations=[text]), ensure_ascii=False))
+
+
+@pytest.mark.parametrize("text", [
+    "Your shoulder outline reads more clearly in Image B.",
+    "Image B uses a wider frame, so more of the legs is visible.",
+    "The lighting in Image A is softer than in Image B.",
+    "Keep the weight you lift out of frame next time.",
+    "B fotoğrafında omuz hattın daha net seçiliyor.",
+    "A fotoğrafında ışık daha yumuşak, B'de kontrast daha yüksek.",
+    "Pump sonrası kasların iki fotoğrafta da dolgun görünüyor.",
+])
+def test_ordinary_comparison_wording_passes_the_shared_checks(text):
+    from app.services.mobile_pump_check_comparisons.analysis import (
+        parse_analysis as parse_comparison)
+    value = _comparison(observed_changes=[text], summary=text)
+    assert parse_comparison(json.dumps(value, ensure_ascii=False), "comparable")
+
+
+def test_hardening_leaves_the_prompt_untouched():
+    # The 16/16 A/B-tested prompt is pinned by the tests above; this change is
+    # validator-only, so the prompt body must not mention the new checks.
+    for word in ("leaner", "swollen", "dehydrat", "overtrain", "kilo"):
+        assert word not in analysis.PROMPT_BODY
