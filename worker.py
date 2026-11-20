@@ -182,20 +182,33 @@ def main():
         # before any fork: parent connections must never cross that boundary.
         import json
         from pathlib import Path
-        from app.jobs.tasks import _in_app_context
+        from app.jobs import tasks
+        from app.schema_safety import verify_schema_ready
         from app.services import r6_runtime_admission as admission
+
+        if use_simple:
+            raise RuntimeError("R6_COACH_FORK_WORKER_REQUIRED")
 
         def prove():
             from flask import current_app
             from app.extensions import db
             try:
-                return {**admission.process_identity(), **admission.database_proof(),
-                        "revision": current_app.config["BUILD_REVISION"]}
+                app = current_app._get_current_object()
+                if not admission.coach_contained():
+                    raise RuntimeError("R6_COACH_CONTAINMENT_REQUIRED")
+                heads = verify_schema_ready(app)
+                return app, heads, {**admission.process_identity(), **admission.database_proof(),
+                                    "revision": app.config["BUILD_REVISION"]}
             finally:
                 db.session.remove()
                 db.engine.dispose()
 
-        proof = _in_app_context(prove)
+        try:
+            app, heads, proof = tasks._in_app_context(prove)
+            admission.start_coach_attestation(
+                app, "worker", cached_worker_app=lambda: tasks._worker_app, worker_heads=heads)
+        except Exception:
+            raise RuntimeError("R6_COACH_WORKER_STARTUP_UNPROVEN") from None
         target = Path(admission.WORKER_RECEIPT)
         temporary = target.with_suffix(".tmp")
         temporary.write_text(json.dumps(proof))

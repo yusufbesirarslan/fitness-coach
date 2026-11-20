@@ -18,6 +18,7 @@ import base64
 import json
 import os
 import re
+from secrets import token_hex
 import shutil
 import socket
 import subprocess
@@ -595,3 +596,60 @@ def test_apple_orphan_inspection_uses_the_real_docker_top_contract(stack, tmp_pa
             "Apple scheduler ownership/source/execution unproven (PREVIOUS_RECONCILIATION_STILL_RUNNING)"]
     finally:
         sh("docker", "rm", "-f", orphan, check=False)
+
+
+def test_coach_proof_uses_live_gunicorn_and_cached_rq_on_the_same_schema(stack):
+    revision, deploy, main = stack["revision"], stack["deploy"], stack["main"]
+    worker_name = "r6bit-coach-proof-worker"
+    wait_port_released(deploy, "blue")
+
+    def probe(cid, role, *, expected=True):
+        run = sh("docker", "exec", cid, "python3", "-I",
+                 "/app/scripts/r6_coach_attestation.py", role, revision, token_hex(16),
+                 check=False)
+        assert (run.returncode == 0) is expected, run.stderr
+        if expected:
+            proof = json.loads(run.stdout)
+            assert proof["flag"] is proof["guard"] is False
+            assert proof["role"] == role and proof["revision"] == revision
+            return proof
+
+    try:
+        code, out = helper(deploy, "start", "--slot", "blue", "--revision", revision)
+        assert code == 0 and out["action"] == "started", out
+        web_id = slot_container("blue")["Id"]
+        wait_healthy(web_id)
+        sh(*main, "stop", "worker")
+        sh(*main, "run", "--no-deps", "-d", "--name", worker_name,
+           "-e", "R6_RUNTIME_ADMISSION=required", "-e", f"APP_REVISION={revision}", "worker")
+        wait_healthy(worker_name)
+        worker_id = inspect(worker_name)["Id"]
+        assert inspect(web_id)["Image"] == inspect(worker_id)["Image"]
+        web, worker = probe(web_id, "web"), probe(worker_id, "worker")
+        assert web["heads"] == worker["heads"] and web["boot"] != worker["boot"]
+        assert probe(worker_id, "worker") == worker
+        probe(worker_id, "web", expected=False)
+
+        # Replace only the Gunicorn child. The Docker identity stays put; the
+        # attested application boot and its live /proc identity must change.
+        sh("docker", "exec", web_id, "python3", "-c",
+           "import os,signal,sys; os.kill(int(sys.argv[1]), signal.SIGTERM)", str(web["pid"]))
+        deadline = time.monotonic() + 45
+        while True:
+            result = sh("docker", "exec", web_id, "python3", "-I",
+                        "/app/scripts/r6_coach_attestation.py", "web", revision, token_hex(16),
+                        check=False)
+            if result.returncode == 0:
+                replacement = json.loads(result.stdout)
+                if replacement["boot"] != web["boot"]:
+                    break
+            assert time.monotonic() < deadline, "new web application boot unproven"
+            time.sleep(1)
+        assert replacement["pid"] != web["pid"]
+        assert replacement["heads"] == worker["heads"]
+        assert probe(worker_id, "worker") == worker
+    finally:
+        sh("docker", "rm", "-f", worker_name, check=False)
+        sh(*main, "up", "-d", "--no-deps", "worker")
+        helper(deploy, "remove", "--slot", "blue", "--expected-revision", revision)
+        wait_port_released(deploy, "blue")

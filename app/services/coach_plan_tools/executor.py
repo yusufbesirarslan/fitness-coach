@@ -320,13 +320,12 @@ def plan_mutation_tools_enabled():
     """Whether the plan-mutation tool surface is active for this request.
 
     Reads the canonical rollout flag through ``current_app.config``, the same
-    path every other flag in this repository uses, so ``/health?deep=1`` and the
-    ``[FLAGS]`` boot line report it without a second mechanism. Fail-closed on
-    anything unexpected: no app context, a missing key, or a config object that
-    raises all mean "we cannot prove this is on", and the safe reading of that
-    is OFF (brief §45).
+    path used by the rollout registry. Protected R6 web and worker apps keep
+    the guard closed for the lifetime of the loaded application.
     """
     try:
+        if current_app.extensions.get("r6_coach_containment"):
+            return False
         return bool(current_app.config.get(FLAG_KEY, False))
     except Exception:
         return False

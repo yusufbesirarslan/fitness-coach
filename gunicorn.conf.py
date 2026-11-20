@@ -21,6 +21,14 @@ accesslog = None
 errorlog = "-"
 
 
+def post_worker_init(worker):
+    if os.environ.get("R6_REGISTRATION_ADMISSION") == "closed":
+        if worker.cfg.preload_app or worker.cfg.workers != 1:
+            raise RuntimeError("R6_COACH_SINGLE_NON_PRELOADED_WEB_REQUIRED")
+        from app.services.r6_runtime_admission import start_coach_attestation
+        start_coach_attestation(worker.wsgi, "web")
+
+
 def worker_exit(server, worker):
     """Worker kapanırken son runtime-metrik penceresini boşalt (Hardening PR4).
 

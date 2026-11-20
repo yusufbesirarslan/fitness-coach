@@ -104,6 +104,8 @@ def failed(same_head, monkeypatch):
             assert w.head == revision and w.worker.revision == revision and w.route == slot
             assert w.slots[slot].revision == revision
         w.registration_open = action == 'open'
+        if action == 'open':
+            return 'a' * 64
 
     def close_worker(self, previous, timeout):
         self._rec('close_old_worker', timeout=timeout)

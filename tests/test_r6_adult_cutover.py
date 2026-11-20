@@ -49,15 +49,16 @@ def adult(monkeypatch, request):
             assert old_slot not in w.slots
             assert w.worker.revision == CAND and w.head == CAND
             self._fail("open_readback")
+            return "a" * 64
 
-    def runtime(self, slot, revision, timeout):
+    def runtime(self, slot, revision, candidate_worker, timeout):
         self._rec("adult_runtime_proof", timeout=timeout)
         assert not w.registration_open
         self._fail("acl")
         self._fail("web_utc")
         self._fail("worker_utc")
 
-    def candidate(self, slot, revision, timeout):
+    def candidate(self, slot, revision, approved, timeout):
         self._rec("adult_candidate_closed", timeout=timeout)
         assert not w.registration_open
         self._fail("eligibility")
@@ -86,6 +87,7 @@ def adult(monkeypatch, request):
     monkeypatch.setattr(FakeOps, "reload_generation", reload_generation, raising=False)
     monkeypatch.setattr(FakeOps, "registration_latch", latch, raising=False)
     monkeypatch.setattr(FakeOps, "adult_runtime_proof", runtime, raising=False)
+    monkeypatch.setattr(FakeOps, "coach_release_complete", lambda self, timeout: "a" * 64, raising=False)
     monkeypatch.setattr(FakeOps, "adult_candidate_closed", candidate, raising=False)
     monkeypatch.setattr(FakeOps, "close_old_worker", close_worker, raising=False)
     monkeypatch.setattr(FakeOps, "release_prepare", prepare)
