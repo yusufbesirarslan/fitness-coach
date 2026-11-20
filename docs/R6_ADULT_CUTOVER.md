@@ -152,7 +152,8 @@ The recovery attempt emits either fresh preparation or reuse of the durable
 prepared receipt. It emits either a route switch or proof of the already
 active candidate route after the nginx reload barrier. After the durable
 commit, a runtime event records the exact image and the web and worker Docker
-IDs and start times. Post and watch must match the live pair to that event.
+IDs and start times. Post and watch must match the live pair to that event,
+including a web or worker boot that was retained from an earlier attempt.
 
 `scripts/r6_recovery_acceptance.py` checks the attempt-specific protected
 deploy job, exact main SHA and tree, reviewed diff, successful main-push CI,
@@ -169,8 +170,11 @@ snapshot, route, health, containment and journal checks. Its base checker and
 probe SHA-256 are respectively
 `2844d9a89c0b7ffb8527bd5a8031d46ce944eb2827a157980c673ba58b6654d8` and
 `f2e594ed2494a77b6f114dd1ba01ac94ba6e9310125f60048ae41f1730fd5adf`.
-The adapter has no finalized release binding. Applying it to the authoritative
-package or collecting live evidence requires separate authorization.
+After verifying those hashes, validate a review copy with
+`git apply --check --unidiff-zero <path-to-release-checker.patch>`. The checker
+expects the matching `r6_recovery_acceptance.py` beside it and verifies its
+SHA-256. The adapter has no finalized release binding. Applying it to the
+authoritative package or collecting live evidence requires separate authorization.
 
 ## Focused qualification
 

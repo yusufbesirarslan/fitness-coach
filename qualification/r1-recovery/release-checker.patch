@@ -61,7 +61,7 @@
 +            b.append(str(exc))
 @@ -570 +596 @@
 -            if job and phase == 'post':
-+            if job and phase == 'post' and (not recovery or name == 'WORKER'):
++            if job and phase == 'post' and not recovery:
 @@ -800,2 +826,5 @@
 -        need(all(isinstance(B[k], str) and B[k].isalnum() for k in FINAL_KEYS),
 -             'BINDING_NOT_FINALIZED (R1 stage A: candidate/run/ci_run are bound only after the founder merges #543)')

@@ -32,11 +32,19 @@ def release(request, same_head, monkeypatch):
     monkeypatch.setattr(FakeOps, '_container', recorded)
     interrupt(same_head, request.param)
     retained_web = same_head.serving_box()
+    retained_worker = same_head.worker
+    if retained_worker is not None:
+        def reuse_worker(self, kind, image_tag, revision, timeout):
+            assert kind == 'candidate' and revision == CAND and same_head.worker is retained_worker
+            self._rec('worker_up', kind, image_tag, revision, timeout=timeout)
+
+        monkeypatch.setattr(FakeOps, 'worker_up', reuse_worker)
     same_head.events.clear()
     code, _ = run(same_head, mode='forward-recovery')
     assert code == tx.EXIT_OK
     if retained_web is not None:
         assert same_head.serving_box() is retained_web
+        assert same_head.worker is retained_worker
     lines = [
         f'{STAMP} forward recovery authorized for this exact run attempt; delete the attempt binding',
         f'{STAMP} Recovery snapshot Available for candidate {CAND}: {SNAPSHOT}',
