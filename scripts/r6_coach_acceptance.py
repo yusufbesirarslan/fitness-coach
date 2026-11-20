@@ -40,6 +40,31 @@ def collect(ops, approved, expected_digest, challenge):
             "observation": coach.boot_digest(challenge)}
 
 
+def verify_observation(report, approved, expected_digest, challenge, started, ended):
+    """Outer one-shot checker gate for the exact authorized host invocation."""
+    if (not isinstance(report, dict)
+            or set(report) != {"binding", "web", "worker", "digest", "observed_at", "observation"}
+            or report["binding"] != approved or report["digest"] != expected_digest
+            or not coach.NONCE.fullmatch(challenge)
+            or report["observation"] != coach.boot_digest(challenge)):
+        raise ValueError("R6_COACH_OBSERVATION_BINDING_INVALID")
+    observed = datetime.fromisoformat(report["observed_at"])
+    if observed.utcoffset() != timezone.utc.utcoffset(None) or not started <= observed <= ended:
+        raise ValueError("R6_COACH_OBSERVATION_TIME_INVALID")
+    for role in ("web", "worker"):
+        actor = report[role]
+        if not isinstance(actor, dict) or set(actor) != coach.FIELDS | {"container", "started"}:
+            raise ValueError("R6_COACH_OBSERVATION_ACTOR_INVALID")
+        coach.validate_process({key: actor[key] for key in coach.FIELDS},
+                               role=role, revision=approved["revision"])
+        if (not coach.DIGEST.fullmatch(actor["container"])
+                or not coach.STARTED.fullmatch(actor["started"])
+                or actor["heads"] != approved["heads"]):
+            raise ValueError("R6_COACH_OBSERVATION_ACTOR_INVALID")
+    if coach.fingerprint(approved, report["web"], report["worker"]) != expected_digest:
+        raise ValueError("R6_COACH_OBSERVATION_DIGEST_INVALID")
+
+
 def main():
     from scripts.r6_deploy_transaction import HostOps
 

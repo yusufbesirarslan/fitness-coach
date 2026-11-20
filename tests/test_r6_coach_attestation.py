@@ -1,4 +1,7 @@
 """Synthetic proofs and actual loaded-app cache negatives, without provider calls."""
+import json
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from scripts import r6_coach_acceptance as acceptance
@@ -117,3 +120,69 @@ def test_deploy_log_requires_one_ordered_attestation_before_success():
                     [event.replace("worker_guard=false", "worker_guard=true") for event in events]):
         with pytest.raises(ValueError):
             acceptance.deployment_digest(log(invalid), CAND, "blue")
+
+
+def test_response_rejects_stale_challenge_and_conflicting_fields():
+    reply = {**process("web"), "challenge": CHALLENGE}
+    payload = json.dumps(reply).encode("ascii") + b"\n"
+    assert coach.decode_response(payload, CHALLENGE, "web", CAND) == process("web")
+    with pytest.raises(ValueError, match="CHALLENGE_UNPROVEN"):
+        coach.decode_response(payload, "b" * 32, "web", CAND)
+    with pytest.raises(ValueError, match="DUPLICATE_FIELDS"):
+        coach.decode_response(b'{"flag": true, ' + payload[1:], CHALLENGE, "web", CAND)
+
+
+def test_pair_rechecks_gunicorn_worker_after_rq_observation(tmp_path):
+    ops = host(tmp_path, Recorder())
+    ops._ok = lambda *args: TREE
+    ops.route_status = lambda t: tx.Route("blue", coach.ROUTES["blue"])
+    ops._adult_cid = lambda *a: container("web")[0]
+    ops.worker = lambda t: [tx.Container(container("worker")[0], IMAGE,
+                                         "running", "healthy", STARTED, CAND)]
+    web = process("web")
+
+    def actor(cid, role, *args, approved):
+        if role == "worker":
+            web.update(pid=3, start_ticks=50, boot="a" * 64)
+        proof = web if role == "web" else process("worker")
+        return approved, coach.bind_actor(proof, container(role), container(role), approved, role)
+
+    ops._coach_actor = actor
+    with pytest.raises(tx.OpError, match="inventory changed"):
+        ops.coach_release_proof(BOUND, 30)
+
+
+def test_recreated_worker_cannot_disagree_with_the_recovery_actor(tmp_path):
+    ops = host(tmp_path, Recorder())
+    web = coach.bind_actor(process("web"), container("web"), container("web"), BOUND, "web")
+    current = container("worker")
+    worker = coach.bind_actor(process("worker"), current, current, BOUND, "worker")
+    ops.coach_web = BOUND, web
+    ops.coach_release_proof = lambda *args: {"web": web, "worker": worker}
+    ops._adult_cid = lambda *args: web["container"]
+    ops._adult_web_proof = lambda *args: {"closed": True}
+    previous = tx.Container("a" * 64, IMAGE, "running", "healthy", STARTED, CAND)
+    with pytest.raises(tx.OpError, match="verified worker update"):
+        ops.adult_runtime_proof("blue", CAND, previous, 30)
+    assert ops.coach_pair is None
+
+
+def test_outer_checker_refuses_saved_observation_and_modified_evidence():
+    web, worker = (coach.bind_actor(process(role), container(role), container(role), BOUND, role)
+                   for role in ("web", "worker"))
+    digest = coach.fingerprint(BOUND, web, worker)
+    now = datetime.now(timezone.utc)
+    start, end = now - timedelta(seconds=1), now + timedelta(seconds=1)
+    report = dict(binding=BOUND, web=web, worker=worker, digest=digest,
+                  observation=coach.boot_digest(CHALLENGE), observed_at=now.isoformat())
+    acceptance.verify_observation(report, BOUND, digest, CHALLENGE, start, end)
+    with pytest.raises(ValueError, match="TIME_INVALID"):
+        acceptance.verify_observation(report, BOUND, digest, CHALLENGE, end, end)
+    with pytest.raises(ValueError, match="BINDING_INVALID"):
+        acceptance.verify_observation(report, BOUND, digest, "b" * 32, start, end)
+    with pytest.raises(ValueError, match="PROCESS_UNPROVEN"):
+        acceptance.verify_observation({**report, "worker": {**worker, "flag": 0}},
+                                      BOUND, digest, CHALLENGE, start, end)
+    with pytest.raises(ValueError, match="DIGEST_INVALID"):
+        acceptance.verify_observation({**report, "worker": {**worker, "pid": 2}},
+                                      BOUND, digest, CHALLENGE, start, end)

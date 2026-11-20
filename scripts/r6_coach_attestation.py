@@ -73,6 +73,21 @@ def _actor(role):
     return pid, ticks, master[1]
 
 
+def decode_response(line, challenge, role, revision):
+    def unique_fields(pairs):
+        result = dict(pairs)
+        if len(result) != len(pairs):
+            raise ValueError("R6_COACH_DUPLICATE_FIELDS")
+        return result
+
+    if len(line) >= LIMIT or not line.endswith(b"\n"):
+        raise ValueError("R6_COACH_WIRE_INVALID")
+    response = json.loads(line, object_pairs_hook=unique_fields)
+    if not isinstance(response, dict) or response.pop("challenge", None) != challenge:
+        raise ValueError("R6_COACH_CHALLENGE_UNPROVEN")
+    return validate_process(response, role=role, revision=revision)
+
+
 def read_process(role, revision, challenge):
     if not NONCE.fullmatch(challenge):
         raise ValueError("R6_COACH_CHALLENGE_INVALID")
@@ -89,10 +104,7 @@ def read_process(role, revision, challenge):
             raise ValueError("R6_COACH_PEER_UNPROVEN")
         client.sendall(challenge.encode("ascii") + b"\n")
         with client.makefile("rb") as source:
-            response = json.loads(source.readline(LIMIT))
-    if not isinstance(response, dict) or response.pop("challenge", None) != challenge:
-        raise ValueError("R6_COACH_CHALLENGE_UNPROVEN")
-    proof = validate_process(response, role=role, revision=revision)
+            proof = decode_response(source.readline(LIMIT), challenge, role, revision)
     if _actor(role) != actor or (proof["pid"], proof["start_ticks"]) != actor[:2]:
         raise ValueError("R6_COACH_PROCESS_CHANGED")
     return proof

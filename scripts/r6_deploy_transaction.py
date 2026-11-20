@@ -184,6 +184,7 @@ CAPABILITY_PROBE_SECONDS = 60
 # bounded share of the baseline step so a dying web that never turns healthy
 # cannot starve the worker/Redis identity proofs that follow.
 RECOVERY_PREVIOUS_WEB_PROBE_SECONDS = 25
+COACH_FINAL_PROOF_RESERVE_SECONDS = 45
 ADULT_MIGRATION = "ad17de1e0001"
 _FLOOR_STATES = {"raised", "absent"}
 _FENCE_STATES = {"verified", "absent", "invalid"}
@@ -1069,11 +1070,12 @@ class HostOps:
             raise OpError(f"loaded Coach {role} attestation unproven") from None
 
     @_host_operation
-    def adult_candidate_closed(self, slot, revision, image, timeout):
+    def adult_candidate_closed(self, slot, revision, candidate, timeout):
         cid = self._adult_cid(slot, revision, timeout)
-        bound, actor = self._coach_actor(cid, "web", revision, image, slot, timeout)
+        bound, actor = self._coach_actor(cid, "web", revision, candidate.image_id, slot, timeout)
         admission = self._adult_web_proof(cid, timeout)
-        if (admission.get("closed") is not True
+        if ((actor["container"], actor["started"]) != (candidate.id, candidate.started_at)
+                or admission.get("closed") is not True
                 or coach.boot_digest(admission["boot"]) != actor["boot"]
                 or any(admission.get(key) != actor[key] for key in ("pid", "start_ticks"))):
             raise OpError("candidate registration and Coach proof do not identify the same closed boot")
@@ -1106,7 +1108,10 @@ class HostOps:
         _, web = self._coach_actor(cid, "web", revision, image, slot, timeout, approved=approved)
         _, worker = self._coach_actor(workers[0].id, "worker", revision, image, slot, timeout,
                                      approved=approved)
-        if (self.route_status(timeout) != expected_route
+        # A Gunicorn child can be replaced without a new Docker boot. Bracket
+        # the worker observation with the full web process check.
+        _, web_after = self._coach_actor(cid, "web", revision, image, slot, timeout, approved=approved)
+        if (web_after != web or self.route_status(timeout) != expected_route
                 or self._adult_cid(slot, revision, timeout) != cid
                 or self.worker(timeout) != workers):
             raise OpError("Coach serving route or inventory changed")
@@ -1117,7 +1122,7 @@ class HostOps:
         return {"binding": approved, "web": web, "worker": worker, "digest": digest}
 
     @_host_operation
-    def adult_runtime_proof(self, slot, revision, timeout):
+    def adult_runtime_proof(self, slot, revision, candidate_worker, timeout):
         if self.coach_web is None:
             raise OpError("Coach pre-switch proof absent")
         approved, web = self.coach_web
@@ -1134,6 +1139,8 @@ class HostOps:
             "print(json.dumps({k:p[k] for k in "
             "('pid','start_ticks','revision','deletion_acl','pooled_utc')}))")
         worker = pair["worker"]
+        if (worker["container"], worker["started"]) != (candidate_worker.id, candidate_worker.started_at):
+            raise OpError("candidate Coach worker boot differs from the verified worker update")
         p = json.loads(self._docker(timeout, "exec", worker["container"], "python3", "-c", code))
         if (p.get("revision") != revision or p.get("deletion_acl") is not True
                 or p.get("pooled_utc") is not True
@@ -2331,7 +2338,7 @@ class Transaction:
                    self.previous_revision, self.target_slot, self.deploy_sha, True)
         self.recovery_web = self._verify_candidate(self._step_deadline("candidate_verify"))
         self._call(self._step_deadline("adult_admission"), "loaded adult runtime",
-                   self.ops.adult_runtime_proof, self.target_slot, self.deploy_sha)
+                   self.ops.adult_runtime_proof, self.target_slot, self.deploy_sha, self.recovery_worker)
         self._admit_before_switch()
         self._event("adult-reopen-ready", generation="retired", acl="accepted",
                     web_worker_pools="UTC", admission="still-closed")
@@ -2367,7 +2374,7 @@ class Transaction:
             raise StepFailed("candidate does not run the exact built image")
         if self.adult_transition and not self.admission_open_attempted:
             self._call(deadline, "closed adult candidate", self.ops.adult_candidate_closed,
-                       self.target_slot, self.deploy_sha, self.candidate_image_id)
+                       self.target_slot, self.deploy_sha, current)
         return current
 
     def _pre_switch(self):
@@ -2733,8 +2740,10 @@ class Transaction:
                 self.budget.deadline(steps["capability_activation"]))
         hk_deadline = self.budget.deadline(steps["housekeeping"])
 
+        reserve = COACH_FINAL_PROOF_RESERVE_SECONDS if status == EXIT_OK and self.adult_transition else 0
+
         def timeout_for():
-            return min(120, hk_deadline - self.clock())
+            return min(120, hk_deadline - reserve - self.clock())
 
         try:
             for note in self.ops.housekeeping(

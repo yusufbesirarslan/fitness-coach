@@ -51,14 +51,14 @@ def adult(monkeypatch, request):
             self._fail("open_readback")
             return "a" * 64
 
-    def runtime(self, slot, revision, timeout):
+    def runtime(self, slot, revision, candidate_worker, timeout):
         self._rec("adult_runtime_proof", timeout=timeout)
         assert not w.registration_open
         self._fail("acl")
         self._fail("web_utc")
         self._fail("worker_utc")
 
-    def candidate(self, slot, revision, image, timeout):
+    def candidate(self, slot, revision, approved, timeout):
         self._rec("adult_candidate_closed", timeout=timeout)
         assert not w.registration_open
         self._fail("eligibility")
