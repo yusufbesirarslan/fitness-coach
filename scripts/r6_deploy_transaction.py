@@ -98,6 +98,7 @@ import json
 import os
 import re
 import signal
+import secrets
 import stat
 import subprocess
 import sys
@@ -127,6 +128,7 @@ def _load_sibling(name):
 
 contract = _load_sibling("deploy_contract")
 repair = _load_sibling("r6_repair_handoff")
+coach = _load_sibling("r6_coach_attestation")
 
 # â”€â”€ Identity contract â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ROUTE_STATES = ("legacy", "blue", "green")
@@ -470,6 +472,8 @@ class HostOps:
         self.python = python or sys.executable
         self.environ = dict(os.environ if environ is None else environ)
         self.network = f"{main_project}_default"
+        self.coach_web = None
+        self.coach_pair = None
 
     # plumbing
     def _command(self, argv, timeout, env=None):
@@ -1037,32 +1041,113 @@ class HostOps:
         except (ValueError, TypeError) as exc:
             raise OpError("loaded adult web/ACL/pool proof missing") from exc
 
-    def adult_candidate_closed(self, slot, revision, timeout):
+    def _coach_container(self, cid, timeout):
+        return json.loads(self._docker(
+            timeout, "inspect", "--format",
+            "[{{json .Id}},{{json .Image}},{{json .State.StartedAt}},"
+            "{{json .State.Status}},{{json .State.Health.Status}},"
+            "{{json .RestartCount}},{{json .State.OOMKilled}}]", cid))
+
+    def _coach_actor(self, cid, role, revision, image, slot, timeout, *, approved=None):
+        try:
+            before = self._coach_container(cid, timeout)
+            # The protected archive supplies the verifier. Container-writable
+            # files cannot substitute the peer/lineage check.
+            client = Path(coach.__file__).read_text(encoding="utf-8")
+            proof = json.loads(self._docker(timeout, "exec", cid, "python3", "-I", "-c",
+                                            client, role, revision, secrets.token_hex(16)))
+            after = self._coach_container(cid, timeout)
+            if approved is None:
+                tree = self._ok(["git", "-C", str(self.deploy_dir), "rev-parse", "--verify",
+                                 f"{revision}^{{tree}}"], timeout, "Coach tree binding").strip()
+                approved = coach.binding(revision, tree, image, slot, proof["heads"])
+            actor = coach.bind_actor(proof, before, after, approved, role)
+            if not actor["container"].startswith(cid):
+                raise ValueError()
+            return approved, actor
+        except (KeyError, OSError, OpError, TypeError, ValueError):
+            raise OpError(f"loaded Coach {role} attestation unproven") from None
+
+    @_host_operation
+    def adult_candidate_closed(self, slot, revision, image, timeout):
         cid = self._adult_cid(slot, revision, timeout)
-        if self._adult_web_proof(cid, timeout).get("closed") is not True:
-            raise OpError("candidate registration latch missing or open")
+        bound, actor = self._coach_actor(cid, "web", revision, image, slot, timeout)
+        admission = self._adult_web_proof(cid, timeout)
+        if (admission.get("closed") is not True
+                or coach.boot_digest(admission["boot"]) != actor["boot"]
+                or any(admission.get(key) != actor[key] for key in ("pid", "start_ticks"))):
+            raise OpError("candidate registration and Coach proof do not identify the same closed boot")
+        observed = bound, actor
+        if self.coach_web is not None and observed != self.coach_web:
+            raise OpError("candidate Coach web boot changed")
+        self.coach_web = observed
+
+    @_host_operation
+    def coach_release_proof(self, approved, timeout):
+        """Read-only pair proof for a routed release and its later acceptance."""
+        try:
+            revision, tree, image, slot, heads = (
+                approved[key] for key in ("revision", "tree", "image", "slot", "heads"))
+            if approved != coach.binding(revision, tree, image, slot, heads):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise OpError("Coach release binding invalid") from None
+        actual_tree = self._ok(["git", "-C", str(self.deploy_dir), "rev-parse", "--verify",
+                                f"{revision}^{{tree}}"], timeout, "Coach tree binding").strip()
+        if revision != self.deploy_sha or tree != actual_tree:
+            raise OpError("Coach approved source tree unproven")
+        expected_route = Route(slot, approved["backend"])
+        if self.route_status(timeout) != expected_route:
+            raise OpError("Coach serving route unproven")
+        cid = self._adult_cid(slot, revision, timeout)
+        workers = self.worker(timeout)
+        if len(workers) != 1 or workers[0].app_revision != revision:
+            raise OpError("Coach worker inventory unproven")
+        _, web = self._coach_actor(cid, "web", revision, image, slot, timeout, approved=approved)
+        _, worker = self._coach_actor(workers[0].id, "worker", revision, image, slot, timeout,
+                                     approved=approved)
+        if (self.route_status(timeout) != expected_route
+                or self._adult_cid(slot, revision, timeout) != cid
+                or self.worker(timeout) != workers):
+            raise OpError("Coach serving route or inventory changed")
+        try:
+            digest = coach.fingerprint(approved, web, worker)
+        except ValueError:
+            raise OpError("Coach process pair unproven") from None
+        return {"binding": approved, "web": web, "worker": worker, "digest": digest}
 
     @_host_operation
     def adult_runtime_proof(self, slot, revision, timeout):
+        if self.coach_web is None:
+            raise OpError("Coach pre-switch proof absent")
+        approved, web = self.coach_web
         cid = self._adult_cid(slot, revision, timeout)
         if self._adult_web_proof(cid, timeout).get("closed") is not True:
             raise OpError("candidate registration is not closed")
-        workers = self.worker(timeout)
-        if len(workers) != 1 or workers[0].app_revision != revision:
-            raise OpError("candidate worker identity unproven")
-        # Receipt WRITTEN BY the real worker, never by this docker-exec.
+        pair = self.coach_release_proof(approved, timeout)
+        if pair["web"] != web:
+            raise OpError("candidate Coach web boot changed before registration")
+        # Existing pooled UTC and deletion ACL receipt from the real worker.
         code = (
             "import json,pathlib; "
             "p=json.loads(pathlib.Path('/tmp/axisai-r6-worker-ready.json').read_text()); "
-            "s=pathlib.Path('/proc',str(p['pid'])); "
-            "assert int(s.joinpath('stat').read_text().split(') ',1)[1].split()[19])==p['start_ticks']; "
-            "assert b'worker.py' in s.joinpath('cmdline').read_bytes(); "
-            "print(json.dumps(p))")
-        p = json.loads(self._docker(timeout, "exec", workers[0].id, "python3", "-c", code))
+            "print(json.dumps({k:p[k] for k in "
+            "('pid','start_ticks','revision','deletion_acl','pooled_utc')}))")
+        worker = pair["worker"]
+        p = json.loads(self._docker(timeout, "exec", worker["container"], "python3", "-c", code))
         if (p.get("revision") != revision or p.get("deletion_acl") is not True
-                or p.get("pooled_utc") is not True):
+                or p.get("pooled_utc") is not True
+                or any(p.get(key) != worker[key] for key in ("pid", "start_ticks"))):
             raise OpError("worker process ACL/pool proof missing")
+        self.coach_pair = pair
         return True
+
+    @_host_operation
+    def coach_release_complete(self, timeout):
+        if (self.coach_pair is None
+                or self.coach_release_proof(self.coach_pair["binding"], timeout) != self.coach_pair):
+            raise OpError("loaded Coach process pair changed")
+        return self.coach_pair["digest"]
 
     @_host_operation
     def registration_latch(self, slot, revision, action, timeout):
@@ -1089,8 +1174,10 @@ class HostOps:
             return
         if action != "open":
             raise OpError("unknown registration latch operation")
+        self.coach_release_complete(timeout)
         p = self._adult_web_proof(cid, timeout)
-        if p.get("closed") is not True:
+        if (p.get("closed") is not True
+                or coach.boot_digest(p["boot"]) != self.coach_pair["web"]["boot"]):
             raise OpError("registration opening requires a closed boot")
         receipt = json.dumps({"boot": p["boot"], "revision": revision})
         code = ("from pathlib import Path; p=Path(" + repr(path) + "); "
@@ -1099,6 +1186,7 @@ class HostOps:
         after = self._adult_web_proof(cid, timeout)
         if after.get("boot") != p["boot"] or after.get("closed") is not False:
             raise OpError("registration open readback unproven")
+        return self.coach_release_complete(timeout)
 
     def reload_generation(self, slot, timeout):
         self._reload_generation(slot, slot, timeout)
@@ -1426,9 +1514,9 @@ class Transaction:
             self._checkout()
             if self.adult_transition:
                 self.admission_open_attempted = True
-                self._call(self._step_deadline("adult_admission"), "registration open",
-                           self.ops.registration_latch, self.target_slot,
-                           self.deploy_sha, "open")
+                self.coach_digest = self._call(self._step_deadline("adult_admission"), "registration open",
+                                               self.ops.registration_latch, self.target_slot,
+                                               self.deploy_sha, "open")
                 self._event("adult-registration-open", revision=self.deploy_sha)
         except Exception as failure:  # noqa: BLE001 - any surprise rolls back
             self._event("release-failed", reason=f"{type(failure).__name__}: {failure}")
@@ -2279,7 +2367,7 @@ class Transaction:
             raise StepFailed("candidate does not run the exact built image")
         if self.adult_transition and not self.admission_open_attempted:
             self._call(deadline, "closed adult candidate", self.ops.adult_candidate_closed,
-                       self.target_slot, self.deploy_sha)
+                       self.target_slot, self.deploy_sha, self.candidate_image_id)
         return current
 
     def _pre_switch(self):
@@ -2655,6 +2743,13 @@ class Transaction:
                 self.log(f"housekeeping warning: {note}")
         except (OpError, OSError) as exc:
             self.log(f"housekeeping warning: {exc}")
+        if status == EXIT_OK and self.adult_transition:
+            digest = self._call(hk_deadline, "post-retirement loaded Coach pair",
+                                self.ops.coach_release_complete)
+            if not coach.DIGEST.fullmatch(digest or "") or digest != self.coach_digest:
+                raise StepFailed("final loaded Coach pair differs from the opened pair")
+            self._event("coach-containment-proven", digest=digest, version=coach.VERSION,
+                        web_flag="false", web_guard="false", worker_flag="false", worker_guard="false")
         if status == EXIT_OK:
             self._event("release-complete", route=self.target_slot,
                         revision=self.deploy_sha)

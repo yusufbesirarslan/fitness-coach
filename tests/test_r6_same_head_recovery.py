@@ -216,6 +216,7 @@ def test_next_normal_release_starts_from_actual_committed_slot(same_head, monkey
         assert (slot, revision, action) == (original, OTHER, 'open')
         assert same_head.head == OTHER and same_head.worker.image_id == IMG[OTHER]
         same_head.registration_open = True
+        return "a" * 64
 
     def prepare(self, revision, timeout):
         assert committed not in same_head.slots and same_head.worker is None
