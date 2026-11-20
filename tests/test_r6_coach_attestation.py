@@ -186,3 +186,66 @@ def test_outer_checker_refuses_saved_observation_and_modified_evidence():
     with pytest.raises(ValueError, match="DIGEST_INVALID"):
         acceptance.verify_observation({**report, "worker": {**worker, "pid": 2}},
                                       BOUND, digest, CHALLENGE, start, end)
+
+
+_FLAG_ABSENT = object()
+
+
+@pytest.mark.parametrize("value", [False, True, 0, 1, "", "0", None, _FLAG_ABSENT])
+def test_ordinary_coach_guard_preserves_existing_config_semantics(app, value):
+    from app.services.coach_plan_tools import executor
+
+    if value is _FLAG_ABSENT:
+        app.config.pop(executor.FLAG_KEY, None)
+        expected = False
+    else:
+        app.config[executor.FLAG_KEY] = value
+        expected = bool(value)
+    assert "r6_coach_containment" not in app.extensions
+    with app.app_context():
+        assert executor.plan_mutation_tools_enabled() is expected
+
+
+@pytest.mark.parametrize("role,env,value", [
+    ("web", "R6_REGISTRATION_ADMISSION", "closed"),
+    ("worker", "R6_RUNTIME_ADMISSION", "required"),
+])
+def test_protected_loaded_and_recreated_apps_always_deny_flag_drift(
+        role, env, value, monkeypatch):
+    from flask import Flask
+    from app import schema_safety
+    from app.services import r6_runtime_admission as admission
+    from app.services.coach_plan_tools import executor
+
+    monkeypatch.setenv(env, value)
+    monkeypatch.setattr(schema_safety, "verify_schema_ready", lambda app: HEADS)
+    monkeypatch.setattr(admission, "process_identity", lambda: {"pid": 7, "start_ticks": 42})
+    cache = None
+
+    def boot():
+        app = Flask("protected")
+        app.config.update(BUILD_REVISION=CAND, **{executor.FLAG_KEY: False})
+        admission.install(app)
+        return app
+
+    cache = boot()
+    arguments = {"cached_worker_app": lambda: cache, "worker_heads": HEADS} if role == "worker" else {}
+    _, observe = admission.loaded_coach_proof(cache, role, **arguments)
+    first = observe()
+    for drifted in (True, 1, "1", 0, "0", None, _FLAG_ABSENT):
+        if drifted is _FLAG_ABSENT:
+            cache.config.pop(executor.FLAG_KEY)
+        else:
+            cache.config[executor.FLAG_KEY] = drifted
+        with cache.app_context():
+            assert executor.plan_mutation_tools_enabled() is False
+        with pytest.raises(ValueError, match="CONTAINMENT_REQUIRED"):
+            observe()
+        with pytest.raises(RuntimeError, match="CONTAINMENT_REQUIRED"):
+            admission.loaded_coach_proof(cache, role, **arguments)
+
+    cache = boot()
+    _, observe_recreated = admission.loaded_coach_proof(cache, role, **arguments)
+    assert observe_recreated()["boot"] != first["boot"]
+    with cache.app_context():
+        assert executor.plan_mutation_tools_enabled() is False

@@ -320,13 +320,13 @@ def plan_mutation_tools_enabled():
     """Whether the plan-mutation tool surface is active for this request.
 
     Reads the canonical rollout flag through ``current_app.config``, the same
-    path used by the rollout registry. Only literal True can enable it.
-    Protected web slots and the protected worker additionally keep the guard
-    closed for the lifetime of the loaded application.
+    path used by the rollout registry. Protected R6 web and worker apps keep
+    the guard closed for the lifetime of the loaded application.
     """
     try:
-        return (current_app.config.get(FLAG_KEY) is True
-                and not current_app.extensions.get("r6_coach_containment", False))
+        if current_app.extensions.get("r6_coach_containment"):
+            return False
+        return bool(current_app.config.get(FLAG_KEY, False))
     except Exception:
         return False
 
