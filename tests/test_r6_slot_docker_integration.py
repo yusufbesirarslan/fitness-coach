@@ -632,7 +632,8 @@ def test_coach_proof_uses_live_gunicorn_and_cached_rq_on_the_same_schema(stack):
 
         # Replace only the Gunicorn child. The Docker identity stays put; the
         # attested application boot and its live /proc identity must change.
-        sh("docker", "exec", web_id, "kill", "-TERM", str(web["pid"]))
+        sh("docker", "exec", web_id, "python3", "-c",
+           "import os,signal,sys; os.kill(int(sys.argv[1]), signal.SIGTERM)", str(web["pid"]))
         deadline = time.monotonic() + 45
         while True:
             result = sh("docker", "exec", web_id, "python3", "-I",
