@@ -177,6 +177,54 @@ def stack(tmp_path_factory):
         sh("docker", "rmi", "-f", image, f"axisai-web:{OTHER_REV}", check=False)
 
 
+def test_image_fault_persists_across_docker_healthy_fresh_boots(stack, tmp_path):
+    deploy = stack["deploy"]
+    failed = "a" * 40
+    tag = f"axisai-web:{failed}"
+    source = (ROOT / "app/__init__.py").read_text(encoding="utf-8")
+    branch = '        if request.args.get("deep") == "1" and _deep_health_allowed():\n'
+    assert source.count(branch) == 1
+    fault = branch + '            return {"status": "error"}, 503\n'
+    (tmp_path / "fault.py").write_text(source.replace(branch, fault), encoding="utf-8")
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM {stack['image']}\n"
+        "USER root\n"
+        f"RUN chmod 0644 /app/BUILD_REVISION && echo {failed} >/app/BUILD_REVISION"
+        " && chmod 0444 /app/BUILD_REVISION\n"
+        "COPY --chown=appuser:appuser fault.py /app/app/__init__.py\n"
+        "USER appuser\n", encoding="utf-8")
+    sh("docker", "build", "-t", tag, str(tmp_path))
+    schema = schema_fingerprint()
+    boots = []
+    try:
+        for _ in range(2):
+            code, out = helper(deploy, "start", "--slot", "blue", "--revision", failed)
+            assert code == 0 and out["action"] == "started", out
+            initial = slot_container("blue")
+            wait_healthy(initial["Id"])
+            boot = inspect(initial["Id"])
+            assert boot["Image"] == inspect(tag)["Id"]
+            assert sh("docker", "exec", boot["Id"], "cat", "/app/BUILD_REVISION").stdout.strip() == failed
+            assert http("http://127.0.0.1:5001/health")[0] == 200
+            code, out = helper(deploy, "verify", "--slot", "blue", "--revision", failed)
+            assert code == 4 and "in-container deep health never proved" in out["detail"], out
+            boots.append((boot["Id"], boot["State"]["StartedAt"], boot["Image"]))
+            code, out = helper(deploy, "remove", "--slot", "blue", "--expected-revision", failed)
+            assert code == 0 and out["action"] == "removed", out
+        assert boots[0][0] != boots[1][0] and boots[0][1] != boots[1][1]
+        assert boots[0][2] == boots[1][2] and schema_fingerprint() == schema
+        code, out = helper(deploy, "start", "--slot", "blue", "--revision", stack["revision"])
+        assert code == 0 and out["action"] == "started", out
+        code, out = helper(deploy, "verify", "--slot", "blue", "--revision", stack["revision"])
+        assert code == 0 and out["deep_health_revision"] == stack["revision"], out
+        assert slot_container("blue")["Image"] != boots[0][2]
+        assert schema_fingerprint() == schema
+    finally:
+        for revision in (failed, stack["revision"]):
+            helper(deploy, "remove", "--slot", "blue", "--expected-revision", revision)
+        sh("docker", "rmi", tag, check=False)
+
+
 def test_two_slot_runtime_end_to_end(stack):
     rev, deploy, main = stack["revision"], stack["deploy"], stack["main"]
     redis_before = inspect("fitx-redis")

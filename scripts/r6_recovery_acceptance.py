@@ -38,6 +38,34 @@ class RuntimeProof:
     snapshot: str
 
 
+@dataclass(frozen=True)
+class RepairProof:
+    failed: str
+    failed_image: str
+    failed_snapshot: str
+    tree: str
+    image: str
+    receipt: str
+    run: str
+    stage_attempt: int
+    attempt: int
+
+    def event(self, candidate, snapshot):
+        if (not all(isinstance(s, str) and SHA.fullmatch(s) for s in (self.failed, self.tree))
+                or self.failed == candidate
+                or not all(isinstance(s, str) and IMAGE.fullmatch(s) for s in (self.image, self.failed_image))
+                or self.image == self.failed_image
+                or not re.fullmatch(rf'predeploy-{self.failed}-[0-9a-f]{{32}}', self.failed_snapshot)
+                or not re.fullmatch(r'[0-9a-f]{64}', self.receipt)
+                or not re.fullmatch(r'[1-9][0-9]*', self.run)
+                or type(self.stage_attempt) is not int or type(self.attempt) is not int
+                or not 0 < self.stage_attempt < self.attempt):
+            raise ValueError('R6_REPAIR_BINDING_INVALID')
+        return (f'revision={candidate} tree={self.tree} failed={self.failed} failed_image={self.failed_image} '
+                f'image={self.image} receipt={self.receipt} stage_attempt={self.stage_attempt} '
+                f'run={self.run} attempt={self.attempt} snapshot={snapshot}')
+
+
 def verify_identity(*, phase, candidate, tree, run_id, attempt, ci_id, main, actual_tree, run, job, ci):
     """Validate attempt-scoped GitHub objects before reading the deploy log."""
     if phase not in POST_PHASES:
@@ -103,12 +131,23 @@ def github_recovery(phase, binding, gh, repo, diff_hash):
             or diff_hash(file["filename"] for file in files) != binding.get("reviewed_diff")):
         raise ValueError("R6_RECOVERY_REVIEWED_DIFF_UNPROVEN")
     log = gh(f"{root}/actions/jobs/{job['id']}/logs", raw=True)
+    repair = None
+    if binding.get('transaction_mode') == 'repair-apply':
+        reviewed = binding.get('repair')
+        if not isinstance(reviewed, dict) or set(reviewed) != {
+            'failed', 'failed_image', 'failed_snapshot', 'image', 'receipt', 'stage_attempt',
+        }:
+            raise ValueError('R6_REPAIR_BINDING_INVALID')
+        repair = RepairProof(**reviewed, tree=tree, run=run_id, attempt=attempt)
+    elif binding.get('repair') is not None:
+        raise ValueError('R6_REPAIR_BINDING_INVALID')
     proof = parse_recovery_log(log, previous=previous, candidate=candidate,
-                               old_slot=binding.get("serving_slot"), db_heads=binding.get("db_heads"))
+                               old_slot=binding.get("serving_slot"), db_heads=binding.get("db_heads"),
+                               repair=repair)
     return job, proof
 
 
-def parse_recovery_log(log, *, previous, candidate, old_slot, db_heads):
+def parse_recovery_log(log, *, previous, candidate, old_slot, db_heads, repair=None):
     """Accept only the successful same-head sequence from the selected attempt."""
     if not (all(isinstance(sha, str) and SHA.fullmatch(sha) for sha in (previous, candidate))
             and previous != candidate
@@ -121,6 +160,8 @@ def parse_recovery_log(log, *, previous, candidate, old_slot, db_heads):
     detail = {match[1]: match[2] or "" for match in events}
     if FAILURE_EVENTS.intersection(names):
         raise ValueError("R6_RECOVERY_FAILURE_OR_RESIDUE")
+    if 'repair-staged' in names or ('repair-handoff' in names) != (repair is not None):
+        raise ValueError('R6_REPAIR_MODE_MISMATCH')
 
     preparation = [item for item in ("release-prepared", "release-prepare-retained") if item in names]
     routing = [item for item in ("route-switched", "route-already-candidate") if item in names]
@@ -129,6 +170,7 @@ def parse_recovery_log(log, *, previous, candidate, old_slot, db_heads):
     preparation, routing = preparation[0], routing[0]
     required = (
         "route-baseline", "recovery-baseline", "migration-delta", "image-proven", "same-head-schema-evidence",
+        *(("repair-handoff",) if repair is not None else ()),
         "old-registration-closed", preparation, "candidate-verified", routing, "post-switch-proven",
         "worker-updated", "adult-reopen-ready", "adult-registration-open", "release-committed",
         "same-head-runtime-proven", "release-complete",
@@ -169,7 +211,9 @@ def parse_recovery_log(log, *, previous, candidate, old_slot, db_heads):
                            rf"worker_started=({STARTED.pattern})", detail["same-head-runtime-proven"])
     if not runtime or runtime[1] == runtime[3]:
         raise ValueError("R6_RECOVERY_RUNTIME_LOG_UNPROVEN")
-    authorized = list(re.finditer(r"^\S+Z forward recovery authorized for this exact run attempt;[^\n]*$", log, re.M))
+    auth_pattern = (r"repair-apply authorized for this exact run attempt[ \t]*"
+                    if repair is not None else r"forward recovery authorized for this exact run attempt;[^\n]*")
+    authorized = list(re.finditer(rf"^\S+Z {auth_pattern}$", log, re.M))
     snapshots = list(re.finditer(rf"^\S+Z Recovery snapshot Available for candidate {candidate}: "
                                  rf"(predeploy-{candidate}-[0-9a-f]{{32}})[ \t]*$", log, re.M))
     verified = list(re.finditer(rf"^\S+Z deployment verified at {candidate}[ \t]*$", log, re.M))
@@ -177,6 +221,17 @@ def parse_recovery_log(log, *, previous, candidate, old_slot, db_heads):
             or not authorized[0].start() < snapshots[0].start() < positions[0]
             or verified[0].start() <= positions[-1]):
         raise ValueError("R6_RECOVERY_CONTROLLER_OR_SNAPSHOT_UNPROVEN")
+    if repair is not None:
+        try:
+            approved_event = repair.event(candidate, snapshots[0][1])
+        except (AttributeError, TypeError) as exc:
+            raise ValueError('R6_REPAIR_BINDING_INVALID') from exc
+        retained = list(re.finditer(rf'^\S+Z Retained failed-candidate snapshot Available: '
+                                    rf'{repair.failed_snapshot}[ \t]*$', log, re.M))
+        if (repair.failed == previous or repair.image != image or detail['repair-handoff'] != approved_event
+                or preparation != 'release-prepare-retained' or len(retained) != 1
+                or not authorized[0].start() < retained[0].start() < snapshots[0].start()):
+            raise ValueError('R6_REPAIR_AUTHORITY_OR_SNAPSHOT_UNPROVEN')
     return RuntimeProof(candidate, image, *runtime.groups(), snapshots[0][1])
 
 

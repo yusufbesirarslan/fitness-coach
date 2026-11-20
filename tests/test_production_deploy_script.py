@@ -588,8 +588,9 @@ def test_unrelated_holder_with_unlocked_exact_inode_fd_is_rejected(
 
 
 @pytest.mark.linux_lock
+@pytest.mark.parametrize("competing_mode", ["normal", "repair-stage", "repair-apply"])
 def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd(
-        bash_executable, host_fixture, request):
+        bash_executable, host_fixture, request, competing_mode):
     import stat
 
     assert request.config.getoption("--run-authoritative-linux-lock-tests")
@@ -634,6 +635,7 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd(
         environment.pop("BASH_ENV", None)
         environment["PATH"] = os.environ.get("PATH", "")
         environment["AXISAI_OUTER_LOCK_FD"] = "7"
+        environment["AXISAI_R6_TRANSACTION_MODE"] = competing_mode
         result = subprocess.run(
             fixture.command(bash_executable, "not-a-sha") + ["https://fitness.example/health"],
             text=True, capture_output=True, check=False, env=environment, timeout=30,
@@ -1193,19 +1195,22 @@ def test_unknown_transaction_mode_refuses_before_git_or_engine(bash_executable, 
     f = host_fixture()
     result = f.run(bash_executable, AXISAI_R6_TRANSACTION_MODE=mode)
     assert result.returncode == 64
-    assert "AXISAI_R6_TRANSACTION_MODE must be normal or forward-recovery" in result.stderr
+    assert "invalid AXISAI_R6_TRANSACTION_MODE" in result.stderr
     trace = f.trace_text()
     assert "git " not in trace and "docker " not in trace and "ENGINE_PROOF=" not in trace
 
 
-def test_forward_recovery_mode_reaches_the_engine_verbatim(bash_executable, host_fixture):
+@pytest.mark.parametrize("mode", ["forward-recovery", "repair-stage", "repair-apply"])
+def test_protected_recovery_modes_reach_the_engine_verbatim(bash_executable, host_fixture, mode):
     import json
     f = host_fixture()
-    result = f.run(bash_executable, AXISAI_R6_TRANSACTION_MODE="forward-recovery")
+    result = f.run(bash_executable, AXISAI_R6_TRANSACTION_MODE=mode)
     assert result.returncode == 0, result.stderr
     (proof,) = [line for line in f.trace_text().splitlines() if line.startswith("ENGINE_PROOF=")]
-    assert json.loads(proof.split("=", 1)[1])["mode"] == "forward-recovery"
-    assert "mode forward-recovery" in result.stderr
+    assert json.loads(proof.split("=", 1)[1])["mode"] == mode
+    assert f"mode {mode}" in result.stderr
+    assert ("deployment verified at" in result.stderr) == (mode != "repair-stage")
+    assert ("repair staging verified at" in result.stderr) == (mode == "repair-stage")
     assert _run(["git", "-C", str(f.deploy_dir), "rev-parse", "HEAD"]) == f.prev_commit
 
 

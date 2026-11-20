@@ -5,7 +5,7 @@
 @@ -47 +48,2 @@
 -PROBE_SHA = 'f2e594ed2494a77b6f114dd1ba01ac94ba6e9310125f60048ae41f1730fd5adf'
 +PROBE_SHA = '449c1190539408601619686ce47fb51046c0a9edc8e9e26fc0db18fb99288a80'
-+RECOVERY_PROFILE_SHA = '6663b9e919001460d31c8c2dbfca510923585aeafe470a9331d581ab8ae19a73'
++RECOVERY_PROFILE_SHA = 'cd78b732af7f1fefb28cd32f1328d227afd4a41aac2c41d9e87d97cf3013cb85'
 @@ -51,10 +53,4 @@
 -    # R1 (Coach plan-mutation runtime containment): draft PR #543 reverts #534 + #537 on main 744ca3b2 in ONE commit.
 -    # Stage A (now): content is pinned by TREE; the main SHA / CI run / deploy run exist only after the founder merges
@@ -20,7 +20,7 @@
 +    # The reviewed draft tree and diff are supplied after review. Stage B also needs
 +    # the exact merged main SHA and its protected deploy and main-push CI IDs.
 +    candidate=None, run=None, ci_run=None, candidate_tree=None,
-+    transaction_mode='normal', recovery_attempt=None,
++    transaction_mode='normal', recovery_attempt=None, repair=None,
 @@ -63 +59 @@
 -    reviewed_diff=(69, '6cbba34be2891212860670b44e96257756b22e36439e132381e19943db54b1b1'),  # R1's 66 + 3 R6-R1-29 files
 +    reviewed_diff=None,
@@ -39,8 +39,8 @@
 +def github_post(phase='post'):
 @@ -241,0 +248,13 @@
 +    mode = B.get('transaction_mode', 'normal')
-+    need(mode in ('normal', 'forward-recovery'), 'INVALID_TRANSACTION_MODE')
-+    if mode == 'forward-recovery':
++    need(mode in ('normal', 'forward-recovery', 'repair-apply'), 'INVALID_TRANSACTION_MODE')
++    if mode in ('forward-recovery', 'repair-apply'):
 +        profile = load_recovery_profile()
 +        try:
 +            job, proof = profile.github_recovery(phase, B, gh, REPO, diff_hash)

@@ -173,10 +173,10 @@ if [[ -z "$PUBLIC_HEALTH_URL" ]]; then
   echo "PUBLIC_HEALTH_URL is required for the post-switch proof" >&2
   exit 64
 fi
-if [[ "$TRANSACTION_MODE" != "normal" && "$TRANSACTION_MODE" != "forward-recovery" ]]; then
-  echo "AXISAI_R6_TRANSACTION_MODE must be normal or forward-recovery" >&2
-  exit 64
-fi
+case "$TRANSACTION_MODE" in
+  normal|forward-recovery|repair-stage|repair-apply) ;;
+  *) echo "invalid AXISAI_R6_TRANSACTION_MODE" >&2; exit 64 ;;
+esac
 
 if ((HOST_ROOT_BOOTSTRAP_SECONDS + HOST_LOCK_ACQUISITION_SECONDS +
       HOST_AUTHORITY_AND_STALE_PROOF_SECONDS + HOST_CLOCK_SETUP_SECONDS +
@@ -306,4 +306,8 @@ run_external python3 -I -B "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" run \
   --public-health-url "$PUBLIC_HEALTH_URL" \
   --transaction-epoch "$TRANSACTION_EPOCH" \
   --mode "$TRANSACTION_MODE"
-echo "deployment verified at $DEPLOY_SHA" >&2
+if [[ "$TRANSACTION_MODE" == "repair-stage" ]]; then
+  echo "repair staging verified at $DEPLOY_SHA" >&2
+else
+  echo "deployment verified at $DEPLOY_SHA" >&2
+fi

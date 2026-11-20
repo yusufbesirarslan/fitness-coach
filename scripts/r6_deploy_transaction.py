@@ -126,6 +126,7 @@ def _load_sibling(name):
 
 
 contract = _load_sibling("deploy_contract")
+repair = _load_sibling("r6_repair_handoff")
 
 # â”€â”€ Identity contract â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 ROUTE_STATES = ("legacy", "blue", "green")
@@ -187,7 +188,7 @@ _FENCE_STATES = {"verified", "absent", "invalid"}
 
 # R6-R1-28 forward recovery. The mode is never inferred: the protected
 # controller passes it only for an exact run-attempt authorization.
-MODES = ("normal", "forward-recovery")
+MODES = ("normal", "forward-recovery", *repair.MODES)
 SCHEMA_HEADS_PREFIX = "schema-heads: "
 SCHEMA_HEADS_SERVICE = "schema-heads"
 SAME_HEAD_RECEIPT = "axisai-r6-same-head.json"
@@ -507,32 +508,40 @@ class HostOps:
             raise OSError("unsafe Git metadata directory")
         return directory / SAME_HEAD_RECEIPT
 
-    def read_same_head_receipt(self, timeout):
-        try:
-            path = self._receipt_path(timeout)
-        except OSError as exc:
-            raise OpError("same-head receipt directory unavailable") from exc
+    def _read_receipt(self, path):
         try:
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             with os.fdopen(fd, "rb") as source:
                 metadata = os.fstat(source.fileno())
                 if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid()
                         or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1
-                        or metadata.st_size > 1024):
+                        or metadata.st_size > 4096):
                     raise ValueError("unsafe receipt metadata")
-                return SameHeadReceipt.parse(json.loads(source.read(1025)))
+                raw = source.read(4097)
+                payload = json.loads(raw)
+                if isinstance(payload, dict) and "repair_handoff_v1" in payload:
+                    return repair.RepairReceipt.parse(payload, SameHeadReceipt.parse)
+                if len(raw) > 1024:
+                    raise ValueError("oversized same-head receipt")
+                return SameHeadReceipt.parse(payload)
         except FileNotFoundError:
             return None
         except (OSError, ValueError, TypeError) as exc:
             raise OpError("same-head receipt unreadable or invalid") from exc
 
-    def write_same_head_receipt(self, record, timeout):
+    def read_same_head_receipt(self, timeout):
+        try:
+            return self._read_receipt(self._receipt_path(timeout))
+        except OSError as exc:
+            raise OpError("same-head receipt directory unavailable") from exc
+
+    def _write_receipt(self, path, record):
         temporary = None
         try:
-            path = self._receipt_path(timeout)
             with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
                 temporary = Path(stream.name)
-                json.dump(asdict(record), stream)
+                payload = record.payload() if isinstance(record, repair.RepairReceipt) else asdict(record)
+                json.dump(payload, stream)
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, path)
@@ -546,6 +555,37 @@ class HostOps:
         finally:
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
+
+    def write_same_head_receipt(self, record, timeout):
+        try:
+            self._write_receipt(self._receipt_path(timeout), record)
+        except OSError as exc:
+            raise OpError("same-head receipt directory unavailable") from exc
+
+    def archive_repair_receipt(self, record, timeout):
+        path = self._receipt_path(timeout).with_name(f"axisai-r6-repair-{record.stage.revision}.json")
+        archived = self._read_receipt(path)
+        if archived is None:
+            self._write_receipt(path, record)
+        elif archived != record:
+            raise OpError("existing repair archive differs from the committed receipt")
+
+    @_host_operation
+    def repair_source_identity(self, stage, previous, timeout):
+        """All source objects are exact Git objects obtained by the protected wrapper."""
+        def git(*args):
+            return self._ok(["git", "-C", str(self.deploy_dir), *args], timeout,
+                            "repair source identity").strip()
+
+        git("merge-base", "--is-ancestor", previous, stage.failed)
+        git("merge-base", "--is-ancestor", stage.failed, stage.revision)
+        if (git("rev-parse", "--verify", f"{stage.failed}^{{tree}}") != stage.failed_tree
+                or git("rev-parse", "--verify", f"{stage.revision}^{{tree}}") != stage.tree):
+            raise OpError("repair tree differs from the authorized source")
+        trees = {git("rev-parse", "--verify", f"{rev}:migrations")
+                 for rev in (previous, stage.failed, stage.revision)}
+        if len(trees) != 1 or not _SHA.fullmatch(next(iter(trees))):
+            raise OpError("repair requires identical migration trees")
 
     def use_recovery_previous(self, previous, timeout):
         self._ok(["git", "-C", str(self.deploy_dir), "merge-base", "--is-ancestor",
@@ -1061,8 +1101,14 @@ class HostOps:
             raise OpError("registration open readback unproven")
 
     def reload_generation(self, slot, timeout):
+        self._reload_generation(slot, slot, timeout)
+
+    def reload_repair_generation(self, slot, allowed_slot, timeout):
+        self._reload_generation(slot, allowed_slot, timeout)
+
+    def _reload_generation(self, slot, candidate, timeout):
         self._ok(["sudo", "-n", "/usr/bin/python3", "-I",
-            str(self.context / "scripts/r6_ingress_admission.py"), slot, slot, "reload"],
+            str(self.context / "scripts/r6_ingress_admission.py"), slot, candidate, "reload"],
             timeout, "unchanged route generation barrier")
 
     # completion capability (PRIV-K6 rollback gate Layer B)
@@ -1248,11 +1294,16 @@ class Transaction:
                  clock=time.monotonic, sleep=time.sleep, log=None, budget=None,
                  drain_max_seconds=contract.OLD_BACKEND_DRAIN_MAX_SECONDS,
                  drain_poll_seconds=contract.OLD_BACKEND_DRAIN_POLL_SECONDS,
-                 mode="normal"):
+                 mode="normal", repair_authorization="", repair_snapshot=""):
         if mode not in MODES:
             raise ValueError(f"unknown transaction mode {mode!r}")
         self.ops = ops
-        self.forward_recovery = mode == "forward-recovery"
+        self.mode = mode
+        self.forward_recovery = mode != "normal"
+        self.repair_authorization = repair_authorization
+        self.repair_snapshot = repair_snapshot
+        self.repair_record = None
+        self.repair_binding = None
         self.deploy_sha = deploy_sha
         self.previous_commit = previous_commit
         self.public_health_url = public_health_url
@@ -1341,11 +1392,14 @@ class Transaction:
             self._build_and_prove_image()
             admission = self._step_deadline("capability_admission")
             if self.forward_recovery:
-                if self.same_head is not None:
-                    self._same_head_schema_gate(admission)
+                if self.same_head is not None or self.mode == "repair-stage":
+                    heads = self._same_head_schema_gate(admission)
                 else:
                     self._recovery_schema_gate(admission)
             self._admit_capability(admission)
+            if self.mode in repair.MODES:
+                if self._repair_admission(admission, heads):
+                    return EXIT_OK
             if self.adult_transition:
                 if (not self.forward_recovery and not self.delta
                         and self.previous_route in ("blue", "green")
@@ -1411,6 +1465,16 @@ class Transaction:
         deadline = self._step_deadline("baseline")
         self.previous_proven = False
         record = self._call(deadline, "same-head receipt", self.ops.read_same_head_receipt)
+        if self.mode in repair.MODES:
+            self._load_repair_receipt(record, deadline)
+            return
+        if self.repair_authorization or self.repair_snapshot:
+            raise StepFailed("repair authorization is invalid outside a repair mode")
+        if isinstance(record, repair.RepairReceipt):
+            if not record.committed:
+                raise StepFailed("pending repair handoff requires separately authorized exact repair")
+            self._call(deadline, "archive finalized repair", self.ops.archive_repair_receipt, record)
+            record = self._repair_candidate(record)
         if record is not None and not record.committed:
             admissible_checkouts = (record.previous, record.candidate) if record.prepared else (
                 record.previous,)
@@ -1429,8 +1493,136 @@ class Transaction:
             self.previous_proven = not self.forward_recovery
 
     def _save_same_head_receipt(self, record, deadline):
-        self._call(deadline, "same-head receipt", self.ops.write_same_head_receipt, record)
+        durable = (replace(self.repair_record, committed=record.committed)
+                   if self.repair_record is not None else record)
+        self._call(deadline, "same-head receipt", self.ops.write_same_head_receipt, durable)
         self.same_head = record
+        if self.repair_record is not None:
+            self.repair_record = durable
+
+    @staticmethod
+    def _repair_candidate(record):
+        original = SameHeadReceipt.parse(record.original)
+        return SameHeadReceipt(original.previous, record.stage.revision, original.old_slot,
+                               record.image, prepared=True, committed=record.committed)
+
+    def _load_repair_receipt(self, record, deadline):
+        mode, binding = repair.parse_authorization(self.repair_authorization)
+        if (mode != self.mode or binding.revision != self.deploy_sha
+                or not repair.snapshot_for(self.repair_snapshot, self.deploy_sha)):
+            raise StepFailed("repair invocation is not exact or snapshotted")
+        self.repair_binding = binding
+        if self.mode == "repair-stage":
+            if (not isinstance(record, SameHeadReceipt) or not record.prepared or record.committed
+                    or record.candidate != binding.failed or record.previous == self.deploy_sha
+                    or repair.fingerprint(asdict(record)) != binding.original_receipt):
+                raise StepFailed("repair staging requires the exact pending prepared incident")
+            if self.checkout_baseline not in (record.previous, record.candidate):
+                raise StepFailed("repair staging checkout is outside the incident")
+            self.repair_original = record
+            stage = binding
+        else:
+            if not isinstance(record, repair.RepairReceipt):
+                raise StepFailed("repair apply requires a durable staged image")
+            record.claim(binding, self.repair_snapshot)
+            stage = record.stage
+            self.repair_original = SameHeadReceipt.parse(record.original)
+            if self.checkout_baseline not in (self.repair_original.previous, stage.failed, stage.revision):
+                raise StepFailed("repair apply checkout is outside the incident")
+            if not record.last_apply and self.checkout_baseline == stage.revision:
+                raise StepFailed("unstaged repair checkout is unreachable before first apply")
+            self.repair_record = record
+            self.same_head = self._repair_candidate(record)
+        previous = self.repair_original.previous
+        self._call(deadline, "repair source", self.ops.repair_source_identity, stage, previous)
+        self._call(deadline, "repair previous revision", self.ops.use_recovery_previous, previous)
+        self.previous_commit = previous
+
+    def _repair_requires_empty_route(self):
+        return self.mode == "repair-stage" or (self.repair_record is not None
+                                                and not self.repair_record.last_apply)
+
+    def _repair_empty_route(self, deadline):
+        old = self.repair_original.old_slot
+        route = self._call(deadline, "repair dark route", self.ops.route_status)
+        if route != Route(old, ROUTE_BACKENDS[old]):
+            raise StepFailed("repair requires canonical route to the empty old slot")
+        if (self._call(deadline, "legacy web", self.ops.main_web)
+                or self._call(deadline, "repair worker absence", self.ops.worker)):
+            raise StepFailed("repair requires quarantine of all former writers")
+        for slot in (old, CANDIDATE_SLOT[old]):
+            if (self._call(deadline, "repair slot absence", self.ops.slot_inspect, slot)
+                    or self._call(deadline, "repair request absence", self.ops.established_connections,
+                                  ROUTE_BACKENDS[slot])):
+                raise StepFailed("repair requires both slots and request sockets to be empty")
+        self._call(deadline, "empty application listeners", self.ops.ingress_snapshot, old, "empty")
+
+    def _repair_admission(self, deadline, heads):
+        stage = self.repair_binding if self.mode == "repair-stage" else self.repair_record.stage
+        if self._call(deadline, "failed migrator absence", self.ops.container,
+                      release_prepare_container_name(stage.failed)) is not None:
+            raise StepFailed("failed candidate preparation container still exists")
+        floor = self._read_floor(deadline)
+        if (CAPABILITY not in self.candidate_capabilities or floor is None
+                or floor["fence"] != "verified"):
+            raise StepFailed("repair cannot reuse unverified preparation or completion fence")
+        if self._repair_requires_empty_route():
+            self._repair_empty_route(deadline)
+        if self.mode == "repair-stage":
+            if self.candidate_image_id == self.repair_original.image:
+                raise StepFailed("repair must have a distinct immutable image")
+            # Receipt still points to the failed immutable ID even after the
+            # regular release tags are pruned by a future normal release.
+            failed = self.repair_original
+            evidence_tag = f"axisai-incident-evidence:{failed.candidate}-{failed.image[-64:]}"
+            self._call(deadline, "pin failed incident image", self.ops.tag_image, failed.image, evidence_tag)
+            if (self._call(deadline, "failed image pin", self.ops.image_id, evidence_tag) != failed.image
+                    or self._call(deadline, "failed image revision", self.ops.image_baked_revision,
+                                  evidence_tag) != failed.candidate):
+                raise StepFailed("failed incident image could not be preserved")
+            record = repair.RepairReceipt(asdict(self.repair_original), self.repair_authorization,
+                                          self.repair_snapshot, self.candidate_image_id, tuple(sorted(heads)))
+            self._call(deadline, "stage durable repair", self.ops.write_same_head_receipt, record)
+            self._event("repair-staged", revision=self.deploy_sha, tree=stage.tree,
+                        image=record.image, receipt=record.staged_identity, snapshot=self.repair_snapshot)
+            return True
+        record = self.repair_record
+        if tuple(sorted(heads)) != record.heads:
+            raise StepFailed("live schema heads differ from the durable repair stage")
+        # Starting on the empty old route must never expose a repair to an
+        # nginx generation that still forwards to the quarantined slot.
+        retained = self._slot_container(self.target_slot, self._step_deadline("baseline"))
+        allowed_slot = self.target_slot if retained else "empty"
+        if self.already_switched:
+            if retained is None:
+                raise StepFailed("repair cannot recreate a missing routed candidate")
+            self._call(self._step_deadline("baseline"), "routed repair ingress",
+                       self.ops.ingress_snapshot, self.target_slot, allowed_slot)
+        else:
+            old = self.repair_original.old_slot
+            generation_deadline = self._step_deadline("generation_retirement")
+            before = self._call(generation_deadline, "pre-repair ingress",
+                                self.ops.ingress_snapshot, old, allowed_slot)
+            # A retained candidate on a previously claimed apply may already
+            # listen on its loopback port. Never open its latch here.
+            self._call(generation_deadline, "repair route generation reload",
+                       self.ops.reload_repair_generation, old, allowed_slot)
+            self._retire_generation(before, old, allowed_slot, generation_deadline)
+            if self._repair_requires_empty_route():
+                self._repair_empty_route(generation_deadline)
+            elif self._call(generation_deadline, "repair route read-back", self.ops.route_status) != Route(
+                    old, ROUTE_BACKENDS[old]):
+                raise StepFailed("repair dark route changed during generation retirement")
+        attempt = record.claim(self.repair_binding, self.repair_snapshot)
+        record = replace(record, last_apply=attempt, last_snapshot=self.repair_snapshot)
+        self._call(self._step_deadline("adult_admission"), "claim durable repair apply",
+                   self.ops.write_same_head_receipt, record)
+        self.repair_record = record
+        self._event("repair-handoff", revision=self.deploy_sha, tree=stage.tree, failed=stage.failed,
+                    failed_image=self.repair_original.image, image=record.image,
+                    receipt=record.staged_identity, stage_attempt=stage.attempt,
+                    run=stage.run, attempt=attempt, snapshot=self.repair_snapshot)
+        return False
 
     def _baseline(self):
         deadline = self._step_deadline("baseline")
@@ -1455,7 +1647,13 @@ class Transaction:
             raise StepFailed("checkout HEAD moved since the host preflight")
 
         if self.forward_recovery:
+            if self._repair_requires_empty_route():
+                self._repair_empty_route(deadline)
             self._recovery_baseline(route, deadline)
+            if self.mode == "repair-apply" and (
+                    self.baseline_worker_revision not in (None, self.deploy_sha)
+                    or self._slot_container(self.repair_original.old_slot, deadline) is not None):
+                raise StepFailed("repair never admits a surviving previous writer")
             return
 
         legacy = self._call(deadline, "legacy web", self.ops.main_web)
@@ -1701,6 +1899,7 @@ class Transaction:
         if heads is None:
             raise StepFailed("same-head recovery requires the exact adult database head")
         self._event("same-head-schema-evidence", current=",".join(sorted(heads)))
+        return heads
 
     def _clear_stale_candidate(self, deadline):
         """Resume what an earlier attempt left in the candidate slot. A running
@@ -2015,16 +2214,15 @@ class Transaction:
         self._event("old-registration-closed", old=self.previous_commit,
                     inflight="terminated-with-old-processes", old_port="never-reused")
 
-    def _adult_reopen_ready(self):
-        deadline = self._step_deadline("generation_retirement")
-        old_workers = {tuple(x) for x in self.ingress_before["workers"]}
+    def _retire_generation(self, before, slot, allowed_slot, deadline):
+        old_workers = {tuple(x) for x in before["workers"]}
         stable_workers = None
         while True:
             current = self._call(deadline, "loaded generation",
-                self.ops.ingress_snapshot, self.target_slot, self.target_slot)
-            if current["master"] != self.ingress_before["master"]:
+                self.ops.ingress_snapshot, slot, allowed_slot)
+            if current["master"] != before["master"]:
                 raise StepFailed("nginx master changed during adult cutover")
-            if current["configuration"] != self.ingress_before["configuration"]:
+            if current["configuration"] != before["configuration"]:
                 raise StepFailed("nginx configuration changed beyond canonical route")
             workers = {tuple(x) for x in current["workers"]}
             if not old_workers.intersection(workers):
@@ -2036,6 +2234,10 @@ class Transaction:
             if self.clock() + 2 >= deadline:
                 raise StepFailed("old nginx generation retirement unproven at 150s")
             self.sleep(2)
+
+    def _adult_reopen_ready(self):
+        self._retire_generation(self.ingress_before, self.target_slot, self.target_slot,
+                                self._step_deadline("generation_retirement"))
         self._call(self._step_deadline("adult_admission"), "isolated adult web inventory",
                    self.ops.adult_web_inventory, self.previous_route,
                    self.previous_revision, self.target_slot, self.deploy_sha, True)
@@ -2049,11 +2251,16 @@ class Transaction:
     def _start_candidate(self):
         self.candidate_started = True
         deadline = self._step_deadline("candidate_start")
-        if self.forward_recovery:
-            self._clear_stale_candidate(deadline)
-        self._call(deadline, "candidate start",
-                   self.ops.slot_start, self.target_slot, self.deploy_sha)
-        self._verify_candidate(self._step_deadline("candidate_verify"))
+        if self.mode == "repair-apply" and self.already_switched:
+            # The earlier apply switched only after verifying an unrouted
+            # boot. A new boot cannot be started behind a live route.
+            self._verify_candidate(self._step_deadline("candidate_verify"))
+        else:
+            if self.forward_recovery:
+                self._clear_stale_candidate(deadline)
+            self._call(deadline, "candidate start",
+                       self.ops.slot_start, self.target_slot, self.deploy_sha)
+            self._verify_candidate(self._step_deadline("candidate_verify"))
         self._event("candidate-verified", slot=self.target_slot, eligibility="enforced")
 
     def _verify_candidate(self, deadline):
@@ -2541,7 +2748,7 @@ def main(argv=None, environ=None):
         if not re.fullmatch(r"[0-9]{1,15}", args.transaction_epoch):
             raise ValueError("transaction epoch must be a monotonic second count")
         if args.mode not in MODES:
-            raise ValueError("mode must be normal or forward-recovery")
+            raise ValueError("invalid transaction mode")
         epoch = int(args.transaction_epoch)
     except ValueError as exc:
         print(f"r6-deploy: invalid invocation: {exc}", file=sys.stderr)
@@ -2563,7 +2770,9 @@ def main(argv=None, environ=None):
                               previous_commit=args.previous_commit,
                               public_health_url=args.public_health_url,
                               budget=Budget(time.monotonic, forward_cutoff),
-                              mode=args.mode)
+                              mode=args.mode,
+                              repair_authorization=environ.get("AXISAI_R6_REPAIR_AUTHORIZATION", ""),
+                              repair_snapshot=environ.get("AXISAI_R6_REPAIR_SNAPSHOT", ""))
     return transaction.run()
 
 
