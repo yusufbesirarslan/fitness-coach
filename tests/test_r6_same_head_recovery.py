@@ -84,6 +84,11 @@ def test_preclosure_failure_preserves_serving_pair_and_has_no_receipt(same_head)
     assert same_head.slots == {'blue': old_web} and same_head.worker is old_worker
     assert same_head.same_head_receipt is None
     assert 'release_prepare' not in names(same_head)
+    same_head.faults.pop('direct_origin')
+    same_head.calls.clear()
+    code, transaction = run(same_head)
+    assert code == tx.EXIT_OK
+    assert_recovered(same_head, transaction)
 
 
 def test_foreign_stopped_target_refuses_before_arming_receipt(same_head):
@@ -140,6 +145,94 @@ def test_postcommit_floor_failure_keeps_pair_and_refuses_same_release(same_head)
         assert same_head.head == CAND and same_head.registration_open
         assert 'registration_latch' not in names(same_head)
         assert 'checkout_reset' not in names(same_head)
+
+
+@pytest.mark.parametrize('fault', ['release_prepare', 'boot', 'eligibility', 'acl',
+                                   'worker_unhealthy', 'open_readback', 'buffered'])
+def test_persistent_fault_contains_each_retry_and_keeps_pending_identity(same_head, fault):
+    interrupt(same_head, fault)
+    record = same_head.same_head_receipt
+    same_head.faults[fault] = True
+    for _ in range(2):
+        same_head.calls.clear()
+        code, transaction = run(same_head, previous_commit=same_head.head, mode='forward-recovery')
+        assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+        assert same_head.same_head_receipt == record
+        assert 'build_image' not in names(same_head)
+        assert not {'release-committed', 'same-head-runtime-proven'} & dict(transaction.events).keys()
+        assert_no_old_recovery(same_head, record.old_slot)
+
+    same_head.calls.clear()
+    code, _ = run(same_head, previous_commit=same_head.head, deploy_sha=OTHER, mode='forward-recovery')
+    assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+    assert same_head.same_head_receipt == record
+    assert not {'slot_start', 'slot_remove', 'worker_up', 'release_prepare'} & set(names(same_head))
+    same_head.faults.pop(fault)
+    same_head.calls.clear()
+    code, transaction = run(same_head, previous_commit=same_head.head, mode='forward-recovery')
+    assert code == tx.EXIT_OK
+    assert_recovered(same_head, transaction)
+
+
+def test_docker_healthy_routed_candidate_with_bad_deep_health_is_preserved(same_head):
+    interrupt(same_head, 'acl')
+    web = same_head.serving_box()
+    web.deep_ok = False
+    assert web.health == 'healthy'
+    for _ in range(2):
+        same_head.calls.clear()
+        code, _ = run(same_head, previous_commit=same_head.head, mode='forward-recovery')
+        assert code == tx.EXIT_ROLLBACK_INCOMPLETE
+        assert same_head.serving_box() is web and not same_head.registration_open
+        assert ('slot_remove', same_head.route, CAND) not in same_head.calls
+        assert not same_head.same_head_receipt.committed
+
+
+@pytest.mark.parametrize('adult', ['blue', 'green'], indirect=True)
+@pytest.mark.parametrize('after', ['recovered', 'committed-residue'])
+def test_next_normal_release_starts_from_actual_committed_slot(same_head, monkeypatch, after):
+    original = same_head.route
+    if after == 'recovered':
+        interrupt(same_head, 'acl')
+        code, _ = run(same_head, mode='forward-recovery')
+        assert code == tx.EXIT_OK
+    else:
+        same_head.floor.update(floor='absent', claims_present=False, raised_by_revision=None)
+        same_head.faults['floor_raise'] = True
+        assert run(same_head)[0] == tx.EXIT_COMMITTED_RESIDUE
+        same_head.faults.pop('floor_raise')
+    committed = same_head.route
+    prior = same_head.same_head_receipt
+    assert committed != original and prior.committed
+    assert same_head.registration_open and same_head.head == CAND
+    same_head.manifests[IMG[OTHER]] = same_head.manifests[IMG[CAND]]
+
+    def ingress(self, route, candidate, timeout):
+        assert route == same_head.route
+        return {'configuration': 'd' * 64, 'master': [1, 10],
+                'workers': [[3, 30] if route == original else [2, 20]]}
+
+    def latch(self, slot, revision, action, timeout):
+        assert (slot, revision, action) == (original, OTHER, 'open')
+        assert same_head.head == OTHER and same_head.worker.image_id == IMG[OTHER]
+        same_head.registration_open = True
+
+    def prepare(self, revision, timeout):
+        assert committed not in same_head.slots and same_head.worker is None
+        same_head.registration_open = False
+        assert revision == OTHER
+        self._rec('release_prepare', revision, timeout=timeout)
+
+    monkeypatch.setattr(FakeOps, 'ingress_snapshot', ingress)
+    monkeypatch.setattr(FakeOps, 'registration_latch', latch)
+    monkeypatch.setattr(FakeOps, 'release_prepare', prepare)
+    same_head.calls.clear()
+    code, transaction = run(same_head, previous_commit=CAND, deploy_sha=OTHER)
+    assert code == tx.EXIT_OK
+    assert same_head.registration_open and same_head.head == OTHER
+    assert same_head.route == original and committed not in same_head.slots
+    assert same_head.same_head_receipt == tx.SameHeadReceipt(CAND, OTHER, committed, IMG[OTHER], True, True)
+    assert 'recovery-baseline' not in dict(transaction.events)
 
 
 @pytest.mark.parametrize('reason', ['untracked', 'wrong-candidate', 'wrong-image', 'wrong-head',

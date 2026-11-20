@@ -96,7 +96,7 @@ def _set_state(monkeypatch, state, trees):
         _dispose(tool)
 
 
-def _schema_heads(monkeypatch, statements=None):
+def _schema_heads(monkeypatch, statements=None, *, require_at_head=False):
     """The real CLI, as the one-off container runs it (FITX_SKIP_DB_INIT=1)."""
     import json
     tool = _boot_tool(monkeypatch)
@@ -107,7 +107,8 @@ def _schema_heads(monkeypatch, statements=None):
     if statements is not None:
         sa.event.listen(sa.engine.Engine, "before_cursor_execute", record)
     try:
-        result = tool.test_cli_runner().invoke(args=["schema-heads"])
+        args = ["schema-heads", "--require-at-head"] if require_at_head else ["schema-heads"]
+        result = tool.test_cli_runner().invoke(args=args)
     finally:
         if statements is not None:
             sa.event.remove(sa.engine.Engine, "before_cursor_execute", record)
@@ -161,6 +162,22 @@ def test_schema_heads_reports_a_missing_version_table_as_such(pg_url, monkeypatc
     code, payload = _schema_heads(monkeypatch)
     assert code == 0 and payload == {"result": "ok", "has_table": False, "current": []}
     assert tx.parse_schema_heads(payload) is None
+
+
+@pytest.mark.parametrize("state,expected", [("migrated", 0), ("midway", 1), ("foreign", 1), ("missing", 1)])
+def test_same_head_requires_the_exact_graph_head_without_writes(pg_url, monkeypatch, trees, state, expected):
+    _set_state(monkeypatch, state, trees)
+    before = _versions(pg_url) if state != "missing" else None
+    statements = []
+    code, result = _schema_heads(monkeypatch, statements, require_at_head=True)
+    assert code == expected
+    assert result["result"] == ("ok" if expected == 0 else "error")
+    if expected == 0:
+        assert tx.parse_schema_heads(result) == frozenset({trees["head"]})
+    assert "SET TRANSACTION READ ONLY" in statements
+    assert not any(_WRITE_SQL.match(statement) for statement in statements)
+    if before is not None:
+        assert _versions(pg_url) == before
 
 
 # ── the real gate on real schema states ─────────────────────────────────────

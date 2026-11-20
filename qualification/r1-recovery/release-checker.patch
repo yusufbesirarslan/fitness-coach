@@ -1,0 +1,90 @@
+--- a/FOUNDER_RELEASE_CHECK_ONCE.py
++++ b/FOUNDER_RELEASE_CHECK_ONCE.py
+@@ -43,0 +44 @@
++from types import ModuleType
+@@ -47 +48,2 @@
+-PROBE_SHA = 'f2e594ed2494a77b6f114dd1ba01ac94ba6e9310125f60048ae41f1730fd5adf'
++PROBE_SHA = '449c1190539408601619686ce47fb51046c0a9edc8e9e26fc0db18fb99288a80'
++RECOVERY_PROFILE_SHA = '6663b9e919001460d31c8c2dbfca510923585aeafe470a9331d581ab8ae19a73'
+@@ -51,10 +53,4 @@
+-    # R1 (Coach plan-mutation runtime containment): draft PR #543 reverts #534 + #537 on main 744ca3b2 in ONE commit.
+-    # Stage A (now): content is pinned by TREE; the main SHA / CI run / deploy run exist only after the founder merges
+-    # #543, so pre/post/watch refuse with BINDING_NOT_FINALIZED until stage B fills these three values (readbacks
+-    # need only `serving` and keep working). Superseded binding: 3db3fc76 / run 44452068699 (CANCELLED).
+-    candidate=None,                                           # stage B: main SHA after the #543 merge
+-    run=None, ci_run=None,                                    # stage B: deploy.yml run (waiting) / CI push run (green)
+-    # Reconciliation (P1-01): the deployable candidate is the R6-R1-29 successor stacked on #543, never the R1-only
+-    # head (its engine has no same-schema recovery). df202a51 = b5842b1b (R1 == tree of 932551d8) + the engine fix
+-    # (6df1d0af) + its review follow-up 3b2df773 (positive closure evidence). Superseded: af59e11d (6df1d0af alone).
+-    candidate_tree='df202a519a11f1c5e83b34b0105192ee2745bfd2',
++    # The reviewed draft tree and diff are supplied after review. Stage B also needs
++    # the exact merged main SHA and its protected deploy and main-push CI IDs.
++    candidate=None, run=None, ci_run=None, candidate_tree=None,
++    transaction_mode='normal', recovery_attempt=None,
+@@ -63 +59 @@
+-    reviewed_diff=(69, '6cbba34be2891212860670b44e96257756b22e36439e132381e19943db54b1b1'),  # R1's 66 + 3 R6-R1-29 files
++    reviewed_diff=None,
+@@ -240 +236,11 @@
+-def github_post():
++def load_recovery_profile():
++    path = HERE / 'r6_recovery_acceptance.py'
++    source = path.read_bytes() if path.is_file() else b''
++    need(hashlib.sha256(source).hexdigest() == RECOVERY_PROFILE_SHA, 'PIN_MISMATCH:' + path.name)
++    profile = ModuleType('r6_recovery_acceptance')
++    sys.modules[profile.__name__] = profile
++    exec(compile(source, str(path), 'exec'), vars(profile))
++    return profile
++
++
++def github_post(phase='post'):
+@@ -241,0 +248,13 @@
++    mode = B.get('transaction_mode', 'normal')
++    need(mode in ('normal', 'forward-recovery'), 'INVALID_TRANSACTION_MODE')
++    if mode == 'forward-recovery':
++        profile = load_recovery_profile()
++        try:
++            job, proof = profile.github_recovery(phase, B, gh, REPO, diff_hash)
++        except ValueError as exc:
++            return [str(exc)], n, {}, None
++        facts = dict(run=job['run_id'], attempt=job['run_attempt'], job=job['id'], started=job['started_at'],
++                     completed=job['completed_at'], snapshot=proof.snapshot, mode=mode)
++        context = dict(start=utc_epoch(job['started_at']), done=utc_epoch(job['completed_at']),
++                       snapshot=proof.snapshot, recovery=(profile.verify_runtime, proof))
++        return b, n, facts, context
+@@ -556,0 +576,7 @@
++    recovery = job and job.get('recovery')
++    if recovery:
++        verify_runtime, proof = recovery
++        try:
++            verify_runtime(proof, web, w)
++        except ValueError as exc:
++            b.append(str(exc))
+@@ -570 +596 @@
+-            if job and phase == 'post':
++            if job and phase == 'post' and (not recovery or name == 'WORKER'):
+@@ -800,2 +826,5 @@
+-        need(all(isinstance(B[k], str) and B[k].isalnum() for k in FINAL_KEYS),
+-             'BINDING_NOT_FINALIZED (R1 stage A: candidate/run/ci_run are bound only after the founder merges #543)')
++        need(all(isinstance(B[k], str) and B[k].isalnum() for k in FINAL_KEYS)
++             and isinstance(B.get('candidate_tree'), str)
++             and re.fullmatch(r'[0-9a-f]{40}', B['candidate_tree'])
++             and isinstance(B.get('reviewed_diff'), tuple),
++             'BINDING_NOT_FINALIZED (R1 stage B needs the exact reviewed successor, main SHA and runs)')
+@@ -834 +863 @@
+-        gb, gn, gfacts, job = github_post()
++        gb, gn, gfacts, job = github_post(phase)
+--- a/RELEASE_HOST_PROBE.py
++++ b/RELEASE_HOST_PROBE.py
+@@ -350 +350 @@
+-def container_detail(cid, exec_revision):
++def container_detail(cid, exec_revision, include_identity=False):
+@@ -366,0 +367,4 @@
++    if include_identity and exec_revision:
++        started_at = state.get('StartedAt')
++        out.update(container_id=cid, image_id=image_id if out['image_immutable'] else None,
++                   started_at=started_at if out['started_epoch'] is not None else None)
+@@ -491 +495,3 @@
+-                            **section(container_detail, r['_cid'], r['state'] == 'running' and r['service'] in ('web', 'worker')))
++                            **section(container_detail, r['_cid'],
++                                      r['state'] == 'running' and r['service'] in ('web', 'worker'),
++                                      args['mode'] == 'post'))

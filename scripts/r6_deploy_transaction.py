@@ -1278,6 +1278,8 @@ class Transaction:
         self.previous_worker = None
         self.redis_baseline = None
         self.candidate_image_id = None
+        self.recovery_web = None
+        self.recovery_worker = None
         self.worker_rollback_tag = None
         self.previous_web_image_id = None
         self.candidate_capabilities = frozenset()
@@ -1357,6 +1359,8 @@ class Transaction:
                 if self.same_head is not None:
                     self._save_same_head_receipt(replace(self.same_head, prepared=True),
                                                  self._step_deadline("adult_admission"))
+            else:
+                self._event("release-prepare-retained", image=self.same_head.image)
             self._start_candidate()
             self._admit_before_switch()
             self._pre_switch()
@@ -1391,6 +1395,11 @@ class Transaction:
                 return EXIT_ROLLBACK_INCOMPLETE
         self._event("release-committed", revision=self.deploy_sha,
                     route=self.target_slot)
+        if self.forward_recovery and self.same_head is not None:
+            self._event("same-head-runtime-proven", revision=self.deploy_sha,
+                        image=self.candidate_image_id, web=self.recovery_web.id,
+                        web_started=self.recovery_web.started_at,
+                        worker=self.recovery_worker.id, worker_started=self.recovery_worker.started_at)
         try:
             return self._retire()
         except Exception as surprise:  # noqa: BLE001 - committed; never roll back
@@ -2030,7 +2039,7 @@ class Transaction:
         self._call(self._step_deadline("adult_admission"), "isolated adult web inventory",
                    self.ops.adult_web_inventory, self.previous_route,
                    self.previous_revision, self.target_slot, self.deploy_sha, True)
-        self._verify_candidate(self._step_deadline("candidate_verify"))
+        self.recovery_web = self._verify_candidate(self._step_deadline("candidate_verify"))
         self._call(self._step_deadline("adult_admission"), "loaded adult runtime",
                    self.ops.adult_runtime_proof, self.target_slot, self.deploy_sha)
         self._admit_before_switch()
@@ -2064,6 +2073,7 @@ class Transaction:
         if self.adult_transition and not self.admission_open_attempted:
             self._call(deadline, "closed adult candidate", self.ops.adult_candidate_closed,
                        self.target_slot, self.deploy_sha)
+        return current
 
     def _pre_switch(self):
         deadline = self._step_deadline("pre_switch_verify")
@@ -2145,7 +2155,7 @@ class Transaction:
         self.worker_attempted = True
         self._call(deadline, "worker update", self.ops.worker_up, "candidate",
                    f"{IMAGE_REPO}:{self.deploy_sha}", self.deploy_sha)
-        self._prove_worker(deadline, self.candidate_image_id, self.deploy_sha)
+        self.recovery_worker = self._prove_worker(deadline, self.candidate_image_id, self.deploy_sha)
         redis = self._call(deadline, "redis identity", self.ops.redis)
         if (len(redis) != 1 or redis[0].id != self.redis_baseline.id
                 or redis[0].started_at != self.redis_baseline.started_at
@@ -2173,6 +2183,7 @@ class Transaction:
                            self.ops.container_build_revision, worker.id)
         if baked != revision or worker.app_revision != revision:
             raise StepFailed("worker revision does not match")
+        return worker
 
     def _checkout(self):
         deadline = self._step_deadline("checkout")

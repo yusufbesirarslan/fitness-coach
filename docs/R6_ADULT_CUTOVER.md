@@ -135,9 +135,42 @@ before retry. Preserve the Git metadata receipt and its image during incident
 handling. A same-head interruption predating the receipt has no automatic
 same-head recovery authority.
 
+Repeated attempts preserve the pending receipt and the exact image. Persistent
+pre-commit faults can still leave a service outage. A different repair SHA has
+no authority over the pending receipt, and a running routed candidate is kept
+even when deep health fails. Resolve such an incident through a separately
+reviewed procedure. After commit, a distinct normal release can proceed from
+the committed slot under the existing protected controller.
+
 A later app-process restart invalidates its open receipt and fails closed.
 Reopening requires a separately authorized protected release/recovery action;
 restarting a process is never treated as carrying its old admission proof.
+
+## Same-head recovery evidence for post and watch
+
+The recovery attempt emits either fresh preparation or reuse of the durable
+prepared receipt. It emits either a route switch or proof of the already
+active candidate route after the nginx reload barrier. After the durable
+commit, a runtime event records the exact image and the web and worker Docker
+IDs and start times. Post and watch must match the live pair to that event.
+
+`scripts/r6_recovery_acceptance.py` checks the attempt-specific protected
+deploy job, exact main SHA and tree, reviewed diff, successful main-push CI,
+same-head schema evidence, available snapshot marker, and ordered admission and
+commit events. It admits evidence only for `post`, `post2`, `watch1` and
+`watch2`. Exit with committed residue keeps the candidate serving and fails
+this acceptance profile. The regular deployment event profile stays in effect
+for normal releases.
+
+The proposed [release checker adapter](../qualification/r1-recovery/release-checker.patch)
+is for the strict F3 one-shot package. It adds the recovery profile and Docker
+identity fields to its read-only probe, and retains its existing alarm,
+snapshot, route, health, containment and journal checks. Its base checker and
+probe SHA-256 are respectively
+`2844d9a89c0b7ffb8527bd5a8031d46ce944eb2827a157980c673ba58b6654d8` and
+`f2e594ed2494a77b6f114dd1ba01ac94ba6e9310125f60048ae41f1730fd5adf`.
+The adapter has no finalized release binding. Applying it to the authoritative
+package or collecting live evidence requires separate authorization.
 
 ## Focused qualification
 
