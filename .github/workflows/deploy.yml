@@ -133,4 +133,5 @@ jobs:
           # `forward-recovery:<sha>:<run id>:<attempt>` (scripts/deploy_control.py);
           # GITHUB_RUN_ID/GITHUB_RUN_ATTEMPT come from the runner itself.
           R6_FORWARD_RECOVERY_AUTHORIZATION: ${{ vars.R6_FORWARD_RECOVERY_AUTHORIZATION }}
+          R6_REPAIR_AUTHORIZATION: ${{ vars.R6_REPAIR_AUTHORIZATION }}
         run: python3 scripts/deploy_control.py

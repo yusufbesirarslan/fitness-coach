@@ -9,8 +9,6 @@ vocabulary the model sees.
 from app.extensions import db
 from app.services.plan_confirmation import get_pending
 
-from .proposals import is_training_proposal
-
 from .executor import (
     _settle_transaction,
     plan_changed_this_turn,
@@ -35,7 +33,7 @@ def turn_plan_effects(user_id):
                 "proposal_id": None}
     try:
         row = get_pending(user_id)
-        pending = is_training_proposal(row)
+        pending = row is not None
         proposal_id = row.public_id if pending else None
     except Exception:
         try:

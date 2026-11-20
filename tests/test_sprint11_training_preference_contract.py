@@ -466,7 +466,7 @@ def test_powerlifting_minimal_is_unsupported():
     assert evaluate_capability(prefs).status == STATUS_UNSUPPORTED
 
 
-def test_six_training_plus_five_cardio_is_supported():
+def test_six_training_plus_five_cardio_is_conflicting():
     prefs = parse_preferences({
         "antrenman_tarzi": "genel",
         "ekipman": "spor_salonu",
@@ -476,8 +476,8 @@ def test_six_training_plus_five_cardio_is_supported():
         "kardiyo_gun": 5,
     })
     result = evaluate_capability(prefs)
-    assert result.status == STATUS_SUPPORTED
-    assert result.reason == "SUPPORTED"
+    assert result.status == STATUS_CONFLICTING
+    assert result.reason == "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS"
     assert prefs.gun_sayisi + prefs.kardiyo_gun > 7
 
 
@@ -560,7 +560,7 @@ def test_home_powerlifting_invokes_zero_provider_calls(client, auth_user, monkey
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_independent_frequencies_reach_provider(client, auth_user, monkeypatch):
+def test_overfull_week_invokes_zero_provider_calls(client, auth_user, monkeypatch):
     _session(auth_user)
     called = []
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: called.append(kwargs) or "{}")
@@ -570,8 +570,9 @@ def test_independent_frequencies_reach_provider(client, auth_user, monkeypatch):
         "kardiyo_tipi": "kosu",
         "kardiyo_gun": 5,
     })
-    assert response.status_code == 500  # deliberately invalid provider output
-    assert len(called) == 2  # one completion and the bounded schema repair
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_CONFLICTING
+    assert called == []
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -749,13 +750,15 @@ def test_gym_prompt_lists_every_equipment_tier(client, auth_user, monkeypatch):
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_prompt_explains_independent_cardio_sessions(
+def test_prompt_tells_the_provider_cardio_belongs_only_on_kardiyo_days(
         client, auth_user, monkeypatch):
-    """The prompt states the mixed-session prescription and seven-day rules."""
+    """The vocabulary block hands the provider cardio names mixed in with
+    everything else. Since canonicalization now fails a plan closed when a
+    cardio-movement entry lands on a non-kardiyo day, the rule the provider
+    is judged against has to be stated in the prompt."""
     prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="ev")
     assert 'tip="kardiyo"' in prompt
-    assert "aynı" in prompt
-    assert 'tekrar="20 dk"' in prompt
+    assert "Kardiyo egzersizleri" in prompt
 
 
 def test_prompt_builder_requires_a_non_empty_closed_choice_set():
@@ -1024,7 +1027,7 @@ def test_contract_failure_never_enters_compact_retry(monkeypatch):
                 "gun_sayisi": 6, "sure": 45,
                 "antrenman_tarzi": "genel",
                 "kardiyo_tipi": "kosu",
-                "kardiyo_gun": 7,
+                "kardiyo_gun": 5,
             },
             chat_fn=fake_chat,
         )

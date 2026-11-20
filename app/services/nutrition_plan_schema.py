@@ -45,10 +45,9 @@ MEAL_MACRO_KEYS = ("kalori", "protein", "karb", "yag")
 TOTAL_KEYS = ("toplam_kalori", "toplam_protein", "toplam_karb", "toplam_yag")
 NAME_KEY = "isim"
 ITEMS_KEY = "yemekler"
-ESTIMATED_KEY = "tahmini"
 
 TOP_LEVEL_KEYS = frozenset((NAME_KEY,) + MEAL_KEYS + TOTAL_KEYS)
-MEAL_OBJECT_KEYS = frozenset((ITEMS_KEY, ESTIMATED_KEY) + MEAL_MACRO_KEYS)
+MEAL_OBJECT_KEYS = frozenset((ITEMS_KEY,) + MEAL_MACRO_KEYS)
 
 # Bounds. They are not physiology, they are document bounds: large enough that
 # no plan the app can generate touches them, small enough that the row, the
@@ -158,12 +157,6 @@ def _meal(raw, key):
     for macro in MEAL_MACRO_KEYS:
         if macro in raw:
             meal[macro] = _number(raw[macro], "%s.%s" % (key, macro))
-    # Only an affirmative estimate marker is persisted; absence keeps legacy
-    # plans unchanged. It survives unrelated edits and exact journal undo.
-    if ESTIMATED_KEY in raw:
-        if raw[ESTIMATED_KEY] is not True:
-            raise NutritionPlanInvalid("%s.tahmini is not true" % key)
-        meal[ESTIMATED_KEY] = True
     return meal
 
 

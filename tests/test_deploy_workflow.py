@@ -310,6 +310,7 @@ def test_deploy_lifecycle_has_one_controller_entrypoint_and_named_inputs():
         "AXISAI_WEB_SLOT_APPLE_FILES": "${{ vars.AXISAI_WEB_SLOT_APPLE_FILES || '0' }}",
         # R6-R1-28: no default; empty is the normal transaction.
         "R6_FORWARD_RECOVERY_AUTHORIZATION": "${{ vars.R6_FORWARD_RECOVERY_AUTHORIZATION }}",
+        "R6_REPAIR_AUTHORIZATION": "${{ vars.R6_REPAIR_AUTHORIZATION }}",
     }
     assert _workflow_doc()["env"] == {
         "DEPLOY_SHA": "${{ github.event.workflow_run.head_sha }}",
@@ -2140,6 +2141,9 @@ APPROVED_SEND_PATH_CALLS = frozenset({
     ("render_bootstrap", "quote"),
     ("render_bootstrap", "replace"),
     ("render_bootstrap", "dumps"),
+    # Fixed small authorization and snapshot grammars. Neither waits nor uses I/O.
+    ("render_bootstrap", "parse_authorization"),
+    ("render_bootstrap", "snapshot_for"),
     ("render_bootstrap", "ConfigError"),
     ("require_command_id", "InvocationProtocolError"),
     ("require_command_id", "UUID"),

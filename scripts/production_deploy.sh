@@ -173,10 +173,10 @@ if [[ -z "$PUBLIC_HEALTH_URL" ]]; then
   echo "PUBLIC_HEALTH_URL is required for the post-switch proof" >&2
   exit 64
 fi
-if [[ "$TRANSACTION_MODE" != "normal" && "$TRANSACTION_MODE" != "forward-recovery" ]]; then
-  echo "AXISAI_R6_TRANSACTION_MODE must be normal or forward-recovery" >&2
-  exit 64
-fi
+case "$TRANSACTION_MODE" in
+  normal|forward-recovery|repair-stage|repair-apply) ;;
+  *) echo "invalid AXISAI_R6_TRANSACTION_MODE" >&2; exit 64 ;;
+esac
 
 if ((HOST_ROOT_BOOTSTRAP_SECONDS + HOST_LOCK_ACQUISITION_SECONDS +
       HOST_AUTHORITY_AND_STALE_PROOF_SECONDS + HOST_CLOCK_SETUP_SECONDS +
@@ -280,11 +280,6 @@ if ! run_external git merge-base --is-ancestor "$PREV_COMMIT" "$DEPLOY_SHA"; the
   echo "deployment candidate is older than or divergent from production" >&2
   exit 1
 fi
-if [[ "$TRANSACTION_MODE" == "forward-recovery" && "$PREV_COMMIT" == "$DEPLOY_SHA" ]]; then
-  echo "forward recovery refused: the checkout already runs DEPLOY_SHA" >&2
-  exit 1
-fi
-
 # The exact candidate tree, from git objects only: untracked or ignored host
 # files can never enter the image build or the transaction engine. The
 # checkout itself is not touched here; the engine moves it to DEPLOY_SHA only
@@ -311,4 +306,8 @@ run_external python3 -I -B "$BUILD_CONTEXT_DIR/$TRANSACTION_ENGINE" run \
   --public-health-url "$PUBLIC_HEALTH_URL" \
   --transaction-epoch "$TRANSACTION_EPOCH" \
   --mode "$TRANSACTION_MODE"
-echo "deployment verified at $DEPLOY_SHA" >&2
+if [[ "$TRANSACTION_MODE" == "repair-stage" ]]; then
+  echo "repair staging verified at $DEPLOY_SHA" >&2
+else
+  echo "deployment verified at $DEPLOY_SHA" >&2
+fi
