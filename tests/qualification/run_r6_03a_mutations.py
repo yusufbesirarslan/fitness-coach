@@ -11,11 +11,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 TX = "scripts/r6_deploy_transaction.py"
+PREPARATION = (
+    "            if self.same_head is None or not self.same_head.prepared:\n"
+    "                self._release_prepare()\n"
+    "                if self.same_head is not None:\n"
+    "                    self._save_same_head_receipt(replace(self.same_head, prepared=True),\n"
+    '                                                 self._step_deadline("adult_admission"))\n'
+    "            else:\n"
+    '                self._event("release-prepare-retained", image=self.same_head.image)\n'
+)
+START_CANDIDATE = "            self._start_candidate()\n"
 MUTANTS = [
     ("migration-overlap-gate", TX, "        if problems:\n", "        if False:\n",
      "test_contract_migration_is_refused_before_build_and_database"),
-    ("release-prepare-before-start", TX, "            self._release_prepare()\n            self._start_candidate()\n",
-     "            self._start_candidate()\n            self._release_prepare()\n",
+    ("release-prepare-before-start", TX, PREPARATION + START_CANDIDATE, START_CANDIDATE + PREPARATION,
      "test_first_cutover_legacy_to_blue_reaches_the_exact_steady_state"),
     ("candidate-pre-switch-reverify", TX, "            self._pre_switch()\n", "",
      "test_pre_switch_reverify_failure_rolls_back_without_switching"),
