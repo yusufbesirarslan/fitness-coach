@@ -1209,6 +1209,19 @@ def test_forward_recovery_mode_reaches_the_engine_verbatim(bash_executable, host
     assert _run(["git", "-C", str(f.deploy_dir), "rev-parse", "HEAD"]) == f.prev_commit
 
 
+def test_forward_recovery_checkout_equality_is_decided_by_the_archived_engine(
+        bash_executable, host_fixture):
+    f = host_fixture()
+    _run(["git", "-C", str(f.deploy_dir), "fetch", "origin", "main"])
+    _run(["git", "-C", str(f.deploy_dir), "reset", "--hard", f.candidate_commit])
+    result = f.run(bash_executable, AXISAI_R6_TRANSACTION_MODE="forward-recovery")
+    assert result.returncode == 0, result.stderr
+    (proof,) = [line for line in f.trace_text().splitlines() if line.startswith("ENGINE_PROOF=")]
+    arguments = json.loads(proof.split("=", 1)[1])
+    assert arguments["mode"] == "forward-recovery"
+    assert arguments["previous_commit"] == arguments["deploy_sha"] == f.candidate_commit
+
+
 # ---------------------------------------------------------------------------
 # Apple launcher git, as real root. Selected by the same root CI job.
 # ---------------------------------------------------------------------------

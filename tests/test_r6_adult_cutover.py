@@ -10,14 +10,17 @@ from tests.test_r6_deploy_transaction import (
 
 
 @pytest.fixture
-def adult(monkeypatch):
-    w = slot_world("blue")
+def adult(monkeypatch, request):
+    old_slot = getattr(request, "param", "blue")
+    new_slot = tx.CANDIDATE_SLOT[old_slot]
+    w = slot_world(old_slot)
     from tests.test_r6_completion_capability import capable_candidate, capable_previous, raised
     raised(capable_previous(capable_candidate(w)))
     w.source_revisions["candidate"].add(tx.ADULT_MIGRATION)
     w.registration_open = False
     w.generations = 0
     w.migration_attempts = []
+    w.reloads = 0
 
     def inventory(self, old, old_revision, new, revision, closed, timeout):
         self._rec("adult_web_inventory", closed, timeout=timeout)
@@ -28,16 +31,22 @@ def adult(monkeypatch):
 
     def ingress(self, state, candidate, timeout):
         self._rec("ingress_snapshot", state, timeout=timeout)
-        switched = w.route == "green"
+        switched = w.route == new_slot
         self._fail("ingress_proof")
+        generation = 3 + w.reloads if switched and not w.fault("buffered") else 2
         return {"configuration": "d"*64, "master": [1, 10],
-                "workers": [[3, 30] if switched and not w.fault("buffered") else [2, 20]]}
+                "workers": [[generation, 10 * generation]]}
+
+    def reload_generation(self, slot, timeout):
+        self._rec("reload_generation", slot, timeout=timeout)
+        assert slot == w.route
+        w.reloads += 1
 
     def latch(self, slot, revision, action, timeout):
         self._rec("registration_latch", action, timeout=timeout)
         w.registration_open = action == "open"
         if action == "open":
-            assert "blue" not in w.slots
+            assert old_slot not in w.slots
             assert w.worker.revision == CAND and w.head == CAND
             self._fail("open_readback")
 
@@ -57,15 +66,16 @@ def adult(monkeypatch):
     def close_worker(self, old_revision, timeout):
         self._rec("close_old_worker", timeout=timeout)
         self._fail("worker_close")
-        w.worker = None  # no unless-stopped old container may restart after DDL
+        if w.worker is not None and w.worker.revision == old_revision:
+            w.worker = None  # no unless-stopped old container may restart after DDL
 
     original = FakeOps.release_prepare
 
     def prepare(self, revision, timeout):
         # Both a request already buffered by nginx and a direct old-origin
         # request have no old process to execute at the migration boundary.
-        w.migration_attempts.append((w.slots.get("blue"), w.registration_open))
-        assert "blue" not in w.slots and not w.registration_open
+        w.migration_attempts.append((w.slots.get(old_slot), w.registration_open))
+        assert old_slot not in w.slots and not w.registration_open
         assert w.worker is None
         original(self, revision, timeout)
         if w.fault("migration_timeout"):
@@ -73,6 +83,7 @@ def adult(monkeypatch):
 
     monkeypatch.setattr(FakeOps, "adult_web_inventory", inventory, raising=False)
     monkeypatch.setattr(FakeOps, "ingress_snapshot", ingress, raising=False)
+    monkeypatch.setattr(FakeOps, "reload_generation", reload_generation, raising=False)
     monkeypatch.setattr(FakeOps, "registration_latch", latch, raising=False)
     monkeypatch.setattr(FakeOps, "adult_runtime_proof", runtime, raising=False)
     monkeypatch.setattr(FakeOps, "adult_candidate_closed", candidate, raising=False)
@@ -81,8 +92,8 @@ def adult(monkeypatch):
     return w
 
 
-def assert_no_old_recovery(w):
-    assert not any(c[:2] == ("route_switch", "blue") for c in w.calls)
+def assert_no_old_recovery(w, old_slot="blue"):
+    assert not any(c[:2] == ("route_switch", old_slot) for c in w.calls)
     assert not any(c[:2] == ("worker_up", "previous") for c in w.calls)
     assert not w.registration_open
 

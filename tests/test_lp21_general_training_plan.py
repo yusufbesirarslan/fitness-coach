@@ -1002,21 +1002,16 @@ def test_every_cardio_input_keeps_the_v1_strength_week_and_adds_real_cardio_days
         assert [day["gun"] for day in program] == WEEKDAYS
         tips = [day["tip"] for day in program]
         assert tips.count("antrenman") == days
-        assert tips.count("kardiyo") == min(cardio_days, 7 - days)
-        assert tips.count("dinlenme") == max(0, 7 - days - cardio_days)
-        assert sum(any(catalog.by_id[ex["exercise_id"]].movement == "cardio"
-                       for ex in day["egzersizler"])
-                   for day in program) == cardio_days
+        assert tips.count("kardiyo") == cardio_days
+        # Never a full week: Sunday stays a rest day.
+        assert tips.count("dinlenme") == 7 - days - cardio_days >= 1
+        assert program[6]["tip"] == "dinlenme"
         context = ExerciseContext(equipment_context=equipment,
                                   cardio_type=cardio_type)
         for strength, original in zip(program, v1):
             if original["tip"] == "antrenman":
-                # Strength prescriptions stay unchanged, with cardio appended.
-                assert strength["egzersizler"][:len(original["egzersizler"])] == original["egzersizler"]
-                added = len(strength["egzersizler"]) > len(original["egzersizler"])
-                assert strength["sure_dk"] == original["sure_dk"] + (20 if added else 0)
-                if not added:
-                    assert strength == original
+                # The strength week is v1's, byte for byte.
+                assert strength == original
                 continue
             assert strength["tahmini_kalori"] == 0
             if strength["tip"] == "dinlenme":
@@ -1072,8 +1067,8 @@ def test_cardio_documents_are_deterministic_and_language_only_relabels():
     _cardio(kardiyo_tipi="crossfit"),
     _cardio(kardiyo_tipi="KOSU"),
     _cardio(kardiyo_gun=0),
-    _cardio(kardiyo_gun=7),
-    _cardio(kardiyo_gun=-1),
+    _cardio(gun_sayisi=3, kardiyo_gun=4),  # 3 + 4 fills the week
+    _cardio(gun_sayisi=4, kardiyo_gun=3),  # 4 + 3 fills the week
     _cardio(kardiyo_gun=True),
     _cardio(kardiyo_gun="2"),
     _cardio(kardiyo_sure=25),
@@ -1109,9 +1104,9 @@ def test_cardio_fingerprint_binds_every_field_and_keeps_v1_identity():
 
 def test_every_accepted_request_names_its_template_and_nothing_else_does():
     space = list(identity.request_space())
-    # 6 strength-only + (6 + 6 cardio-day counts) * 3 equipment * 6 types
+    # 6 strength-only + (3 + 2 cardio-day counts) * 3 equipment * 6 types
     # * 4 durations * 4 intensities.
-    assert len(space) == 6 + 12 * 3 * 6 * 4 * 4
+    assert len(space) == 6 + 5 * 3 * 6 * 4 * 4
     for body in space:
         request = parse_general_request(body)
         assert identity.template_for_fingerprint(request.fingerprint) \
@@ -1129,12 +1124,11 @@ def test_identity_vocabularies_match_the_canonical_preference_contract():
     assert identity.EQUIPMENT == prefs.EQUIPMENT_VALUES
     for days in identity.STRENGTH_DAYS:
         assert set(identity.cardio_day_choices(days)) <= prefs.CARDIO_DAYS
-        assert identity.cardio_day_choices(days) == (1, 2, 3, 4, 5, 6)
+        assert days + max(identity.cardio_day_choices(days)) == 6
     # The cardio slots hold exactly the largest allowed cardio week.
     for days, slots in general_template._CARDIO_SLOTS.items():
         assert len(slots) == max(identity.cardio_day_choices(days))
-        assert len(set(slots)) == len(slots)
-        assert set(slots) <= set(range(7))
+        assert 6 not in slots
     assert set(general_template._CARDIO_EXERCISES) == identity.CARDIO_TYPES
 
 

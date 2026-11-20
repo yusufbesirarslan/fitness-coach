@@ -2,8 +2,8 @@
 
 ``general_full_body_v1`` (rules version 1) is the strength-only week.
 ``general_full_body_cardio_v1`` is that SAME strength week, unchanged, with
-cardio sessions placed on rest slots first, then alongside strength. Existing
-request combinations retain their exact content; no stored plan is rewritten.
+dedicated cardio days placed on fixed rest slots; it never alters a strength
+day and always leaves Sunday as a full rest day.
 
 Pure data and one pure builder: no database, Flask, clock, randomness,
 profile, history or provider. The same ``(days, equipment, language)`` always
@@ -149,11 +149,12 @@ def build_program(days: int, equipment: str, language) -> list[dict]:
     return program
 
 
-# Preserve existing placements, then use Sunday and overlap strength slots.
-# Each modality occurs at most once per calendar day; no rest day is required.
+# Cardio days fill rest slots in this order: Saturday first, then the
+# mid-week gaps. Sunday is never listed, so every week keeps one full rest
+# day; the slot lists are long enough for ``cardio_day_choices`` exactly.
 _CARDIO_SLOTS = {
-    3: (5, 1, 3, 6, 0, 2),
-    4: (5, 2, 6, 0, 1, 3),
+    3: (5, 1, 3),
+    4: (5, 2),
 }
 
 # One catalog cardio entry per type. Mixed rotates through activities that
@@ -205,10 +206,11 @@ def build_cardio_program(
     intensity: str,
     language,
 ) -> list[dict]:
-    """The v1 strength sessions plus independent cardio sessions.
+    """The v1 strength week plus ``cardio_days`` dedicated cardio days.
 
-    Rest slots become cardio days first. Additional cardio follows strength
-    in the same exercise list, with total day duration including both sessions.
+    Every strength day is exactly ``build_program``'s; only rest slots become
+    cardio days. Each cardio day holds one catalog cardio entry for the
+    requested minutes: one round, no rest, no estimated calories, no notes.
     """
     if (cardio_type not in identity.CARDIO_TYPES
             or cardio_days not in identity.cardio_day_choices(days)
@@ -221,7 +223,7 @@ def build_cardio_program(
     rotation = _CARDIO_EXERCISES[cardio_type]
     for index, slot in enumerate(sorted(_CARDIO_SLOTS[days][:cardio_days])):
         exercise_id = rotation[index % len(rotation)]
-        cardio_day = {
+        program[slot] = {
             "gun": WEEKDAYS[slot],
             "tip": CARDIO_TIP,
             "odak": " · ".join((
@@ -237,10 +239,4 @@ def build_cardio_program(
                 "not": "",
             }],
         }
-        if program[slot]["tip"] == "antrenman":
-            program[slot]["egzersizler"].extend(cardio_day["egzersizler"])
-            program[slot]["sure_dk"] += cardio_minutes
-            program[slot]["odak"] += " · " + labels["cardio"]
-        else:
-            program[slot] = cardio_day
     return program

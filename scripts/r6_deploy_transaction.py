@@ -51,8 +51,8 @@ FORWARD RECOVERY (``--mode forward-recovery``; R6-R1-28). release-prepare
 moves the schema past the previous revision, whose read-only boot then refuses
 (``not_at_head``): once its processes die, the previous web can never be
 re-verified, so the normal baseline above refuses every later run and no
-protected deployment could restore service. Forward recovery is the same
-transaction with exactly two changes:
+protected deployment could restore service. Recovery without a same-head
+receipt changes two gates:
 
 * baseline proves the route, control plane, checkout, slot identities, worker
   identity and Redis, but tolerates a previous web/worker that cannot be
@@ -62,6 +62,14 @@ transaction with exactly two changes:
   least one is outside the previous revision's graph. Otherwise nothing past
   the image build happens (Green died before migration: a normal run is the
   path, never this one).
+
+An unchanged adult graph can also have an outage after closure. Before
+attempting closure on a slot-to-slot release, record exact live heads and
+persist the cutover identity in Git metadata. A protected same-head retry
+requires that pending receipt, the same live head set as the archived graph,
+and the originally built image. It finishes closure and replays preparation
+only if preparation was never durably proven. A committed receipt requires
+a successor release.
 
 It is reachable only through the protected workflow with an exact
 ``forward-recovery:<sha>:<run id>:<attempt>`` authorization (scripts/
@@ -94,10 +102,11 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import wraps
 from pathlib import Path, PurePosixPath
 from typing import Callable, Optional
@@ -181,6 +190,7 @@ _FENCE_STATES = {"verified", "absent", "invalid"}
 MODES = ("normal", "forward-recovery")
 SCHEMA_HEADS_PREFIX = "schema-heads: "
 SCHEMA_HEADS_SERVICE = "schema-heads"
+SAME_HEAD_RECEIPT = "axisai-r6-same-head.json"
 _REVISION_ID = re.compile(r"[0-9a-z_]{1,64}")
 
 EXIT_OK = 0
@@ -232,6 +242,29 @@ class Container:
 class Route:
     state: str
     backend: str
+
+
+@dataclass(frozen=True)
+class SameHeadReceipt:
+    previous: str
+    candidate: str
+    old_slot: str
+    image: str
+    prepared: bool = False
+    committed: bool = False
+
+    @classmethod
+    def parse(cls, payload):
+        if not isinstance(payload, dict) or set(payload) != {
+                "previous", "candidate", "old_slot", "image", "prepared", "committed"}:
+            raise ValueError("invalid receipt fields")
+        record = cls(**payload)
+        if (not _SHA.fullmatch(record.previous) or not _SHA.fullmatch(record.candidate)
+                or record.previous == record.candidate or record.old_slot not in ("blue", "green")
+                or not _IMAGE_ID.fullmatch(record.image) or type(record.prepared) is not bool
+                or type(record.committed) is not bool or (record.committed and not record.prepared)):
+            raise ValueError("invalid receipt identity")
+        return record
 
 
 # â”€â”€ Migration overlap gate (pure; static; no database) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -337,6 +370,10 @@ def parse_schema_heads(payload):
             or len(set(current)) != len(current)):
         return None
     return frozenset(current)
+
+
+def release_prepare_container_name(revision):
+    return f"axisai-release-prepare-{revision[:12]}"
 
 
 def parse_floor_status(payload):
@@ -459,6 +496,62 @@ class HostOps:
             what=f"docker compose {args[0]}")
 
     # workspace
+    def _receipt_path(self, timeout):
+        directory = Path(self._ok(["git", "-C", str(self.deploy_dir), "rev-parse",
+                                  "--absolute-git-dir"], timeout, "Git metadata path").strip())
+        if not directory.is_absolute():
+            raise OSError("Git metadata directory is not absolute")
+        metadata = directory.lstat()
+        if (not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid not in (0, os.geteuid())
+                or metadata.st_mode & 0o022):
+            raise OSError("unsafe Git metadata directory")
+        return directory / SAME_HEAD_RECEIPT
+
+    def read_same_head_receipt(self, timeout):
+        try:
+            path = self._receipt_path(timeout)
+        except OSError as exc:
+            raise OpError("same-head receipt directory unavailable") from exc
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as source:
+                metadata = os.fstat(source.fileno())
+                if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid()
+                        or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1
+                        or metadata.st_size > 1024):
+                    raise ValueError("unsafe receipt metadata")
+                return SameHeadReceipt.parse(json.loads(source.read(1025)))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError, TypeError) as exc:
+            raise OpError("same-head receipt unreadable or invalid") from exc
+
+    def write_same_head_receipt(self, record, timeout):
+        temporary = None
+        try:
+            path = self._receipt_path(timeout)
+            with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as stream:
+                temporary = Path(stream.name)
+                json.dump(asdict(record), stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError as exc:
+            raise OpError("could not persist same-head receipt") from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def use_recovery_previous(self, previous, timeout):
+        self._ok(["git", "-C", str(self.deploy_dir), "merge-base", "--is-ancestor",
+                  previous, self.deploy_sha], timeout, "same-head recovery ancestry")
+        self.previous_commit = previous
+
     @_host_operation
     def prepare_workspace(self, timeout):
         """Fill the private work dir (a sibling of the archive context, never
@@ -755,7 +848,7 @@ class HostOps:
             "      driver: json-file\n"
             "      options: {max-size: '10m', max-file: '3'}\n",
             encoding="utf-8")
-        name = f"axisai-release-prepare-{revision[:12]}"
+        name = release_prepare_container_name(revision)
         if timeout <= 30 + COMMAND_KILL_GRACE_SECONDS:
             raise OpError("release-prepare has no cleanup reserve")
         try:
@@ -1023,16 +1116,18 @@ class HostOps:
             entrypoint, CAPABILITY_FLOOR_PREFIX, f"completion-floor {action}", timeout)
 
     @_host_operation
-    def schema_heads(self, image_id, revision, timeout):
+    def schema_heads(self, image_id, revision, timeout, *, require_at_head=False):
         """``flask schema-heads`` once, read-only, in a one-off container of the
         EXACT candidate image ID; returns its one machine line (forward
         recovery's post-migration evidence)."""
         if not _IMAGE_ID.fullmatch(image_id or ""):
             raise OpError("invalid schema-heads invocation")
+        entrypoint = ["flask", "--app", "starter", "schema-heads"]
+        if require_at_head:
+            entrypoint.append("--require-at-head")
         return self._machine_one_off(
             SCHEMA_HEADS_SERVICE, "schema-heads", image_id, revision,
-            ["flask", "--app", "starter", "schema-heads"], SCHEMA_HEADS_PREFIX,
-            "schema-heads", timeout)
+            entrypoint, SCHEMA_HEADS_PREFIX, "schema-heads", timeout)
 
     def _machine_one_off(self, service, label, image_id, revision, entrypoint, prefix,
                          what, timeout):
@@ -1161,6 +1256,8 @@ class Transaction:
         self.deploy_sha = deploy_sha
         self.previous_commit = previous_commit
         self.public_health_url = public_health_url
+        self.checkout_baseline = previous_commit
+        self.same_head = None
         parts = urlsplit(public_health_url)
         self.ingress_url = urlunsplit((parts.scheme, parts.netloc,
                                        MOBILE_INGRESS_PATH, "", ""))
@@ -1181,6 +1278,8 @@ class Transaction:
         self.previous_worker = None
         self.redis_baseline = None
         self.candidate_image_id = None
+        self.recovery_web = None
+        self.recovery_worker = None
         self.worker_rollback_tag = None
         self.previous_web_image_id = None
         self.candidate_capabilities = frozenset()
@@ -1232,6 +1331,7 @@ class Transaction:
     # â”€â”€ forward â”€â”€
     def run(self):
         try:
+            self._load_same_head_receipt()
             self._call(self._step_deadline("baseline"), "workspace",
                        self.ops.prepare_workspace)
             self._baseline()
@@ -1241,11 +1341,26 @@ class Transaction:
             self._build_and_prove_image()
             admission = self._step_deadline("capability_admission")
             if self.forward_recovery:
-                self._recovery_schema_gate(admission)
+                if self.same_head is not None:
+                    self._same_head_schema_gate(admission)
+                else:
+                    self._recovery_schema_gate(admission)
             self._admit_capability(admission)
             if self.adult_transition:
+                if (not self.forward_recovery and not self.delta
+                        and self.previous_route in ("blue", "green")
+                        and self.previous_commit != self.deploy_sha):
+                    self._same_head_schema_gate(admission)
+                    self.same_head = SameHeadReceipt(self.previous_commit, self.deploy_sha,
+                                                     self.previous_route, self.candidate_image_id)
                 self._close_old_registration()
-            self._release_prepare()
+            if self.same_head is None or not self.same_head.prepared:
+                self._release_prepare()
+                if self.same_head is not None:
+                    self._save_same_head_receipt(replace(self.same_head, prepared=True),
+                                                 self._step_deadline("adult_admission"))
+            else:
+                self._event("release-prepare-retained", image=self.same_head.image)
             self._start_candidate()
             self._admit_before_switch()
             self._pre_switch()
@@ -1270,14 +1385,52 @@ class Transaction:
                             manual=f"rollback crashed: {type(surprise).__name__}: "
                                    f"{surprise}")
                 return EXIT_ROLLBACK_INCOMPLETE
+        if self.same_head is not None:
+            try:
+                self._save_same_head_receipt(replace(self.same_head, committed=True),
+                                             self._step_deadline("adult_admission"))
+            except Exception as failure:  # the open boot was verified; preserve it on I/O ambiguity
+                self._event("commit-receipt-unproven", reason=str(failure),
+                            admission="verified-open", recovery="inspect-durable-receipt")
+                return EXIT_ROLLBACK_INCOMPLETE
         self._event("release-committed", revision=self.deploy_sha,
                     route=self.target_slot)
+        if self.forward_recovery and self.same_head is not None:
+            self._event("same-head-runtime-proven", revision=self.deploy_sha,
+                        image=self.candidate_image_id, web=self.recovery_web.id,
+                        web_started=self.recovery_web.started_at,
+                        worker=self.recovery_worker.id, worker_started=self.recovery_worker.started_at)
         try:
             return self._retire()
         except Exception as surprise:  # noqa: BLE001 - committed; never roll back
             self._event("retirement-incomplete", backend=self.previous_route,
                         reason=f"{type(surprise).__name__}: {surprise}")
             return EXIT_COMMITTED_RESIDUE
+
+    def _load_same_head_receipt(self):
+        deadline = self._step_deadline("baseline")
+        self.previous_proven = False
+        record = self._call(deadline, "same-head receipt", self.ops.read_same_head_receipt)
+        if record is not None and not record.committed:
+            admissible_checkouts = (record.previous, record.candidate) if record.prepared else (
+                record.previous,)
+            if (not self.forward_recovery or self.deploy_sha != record.candidate
+                    or self.checkout_baseline not in admissible_checkouts):
+                raise StepFailed("interrupted same-head cutover requires recovery of its exact candidate")
+            self._call(deadline, "previous recovery revision", self.ops.use_recovery_previous,
+                       record.previous)
+            self.previous_commit = record.previous
+            self.same_head = record
+        elif record is not None and record.candidate == self.deploy_sha:
+            raise StepFailed("same-head release already committed; fix forward with a successor")
+        elif self.forward_recovery and self.checkout_baseline == self.deploy_sha:
+            raise StepFailed("forward recovery needs an uncommitted candidate or an exact pending receipt")
+        else:
+            self.previous_proven = not self.forward_recovery
+
+    def _save_same_head_receipt(self, record, deadline):
+        self._call(deadline, "same-head receipt", self.ops.write_same_head_receipt, record)
+        self.same_head = record
 
     def _baseline(self):
         deadline = self._step_deadline("baseline")
@@ -1298,7 +1451,7 @@ class Transaction:
                              + "; ".join(mismatches))
 
         head = self._call(deadline, "checkout head", self.ops.checkout_head)
-        if head != self.previous_commit:
+        if head != self.checkout_baseline:
             raise StepFailed("checkout HEAD moved since the host preflight")
 
         if self.forward_recovery:
@@ -1405,7 +1558,23 @@ class Transaction:
                              "container still exists")
         routed_container = self._slot_container(route.state, deadline)
         routed = routed_container["app_revision"] if routed_container else None
-        if routed == self.deploy_sha:
+        if self.same_head is not None:
+            self.previous_route = self.same_head.old_slot
+            self.previous_backend = ROUTE_BACKENDS[self.previous_route]
+            self.target_slot = CANDIDATE_SLOT[self.previous_route]
+            self.already_switched = route.state == self.target_slot
+            if self.already_switched and not self.same_head.prepared:
+                raise StepFailed("same-head route switched without a prepared receipt")
+            if self._slot_revision(self.previous_route, deadline) not in (None, self.previous_commit):
+                raise StepFailed("same-head previous slot holds a foreign revision")
+            candidate = self._slot_container(self.target_slot, deadline)
+            if candidate is not None:
+                current = self._call(deadline, "recovery candidate image", self.ops.container,
+                                     candidate["id"])
+                if (current is None or current.app_revision != self.deploy_sha
+                        or current.image_id != self.same_head.image or not self.same_head.prepared):
+                    raise StepFailed("same-head candidate slot does not match the prepared receipt")
+        elif routed == self.deploy_sha:
             # An earlier attempt switched before it stopped: the candidate slot
             # already receives traffic and the other slot is the old backend.
             self.already_switched = True
@@ -1460,6 +1629,9 @@ class Transaction:
             worker = workers[0]
             if worker.app_revision not in (self.previous_commit, self.deploy_sha):
                 raise StepFailed("worker carries a foreign revision")
+            if (self.same_head is not None and worker.app_revision == self.deploy_sha
+                    and (worker.image_id != self.same_head.image or not self.same_head.prepared)):
+                raise StepFailed("same-head candidate worker does not match the prepared receipt")
             self.baseline_worker_revision = worker.app_revision
             if (worker.app_revision == self.previous_commit
                     and worker.status == "running" and worker.health == "healthy"
@@ -1473,7 +1645,7 @@ class Transaction:
                 self.previous_worker = worker
         # The previous WEB decides whether there is anything to route back to.
         # An unproven worker is never restored (it is reported instead).
-        self.previous_proven = web_proven
+        self.previous_proven = web_proven and self.same_head is None
         self._event("recovery-baseline", route=route.state, candidate=self.target_slot,
                     switched="yes" if self.already_switched else "no",
                     previous_web="proven" if web_proven else "unproven",
@@ -1513,6 +1685,22 @@ class Transaction:
                              "a post-migration recovery")
         self._event("recovery-schema-evidence", current=",".join(sorted(current)),
                     advanced=",".join(advanced))
+
+    def _same_head_schema_gate(self, deadline):
+        if not self.adult_transition or self.delta:
+            raise StepFailed("same-head recovery requires an unchanged adult migration graph")
+        migrator = self._call(deadline, "release-prepare absence", self.ops.container,
+                              release_prepare_container_name(self.deploy_sha))
+        if migrator is not None:
+            raise StepFailed("release-prepare container still exists; its cleanup is unproven")
+        payload = self._call(deadline, "exact schema heads", lambda timeout:
+                             self.ops.schema_heads(self.candidate_image_id, self.deploy_sha,
+                                                   min(CAPABILITY_PROBE_SECONDS, timeout),
+                                                   require_at_head=True))
+        heads = parse_schema_heads(payload)
+        if heads is None:
+            raise StepFailed("same-head recovery requires the exact adult database head")
+        self._event("same-head-schema-evidence", current=",".join(sorted(heads)))
 
     def _clear_stale_candidate(self, deadline):
         """Resume what an earlier attempt left in the candidate slot. A running
@@ -1592,12 +1780,18 @@ class Transaction:
 
     def _build_and_prove_image(self):
         tag = f"{IMAGE_REPO}:{self.deploy_sha}"
-        self.image_build_attempted = True
-        self._call(self._step_deadline("image_build"), "image build",
-                   self.ops.build_image, self.deploy_sha)
+        if self.same_head is None:
+            self.image_build_attempted = True
+            self._call(self._step_deadline("image_build"), "image build",
+                       self.ops.build_image, self.deploy_sha)
+        else:
+            self._call(self._step_deadline("image_build"), "restore exact candidate tag",
+                       self.ops.tag_image, self.same_head.image, tag)
         deadline = self._step_deadline("image_proof")
         self.candidate_image_id = self._call(deadline, "image inspect",
                                              self.ops.image_id, tag)
+        if self.same_head is not None and self.candidate_image_id != self.same_head.image:
+            raise StepFailed("candidate tag differs from the recorded immutable image")
         baked = self._call(deadline, "baked revision", self.ops.image_baked_revision, tag)
         if baked != self.deploy_sha:
             raise StepFailed("candidate image bakes a different BUILD_REVISION")
@@ -1784,11 +1978,15 @@ class Transaction:
         self._call(deadline, "web inventory", self.ops.adult_web_inventory,
                    self.previous_route, self.previous_revision,
                    self.target_slot, self.deploy_sha, False)
+        candidate = self._call(deadline, "candidate inspection", self.ops.slot_inspect,
+                               self.target_slot)
+        if self.same_head is not None and not self.forward_recovery:
+            if candidate:
+                raise StepFailed("same-head cutover needs an empty candidate slot before closure")
+            self._save_same_head_receipt(self.same_head, deadline)
         self.registration_closure_attempted = True
         # A recovery may already hold the candidate. Its boot latch closes
         # independently of readiness; it is never replaced by an old process.
-        candidate = self._call(deadline, "candidate inspection", self.ops.slot_inspect,
-                               self.target_slot)
         if candidate:
             self._call(deadline, "candidate registration close",
                        self.ops.registration_latch, self.target_slot,
@@ -1841,7 +2039,7 @@ class Transaction:
         self._call(self._step_deadline("adult_admission"), "isolated adult web inventory",
                    self.ops.adult_web_inventory, self.previous_route,
                    self.previous_revision, self.target_slot, self.deploy_sha, True)
-        self._verify_candidate(self._step_deadline("candidate_verify"))
+        self.recovery_web = self._verify_candidate(self._step_deadline("candidate_verify"))
         self._call(self._step_deadline("adult_admission"), "loaded adult runtime",
                    self.ops.adult_runtime_proof, self.target_slot, self.deploy_sha)
         self._admit_before_switch()
@@ -1875,6 +2073,7 @@ class Transaction:
         if self.adult_transition and not self.admission_open_attempted:
             self._call(deadline, "closed adult candidate", self.ops.adult_candidate_closed,
                        self.target_slot, self.deploy_sha)
+        return current
 
     def _pre_switch(self):
         deadline = self._step_deadline("pre_switch_verify")
@@ -1956,7 +2155,7 @@ class Transaction:
         self.worker_attempted = True
         self._call(deadline, "worker update", self.ops.worker_up, "candidate",
                    f"{IMAGE_REPO}:{self.deploy_sha}", self.deploy_sha)
-        self._prove_worker(deadline, self.candidate_image_id, self.deploy_sha)
+        self.recovery_worker = self._prove_worker(deadline, self.candidate_image_id, self.deploy_sha)
         redis = self._call(deadline, "redis identity", self.ops.redis)
         if (len(redis) != 1 or redis[0].id != self.redis_baseline.id
                 or redis[0].started_at != self.redis_baseline.started_at
@@ -1984,6 +2183,7 @@ class Transaction:
                            self.ops.container_build_revision, worker.id)
         if baked != revision or worker.app_revision != revision:
             raise StepFailed("worker revision does not match")
+        return worker
 
     def _checkout(self):
         deadline = self._step_deadline("checkout")
@@ -2342,8 +2542,6 @@ def main(argv=None, environ=None):
             raise ValueError("transaction epoch must be a monotonic second count")
         if args.mode not in MODES:
             raise ValueError("mode must be normal or forward-recovery")
-        if args.mode == "forward-recovery" and args.deploy_sha == args.previous_commit:
-            raise ValueError("forward recovery needs an uncommitted candidate")
         epoch = int(args.transaction_epoch)
     except ValueError as exc:
         print(f"r6-deploy: invalid invocation: {exc}", file=sys.stderr)

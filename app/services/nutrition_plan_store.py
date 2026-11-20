@@ -31,7 +31,6 @@ from app.services.plan_owner_lock import lock_plan_owner
 
 
 UNCONDITIONAL = None
-_UNCHANGED_LINEAGE = object()
 
 
 def newest_plan_query(user_id):
@@ -46,26 +45,6 @@ def newest_plan_query(user_id):
 
 def newest_plan(user_id):
     return newest_plan_query(user_id).first()
-
-
-def write_targeted_locked(row, *, lineage_id, version, before, after,
-                          before_lineage_id=_UNCHANGED_LINEAGE):
-    """Assign a validated targeted result inside the caller's owner/plan locks.
-
-    The mutation service commits journal, proposal and these fields together.
-    No provider I/O or commit here. Whole replacement uses the same owner lock.
-    """
-    from app.services.nutrition_plan_mutation.document import EditError, parse_snapshot
-    if not isinstance(row, NutritionPlan):
-        raise EditError("invalid_plan_domain")
-    expected_lineage = lineage_id if before_lineage_id is _UNCHANGED_LINEAGE else before_lineage_id
-    if (row.lineage_id != expected_lineage or row.mutation_version != version
-            or row.plan_data != before):
-        raise EditError("plan_stale")
-    parse_snapshot(after)
-    row.lineage_id = lineage_id
-    row.plan_data = after
-    row.mutation_version = version + 1
 
 
 def replace_nutrition_plan(user_id, document, score, check=UNCONDITIONAL, *, authority):

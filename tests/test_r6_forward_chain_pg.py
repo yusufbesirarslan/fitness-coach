@@ -2,11 +2,11 @@
 
 The historical R6 baseline was ``c6f8b0d2e4a1`` (restore receipt, 2026-11-09).
 Preserve its four reviewed forward migrations as a frozen prefix, then add
-the source-qualified M4 monitoring revision, the account-deletion
-destruction record, and the dormant C1 Nutrition history expansion:
+only the source-qualified M4 monitoring revision and the account-deletion
+destruction record (one empty table, no foreign key, no backfill):
 
     c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
-        -> f01a4e000003 -> ad17de1e0001 -> c1a9b7e5d301
+        -> f01a4e000003 -> ad17de1e0001
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -23,8 +23,8 @@ the CHAIN qualification on a database built only by the real Alembic history:
 * a database at ``c6f8b0d2e4a1`` populated the way production is (completion
   floor raised, historical Pump Check evidence, photo-free claims, legacy
   FatSecret rows, narrow-scope allowance buckets) is brought to head by the
-  real ``flask release-prepare``; every pre-existing row is unchanged, no
-  existing field is rewritten, deleted or retroactively authorized (no consent rows, no
+  real ``flask release-prepare``; every pre-existing row is unchanged, nothing
+  is backfilled, deleted or retroactively authorized (no consent rows, no
   erasure rows), and the O2-B completion-claim retention fence is installed;
 * the whole chain runs in ONE transaction (migrations/env.py): a lock that
   blocks the third migration rolls the first two back too, the previous
@@ -72,7 +72,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
-CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "c1a9b7e5d301")
+CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -84,8 +84,7 @@ SEEDED = ("user", "meal_log", "custom_meal", "custom_meal_item", "weekly_check_i
           "completion_capability_floor", "activity", "activity_clap")
 NEW_TABLES = ("health_consent_state", "health_consent_event", "meal_log_retained_total",
               "health_erasure", "health_legal_hold", "health_erasure_retry",
-              "account_deletion_record", "nutrition_plan_edit_operation",
-              "nutrition_plan_mutation_record")
+              "account_deletion_record")
 PROVIDER_COLUMNS = {"meal_log": ("provider_items", "provider_acquired_at", "provider_expired_at"),
                     "custom_meal_item": ("provider_acquired_at", "provider_expired_at")}
 
@@ -276,7 +275,7 @@ def _verify_head_fence(url):
 
 # ── 1. the graph (no database) ──────────────────────────────────────────────
 
-def test_release_chain_preserves_reviewed_r6_prefix_and_additive_successors():
+def test_release_chain_preserves_reviewed_r6_prefix_and_adds_only_m4():
     from alembic.script import ScriptDirectory
     script = ScriptDirectory(str(ROOT / "migrations"))
     assert script.get_heads() == [HEAD]
@@ -489,8 +488,7 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
     # Nothing retroactively authorized or erased; no retained totals invented.
     for table in ("health_consent_state", "health_consent_event", "health_erasure",
                   "health_legal_hold", "meal_log_retained_total",
-                  "account_deletion_record", "nutrition_plan_edit_operation",
-                  "nutrition_plan_mutation_record"):
+                  "account_deletion_record"):
         assert _sql(chain_url, f"SELECT count(*) FROM {table}")[0][0] == 0, table
     definition, valid = _bucket_scope(chain_url)
     assert valid is True and "'LAUNCH_FREE'" in definition and "'STARTER'" in definition
