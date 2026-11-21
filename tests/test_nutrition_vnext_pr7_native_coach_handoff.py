@@ -4,7 +4,7 @@
 
 The native Coach body stays ``{"message"}`` and gains ONE optional key,
 ``handoff``, whose only accepted value is ``"nutrition-day"``. At send time the
-server re-derives the PR6 NutritionDayView for the Bearer owner — no client
+server re-derives the qualified diary and independent goal/hydration for the Bearer owner — no client
 number can become model context. Everything else about LP-09 (one model call,
 shared quota, persistence, provider failure semantics) is unchanged.
 """
@@ -34,7 +34,7 @@ def test_message_only_native_coach_is_unchanged(mobile, bearer, provider, alice)
     response = send(mobile, bearer(alice), message="Hi")
     assert response.status_code == 200
     assert len(provider.calls) == 1
-    assert "[NUTRITION CONTEXT]" not in provider.calls[0]["context"]
+    assert "[NUTRITION DIARY]" not in provider.calls[0]["context"]
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -46,11 +46,12 @@ def test_marker_adds_server_rederived_day_view_context(mobile, bearer, provider,
     call = provider.calls[0]
     assert call["question"] == "Review my day"   # user speech is untouched
     context = call["context"]
-    assert "[NUTRITION CONTEXT]" in context
-    assert "- daily target: 2100 kcal per day" in context
+    assert "[NUTRITION DIARY]" in context
+    assert '"calories": 2100.0' in context
     # FatSecret advice fallback: unproven logged intake is withheld from the model.
-    assert "525 kcal" not in context and "Logged intake is unavailable for advice" in context
-    assert "3 glass(es) of water" in context
+    assert "525" not in context and '"status": "unavailable"' in context
+    assert "logged_totals" not in context and "nutrition plan" not in context
+    assert '"glasses": 3' in context
     assert "Secret soup" not in context           # no meal text in model context
     # Context is not persisted as user speech.
     assert [r.content for r in _rows(alice.id) if r.role == "user"] == ["Review my day"]
@@ -64,8 +65,8 @@ def test_latest_canonical_truth_wins_over_any_client_snapshot(mobile, bearer, pr
     send(mobile, bearer(alice), json={"message": "Review", "handoff": MARKER})
     # Re-derived at send time and still withheld: neither 525 nor 825 reaches the model.
     context = provider.calls[0]["context"]
-    assert "825 kcal" not in context and "525 kcal" not in context
-    assert "Logged intake is unavailable for advice" in context
+    assert "825" not in context and "525" not in context
+    assert '"status": "unavailable"' in context and "logged_totals" not in context
 
 
 @pytest.mark.parametrize("body", [
@@ -95,13 +96,14 @@ def test_unknown_markers_and_client_facts_are_refused_and_spend_nothing(
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_unreadable_intake_does_not_fabricate_context(
         mobile, bearer, provider, alice, monkeypatch):
-    from app.services import nutrition_day_view as dv
+    from app.services import coach_nutrition_diary as diary
     _seed(alice)
-    monkeypatch.setattr(dv, "_read_intake",
+    monkeypatch.setattr(diary, "nutrition_diary",
                         lambda *_a: (_ for _ in ()).throw(RuntimeError("db")))
     response = send(mobile, bearer(alice), json={"message": "Review", "handoff": MARKER})
     assert response.status_code == 200
-    assert "[NUTRITION CONTEXT]" not in provider.calls[0]["context"]
+    assert '"status": "unavailable"' in provider.calls[0]["context"]
+    assert "logged_totals" not in provider.calls[0]["context"]
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -110,7 +112,7 @@ def test_handoff_context_is_owner_scoped(mobile, bearer, provider, alice, bob):
     send(mobile, bearer(bob), json={"message": "Review", "handoff": MARKER})
     context = provider.calls[0]["context"]
     assert "777" not in context
-    assert "no meals logged yet (measured 0)" in context
+    assert '"status": "empty", "entries": []' in context
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")

@@ -69,6 +69,7 @@ def log_food(user_id, key, command):
     db.session.rollback()
 
     provenance = None
+    amounts_entered = False
     if isinstance(command, ProviderBackedLogFoodCommand):
         snapshot = resolve_provider_food(
             command.provider, command.food_id, command.serving_id,
@@ -91,6 +92,9 @@ def log_food(user_id, key, command):
             user_id, description, nutrition)
         if provenance is not None and not launch_food_search.available():
             raise ProviderPersistenceHeld  # no import disguised as a repeat
+        amounts_entered = (command.amounts_entered and provenance is None
+                           and not provider_retention.matches_unqualified_diary_entry(
+                               user_id, description, nutrition))
         db.session.rollback()  # close the read before the write transaction
     else:  # pragma: no cover - typed parser is the only caller
         raise TypeError("unsupported command")
@@ -110,6 +114,10 @@ def log_food(user_id, key, command):
     )
     if provenance is not None:
         provider_retention.stamp(entry, *provenance)
+    elif amounts_entered:
+        # The explicit entry command is reserved for values the owner typed.
+        # The shipped manual/Repeat command never makes that assertion.
+        entry.provider_items = []
     winner, created = meal_idempotency.commit_once(entry, key)
     if winner.idempotency_fingerprint != fingerprint:
         raise IdempotencyConflict

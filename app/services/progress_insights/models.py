@@ -230,6 +230,7 @@ class ProgressInsights:
     # Additive (V2 PR3): the one coherent insight the Progress page renders.
     # ``None`` only for callers that build the three slots alone.
     insight: AxisInsight | None = None
+    measured_volume_trend: bool = False
 
 
 __all__ = [

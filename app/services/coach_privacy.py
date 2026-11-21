@@ -5,6 +5,7 @@ messages remain user input; stored enrichment must pass an operation projection.
 """
 import json
 import math
+import re
 
 GOALS = ('kilo verme', 'kas kazanma', 'lose_weight', 'build_muscle')
 LEVELS = ('beginner', 'intermediate', 'advanced')
@@ -60,6 +61,34 @@ def operation(question, handoff=None):
         if any(word in q for word in words):
             return kind
     return 'chat'
+
+
+# Relevance rules for richer D1 context. Keep ambiguous "plan" and "weight"
+# out of the training/body rules unless the message names the domain.
+_CONTEXT_RULES = {
+    "training": r"\b(?:training|workouts?|exercis\w*|sets?|reps?|squats?|deadlifts?|bench|"
+                r"lift(?:ed|ing)?|work(?:ed|ing)? out|antrenman\w*|egzersiz\w*|çömel\w*|koşu\w*)\b",
+    "nutrition": r"\b(?:nutrition|calories?|meals?|macros?|food|intake|(?:did|have) i (?:eat|eaten)|diet\w*|"
+                 r"protein|kalori\w*|beslen\w*|öğün\w*|yemek\w*|yiyeyim|yedi(?:m|ğim|klerim|klerimi)|tükettim)\b",
+    "recovery": r"\b(?:recovery|sleep|fatigue|toparlan\w*|uyku\w*|yorgun\w*)\b",
+    "body": r"\b(?:body weight|weight (?:loss|gain|progress|change)|my weight|body measurements?|bmr|tdee|"
+            r"vücut ağırlığ\w*|kilo\s+(?:ver\w*|al\w*)|kilom\w*)\b",
+    "goals": r"\b(?:my (?:fitness )?goals?|hedefim\w*|hedeflerim\w*)\b",
+    "progress": r"\b(?:progress\w*|performance|plateau\w*|strength trend\w*|"
+                r"ilerle\w*|performans\w*|plato\w*)\b",
+}
+
+
+def context_operations(question, handoff=None):
+    """Collect named domains for a turn. An allowlisted handoff adds its domain."""
+    question = (question or "").casefold()
+    selected = {kind for kind, pattern in _CONTEXT_RULES.items() if re.search(pattern, question)}
+    domain = {"nutrition-day": "nutrition", "progress-insight": "progress"}.get(handoff)
+    if domain:
+        selected.add(domain)
+    if domain != "progress" and "body" in selected and "progress" in selected and "training" not in selected:
+        selected.remove("progress")
+    return selected or {"chat"}
 
 
 def exercise_name(value):

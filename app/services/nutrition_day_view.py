@@ -277,6 +277,14 @@ def _guard(read, failed):
         return failed
 
 
+def read_nutrition_target_and_hydration(user_id, day):
+    """Independent day facts for Coach, with no diary or saved-plan access."""
+    return (
+        _guard(lambda: _read_target(user_id), TargetSection(UNAVAILABLE)),
+        _guard(lambda: _read_hydration(user_id, day.isoformat()), HydrationSection(UNAVAILABLE)),
+    )
+
+
 def build_nutrition_day_view(user_id) -> NutritionDayView:
     """Owner-scoped day view. Never raises for a section read; never writes."""
     today = app_today()

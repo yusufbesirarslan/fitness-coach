@@ -65,8 +65,8 @@ READ_PLAN_TOOL_DEF = {
     "name": READ_PLAN_TOOL,
     "description": (
         "Read the user's CURRENT saved training plan (weekday, day type, "
-        "exercises with sets and reps). Call this before you describe the "
-        "plan, name a day or exercise, or propose or make any plan change. "
+        "exercises with sets and reps). Call this when the user asks about "
+        "their saved plan, or before describing or proposing a change to it. "
         "Never describe plan contents from memory. Takes no arguments; it "
         "only reads and never changes anything."
     ),

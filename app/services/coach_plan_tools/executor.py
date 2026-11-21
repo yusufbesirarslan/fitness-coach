@@ -394,17 +394,19 @@ def invalid_arguments_result(detail):
     return results.error_result(results.ERROR_INVALID_ARGUMENTS, detail)
 
 
-def execute_plan_read(user_id):
-    """Run the read-only ``get_current_training_plan`` tool (Foundation V1 B1).
+def training_plan_read_authorized(user_id):
+    from app.services.context_builder import assert_principal
 
-    Same gate as the write family: OFF means the tool is neither published nor
-    executable. Never raises for a storage fault — the model is told the plan is
-    unreadable instead of being handed a guess — and never leaves a read
-    transaction open across the provider call that follows.
-    """
+    assert_principal(user_id)
+    return ai_consent.authorize_coach_read(
+        user_id, "training_history", "fitness_preferences", "tool_results")
+
+
+def execute_plan_read(user_id):
+    """Read the plan under current D1 authority and settle the read transaction."""
     from .plan_read import ERROR_PLAN_UNREADABLE, READ_PLAN_TOOL, read_current_training_plan
 
-    if not plan_mutation_tools_enabled():
+    if not training_plan_read_authorized(user_id):
         payload = results.error_result(results.ERROR_CAPABILITY_DISABLED)
     else:
         try:
