@@ -98,6 +98,9 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/today/guidance"),
         ("get", "/api/v1/training/preferences"),
         ("get", "/api/v1/training/plans/current"),
+        ("get", "/api/v1/training/editor"),
+        ("get", "/api/v1/training/exercise-catalog"),
+        ("post", "/api/v1/training/editor/add"),
         ("get", "/api/v1/training/workouts/AAAAAAAAAAAAAAAAAAAAAAAA"),
         ("get", "/api/v1/training/workout-execution-capabilities"),
         ("get", "/api/v1/training/exercise-history-capabilities"),
@@ -254,6 +257,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/plans/replacement-proposals", ("POST",)),
             ("/api/v1/training/plans/replacement/confirm", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),
+            ("/api/v1/training/editor", ("GET",)),
+            ("/api/v1/training/exercise-catalog", ("GET",)),
+            ("/api/v1/training/editor/<any(add,remove,replace,prescription,undo):operation>", ("POST",)),
             ("/api/v1/training/workouts/<workout_reference>", ("GET",)),
             # Mobile Training session contracts; behind
             # FITX_WORKOUT_SESSIONS_ENABLED at request time, but the ROUTES are
