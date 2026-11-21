@@ -29,7 +29,7 @@ from flask import current_app, g
 
 from app.extensions import db
 from app.observability import current_request_id
-from app.services import ai_consent
+from app.services import ai_consent, coach_privacy
 from app.services.coach_plan_policy import (
     APPLY_NOW,
     CANCEL,
@@ -395,9 +395,7 @@ def invalid_arguments_result(detail):
 
 
 def training_plan_read_authorized(user_id):
-    from app.services.context_builder import assert_principal
-
-    assert_principal(user_id)
+    coach_privacy.assert_principal(user_id)
     return ai_consent.authorize_coach_read(
         user_id, "training_history", "fitness_preferences", "tool_results")
 

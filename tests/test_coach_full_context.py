@@ -65,6 +65,7 @@ def test_mixed_context_uses_canonical_facts_and_keeps_unrelated_data_out(
             user_id, "Compare today's food diary, recent workout progress and sleep", "en")
         single = context_builder.fetch_coach_context(
             user_id, "What is protein and what should I train today?", "en")
+        macros = context_builder.fetch_coach_context(user_id, "What are my macros today?", "en")
         body = context_builder.fetch_coach_context(user_id, "How's my weight progress?", "en")
         goals = context_builder.fetch_coach_context(user_id, "My goal, nutrition and sleep", "en")
 
@@ -76,6 +77,7 @@ def test_mixed_context_uses_canonical_facts_and_keeps_unrelated_data_out(
                    "932", "828", "722", '"volume_trend"'):
         assert absent not in context
     assert "[NUTRITION DIARY]" not in single and "[COMPLETED WORKOUTS" not in single
+    assert '"logged_totals"' in macros
     assert "[BODY PROGRESS]" in body and "[PROGRESS CONTEXT]" not in body
     assert '"recorded_weight_change_kg": null' in body
     assert "build_muscle" in goals and "dumbbell" not in goals

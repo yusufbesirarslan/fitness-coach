@@ -14,6 +14,21 @@ EQUIPMENT = ('dumbbell', 'barbell', 'bench', 'cable', 'machine', 'bodyweight',
 RESTRICTIONS = ('vegan', 'vegetarian', 'gluten_free', 'lactose_free', 'halal')
 
 
+def assert_principal(user_id):
+    """Savunma derinliği: in-process koç/MCP araçları yalnızca kimliği doğrulanmış
+    kullanıcı için çalışmalı. user_id ASLA LLM'den gelmez; yine de bir istek
+    bağlamında çağrıldıysak current_user ile eşleştiğini doğrula (gelecekteki bir
+    yanlış kullanım çapraz-kullanıcı okuma/yazmaya dönüşmesin)."""
+    from flask import g, has_request_context
+    from flask_login import current_user
+    if has_request_context():
+        principal = getattr(g, "mobile_user", None)
+        if principal is None and getattr(current_user, "is_authenticated", False):
+            principal = current_user
+        if principal is not None and principal.id != user_id:
+            raise PermissionError("user_id does not match the authenticated owner")
+
+
 def number(value):
     return value if type(value) in (int, float) and math.isfinite(value) else None
 

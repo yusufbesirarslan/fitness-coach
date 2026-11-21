@@ -6,27 +6,13 @@ serializers remain available to non-AI callers.
 import json
 import re
 from datetime import timedelta
-from flask import current_app, g
+from flask import current_app
 from app.extensions import db
 from app.models import User, WeeklyCheckIn
 from app.services import ai_consent, coach_privacy as privacy
+from app.services.coach_privacy import assert_principal
 from app.services.workout_state import resolve_workout_state
 from app.timeutil import app_today
-
-
-def assert_principal(user_id):
-    """Savunma derinliği: in-process koç/MCP araçları yalnızca kimliği doğrulanmış
-    kullanıcı için çalışmalı. user_id ASLA LLM'den gelmez; yine de bir istek
-    bağlamında çağrıldıysak current_user ile eşleştiğini doğrula (gelecekteki bir
-    yanlış kullanım çapraz-kullanıcı okuma/yazmaya dönüşmesin)."""
-    from flask import has_request_context
-    from flask_login import current_user
-    if has_request_context():
-        principal = getattr(g, "mobile_user", None)
-        if principal is None and getattr(current_user, "is_authenticated", False):
-            principal = current_user
-        if principal is not None and principal.id != user_id:
-            raise PermissionError("user_id does not match the authenticated owner")
 
 
 def fetch_profile_and_trends(user_id, selected_operation="training"):
@@ -88,7 +74,7 @@ def _nutrition_context(user_id, question, language, handoff, expanded):
     requested = (question or "").casefold()
     diary_requested = handoff == "nutrition-day" or re.search(
         r"\b(?:food (?:diary|log)|nutrition (?:diary|log)|meal log|i (?:ate|drank|eat|consumed|logged)|"
-        r"my (?:meals?|calories|intake|food log)|what (?:did|have) i (?:eat|eaten)|"
+        r"my (?:meals?|calories|macros|intake|food log)|what (?:did|have) i (?:eat|eaten)|"
         r"(?:yemek|beslenme) günlüğ\w*|öğünlerim\w*|aldığım kalori\w*|"
         r"yedi(?:m|ğim|klerim|klerimi)|tükettim)\b", requested)
     today = app_today()

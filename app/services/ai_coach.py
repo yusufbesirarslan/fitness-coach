@@ -44,8 +44,8 @@ from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _norm
 # tests/test_plan_mutation_architecture.py fails the build if it ever does, so
 # "the AI cannot reach plan persistence directly" is structural, not a promise.
 from app.services import coach_confirmation, coach_plan_tools
+from app.services.coach_privacy import assert_principal as _assert_principal
 from app.services.context_builder import (  # noqa: F401 (re-export)
-    assert_principal as _assert_principal,
     fetch_coach_context as _fetch_coach_context,
     fetch_profile_and_trends as _fetch_profile_and_trends,
     neutralize_friend_content as _neutralize_friend_content,
