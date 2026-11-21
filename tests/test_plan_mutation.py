@@ -1020,14 +1020,14 @@ class TestCanonicalExerciseAuthority:
         with pytest.raises(InvalidMutation):
             apply_command(document, ReplaceExerciseCommand(
                 day="Pazartesi", exercise="Dumbbell Row",
-                replacement="Machine Chest Press"))
+                replacement="Zercher Squat"))
 
     def test_canonical_target_outside_the_catalog_is_rejected(self):
         document = canonical_document(equipment_context="minimal")
 
         with pytest.raises(InvalidMutation):
             apply_command(document, RemoveExerciseCommand(
-                day="Pazartesi", exercise="Machine Chest Press"))
+                day="Pazartesi", exercise="Zercher Squat"))
 
     def test_canonical_target_that_resolves_but_is_absent_is_not_found(self):
         """Resolution and presence are different questions, and the second one

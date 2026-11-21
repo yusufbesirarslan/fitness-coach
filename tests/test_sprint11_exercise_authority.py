@@ -65,7 +65,7 @@ EXPECTED_EQUIPMENT = frozenset({
 })
 EXPECTED_MOVEMENTS = frozenset({
     "anti_extension", "anti_rotation", "calf_raise", "carry", "cardio",
-    "core_dynamic", "curl", "dip", "hinge", "horizontal_pull",
+    "core_dynamic", "curl", "dip", "hinge", "hip_abduction", "hip_adduction", "horizontal_pull",
     "horizontal_push", "lunge", "mobility", "squat", "vertical_pull",
     "vertical_push",
 })
@@ -124,7 +124,7 @@ def test_real_catalog_has_valid_closed_shape_and_unique_lookup_keys():
     catalog = load_exercise_catalog()
 
     assert set(raw) == {"version", "exercises"}
-    assert raw["version"] == catalog.version == 1
+    assert raw["version"] == catalog.version == 2
     assert len(raw["exercises"]) == len(catalog.exercises)
 
     ids = []
@@ -676,6 +676,12 @@ def _valid_payload(user_id=7, **overrides):
     return payload
 
 
+def test_signed_v1_draft_is_accepted_after_the_additive_catalog_upgrade():
+    token = _mint(_valid_payload(catalog=1), secret="secret")
+    restored = verify_exercise_context(token, "secret", user_id=7)
+    assert restored.catalog_version == 1
+
+
 def _tamper(segment):
     """Swap one base64url character for a different, still-legal one."""
     return ("B" if segment[0] != "B" else "C") + segment[1:]
@@ -708,7 +714,7 @@ def test_context_token_tampering_fails_closed(mutation):
 
 def test_context_token_round_trip_preserves_every_context_field():
     context = ExerciseContext(
-        "ev", cardio_type="ip_atlama", style="calisthenics", catalog_version=1)
+        "ev", cardio_type="ip_atlama", style="calisthenics")
     restored = verify_exercise_context(
         sign_exercise_context(context, "secret", user_id=3), "secret", user_id=3)
 
