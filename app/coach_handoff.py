@@ -67,9 +67,14 @@ def _public_insight(user_id, language="tr", include_evidence=False):
     """Re-derive owner-scoped canonical facts and project only public copy."""
     from app.services.progress_insights import EVIDENCE_CODES, build_progress_insights
 
-    insight = build_progress_insights(user_id).insight
+    progress = build_progress_insights(user_id)
+    insight = progress.insight
     if insight is None:
         return None
+    if (include_evidence and insight.code == "holding_steady"
+            and not progress.measured_volume_trend):
+        return ["Insufficient measured workout history to establish a trend." if language == "en"
+                else "Eğilimi belirlemek için yeterli ölçülmüş antrenman geçmişi yok."]
     insight_key = INSIGHT_KEYS.get(insight.code)
     action_key = ACTION_KEYS.get(insight.action_code)
     if not insight_key or not action_key:

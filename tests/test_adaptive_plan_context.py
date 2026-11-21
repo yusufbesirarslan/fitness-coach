@@ -15,7 +15,7 @@ from app.services.training_progression import ProgressionReport
 
 
 BASELINE_CONTEXT = (
-    '{"period_days": 7, "total_workouts_completed": 0, "total_volume": 0.0, "volume_trend": "flat"}\n\n'
+    '{"period_days": 7, "total_workouts_completed": 0, "total_volume": 0.0}\n\n'
     '[GÜNCEL ANTRENMAN DURUMU]\n'
     '{"primary_state": "scheduled_not_started", "completed_today": false, "is_rest_day": false}'
 )
@@ -113,7 +113,7 @@ def _stub_baseline_context_sources(monkeypatch):
     monkeypatch.setattr(analytics_engine, "get_nudges", lambda *args, **kwargs: [])
 
 
-def test_pre_pr4_context_bytes_are_characterized(auth_user, monkeypatch):
+def test_baseline_context_omits_an_unmeasured_volume_trend(auth_user, monkeypatch):
     _stub_baseline_context_sources(monkeypatch)
 
     context = context_builder.fetch_coach_context(auth_user.id, "workout", "tr")

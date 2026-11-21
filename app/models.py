@@ -892,7 +892,9 @@ class MealLog(db.Model):
     # and non-provider labels. ``provider_acquired_at`` is the UTC instant the
     # provider values were fetched; the 24h deadline runs from it and nothing
     # extends it. ``provider_expired_at`` is set once the restricted per-item
-    # values and provider text have been removed. All NULL = not provider data.
+    # values and provider text have been removed. An empty component list with
+    # both timestamps NULL marks an explicit user-entered mobile log
+    # checked for Repeat provenance. All NULL does not establish lineage.
     provider_items = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
     provider_acquired_at = db.Column(db.DateTime, nullable=True)
     provider_expired_at = db.Column(db.DateTime, nullable=True)
@@ -918,6 +920,14 @@ class MealLog(db.Model):
         db.UniqueConstraint("user_id", "idempotency_key",
                             name="uq_meal_log_user_idempotency"),
     )
+
+    @classmethod
+    def user_entered_amounts(cls):
+        """SQL predicate for the dedicated user-entered LogFood command."""
+        return db.and_(
+            cls.source == "manual", cls.provider_items == [],
+            cls.provider_acquired_at.is_(None), cls.provider_expired_at.is_(None),
+        )
 
     def __repr__(self):
         return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"

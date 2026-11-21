@@ -327,6 +327,13 @@ APPROVED_CONSUMERS = {
         PACKAGE_DOTTED + '.selection': {'check_invariants'},
         'app.services.workout_session.checkpoint': {'MAX_REVISION', 'MAX_SETS_PER_EXERCISE'},
     },
+    'app/services/coach_workout_history.py': {
+        'json': None,
+        'app.services.exercise_catalog': {'ExerciseResolutionError', 'resolve_historical_exercise'},
+        PACKAGE_DOTTED + '.models': {'ROW_ELIGIBLE', 'ROW_EXCLUDED'},
+        PACKAGE_DOTTED + '.queries': {'load_candidates'},
+        PACKAGE_DOTTED + '.selection': {'classify', 'performed_sets'},
+    },
 }
 
 
@@ -357,7 +364,9 @@ def approved_consumer_violations(relative, source):
                 found.append('dynamic bypass')
             if name == 'build_exercise_history':
                 builds.append(ast.unparse(node))
-        elif isinstance(node, ast.Name) and node.id in {'request', 'WorkoutSession', 'queries', 'load_candidates'}:
+        elif isinstance(node, ast.Name) and node.id in (
+                {'request', 'WorkoutSession', 'queries'} if relative == 'app/services/coach_workout_history.py'
+                else {'request', 'WorkoutSession', 'queries', 'load_candidates'}):
             found.append('direct query/request bypass')
     expected = ['build_exercise_history(owner_id, exercise_id)'] if relative.startswith('app/blueprints/') else []
     if builds != expected:
@@ -382,7 +391,7 @@ def approved_consumer_violations(relative, source):
     return found
 
 
-def test_h_a8_exact_pr2_consumers():
+def test_h_a8_exact_approved_consumers():
     modules = list(_production_modules())
     assert len(modules) > 200 and any(path.name == "mobile_api.py" for path in modules)
     callers = {}
@@ -393,7 +402,7 @@ def test_h_a8_exact_pr2_consumers():
             assert approved_consumer_violations(relative, path.read_text()) == [], relative
         elif found:
             callers[str(path.relative_to(ROOT))] = found
-    assert callers == {}, ('TD-01 PR2 admits only the exact transport and DTO consumers', callers)
+    assert callers == {}, ('only the approved history projections may call this service', callers)
     assert all((ROOT / relative).is_file() for relative in APPROVED_CONSUMERS)
 
 
@@ -407,6 +416,8 @@ def test_h_a8_exact_pr2_consumers():
     ('app/blueprints/mobile_exercise_history.py', 'other = build_exercise_history'),
     ('app/blueprints/mobile_exercise_history.py', 'db.session.query()'),
     ('app/blueprints/mobile_exercise_history.py', 'db.session.get(None, 1)'),
+    ('app/services/coach_workout_history.py', 'from app.models import WorkoutSession'),
+    ('app/services/coach_workout_history.py', 'db.session.query()'),
 ])
 def test_pr2_consumer_delta_is_non_vacuous(relative, snippet):
     source = (ROOT / relative).read_text()

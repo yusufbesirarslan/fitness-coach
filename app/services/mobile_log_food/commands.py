@@ -55,6 +55,7 @@ class ManualLogFoodCommand:
     description: str
     slot: str
     nutrition: ManualNutritionSnapshot
+    amounts_entered: bool = False
 
     def __post_init__(self):
         if not isinstance(self.description, str) or not self.description:
@@ -63,6 +64,8 @@ class ManualLogFoodCommand:
             raise ValueError("description must already be normalized")
         if self.slot not in _SLOTS:
             raise ValueError("invalid slot")
+        if type(self.amounts_entered) is not bool:
+            raise ValueError("invalid manual entry provenance")
         if not isinstance(self.nutrition, ManualNutritionSnapshot):
             raise ValueError("validated nutrition is required")
 
