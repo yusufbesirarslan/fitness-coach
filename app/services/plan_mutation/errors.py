@@ -128,3 +128,7 @@ class PlanStateConflict(PlanMutationError):
     The authoritative row moved between the locked read and the write. The
     transaction is rolled back whole; no partial mutation survives.
     """
+
+
+class ActiveWorkoutConflict(PlanStateConflict):
+    """A workout session is still in progress for this owner."""

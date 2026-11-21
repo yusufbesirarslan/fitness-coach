@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 import json
 from pathlib import Path
@@ -25,7 +25,7 @@ EQUIPMENT_VOCABULARY = frozenset({
 })
 MOVEMENT_VOCABULARY = frozenset({
     "anti_extension", "anti_rotation", "calf_raise", "carry", "cardio",
-    "core_dynamic", "curl", "dip", "hinge", "horizontal_pull",
+    "core_dynamic", "curl", "dip", "hinge", "hip_abduction", "hip_adduction", "horizontal_pull",
     "horizontal_push", "lunge", "mobility", "squat", "vertical_pull",
     "vertical_push",
 })
@@ -105,7 +105,7 @@ class ExerciseContext:
     equipment_context: str
     cardio_type: str = "yok"
     style: str = "general_fitness"
-    catalog_version: int = 1
+    catalog_version: int = field(default_factory=lambda: load_exercise_catalog().version)
 
 
 @dataclass(frozen=True)
@@ -282,3 +282,31 @@ def compatible_exercises(context: ExerciseContext) -> tuple[ExerciseDefinition, 
         exercise for exercise in load_exercise_catalog().exercises
         if exercise.active and is_exercise_compatible(exercise, context)
     )
+
+
+def _search_key(value: str) -> str:
+    """Fold accents, Turkish dotless i and separators for discovery only."""
+    text = unicodedata.normalize("NFKD", normalize_exercise_lookup(value))
+    folded = "".join(char for char in text if not unicodedata.combining(char))
+    folded = folded.replace("ı", "i")
+    return " ".join("".join(char if char.isalnum() else " " for char in folded).split())
+
+
+def search_exercises(catalog: ExerciseCatalog, query: str) -> tuple[ExerciseDefinition, ...]:
+    """Rank active IDs by exact name or alias, then by partial token matches."""
+    query = _search_key(query)
+    tokens = query.split()
+    hits = []
+    for exercise in catalog.exercises:
+        if not exercise.active:
+            continue
+        labels = tuple(_search_key(label) for label in (
+            exercise.canonical_name, *exercise.aliases, exercise.exercise_id))
+        if query in labels:
+            rank = 0
+        elif any(all(token in label for token in tokens) for label in labels):
+            rank = 1
+        else:
+            continue
+        hits.append((rank, labels[0], exercise.exercise_id, exercise))
+    return tuple(hit[3] for hit in sorted(hits))

@@ -1248,7 +1248,7 @@ def test_the_coach_cannot_invent_an_exercise_on_a_canonical_plan(
     exercise. No fuzzy match, no nearest neighbour, no substitution."""
     result = call(canonical_user.id, REPLACE, {
         "day": "Pazartesi", "exercise": "Dumbbell Row",
-        "replacement": "Machine Chest Press"})
+        "replacement": "Zercher Squat"})
 
     assert result["status"] == results.STATUS_NEEDS_INPUT
     assert result["reason"] in (

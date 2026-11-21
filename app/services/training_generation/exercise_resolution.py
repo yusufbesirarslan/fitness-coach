@@ -157,13 +157,20 @@ def _resolve_plan_exercise(
 
 def check_placement(
     exercise: ExerciseDefinition, day: dict, *, allow_overlap: bool = False,
+    require_cardio_on_dedicated_day: bool = False,
 ) -> None:
     """Allow cardio on a cardio day or alongside real strength on new plans.
 
     Equipment and cardio-type checks run independently before this check.
     Mutation callers keep their existing placement policy by default.
     """
-    if exercise.movement != CARDIO_MOVEMENT or day.get("tip") == CARDIO_TIP:
+    if day.get("tip") == CARDIO_TIP:
+        if require_cardio_on_dedicated_day and exercise.movement != CARDIO_MOVEMENT:
+            raise GenerationExerciseIncompatibleError(
+                "dedicated cardio day requires cardio exercises",
+                resolution_category="cardio_placement")
+        return
+    if exercise.movement != CARDIO_MOVEMENT:
         return
     if allow_overlap and day.get("tip") == "antrenman":
         catalog = load_exercise_catalog()

@@ -38,16 +38,20 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import TrainingPlan
+from app.services.plan_owner_lock import lock_plan_owner
+from app.services.plan_session_transition import lock_plan_session_transition
 from app.services.today_facts import get_active_plan
+from app.services.workout_session.queries import get_active_session
 
 from .commands import PLAN_MUTATION_COMMANDS
-from .context import validate_context
+from .context import ACTOR_USER, validate_context
 from .document import (
     apply_command,
     parse_plan_document,
     serialize_plan_document,
 )
 from .errors import (
+    ActiveWorkoutConflict,
     IdempotencyConflict,
     InvalidMutation,
     PlanNotFound,
@@ -71,6 +75,15 @@ from .journal import (
     find_by_key,
     latest_reversible,
 )
+
+
+@dataclass(frozen=True)
+class PlanEditRevision:
+    """Exact persisted plan snapshot shown in the native editor."""
+
+    lineage_id: str
+    mutation_version: int
+    snapshot_fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -223,7 +236,35 @@ def _arbitrated_result(user_id, context, expected_type, expected_fingerprint):
         db.session.rollback()
 
 
-def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> PlanMutationResult:
+def _lock_for_mutation(user_id, *, editor):
+    if editor:
+        # Same order as native replacement. Serialize with starts and
+        # plan creation before reading which lineage is currently active.
+        lock_plan_session_transition(user_id)
+    # D1 fences a write inside an AI operation before taking its plan row.
+    _fence_active_operation(user_id)
+    if editor:
+        lock_plan_owner(user_id)
+    return _locked_active_plan(user_id)
+
+
+def _validate_editor_call(revision, binding, context):
+    if revision is not None and (
+        not isinstance(revision, PlanEditRevision) or binding is not None
+        or context.actor != ACTOR_USER
+    ):
+        raise InvalidMutation("invalid native editor context")
+
+
+def _require_editor_state(user_id, plan, revision):
+    _require_binding(plan, revision)
+    if get_active_session(user_id) is not None:
+        raise ActiveWorkoutConflict("complete or abandon the active workout first")
+
+
+def apply_plan_mutation(
+    user_id, command, context, *, expected_binding=None, editor_revision=None,
+) -> PlanMutationResult:
     """Apply one typed mutation to the authenticated user's active plan.
 
     ``user_id`` MUST come from the authenticated server context. It is never read
@@ -238,7 +279,8 @@ def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> 
 
     context = validate_context(context)
     ctype = command_type(command)
-    fingerprint = semantic_fingerprint(command)
+    _validate_editor_call(editor_revision, expected_binding, context)
+    fingerprint = semantic_fingerprint(command, editor_revision=editor_revision)
 
     try:
         replayed = _existing_result(user_id, context, ctype, fingerprint)
@@ -248,10 +290,7 @@ def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> 
             db.session.rollback()
             return replayed
 
-        # D1 (LP21): a change requested inside an AI operation is fenced
-        # under the owner lock BEFORE the plan row (owner -> plan order).
-        _fence_active_operation(user_id)
-        plan = _locked_active_plan(user_id)
+        plan = _lock_for_mutation(user_id, editor=editor_revision is not None)
         if expected_binding is not None:
             _require_binding(plan, expected_binding)
 
@@ -264,6 +303,10 @@ def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> 
             db.session.rollback()
             return replayed
 
+        if editor_revision is not None:
+            # A concurrent same-key delivery replays before the stale check.
+            _require_editor_state(user_id, plan, editor_revision)
+
         before_snapshot = plan.plan_data
         before_version = plan.mutation_version
         lineage_id = plan.lineage_id
@@ -272,7 +315,8 @@ def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> 
         # A validation failure raises out of here, before anything is inserted:
         # a rejected command consumes no operation identity and leaves no
         # "accepted mutation" in history that never happened.
-        mutated, changed = apply_command(document, command)
+        mutated, changed = apply_command(
+            document, command, native_editor=editor_revision is not None)
 
         if changed:
             after_snapshot = serialize_plan_document(mutated)
@@ -338,7 +382,9 @@ def apply_plan_mutation(user_id, command, context, *, expected_binding=None) -> 
     return arbitrated
 
 
-def undo_last_change(user_id, context, *, expected_binding=None) -> PlanMutationResult:
+def undo_last_change(
+    user_id, context, *, expected_binding=None, editor_revision=None, target_mutation_id=None,
+) -> PlanMutationResult:
     """Reverse the latest reversible change to the caller's own active plan.
 
     The ONE canonical reversal. There is no redo, no ``rollback_to_version`` and
@@ -352,7 +398,11 @@ def undo_last_change(user_id, context, *, expected_binding=None) -> PlanMutation
     fields this domain does not model.
     """
     context = validate_context(context)
-    fingerprint = undo_fingerprint()
+    _validate_editor_call(editor_revision, expected_binding, context)
+    if (editor_revision is None) != (target_mutation_id is None):
+        raise InvalidMutation("undo needs both an editor revision and a target")
+    fingerprint = undo_fingerprint(
+        editor_revision=editor_revision, target_mutation_id=target_mutation_id)
 
     try:
         replayed = _existing_result(
@@ -361,10 +411,7 @@ def undo_last_change(user_id, context, *, expected_binding=None) -> PlanMutation
             db.session.rollback()
             return replayed
 
-        # D1 (LP21): a change requested inside an AI operation is fenced
-        # under the owner lock BEFORE the plan row (owner -> plan order).
-        _fence_active_operation(user_id)
-        plan = _locked_active_plan(user_id)
+        plan = _lock_for_mutation(user_id, editor=editor_revision is not None)
         if expected_binding is not None:
             _require_binding(plan, expected_binding)
 
@@ -374,12 +421,20 @@ def undo_last_change(user_id, context, *, expected_binding=None) -> PlanMutation
             db.session.rollback()
             return replayed
 
+        if editor_revision is not None:
+            _require_editor_state(user_id, plan, editor_revision)
+
         before_snapshot = plan.plan_data
         before_version = plan.mutation_version
 
         target = latest_reversible(user_id, plan.lineage_id)
         if target is None:
             raise UndoUnavailable("there is no change to undo")
+
+        if editor_revision is not None and (
+            target.public_id != target_mutation_id or target.actor != ACTOR_USER
+        ):
+            raise UndoUnavailable("the requested edit is not the latest reversible user edit")
 
         # Fail closed unless the plan is EXACTLY the state this mutation
         # produced. Version alone cannot carry this: after two undos the plan
