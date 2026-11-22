@@ -65,6 +65,19 @@ reuploads or reruns Bedrock. A concurrent request observing analyzing returns
 that same canonical state; an interrupted attempt becomes reclaimable after its
 bounded lease, with generation-aware finalization.
 
+An allowance (402) or consent refusal leaves NO Pump Check (P2-1). Before this
+fix the claimed `pending` row was committed and, never analysed, listed in
+history as "Queued" forever. `create_or_replay` now deletes the row when THIS
+call inserted it and it is still unclaimed — every guard is in the DELETE:
+owner, id, `pending`, `analysis_attempt IS NULL`, `image_key IS NULL` — then
+re-raises the original refusal unchanged (a failed delete is logged by error
+type and never masks it). A claimed, uploaded, analysed or finished row is never
+touched, and a same-key replay never deletes. A concurrent same-key replay
+that finds its row discarded answers `PUMP_CHECK_PERSISTENCE_UNAVAILABLE`
+(retryable; the retry creates the command afresh). Rows left by the defect
+before this change are NOT removed by it. Tests
+`tests/test_mobile_pump_check_allowance_refusal.py`.
+
 ## Privacy and PR2 boundary
 
 PumpCheckId is a persisted 144-bit URL-safe random owner-bound HMAC in domain
