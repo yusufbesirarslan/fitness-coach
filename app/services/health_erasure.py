@@ -237,6 +237,10 @@ def _erase_rows(user, held):
         ).update({"generation_context": None, "review_data": None}, synchronize_session=False)
         counts["plans"] = changed
 
+    # Private IDs can be referenced by either plan snapshots or performed workouts.
+    if not {"plans", "workouts"} & held:
+        counts["plans"] += _delete(m.PrivateExercise, m.PrivateExercise.user_id == uid)
+
     if "workouts" not in held:
         day_ids = [i for (i,) in db.session.query(m.WorkoutCompletionDay.id).filter(
             m.WorkoutCompletionDay.user_id == uid)]

@@ -14,16 +14,18 @@ _TARGETS = ('target_reps', 'target_load_kg', 'target_rir', 'target_tempo', 'plan
 def capture(plan, entries):
     from app.services.exercise_catalog import resolve_exercise
     from app.services.mobile_training import _rest
+    from app.services.private_exercises import owned_catalog
 
     if not entries or len(entries) > 32:
         return None
+    catalog = owned_catalog(plan.user_id, (entry.get("exercise_id") for entry in entries))
     result, seen = [], set()
     for entry in entries:
         identity, sets = entry.get('exercise_id'), entry.get('set')
         if not isinstance(identity, str) or identity in seen or type(sets) is not int or not 1 <= sets <= 20:
             return None
         try:
-            resolve_exercise(exercise_id=identity)
+            resolve_exercise(exercise_id=identity, catalog=catalog)
         except (ValueError, KeyError):
             return None
         seen.add(identity)

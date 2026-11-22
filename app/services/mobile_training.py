@@ -10,6 +10,13 @@ import re
 from datetime import datetime, timezone
 
 from app.services.exercise_catalog import resolve_exercise
+from app.services.private_exercises import owned_catalog, program_exercise_ids
+from app.services.plan_mutation import InvalidMutation
+from app.services.plan_mutation.fingerprint import snapshot_fingerprint
+from app.services.plan_mutation.validation import (
+    FIELD_EXERCISE_CONTEXT,
+    validate_exercise_context,
+)
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.capability import (
     public_capability_constraints,
@@ -26,7 +33,11 @@ from app.services.training_generation.preference_contract import (
     FOCUS_VALUES,
     STYLE_RULE_KEYS,
 )
-from app.services.training_generation.plan_schema import SCORE_MAX, SCORE_MIN
+from app.services.training_generation.plan_schema import (
+    NATIVE_MAX_EXERCISES_PER_DAY as MAX_EXERCISES_PER_DAY,
+    SCORE_MAX,
+    SCORE_MIN,
+)
 from app.services.training_generation.response_validator import (
     WEEKDAYS,
     validate_plan_structure,
@@ -39,7 +50,6 @@ from app.timeutil import app_today
 
 
 CONTRACT_VERSION = 1
-MAX_EXERCISES_PER_DAY = 32
 _PLAN_DATA_MAX = 256_000
 _REST_SECONDS_MAX = 86_400
 _REF_BYTES = 18
@@ -105,6 +115,7 @@ def preference_contract(minor: bool = False) -> dict:
 def build_current_plan(
     user_id: int, secret, *, sessions_enabled: bool = False,
     include_origin: bool = False,
+    include_editor_revision: bool = False,
 ) -> dict:
     """Project the authenticated owner's current plan inside one read snapshot."""
     try:
@@ -114,7 +125,8 @@ def build_current_plan(
                 return {"plan": None}
             return project_current_plan(
                 plan, user_id, secret, sessions_enabled=sessions_enabled,
-                include_origin=include_origin)
+                include_origin=include_origin,
+                include_editor_revision=include_editor_revision)
     except PlanUnprojectable:
         raise
     except WorkoutStateReadError as error:
@@ -126,11 +138,13 @@ def build_current_plan(
 def project_current_plan(
     plan, user_id: int, secret, *, sessions_enabled: bool = False,
     include_origin: bool = False,
+    include_editor_revision: bool = False,
 ) -> dict:
     """Project a known canonical row through the same current-plan authority."""
     try:
         day = app_today()
-        projected = _project_plan(plan, user_id, secret)
+        projected = _project_plan(
+            plan, user_id, secret, include_editor_revision=include_editor_revision)
         snapshot = resolve_workout_state(
             user_id,
             today=day,
@@ -213,7 +227,7 @@ def _token_field(default, choices):
     return {"type": "token", "default": default, "choices": sorted(choices)}
 
 
-def _project_plan(plan, user_id, secret) -> dict:
+def _project_plan(plan, user_id, secret, *, include_editor_revision=False) -> dict:
     try:
         lineage = _lineage(plan.lineage_id)
         version = _version(plan.mutation_version)
@@ -234,16 +248,30 @@ def _project_plan(plan, user_id, secret) -> dict:
             for key in ("program", "haftalik_ozet")
             if key in document
         }
+        if include_editor_revision:
+            validate_exercise_context(document.get(FIELD_EXERCISE_CONTEXT))
+        # Canonical Add used to persist this exact four-field shape. Supply
+        # its missing rest value only in the read projection.
+        program = plan_document.get("program")
+        if isinstance(program, list):
+            for day in program:
+                exercises = day.get("egzersizler") if isinstance(day, dict) else None
+                if isinstance(exercises, list):
+                    for exercise in exercises:
+                        if (isinstance(exercise, dict)
+                                and set(exercise) == {"isim", "set", "tekrar", "exercise_id"}):
+                            exercise["dinlenme"] = "0"
         validated = validate_plan_structure(
             plan_document, allow_exercise_id=True)
         by_weekday = {day["gun"]: day for day in validated["program"]}
+        catalog = owned_catalog(user_id, program_exercise_ids(validated["program"]))
         days = [
             _project_day(
-                by_weekday[weekday], slot, user_id, secret, lineage, version
+                by_weekday[weekday], slot, user_id, secret, lineage, version, catalog
             )
             for slot, weekday in enumerate(WEEKDAYS)
         ]
-        return {
+        projected = {
             "plan_lineage": lineage,
             "mutation_version": version,
             "created_at": created_at,
@@ -251,16 +279,19 @@ def _project_plan(plan, user_id, secret) -> dict:
             "current_workout_ref": None,
             "days": days,
         }
+        if include_editor_revision:
+            projected["snapshot"] = snapshot_fingerprint(raw)
+        return projected
     except PlanUnprojectable:
         raise
     except (
         ValueError, TypeError, KeyError, AttributeError, OverflowError,
-        RecursionError,
+        RecursionError, InvalidMutation,
     ) as error:
         raise PlanUnprojectable("persisted plan is not projectable") from error
 
 
-def _project_day(day, slot, user_id, secret, lineage, version):
+def _project_day(day, slot, user_id, secret, lineage, version, catalog):
     if len(day["egzersizler"]) > MAX_EXERCISES_PER_DAY:
         raise PlanUnprojectable("day exceeds the native exercise bound")
     kind = day_kind(day["tip"])
@@ -275,15 +306,15 @@ def _project_day(day, slot, user_id, secret, lineage, version):
         "duration_minutes": day["sure_dk"],
         "estimated_calories": day["tahmini_kalori"],
         "workout_ref": reference,
-        "exercises": [_project_exercise(item) for item in day["egzersizler"]],
+        "exercises": [_project_exercise(item, catalog=catalog) for item in day["egzersizler"]],
     }
 
 
-def _project_exercise(item):
+def _project_exercise(item, *, catalog=None):
     exercise_id = item.get("exercise_id")
     if not isinstance(exercise_id, str):
         raise PlanUnprojectable("canonical exercise identity is missing")
-    definition = resolve_exercise(exercise_id=exercise_id)
+    definition = resolve_exercise(exercise_id=exercise_id, catalog=catalog)
     return {
         "exercise_id": definition.exercise_id,
         "display_name": definition.canonical_name,

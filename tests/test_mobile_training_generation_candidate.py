@@ -110,7 +110,7 @@ def test_typed_candidate_runs_the_canonical_pipeline_once(make_user):
         "equipment_context": "spor_salonu",
         "cardio_type": "yok",
         "style": "genel",
-        "catalog_version": 1,
+        "catalog_version": 2,
     }
 
 

@@ -282,7 +282,7 @@ def test_h_a9_active_only_resolver_is_not_used(name):
 
 
 def test_h_a9_historical_resolver_is_used():
-    assert "resolve_historical_exercise" in _identifiers(_source("__init__.py"))
+    assert "resolve_owned_historical_exercise" in _identifiers(_source("__init__.py"))
 
 
 def test_reused_primitives_do_not_reach_a_legacy_source():
@@ -462,8 +462,8 @@ _SELECTION_TRY = "        return parse_stored_exercises(load_snapshot(checkpoint
     (derived_violations, "selection.py", "    occurrences = []\n",
      "    occurrences = []\n    anchor = app_today()\n"),
     (pure_layer_violations, "selection.py", "import math\n", "import math\nfrom app.extensions import db\n"),
-    (resolver_violations, "__init__.py", "    resolve_historical_exercise(exercise_id)\n",
-     "    resolve_historical_exercise(exercise_id)\n    resolve_exercise(exercise_id)\n"),
+    (resolver_violations, "__init__.py", "    resolve_owned_historical_exercise(user_id, exercise_id)\n",
+     "    resolve_owned_historical_exercise(user_id, exercise_id)\n    resolve_exercise(exercise_id)\n"),
     (exception_violations, "selection.py", _SELECTION_TRY,
      _SELECTION_TRY.replace("except InvalidSessionRequest:", "except Exception:")),
     (exception_violations, "selection.py", _SELECTION_TRY,

@@ -154,20 +154,29 @@ def _digest(payload):
     return hashlib.sha256(canonical).hexdigest()
 
 
-def semantic_fingerprint(command) -> str:
-    """The versioned semantic digest of one typed mutation command."""
-    return _digest(_semantic_payload(command))
+def _editor_payload(revision):
+    return {
+        "domain": "axisai/training-plan-mutation/native-editor/v1",
+        "lineage": revision.lineage_id,
+        "version": revision.mutation_version,
+        "snapshot": revision.snapshot_fingerprint,
+    }
 
 
-def undo_fingerprint() -> str:
-    """The digest every ``undo_last_change`` request shares.
+def semantic_fingerprint(command, *, editor_revision=None) -> str:
+    """Keep existing digests stable and bind native intent to its read revision."""
+    payload = _semantic_payload(command)
+    if editor_revision is not None:
+        payload.update(_editor_payload(editor_revision), position=getattr(command, "position", None))
+    return _digest(payload)
 
-    Undo takes no arguments: its meaning is entirely "reverse the latest
-    reversible mutation of my current plan". One constant digest is therefore
-    correct, and it is what makes a same-key undo retry replay the original undo
-    instead of reversing a second, earlier mutation (brief §31).
-    """
-    return _digest({"domain": FINGERPRINT_DOMAIN, "kind": UNDO_COMMAND_TYPE})
+
+def undo_fingerprint(*, editor_revision=None, target_mutation_id=None) -> str:
+    """Bind native undo to its exact revision and target, retaining legacy replay."""
+    payload = {"domain": FINGERPRINT_DOMAIN, "kind": UNDO_COMMAND_TYPE}
+    if editor_revision is not None:
+        payload.update(_editor_payload(editor_revision), target_mutation_id=target_mutation_id)
+    return _digest(payload)
 
 
 def snapshot_fingerprint(plan_text) -> str:

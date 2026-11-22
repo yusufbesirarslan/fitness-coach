@@ -130,7 +130,7 @@ def _exact_int(value) -> int:
     return value
 
 
-def _checked_context(context: ExerciseContext) -> ExerciseContext:
+def _checked_context(context: ExerciseContext, *, verify=False) -> ExerciseContext:
     """Reject any context outside the closed server vocabulary, fail-closed."""
     if not isinstance(context, ExerciseContext):
         raise ExerciseContextInvalid("context is not an ExerciseContext")
@@ -140,7 +140,11 @@ def _checked_context(context: ExerciseContext) -> ExerciseContext:
         raise ExerciseContextInvalid("unknown cardio type")
     if context.style not in STYLES:
         raise ExerciseContextInvalid("unknown program style")
-    if _exact_int(context.catalog_version) != load_exercise_catalog().version:
+    catalog_version = _exact_int(context.catalog_version)
+    live_version = load_exercise_catalog().version
+    # V2 adds entries and aliases without changing V1 identities or contexts.
+    # Already issued V1 drafts still pass the live save-time exercise checks.
+    if catalog_version != live_version and not (verify and (catalog_version, live_version) == (1, 2)):
         raise ExerciseContextInvalid("catalog version mismatch")
     return context
 
@@ -219,4 +223,4 @@ def verify_exercise_context(token, secret_key, user_id) -> ExerciseContext:
         cardio_type=payload["cardio"],
         style=payload["style"],
         catalog_version=payload["catalog"],
-    ))
+    ), verify=True)

@@ -1,4 +1,4 @@
-"""Narrow PostgreSQL authority: session start versus native replacement only.
+"""Narrow PostgreSQL authority: session start, native replacement and native edits.
 
 Two-int advisory keys are disjoint from existing single-bigint advisory locks.
 Never acquire from a day/session/User/plan lock holder. Never log owner/key.

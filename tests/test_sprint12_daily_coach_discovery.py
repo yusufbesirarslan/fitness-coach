@@ -84,6 +84,14 @@ def _mobile_paths(flask_app):
     }
 
 
+_TRAINING_EDITOR_PATHS = {
+    "/api/v1/training/private-exercises",
+    "/api/v1/training/editor",
+    "/api/v1/training/editor/<any(add,remove,replace,prescription,undo):operation>",
+    "/api/v1/training/exercise-catalog",
+}
+
+
 def test_mobile_api_publishes_only_approved_domain_contracts(
         mobile_enabled_app):
     """F1 - the entire mobile contract, enumerated.
@@ -183,6 +191,8 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/exercises/<exercise_id>/note",
         "/api/v1/training/plans",
         "/api/v1/training/plans/current",
+        # Founder-ordered native editor over the canonical plan writer.
+        *_TRAINING_EDITOR_PATHS,
         # LP21 deterministic non-AI first plan through the same create authority.
         "/api/v1/training/plans/general",
         # LP18-B1 immutable proposal and explicit B0 confirmation.
@@ -255,6 +265,7 @@ _APPROVED_NUTRITION_PLAN_PATHS = {
 }
 
 _APPROVED_TRAINING_PATHS = {
+    *_TRAINING_EDITOR_PATHS,
     "/api/v1/training/preferences",
     # TI-01B owner × catalog notes; no Daily-Coach/diagnostic semantics.
     "/api/v1/training/exercises/<exercise_id>/note",
@@ -507,12 +518,17 @@ def test_pending_plan_confirmation_is_reachable_only_from_the_coach_turn():
 
 
 def test_no_blueprint_reads_the_plan_mutation_journal():
-    """F5 - "why did my plan change?" has no HTTP surface either."""
-    offenders = {
-        path.relative_to(REPO_ROOT).as_posix()
-        for path in (REPO_ROOT / "app" / "blueprints").rglob("*.py")
-        if "plan_mutation" in path.read_text(encoding="utf-8")
-    }
+    """The editor may submit commands and receive receipts through the service."""
+    offenders = set()
+    for path in (REPO_ROOT / "app" / "blueprints").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        direct_journal_access = any(
+            name in source for name in ("plan_mutation.journal", "PlanMutationRecord")
+        )
+        if direct_journal_access or (
+            "plan_mutation" in source and path.name != "mobile_training_editor.py"
+        ):
+            offenders.add(path.relative_to(REPO_ROOT).as_posix())
     assert offenders == set(), (
         "a blueprint now reads plan mutation history: %s" % sorted(offenders))
 

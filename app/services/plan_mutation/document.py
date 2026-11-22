@@ -59,12 +59,17 @@ from app.services.exercise_catalog import (
     is_exercise_compatible,
     load_exercise_catalog,
     resolve_exercise,
+    with_owner_definitions,
 )
 from app.services.training_generation.exercise_resolution import (
     check_placement,
 )
 from app.services.training_generation.output_errors import (
     GenerationExerciseIncompatibleError,
+)
+
+from app.services.training_generation.plan_schema import (
+    NATIVE_MAX_EXERCISES_PER_DAY,
 )
 
 from .commands import (
@@ -118,6 +123,7 @@ class _ExerciseAuthority:
 
     catalog: ExerciseCatalog
     context: ExerciseContext
+    by_id: bool
 
 
 def parse_plan_document(plan_text):
@@ -223,7 +229,7 @@ def _document_carries_exercise_identity(document):
     return False
 
 
-def _exercise_authority(document):
+def _exercise_authority(document, *, by_id=False, private_definitions=None):
     """The catalog authority for this document, or ``None`` for a legacy plan.
 
     Present  — a dict document carrying an ``exercise_context`` block.
@@ -249,14 +255,16 @@ def _exercise_authority(document):
     tests/test_plan_mutation_architecture.py pins the single call site.
     """
     if not isinstance(document, dict) or FIELD_EXERCISE_CONTEXT not in document:
-        if _document_carries_exercise_identity(document):
+        if by_id or _document_carries_exercise_identity(document):
             raise InvalidMutation("stored exercise context is not canonical")
         return None
     context = validate_exercise_context(document[FIELD_EXERCISE_CONTEXT])
-    return _ExerciseAuthority(catalog=load_exercise_catalog(), context=context)
+    return _ExerciseAuthority(
+        catalog=with_owner_definitions(load_exercise_catalog(), private_definitions),
+        context=context, by_id=by_id)
 
 
-def _resolve_exercise_name(authority, name) -> ExerciseDefinition:
+def _resolve_catalog_exercise(authority, name) -> ExerciseDefinition:
     """Resolve one name to catalog identity, or refuse the whole mutation.
 
     Exact resolution only: an active entry's canonical name or one of its
@@ -271,13 +279,14 @@ def _resolve_exercise_name(authority, name) -> ExerciseDefinition:
     with no handler and surface to the user as a 500.
     """
     try:
-        return resolve_exercise(name=name, catalog=authority.catalog)
+        identity = {"exercise_id": name} if authority.by_id else {"name": name}
+        return resolve_exercise(catalog=authority.catalog, **identity)
     except ExerciseResolutionError as exc:
         raise InvalidMutation(
-            "exercise name is not canonical catalog identity") from exc
+            "exercise is not canonical catalog identity") from exc
 
 
-def _resolve_placeable_exercise(authority, name, day) -> ExerciseDefinition:
+def _resolve_placeable_exercise(authority, name, day, *, allow_overlap=False) -> ExerciseDefinition:
     """Resolve a name that is about to be WRITTEN into ``day``.
 
     Two gates, both the catalog's own and neither re-implemented here:
@@ -297,15 +306,16 @@ def _resolve_placeable_exercise(authority, name, day) -> ExerciseDefinition:
     be edited. A second copy of the predicate here is the failure mode worth
     avoiding — two doors drifting apart is how the first hole was opened.
     """
-    exercise = _resolve_exercise_name(authority, name)
+    exercise = _resolve_catalog_exercise(authority, name)
     if not is_exercise_compatible(exercise, authority.context):
         raise InvalidMutation(
             "exercise is not compatible with the plan's equipment context")
     try:
-        check_placement(exercise, day)
+        check_placement(exercise, day, allow_overlap=allow_overlap,
+                        require_cardio_on_dedicated_day=authority.by_id, catalog=authority.catalog)
     except GenerationExerciseIncompatibleError as exc:
         raise InvalidMutation(
-            "cardio exercise cannot be placed on a non-cardio day") from exc
+            "exercise is incompatible with the day type") from exc
     return exercise
 
 
@@ -347,7 +357,7 @@ def _identity_matches(exercises, wanted, authority, resolved=None):
             if isinstance(entry, dict)
             and str(entry.get(FIELD_NAME) or "").strip().casefold() == folded
         ]
-    target = resolved if resolved is not None else _resolve_exercise_name(
+    target = resolved if resolved is not None else _resolve_catalog_exercise(
         authority, wanted)
     return [
         index
@@ -358,17 +368,29 @@ def _identity_matches(exercises, wanted, authority, resolved=None):
 
 
 def _find_exercise_index(exercises, exercise_name, authority,
-                         match_sets=None, match_reps=None):
+                         match_sets=None, match_reps=None, *, position=None):
     """The single index matching ``exercise_name``.
 
-    Two matches is refused, never resolved by position (see
-    ``AmbiguousExerciseTarget``); zero is ``ExerciseNotFound``. What counts as
+    Native commands identify an occurrence by a revision-bound position and
+    its expected ID. Name-based commands refuse two matches and a missing
+    target raises ``ExerciseNotFound``. What counts as
     a match is ``_identity_matches``; the optional selectors only narrow those
     identity matches (``_select_by_prescription``) and never widen them.
     """
     wanted = normalize_exercise_name(exercise_name)
     if wanted is None:
         raise InvalidMutation("exercise name is required")
+    if authority is not None and authority.by_id:
+        # The service checked the exact plan bytes under lock before this
+        # position could be used. Verify the ID at that position as well.
+        if type(position) is not int or not 0 <= position < len(exercises):
+            raise ExerciseNotFound("target position is not in the day")
+        target = _resolve_catalog_exercise(authority, wanted)
+        entry = exercises[position]
+        if not isinstance(entry, dict) or entry.get(FIELD_EXERCISE_ID) != target.exercise_id:
+            raise ExerciseNotFound("target exercise is not at that position")
+        return position
+
     hits = _identity_matches(exercises, wanted, authority)
     hits = _select_by_prescription(exercises, hits, match_sets, match_reps)
     if not hits:
@@ -438,7 +460,21 @@ def _require_day_stays_valid(day):
         raise InvalidMutation("a training day must keep at least one exercise")
 
 
-def apply_command(document, command):
+def _require_native_cardio_placement(day, authority):
+    """An edit may keep mixed days, provided their strength work survives."""
+    if authority is None or not authority.by_id:
+        return
+    for entry in _exercises_of(day):
+        if not isinstance(entry, dict):
+            raise PlanNotMutable("day has a malformed exercise")
+        exercise = _resolve_catalog_exercise(authority, entry.get(FIELD_EXERCISE_ID))
+        try:
+            check_placement(exercise, day, allow_overlap=True, catalog=authority.catalog)
+        except GenerationExerciseIncompatibleError as exc:
+            raise InvalidMutation("edit would leave cardio without a strength session") from exc
+
+
+def apply_command(document, command, *, native_editor=False, private_definitions=None):
     """Apply ``command`` to a copy of ``document``.
 
     Returns ``(new_document, changed)``. ``changed`` is False when the requested
@@ -449,12 +485,15 @@ def apply_command(document, command):
     command that fails half-way leaves the caller's document untouched and there
     is no partially-mutated state to roll back.
     """
+    if not native_editor and getattr(command, "position", None) is not None:
+        raise InvalidMutation("exercise position requires a bound editor revision")
     working = copy.deepcopy(document)
     program = _program_of(working)
     # Resolved once, before any branch: the context decides how EVERY command
     # below reads identity, and a command that touches no exercise at all
     # (a day move) must still be refused on a plan whose context is broken.
-    authority = _exercise_authority(working)
+    authority = _exercise_authority(working, by_id=native_editor,
+                                    private_definitions=private_definitions if native_editor else None)
 
     if isinstance(command, ReplaceExerciseCommand):
         changed = _apply_replace(program, command, authority)
@@ -479,7 +518,8 @@ def _apply_replace(program, command, authority):
 
     day = _find_day(program, command.day)
     exercises = _exercises_of(day)
-    index = _find_exercise_index(exercises, command.exercise, authority)
+    index = _find_exercise_index(
+        exercises, command.exercise, authority, position=command.position)
 
     # Mutate the existing slot in place: position, rest, notes and any field
     # this PR does not model are inherited, not rebuilt (brief §9A).
@@ -492,7 +532,13 @@ def _apply_replace(program, command, authority):
         # Because both land in ``updates``, the no-op short-circuit below
         # also still holds — replacing an exercise with an alias of itself
         # resolves back to the same pair and stays a deterministic no-op.
-        resolved = _resolve_placeable_exercise(authority, replacement, day)
+        resolved = _resolve_placeable_exercise(
+            authority, replacement, day,
+            allow_overlap=authority.by_id and replacement == entry.get(FIELD_EXERCISE_ID),
+        )
+        if (authority.by_id and resolved.exercise_id != entry.get(FIELD_EXERCISE_ID)
+                and _identity_matches(exercises, replacement, authority, resolved)):
+            raise ExerciseAlreadyPresent("replacement is already in the target day")
         updates[FIELD_NAME] = resolved.canonical_name
         updates[FIELD_EXERCISE_ID] = resolved.exercise_id
     if command.sets is not None:
@@ -503,6 +549,7 @@ def _apply_replace(program, command, authority):
     if all(entry.get(key) == value for key, value in updates.items()):
         return False
     entry.update(updates)
+    _require_native_cardio_placement(day, authority)
     return True
 
 
@@ -522,6 +569,8 @@ def _apply_add(program, command, authority):
     if authority is not None:
         resolved = _resolve_placeable_exercise(authority, name, day)
         entry[FIELD_NAME] = resolved.canonical_name
+        entry["dinlenme"] = "0"
+        entry["not"] = ""
         # Appended last, matching the key order canonicalization produces on
         # the generate/save path, so a mutated canonical plan and a freshly
         # saved one serialize the same way.
@@ -564,6 +613,9 @@ def _apply_add(program, command, authority):
         # the one already there is a different change than the one requested.
         raise ExerciseAlreadyPresent("exercise is already in the target day")
 
+    if (authority is not None and authority.by_id
+            and len(exercises) >= NATIVE_MAX_EXERCISES_PER_DAY):
+        raise InvalidMutation("workout has reached the exercise limit")
     exercises.append(entry)
     return True
 
@@ -573,9 +625,11 @@ def _apply_remove(program, command, authority):
     exercises = _exercises_of(day)
     index = _find_exercise_index(
         exercises, command.exercise, authority,
-        match_sets=command.match_sets, match_reps=command.match_reps)
+        match_sets=command.match_sets, match_reps=command.match_reps,
+        position=command.position)
     exercises.pop(index)
     _require_day_stays_valid(day)
+    _require_native_cardio_placement(day, authority)
     return True
 
 
@@ -594,7 +648,8 @@ def _apply_update(program, command, authority):
     # Identity is only READ here. A prescription change is not an identity
     # change, so ``exercise_id`` and ``isim`` are both left exactly alone.
     entry = exercises[
-        _find_exercise_index(exercises, command.exercise, authority)]
+        _find_exercise_index(
+            exercises, command.exercise, authority, position=command.position)]
 
     if all(entry.get(key) == value for key, value in updates.items()):
         return False
