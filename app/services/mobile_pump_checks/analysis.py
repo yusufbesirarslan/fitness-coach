@@ -114,8 +114,289 @@ _TR_MEASUREMENT_RE = re.compile(
     + r"\s*(?:kilo\w*|kg|santim\w*|cm|milim\w*|mm|gram\w*|gr|inc|inch)\b)")
 
 
+# ── Weight, judgment, physiology and comparison checks (EN + TR) ────────────
+# One still photo cannot support a weight or body-fat change, a weight-loss
+# instruction, a verdict on how the body looks, a physiological state, or a
+# comparison with an earlier photo or with other people. Each pattern names
+# the claim, not the bare word: "weight" (the bar), "fat grip", "lean"
+# (posture or a lean physique), "softer than your thighs" (same photo),
+# "weak light", "gain muscle" (training advice), "kilo" (plates), "yağlı cilt"
+# (oily skin), "su şişesi" (a water bottle) and "sisli" (hazy) stay legal.
+# EN runs with IGNORECASE on _en_normalized (curly apostrophes → ', format
+# characters such as soft hyphens dropped); TR runs on _tr_folded.
+_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})
+_BODY_AMOUNT = (
+    r"(?:(?:some|more|extra|a\s+(?:little|bit|lot|few|couple)|a\s+couple|"
+    r"several)\s+(?:of\s+)?)?")
+_WEIGHT_CHANGE_RE = re.compile(
+    r"\b(?:los[et]|loses|losing|gain(?:ed|ing|s)?|put(?:s|ting)?\s+on|"
+    r"shed(?:s|ding)?)\s+" + _BODY_AMOUNT
+    + r"(?:body\s*)?(?:weight|fat|kilos?|kilograms?|pounds?|lbs|stone|"
+    r"inches)\b|"
+    # Past gains are claims; "gain muscle with incline presses" is advice.
+    r"\b(?:gained|lost|built|put\s+on|packed\s+on)\s+" + _BODY_AMOUNT
+    + r"(?:muscle|mass|size)\b|"
+    r"\bdropped\s+" + _BODY_AMOUNT
+    + r"(?:body\s*)?(?:weight|fat|kilos?|pounds?|lbs)\b|"
+    r"\bdrop(?:s|ping)?\s+" + _BODY_AMOUNT + r"(?:body\s*)?fat\b|"
+    r"\bburn(?:s|ed|t|ing)?\s+(?:off\s+)?(?:\w+\s+)?fat\b|"
+    r"\b(?:weight|fat)[ -]?(?:loss|gain|reduction)\b|"
+    r"\b(?:less|more|extra|excess|stubborn|belly|visceral|subcutaneous|"
+    r"abdominal)\s+(?:body\s*)?fat\b(?!\s*grip)|"
+    r"\bfat\s+(?:around|on\s+(?:your|the)|deposits?|stores?|layers?|levels?|"
+    r"percentage|mass)\b|"
+    r"\b(?:extra|excess)\s+(?:body\s*)?(?:weight|fat)\s+(?:around|on|in|at)\s+"
+    r"(?:the|your)\s+(?:midsection|waist|belly|stomach|hips|face|chest|arms|"
+    r"thighs|sides)\b|"
+    r"\byou(?:'re|\s+are)\s+carrying\s+(?:some\s+|a\s+(?:little|bit)\s+"
+    r"(?:of\s+)?)?(?:extra|excess)\b|"
+    r"\b(?:over|under)weight\b|\bobes(?:e|ity)\b|\bwater\s+weight\b|"
+    r"\b(?:leaner|skinnier|fatter|chubbier)\b|"
+    r"\b(?:has|have|'ve|'s)\s+(?:\w+\s+)?slimmed\b|"
+    r"\b(?:waist|face|arms?|legs?|belly|stomach|midsection|thighs|hips)\s+"
+    r"slimmed\b|"
+    r"\bslimmer\b(?!\s+(?:stance|grip|profile))|"
+    r"\byou(?:'re|\s+are|\s+look|\s+seem|\s+appear|'ve\s+gotten|"
+    r"\s+have\s+gotten|\s+got)\s+(?:a\s+(?:bit|little|lot)\s+|much\s+|"
+    r"slightly\s+|noticeably\s+|visibly\s+|clearly\s+|definitely\s+)?"
+    r"(?:thinner|heavier|lighter)\b|"
+    r"\b(?:slim(?:med|ming)?|trim(?:med|ming)?)\s+down\b|"
+    r"\blean(?:ed|ing)?\s+out\b|\bbulk(?:ed|ing)?\s+up\b|"
+    r"\b(?:calorie|caloric)\s+deficit\b|\b(?:go|going)\s+on\s+a\s+diet\b|"
+    r"\b(?:diet|cutting|fat[ -]loss)\s+phase\b|\bdiet(?:ing)?\s+down\b|"
+    r"\b(?:reduce|lower|cut|decrease)\w*\s+(?:your\s+)?(?:daily\s+)?"
+    r"(?:calories|(?:calorie|caloric|food)\s+intake)\b|"
+    r"\b(?:eat|eating)\s+less\b|\bcut(?:ting)?\s+(?:back\s+on\s+)?calories\b|"
+    r"\bcount(?:ing)?\s+calories\b",
+    re.IGNORECASE,
+)
+_NEGATIVE_BODY_RE = re.compile(
+    r"\b(?:flabby|flab|saggy|chubby|pudgy|scrawny|puny|skinny|unattractive|"
+    r"ugly|unsightly|out\s+of\s+shape|unfit|love\s+handles|muffin\s+top|"
+    r"(?:beer|pot)\s+belly|man\s+boobs|moobs|cellulite|double\s+chin|"
+    r"dad\s+bod|underdeveloped|undeveloped)\b|"
+    r"\b(?:lacks?|lacking)\s+(?:muscle|mass)\b|"
+    r"\b(?:belly|gut|stomach)\s+(?:sticks|hangs|pokes)\s+out\b|"
+    r"(?<!trust )\byour\s+gut\b|"
+    r"\b(?:look|looks|looking|appear|appears|seem|seems|are|is|'re)\s+"
+    r"(?:a\s+(?:bit|little)\s+|quite\s+|very\s+|too\s+|kind\s+of\s+|"
+    r"rather\s+|slightly\s+|somewhat\s+)?(?:fat|overweight)\b(?!\s*grip)",
+    re.IGNORECASE,
+)
+_PHYSIOLOGICAL_RE = re.compile(
+    r"\b(?:swell(?:ing|s)?|swollen|puffiness|puffy\s+(?:face|eyes|cheeks|"
+    r"skin)|bloat(?:ed|ing)?|water\s+retention|retain(?:s|ing)?\s+water|"
+    r"holding\s+(?:onto\s+)?water|fluid\s+retention|dehydrat\w*|"
+    r"over-?train\w*|overreach\w*|under-?recover\w*|poor(?:ly)?\s+recover\w*|"
+    r"glycogen|electrolytes?|cortisol|testosterone|o?estrogen|steroids?|"
+    r"inflamed|muscle\s+(?:strain|cramps?|damage|breakdown)|"
+    r"strained\s+(?:muscles?|tendons?|ligaments?)|"
+    r"fatigued|lethargic|malnourish\w*|undernourish\w*|"
+    r"nutrient\s+deficien\w*|(?:low|poor)\s+hydration|"
+    r"(?:incomplete|poor|insufficient)\s+recovery|"
+    r"(?:shows?|showing|displays?|displaying|signs?\s+of)\s+fatigue|"
+    r"short\s+on\s+sleep|lack\s+of\s+sleep)\b|"
+    r"\b(?:hydration|recovery)\s+(?:looks?|seems?|appears?|is)\s+(?:\w+\s+)?"
+    r"(?:low|poor|off|incomplete|lacking|insufficient)\b|"
+    # "training to exhaustion" is exercise advice; looking exhausted is not.
+    r"\b(?:look|looks|looking|appear|appears|seem|seems)\s+"
+    r"(?:a\s+(?:bit|little)\s+|quite\s+|very\s+|slightly\s+|rather\s+)?"
+    r"(?:tired|exhausted|drained|run[ -]down|unwell|stressed|"
+    r"sleep[ -]deprived|sore)\b|"
+    r"\bflat\s+and\s+depleted\b|"
+    r"\b(?:you|muscles?|arms?|chest|legs?|quads?|shoulders?|back|abs)\s+"
+    r"(?:look|looks|appear|appears|seem|seems)\s+(?:\w+\s+)?depleted\b",
+    re.IGNORECASE,
+)
+_NORM_COMPARISON_RE = re.compile(
+    r"\b(?:than|compared\s+(?:to|with)|relative\s+to)\s+(?:most|many|other|"
+    r"typical|the\s+average|average|the\s+typical|a\s+typical)\s+"
+    r"(?:other\s+)?(?:people|"
+    r"persons?|lifters?|men|women|guys|athletes?|gym[ -]?goers?|trainees?|"
+    r"bodybuilders?|users?|beginners?)\b|"
+    r"\b(?:than|compared\s+(?:to|with))\s+(?:a|the)\s+typical\b|"
+    r"\bthan\s+most\b(?!\s+(?:of|other|areas?|parts?|regions?|spots?|"
+    r"sections?)\b)|"
+    r"\b(?:impressive|great|good|solid|strong|excellent)\s+(?:\w+\s+){0,2}"
+    r"for\s+a\s+(?:beginner|novice|newbie|natural|first[ -]timer)\b|"
+    r"\bthan\s+(?:the\s+)?average\b|\b(?:above|below)[ -]average\b|"
+    r"\bfor\s+(?:your|someone\s+your|a\s+(?:man|woman|person)\s+(?:of\s+)?"
+    r"your)\s+age\b|"
+    r"\b(?:stage|competition|contest|show)[ -]ready\b|"
+    r"\b(?:like|as)\s+(?:a\s+)?(?:pro(?:fessional)?\s+)?(?:bodybuilder|"
+    r"fitness\s+model|physique\s+competitor)\b|"
+    r"\b(?:elite|world[ -]class|pro[ -]level|competition[ -]level|"
+    r"top[ -]tier)\s+(?:physique|build|body)\b",
+    re.IGNORECASE,
+)
+# Single-image only (the two-photo comparison contract exists to describe
+# A-to-B differences): this photo has no earlier photo to compare with. An
+# explicit earlier reference plus a body comparative is a claim, unless the
+# item is about the photo setup ("a wider frame than in your last photo").
+_PAST_REFERENCE_RE = re.compile(
+    r"\b(?:than|since|compared\s+(?:to|with)|versus|vs\.?|relative\s+to)\s+"
+    r"(?:before|ever|last\s+(?:time|week|month)|previously|earlier|"
+    r"(?:in\s+)?(?:(?:your|the|my)\s+)?(?:last|previous|prior|earlier|first|"
+    r"older?|past)\b|(?:a\s+)?(?:few\s+|couple\s+(?:of\s+)?)?(?:\w+\s+)?"
+    r"(?:days?|weeks?|months?|years?)\s+ago|(?:they|it|you)\s+(?:were|was|"
+    r"used\s+to))|"
+    r"\b(?:over|in)\s+the\s+(?:past|last)\s+(?:few\s+|\w+\s+)?"
+    r"(?:days?|weeks?|months?)\b|"
+    r"\b(?:used\s+to\s+be|it\s+used\s+to|they\s+used\s+to|these\s+days|"
+    r"lately)\b",
+    re.IGNORECASE,
+)
+_PHYSIQUE_COMPARATIVE_RE = re.compile(
+    r"\b(?:bigger|larger|smaller|thicker|thinner|wider|broader|fuller|"
+    r"bulkier|leaner|slimmer|stronger|grown|improved|(?:has|have)\s+progressed|"
+    r"more\s+(?:muscular|defined|developed|toned|vascular|ripped|shredded|"
+    r"separated|definition|muscle|mass|size)|"
+    r"less\s+(?:muscular|defined|developed|toned|definition|muscle|mass|"
+    r"size|fat))\b",
+    re.IGNORECASE,
+)
+# A comparative that describes the photo setup ("a wider frame than in your
+# last photo", "the light is softer than before") is removed before the
+# comparative check; a body comparative elsewhere in the item still counts.
+_SETUP_NOUNS = (r"(?:frame|framing|crop|shot|light|lighting|angle|distance|"
+                r"camera|background|exposure|zoom|lens|view)")
+_PHOTO_SETUP_PHRASE_RE = re.compile(
+    r"\b(?:bigger|larger|smaller|thicker|thinner|wider|broader|fuller|"
+    r"tighter)\s+(?:a\s+|an\s+|the\s+|much\s+|slightly\s+)?"
+    + _SETUP_NOUNS + r"s?\b|"
+    r"\b" + _SETUP_NOUNS + r"s?\s+(?:is|looks?|seems?|was)\s+(?:\w+\s+)?"
+    r"(?:bigger|larger|smaller|wider|broader|fuller|tighter)\b",
+    re.IGNORECASE,
+)
+_PHYSIQUE_CHANGE_RE = re.compile(
+    r"\b(?:have|has|'ve|'s)\s+(?:really\s+|clearly\s+|definitely\s+|"
+    r"visibly\s+|noticeably\s+|already\s+)?(?:grown|gotten\s+(?:bigger|"
+    r"larger|thicker|wider|broader|leaner|slimmer|thinner|smaller|fuller)|"
+    r"thickened|widened|shrunk(?:en)?|filled\s+in|improved|developed|"
+    r"progressed)\b|"
+    r"\b(?:grew|shrank)\b|"
+    r"\b(?:got|getting|growing)\s+(?:much\s+|a\s+lot\s+|a\s+bit\s+|"
+    r"noticeably\s+)?(?:bigger|larger|thicker|wider|broader|smaller|fuller)\b|"
+    r"\byou(?:'re|\s+are|\s+look|\s+seem|\s+appear)\s+(?:a\s+(?:bit|little|"
+    r"lot)\s+|much\s+|slightly\s+|noticeably\s+|visibly\s+|clearly\s+)?"
+    r"(?:bigger|smaller|larger|bulkier)\b",
+    re.IGNORECASE,
+)
+
+# Turkish (folded: ş→s, ğ→g, ü→u, ö→o, ç→c, ı/İ→i). "kilo düşür" (take
+# weight off the bar), "birkaç kilo daha ekle", "kademeli kilo artışı",
+# "kilo almadan önce formuna odaklan", "fazla kilolarla çalışma", "aşırı
+# yüklenme", "kalçan sarkıyor", "sarkık omuz duruşu", "formdan düşmeden",
+# "zayıf ışık", "gelişmiş omuz hattı", "birçok kişi bu pozda…" (advice) and
+# "zamanla ilerlemeyi görmek için…" are deliberately not matched.
+_TR_WEIGHT_CHANGE_RE = re.compile(
+    r"\bkilo (?:ver|kayb|kaybet)\w*|"
+    r"\bkilo al(?:mis|dim|din|di\b|iyorsun|malisin|man gerek)\w*|"
+    r"\bfazla kilo(?:n|nu|nuz|larin|larindan)\b|"
+    r"\bkilo(?:lar)?(?:in|un)?(?:dan|indan|undan)? kurtul\w*|"
+    r"\bzayifla\w*|\bincel(?:mis|din|dim|di\b|meli|meye|mek|men)\w*|"
+    r"\bincelt\w*|"
+    r"\byag (?:kayb|kaybet|yak|at(?:mis|ma|man|tin|ti\b|abilir)|birik|bagla|"
+    r"topla|tabaka|katman|doku|depo)\w*|"
+    r"\b(?:fazla|ekstra|fazlalik) yag(?:\b|in\b|lar|dan|i\b)|"
+    r"\byag(?:in|lar|larin)? (?:azal|erim|eri|git)\w*|"
+    r"\b(?:gobeg|gobek|yag|bel)\w* erit\w*|"
+    r"\bgobeg\w* (?:eri|azal|kucul|incel)\w*|"
+    # "yağlanmış cilt/ten" is stage oil; fat gain is tied to a body region.
+    r"\b(?:(?:bel|karin|gobek|gobeg|kalca|basen)\w*|yan(?:lar|lari|larin|"
+    r"larinda)?) (?:\w+ )?yaglan\w*|"
+    r"\byaglanmis(?:sin|siniz)\b|"
+    r"\bkas (?:kazanmis|kaybetmis)\w*|"
+    r"\bdiyet(?:e\b| yap| uygula| program)|\bkalori (?:acig|kisit|azalt)\w*|"
+    r"\bkalori alim\w* (?:azalt|dusur|kis)\w*|"
+    r"\b(?:daha )?az ye(?:\b|meli|rsen)|\b(?:daha )?az kalori\b")
+_TR_SAG_NOUNS = r"(?:gogus|gogs|karin|cilt|deri|popo|gerdan|yanak|gobek|gobeg)"
+_TR_NEGATIVE_BODY_RE = re.compile(
+    r"\b(?:sisman|tombul|obez|obezite|kilolu|gobekli|gobeklen\w*|"
+    r"selulit|cirkin|bicimsiz|formsuz|ciliz|siska|celimsiz|gelismemis)\b|"
+    r"\bzayif (?:gorunuyorsun|duruyorsun|kalmissin)\w*|\bzayifsin\b|"
+    r"\b" + _TR_SAG_NOUNS + r"\w* (?:\w+ )?(?:sarkik|sarkmis)\w*(?! degil)|"
+    r"\b(?:sarkik|sarkmis) " + _TR_SAG_NOUNS + r"|"
+    r"\bgobek (?:yap|at|buyu|olus|cik)\w*|"
+    r"\bgobeg(?:in|iniz) (?:var|cik|buyu)\w*|\bformdan dusmus\w*")
+_TR_PHYSIOLOGICAL_RE = re.compile(
+    r"\b(?:sismis|siskin|sismes)\w*|\bsu tutulum\w*|\bsu tutma(?:si|n|nin)?\b|"
+    r"\b(?:vucud\w*|kaslar\w*|fazla|asiri) su tut\w*|\bdehidrat\w*|"
+    r"\bsusuz (?:kal|gorun)\w*|\bsusuzluk\w*|"
+    r"\bsivi (?:kayb|eksik|tutulum)\w*|"
+    r"\basiri antrenman|\bfazla antrenman yap(?:mis|tin|iyorsun)\w*|"
+    r"\btoparlana(?:ma|mi)\w*|\byetersiz toparlanma|"
+    r"\byorgun (?:gorun|dus|gozuk)\w*|"
+    r"\byorgunluk (?:gorul|gorun|belirgin|var|izi)\w*|"
+    r"\b(?:bitkin|halsiz|tukenmis)\w*|"
+    r"\b(?:glikojen|elektrolit|kortizol|testosteron|ostrojen|steroid)\w*|"
+    r"\bkas (?:hasar|yikim|kramp)\w*")
+# "şişlik" (swelling) folds to "sislik" (haziness), so it is matched on a
+# Turkish-lowercased copy that keeps the letters.
+_TR_LETTER_PHYSIOLOGICAL_RE = re.compile(r"\bşişli[kğ]")
+_TR_PEOPLE = r"(?:insan|kisi|sporcu|erkek|kadin|adam|kullanici)"
+_TR_NORM_COMPARISON_RE = re.compile(
+    r"\b(?:cogu|bircok|diger|ortalama|ortalama bir) " + _TR_PEOPLE
+    + r"(?:lar|ler)?(?:dan|den|tan|ten|a gore|e gore|ye gore|ya gore)\b|"
+    r"\bortalama(?:nin)? (?:ust|alt)\w*|\bortalamadan\b|"
+    r"\byasin(?:a|iza) gore|\b(?:yasit|akran)\w*|"
+    r"\bdigerlerin(?:den|e gore)|"
+    r"\b(?:vucut gelistirmeci|fitness modeli|yarismaci|profesyonel sporcu)"
+    r"(?:ler)? gibi|\b(?:sahneye|yarismaya) hazir|"
+    r"\belit (?:fizik|vucut)\w*")
+_TR_PAST_REFERENCE_RE = re.compile(
+    r"\b(?:son|onceki|gecen|eski|ilk)\s+(?:fotograf|foto|kontrol|cekim|kare|"
+    r"resim|sefer|hafta|ay|pump|hal)\w*|"
+    r"\b(?:oncekin|eskisin|gecen seferkin)\w*|\boncesine gore|\boncesinden\b|"
+    r"\beskiye gore|\beskiden\b|\beskisi gibi|\bson zamanlarda")
+_TR_PHYSIQUE_COMPARATIVE_RE = re.compile(
+    r"\bdaha (?:buyuk|iri|kalin|genis|dolgun|belirgin|tanimli|kasli|ince|"
+    r"zayif|kucuk|hacimli|guclu|yagsiz)\w*|\bbelirginles\w*|\bdolmus\w*")
+# Bare or object forms only ("kadrajı daha geniş tut", "daha geniş bir
+# kadraj"): a locative/ablative setup word ("ışıkta", "bu açıdan") is a
+# circumstance, not the thing compared, and no body noun may sit between.
+_TR_SETUP_NOUNS = (r"(?:kadraj(?:i|ini)?|isik|isigi|isigin|mesafe(?:yi)?|"
+                   r"kamera(?:yi)?|arka plan(?:i)?|zoom|aci|aciyi)\b")
+_TR_BODY_NOUNS = (r"(?:omuz|omz|kol|gogus|gogs|sirt|bacak|baldir|pazu|kas|"
+                  r"karin|karn|bel|gobek|gobeg|vucud|vucut|fizik|fizig|"
+                  r"trapez|deltoid|lat|kanat|kalca|boyn)")
+_TR_PHOTO_SETUP_PHRASE_RE = re.compile(
+    r"\bdaha \w+ (?:bir )?" + _TR_SETUP_NOUNS + r"|"
+    r"\b" + _TR_SETUP_NOUNS + r" (?:(?!" + _TR_BODY_NOUNS
+    + r")\w+ ){0,2}daha \w+|"
+    # purpose clauses are advice: "daha belirgin görünsün diye ışık al"
+    # ("daha dolgun görünmesi güzel" without için/diye is a claim)
+    r"\bdaha \w+ gorun(?:sun\w*(?: (?:icin|diye))?|(?:mesi|mek|ecek)\w* "
+    r"(?:icin|diye))")
+# -mış forms with any ending; -di forms only as finite verbs, so that
+# "büyüdükçe" (as … grows) and "büyüdüğünde" stay legal.
+_TR_PHYSIQUE_CHANGE_RE = re.compile(
+    r"\b(?:buyumus|kalinlasmis|genislemis|kuculmus|irilesmis|"
+    r"dolgunlasmis)\w*|"
+    r"\b(?:buyudu|kalinlasti|genisledi|kuculdu|irilesti|dolgunlasti)"
+    r"(?:n|nuz|niz|k|ler|lar)?\b(?! m[iu]\b)|"
+    # nominalized -dIk ("büyüdüğünü görüyorum"), but not "-dikçe"/"-diğinde"
+    r"\b(?:buyudu|kalinlasti|genisledi|kuculdu|irilesti|dolgunlasti)[gk]"
+    r"(?!(?:ce|ca|unde|inde|unda|inda|u zaman|i zaman|ten sonra|tan sonra|"
+    r"unu gormek|ini gormek)\b)\w*|"
+    r"\bkas yap(?:mis|tin|tiniz)\w*")
+
+
+def _without_format_chars(value):
+    return "".join(c for c in value if unicodedata.category(c) != "Cf")
+
+
+def _en_normalized(value):
+    return _without_format_chars(value).translate(_APOSTROPHES)
+
+
+def _tr_lowered(value):
+    text = unicodedata.normalize("NFC", _without_format_chars(value))
+    return text.replace("İ", "i").replace("I", "ı").lower()
+
+
 def _tr_folded(value):
-    decomposed = unicodedata.normalize("NFKD", value)
+    decomposed = unicodedata.normalize("NFKD", _without_format_chars(value))
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
     return " ".join(stripped.translate(_TR_FOLD).lower().split())
 
@@ -130,13 +411,15 @@ def _plain_text(value, maximum, field):
     value = value.strip()
     if not value or len(value) > maximum:
         raise InvalidAnalysis("analysis text is outside bounds")
-    if (_HTML_RE.search(value) or _MEDICAL_RE.search(value)
-            or _PASSIVE_MEDICAL_RE.search(value)
-            or _DIAGNOSTIC_ASSERTION_RE.search(value)):
+    english = _en_normalized(value)
+    if (_HTML_RE.search(value) or _MEDICAL_RE.search(english)
+            or _PASSIVE_MEDICAL_RE.search(english)
+            or _DIAGNOSTIC_ASSERTION_RE.search(english)):
         raise InvalidAnalysis("analysis text violates safety policy")
-    if _BODY_CLAIM_RE.search(value):
+    if _BODY_CLAIM_RE.search(english):
         raise InvalidAnalysis("analysis contains a prohibited body claim")
-    if _MEASUREMENT_RE.search(value) or _IMPERIAL_MEASUREMENT_RE.search(value):
+    if (_MEASUREMENT_RE.search(english)
+            or _IMPERIAL_MEASUREMENT_RE.search(english)):
         raise InvalidAnalysis("analysis contains image-derived false precision")
     folded = _tr_folded(value)
     if _TR_MEDICAL_RE.search(folded) or _TR_DIAGNOSTIC_RE.search(folded):
@@ -145,13 +428,43 @@ def _plain_text(value, maximum, field):
         raise InvalidAnalysis("analysis contains a prohibited body claim")
     if _TR_MEASUREMENT_RE.search(folded):
         raise InvalidAnalysis("analysis contains image-derived false precision")
+    if (_PHYSIOLOGICAL_RE.search(english)
+            or _TR_PHYSIOLOGICAL_RE.search(folded)
+            or _TR_LETTER_PHYSIOLOGICAL_RE.search(_tr_lowered(value))):
+        raise InvalidAnalysis("analysis text violates safety policy")
+    if (_WEIGHT_CHANGE_RE.search(english)
+            or _TR_WEIGHT_CHANGE_RE.search(folded)):
+        raise InvalidAnalysis("analysis contains a prohibited body claim")
+    if (_NEGATIVE_BODY_RE.search(english)
+            or _TR_NEGATIVE_BODY_RE.search(folded)):
+        raise InvalidAnalysis("analysis contains a negative body judgment")
+    if (_NORM_COMPARISON_RE.search(english)
+            or _TR_NORM_COMPARISON_RE.search(folded)):
+        raise InvalidAnalysis("analysis contains an unsupported comparison")
+    return value
+
+
+def _single_image_text(value, maximum, field):
+    """_plain_text plus the checks that only make sense for one photo."""
+    value = _plain_text(value, maximum, field)
+    english = _en_normalized(value)
+    folded = _tr_folded(value)
+    if (_PHYSIQUE_CHANGE_RE.search(english)
+            or _TR_PHYSIQUE_CHANGE_RE.search(folded)
+            or (_PAST_REFERENCE_RE.search(english)
+                and _PHYSIQUE_COMPARATIVE_RE.search(
+                    _PHOTO_SETUP_PHRASE_RE.sub(" ", english)))
+            or (_TR_PAST_REFERENCE_RE.search(folded)
+                and _TR_PHYSIQUE_COMPARATIVE_RE.search(
+                    _TR_PHOTO_SETUP_PHRASE_RE.sub(" ", folded)))):
+        raise InvalidAnalysis("analysis contains an unsupported comparison")
     return value
 
 
 def _text_list(value, maximum_count, field):
     if not isinstance(value, list) or len(value) > maximum_count:
         raise InvalidAnalysis("analysis list is outside bounds")
-    return [_plain_text(item, ITEM_MAX, field) for item in value]
+    return [_single_image_text(item, ITEM_MAX, field) for item in value]
 
 
 def parse_analysis(raw):
@@ -167,7 +480,7 @@ def parse_analysis(raw):
     if not isinstance(quality, str) or quality not in QUALITY_VALUES:
         raise InvalidAnalysis("analysis quality is invalid")
     return {
-        "summary": _plain_text(value["summary"], SUMMARY_MAX, "summary"),
+        "summary": _single_image_text(value["summary"], SUMMARY_MAX, "summary"),
         "observations": _text_list(
             value["observations"], OBSERVATIONS_MAX, "observations"),
         "strengths": _text_list(value["strengths"], LIST_MAX, "strengths"),
@@ -175,7 +488,7 @@ def parse_analysis(raw):
             value["focus_areas"], LIST_MAX, "focus_areas"),
         "limitations": _text_list(
             value["limitations"], LIST_MAX, "limitations"),
-        "next_check_guidance": _plain_text(
+        "next_check_guidance": _single_image_text(
             value["next_check_guidance"], GUIDANCE_MAX, "next_check_guidance"),
         "quality": quality,
     }
