@@ -37,6 +37,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
+from app.services import private_exercises
 from app.models import TrainingPlan
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.plan_session_transition import lock_plan_session_transition
@@ -311,12 +312,19 @@ def apply_plan_mutation(
         before_version = plan.mutation_version
         lineage_id = plan.lineage_id
 
-        document, _program = parse_plan_document(before_snapshot)
+        document, program = parse_plan_document(before_snapshot)
+        private_definitions = None
+        if editor_revision is not None:
+            # Resolve existing slots as well as incoming IDs for placement and targeting.
+            ids = list(private_exercises.program_exercise_ids(program))
+            ids.extend(getattr(command, field, None) for field in ("exercise", "replacement"))
+            private_definitions = private_exercises.owner_definitions(user_id, ids)
         # A validation failure raises out of here, before anything is inserted:
         # a rejected command consumes no operation identity and leaves no
         # "accepted mutation" in history that never happened.
         mutated, changed = apply_command(
-            document, command, native_editor=editor_revision is not None)
+            document, command, native_editor=editor_revision is not None,
+            private_definitions=private_definitions)
 
         if changed:
             after_snapshot = serialize_plan_document(mutated)

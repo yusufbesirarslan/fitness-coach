@@ -105,8 +105,36 @@ def _plan_reps(value):
     return value.strip()
 
 
-def _training_plan_projection(source):
-    """Rebuild the plan read from tokens; never forward the domain dict."""
+def _private_plan_labels(days, user_id, max_exercises):
+    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.orm import Session
+
+    from app.extensions import db
+    from app.services.private_exercises import is_private_id, owner_definitions
+
+    ids = set()
+    for day in days[:7]:
+        raw = day.get('exercises') if isinstance(day, dict) else None
+        if isinstance(raw, list):
+            for exercise in raw[:max_exercises]:
+                identity = exercise.get('private_exercise_id') if isinstance(exercise, dict) else None
+                if is_private_id(identity):
+                    ids.add(identity)
+    if not ids or user_id is None:
+        return {}
+    try:
+        # This tool reprojects just before provider transfer. Release the read
+        # connection immediately without touching the Coach's ambient session.
+        with Session(db.engine) as session:
+            return owner_definitions(user_id, ids, session=session)
+    except SQLAlchemyError:
+        return {}
+
+
+def _training_plan_projection(source, user_id):
+    """Rebuild the plan read from tokens and owner-authorized definitions."""
+    from app.services.private_exercises import is_private_id
+    from app.services.training_generation.plan_schema import NATIVE_MAX_EXERCISES_PER_DAY
     out = {}
     if token(source.get('error'), _PLAN_READ_ERRORS):
         out['error'] = source['error']
@@ -114,24 +142,44 @@ def _training_plan_projection(source):
     days = plan.get('days') if isinstance(plan, dict) else None
     if source.get('status') != 'ok' or not isinstance(days, list):
         return out
+    private_labels = _private_plan_labels(days, user_id, NATIVE_MAX_EXERCISES_PER_DAY)
     projected = []
     for day in days[:7]:
         if not isinstance(day, dict) or not token(day.get('day'), _WEEKDAYS):
             continue
         exercises = []
         raw = day.get('exercises') if isinstance(day.get('exercises'), list) else []
-        for exercise in raw[:_MAX_PLAN_EXERCISES]:
+        limit = _MAX_PLAN_EXERCISES
+        if private_labels and any(
+            is_private_id(item.get('private_exercise_id')) and item['private_exercise_id'] in private_labels
+            for item in raw[:NATIVE_MAX_EXERCISES_PER_DAY] if isinstance(item, dict)
+        ):
+            limit = NATIVE_MAX_EXERCISES_PER_DAY
+        for position, exercise in enumerate(raw[:limit]):
             if not isinstance(exercise, dict):
                 continue
             sets = exercise.get('sets')
             label = exercise.get('name')
-            exercises.append({
-                # Catalog-vouched label only; unknown prose fails closed.
-                'name': label if isinstance(label, str) and len(label) <= 120
-                and exercise_name(label) else None,
+            projected_exercise = {
+                'name': None,
                 'sets': sets if type(sets) is int and 1 <= sets <= 100 else None,
                 'reps': _plan_reps(exercise.get('reps')),
-            })
+            }
+            if 'private_exercise_id' in exercise:
+                identity = exercise['private_exercise_id']
+                definition = private_labels.get(identity) if is_private_id(identity) else None
+                if definition is not None:
+                    projected_exercise.update(
+                        name=definition.canonical_name,
+                        movement=definition.movement,
+                        equipment=sorted(definition.equipment),
+                        primary_region=definition.primary_region,
+                        position=position,
+                        user_defined=True,
+                    )
+            elif isinstance(label, str) and len(label) <= 120 and exercise_name(label):
+                projected_exercise['name'] = label
+            exercises.append(projected_exercise)
         entry = {'day': day['day'], 'kind': token(day.get('kind'), _DAY_KINDS),
                  'exercises': exercises}
         if day.get('truncated') is True:
@@ -207,7 +255,7 @@ def tool_result(name, raw, *, user_id=None):
     elif name == 'cancel_pending_log':
         out.update(numeric_fields(source, ('removed',)))
     elif name == 'get_current_training_plan':
-        out.update(_training_plan_projection(source))
+        out.update(_training_plan_projection(source, user_id))
     elif name == 'analyze_gym_photo':
         out.update(numeric_fields(source, ('form_rating', 'xp_awarded')))
         for key in ('is_gym', 'awarded'):

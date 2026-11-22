@@ -85,6 +85,7 @@ def _mobile_paths(flask_app):
 
 
 _TRAINING_EDITOR_PATHS = {
+    "/api/v1/training/private-exercises",
     "/api/v1/training/editor",
     "/api/v1/training/editor/<any(add,remove,replace,prescription,undo):operation>",
     "/api/v1/training/exercise-catalog",

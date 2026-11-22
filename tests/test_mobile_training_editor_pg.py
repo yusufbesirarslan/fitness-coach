@@ -79,3 +79,53 @@ def test_competing_editor_requests_serialize_and_keep_one_journal_record(
         assert record.after_snapshot == row.plan_data
         assert record.before_version == 0
         assert record.after_version == 1
+
+
+@pytest.mark.parametrize("same_metadata", [True, False], ids=["replay", "conflict"])
+def test_concurrent_private_registration_arbitrates_on_owner_and_name(
+    pg_plan_app, as_owner, monkeypatch, same_metadata,
+):
+    from app.blueprints.mobile_api import bp
+    from app.extensions import db
+    from app.health_boundary import HealthProcessingBoundary
+    from app.models import PrivateExercise, User
+    from app.services import health_consent, health_disclosure, private_exercises
+    from tests.test_mobile_private_exercises import BODY, register
+
+    app, owner_id = pg_plan_app
+    app.register_blueprint(bp)
+    app.wsgi_app = HealthProcessingBoundary(app.wsgi_app)
+    monkeypatch.setattr(health_disclosure, "APPROVED_VERSION", health_disclosure.VERSION)
+    with app.app_context():
+        headers = as_owner(db.session.get(User, owner_id))
+        health_consent.mutate(owner_id, {
+            "action": "affirmative_grant", "purpose": health_disclosure.PURPOSE,
+            "version": health_disclosure.VERSION, "locale": "en",
+            "text_digest": health_disclosure.DIGESTS["en"], "expected_generation": 0,
+            "request_id": "synthetic-private-exercise-grant",
+        })
+
+    barrier = Barrier(2)
+    pg_insert = private_exercises.pg_insert
+
+    def concurrent_insert(table):
+        barrier.wait(timeout=10)
+        return pg_insert(table)
+
+    monkeypatch.setattr(private_exercises, "pg_insert", concurrent_insert)
+
+    def contender(index):
+        equipment = BODY["equipment"] if same_metadata or index == 0 else ["bodyweight"]
+        return register(app.test_client(), headers, equipment=equipment)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = dict(executor.map(contender, range(2)))
+    assert sorted(outcomes) == ([200, 201] if same_metadata else [201, 409]), outcomes
+    if same_metadata:
+        assert outcomes[200] == outcomes[201]
+    else:
+        assert outcomes[409]["error"]["code"] == "TRAINING_PRIVATE_EXERCISE_CONFLICT"
+    with app.app_context():
+        row = PrivateExercise.query.filter_by(user_id=owner_id).one()
+        assert row.exercise_id == outcomes[201]["exercise"]["exercise_id"]
+        assert row.equipment == outcomes[201]["exercise"]["equipment"]

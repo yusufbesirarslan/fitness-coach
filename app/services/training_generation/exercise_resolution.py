@@ -157,7 +157,7 @@ def _resolve_plan_exercise(
 
 def check_placement(
     exercise: ExerciseDefinition, day: dict, *, allow_overlap: bool = False,
-    require_cardio_on_dedicated_day: bool = False,
+    require_cardio_on_dedicated_day: bool = False, catalog=None,
 ) -> None:
     """Allow cardio on a cardio day or alongside real strength on new plans.
 
@@ -173,7 +173,7 @@ def check_placement(
     if exercise.movement != CARDIO_MOVEMENT:
         return
     if allow_overlap and day.get("tip") == "antrenman":
-        catalog = load_exercise_catalog()
+        catalog = catalog or load_exercise_catalog()
         for item in day["egzersizler"]:
             try:
                 entry = resolve_exercise(

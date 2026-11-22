@@ -24,9 +24,9 @@ from app.models import (
 from app.services.exercise_catalog import (
     CatalogConfigurationError,
     ExerciseResolutionError,
-    load_exercise_catalog,
     resolve_exercise,
 )
+from app.services.private_exercises import owned_catalog
 from app.services.training_generation.response_validator import VALID_TIPS, WEEKDAYS
 from app.services.workout_completion import (
     already_completed_today,
@@ -208,7 +208,7 @@ def planned_workout_for_slot(user_id: int, weekday_slot: Optional[str]) -> Plann
     fingerprint = compute_fingerprint(
         str(ex.get("isim") or "").strip() for ex in entries)
     try:
-        catalog = load_exercise_catalog()
+        catalog = owned_catalog(user_id, (ex.get("exercise_id") for ex in entries))
         identities = tuple(
             resolve_exercise(
                 exercise_id=ex.get("exercise_id"), catalog=catalog).exercise_id

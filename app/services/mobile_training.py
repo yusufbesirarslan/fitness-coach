@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timezone
 
 from app.services.exercise_catalog import resolve_exercise
+from app.services.private_exercises import owned_catalog, program_exercise_ids
 from app.services.plan_mutation import InvalidMutation
 from app.services.plan_mutation.fingerprint import snapshot_fingerprint
 from app.services.plan_mutation.validation import (
@@ -263,9 +264,10 @@ def _project_plan(plan, user_id, secret, *, include_editor_revision=False) -> di
         validated = validate_plan_structure(
             plan_document, allow_exercise_id=True)
         by_weekday = {day["gun"]: day for day in validated["program"]}
+        catalog = owned_catalog(user_id, program_exercise_ids(validated["program"]))
         days = [
             _project_day(
-                by_weekday[weekday], slot, user_id, secret, lineage, version
+                by_weekday[weekday], slot, user_id, secret, lineage, version, catalog
             )
             for slot, weekday in enumerate(WEEKDAYS)
         ]
@@ -289,7 +291,7 @@ def _project_plan(plan, user_id, secret, *, include_editor_revision=False) -> di
         raise PlanUnprojectable("persisted plan is not projectable") from error
 
 
-def _project_day(day, slot, user_id, secret, lineage, version):
+def _project_day(day, slot, user_id, secret, lineage, version, catalog):
     if len(day["egzersizler"]) > MAX_EXERCISES_PER_DAY:
         raise PlanUnprojectable("day exceeds the native exercise bound")
     kind = day_kind(day["tip"])
@@ -304,15 +306,15 @@ def _project_day(day, slot, user_id, secret, lineage, version):
         "duration_minutes": day["sure_dk"],
         "estimated_calories": day["tahmini_kalori"],
         "workout_ref": reference,
-        "exercises": [_project_exercise(item) for item in day["egzersizler"]],
+        "exercises": [_project_exercise(item, catalog) for item in day["egzersizler"]],
     }
 
 
-def _project_exercise(item):
+def _project_exercise(item, catalog):
     exercise_id = item.get("exercise_id")
     if not isinstance(exercise_id, str):
         raise PlanUnprojectable("canonical exercise identity is missing")
-    definition = resolve_exercise(exercise_id=exercise_id)
+    definition = resolve_exercise(exercise_id=exercise_id, catalog=catalog)
     return {
         "exercise_id": definition.exercise_id,
         "display_name": definition.canonical_name,

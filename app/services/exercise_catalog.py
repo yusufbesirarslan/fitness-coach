@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 import json
 from pathlib import Path
@@ -15,6 +15,7 @@ import unicodedata
 CATALOG_PATH = Path(__file__).with_name("training_assets") / "exercises.json"
 ID_PATTERN = re.compile(r"^ex_[a-z0-9_]+$")
 MAX_EXERCISE_ID_LENGTH = 64
+PRIVATE_ID_PREFIX = "ex_private_"
 HYPHENS = "‐‑‒–—―−"
 
 EQUIPMENT_VOCABULARY = frozenset({
@@ -196,6 +197,8 @@ def load_exercise_catalog() -> ExerciseCatalog:
     by_id: dict[str, ExerciseDefinition] = {}
     by_lookup: dict[str, tuple[ExerciseDefinition, ...]] = {}
     for exercise in exercises:
+        if exercise.exercise_id.startswith(PRIVATE_ID_PREFIX):
+            raise CatalogConfigurationError("reserved private exercise namespace")
         if exercise.exercise_id in by_id:
             raise CatalogConfigurationError("duplicate exercise ID")
         by_id[exercise.exercise_id] = exercise
@@ -210,6 +213,11 @@ def load_exercise_catalog() -> ExerciseCatalog:
         by_id=MappingProxyType(by_id),
         by_lookup=MappingProxyType(by_lookup),
     )
+
+
+def with_owner_definitions(catalog, definitions):
+    """Add pre-authorized definitions by ID only to a request-local view."""
+    return replace(catalog, by_id={**catalog.by_id, **definitions}) if definitions else catalog
 
 
 def resolve_exercise(
