@@ -24,7 +24,7 @@ class RecoveryError(RuntimeError):
 
 
 def require_recovery(environ: Mapping[str, str], aws: Callable, monotonic: Callable,
-                     sleep: Callable, log: Callable) -> str:
+                     sleep: Callable, log: Callable, *, retained_snapshot: str | None = None) -> str:
     """Create once and independently prove Available before any host authority.
 
     The injected AWS runner must bound each call to CALL_SECONDS. Errors and
@@ -75,11 +75,10 @@ def require_recovery(environ: Mapping[str, str], aws: Callable, monotonic: Calla
             or not isinstance(resource_id, str) or re.fullmatch(r"db-[A-Z0-9]+", resource_id) is None):
         raise RecoveryError("recovery instance identity or state rejected")
     snapshot_id = f"predeploy-{sha}-{uuid4().hex}"
-    snapshot_arn = f"arn:aws:rds:eu-central-1:{account}:snapshot:{snapshot_id}"
-
-    def status(snapshot):
+    def status(snapshot, expected):
+        snapshot_arn = f"arn:aws:rds:eu-central-1:{account}:snapshot:{expected}"
         if (not isinstance(snapshot, Mapping)
-                or snapshot.get("DBSnapshotIdentifier") != snapshot_id
+                or snapshot.get("DBSnapshotIdentifier") != expected
                 or snapshot.get("DBInstanceIdentifier") != identifier
                 or snapshot.get("DBSnapshotArn") != snapshot_arn
                 or snapshot.get("DbiResourceId") != resource_id
@@ -92,15 +91,25 @@ def require_recovery(environ: Mapping[str, str], aws: Callable, monotonic: Calla
             raise RecoveryError("recovery snapshot unavailable or unknown")
         return state
 
-    response = call(["rds", "create-db-snapshot", "--db-instance-identifier", identifier,
-                     "--db-snapshot-identifier", snapshot_id])
-    status(response.get("DBSnapshot"))
-    log("Recovery snapshot request accepted; independent availability proof required")
-    while True:
-        snapshots = call(["rds", "describe-db-snapshots", "--db-snapshot-identifier", snapshot_id]).get("DBSnapshots")
+    def read_snapshot(name):
+        snapshots = call(["rds", "describe-db-snapshots", "--db-snapshot-identifier", name]).get("DBSnapshots")
         if not isinstance(snapshots, list) or len(snapshots) != 1:
             raise RecoveryError("recovery snapshot readback unavailable")
-        if status(snapshots[0]) == "available":
+        return status(snapshots[0], name)
+
+    if retained_snapshot is not None:
+        if (re.fullmatch(r"predeploy-[0-9a-f]{40}-[0-9a-f]{32}", retained_snapshot) is None
+                or retained_snapshot.startswith(f"predeploy-{sha}-")
+                or read_snapshot(retained_snapshot) != "available"):
+            raise RecoveryError("failed candidate recovery snapshot unproven")
+        log(f"Retained failed-candidate snapshot Available: {retained_snapshot}")
+
+    response = call(["rds", "create-db-snapshot", "--db-instance-identifier", identifier,
+                     "--db-snapshot-identifier", snapshot_id])
+    status(response.get("DBSnapshot"), snapshot_id)
+    log("Recovery snapshot request accepted; independent availability proof required")
+    while True:
+        if read_snapshot(snapshot_id) == "available":
             log(f"Recovery snapshot Available for candidate {sha}: {snapshot_id}")
             return snapshot_id
         log("Recovery snapshot creating; migration remains unauthorized")

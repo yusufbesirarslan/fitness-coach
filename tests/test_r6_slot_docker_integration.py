@@ -18,6 +18,7 @@ import base64
 import json
 import os
 import re
+from secrets import token_hex
 import shutil
 import socket
 import subprocess
@@ -29,6 +30,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from scripts import web_slot_runtime as rt
 
 if os.environ.get("FITX_R6_DOCKER_IT") != "1":
     pytest.skip("set FITX_R6_DOCKER_IT=1 on a disposable Docker host",
@@ -96,6 +98,18 @@ def wait_healthy(name, seconds=300):
         time.sleep(3)
     raise AssertionError(f"{name} never became healthy:\n"
                          + sh("docker", "logs", "--tail", "80", name, check=False).stderr)
+
+
+def wait_port_released(deploy, slot):
+    # Host HTTP probes can leave Linux TIME_WAIT sockets after removal.
+    # Wait for the runtime's conservative bind gate to pass on its own.
+    runtime = rt.SlotRuntime(deploy)
+    deadline = time.monotonic() + 150
+    while time.monotonic() < deadline:
+        if runtime.port_available(slot):
+            return
+        time.sleep(2)
+    raise AssertionError(f"removed slot {slot} did not release its port")
 
 
 def schema_fingerprint():
@@ -175,6 +189,59 @@ def stack(tmp_path_factory):
                check=False)
         sh(*main, "down", "-v", "--timeout", "5", check=False)
         sh("docker", "rmi", "-f", image, f"axisai-web:{OTHER_REV}", check=False)
+
+
+def test_image_fault_persists_across_docker_healthy_fresh_boots(stack, tmp_path):
+    deploy = stack["deploy"]
+    failed = "a" * 40
+    tag = f"axisai-web:{failed}"
+    source = (ROOT / "app/__init__.py").read_text(encoding="utf-8")
+    branch = '        if request.args.get("deep") == "1" and _deep_health_allowed():\n'
+    assert source.count(branch) == 1
+    fault = branch + '            return {"status": "error"}, 503\n'
+    (tmp_path / "fault.py").write_text(source.replace(branch, fault), encoding="utf-8")
+    (tmp_path / "Dockerfile").write_text(
+        f"FROM {stack['image']}\n"
+        "USER root\n"
+        f"RUN chmod 0644 /app/BUILD_REVISION && echo {failed} >/app/BUILD_REVISION"
+        " && chmod 0444 /app/BUILD_REVISION\n"
+        "COPY --chown=appuser:appuser fault.py /app/app/__init__.py\n"
+        "USER appuser\n", encoding="utf-8")
+    sh("docker", "build", "-t", tag, str(tmp_path))
+    schema = schema_fingerprint()
+    boots = []
+    try:
+        for _ in range(2):
+            code, out = helper(deploy, "start", "--slot", "blue", "--revision", failed)
+            assert code == 0 and out["action"] == "started", out
+            initial = slot_container("blue")
+            wait_healthy(initial["Id"])
+            boot = inspect(initial["Id"])
+            assert boot["Image"] == inspect(tag)["Id"]
+            assert sh("docker", "exec", boot["Id"], "cat", "/app/BUILD_REVISION").stdout.strip() == failed
+            shallow = sh("docker", "exec", boot["Id"], "python3", "-c",
+                         "import urllib.request; print(urllib.request.urlopen("
+                         "'http://127.0.0.1:5000/health', timeout=5).status)")
+            assert shallow.stdout.strip() == "200"
+            code, out = helper(deploy, "verify", "--slot", "blue", "--revision", failed)
+            assert code == 4 and "in-container deep health never proved" in out["detail"], out
+            boots.append((boot["Id"], boot["State"]["StartedAt"], boot["Image"]))
+            code, out = helper(deploy, "remove", "--slot", "blue", "--expected-revision", failed)
+            assert code == 0 and out["action"] == "removed", out
+            wait_port_released(deploy, "blue")
+        assert boots[0][0] != boots[1][0] and boots[0][1] != boots[1][1]
+        assert boots[0][2] == boots[1][2] and schema_fingerprint() == schema
+        code, out = helper(deploy, "start", "--slot", "blue", "--revision", stack["revision"])
+        assert code == 0 and out["action"] == "started", out
+        code, out = helper(deploy, "verify", "--slot", "blue", "--revision", stack["revision"])
+        assert code == 0 and out["deep_health_revision"] == stack["revision"], out
+        assert slot_container("blue")["Image"] != boots[0][2]
+        assert schema_fingerprint() == schema
+    finally:
+        for revision in (failed, stack["revision"]):
+            helper(deploy, "remove", "--slot", "blue", "--expected-revision", revision)
+        sh("docker", "rmi", tag, check=False)
+        wait_port_released(deploy, "blue")
 
 
 def test_two_slot_runtime_end_to_end(stack):
@@ -323,7 +390,6 @@ def test_apple_files_in_real_blue_green_containers(stack, tmp_path):
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.x509.oid import NameOID
-    from scripts import web_slot_runtime as rt
 
     rev, deploy = stack["revision"], stack["deploy"]
     previous = sh("git", "rev-parse", "HEAD^", cwd=ROOT).stdout.strip()
@@ -376,20 +442,8 @@ def test_apple_files_in_real_blue_green_containers(stack, tmp_path):
            "0440" if filename == "private-key.p8" else "0444",
            str(tmp_path / filename), str(directory / filename))
 
-    def wait_port_released(slot):
-        # Prior real HTTP probes can leave Linux TIME_WAIT sockets after a
-        # container is removed. Preserve the runtime's conservative bind gate;
-        # wait for kernel release rather than bypassing admission in the test.
-        runtime = rt.SlotRuntime(deploy)
-        deadline = time.monotonic() + 150
-        while time.monotonic() < deadline:
-            if runtime.port_available(slot):
-                return
-            time.sleep(2)
-        raise AssertionError(f"removed slot {slot} did not release its port")
-
     assert call("remove", "--slot", "blue", "--expected-revision", rev)[0] == 0
-    wait_port_released("blue")
+    wait_port_released(deploy, "blue")
     try:
         sh("sudo", "-n", "install", "-d", "-o", "0", "-g", "0", "-m", "0755", str(source))
         sh("sudo", "-n", "install", "-d", "-o", "0", "-g", "0", "-m", "0755", str(previous_source))
@@ -452,7 +506,7 @@ for name in ('private-key.p8', 'root-g2.cer', 'root-g3.cer'):
         assert call("verify", "--slot", "blue", "--revision", previous,
                     "--allow-existing-files", mode="0")[0] == 0
         assert call("remove", "--slot", "blue", "--expected-revision", previous)[0] == 0
-        wait_port_released("blue")
+        wait_port_released(deploy, "blue")
         # Malformed bytes pass metadata admission by design. Startup with
         # subscription flags OFF remains healthy; adapter initialization fails
         # closed locally before any Apple request. Health is not key validity.
@@ -542,3 +596,60 @@ def test_apple_orphan_inspection_uses_the_real_docker_top_contract(stack, tmp_pa
             "Apple scheduler ownership/source/execution unproven (PREVIOUS_RECONCILIATION_STILL_RUNNING)"]
     finally:
         sh("docker", "rm", "-f", orphan, check=False)
+
+
+def test_coach_proof_uses_live_gunicorn_and_cached_rq_on_the_same_schema(stack):
+    revision, deploy, main = stack["revision"], stack["deploy"], stack["main"]
+    worker_name = "r6bit-coach-proof-worker"
+    wait_port_released(deploy, "blue")
+
+    def probe(cid, role, *, expected=True):
+        run = sh("docker", "exec", cid, "python3", "-I",
+                 "/app/scripts/r6_coach_attestation.py", role, revision, token_hex(16),
+                 check=False)
+        assert (run.returncode == 0) is expected, run.stderr
+        if expected:
+            proof = json.loads(run.stdout)
+            assert proof["flag"] is proof["guard"] is False
+            assert proof["role"] == role and proof["revision"] == revision
+            return proof
+
+    try:
+        code, out = helper(deploy, "start", "--slot", "blue", "--revision", revision)
+        assert code == 0 and out["action"] == "started", out
+        web_id = slot_container("blue")["Id"]
+        wait_healthy(web_id)
+        sh(*main, "stop", "worker")
+        sh(*main, "run", "--no-deps", "-d", "--name", worker_name,
+           "-e", "R6_RUNTIME_ADMISSION=required", "-e", f"APP_REVISION={revision}", "worker")
+        wait_healthy(worker_name)
+        worker_id = inspect(worker_name)["Id"]
+        assert inspect(web_id)["Image"] == inspect(worker_id)["Image"]
+        web, worker = probe(web_id, "web"), probe(worker_id, "worker")
+        assert web["heads"] == worker["heads"] and web["boot"] != worker["boot"]
+        assert probe(worker_id, "worker") == worker
+        probe(worker_id, "web", expected=False)
+
+        # Replace only the Gunicorn child. The Docker identity stays put; the
+        # attested application boot and its live /proc identity must change.
+        sh("docker", "exec", web_id, "python3", "-c",
+           "import os,signal,sys; os.kill(int(sys.argv[1]), signal.SIGTERM)", str(web["pid"]))
+        deadline = time.monotonic() + 45
+        while True:
+            result = sh("docker", "exec", web_id, "python3", "-I",
+                        "/app/scripts/r6_coach_attestation.py", "web", revision, token_hex(16),
+                        check=False)
+            if result.returncode == 0:
+                replacement = json.loads(result.stdout)
+                if replacement["boot"] != web["boot"]:
+                    break
+            assert time.monotonic() < deadline, "new web application boot unproven"
+            time.sleep(1)
+        assert replacement["pid"] != web["pid"]
+        assert replacement["heads"] == worker["heads"]
+        assert probe(worker_id, "worker") == worker
+    finally:
+        sh("docker", "rm", "-f", worker_name, check=False)
+        sh(*main, "up", "-d", "--no-deps", "worker")
+        helper(deploy, "remove", "--slot", "blue", "--expected-revision", revision)
+        wait_port_released(deploy, "blue")

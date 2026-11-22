@@ -20,7 +20,6 @@ from app.services.plan_mutation.document import (
     remove_target_slots,
 )
 from app.services.plan_mutation.fingerprint import (
-    COMMAND_TYPES,
     UNDO_COMMAND_TYPE,
     command_type,
     semantic_fingerprint,
@@ -224,8 +223,3 @@ def session_impact_facts(user_id, command):
     except Exception:
         return ImpactFacts(
             touches_active_session=False, impact_undeterminable=True)
-
-
-def is_training_proposal(row):
-    """Keep shared proposal storage separate from Training transport/actions."""
-    return row is not None and row.command_type in (*COMMAND_TYPES.values(), UNDO_COMMAND_TYPE)

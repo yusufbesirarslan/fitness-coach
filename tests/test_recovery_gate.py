@@ -96,6 +96,38 @@ def run_controller(world, tmp_path, monkeypatch, env=None, git=None):
                            run_git=git or (lambda args: SHA))
 
 
+@pytest.mark.parametrize("change", [{}, {"Status": "creating"}, {"DbiResourceId": "db-FOREIGN"},
+                                     {"Encrypted": False}, {"SnapshotType": "automated"}])
+def test_repair_requires_available_original_snapshot_before_new_snapshot(change, tmp_path, monkeypatch):
+    failed = "b" * 40
+    retained = f"predeploy-{failed}-{'1' * 32}"
+    approval = f"repair-apply:{SHA}:123:2:{'c' * 64}:sha256:{'d' * 64}:{retained}"
+    env = ENV | {"R6_REPAIR_AUTHORIZATION": approval, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2"}
+    world = World()
+    original = world.aws
+
+    def aws(args):
+        if args[1] == "describe-db-snapshots" and retained in args:
+            world.calls.append(args)
+            return {"DBSnapshots": [{
+                "DBSnapshotIdentifier": retained, "DBInstanceIdentifier": ENV["RDS_INSTANCE_ID"],
+                "DBSnapshotArn": f"arn:aws:rds:eu-central-1:{ACCOUNT}:snapshot:{retained}",
+                "DbiResourceId": "db-ABC123", "SnapshotType": "manual", "Engine": "postgres",
+                "Encrypted": True, "Status": "available", **change,
+            }]}
+        return original(args)
+
+    world.aws = aws
+    assert run_controller(world, tmp_path, monkeypatch, env) == bool(change)
+    operations = world.operations()
+    if change:
+        assert not {"create-db-snapshot", "put-parameter", "send-command"} & set(operations)
+    else:
+        assert operations.index("describe-db-snapshots") < operations.index("create-db-snapshot")
+        assert operations.index("create-db-snapshot") < operations.index("send-command")
+        assert operations.index("send-command") < operations.index("put-parameter")
+
+
 @pytest.mark.parametrize("states", [("available",), ("creating", "available"), ("creating", "creating", "available")])
 def test_only_independent_available_readback_authorizes_ssm(states, tmp_path, monkeypatch):
     world = World(states)

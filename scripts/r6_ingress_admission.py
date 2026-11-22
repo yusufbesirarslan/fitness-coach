@@ -224,7 +224,7 @@ def nginx_processes():
 def identity(x):
     return x["pid"],x["start_ticks"]
 
-def socket_coverage(master,workers,ports,application_port=None):
+def socket_coverage(master,workers,ports,application_ports=None):
     owned=set()
     for x in [master,*workers]:
         for f in Path('/proc',str(x['pid']),'fd').iterdir():
@@ -246,8 +246,8 @@ def socket_coverage(master,workers,ports,application_port=None):
             b=bytes.fromhex(host)
             b=b''.join(b[i:i+4][::-1] for i in range(0,len(b),4))
             address=ipaddress.ip_address(b)
-            if application_port is not None:
-                require(port not in {5000,5001,5002} - {application_port},
+            if application_ports is not None:
+                require(port not in {5000,5001,5002} - application_ports,
                         "OBSOLETE_APPLICATION_LISTENER")
             if inode in owned:
                 require(port in ports,"UNEXPLAINED_NGINX_LISTENER")
@@ -260,9 +260,9 @@ def snapshot(state, candidate="any"):
     require(state in BACKENDS, "UNKNOWN_ROUTE")
     digest, ports = configuration(state)
     master, workers = nginx_processes()
-    require(candidate in ("any", "blue", "green"), "UNEXPECTED_CANDIDATE")
-    socket_coverage(master, workers, ports, None if candidate=="any" else
-                    int(BACKENDS[candidate].rsplit(":",1)[1]))
+    accepted = {"any": None, "empty": set(), "blue": {5001}, "green": {5002}}
+    require(candidate in accepted, "UNEXPECTED_CANDIDATE")
+    socket_coverage(master, workers, ports, accepted[candidate])
     return {"configuration": digest, "master": identity(master),
             "workers": [identity(w) for w in workers]}
 
@@ -273,12 +273,18 @@ def main():
         require(len(sys.argv) in (3,4), "EXACT_STATE_REQUIRED")
         if len(sys.argv) == 4:
             require(sys.argv[3] == "reload", "UNKNOWN_OPERATION")
-            before = snapshot(sys.argv[1],sys.argv[2])
-            run(["/usr/sbin/nginx", "-t", "-q"])
-            run(["/usr/bin/systemctl", "reload", "nginx"], 30)
-            after = snapshot(sys.argv[1],sys.argv[2])
-            require(before["configuration"] == after["configuration"] and
-                    before["master"] == after["master"], "RELOAD_DRIFT")
+            cfg = sw.Config()
+            lock = sw._flock(cfg.lock_path, cfg)
+            try:
+                require(sw.do_status(cfg).fields.get("state") == sys.argv[1], "ROUTE_CHANGED")
+                before = snapshot(sys.argv[1], sys.argv[2])
+                run(["/usr/sbin/nginx", "-t", "-q"])
+                run(["/usr/bin/systemctl", "reload", "nginx"], 30)
+                after = snapshot(sys.argv[1], sys.argv[2])
+                require(before["configuration"] == after["configuration"] and
+                        before["master"] == after["master"], "RELOAD_DRIFT")
+            finally:
+                os.close(lock)
             print(json.dumps(after, sort_keys=True))
             return 0
         print(json.dumps(snapshot(sys.argv[1],sys.argv[2]), sort_keys=True))

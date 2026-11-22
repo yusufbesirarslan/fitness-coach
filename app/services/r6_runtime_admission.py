@@ -6,6 +6,8 @@ No HTTP endpoint, client value or launch eligibility flag opens this latch.
 """
 import json
 import os
+import socket
+import threading
 import uuid
 from pathlib import Path
 
@@ -27,6 +29,8 @@ def install(app):
     # container. Ordinary non-slot development retains its existing behavior.
     app.config["R6_REGISTRATION_CLOSED"] = os.environ.get(
         "R6_REGISTRATION_ADMISSION") == "closed"
+    if app.config["R6_REGISTRATION_CLOSED"] or os.environ.get("R6_RUNTIME_ADMISSION") == "required":
+        app.extensions["r6_coach_containment"] = True
     app.config["R6_ADMISSION_BOOT"] = uuid.uuid4().hex
     @app.before_request
     def registration_boundary():
@@ -49,6 +53,8 @@ def is_open():
         return True
     try:
         receipt = json.loads(Path(WEB_RECEIPT).read_text())
+        if current_app.extensions.get("r6_coach_containment") and not coach_contained():
+            return False
         return receipt == {"boot": current_app.config["R6_ADMISSION_BOOT"],
                            "revision": current_app.config["BUILD_REVISION"]}
     except (OSError, ValueError):
@@ -88,3 +94,71 @@ def web_proof():
             "revision": current_app.config["BUILD_REVISION"],
             "policy": POLICY if policy else None,
             "closed": not is_open(), **database_proof()}
+
+
+def coach_contained():
+    from app.services.coach_plan_tools.executor import FLAG_KEY, plan_mutation_tools_enabled
+    return (current_app.extensions.get("r6_coach_containment") is True
+            and current_app.config.get(FLAG_KEY) is False
+            and plan_mutation_tools_enabled() is False)
+
+
+def loaded_coach_proof(app, role, *, cached_worker_app=None, worker_heads=None):
+    """Capture the serving app and build a fresh, sanitized observer."""
+    from app.schema_safety import verify_schema_ready
+    from scripts import r6_coach_attestation as wire
+
+    with app.app_context():
+        if not coach_contained():
+            raise RuntimeError("R6_COACH_CONTAINMENT_REQUIRED")
+    identity = process_identity()
+    boot = wire.boot_digest(app.config["R6_ADMISSION_BOOT"])
+    revision = app.config["BUILD_REVISION"]
+
+    def observe():
+        if role == "worker" and cached_worker_app() is not app:
+            raise ValueError("R6_COACH_WORKER_CACHE_CHANGED")
+        # RQ's long-lived parent must not reopen a DB connection after startup.
+        # Its initial pooled read is joined with the web's fresh schema read.
+        heads = worker_heads if role == "worker" else verify_schema_ready(app)
+        with app.app_context():
+            if (not coach_contained() or wire.boot_digest(app.config["R6_ADMISSION_BOOT"]) != boot
+                    or app.config["BUILD_REVISION"] != revision):
+                raise ValueError("R6_COACH_CONTAINMENT_REQUIRED")
+        proof = {**identity, "version": wire.VERSION, "role": role, "boot": boot,
+                 "revision": revision, "heads": sorted(heads), "flag": False, "guard": False}
+        return wire.validate_process(proof, role=role, revision=revision)
+
+    return identity["pid"], observe
+
+
+def start_coach_attestation(app, role, **worker_context):
+    from scripts import r6_coach_attestation as wire
+
+    pid, observe = loaded_coach_proof(app, role, **worker_context)
+    path = wire.socket_path(pid)
+    path.unlink(missing_ok=True)
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(path))
+    path.chmod(0o600)
+    listener.listen(2)
+    if role == "worker":
+        os.register_at_fork(after_in_child=listener.close)
+
+    def serve():
+        while True:
+            connection, _ = listener.accept()
+            with connection:
+                try:
+                    connection.settimeout(5)
+                    with connection.makefile("rb") as request:
+                        challenge = request.readline(34).decode("ascii").removesuffix("\n")
+                    if not wire.NONCE.fullmatch(challenge):
+                        continue
+                    response = {**observe(), "challenge": challenge}
+                    connection.sendall(json.dumps(response).encode("ascii") + b"\n")
+                except Exception:
+                    # Refusal is EOF. Never send configuration, SQL errors or request content.
+                    pass
+
+    threading.Thread(target=serve, name="r6-coach-attestation", daemon=True).start()

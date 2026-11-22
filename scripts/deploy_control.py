@@ -11,7 +11,7 @@ import shlex
 import subprocess
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -46,8 +46,10 @@ else:
 
 if __package__:
     from .recovery_gate import RecoveryError, require_recovery
+    from . import r6_repair_handoff as repair
 else:
     from recovery_gate import RecoveryError, require_recovery
+    import r6_repair_handoff as repair
 
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -55,9 +57,10 @@ INSTANCE_RE = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?")
 USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 DEPLOY_DIR_RE = re.compile(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+")
 FORWARD_RECOVERY_AUTHORIZATION_ENV = "R6_FORWARD_RECOVERY_AUTHORIZATION"
+REPAIR_AUTHORIZATION_ENV = "R6_REPAIR_AUTHORIZATION"
 RUN_ID_RE = re.compile(r"[1-9][0-9]{0,19}")
 RUN_ATTEMPT_RE = re.compile(r"[1-9][0-9]{0,3}")
-TRANSACTION_MODES = ("normal", "forward-recovery")
+TRANSACTION_MODES = ("normal", "forward-recovery", *repair.MODES)
 AWS_ERROR_CODE_RE = re.compile(
     r"An error occurred \(([A-Za-z][A-Za-z0-9]*)\) when calling"
 )
@@ -586,6 +589,8 @@ class DeployConfig:
     public_health_url: str | None
     apple_files: str = "0"
     transaction_mode: str = "normal"
+    repair_authorization: str = ""
+    repair_snapshot: str = ""
 
     @classmethod
     def from_environ(cls, env: Mapping[str, str]) -> "DeployConfig":
@@ -623,7 +628,7 @@ class DeployConfig:
         validate_public_health_url(public_url)
         mode = transaction_mode(env, deploy_sha)
         return cls(deploy_sha, region, instance_id, deploy_user, deploy_dir, public_url,
-                   apple_files, mode)
+                   apple_files, mode, env.get(REPAIR_AUTHORIZATION_ENV, ""))
 
 
 @dataclass(frozen=True)
@@ -661,6 +666,18 @@ def transaction_mode(env: Mapping[str, str], deploy_sha: str) -> str:
     degrades to either mode.
     """
     authorization = env.get(FORWARD_RECOVERY_AUTHORIZATION_ENV, "")
+    repair_authorization = env.get(REPAIR_AUTHORIZATION_ENV, "")
+    if repair_authorization:
+        if authorization:
+            raise ConfigError("repair and forward-recovery authorizations conflict")
+        try:
+            mode, binding = repair.parse_authorization(repair_authorization)
+        except ValueError as exc:
+            raise ConfigError("invalid repair authorization") from exc
+        if (binding.revision != deploy_sha or binding.run != env.get("GITHUB_RUN_ID")
+                or binding.attempt != env.get("GITHUB_RUN_ATTEMPT")):
+            raise ConfigError("repair authorization does not name this exact run attempt")
+        return mode
     if authorization == "":
         return "normal"
     run_id = env.get("GITHUB_RUN_ID", "")
@@ -963,12 +980,14 @@ def render_bootstrap(
     region: str,
     apple_files: str = "0",
     transaction_mode: str = "normal",
+    repair_authorization: str = "",
+    repair_snapshot: str = "",
 ) -> str:
     """Render a fixed root bootstrap from validated and base64-encoded values."""
     if apple_files not in ("0", "1"):
         raise ConfigError("Apple files switch must be 0 or 1")
     if transaction_mode not in TRANSACTION_MODES:
-        raise ConfigError("transaction mode must be normal or forward-recovery")
+        raise ConfigError("unknown transaction mode")
     # Bind the reviewed process opt-in into both clean remote environments.
     # No inherited remote environment or shared .env can activate transport.
     root_source = ROOT_LOCK_WRAPPER_SOURCE.replace(
@@ -982,6 +1001,20 @@ def render_bootstrap(
     if mode_line not in drop_source:
         # Never let an authorized mode silently degrade to the default.
         raise ConfigError("privilege-drop source lost the transaction mode")
+    if transaction_mode in repair.MODES:
+        try:
+            mode, binding = repair.parse_authorization(repair_authorization)
+        except ValueError as exc:
+            raise ConfigError("invalid repair bootstrap authorization") from exc
+        if (mode != transaction_mode or binding.revision != deploy_sha
+                or not repair.snapshot_for(repair_snapshot, deploy_sha)):
+            raise ConfigError("repair bootstrap identity or snapshot unproven")
+        drop_source = drop_source.replace(mode_line, mode_line + ",\n"
+            f'                "AXISAI_R6_REPAIR_AUTHORIZATION": {json.dumps(repair_authorization)},\n'
+            f'                "AXISAI_R6_REPAIR_SNAPSHOT": {json.dumps(repair_snapshot)}')
+    elif repair_authorization or repair_snapshot:
+        raise ConfigError("unexpected repair bootstrap data")
+    repair_nginx = "true" if transaction_mode in repair.MODES else "false"
     helper_sha256 = hashlib.sha256(
         base64.b64decode(encoded_script, validate=True)
     ).hexdigest()
@@ -1102,7 +1135,11 @@ if [ -f "$nginx_site" ] && root_external grep -q 'add_header Content-Security-Po
   echo 'ERROR: nginx site config still contains add_header Content-Security-Policy' >&2
   exit 1
 fi
-if root_external nginx -t; then
+if {repair_nginx}; then
+  # Repair stage must leave nginx alone. Apply validates and retires the
+  # exact dark-route generation under the production and route authorities.
+  root_external nginx -t
+elif root_external nginx -t; then
   if root_external systemctl is-active --quiet nginx; then
     root_external systemctl reload nginx
     echo 'nginx: configuration validated and reloaded'
@@ -1205,6 +1242,8 @@ def build_remote_command(
         config.region,
         config.apple_files,
         config.transaction_mode,
+        config.repair_authorization,
+        config.repair_snapshot,
     )
 
 
@@ -1460,7 +1499,14 @@ def run_deploy(
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
     preflight(config, aws, utc_now)
     script = _load_host_script(repo_path)
-    require_recovery(environ, aws, monotonic, sleep, log)
+    if config.transaction_mode in repair.MODES:
+        _, binding = repair.parse_authorization(config.repair_authorization)
+        log(f"{config.transaction_mode} authorized for this exact run attempt")
+        snapshot = require_recovery(environ, aws, monotonic, sleep, log,
+                                    retained_snapshot=binding.failed_snapshot)
+        config = replace(config, repair_snapshot=snapshot)
+    else:
+        require_recovery(environ, aws, monotonic, sleep, log)
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
     if controller_deadline - monotonic() < SEND_AND_MONITOR_RESERVE_SECONDS:
         raise ConfigError(
