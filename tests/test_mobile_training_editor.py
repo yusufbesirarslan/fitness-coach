@@ -97,7 +97,7 @@ def test_editor_requires_bearer_and_first_party_consent(raw_client, make_user, a
     ("dambilla yana ac", "ex_lateral_raise"),
     ("ŞINAV", "ex_push_up"),
     ("db shoulder press", "ex_dumbbell_shoulder_press"),
-    ("chest supported", "ex_machine_chest_supported_row"),
+    ("chest supported machine", "ex_machine_chest_supported_row"),
     ("yuzm", "ex_swimming"),
 ])
 def test_versioned_picker_search(raw_client, make_user, as_owner, query, first):

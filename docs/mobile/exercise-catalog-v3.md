@@ -4,10 +4,12 @@ Source-only foundation (founder order #547, stacked on #549). Nothing is merged,
 
 ## What changed
 
-- **Catalog version 3.** `exercises.json` grows from 89 to 205 active canonical IDs. The 89 V2 lines are byte-identical except two reviewed alias additions (`Dumbbell Curl`, `Dumbbell Thruster`) that keep Coach grounding exact. No ID was reused, renamed, retired or re-classified in its legacy fields. `primary_region`, `movement` and cardio semantics keep their generation/validation meaning.
+- **Catalog version 3.** `exercises.json` grows from 89 to 205 active canonical IDs. The 89 V2 lines are byte-identical (pinned against `tests/fixtures/exercise_catalog_v2_snapshot.json`). No ID was reused, renamed, retired or re-classified in its legacy fields. `primary_region`, `movement` and cardio semantics keep their generation/validation meaning.
 - **Equipment vocabulary** gains `smith_machine` and `ez_bar`. The gym context (`spor_salonu`) admits them; `ev` and `minimal` do not.
 - **Additive taxonomy** `exercise_taxonomy_v3.json` (`app/services/exercise_catalog_v3.py`) adds 13 target regions, 126 exercise families and one equipment variant per member. The loader refuses any drift: an active ID outside exactly one family, a variant whose equipment the exercise does not require, duplicate equipment in a family, a cardio identity outside `cardio`, a private-namespace ID, a "Baldır" label, or an overlay for another catalog version.
 - **Generation is unchanged.** The 116 V3 additions carry `"generation": false`, so the AI generator's closed choice set is exactly the V2 set (pinned by test). Admitting them is a separate reviewed overlay change after a real-provider qualification.
+- **Coach WRITE grounding is unchanged.** `exercise_grounding` only considers reviewed IDs (`coach_grounding_eligible`, the same gate as generation). A V3 name can therefore never steal, split or newly answer a Coach phrase. A differential test pins every phrase in a generated corpus (more than 1,500 names, aliases, plurals, token runs and common phrasings) to exactly the catalog V2 result. Coach WRITE stays OFF.
+- **Training Insights.** The two assistance machines (`ex_machine_assisted_pull_up`, `ex_machine_assisted_dip`) are excluded from load comparability (`UNKNOWN_LOAD_EXERCISE_IDS`), because more assistance kg means less effort. Band assistance was already excluded by equipment.
 - **Signed drafts.** Browser drafts signed against catalog 1 or 2 still verify on save; issuing always uses the live version and a newer version is refused. Every reference is still re-resolved live.
 
 ## Target regions
@@ -107,6 +109,11 @@ The private workstream (`ex_private_` namespace, owner-scoped rows) stays outsid
 3. Coach: the private branch adds `source: "owner_private"` + validated user metadata in `plan_read` *and* `coach_privacy`. Today an `ex_private_` slot gets no V3 fields (pinned by test), so nothing leaks before that lands.
 
 ## HOLD and post-R1 integration
+
+- **Review r1 P3s accepted, not changed here:**
+  - Generation and grounding exclusion is a denylist of the overlay's `generation:false` rows. The coverage test fails on any active ID missing from the overlay, but the runtime gate does not.
+  - Coach READ publishes the stored, catalog-vouched `isim` beside the ID-derived V3 fields. Current writers canonicalize `isim`, so the two agree.
+  - The Close-Grip Bench Press variants keep different legacy `primary_region` values (barbell `chest` from V2, Smith `arms`). New IDs are generation-excluded, so this has no effect.
 
 - **Cardio modalities (treadmill, elliptical, rowing ergometer): HOLD.** They need a product decision on which `cardio_type` admits them (`kosu` ⊇ treadmill?) and a `CARDIO_EQUIPMENT` change that alters generation and scheduling. No identity is added, so placement and scheduling gates are untouched.
 - **Shrugs, wrist/forearm work, burpees, ab wheel:** not added. There is no honest movement/equipment vocabulary for them yet, and inventing metadata was the bigger risk.

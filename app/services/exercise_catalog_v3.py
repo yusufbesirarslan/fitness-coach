@@ -277,6 +277,17 @@ def generation_eligible(exercise_id: str) -> bool:
     return exercise_id not in generation_excluded_ids()
 
 
+def coach_grounding_eligible(exercise_id: str) -> bool:
+    """Whether Coach WRITE grounding may name this ID as a destination.
+
+    Shares the generation review gate: a V3 addition reaches neither AI
+    surface until a reviewed overlay change admits it, so Coach grounding of
+    any phrase stays what catalog V2 gave (pinned by a differential test).
+    The editor, the picker and Coach READ are not gated by this.
+    """
+    return generation_eligible(exercise_id)
+
+
 def availability(exercise: ExerciseDefinition, context: ExerciseContext | None) -> str | None:
     """Advisory picker state under a plan's saved context; the edit still decides."""
     if context is None:

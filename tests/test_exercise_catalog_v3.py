@@ -55,19 +55,18 @@ def test_every_v2_identity_is_preserved_exactly():
         assert current.equipment == frozenset(entry["equipment"])
         assert current.movement == entry["movement"]
         assert current.primary_region == entry["primary_region"]
-        # Aliases may only grow: every stored legacy name still resolves.
-        assert set(entry["aliases"]) <= set(current.aliases)
+        assert current.aliases == tuple(entry["aliases"])
         assert resolve_historical_exercise(entry["exercise_id"]) is current
         for name in (entry["canonical_name"], *entry["aliases"]):
             assert exercise_catalog.resolve_exercise(name=name) is current
 
 
-def test_v2_lines_are_unchanged_except_reviewed_alias_additions():
+def test_v2_lines_are_byte_identical():
     current = {line.strip().rstrip(",") for line in
                exercise_catalog.CATALOG_PATH.read_text(encoding="utf-8").splitlines()}
     changed = [entry["exercise_id"] for entry in V2["exercises"] if json.dumps(
         entry, ensure_ascii=False, separators=(",", ":")) not in current]
-    assert sorted(changed) == ["ex_dumbbell_biceps_curl", "ex_dumbbell_squat_to_press"]
+    assert changed == []
 
 
 # 2. Uniqueness and collisions ----------------------------------------------
@@ -298,6 +297,70 @@ def test_generator_choice_set_is_exactly_the_v2_identities():
             assert ids <= V2_IDS
             assert ids == {e.exercise_id for e in exercise_catalog.compatible_exercises(context)
                            if e.exercise_id in V2_IDS}
+
+
+# Phrasings a Coach user plausibly types; the generated corpus covers the rest.
+_GROUNDING_PHRASES = (
+    "curl", "row", "press", "squats", "lunges", "dumbbell curl", "cable row", "machine row",
+    "row machine", "rowing machine", "overhead press", "chest press", "triceps extension",
+    "hip abduction", "machine leg curl", "db curl", "biseps curl", "chest supported row",
+    "bulgarian split", "reverse lunge", "geri hamle", "calf raise machine", "db fly",
+    "dambıl açış", "ağırlıksız squat", "db split squat", "dambılla split squat", "db deadlift",
+    "dambıl curl", "smith squat", "ez curl", "assisted pull up", "assisted dip", "pec deck",
+    "skull crushers", "preacher curl", "hip thrust", "face pull", "upright row", "blabla",
+)
+
+
+def _grounding_corpus():
+    phrases = set(_GROUNDING_PHRASES)
+    for exercise in load_exercise_catalog().exercises:
+        for label in (exercise.canonical_name, *exercise.aliases):
+            tokens = label.replace("-", " ").split()
+            phrases.update({label, label + "s", label.lower()})
+            phrases.update(" ".join(tokens[i:j]) for i in range(len(tokens))
+                           for j in range(i + 1, min(i + 3, len(tokens)) + 1))
+    return sorted(phrases)
+
+
+def test_coach_write_grounding_is_exactly_what_catalog_v2_gave(monkeypatch):
+    """Review r1 P2-2: V3 names must not steal, split or newly answer a phrase."""
+    from app.services.coach_plan_tools import exercise_grounding
+
+    corpus = _grounding_corpus()
+
+    def grounded():
+        exercise_catalog.load_exercise_catalog.cache_clear()
+        out = {}
+        for phrase in corpus:
+            target = exercise_grounding.resolve_destination(phrase)
+            out[phrase] = (target.kind, target.canonical_name, target.suggestion)
+        return out
+
+    live = grounded()
+    monkeypatch.setattr(exercise_catalog, "CATALOG_PATH", SNAPSHOT)
+    try:
+        v2 = grounded()
+    finally:
+        monkeypatch.undo()
+        exercise_catalog.load_exercise_catalog.cache_clear()
+    assert len(corpus) > 1500
+    assert {p: (v2[p], live[p]) for p in corpus if v2[p] != live[p]} == {}
+    v2_names = {entry["canonical_name"] for entry in V2["exercises"]}
+    assert {value for _kind, canonical, hint in live.values()
+            for value in (canonical, hint) if value} <= v2_names
+
+
+def test_assistance_machines_have_no_comparable_load():
+    """Review r1 P2-3: more assistance kg is less effort; never paired as load."""
+    from app.services.training_intelligence.comparability import measurement_supported
+
+    assert not measurement_supported("ex_machine_assisted_pull_up")
+    assert not measurement_supported("ex_machine_assisted_dip")
+    assert not measurement_supported("ex_assisted_pull_up")
+    assert measurement_supported("ex_machine_shoulder_press")
+    assisted = {e.exercise_id for e in load_exercise_catalog().exercises
+                if "assisted" in e.canonical_name.lower()}
+    assert assisted and not any(measurement_supported(i) for i in assisted)
 
 
 def test_cardio_identities_unchanged_and_availability_is_advisory():

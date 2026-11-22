@@ -7,6 +7,10 @@ A simple English plural of a unique *canonical* name is also eligible
 Everything else is presentation-only: at most one high-confidence
 suggestion, never silent substitution. Fuzzy scores never become the
 identity that is written.
+
+Only reviewed catalog IDs are candidates (``coach_grounding_eligible``):
+the Catalog V3 additions are invisible here until a reviewed overlay change
+admits them, so a new name can never steal or split a V2 phrase.
 """
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -17,6 +21,7 @@ from app.services.exercise_catalog import (
     normalize_exercise_lookup,
     resolve_exercise,
 )
+from app.services.exercise_catalog_v3 import coach_grounding_eligible
 
 
 KIND_RESOLVED = "resolved"
@@ -50,6 +55,8 @@ def resolve_destination(name):
         definition = resolve_exercise(name=name)
     except ExerciseResolutionError:
         definition = None
+    if definition is not None and not coach_grounding_eligible(definition.exercise_id):
+        definition = None
     if definition is not None:
         return ExerciseTarget(
             KIND_RESOLVED, canonical_name=definition.canonical_name)
@@ -75,6 +82,12 @@ def resolve_destination(name):
     return ExerciseTarget(KIND_UNKNOWN)
 
 
+def _candidates():
+    return tuple(
+        exercise for exercise in load_exercise_catalog().exercises
+        if exercise.active and coach_grounding_eligible(exercise.exercise_id))
+
+
 def _unique_canonical_plural(name):
     """``Walking Lunges`` → the one catalog entry whose canonical name is
     ``Walking Lunge``. Aliases are not eligible: ``squats`` matching the
@@ -84,9 +97,7 @@ def _unique_canonical_plural(name):
     if not needle:
         return None
     hits = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         canon = _fold(exercise.canonical_name)
         if needle in (canon + "s", canon + "es") or (
                 canon.endswith("s") and needle == canon[:-1]):
@@ -106,9 +117,7 @@ def _unique_alias_plural(name):
     if not needle:
         return None
     hits = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         for alias in exercise.aliases:
             folded = _fold(alias)
             if needle in (folded + "s", folded + "es"):
@@ -127,9 +136,7 @@ def _unique_token_subset(name):
     if len(tokens) < 2:
         return None
     hits = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         labels = (exercise.canonical_name,) + tuple(exercise.aliases)
         for label in labels:
             label_tokens = set(_fold(label).split())
@@ -146,9 +153,7 @@ def _high_confidence_suggestion(name):
     if not needle:
         return None
     scored = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         labels = (exercise.canonical_name,) + tuple(exercise.aliases)
         score = max(_similarity(needle, _fold(label)) for label in labels)
         scored.append((score, exercise))
