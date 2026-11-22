@@ -654,6 +654,9 @@ def _apply_update(program, command, authority):
     if all(entry.get(key) == value for key, value in updates.items()):
         return False
     entry.update(updates)
+    # A new revision of a day must satisfy the same placement invariant as any
+    # other edit, so a stored cardio-without-strength day is not re-saved.
+    _require_native_cardio_placement(day, authority)
     return True
 
 

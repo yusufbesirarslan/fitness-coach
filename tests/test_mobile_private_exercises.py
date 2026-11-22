@@ -330,6 +330,10 @@ def test_mobility_never_counts_as_the_strength_that_keeps_cardio_on_a_day(
           "reps": "25 dk"}),
         ("remove-mobility-day-strength", "remove", {"day_slot": 2, "position": 0,
                                                    "exercise_id": MOBILITY}),
+        ("prescription-cardio", "prescription",
+         {"day_slot": 2, "position": 1, "exercise_id": RUN, "reps": "30 dk"}),
+        ("prescription-mobility", "prescription",
+         {"day_slot": 2, "position": 0, "exercise_id": MOBILITY, "sets": 2}),
     ):
         response = mutate(raw_client, headers, operation, binding, f"private-mobility-{key}",
                           **fields)
