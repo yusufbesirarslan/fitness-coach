@@ -9,7 +9,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.blueprints.mobile_api import bp, mobile_error
 from app.mobile_auth_middleware import require_mobile_auth
-from app.services import mobile_training
+from app.services import exercise_picker, mobile_training
 from app.services.exercise_catalog import (
     ID_PATTERN,
     MAX_EXERCISE_ID_LENGTH,
@@ -17,6 +17,7 @@ from app.services.exercise_catalog import (
     load_exercise_catalog,
     search_exercises,
 )
+from app.services.exercise_catalog_v3 import TARGET_REGIONS
 from app.services.plan_mutation import (
     ACTOR_USER,
     ActiveWorkoutConflict,
@@ -178,6 +179,31 @@ def training_exercise_catalog():
             "primary_region": item.primary_region,
         } for item in exercises],
     )
+
+
+@bp.get("/training/exercise-families")
+@require_mobile_auth
+def training_exercise_families():
+    """Catalog V3 picker: families, equipment variants and advisory availability.
+
+    A separate versioned resource, so the strict V1 catalog decoder never sees
+    a new field. The saved identity is always one variant's ``exercise_id``.
+    """
+    query = request.args.get("q", "")
+    region = request.args.get("region")
+    if (set(request.args) - {"q", "region"}
+            or any(len(request.args.getlist(key)) > 1 for key in request.args)
+            or not _is_safe_text(query, _MAX_QUERY_CHARS)
+            or (region is not None and region not in TARGET_REGIONS)):
+        return mobile_error("TRAINING_EDITOR_INVALID_REQUEST",
+                            "Invalid exercise search.", 400, False)
+    try:
+        context = exercise_picker.plan_exercise_context(g.mobile_user.id)
+        payload = exercise_picker.build_picker(query, region, context)
+    except (SQLAlchemyError, CatalogConfigurationError):
+        return mobile_error("TRAINING_EDITOR_UNAVAILABLE",
+                            "The exercise catalog is temporarily unavailable.", 503, True)
+    return jsonify(payload)
 
 
 @bp.post("/training/editor/<any(add,remove,replace,prescription,undo):operation>")

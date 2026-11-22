@@ -48,6 +48,9 @@ FREQUENCY_INCREASE_MIN_EXTRA_DAYS = 1
 # no rep/load measurement at all. Such exercises yield no eligible pairs.
 UNSUPPORTED_MOVEMENTS = frozenset({"cardio", "mobility"})
 UNKNOWN_LOAD_EQUIPMENT = frozenset({"bodyweight", "pull_up_bar", "resistance_band"})
+# Assistance machines carry plain ``machine`` equipment, but their logged kg
+# is assistance (more kg = less effort), so it has no comparable load meaning.
+UNKNOWN_LOAD_EXERCISE_IDS = frozenset({"ex_machine_assisted_dip", "ex_machine_assisted_pull_up"})
 
 # Only between-set logging intervals measured by this method are read. It is
 # client-observed completion-tap evidence, never physiological rest.

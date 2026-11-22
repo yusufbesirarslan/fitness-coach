@@ -55,13 +55,14 @@ from app.services.training_generation.exercise_choices import (
     compatible_exercise_choices,
 )
 from app.services.training_generation.response_validator import validate_plan_structure
+from app.services.exercise_catalog_v3 import generation_eligible
 
 
 EXPECTED_EQUIPMENT = frozenset({
     "barbell", "bench", "bodyweight", "cable", "cardio_machine",
-    "dumbbell", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
+    "dumbbell", "ez_bar", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
     "pool", "pull_up_bar", "rack", "resistance_band", "rope",
-    "stationary_bicycle",
+    "smith_machine", "stationary_bicycle",
 })
 EXPECTED_MOVEMENTS = frozenset({
     "anti_extension", "anti_rotation", "calf_raise", "carry", "cardio",
@@ -124,7 +125,7 @@ def test_real_catalog_has_valid_closed_shape_and_unique_lookup_keys():
     catalog = load_exercise_catalog()
 
     assert set(raw) == {"version", "exercises"}
-    assert raw["version"] == catalog.version == 2
+    assert raw["version"] == catalog.version == 3
     assert len(raw["exercises"]) == len(catalog.exercises)
 
     ids = []
@@ -589,8 +590,11 @@ def test_prompt_choices_are_exact_catalog_pairs_without_aliases_or_metadata():
 
     assert choices.context == context
     assert choices.catalog_version == catalog.version
+    # Catalog V3 additions stay out of the generator until a reviewed overlay
+    # change admits them (tests/test_exercise_catalog_v3.py pins the set).
     assert choices.exercise_ids == {
-        exercise.exercise_id for exercise in compatible_exercises(context)}
+        exercise.exercise_id for exercise in compatible_exercises(context)
+        if generation_eligible(exercise.exercise_id)}
     for choice in choices.choices:
         entry = catalog.by_id[choice.exercise_id]
         assert choice.canonical_name == entry.canonical_name

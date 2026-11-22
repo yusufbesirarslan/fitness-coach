@@ -23,14 +23,24 @@ closes that gap the narrow way:
   ``name: null`` so the model knows a slot exists that it cannot name — it
   must ask the user instead of guessing (PA06: stored prose fails closed).
 
+Catalog V3 adds, for every slot, its ``position`` in the stored day (the
+editor's row index) and — only when the stored ``exercise_id`` is a curated
+catalog identity — ``exercise_id``, ``source``, ``family_id``,
+``target_region`` and the variant ``equipment``. They come from the server's
+own taxonomy for that ID, never from stored plan text, so an equipment change
+made in the editor (Dumbbell → Machine) is what the next read reports. No
+muscle-activation profile is published. Owner-private IDs are out of scope here.
+
 ``coach_privacy.tool_result`` re-projects this payload before it reaches a
 provider; that is the transfer boundary. This module is the domain read.
 """
 from app.services.exercise_catalog import (
+    CatalogConfigurationError,
     ExerciseResolutionError,
     load_exercise_catalog,
     resolve_exercise,
 )
+from app.services.exercise_catalog_v3 import describe_exercise
 from app.services.plan_mutation.document import (
     FIELD_DAY,
     FIELD_EXERCISE_ID,
@@ -119,6 +129,22 @@ def _exercise_name(exercise, catalog):
     return None
 
 
+def _curated_identity(exercise):
+    """V3 identity fields for a curated stored ID, else nothing.
+
+    The V3 layer is additive: an unloadable overlay drops these fields (the
+    pre-V3 read) instead of making the whole plan unreadable.
+    """
+    try:
+        descriptor = describe_exercise(exercise.get(FIELD_EXERCISE_ID))
+    except CatalogConfigurationError:
+        return {}
+    if descriptor is None:
+        return {}
+    return {key: descriptor[key] for key in (
+        "exercise_id", "source", "family_id", "target_region", "equipment")}
+
+
 def project_program(program, catalog=None):
     """Pure projection of a parsed program into the closed read shape."""
     catalog = catalog or load_exercise_catalog()
@@ -132,14 +158,17 @@ def project_program(program, catalog=None):
         if not isinstance(raw, list):
             raise PlanNotMutable("day has a malformed exercise list")
         exercises = []
-        for exercise in raw[:MAX_PROJECTED_EXERCISES_PER_DAY]:
+        for position, exercise in enumerate(raw[:MAX_PROJECTED_EXERCISES_PER_DAY]):
             if not isinstance(exercise, dict):
                 raise PlanNotMutable("day has a malformed exercise")
-            exercises.append({
+            projected = {
                 "name": _exercise_name(exercise, catalog),
                 "sets": _sets(exercise.get(FIELD_SETS)),
                 "reps": _reps(exercise.get(FIELD_REPS)),
-            })
+                "position": position,
+            }
+            projected.update(_curated_identity(exercise))
+            exercises.append(projected)
         entry = {
             "day": name,
             "kind": kind if kind in VALID_TIPS else None,

@@ -19,6 +19,7 @@ from .models import (
     STATE_INSUFFICIENT,
     STATE_NOT_COMPARABLE,
     UNKNOWN_LOAD_EQUIPMENT,
+    UNKNOWN_LOAD_EXERCISE_IDS,
     UNSUPPORTED_MOVEMENTS,
     Pair,
     RecentPerformance,
@@ -40,15 +41,16 @@ def measurement_supported(exercise_id: str) -> bool:
     """Whether a logged kilogram value has a defined meaning for this exercise.
 
     Unknown, inactive or malformed catalog identities, cardio/mobility
-    activities and bodyweight/assisted/band equipment have no comparable
-    load convention. No synthetic identity is ever derived from a name.
+    activities, bodyweight/assisted/band equipment and assistance machines
+    have no comparable load convention. No synthetic identity is ever derived from a name.
     """
     try:
         definition = resolve_exercise(exercise_id=exercise_id)
     except ExerciseResolutionError:
         return False
     return (definition.movement not in UNSUPPORTED_MOVEMENTS
-            and not definition.equipment & UNKNOWN_LOAD_EQUIPMENT)
+            and not definition.equipment & UNKNOWN_LOAD_EQUIPMENT
+            and definition.exercise_id not in UNKNOWN_LOAD_EXERCISE_IDS)
 
 
 def prescription_entry(session: SessionExecution, exercise_id: str) -> Optional[dict]:
