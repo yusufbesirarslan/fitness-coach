@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -37,30 +38,34 @@ PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
 GIT_SECONDS = 30
 
 
-def source_checkout(deploy_dir, main_project, revision, *, run=subprocess.run,
-                    here=Path(__file__)):
+def source_checkout(deploy_dir, main_project, revision, sources, *, run=subprocess.run):
     """The canonical absolute checkout this reader runs from, at the approved commit.
 
     HostOps runs ``<context>/scripts/web_slot_runtime.py --deploy-dir <context>``
     and the slot runtime accepts only an absolute directory. For a post/watch
     read the verified checkout is that context, as in the engine's own
     ``--deploy-dir`` rule and the slot runtime's default. Refuse every other
-    directory instead of resolving one.
+    directory instead of resolving one. ``sources`` are the files of the loaded
+    reader modules; each must be ``<deploy_dir>/scripts/<name>``.
     """
-    path = PurePosixPath(deploy_dir)
-    if (not isinstance(deploy_dir, str) or not deploy_dir.startswith("/")
-            or deploy_dir.startswith("//") or os.path.normpath(deploy_dir) != deploy_dir
-            or not path.is_absolute() or os.path.realpath(deploy_dir) != deploy_dir
-            or not PROJECT.fullmatch(main_project) or main_project.startswith("axisai-web-")
-            or path.name != main_project
-            or Path(here).resolve().parents[1] != Path(deploy_dir)):
+    # realpath(x) == x: absolute, normalized (no ".", "..", repeated or
+    # trailing slash) and free of symlinks, so it names one directory.
+    if (not isinstance(deploy_dir, str) or os.path.realpath(deploy_dir) != deploy_dir
+            or not isinstance(main_project, str) or not PROJECT.fullmatch(main_project)
+            or main_project.startswith("axisai-web-")
+            or PurePosixPath(deploy_dir).name != main_project
+            or not sources
+            or any(Path(source).resolve().parent != Path(deploy_dir, "scripts")
+                   for source in sources)):
         raise ValueError("R6_COACH_SOURCE_CHECKOUT_INVALID")
-    git = ["git", "-C", deploy_dir]
+    # --no-optional-locks: a stat-dirty index is never refreshed or written.
+    git = ["git", "--no-optional-locks", "-C", deploy_dir]
     head = run([*git, "rev-parse", "--verify", "HEAD^{commit}"], capture_output=True,
                text=True, timeout=GIT_SECONDS, check=False)
-    clean = run([*git, "diff", "--quiet", "HEAD", "--", "scripts"], capture_output=True,
-                timeout=GIT_SECONDS, check=False)
-    if head.returncode != 0 or head.stdout.strip() != revision or clean.returncode != 0:
+    status = run([*git, "status", "--porcelain=v1", "--untracked-files=all", "--", "scripts"],
+                 capture_output=True, text=True, timeout=GIT_SECONDS, check=False)
+    if (head.returncode != 0 or head.stdout.strip() != revision
+            or status.returncode != 0 or status.stdout != ""):
         raise ValueError("R6_COACH_SOURCE_CHECKOUT_UNPROVEN")
     return deploy_dir
 
@@ -111,7 +116,10 @@ def main():
     args = parser.parse_args()
     try:
         approved = coach.binding(args.revision, args.tree, args.image, args.slot, sorted(args.head))
-        checkout = source_checkout(args.deploy_dir, args.main_project, args.revision)
+        checkout = source_checkout(
+            args.deploy_dir, args.main_project, args.revision,
+            (__file__, coach.__file__, sys.modules["scripts.r6_recovery_acceptance"].__file__,
+             sys.modules[HostOps.__module__].__file__))
         # Read-only: no work-directory operation is reachable from collect().
         ops = HostOps(deploy_dir=checkout, context_dir=checkout, work_dir=checkout,
                       main_project=args.main_project, deploy_sha=args.revision, previous_commit="")

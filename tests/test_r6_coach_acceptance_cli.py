@@ -82,6 +82,11 @@ print("op=status result=ok state=%s backend=%s" % tuple(state["route"]))
 '''
 
 
+BOOT = ("import runpy, sys\n"
+        "sys.path.append(sys.argv.pop(1))\n"
+        "runpy.run_module('scripts.r6_coach_acceptance', run_name='__main__', alter_sys=True)\n")
+
+
 def _git(cwd, *args):
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
                           text=True).stdout.strip()
@@ -92,6 +97,7 @@ def _checkout(parent, source=SOURCE):
     (checkout / "scripts").mkdir(parents=True)
     for path in sorted(source.glob("*.py")):
         shutil.copyfile(path, checkout / "scripts" / path.name)
+    shutil.copyfile(ROOT / ".gitignore", checkout / ".gitignore")
     _git(checkout, "init", "-q")
     _git(checkout, "config", "user.email", "r6@example.invalid")
     _git(checkout, "config", "user.name", "r6 synthetic")
@@ -155,14 +161,17 @@ def host(tmp_path):
     h.digest = _expected_digest(approved, state["actors"])
 
     def run(*, deploy_dir=None, cwd=None, digest=None, challenge=CHALLENGE, revision=None,
-            main_project=PROJECT, extra=()):
+            main_project=PROJECT, extra=(), boot=False):
         (base / "state.json").write_text(json.dumps(h.state), encoding="utf-8")
         h.log.write_text("", encoding="utf-8")
         env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "GIT_"))}
         env.update(PATH=f"{tools}{os.pathsep}{os.environ.get('PATH', '')}",
                    PYTHONDONTWRITEBYTECODE="1", FAKE_HOST_STATE=str(base / "state.json"),
                    FAKE_HOST_LOG=str(h.log))
-        argv = [sys.executable, "-m", "scripts.r6_coach_acceptance",
+        # boot=True: the outer checker's isolated form (no cwd on sys.path).
+        entry = ([sys.executable, "-I", "-B", "-c", BOOT, str(checkout)] if boot
+                 else [sys.executable, "-m", "scripts.r6_coach_acceptance"])
+        argv = [*entry,
                 "--deploy-dir", str(checkout) if deploy_dir is None else deploy_dir,
                 "--main-project", main_project, "--revision", revision or h.revision,
                 "--tree", h.tree, "--image", IMAGE, "--slot", "blue", "--head", HEADS[0],
@@ -249,6 +258,59 @@ def test_wrong_source_checkout_is_refused(host):
     assert (done.returncode, done.stdout, calls) == (1, "", [])
 
 
+def test_outer_checker_isolated_boot_form_passes(host):
+    done, calls, started, ended = host.run(boot=True)
+    assert done.returncode == 0, done.stderr
+    acceptance.verify_observation(json.loads(done.stdout), host.approved, host.digest,
+                                  CHALLENGE, started, ended)
+    assert len(_slot_runtime_calls(calls)) == 2
+
+
+def test_head_must_be_the_approved_commit_that_exists_in_the_checkout(host):
+    """R2 exists in the repository but the checkout HEAD is still R1."""
+    r1 = host.revision
+    _git(host.checkout, "commit", "-q", "--allow-empty", "-m", "approved R2")
+    r2 = _git(host.checkout, "rev-parse", "HEAD")
+    host.state["revision"], host.state["actors"] = r2, _actors(r2)
+    approved = coach.binding(r2, host.tree, IMAGE, "blue", HEADS)
+    digest = _expected_digest(approved, host.state["actors"])
+    _git(host.checkout, "reset", "-q", "--hard", r1)
+    done, calls, *_ = host.run(revision=r2, digest=digest)
+    assert (done.returncode, done.stdout, calls) == (1, "", [])
+    # Control: the same binding passes once HEAD is the approved commit.
+    _git(host.checkout, "reset", "-q", "--hard", r2)
+    done, calls, started, ended = host.run(revision=r2, digest=digest)
+    assert done.returncode == 0, done.stderr
+    acceptance.verify_observation(json.loads(done.stdout), approved, digest, CHALLENGE,
+                                  started, ended)
+
+
+def test_untracked_module_shadow_is_refused(host):
+    """A package shadow that behaves exactly like the real module is still refused.
+
+    Code that acts at import time runs before any reader check; the outer
+    checker pins the checkout bytes before it starts the reader.
+    """
+    shadow = host.checkout / "scripts" / "r6_coach_attestation"
+    shadow.mkdir()
+    (shadow / "__init__.py").write_text(
+        "import pathlib\n"
+        "real = pathlib.Path(__file__).parent.with_suffix('.py')\n"
+        "exec(compile(real.read_text(), str(real), 'exec'))\n")
+    done, calls, *_ = host.run()
+    assert (done.returncode, done.stdout, calls) == (1, "", [])
+
+
+def test_stat_dirty_scripts_do_not_make_the_reader_write_the_index(host):
+    index = host.checkout / ".git" / "index"
+    os.utime(host.checkout / "scripts" / "web_slot_runtime.py", (1, 1))
+    before = (index.read_bytes(), index.stat().st_mtime_ns)
+    done, *_ = host.run()
+    assert done.returncode == 0, done.stderr
+    assert (index.read_bytes(), index.stat().st_mtime_ns) == before
+    assert not (host.checkout / ".git" / "index.lock").exists()
+
+
 def test_checkout_must_be_the_approved_commit_with_unmodified_scripts(host):
     done, calls, *_ = host.run(revision="9" * 40)
     assert (done.returncode, done.stdout, calls) == (1, "", [])
@@ -312,3 +374,126 @@ def test_route_and_digest_mismatch_are_unproven(host):
 def test_invalid_binding_inputs_are_refused_before_any_host_read(host, challenge, digest):
     done, calls, *_ = host.run(challenge=challenge, digest=digest)
     assert (done.returncode, done.stdout, calls) == (1, "", [])
+
+
+class _Done:
+    def __init__(self, returncode=0, stdout=""):
+        self.returncode, self.stdout = returncode, stdout
+
+
+def _recording(head=None, head_rc=0, status="", status_rc=0):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["timeout"] == acceptance.GIT_SECONDS and kwargs["check"] is False
+        if "rev-parse" in argv:
+            return _Done(head_rc, (head or "") + "\n")
+        return _Done(status_rc, status)
+    return run, calls
+
+
+@pytest.fixture
+def tree(tmp_path):
+    checkout = tmp_path.resolve() / PROJECT
+    (checkout / "scripts").mkdir(parents=True)
+    return checkout, (str(checkout / "scripts" / "r6_coach_acceptance.py"),
+                      str(checkout / "scripts" / "r6_deploy_transaction.py"))
+
+
+def test_source_checkout_accepts_only_the_canonical_clean_approved_checkout(tree):
+    checkout, sources = tree
+    run, calls = _recording(head="f" * 40)
+    assert acceptance.source_checkout(str(checkout), PROJECT, "f" * 40, sources,
+                                      run=run) == str(checkout)
+    git = ["git", "--no-optional-locks", "-C", str(checkout)]
+    assert calls == [[*git, "rev-parse", "--verify", "HEAD^{commit}"],
+                     [*git, "status", "--porcelain=v1", "--untracked-files=all", "--",
+                      "scripts"]]
+
+
+@pytest.mark.parametrize("variant", ["relative", "dot", "trailing", "dotdot", "double", "symlink",
+                                     "current", "project", "slot_project", "bad_project", "foreign_source",
+                                     "nested_source", "no_sources", "not_str"])
+def test_source_checkout_path_refusals_never_run_git(tree, variant):
+    checkout, sources = tree
+    deploy_dir, project = str(checkout), PROJECT
+    link = checkout.parent / "link"
+    link.mkdir()
+    (link / PROJECT).symlink_to(checkout, target_is_directory=True)
+    if variant == "relative":
+        deploy_dir = PROJECT
+    elif variant == "dot":
+        deploy_dir = "."
+    elif variant == "current":
+        deploy_dir = str(checkout).replace(f"/{PROJECT}", f"/./{PROJECT}")
+    elif variant == "trailing":
+        deploy_dir += "/"
+    elif variant == "dotdot":
+        deploy_dir = f"{checkout}/../{PROJECT}"
+    elif variant == "double":
+        deploy_dir = "/" + deploy_dir
+    elif variant == "symlink":
+        deploy_dir = str(link / PROJECT)
+    elif variant == "project":
+        project = "fitness-coach-2"
+    elif variant == "slot_project":
+        # A checkout named like a slot project: only the slot-prefix rule refuses it.
+        project = "axisai-web-blue"
+        slot = checkout.parent / project
+        (slot / "scripts").mkdir(parents=True)
+        deploy_dir = str(slot)
+        sources = (str(slot / "scripts" / "r6_coach_acceptance.py"),)
+    elif variant == "bad_project":
+        # A checkout whose own name is not a Compose project: only the name rule refuses it.
+        project = "fitness coach"
+        bad = checkout.parent / project
+        (bad / "scripts").mkdir(parents=True)
+        deploy_dir = str(bad)
+        sources = (str(bad / "scripts" / "r6_coach_acceptance.py"),)
+    elif variant == "foreign_source":
+        sources = (*sources, str(checkout.parent / "scripts" / "r6_coach_attestation.py"))
+    elif variant == "nested_source":
+        sources = (str(checkout / "scripts" / "r6_coach_attestation" / "__init__.py"),)
+    elif variant == "no_sources":
+        sources = ()
+    else:
+        deploy_dir = checkout
+    run, calls = _recording(head="f" * 40)
+    with pytest.raises(ValueError, match="^R6_COACH_SOURCE_CHECKOUT_INVALID$"):
+        acceptance.source_checkout(deploy_dir, project, "f" * 40, sources, run=run)
+    assert calls == []
+
+
+@pytest.mark.parametrize("result", [
+    dict(head="e" * 40), dict(head="f" * 40, head_rc=128), dict(head=""),
+    dict(head="f" * 40, status=" M scripts/web_slot_runtime.py\n"),
+    dict(head="f" * 40, status="?? scripts/r6_coach_attestation/__init__.py\n"),
+    dict(head="f" * 40, status_rc=128),
+])
+def test_source_checkout_head_and_cleanliness_refusals(tree, result):
+    checkout, sources = tree
+    run, calls = _recording(**result)
+    with pytest.raises(ValueError, match="^R6_COACH_SOURCE_CHECKOUT_UNPROVEN$"):
+        acceptance.source_checkout(str(checkout), PROJECT, "f" * 40, sources, run=run)
+    assert len(calls) == 2
+
+
+def test_main_binds_every_loaded_reader_module_to_the_checkout(monkeypatch):
+    seen = []
+
+    def refuse(deploy_dir, main_project, revision, sources):
+        seen.append(sources)
+        raise ValueError("stop")
+
+    monkeypatch.setattr(acceptance, "source_checkout", refuse)
+    monkeypatch.setattr(sys, "argv", [
+        "r6_coach_acceptance", "--deploy-dir", "/srv/fitness-coach", "--main-project", PROJECT,
+        "--revision", "f" * 40, "--tree", "e" * 40, "--image", IMAGE, "--slot", "blue",
+        "--head", HEADS[0], "--digest", "d" * 64, "--challenge", CHALLENGE])
+    with pytest.raises(SystemExit, match="^R6_COACH_LIVE_ACCEPTANCE_UNPROVEN$"):
+        acceptance.main()
+    [sources] = seen
+    assert [Path(source).resolve() for source in sources] == [
+        SOURCE / name for name in ("r6_coach_acceptance.py", "r6_coach_attestation.py",
+                                   "r6_recovery_acceptance.py", "r6_deploy_transaction.py")]
