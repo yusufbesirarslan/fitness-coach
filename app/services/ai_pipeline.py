@@ -127,6 +127,8 @@ def _context_stage(user_id, question, language, handoff=None):
                                                        language=language)
         return context_builder.fetch_coach_context(user_id, question,
                                                    language=language, handoff=handoff)
+    except ai_consent.ConsentDenied:
+        raise
     except Exception:
         current_app.logger.warning("[PIPELINE] koç bağlamı kurulamadı", exc_info=True)
         return ""

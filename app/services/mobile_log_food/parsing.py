@@ -126,6 +126,7 @@ def _manual(data):
             description=description,
             slot=_enum(data.get("slot")),
             nutrition=snapshot,
+            amounts_entered=_enum(data.get("kind")) == "manual_entered",
         )
     except ValueError as error:
         raise InvalidLogFoodCommand(str(error)) from None
@@ -137,6 +138,6 @@ def parse_command(data):
     kind = _enum(data.get("kind"))
     if kind == "provider_backed":
         return _provider(data)
-    if kind == "manual":
+    if kind in ("manual", "manual_entered"):
         return _manual(data)
     raise InvalidLogFoodCommand("invalid command kind")

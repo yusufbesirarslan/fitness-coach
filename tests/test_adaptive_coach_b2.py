@@ -292,5 +292,5 @@ def test_mutation_tools_run_on_the_base_prompt(app, tools_on):
     assert PLAN_MUTATION_POLICY in prompt
     with app.test_request_context("/ask"):
         names = [t["function"]["name"] for t in ai_coach._openai_tools_for_call()]
-    assert coach_plan_tools.READ_PLAN_TOOL in names
+    assert coach_plan_tools.READ_PLAN_TOOL not in names
     assert REMOVE in names

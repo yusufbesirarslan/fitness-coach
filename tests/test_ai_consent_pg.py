@@ -1,5 +1,6 @@
 """Real PostgreSQL fencing with synthetic owners and final mocked SDK capture."""
 import copy
+import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -660,3 +661,74 @@ def test_phase2_purposes_are_independent_and_original_generation_is_fenced(pg_ap
         consent.mutate(1, command(feature, generation=2, key='regrant-phase2'))
         with pytest.raises(consent.ConsentDenied):
             consent.authorize_operation(authority)
+
+
+def test_coach_plan_read_is_fenced_at_execution_and_provider_dispatch(pg_app):
+    from app.models import TrainingPlan
+    from app.services import ai_coach, coach_plan_tools, coach_privacy
+
+    owner = 1
+    recipient, model = "openai", ai.OPENAI_MODEL
+    read = coach_plan_tools.READ_PLAN_TOOL
+    captured = []
+    with pg_app.app_context(), ai_spend_guard.subject_scope(owner):
+        pg_app.extensions["r6_coach_containment"] = True
+        pg_app.config[coach_plan_tools.FLAG_KEY] = True
+        plan = {"program": [{"gun": "Pazartesi", "tip": "dinlenme"}]}
+        db.session.add(TrainingPlan(user_id=owner, score=1, plan_data=json.dumps(plan)))
+        db.session.commit()
+        consent.mutate(owner, command("coach"))
+
+        authority = consent.begin_operation(owner, "coach", recipient, model)
+        with consent.operation_scope(authority):
+            definitions = ai_coach._coach_tool_defs_for_call(owner)
+            names = {tool["name"] for tool in definitions}
+            assert read in names and not names.intersection(coach_plan_tools.PLAN_WRITE_TOOL_NAMES)
+            raw = ai_coach._dispatch_coach_tool(owner, read, "{}")
+            projected = coach_privacy.tool_result(read, raw, user_id=owner)
+            assert '"plan":' in projected
+
+            payload = dict(model=model, max_tokens=100,
+                           messages=[{"role": "tool", "content": projected}])
+            with calls.admit(feature="coach", provider=recipient, payload=payload,
+                             gate=False, charge=False) as admitted:
+                admitted.create(lambda **kwargs: captured.append(kwargs))
+            assert len(captured) == 1
+
+            with calls.admit(feature="coach", provider=recipient, payload=payload,
+                             gate=False, charge=False) as admitted:
+                consent.mutate(owner, command("coach", generation=1, action="revoke",
+                                              key="read-revoke-01"))
+                with pytest.raises(consent.ConsentDenied):
+                    admitted.create(lambda **kwargs: captured.append(kwargs))
+            assert len(captured) == 1
+            with pytest.raises(consent.ConsentDenied):
+                ai_coach._coach_tool_defs_for_call(owner)
+            with pytest.raises(consent.ConsentDenied):
+                ai_coach._dispatch_coach_tool(owner, read, "{}")
+
+
+def test_coach_diary_only_projects_explicit_origin_under_postgres(pg_app):
+    from app.models import MealLog
+    from app.services.coach_nutrition_diary import nutrition_diary
+    from app.services.mobile_log_food import log_food, parse_command
+    from app.timeutil import app_today
+
+    with pg_app.app_context():
+        today = app_today()
+        command = parse_command({
+            "kind": "manual_entered", "description": "Entered privately", "slot": "ogle",
+            "nutrition": {"energy_kcal": 400, "protein_g": 12, "carbohydrate_g": 60, "fat_g": 14},
+        })
+        entry, created = log_food(1, "pg-user-entered-01", command)
+        assert created and entry.provider_items == []
+        assert nutrition_diary(1, today)["logged_totals"]["calories"] == 400
+        assert nutrition_diary(2, today)["status"] == "empty"
+        db.session.add(MealLog(
+            user_id=1, source="manual", ogun="Öğle", yemekler="Unproven", tarih=today.isoformat(),
+            kalori=995, protein=40, karb=140, yag=25))
+        db.session.commit()
+        result = nutrition_diary(1, today)
+        assert result["status"] == "unavailable"
+        assert "logged_totals" not in result
+        assert "995" not in str(result)

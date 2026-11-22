@@ -6,6 +6,7 @@ separate tests exercise the real authority, default deny and PostgreSQL fence.
 Never imported by application code; no runtime allow-on-error or test flag.
 """
 from contextlib import nullcontext
+from dataclasses import replace
 
 
 def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
@@ -13,9 +14,12 @@ def allow_synthetic_authority(monkeypatch, app=None, *, memory=False):
     from app.blueprints import ai_consent as routes
     from app import consent_publication
     monkeypatch.setattr(consent_publication, "protect_response", lambda response: response)
+    coach = consent.POLICIES['d1-closure02-coach-candidate-r2']
+    coach = replace(coach, version='synthetic-layer-test', nested_features=())
+    monkeypatch.setattr(consent, 'POLICIES', {**consent.POLICIES, coach.version: coach})
     monkeypatch.setattr(consent, 'BINDINGS', {**consent.BINDINGS, **{
         f: ('synthetic.layer-test', ()) for f in
-        ('coach', 'summary', 'nutrition', 'menu_extract', 'menu_ocr', 'vision', 'health_probe', 'other')
+        ('summary', 'nutrition', 'menu_extract', 'menu_ocr', 'vision', 'health_probe', 'other')
     }})
     # This helper explicitly selects ALLOW for provider-layer tests only.
     # Real native-operation/path denial is covered by D1/PG qualification.

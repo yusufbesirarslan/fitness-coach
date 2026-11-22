@@ -465,6 +465,24 @@ def current_operation():
     return _OPERATION.get()
 
 
+def authorize_coach_read(owner, *categories):
+    """Use the current Coach disclosure for a bounded owner read."""
+    authority = current_operation()
+    if authority is None:
+        return False
+    if type(owner) is not int or owner <= 0:
+        raise ConsentDenied()
+    _operation_binding(authority, owner)
+    if authority.feature != "coach":
+        raise ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
+    policy = POLICIES.get(authority.version)
+    if (policy is None or policy.purpose != BINDINGS["coach"][0]
+            or not set(categories).issubset(policy.categories)):
+        return False
+    authorize_operation(authority)
+    return True
+
+
 def admission_generation(owner, feature):
     """The generation a new Admission fences on: the operation's, never a newer one."""
     operation = _OPERATION.get()

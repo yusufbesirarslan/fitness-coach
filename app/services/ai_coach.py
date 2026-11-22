@@ -44,8 +44,8 @@ from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _norm
 # tests/test_plan_mutation_architecture.py fails the build if it ever does, so
 # "the AI cannot reach plan persistence directly" is structural, not a promise.
 from app.services import coach_confirmation, coach_plan_tools
+from app.services.coach_privacy import assert_principal as _assert_principal
 from app.services.context_builder import (  # noqa: F401 (re-export)
-    assert_principal as _assert_principal,
     fetch_coach_context as _fetch_coach_context,
     fetch_profile_and_trends as _fetch_profile_and_trends,
     neutralize_friend_content as _neutralize_friend_content,
@@ -1016,24 +1016,15 @@ def _qualified_composite_tool(user_id, name):
 
 
 def _coach_tool_defs_for_call(user_id=None):
-    """Bu istekte modele sunulacak kanonik araç tanımları.
-
-    Plan düzenleme araçları bayrak AÇIKken TEK kanonik tanımdan (coach_plan_tools
-    .PLAN_MUTATION_TOOL_DEFS / confirmation defs) eklenir — iki sağlayıcı biçimi
-    de aşağıda BU listeden türetilir, yani bir sağlayıcının şeması diğerinden
-    ayrışamaz (brief §41). Bayrak KAPALIYKEN liste, PR3 öncesiyle AYNI nesnedir:
-    ek kopya, ek alan, ek boşluk yok.
-    """
+    """Build the shared provider tool list using the independent read and write gates."""
     defs = coach_confirmation.filter_coach_tool_defs(_COACH_TOOL_DEFS, user_id)
     defs = [tool for tool in defs if tool["name"] not in _UNQUALIFIED_D1_TOOLS
             or _qualified_composite_tool(user_id, tool["name"])]
-    if not coach_plan_tools.plan_mutation_tools_enabled():
-        return defs
-    # Foundation V1 B1: the read tool is published whenever the plan surface
-    # is ON — including while a confirmation is pending, because reading never
-    # changes anything and the model must describe the real plan.
-    return defs + [coach_plan_tools.READ_PLAN_TOOL_DEF] + list(
-        coach_plan_tools.published_plan_tool_defs(user_id))
+    if user_id is not None and coach_plan_tools.training_plan_read_authorized(user_id):
+        defs.append(coach_plan_tools.READ_PLAN_TOOL_DEF)
+    if coach_plan_tools.plan_mutation_tools_enabled():
+        defs.extend(coach_plan_tools.published_plan_tool_defs(user_id))
+    return defs
 
 
 def _openai_tools_for_call(user_id=None):
@@ -1054,7 +1045,7 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
     if name in _UNQUALIFIED_D1_TOOLS and not _qualified_composite_tool(user_id, name):
         return json.dumps({"status": "unavailable", "message": "Tool unavailable."})
     authority = ai_consent.current_operation()
-    if authority is not None:
+    if authority is not None and name != coach_plan_tools.READ_PLAN_TOOL:
         if authority.owner != user_id or authority.feature != "coach":
             raise ai_consent.ConsentDenied("AI_CONSENT_RECIPIENT_OR_SCOPE_UNAVAILABLE")
         ai_consent.authorize_operation(authority)

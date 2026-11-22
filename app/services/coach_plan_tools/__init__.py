@@ -35,8 +35,8 @@ Two things this package is honest about rather than papering over:
   explicitly instead of re-rendering a block that would be stale again after
   the next call.
 
-Default OFF behind ``AI_COACH_PLAN_MUTATION_TOOLS_ENABLED``: with the flag off
-the tools are absent from both provider schemas AND refused at execution.
+Writes default OFF behind ``AI_COACH_PLAN_MUTATION_TOOLS_ENABLED``. The
+read-only Training tool uses current owner-matched D1 Coach authority.
 """
 from .executor import (
     DIRECT_CANCEL,
@@ -47,6 +47,7 @@ from .executor import (
     current_confirmation_intent,
     execute_direct_confirmation,
     execute_plan_read,
+    training_plan_read_authorized,
     execute_plan_tool,
     invalid_arguments_result,
     plan_changed_this_turn,

@@ -56,7 +56,7 @@ def _tie_key():
     raise RuntimeError("unsupported database for exercise performance history")
 
 
-def load_candidates(user_id: int, anchor: date):
+def load_candidates(user_id: int, anchor: date, *, lookback=HISTORY_DAYS):
     """``(rows, scan_limit_reached)`` for one owner and one anchor day.
 
     ``scan_limit_reached`` is True whenever the row bound was reached, even if
@@ -65,12 +65,14 @@ def load_candidates(user_id: int, anchor: date):
     """
     if type(user_id) is not int:
         raise TypeError("user_id must be the authenticated owner's integer id")
+    if type(lookback) is not int or not 0 <= lookback <= HISTORY_DAYS:
+        raise ValueError("lookback is outside the canonical history window")
     rows = (
         db.session.query(*_COLUMNS)
         .filter(
             WorkoutSession.user_id == user_id,
             WorkoutSession.status == WORKOUT_SESSION_COMPLETED,
-            WorkoutSession.workout_date.in_(day_keys(anchor)),
+            WorkoutSession.workout_date.in_(day_keys(anchor)[-(lookback + 1):]),
         )
         .order_by(nullslast(WorkoutSession.completed_at.desc()), _tie_key().desc())
         .limit(MAX_SCAN_ROWS)

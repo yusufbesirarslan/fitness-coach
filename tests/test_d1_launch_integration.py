@@ -98,6 +98,8 @@ def test_coach_composition_requires_exact_original_contract(contracts, monkeypat
     contracts["grants"].pop("nutrition.plan")
     contracts["grants"].pop("pump_check.analysis")
     authority = consent.OperationAuthority(owner, "coach", 5, "coach")
+    monkeypatch.setattr(consent, 'authorize_operation',
+                        lambda operation: consent._check_operation(contracts, operation))
     with subject_scope(owner), consent.operation_scope(authority):
         assert consent.admission_generation(owner, helper) == 5
         assert consent.provider_binding(owner, helper) == consent.BINDINGS["coach"]

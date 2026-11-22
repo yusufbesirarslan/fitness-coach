@@ -57,7 +57,7 @@ def _semantic_payload(command):
     if isinstance(command, ManualLogFoodCommand):
         return {
             "domain": _DOMAIN,
-            "kind": "manual",
+            "kind": "manual_entered" if command.amounts_entered else "manual",
             "description": command.description,
             "slot": command.slot,
             "nutrition": {
