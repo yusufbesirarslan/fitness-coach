@@ -256,3 +256,21 @@ def test_coach_resolves_private_exercise_after_curated_projection_limit(raw_clie
     assert len(exercises) == 32
     assert exercises[-1]["name"] == BODY["display_name"]
     assert exercises[-1]["position"] == 31
+
+
+def test_migration_verifies_precreated_table_and_refuses_losing_registered_ids(
+    raw_client, make_user, as_owner,
+):
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from alembic.script import ScriptDirectory
+
+    migration = ScriptDirectory("migrations").get_revision("e5b27aa4101c").module
+    headers = as_owner(make_user("private-precreated"))
+    assert register(raw_client, headers)[0] == 201
+    with db.engine.begin() as connection:
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+            with pytest.raises(RuntimeError, match="would lose durable identities"):
+                migration.downgrade()
+    assert PrivateExercise.query.count() == 1
