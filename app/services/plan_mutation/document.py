@@ -59,6 +59,7 @@ from app.services.exercise_catalog import (
     is_exercise_compatible,
     load_exercise_catalog,
     resolve_exercise,
+    with_owner_definitions,
 )
 from app.services.training_generation.exercise_resolution import (
     check_placement,
@@ -228,7 +229,7 @@ def _document_carries_exercise_identity(document):
     return False
 
 
-def _exercise_authority(document, *, by_id=False):
+def _exercise_authority(document, *, by_id=False, private_definitions=None):
     """The catalog authority for this document, or ``None`` for a legacy plan.
 
     Present  — a dict document carrying an ``exercise_context`` block.
@@ -259,7 +260,8 @@ def _exercise_authority(document, *, by_id=False):
         return None
     context = validate_exercise_context(document[FIELD_EXERCISE_CONTEXT])
     return _ExerciseAuthority(
-        catalog=load_exercise_catalog(), context=context, by_id=by_id)
+        catalog=with_owner_definitions(load_exercise_catalog(), private_definitions),
+        context=context, by_id=by_id)
 
 
 def _resolve_catalog_exercise(authority, name) -> ExerciseDefinition:
@@ -310,7 +312,7 @@ def _resolve_placeable_exercise(authority, name, day, *, allow_overlap=False) ->
             "exercise is not compatible with the plan's equipment context")
     try:
         check_placement(exercise, day, allow_overlap=allow_overlap,
-                        require_cardio_on_dedicated_day=authority.by_id)
+                        require_cardio_on_dedicated_day=authority.by_id, catalog=authority.catalog)
     except GenerationExerciseIncompatibleError as exc:
         raise InvalidMutation(
             "exercise is incompatible with the day type") from exc
@@ -467,12 +469,12 @@ def _require_native_cardio_placement(day, authority):
             raise PlanNotMutable("day has a malformed exercise")
         exercise = _resolve_catalog_exercise(authority, entry.get(FIELD_EXERCISE_ID))
         try:
-            check_placement(exercise, day, allow_overlap=True)
+            check_placement(exercise, day, allow_overlap=True, catalog=authority.catalog)
         except GenerationExerciseIncompatibleError as exc:
             raise InvalidMutation("edit would leave cardio without a strength session") from exc
 
 
-def apply_command(document, command, *, native_editor=False):
+def apply_command(document, command, *, native_editor=False, private_definitions=None):
     """Apply ``command`` to a copy of ``document``.
 
     Returns ``(new_document, changed)``. ``changed`` is False when the requested
@@ -490,7 +492,8 @@ def apply_command(document, command, *, native_editor=False):
     # Resolved once, before any branch: the context decides how EVERY command
     # below reads identity, and a command that touches no exercise at all
     # (a day move) must still be refused on a plan whose context is broken.
-    authority = _exercise_authority(working, by_id=native_editor)
+    authority = _exercise_authority(working, by_id=native_editor,
+                                    private_definitions=private_definitions if native_editor else None)
 
     if isinstance(command, ReplaceExerciseCommand):
         changed = _apply_replace(program, command, authority)
