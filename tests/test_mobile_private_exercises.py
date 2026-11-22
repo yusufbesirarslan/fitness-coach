@@ -292,12 +292,14 @@ def test_private_replacement_and_mixed_day_use_canonical_placement_rules(
     refused = mutate(raw_client, headers, "replace", binding, "private-equipment",
                      replacement_id=incompatible, **fields)
     assert refused.status_code == 400
-    changed = mutate(raw_client, headers, "replace", binding, "private-mixed-replace",
-                     replacement_id=accessible, **fields)
-    assert changed.status_code == 200, changed.json
-    removed = mutate(raw_client, headers, "remove", revision(raw_client, headers), "private-mixed-remove",
-                     position=0, exercise_id=accessible)
-    assert removed.status_code == 400
+    unrelated = mutate(raw_client, headers, "replace", binding, "private-mixed-replace",
+                       replacement_id=accessible, **fields)
+    assert unrelated.status_code == 400, unrelated.json
+    corrected = mutate(raw_client, headers, "replace", binding, "private-mixed-correct",
+                       position=1, exercise_id=RUN, replacement_id=accessible)
+    assert corrected.status_code == 200, corrected.json
+    day = json.loads(raw_client.get(CURRENT, headers=headers).data)["plan"]["days"][0]
+    assert [item["exercise_id"] for item in day["exercises"]] == [SQUAT, accessible]
 
 
 MOBILITY = "ex_hip_mobility_flow"
@@ -341,20 +343,20 @@ def test_mobility_never_counts_as_the_strength_that_keeps_cardio_on_a_day(
         assert response.json["error"]["code"] == "TRAINING_EDITOR_INVALID_REQUEST"
         assert durable_state(raw_client, headers, plan_id) == before, key
 
-    added = mutate(raw_client, headers, "add", binding, "private-mobility-add",
-                   exercise_id=private_mobility, sets=1, reps="60 sn")
-    assert added.status_code == 200, added.json
-    after_add = durable_state(raw_client, headers, plan_id)
-    removed = mutate(raw_client, headers, "remove", after_add[-1], "private-mobility-remove",
-                     **last_strength)
-    assert removed.status_code == 400, removed.json
-    assert durable_state(raw_client, headers, plan_id) == after_add
+    for key, operation, fields in (
+        ("add", "add", {"exercise_id": private_mobility, "sets": 1, "reps": "60 sn"}),
+        ("plank", "replace", {**last_strength, "replacement_id": PLANK}),
+    ):
+        response = mutate(raw_client, headers, operation, binding, f"private-mobility-{key}",
+                          **fields)
+        assert response.status_code == 400, (key, response.json)
+        assert durable_state(raw_client, headers, plan_id) == before, key
 
-    strength = mutate(raw_client, headers, "replace", after_add[-1], "private-mobility-plank",
-                      **last_strength, replacement_id=PLANK)
-    assert strength.status_code == 200, strength.json
+    corrected = mutate(raw_client, headers, "replace", binding, "private-mobility-correct",
+                       position=1, exercise_id=RUN, replacement_id=private_mobility)
+    assert corrected.status_code == 200, corrected.json
     day = json.loads(raw_client.get(CURRENT, headers=headers).data)["plan"]["days"][0]
-    assert [item["exercise_id"] for item in day["exercises"]] == [PLANK, RUN, private_mobility]
+    assert [item["exercise_id"] for item in day["exercises"]] == [SQUAT, private_mobility]
 
 
 def test_retention_holds_and_account_purge_erase_only_owned_rows(raw_client, make_user, as_owner):

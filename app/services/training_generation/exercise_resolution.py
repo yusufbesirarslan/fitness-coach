@@ -30,7 +30,6 @@ from __future__ import annotations
 
 from app.services.exercise_catalog import (
     CARDIO_MOVEMENT,
-    NON_STRENGTH_MOVEMENTS,
     ExerciseAmbiguous,
     ExerciseContext,
     ExerciseDefinition,
@@ -157,15 +156,23 @@ def _resolve_plan_exercise(
 
 
 def check_placement(
-    exercise: ExerciseDefinition, day: dict, *, allow_overlap: bool = False,
-    require_cardio_on_dedicated_day: bool = False, catalog=None,
+    exercise: ExerciseDefinition, day: dict, *,
+    require_cardio_on_dedicated_day: bool = False,
 ) -> None:
-    """Apply dedicated cardio placement and preserve existing mixed editor days.
+    """Bind a cardio-movement entry to a cardio day, fail-closed otherwise.
 
-    Plan generation uses dedicated cardio days. The native editor may retain
-    existing cardio on training days that still contain strength work.
-    Strength work means a movement outside ``NON_STRENGTH_MOVEMENTS``, so
-    curated or private mobility on its own cannot keep cardio on the day.
+    ``is_exercise_compatible`` deliberately gates cardio by the declared
+    ``cardio_type`` and not by ``equipment_context`` — a home user who runs
+    outdoors is a real product case. That carve-out is only sound while a
+    cardio entry can only land on a ``kardiyo`` day: without this rule a
+    ``ekipman="ev"`` plan could prescribe swimming inside a strength day and
+    still persist under ``equipment_context: "ev"``, i.e. the equipment gate
+    would be bypassable purely by placement. Strength or core work on the same
+    day never changes that answer.
+
+    By default the rule is one-directional. Native by-ID writes may also ask
+    ``require_cardio_on_dedicated_day`` to keep non-cardio work off a
+    dedicated cardio day.
     """
     if day.get("tip") == CARDIO_TIP:
         if require_cardio_on_dedicated_day and exercise.movement != CARDIO_MOVEMENT:
@@ -173,22 +180,10 @@ def check_placement(
                 "dedicated cardio day requires cardio exercises",
                 resolution_category="cardio_placement")
         return
-    if exercise.movement != CARDIO_MOVEMENT:
-        return
-    if allow_overlap and day.get("tip") == "antrenman":
-        catalog = catalog or load_exercise_catalog()
-        for item in day["egzersizler"]:
-            try:
-                entry = resolve_exercise(
-                    exercise_id=item.get(EXERCISE_ID_KEY),
-                    name=item.get("isim"), catalog=catalog)
-            except ExerciseResolutionError:
-                continue  # The identity gate rejects this item independently.
-            if entry.movement not in NON_STRENGTH_MOVEMENTS:
-                return
-    raise GenerationExerciseIncompatibleError(
-        "cardio exercise requires a cardio day or a strength session",
-        resolution_category="cardio_placement")
+    if exercise.movement == CARDIO_MOVEMENT:
+        raise GenerationExerciseIncompatibleError(
+            "cardio exercise is placed on a day that is not a cardio day",
+            resolution_category="cardio_placement")
 
 
 def _resolve_chosen_id(
