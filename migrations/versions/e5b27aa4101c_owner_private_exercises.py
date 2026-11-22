@@ -25,6 +25,7 @@ _COLUMNS = {
     "equipment": sa.JSON(),
     "movement": sa.String(32),
     "primary_region": sa.String(32),
+    "target_region": sa.String(32),
 }
 
 

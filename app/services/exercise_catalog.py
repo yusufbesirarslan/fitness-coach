@@ -99,6 +99,7 @@ class ExerciseDefinition:
     movement: str
     primary_region: str
     active: bool
+    target_region: str | None = None
 
 
 @dataclass(frozen=True)

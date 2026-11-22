@@ -115,8 +115,8 @@ def test_concurrent_private_registration_arbitrates_on_owner_and_name(
     monkeypatch.setattr(private_exercises, "pg_insert", concurrent_insert)
 
     def contender(index):
-        equipment = BODY["equipment"] if same_metadata or index == 0 else ["bodyweight"]
-        return register(app.test_client(), headers, equipment=equipment)
+        target_region = BODY["target_region"] if same_metadata or index == 0 else "glutes"
+        return register(app.test_client(), headers, target_region=target_region)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         outcomes = dict(executor.map(contender, range(2)))
@@ -129,3 +129,5 @@ def test_concurrent_private_registration_arbitrates_on_owner_and_name(
         row = PrivateExercise.query.filter_by(user_id=owner_id).one()
         assert row.exercise_id == outcomes[201]["exercise"]["exercise_id"]
         assert row.equipment == outcomes[201]["exercise"]["equipment"]
+        assert row.target_region == outcomes[201]["exercise"]["target_region"]
+        assert row.primary_region == "lower_body"

@@ -318,6 +318,7 @@ class PrivateExercise(db.Model):
     equipment = db.Column(db.JSON, nullable=False)
     movement = db.Column(db.String(32), nullable=False)
     primary_region = db.Column(db.String(32), nullable=False)
+    target_region = db.Column(db.String(32), nullable=False)
     __table_args__ = (
         db.UniqueConstraint("user_id", "name_key", name="uq_private_exercise_owner_name"),
         db.Index("ix_private_exercise_owner_id", "user_id", "exercise_id"),

@@ -29,7 +29,8 @@ def browse_private_exercises():
             g.mobile_user.id, normalize_exercise_lookup(query), cursor)
     except SQLAlchemyError:
         return _unavailable()
-    return jsonify(contract_version=1, exercises=items, next_cursor=next_cursor)
+    return jsonify(contract_version=private_exercises.CONTRACT_VERSION,
+                   exercises=items, next_cursor=next_cursor)
 
 
 @bp.post("/training/private-exercises")
@@ -49,7 +50,8 @@ def register_private_exercise():
         return _invalid(status=413)
     except SQLAlchemyError:
         return _unavailable()
-    return jsonify(contract_version=1, exercise=item), 201 if created else 200
+    return jsonify(contract_version=private_exercises.CONTRACT_VERSION,
+                   exercise=item), 201 if created else 200
 
 
 def _invalid(status=400):

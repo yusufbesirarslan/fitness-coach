@@ -15,7 +15,6 @@ from app.services.exercise_catalog import (
     CARDIO_MOVEMENT,
     EQUIPMENT_VOCABULARY,
     MOVEMENT_VOCABULARY,
-    REGION_VOCABULARY,
     PRIVATE_ID_PREFIX,
     ExerciseDefinition,
     normalize_exercise_lookup,
@@ -28,6 +27,16 @@ from app.services.training_generation.plan_schema import NAME_MAX
 
 PRIVATE_ID = re.compile(PRIVATE_ID_PREFIX + r"[0-9a-f]{32}")
 PAGE_SIZE = 50
+CONTRACT_VERSION = 2
+
+# V3 LEGACY_REGION_FOR, kept here until the V3 catalog foundation is composed.
+LEGACY_REGION_FOR = {
+    "chest": "chest", "back": "back", "shoulders": "shoulders",
+    "biceps": "arms", "triceps": "arms",
+    "quads": "lower_body", "hamstrings": "lower_body", "glutes": "lower_body",
+    "calves": "calves", "core": "core", "full_body": "full_body",
+    "cardio": "cardio", "mobility": "mobility",
+}
 
 
 class InvalidRegistration(ValueError):
@@ -48,7 +57,7 @@ def _label_char(char):
 
 def _registration(body):
     if not isinstance(body, dict) or set(body) != {
-        "display_name", "equipment", "movement", "primary_region",
+        "display_name", "equipment", "movement", "target_region",
     }:
         raise InvalidRegistration()
     name = body["display_name"]
@@ -65,29 +74,30 @@ def _registration(body):
             or not all(isinstance(item, str) and item in EQUIPMENT_VOCABULARY for item in equipment)
             or len(set(equipment)) != len(equipment)):
         raise InvalidRegistration()
-    movement, region = body["movement"], body["primary_region"]
+    movement, target_region = body["movement"], body["target_region"]
     if (not isinstance(movement, str) or movement not in MOVEMENT_VOCABULARY
-            or not isinstance(region, str) or region not in REGION_VOCABULARY):
+            or not isinstance(target_region, str) or target_region not in LEGACY_REGION_FOR):
         raise InvalidRegistration()
-    if movement == CARDIO_MOVEMENT and (
-        region != "cardio" or not set(equipment) <= CARDIO_EQUIPMENT["karisik"]
-    ):
+    if (movement == CARDIO_MOVEMENT) != (target_region == "cardio"):
         raise InvalidRegistration()
-    if movement != CARDIO_MOVEMENT and region == "cardio":
+    if movement == CARDIO_MOVEMENT and not set(equipment) <= CARDIO_EQUIPMENT["karisik"]:
         raise InvalidRegistration()
-    return name, key, sorted(equipment), movement, region
+    if target_region == "mobility" and movement != "mobility":
+        raise InvalidRegistration()
+    return name, key, sorted(equipment), movement, target_region
 
 
 def register(user_id, body):
     """Insert or replay an immutable registration. The unique key arbitrates races."""
-    name, key, equipment, movement, region = _registration(body)
+    name, key, equipment, movement, target_region = _registration(body)
     insert = sqlite_insert if db.session.get_bind().dialect.name == "sqlite" else pg_insert
     inserted = db.session.execute(insert(PrivateExercise).values(
         exercise_id=PRIVATE_ID_PREFIX + uuid4().hex, user_id=user_id, name_key=key,
-        display_name=name, equipment=equipment, movement=movement, primary_region=region,
+        display_name=name, equipment=equipment, movement=movement,
+        primary_region=LEGACY_REGION_FOR[target_region], target_region=target_region,
     ).on_conflict_do_nothing(index_elements=["user_id", "name_key"])).rowcount == 1
     row = PrivateExercise.query.filter_by(user_id=user_id, name_key=key).one()
-    if (row.equipment, row.movement, row.primary_region) != (equipment, movement, region):
+    if (row.equipment, row.movement, row.target_region) != (equipment, movement, target_region):
         raise RegistrationConflict()
     result = project(row)
     db.session.commit()
@@ -99,6 +109,7 @@ def project(row):
         "exercise_id": row.exercise_id, "display_name": row.display_name,
         "equipment": row.equipment, "movement": row.movement,
         "primary_region": row.primary_region,
+        "target_region": row.target_region,
     }
 
 
@@ -123,7 +134,7 @@ def owner_definitions(user_id, exercise_ids, *, session=None):
     return {
         row.exercise_id: ExerciseDefinition(
             row.exercise_id, row.display_name, (), frozenset(row.equipment),
-            row.movement, row.primary_region, True,
+            row.movement, row.primary_region, True, target_region=row.target_region,
         )
         for row in rows
     }

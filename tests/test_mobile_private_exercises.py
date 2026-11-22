@@ -22,7 +22,7 @@ from tests.test_mobile_training_editor import (
 PRIVATE = "/api/v1/training/private-exercises"
 BODY = {
     "display_name": "Zercher split squat", "equipment": ["barbell", "rack"],
-    "movement": "lunge", "primary_region": "lower_body",
+    "movement": "lunge", "target_region": "hamstrings",
 }
 
 
@@ -45,8 +45,10 @@ def test_private_routes_require_authentication_and_health_consent(
     {"display_name": "   "}, {"display_name": "---"}, {"display_name": "x" * 121},
     {"display_name": "bad\u202ename"}, {"display_name": "<script>"},
     {"equipment": []}, {"equipment": ["rack", "rack"]}, {"equipment": [{}]},
-    {"equipment": ["unknown"]}, {"movement": []}, {"primary_region": "bad"},
-    {"movement": "cardio", "primary_region": "cardio"}, {"user_id": 999},
+    {"equipment": ["unknown"]}, {"movement": []}, {"primary_region": "lower_body"},
+    {"target_region": "lower_body"}, {"target_region": []}, {"target_region": "cardio"},
+    {"target_region": "mobility"}, {"movement": "cardio"},
+    {"movement": "cardio", "target_region": "cardio"}, {"user_id": 999},
     {"exercise_id": SQUAT},
 ])
 def test_rejects_invalid_registration_without_writing(raw_client, make_user, as_owner, overrides):
@@ -67,6 +69,7 @@ def test_duplicate_scope_private_search_and_closed_generation(raw_client, make_u
     status, conflict = register(raw_client, first, equipment=["bodyweight"])
     assert status == 409
     assert conflict["error"]["code"] == "TRAINING_PRIVATE_EXERCISE_CONFLICT"
+    assert register(raw_client, first, target_region="glutes")[0] == 409
     with raw_client.get(PRIVATE, headers=other) as response:
         assert response.json["exercises"] == []
     status, second = register(raw_client, other)
@@ -74,7 +77,7 @@ def test_duplicate_scope_private_search_and_closed_generation(raw_client, make_u
     item = original["exercise"]
     assert item["exercise_id"] != second["exercise"]["exercise_id"]
     with raw_client.get(PRIVATE, headers=first, query_string={"q": "SPLIT SQUAT"}) as response:
-        assert response.json == {"contract_version": 1, "exercises": [item], "next_cursor": None}
+        assert response.json == {"contract_version": 2, "exercises": [item], "next_cursor": None}
         assert response.cache_control.no_store
     for query in ({"q": "%"}, {"q": "_"}, {"q": "other"}):
         with raw_client.get(PRIVATE, headers=first, query_string=query) as response:
@@ -85,6 +88,59 @@ def test_duplicate_scope_private_search_and_closed_generation(raw_client, make_u
     assert item["exercise_id"] not in {
         choice.exercise_id for choice in compatible_exercises(ExerciseContext("spor_salonu"))
     }
+
+
+@pytest.mark.parametrize(("target_region", "primary_region", "movement", "equipment"), [
+    ("chest", "chest", "horizontal_push", "bodyweight"),
+    ("back", "back", "hinge", "barbell"),
+    ("shoulders", "shoulders", "vertical_push", "dumbbell"),
+    ("biceps", "arms", "curl", "dumbbell"),
+    ("triceps", "arms", "horizontal_push", "barbell"),
+    ("quads", "lower_body", "squat", "barbell"),
+    ("hamstrings", "lower_body", "hinge", "barbell"),
+    ("glutes", "lower_body", "hinge", "barbell"),
+    ("calves", "calves", "calf_raise", "bodyweight"),
+    ("core", "core", "anti_rotation", "cable"),
+    ("full_body", "full_body", "carry", "dumbbell"),
+    ("cardio", "cardio", "cardio", "outdoor_walking"),
+    ("mobility", "mobility", "mobility", "bodyweight"),
+])
+def test_registration_preserves_selected_region_and_derives_legacy_region(
+    raw_client, make_user, as_owner, target_region, primary_region, movement, equipment,
+):
+    headers = as_owner(make_user("private-region"))
+    status, payload = register(raw_client, headers, target_region=target_region,
+                               movement=movement, equipment=[equipment])
+    assert status == 201
+    assert payload["contract_version"] == 2
+    item = payload["exercise"]
+    assert (item["target_region"], item["primary_region"]) == (target_region, primary_region)
+    row = db.session.get(PrivateExercise, item["exercise_id"])
+    assert (row.target_region, row.primary_region) == (target_region, primary_region)
+
+
+def test_registration_recovers_after_response_loss_without_key_binding(
+    raw_client, make_user, as_owner, monkeypatch,
+):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    headers = {**as_owner(make_user("private-uncertain")), "Idempotency-Key": "ignored"}
+    commit = db.session.commit
+
+    def commit_without_response():
+        commit()
+        raise SQLAlchemyError("synthetic loss after commit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(db.session, "commit", commit_without_response)
+        assert register(raw_client, headers)[0] == 503
+
+    stored, = raw_client.get(PRIVATE, headers=headers).json["exercises"]
+    assert register(raw_client, headers) == (200, {"contract_version": 2, "exercise": stored})
+    assert register(raw_client, headers, target_region="glutes")[0] == 409
+    status, payload = register(raw_client, headers, display_name="A new intent")
+    assert status == 201
+    assert payload["exercise"]["exercise_id"] != stored["exercise_id"]
 
 
 def test_picker_pages_repeatably_without_crossing_owners(raw_client, make_user, as_owner, monkeypatch):
@@ -105,8 +161,11 @@ def test_picker_pages_repeatably_without_crossing_owners(raw_client, make_user, 
         assert [row["exercise_id"] for row in second.json["exercises"]] == identities[2:]
 
 
+@pytest.mark.parametrize(("saved_reps", "coach_reps"), [
+    ("8–12", "8-12"), ("30 sn", "30 sn"), ("stop when it burns", None),
+])
 def test_add_replace_undo_and_resolve_in_fresh_plan_today_workout_and_coach(
-    app, raw_client, make_user, as_owner, monkeypatch,
+    app, raw_client, make_user, as_owner, monkeypatch, saved_reps, coach_reps,
 ):
     from datetime import date
 
@@ -122,7 +181,7 @@ def test_add_replace_undo_and_resolve_in_fresh_plan_today_workout_and_coach(
     identity = register(raw_client, headers)[1]["exercise"]["exercise_id"]
     assert app.config.get("AI_COACH_PLAN_MUTATION_TOOLS_ENABLED", False) is False
     foreign_binding = revision(raw_client, other_headers)
-    foreign_fields = {"exercise_id": identity, "sets": 2, "reps": "8-12"}
+    foreign_fields = {"exercise_id": identity, "sets": 3, "reps": saved_reps}
     foreign = mutate(raw_client, other_headers, "add", foreign_binding, "private-foreign", **foreign_fields)
     unknown = mutate(raw_client, other_headers, "add", foreign_binding, "private-unknown",
                      **{**foreign_fields, "exercise_id": "ex_private_" + "0" * 32})
@@ -145,7 +204,9 @@ def test_add_replace_undo_and_resolve_in_fresh_plan_today_workout_and_coach(
         day = current.json["plan"]["days"][0]
         assert day["exercises"][2]["exercise_id"] == identity
         assert day["exercises"][2]["display_name"] == BODY["display_name"]
-        assert day["exercises"][2]["reps"] == "8-12"
+        assert day["exercises"][2]["sets"] == 3
+        assert day["exercises"][2]["reps"] == saved_reps
+        assert "target_region" not in day["exercises"][2]
     with fresh.get(f"/api/v1/training/workouts/{day['workout_ref']}", headers=headers) as workout:
         assert workout.json["workout"]["exercises"][2] == day["exercises"][2]
     row = db.session.get(TrainingPlan, plan_id)
@@ -155,17 +216,18 @@ def test_add_replace_undo_and_resolve_in_fresh_plan_today_workout_and_coach(
     assert json.loads(capture(row, entries))["exercises"][2]["exercise_id"] == identity
 
     def coach(owner):
-        raw = json.dumps(read_current_training_plan(owner_id))
-        projected = coach_privacy.tool_result(READ_PLAN_TOOL, raw, user_id=owner)
+        result = read_current_training_plan(owner_id)
+        projected = coach_privacy.tool_result(READ_PLAN_TOOL, json.dumps(result), user_id=owner)
         assert identity not in projected
         return json.loads(projected)["plan"]["days"][0]["exercises"][2]
 
+    assert read_current_training_plan(owner_id)["plan"]["days"][0]["exercises"][2]["reps"] == saved_reps
     assert coach(owner_id) == {
         "name": BODY["display_name"], "equipment": BODY["equipment"], "movement": BODY["movement"],
-        "primary_region": BODY["primary_region"], "sets": 2, "reps": "8-12",
+        "primary_region": "lower_body", "target_region": BODY["target_region"], "sets": 3, "reps": coach_reps,
         "position": 2, "user_defined": True,
     }
-    assert coach(other_id) == {"name": None, "sets": 2, "reps": "8-12"}
+    assert coach(other_id) == {"name": None, "sets": 3, "reps": coach_reps}
     assert coach(None)["name"] is None
     edited = mutate(fresh, headers, "prescription", newer, "private-prescription", position=2,
                     exercise_id=identity, sets=4)
@@ -181,6 +243,7 @@ def test_add_replace_undo_and_resolve_in_fresh_plan_today_workout_and_coach(
         assert undo.status_code == 200, undo.json
     assert db.session.get(TrainingPlan, plan_id).plan_data == before_replace
     assert coach(owner_id)["sets"] == 4
+    assert coach(owner_id)["target_region"] == BODY["target_region"]
     assert build_exercise_history(owner_id, identity).exercise_id == identity
     with pytest.raises(ExerciseUnknown):
         build_exercise_history(other_id, identity)
@@ -194,6 +257,23 @@ def test_add_replace_undo_and_resolve_in_fresh_plan_today_workout_and_coach(
     assert removed.status_code == 200
     persist(owner_id, candidate("h" * 24, on=app_today(), exercises=[(identity, straight(30, 6))]))
     assert build_exercise_history(owner_id, identity).occurrences
+
+
+@pytest.mark.parametrize(("saved", "projected"), [
+    ("8-12", "8-12"), ("8‐12", "8-12"), ("8‑12", "8-12"), ("8‒12", "8-12"),
+    ("8–12", "8-12"), ("8—12", "8-12"), ("8―12", "8-12"), ("8 − 12", "8-12"),
+    ("30 sn", "30 sn"), ("045 sec", "45 sec"), ("20–30 sn", "20-30 sn"),
+    ("stop when it burns", None), ("8-12 reps", None), ("12–8", None),
+    ("8--12", None), ("8-", None), ("0–8", None), ("501", None),
+    ("8" + " " * 15 + "s", None), ("", None), (None, None),
+])
+def test_coach_prescription_uses_closed_projection_grammar(saved, projected):
+    raw = json.dumps({"status": "ok", "plan": {"days": [{
+        "day": "Pazartesi", "kind": "antrenman",
+        "exercises": [{"name": "Plank", "sets": 3, "reps": saved}],
+    }]}})
+    exercise = json.loads(coach_privacy.tool_result(READ_PLAN_TOOL, raw))["plan"]["days"][0]["exercises"][0]
+    assert (exercise["sets"], exercise["reps"]) == (3, projected)
 
 
 def test_private_replacement_and_mixed_day_use_canonical_placement_rules(

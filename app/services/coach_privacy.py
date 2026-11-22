@@ -5,6 +5,9 @@ messages remain user input; stored enrichment must pass an operation projection.
 """
 import json
 import math
+import re
+
+from app.services.exercise_catalog import HYPHENS
 
 GOALS = ('kilo verme', 'kas kazanma', 'lose_weight', 'build_muscle')
 LEVELS = ('beginner', 'intermediate', 'advanced')
@@ -84,6 +87,8 @@ _WEEKDAYS = ('Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi
 _DAY_KINDS = ('antrenman', 'dinlenme', 'kardiyo')
 _PLAN_READ_ERRORS = ('PLAN_UNREADABLE', 'CAPABILITY_DISABLED')
 _MAX_PLAN_EXERCISES = 20
+_PLAN_REPS = re.compile(r'([0-9]{1,3})(?: *- *([0-9]{1,3}))?(?: +(sn|dk|sec|min|s))?')
+_PLAN_REPS_DASHES = str.maketrans({dash: '-' for dash in HYPHENS})
 
 
 def _plan_reps(value):
@@ -94,15 +99,16 @@ def _plan_reps(value):
     """
     if not isinstance(value, str) or len(value) > 16:
         return None
-    count, _, unit = value.strip().partition(' ')
-    if unit and unit not in ('sn', 'dk', 'sec', 'min', 's'):
+    match = _PLAN_REPS.fullmatch(value.strip(' ').translate(_PLAN_REPS_DASHES))
+    if match is None:
         return None
-    parts = count.split('-')
-    if not 1 <= len(parts) <= 2 or not all(
-            p.isascii() and p.isdigit() and len(p) <= 3 and 1 <= int(p) <= 500
-            for p in parts):
+    start, end, unit = match.groups()
+    lower = int(start)
+    upper = int(end) if end is not None else lower
+    if not 1 <= lower <= upper <= 500:
         return None
-    return value.strip()
+    count = str(lower) if end is None else f'{lower}-{upper}'
+    return f'{count} {unit}' if unit is not None else count
 
 
 def _private_plan_labels(days, user_id, max_exercises):
@@ -133,7 +139,7 @@ def _private_plan_labels(days, user_id, max_exercises):
 
 def _training_plan_projection(source, user_id):
     """Rebuild the plan read from tokens and owner-authorized definitions."""
-    from app.services.private_exercises import is_private_id
+    from app.services.private_exercises import LEGACY_REGION_FOR, is_private_id
     from app.services.training_generation.plan_schema import NATIVE_MAX_EXERCISES_PER_DAY
     out = {}
     if token(source.get('error'), _PLAN_READ_ERRORS):
@@ -174,6 +180,7 @@ def _training_plan_projection(source, user_id):
                         movement=definition.movement,
                         equipment=sorted(definition.equipment),
                         primary_region=definition.primary_region,
+                        target_region=token(definition.target_region, LEGACY_REGION_FOR),
                         position=position,
                         user_defined=True,
                     )
