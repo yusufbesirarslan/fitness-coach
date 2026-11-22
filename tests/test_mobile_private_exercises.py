@@ -84,7 +84,8 @@ def test_duplicate_scope_private_search_and_closed_generation(raw_client, make_u
             assert response.json["exercises"] == []
     assert raw_client.get(f"{PRIVATE}?q=a&q=b", headers=first).status_code == 400
     assert raw_client.get(f"{PRIVATE}?after={SQUAT}", headers=first).status_code == 400
-    assert raw_client.get(CATALOG, headers=first, query_string={"q": "Zercher"}).json["exercises"] == []
+    curated = raw_client.get(CATALOG, headers=first, query_string={"q": "Zercher"}).json["exercises"]
+    assert [exercise["exercise_id"] for exercise in curated] == ["ex_barbell_zercher_squat"]
     assert item["exercise_id"] not in {
         choice.exercise_id for choice in compatible_exercises(ExerciseContext("spor_salonu"))
     }
