@@ -22,21 +22,13 @@ from app.services.exercise_catalog import (
     resolve_historical_exercise,
     with_owner_definitions,
 )
+from app.services.exercise_catalog_v3 import LEGACY_REGION_FOR
 from app.services.training_generation.plan_schema import NAME_MAX
 
 
 PRIVATE_ID = re.compile(PRIVATE_ID_PREFIX + r"[0-9a-f]{32}")
 PAGE_SIZE = 50
 CONTRACT_VERSION = 2
-
-# V3 LEGACY_REGION_FOR, kept here until the V3 catalog foundation is composed.
-LEGACY_REGION_FOR = {
-    "chest": "chest", "back": "back", "shoulders": "shoulders",
-    "biceps": "arms", "triceps": "arms",
-    "quads": "lower_body", "hamstrings": "lower_body", "glutes": "lower_body",
-    "calves": "calves", "core": "core", "full_body": "full_body",
-    "cardio": "cardio", "mobility": "mobility",
-}
 
 
 class InvalidRegistration(ValueError):

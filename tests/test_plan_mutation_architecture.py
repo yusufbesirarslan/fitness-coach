@@ -120,6 +120,9 @@ def test_only_approved_consumers_import_the_domain():
         # Foundation V1 B1: read-only plan projection (parser + bounds only).
         Path("app/services/coach_plan_tools/plan_read.py"),
         Path("app/services/coach_plan_policy/decisions.py"),
+        # Catalog V3 picker: read-only parser + context validator for advisory
+        # availability; never a command, entrypoint, journal or write.
+        Path("app/services/exercise_picker.py"),
     }
     consumers = set()
     for path in APP_ROOT.rglob("*.py"):

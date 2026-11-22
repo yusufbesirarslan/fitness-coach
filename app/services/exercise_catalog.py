@@ -20,9 +20,9 @@ HYPHENS = "‐‑‒–—―−"
 
 EQUIPMENT_VOCABULARY = frozenset({
     "barbell", "bench", "bodyweight", "cable", "cardio_machine",
-    "dumbbell", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
+    "dumbbell", "ez_bar", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
     "pool", "pull_up_bar", "rack", "resistance_band", "rope",
-    "stationary_bicycle",
+    "smith_machine", "stationary_bicycle",
 })
 MOVEMENT_VOCABULARY = frozenset({
     "anti_extension", "anti_rotation", "calf_raise", "carry", "cardio",

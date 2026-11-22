@@ -24,6 +24,7 @@ from .exercise_grounding import (
     KIND_SUGGEST as EX_SUGGEST,
     KIND_UNKNOWN as EX_UNKNOWN,
     resolve_destination,
+    resolve_slot_name,
 )
 from .prescriptions import (
     Prescription,
@@ -828,7 +829,7 @@ def _resolve_command_workout(user_id, command, intent):
     if (isinstance(command, slot_commands) and intent.get("typed_exercise")
             and not named_day and not named_region):
         search = command.exercise
-        destination = resolve_destination(search)
+        destination = resolve_slot_name(search)
         if destination.canonical_name:
             search = destination.canonical_name
         elif destination.suggestion:

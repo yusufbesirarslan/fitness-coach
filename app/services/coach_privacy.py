@@ -111,6 +111,20 @@ def _plan_reps(value):
     return f'{count} {unit}' if unit is not None else count
 
 
+def _curated_plan_identity(exercise_id):
+    """Catalog V3 fields re-derived from the server taxonomy, never forwarded."""
+    from app.services.exercise_catalog import CatalogConfigurationError
+    from app.services.exercise_catalog_v3 import describe_exercise
+    try:
+        descriptor = describe_exercise(exercise_id)
+    except CatalogConfigurationError:
+        return {}
+    if descriptor is None:
+        return {}
+    return {key: descriptor[key] for key in (
+        'exercise_id', 'source', 'family_id', 'target_region', 'equipment')}
+
+
 def _private_plan_labels(days, user_id, max_exercises):
     from sqlalchemy.exc import SQLAlchemyError
     from sqlalchemy.orm import Session
@@ -139,7 +153,8 @@ def _private_plan_labels(days, user_id, max_exercises):
 
 def _training_plan_projection(source, user_id):
     """Rebuild the plan read from tokens and owner-authorized definitions."""
-    from app.services.private_exercises import LEGACY_REGION_FOR, is_private_id
+    from app.services.exercise_catalog_v3 import LEGACY_REGION_FOR
+    from app.services.private_exercises import is_private_id
     from app.services.training_generation.plan_schema import NATIVE_MAX_EXERCISES_PER_DAY
     out = {}
     if token(source.get('error'), _PLAN_READ_ERRORS):
@@ -184,8 +199,13 @@ def _training_plan_projection(source, user_id):
                         position=position,
                         user_defined=True,
                     )
-            elif isinstance(label, str) and len(label) <= 120 and exercise_name(label):
-                projected_exercise['name'] = label
+            else:
+                if isinstance(label, str) and len(label) <= 120 and exercise_name(label):
+                    projected_exercise['name'] = label
+                stored_position = exercise.get('position')
+                if type(stored_position) is int and 0 <= stored_position < NATIVE_MAX_EXERCISES_PER_DAY:
+                    projected_exercise['position'] = stored_position
+                projected_exercise.update(_curated_plan_identity(exercise.get('exercise_id')))
             exercises.append(projected_exercise)
         entry = {'day': day['day'], 'kind': token(day.get('kind'), _DAY_KINDS),
                  'exercises': exercises}
