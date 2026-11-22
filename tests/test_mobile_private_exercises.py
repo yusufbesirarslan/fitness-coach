@@ -14,8 +14,8 @@ from app.services.exercise_performance_history import build_exercise_history
 from app.services.workout_session.prescription import capture
 from app.services.workout_session.queries import planned_workout_for_slot
 from tests.test_mobile_training_editor import (
-    CATALOG, CURRENT, EDITOR, PLANK, SQUAT, as_owner, exercise, mutate, program, revision,
-    save_plan,
+    CATALOG, CURRENT, EDITOR, PLANK, RUN, SQUAT, as_owner, durable_state, exercise, mutate,
+    program, revision, save_plan,
 )
 
 
@@ -298,6 +298,59 @@ def test_private_replacement_and_mixed_day_use_canonical_placement_rules(
     removed = mutate(raw_client, headers, "remove", revision(raw_client, headers), "private-mixed-remove",
                      position=0, exercise_id=accessible)
     assert removed.status_code == 400
+
+
+MOBILITY = "ex_hip_mobility_flow"
+
+
+def test_mobility_never_counts_as_the_strength_that_keeps_cardio_on_a_day(
+    raw_client, make_user, as_owner,
+):
+    owner = make_user("private-mobility-last-strength")
+    headers = as_owner(owner)
+    document = program(equipment="ev", mixed=True)
+    document["program"][2].update(tip="antrenman", sure_dk=30)
+    document["program"][2]["egzersizler"] = [exercise(MOBILITY), exercise(RUN)]
+    plan_id = save_plan(owner.id, document)
+    status, payload = register(raw_client, headers, display_name="Private hip flow",
+                               equipment=["bodyweight"], movement="mobility",
+                               target_region="mobility")
+    assert status == 201, payload
+    private_mobility = payload["exercise"]["exercise_id"]
+    before = durable_state(raw_client, headers, plan_id)
+    binding = before[-1]
+    last_strength = {"position": 0, "exercise_id": SQUAT}
+    for key, operation, fields in (
+        ("private", "replace", {**last_strength, "replacement_id": private_mobility}),
+        ("curated", "replace", {**last_strength, "replacement_id": MOBILITY}),
+        ("private-prescribed", "replace",
+         {**last_strength, "replacement_id": private_mobility, "sets": 2}),
+        ("same-id-cardio", "replace",
+         {"day_slot": 2, "position": 1, "exercise_id": RUN, "replacement_id": RUN,
+          "reps": "25 dk"}),
+        ("remove-mobility-day-strength", "remove", {"day_slot": 2, "position": 0,
+                                                   "exercise_id": MOBILITY}),
+    ):
+        response = mutate(raw_client, headers, operation, binding, f"private-mobility-{key}",
+                          **fields)
+        assert response.status_code == 400, (key, response.json)
+        assert response.json["error"]["code"] == "TRAINING_EDITOR_INVALID_REQUEST"
+        assert durable_state(raw_client, headers, plan_id) == before, key
+
+    added = mutate(raw_client, headers, "add", binding, "private-mobility-add",
+                   exercise_id=private_mobility, sets=1, reps="60 sn")
+    assert added.status_code == 200, added.json
+    after_add = durable_state(raw_client, headers, plan_id)
+    removed = mutate(raw_client, headers, "remove", after_add[-1], "private-mobility-remove",
+                     **last_strength)
+    assert removed.status_code == 400, removed.json
+    assert durable_state(raw_client, headers, plan_id) == after_add
+
+    strength = mutate(raw_client, headers, "replace", after_add[-1], "private-mobility-plank",
+                      **last_strength, replacement_id=PLANK)
+    assert strength.status_code == 200, strength.json
+    day = json.loads(raw_client.get(CURRENT, headers=headers).data)["plan"]["days"][0]
+    assert [item["exercise_id"] for item in day["exercises"]] == [PLANK, RUN, private_mobility]
 
 
 def test_retention_holds_and_account_purge_erase_only_owned_rows(raw_client, make_user, as_owner):

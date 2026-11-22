@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from app.services.exercise_catalog import (
     CARDIO_MOVEMENT,
+    NON_STRENGTH_MOVEMENTS,
     ExerciseAmbiguous,
     ExerciseContext,
     ExerciseDefinition,
@@ -163,6 +164,8 @@ def check_placement(
 
     Plan generation uses dedicated cardio days. The native editor may retain
     existing cardio on training days that still contain strength work.
+    Strength work means a movement outside ``NON_STRENGTH_MOVEMENTS``, so
+    curated or private mobility on its own cannot keep cardio on the day.
     """
     if day.get("tip") == CARDIO_TIP:
         if require_cardio_on_dedicated_day and exercise.movement != CARDIO_MOVEMENT:
@@ -181,7 +184,7 @@ def check_placement(
                     name=item.get("isim"), catalog=catalog)
             except ExerciseResolutionError:
                 continue  # The identity gate rejects this item independently.
-            if entry.movement != CARDIO_MOVEMENT:
+            if entry.movement not in NON_STRENGTH_MOVEMENTS:
                 return
     raise GenerationExerciseIncompatibleError(
         "cardio exercise requires a cardio day or a strength session",
