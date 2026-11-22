@@ -22,6 +22,7 @@ from app.services.exercise_catalog import (
 )
 from app.services.training_generation import exercise_context_token
 from app.services.training_generation.exercise_choices import compatible_exercise_choices
+from tests.test_coach_plan_tools import tools_on  # noqa: F401 (fixture)
 from tests.test_mobile_training_editor import (  # noqa: F401 (fixture)
     EDITOR, as_owner, exercise, mutate, program, revision, save_plan,
 )
@@ -311,6 +312,13 @@ _GROUNDING_PHRASES = (
 )
 
 
+def _exact_id(phrase):
+    try:
+        return exercise_catalog.resolve_exercise(name=phrase).exercise_id
+    except exercise_catalog.ExerciseResolutionError:
+        return None
+
+
 def _grounding_corpus():
     phrases = set(_GROUNDING_PHRASES)
     for exercise in load_exercise_catalog().exercises:
@@ -328,26 +336,112 @@ def test_coach_write_grounding_is_exactly_what_catalog_v2_gave(monkeypatch):
 
     corpus = _grounding_corpus()
 
-    def grounded():
+    def grounded(resolve):
         exercise_catalog.load_exercise_catalog.cache_clear()
         out = {}
         for phrase in corpus:
-            target = exercise_grounding.resolve_destination(phrase)
+            target = resolve(phrase)
             out[phrase] = (target.kind, target.canonical_name, target.suggestion)
         return out
 
-    live = grounded()
+    # Exact labels of not-yet-reviewed IDs have their own rule (next tests).
+    corpus = [p for p in corpus if _exact_id(p) is None or _exact_id(p) in V2_IDS]
+    live = grounded(exercise_grounding.resolve_destination)
+    live_slot = grounded(exercise_grounding.resolve_slot_name)
     monkeypatch.setattr(exercise_catalog, "CATALOG_PATH", SNAPSHOT)
     try:
-        v2 = grounded()
+        v2 = grounded(exercise_grounding.resolve_destination)
     finally:
         monkeypatch.undo()
         exercise_catalog.load_exercise_catalog.cache_clear()
     assert len(corpus) > 1500
     assert {p: (v2[p], live[p]) for p in corpus if v2[p] != live[p]} == {}
+    assert {p: (v2[p], live_slot[p]) for p in corpus if v2[p] != live_slot[p]} == {}
     v2_names = {entry["canonical_name"] for entry in V2["exercises"]}
     assert {value for _kind, canonical, hint in live.values()
             for value in (canonical, hint) if value} <= v2_names
+
+
+def _editor_v3_program():
+    def slot(exercise_id, name):
+        return {"isim": name, "exercise_id": exercise_id, "set": 3, "tekrar": "10"}
+
+    def train(day, *slots):
+        return {"gun": day, "tip": "antrenman", "odak": "Legs", "egzersizler": list(slots)}
+
+    def rest(day):
+        return {"gun": day, "tip": "dinlenme", "egzersizler": []}
+
+    return {"program": [
+        train("Pazartesi", slot("ex_smith_machine_squat", "Smith Machine Squat")),
+        rest("Salı"),
+        train("Çarşamba", slot("ex_dumbbell_reverse_lunge", "Dumbbell Reverse Lunge")),
+        rest("Perşembe"),
+        train("Cuma", slot("ex_reverse_lunge", "Reverse Lunge")),
+        rest("Cumartesi"), rest("Pazar"),
+    ], "exercise_context": {"equipment_context": "spor_salonu", "cardio_type": "yok",
+                            "style": "general_fitness", "catalog_version": 3}}
+
+
+@pytest.mark.parametrize(("message", "args", "day"), [
+    ("Change Smith Machine Squat to 4x8.",
+     {"day": "", "exercise": "Smith Machine Squat", "sets": 4, "reps": "8"}, "Pazartesi"),
+    ("Change Reverse Lunge to 4x8.",
+     {"day": "", "exercise": "Reverse Lunge", "sets": 4, "reps": "8"}, "Cuma"),
+])
+def test_coach_finds_an_editor_added_v3_slot_without_a_day(
+        app, make_user, tools_on, message, args, day):
+    """Review r2 N-P2-1: slot lookup names the stored exercise, reviewed or not."""
+    from app.services.today_facts import get_active_plan
+    from tests.test_coach_plan_mutation_grounding import _fresh_turn
+    from tests.test_coach_plan_tools import PRESCRIBE, call, seed_plan
+
+    user_id = make_user(f"v3-slot-{day}").id
+    seed_plan(user_id, _editor_v3_program())
+    with app.test_request_context("/ask", method="POST"):
+        _fresh_turn(app, message, user_id=user_id)
+        result = call(user_id, PRESCRIBE, args)
+    payload = json.loads(result) if isinstance(result, str) else result
+    assert (payload.get("status"), payload["change"]["day"]) == ("applied", day), payload
+    program = json.loads(get_active_plan(user_id).plan_data)["program"]
+    changed = {(d["gun"], e["exercise_id"]) for d in program for e in d["egzersizler"]
+               if (e.get("set"), str(e.get("tekrar"))) == (4, "8")}
+    assert changed == {(day, next(e["exercise_id"] for d in _editor_v3_program()["program"]
+                              if d["gun"] == day for e in d["egzersizler"]))}
+
+
+def test_coach_add_of_an_exact_v3_name_writes_nothing(app, make_user, tools_on):
+    """Review r2 N-P2-2: "Reverse Lunge" must not become Dumbbell Reverse Lunge."""
+    from app.services.today_facts import get_active_plan
+    from tests.test_coach_plan_mutation_grounding import _fresh_turn
+    from tests.test_coach_plan_tools import ADD, call, seed_plan
+
+    user_id = make_user("v3-add-exact").id
+    seed_plan(user_id, _editor_v3_program())
+    before = get_active_plan(user_id).plan_data
+    with app.test_request_context("/ask", method="POST"):
+        _fresh_turn(app, "Add Reverse Lunge 3x10 on Monday.", user_id=user_id)
+        result = call(user_id, ADD, {"day": "Pazartesi", "exercise": "Reverse Lunge",
+                                     "sets": 3, "reps": "10"})
+    payload = json.loads(result) if isinstance(result, str) else result
+    assert payload.get("status") != "applied", payload
+    assert get_active_plan(user_id).plan_data == before
+
+
+def test_exact_v3_name_is_never_written_as_another_exercise():
+    """Review r2 N-P2-2: an exact V3 label is unknown as a Coach destination."""
+    from app.services.coach_plan_tools import exercise_grounding as eg
+
+    catalog = load_exercise_catalog()
+    for exercise in catalog.exercises:
+        if exercise.exercise_id in V2_IDS:
+            continue
+        for label in (exercise.canonical_name, *exercise.aliases):
+            assert eg.resolve_destination(label).kind == eg.KIND_UNKNOWN, label
+            slot = eg.resolve_slot_name(label)
+            assert (slot.kind, slot.canonical_name) == (eg.KIND_RESOLVED, exercise.canonical_name)
+    for label in ("Reverse Lunge", "Geri Hamle", "Machine Row", "Calf Raise Machine"):
+        assert eg.resolve_destination(label).kind == eg.KIND_UNKNOWN
 
 
 def test_assistance_machines_have_no_comparable_load():

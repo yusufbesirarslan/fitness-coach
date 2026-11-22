@@ -8,7 +8,11 @@ Source-only foundation (founder order #547, stacked on #549). Nothing is merged,
 - **Equipment vocabulary** gains `smith_machine` and `ez_bar`. The gym context (`spor_salonu`) admits them; `ev` and `minimal` do not.
 - **Additive taxonomy** `exercise_taxonomy_v3.json` (`app/services/exercise_catalog_v3.py`) adds 13 target regions, 126 exercise families and one equipment variant per member. The loader refuses any drift: an active ID outside exactly one family, a variant whose equipment the exercise does not require, duplicate equipment in a family, a cardio identity outside `cardio`, a private-namespace ID, a "Baldır" label, or an overlay for another catalog version.
 - **Generation is unchanged.** The 116 V3 additions carry `"generation": false`, so the AI generator's closed choice set is exactly the V2 set (pinned by test). Admitting them is a separate reviewed overlay change after a real-provider qualification.
-- **Coach WRITE grounding is unchanged.** `exercise_grounding` only considers reviewed IDs (`coach_grounding_eligible`, the same gate as generation). A V3 name can therefore never steal, split or newly answer a Coach phrase. A differential test pins every phrase in a generated corpus (more than 1,500 names, aliases, plurals, token runs and common phrasings) to exactly the catalog V2 result. Coach WRITE stays OFF.
+- **Coach WRITE grounding:**
+  - *Destinations* (ADD target and replacement) are reviewed IDs only (`coach_grounding_eligible`, the same gate as generation). An exact V3 name is `unknown`, never re-read as a different V2 exercise. For example, "Reverse Lunge" is not written as Dumbbell Reverse Lunge.
+  - *Slot lookup* (update, replace or remove an exercise already in the plan, with no day named) uses `resolve_slot_name`. An exact V3 name names itself, so editor-added exercises can be targeted.
+  - Every other phrase grounds exactly as on catalog V2, in both modes. A differential test pins this over a generated corpus of more than 1,500 names, aliases, plurals, token runs and common phrasings.
+  - Coach WRITE stays OFF.
 - **Training Insights.** The two assistance machines (`ex_machine_assisted_pull_up`, `ex_machine_assisted_dip`) are excluded from load comparability (`UNKNOWN_LOAD_EXERCISE_IDS`), because more assistance kg means less effort. Band assistance was already excluded by equipment.
 - **Signed drafts.** Browser drafts signed against catalog 1 or 2 still verify on save; issuing always uses the live version and a newer version is refused. Every reference is still re-resolved live.
 

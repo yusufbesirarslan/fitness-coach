@@ -8,9 +8,12 @@ Everything else is presentation-only: at most one high-confidence
 suggestion, never silent substitution. Fuzzy scores never become the
 identity that is written.
 
-Only reviewed catalog IDs are candidates (``coach_grounding_eligible``):
-the Catalog V3 additions are invisible here until a reviewed overlay change
-admits them, so a new name can never steal or split a V2 phrase.
+Only reviewed catalog IDs are destinations (``coach_grounding_eligible``):
+the Catalog V3 additions are not offered until a reviewed overlay change
+admits them, so a new name can never steal or split a V2 phrase, and an
+exact V3 name is ``unknown`` rather than re-read as another exercise.
+``resolve_slot_name`` (finding an exercise already in the plan) also lets an
+exact V3 name name itself, because the editor may have placed it.
 """
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -47,20 +50,47 @@ def _fold(value):
     return text.replace("ı", "i").replace("â", "a")
 
 
+def _exact(name):
+    try:
+        return resolve_exercise(name=name)
+    except ExerciseResolutionError:
+        return None
+
+
 def resolve_destination(name):
-    """Resolve an ADD/replacement destination against the live catalog."""
+    """Resolve an ADD/replacement destination against the live catalog.
+
+    An exact name of a not-yet-reviewed ID is ``unknown``: it is never
+    re-read as a different (reviewed) exercise by the inexact paths.
+    """
     if not isinstance(name, str) or not name.strip():
         return ExerciseTarget(KIND_UNKNOWN)
-    try:
-        definition = resolve_exercise(name=name)
-    except ExerciseResolutionError:
-        definition = None
-    if definition is not None and not coach_grounding_eligible(definition.exercise_id):
-        definition = None
+    definition = _exact(name)
+    if definition is not None:
+        if not coach_grounding_eligible(definition.exercise_id):
+            return ExerciseTarget(KIND_UNKNOWN)
+        return ExerciseTarget(
+            KIND_RESOLVED, canonical_name=definition.canonical_name)
+    return _inexact(name)
+
+
+def resolve_slot_name(name):
+    """Name an exercise already in the plan (update/replace/remove lookup).
+
+    The editor may have placed any active catalog ID, so an exact name
+    resolves to itself whether or not it is reviewed for Coach destinations.
+    Everything else follows the destination rules (reviewed IDs only).
+    """
+    if not isinstance(name, str) or not name.strip():
+        return ExerciseTarget(KIND_UNKNOWN)
+    definition = _exact(name)
     if definition is not None:
         return ExerciseTarget(
             KIND_RESOLVED, canonical_name=definition.canonical_name)
+    return _inexact(name)
 
+
+def _inexact(name):
     subset = _unique_token_subset(name)
     if subset is not None:
         return ExerciseTarget(
