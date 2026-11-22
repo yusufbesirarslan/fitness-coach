@@ -663,18 +663,28 @@ def test_phase2_purposes_are_independent_and_original_generation_is_fenced(pg_ap
             consent.authorize_operation(authority)
 
 
-def test_coach_plan_read_is_fenced_at_execution_and_provider_dispatch(pg_app):
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+def test_coach_plan_read_is_fenced_at_execution_and_provider_dispatch(pg_app, recipient):
     from app.models import TrainingPlan
-    from app.services import ai_coach, coach_plan_tools, coach_privacy
+    from app.services import ai_coach, coach_plan_tools, coach_privacy, private_exercises
 
     owner = 1
-    recipient, model = "openai", ai.OPENAI_MODEL
+    model = ai.OPENAI_MODEL if recipient == "openai" else app_config.BEDROCK_MODEL
     read = coach_plan_tools.READ_PLAN_TOOL
     captured = []
     with pg_app.app_context(), ai_spend_guard.subject_scope(owner):
         pg_app.extensions["r6_coach_containment"] = True
         pg_app.config[coach_plan_tools.FLAG_KEY] = True
-        plan = {"program": [{"gun": "Pazartesi", "tip": "dinlenme"}]}
+        registration, _ = private_exercises.register(owner, {
+            "display_name": "Local private press", "equipment": ["smith_machine"],
+            "movement": "vertical_push", "target_region": "shoulders",
+        })
+        identity = registration["exercise_id"]
+        plan = {"program": [{"gun": "Pazartesi", "tip": "antrenman", "egzersizler": [
+            {"exercise_id": "ex_machine_shoulder_press", "isim": "Machine Shoulder Press",
+             "set": 3, "tekrar": "8"},
+            {"exercise_id": identity, "isim": "UNTRUSTED_STORED_LABEL", "set": 3, "tekrar": "8–12"},
+        ]}]}
         db.session.add(TrainingPlan(user_id=owner, score=1, plan_data=json.dumps(plan)))
         db.session.commit()
         consent.mutate(owner, command("coach"))
@@ -686,7 +696,19 @@ def test_coach_plan_read_is_fenced_at_execution_and_provider_dispatch(pg_app):
             assert read in names and not names.intersection(coach_plan_tools.PLAN_WRITE_TOOL_NAMES)
             raw = ai_coach._dispatch_coach_tool(owner, read, "{}")
             projected = coach_privacy.tool_result(read, raw, user_id=owner)
-            assert '"plan":' in projected
+            curated, private = json.loads(projected)["plan"]["days"][0]["exercises"]
+            assert curated["family_id"] == "fam_shoulder_press"
+            assert private == {
+                "name": "Local private press", "movement": "vertical_push",
+                "equipment": ["smith_machine"], "primary_region": "shoulders",
+                "target_region": "shoulders", "position": 1, "user_defined": True,
+                "sets": 3, "reps": "8-12",
+            }
+            assert identity not in projected and "UNTRUSTED_STORED_LABEL" not in projected
+            with pytest.raises(consent.ConsentDenied):
+                coach_plan_tools.execute_plan_read(2)
+            foreign = coach_privacy.tool_result(read, raw, user_id=2)
+            assert "Local private press" not in foreign and identity not in foreign
 
             payload = dict(model=model, max_tokens=100,
                            messages=[{"role": "tool", "content": projected}])
