@@ -1,8 +1,11 @@
 """Post/watch integration for an already authorized R6 production read."""
 import argparse
 import json
+import os
 import re
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path, PurePosixPath
 
 from scripts import r6_coach_attestation as coach
 from scripts.r6_recovery_acceptance import EVENT
@@ -28,6 +31,38 @@ def deployment_digest(log, revision, slot):
                 "capability-activation-incomplete"}.intersection(names)):
         raise ValueError("R6_COACH_DEPLOYMENT_PROOF_UNPROVEN")
     return match[1]
+
+
+PROJECT = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}")
+GIT_SECONDS = 30
+
+
+def source_checkout(deploy_dir, main_project, revision, *, run=subprocess.run,
+                    here=Path(__file__)):
+    """The canonical absolute checkout this reader runs from, at the approved commit.
+
+    HostOps runs ``<context>/scripts/web_slot_runtime.py --deploy-dir <context>``
+    and the slot runtime accepts only an absolute directory. For a post/watch
+    read the verified checkout is that context, as in the engine's own
+    ``--deploy-dir`` rule and the slot runtime's default. Refuse every other
+    directory instead of resolving one.
+    """
+    path = PurePosixPath(deploy_dir)
+    if (not isinstance(deploy_dir, str) or not deploy_dir.startswith("/")
+            or deploy_dir.startswith("//") or os.path.normpath(deploy_dir) != deploy_dir
+            or not path.is_absolute() or os.path.realpath(deploy_dir) != deploy_dir
+            or not PROJECT.fullmatch(main_project) or main_project.startswith("axisai-web-")
+            or path.name != main_project
+            or Path(here).resolve().parents[1] != Path(deploy_dir)):
+        raise ValueError("R6_COACH_SOURCE_CHECKOUT_INVALID")
+    git = ["git", "-C", deploy_dir]
+    head = run([*git, "rev-parse", "--verify", "HEAD^{commit}"], capture_output=True,
+               text=True, timeout=GIT_SECONDS, check=False)
+    clean = run([*git, "diff", "--quiet", "HEAD", "--", "scripts"], capture_output=True,
+                timeout=GIT_SECONDS, check=False)
+    if head.returncode != 0 or head.stdout.strip() != revision or clean.returncode != 0:
+        raise ValueError("R6_COACH_SOURCE_CHECKOUT_UNPROVEN")
+    return deploy_dir
 
 
 def collect(ops, approved, expected_digest, challenge):
@@ -76,7 +111,9 @@ def main():
     args = parser.parse_args()
     try:
         approved = coach.binding(args.revision, args.tree, args.image, args.slot, sorted(args.head))
-        ops = HostOps(deploy_dir=args.deploy_dir, context_dir=".", work_dir=".",
+        checkout = source_checkout(args.deploy_dir, args.main_project, args.revision)
+        # Read-only: no work-directory operation is reachable from collect().
+        ops = HostOps(deploy_dir=checkout, context_dir=checkout, work_dir=checkout,
                       main_project=args.main_project, deploy_sha=args.revision, previous_commit="")
         print(json.dumps(collect(ops, approved, args.digest, args.challenge), sort_keys=True))
     except Exception:
