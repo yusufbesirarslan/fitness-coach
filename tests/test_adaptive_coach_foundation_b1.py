@@ -86,8 +86,8 @@ def test_the_read_is_the_canonical_plan_in_calendar_order(
     monday = days[0]
     assert monday["kind"] == "antrenman"
     assert monday["exercises"] == [
-        {"name": "Bench Press", "sets": 3, "reps": "8-12"},
-        {"name": "Shoulder Press", "sets": 4, "reps": "10-12"}]
+        {"name": "Bench Press", "sets": 3, "reps": "8-12", "position": 0},
+        {"name": "Shoulder Press", "sets": 4, "reps": "10-12", "position": 1}]
     assert days[1] == {"day": "Salı", "kind": "dinlenme", "exercises": []}
 
 
@@ -227,7 +227,7 @@ def test_read_then_edit_changes_exactly_one_field_through_the_real_loop(
                       if m.get("role") == "tool")
     seen = json.loads(first_tool["content"])
     assert seen["plan"]["days"][0]["exercises"][0] == {
-        "name": "Bench Press", "sets": 3, "reps": "8-12"}
+        "name": "Bench Press", "sets": 3, "reps": "8-12", "position": 0}
     # An applied write ends the loop with a server-owned reply (PR4); the
     # model never narrates a change it only believes happened.
     assert len(openai.calls) == 2
@@ -236,7 +236,7 @@ def test_read_then_edit_changes_exactly_one_field_through_the_real_loop(
         assign_request_id()
         reread = coach_plan_tools.execute_plan_read(planned_user.id)
     assert reread["plan"]["days"][0]["exercises"][0] == {
-        "name": "Bench Press", "sets": 2, "reps": "8-12"}
+        "name": "Bench Press", "sets": 2, "reps": "8-12", "position": 0}
 
     after = json.loads(_active(planned_user.id).plan_data)
     expected = json.loads(json.dumps(before))

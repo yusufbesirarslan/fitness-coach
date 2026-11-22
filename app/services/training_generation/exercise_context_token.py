@@ -45,6 +45,8 @@ from app.services.training_generation.preference_contract import (
 
 TOKEN_VERSION = 1
 PAYLOAD_KEYS = frozenset({"v", "uid", "eq", "cardio", "style", "catalog"})
+#: (signed catalog version, live catalog version) pairs a save may still verify.
+_VERIFIABLE_EARLIER_VERSIONS = frozenset({(1, 2), (1, 3), (2, 3)})
 # A valid token is ~170 characters. The cap exists so a hostile body is
 # rejected on sight instead of being base64-decoded and JSON-parsed first.
 MAX_TOKEN_CHARS = 512
@@ -142,9 +144,12 @@ def _checked_context(context: ExerciseContext, *, verify=False) -> ExerciseConte
         raise ExerciseContextInvalid("unknown program style")
     catalog_version = _exact_int(context.catalog_version)
     live_version = load_exercise_catalog().version
-    # V2 adds entries and aliases without changing V1 identities or contexts.
-    # Already issued V1 drafts still pass the live save-time exercise checks.
-    if catalog_version != live_version and not (verify and (catalog_version, live_version) == (1, 2)):
+    # V2 and V3 only add entries and aliases; no earlier identity or context
+    # changed meaning. Already issued V1/V2 drafts still pass the live
+    # save-time exercise checks, which re-resolve every reference. A newer
+    # (unknown) version is never accepted, and issuing always uses the live one.
+    if catalog_version != live_version and not (
+            verify and (catalog_version, live_version) in _VERIFIABLE_EARLIER_VERSIONS):
         raise ExerciseContextInvalid("catalog version mismatch")
     return context
 

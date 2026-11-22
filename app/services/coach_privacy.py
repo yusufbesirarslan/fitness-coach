@@ -105,6 +105,20 @@ def _plan_reps(value):
     return value.strip()
 
 
+def _curated_plan_identity(exercise_id):
+    """Catalog V3 fields re-derived from the server taxonomy, never forwarded."""
+    from app.services.exercise_catalog import CatalogConfigurationError
+    from app.services.exercise_catalog_v3 import describe_exercise
+    try:
+        descriptor = describe_exercise(exercise_id)
+    except CatalogConfigurationError:
+        return {}
+    if descriptor is None:
+        return {}
+    return {key: descriptor[key] for key in (
+        'exercise_id', 'source', 'family_id', 'target_region', 'equipment')}
+
+
 def _training_plan_projection(source):
     """Rebuild the plan read from tokens; never forward the domain dict."""
     out = {}
@@ -125,13 +139,18 @@ def _training_plan_projection(source):
                 continue
             sets = exercise.get('sets')
             label = exercise.get('name')
-            exercises.append({
+            item = {
                 # Catalog-vouched label only; unknown prose fails closed.
                 'name': label if isinstance(label, str) and len(label) <= 120
                 and exercise_name(label) else None,
                 'sets': sets if type(sets) is int and 1 <= sets <= 100 else None,
                 'reps': _plan_reps(exercise.get('reps')),
-            })
+            }
+            position = exercise.get('position')
+            if type(position) is int and 0 <= position < 64:
+                item['position'] = position
+            item.update(_curated_plan_identity(exercise.get('exercise_id')))
+            exercises.append(item)
         entry = {'day': day['day'], 'kind': token(day.get('kind'), _DAY_KINDS),
                  'exercises': exercises}
         if day.get('truncated') is True:

@@ -104,16 +104,16 @@ def test_versioned_picker_search(raw_client, make_user, as_owner, query, first):
     headers = as_owner(make_user("editor-catalog"))
     response = raw_client.get(CATALOG, headers=headers, query_string={"q": query})
     assert response.status_code == 200
-    assert response.json["catalog_version"] == 2
+    assert response.json["catalog_version"] == 3
     assert response.json["exercises"][0]["exercise_id"] == first
 
 
 def test_catalog_browse_and_missing_name(raw_client, make_user, as_owner):
     headers = as_owner(make_user("editor-catalog"))
     exercises = raw_client.get(CATALOG, headers=headers).json["exercises"]
-    assert len({exercise["exercise_id"] for exercise in exercises}) == len(exercises) == 89
-    assert raw_client.get(CATALOG, headers=headers, query_string={"q": "Zercher squat"}).json == {
-        "contract_version": 1, "catalog_version": 2, "exercises": [],
+    assert len({exercise["exercise_id"] for exercise in exercises}) == len(exercises) == 205
+    assert raw_client.get(CATALOG, headers=headers, query_string={"q": "Belt squat"}).json == {
+        "contract_version": 1, "catalog_version": 3, "exercises": [],
     }
     assert raw_client.get(f"{CATALOG}?q=run&q=walk", headers=headers).status_code == 400
 

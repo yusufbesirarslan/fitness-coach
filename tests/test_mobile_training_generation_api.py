@@ -328,7 +328,7 @@ def test_exercise_identity_diagnostic_is_bounded_correlated_and_private(
         "code": "TRAINING_PLAN_GENERATION_EXERCISE_IDENTITY_INVALID",
         "category": "unknown_id",
         "request_id": result.json["error"]["request_id"],
-        "catalog_version": "2",
+        "catalog_version": "3",
         "equipment": "spor_salonu",
         "cardio_type": "yok",
         "completion_count": "1",
