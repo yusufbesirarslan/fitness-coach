@@ -286,7 +286,7 @@ def _resolve_catalog_exercise(authority, name) -> ExerciseDefinition:
             "exercise is not canonical catalog identity") from exc
 
 
-def _resolve_placeable_exercise(authority, name, day, *, allow_overlap=False) -> ExerciseDefinition:
+def _resolve_placeable_exercise(authority, name, day) -> ExerciseDefinition:
     """Resolve a name that is about to be WRITTEN into ``day``.
 
     Two gates, both the catalog's own and neither re-implemented here:
@@ -311,8 +311,7 @@ def _resolve_placeable_exercise(authority, name, day, *, allow_overlap=False) ->
         raise InvalidMutation(
             "exercise is not compatible with the plan's equipment context")
     try:
-        check_placement(exercise, day, allow_overlap=allow_overlap,
-                        require_cardio_on_dedicated_day=authority.by_id, catalog=authority.catalog)
+        check_placement(exercise, day, require_cardio_on_dedicated_day=authority.by_id)
     except GenerationExerciseIncompatibleError as exc:
         raise InvalidMutation(
             "exercise is incompatible with the day type") from exc
@@ -460,18 +459,54 @@ def _require_day_stays_valid(day):
         raise InvalidMutation("a training day must keep at least one exercise")
 
 
-def _require_native_cardio_placement(day, authority):
-    """An edit may keep mixed days, provided their strength work survives."""
-    if authority is None or not authority.by_id:
-        return
+def _misplaced_entries(day, authority, *, strict):
+    """How many entries on ``day`` the canonical placement rule refuses.
+
+    ``strict`` resolution refuses the mutation on any entry it cannot
+    resolve. The non-strict count, taken before an edit, skips such entries,
+    which can only lower the baseline and so only make the later check
+    stricter.
+    """
+    misplaced = 0
     for entry in _exercises_of(day):
         if not isinstance(entry, dict):
-            raise PlanNotMutable("day has a malformed exercise")
-        exercise = _resolve_catalog_exercise(authority, entry.get(FIELD_EXERCISE_ID))
+            if strict:
+                raise PlanNotMutable("day has a malformed exercise")
+            continue
         try:
-            check_placement(exercise, day, allow_overlap=True, catalog=authority.catalog)
-        except GenerationExerciseIncompatibleError as exc:
-            raise InvalidMutation("edit would leave cardio without a strength session") from exc
+            exercise = _resolve_catalog_exercise(authority, entry.get(FIELD_EXERCISE_ID))
+        except InvalidMutation:
+            if strict:
+                raise
+            continue
+        try:
+            check_placement(exercise, day)
+        except GenerationExerciseIncompatibleError:
+            misplaced += 1
+    return misplaced
+
+
+def _native_placement_baseline(day, authority):
+    """Misplaced entries on ``day`` as read, before a native edit touches it."""
+    if authority is None or not authority.by_id:
+        return 0
+    return _misplaced_entries(day, authority, strict=False)
+
+
+def _require_native_cardio_placement(day, authority, before):
+    """A native edit may correct misplaced cardio, never re-save it.
+
+    Cardio belongs on a ``kardiyo`` day, whatever else the day holds. An
+    edited day passes when nothing on it is misplaced, or when the edit
+    strictly reduced what was misplaced (a corrective Replace or Remove on a
+    legacy day). Any other edit of a day that still holds misplaced cardio is
+    refused, so an unrelated change cannot write a new revision of it.
+    """
+    if authority is None or not authority.by_id:
+        return
+    after = _misplaced_entries(day, authority, strict=True)
+    if after and after >= before:
+        raise InvalidMutation("cardio must be corrected before this day can be edited")
 
 
 def apply_command(document, command, *, native_editor=False, private_definitions=None):
@@ -524,6 +559,7 @@ def _apply_replace(program, command, authority):
     # Mutate the existing slot in place: position, rest, notes and any field
     # this PR does not model are inherited, not rebuilt (brief §9A).
     entry = exercises[index]
+    before = _native_placement_baseline(day, authority)
     updates = {FIELD_NAME: replacement}
     if authority is not None:
         # Name and identity are written as ONE update, which is what closes
@@ -532,10 +568,7 @@ def _apply_replace(program, command, authority):
         # Because both land in ``updates``, the no-op short-circuit below
         # also still holds — replacing an exercise with an alias of itself
         # resolves back to the same pair and stays a deterministic no-op.
-        resolved = _resolve_placeable_exercise(
-            authority, replacement, day,
-            allow_overlap=authority.by_id and replacement == entry.get(FIELD_EXERCISE_ID),
-        )
+        resolved = _resolve_placeable_exercise(authority, replacement, day)
         if (authority.by_id and resolved.exercise_id != entry.get(FIELD_EXERCISE_ID)
                 and _identity_matches(exercises, replacement, authority, resolved)):
             raise ExerciseAlreadyPresent("replacement is already in the target day")
@@ -549,7 +582,7 @@ def _apply_replace(program, command, authority):
     if all(entry.get(key) == value for key, value in updates.items()):
         return False
     entry.update(updates)
-    _require_native_cardio_placement(day, authority)
+    _require_native_cardio_placement(day, authority, before)
     return True
 
 
@@ -616,7 +649,9 @@ def _apply_add(program, command, authority):
     if (authority is not None and authority.by_id
             and len(exercises) >= NATIVE_MAX_EXERCISES_PER_DAY):
         raise InvalidMutation("workout has reached the exercise limit")
+    before = _native_placement_baseline(day, authority)
     exercises.append(entry)
+    _require_native_cardio_placement(day, authority, before)
     return True
 
 
@@ -627,9 +662,10 @@ def _apply_remove(program, command, authority):
         exercises, command.exercise, authority,
         match_sets=command.match_sets, match_reps=command.match_reps,
         position=command.position)
+    before = _native_placement_baseline(day, authority)
     exercises.pop(index)
     _require_day_stays_valid(day)
-    _require_native_cardio_placement(day, authority)
+    _require_native_cardio_placement(day, authority, before)
     return True
 
 
@@ -650,13 +686,12 @@ def _apply_update(program, command, authority):
     entry = exercises[
         _find_exercise_index(
             exercises, command.exercise, authority, position=command.position)]
+    before = _native_placement_baseline(day, authority)
 
     if all(entry.get(key) == value for key, value in updates.items()):
         return False
     entry.update(updates)
-    # A new revision of a day must satisfy the same placement invariant as any
-    # other edit, so a stored cardio-without-strength day is not re-saved.
-    _require_native_cardio_placement(day, authority)
+    _require_native_cardio_placement(day, authority, before)
     return True
 
 

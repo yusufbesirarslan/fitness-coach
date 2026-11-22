@@ -244,14 +244,13 @@ def test_editor_preserves_equipment_cardio_and_in_flight_session(raw_client, mak
         assert mutate(raw_client, headers, operation, binding, "editor-refuse", **fields).status_code == 400
 
     assert mutate(raw_client, headers, "prescription", binding, "editor-cardio-edit",
-                  exercise_id=RUN, position=1, reps="25 dk").status_code == 200
-    binding = revision(raw_client, headers)
+                  exercise_id=RUN, position=1, reps="25 dk").status_code == 400
     db.session.add(WorkoutSession(user_id=owner_id, workout_date="2026-11-21"))
     db.session.commit()
     active = mutate(raw_client, headers, "remove", binding, "editor-active", exercise_id=RUN, position=1)
     assert active.status_code == 409
     assert active.json["error"]["code"] == "TRAINING_EDITOR_ACTIVE_WORKOUT"
-    assert PlanMutationRecord.query.count() == 1
+    assert PlanMutationRecord.query.count() == 0
 
 
 def durable_state(client, headers, plan_id):
@@ -291,11 +290,62 @@ def test_distinct_cardio_add_and_replace_are_refused_on_strength_days(raw_client
         assert response.json["error"]["code"] == "TRAINING_EDITOR_INVALID_REQUEST"
         assert durable_state(raw_client, headers, plan_id) == before, key
 
-    # A stored mixed day stays editable while its strength work survives.
+    # Strength beside cardio does not make a stored mixed day editable: only
+    # an edit that removes the misplaced cardio is accepted.
     kept = mutate(raw_client, headers, "replace", binding, "editor-cardio-same-id",
                   day_slot=2, position=1, exercise_id=RUN, replacement_id=RUN, reps="25 dk")
-    assert kept.status_code == 200, kept.json
-    assert PlanMutationRecord.query.count() == 1
+    assert kept.status_code == 400, kept.json
+    assert durable_state(raw_client, headers, plan_id) == before
+    corrected = mutate(raw_client, headers, "remove", binding, "editor-cardio-correct",
+                       day_slot=2, position=1, exercise_id=RUN)
+    assert corrected.status_code == 200, corrected.json
+    edited = mutate(raw_client, headers, "prescription", revision(raw_client, headers),
+                    "editor-cardio-after", day_slot=2, position=0, exercise_id=SQUAT, sets=4)
+    assert edited.status_code == 200, edited.json
+    assert PlanMutationRecord.query.count() == 2
+
+
+def test_core_work_never_keeps_cardio_on_a_training_day(raw_client, make_user, as_owner):
+    owner = make_user("editor-plank-run")
+    document = program(equipment="ev")
+    document["exercise_context"]["cardio_type"] = "karisik"
+    document["program"][0]["egzersizler"] = [exercise(PLANK), exercise(RUN), exercise("ex_brisk_walk")]
+    plan_id = save_plan(owner.id, document)
+    headers = as_owner(owner)
+    before = durable_state(raw_client, headers, plan_id)
+    binding = before[-1]
+    for key, operation, fields in (
+        ("plank-prescription", "prescription", {"position": 0, "exercise_id": PLANK, "sets": 4}),
+        ("run-prescription", "prescription", {"position": 1, "exercise_id": RUN, "reps": "25 dk"}),
+        ("run-same-id", "replace",
+         {"position": 1, "exercise_id": RUN, "replacement_id": RUN, "reps": "25 dk"}),
+        ("plank-to-squat", "replace",
+         {"position": 0, "exercise_id": PLANK, "replacement_id": SQUAT}),
+        ("add-squat", "add", {"exercise_id": SQUAT, "sets": 3, "reps": "10"}),
+        ("remove-plank", "remove", {"position": 0, "exercise_id": PLANK}),
+    ):
+        response = mutate(raw_client, headers, operation, binding, f"editor-plank-{key}", **fields)
+        assert response.status_code == 400, (key, response.json)
+        assert response.json["error"]["code"] == "TRAINING_EDITOR_INVALID_REQUEST"
+        assert durable_state(raw_client, headers, plan_id) == before, key
+
+    # Correction is stepwise: each accepted edit removes misplaced cardio,
+    # and an unrelated edit stays refused until none is left.
+    first = mutate(raw_client, headers, "replace", binding, "editor-plank-fix-run",
+                   position=1, exercise_id=RUN, replacement_id=SQUAT)
+    assert first.status_code == 200, first.json
+    partial = durable_state(raw_client, headers, plan_id)
+    still = mutate(raw_client, headers, "prescription", partial[-1], "editor-plank-still",
+                   position=0, exercise_id=PLANK, sets=4)
+    assert still.status_code == 400, still.json
+    assert durable_state(raw_client, headers, plan_id) == partial
+    second = mutate(raw_client, headers, "remove", partial[-1], "editor-plank-fix-walk",
+                    position=2, exercise_id="ex_brisk_walk")
+    assert second.status_code == 200, second.json
+    done = mutate(raw_client, headers, "prescription", revision(raw_client, headers),
+                  "editor-plank-done", position=0, exercise_id=PLANK, sets=4)
+    assert done.status_code == 200, done.json
+    assert PlanMutationRecord.query.count() == 3
 
 
 def test_undo_restores_exact_bytes_and_refuses_coach_mutations(raw_client, make_user, as_owner):

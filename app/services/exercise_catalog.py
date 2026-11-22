@@ -34,10 +34,6 @@ MOVEMENT_VOCABULARY = frozenset({
 # pattern. Named here, in the vocabulary's own module, so callers that need to
 # reason about cardio placement do not grow a second movement vocabulary.
 CARDIO_MOVEMENT = "cardio"
-# Movements that are not strength work. Cardio is a modality. Mobility is
-# movement preparation and does not count as strength either, so a day that
-# keeps cardio beside "strength" still needs a movement outside this set.
-NON_STRENGTH_MOVEMENTS = frozenset({CARDIO_MOVEMENT, "mobility"})
 
 REGION_VOCABULARY = frozenset({
     "arms", "back", "calves", "cardio", "chest", "core", "full_body",
