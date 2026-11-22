@@ -306,11 +306,11 @@ def _project_day(day, slot, user_id, secret, lineage, version, catalog):
         "duration_minutes": day["sure_dk"],
         "estimated_calories": day["tahmini_kalori"],
         "workout_ref": reference,
-        "exercises": [_project_exercise(item, catalog) for item in day["egzersizler"]],
+        "exercises": [_project_exercise(item, catalog=catalog) for item in day["egzersizler"]],
     }
 
 
-def _project_exercise(item, catalog):
+def _project_exercise(item, *, catalog=None):
     exercise_id = item.get("exercise_id")
     if not isinstance(exercise_id, str):
         raise PlanUnprojectable("canonical exercise identity is missing")
