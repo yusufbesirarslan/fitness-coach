@@ -79,11 +79,15 @@ from . import results
 from .identity import (
     TurnIdentityUnavailable,
     confirmation_operation_key,
+    current_turn_id,
     mutation_operation_key,
     undo_operation_key,
 )
 from .parser import ToolArgumentError, build_command
+from .prescriptions import POLICY_VERSION, validate_coach_prescription
 from .proposals import (
+    POLICY_KEY,
+    PREVIEW_KEY,
     binding_matches,
     is_training_proposal,
     decode_command,
@@ -680,6 +684,7 @@ def _execute_mutation(user_id, name, arguments):
     if not grounded.ready:
         return grounded.result
     command = grounded.command
+    validate_coach_prescription(command)
     # Keep a session start or native edit from invalidating the impact decision.
     lock_plan_session_transition(user_id)
     pending = get_pending(user_id)
@@ -687,7 +692,7 @@ def _execute_mutation(user_id, name, arguments):
         return _reuse_or_block_pending(pending, name, arguments)
     if original_plan is not None:
         db.session.expire(original_plan)
-    plan, _document, changed = preview_command(user_id, command)
+    plan, preview, changed = preview_command(user_id, command)
     # A newer snapshot can change what a grounded workout target means.
     if binding is None or binding != plan_binding(plan):
         raise PlanStateConflict("the plan changed during Coach grounding")
@@ -698,7 +703,7 @@ def _execute_mutation(user_id, name, arguments):
     if decision.verdict == REFUSE_UNSUPPORTED:
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
     if decision.verdict == REQUIRE_CONFIRMATION:
-        return _stage_proposal(user_id, binding, command, decision)
+        return _stage_proposal(user_id, binding, command, decision, preview=preview)
     if decision.verdict != APPLY_NOW:
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
     return _apply_typed(user_id, command, binding)
@@ -719,6 +724,10 @@ def _execute_undo(user_id, arguments):
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
     if decision.verdict == REQUIRE_CONFIRMATION:
         from app.services.plan_mutation.journal import latest_reversible
+        db.session.expire(plan)
+        current = get_active_plan(user_id)
+        if current is None or plan_binding(current) != binding:
+            raise PlanStateConflict("the plan changed during Coach Undo preview")
         if latest_reversible(user_id, plan.lineage_id) is None:
             return _apply_undo(user_id, binding)
         return _stage_proposal(user_id, binding, UNDO_LAST_CHANGE, decision)
@@ -757,8 +766,12 @@ def _reuse_or_block_pending(pending, name, arguments):
     return results.error_result(results.ERROR_PENDING_CONFIRMATION_EXISTS)
 
 
-def _stage_proposal(user_id, binding, command, decision):
+def _stage_proposal(user_id, binding, command, decision, *, preview=None):
+    current_turn_id()
     kind, payload, fingerprint = encode_command(command)
+    payload[POLICY_KEY] = POLICY_VERSION
+    if preview:
+        payload[PREVIEW_KEY] = preview
     try:
         _row, reused = create_or_reuse_pending(
             user_id,
@@ -830,7 +843,9 @@ def _confirm_pending(user_id):
     if already is None and (
             plan is None
             or plan.lineage_id != row.plan_lineage_id
-            or not binding_matches(row, plan)):
+            or not binding_matches(row, plan)
+            or (row.command_type not in (UNDO_COMMAND_TYPE, "remove_exercise")
+                and (row.command_payload or {}).get(POLICY_KEY) != POLICY_VERSION)):
         mark_stale(user_id, row.public_id)
         return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
     if not _charge_budget(key):
@@ -992,6 +1007,8 @@ def _apply_confirmed_now(user_id, pending):
             user_id, _context(key), expected_binding=_confirmation_binding(pending))
         payload = results.undo_result(result)
     else:
+        if find_by_key(user_id, key) is None:
+            validate_coach_prescription(command)
         result = apply_plan_mutation(
             user_id, command, _context(key),
             expected_binding=_confirmation_binding(pending))

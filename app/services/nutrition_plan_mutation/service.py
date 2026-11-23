@@ -302,6 +302,45 @@ def find_quote(owner, proposal_id=None):
                  op.before_snapshot, op.after_snapshot)
 
 
+def check_pending_quote(owner, proposal_id=None):
+    """Return (available quote, denied) using the quote's original grants.
+
+    A definitive denial retires the exact pair using the resolution lock
+    order. A temporary failure withholds it and leaves it recoverable.
+    """
+    _entry(owner)
+    if proposal_id is None:
+        proposal_id = (Proposal.query.filter_by(user_id=owner, command_type=COMMAND, status="pending")
+                       .with_entities(Proposal.public_id).scalar())
+        if proposal_id is None:
+            return None, False
+    operation_id = None
+    try:
+        proposal = lock_proposal(owner, proposal_id)
+        if (proposal is None or proposal.command_type != COMMAND
+                or proposal.status != "pending"):
+            # A concurrent resolver consumed the observed quote. A bare
+            # decision still must not fall through to another pending action.
+            return None, True
+        op = _operation(owner, proposal_public_id=proposal.public_id)
+        if (op is None or op.status != "prepared"
+                or proposal.command_payload.get("operation_id") != op.public_id):
+            return None, True
+        operation_id = op.public_id
+        _fence(owner, op)
+        quote = find_quote(owner, proposal_id)
+        return quote, quote is None
+    except ai_consent.ConsentDenied as denied:
+        db.session.rollback()
+        if denied.status >= 500:
+            raise
+        if operation_id is not None:
+            _retire_denied(owner, operation_id, proposal_id)
+        return None, True
+    finally:
+        db.session.rollback()
+
+
 def release_unavailable(owner, proposal_id):
     """Owner-only cancel of a quote stranded while the boundary is CLOSED.
 

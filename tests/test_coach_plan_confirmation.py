@@ -44,12 +44,16 @@ def _new_turn(app, message=""):
     ai_coach._begin_coach_turn(message)
 
 
-def test_replace_without_session_impact_still_applies(
+def test_replace_without_session_impact_requires_preview_and_confirmation(
         app, planned_user, tools_on, turn):
     result = call(planned_user.id, REPLACE,
                   {"day": "Pazartesi", "exercise": "Bench Press",
                    "replacement": "Push-Up"})
-    assert result["status"] == results.STATUS_APPLIED
+    assert result["status"] == results.STATUS_CONFIRMATION_REQUIRED
+    assert names(planned_user.id)[0] == "Bench Press"
+    assert not journal(planned_user.id)
+    _new_turn(app, "yes")
+    assert call(planned_user.id, CONFIRM)["status"] == results.STATUS_APPLIED
     assert names(planned_user.id)[0] == "Push-Up"
     assert plan_version(planned_user.id) == 1
     assert len(journal(planned_user.id)) == 1
@@ -138,7 +142,10 @@ def test_plan_change_after_undo_impact_check_cannot_retarget_undo(
     owner = planned_user.id
     assert call(owner, REPLACE, {
         "day": "Pazartesi", "exercise": "Bench Press", "replacement": "Push-Up",
-    })["status"] == results.STATUS_APPLIED
+    })["status"] == results.STATUS_CONFIRMATION_REQUIRED
+    _new_turn(app, "yes")
+    assert call(owner, CONFIRM)["status"] == results.STATUS_APPLIED
+    _new_turn(app)
     impact_facts = executor.session_impact_facts
 
     def change_after_impact(user_id, command):

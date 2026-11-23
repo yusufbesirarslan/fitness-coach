@@ -251,7 +251,13 @@ def test_read_then_edit_changes_exactly_one_field_through_the_real_loop(
     # An applied write ends the loop with a server-owned reply (PR4); the
     # model never narrates a change it only believes happened.
     assert len(openai.calls) == 2
-    # A later read (next turn) reflects the persisted change.
+    assert _active(planned_user.id).mutation_version == 0
+    db.session.rollback()
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        with coach_read_scope(planned_user.id):
+            ai_coach._run_coach_conversation(
+                planned_user.id, "yes", "", client_history=[], language="en")
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
         with coach_read_scope(planned_user.id):
@@ -280,6 +286,12 @@ def test_turn_effects_report_a_change_and_a_pending_proposal(
     coach_plan_tools.execute_plan_tool(
         planned_user.id, PRESCRIBE,
         {"day": "Pazartesi", "exercise": "Bench Press", "sets": 2})
+    assert coach_plan_tools.turn_plan_effects(planned_user.id)["changed"] is False
+    from app.observability import assign_request_id
+    assign_request_id()
+    coach_plan_tools.begin_turn("yes")
+    assert coach_plan_tools.execute_plan_tool(
+        planned_user.id, coach_plan_tools.CONFIRM_TOOL, {})["status"] == "applied"
     assert coach_plan_tools.turn_plan_effects(planned_user.id)["changed"] is True
 
     coach_plan_tools.execute_plan_tool(

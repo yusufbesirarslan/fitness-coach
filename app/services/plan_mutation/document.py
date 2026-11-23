@@ -448,7 +448,7 @@ def remove_target_slots(document, day_name, exercise_name):
 def _require_workout_day(day):
     """Refuse to put exercises on an explicit rest day."""
     if day.get(FIELD_KIND) == REST_TIP:
-        raise InvalidMutation("cannot add an exercise to a rest day")
+        raise InvalidMutation("cannot edit exercises on a rest day")
 
 
 def _require_day_stays_valid(day):
@@ -509,7 +509,7 @@ def _require_native_cardio_placement(day, authority, before):
         raise InvalidMutation("cardio must be corrected before this day can be edited")
 
 
-def apply_command(document, command, *, native_editor=False, private_definitions=None):
+def apply_command(document, command, *, native_editor=False, private_definitions=None, coach=False):
     """Apply ``command`` to a copy of ``document``.
 
     Returns ``(new_document, changed)``. ``changed`` is False when the requested
@@ -530,10 +530,23 @@ def apply_command(document, command, *, native_editor=False, private_definitions
     authority = _exercise_authority(working, by_id=native_editor,
                                     private_definitions=private_definitions if native_editor else None)
 
+    if coach:
+        day = _find_day(program, command.day)
+        if isinstance(command, MoveTrainingDayCommand):
+            other = _find_day(program, command.target_day)
+            for slot in (day, other):
+                if slot.get(FIELD_KIND) == REST_TIP:
+                    if slot.get(FIELD_EXERCISES) not in (None, []):
+                        raise InvalidMutation("a rest day cannot contain exercises")
+                else:
+                    _require_day_stays_valid(slot)
+        else:
+            _require_workout_day(day)
+
     if isinstance(command, ReplaceExerciseCommand):
-        changed = _apply_replace(program, command, authority)
+        changed = _apply_replace(program, command, authority, coach=coach)
     elif isinstance(command, AddExerciseCommand):
-        changed = _apply_add(program, command, authority)
+        changed = _apply_add(program, command, authority, coach=coach)
     elif isinstance(command, RemoveExerciseCommand):
         changed = _apply_remove(program, command, authority)
     elif isinstance(command, UpdateExercisePrescriptionCommand):
@@ -546,7 +559,7 @@ def apply_command(document, command, *, native_editor=False, private_definitions
     return (working, True) if changed else (document, False)
 
 
-def _apply_replace(program, command, authority):
+def _apply_replace(program, command, authority, *, coach):
     replacement = normalize_exercise_name(command.replacement)
     if replacement is None:
         raise InvalidMutation("replacement name is required")
@@ -569,7 +582,7 @@ def _apply_replace(program, command, authority):
         # also still holds — replacing an exercise with an alias of itself
         # resolves back to the same pair and stays a deterministic no-op.
         resolved = _resolve_placeable_exercise(authority, replacement, day)
-        if (authority.by_id and resolved.exercise_id != entry.get(FIELD_EXERCISE_ID)
+        if ((authority.by_id or coach) and resolved.exercise_id != entry.get(FIELD_EXERCISE_ID)
                 and _identity_matches(exercises, replacement, authority, resolved)):
             raise ExerciseAlreadyPresent("replacement is already in the target day")
         updates[FIELD_NAME] = resolved.canonical_name
@@ -586,7 +599,7 @@ def _apply_replace(program, command, authority):
     return True
 
 
-def _apply_add(program, command, authority):
+def _apply_add(program, command, authority, *, coach):
     name = normalize_exercise_name(command.exercise)
     if name is None:
         raise InvalidMutation("exercise name is required")
@@ -602,7 +615,7 @@ def _apply_add(program, command, authority):
     if authority is not None:
         resolved = _resolve_placeable_exercise(authority, name, day)
         entry[FIELD_NAME] = resolved.canonical_name
-        entry["dinlenme"] = "0"
+        entry["dinlenme"] = "—" if coach else "0"
         entry["not"] = ""
         # Appended last, matching the key order canonicalization produces on
         # the generate/save path, so a mutated canonical plan and a freshly
@@ -646,7 +659,7 @@ def _apply_add(program, command, authority):
         # the one already there is a different change than the one requested.
         raise ExerciseAlreadyPresent("exercise is already in the target day")
 
-    if (authority is not None and authority.by_id
+    if ((coach or (authority is not None and authority.by_id))
             and len(exercises) >= NATIVE_MAX_EXERCISES_PER_DAY):
         raise InvalidMutation("workout has reached the exercise limit")
     before = _native_placement_baseline(day, authority)

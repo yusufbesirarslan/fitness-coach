@@ -30,6 +30,7 @@ from .prescriptions import (
     Prescription,
     merge_prescription,
     parse_prescription,
+    strip_timed_prescription,
 )
 from .schemas import (
     ADD_EXERCISE_TOOL,
@@ -338,7 +339,7 @@ def _exercise_from_text(message):
     """
     if not isinstance(message, str) or not message.strip():
         return ""
-    text = message
+    text = strip_timed_prescription(message)
     text = re.sub(
         r"\d+\s*[x×]\s*\d+(?:\s*[-–—]\s*\d+)?", " ", text, flags=re.I)
     text = re.sub(

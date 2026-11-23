@@ -113,6 +113,7 @@ def test_only_approved_consumers_import_the_domain():
         Path("app/services/training_plan_replacement/generation.py"),
         Path("app/services/coach_plan_tools/executor.py"),
         Path("app/services/coach_plan_tools/parser.py"),
+        Path("app/services/coach_plan_tools/prescriptions.py"),  # pure validation
         Path("app/services/coach_plan_tools/results.py"),
         Path("app/services/coach_plan_tools/schemas.py"),
         Path("app/services/coach_plan_tools/identity.py"),
