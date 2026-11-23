@@ -392,17 +392,21 @@ def _editor_v3_program():
 def test_coach_finds_an_editor_added_v3_slot_without_a_day(
         app, make_user, tools_on, message, args, day):
     """Review r2 N-P2-1: slot lookup names the stored exercise, reviewed or not."""
+    from app.services.coach_plan_tools import CONFIRM_TOOL
     from app.services.today_facts import get_active_plan
     from tests.test_coach_plan_mutation_grounding import _fresh_turn
     from tests.test_coach_plan_tools import PRESCRIBE, call, seed_plan
 
     user_id = make_user(f"v3-slot-{day}").id
     seed_plan(user_id, _editor_v3_program())
+    before = get_active_plan(user_id).plan_data
     with app.test_request_context("/ask", method="POST"):
         _fresh_turn(app, message, user_id=user_id)
         result = call(user_id, PRESCRIBE, args)
-    payload = json.loads(result) if isinstance(result, str) else result
-    assert (payload.get("status"), payload["change"]["day"]) == ("applied", day), payload
+        assert (result["status"], result["change"]["day"]) == ("confirmation_required", day)
+        assert get_active_plan(user_id).plan_data == before
+        _fresh_turn(app, "yes", user_id=user_id)
+        assert call(user_id, CONFIRM_TOOL)["status"] == "applied"
     program = json.loads(get_active_plan(user_id).plan_data)["program"]
     changed = {(d["gun"], e["exercise_id"]) for d in program for e in d["egzersizler"]
                if (e.get("set"), str(e.get("tekrar"))) == (4, "8")}

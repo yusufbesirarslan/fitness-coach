@@ -130,6 +130,13 @@ def _assert_unchanged(user_id, before):
     assert _snapshot(user_id) == before
 
 
+def _confirm_preview(app, user_id, before):
+    staged = _snapshot(user_id)
+    assert staged == (*before[:3], before[3] + 1, *before[4:])
+    _, reply = _turn(app, user_id, "yes")
+    assert "updated" in reply.lower() or "added" in reply.lower() or "replaced" in reply.lower()
+
+
 def _journal(user_id):
     return PlanMutationRecord.query.filter_by(
         user_id=user_id).order_by(PlanMutationRecord.id).all()
@@ -153,6 +160,7 @@ def test_a_partial_prescription_is_kept_across_the_clarification(
     _assert_unchanged(arms_user.id, before)
 
     _, reply = _turn(app, arms_user.id, "15")
+    _confirm_preview(app, arms_user.id, before)
 
     assert _rx(arms_user.id, "Çarşamba", "Walking Lunge") == (4, "15")
     assert "Walking Lunge" in reply
@@ -178,6 +186,7 @@ def test_b_the_reverse_partial_is_kept_too(app, arms_user, tools_on):
     _assert_unchanged(arms_user.id, before)
 
     _turn(app, arms_user.id, "4")
+    _confirm_preview(app, arms_user.id, before)
 
     assert _rx(arms_user.id, "Çarşamba", "Walking Lunge") == (4, "12")
     assert len(_journal(arms_user.id)) == 1
@@ -213,6 +222,7 @@ def test_b2_a_half_answered_request_keeps_both_answers(app, arms_user,
         "Pazartesi", 4, None)
 
     _turn(app, uid, "12")
+    _confirm_preview(app, uid, before)
 
     assert _rx(uid, "Pazartesi", "Walking Lunge") == (4, "12")
     assert _names(uid, "Cuma") == ["Barbell Curl"]
@@ -256,6 +266,7 @@ def test_c_a_failed_add_does_not_leave_the_older_replace_executable(
     _assert_unchanged(uid, before)
 
     _, reply = _turn(app, uid, "Monday")
+    _confirm_preview(app, uid, before)
 
     journal = _journal(uid)
     assert len(journal) == 1
@@ -294,12 +305,14 @@ def test_c3_the_same_request_is_never_superseded_by_its_own_continuation(
     could not tell that apart from a new intention, every continuation would
     clear the record it is completing and nothing would ever apply."""
     uid = arms_user.id
+    before = _snapshot(uid)
     _turn(app, uid,
           "Add Walking Lunges with 4 sets to my Wednesday workout",
           [(ADD, {"day": "Çarşamba", "exercise": "Walking Lunges",
                   "sets": 4})])
 
     _turn(app, uid, "15")
+    _confirm_preview(app, uid, before)
 
     assert _rx(uid, "Çarşamba", "Walking Lunge") == (4, "15")
 
@@ -321,6 +334,7 @@ def test_d_an_ambiguous_add_asks_and_then_lands_on_the_named_day(
     _assert_unchanged(uid, before)
 
     _turn(app, uid, "Friday")
+    _confirm_preview(app, uid, before)
 
     assert _names(uid, "Cuma") == ["Barbell Curl", "Walking Lunge"]
     assert _names(uid, "Pazartesi") == ["Barbell Curl"]
@@ -334,13 +348,15 @@ def test_e_replace_inherits_the_prescription_it_was_not_given(
     """Replace needs source + replacement + day. Sets and reps are optional
     and inherit — asking for them was the regression."""
     uid = arms_user.id
+    before = _snapshot(uid)
 
     results, reply = _turn(
         app, uid, "Replace Barbell Curl with Dumbbell Curl in my Friday workout",
         [(REPLACE, {"day": "Cuma", "exercise": "Barbell Curl",
                     "replacement": "Dumbbell Curl"})])
 
-    assert results[0]["status"] == "applied"
+    assert results[0]["status"] == "confirmation_required"
+    _confirm_preview(app, uid, before)
     assert _names(uid, "Cuma") == ["Dumbbell Biceps Curl"]
     assert _rx(uid, "Cuma", "Dumbbell Biceps Curl") == (4, "12")
     assert "Friday" in reply
@@ -352,13 +368,15 @@ def test_e2_replace_survives_a_provider_that_blanks_the_optional_fields(
     """Providers emit "" for "I have nothing for this". Refusing that is how
     a replace ended up asking for sets and reps."""
     uid = arms_user.id
+    before = _snapshot(uid)
 
     results, _ = _turn(
         app, uid, "Replace Barbell Curl with Dumbbell Curl in my Friday workout",
         [(REPLACE, {"day": "Cuma", "exercise": "Barbell Curl",
                     "replacement": "Dumbbell Curl", "sets": "", "reps": ""})])
 
-    assert results[0]["status"] == "applied"
+    assert results[0]["status"] == "confirmation_required"
+    _confirm_preview(app, uid, before)
     assert _rx(uid, "Cuma", "Dumbbell Biceps Curl") == (4, "12")
 
 
@@ -378,6 +396,7 @@ def test_f_replace_with_a_fuzzy_destination_asks_then_applies(
     _assert_unchanged(uid, before)
 
     _turn(app, uid, "yes")
+    _confirm_preview(app, uid, before)
 
     assert _names(uid, "Cuma") == ["Dumbbell Biceps Curl"]
     assert _rx(uid, "Cuma", "Dumbbell Biceps Curl") == (4, "12")
@@ -390,13 +409,15 @@ def test_g_update_resolves_a_unique_slot_without_being_told_the_day(
         app, arms_user, tools_on):
     """"Change Bodyweight Squat to 4x10" names one slot in the whole plan."""
     uid = arms_user.id
+    before = _snapshot(uid)
 
     results, reply = _turn(
         app, uid, "Change Bodyweight Squat to 4x10",
         [(PRESCRIBE, {"day": "", "exercise": "Bodyweight Squat", "sets": 4,
                       "reps": "10"})])
 
-    assert results[0]["status"] == "applied"
+    assert results[0]["status"] == "confirmation_required"
+    _confirm_preview(app, uid, before)
     assert _rx(uid, "Çarşamba", "Bodyweight Squat") == (4, "10")
     assert reply and "Monday" not in reply and "Friday" not in reply
     assert _rx(uid, "Pazartesi", "Barbell Curl") == (3, "10")
@@ -427,6 +448,7 @@ def test_h_an_ambiguous_update_asks_only_for_the_day(app, arms_user, tools_on):
     assert record["operation"] == "update_exercise_prescription"
 
     _turn(app, uid, "Monday")
+    _confirm_preview(app, uid, before)
 
     assert _rx(uid, "Pazartesi", "Barbell Curl") == (5, "8")
     assert _rx(uid, "Cuma", "Barbell Curl") == (4, "12")
@@ -438,6 +460,7 @@ def test_h_an_ambiguous_update_asks_only_for_the_day(app, arms_user, tools_on):
 def test_i_a_new_request_supersedes_the_pending_one_across_turns(
         app, arms_user, tools_on):
     uid = arms_user.id
+    before = _snapshot(uid)
 
     _turn(app, uid, "Change Barbell Curl to 5x8",
           [(PRESCRIBE, {"day": "", "exercise": "Barbell Curl", "sets": 5,
@@ -446,6 +469,7 @@ def test_i_a_new_request_supersedes_the_pending_one_across_turns(
           [(ADD, {"day": "", "exercise": "Walking Lunges", "sets": 3,
                   "reps": "10"})])
 
+    _confirm_preview(app, uid, before)
     journal = _journal(uid)
     assert [r.command_type for r in journal] == ["add_exercise"]
     assert _rx(uid, "Pazartesi", "Barbell Curl") == (3, "10")
@@ -640,6 +664,7 @@ def test_an_ungroundable_day_is_asked_for_not_guessed(app, arms_user,
 
 def test_a_continuation_is_consumed_once(app, arms_user, tools_on):
     uid = arms_user.id
+    before = _snapshot(uid)
     _turn(app, uid, "Add Walking Lunges 3x10 to my arm workout",
           [(ADD, {"day": "", "exercise": "Walking Lunges", "sets": 3,
                   "reps": "10"})])
@@ -649,6 +674,8 @@ def test_a_continuation_is_consumed_once(app, arms_user, tools_on):
     _turn(app, uid, "Friday")
 
     assert _snapshot(uid) == after_first
+    assert not _journal(uid)
+    _confirm_preview(app, uid, before)
     assert len(_journal(uid)) == 1
     assert _names(uid, "Cuma").count("Walking Lunge") == 1
 

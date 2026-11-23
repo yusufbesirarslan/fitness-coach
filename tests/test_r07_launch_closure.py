@@ -183,3 +183,23 @@ def test_typed_yes_without_observed_proposal_cannot_apply_a_later_one(
     _new_turn(app, "yes")
     assert "updated" in coach_confirmation.resolve_pending_turn(owner, "en")
     assert len(journal(owner)) == 1
+
+
+def test_prescription_proposal_without_current_policy_is_stale(
+        app, planned_user, tools_on, turn):
+    from app.services.coach_plan_tools.proposals import POLICY_KEY
+
+    owner = planned_user.id
+    baseline = get_active_plan(owner).plan_data
+    result = call(owner, PRESCRIBE, {"day": "Pazartesi", "exercise": "Bench Press", "sets": 4})
+    assert result["status"] == "confirmation_required"
+    proposal = plan_confirmation.get_pending(owner)
+    old_payload = dict(proposal.command_payload)
+    old_payload.pop(POLICY_KEY)
+    proposal.command_payload = old_payload
+    db.session.commit()
+
+    _new_turn(app, "yes")
+    assert call(owner, coach_plan_tools.CONFIRM_TOOL)["error"] == "PENDING_CONFIRMATION_STALE"
+    assert plan_confirmation.get_pending(owner) is None
+    assert get_active_plan(owner).plan_data == baseline and not journal(owner)

@@ -785,7 +785,8 @@ def _reuse_or_block_pending(pending, name, arguments):
 def _stage_proposal(user_id, binding, command, decision, *, preview=None):
     current_turn_id()
     kind, payload, fingerprint = encode_command(command)
-    payload[POLICY_KEY] = POLICY_VERSION
+    if kind not in (UNDO_COMMAND_TYPE, "remove_exercise"):
+        payload[POLICY_KEY] = POLICY_VERSION
     if preview:
         payload[PREVIEW_KEY] = preview
     try:
