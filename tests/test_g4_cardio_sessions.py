@@ -829,6 +829,34 @@ def test_coach_previews_and_confirms_attached_cardio_move_and_undo(
     assert len(journal(uid)) == 2
 
 
+def test_coach_retires_move_proposal_with_precomposition_preview(app, make_user, tools_on):
+    from app.services import coach_plan_tools, plan_confirmation
+    from app.services.coach_plan_tools.proposals import PREVIEW_KEY
+    from tests.test_coach_plan_confirmation import _new_turn
+    from tests.test_coach_plan_tools import MOVE, call, journal
+
+    owner_id = make_user("g4-old-move-preview").id
+    original = document()
+    plan_id = save(owner_id, original)
+    with app.test_request_context("/ask"):
+        _new_turn(app)
+        result = call(owner_id, MOVE, {"day": "Pazartesi", "target_day": "Çarşamba"})
+        assert result["status"] == "confirmation_required"
+        pending = plan_confirmation.get_pending(owner_id)
+        pending.command_payload = {
+            **pending.command_payload,
+            PREVIEW_KEY: {"source_rest": False, "target_rest": True},
+        }
+        db.session.commit()
+
+        _new_turn(app, "yes")
+        refused = call(owner_id, coach_plan_tools.CONFIRM_TOOL)
+        assert refused["error"] == "PENDING_CONFIRMATION_STALE"
+        assert plan_confirmation.get_pending(owner_id) is None
+        assert not journal(owner_id)
+        assert json.loads(db.session.get(TrainingPlan, plan_id).plan_data) == original
+
+
 # ── migration ─────────────────────────────────────────────────────────────
 
 def test_outcome_migration_is_expand_only_and_never_drops_recorded_outcomes():

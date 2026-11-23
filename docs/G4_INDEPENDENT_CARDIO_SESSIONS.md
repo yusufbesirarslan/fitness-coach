@@ -77,6 +77,7 @@ A legacy client reading an account whose plan was made by a new client sees the 
 
 - `get_current_training_plan` publishes a day's session as `cardio_session: {exercises: [...]}`, using the same closed exercise projection. `coach_privacy` re-projects it.
 - Coach write tools build commands without a session selector, so they address the strength list only, under the same placement rule. Coach editing of sessions is a follow-up, needed only once Coach WRITE is activated.
+- A Coach whole-day swap moves any attached cardio session with the strength day. The EN/TR confirmation preview identifies the source and destination of each attached session. A pending move from before this preview contract must be proposed again.
 - `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` stays `0`. No Coach WRITE is activated.
 
 ## 6. Migration and release class (D3)
