@@ -154,10 +154,15 @@ def _reject(rule):
 def validate_plan(age, plan: dict) -> dict:
     if not is_minor(age):
         return plan
+    from app.services.training_generation.plan_schema import cardio_session_of
     for day in plan.get("program", ()):
         if _prescribes_forbidden(str(day.get("odak") or "")):
             _reject("focus_term")
-        for exercise in day.get("egzersizler") or ():
+        session = cardio_session_of(day) or {}
+        # G4: session entries are screened like a cardio day's (terms, notes);
+        # the strength-only rules below key on ``tip`` and never see them.
+        for exercise in [*(day.get("egzersizler") or ()),
+                         *(session.get("egzersizler") or ())]:
             reps = str(exercise.get("tekrar") or "")
             if _prescribes_forbidden(reps):
                 _reject("reps_term")

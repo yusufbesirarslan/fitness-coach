@@ -171,10 +171,11 @@ class _CompletionBudget:
         return text, truncated
 
 
-def _parse_and_validate(text, truncated, preferences, age=None):
+def _parse_and_validate(text, truncated, preferences, age=None, sessions=False):
     parsed = extract_plan_object(text, truncated=truncated)
     structured, _ = validate_generated_plan(
-        parsed, preferences, injuries=preferences.injuries)
+        parsed, preferences, injuries=preferences.injuries,
+        allow_sessions=sessions)
     return youth_safety.validate_plan(age, structured)
 
 
@@ -192,7 +193,7 @@ def resolve_save_exercise_context(token, secret_key, user_id):
             "exercise context token could not be verified") from exc
 
 
-def validate_plan_for_save(plan, exercise_context):
+def validate_plan_for_save(plan, exercise_context, *, allow_sessions=False):
     """Canonical save-time re-validation. Runs before any delete/insert.
 
     Accepts either shape a client can honestly hold: the provider-style
@@ -210,7 +211,8 @@ def validate_plan_for_save(plan, exercise_context):
         document = coerce_plan_document(plan)
         supplied_ozet = "haftalik_ozet" in document
         structured = validate_plan_structure(
-            document, require_ozet=False, allow_exercise_id=True)
+            document, require_ozet=False, allow_exercise_id=True,
+            allow_sessions=allow_sessions)
         validate_plan_semantics(structured, None)
     except (SchemaInvalidError, SemanticInvalidError, PlanValidationError) as exc:
         raise SaveInvalidError(str(exc)) from exc
@@ -248,7 +250,7 @@ def generate_training_plan_candidate(
     chat_fn,
     language="tr",
     logger=None,
-    *, frozen_features=None,
+    *, frozen_features=None, sessions=False,
 ) -> GeneratedTrainingPlanCandidate:
     """Run the canonical generator and return one persistence-ready candidate.
 
@@ -258,7 +260,11 @@ def generate_training_plan_candidate(
     """
     if not isinstance(preferences, TrainingPreferences):
         raise TypeError("preferences must be TrainingPreferences")
-    require_supported(preferences)
+    # G4: ``sessions`` is the requesting client's opt-in to cardio sessions on
+    # strength days. It widens capability, prompt and structure together;
+    # without it every step is exactly the pre-G4 contract.
+    sessions = sessions is True
+    require_supported(preferences, sessions=sessions)
     _log(
         logger, "generation_started",
         style=preferences.antrenman_tarzi,
@@ -288,7 +294,7 @@ def generate_training_plan_candidate(
     exercise_choices = compatible_exercise_choices(exercise_context)
     prompt = build_training_prompt(
         features, preferences, classification, context, language=language,
-        exercise_choices=exercise_choices)
+        exercise_choices=exercise_choices, sessions=sessions)
     system_prompt = build_system_prompt(language)
     youth = youth_safety.directive(age, language)
     if youth:
@@ -302,7 +308,7 @@ def generate_training_plan_candidate(
             prompt=prompt, system_prompt=system_prompt,
             max_tokens=PRIMARY_MAX_TOKENS, temperature=0.35)
         try:
-            plan = _parse_and_validate(text, truncated, preferences, age)
+            plan = _parse_and_validate(text, truncated, preferences, age, sessions)
         except (SchemaInvalidError, SemanticInvalidError):
             # Provider said it stopped at the token cap. A closed-but-short
             # object is still truncation, not a semantic command miss.
@@ -343,7 +349,7 @@ def generate_training_plan_candidate(
                 max_tokens=repair_tokens,
                 temperature=0.35,
             )
-            plan = _parse_and_validate(text, truncated, preferences, age)
+            plan = _parse_and_validate(text, truncated, preferences, age, sessions)
         except (ParseFailedError, TruncatedError, SchemaInvalidError, SemanticInvalidError):
             _log(logger, "repair_failed", calls=len(budget.calls))
             raise

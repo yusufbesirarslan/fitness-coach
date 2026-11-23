@@ -37,6 +37,8 @@ from app.services.training_generation.plan_schema import (
     NATIVE_MAX_EXERCISES_PER_DAY as MAX_EXERCISES_PER_DAY,
     SCORE_MAX,
     SCORE_MIN,
+    cardio_session_of,
+    session_minutes,
 )
 from app.services.training_generation.response_validator import (
     WEEKDAYS,
@@ -57,6 +59,39 @@ _REF_INFO = b"axisai/mobile-training/workout-ref/v1"
 WORKOUT_REF_RE = re.compile(r"^[A-Za-z0-9_-]{24}$")
 _REST_RE = re.compile(r"^(0|[1-9][0-9]*) (sn|dk)$")
 _KIND = {"antrenman": "training", "kardiyo": "cardio", "dinlenme": "rest"}
+
+# G4 (#530): per-request opt-in to independent cardio sessions, the same
+# strict shape as LP21's ``include_origin``. Absent → the legacy contract,
+# byte-identical (a strength day's session is not projected, not generated
+# and not addressable); exactly ``1`` → sessions; anything else is refused.
+INCLUDE_SESSIONS_PARAM = "include_sessions"
+# A session reference is minted over a slot outside the weekday range, so it
+# can never equal, or be resolved as, a day's ``workout_ref``.
+SESSION_SLOT_OFFSET = 7
+SESSION_DAY = "day"
+SESSION_CARDIO = "cardio_session"
+STATE_COMPLETED = "completed"
+STATE_SKIPPED = "skipped"
+STATE_INCOMPLETE = "incomplete"
+
+
+class InvalidSessionsExpansion(ValueError):
+    """``include_sessions`` was present but not exactly ``1``."""
+
+
+def sessions_requested(args) -> bool:
+    values = args.getlist(INCLUDE_SESSIONS_PARAM)
+    if not values:
+        return False
+    if values == ["1"]:
+        return True
+    raise InvalidSessionsExpansion(INCLUDE_SESSIONS_PARAM)
+
+
+def cardio_session_ref(secret, user_id: int, lineage: str, mutation_version: int, slot: int) -> str:
+    """The opaque reference of ``slot``'s cardio session (never a day ref)."""
+    return workout_ref(secret, user_id, lineage, mutation_version,
+                       int(slot) + SESSION_SLOT_OFFSET)
 
 
 def day_kind(tip: str) -> str:
@@ -84,7 +119,7 @@ class WorkoutStale(LookupError):
     """A well-formed reference does not match the owner's current revision."""
 
 
-def preference_contract(minor: bool = False) -> dict:
+def preference_contract(minor: bool = False, *, sessions: bool = False) -> dict:
     """Return deterministic rendering metadata from the canonical vocabularies.
 
     ``minor`` (profile age < 18) omits the choices the youth boundary refuses,
@@ -108,7 +143,7 @@ def preference_contract(minor: bool = False) -> dict:
             "odak_hedef": _token_field("genel", focus),
             "injuries": {"type": "string", "default": ""},
         },
-        "capability_constraints": public_capability_constraints(),
+        "capability_constraints": public_capability_constraints(sessions=sessions),
     }
 
 
@@ -116,6 +151,7 @@ def build_current_plan(
     user_id: int, secret, *, sessions_enabled: bool = False,
     include_origin: bool = False,
     include_editor_revision: bool = False,
+    include_sessions: bool = False,
 ) -> dict:
     """Project the authenticated owner's current plan inside one read snapshot."""
     try:
@@ -126,7 +162,8 @@ def build_current_plan(
             return project_current_plan(
                 plan, user_id, secret, sessions_enabled=sessions_enabled,
                 include_origin=include_origin,
-                include_editor_revision=include_editor_revision)
+                include_editor_revision=include_editor_revision,
+                include_sessions=include_sessions)
     except PlanUnprojectable:
         raise
     except WorkoutStateReadError as error:
@@ -139,12 +176,14 @@ def project_current_plan(
     plan, user_id: int, secret, *, sessions_enabled: bool = False,
     include_origin: bool = False,
     include_editor_revision: bool = False,
+    include_sessions: bool = False,
 ) -> dict:
     """Project a known canonical row through the same current-plan authority."""
     try:
         day = app_today()
         projected = _project_plan(
-            plan, user_id, secret, include_editor_revision=include_editor_revision)
+            plan, user_id, secret, include_editor_revision=include_editor_revision,
+            include_sessions=include_sessions)
         snapshot = resolve_workout_state(
             user_id,
             today=day,
@@ -157,6 +196,12 @@ def project_current_plan(
             candidate = projected["days"][day.weekday()]
             current_ref = candidate["workout_ref"]
         projected["current_workout_ref"] = current_ref
+        if include_sessions:
+            # G4 / D1: today's progress over every planned session. Opt-in
+            # only; the legacy shape never sees this key or pays this read.
+            projected["today_progress"] = _today_progress(
+                projected["days"][day.weekday()], user_id, day,
+                snapshot.completed_today, projected["plan_lineage"])
         if include_origin:
             # LP21 opt-in only: the legacy shape (and its strict mobile DTOs)
             # never sees this key or pays this read. A failed read raises
@@ -227,7 +272,8 @@ def _token_field(default, choices):
     return {"type": "token", "default": default, "choices": sorted(choices)}
 
 
-def _project_plan(plan, user_id, secret, *, include_editor_revision=False) -> dict:
+def _project_plan(plan, user_id, secret, *, include_editor_revision=False,
+                  include_sessions=False) -> dict:
     try:
         lineage = _lineage(plan.lineage_id)
         version = _version(plan.mutation_version)
@@ -261,13 +307,16 @@ def _project_plan(plan, user_id, secret, *, include_editor_revision=False) -> di
                         if (isinstance(exercise, dict)
                                 and set(exercise) == {"isim", "set", "tekrar", "exercise_id"}):
                             exercise["dinlenme"] = "0"
+        # A stored plan is read whichever client asks: sessions are always
+        # admitted here and only the PROJECTION depends on the opt-in.
         validated = validate_plan_structure(
-            plan_document, allow_exercise_id=True)
+            plan_document, allow_exercise_id=True, allow_sessions=True)
         by_weekday = {day["gun"]: day for day in validated["program"]}
         catalog = owned_catalog(user_id, program_exercise_ids(validated["program"]))
         days = [
             _project_day(
-                by_weekday[weekday], slot, user_id, secret, lineage, version, catalog
+                by_weekday[weekday], slot, user_id, secret, lineage, version, catalog,
+                include_sessions=include_sessions,
             )
             for slot, weekday in enumerate(WEEKDAYS)
         ]
@@ -291,14 +340,15 @@ def _project_plan(plan, user_id, secret, *, include_editor_revision=False) -> di
         raise PlanUnprojectable("persisted plan is not projectable") from error
 
 
-def _project_day(day, slot, user_id, secret, lineage, version, catalog):
+def _project_day(day, slot, user_id, secret, lineage, version, catalog,
+                 *, include_sessions=False):
     if len(day["egzersizler"]) > MAX_EXERCISES_PER_DAY:
         raise PlanUnprojectable("day exceeds the native exercise bound")
     kind = day_kind(day["tip"])
     reference = None
     if kind != "rest":
         reference = workout_ref(secret, user_id, lineage, version, slot)
-    return {
+    projected = {
         "slot": slot,
         "weekday": day["gun"],
         "kind": kind,
@@ -308,6 +358,61 @@ def _project_day(day, slot, user_id, secret, lineage, version, catalog):
         "workout_ref": reference,
         "exercises": [_project_exercise(item, catalog=catalog) for item in day["egzersizler"]],
     }
+    if include_sessions:
+        # G4: the strength day keeps its own list, minutes and focus; its
+        # cardio session is a separate block with its own reference. Without
+        # the opt-in the day is projected exactly as before (strength only),
+        # which is everything a legacy client can show, start and edit.
+        session = cardio_session_of(day)
+        block = None
+        if session is not None:
+            exercises = session["egzersizler"]
+            if len(exercises) > MAX_EXERCISES_PER_DAY:
+                raise PlanUnprojectable("session exceeds the native exercise bound")
+            block = {
+                "workout_ref": cardio_session_ref(
+                    secret, user_id, lineage, version, slot),
+                "duration_minutes": session_minutes(exercises),
+                "exercises": [_project_exercise(item, catalog=catalog)
+                              for item in exercises],
+            }
+        projected["cardio_session"] = block
+    return projected
+
+
+def _today_progress(today_day, user_id, today, day_completed, plan_lineage):
+    """D1: a day with several planned sessions is complete only when every
+    one of them reached a terminal state; completion and skipping stay
+    distinguishable per session. A single-session day keeps its existing
+    meaning exactly (the canonical completion claim)."""
+    if today_day["kind"] == "rest":
+        return None
+    sessions = [{
+        "session": SESSION_DAY,
+        "kind": today_day["kind"],
+        "workout_ref": today_day["workout_ref"],
+        "state": STATE_COMPLETED if day_completed else STATE_INCOMPLETE,
+    }]
+    block = today_day.get("cardio_session")
+    if block is not None:
+        from app.services.training_session_outcomes import outcomes_for_day
+        outcome = outcomes_for_day(user_id, today, plan_lineage).get("cardio")
+        sessions.append({
+            "session": SESSION_CARDIO,
+            "kind": "cardio",
+            "workout_ref": block["workout_ref"],
+            "state": outcome or STATE_INCOMPLETE,
+        })
+    states = [item["state"] for item in sessions]
+    if all(state == STATE_COMPLETED for state in states):
+        status = "complete"
+    elif STATE_INCOMPLETE not in states:
+        status = "complete_with_skips"
+    elif any(state != STATE_INCOMPLETE for state in states):
+        status = "partial"
+    else:
+        status = "not_started"
+    return {"date": today.isoformat(), "status": status, "sessions": sessions}
 
 
 def _project_exercise(item, *, catalog=None):

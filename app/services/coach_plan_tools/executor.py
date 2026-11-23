@@ -859,12 +859,17 @@ def _confirm_pending(user_id):
             return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
         return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     plan = get_active_plan(user_id)
+    payload = row.command_payload or {}
+    preview = payload.get(PREVIEW_KEY) or {}
     if already is None and (
             plan is None
             or plan.lineage_id != row.plan_lineage_id
             or not binding_matches(row, plan)
             or (row.command_type not in (UNDO_COMMAND_TYPE, "remove_exercise")
-                and (row.command_payload or {}).get(POLICY_KEY) != POLICY_VERSION)):
+                and payload.get(POLICY_KEY) != POLICY_VERSION)
+            or (row.command_type == "move_training_day"
+                and (type(preview.get("source_cardio")) is not bool
+                     or type(preview.get("target_cardio")) is not bool))):
         mark_stale(user_id, row.public_id)
         return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
     if not _charge_budget(key):

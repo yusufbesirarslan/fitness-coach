@@ -60,7 +60,10 @@ from app.services.plan_mutation.validation import (
     WEEKDAYS,
 )
 from app.services.today_facts import get_active_plan
-from app.services.training_generation.plan_schema import NATIVE_MAX_EXERCISES_PER_DAY
+from app.services.training_generation.plan_schema import (
+    CARDIO_SESSION_KEY,
+    NATIVE_MAX_EXERCISES_PER_DAY,
+)
 
 READ_PLAN_TOOL = "get_current_training_plan"
 
@@ -149,6 +152,37 @@ def _curated_identity(exercise):
         "exercise_id", "source", "family_id", "target_region", "equipment")}
 
 
+def _project_exercises(raw, catalog, private_definitions):
+    """One exercise list in the closed read shape: ``(exercises, truncated)``."""
+    if not isinstance(raw, list):
+        raise PlanNotMutable("day has a malformed exercise list")
+    limit = MAX_PROJECTED_EXERCISES_PER_DAY
+    if private_definitions and any(
+        is_private_id(item.get(FIELD_EXERCISE_ID)) and item[FIELD_EXERCISE_ID] in private_definitions
+        for item in raw[:NATIVE_MAX_EXERCISES_PER_DAY] if isinstance(item, dict)
+    ):
+        limit = NATIVE_MAX_EXERCISES_PER_DAY
+    exercises = []
+    for position, exercise in enumerate(raw[:limit]):
+        if not isinstance(exercise, dict):
+            raise PlanNotMutable("day has a malformed exercise")
+        identity = exercise.get(FIELD_EXERCISE_ID)
+        projected = {
+            "name": None,
+            "sets": _sets(exercise.get(FIELD_SETS)),
+            "reps": _reps(exercise.get(FIELD_REPS)),
+        }
+        if is_private_id(identity):
+            definition = private_definitions.get(identity)
+            if definition is not None:
+                projected.update(name=definition.canonical_name, private_exercise_id=identity)
+        else:
+            projected.update(name=_exercise_name(exercise, catalog), position=position)
+            projected.update(_curated_identity(exercise))
+        exercises.append(projected)
+    return exercises, len(raw) > limit
+
+
 def project_program(program, catalog=None, *, private_definitions=None):
     """Pure projection of a parsed program into the closed read shape."""
     catalog = catalog or load_exercise_catalog()
@@ -160,39 +194,26 @@ def project_program(program, catalog=None, *, private_definitions=None):
             raise PlanNotMutable("plan has an unrecognised or duplicate day")
         kind = day.get(FIELD_KIND)
         raw = day.get(FIELD_EXERCISES) or []
-        if not isinstance(raw, list):
-            raise PlanNotMutable("day has a malformed exercise list")
-        limit = MAX_PROJECTED_EXERCISES_PER_DAY
-        if private_definitions and any(
-            is_private_id(item.get(FIELD_EXERCISE_ID)) and item[FIELD_EXERCISE_ID] in private_definitions
-            for item in raw[:NATIVE_MAX_EXERCISES_PER_DAY] if isinstance(item, dict)
-        ):
-            limit = NATIVE_MAX_EXERCISES_PER_DAY
-        exercises = []
-        for position, exercise in enumerate(raw[:limit]):
-            if not isinstance(exercise, dict):
-                raise PlanNotMutable("day has a malformed exercise")
-            identity = exercise.get(FIELD_EXERCISE_ID)
-            projected = {
-                "name": None,
-                "sets": _sets(exercise.get(FIELD_SETS)),
-                "reps": _reps(exercise.get(FIELD_REPS)),
-            }
-            if is_private_id(identity):
-                definition = private_definitions.get(identity)
-                if definition is not None:
-                    projected.update(name=definition.canonical_name, private_exercise_id=identity)
-            else:
-                projected.update(name=_exercise_name(exercise, catalog), position=position)
-                projected.update(_curated_identity(exercise))
-            exercises.append(projected)
+        exercises, truncated = _project_exercises(raw, catalog, private_definitions)
         entry = {
             "day": name,
             "kind": kind if kind in VALID_TIPS else None,
             "exercises": exercises,
         }
-        if len(raw) > limit:
+        if truncated:
             entry["truncated"] = True
+        session = day.get(CARDIO_SESSION_KEY)
+        if session is not None:
+            # G4: the strength day's separate cardio session, published as
+            # its own block so the Coach never reads cardio as a strength
+            # exercise (P3A). Same closed exercise projection.
+            if not isinstance(session, dict):
+                raise PlanNotMutable("day has a malformed cardio session")
+            session_exercises, session_truncated = _project_exercises(
+                session.get(FIELD_EXERCISES) or [], catalog, private_definitions)
+            entry["cardio_session"] = {"exercises": session_exercises}
+            if session_truncated:
+                entry["cardio_session"]["truncated"] = True
         by_day[name] = entry
     # Calendar order, independent of storage order.
     return [by_day[name] for name in WEEKDAYS if name in by_day]

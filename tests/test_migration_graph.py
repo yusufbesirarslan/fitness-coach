@@ -46,7 +46,8 @@ def test_alembic_migrations_have_single_head():
     # MON-02-BE-02's empty Apple notification/reconciliation tables follow the fence.
     # LAUNCH-FREE-BE-01 widens the bucket scope CHECK on the physical budget.
     # FATSECRET-RETENTION-PHASE1 adds provider provenance on top of F01.
-    assert heads == ["19cb998acd2f"]
+    # G4 (#530) records independent cardio-session outcomes after C1.
+    assert heads == ["5cc5aa7e47ba"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -89,7 +90,8 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # The account-deletion destruction record adds one table, no catalog schema.
     # Private exercise registration adds its own owner-private table; C1 adds
     # Nutrition lineage and a separate edit journal, no exercise schema.
-    assert len(revision_files) == 68
+    # G4 adds the cardio-session outcome table, no exercise schema.
+    assert len(revision_files) == 69
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py",
         "e5b27aa4101c_owner_private_exercises.py",

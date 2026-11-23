@@ -69,7 +69,7 @@ from app.today_presenter import (INSIGHT_WATCH, INSIGHT_WORKING, TodayFacts,
 _SESSIONS_FLAG = "FITX_WORKOUT_SESSIONS_ENABLED"
 
 
-def get_active_plan(user_id):
+def get_active_plan(user_id, *, lock_for_share=False):
     """The canonical active ``TrainingPlan`` for a user, or ``None``.
 
     This is the exact selector ``/training-plan/active`` has always used: the
@@ -77,11 +77,15 @@ def get_active_plan(user_id):
     endpoint (an archived/superseded older plan is never treated as active
     because a newer row would sort ahead of it).
     """
-    return (
+    query = (
         TrainingPlan.query.filter_by(user_id=user_id)
         .order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())
-        .first()
     )
+    if lock_for_share:
+        # Outcome writers verify a revision and retain it until they commit.
+        # Other outcome writers may read it while a plan mutation must wait.
+        query = query.populate_existing().with_for_update(read=True)
+    return query.first()
 
 
 def has_active_plan(user_id) -> bool:

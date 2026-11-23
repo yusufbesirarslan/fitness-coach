@@ -970,6 +970,7 @@
   "coach.confirm.propose_replace_prescription": "Replace {exercise} with {replacement} on {day} and set {prescription}? Other prescription fields stay as they are.",
   "coach.confirm.propose_training_undo": "Undo the latest saved training-plan change and restore the previous plan?",
   "coach.confirm.propose_rest_swap": "Move your rest day from {rest} to {other} and move the {other} session to {rest}? Notes and exercises move with their days.",
+  "coach.confirm.move_attached_cardio": "The separate cardio session on {source} will move to {destination}.",
   "coach.confirm.propose_day_swap": "Swap the full schedule for {day} and {target}, including notes and exercises?",
   "coach.confirm.propose_plan_remove": "I'll remove {exercise} from {day}. Confirm this change?",
   "coach.confirm.propose_plan_replace": "I'll replace {exercise} with {replacement} on {day}. Confirm this change?",

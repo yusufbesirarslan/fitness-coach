@@ -52,7 +52,12 @@ from app.services.training_generation.output_errors import (
     GenerationExerciseIncompatibleError,
     GenerationExerciseUnresolvedError,
 )
-from app.services.training_generation.plan_schema import CARDIO_TIP, EXERCISE_ID_KEY
+from app.services.training_generation.plan_schema import (
+    CARDIO_SESSION_KEY,
+    CARDIO_SESSION_PLACEMENT,
+    CARDIO_TIP,
+    EXERCISE_ID_KEY,
+)
 
 
 def _resolve_generated_name(
@@ -186,6 +191,21 @@ def check_placement(
             resolution_category="cardio_placement")
 
 
+def check_session_placement(exercise: ExerciseDefinition) -> None:
+    """G4: a strength day's cardio SESSION is a cardio placement.
+
+    Exactly the dedicated-cardio-day rule, asked against a synthetic
+    ``{"tip": "kardiyo"}`` placement: only cardio movements, and nothing
+    else, ever lands in a session. Because the session IS a cardio placement,
+    ``is_exercise_compatible``'s ``cardio_type`` carve-out stays exactly as
+    sound as on a ``kardiyo`` day, while the strength list next to it keeps
+    refusing cardio (P3A). One definition for generation, save, the editor
+    and the Coach (which mutates through the editor's engine).
+    """
+    check_placement(exercise, CARDIO_SESSION_PLACEMENT,
+                    require_cardio_on_dedicated_day=True)
+
+
 def _resolve_chosen_id(
     exercise_id,
     catalog,
@@ -241,10 +261,10 @@ def canonicalize_generated_exercises(
     """
     catalog = load_exercise_catalog()
     context = choices.context
-    canonical_program = []
-    for day in plan["program"]:
+
+    def canonical(exercises, place):
         canonical_exercises = []
-        for exercise in day["egzersizler"]:
+        for exercise in exercises:
             resolved = _resolve_chosen_id(
                 exercise.get(EXERCISE_ID_KEY), catalog, choices)
             if not is_exercise_compatible(resolved, context):
@@ -252,7 +272,7 @@ def canonicalize_generated_exercises(
                     "generated exercise is not compatible with the accepted "
                     "equipment context",
                     resolution_category="equipment")
-            check_placement(resolved, day)
+            place(resolved)
             canonical_exercises.append({
                 "isim": resolved.canonical_name,
                 "set": exercise["set"],
@@ -261,8 +281,25 @@ def canonicalize_generated_exercises(
                 "not": exercise["not"],
                 EXERCISE_ID_KEY: resolved.exercise_id,
             })
-        canonical_program.append({**day, "egzersizler": canonical_exercises})
-    return {**plan, "program": canonical_program}
+        return canonical_exercises
+
+    return {**plan, "program": [
+        _canonical_day(day, canonical) for day in plan["program"]]}
+
+
+def _canonical_day(day, canonical):
+    """One day rebuilt: its own list under the day's placement, its cardio
+    session (G4) under the dedicated-cardio placement. Nothing moves between
+    the two lists and nothing is substituted."""
+    rebuilt = {**day, "egzersizler": canonical(
+        day["egzersizler"], lambda resolved: check_placement(resolved, day))}
+    if CARDIO_SESSION_KEY in day:
+        rebuilt[CARDIO_SESSION_KEY] = {
+            **day[CARDIO_SESSION_KEY],
+            "egzersizler": canonical(
+                day[CARDIO_SESSION_KEY]["egzersizler"], check_session_placement),
+        }
+    return rebuilt
 
 
 def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
@@ -289,21 +326,23 @@ def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
     """
     catalog = load_exercise_catalog()
     cache: dict[str, ExerciseDefinition] = {}
-    canonical_program = []
-    for day in plan["program"]:
+
+    def canonical(exercises, place):
         canonical_exercises = []
-        for exercise in day["egzersizler"]:
+        for exercise in exercises:
             resolved = _resolve_plan_exercise(exercise, catalog, cache)
             if not is_exercise_compatible(resolved, context):
                 raise GenerationExerciseIncompatibleError(
                     "generated exercise is not compatible with the accepted "
                     "equipment context",
                     resolution_category="equipment")
-            check_placement(resolved, day)
+            place(resolved)
             canonical_exercises.append({
                 **exercise,
                 "isim": resolved.canonical_name,
                 "exercise_id": resolved.exercise_id,
             })
-        canonical_program.append({**day, "egzersizler": canonical_exercises})
-    return {**plan, "program": canonical_program}
+        return canonical_exercises
+
+    return {**plan, "program": [
+        _canonical_day(day, canonical) for day in plan["program"]]}

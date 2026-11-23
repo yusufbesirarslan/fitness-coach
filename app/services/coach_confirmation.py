@@ -742,9 +742,18 @@ def _format_plan_proposal(pending, language):
         preview = payload.get(PREVIEW_KEY) or {}
         if preview.get("source_rest") != preview.get("target_rest"):
             rest, other = (day, target) if preview["source_rest"] else (target, day)
-            return t("coach.confirm.propose_rest_swap", locale=language,
-                     rest=rest, other=other)
-        return t("coach.confirm.propose_day_swap", locale=language, day=day, target=target)
+            prompt = t("coach.confirm.propose_rest_swap", locale=language,
+                       rest=rest, other=other)
+        else:
+            prompt = t("coach.confirm.propose_day_swap", locale=language, day=day, target=target)
+        for moves_cardio, source, destination in (
+            (preview.get("source_cardio"), day, target),
+            (preview.get("target_cardio"), target, day),
+        ):
+            if moves_cardio:
+                prompt += " " + t("coach.confirm.move_attached_cardio", locale=language,
+                                   source=source, destination=destination)
+        return prompt
     return t("coach.confirm.propose_plan", locale=language)
 
 

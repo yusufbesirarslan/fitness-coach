@@ -31,6 +31,7 @@ from app.services.plan_mutation.fingerprint import (
     undo_fingerprint,
 )
 from app.services.today_facts import get_active_plan
+from app.services.training_generation.plan_schema import CARDIO_SESSION_KEY
 
 
 POLICY_KEY = "policy_version"
@@ -138,9 +139,13 @@ def preview_command(user_id, command):
     document, _program = parse_plan_document(plan.plan_data)
     _, changed = apply_command(document, command, coach=True)
     if changed and isinstance(command, MoveTrainingDayCommand):
+        source = _find_day(_program, command.day)
+        target = _find_day(_program, command.target_day)
         preview = {
-            key: _find_day(_program, label).get(FIELD_KIND) == REST_TIP
-            for key, label in (("source_rest", command.day), ("target_rest", command.target_day))
+            "source_rest": source.get(FIELD_KIND) == REST_TIP,
+            "target_rest": target.get(FIELD_KIND) == REST_TIP,
+            "source_cardio": CARDIO_SESSION_KEY in source,
+            "target_cardio": CARDIO_SESSION_KEY in target,
         }
     else:
         preview = {}

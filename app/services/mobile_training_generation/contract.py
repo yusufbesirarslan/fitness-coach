@@ -56,6 +56,10 @@ class NativePlanRequest:
     preferences: TrainingPreferences
     normalized: dict[str, object]
     fingerprint: str
+    # G4: the client opted in (``include_sessions=1``) to cardio sessions on
+    # strength days. Part of the request identity only when set, so every
+    # legacy request keeps its exact fingerprint.
+    sessions: bool = False
 
 
 def parse_idempotency_key(raw: object) -> str:
@@ -94,7 +98,7 @@ def _semantic_fingerprint(normalized: dict[str, object]) -> str:
     return hashlib.sha256(_FINGERPRINT_DOMAIN + encoded).hexdigest()
 
 
-def parse_native_request(raw: object) -> NativePlanRequest:
+def parse_native_request(raw: object, *, sessions: bool = False) -> NativePlanRequest:
     """Parse one exact native request through canonical Training authorities."""
     if not isinstance(raw, dict) or isinstance(raw, bool):
         raise InvalidPlanRequest("request body must be an object")
@@ -107,10 +111,17 @@ def parse_native_request(raw: object) -> NativePlanRequest:
         if error.status != "invalid":
             raise
         raise InvalidPlanRequest("preference value is invalid") from None
-    require_supported(preferences)
+    sessions = sessions is True
+    require_supported(preferences, sessions=sessions)
     normalized = asdict(preferences)
+    identity = dict(normalized)
+    if sessions:
+        # One key can never mean both contracts: an opted-in request is a
+        # different request, so replaying it across the opt-in is a conflict.
+        identity["plan_sessions"] = 1
     return NativePlanRequest(
         preferences=preferences,
         normalized=normalized,
-        fingerprint=_semantic_fingerprint(normalized),
+        fingerprint=_semantic_fingerprint(identity),
+        sessions=sessions,
     )
