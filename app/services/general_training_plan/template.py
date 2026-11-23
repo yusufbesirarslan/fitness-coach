@@ -161,13 +161,14 @@ _CARDIO_SLOTS = {
     4: (5, 2),
 }
 
-# G4 (sessions opt-in only; #537's order): after the pre-G4 slots, Sunday,
-# then strength days, where the cardio becomes the day's separate session.
+# G4 (sessions opt-in only): after the pre-G4 slots, the strength days, where
+# the cardio becomes the day's separate session. Sunday is never listed, so
+# the week keeps its full rest day at every count, exactly as before G4.
 # Every prefix the pre-G4 choices reach is the pre-G4 tuple, so existing
 # combinations keep their exact content.
 _SESSION_CARDIO_SLOTS = {
-    3: (5, 1, 3, 6, 0, 2),
-    4: (5, 2, 6, 0, 1, 3),
+    3: (5, 1, 3, 0, 2, 4),
+    4: (5, 2, 0, 1, 3, 4),
 }
 
 # One catalog cardio entry per type. Mixed rotates through activities that

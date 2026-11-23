@@ -65,11 +65,11 @@ def test_concurrent_answers_claim_one_outcome(pg_plan_app, as_owner, monkeypatch
     first_reads = []
     guard = Lock()
 
-    def contend(user_id, date_key):
+    def contend(user_id, date_key, plan_lineage):
         # Both requests read "no outcome yet"; PostgreSQL's unique claim
         # decides. Only each request's first read waits; the loser's re-read
         # after the IntegrityError passes straight through.
-        row = existing(user_id, date_key)
+        row = existing(user_id, date_key, plan_lineage)
         with guard:
             first = len(first_reads) < 2
             first_reads.append(1)

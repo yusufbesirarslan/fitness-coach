@@ -6,8 +6,9 @@ session has its own identity (an opaque reference minted by
 here and nowhere else:
 
 * ``completed`` or ``skipped`` — one explicit, owner-initiated answer per
-  Istanbul day. A replay of the same answer is idempotent; a different answer
-  is a conflict, never an overwrite.
+  Istanbul day and PLAN (lineage). A replay of the same answer is idempotent;
+  a different answer is a conflict, never an overwrite. A new plan starts
+  unanswered: an answer is never carried over to, or shown for, another plan.
 * no row — the session is still ``incomplete``.
 
 What this deliberately does NOT do:
@@ -48,20 +49,22 @@ class SessionOutcomeRefused(Exception):
         self.reason = reason
 
 
-def outcomes_for_day(user_id: int, day) -> dict:
-    """``{session_kind: outcome}`` recorded for ``user_id`` on ``day``."""
+def outcomes_for_day(user_id: int, day, plan_lineage: str) -> dict:
+    """``{session_kind: outcome}`` answered on ``day`` for THIS plan lineage."""
     rows = db.session.query(
         TrainingSessionOutcome.session_kind, TrainingSessionOutcome.outcome,
     ).filter(
         TrainingSessionOutcome.user_id == user_id,
         TrainingSessionOutcome.date_key == day.isoformat(),
+        TrainingSessionOutcome.plan_lineage_id == plan_lineage,
     ).all()
     return {kind: outcome for kind, outcome in rows}
 
 
-def _existing(user_id, date_key):
+def _existing(user_id, date_key, plan_lineage):
     return TrainingSessionOutcome.query.filter_by(
-        user_id=user_id, date_key=date_key, session_kind=KIND_CARDIO).one_or_none()
+        user_id=user_id, date_key=date_key, session_kind=KIND_CARDIO,
+        plan_lineage_id=plan_lineage).one_or_none()
 
 
 def record_cardio_outcome(user_id: int, secret, reference, outcome: str):
@@ -88,11 +91,12 @@ def record_cardio_outcome(user_id: int, secret, reference, outcome: str):
         raise SessionOutcomeRefused("not_today")
 
     date_key = today.isoformat()
-    existing = _existing(user_id, date_key)
+    lineage = projected["plan_lineage"]
+    existing = _existing(user_id, date_key, lineage)
     if existing is None:
         db.session.add(TrainingSessionOutcome(
             user_id=user_id, date_key=date_key, session_kind=KIND_CARDIO,
-            outcome=outcome, plan_lineage_id=projected["plan_lineage"],
+            outcome=outcome, plan_lineage_id=lineage,
             mutation_version=projected["mutation_version"]))
         try:
             db.session.commit()
@@ -100,7 +104,7 @@ def record_cardio_outcome(user_id: int, secret, reference, outcome: str):
         except IntegrityError:
             # A concurrent answer won the unique claim; re-read it below.
             db.session.rollback()
-            existing = _existing(user_id, date_key)
+            existing = _existing(user_id, date_key, lineage)
             if existing is None:
                 raise
     if existing.outcome != outcome:

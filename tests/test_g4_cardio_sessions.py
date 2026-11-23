@@ -351,6 +351,8 @@ def test_general_widened_counts_use_separate_sessions(days, cardio_days):
     sessions = [day for day in program if CARDIO_SESSION_KEY in day]
     dedicated = [day for day in program if day["tip"] == "kardiyo"]
     assert len(sessions) + len(dedicated) == cardio_days
+    # The week keeps its full rest day at every count, exactly as before G4.
+    assert program[6]["tip"] == "dinlenme"
     assert sum(day["tip"] == "antrenman" for day in program) == days
     for before, after in zip(strength, program):
         if after["tip"] == "antrenman":
@@ -459,8 +461,9 @@ def test_general_endpoint_generates_sessions_only_for_an_opted_in_client(
                    as_owner(owner, "g4-general-opted-1"), json=body)
     assert created.status_code == 201, created.json
     days = created.json["plan"]["days"]
-    assert sum(day["cardio_session"] is not None for day in days) == 2
-    assert sum(day["kind"] == "cardio" for day in days) == 3
+    assert sum(day["cardio_session"] is not None for day in days) == 3
+    assert sum(day["kind"] == "cardio" for day in days) == 2
+    assert days[6]["kind"] == "rest"
     stored = json.loads(TrainingPlan.query.filter_by(user_id=owner.id).one().plan_data)
     assert all(not any(item["exercise_id"] == RUN for item in day["egzersizler"])
                for day in stored["program"] if day["tip"] == "antrenman")
@@ -561,6 +564,27 @@ def test_only_todays_session_of_the_current_plan_can_be_answered(
     edited = post(raw_client, f"{SESSIONS}/{ref}/complete", headers)
     assert edited.json["error"]["code"] == "TRAINING_SESSION_STALE"
     assert TrainingSessionOutcome.query.count() == 0
+
+
+def test_an_answer_belongs_to_one_plan_and_is_never_carried_over(
+        raw_client, make_user, as_owner):
+    """Review P2: a new plan (lineage) starts unanswered; the old plan's
+    answer is neither shown for it nor blocks answering it."""
+    owner = make_user("g4-lineage")
+    owner_id = owner.id
+    first = save(owner_id, document())
+    headers = as_owner(owner)
+    assert post(raw_client, f"{SESSIONS}/{_session_ref(raw_client, headers)}/skip",
+                headers).status_code == 200
+    db.session.delete(db.session.get(TrainingPlan, first))
+    db.session.commit()
+    save(owner_id, document())
+    progress = _progress(raw_client, headers)
+    assert [item["state"] for item in progress["sessions"]] == ["incomplete", "incomplete"]
+    answered = post(raw_client, f"{SESSIONS}/{_session_ref(raw_client, headers)}/complete",
+                    headers)
+    assert answered.status_code == 200, answered.json
+    assert TrainingSessionOutcome.query.filter_by(user_id=owner_id).count() == 2
 
 
 def test_session_answers_need_health_consent(raw_client, make_user, as_owner):
@@ -667,6 +691,35 @@ def test_editor_addresses_the_cardio_session_separately(raw_client, make_user, a
     assert PlanMutationRecord.query.count() == 4
 
 
+@pytest.mark.parametrize("reps", ["٢٠ dk", "２０ dk", "²5 dk", "20 DK", "0 dk", "20dk"])
+def test_editor_never_saves_a_session_the_reader_would_refuse(
+        raw_client, make_user, as_owner, reps):
+    """Review P1: editor and reader share ONE session rule, so a stored plan
+    can never become unreadable (legacy clients included)."""
+    owner = make_user("g4-editor-digits")
+    plan_id = save(owner.id, document())
+    headers = as_owner(owner)
+    before = db.session.get(TrainingPlan, plan_id).plan_data
+    binding, _ = _binding(raw_client, headers)
+    response = _edit(raw_client, headers, "prescription", binding, "g4-digits",
+                     session="cardio", position=0, exercise_id=RUN, reps=reps)
+    assert response.status_code == 400, response.json
+    db.session.expire_all()
+    assert db.session.get(TrainingPlan, plan_id).plan_data == before
+    assert get(raw_client, CURRENT, headers).status_code == 200
+
+
+@pytest.mark.parametrize("session", [["cardio"], {"cardio": 1}, 1, None])
+def test_malformed_session_selector_is_a_client_error(raw_client, make_user, as_owner, session):
+    owner = make_user("g4-editor-selector")
+    save(owner.id, document())
+    headers = as_owner(owner)
+    binding, _ = _binding(raw_client, headers)
+    response = _edit(raw_client, headers, "add", binding, "g4-selector",
+                     session=session, exercise_id=RUN, sets=1, reps="10 dk")
+    assert response.status_code == 400, response.json
+
+
 def test_a_legacy_client_keeps_editing_the_strength_session(raw_client, make_user, as_owner):
     """No session selector = the day's own list. The session is preserved,
     never addressable by a legacy position, and never lost."""
@@ -750,6 +803,11 @@ def test_outcome_migration_is_expand_only_and_never_drops_recorded_outcomes():
                 "INSERT INTO training_session_outcome (user_id, date_key, session_kind, "
                 "outcome, plan_lineage_id, mutation_version, created_at) VALUES "
                 "(1, '2026-11-23', 'cardio', 'completed', 'lineage', 0, '2026-11-23')"))
+            # Another plan's answer for the same day is its own row.
+            conn.execute(sa.text(
+                "INSERT INTO training_session_outcome (user_id, date_key, session_kind, "
+                "outcome, plan_lineage_id, mutation_version, created_at) VALUES "
+                "(1, '2026-11-23', 'cardio', 'skipped', 'other', 0, '2026-11-23')"))
             with pytest.raises(sa.exc.IntegrityError):
                 with conn.begin_nested():
                     conn.execute(sa.text(

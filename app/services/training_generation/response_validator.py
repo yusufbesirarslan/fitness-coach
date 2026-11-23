@@ -138,7 +138,7 @@ def _validate_provider_exercise(raw) -> dict:
     }
 
 
-_SESSION_MINUTES_RE = re.compile(r"([1-9][0-9]{0,2}) dk")
+_SESSION_MINUTES_RE = re.compile(r"([1-9][0-9]{0,2}) dk", re.ASCII)
 
 
 def _validate_exercise_list(exercises_raw, label, *, allow_exercise_id, provider_identity):
@@ -152,7 +152,7 @@ def _validate_exercise_list(exercises_raw, label, *, allow_exercise_id, provider
     ]
 
 
-def _validate_cardio_session(raw, *, allow_exercise_id, provider_identity) -> dict:
+def validate_cardio_session(raw, *, allow_exercise_id=True, provider_identity=False) -> dict:
     """G4 cardio session: exact keys, >=1 timed one-round entry, bounded total."""
     session = _require_mapping(raw, "kardiyo_seansi")
     _forbid_unknown(session, CARDIO_SESSION_KEYS, "kardiyo_seansi")
@@ -218,7 +218,7 @@ def _validate_day(
         # one would be a second, misleading cardio placement.
         if tip != SESSION_TIP:
             raise SchemaInvalidError("kardiyo_seansi yalnız antrenman gününde olabilir")
-        validated[CARDIO_SESSION_KEY] = _validate_cardio_session(
+        validated[CARDIO_SESSION_KEY] = validate_cardio_session(
             day[CARDIO_SESSION_KEY], allow_exercise_id=allow_exercise_id,
             provider_identity=provider_identity)
     return validated

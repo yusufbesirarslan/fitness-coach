@@ -70,7 +70,6 @@ from app.services.training_generation.output_errors import (
 
 from app.services.training_generation.plan_schema import (
     CARDIO_SESSION_KEY,
-    CARDIO_SESSION_MINUTES_MAX,
     CARDIO_SESSION_PLACEMENT,
     NATIVE_MAX_EXERCISES_PER_DAY,
     SESSION_TIP,
@@ -509,8 +508,10 @@ def _require_native_cardio_placement(day, authority, before):
 
     G4 founder ruling: a legacy day that already holds misplaced cardio (a
     pre-P3A mixed list) is NOT locked. Its strength work stays editable and
-    the misplaced entries are preserved exactly as stored — never moved,
-    rewritten or dropped — until the owner corrects them.
+    the misplaced entries stay where they are with the same identity — never
+    moved to another list, re-identified or dropped by an unrelated edit. The
+    owner may still edit their stored sets/reps (identity cannot change: a
+    Replace is placement-checked) or correct them.
     """
     if authority is None or not authority.by_id:
         return
@@ -540,7 +541,6 @@ def _holds_strength_work(day, authority):
 #: G4 session selectors on a native exercise command.
 SESSION_STRENGTH = "strength"
 SESSION_CARDIO = "cardio"
-_SESSION_REPS_SUFFIX = " dk"
 
 
 def _selected_session(command):
@@ -579,21 +579,13 @@ def _target_list(day, command, authority, *, create=False):
     return session[FIELD_EXERCISES], CARDIO_SESSION_PLACEMENT
 
 
-def _session_minutes(reps):
-    if not isinstance(reps, str) or not reps.endswith(_SESSION_REPS_SUFFIX):
-        return None
-    number = reps[:-len(_SESSION_REPS_SUFFIX)]
-    if not number.isdigit() or number.startswith("0") or len(number) > 3:
-        return None
-    return int(number)
-
-
 def _finish_session(day, command):
     """Keep a cardio session canonical after a session edit.
 
-    Every entry stays one round of ``"<n> dk"`` (the structural rule), the
-    total stays bounded, and removing the last entry removes the block —
-    an empty session is not a planned session.
+    Every entry stays one round of ASCII ``"<n> dk"`` and the total stays
+    bounded — exactly the structural rule the reader applies — and removing
+    the last entry removes the block: an empty session is not a planned
+    session.
     """
     if _selected_session(command) is None:
         return
@@ -601,14 +593,15 @@ def _finish_session(day, command):
     if not exercises:
         del day[CARDIO_SESSION_KEY]
         return
-    total = 0
-    for entry in exercises:
-        minutes = _session_minutes(entry.get(FIELD_REPS)) if isinstance(entry, dict) else None
-        if minutes is None or entry.get(FIELD_SETS) != 1:
-            raise InvalidPrescription("a cardio session entry is one round of minutes")
-        total += minutes
-    if total > CARDIO_SESSION_MINUTES_MAX:
-        raise InvalidPrescription("cardio session exceeds its duration bound")
+    # The plan READER's own session validator is the one authority: an edit
+    # the reader would refuse can never be saved (a refused stored session
+    # would make the whole plan unreadable on every client).
+    from app.services.training_generation.output_errors import SchemaInvalidError
+    from app.services.training_generation.response_validator import validate_cardio_session
+    try:
+        validate_cardio_session(day[CARDIO_SESSION_KEY])
+    except SchemaInvalidError as exc:
+        raise InvalidPrescription("a cardio session entry is one round of minutes") from exc
 
 
 def apply_command(document, command, *, native_editor=False, private_definitions=None):

@@ -50,7 +50,8 @@ def upgrade():
                       sa.ForeignKey("user.id", ondelete="CASCADE"), nullable=False),
             *(sa.Column(name, kind, nullable=False) for name, kind in _COLUMNS.items()
               if name not in {"id", "user_id"}),
-            sa.UniqueConstraint("user_id", "date_key", "session_kind", name=_UNIQUE),
+            sa.UniqueConstraint("user_id", "date_key", "session_kind", "plan_lineage_id",
+                                name=_UNIQUE),
             *(sa.CheckConstraint(sql, name=name) for name, sql in _CHECKS.items()),
         )
 
@@ -64,7 +65,7 @@ def upgrade():
     keys = inspector.get_foreign_keys(_TABLE)
     if (columns != expected
             or inspector.get_pk_constraint(_TABLE)["constrained_columns"] != ["id"]
-            or unique.get(_UNIQUE) != ["user_id", "date_key", "session_kind"]
+            or unique.get(_UNIQUE) != ["user_id", "date_key", "session_kind", "plan_lineage_id"]
             or not set(_CHECKS) <= checks
             or len(keys) != 1
             or keys[0]["constrained_columns"] != ["user_id"]

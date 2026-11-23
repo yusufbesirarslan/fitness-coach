@@ -201,7 +201,7 @@ def project_current_plan(
             # only; the legacy shape never sees this key or pays this read.
             projected["today_progress"] = _today_progress(
                 projected["days"][day.weekday()], user_id, day,
-                snapshot.completed_today)
+                snapshot.completed_today, projected["plan_lineage"])
         if include_origin:
             # LP21 opt-in only: the legacy shape (and its strict mobile DTOs)
             # never sees this key or pays this read. A failed read raises
@@ -380,7 +380,7 @@ def _project_day(day, slot, user_id, secret, lineage, version, catalog,
     return projected
 
 
-def _today_progress(today_day, user_id, today, day_completed):
+def _today_progress(today_day, user_id, today, day_completed, plan_lineage):
     """D1: a day with several planned sessions is complete only when every
     one of them reached a terminal state; completion and skipping stay
     distinguishable per session. A single-session day keeps its existing
@@ -396,7 +396,7 @@ def _today_progress(today_day, user_id, today, day_completed):
     block = today_day.get("cardio_session")
     if block is not None:
         from app.services.training_session_outcomes import outcomes_for_day
-        outcome = outcomes_for_day(user_id, today).get("cardio")
+        outcome = outcomes_for_day(user_id, today, plan_lineage).get("cardio")
         sessions.append({
             "session": SESSION_CARDIO,
             "kind": "cardio",

@@ -68,7 +68,10 @@ def build_training_prompt(
             f"antrenman (kuvvet) günü ve toplam {cardio_days} bağımsız kardiyo "
             "seansı. Bir kardiyo seansı ya ayrı bir tip=\"kardiyo\" günüdür ya "
             "da bir tip=\"antrenman\" gününün \"kardiyo_seansi\" bloğudur. "
-            "Kalan günler tip=\"dinlenme\" olur.")
+            "Kardiyoyu önce boş günlere tip=\"kardiyo\" olarak yerleştir ve "
+            "mümkünse en az bir tam dinlenme günü bırak; \"kardiyo_seansi\" "
+            "yalnız bunlar yetmediğinde kullanılır. Kalan günler "
+            "tip=\"dinlenme\" olur.")
         cardio_rule = (
             "Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) "
             "ASLA bir antrenman gününün \"egzersizler\" listesine yazılmaz. "

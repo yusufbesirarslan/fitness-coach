@@ -136,7 +136,7 @@ def _parse_mutation(operation, body):
             raise InvalidPrescription("invalid reps text")
         fields["reps"] = validate_reps(body["reps"])
     if _SESSION_FIELD in body:
-        if body[_SESSION_FIELD] not in _SESSIONS:
+        if not isinstance(body[_SESSION_FIELD], str) or body[_SESSION_FIELD] not in _SESSIONS:
             raise InvalidMutation("invalid session")
         fields["session"] = body[_SESSION_FIELD]
     if operation == "prescription" and not _PRESCRIPTION_FIELDS & fields.keys():

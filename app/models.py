@@ -1344,13 +1344,16 @@ class TrainingSessionOutcome(db.Model):
     date_key = db.Column(db.String(10), nullable=False)
     session_kind = db.Column(db.String(16), nullable=False)
     outcome = db.Column(db.String(16), nullable=False)
-    # Provenance only: the plan revision whose session was answered.
+    # The answer belongs to ONE plan: a new plan (lineage) starts unanswered,
+    # never inheriting another plan's answer. ``mutation_version`` is
+    # provenance only (edits within the plan keep the day's answer, as they
+    # keep the day's own completion claim).
     plan_lineage_id = db.Column(db.String(64), nullable=False)
     mutation_version = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
-        db.UniqueConstraint("user_id", "date_key", "session_kind",
+        db.UniqueConstraint("user_id", "date_key", "session_kind", "plan_lineage_id",
                             name="uq_training_session_outcome_day"),
         db.CheckConstraint("session_kind IN ('cardio')",
                            name="ck_training_session_outcome_kind"),

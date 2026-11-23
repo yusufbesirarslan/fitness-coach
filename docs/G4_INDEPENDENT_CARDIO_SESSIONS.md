@@ -15,7 +15,7 @@ A strength day (`tip="antrenman"`) may carry **one** cardio session:
                                        "set": 1, "tekrar": "20 dk", "dinlenme": "0 sn", "not": ""}]}}
 ```
 
-- **Contents.** Cardio movements only, at least one entry. Each entry is one round of `"<n> dk"`.
+- **Contents.** Cardio movements only, at least one entry. Each entry is one round of ASCII `"<n> dk"`. The editor validates every session edit with the reader's own `validate_cardio_session`, so a saved plan is always readable.
 - **Duration.** Derived from the entries, never stored, and capped at 600 minutes. `sure_dk`, `odak` and `tahmini_kalori` describe the strength session only.
 - **Where it can appear.** A `kardiyo` or `dinlenme` day never carries a session. There are still exactly seven unique weekdays.
 - **Cardio count.** Cardio = `kardiyo` days + sessions. Rest = 7 − strength − `kardiyo` days. Strength 3..6 and cardio 0..6 are all representable.
@@ -28,7 +28,7 @@ A strength day (`tip="antrenman"`) may carry **one** cardio session:
 - Equipment is not bypassed. Cardio is still gated by `cardio_type`, which is only sound because a session **is** a cardio placement. Swimming in an `ev`/`kosu` plan is refused in both lists.
 - Nothing moves between lists automatically: no substitution and no reassignment.
 - **Legacy mixed days.** These are pre-P3A or #537-era cardio items inside a strength list. Founder ruling: they are **not locked**.
-  - Strength edits are accepted, and the stored cardio is preserved byte-for-byte.
+  - Strength edits are accepted. The stored cardio keeps its place and identity (an unrelated edit never moves, re-identifies or drops it); its own sets/reps stay editable.
   - An edit may never add misplaced cardio.
   - An edit may never leave misplaced cardio beside no strength or core work, because that would be a misleading day type.
   - Correcting the cardio (Replace or Remove) is always available.
@@ -41,7 +41,7 @@ The opt-in is strict, like LP21's `include_origin`: absent means legacy, exactly
 |---|---|---|
 | `GET /training/preferences` | unchanged; the `WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS` constraint stays | that constraint is absent |
 | `POST /training/plans` (AI) | unchanged: prompt byte-identical, strength + cardio > 7 conflicts, the session key is refused | the prompt describes the session block; the opt-in is part of the request fingerprint |
-| `POST /training/plans/general` | unchanged choices (cardio ≤ 6 − strength) and byte-identical content | cardio 1..6; overflow lands on strength days as sessions; pre-G4 combinations produce identical content and fingerprints |
+| `POST /training/plans/general` | unchanged choices (cardio ≤ 6 − strength) and byte-identical content | cardio 1..6; overflow lands on strength days as sessions and Sunday stays a full rest day; pre-G4 combinations produce identical content and fingerprints |
 | `GET /training/plans/current`, `/training/editor` | strength session only (exact-key DTOs unchanged) | adds `cardio_session` to each day, plus `today_progress` |
 | `POST /training/plans/replacement-proposals` | unchanged | not opted in yet: replacement candidates never contain sessions (follow-up) |
 
@@ -57,7 +57,7 @@ A legacy client reading an account whose plan was made by a new client sees the 
   - The same answer again is an idempotent replay. A different answer is `409 TRAINING_SESSION_OUTCOME_CONFLICT`, never an overwrite.
   - Other refusals: `TRAINING_SESSION_NOT_FOUND`, `TRAINING_SESSION_STALE`, `TRAINING_SESSION_NOT_TODAY`, `TRAINING_SESSION_INVALID_REQUEST`.
   - Health consent is required, as on every Training route.
-- **Storage.** Table `training_session_outcome`, one row per owner, day and session kind (`cardio`), with outcome `completed` or `skipped`. The plan lineage and version are stored as provenance.
+- **Storage.** Table `training_session_outcome`, one row per owner, day, session kind (`cardio`) and **plan lineage**, with outcome `completed` or `skipped`. A new plan starts unanswered: an answer is never shown for, carried to, or blocking another plan. Within one plan, edits keep the day's answer, as they keep the day's own completion claim. The mutation version is stored as provenance.
   - It is deleted with the `workouts` health-erasure category, by account purge, and by FK `ON DELETE CASCADE`.
 - **Progress (D1).** Reported as `today_progress` (opt-in only):
   - Per session: `{session: "day" | "cardio_session", kind, workout_ref, state: completed | skipped | incomplete}`.
@@ -76,7 +76,7 @@ A legacy client reading an account whose plan was made by a new client sees the 
 ## 5. Coach
 
 - `get_current_training_plan` publishes a day's session as `cardio_session: {exercises: [...]}`, using the same closed exercise projection. `coach_privacy` re-projects it.
-- Coach write tools build commands without a session selector, so they address the strength list only, under the same placement rule.
+- Coach write tools build commands without a session selector, so they address the strength list only, under the same placement rule. Coach editing of sessions is a follow-up, needed only once Coach WRITE is activated.
 - `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` stays `0`. No Coach WRITE is activated.
 
 ## 6. Migration and release class (D3)
