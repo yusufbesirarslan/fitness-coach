@@ -90,3 +90,90 @@ not refused ("işareti olabilir/olarak" and "işaret ediyor" are refused). Repla
 answers: all 8 Turkish answers from this prompt pass; 2 of 7 valid Turkish
 answers from the previous prompt are refused ("düşündürüyor", "asimetrik"),
 which is why the validator ships only together with or after this prompt.
+
+## Weight, judgment, physiology and comparison checks (validator only)
+
+Probes on main after #532 showed that wording the prompt forbids could still
+reach the client in both languages: weight or fat change ("birkaç kilo yağ
+kaybetmişsin", "You need to lose a few kilos"), weight-loss instructions
+("kilo vermelisin"), negative judgments about the body, physiological
+inferences (swelling, dehydration, overtraining) and physique comparisons that
+one photo cannot support ("Your arms are bigger than in your last photo").
+None of the 24 real staging answers contained them; the prompt is unchanged.
+
+`_plain_text` now also refuses, in EN (raw text, IGNORECASE) and TR
+(`_tr_folded`):
+
+| Check | EN / TR pattern | Message |
+|---|---|---|
+| Weight / body-fat change, weight-loss directives | `_WEIGHT_CHANGE_RE` / `_TR_WEIGHT_CHANGE_RE` | prohibited body claim |
+| Negative body judgment | `_NEGATIVE_BODY_RE` / `_TR_NEGATIVE_BODY_RE` | negative body judgment |
+| Medical / physiological inference | `_PHYSIOLOGICAL_RE` / `_TR_PHYSIOLOGICAL_RE` | safety policy |
+| Comparison with other people or norms | `_NORM_COMPARISON_RE` / `_TR_NORM_COMPARISON_RE` | unsupported comparison |
+
+`_single_image_text` (single-image `parse_analysis` only) also refuses a
+comparison with an earlier photo: a growth/shrink verb on the body
+(`_PHYSIQUE_CHANGE_RE`, `_TR_PHYSIQUE_CHANGE_RE`), or a past reference
+(`_PAST_REFERENCE_RE`, `_TR_PAST_REFERENCE_RE`) together with a physique
+comparative in the same item. The two-photo comparison validator reuses
+`_plain_text` and so gets the first four checks; it does not get this one,
+because describing an A-to-B difference is its job.
+
+Each pattern names the claim, not the word. These stay legal and are pinned by
+`EN_HARDENING_ORDINARY` / `TR_HARDENING_ORDINARY`: gym weights ("lower the
+weight", "drop the weight", "fat grips", "kilo düşür", "birkaç kilo daha
+ekle", "fazla kilolarla çalışma"); ordinary exercise advice ("stay hydrated",
+"hips are sagging" in a plank, "aşırı yüklenme", "kalçan sarkıyor"); neutral
+photo observations ("a lean, well-developed physique", "flat/soft light",
+"zayıf ışık", "yağlı cilt", "su şişesi", "sisli", "gelişmiş omuz hattı",
+"pumped"); and same-photo comparisons ("softer than your thighs", "diğer
+bölgelere göre daha az", "sağdakinden daha belirgin"). Guidance that only
+mentions an earlier photo ("same angle as your last photo", "İlk fotoğrafa
+göre aynı ışığı kullan") passes, because it makes no physique comparison.
+
+Replay of every stored staging answer (`~/axisai-pump-check-response-quality-01`,
+135 answers, including the 32 final A/B pairs, and all 435 distinct text
+items): no verdict changes against main.
+
+EN checks run on `_en_normalized` (curly apostrophes → `'`, Unicode format
+characters such as soft hyphens dropped); `_tr_folded` drops format
+characters too. "şişlik" (swelling) folds to "sislik" (haziness), so it is
+matched on a Turkish-lowercased copy that keeps the letters
+(`_TR_LETTER_PHYSIOLOGICAL_RE`). The earlier-photo check needs an explicit
+earlier reference ("than before", "than they were", "since your last
+photo", "over the past weeks", "önceki fotoğrafa göre", "geçen seferden";
+not bare "now", "recently", "zamanla", "artık") and a body comparative. A
+comparative that describes the photo setup itself ("a wider frame than in
+your last photo", "the light is softer than before", "kadrajı daha geniş
+tut") is removed before that check (`_PHOTO_SETUP_PHRASE_RE`,
+`_TR_PHOTO_SETUP_PHRASE_RE`); a setup word elsewhere in the item does not
+exempt it ("bigger than in your last shot", "…; focus on the chest next" are
+refused). Only an article or adverb may sit between the comparative and
+the setup noun ("bigger in frame", "fuller on camera" are not setup), and in
+Turkish only bare/object setup forms count ("kadrajı", "ışık"; not "ışıkta",
+"bu açıdan") with no body noun in between; a purpose clause ("daha belirgin
+görünsün diye") is advice. Turkish change verbs are matched as -mış forms,
+finite -di forms (not questions: "büyüdü mü") and nominalized -dIk forms
+("büyüdüğünü"), but not "büyüdükçe"/"büyüdüğünde". All English
+checks, including the pre-existing ones, run on `_en_normalized`.
+
+Independent review rounds 1–3 (REQUEST_CHANGES) found Turkish -di bypasses,
+curly-apostrophe and soft-hyphen bypasses, and refused guidance such as
+"Zamanla ilerlemeyi görmek için…", "Kademeli kilo artışı…", "Keep training to
+gain muscle…", "Birçok kişi bu pozda…"; round 2 found that a setup word
+anywhere in the item exempted it, "artık" and "than most other areas"
+false positives, and stem collisions ("büyüdükçe", "kolay", "sırt dolmuş").
+All of them are now pinned in `REVIEW_PROHIBITED` / `REVIEW_ORDINARY`.
+
+Known residuals:
+- an earlier-photo comparison written as a setup phrase ("a bigger frame
+  than last time" is treated as setup);
+- soft adjectives and idioms the patterns do not list ("the midsection is
+  soft", "yeni başlayan biri için kaslısın", "for a beginner" praise other
+  than impressive/great/good/solid/strong/excellent);
+- "sislik" written without Turkish letters (indistinguishable from haziness);
+- praise relative to a group the patterns do not list ("for a beginner",
+  which is also ordinary advice);
+- pump wording that uses "swollen"/"şişmiş" is refused, as specified; watch
+  for it in real outputs, since this product is called Pump Check;
+- judgments written as adjectives the patterns do not list.

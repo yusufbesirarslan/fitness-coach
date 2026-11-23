@@ -82,6 +82,7 @@ from .identity import (
 from .parser import ToolArgumentError, build_command
 from .proposals import (
     binding_matches,
+    is_training_proposal,
     decode_command,
     encode_command,
     plan_binding,
@@ -128,6 +129,10 @@ _BUDGET_ATTR = "_coach_plan_operation_keys"
 #: turn identity — applies the same edit a second time. Same placement and
 #: lifetime as the budget: on ``g``, so it dies with the request.
 _CHANGED_ATTR = "_coach_plan_change_applied"
+#: C2: ``_CHANGED_ATTR`` now means "any plan domain moved" (degraded-reply copy,
+#: COACH_REPLY_INCOMPLETE). The Training transport fact needs its own marker so
+#: a Nutrition change is never reported as ``training_plan.changed``.
+_TRAINING_CHANGED_ATTR = "_coach_training_plan_change_applied"
 _PROPOSAL_ATTR = "_coach_plan_proposal_created"
 _NEW_PROPOSAL_ATTR = "_coach_plan_new_proposal_created"
 _INTENT_ATTR = "_coach_plan_confirmation_intent"
@@ -167,6 +172,9 @@ def begin_turn(user_message="", history=None, user_id=None):
         setattr(g, _USER_MSG_ATTR, user_message or "")
         setattr(g, _HISTORY_ATTR, list(history or ()))
         setattr(g, _USER_ID_ATTR, user_id)
+        setattr(g, _TRAINING_CHANGED_ATTR, False)
+        from .nutrition import reset_turn
+        reset_turn()
         from .grounding import refresh_clarification_for_turn
         refresh_clarification_for_turn(user_message, user_id=user_id)
     except RuntimeError:
@@ -231,6 +239,8 @@ def published_plan_tool_defs(user_id=None):
         if intent in (CONFIRM, CANCEL):
             return ()
         return PLAN_MUTATION_TOOL_DEFS
+    if not is_training_proposal(pending):
+        return ()
     if new_proposal_created_this_turn():
         # Staged this turn: the user has not seen it yet. Confirm/cancel
         # belong to a later authenticated turn.
@@ -258,6 +268,38 @@ def plan_changed_this_turn():
         return bool(getattr(g, _CHANGED_ATTR, False))
     except RuntimeError:
         return False
+
+
+def training_plan_changed_this_turn():
+    """Like ``plan_changed_this_turn`` but Training only (transport fact)."""
+    try:
+        return bool(getattr(g, _TRAINING_CHANGED_ATTR, False))
+    except RuntimeError:
+        return False
+
+
+def _mark_shared_change():
+    """C2: another plan domain durably changed in this turn."""
+    try:
+        setattr(g, _CHANGED_ATTR, True)
+    except RuntimeError:
+        pass
+
+
+def _mark_shared_proposal():
+    """C2: another plan domain staged a proposal awaiting confirmation."""
+    try:
+        setattr(g, _PROPOSAL_ATTR, True)
+        setattr(g, _NEW_PROPOSAL_ATTR, True)
+    except RuntimeError:
+        pass
+
+
+def _mark_plan_tool_attempted_any():
+    try:
+        setattr(g, _PLAN_TOOL_ATTEMPTED_ATTR, True)
+    except RuntimeError:
+        pass
 
 
 def plan_tool_attempted_this_turn():
@@ -467,8 +509,22 @@ def execute_direct_confirmation(user_id, proposal_id, decision):
         return results.error_result(
             results.ERROR_INVALID_ARGUMENTS, "geçersiz onay isteği")
     _begin_direct_turn(user_id, intent, proposal_id)
+    from . import nutrition
+    if (plan_mutation_tools_enabled() and nutrition.tools_enabled()
+            and nutrition.owns_proposal(user_id, proposal_id)):
+        # C2: a named Nutrition quote resolves through C1 only, under its
+        # stored original authorities. Training ids never reach this branch.
+        return nutrition.execute_resolution(user_id, proposal_id, decision)
     name = CONFIRM_TOOL if intent == CONFIRM else CANCEL_PENDING_TOOL
-    return execute_plan_tool(user_id, name, {})
+    result = execute_plan_tool(user_id, name, {})
+    if (intent == CANCEL and plan_mutation_tools_enabled()
+            and result.get("error") == results.ERROR_NO_PENDING_CONFIRMATION
+            and nutrition.release_stranded(user_id, proposal_id)):
+        # Closed boundary: an owned Nutrition quote can still be cancelled,
+        # never applied (only after the Training path found nothing, so a
+        # Training cancel pays no extra read).
+        return nutrition.cancelled_result()
+    return result
 
 
 def _begin_direct_turn(user_id, intent, proposal_id):
@@ -481,6 +537,9 @@ def _begin_direct_turn(user_id, intent, proposal_id):
     setattr(g, _PLAN_TOOL_ATTEMPTED_ATTR, False)
     setattr(g, _USER_ID_ATTR, user_id)
     setattr(g, _DIRECT_PROPOSAL_ATTR, proposal_id)
+    setattr(g, _TRAINING_CHANGED_ATTR, False)
+    from .nutrition import reset_turn
+    reset_turn()
 
 
 def _direct_proposal_id():
@@ -501,6 +560,7 @@ def _mark_plan_changed(payload):
         return
     try:
         setattr(g, _CHANGED_ATTR, True)
+        setattr(g, _TRAINING_CHANGED_ATTR, True)
         from .clarifications import clear
         clear(reason="mutation_applied")
     except RuntimeError:
@@ -733,7 +793,8 @@ def _confirm_pending(user_id):
             return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
         public_id = pending.public_id
     row = lock_proposal(user_id, public_id)
-    if row is None:
+    if not is_training_proposal(row):
+        db.session.rollback()
         return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
@@ -825,6 +886,9 @@ def _cancel_pending(user_id):
         if named is not None:
             return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
         return results.cancelled_pending_result()
+    if not is_training_proposal(row):
+        db.session.rollback()
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
     if already is not None:

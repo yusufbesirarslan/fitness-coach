@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 import s3_helper
 from app.extensions import db
 from app.services.ai_allowances import execution as meter
+from app.services.ai_spend_guard import AISpendLimitExceeded
 from app.i18n import DEFAULT_LOCALE
 from app.models import PumpCheck
 from app.services.mobile_pump_checks.analysis import (
@@ -186,18 +187,55 @@ def create_or_replay(user_id, key, command, *, language=DEFAULT_LOCALE):
     # was checked by _claim_row before returning any prior result.
     if row.analysis_status == "completed" or not meter.enabled():
         return _run_pump_analysis(row_id, user_id, command, created, language)
-    action = meter.prepare(user_id, "pump_check", {"command": fingerprint(command)}, key=key)
-    with meter.scope(action):
-        try:
-            return _run_pump_analysis(row_id, user_id, command, created, language)
-        finally:
-            action.finish()
+    try:
+        action = meter.prepare(
+            user_id, "pump_check", {"command": fingerprint(command)}, key=key)
+        with meter.scope(action):
+            try:
+                return _run_pump_analysis(
+                    row_id, user_id, command, created, language)
+            finally:
+                action.finish()
+    except AISpendLimitExceeded:
+        # Allowance (402) and consent refusals: when THIS call inserted the row
+        # and nothing ever claimed it, the row is not a Pump Check the user has
+        # — drop it so history never shows a permanent "pending" (P2-1).
+        if created:
+            _discard_unclaimed(row_id, user_id)
+        raise
+
+
+def _discard_unclaimed(row_id, user_id):
+    """Delete a row no analysis attempt ever claimed; never mask the refusal.
+
+    Every guard is in the DELETE itself: a row another request has claimed,
+    uploaded to, analysed or finished is left exactly as it is.
+    """
+    try:
+        PumpCheck.query.filter(
+            PumpCheck.id == row_id,
+            PumpCheck.user_id == user_id,
+            PumpCheck.analysis_status == "pending",
+            PumpCheck.analysis_attempt.is_(None),
+            PumpCheck.image_key.is_(None),
+        ).delete(synchronize_session=False)
+        db.session.commit()
+    except Exception as error:
+        db.session.rollback()
+        current_app.logger.warning(
+            "mobile_pump_check event=refused_row_discard_failed error_type=%s",
+            type(error).__name__)
 
 
 def _run_pump_analysis(row_id, user_id, command, created, language):
     attempt = _claim_analysis(row_id, user_id)
     if attempt is None:
-        return db.session.get(PumpCheck, row_id), created
+        row = db.session.get(PumpCheck, row_id)
+        if row is None:
+            # A same-key request was refused and discarded the unclaimed row
+            # after this call read it. Retrying creates the command afresh.
+            raise PumpCheckPersistenceUnavailable("pump check row was discarded")
+        return row, created
     image_key = db.session.query(PumpCheck.image_key).filter_by(
         id=row_id, user_id=user_id).scalar()
     db.session.rollback()

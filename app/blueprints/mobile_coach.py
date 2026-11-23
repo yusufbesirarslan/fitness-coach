@@ -245,7 +245,7 @@ def _send_authorized_turn(user, question, handoff):
     payload = mobile_coach.turn_payload(
         result.get("recorded_turn"), question, result["answer"], user_id,
         current_app.config["SECRET_KEY"],
-        plan_effects=coach_plan_tools.turn_plan_effects(user_id))
+        plan_effects=coach_plan_tools.turn_plan_effects(user_id, user.language))
     from app.consent_publication import protect_response
     return protect_response(_with_deferred_summary(jsonify(payload), result))
 
@@ -300,7 +300,7 @@ def resolve_plan_confirmation():
         return consent_error_response(error)
     message = coach_confirmation.direct_resolution_reply(result, user.language)
     body, status = mobile_coach.direct_confirmation_response(
-        result, message, coach_plan_tools.turn_plan_effects(user.id))
+        result, message, coach_plan_tools.turn_plan_effects(user.id, user.language))
     if body is not None:
         return jsonify(body)
     code, text, retryable = _CONFIRMATION_ERRORS[status]

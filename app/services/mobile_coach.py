@@ -108,13 +108,28 @@ def project_plan_effects(plan_effects):
     proposal_id = plan_effects.get("proposal_id")
     if not (pending and isinstance(proposal_id, str) and proposal_id):
         proposal_id = None
-    return {
+    projected = {
         "training_plan": {
             "changed": plan_effects.get("changed") is True,
             "pending_confirmation": pending,
             "proposal_id": proposal_id,
         },
     }
+    nutrition = plan_effects.get("nutrition_plan")
+    if isinstance(nutrition, dict):
+        # C2: additive and present only while the Nutrition boundary is
+        # available. The proposal is the server's persisted quote (owner-scoped
+        # id, before/after meal, day totals, estimate provenance and notice).
+        n_pending = nutrition.get("pending_confirmation")
+        n_pending = None if n_pending is None else n_pending is True
+        proposal = nutrition.get("proposal") if n_pending else None
+        projected["nutrition_plan"] = {
+            "changed": nutrition.get("changed") is True,
+            "pending_confirmation": n_pending,
+            "proposal_id": (proposal or {}).get("proposal_id") if isinstance(proposal, dict) else None,
+            "proposal": proposal if isinstance(proposal, dict) else None,
+        }
+    return projected
 
 
 def history_payload(user_id, secret):

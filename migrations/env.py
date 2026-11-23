@@ -109,14 +109,33 @@ def run_migrations_online():
         with connectable.connect() as connection:
             if lock_timeout_ms is not None:
                 assert_lock_timeout(connection, lock_timeout_ms)
+            # Every applied step is recorded so a retired-revision
+            # reconciliation can prove it was a complete upgrade to head.
+            applied = []
+            run_args = dict(conf_args)
+            callbacks = list(run_args.pop("on_version_apply", None) or ())
+            callbacks.append(lambda ctx, step, heads, run_args: applied.append(step))
             context.configure(
                 connection=connection,
                 target_metadata=get_metadata(),
-                **conf_args
+                on_version_apply=callbacks,
+                **run_args
             )
 
             with context.begin_transaction():
+                # Retired revisions (app/retired_revisions.py) are refused, or
+                # reconciled when explicitly requested, in this same
+                # transaction and before Alembic reads the current heads.
+                from app.retired_revisions import confirm, guard
+                reconciled = guard(connection, context.script)
+                if reconciled is not None:
+                    logger.warning("retired revision %s verified; version pointer "
+                                   "moved to %s before upgrade", *reconciled)
                 context.run_migrations()
+                if reconciled is not None:
+                    # Only a complete upgrade to head may keep the pointer
+                    # move; stamp/current/partial runs raise and roll back.
+                    confirm(connection, context.script, reconciled, applied)
     finally:
         if lock_timeout_ms is not None:
             connectable.dispose()
