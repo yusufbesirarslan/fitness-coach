@@ -60,6 +60,7 @@ from app.services.plan_mutation import (
     MutationContext,
     PlanMutationResult,
     PlanMutationError,
+    PlanNotFound,
     apply_plan_mutation,
     undo_last_change,
 )
@@ -70,6 +71,7 @@ from app.services.plan_mutation.journal import (
     OUTCOME_APPLIED,
     find_by_key,
 )
+from app.services.plan_session_transition import lock_plan_session_transition
 from app.services.today_facts import get_active_plan
 
 from . import results
@@ -673,18 +675,22 @@ def _execute_mutation(user_id, name, arguments):
     if not grounded.ready:
         return grounded.result
     command = grounded.command
+    # Keep a session start or native edit from invalidating the impact decision.
+    lock_plan_session_transition(user_id)
     plan, _document, changed = preview_command(user_id, command)
+    # A no-op on this snapshot can be material after another edit.
+    binding = plan_binding(plan)
     if not changed:
-        return _apply_typed(user_id, command)
+        return _apply_typed(user_id, command, binding)
     facts = session_impact_facts(user_id, command)
     decision = decide_plan_mutation_impact(command, facts)
     if decision.verdict == REFUSE_UNSUPPORTED:
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
     if decision.verdict == REQUIRE_CONFIRMATION:
-        return _stage_proposal(user_id, plan, command, decision)
+        return _stage_proposal(user_id, binding, command, decision)
     if decision.verdict != APPLY_NOW:
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
-    return _apply_typed(user_id, command)
+    return _apply_typed(user_id, command, binding)
 
 
 def _execute_undo(user_id, arguments):
@@ -692,35 +698,38 @@ def _execute_undo(user_id, arguments):
     # ignored, because a model that thinks it can pass "which change" needs to
     # learn it cannot (brief §31).
     build_undo_arguments(arguments)
+    lock_plan_session_transition(user_id)
+    plan = get_active_plan(user_id)
+    if plan is None:
+        raise PlanNotFound("no active training plan")
+    binding = plan_binding(plan)
     facts = session_impact_facts(user_id, UNDO_LAST_CHANGE)
     decision = decide_plan_mutation_impact(UNDO_LAST_CHANGE, facts)
     if decision.verdict == REFUSE_UNSUPPORTED:
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
     if decision.verdict == REQUIRE_CONFIRMATION:
-        plan = get_active_plan(user_id)
-        from app.services.plan_mutation.errors import PlanNotFound
         from app.services.plan_mutation.journal import latest_reversible
-        if plan is None:
-            raise PlanNotFound("no active training plan")
         if latest_reversible(user_id, plan.lineage_id) is None:
-            return _apply_undo(user_id)
-        return _stage_proposal(user_id, plan, UNDO_LAST_CHANGE, decision)
-    return _apply_undo(user_id)
+            return _apply_undo(user_id, binding)
+        return _stage_proposal(user_id, binding, UNDO_LAST_CHANGE, decision)
+    return _apply_undo(user_id, binding)
 
 
-def _apply_typed(user_id, command):
+def _apply_typed(user_id, command, binding):
     operation_key = mutation_operation_key(command)
     if not _charge_budget(operation_key):
         return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
-    result = apply_plan_mutation(user_id, command, _context(operation_key))
+    result = apply_plan_mutation(
+        user_id, command, _context(operation_key), expected_binding=binding)
     return results.mutation_result(command, result)
 
 
-def _apply_undo(user_id):
+def _apply_undo(user_id, binding):
     operation_key = undo_operation_key()
     if not _charge_budget(operation_key):
         return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
-    result = undo_last_change(user_id, _context(operation_key))
+    result = undo_last_change(
+        user_id, _context(operation_key), expected_binding=binding)
     return results.undo_result(result)
 
 
@@ -738,9 +747,8 @@ def _reuse_or_block_pending(pending, name, arguments):
     return results.error_result(results.ERROR_PENDING_CONFIRMATION_EXISTS)
 
 
-def _stage_proposal(user_id, plan, command, decision):
+def _stage_proposal(user_id, binding, command, decision):
     kind, payload, fingerprint = encode_command(command)
-    binding = plan_binding(plan)
     try:
         _row, reused = create_or_reuse_pending(
             user_id,

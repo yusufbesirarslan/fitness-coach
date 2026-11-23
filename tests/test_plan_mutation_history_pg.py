@@ -92,6 +92,54 @@ def pg_plan_app():
             db.drop_all()
 
 
+@pytest.mark.parametrize("undo", [False, True], ids=["edit", "undo"])
+def test_coach_impact_check_serializes_with_workout_start(
+        pg_plan_app, monkeypatch, undo):
+    from app.extensions import db
+    from app.observability import assign_request_id
+    from app.services.coach_plan_tools import executor, results
+    from app.services.plan_mutation import (
+        MutationContext, ReplaceExerciseCommand, apply_plan_mutation,
+    )
+    from app.services.plan_session_transition import TRANSITION_LOCK_NAMESPACE
+
+    app, owner = pg_plan_app
+    app.config[executor.FLAG_KEY] = True
+    arguments = {
+        "day": "Pazartesi", "exercise": "Bench Press", "replacement": "Push-Up",
+    }
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        executor.begin_turn()
+        if undo:
+            apply_plan_mutation(
+                owner, ReplaceExerciseCommand(**arguments),
+                MutationContext(idempotency_key="seed-coach-undo"),
+            )
+        impact_facts = executor.session_impact_facts
+        lock_available_during_impact = []
+
+        def start_lock_available():
+            with db.engine.connect() as competitor:
+                return competitor.execute(
+                    sa.text("SELECT pg_try_advisory_xact_lock(:namespace, :owner)"),
+                    {"namespace": TRANSITION_LOCK_NAMESPACE, "owner": owner},
+                ).scalar_one()
+
+        def check_impact(user_id, command):
+            lock_available_during_impact.append(start_lock_available())
+            return impact_facts(user_id, command)
+
+        monkeypatch.setattr(executor, "session_impact_facts", check_impact)
+        result = executor.execute_plan_tool(
+            owner, executor.UNDO_TOOL if undo else "replace_training_plan_exercise",
+            {} if undo else arguments,
+        )
+        assert result["status"] == results.STATUS_APPLIED
+        assert lock_available_during_impact == [False]
+        assert start_lock_available() is True
+
+
 def _state(app, user_id):
     from app.models import PlanMutationRecord
     from app.services.today_facts import get_active_plan
