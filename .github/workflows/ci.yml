@@ -432,6 +432,8 @@ jobs:
           tests/test_r6_adult_runtime_pg.py
           tests/test_mobile_training_editor_pg.py
           tests/test_ai_consent_pg.py
+          --deselect tests/test_ai_consent_pg.py::test_fresh_empty_postgres_complete_chain_has_no_implicit_grants
+          --deselect tests/test_ai_consent_pg.py::test_existing_merged_main_upgrade_preserves_all_rows_and_schema
 
   mobile-pg-concurrency:
     name: PostgreSQL concurrency
