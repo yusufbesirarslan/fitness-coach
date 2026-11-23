@@ -99,7 +99,7 @@ def test_coach_impact_check_serializes_with_workout_start(
     from app.observability import assign_request_id
     from app.services.coach_plan_tools import executor, results
     from app.services.plan_mutation import (
-        MutationContext, ReplaceExerciseCommand, apply_plan_mutation,
+        MutationContext, ReplaceExerciseCommand, apply_plan_mutation, service,
     )
     from app.services.plan_session_transition import TRANSITION_LOCK_NAMESPACE
 
@@ -117,7 +117,8 @@ def test_coach_impact_check_serializes_with_workout_start(
                 MutationContext(idempotency_key="seed-coach-undo"),
             )
         impact_facts = executor.session_impact_facts
-        lock_available_during_impact = []
+        lock_for_mutation = service._lock_for_mutation
+        competing_lock_checks = []
 
         def start_lock_available():
             with db.engine.connect() as competitor:
@@ -127,16 +128,21 @@ def test_coach_impact_check_serializes_with_workout_start(
                 ).scalar_one()
 
         def check_impact(user_id, command):
-            lock_available_during_impact.append(start_lock_available())
+            competing_lock_checks.append(("impact", start_lock_available()))
             return impact_facts(user_id, command)
 
+        def check_save(user_id, *, editor):
+            competing_lock_checks.append(("save", start_lock_available()))
+            return lock_for_mutation(user_id, editor=editor)
+
         monkeypatch.setattr(executor, "session_impact_facts", check_impact)
+        monkeypatch.setattr(service, "_lock_for_mutation", check_save)
         result = executor.execute_plan_tool(
             owner, executor.UNDO_TOOL if undo else "replace_training_plan_exercise",
             {} if undo else arguments,
         )
         assert result["status"] == results.STATUS_APPLIED
-        assert lock_available_during_impact == [False]
+        assert competing_lock_checks == [("impact", False), ("save", False)]
         assert start_lock_available() is True
 
 

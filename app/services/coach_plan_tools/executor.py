@@ -61,6 +61,7 @@ from app.services.plan_mutation import (
     PlanMutationResult,
     PlanMutationError,
     PlanNotFound,
+    PlanStateConflict,
     apply_plan_mutation,
     undo_last_change,
 )
@@ -616,6 +617,8 @@ def _execute(user_id, name, arguments):
         # request leaves the previous one armed for the next "Monday"/"yes".
         from .grounding import supersede_stale_clarification
         supersede_stale_clarification(user_id, name, arguments)
+        if name == UNDO_TOOL:
+            lock_plan_session_transition(user_id)
         pending = get_pending(user_id)
         if pending is not None:
             return _reuse_or_block_pending(pending, name, arguments)
@@ -670,6 +673,8 @@ def _context(operation_key):
 
 def _execute_mutation(user_id, name, arguments):
     command = build_command(name, arguments)
+    original_plan = get_active_plan(user_id)
+    binding = plan_binding(original_plan) if original_plan is not None else None
     from .grounding import ground_command
     grounded = ground_command(user_id, command)
     if not grounded.ready:
@@ -677,9 +682,15 @@ def _execute_mutation(user_id, name, arguments):
     command = grounded.command
     # Keep a session start or native edit from invalidating the impact decision.
     lock_plan_session_transition(user_id)
+    pending = get_pending(user_id)
+    if pending is not None:
+        return _reuse_or_block_pending(pending, name, arguments)
+    if original_plan is not None:
+        db.session.expire(original_plan)
     plan, _document, changed = preview_command(user_id, command)
-    # A no-op on this snapshot can be material after another edit.
-    binding = plan_binding(plan)
+    # A newer snapshot can change what a grounded workout target means.
+    if binding is None or binding != plan_binding(plan):
+        raise PlanStateConflict("the plan changed during Coach grounding")
     if not changed:
         return _apply_typed(user_id, command, binding)
     facts = session_impact_facts(user_id, command)
@@ -698,7 +709,6 @@ def _execute_undo(user_id, arguments):
     # ignored, because a model that thinks it can pass "which change" needs to
     # learn it cannot (brief §31).
     build_undo_arguments(arguments)
-    lock_plan_session_transition(user_id)
     plan = get_active_plan(user_id)
     if plan is None:
         raise PlanNotFound("no active training plan")

@@ -13,7 +13,7 @@ from app.models import (
 )
 from app.observability import assign_request_id
 from app.services import ai_coach, coach_plan_tools, plan_confirmation
-from app.services.coach_plan_tools import executor, identity, results
+from app.services.coach_plan_tools import executor, grounding, identity, results
 from app.services.plan_mutation import (
     ACTOR_AI_COACH,
     MoveTrainingDayCommand,
@@ -157,6 +157,32 @@ def test_plan_change_after_undo_impact_check_cannot_retarget_undo(
     assert len(day_exercises(owner, "Perşembe")) == 1
     assert plan_version(owner) == 2
     assert len(journal(owner)) == 2
+
+
+def test_plan_change_after_grounding_cannot_retarget_a_named_workout(
+        app, planned_user, tools_on, turn, monkeypatch):
+    owner = planned_user.id
+    ground_command = grounding.ground_command
+
+    def change_after_grounding(user_id, command):
+        grounded = ground_command(user_id, command)
+        assert grounded.ready and grounded.command.day == "Cuma"
+        apply_plan_mutation(
+            owner, MoveTrainingDayCommand(day="Cuma", target_day="Pazartesi"),
+            MutationContext(idempotency_key="intervening-owner-change"),
+        )
+        return grounded
+
+    monkeypatch.setattr(grounding, "ground_command", change_after_grounding)
+    _new_turn(app, "Add Walking Lunges to my leg day with 3 sets of 10 reps")
+    result = call(owner, "add_training_plan_exercise", {
+        "exercise": "Walking Lunges", "sets": 3, "reps": "10",
+    })
+
+    assert result.get("error") == results.ERROR_PLAN_STATE_CONFLICT
+    assert names(owner, "Cuma") == ["Bench Press", "Shoulder Press"]
+    assert names(owner, "Pazartesi") == ["Squat"]
+    assert len(journal(owner)) == 1
 
 
 def test_replace_on_an_active_session_day_requires_confirmation(
