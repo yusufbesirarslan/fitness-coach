@@ -99,7 +99,7 @@ def test_coach_impact_check_serializes_with_workout_start(
     from app.observability import assign_request_id
     from app.services.coach_plan_tools import executor, results
     from app.services.plan_mutation import (
-        MutationContext, ReplaceExerciseCommand, apply_plan_mutation, service,
+        MutationContext, ReplaceExerciseCommand, apply_plan_mutation,
     )
     from app.services.plan_session_transition import TRANSITION_LOCK_NAMESPACE
 
@@ -117,7 +117,7 @@ def test_coach_impact_check_serializes_with_workout_start(
                 MutationContext(idempotency_key="seed-coach-undo"),
             )
         impact_facts = executor.session_impact_facts
-        lock_for_mutation = service._lock_for_mutation
+        create_pending = executor.create_or_reuse_pending
         competing_lock_checks = []
 
         def start_lock_available():
@@ -131,18 +131,18 @@ def test_coach_impact_check_serializes_with_workout_start(
             competing_lock_checks.append(("impact", start_lock_available()))
             return impact_facts(user_id, command)
 
-        def check_save(user_id, *, editor):
-            competing_lock_checks.append(("save", start_lock_available()))
-            return lock_for_mutation(user_id, editor=editor)
+        def check_stage(user_id, **kwargs):
+            competing_lock_checks.append(("stage", start_lock_available()))
+            return create_pending(user_id, **kwargs)
 
         monkeypatch.setattr(executor, "session_impact_facts", check_impact)
-        monkeypatch.setattr(service, "_lock_for_mutation", check_save)
+        monkeypatch.setattr(executor, "create_or_reuse_pending", check_stage)
         result = executor.execute_plan_tool(
             owner, executor.UNDO_TOOL if undo else "replace_training_plan_exercise",
             {} if undo else arguments,
         )
-        assert result["status"] == results.STATUS_APPLIED
-        assert competing_lock_checks == [("impact", False), ("save", False)]
+        assert result["status"] == results.STATUS_CONFIRMATION_REQUIRED
+        assert competing_lock_checks == [("impact", False), ("stage", False)]
         assert start_lock_available() is True
 
 

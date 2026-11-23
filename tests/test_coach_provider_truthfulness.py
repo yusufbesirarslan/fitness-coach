@@ -341,6 +341,7 @@ def test_a_real_mutation_may_still_report_itself(
     difference is that this turn actually moved persisted state -- which is
     exactly the distinction the invariant is supposed to draw."""
     from app.services import coach_plan_tools
+    from tests.test_coach_plan_confirmation import _new_turn
 
     claim = "I've added Resistance Band Row to your Wednesday workout."
 
@@ -348,6 +349,10 @@ def test_a_real_mutation_may_still_report_itself(
         "day": "Çarşamba", "exercise": "Band Row", "sets": 3,
         "reps": "10-12"})
 
+    assert result["status"] == results.STATUS_CONFIRMATION_REQUIRED, result
+    assert coach_plan_tools.plan_changed_this_turn() is False
+    _new_turn(app, "yes")
+    result = call(canonical_user.id, coach_plan_tools.CONFIRM_TOOL)
     assert result["status"] == results.STATUS_APPLIED, result
     assert coach_plan_tools.plan_changed_this_turn() is True
     assert coach_confirmation.grounded_provider_reply(

@@ -9,6 +9,10 @@ import logging
 import time
 
 import pytest
+
+from tests.r07_immediate_mutation_contract import immediate_mutation_contract  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("immediate_mutation_contract")
 from flask import session as flask_session
 
 from app.extensions import db

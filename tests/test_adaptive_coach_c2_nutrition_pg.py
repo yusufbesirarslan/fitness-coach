@@ -40,6 +40,9 @@ def rig(pg_generation_app, monkeypatch):
     monkeypatch.setattr(access, "NUTRITION_EDITS_ENABLED", True)
     monkeypatch.setattr(access, "APPROVED_COACH_EDIT_DISCLOSURES",
                         frozenset({policies["coach"].version}))
+    monkeypatch.setattr(nutrition, "APPROVED_NUTRITION_READ_DISCLOSURES", frozenset({
+        (policies["coach"].version, policies["nutrition_plan"].version),
+    }))
     from d1_screened_support import screen_adult_tr
     with app.app_context():
         screen_adult_tr(*owners)
@@ -126,8 +129,10 @@ def state(r):
 
 def test_real_grants_publish_tools_and_a_missing_grant_withholds_them(rig):
     r = rig
-    names = in_turn(r, lambda: [d["name"] for d in nutrition.published_tool_defs(r.owner)])
-    assert set(names) == nutrition.TOOL_NAMES
+    write = in_turn(r, lambda: nutrition.published_tool_defs(r.owner))
+    reads = in_turn(r, lambda: nutrition.published_read_tool_defs(r.owner))
+    assert {d["name"] for d in write} == nutrition.WRITE_TOOL_NAMES
+    assert {d["name"] for d in reads} == {nutrition.READ_TOOL}
     read = in_turn(r, lambda: nutrition.execute(r.owner, nutrition.READ_TOOL, {}))
     assert read["status"] == "ok" and read["meals"][0]["items"][0] == "Eggs - 2 adet"
     with r.app.app_context():
@@ -214,3 +219,19 @@ def test_other_account_cannot_resolve_or_see_the_quote(rig):
         assert nutrition.owns_proposal(r.other, proposal_id) is False
         assert service.find_quote(r.other) is None
     assert state(r)[1:] == (0, 0, ["pending"])
+
+
+def test_chat_retires_quote_after_revoke_and_regrant_without_editing(rig):
+    from app.services import coach_confirmation
+    r = rig
+    proposal_id = stage(r)
+    with r.app.app_context():
+        regrant(r.owner, r.policies["nutrition_plan"], "c2-chat-regrant")
+    assert in_turn(r, lambda: coach_confirmation.resolve_pending_turn(r.owner, "en")) is None
+    assert in_turn(r, lambda: nutrition.turn_effects(r.owner, "en")) == {
+        "changed": False, "pending_confirmation": False, "proposal_id": None, "proposal": None,
+    }
+    with pytest.raises(ai_consent.ConsentDenied):
+        resolve(r, "confirm", proposal_id)
+    assert state(r)[1:] == (0, 0, ["stale"])
+    assert len(r.calls) == 1

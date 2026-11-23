@@ -56,11 +56,11 @@ def _move():
     return MoveTrainingDayCommand(day="Cuma", target_day="Cumartesi")
 
 
-def test_replace_add_and_prescription_apply_now_without_session_impact():
+def test_replace_add_and_prescription_require_confirmation_without_session_impact():
     for command in (_replace(), _add(), _prescribe()):
         decision = decide_plan_mutation_impact(command, _SAFE_FACTS)
-        assert decision.verdict == APPLY_NOW
-        assert decision.reason_codes == ()
+        assert decision.verdict == REQUIRE_CONFIRMATION
+        assert decision.reason_codes == ("WORKOUT_PRESCRIPTION",)
 
 
 def test_remove_always_requires_confirmation():
@@ -83,9 +83,9 @@ def test_any_typed_mutation_that_touches_an_active_session_requires_confirmation
         assert REASON_ACTIVE_SESSION_IMPACT in decision.reason_codes
 
 
-def test_undo_applies_now_unless_it_touches_an_active_session():
+def test_undo_requires_confirmation_and_reports_active_session_impact():
     safe = decide_plan_mutation_impact(UNDO_LAST_CHANGE, _SAFE_FACTS)
-    assert safe.verdict == APPLY_NOW
+    assert safe.verdict == REQUIRE_CONFIRMATION
     risky = decide_plan_mutation_impact(
         UNDO_LAST_CHANGE, ImpactFacts(touches_active_session=True))
     assert risky.verdict == REQUIRE_CONFIRMATION

@@ -21,11 +21,13 @@ REFUSE_UNSUPPORTED = "REFUSE_UNSUPPORTED"
 
 REASON_REMOVE_EXERCISE = "REMOVE_EXERCISE"
 REASON_MOVE_TRAINING_DAY = "MOVE_TRAINING_DAY"
+REASON_WORKOUT_PRESCRIPTION = "WORKOUT_PRESCRIPTION"
+REASON_RESTORE_PLAN = "RESTORE_PLAN"
 REASON_ACTIVE_SESSION_IMPACT = "ACTIVE_SESSION_IMPACT"
 REASON_UNKNOWN_COMMAND = "UNKNOWN_COMMAND"
 REASON_IMPACT_UNDETERMINABLE = "IMPACT_UNDETERMINABLE"
 
-_APPLY_NOW_COMMANDS = (
+_PRESCRIPTION_COMMANDS = (
     ReplaceExerciseCommand,
     AddExerciseCommand,
     UpdateExercisePrescriptionCommand,
@@ -70,8 +72,10 @@ def decide_plan_mutation_impact(command, facts: ImpactFacts) -> ImpactDecision:
         reasons.append(REASON_REMOVE_EXERCISE)
     elif isinstance(command, MoveTrainingDayCommand):
         reasons.append(REASON_MOVE_TRAINING_DAY)
-    elif isinstance(command, _APPLY_NOW_COMMANDS) or command is UNDO_LAST_CHANGE:
-        pass
+    elif isinstance(command, _PRESCRIPTION_COMMANDS):
+        reasons.append(REASON_WORKOUT_PRESCRIPTION)
+    elif command is UNDO_LAST_CHANGE:
+        reasons.append(REASON_RESTORE_PLAN)
     else:
         return ImpactDecision(REFUSE_UNSUPPORTED, (REASON_UNKNOWN_COMMAND,))
 

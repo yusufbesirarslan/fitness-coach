@@ -46,6 +46,10 @@ from .identity import (
 )
 
 DOMAIN = "nutrition_plan"
+
+# Exact (Coach saved-plan READ disclosure, independent nutrition.plan
+# disclosure) pairs. Registration and legal approval are separate work.
+APPROVED_NUTRITION_READ_DISCLOSURES = frozenset()
 COMMAND = service.COMMAND
 
 READ_TOOL = "get_current_nutrition_plan"
@@ -78,7 +82,7 @@ STATUS_ERROR = "error"
 
 #: Closed error vocabulary → server-authored recovery instruction (model-facing).
 ERRORS = {
-    "CAPABILITY_DISABLED": "Nutrition Plan editing is not available. Do not claim any change.",
+    "CAPABILITY_DISABLED": "This Nutrition Plan action is not available. Do not claim any change.",
     "PERMISSION_UNAVAILABLE": "Nutrition Plan permission is missing or changed. Nothing was read or changed; tell the user it can be enabled in AI permissions.",
     "AUTHORITY_UNAVAILABLE": "Permission could not be verified right now. Nothing was changed; the user may try again later.",
     "INVALID_ARGUMENTS": "The request was not understood. Nothing was changed.",
@@ -285,6 +289,32 @@ def turn_authorities(user_id):
     return authorities
 
 
+def _read_authorities(user_id):
+    coach = ai_consent.current_operation()
+    if (not APPROVED_NUTRITION_READ_DISCLOSURES or type(user_id) is not int
+            or not isinstance(coach, ai_consent.OperationAuthority)
+            or coach.owner != user_id or coach.feature != "coach"
+            or not any(coach.version == version
+                       for version, _ in APPROVED_NUTRITION_READ_DISCLOSURES)):
+        return None
+    from app.services import ai
+    ai_consent.authorize_operation(coach)
+    nutrition = ai_consent.begin_independent_operation(
+        user_id, "nutrition_plan", *ai.heavy_primary_route())
+    if (nutrition.generation != coach.generation
+            or (coach.version, nutrition.version) not in APPROVED_NUTRITION_READ_DISCLOSURES):
+        return None
+    return access.Authorities(coach, nutrition)
+
+
+def published_read_tool_defs(user_id):
+    try:
+        return (READ_TOOL_DEF,) if _read_authorities(user_id) else ()
+    except Exception:
+        _rollback()
+        return ()
+
+
 def _pending_any(user_id):
     """Fresh owner-scoped fact: is ANY plan proposal pending? Unknown → True."""
     from app.services.plan_confirmation import has_pending
@@ -298,16 +328,13 @@ def _pending_any(user_id):
 
 
 def published_tool_defs(user_id):
-    """Read always (when available); edits/undo only with nothing pending.
-
-    A confirm/cancel-form turn never starts a new Nutrition change.
-    """
+    """Publish edits and Undo only with no pending proposal or decision."""
     if not tools_enabled() or turn_authorities(user_id) is None:
         return ()
     if (_pending_any(user_id)
             or executor.current_confirmation_intent() in (executor.CONFIRM, executor.CANCEL)):
-        return (READ_TOOL_DEF,)
-    return (READ_TOOL_DEF,) + EDIT_TOOL_DEFS + (UNDO_TOOL_DEF,)
+        return ()
+    return EDIT_TOOL_DEFS + (UNDO_TOOL_DEF,)
 
 
 # ── Execution ─────────────────────────────────────────────────────────────────
@@ -334,6 +361,8 @@ def execute(user_id, name, arguments):
 def _execute(user_id, name, arguments):
     if name not in TOOL_NAMES:
         return _error("INVALID_ARGUMENTS")
+    if name == READ_TOOL:
+        return _execute_read(user_id, arguments)
     if not tools_enabled():
         return _error("CAPABILITY_DISABLED")
     if type(user_id) is not int or user_id <= 0:
@@ -345,9 +374,6 @@ def _execute(user_id, name, arguments):
     if authorities is None:
         return _error("PERMISSION_UNAVAILABLE")
     try:
-        if name == READ_TOOL:
-            _no_arguments(arguments)
-            return _read(user_id, authorities)
         if name == UNDO_TOOL:
             _no_arguments(arguments)
             return _undo(user_id, authorities)
@@ -404,12 +430,30 @@ def _parse(name, arguments):
     return Edit(_KINDS[name], meal, item, replacement)
 
 
+def _execute_read(user_id, arguments):
+    if not APPROVED_NUTRITION_READ_DISCLOSURES:
+        return _error("CAPABILITY_DISABLED")
+    try:
+        _no_arguments(arguments)
+        authorities = _read_authorities(user_id)
+        if authorities is None:
+            return _error("PERMISSION_UNAVAILABLE")
+        return _read(user_id, authorities)
+    except _Refusal as refusal:
+        return _error(refusal.code, refusal.detail)
+    except ai_consent.ConsentDenied as denied:
+        return _error("PERMISSION_UNAVAILABLE" if denied.status < 500 else "AUTHORITY_UNAVAILABLE")
+    except Exception:
+        return _error("AUTHORITY_UNAVAILABLE")
+
+
 def _read(user_id, authorities):
     snapshot = read_current_plan(user_id)
     executor._settle_transaction()
     # Publication of saved plan content to the model needs BOTH permissions,
     # rechecked now; the Coach one is re-authorized by every dispatch.
     ai_consent.authorize_operation(authorities.nutrition)
+    ai_consent.authorize_operation(authorities.coach)
     if snapshot is None:
         return {"domain": DOMAIN, "status": STATUS_NOT_FOUND}
     document = json.loads(snapshot.raw)
@@ -470,8 +514,10 @@ def _prepare(user_id, edit, authorities):
         return dict(_applied_view(edit, result.plan_data), status=STATUS_REPLAYED)
     if result.status != "prepared":
         return _error("NO_PENDING_CONFIRMATION")
-    quote = service.find_quote(user_id, result.proposal_id)
+    quote, denied = service.check_pending_quote(user_id, result.proposal_id)
     executor._settle_transaction()
+    if denied:
+        return _error("PERMISSION_UNAVAILABLE")
     if quote is None:
         return _error("PLAN_STATE_CONFLICT")
     return dict(quote_view(quote), status=STATUS_CONFIRMATION_REQUIRED,
@@ -550,17 +596,21 @@ def release_stranded(user_id, proposal_id=None):
         executor._settle_transaction()
 
 
-def pending_quote(user_id):
-    """The owner's pending quote when the boundary is available, else None."""
+def pending_quote_state(user_id, proposal_id=None):
+    """Read the quote and whether a decision could not safely target it."""
     if not tools_enabled():
-        return None
+        return None, False
     try:
-        return service.find_quote(user_id)
+        return service.check_pending_quote(user_id, proposal_id)
     except Exception:
         _rollback()
-        return None
+        return None, True
     finally:
         executor._settle_transaction()
+
+
+def pending_quote(user_id):
+    return pending_quote_state(user_id)[0]
 
 
 def resolve(user_id, proposal_id, decision):
@@ -691,7 +741,7 @@ def turn_effects(user_id, language=None):
         return None
     changed = changed_this_turn()
     try:
-        quote = service.find_quote(user_id)
+        quote, _denied = service.check_pending_quote(user_id)
         pending = quote is not None
         proposal = native_proposal(quote, language) if quote is not None else None
     except Exception:

@@ -21,6 +21,10 @@ import json
 
 import pytest
 
+from tests.r07_immediate_mutation_contract import immediate_mutation_contract  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures("immediate_mutation_contract")
+
 from app.extensions import db
 from app.models import (
     PlanMutationRecord,

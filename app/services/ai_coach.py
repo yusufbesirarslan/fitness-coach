@@ -1022,6 +1022,7 @@ def _coach_tool_defs_for_call(user_id=None):
             or _qualified_composite_tool(user_id, tool["name"])]
     if user_id is not None and coach_plan_tools.training_plan_read_authorized(user_id):
         defs.append(coach_plan_tools.READ_PLAN_TOOL_DEF)
+    defs.extend(coach_plan_tools.nutrition.published_read_tool_defs(user_id))
     if coach_plan_tools.plan_mutation_tools_enabled():
         defs.extend(coach_plan_tools.published_plan_tool_defs(user_id))
         # C2: Nutrition tools appear only when the C1 source gate, the approved

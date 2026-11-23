@@ -556,7 +556,7 @@ def test_streaming_workout_stage_does_not_claim_logged(
     assert _pending_logs(auth_user)
 
 
-def test_apply_now_add_without_session_persists_immediately(
+def test_add_without_active_session_gets_explicit_preview(
         app, planned_user, tools_on):
     with app.test_request_context("/ask", method="POST"):
         _new_turn(app, "add lateral raise 3x10 to monday")
@@ -568,13 +568,13 @@ def test_apply_now_add_without_session_persists_immediately(
         reply = coach_confirmation.reply_after_tools(
             planned_user.id, "en", [result])
 
-    assert result["status"] == results.STATUS_APPLIED
-    assert "Dumbbell Lateral Raise" in names(planned_user.id)
-    assert plan_confirmation.get_pending(planned_user.id) is None
+    assert result["status"] == results.STATUS_CONFIRMATION_REQUIRED
+    assert "Dumbbell Lateral Raise" not in names(planned_user.id)
+    assert plan_confirmation.get_pending(planned_user.id) is not None
     assert _workout_logs(planned_user) == []
     assert "lateral raise" in reply.lower()
-    assert "added" in reply.lower()
-    assert "confirm" not in reply.lower()
+    assert "rest between sets" in reply.lower()
+    assert "3 sets, target 10" in reply.lower()
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
@@ -665,7 +665,7 @@ def test_provider_reply_does_not_misclassify_non_requests(
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_ask_stream_add_applies_once_with_server_owned_copy(
+def test_ask_stream_add_stages_with_server_owned_copy(
         client, auth_user, app, tools_on, monkeypatch):
     from tests.test_ai_stream import (
         _FakeStream, _final, _text_block, _tool_use_block,
@@ -711,15 +711,15 @@ def test_ask_stream_add_applies_once_with_server_owned_copy(
     )
 
     assert response.status_code == 200
-    assert "confirm" not in visible.lower()
+    assert premature not in visible
     assert "dumbbell biceps curl" in visible.lower()
-    assert "added" in visible.lower()
-    assert names(auth_user.id).count("Dumbbell Biceps Curl") == 1
+    assert "3 sets, target 10" in visible.lower()
+    assert "Dumbbell Biceps Curl" not in names(auth_user.id)
     refreshed = db.session.get(TrainingPlan, plan.id)
-    assert refreshed.mutation_version == 1
+    assert refreshed.mutation_version == 0
     assert TrainingPlanConfirmationProposal.query.filter_by(
-        user_id=auth_user.id).count() == 0
-    assert PlanMutationRecord.query.filter_by(user_id=auth_user.id).count() == 1
+        user_id=auth_user.id, status="pending").count() == 1
+    assert PlanMutationRecord.query.filter_by(user_id=auth_user.id).count() == 0
     assert WorkoutLog.query.filter_by(user_id=auth_user.id).count() == 0
     assert len(fake.calls) == 1
 
@@ -773,7 +773,7 @@ def test_flagged_read_tool_preamble_is_suppressed_without_skipping_tool(
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_streaming_apply_now_does_not_emit_success_before_persist(
+def test_streaming_material_add_suppresses_model_success_before_confirmation(
         app, planned_user, tools_on, monkeypatch):
     from app.observability import assign_request_id
     from app.services import ai_stream
@@ -815,16 +815,15 @@ def test_streaming_apply_now_does_not_emit_success_before_persist(
     done = [e for e in events if e.get("type") == "done"]
     assert done
     assert "lateral raise" in done[-1]["text"].lower()
-    assert "added" in done[-1]["text"].lower()
-    assert "confirm" not in done[-1]["text"].lower()
-    assert "Dumbbell Lateral Raise" in names(planned_user.id)
-    assert plan_confirmation.get_pending(planned_user.id) is None
+    assert "3 sets, target 10" in done[-1]["text"].lower()
+    assert "Dumbbell Lateral Raise" not in names(planned_user.id)
+    assert plan_confirmation.get_pending(planned_user.id) is not None
     assert _workout_logs(planned_user) == []
     assert len(fake.calls) == 1
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
-def test_apply_now_later_yes_does_not_mutate_or_stage_workout(
+def test_second_yes_after_confirmed_add_does_not_mutate_or_stage_workout(
         app, planned_user, tools_on, monkeypatch):
     monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
     with app.test_request_context("/ask", method="POST"):
@@ -833,7 +832,10 @@ def test_apply_now_later_yes_does_not_mutate_or_stage_workout(
             "day": "Pazartesi", "exercise": "Lateral Raise",
             "sets": 3, "reps": "10",
         })
-    assert result["status"] == results.STATUS_APPLIED
+    assert result["status"] == results.STATUS_CONFIRMATION_REQUIRED
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "yes")
+        assert call(planned_user.id, coach_plan_tools.CONFIRM_TOOL)["status"] == results.STATUS_APPLIED
     assert plan_confirmation.get_pending(planned_user.id) is None
 
     llm = _ScriptedLLM([

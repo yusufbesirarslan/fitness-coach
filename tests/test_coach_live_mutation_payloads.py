@@ -194,11 +194,21 @@ def _assert_no_side_effects(user_id, before):
     assert _snapshot(user_id) == before
 
 
+def _confirm_preview(app, user_id, before, *, stream=False):
+    staged = _snapshot(user_id)
+    assert staged == (*before[:3], before[3] + 1, *before[4:])
+    if stream:
+        reply = _stream(app, user_id, "yes")
+    else:
+        _, reply = _turn(app, user_id, "yes")
+    assert "updated" in reply.lower() or "added" in reply.lower() or "replaced" in reply.lower()
+
+
 def _assert_exactly_one_mutation(user_id, before):
     after = _snapshot(user_id)
     assert after[1] == before[1] + 1, "version must increment exactly once"
     assert after[2] == before[2] + 1, "exactly one journal effect"
-    assert after[3] == before[3], "no confirmation proposal"
+    assert after[3] == before[3] + 1, "exactly one confirmation proposal"
     assert after[4] == before[4], "no workout log"
     assert after[5] == before[5], "no pending action"
 
@@ -296,6 +306,7 @@ def test_a_bare_15_completes_the_partial_add_as_4x15(app, live_user, tools_on):
     _payloads, reply = _turn(app, live_user.id, "15")
 
     assert "Walking Lunge" in reply
+    _confirm_preview(app, live_user.id, before)
     assert _day(live_user.id, "Perşembe") == [
         ("Barbell Squat", 4, "8"), ("Leg Press", 3, "12"),
         ("Walking Lunge", 4, "15")]
@@ -322,7 +333,9 @@ def test_a_never_writes_the_models_own_three_sets(app, live_user, tools_on):
     assert record["sets"] == 4, "user-owned 4 sets, not the model's 3"
     assert record["reps"] is None, "the model's 12 is not a prescription"
 
+    before = _snapshot(live_user.id)
     _turn(app, live_user.id, "15")
+    _confirm_preview(app, live_user.id, before)
     assert ("Walking Lunge", 4, "15") in _day(live_user.id, "Perşembe")
 
 
@@ -358,6 +371,7 @@ def test_b_monday_completes_the_exact_add(app, live_user, tools_on):
     _payloads, reply = _turn(app, live_user.id, "Monday")
 
     assert "Dumbbell Biceps Curl" in reply
+    _confirm_preview(app, live_user.id, before)
     assert _day(live_user.id, "Pazartesi") == [
         ("Barbell Curl", 3, "10"), ("Triceps Pushdown", 3, "12"),
         ("Dumbbell Biceps Curl", 3, "10")]
@@ -382,8 +396,9 @@ def test_c_replace_executes_without_asking_for_sets_or_reps(
         "Replace Barbell Curl with Dumbbell Curl in my Friday workout",
         [(REPLACE, dict(_LIVE_REPLACE))])
 
-    assert payloads[0]["status"] == results.STATUS_APPLIED
+    assert payloads[0]["status"] == results.STATUS_CONFIRMATION_REQUIRED
     assert "Dumbbell Biceps Curl" in reply
+    _confirm_preview(app, live_user.id, before)
     # The source's own 4x12 is inherited, not re-asked and not defaulted.
     assert _day(live_user.id, "Cuma") == [
         ("Dumbbell Biceps Curl", 4, "12"), ("Hammer Curl", 3, "12")]
@@ -395,7 +410,7 @@ def test_c_replace_executes_without_asking_for_sets_or_reps(
 
 # ── D. UPDATE resolves a unique slot, or asks only the day ──────────────────
 
-def test_d_update_applies_directly_on_a_unique_slot(
+def test_d_update_previews_on_a_unique_slot(
         app, unique_curl_user, tools_on):
     before = _snapshot(unique_curl_user.id)
 
@@ -403,7 +418,8 @@ def test_d_update_applies_directly_on_a_unique_slot(
         app, unique_curl_user.id, "Change Dumbbell Curl to 4x10",
         [(PRESCRIBE, dict(_LIVE_UPDATE))])
 
-    assert payloads[0]["status"] == results.STATUS_APPLIED
+    assert payloads[0]["status"] == results.STATUS_CONFIRMATION_REQUIRED
+    _confirm_preview(app, unique_curl_user.id, before)
     assert _day(unique_curl_user.id, "Cuma") == [
         ("Dumbbell Biceps Curl", 4, "10"), ("Hammer Curl", 3, "12")]
     _assert_exactly_one_mutation(unique_curl_user.id, before)
@@ -428,6 +444,7 @@ def test_d_ambiguous_update_asks_only_the_day_and_keeps_4x10(
     _assert_no_side_effects(ambiguous_curl_user.id, before)
 
     _turn(app, ambiguous_curl_user.id, "Friday")
+    _confirm_preview(app, ambiguous_curl_user.id, before)
     assert _day(ambiguous_curl_user.id, "Cuma") == [
         ("Dumbbell Biceps Curl", 4, "10"), ("Hammer Curl", 3, "12")]
     # Monday's own slot keeps its prescription — one day, one mutation.
@@ -531,6 +548,7 @@ def test_ask_stream_partial_add_then_15_writes_4x15(
     _payloads, reply = _turn(app, live_user.id, "15")
 
     assert "Walking Lunge" in reply
+    _confirm_preview(app, live_user.id, before, stream=True)
     assert ("Walking Lunge", 4, "15") in _day(live_user.id, "Perşembe")
     _assert_exactly_one_mutation(live_user.id, before)
 
@@ -581,6 +599,7 @@ def test_ask_stream_replace_applies_without_a_prescription(
 
     assert "Dumbbell Biceps Curl" in visible
     assert "sets and reps" not in visible
+    _confirm_preview(app, live_user.id, before, stream=True)
     assert _day(live_user.id, "Cuma") == [
         ("Dumbbell Biceps Curl", 4, "12"), ("Hammer Curl", 3, "12")]
     _assert_exactly_one_mutation(live_user.id, before)
@@ -589,12 +608,13 @@ def test_ask_stream_replace_applies_without_a_prescription(
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_ask_stream_update_applies_on_a_unique_slot(
         app, unique_curl_user, tools_on, monkeypatch):
-    """D at the adapter boundary: unique slot, direct 4x10."""
+    """D at the adapter boundary: unique slot and confirmed 4x10."""
     before = _snapshot(unique_curl_user.id)
     _script_one_tool_call(monkeypatch, PRESCRIBE, _LIVE_UPDATE)
 
     _stream(app, unique_curl_user.id, "Change Dumbbell Curl to 4x10")
 
+    _confirm_preview(app, unique_curl_user.id, before, stream=True)
     assert _day(unique_curl_user.id, "Cuma") == [
         ("Dumbbell Biceps Curl", 4, "10"), ("Hammer Curl", 3, "12")]
     _assert_exactly_one_mutation(unique_curl_user.id, before)
@@ -618,6 +638,7 @@ def test_ask_stream_ambiguous_update_asks_only_the_day(
     assert (record["sets"], record["reps"]) == (4, "10")
 
     _turn(app, ambiguous_curl_user.id, "Friday")
+    _confirm_preview(app, ambiguous_curl_user.id, before, stream=True)
     assert _day(ambiguous_curl_user.id, "Cuma") == [
         ("Dumbbell Biceps Curl", 4, "10"), ("Hammer Curl", 3, "12")]
     _assert_exactly_one_mutation(ambiguous_curl_user.id, before)

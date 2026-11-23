@@ -45,7 +45,7 @@ from app.services.today_facts import get_active_plan
 from app.services.workout_session.queries import get_active_session
 
 from .commands import PLAN_MUTATION_COMMANDS
-from .context import ACTOR_USER, validate_context
+from .context import ACTOR_AI_COACH, ACTOR_USER, validate_context
 from .document import (
     apply_command,
     parse_plan_document,
@@ -324,7 +324,8 @@ def apply_plan_mutation(
         # "accepted mutation" in history that never happened.
         mutated, changed = apply_command(
             document, command, native_editor=editor_revision is not None,
-            private_definitions=private_definitions)
+            private_definitions=private_definitions,
+            coach=context.actor == ACTOR_AI_COACH)
 
         if changed:
             after_snapshot = serialize_plan_document(mutated)

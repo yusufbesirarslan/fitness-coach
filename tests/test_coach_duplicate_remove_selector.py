@@ -811,12 +811,7 @@ def test_a_typed_ordinal_outranks_a_conflicting_model_selector(
     assert _snapshot(uid)[:3] == before[:3]
 
 
-# ── Scope: other operations' continuations are untouched ───────────────────
-#
-# Completing a remove answers with the staged proposal's own copy. That is a
-# REMOVE rule only: an add/replace continuation that stages a proposal (it
-# touches the active session) still hands the turn to the provider exactly as
-# before this fix, and an update continuation still applies directly.
+# ── Other material continuations give a server-owned preview ───────────────
 
 def _session_on(user_id, weekday):
     from app.models import WorkoutSession
@@ -844,7 +839,7 @@ def arms_session_user(app, make_user):
     return user
 
 
-def test_an_add_continuation_that_stages_a_proposal_still_hands_back(
+def test_an_add_continuation_previews_the_staged_proposal(
         app, arms_session_user, tools_on):
     from tests.test_coach_plan_tools import ADD
     uid = arms_session_user.id
@@ -856,7 +851,7 @@ def test_an_add_continuation_that_stages_a_proposal_still_hands_back(
 
     _, reply = _turn(app, uid, "15")
 
-    assert reply is None  # the provider loop runs, as before this fix
+    assert "Walking Lunge" in reply and "4 sets" in reply
     rows = _proposals(uid)
     assert [r.command_type for r in rows] == ["add_exercise"]
     assert "ACTIVE_SESSION_IMPACT" in (rows[0].reason_codes or ())
@@ -864,7 +859,7 @@ def test_an_add_continuation_that_stages_a_proposal_still_hands_back(
     assert _journal(uid) == []
 
 
-def test_a_replace_continuation_that_stages_a_proposal_still_hands_back(
+def test_a_replace_continuation_previews_the_staged_proposal(
         app, arms_session_user, tools_on):
     from tests.test_coach_plan_tools import REPLACE
     uid = arms_session_user.id
@@ -876,7 +871,7 @@ def test_a_replace_continuation_that_stages_a_proposal_still_hands_back(
 
     _, reply = _turn(app, uid, "yes")
 
-    assert reply is None
+    assert "replace Barbell Curl with Dumbbell Biceps Curl" in reply
     rows = _proposals(uid)
     assert [r.command_type for r in rows] == ["replace_exercise"]
     assert "ACTIVE_SESSION_IMPACT" in (rows[0].reason_codes or ())
@@ -884,7 +879,7 @@ def test_a_replace_continuation_that_stages_a_proposal_still_hands_back(
     assert _journal(uid) == []
 
 
-def test_an_update_continuation_on_a_session_day_still_applies_directly(
+def test_an_update_continuation_on_a_session_day_requires_confirmation(
         app, arms_session_user, tools_on):
     from tests.test_coach_plan_tools import PRESCRIBE
     uid = arms_session_user.id
@@ -892,11 +887,15 @@ def test_an_update_continuation_on_a_session_day_still_applies_directly(
     _turn(app, uid, "Change Barbell Curl to 5x8",
           [(PRESCRIBE, {"day": "", "exercise": "Barbell Curl", "sets": 5,
                         "reps": "8"})])
+    before = _plan(uid).plan_data
 
     _, reply = _turn(app, uid, "Monday")
 
-    assert reply  # applied now, server copy, as before this fix
-    assert _proposals(uid) == []
+    assert "5 sets" in reply and "8" in reply
+    assert [row.command_type for row in _proposals(uid)] == ["update_exercise_prescription"]
+    assert _plan(uid).plan_data == before
+    assert _journal(uid) == []
+    _turn(app, uid, "yes")
     assert len(_journal(uid)) == 1
     document = json.loads(_plan(uid).plan_data)
     rx = {(d["gun"], e["isim"]): (e["set"], e["tekrar"])
