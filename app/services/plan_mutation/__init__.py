@@ -14,12 +14,8 @@ The arrow never runs the other way: this package does not import the AI Coach,
 any provider SDK, prompt construction, a blueprint, or UI state, and
 tests/test_plan_mutation_architecture.py enforces that.
 
-The boundary still has **no** runtime surface — no route, no AI tool, no feature
-flag, and Sprint 1 PR2 deliberately adds none. The durable history it now keeps
-is internal evidence; there is no history endpoint, no mobile serialization and
-no AI-facing serialization of the journal. What later work owns is listed in
-docs/ADAPTIVE_COACHING.md; the short version is that an AI may *request* a plan
-change, but never owns plan persistence.
+The journal stores internal evidence. Consumers receive only the typed
+mutation result.
 
 Sprint 1 PR2 adds three things to the contract: every call carries a
 ``MutationContext`` (durable operation key + actor + optional bounded reason),
@@ -44,6 +40,7 @@ from .context import (
     MutationContext,
 )
 from .errors import (
+    ActiveWorkoutConflict,
     AmbiguousExerciseTarget,
     DayNotFound,
     ExerciseAlreadyPresent,
@@ -59,7 +56,7 @@ from .errors import (
     UndoUnavailable,
 )
 from .journal import OUTCOME_APPLIED, OUTCOME_NO_OP
-from .service import PlanMutationResult, apply_plan_mutation, undo_last_change
+from .service import PlanEditRevision, PlanMutationResult, apply_plan_mutation, undo_last_change
 
 __all__ = [
     "ACTOR_AI_COACH",
@@ -70,6 +67,7 @@ __all__ = [
     "OUTCOME_NO_OP",
     "PLAN_MUTATION_ACTORS",
     "PLAN_MUTATION_COMMANDS",
+    "ActiveWorkoutConflict",
     "AddExerciseCommand",
     "AmbiguousExerciseTarget",
     "DayNotFound",
@@ -81,6 +79,7 @@ __all__ = [
     "MoveTrainingDayCommand",
     "MutationContext",
     "PlanMutationError",
+    "PlanEditRevision",
     "PlanMutationResult",
     "PlanNotFound",
     "PlanNotMutable",

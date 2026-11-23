@@ -155,7 +155,10 @@ def _resolve_plan_exercise(
     return _resolve_generated_name(exercise["isim"], catalog, cache)
 
 
-def check_placement(exercise: ExerciseDefinition, day: dict) -> None:
+def check_placement(
+    exercise: ExerciseDefinition, day: dict, *,
+    require_cardio_on_dedicated_day: bool = False,
+) -> None:
     """Bind a cardio-movement entry to a cardio day, fail-closed otherwise.
 
     ``is_exercise_compatible`` deliberately gates cardio by the declared
@@ -164,13 +167,20 @@ def check_placement(exercise: ExerciseDefinition, day: dict) -> None:
     cardio entry can only land on a ``kardiyo`` day: without this rule a
     ``ekipman="ev"`` plan could prescribe swimming inside a strength day and
     still persist under ``equipment_context: "ev"``, i.e. the equipment gate
-    would be bypassable purely by placement.
+    would be bypassable purely by placement. Strength or core work on the same
+    day never changes that answer.
 
-    Deliberately one-directional. Forbidding a non-cardio exercise on a
-    cardio day is a plan-quality opinion, not an authority question, and this
-    boundary only answers authority questions.
+    By default the rule is one-directional. Native by-ID writes may also ask
+    ``require_cardio_on_dedicated_day`` to keep non-cardio work off a
+    dedicated cardio day.
     """
-    if exercise.movement == CARDIO_MOVEMENT and day.get("tip") != CARDIO_TIP:
+    if day.get("tip") == CARDIO_TIP:
+        if require_cardio_on_dedicated_day and exercise.movement != CARDIO_MOVEMENT:
+            raise GenerationExerciseIncompatibleError(
+                "dedicated cardio day requires cardio exercises",
+                resolution_category="cardio_placement")
+        return
+    if exercise.movement == CARDIO_MOVEMENT:
         raise GenerationExerciseIncompatibleError(
             "cardio exercise is placed on a day that is not a cardio day",
             resolution_category="cardio_placement")

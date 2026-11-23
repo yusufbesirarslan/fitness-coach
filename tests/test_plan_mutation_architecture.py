@@ -93,7 +93,7 @@ def test_the_coach_reaches_the_mutation_domain_through_exactly_one_bridge():
         f"coach_plan_tools: {violations}")
 
 
-def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
+def test_only_approved_consumers_import_the_domain():
     """Who may import ``plan_mutation`` at all, stated in one place.
 
     Kept as an explicit allow-list because the interesting failure is a *new*
@@ -103,6 +103,8 @@ def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
     """
     approved = {
         Path("app/services/plan_replacement.py"),
+        Path("app/blueprints/mobile_training_editor.py"),
+        Path("app/services/mobile_training.py"),
         Path("app/services/training_plan_replacement/service.py"),
         # B1 reads the canonical snapshot fingerprint; it never mutates a plan.
         Path("app/services/training_plan_replacement/generation.py"),
@@ -118,6 +120,9 @@ def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
         # Foundation V1 B1: read-only plan projection (parser + bounds only).
         Path("app/services/coach_plan_tools/plan_read.py"),
         Path("app/services/coach_plan_policy/decisions.py"),
+        # Catalog V3 picker: read-only parser + context validator for advisory
+        # availability; never a command, entrypoint, journal or write.
+        Path("app/services/exercise_picker.py"),
     }
     consumers = set()
     for path in APP_ROOT.rglob("*.py"):
@@ -265,8 +270,8 @@ def test_journal_rows_are_built_in_one_place():
 
 def test_the_mutation_domain_does_not_write_workout_session_state():
     """PR1 decided this boundary is not a second writer of workout-session or
-    completion state, and PR2 keeps that decision. Importing those owners is how
-    a plan change would start silently re-blessing sessions."""
+    completion state. The native editor may read active-session presence so an
+    in-flight workout can be completed or abandoned before editing."""
     forbidden = (
         "app.services.workout_session",
         "app.services.workout_completion",
@@ -275,6 +280,11 @@ def test_the_mutation_domain_does_not_write_workout_session_state():
     violations = []
     for path in _mutation_modules():
         for imported, lineno in _python_imports(path):
+            if path.name == "service.py" and imported in {
+                "app.services.workout_session.queries",
+                "app.services.workout_session.queries.get_active_session",
+            }:
+                continue
             if any(_module_matches(imported, p) for p in forbidden):
                 violations.append(f"{path}:{lineno} -> {imported}")
 
@@ -305,14 +315,15 @@ def test_the_journal_is_never_logged():
     assert not violations, f"plan_mutation can emit audit material: {violations}"
 
 
-def test_the_journal_has_no_transport_surface_yet():
-    """No history endpoint, no mobile or AI serialization in PR2. A blueprint
-    that imports the journal would be publishing an audit trail through a
-    boundary nobody has reviewed for authorization or privacy."""
+def test_the_journal_has_no_transport_surface():
+    """The native route may publish receipts through the public service."""
+
     violations = []
     for path in list(Path("app/blueprints").rglob("*.py")):
         for imported, lineno in _python_imports(path):
-            if _module_matches(imported, "app.services.plan_mutation"):
+            if (_module_matches(imported, "app.services.plan_mutation.journal")
+                    or (path.name != "mobile_training_editor.py"
+                        and _module_matches(imported, "app.services.plan_mutation"))):
                 violations.append(f"{path}:{lineno} -> {imported}")
         if "PlanMutationRecord" in path.read_text(encoding="utf-8"):
             violations.append(f"{path} -> PlanMutationRecord")

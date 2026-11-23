@@ -13,7 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.extensions import db
 from app.models import ExerciseNote
-from app.services.exercise_catalog import ExerciseResolutionError, resolve_exercise
+from app.services.exercise_catalog import ExerciseResolutionError
+from app.services.private_exercises import resolve_owned_exercise
 from app.timeutil import app_now
 
 MAX_REVISION = 999999999
@@ -42,9 +43,9 @@ class NoteUnavailable(NoteError):
     resolution = "retry"
 
 
-def _identity(exercise_id):
+def _identity(user_id, exercise_id):
     try:
-        resolve_exercise(exercise_id=exercise_id)
+        resolve_owned_exercise(user_id, exercise_id)
     except ExerciseResolutionError:
         raise NoteError() from None
 
@@ -98,8 +99,8 @@ def _project(exercise_id, row):
 
 
 def get_exercise_note(user_id, exercise_id):
-    _identity(exercise_id)
     try:
+        _identity(user_id, exercise_id)
         return _project(exercise_id, _query(user_id, exercise_id).first())
     except SQLAlchemyError:
         db.session.rollback()
@@ -107,11 +108,11 @@ def get_exercise_note(user_id, exercise_id):
 
 
 def set_exercise_note(user_id, exercise_id, body, revision):
-    _identity(exercise_id)
     text = parse_text(body)
     expected = parse_revision(revision)
     now = app_now().astimezone(timezone.utc).replace(tzinfo=None)
     try:
+        _identity(user_id, exercise_id)
         dialect = db.session.get_bind().dialect.name
         insert = {"postgresql": pg_insert, "sqlite": sqlite_insert}.get(dialect)
         if insert is None:

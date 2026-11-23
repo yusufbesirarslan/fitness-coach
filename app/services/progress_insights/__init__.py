@@ -200,6 +200,9 @@ def build_progress_insights(
 
     return ProgressInsights(
         window=build_window(end_day, INSIGHTS_WEEKS),
+        # Volume trend compares the first and last positive-volume weeks.
+        # Marker-only weeks establish attendance, not measured load.
+        measured_volume_trend=sum(week.total_volume > 0 for week in report.weekly_volume) >= 2,
         working=select_working(performance, consistency),
         watch=select_watch(plan, consistency),
         next_move=select_next_move(plan),

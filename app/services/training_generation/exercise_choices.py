@@ -9,8 +9,12 @@ provider-chosen ID against the SAME object. The prompt is advisory; this set
 is what the server enforces.
 
 Built only from active, context-compatible catalog entries
-(``exercise_catalog.compatible_exercises``). Carries no aliases and no
-equipment/movement metadata — only what the provider needs to choose.
+(``exercise_catalog.compatible_exercises``) that Catalog V3 marks
+generation-eligible. V3 additions are editor/picker identities first: they
+join this set only through a reviewed overlay change after a real-provider
+qualification, so expanding the catalog never silently changes the prompt.
+Carries no aliases and no equipment/movement metadata — only what the
+provider needs to choose.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ from app.services.exercise_catalog import (
     compatible_exercises,
     load_exercise_catalog,
 )
+from app.services.exercise_catalog_v3 import generation_eligible
 
 
 @dataclass(frozen=True)
@@ -50,7 +55,9 @@ class CompatibleExerciseChoices:
 def compatible_exercise_choices(context: ExerciseContext) -> CompatibleExerciseChoices:
     """The closed choice set for ``context``, sorted by canonical name."""
     catalog = load_exercise_catalog()
-    entries = sorted(compatible_exercises(context), key=lambda e: e.canonical_name)
+    entries = sorted(
+        (e for e in compatible_exercises(context) if generation_eligible(e.exercise_id)),
+        key=lambda e: e.canonical_name)
     return CompatibleExerciseChoices(
         context=context,
         catalog_version=catalog.version,

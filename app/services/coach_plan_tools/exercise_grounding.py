@@ -7,6 +7,13 @@ A simple English plural of a unique *canonical* name is also eligible
 Everything else is presentation-only: at most one high-confidence
 suggestion, never silent substitution. Fuzzy scores never become the
 identity that is written.
+
+Only reviewed catalog IDs are destinations (``coach_grounding_eligible``):
+the Catalog V3 additions are not offered until a reviewed overlay change
+admits them, so a new name can never steal or split a V2 phrase, and an
+exact V3 name is ``unknown`` rather than re-read as another exercise.
+``resolve_slot_name`` (finding an exercise already in the plan) also lets an
+exact V3 name name itself, because the editor may have placed it.
 """
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -17,6 +24,7 @@ from app.services.exercise_catalog import (
     normalize_exercise_lookup,
     resolve_exercise,
 )
+from app.services.exercise_catalog_v3 import coach_grounding_eligible
 
 
 KIND_RESOLVED = "resolved"
@@ -42,18 +50,47 @@ def _fold(value):
     return text.replace("ı", "i").replace("â", "a")
 
 
+def _exact(name):
+    try:
+        return resolve_exercise(name=name)
+    except ExerciseResolutionError:
+        return None
+
+
 def resolve_destination(name):
-    """Resolve an ADD/replacement destination against the live catalog."""
+    """Resolve an ADD/replacement destination against the live catalog.
+
+    An exact name of a not-yet-reviewed ID is ``unknown``: it is never
+    re-read as a different (reviewed) exercise by the inexact paths.
+    """
     if not isinstance(name, str) or not name.strip():
         return ExerciseTarget(KIND_UNKNOWN)
-    try:
-        definition = resolve_exercise(name=name)
-    except ExerciseResolutionError:
-        definition = None
+    definition = _exact(name)
+    if definition is not None:
+        if not coach_grounding_eligible(definition.exercise_id):
+            return ExerciseTarget(KIND_UNKNOWN)
+        return ExerciseTarget(
+            KIND_RESOLVED, canonical_name=definition.canonical_name)
+    return _inexact(name)
+
+
+def resolve_slot_name(name):
+    """Name an exercise already in the plan (update/replace/remove lookup).
+
+    The editor may have placed any active catalog ID, so an exact name
+    resolves to itself whether or not it is reviewed for Coach destinations.
+    Everything else follows the destination rules (reviewed IDs only).
+    """
+    if not isinstance(name, str) or not name.strip():
+        return ExerciseTarget(KIND_UNKNOWN)
+    definition = _exact(name)
     if definition is not None:
         return ExerciseTarget(
             KIND_RESOLVED, canonical_name=definition.canonical_name)
+    return _inexact(name)
 
+
+def _inexact(name):
     subset = _unique_token_subset(name)
     if subset is not None:
         return ExerciseTarget(
@@ -75,6 +112,12 @@ def resolve_destination(name):
     return ExerciseTarget(KIND_UNKNOWN)
 
 
+def _candidates():
+    return tuple(
+        exercise for exercise in load_exercise_catalog().exercises
+        if exercise.active and coach_grounding_eligible(exercise.exercise_id))
+
+
 def _unique_canonical_plural(name):
     """``Walking Lunges`` → the one catalog entry whose canonical name is
     ``Walking Lunge``. Aliases are not eligible: ``squats`` matching the
@@ -84,9 +127,7 @@ def _unique_canonical_plural(name):
     if not needle:
         return None
     hits = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         canon = _fold(exercise.canonical_name)
         if needle in (canon + "s", canon + "es") or (
                 canon.endswith("s") and needle == canon[:-1]):
@@ -106,9 +147,7 @@ def _unique_alias_plural(name):
     if not needle:
         return None
     hits = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         for alias in exercise.aliases:
             folded = _fold(alias)
             if needle in (folded + "s", folded + "es"):
@@ -127,9 +166,7 @@ def _unique_token_subset(name):
     if len(tokens) < 2:
         return None
     hits = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         labels = (exercise.canonical_name,) + tuple(exercise.aliases)
         for label in labels:
             label_tokens = set(_fold(label).split())
@@ -146,9 +183,7 @@ def _high_confidence_suggestion(name):
     if not needle:
         return None
     scored = []
-    for exercise in load_exercise_catalog().exercises:
-        if not exercise.active:
-            continue
+    for exercise in _candidates():
         labels = (exercise.canonical_name,) + tuple(exercise.aliases)
         score = max(_similarity(needle, _fold(label)) for label in labels)
         scored.append((score, exercise))

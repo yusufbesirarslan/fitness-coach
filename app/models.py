@@ -308,6 +308,23 @@ class User(UserMixin, db.Model):
         return f"<User {self.username}>"
 
 
+class PrivateExercise(db.Model):
+    """Immutable movement metadata owned by one account."""
+
+    exercise_id = db.Column(db.String(64), primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    name_key = db.Column(db.String(480), nullable=False)
+    display_name = db.Column(db.String(120), nullable=False)
+    equipment = db.Column(db.JSON, nullable=False)
+    movement = db.Column(db.String(32), nullable=False)
+    primary_region = db.Column(db.String(32), nullable=False)
+    target_region = db.Column(db.String(32), nullable=False)
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "name_key", name="uq_private_exercise_owner_name"),
+        db.Index("ix_private_exercise_owner_id", "user_id", "exercise_id"),
+    )
+
+
 class ExerciseNote(db.Model):
     """Durable private catalog note; cleared rows retain their revision."""
     __tablename__ = "exercise_note"
@@ -892,7 +909,9 @@ class MealLog(db.Model):
     # and non-provider labels. ``provider_acquired_at`` is the UTC instant the
     # provider values were fetched; the 24h deadline runs from it and nothing
     # extends it. ``provider_expired_at`` is set once the restricted per-item
-    # values and provider text have been removed. All NULL = not provider data.
+    # values and provider text have been removed. An empty component list with
+    # both timestamps NULL marks an explicit user-entered mobile log
+    # checked for Repeat provenance. All NULL does not establish lineage.
     provider_items = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
     provider_acquired_at = db.Column(db.DateTime, nullable=True)
     provider_expired_at = db.Column(db.DateTime, nullable=True)
@@ -918,6 +937,14 @@ class MealLog(db.Model):
         db.UniqueConstraint("user_id", "idempotency_key",
                             name="uq_meal_log_user_idempotency"),
     )
+
+    @classmethod
+    def user_entered_amounts(cls):
+        """SQL predicate for the dedicated user-entered LogFood command."""
+        return db.and_(
+            cls.source == "manual", cls.provider_items == [],
+            cls.provider_acquired_at.is_(None), cls.provider_expired_at.is_(None),
+        )
 
     def __repr__(self):
         return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"

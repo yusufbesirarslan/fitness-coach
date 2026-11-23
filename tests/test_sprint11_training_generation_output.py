@@ -1503,6 +1503,29 @@ def test_a_cardio_exercise_still_saves_on_a_genuine_cardio_day(
     assert stored["exercise_id"] == "ex_swimming"
 
 
+def test_a_genuine_strength_plus_cardio_day_cannot_be_saved(
+        client, auth_user, save_token):
+    """Real strength beside cardio is still a training day, not a cardio day."""
+    token = save_token(equipment="ev", cardio_type="karisik")
+    saved = _week(exercises=[_exercise("Push-Up")])["program"]
+    assert _post_save(client, saved, token).status_code == 200
+    existing = TrainingPlan.query.filter_by(user_id=auth_user.id).one()
+    before = (existing.id, existing.plan_data, existing.lineage_id,
+              existing.mutation_version)
+
+    mixed = _week(exercises=[_exercise("Push-Up"), _exercise("Bodyweight Squat"),
+                             _exercise("Swimming", 1)])["program"]
+    assert mixed[0]["tip"] == "antrenman"
+    response = _post_save(client, mixed, token, score=9)
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    db.session.expire_all()
+    stored = TrainingPlan.query.filter_by(user_id=auth_user.id).one()
+    assert (stored.id, stored.plan_data, stored.lineage_id,
+            stored.mutation_version) == before
+
+
 def test_cardio_type_yok_still_refuses_a_cardio_exercise_on_a_cardio_day(
         client, auth_user, save_token):
     """The placement rule is additive: the cardio_type gate is still the gate."""

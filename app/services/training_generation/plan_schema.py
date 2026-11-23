@@ -66,3 +66,6 @@ MIN_TRAINING_EXERCISES = {
 MAX_PROVIDER_COMPLETIONS = 2
 PRIMARY_MAX_TOKENS = 4000
 REPAIR_MAX_TOKENS = 7000
+
+# Shared bound for native workout projection and manual insertion.
+NATIVE_MAX_EXERCISES_PER_DAY = 32

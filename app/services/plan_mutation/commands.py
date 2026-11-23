@@ -27,6 +27,7 @@ class ReplaceExerciseCommand:
     replacement: str
     sets: Optional[int] = None
     reps: Optional[str] = None
+    position: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -55,13 +56,14 @@ class RemoveExerciseCommand:
     equal them exactly, which is what makes one of two historical duplicates
     ("Walking Lunge 4x15" next to "Walking Lunge 4x12") addressable at all.
     Without them a name matching twice stays ``AmbiguousExerciseTarget``; with
-    them the result must still be exactly one slot. List position is never an
-    input.
+    them the result must still be exactly one slot. Native requests can instead identify a position
+    within an exact, bound revision.
     """
     day: str
     exercise: str
     match_sets: Optional[int] = None
     match_reps: Optional[str] = None
+    position: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,7 @@ class UpdateExercisePrescriptionCommand:
     exercise: str
     sets: Optional[int] = None
     reps: Optional[str] = None
+    position: Optional[int] = None
 
 
 @dataclass(frozen=True)

@@ -12,7 +12,7 @@ import pytest
 
 from app.extensions import db
 from app.models import PlanMutationRecord, TrainingPlan
-from app.services import ai_coach, coach_plan_tools, coach_privacy
+from app.services import ai_coach, ai_consent, coach_plan_tools, coach_privacy
 from app.services.coach_plan_tools import plan_read, results
 from tests.test_coach_plan_tool_characterization import (  # noqa: F401
     _program, open_transaction, planned_user,
@@ -23,6 +23,14 @@ from tests.test_coach_plan_tools import (  # noqa: F401
 
 READ = coach_plan_tools.READ_PLAN_TOOL
 PRESCRIBE = "update_training_plan_prescription"
+
+
+@pytest.fixture
+def coach_read_scope(monkeypatch):
+    # SQLite layer test. Exact grants and dispatch fencing are tested on PG.
+    monkeypatch.setattr(ai_consent, "authorize_operation", lambda _: None)
+    return lambda owner: ai_consent.operation_scope(ai_consent.OperationAuthority(
+        owner, "coach", 1, "d1-closure02-coach-candidate-r2"))
 
 
 def _active(user_id):
@@ -39,7 +47,9 @@ def _names(tools):
 
 # ── Publication and the flag ────────────────────────────────────────────────
 
-def test_off_neither_publishes_nor_executes_the_read(app, planned_user, turn):
+@pytest.mark.parametrize("writes_enabled", [False, True])
+def test_read_requires_authority_regardless_of_write_flag(app, planned_user, turn, writes_enabled):
+    app.config[coach_plan_tools.FLAG_KEY] = writes_enabled
     assert READ not in _names(ai_coach._openai_tools_for_call(planned_user.id))
     assert READ not in _names(ai_coach._anthropic_tools_for_call(planned_user.id))
     result = coach_plan_tools.execute_plan_read(planned_user.id)
@@ -47,10 +57,11 @@ def test_off_neither_publishes_nor_executes_the_read(app, planned_user, turn):
     assert "plan" not in result
 
 
-def test_on_publishes_one_argument_free_read_to_both_providers(
-        app, planned_user, tools_on, turn):
-    openai = _names(ai_coach._openai_tools_for_call(planned_user.id))
-    anthropic = _names(ai_coach._anthropic_tools_for_call(planned_user.id))
+def test_writes_off_publishes_one_argument_free_read_to_both_providers(
+        app, planned_user, turn, coach_read_scope):
+    with coach_read_scope(planned_user.id):
+        openai = _names(ai_coach._openai_tools_for_call(planned_user.id))
+        anthropic = _names(ai_coach._anthropic_tools_for_call(planned_user.id))
     assert openai == anthropic
     assert openai.count(READ) == 1
     schema = plan_read.READ_PLAN_TOOL_DEF["parameters"]
@@ -60,7 +71,7 @@ def test_on_publishes_one_argument_free_read_to_both_providers(
 
 
 def test_the_read_stays_published_while_a_confirmation_is_pending(
-        app, planned_user, tools_on, turn):
+        app, planned_user, tools_on, turn, coach_read_scope):
     """Pending + NONE publishes no write tool, but the model must still be
     able to describe the real plan it is asking the user to confirm against."""
     staged = coach_plan_tools.execute_plan_tool(
@@ -69,15 +80,17 @@ def test_the_read_stays_published_while_a_confirmation_is_pending(
     assert staged["status"] == "confirmation_required"
     from flask import g
     g.pop("coach_plan_new_proposal", None)  # a later turn, conceptually
-    published = _names(ai_coach._openai_tools_for_call(planned_user.id))
+    with coach_read_scope(planned_user.id):
+        published = _names(ai_coach._openai_tools_for_call(planned_user.id))
     assert READ in published
 
 
 # ── What the read returns ───────────────────────────────────────────────────
 
 def test_the_read_is_the_canonical_plan_in_calendar_order(
-        app, planned_user, tools_on, turn):
-    result = coach_plan_tools.execute_plan_read(planned_user.id)
+        app, planned_user, tools_on, turn, coach_read_scope):
+    with coach_read_scope(planned_user.id):
+        result = coach_plan_tools.execute_plan_read(planned_user.id)
 
     assert result["status"] == "ok"
     days = result["plan"]["days"]
@@ -86,57 +99,62 @@ def test_the_read_is_the_canonical_plan_in_calendar_order(
     monday = days[0]
     assert monday["kind"] == "antrenman"
     assert monday["exercises"] == [
-        {"name": "Bench Press", "sets": 3, "reps": "8-12"},
-        {"name": "Shoulder Press", "sets": 4, "reps": "10-12"}]
+        {"name": "Bench Press", "sets": 3, "reps": "8-12", "position": 0},
+        {"name": "Shoulder Press", "sets": 4, "reps": "10-12", "position": 1}]
     assert days[1] == {"day": "Salı", "kind": "dinlenme", "exercises": []}
 
 
 def test_the_read_never_carries_identity_versions_or_free_text(
-        app, planned_user, tools_on, turn):
+        app, planned_user, tools_on, turn, coach_read_scope):
     plan = _active(planned_user.id)
-    encoded = json.dumps(coach_plan_tools.execute_plan_read(planned_user.id),
-                         ensure_ascii=False)
+    with coach_read_scope(planned_user.id):
+        encoded = json.dumps(coach_plan_tools.execute_plan_read(planned_user.id),
+                             ensure_ascii=False)
     for forbidden in (plan.lineage_id, "lineage", "mutation_version",
                       "user_id", "İtiş", "90 sn", "haftalik_ozet", "odak"):
         assert forbidden not in encoded
 
 
 def test_no_plan_is_not_found_and_another_users_plan_is_unreachable(
-        app, planned_user, make_user, tools_on, turn):
+        app, planned_user, make_user, tools_on, turn, coach_read_scope):
     """Ownership is structural: the only input is the server-resolved owner.
     A user without a plan sees ``not_found`` even while another user has one."""
     stranger = make_user("stranger")
-    assert coach_plan_tools.execute_plan_read(stranger.id) == {
-        "status": "not_found"}
+    with coach_read_scope(stranger.id):
+        assert coach_plan_tools.execute_plan_read(stranger.id) == {
+            "status": "not_found"}
 
 
 def test_an_unreadable_plan_is_reported_not_guessed(
-        app, make_user, tools_on, turn):
+        app, make_user, tools_on, turn, coach_read_scope):
     user = make_user("broken")
     db.session.add(TrainingPlan(user_id=user.id, score=1, plan_data="{not json"))
     db.session.commit()
-    result = coach_plan_tools.execute_plan_read(user.id)
+    with coach_read_scope(user.id):
+        result = coach_plan_tools.execute_plan_read(user.id)
     assert result == {"status": "error", "error": "PLAN_UNREADABLE"}
 
 
 def test_a_storage_fault_is_unreadable_and_leaves_no_transaction(
-        app, planned_user, tools_on, turn, monkeypatch):
+        app, planned_user, tools_on, turn, monkeypatch, coach_read_scope):
     def boom(_user_id):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(plan_read, "read_current_training_plan", boom)
-    result = coach_plan_tools.execute_plan_read(planned_user.id)
+    with coach_read_scope(planned_user.id):
+        result = coach_plan_tools.execute_plan_read(planned_user.id)
     assert result == {"status": "error", "error": "PLAN_UNREADABLE"}
     assert open_transaction() is False
 
 
 def test_the_read_writes_nothing_and_settles_its_transaction(
-        app, planned_user, tools_on, turn):
+        app, planned_user, tools_on, turn, coach_read_scope):
     before = _active(planned_user.id)
     snapshot = (before.plan_data, before.mutation_version, before.lineage_id)
     db.session.rollback()
 
-    coach_plan_tools.execute_plan_read(planned_user.id)
+    with coach_read_scope(planned_user.id):
+        coach_plan_tools.execute_plan_read(planned_user.id)
     assert open_transaction() is False
 
     after = _active(planned_user.id)
@@ -144,14 +162,15 @@ def test_the_read_writes_nothing_and_settles_its_transaction(
     assert PlanMutationRecord.query.filter_by(user_id=planned_user.id).count() == 0
 
 
-def test_the_dispatcher_refuses_any_argument(app, planned_user, tools_on, turn):
-    for raw in ('{"user_id": 1}', '{"version": 3}', '[1]', '{bad'):
-        result = json.loads(
-            ai_coach._dispatch_coach_tool(planned_user.id, READ, raw))
-        assert result["error"] == results.ERROR_INVALID_ARGUMENTS
-        assert "plan" not in result
-    ok = json.loads(ai_coach._dispatch_coach_tool(planned_user.id, READ, "{}"))
-    assert ok["status"] == "ok"
+def test_the_dispatcher_refuses_any_argument(app, planned_user, tools_on, turn, coach_read_scope):
+    with coach_read_scope(planned_user.id):
+        for raw in ('{"user_id": 1}', '{"version": 3}', '[1]', '{bad'):
+            result = json.loads(
+                ai_coach._dispatch_coach_tool(planned_user.id, READ, raw))
+            assert result["error"] == results.ERROR_INVALID_ARGUMENTS
+            assert "plan" not in result
+        ok = json.loads(ai_coach._dispatch_coach_tool(planned_user.id, READ, "{}"))
+        assert ok["status"] == "ok"
 
 
 # ── The provider transfer boundary ──────────────────────────────────────────
@@ -202,7 +221,7 @@ def test_the_policy_tells_the_model_to_read_before_naming(app):
 
 @pytest.mark.usefixtures("synthetic_ai_layer")
 def test_read_then_edit_changes_exactly_one_field_through_the_real_loop(
-        app, planned_user, tools_on, monkeypatch):
+        app, planned_user, tools_on, monkeypatch, coach_read_scope):
     """"Change bench press from 3 sets to 2": the model reads the real plan,
     the edit lands on the right slot, and nothing else in the document moves."""
     from app.observability import assign_request_id
@@ -218,25 +237,27 @@ def test_read_then_edit_changes_exactly_one_field_through_the_real_loop(
 
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
-        ai_coach._run_coach_conversation(
-            planned_user.id, "Bench press'i 3 setten 2 sete düşür", "",
-            client_history=[])
+        with coach_read_scope(planned_user.id):
+            ai_coach._run_coach_conversation(
+                planned_user.id, "Bench press'i 3 setten 2 sete düşür", "",
+                client_history=[])
 
     # What the model saw first is the real plan, through the transfer boundary.
     first_tool = next(m for m in openai.calls[1]["messages"]
                       if m.get("role") == "tool")
     seen = json.loads(first_tool["content"])
     assert seen["plan"]["days"][0]["exercises"][0] == {
-        "name": "Bench Press", "sets": 3, "reps": "8-12"}
+        "name": "Bench Press", "sets": 3, "reps": "8-12", "position": 0}
     # An applied write ends the loop with a server-owned reply (PR4); the
     # model never narrates a change it only believes happened.
     assert len(openai.calls) == 2
     # A later read (next turn) reflects the persisted change.
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
-        reread = coach_plan_tools.execute_plan_read(planned_user.id)
+        with coach_read_scope(planned_user.id):
+            reread = coach_plan_tools.execute_plan_read(planned_user.id)
     assert reread["plan"]["days"][0]["exercises"][0] == {
-        "name": "Bench Press", "sets": 2, "reps": "8-12"}
+        "name": "Bench Press", "sets": 2, "reps": "8-12", "position": 0}
 
     after = json.loads(_active(planned_user.id).plan_data)
     expected = json.loads(json.dumps(before))

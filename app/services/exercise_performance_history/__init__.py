@@ -8,9 +8,8 @@ merged or used as a fallback.
 Layering: ``queries`` (one SELECT) -> pure ``selection`` (classification, fact
 extraction, state, invariants) over ``models`` (bounds, tokens, value objects).
 
-PR1 has ZERO production callers (TD-01 T11, guard H-A8): no route, flag, client,
-Coach or Today consumer imports this package. A later, separately approved
-slice must change that guard explicitly.
+The native exercise history read and Coach's authorized recent-session
+projection consume the same query and checkpoint validation primitives.
 
 Failure classes are distinct exception types and are never converted into a
 state: ``SQLAlchemyError`` (read_failed), ``ProjectionInvariantError`` or any
@@ -20,7 +19,7 @@ other unexpected exception (invariant_failed), ``CatalogConfigurationError``
 """
 from __future__ import annotations
 
-from app.services.exercise_catalog import resolve_historical_exercise
+from app.services.private_exercises import resolve_owned_historical_exercise
 from app.timeutil import app_today
 
 from . import queries, selection
@@ -53,7 +52,7 @@ def build_exercise_history(user_id: int, exercise_id: str) -> ExerciseHistory:
     only owner input. The exercise identity is validated before any history
     read, and the anchor day is computed exactly once.
     """
-    resolve_historical_exercise(exercise_id)
+    resolve_owned_historical_exercise(user_id, exercise_id)
     anchor = app_today()
     rows, scan_limit_reached = queries.load_candidates(user_id, anchor)
     history = selection.select_history(exercise_id, anchor, rows, scan_limit_reached)

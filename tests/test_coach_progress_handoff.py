@@ -69,7 +69,7 @@ def test_send_uses_fresh_canonical_state_after_page_render(app, monkeypatch):
     codes = iter(("baseline", "holding_steady"))
 
     def build(uid):
-        return SimpleNamespace(insight=SimpleNamespace(
+        return SimpleNamespace(measured_volume_trend=True, insight=SimpleNamespace(
             code=next(codes), action_code="build_baseline", action=None, evidence=()))
 
     monkeypatch.setattr(insights, "build_progress_insights", build)

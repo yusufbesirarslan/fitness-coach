@@ -595,6 +595,19 @@ def copied_provenance(user_id, description, nutrition):
     return None
 
 
+def matches_unqualified_diary_entry(user_id, description, nutrition):
+    """Keep a known copy of an estimate, provider row or ambiguous log unqualified."""
+    amounts = (nutrition.energy_kcal, nutrition.protein_g, nutrition.carbohydrate_g, nutrition.fat_g)
+    qualified = MealLog.user_entered_amounts()
+    match = (MealLog.query.filter(
+        MealLog.user_id == user_id, MealLog.yemekler == description,
+        *(getattr(MealLog, column).between(float(value) - 1e-9, float(value) + 1e-9)
+          for (column, _), value in zip(_MACROS, amounts)),
+        db.func.coalesce(qualified, False).is_(False),
+    ).with_entities(MealLog.id).first())
+    return match is not None
+
+
 # ── legacy dry run (read-only) ──────────────────────────────────────────────
 
 LEGACY_V1_CACHE_PATTERN = "food:macros:v1:*"

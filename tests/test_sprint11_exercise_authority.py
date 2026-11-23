@@ -55,17 +55,18 @@ from app.services.training_generation.exercise_choices import (
     compatible_exercise_choices,
 )
 from app.services.training_generation.response_validator import validate_plan_structure
+from app.services.exercise_catalog_v3 import generation_eligible
 
 
 EXPECTED_EQUIPMENT = frozenset({
     "barbell", "bench", "bodyweight", "cable", "cardio_machine",
-    "dumbbell", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
+    "dumbbell", "ez_bar", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
     "pool", "pull_up_bar", "rack", "resistance_band", "rope",
-    "stationary_bicycle",
+    "smith_machine", "stationary_bicycle",
 })
 EXPECTED_MOVEMENTS = frozenset({
     "anti_extension", "anti_rotation", "calf_raise", "carry", "cardio",
-    "core_dynamic", "curl", "dip", "hinge", "horizontal_pull",
+    "core_dynamic", "curl", "dip", "hinge", "hip_abduction", "hip_adduction", "horizontal_pull",
     "horizontal_push", "lunge", "mobility", "squat", "vertical_pull",
     "vertical_push",
 })
@@ -124,7 +125,7 @@ def test_real_catalog_has_valid_closed_shape_and_unique_lookup_keys():
     catalog = load_exercise_catalog()
 
     assert set(raw) == {"version", "exercises"}
-    assert raw["version"] == catalog.version == 1
+    assert raw["version"] == catalog.version == 3
     assert len(raw["exercises"]) == len(catalog.exercises)
 
     ids = []
@@ -589,8 +590,11 @@ def test_prompt_choices_are_exact_catalog_pairs_without_aliases_or_metadata():
 
     assert choices.context == context
     assert choices.catalog_version == catalog.version
+    # Catalog V3 additions stay out of the generator until a reviewed overlay
+    # change admits them (tests/test_exercise_catalog_v3.py pins the set).
     assert choices.exercise_ids == {
-        exercise.exercise_id for exercise in compatible_exercises(context)}
+        exercise.exercise_id for exercise in compatible_exercises(context)
+        if generation_eligible(exercise.exercise_id)}
     for choice in choices.choices:
         entry = catalog.by_id[choice.exercise_id]
         assert choice.canonical_name == entry.canonical_name
@@ -676,6 +680,12 @@ def _valid_payload(user_id=7, **overrides):
     return payload
 
 
+def test_signed_v1_draft_is_accepted_after_the_additive_catalog_upgrade():
+    token = _mint(_valid_payload(catalog=1), secret="secret")
+    restored = verify_exercise_context(token, "secret", user_id=7)
+    assert restored.catalog_version == 1
+
+
 def _tamper(segment):
     """Swap one base64url character for a different, still-legal one."""
     return ("B" if segment[0] != "B" else "C") + segment[1:]
@@ -708,7 +718,7 @@ def test_context_token_tampering_fails_closed(mutation):
 
 def test_context_token_round_trip_preserves_every_context_field():
     context = ExerciseContext(
-        "ev", cardio_type="ip_atlama", style="calisthenics", catalog_version=1)
+        "ev", cardio_type="ip_atlama", style="calisthenics")
     restored = verify_exercise_context(
         sign_exercise_context(context, "secret", user_id=3), "secret", user_id=3)
 

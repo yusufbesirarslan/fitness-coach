@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 import json
 from pathlib import Path
@@ -15,17 +15,18 @@ import unicodedata
 CATALOG_PATH = Path(__file__).with_name("training_assets") / "exercises.json"
 ID_PATTERN = re.compile(r"^ex_[a-z0-9_]+$")
 MAX_EXERCISE_ID_LENGTH = 64
+PRIVATE_ID_PREFIX = "ex_private_"
 HYPHENS = "‐‑‒–—―−"
 
 EQUIPMENT_VOCABULARY = frozenset({
     "barbell", "bench", "bodyweight", "cable", "cardio_machine",
-    "dumbbell", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
+    "dumbbell", "ez_bar", "kettlebell", "machine", "outdoor_running", "outdoor_walking",
     "pool", "pull_up_bar", "rack", "resistance_band", "rope",
-    "stationary_bicycle",
+    "smith_machine", "stationary_bicycle",
 })
 MOVEMENT_VOCABULARY = frozenset({
     "anti_extension", "anti_rotation", "calf_raise", "carry", "cardio",
-    "core_dynamic", "curl", "dip", "hinge", "horizontal_pull",
+    "core_dynamic", "curl", "dip", "hinge", "hip_abduction", "hip_adduction", "horizontal_pull",
     "horizontal_push", "lunge", "mobility", "squat", "vertical_pull",
     "vertical_push",
 })
@@ -98,6 +99,7 @@ class ExerciseDefinition:
     movement: str
     primary_region: str
     active: bool
+    target_region: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ class ExerciseContext:
     equipment_context: str
     cardio_type: str = "yok"
     style: str = "general_fitness"
-    catalog_version: int = 1
+    catalog_version: int = field(default_factory=lambda: load_exercise_catalog().version)
 
 
 @dataclass(frozen=True)
@@ -196,6 +198,8 @@ def load_exercise_catalog() -> ExerciseCatalog:
     by_id: dict[str, ExerciseDefinition] = {}
     by_lookup: dict[str, tuple[ExerciseDefinition, ...]] = {}
     for exercise in exercises:
+        if exercise.exercise_id.startswith(PRIVATE_ID_PREFIX):
+            raise CatalogConfigurationError("reserved private exercise namespace")
         if exercise.exercise_id in by_id:
             raise CatalogConfigurationError("duplicate exercise ID")
         by_id[exercise.exercise_id] = exercise
@@ -210,6 +214,11 @@ def load_exercise_catalog() -> ExerciseCatalog:
         by_id=MappingProxyType(by_id),
         by_lookup=MappingProxyType(by_lookup),
     )
+
+
+def with_owner_definitions(catalog, definitions):
+    """Add pre-authorized definitions by ID only to a request-local view."""
+    return replace(catalog, by_id={**catalog.by_id, **definitions}) if definitions else catalog
 
 
 def resolve_exercise(
@@ -282,3 +291,31 @@ def compatible_exercises(context: ExerciseContext) -> tuple[ExerciseDefinition, 
         exercise for exercise in load_exercise_catalog().exercises
         if exercise.active and is_exercise_compatible(exercise, context)
     )
+
+
+def _search_key(value: str) -> str:
+    """Fold accents, Turkish dotless i and separators for discovery only."""
+    text = unicodedata.normalize("NFKD", normalize_exercise_lookup(value))
+    folded = "".join(char for char in text if not unicodedata.combining(char))
+    folded = folded.replace("ı", "i")
+    return " ".join("".join(char if char.isalnum() else " " for char in folded).split())
+
+
+def search_exercises(catalog: ExerciseCatalog, query: str) -> tuple[ExerciseDefinition, ...]:
+    """Rank active IDs by exact name or alias, then by partial token matches."""
+    query = _search_key(query)
+    tokens = query.split()
+    hits = []
+    for exercise in catalog.exercises:
+        if not exercise.active:
+            continue
+        labels = tuple(_search_key(label) for label in (
+            exercise.canonical_name, *exercise.aliases, exercise.exercise_id))
+        if query in labels:
+            rank = 0
+        elif any(all(token in label for token in tokens) for label in labels):
+            rank = 1
+        else:
+            continue
+        hits.append((rank, labels[0], exercise.exercise_id, exercise))
+    return tuple(hit[3] for hit in sorted(hits))

@@ -1,0 +1,2109 @@
+{
+ "taxonomy_version": 1,
+ "catalog_version": 3,
+ "regions": [
+  {
+   "key": "chest",
+   "label_tr": "Göğüs",
+   "label_en": "Chest"
+  },
+  {
+   "key": "back",
+   "label_tr": "Sırt",
+   "label_en": "Back"
+  },
+  {
+   "key": "shoulders",
+   "label_tr": "Omuz",
+   "label_en": "Shoulders"
+  },
+  {
+   "key": "biceps",
+   "label_tr": "Biceps",
+   "label_en": "Biceps"
+  },
+  {
+   "key": "triceps",
+   "label_tr": "Triceps",
+   "label_en": "Triceps"
+  },
+  {
+   "key": "quads",
+   "label_tr": "Bacak (Quad)",
+   "label_en": "Legs (Quads)"
+  },
+  {
+   "key": "hamstrings",
+   "label_tr": "Bacak (Hamstring)",
+   "label_en": "Legs (Hamstrings)"
+  },
+  {
+   "key": "glutes",
+   "label_tr": "Kalça",
+   "label_en": "Glutes"
+  },
+  {
+   "key": "calves",
+   "label_tr": "Calf",
+   "label_en": "Calves"
+  },
+  {
+   "key": "core",
+   "label_tr": "Karın / Core",
+   "label_en": "Core"
+  },
+  {
+   "key": "full_body",
+   "label_tr": "Tüm Vücut",
+   "label_en": "Full Body"
+  },
+  {
+   "key": "cardio",
+   "label_tr": "Kardiyo",
+   "label_en": "Cardio"
+  },
+  {
+   "key": "mobility",
+   "label_tr": "Mobilite",
+   "label_en": "Mobility"
+  }
+ ],
+ "equipment_labels": [
+  {
+   "key": "barbell",
+   "label_tr": "Barbell",
+   "label_en": "Barbell"
+  },
+  {
+   "key": "dumbbell",
+   "label_tr": "Dumbbell",
+   "label_en": "Dumbbell"
+  },
+  {
+   "key": "machine",
+   "label_tr": "Machine",
+   "label_en": "Machine"
+  },
+  {
+   "key": "smith_machine",
+   "label_tr": "Smith Machine",
+   "label_en": "Smith Machine"
+  },
+  {
+   "key": "cable",
+   "label_tr": "Cable",
+   "label_en": "Cable"
+  },
+  {
+   "key": "ez_bar",
+   "label_tr": "EZ Bar",
+   "label_en": "EZ Bar"
+  },
+  {
+   "key": "kettlebell",
+   "label_tr": "Kettlebell",
+   "label_en": "Kettlebell"
+  },
+  {
+   "key": "resistance_band",
+   "label_tr": "Direnç Bandı",
+   "label_en": "Resistance Band"
+  },
+  {
+   "key": "bodyweight",
+   "label_tr": "Vücut Ağırlığı",
+   "label_en": "Bodyweight"
+  },
+  {
+   "key": "bench",
+   "label_tr": "Bench",
+   "label_en": "Bench"
+  },
+  {
+   "key": "rack",
+   "label_tr": "Rack",
+   "label_en": "Rack"
+  },
+  {
+   "key": "pull_up_bar",
+   "label_tr": "Barfiks Barı",
+   "label_en": "Pull-Up Bar"
+  },
+  {
+   "key": "cardio_machine",
+   "label_tr": "Kardiyo Makinesi",
+   "label_en": "Cardio Machine"
+  },
+  {
+   "key": "outdoor_running",
+   "label_tr": "Açık Hava",
+   "label_en": "Outdoor"
+  },
+  {
+   "key": "outdoor_walking",
+   "label_tr": "Açık Hava",
+   "label_en": "Outdoor"
+  },
+  {
+   "key": "rope",
+   "label_tr": "İp",
+   "label_en": "Jump Rope"
+  },
+  {
+   "key": "stationary_bicycle",
+   "label_tr": "Sabit Bisiklet",
+   "label_en": "Stationary Bike"
+  },
+  {
+   "key": "pool",
+   "label_tr": "Havuz",
+   "label_en": "Pool"
+  }
+ ],
+ "families": [
+  {
+   "family_id": "fam_bench_press",
+   "display_name_en": "Bench Press",
+   "display_name_tr": "Bench Press",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_bench_press"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_bench_press"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_chest_press"
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_bench_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_incline_bench_press",
+   "display_name_en": "Incline Bench Press",
+   "display_name_tr": "Incline Bench Press",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_incline_barbell_bench_press"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_incline_dumbbell_press"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_incline_chest_press",
+     "generation": false
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_incline_bench_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_decline_bench_press",
+   "display_name_en": "Decline Bench Press",
+   "display_name_tr": "Decline Bench Press",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_decline_barbell_bench_press",
+     "generation": false
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_decline_dumbbell_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_chest_fly",
+   "display_name_en": "Chest Fly",
+   "display_name_tr": "Chest Fly",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_chest_fly"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_pec_deck_fly"
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_standing_cable_chest_fly"
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_chest_fly",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_incline_fly",
+   "display_name_en": "Incline Fly",
+   "display_name_tr": "Incline Fly",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_incline_dumbbell_fly",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_low_to_high_cable_fly",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_floor_press",
+   "display_name_en": "Floor Press",
+   "display_name_tr": "Floor Press",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_floor_press"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_push_up",
+   "display_name_en": "Push-Up",
+   "display_name_tr": "Push-Up",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_push_up"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_knee_push_up",
+   "display_name_en": "Knee Push-Up",
+   "display_name_tr": "Knee Push-Up",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_knee_push_up",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_incline_push_up",
+   "display_name_en": "Incline Push-Up",
+   "display_name_tr": "Incline Push-Up",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_incline_push_up"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_decline_push_up",
+   "display_name_en": "Decline Push-Up",
+   "display_name_tr": "Decline Push-Up",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_decline_push_up"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_archer_push_up",
+   "display_name_en": "Archer Push-Up",
+   "display_name_tr": "Archer Push-Up",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_archer_push_up"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_dip",
+   "display_name_en": "Dip",
+   "display_name_tr": "Dip",
+   "target_region": "chest",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_dip"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_assisted_dip",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_deadlift",
+   "display_name_en": "Deadlift",
+   "display_name_tr": "Deadlift",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_deadlift"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_rack_pull",
+   "display_name_en": "Rack Pull",
+   "display_name_tr": "Rack Pull",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_rack_pull",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_bent_over_row",
+   "display_name_en": "Bent-Over Row",
+   "display_name_tr": "Bent-Over Row",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_row"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_bent_over_row",
+     "generation": false
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_row",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_one_arm_row",
+   "display_name_en": "One-Arm Row",
+   "display_name_tr": "One-Arm Row",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_row"
+    },
+    {
+     "equipment": "kettlebell",
+     "exercise_id": "ex_kettlebell_row",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_single_arm_cable_row",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_seated_row",
+   "display_name_en": "Seated Row",
+   "display_name_tr": "Seated Row",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_seated_cable_row"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_seated_machine_row",
+     "generation": false
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_row"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_chest_supported_row",
+   "display_name_en": "Chest-Supported Row",
+   "display_name_tr": "Chest-Supported Row",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_chest_supported_row"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_chest_supported_dumbbell_row",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_t_bar_row",
+   "display_name_en": "T-Bar Row",
+   "display_name_tr": "T-Bar Row",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_t_bar_row",
+     "generation": false
+    },
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_landmine_t_bar_row",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_inverted_row",
+   "display_name_en": "Inverted Row",
+   "display_name_tr": "Inverted Row",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_inverted_row"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_pull_up",
+   "display_name_en": "Pull-Up",
+   "display_name_tr": "Pull-Up",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_pull_up"
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_assisted_pull_up"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_assisted_pull_up",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_chin_up",
+   "display_name_en": "Chin-Up",
+   "display_name_tr": "Chin-Up",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_chin_up"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_lat_pulldown",
+   "display_name_en": "Lat Pulldown",
+   "display_name_tr": "Lat Pulldown",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_lat_pulldown"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_lat_pulldown",
+     "generation": false
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_pulldown"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_close_grip_pulldown",
+   "display_name_en": "Close-Grip Pulldown",
+   "display_name_tr": "Close-Grip Pulldown",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_close_grip_lat_pulldown",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_straight_arm_pulldown",
+   "display_name_en": "Straight-Arm Pulldown",
+   "display_name_tr": "Straight-Arm Pulldown",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_straight_arm_pulldown",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_back_extension",
+   "display_name_en": "Back Extension",
+   "display_name_tr": "Back Extension",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_back_extension",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_scapular_pull_up",
+   "display_name_en": "Scapular Pull-Up",
+   "display_name_tr": "Scapular Pull-Up",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_scapular_pull_up"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_dead_hang",
+   "display_name_en": "Dead Hang",
+   "display_name_tr": "Dead Hang",
+   "target_region": "back",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_dead_hang"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_shoulder_press",
+   "display_name_en": "Shoulder Press",
+   "display_name_tr": "Shoulder Press",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_shoulder_press"
+    },
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_overhead_press"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_shoulder_press"
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_shoulder_press",
+     "generation": false
+    },
+    {
+     "equipment": "kettlebell",
+     "exercise_id": "ex_kettlebell_overhead_press",
+     "generation": false
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_shoulder_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_arnold_press",
+   "display_name_en": "Arnold Press",
+   "display_name_tr": "Arnold Press",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_arnold_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_landmine_press",
+   "display_name_en": "Landmine Press",
+   "display_name_tr": "Landmine Press",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_landmine_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_pike_push_up",
+   "display_name_en": "Pike Push-Up",
+   "display_name_tr": "Pike Push-Up",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_pike_push_up"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_lateral_raise",
+   "display_name_en": "Lateral Raise",
+   "display_name_tr": "Lateral Raise",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_lateral_raise"
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_lateral_raise"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_lateral_raise",
+     "generation": false
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_lateral_raise",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_front_raise",
+   "display_name_en": "Front Raise",
+   "display_name_tr": "Front Raise",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_front_raise",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_front_raise",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_reverse_fly",
+   "display_name_en": "Reverse Fly",
+   "display_name_tr": "Reverse Fly",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_reverse_dumbbell_fly"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_reverse_pec_deck",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_reverse_fly",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_face_pull",
+   "display_name_en": "Face Pull",
+   "display_name_tr": "Face Pull",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_face_pull"
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_face_pull",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_band_pull_apart",
+   "display_name_en": "Band Pull-Apart",
+   "display_name_tr": "Band Pull-Apart",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_pull_apart",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_upright_row",
+   "display_name_en": "Upright Row",
+   "display_name_tr": "Upright Row",
+   "target_region": "shoulders",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_upright_row",
+     "generation": false
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_upright_row",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_upright_row",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_biceps_curl",
+   "display_name_en": "Biceps Curl",
+   "display_name_tr": "Biceps Curl",
+   "target_region": "biceps",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_biceps_curl"
+    },
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_biceps_curl"
+    },
+    {
+     "equipment": "ez_bar",
+     "exercise_id": "ex_ez_bar_curl",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_biceps_curl",
+     "generation": false
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_biceps_curl"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hammer_curl",
+   "display_name_en": "Hammer Curl",
+   "display_name_tr": "Hammer Curl",
+   "target_region": "biceps",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_hammer_curl"
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_rope_hammer_curl",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_preacher_curl",
+   "display_name_en": "Preacher Curl",
+   "display_name_tr": "Preacher Curl",
+   "target_region": "biceps",
+   "variants": [
+    {
+     "equipment": "ez_bar",
+     "exercise_id": "ex_ez_bar_preacher_curl",
+     "generation": false
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_preacher_curl",
+     "generation": false
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_preacher_curl",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_incline_curl",
+   "display_name_en": "Incline Curl",
+   "display_name_tr": "Incline Curl",
+   "target_region": "biceps",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_incline_dumbbell_curl",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_concentration_curl",
+   "display_name_en": "Concentration Curl",
+   "display_name_tr": "Concentration Curl",
+   "target_region": "biceps",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_concentration_curl",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_triceps_pushdown",
+   "display_name_en": "Triceps Pushdown",
+   "display_name_tr": "Triceps Pushdown",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_triceps_pushdown"
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_triceps_pushdown",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_overhead_triceps_extension",
+   "display_name_en": "Overhead Triceps Extension",
+   "display_name_tr": "Overhead Triceps Extension",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_overhead_dumbbell_triceps_extension"
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_overhead_cable_triceps_extension",
+     "generation": false
+    },
+    {
+     "equipment": "ez_bar",
+     "exercise_id": "ex_ez_bar_overhead_triceps_extension",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_skull_crusher",
+   "display_name_en": "Skull Crusher",
+   "display_name_tr": "Skull Crusher",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "ez_bar",
+     "exercise_id": "ex_ez_bar_skull_crusher",
+     "generation": false
+    },
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_skull_crusher",
+     "generation": false
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_skull_crusher",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_close_grip_bench_press",
+   "display_name_en": "Close-Grip Bench Press",
+   "display_name_tr": "Close-Grip Bench Press",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_close_grip_barbell_bench_press"
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_close_grip_bench_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_triceps_kickback",
+   "display_name_en": "Triceps Kickback",
+   "display_name_tr": "Triceps Kickback",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_triceps_kickback",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_triceps_kickback",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_machine_dip",
+   "display_name_en": "Seated Dip Machine",
+   "display_name_tr": "Seated Dip Machine",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_triceps_dip",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_bench_dip",
+   "display_name_en": "Bench Dip",
+   "display_name_tr": "Bench Dip",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_bench_dip",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_diamond_push_up",
+   "display_name_en": "Diamond Push-Up",
+   "display_name_tr": "Diamond Push-Up",
+   "target_region": "triceps",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_diamond_push_up",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_back_squat",
+   "display_name_en": "Back Squat",
+   "display_name_tr": "Back Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_back_squat"
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_paused_back_squat",
+   "display_name_en": "Paused Back Squat",
+   "display_name_tr": "Paused Back Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_paused_barbell_back_squat"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_front_squat",
+   "display_name_en": "Front Squat",
+   "display_name_tr": "Front Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_front_squat"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_zercher_squat",
+   "display_name_en": "Zercher Squat",
+   "display_name_tr": "Zercher Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_zercher_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_goblet_squat",
+   "display_name_en": "Goblet Squat",
+   "display_name_tr": "Goblet Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_goblet_squat"
+    },
+    {
+     "equipment": "kettlebell",
+     "exercise_id": "ex_kettlebell_goblet_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_bodyweight_squat",
+   "display_name_en": "Bodyweight Squat",
+   "display_name_tr": "Bodyweight Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_bodyweight_squat"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_jump_squat",
+   "display_name_en": "Jump Squat",
+   "display_name_tr": "Jump Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_jump_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_wall_sit",
+   "display_name_en": "Wall Sit",
+   "display_name_tr": "Wall Sit",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_wall_sit",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hack_squat",
+   "display_name_en": "Hack Squat",
+   "display_name_tr": "Hack Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_hack_squat"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_pendulum_squat",
+   "display_name_en": "Pendulum Squat",
+   "display_name_tr": "Pendulum Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_pendulum_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_leg_press",
+   "display_name_en": "Leg Press",
+   "display_name_tr": "Leg Press",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_leg_press"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_leg_extension",
+   "display_name_en": "Leg Extension",
+   "display_name_tr": "Leg Extension",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_leg_extension"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_split_squat",
+   "display_name_en": "Split Squat",
+   "display_name_tr": "Split Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_split_squat"
+    },
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_bodyweight_split_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_bulgarian_split_squat",
+   "display_name_en": "Bulgarian Split Squat",
+   "display_name_tr": "Bulgarian Split Squat",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_bulgarian_split_squat"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_bulgarian_split_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_walking_lunge",
+   "display_name_en": "Walking Lunge",
+   "display_name_tr": "Walking Lunge",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_walking_lunge"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_walking_lunge"
+    },
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_walking_lunge",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_reverse_lunge",
+   "display_name_en": "Reverse Lunge",
+   "display_name_tr": "Reverse Lunge",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_reverse_lunge",
+     "generation": false
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_reverse_lunge"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_lateral_lunge",
+   "display_name_en": "Lateral Lunge",
+   "display_name_tr": "Lateral Lunge",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_lateral_lunge",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_step_up",
+   "display_name_en": "Step-Up",
+   "display_name_tr": "Step-Up",
+   "target_region": "quads",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_step_up"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_step_up",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_romanian_deadlift",
+   "display_name_en": "Romanian Deadlift",
+   "display_name_tr": "Romanian Deadlift",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_romanian_deadlift"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_romanian_deadlift"
+    },
+    {
+     "equipment": "kettlebell",
+     "exercise_id": "ex_kettlebell_romanian_deadlift",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_stiff_leg_deadlift",
+   "display_name_en": "Stiff-Leg Deadlift",
+   "display_name_tr": "Stiff-Leg Deadlift",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_stiff_leg_deadlift",
+     "generation": false
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_stiff_leg_deadlift",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_single_leg_rdl",
+   "display_name_en": "Single-Leg Romanian Deadlift",
+   "display_name_tr": "Single-Leg Romanian Deadlift",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_single_leg_romanian_deadlift",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_good_morning",
+   "display_name_en": "Good Morning",
+   "display_name_tr": "Good Morning",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_good_morning",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_lying_leg_curl",
+   "display_name_en": "Lying Leg Curl",
+   "display_name_tr": "Lying Leg Curl",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_lying_leg_curl"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_seated_leg_curl",
+   "display_name_en": "Seated Leg Curl",
+   "display_name_tr": "Seated Leg Curl",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_seated_machine_leg_curl"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_standing_leg_curl",
+   "display_name_en": "Standing Leg Curl",
+   "display_name_tr": "Standing Leg Curl",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_standing_machine_leg_curl",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_nordic_curl",
+   "display_name_en": "Nordic Hamstring Curl",
+   "display_name_tr": "Nordic Hamstring Curl",
+   "target_region": "hamstrings",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_nordic_hamstring_curl",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hip_thrust",
+   "display_name_en": "Hip Thrust",
+   "display_name_tr": "Hip Thrust",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_hip_thrust"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_hip_thrust",
+     "generation": false
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_hip_thrust",
+     "generation": false
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_hip_thrust",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_glute_bridge",
+   "display_name_en": "Glute Bridge",
+   "display_name_tr": "Glute Bridge",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_glute_bridge"
+    },
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_glute_bridge",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_single_leg_glute_bridge",
+   "display_name_en": "Single-Leg Glute Bridge",
+   "display_name_tr": "Single-Leg Glute Bridge",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_single_leg_glute_bridge",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hip_abduction",
+   "display_name_en": "Hip Abduction",
+   "display_name_tr": "Hip Abduction",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_hip_abduction"
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_hip_abduction",
+     "generation": false
+    },
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_hip_abduction",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hip_adduction",
+   "display_name_en": "Hip Adduction",
+   "display_name_tr": "Hip Adduction",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_hip_adduction"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_glute_kickback",
+   "display_name_en": "Glute Kickback",
+   "display_name_tr": "Glute Kickback",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_glute_kickback",
+     "generation": false
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_glute_kickback",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_pull_through",
+   "display_name_en": "Pull-Through",
+   "display_name_tr": "Pull-Through",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_pull_through",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_sumo_deadlift",
+   "display_name_en": "Sumo Deadlift",
+   "display_name_tr": "Sumo Deadlift",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_sumo_deadlift",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_sumo_squat",
+   "display_name_en": "Sumo Squat",
+   "display_name_tr": "Sumo Squat",
+   "target_region": "glutes",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_sumo_squat",
+     "generation": false
+    },
+    {
+     "equipment": "kettlebell",
+     "exercise_id": "ex_kettlebell_sumo_squat",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_standing_calf_raise",
+   "display_name_en": "Standing Calf Raise",
+   "display_name_tr": "Standing Calf Raise",
+   "target_region": "calves",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_calf_raise"
+    },
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_calf_raise"
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_standing_machine_calf_raise",
+     "generation": false
+    },
+    {
+     "equipment": "smith_machine",
+     "exercise_id": "ex_smith_machine_calf_raise",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_single_leg_calf_raise",
+   "display_name_en": "Single-Leg Calf Raise",
+   "display_name_tr": "Single-Leg Calf Raise",
+   "target_region": "calves",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_single_leg_calf_raise",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_seated_calf_raise",
+   "display_name_en": "Seated Calf Raise",
+   "display_name_tr": "Seated Calf Raise",
+   "target_region": "calves",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_seated_machine_calf_raise"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_leg_press_calf_raise",
+   "display_name_en": "Leg Press Calf Raise",
+   "display_name_tr": "Leg Press Calf Raise",
+   "target_region": "calves",
+   "variants": [
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_leg_press_calf_raise",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_plank",
+   "display_name_en": "Plank",
+   "display_name_tr": "Plank",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_plank"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_side_plank",
+   "display_name_en": "Side Plank",
+   "display_name_tr": "Side Plank",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_side_plank"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hollow_hold",
+   "display_name_en": "Hollow Body Hold",
+   "display_name_tr": "Hollow Body Hold",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_hollow_hold"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_dead_bug",
+   "display_name_en": "Dead Bug",
+   "display_name_tr": "Dead Bug",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_dead_bug"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_bird_dog",
+   "display_name_en": "Bird Dog",
+   "display_name_tr": "Bird Dog",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_bird_dog",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_pallof_press",
+   "display_name_en": "Pallof Press",
+   "display_name_tr": "Pallof Press",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_pallof_press"
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_pallof_press",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_leg_raise",
+   "display_name_en": "Leg Raise",
+   "display_name_tr": "Leg Raise",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_leg_raise"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hanging_leg_raise",
+   "display_name_en": "Hanging Leg Raise",
+   "display_name_tr": "Hanging Leg Raise",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_hanging_leg_raise",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hanging_knee_raise",
+   "display_name_en": "Hanging Knee Raise",
+   "display_name_tr": "Hanging Knee Raise",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_hanging_knee_raise",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_crunch",
+   "display_name_en": "Crunch",
+   "display_name_tr": "Crunch",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_crunch",
+     "generation": false
+    },
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_crunch",
+     "generation": false
+    },
+    {
+     "equipment": "machine",
+     "exercise_id": "ex_machine_crunch",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_sit_up",
+   "display_name_en": "Sit-Up",
+   "display_name_tr": "Sit-Up",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_sit_up",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_decline_sit_up",
+   "display_name_en": "Decline Sit-Up",
+   "display_name_tr": "Decline Sit-Up",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_decline_sit_up",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_reverse_crunch",
+   "display_name_en": "Reverse Crunch",
+   "display_name_tr": "Reverse Crunch",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_reverse_crunch",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_bicycle_crunch",
+   "display_name_en": "Bicycle Crunch",
+   "display_name_tr": "Bicycle Crunch",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_bicycle_crunch",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_russian_twist",
+   "display_name_en": "Russian Twist",
+   "display_name_tr": "Russian Twist",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_russian_twist",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_woodchop",
+   "display_name_en": "Woodchop",
+   "display_name_tr": "Woodchop",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "cable",
+     "exercise_id": "ex_cable_woodchop",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_mountain_climber",
+   "display_name_en": "Mountain Climber",
+   "display_name_tr": "Mountain Climber",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_mountain_climber"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_suitcase_carry",
+   "display_name_en": "Suitcase Carry",
+   "display_name_tr": "Suitcase Carry",
+   "target_region": "core",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_suitcase_carry"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_kettlebell_swing",
+   "display_name_en": "Kettlebell Swing",
+   "display_name_tr": "Kettlebell Swing",
+   "target_region": "full_body",
+   "variants": [
+    {
+     "equipment": "kettlebell",
+     "exercise_id": "ex_kettlebell_swing"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_thruster",
+   "display_name_en": "Thruster",
+   "display_name_tr": "Thruster",
+   "target_region": "full_body",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_dumbbell_squat_to_press"
+    },
+    {
+     "equipment": "barbell",
+     "exercise_id": "ex_barbell_thruster",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_farmer_carry",
+   "display_name_en": "Farmer Carry",
+   "display_name_tr": "Farmer Carry",
+   "target_region": "full_body",
+   "variants": [
+    {
+     "equipment": "dumbbell",
+     "exercise_id": "ex_farmer_carry"
+    },
+    {
+     "equipment": "kettlebell",
+     "exercise_id": "ex_kettlebell_farmer_carry",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_running",
+   "display_name_en": "Running",
+   "display_name_tr": "Running",
+   "target_region": "cardio",
+   "variants": [
+    {
+     "equipment": "outdoor_running",
+     "exercise_id": "ex_outdoor_run"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_walking",
+   "display_name_en": "Walking",
+   "display_name_tr": "Walking",
+   "target_region": "cardio",
+   "variants": [
+    {
+     "equipment": "outdoor_walking",
+     "exercise_id": "ex_brisk_walk"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_jump_rope",
+   "display_name_en": "Jump Rope",
+   "display_name_tr": "Jump Rope",
+   "target_region": "cardio",
+   "variants": [
+    {
+     "equipment": "rope",
+     "exercise_id": "ex_jump_rope"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_cycling",
+   "display_name_en": "Cycling",
+   "display_name_tr": "Cycling",
+   "target_region": "cardio",
+   "variants": [
+    {
+     "equipment": "stationary_bicycle",
+     "exercise_id": "ex_stationary_cycling"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_swimming",
+   "display_name_en": "Swimming",
+   "display_name_tr": "Swimming",
+   "target_region": "cardio",
+   "variants": [
+    {
+     "equipment": "pool",
+     "exercise_id": "ex_swimming"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hip_mobility_flow",
+   "display_name_en": "Hip Mobility Flow",
+   "display_name_tr": "Hip Mobility Flow",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_hip_mobility_flow"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_thoracic_mobility",
+   "display_name_en": "Thoracic Mobility",
+   "display_name_tr": "Thoracic Mobility",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_thoracic_mobility"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_ankle_mobility",
+   "display_name_en": "Ankle Mobility",
+   "display_name_tr": "Ankle Mobility",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_ankle_mobility"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_single_leg_balance",
+   "display_name_en": "Single-Leg Balance",
+   "display_name_tr": "Single-Leg Balance",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_single_leg_balance"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hip_hinge_drill",
+   "display_name_en": "Hip Hinge Drill",
+   "display_name_tr": "Hip Hinge Drill",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_hip_hinge_drill"
+    }
+   ]
+  },
+  {
+   "family_id": "fam_worlds_greatest_stretch",
+   "display_name_en": "World's Greatest Stretch",
+   "display_name_tr": "World's Greatest Stretch",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_worlds_greatest_stretch",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_cat_cow",
+   "display_name_en": "Cat-Cow",
+   "display_name_tr": "Cat-Cow",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_cat_cow",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hip_90_90_switch",
+   "display_name_en": "90/90 Hip Switch",
+   "display_name_tr": "90/90 Hip Switch",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_hip_90_90_switch",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_hip_flexor_stretch",
+   "display_name_en": "Hip Flexor Stretch",
+   "display_name_tr": "Hip Flexor Stretch",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "bodyweight",
+     "exercise_id": "ex_half_kneeling_hip_flexor_stretch",
+     "generation": false
+    }
+   ]
+  },
+  {
+   "family_id": "fam_shoulder_dislocate",
+   "display_name_en": "Shoulder Dislocate",
+   "display_name_tr": "Shoulder Dislocate",
+   "target_region": "mobility",
+   "variants": [
+    {
+     "equipment": "resistance_band",
+     "exercise_id": "ex_band_shoulder_dislocate",
+     "generation": false
+    }
+   ]
+  }
+ ]
+}

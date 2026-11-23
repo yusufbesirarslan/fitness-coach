@@ -1,5 +1,6 @@
 """Real PostgreSQL fencing with synthetic owners and final mocked SDK capture."""
 import copy
+import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -465,8 +466,8 @@ def _assert_chain_head_and_parity():
     from alembic.migration import MigrationContext
     from alembic.autogenerate import compare_metadata
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
-    assert scripts.get_heads() == ['ad17de1e0001']
-    assert len(list(scripts.walk_revisions())) == 66
+    assert scripts.get_heads() == ['e5b27aa4101c']
+    assert len(list(scripts.walk_revisions())) == 67
     assert scripts.get_revision('a4d6f8b0c2e1').down_revision == 'd7e3a9c1f5b8'
     assert scripts.get_revision('d7e3a9c1f5b8').down_revision == 'f9c6d0a1b2e3'
     assert scripts.get_revision('f9c6d0a1b2e3').down_revision == 'f8b2d4e6a0c3'
@@ -479,7 +480,7 @@ def _assert_chain_head_and_parity():
     assert scripts.get_revision('c2b9d0e1f2a3').down_revision == 'b1a8c9d0e1f2'
     with db.engine.connect() as conn:
         context = MigrationContext.configure(conn, opts={'compare_type': True})
-        assert context.get_current_heads() == ('ad17de1e0001',)
+        assert context.get_current_heads() == ('e5b27aa4101c',)
         assert compare_metadata(context, db.metadata) == []
         checks = conn.execute(sa.text(
             "SELECT conname, convalidated FROM pg_constraint WHERE conrelid IN "
@@ -660,3 +661,96 @@ def test_phase2_purposes_are_independent_and_original_generation_is_fenced(pg_ap
         consent.mutate(1, command(feature, generation=2, key='regrant-phase2'))
         with pytest.raises(consent.ConsentDenied):
             consent.authorize_operation(authority)
+
+
+@pytest.mark.parametrize("recipient", ["openai", "bedrock"])
+def test_coach_plan_read_is_fenced_at_execution_and_provider_dispatch(pg_app, recipient):
+    from app.models import TrainingPlan
+    from app.services import ai_coach, coach_plan_tools, coach_privacy, private_exercises
+
+    owner = 1
+    model = ai.OPENAI_MODEL if recipient == "openai" else app_config.BEDROCK_MODEL
+    read = coach_plan_tools.READ_PLAN_TOOL
+    captured = []
+    with pg_app.app_context(), ai_spend_guard.subject_scope(owner):
+        pg_app.extensions["r6_coach_containment"] = True
+        pg_app.config[coach_plan_tools.FLAG_KEY] = True
+        registration, _ = private_exercises.register(owner, {
+            "display_name": "Local private press", "equipment": ["smith_machine"],
+            "movement": "vertical_push", "target_region": "shoulders",
+        })
+        identity = registration["exercise_id"]
+        plan = {"program": [{"gun": "Pazartesi", "tip": "antrenman", "egzersizler": [
+            {"exercise_id": "ex_machine_shoulder_press", "isim": "Machine Shoulder Press",
+             "set": 3, "tekrar": "8"},
+            {"exercise_id": identity, "isim": "UNTRUSTED_STORED_LABEL", "set": 3, "tekrar": "8–12"},
+        ]}]}
+        db.session.add(TrainingPlan(user_id=owner, score=1, plan_data=json.dumps(plan)))
+        db.session.commit()
+        consent.mutate(owner, command("coach"))
+
+        authority = consent.begin_operation(owner, "coach", recipient, model)
+        with consent.operation_scope(authority):
+            definitions = ai_coach._coach_tool_defs_for_call(owner)
+            names = {tool["name"] for tool in definitions}
+            assert read in names and not names.intersection(coach_plan_tools.PLAN_WRITE_TOOL_NAMES)
+            raw = ai_coach._dispatch_coach_tool(owner, read, "{}")
+            projected = coach_privacy.tool_result(read, raw, user_id=owner)
+            curated, private = json.loads(projected)["plan"]["days"][0]["exercises"]
+            assert curated["family_id"] == "fam_shoulder_press"
+            assert private == {
+                "name": "Local private press", "movement": "vertical_push",
+                "equipment": ["smith_machine"], "primary_region": "shoulders",
+                "target_region": "shoulders", "position": 1, "user_defined": True,
+                "sets": 3, "reps": "8-12",
+            }
+            assert identity not in projected and "UNTRUSTED_STORED_LABEL" not in projected
+            with pytest.raises(consent.ConsentDenied):
+                coach_plan_tools.execute_plan_read(2)
+            foreign = coach_privacy.tool_result(read, raw, user_id=2)
+            assert "Local private press" not in foreign and identity not in foreign
+
+            payload = dict(model=model, max_tokens=100,
+                           messages=[{"role": "tool", "content": projected}])
+            with calls.admit(feature="coach", provider=recipient, payload=payload,
+                             gate=False, charge=False) as admitted:
+                admitted.create(lambda **kwargs: captured.append(kwargs))
+            assert len(captured) == 1
+
+            with calls.admit(feature="coach", provider=recipient, payload=payload,
+                             gate=False, charge=False) as admitted:
+                consent.mutate(owner, command("coach", generation=1, action="revoke",
+                                              key="read-revoke-01"))
+                with pytest.raises(consent.ConsentDenied):
+                    admitted.create(lambda **kwargs: captured.append(kwargs))
+            assert len(captured) == 1
+            with pytest.raises(consent.ConsentDenied):
+                ai_coach._coach_tool_defs_for_call(owner)
+            with pytest.raises(consent.ConsentDenied):
+                ai_coach._dispatch_coach_tool(owner, read, "{}")
+
+
+def test_coach_diary_only_projects_explicit_origin_under_postgres(pg_app):
+    from app.models import MealLog
+    from app.services.coach_nutrition_diary import nutrition_diary
+    from app.services.mobile_log_food import log_food, parse_command
+    from app.timeutil import app_today
+
+    with pg_app.app_context():
+        today = app_today()
+        command = parse_command({
+            "kind": "manual_entered", "description": "Entered privately", "slot": "ogle",
+            "nutrition": {"energy_kcal": 400, "protein_g": 12, "carbohydrate_g": 60, "fat_g": 14},
+        })
+        entry, created = log_food(1, "pg-user-entered-01", command)
+        assert created and entry.provider_items == []
+        assert nutrition_diary(1, today)["logged_totals"]["calories"] == 400
+        assert nutrition_diary(2, today)["status"] == "empty"
+        db.session.add(MealLog(
+            user_id=1, source="manual", ogun="Öğle", yemekler="Unproven", tarih=today.isoformat(),
+            kalori=995, protein=40, karb=140, yag=25))
+        db.session.commit()
+        result = nutrition_diary(1, today)
+        assert result["status"] == "unavailable"
+        assert "logged_totals" not in result
+        assert "995" not in str(result)

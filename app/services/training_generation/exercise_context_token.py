@@ -45,6 +45,8 @@ from app.services.training_generation.preference_contract import (
 
 TOKEN_VERSION = 1
 PAYLOAD_KEYS = frozenset({"v", "uid", "eq", "cardio", "style", "catalog"})
+#: (signed catalog version, live catalog version) pairs a save may still verify.
+_VERIFIABLE_EARLIER_VERSIONS = frozenset({(1, 2), (1, 3), (2, 3)})
 # A valid token is ~170 characters. The cap exists so a hostile body is
 # rejected on sight instead of being base64-decoded and JSON-parsed first.
 MAX_TOKEN_CHARS = 512
@@ -130,7 +132,7 @@ def _exact_int(value) -> int:
     return value
 
 
-def _checked_context(context: ExerciseContext) -> ExerciseContext:
+def _checked_context(context: ExerciseContext, *, verify=False) -> ExerciseContext:
     """Reject any context outside the closed server vocabulary, fail-closed."""
     if not isinstance(context, ExerciseContext):
         raise ExerciseContextInvalid("context is not an ExerciseContext")
@@ -140,7 +142,14 @@ def _checked_context(context: ExerciseContext) -> ExerciseContext:
         raise ExerciseContextInvalid("unknown cardio type")
     if context.style not in STYLES:
         raise ExerciseContextInvalid("unknown program style")
-    if _exact_int(context.catalog_version) != load_exercise_catalog().version:
+    catalog_version = _exact_int(context.catalog_version)
+    live_version = load_exercise_catalog().version
+    # V2 and V3 only add entries and aliases; no earlier identity or context
+    # changed meaning. Already issued V1/V2 drafts still pass the live
+    # save-time exercise checks, which re-resolve every reference. A newer
+    # (unknown) version is never accepted, and issuing always uses the live one.
+    if catalog_version != live_version and not (
+            verify and (catalog_version, live_version) in _VERIFIABLE_EARLIER_VERSIONS):
         raise ExerciseContextInvalid("catalog version mismatch")
     return context
 
@@ -219,4 +228,4 @@ def verify_exercise_context(token, secret_key, user_id) -> ExerciseContext:
         cardio_type=payload["cardio"],
         style=payload["style"],
         catalog_version=payload["catalog"],
-    ))
+    ), verify=True)
