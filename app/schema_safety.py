@@ -153,6 +153,13 @@ def verify_schema_ready(app):
         except CommandError:
             known = None
         if known is None:
+            from app.retired_revisions import RECONCILE_ENV, RETIRED
+            if revision in RETIRED:
+                raise SchemaNotReady(
+                    "retired_revision",
+                    f"database revision {revision} is retired; one migration run "
+                    f"with {RECONCILE_ENV}={revision} reconciles it "
+                    f"(app/retired_revisions.py)")
             raise SchemaNotReady(
                 "unknown_revision",
                 f"database revision {revision} is not in this code's graph")

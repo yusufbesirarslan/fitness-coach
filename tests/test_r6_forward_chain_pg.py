@@ -811,13 +811,15 @@ def test_downgrade_refuses_once_erasure_or_legal_hold_evidence_exists(
 # ── 6. retired C1 stamp (c1a9b7e5d301, reverted by R1) ──────────────────────
 
 RETIRED_C1 = "c1a9b7e5d301"
-C1_TABLES = ("nutrition_plan", "nutrition_plan_edit_operation", "nutrition_plan_mutation_record")
+C1_HISTORY = ("nutrition_plan_edit_operation", "nutrition_plan_mutation_record")
+OPT_IN_ENV = "FITX_RECONCILE_RETIRED_REVISION"
 
 
 def _retired_c1_database(monkeypatch, url):
     """What the reverted C1 left behind: the real chain to the shared parent
     ``ad17de1e0001``, C1's schema and history (byte-identical schema code, now
-    in ``HEAD``), stamped ``c1a9b7e5d301``, and no ``private_exercise``."""
+    in ``HEAD``), stamped ``c1a9b7e5d301``, no ``private_exercise``, and one
+    plan row an R1-era writer inserted later (``lineage_id IS NULL``)."""
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
@@ -841,6 +843,10 @@ def _retired_c1_database(monkeypatch, url):
                 "before_version, after_version, before_snapshot, after_snapshot, created_at) "
                 "VALUES ('c1a9-pub', :u, 'c1a9-lineage', 'c1a9-key', :f, 'mutation', 0, 1, "
                 "'before', 'after', now())"), {"u": owner, "f": "f" * 64})
+            # A later writer that predates C1 inserts its original column set.
+            connection.execute(sa.text(
+                "INSERT INTO nutrition_plan (user_id, plan_data, created_at) "
+                "VALUES (:u, 'r1-era writer', now())"), {"u": owner})
             connection.execute(sa.text("UPDATE alembic_version SET version_num = :r"),
                                {"r": RETIRED_C1})
     finally:
@@ -849,34 +855,82 @@ def _retired_c1_database(monkeypatch, url):
     assert _has_tables(url, ["private_exercise"]) == {"private_exercise": False}
 
 
+def _plans(url):
+    return _sql(url, "SELECT id, user_id, plan_data, created_at, score, lineage_id, "
+                     "mutation_version FROM nutrition_plan ORDER BY id")
+
+
+def _guard_spy(monkeypatch):
+    """Record what the env.py guard returned or raised (it is imported per run)."""
+    from app import retired_revisions
+    real, seen = retired_revisions.guard, []
+
+    def spy(*args, **kwargs):
+        try:
+            result = real(*args, **kwargs)
+        except retired_revisions.RetiredRevisionStamp as exc:
+            seen.append(exc)
+            raise
+        seen.append(result)
+        return result
+
+    monkeypatch.setattr(retired_revisions, "guard", spy)
+    return seen
+
+
+def _migrate_command(monkeypatch, command, **kwargs):
+    import flask_migrate
+    tool = _boot_tool(monkeypatch)
+    try:
+        with tool.app_context():
+            getattr(flask_migrate, command)(**kwargs)
+    finally:
+        _dispose(tool)
+
+
+def _assert_untouched(url, plans, history):
+    assert _versions(url) == [RETIRED_C1]
+    assert _has_tables(url, ["private_exercise"]) == {"private_exercise": False}
+    assert _plans(url) == plans and _snapshot(url, C1_HISTORY) == history
+
+
 def test_retired_c1_stamp_is_refused_before_any_migration(chain_url, monkeypatch):
-    monkeypatch.delenv("FITX_RECONCILE_RETIRED_REVISION", raising=False)
+    monkeypatch.delenv(OPT_IN_ENV, raising=False)
     _retired_c1_database(monkeypatch, chain_url)
-    before = _snapshot(chain_url, C1_TABLES)
+    plans, history = _plans(chain_url), _snapshot(chain_url, C1_HISTORY)
+    seen = _guard_spy(monkeypatch)
     with pytest.raises(SystemExit):
         _upgrade_to(monkeypatch, "head")
     result = _release_prepare(monkeypatch)
     assert result.exit_code != 0, result.output
-    assert _versions(chain_url) == [RETIRED_C1]
-    assert _has_tables(chain_url, ["private_exercise"]) == {"private_exercise": False}
-    assert _snapshot(chain_url, C1_TABLES) == before
+    # The guard itself refused (not Alembic's own unknown-revision error).
+    assert seen and all(
+        f"{OPT_IN_ENV}={RETIRED_C1}" in str(item) and "Nothing was migrated" in str(item)
+        for item in seen), seen
+    _assert_untouched(chain_url, plans, history)
 
 
 def test_retired_c1_stamp_reconciles_only_on_explicit_verified_opt_in(chain_url, monkeypatch):
     _retired_c1_database(monkeypatch, chain_url)
-    before = _snapshot(chain_url, C1_TABLES)
-    monkeypatch.setenv("FITX_RECONCILE_RETIRED_REVISION", RETIRED_C1)
+    plans, history = _plans(chain_url), _snapshot(chain_url, C1_HISTORY)
+    assert [row[5] is None for row in plans] == [False, True]
+    monkeypatch.setenv(OPT_IN_ENV, RETIRED_C1)
+    seen = _guard_spy(monkeypatch)
     result = _release_prepare(monkeypatch)
     assert result.exit_code == 0, result.output
+    assert seen[0] == (RETIRED_C1, "ad17de1e0001")
     assert _versions(chain_url) == [HEAD]
-    # private_exercise is created by e5b27aa4101c; C1 rows, lineage and
-    # history are byte-for-byte unchanged.
+    # private_exercise is created by e5b27aa4101c. C1 history and every plan
+    # column are unchanged; only the R1-era row's NULL lineage is backfilled.
     assert _has_tables(chain_url, ["private_exercise"]) == {"private_exercise": True}
-    assert _snapshot(chain_url, C1_TABLES) == before
+    assert _snapshot(chain_url, C1_HISTORY) == history
+    after = _plans(chain_url)
+    assert after[0] == plans[0]
+    assert after[1][:5] == plans[1][:5] and after[1][6] == plans[1][6]
+    assert after[1][5] is not None and len(after[1][5]) >= 32
     rerun = _release_prepare(monkeypatch)
     assert rerun.exit_code == 0, rerun.output
-    assert _versions(chain_url) == [HEAD]
-    assert _snapshot(chain_url, C1_TABLES) == before
+    assert _versions(chain_url) == [HEAD] and _plans(chain_url) == after
 
 
 def test_retired_c1_reconciliation_commits_with_the_chain_or_not_at_all(chain_url, monkeypatch):
@@ -884,9 +938,26 @@ def test_retired_c1_reconciliation_commits_with_the_chain_or_not_at_all(chain_ur
     # A drifted private_exercise makes e5b27aa4101c refuse AFTER the pointer
     # move; the one migration transaction must roll the move back too.
     _sql(chain_url, "CREATE TABLE private_exercise (exercise_id VARCHAR(64) PRIMARY KEY)")
-    before = _snapshot(chain_url, C1_TABLES)
-    monkeypatch.setenv("FITX_RECONCILE_RETIRED_REVISION", RETIRED_C1)
+    plans, history = _plans(chain_url), _snapshot(chain_url, C1_HISTORY)
+    monkeypatch.setenv(OPT_IN_ENV, RETIRED_C1)
+    seen = _guard_spy(monkeypatch)
     result = _release_prepare(monkeypatch)
     assert result.exit_code != 0, result.output
+    assert seen[0] == (RETIRED_C1, "ad17de1e0001")  # the pointer did move first
     assert _versions(chain_url) == [RETIRED_C1]
-    assert _snapshot(chain_url, C1_TABLES) == before
+    assert _plans(chain_url) == plans and _snapshot(chain_url, C1_HISTORY) == history
+
+
+@pytest.mark.parametrize("command, kwargs", [
+    ("stamp", {"revision": "head"}),
+    ("current", {}),
+    ("upgrade", {"revision": "e5b27aa4101c"}),
+])
+def test_retired_c1_opt_in_refuses_stamp_current_and_partial_upgrade(
+        chain_url, monkeypatch, command, kwargs):
+    _retired_c1_database(monkeypatch, chain_url)
+    plans, history = _plans(chain_url), _snapshot(chain_url, C1_HISTORY)
+    monkeypatch.setenv(OPT_IN_ENV, RETIRED_C1)
+    with pytest.raises(SystemExit):
+        _migrate_command(monkeypatch, command, **kwargs)
+    _assert_untouched(chain_url, plans, history)

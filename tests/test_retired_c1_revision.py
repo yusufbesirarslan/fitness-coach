@@ -144,3 +144,44 @@ def test_a_graph_that_still_carries_the_retired_revision_is_refused(conn):
     with pytest.raises(rr.RetiredRevisionStamp, match="back in the migration graph"):
         rr.guard(conn, _Graph(), OPT_IN)
     assert rr.current_versions(conn) == [RETIRED]
+
+
+class _Step:
+    def __init__(self, revisions, upgrade=True, stamp=False):
+        self.up_revision_ids, self.is_upgrade, self.is_stamp = tuple(revisions), upgrade, stamp
+
+
+def _at(conn, revision):
+    conn.execute(sa.text("DELETE FROM alembic_version"))
+    conn.execute(sa.text("INSERT INTO alembic_version VALUES (:r)"), {"r": revision})
+
+
+def test_confirm_admits_only_a_complete_upgrade_to_head(conn):
+    _historical(conn)
+    reconciled = rr.guard(conn, SCRIPT, OPT_IN)
+    _at(conn, SUCCESSOR)
+    rr.confirm(conn, SCRIPT, reconciled,
+               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR])])
+
+
+@pytest.mark.parametrize("steps, at", [
+    ([], PARENT),                                                  # `flask db current`
+    ([_Step([SUCCESSOR], stamp=True)], SUCCESSOR),                 # `flask db stamp head`
+    ([_Step(["e5b27aa4101c"])], "e5b27aa4101c"),                   # `upgrade e5b27aa4101c`
+    ([_Step([SUCCESSOR])], SUCCESSOR),                             # e5b27aa4101c skipped
+    ([_Step(["e5b27aa4101c"]), _Step([SUCCESSOR], upgrade=False)], SUCCESSOR),
+])
+def test_confirm_refuses_stamp_current_partial_or_skipping_runs(conn, steps, at):
+    _historical(conn)
+    reconciled = rr.guard(conn, SCRIPT, OPT_IN)
+    _at(conn, at)
+    with pytest.raises(rr.RetiredRevisionStamp, match="opt-in run"):
+        rr.confirm(conn, SCRIPT, reconciled, steps)
+
+
+def test_a_leftover_opt_in_with_nothing_to_reconcile_is_logged(conn, caplog):
+    conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
+    conn.execute(sa.text("INSERT INTO alembic_version VALUES (:r)"), {"r": SUCCESSOR})
+    with caplog.at_level("WARNING", logger="app.retired_revisions"):
+        assert rr.guard(conn, SCRIPT, OPT_IN) is None
+    assert rr.RECONCILE_ENV in caplog.text and "remove the variable" in caplog.text

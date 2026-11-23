@@ -20,11 +20,18 @@ Alembic reads the current heads:
   ``ad17de1e0001``. The same upgrade then runs ``e5b27aa4101c`` and
   ``19cb998acd2f``; both verify-or-create, so every existing row is kept.
 
+After the migrations run, ``confirm`` requires that this invocation was a
+complete upgrade to head: no stamp step, every revision from the shared parent
+to head applied, and the database at head. ``flask db stamp``, ``current``,
+``downgrade`` or a partial ``upgrade <rev>`` under the opt-in therefore raise.
+
 Nothing is dropped, rewritten or faked. On PostgreSQL the pointer move and the
 whole chain commit together or not at all (one migration transaction); any
 failure leaves the database exactly as it was, still stamped with the retired
-revision.
+revision. Remove the variable from the environment afterwards; a leftover
+opt-in with nothing to reconcile is logged.
 """
+import logging
 import os
 
 import sqlalchemy as sa
@@ -34,6 +41,9 @@ RECONCILE_ENV = "FITX_RECONCILE_RETIRED_REVISION"
 # retired revision -> (its parent, still in the graph;
 #                      the successor whose frozen verifier proves its schema)
 RETIRED = {"c1a9b7e5d301": ("ad17de1e0001", "19cb998acd2f")}
+
+
+logger = logging.getLogger(__name__)
 
 
 class RetiredRevisionStamp(RuntimeError):
@@ -68,9 +78,13 @@ def guard(connection, script, environ=None):
     environ = os.environ if environ is None else environ
     current = current_versions(connection)
     retired = sorted(set(current) & RETIRED.keys())
-    if not retired:
-        return None
     requested = environ.get(RECONCILE_ENV, "").strip()
+    if not retired:
+        if requested:
+            logger.warning("%s=%s is set but the database is not stamped with a retired "
+                           "revision; nothing to reconcile, remove the variable",
+                           RECONCILE_ENV, requested)
+        return None
     if len(current) != 1:
         _refuse(retired, current, "more than one version row")
     revision = current[0]
@@ -94,3 +108,24 @@ def guard(connection, script, environ=None):
     if moved != 1 or current_versions(connection) != [parent]:
         _refuse(retired, current, "the version row changed during reconciliation")
     return revision, parent
+
+
+def confirm(connection, script, reconciled, applied):
+    """Keep a pointer move only after a complete upgrade to head.
+
+    ``applied`` is every ``MigrationInfo`` this invocation ran (env.py records
+    them through ``on_version_apply``). Raising here, inside the migration
+    transaction, rolls the pointer move back on PostgreSQL.
+    """
+    revision, parent = reconciled
+    heads = sorted(script.get_heads())
+    required = {item.revision for item in script.iterate_revisions("heads", parent)} - {parent}
+    upgraded = set()
+    for step in applied:
+        if step.is_stamp or not step.is_upgrade:
+            _refuse([revision], [parent], "the opt-in run was not a plain upgrade "
+                    "(stamp/downgrade); nothing may be stamped past the retired revision")
+        upgraded.update(step.up_revision_ids)
+    if not required <= upgraded or current_versions(connection) != heads:
+        _refuse([revision], [parent], f"the opt-in run did not upgrade through "
+                f"{sorted(required - upgraded) or required} to head {heads}")
