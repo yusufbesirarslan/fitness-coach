@@ -295,17 +295,27 @@ def test_real_receipt_survives_new_engine_and_rejects_unsafe_file(tmp_path):
         ops.read_same_head_receipt(10)
 
 
+# The source graph's single head. It is the adult migration's descendant once
+# later migrations land (owner-private exercises), so a database still at the
+# adult migration is BEHIND head and must not pass --require-at-head.
+SOURCE_HEAD = 'e5b27aa4101c'
+
+
 @pytest.mark.parametrize('current, success', [(None, False), ([], False),
-                                             ([tx.ADULT_MIGRATION], True),
+                                             ([SOURCE_HEAD], True),
+                                             ([tx.ADULT_MIGRATION], False),
                                              (['d7e3a9c1f5b8'], False),
-                                             ([tx.ADULT_MIGRATION, 'unexpected'], False)])
+                                             ([SOURCE_HEAD, 'unexpected'], False)])
 def test_read_only_schema_command_requires_all_expected_heads(app, current, success):
     from sqlalchemy import text
+    from alembic.script import ScriptDirectory
     from app import schema_safety
     from app.extensions import db
 
     expected = schema_safety.expected_heads(app)
-    assert expected == {tx.ADULT_MIGRATION}
+    assert expected == {SOURCE_HEAD}
+    graph = ScriptDirectory('migrations')
+    assert tx.ADULT_MIGRATION in {rev.revision for rev in graph.iterate_revisions(SOURCE_HEAD, 'base')}
     assert db.engine.dialect.name == 'sqlite'
     if current is not None:
         with db.engine.begin() as connection:

@@ -430,6 +430,8 @@ jobs:
           tests/test_r6_forward_chain_pg.py
           tests/test_r6_forward_recovery_pg.py
           tests/test_r6_adult_runtime_pg.py
+          tests/test_mobile_training_editor_pg.py
+          tests/test_ai_consent_pg.py
 
   mobile-pg-concurrency:
     name: PostgreSQL concurrency
