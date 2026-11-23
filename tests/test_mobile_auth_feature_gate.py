@@ -105,6 +105,8 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/training/private-exercises"),
         ("post", "/api/v1/training/editor/add"),
         ("get", "/api/v1/training/workouts/AAAAAAAAAAAAAAAAAAAAAAAA"),
+        ("post", "/api/v1/training/sessions/AAAAAAAAAAAAAAAAAAAAAAAA/complete"),
+        ("post", "/api/v1/training/sessions/AAAAAAAAAAAAAAAAAAAAAAAA/skip"),
         ("get", "/api/v1/training/workout-execution-capabilities"),
         ("get", "/api/v1/training/exercise-history-capabilities"),
         ("get", "/api/v1/training/exercises/ex_barbell_back_squat/performance-history"),
@@ -267,6 +269,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/private-exercises", ("POST",)),
             ("/api/v1/training/editor/<any(add,remove,replace,prescription,undo):operation>", ("POST",)),
             ("/api/v1/training/workouts/<workout_reference>", ("GET",)),
+            # G4 (#530): one explicit answer for today's cardio session.
+            ("/api/v1/training/sessions/<session_reference>/complete", ("POST",)),
+            ("/api/v1/training/sessions/<session_reference>/skip", ("POST",)),
             # Mobile Training session contracts; behind
             # FITX_WORKOUT_SESSIONS_ENABLED at request time, but the ROUTES are
             # registered unconditionally, so they belong in this allow-list.

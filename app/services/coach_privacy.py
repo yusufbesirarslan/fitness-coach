@@ -177,8 +177,12 @@ def _private_plan_labels(days, user_id, max_exercises):
 
     ids = set()
     for day in days[:7]:
-        raw = day.get('exercises') if isinstance(day, dict) else None
-        if isinstance(raw, list):
+        session = day.get('cardio_session') if isinstance(day, dict) else None
+        lists = [day.get('exercises') if isinstance(day, dict) else None,
+                 session.get('exercises') if isinstance(session, dict) else None]
+        for raw in lists:
+            if not isinstance(raw, list):
+                continue
             for exercise in raw[:max_exercises]:
                 identity = exercise.get('private_exercise_id') if isinstance(exercise, dict) else None
                 if is_private_id(identity):
@@ -196,8 +200,6 @@ def _private_plan_labels(days, user_id, max_exercises):
 
 def _training_plan_projection(source, user_id):
     """Rebuild the plan read from tokens and owner-authorized definitions."""
-    from app.services.exercise_catalog_v3 import LEGACY_REGION_FOR
-    from app.services.private_exercises import is_private_id
     from app.services.training_generation.plan_schema import NATIVE_MAX_EXERCISES_PER_DAY
     out = {}
     if token(source.get('error'), _PLAN_READ_ERRORS):
@@ -211,52 +213,69 @@ def _training_plan_projection(source, user_id):
     for day in days[:7]:
         if not isinstance(day, dict) or not token(day.get('day'), _WEEKDAYS):
             continue
-        exercises = []
-        raw = day.get('exercises') if isinstance(day.get('exercises'), list) else []
-        limit = _MAX_PLAN_EXERCISES
-        if private_labels and any(
-            is_private_id(item.get('private_exercise_id')) and item['private_exercise_id'] in private_labels
-            for item in raw[:NATIVE_MAX_EXERCISES_PER_DAY] if isinstance(item, dict)
-        ):
-            limit = NATIVE_MAX_EXERCISES_PER_DAY
-        for position, exercise in enumerate(raw[:limit]):
-            if not isinstance(exercise, dict):
-                continue
-            sets = exercise.get('sets')
-            label = exercise.get('name')
-            projected_exercise = {
-                'name': None,
-                'sets': sets if type(sets) is int and 1 <= sets <= 100 else None,
-                'reps': _plan_reps(exercise.get('reps')),
-            }
-            if 'private_exercise_id' in exercise:
-                identity = exercise['private_exercise_id']
-                definition = private_labels.get(identity) if is_private_id(identity) else None
-                if definition is not None:
-                    projected_exercise.update(
-                        name=definition.canonical_name,
-                        movement=definition.movement,
-                        equipment=sorted(definition.equipment),
-                        primary_region=definition.primary_region,
-                        target_region=token(definition.target_region, LEGACY_REGION_FOR),
-                        position=position,
-                        user_defined=True,
-                    )
-            else:
-                if isinstance(label, str) and len(label) <= 120 and exercise_name(label):
-                    projected_exercise['name'] = label
-                stored_position = exercise.get('position')
-                if type(stored_position) is int and 0 <= stored_position < NATIVE_MAX_EXERCISES_PER_DAY:
-                    projected_exercise['position'] = stored_position
-                projected_exercise.update(_curated_plan_identity(exercise.get('exercise_id')))
-            exercises.append(projected_exercise)
+        exercises = _plan_exercises(day.get('exercises'), private_labels)
         entry = {'day': day['day'], 'kind': token(day.get('kind'), _DAY_KINDS),
                  'exercises': exercises}
         if day.get('truncated') is True:
             entry['truncated'] = True
+        session = day.get('cardio_session')
+        if isinstance(session, dict):
+            # G4: the strength day's separate cardio session, re-projected
+            # through the same closed exercise shape.
+            entry['cardio_session'] = {
+                'exercises': _plan_exercises(session.get('exercises'), private_labels)}
+            if session.get('truncated') is True:
+                entry['cardio_session']['truncated'] = True
         projected.append(entry)
     out['plan'] = {'days': projected}
     return out
+
+
+def _plan_exercises(raw, private_labels):
+    """One plan exercise list rebuilt from tokens and authorized labels."""
+    from app.services.exercise_catalog_v3 import LEGACY_REGION_FOR
+    from app.services.private_exercises import is_private_id
+    from app.services.training_generation.plan_schema import NATIVE_MAX_EXERCISES_PER_DAY
+    exercises = []
+    raw = raw if isinstance(raw, list) else []
+    limit = _MAX_PLAN_EXERCISES
+    if private_labels and any(
+        is_private_id(item.get('private_exercise_id')) and item['private_exercise_id'] in private_labels
+        for item in raw[:NATIVE_MAX_EXERCISES_PER_DAY] if isinstance(item, dict)
+    ):
+        limit = NATIVE_MAX_EXERCISES_PER_DAY
+    for position, exercise in enumerate(raw[:limit]):
+        if not isinstance(exercise, dict):
+            continue
+        sets = exercise.get('sets')
+        label = exercise.get('name')
+        projected_exercise = {
+            'name': None,
+            'sets': sets if type(sets) is int and 1 <= sets <= 100 else None,
+            'reps': _plan_reps(exercise.get('reps')),
+        }
+        if 'private_exercise_id' in exercise:
+            identity = exercise['private_exercise_id']
+            definition = private_labels.get(identity) if is_private_id(identity) else None
+            if definition is not None:
+                projected_exercise.update(
+                    name=definition.canonical_name,
+                    movement=definition.movement,
+                    equipment=sorted(definition.equipment),
+                    primary_region=definition.primary_region,
+                    target_region=token(definition.target_region, LEGACY_REGION_FOR),
+                    position=position,
+                    user_defined=True,
+                )
+        else:
+            if isinstance(label, str) and len(label) <= 120 and exercise_name(label):
+                projected_exercise['name'] = label
+            stored_position = exercise.get('position')
+            if type(stored_position) is int and 0 <= stored_position < NATIVE_MAX_EXERCISES_PER_DAY:
+                projected_exercise['position'] = stored_position
+            projected_exercise.update(_curated_plan_identity(exercise.get('exercise_id')))
+        exercises.append(projected_exercise)
+    return exercises
 
 
 # ── Adaptive Coach C2: saved Nutrition Plan tools ──────────────────────────

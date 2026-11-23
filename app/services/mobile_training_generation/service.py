@@ -167,7 +167,8 @@ def generate_and_persist(
                   ai_consent.operation_scope(authority)):
                 candidate = generate_training_plan_candidate(
                     user, last_session, request.preferences, chat_fn,
-                    language=language, logger=logger, frozen_features=features)
+                    language=language, logger=logger, frozen_features=features,
+                    sessions=request.sessions)
     except ConsentDenied as error:
         if authorized:
             # Preserve the D1 code while using the existing terminal/refund

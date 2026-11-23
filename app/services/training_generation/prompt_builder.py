@@ -49,6 +49,7 @@ def build_training_prompt(
     language: str = "tr",
     *,
     exercise_choices: CompatibleExerciseChoices,
+    sessions: bool = False,
 ) -> str:
     """The generation prompt. ``exercise_choices`` is required and non-empty:
     the provider output contract is an ``exercise_id`` from this closed set,
@@ -59,6 +60,35 @@ def build_training_prompt(
     injury_text = injury_constraints.build_injury_directive(preferences.injuries)
     cardio_days = preferences.kardiyo_gun if preferences.kardiyo_tipi != "yok" else 0
     dinlenme_gun = 7 - preferences.gun_sayisi - cardio_days
+    # G4 (opt-in only): cardio as its own session. Without ``sessions`` the
+    # prompt below is byte-identical to the pre-G4 prompt.
+    if sessions:
+        allocation_rule = (
+            f"Haftanın tam 7 takvim günü için plan yap: {preferences.gun_sayisi} "
+            f"antrenman (kuvvet) günü ve toplam {cardio_days} bağımsız kardiyo "
+            "seansı. Bir kardiyo seansı ya ayrı bir tip=\"kardiyo\" günüdür ya "
+            "da bir tip=\"antrenman\" gününün \"kardiyo_seansi\" bloğudur. "
+            "Kalan günler tip=\"dinlenme\" olur.")
+        cardio_rule = (
+            "Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) "
+            "ASLA bir antrenman gününün \"egzersizler\" listesine yazılmaz. "
+            "Kardiyo ya tip=\"kardiyo\" gününün egzersizleridir ya da bir "
+            "antrenman gününün ayrı \"kardiyo_seansi\": {\"egzersizler\": [...]} "
+            "bloğudur. Bu blok yalnız tip=\"antrenman\" gününde, günde en "
+            "fazla bir kez olur; yalnız kardiyo egzersizi içerir; her egzersizi "
+            f"set=1 ve tekrar=\"{preferences.kardiyo_sure} dk\" biçimindedir. "
+            "Antrenman gününün sure_dk ve odak alanları yalnız kuvvet seansını "
+            "anlatır. Kardiyoyu yalnız 7 güne sığdırmak için kuvvet listesine "
+            "koyma.")
+    else:
+        allocation_rule = (
+            f"Haftanın tam 7 günü için plan yap: {preferences.gun_sayisi} "
+            f"antrenman günü + {cardio_days} kardiyo günü + {dinlenme_gun} "
+            "dinlenme/aktif toparlanma günü.")
+        cardio_rule = (
+            "Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) "
+            "SADECE tip=\"kardiyo\" günlerine yazılsın; tip=\"antrenman\" "
+            "gününe kardiyo egzersizi koyma.")
     if language == "en":
         lang_rule = ("İçerik dili: ENGLISH; ama gun ve tip kanonik Türkçe kalacak; "
                      "exercise_id opak kimliktir, çevrilmez.")
@@ -171,7 +201,7 @@ STYLE FEW-SHOT REFERENCE
 {injury_text}
 
 PROGRAM RULES
-1. Haftanın tam 7 günü için plan yap: {preferences.gun_sayisi} antrenman günü + {cardio_days} kardiyo günü + {dinlenme_gun} dinlenme/aktif toparlanma günü.
+1. {allocation_rule}
 2. "gun" alanı sadece şu değerlerden biri olsun: Pazartesi, Salı, Çarşamba, Perşembe, Cuma, Cumartesi, Pazar.
 3. "tip" alanı sadece antrenman, dinlenme veya kardiyo olsun.
 4. Aynı ağır pattern iki gün üst üste gelmesin; recovery factor düşükse hacim ve RPE azalt.
@@ -181,7 +211,7 @@ PROGRAM RULES
 8. Yalnızca şemadaki anahtarları kullan; ekstra anahtar ekleme.
 9. Egzersiz nesnesi tam olarak exercise_id, set, tekrar, dinlenme, not içersin; exercise_id EXERCISE CHOICES listesinden birebir kopyalanır, "isim" alanı yazılmaz.
 10. set bir tamsayı olsun; sure_dk ve tahmini_kalori tamsayı olsun.
-11. Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) SADECE tip="kardiyo" günlerine yazılsın; tip="antrenman" gününe kardiyo egzersizi koyma.
+11. {cardio_rule}
 12. tip="dinlenme" günü HİÇBİR egzersiz içermez: "egzersizler": [] olmalı. Aktif toparlanma önerisini o günün "odak" alanına yaz; yürüyüş/esneme/mobilite dahil hiçbir hareketi dinlenme gününün egzersiz listesine ekleme.
 
 JSON FORMAT

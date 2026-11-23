@@ -1326,6 +1326,41 @@ class WorkoutCompletionDay(db.Model):
         return f"<WorkoutCompletionDay {self.user_id} {self.date_key} {self.proof}>"
 
 
+# G4 (#530): the terminal outcome of one independent cardio SESSION (a strength
+# day's ``kardiyo_seansi``) on one Istanbul day. Deliberately NOT a completion
+# claim: ``workout_completion_day`` keeps meaning exactly what it meant (the
+# day's own workout, with its XP, streak, Pump Check and fence semantics), and
+# nothing here awards, counts toward or alters a reward, streak or progress
+# metric. Day progress (D1) is derived from both on read.
+TRAINING_SESSION_KINDS = ("cardio",)
+TRAINING_SESSION_OUTCOMES = ("completed", "skipped")
+
+
+class TrainingSessionOutcome(db.Model):
+    __tablename__ = "training_session_outcome"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    date_key = db.Column(db.String(10), nullable=False)
+    session_kind = db.Column(db.String(16), nullable=False)
+    outcome = db.Column(db.String(16), nullable=False)
+    # Provenance only: the plan revision whose session was answered.
+    plan_lineage_id = db.Column(db.String(64), nullable=False)
+    mutation_version = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", "session_kind",
+                            name="uq_training_session_outcome_day"),
+        db.CheckConstraint("session_kind IN ('cardio')",
+                           name="ck_training_session_outcome_kind"),
+        db.CheckConstraint("outcome IN ('completed', 'skipped')",
+                           name="ck_training_session_outcome_outcome"),
+        db.CheckConstraint("mutation_version >= 0",
+                           name="ck_training_session_outcome_version"),
+    )
+
+
 class CompletionCapabilityFloor(db.Model):
     """The durable, monotonic completion capability floor (PRIV-K6 rollback gate).
 

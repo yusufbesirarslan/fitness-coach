@@ -258,7 +258,8 @@ def _erase_rows(user, held):
             changed += _delete(m.CompletionClaimTransaction,
                                m.CompletionClaimTransaction.claim_id.in_(day_ids))
         changed += sum(_delete(model, model.user_id == uid) for model in (
-            m.WorkoutCompletionDay, m.WorkoutLog, m.WorkoutSession, m.ExerciseNote, m.Activity))
+            m.WorkoutCompletionDay, m.TrainingSessionOutcome, m.WorkoutLog,
+            m.WorkoutSession, m.ExerciseNote, m.Activity))
         if day_ids and db.engine.dialect.name == "postgresql":
             # Validate the erasure exception while the obligation is still open.
             # Binding deletion remains restricted to the claim FK cascade.

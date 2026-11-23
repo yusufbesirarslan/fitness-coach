@@ -166,6 +166,11 @@ def _editor_payload(revision):
 def semantic_fingerprint(command, *, editor_revision=None) -> str:
     """Keep existing digests stable and bind native intent to its read revision."""
     payload = _semantic_payload(command)
+    session = getattr(command, "session", None)
+    if session not in (None, "strength"):
+        # G4: a cardio-session command is a different intent; every pre-G4
+        # (strength) command keeps its exact digest.
+        payload["session"] = session
     if editor_revision is not None:
         payload.update(_editor_payload(editor_revision), position=getattr(command, "position", None))
     return _digest(payload)

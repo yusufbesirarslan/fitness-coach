@@ -27,7 +27,11 @@ from __future__ import annotations
 
 from app.services import general_plan_identity as identity
 from app.services.exercise_catalog import load_exercise_catalog
-from app.services.training_generation.plan_schema import CARDIO_TIP, WEEKDAYS
+from app.services.training_generation.plan_schema import (
+    CARDIO_SESSION_KEY,
+    CARDIO_TIP,
+    WEEKDAYS,
+)
 
 
 TEMPLATE_ID = identity.TEMPLATE_V1
@@ -157,6 +161,15 @@ _CARDIO_SLOTS = {
     4: (5, 2),
 }
 
+# G4 (sessions opt-in only; #537's order): after the pre-G4 slots, Sunday,
+# then strength days, where the cardio becomes the day's separate session.
+# Every prefix the pre-G4 choices reach is the pre-G4 tuple, so existing
+# combinations keep their exact content.
+_SESSION_CARDIO_SLOTS = {
+    3: (5, 1, 3, 6, 0, 2),
+    4: (5, 2, 6, 0, 1, 3),
+}
+
 # One catalog cardio entry per type. Mixed rotates through activities that
 # need no pool, so it never prescribes swimming to someone without one.
 _CARDIO_EXERCISES = {
@@ -205,6 +218,8 @@ def build_cardio_program(
     cardio_minutes: int,
     intensity: str,
     language,
+    *,
+    sessions: bool = False,
 ) -> list[dict]:
     """The v1 strength week plus ``cardio_days`` dedicated cardio days.
 
@@ -213,7 +228,7 @@ def build_cardio_program(
     requested minutes: one round, no rest, no estimated calories, no notes.
     """
     if (cardio_type not in identity.CARDIO_TYPES
-            or cardio_days not in identity.cardio_day_choices(days)
+            or cardio_days not in identity.cardio_day_choices(days, sessions=sessions)
             or cardio_minutes not in identity.CARDIO_DURATIONS
             or intensity not in identity.CARDIO_INTENSITIES):
         raise ValueError("unsupported general cardio parameters")
@@ -221,8 +236,23 @@ def build_cardio_program(
     labels = _CARDIO_LABELS[label_language(language)]
     names = load_exercise_catalog().by_id
     rotation = _CARDIO_EXERCISES[cardio_type]
-    for index, slot in enumerate(sorted(_CARDIO_SLOTS[days][:cardio_days])):
+    slots = (_SESSION_CARDIO_SLOTS if sessions else _CARDIO_SLOTS)[days]
+    for index, slot in enumerate(sorted(slots[:cardio_days])):
         exercise_id = rotation[index % len(rotation)]
+        entry = {
+            "exercise_id": exercise_id,
+            "isim": names[exercise_id].canonical_name,
+            "set": 1,
+            "tekrar": f"{cardio_minutes} dk",
+            "dinlenme": "0 sn",
+            "not": "",
+        }
+        if program[slot]["tip"] == "antrenman":
+            # G4: the strength day is left exactly as built (its list, focus
+            # and minutes describe the strength session); the cardio is its
+            # own session beside it, never an item of the strength list.
+            program[slot][CARDIO_SESSION_KEY] = {"egzersizler": [entry]}
+            continue
         program[slot] = {
             "gun": WEEKDAYS[slot],
             "tip": CARDIO_TIP,
@@ -230,13 +260,6 @@ def build_cardio_program(
                 labels["cardio"], labels[exercise_id], labels[intensity])),
             "sure_dk": cardio_minutes,
             "tahmini_kalori": 0,
-            "egzersizler": [{
-                "exercise_id": exercise_id,
-                "isim": names[exercise_id].canonical_name,
-                "set": 1,
-                "tekrar": f"{cardio_minutes} dk",
-                "dinlenme": "0 sn",
-                "not": "",
-            }],
+            "egzersizler": [entry],
         }
     return program

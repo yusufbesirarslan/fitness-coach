@@ -200,6 +200,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/plans/replacement-proposals",
         "/api/v1/training/plans/replacement/confirm",
         "/api/v1/training/workouts/<workout_reference>",
+        # G4 (#530): one explicit outcome for today's cardio session.
+        "/api/v1/training/sessions/<session_reference>/complete",
+        "/api/v1/training/sessions/<session_reference>/skip",
         "/api/v1/training/workout-execution-capabilities",
         "/api/v1/training/exercise-history-capabilities",
         "/api/v1/training/exercises/<exercise_id>/performance-history",
@@ -285,6 +288,10 @@ _APPROVED_TRAINING_PATHS = {
     "/api/v1/training/plans/replacement-proposals",
     "/api/v1/training/plans/replacement/confirm",
     "/api/v1/training/workouts/<workout_reference>",
+    # G4 (#530): an independent cardio session's explicit outcome. It never
+    # writes the day completion claim, XP, streaks or Pump Check.
+    "/api/v1/training/sessions/<session_reference>/complete",
+    "/api/v1/training/sessions/<session_reference>/skip",
     # Mobile Training PR5 publishes the six native workout-session write
     # contracts. They are execution writes against the ALREADY canonical
     # session and completion authorities -- start/current/resume/checkpoint/

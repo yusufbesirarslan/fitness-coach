@@ -58,11 +58,18 @@ _SNAPSHOT_RE = re.compile(r"[a-f0-9]{64}")
 _REVISION_FIELDS = {"plan_lineage", "mutation_version", "snapshot"}
 _TARGET_FIELDS = {"exercise_id", "position"}
 _PRESCRIPTION_FIELDS = {"sets", "reps"}
+# G4: optional list selector. Absent (every pre-G4 client) is the day's own
+# strength list, exactly as before; "cardio" is the strength day's separate
+# cardio session, which only an ``include_sessions=1`` reader can see.
+_SESSION_FIELD = "session"
+_SESSIONS = frozenset({"strength", "cardio"})
 _OPERATIONS = {
-    "add": (AddExerciseCommand, {"exercise_id", "sets", "reps"}, set()),
-    "remove": (RemoveExerciseCommand, _TARGET_FIELDS, set()),
-    "replace": (ReplaceExerciseCommand, _TARGET_FIELDS | {"replacement_id"}, _PRESCRIPTION_FIELDS),
-    "prescription": (UpdateExercisePrescriptionCommand, _TARGET_FIELDS, _PRESCRIPTION_FIELDS),
+    "add": (AddExerciseCommand, {"exercise_id", "sets", "reps"}, {_SESSION_FIELD}),
+    "remove": (RemoveExerciseCommand, _TARGET_FIELDS, {_SESSION_FIELD}),
+    "replace": (ReplaceExerciseCommand, _TARGET_FIELDS | {"replacement_id"},
+                _PRESCRIPTION_FIELDS | {_SESSION_FIELD}),
+    "prescription": (UpdateExercisePrescriptionCommand, _TARGET_FIELDS,
+                     _PRESCRIPTION_FIELDS | {_SESSION_FIELD}),
 }
 _ERRORS = {
     ActiveWorkoutConflict: ("TRAINING_EDITOR_ACTIVE_WORKOUT", 409),
@@ -128,6 +135,10 @@ def _parse_mutation(operation, body):
         if not _is_safe_text(body["reps"], REPS_MAX):
             raise InvalidPrescription("invalid reps text")
         fields["reps"] = validate_reps(body["reps"])
+    if _SESSION_FIELD in body:
+        if body[_SESSION_FIELD] not in _SESSIONS:
+            raise InvalidMutation("invalid session")
+        fields["session"] = body[_SESSION_FIELD]
     if operation == "prescription" and not _PRESCRIPTION_FIELDS & fields.keys():
         raise InvalidMutation("a prescription field is required")
 
@@ -139,11 +150,17 @@ def _parse_mutation(operation, body):
 @require_mobile_auth
 def training_editor_plan():
     try:
+        include_sessions = mobile_training.sessions_requested(request.args)
+    except mobile_training.InvalidSessionsExpansion:
+        return mobile_error("TRAINING_EDITOR_INVALID_REQUEST",
+                            "Invalid Training editor request.", 400, False)
+    try:
         payload = mobile_training.build_current_plan(
             g.mobile_user.id,
             current_app.config["SECRET_KEY"],
             sessions_enabled=bool(current_app.config.get("FITX_WORKOUT_SESSIONS_ENABLED")),
             include_editor_revision=True,
+            include_sessions=include_sessions,
         )
     except mobile_training.PlanUnprojectable:
         return mobile_error("TRAINING_EDITOR_PLAN_UNAVAILABLE",

@@ -19,13 +19,17 @@ from app import retired_revisions as rr
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ScriptDirectory(str(ROOT / "migrations"))
 RETIRED, PARENT, SUCCESSOR = "c1a9b7e5d301", "ad17de1e0001", "19cb998acd2f"
+# G4 (#530) stacks its session-outcome table on the re-landed C1: the graph's
+# head moved, the retired revision's successor did not.
+HEAD = "5cc5aa7e47ba"
 OPT_IN = {rr.RECONCILE_ENV: RETIRED}
 
 
 def test_graph_retires_c1a9_and_relands_c1_after_private_exercises():
     graph = {item.revision for item in SCRIPT.walk_revisions()}
     assert RETIRED not in graph
-    assert SCRIPT.get_heads() == [SUCCESSOR]
+    assert SCRIPT.get_heads() == [HEAD]
+    assert SCRIPT.get_revision(HEAD).down_revision == SUCCESSOR
     assert SCRIPT.get_revision(SUCCESSOR).down_revision == "e5b27aa4101c"
     assert SCRIPT.get_revision("e5b27aa4101c").down_revision == PARENT
     assert rr.RETIRED == {RETIRED: (PARENT, SUCCESSOR)}
@@ -74,7 +78,7 @@ def conn():
 def test_no_version_table_head_or_other_stamps_are_untouched(conn):
     assert rr.guard(conn, SCRIPT, OPT_IN) is None
     conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
-    for revision in (PARENT, "e5b27aa4101c", SUCCESSOR):
+    for revision in (PARENT, "e5b27aa4101c", SUCCESSOR, HEAD):
         conn.execute(sa.text("DELETE FROM alembic_version"))
         conn.execute(sa.text("INSERT INTO alembic_version VALUES (:r)"), {"r": revision})
         assert rr.guard(conn, SCRIPT, OPT_IN) is None
@@ -159,17 +163,18 @@ def _at(conn, revision):
 def test_confirm_admits_only_a_complete_upgrade_to_head(conn):
     _historical(conn)
     reconciled = rr.guard(conn, SCRIPT, OPT_IN)
-    _at(conn, SUCCESSOR)
+    _at(conn, HEAD)
     rr.confirm(conn, SCRIPT, reconciled,
-               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR])])
+               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([HEAD])])
 
 
 @pytest.mark.parametrize("steps, at", [
     ([], PARENT),                                                  # `flask db current`
-    ([_Step([SUCCESSOR], stamp=True)], SUCCESSOR),                 # `flask db stamp head`
+    ([_Step([HEAD], stamp=True)], HEAD),                           # `flask db stamp head`
     ([_Step(["e5b27aa4101c"])], "e5b27aa4101c"),                   # `upgrade e5b27aa4101c`
-    ([_Step([SUCCESSOR])], SUCCESSOR),                             # e5b27aa4101c skipped
-    ([_Step(["e5b27aa4101c"]), _Step([SUCCESSOR], upgrade=False)], SUCCESSOR),
+    ([_Step(["e5b27aa4101c"]), _Step([SUCCESSOR])], SUCCESSOR),    # `upgrade 19cb998acd2f`
+    ([_Step([SUCCESSOR]), _Step([HEAD])], HEAD),                   # e5b27aa4101c skipped
+    ([_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([HEAD], upgrade=False)], HEAD),
 ])
 def test_confirm_refuses_stamp_current_partial_or_skipping_runs(conn, steps, at):
     _historical(conn)
@@ -181,7 +186,7 @@ def test_confirm_refuses_stamp_current_partial_or_skipping_runs(conn, steps, at)
 
 def test_a_leftover_opt_in_with_nothing_to_reconcile_is_logged(conn, caplog):
     conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
-    conn.execute(sa.text("INSERT INTO alembic_version VALUES (:r)"), {"r": SUCCESSOR})
+    conn.execute(sa.text("INSERT INTO alembic_version VALUES (:r)"), {"r": HEAD})
     with caplog.at_level("WARNING", logger="app.retired_revisions"):
         assert rr.guard(conn, SCRIPT, OPT_IN) is None
     assert rr.RECONCILE_ENV in caplog.text and "remove the variable" in caplog.text

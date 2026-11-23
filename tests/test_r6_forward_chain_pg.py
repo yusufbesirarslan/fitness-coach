@@ -9,6 +9,7 @@ retired, see app/retired_revisions.py):
 
     c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
         -> f01a4e000003 -> ad17de1e0001 -> e5b27aa4101c -> 19cb998acd2f
+        -> 5cc5aa7e47ba (G4 cardio-session outcomes)
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -74,7 +75,8 @@ import r6_deploy_transaction as tx  # noqa: E402
 
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
-CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c", "19cb998acd2f")
+CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c", "19cb998acd2f",
+                    "5cc5aa7e47ba")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -87,7 +89,8 @@ SEEDED = ("user", "meal_log", "custom_meal", "custom_meal_item", "weekly_check_i
 NEW_TABLES = ("health_consent_state", "health_consent_event", "meal_log_retained_total",
               "health_erasure", "health_legal_hold", "health_erasure_retry",
               "account_deletion_record", "private_exercise",
-              "nutrition_plan_edit_operation", "nutrition_plan_mutation_record")
+              "nutrition_plan_edit_operation", "nutrition_plan_mutation_record",
+              "training_session_outcome")
 PROVIDER_COLUMNS = {"meal_log": ("provider_items", "provider_acquired_at", "provider_expired_at"),
                     "custom_meal_item": ("provider_acquired_at", "provider_expired_at")}
 
@@ -492,7 +495,8 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
     for table in ("health_consent_state", "health_consent_event", "health_erasure",
                   "health_legal_hold", "meal_log_retained_total",
                   "account_deletion_record", "private_exercise",
-                  "nutrition_plan_edit_operation", "nutrition_plan_mutation_record"):
+                  "nutrition_plan_edit_operation", "nutrition_plan_mutation_record",
+                  "training_session_outcome"):
         assert _sql(chain_url, f"SELECT count(*) FROM {table}")[0][0] == 0, table
     definition, valid = _bucket_scope(chain_url)
     assert valid is True and "'LAUNCH_FREE'" in definition and "'STARTER'" in definition
@@ -811,6 +815,7 @@ def test_downgrade_refuses_once_erasure_or_legal_hold_evidence_exists(
 # ── 6. retired C1 stamp (c1a9b7e5d301, reverted by R1) ──────────────────────
 
 RETIRED_C1 = "c1a9b7e5d301"
+C1_REVISION = "19cb998acd2f"
 C1_HISTORY = ("nutrition_plan_edit_operation", "nutrition_plan_mutation_record")
 OPT_IN_ENV = "FITX_RECONCILE_RETIRED_REVISION"
 
@@ -818,13 +823,13 @@ OPT_IN_ENV = "FITX_RECONCILE_RETIRED_REVISION"
 def _retired_c1_database(monkeypatch, url):
     """What the reverted C1 left behind: the real chain to the shared parent
     ``ad17de1e0001``, C1's schema and history (byte-identical schema code, now
-    in ``HEAD``), stamped ``c1a9b7e5d301``, no ``private_exercise``, and one
+    in ``C1_REVISION``), stamped ``c1a9b7e5d301``, no ``private_exercise``, and one
     plan row an R1-era writer inserted later (``lineage_id IS NULL``)."""
     from alembic.operations import Operations
     from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
     _upgrade_to(monkeypatch, "ad17de1e0001")
-    module = ScriptDirectory(str(ROOT / "migrations")).get_revision(HEAD).module
+    module = ScriptDirectory(str(ROOT / "migrations")).get_revision(C1_REVISION).module
     engine = _engine(url)
     try:
         with engine.begin() as connection:
@@ -952,6 +957,7 @@ def test_retired_c1_reconciliation_commits_with_the_chain_or_not_at_all(chain_ur
     ("stamp", {"revision": "head"}),
     ("current", {}),
     ("upgrade", {"revision": "e5b27aa4101c"}),
+    ("upgrade", {"revision": "19cb998acd2f"}),
 ])
 def test_retired_c1_opt_in_refuses_stamp_current_and_partial_upgrade(
         chain_url, monkeypatch, command, kwargs):
