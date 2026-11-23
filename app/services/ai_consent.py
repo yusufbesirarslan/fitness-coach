@@ -449,6 +449,22 @@ def begin_operation(owner, feature, recipient, model):
         return authority
 
 
+def begin_independent_operation(owner, feature, recipient, model):
+    """``begin_operation`` for a SECOND, separately held purpose authority.
+
+    Adaptive Coach C2: a Coach turn that may touch the saved Nutrition Plan
+    needs the owner's own ``nutrition.plan`` grant in addition to the Coach
+    one (F-1b). This runs the unmodified ``begin_operation`` predicate with no
+    active operation in a copied context, so the active Coach operation is not
+    switched, widened or re-authorized, and the new authority confers nothing
+    until a caller enters it with ``operation_scope`` or passes it to a fence.
+    """
+    def capture():
+        _OPERATION.set(None)
+        return begin_operation(owner, feature, recipient, model)
+    return contextvars.copy_context().run(capture)
+
+
 @contextmanager
 def operation_scope(authority):
     """Every provider admission inside uses ``authority``'s generation."""

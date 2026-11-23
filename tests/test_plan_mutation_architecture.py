@@ -126,6 +126,9 @@ def test_only_approved_consumers_import_the_domain():
         # Catalog V3 picker: read-only parser + context validator for advisory
         # availability; never a command, entrypoint, journal or write.
         Path("app/services/exercise_picker.py"),
+        # Adaptive Coach C2: only the audit envelope (MutationContext/actor)
+        # for C1 Nutrition calls; never Training commands or entrypoints.
+        Path("app/services/coach_plan_tools/nutrition.py"),
     }
     consumers = set()
     for path in APP_ROOT.rglob("*.py"):

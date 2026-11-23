@@ -133,3 +133,29 @@ def undo_operation_key():
     second, earlier mutation.
     """
     return _key(current_turn_id(), UNDO_COMMAND_TYPE, undo_fingerprint())
+
+
+NUTRITION_KEY_DOMAIN = "axisai/coach-nutrition-plan-operation/v1"
+_NUTRITION_PREFIX = "aic:n"
+
+
+def nutrition_edit_operation_key(edit):
+    """C2: durable key for one typed Nutrition item edit within this turn.
+
+    Built from the turn and the edit's own typed fields (never raw model
+    JSON), so a second delivery of one edit replays C1's durable claim
+    instead of dispatching another estimate.
+    """
+    turn = current_turn_id()
+    parts = (NUTRITION_KEY_DOMAIN, turn, edit.kind, edit.meal, edit.item,
+             edit.replacement or "")
+    digest = hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()[:24]
+    return f"{_NUTRITION_PREFIX}:{turn}:{digest}"
+
+
+def nutrition_undo_operation_key():
+    """C2: every Nutrition undo in one turn is the same operation."""
+    turn = current_turn_id()
+    digest = hashlib.sha256("\0".join(
+        (NUTRITION_KEY_DOMAIN, turn, "undo")).encode("utf-8")).hexdigest()[:24]
+    return f"{_NUTRITION_PREFIX}u:{turn}:{digest}"

@@ -259,6 +259,83 @@ def _training_plan_projection(source, user_id):
     return out
 
 
+# ── Adaptive Coach C2: saved Nutrition Plan tools ──────────────────────────
+# Item text is the owner's own saved food text (nutrition.plan data the turn
+# was authorized to read); it is bounded/control-free and labelled as data by
+# the tool description. Everything else is a token or a finite number.
+
+def _nutrition_tool_names():
+    from app.services.coach_plan_tools import nutrition
+    return nutrition.TOOL_NAMES
+
+
+def _nutrition_text(value):
+    from app.services.nutrition_plan_schema import ITEM_MAX
+    if (isinstance(value, str) and value.strip() and len(value) <= ITEM_MAX
+            and not any(ord(c) < 32 or ord(c) == 127 for c in value)):
+        return value
+    return None
+
+
+def _nutrition_meal(source):
+    from app.services.nutrition_plan_schema import ITEMS_MAX, MEAL_MACRO_KEYS
+    if not isinstance(source, dict):
+        return None
+    items = source.get('items')
+    out = {'items': [x for x in items[:ITEMS_MAX] if _nutrition_text(x)]
+           if isinstance(items, list) else []}
+    out.update(numeric_fields(source, MEAL_MACRO_KEYS))
+    if type(source.get('estimated')) is bool:
+        out['estimated'] = source['estimated']
+    return out
+
+
+def _nutrition_projection(source, status):
+    from app.services.coach_plan_tools import nutrition
+    from app.services.nutrition_plan_schema import MEAL_KEYS, TOTAL_KEYS
+    out = {'domain': nutrition.DOMAIN}
+    error = token(source.get('error'), tuple(nutrition.ERRORS))
+    if error:
+        out['error'] = error
+        out['message'] = nutrition.ERRORS[error]
+    if status == nutrition.STATUS_CONFIRMATION_REQUIRED:
+        out['message'] = nutrition.CONFIRMATION_INSTRUCTION
+    if token(source.get('operation'), ('undo', 'confirm', 'cancel')):
+        out['operation'] = source['operation']
+    meals = source.get('meals')
+    if isinstance(meals, list):
+        out['meals'] = []
+        for meal in meals[:len(MEAL_KEYS)]:
+            projected = _nutrition_meal(meal)
+            if projected is not None and token(meal.get('meal'), MEAL_KEYS):
+                out['meals'].append(dict(projected, meal=meal['meal']))
+    if isinstance(source.get('totals'), dict):
+        out['totals'] = numeric_fields(source['totals'], TOTAL_KEYS)
+    change = source.get('change')
+    if isinstance(change, dict):
+        out['change'] = {}
+        if token(change.get('kind'), ('replace', 'add', 'remove')):
+            out['change']['kind'] = change['kind']
+        if token(change.get('meal'), MEAL_KEYS):
+            out['change']['meal'] = change['meal']
+        for key in ('item', 'replacement'):
+            if _nutrition_text(change.get(key)):
+                out['change'][key] = change[key]
+    for key in ('before', 'after'):
+        projected = _nutrition_meal(source.get(key))
+        if projected is not None:
+            out[key] = projected
+    day = source.get('day_totals')
+    if isinstance(day, dict):
+        out['day_totals'] = {key: numeric_fields(day[key], TOTAL_KEYS)
+                             for key in ('before', 'after') if isinstance(day.get(key), dict)}
+    if isinstance(source.get('estimate'), dict):
+        out['estimate'] = {'source': 'independent_whole_meal_estimate',
+                           'whole_meal_reestimated': True,
+                           'unchanged_foods_may_change': True}
+    return out
+
+
 def tool_result(name, raw, *, user_id=None):
     """Project immediately before insertion into *any* provider's next round.
 
@@ -326,6 +403,8 @@ def tool_result(name, raw, *, user_id=None):
         out.update(numeric_fields(source, ('removed',)))
     elif name == 'get_current_training_plan':
         out.update(_training_plan_projection(source, user_id))
+    elif name in _nutrition_tool_names():
+        out.update(_nutrition_projection(source, out['status']))
     elif name == 'analyze_gym_photo':
         out.update(numeric_fields(source, ('form_rating', 'xp_awarded')))
         for key in ('is_gym', 'awarded'):
