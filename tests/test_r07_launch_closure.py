@@ -136,3 +136,31 @@ def test_coach_add_respects_the_editor_slot_limit(canonical_user, tools_on, turn
     result = call(owner, ADD, {"day": "Pazartesi", "exercise": "Band Row", "sets": 3, "reps": "8"})
     assert result["error"] == "INVALID_MUTATION"
     assert not journal(owner) and plan_confirmation.get_pending(owner) is None
+
+
+def test_typed_yes_cannot_target_replacement_training_proposal(
+        app, planned_user, tools_on, turn, monkeypatch):
+    owner = planned_user.id
+    baseline = get_active_plan(owner).plan_data
+    first = call(owner, PRESCRIBE, {"day": "Pazartesi", "exercise": "Bench Press", "sets": 4})
+    assert first["status"] == "confirmation_required"
+    captured_id = plan_confirmation.get_pending(owner).public_id
+    confirm_observed = coach_confirmation._confirm_plan
+
+    def cancel_and_replace_before_confirmation(user_id, language):
+        plan_confirmation.cancel_pending(owner)
+        with app.test_request_context("/ask"):
+            _new_turn(app)
+            replacement = call(
+                owner, PRESCRIBE, {"day": "Pazartesi", "exercise": "Bench Press", "sets": 5})
+            assert replacement["status"] == "confirmation_required"
+        return confirm_observed(user_id, language)
+
+    monkeypatch.setattr(coach_confirmation, "_confirm_plan", cancel_and_replace_before_confirmation)
+    _new_turn(app, "yes")
+    reply = coach_confirmation.resolve_pending_turn(owner, "en")
+
+    assert "no longer valid" in reply
+    remaining = plan_confirmation.get_pending(owner)
+    assert remaining.public_id != captured_id and remaining.command_payload["sets"] == 5
+    assert get_active_plan(owner).plan_data == baseline and not journal(owner)

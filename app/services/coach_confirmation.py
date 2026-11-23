@@ -19,6 +19,7 @@ from app.services import ai_consent, coach_plan_tools, plan_confirmation
 from app.services.coach_memory_provenance import display_only_reply
 from app.services.coach_plan_policy import CANCEL, CONFIRM, NONE
 from app.services.coach_plan_tools import results
+from app.services.coach_plan_tools.executor import bind_typed_confirmation
 from app.services.coach_plan_tools.proposals import PREVIEW_KEY, is_training_proposal
 from app.services.coach_plan_tools import clarifications as clar_mod
 from app.services.coach_plan_tools.grounding import (
@@ -144,6 +145,8 @@ def resolve_pending_turn(user_id, language="tr"):
         return None
     intent = coach_plan_tools.current_confirmation_intent()
     plan_pending = _plan_pending(user_id)
+    if intent in (CONFIRM, CANCEL):
+        bind_typed_confirmation(plan_pending.public_id if plan_pending is not None else None)
     # C2: only while the Nutrition boundary is available (None otherwise, with
     # no read), so a closed gate never blocks ordinary chat.
     observed = (_raw_pending(user_id)
@@ -170,7 +173,7 @@ def resolve_pending_turn(user_id, language="tr"):
         return _complete_grounded_followup(user_id, language)
     if n > 1:
         if intent == CANCEL:
-            return _cancel_all(user_id, language)
+            return _cancel_all(user_id, language, plan_pending, nutrition_pending)
         return t("coach.confirm.ambiguous", locale=language)
     if intent == NONE:
         return t("coach.confirm.clarify", locale=language)
@@ -607,9 +610,13 @@ def _confirm_plan(user_id, language):
 
 
 def _cancel_plan(user_id, language):
-    coach_plan_tools.execute_plan_tool(
+    result = coach_plan_tools.execute_plan_tool(
         user_id, coach_plan_tools.CANCEL_PENDING_TOOL, {})
-    return t("coach.confirm.cancelled", locale=language)
+    if result.get("status") == results.STATUS_CANCELLED:
+        return t("coach.confirm.cancelled", locale=language)
+    if result.get("status") == results.STATUS_REPLAYED:
+        return _format_plan_applied(result, language)
+    return t("coach.confirm.plan_failed", locale=language)
 
 
 @display_only_reply
@@ -647,12 +654,13 @@ def _cancel_log(user_id, language):
     return t("coach.confirm.cancelled", locale=language)
 
 
-def _cancel_all(user_id, language):
+def _cancel_all(user_id, language, plan_pending, nutrition_pending):
     from app.services import ai_coach
-    if _plan_pending(user_id) is not None:
-        coach_plan_tools.execute_plan_tool(
+    if plan_pending is not None:
+        result = coach_plan_tools.execute_plan_tool(
             user_id, coach_plan_tools.CANCEL_PENDING_TOOL, {})
-    nutrition_pending = coach_plan_tools.nutrition.pending_quote(user_id)
+        if result.get("status") != results.STATUS_CANCELLED:
+            return t("coach.confirm.plan_failed", locale=language)
     if nutrition_pending is not None:
         try:
             outcome = coach_plan_tools.nutrition.execute_resolution(

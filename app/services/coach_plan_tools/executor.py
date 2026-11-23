@@ -148,6 +148,7 @@ _PLAN_TOOL_ATTEMPTED_ATTR = "_coach_plan_tool_attempted"
 #: ``execute_direct_confirmation``; its presence also means "no Coach turn, no
 #: active operation — re-enter the proposing authority before any write".
 _DIRECT_PROPOSAL_ATTR = "_coach_plan_direct_proposal"
+_TYPED_PROPOSAL_ATTR = "_coach_plan_typed_proposal"
 
 
 _USER_MSG_ATTR = "_coach_plan_user_message"
@@ -175,6 +176,7 @@ def begin_turn(user_message="", history=None, user_id=None):
         setattr(g, _PROPOSAL_ATTR, False)
         setattr(g, _NEW_PROPOSAL_ATTR, False)
         setattr(g, _INTENT_ATTR, parse_confirmation_intent(user_message))
+        setattr(g, _TYPED_PROPOSAL_ATTR, None)
         setattr(g, _PLAN_TOOL_ATTEMPTED_ATTR, False)
         setattr(g, _USER_MSG_ATTR, user_message or "")
         setattr(g, _HISTORY_ATTR, list(history or ()))
@@ -549,6 +551,20 @@ def _begin_direct_turn(user_id, intent, proposal_id):
     reset_turn()
 
 
+def bind_typed_confirmation(proposal_id):
+    """Bind a chat decision to the proposal the interceptor observed.
+
+    A chat decision with no observed proposal must never pick up a new one
+    from a later provider round. The native endpoint uses its own named ID.
+    """
+    setattr(g, _TYPED_PROPOSAL_ATTR, proposal_id or False)
+
+
+def _confirmation_target():
+    direct = _direct_proposal_id()
+    return direct if direct is not None else getattr(g, _TYPED_PROPOSAL_ATTR, None)
+
+
 def _direct_proposal_id():
     try:
         return getattr(g, _DIRECT_PROPOSAL_ATTR, None)
@@ -817,7 +833,9 @@ def _confirm_pending(user_id):
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
     if new_proposal_created_this_turn():
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
-    public_id = _direct_proposal_id()
+    public_id = _confirmation_target()
+    if public_id is False:
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     if public_id is None:
         pending = get_pending(user_id)
         if pending is None:
@@ -912,7 +930,7 @@ def _cancel_pending(user_id):
     """
     if current_confirmation_intent() != CANCEL:
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
-    named = _direct_proposal_id()
+    named = _confirmation_target()
     row = (lock_latest_proposal(user_id) if named is None
            else lock_proposal(user_id, named))
     if row is None:
