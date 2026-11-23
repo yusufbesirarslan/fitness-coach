@@ -149,7 +149,7 @@ def test_typed_yes_cannot_target_replacement_training_proposal(
 
     def cancel_and_replace_before_confirmation(user_id, language):
         plan_confirmation.cancel_pending(owner)
-        with app.test_request_context("/ask"):
+        with app.app_context(), app.test_request_context("/ask"):
             _new_turn(app)
             replacement = call(
                 owner, PRESCRIBE, {"day": "Pazartesi", "exercise": "Bench Press", "sets": 5})
@@ -164,3 +164,22 @@ def test_typed_yes_cannot_target_replacement_training_proposal(
     remaining = plan_confirmation.get_pending(owner)
     assert remaining.public_id != captured_id and remaining.command_payload["sets"] == 5
     assert get_active_plan(owner).plan_data == baseline and not journal(owner)
+
+
+def test_typed_yes_without_observed_proposal_cannot_apply_a_later_one(
+        app, planned_user, tools_on, turn):
+    owner = planned_user.id
+    _new_turn(app, "yes")
+    assert coach_confirmation.resolve_pending_turn(owner, "en") is None
+
+    with app.app_context(), app.test_request_context("/ask"):
+        _new_turn(app)
+        result = call(owner, PRESCRIBE, {"day": "Pazartesi", "exercise": "Bench Press", "sets": 4})
+        assert result["status"] == "confirmation_required"
+
+    assert call(owner, coach_plan_tools.CONFIRM_TOOL)["error"] == "NO_PENDING_CONFIRMATION"
+    assert plan_confirmation.get_pending(owner) is not None and not journal(owner)
+
+    _new_turn(app, "yes")
+    assert "updated" in coach_confirmation.resolve_pending_turn(owner, "en")
+    assert len(journal(owner)) == 1
