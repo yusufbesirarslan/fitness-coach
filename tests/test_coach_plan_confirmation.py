@@ -13,9 +13,10 @@ from app.models import (
 )
 from app.observability import assign_request_id
 from app.services import ai_coach, coach_plan_tools, plan_confirmation
-from app.services.coach_plan_tools import identity, results
+from app.services.coach_plan_tools import executor, grounding, identity, results
 from app.services.plan_mutation import (
     ACTOR_AI_COACH,
+    MoveTrainingDayCommand,
     MutationContext,
     RemoveExerciseCommand,
     apply_plan_mutation,
@@ -79,6 +80,109 @@ def test_move_day_requires_confirmation(app, planned_user, tools_on, turn):
     assert day_exercises(planned_user.id, "Cuma") == before
     assert plan_version(planned_user.id) == 0
     assert journal(planned_user.id) == []
+
+
+def test_confirmed_move_swaps_rest_day_and_carries_existing_notes(
+        app, planned_user, tools_on, turn):
+    owner = planned_user.id
+    plan = get_active_plan(owner)
+    document = json.loads(plan.plan_data)
+    friday = document["program"][4]
+    saturday = document["program"][5]
+    friday["egzersizler"][0]["not"] = "Controlled tempo"
+    saturday["odak"] = "Recovery"
+    plan.plan_data = json.dumps(document, ensure_ascii=False)
+    db.session.commit()
+
+    result = call(owner, MOVE, {"day": "Cuma", "target_day": "Cumartesi"})
+    assert result["status"] == results.STATUS_CONFIRMATION_REQUIRED
+    assert json.loads(get_active_plan(owner).plan_data) == document
+
+    _new_turn(app, "evet")
+    assert call(owner, CONFIRM, {})["status"] == results.STATUS_APPLIED
+
+    expected = document["program"].copy()
+    expected[4] = dict(saturday, gun="Cuma")
+    expected[5] = dict(friday, gun="Cumartesi")
+    saved = json.loads(get_active_plan(owner).plan_data)
+    assert saved == dict(document, program=expected)
+    assert plan_version(owner) == 1
+    assert len(journal(owner)) == 1
+
+
+def test_plan_change_after_no_op_preview_cannot_apply_unconfirmed_move(
+        app, planned_user, tools_on, turn, monkeypatch):
+    owner = planned_user.id
+    apply_typed = executor._apply_typed
+
+    def change_before_apply(user_id, command, *args, **kwargs):
+        apply_plan_mutation(
+            owner, MoveTrainingDayCommand(day="Çarşamba", target_day="Perşembe"),
+            MutationContext(idempotency_key="intervening-owner-change"),
+        )
+        return apply_typed(user_id, command, *args, **kwargs)
+
+    monkeypatch.setattr(executor, "_apply_typed", change_before_apply)
+    result = call(owner, MOVE, {"day": "Salı", "target_day": "Perşembe"})
+
+    assert result.get("error") == results.ERROR_PLAN_STATE_CONFLICT
+    assert day_exercises(owner, "Salı") == []
+    assert len(day_exercises(owner, "Perşembe")) == 1
+    assert plan_version(owner) == 1
+    assert len(journal(owner)) == 1
+    assert plan_confirmation.get_pending(owner) is None
+
+
+def test_plan_change_after_undo_impact_check_cannot_retarget_undo(
+        app, planned_user, tools_on, turn, monkeypatch):
+    owner = planned_user.id
+    assert call(owner, REPLACE, {
+        "day": "Pazartesi", "exercise": "Bench Press", "replacement": "Push-Up",
+    })["status"] == results.STATUS_APPLIED
+    impact_facts = executor.session_impact_facts
+
+    def change_after_impact(user_id, command):
+        facts = impact_facts(user_id, command)
+        apply_plan_mutation(
+            owner, MoveTrainingDayCommand(day="Çarşamba", target_day="Perşembe"),
+            MutationContext(idempotency_key="intervening-owner-change"),
+        )
+        return facts
+
+    monkeypatch.setattr(executor, "session_impact_facts", change_after_impact)
+    result = call(owner, executor.UNDO_TOOL, {})
+
+    assert result.get("error") == results.ERROR_PLAN_STATE_CONFLICT
+    assert names(owner)[0] == "Push-Up"
+    assert len(day_exercises(owner, "Perşembe")) == 1
+    assert plan_version(owner) == 2
+    assert len(journal(owner)) == 2
+
+
+def test_plan_change_after_grounding_cannot_retarget_a_named_workout(
+        app, planned_user, tools_on, turn, monkeypatch):
+    owner = planned_user.id
+    ground_command = grounding.ground_command
+
+    def change_after_grounding(user_id, command):
+        grounded = ground_command(user_id, command)
+        assert grounded.ready and grounded.command.day == "Cuma"
+        apply_plan_mutation(
+            owner, MoveTrainingDayCommand(day="Cuma", target_day="Pazartesi"),
+            MutationContext(idempotency_key="intervening-owner-change"),
+        )
+        return grounded
+
+    monkeypatch.setattr(grounding, "ground_command", change_after_grounding)
+    _new_turn(app, "Add Walking Lunges to my leg day with 3 sets of 10 reps")
+    result = call(owner, "add_training_plan_exercise", {
+        "exercise": "Walking Lunges", "sets": 3, "reps": "10",
+    })
+
+    assert result.get("error") == results.ERROR_PLAN_STATE_CONFLICT
+    assert names(owner, "Cuma") == ["Bench Press", "Shoulder Press"]
+    assert names(owner, "Pazartesi") == ["Squat"]
+    assert len(journal(owner)) == 1
 
 
 def test_replace_on_an_active_session_day_requires_confirmation(
