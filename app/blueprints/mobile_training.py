@@ -16,6 +16,7 @@ from app.services.ai_consent import ConsentDenied
 from app.services.ai_gate import BlockingConcurrencyLimit, blocking_concurrency_slot
 from app.services.mobile_training_generation import (
     GenerationInProgress,
+    InvalidPlanRequest,
     PlanGenerationCommandError,
     TrainingAllowanceRefused,
     generate_and_persist,
@@ -31,6 +32,14 @@ from app.services.training_plan_origin import (
 
 def _sessions_enabled():
     return bool(current_app.config.get("FITX_WORKOUT_SESSIONS_ENABLED", False))
+
+
+def _plan_sessions_requested():
+    """G4 opt-in for a write command; a malformed opt-in is an invalid request."""
+    try:
+        return mobile_training.sessions_requested(request.args)
+    except mobile_training.InvalidSessionsExpansion:
+        raise InvalidPlanRequest("include_sessions must be exactly 1") from None
 
 
 @contextmanager
@@ -63,7 +72,9 @@ def _generation_error(error, *, retry_after=None):
 def create_training_plan():
     try:
         key = parse_idempotency_key(request.headers.get("Idempotency-Key"))
-        native_request = parse_native_request(request.get_json(silent=True))
+        include_sessions = _plan_sessions_requested()
+        native_request = parse_native_request(
+            request.get_json(silent=True), sessions=include_sessions)
         result = generate_and_persist(
             g.mobile_user,
             native_request,
@@ -77,6 +88,7 @@ def create_training_plan():
             g.mobile_user.id,
             current_app.config["SECRET_KEY"],
             sessions_enabled=_sessions_enabled(),
+            include_sessions=include_sessions,
         )
     except PreferenceContractError as error:
         return mobile_error(
@@ -129,8 +141,18 @@ def create_training_plan():
 @require_mobile_auth
 def training_preferences():
     from app.services.training_generation.youth_safety import is_minor
+    try:
+        include_sessions = mobile_training.sessions_requested(request.args)
+    except mobile_training.InvalidSessionsExpansion:
+        return mobile_error(
+            "TRAINING_READ_INVALID_REQUEST",
+            "Invalid Training read request.",
+            400,
+            False,
+        )
     return jsonify(mobile_training.preference_contract(
-        minor=is_minor(getattr(g.mobile_user, "age", None))))
+        minor=is_minor(getattr(g.mobile_user, "age", None)),
+        sessions=include_sessions))
 
 
 @bp.get("/training/plans/current")
@@ -139,7 +161,9 @@ def current_training_plan():
     try:
         # LP21 per-request origin opt-in; absent keeps the legacy contract.
         include_origin = origin_requested(request.args)
-    except InvalidOriginExpansion:
+        # G4 per-request cardio-session opt-in; absent keeps the legacy shape.
+        include_sessions = mobile_training.sessions_requested(request.args)
+    except (InvalidOriginExpansion, mobile_training.InvalidSessionsExpansion):
         return mobile_error(
             "TRAINING_READ_INVALID_REQUEST",
             "Invalid Training read request.",
@@ -152,6 +176,7 @@ def current_training_plan():
             current_app.config["SECRET_KEY"],
             sessions_enabled=_sessions_enabled(),
             include_origin=include_origin,
+            include_sessions=include_sessions,
         )
     except mobile_training.PlanUnprojectable:
         return mobile_error(
@@ -208,6 +233,80 @@ def training_workout(workout_reference):
             True,
         )
     return jsonify(payload)
+
+
+_SESSION_OUTCOME_ERRORS = {
+    "not_found": ("TRAINING_SESSION_NOT_FOUND",
+                  "The Training session was not found.", 404),
+    "stale": ("TRAINING_SESSION_STALE",
+              "The Training session reference is stale.", 409),
+    "not_today": ("TRAINING_SESSION_NOT_TODAY",
+                  "Only today's Training session can be answered.", 409),
+    "conflict": ("TRAINING_SESSION_OUTCOME_CONFLICT",
+                 "A different outcome is already recorded for this session.", 409),
+}
+
+
+def _answer_cardio_session(session_reference, outcome):
+    """G4 / D1-D2: one explicit answer for today's cardio session.
+
+    No body, no timer, no started workout. Never touches the day completion
+    claim, XP, streaks or Pump Check (see training_session_outcomes).
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.extensions import db
+    from app.services import training_session_outcomes as outcomes
+    if request.get_data(cache=True):
+        return mobile_error(
+            "TRAINING_SESSION_INVALID_REQUEST",
+            "This Training session request takes no body.",
+            400,
+            False,
+        )
+    try:
+        state, replayed = outcomes.record_cardio_outcome(
+            g.mobile_user.id, current_app.config["SECRET_KEY"],
+            session_reference, outcome)
+    except outcomes.SessionOutcomeRefused as error:
+        db.session.rollback()
+        code, message, status = _SESSION_OUTCOME_ERRORS[error.reason]
+        return mobile_error(code, message, status, False)
+    except mobile_training.PlanUnprojectable:
+        db.session.rollback()
+        return mobile_error(
+            "TRAINING_PLAN_UNPROJECTABLE",
+            "The current Training plan cannot be displayed safely.",
+            409,
+            False,
+        )
+    except SQLAlchemyError:
+        db.session.rollback()
+        return mobile_error(
+            "TRAINING_READ_UNAVAILABLE",
+            "Training is temporarily unavailable.",
+            503,
+            True,
+        )
+    return jsonify({
+        "contract_version": 1,
+        "session": mobile_training.SESSION_CARDIO,
+        "workout_ref": session_reference,
+        "state": state,
+        "replayed": replayed,
+    })
+
+
+@bp.post("/training/sessions/<session_reference>/complete")
+@require_mobile_auth
+def complete_cardio_session(session_reference):
+    return _answer_cardio_session(session_reference, mobile_training.STATE_COMPLETED)
+
+
+@bp.post("/training/sessions/<session_reference>/skip")
+@require_mobile_auth
+def skip_cardio_session(session_reference):
+    return _answer_cardio_session(session_reference, mobile_training.STATE_SKIPPED)
 
 
 @bp.post("/training/plans/replacement-proposals")

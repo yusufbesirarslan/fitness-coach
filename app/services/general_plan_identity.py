@@ -13,6 +13,11 @@ Two versioned templates exist. Neither changes the other's meaning:
 * ``general_full_body_cardio_v1`` — the same strength week plus dedicated
   cardio days, adding the four canonical cardio preferences. Cardio is never
   "none" here: a strength-only week is the v1 template, not this one.
+  G4 (#530): a client that opted in to cardio sessions may also ask for
+  independent cardio counts up to six; cardio beyond the free days becomes a
+  strength day's separate ``kardiyo_seansi``. The body keys, fingerprint
+  domain and every pre-G4 combination (and its content) are unchanged; the
+  widened counts are new, previously refused combinations.
 
 A receipt stores only the request fingerprint, never the template. Both
 request spaces are small and closed, so the template is recovered by exact
@@ -57,8 +62,18 @@ CARDIO_FIELDS = V1_FIELDS | frozenset({
 FINGERPRINT_DOMAIN = b"axisai:training-plan-general:v1\0"
 
 
-def cardio_day_choices(strength_days: int) -> tuple[int, ...]:
-    """The cardio day counts a strength week of this size can hold."""
+# G4: independent cardio frequency (the AI contract's 1..6), sessions only.
+SESSION_CARDIO_DAYS = tuple(range(1, 7))
+
+
+def cardio_day_choices(strength_days: int, *, sessions: bool = False) -> tuple[int, ...]:
+    """The cardio counts a strength week of this size can hold.
+
+    Without the sessions opt-in every cardio session is a dedicated day and
+    one full rest day stays. With it, any count 1..6 (G4).
+    """
+    if sessions:
+        return SESSION_CARDIO_DAYS if strength_days in STRENGTH_DAYS else ()
     return tuple(range(1, 7 - MIN_REST_DAYS - strength_days + 1))
 
 
@@ -75,7 +90,7 @@ def request_space():
         yield {"template": TEMPLATE_V1, "gun_sayisi": days, "ekipman": equipment}
     for days, equipment in product(sorted(STRENGTH_DAYS), sorted(EQUIPMENT)):
         for cardio_type, cardio_days, minutes, intensity in product(
-                sorted(CARDIO_TYPES), cardio_day_choices(days),
+                sorted(CARDIO_TYPES), cardio_day_choices(days, sessions=True),
                 sorted(CARDIO_DURATIONS), sorted(CARDIO_INTENSITIES)):
             yield {
                 "template": TEMPLATE_CARDIO_V1,

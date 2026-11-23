@@ -42,6 +42,11 @@ class GeneralPlanRequest:
     equipment: str
     fingerprint: str
     cardio: GeneralCardio | None = None
+    # G4 opt-in. NOT part of the fingerprint: every combination both
+    # contracts accept builds byte-identical content (no session is needed
+    # below the pre-G4 ceiling), and the widened combinations are accepted
+    # only when opted in.
+    sessions: bool = False
 
 
 def _token(raw: dict, field: str, allowed) -> str:
@@ -58,7 +63,7 @@ def _integer(raw: dict, field: str, allowed) -> int:
     return value
 
 
-def parse_general_request(raw: object) -> GeneralPlanRequest:
+def parse_general_request(raw: object, *, sessions: bool = False) -> GeneralPlanRequest:
     """Parse one exact request; unsupported or extra input is refused, never coerced.
 
     The template names its own closed key set. A v1 body is exactly what it
@@ -85,7 +90,8 @@ def parse_general_request(raw: object) -> GeneralPlanRequest:
     if template == identity.TEMPLATE_CARDIO_V1:
         cardio = GeneralCardio(
             cardio_type=_token(raw, "kardiyo_tipi", identity.CARDIO_TYPES),
-            days=_integer(raw, "kardiyo_gun", identity.cardio_day_choices(days)),
+            days=_integer(raw, "kardiyo_gun", identity.cardio_day_choices(
+                days, sessions=sessions is True)),
             minutes=_integer(raw, "kardiyo_sure", identity.CARDIO_DURATIONS),
             intensity=_token(raw, "kardiyo_yogunluk", identity.CARDIO_INTENSITIES),
         )
@@ -101,4 +107,5 @@ def parse_general_request(raw: object) -> GeneralPlanRequest:
         equipment=equipment,
         fingerprint=identity.fingerprint(normalized),
         cardio=cardio,
+        sessions=sessions is True,
     )

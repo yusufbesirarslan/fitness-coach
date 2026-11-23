@@ -40,8 +40,14 @@ SUPPORTED_EQUIPMENT_BY_STYLE = {
 }
 
 
-def public_capability_constraints() -> list[dict]:
-    """Return an ordered, field-only projection of the canonical matrix."""
+def public_capability_constraints(*, sessions: bool = False) -> list[dict]:
+    """Return an ordered, field-only projection of the canonical matrix.
+
+    ``sessions`` (G4) is the client's opt-in to cardio sessions on strength
+    days. Only then is strength + cardio > 7 representable, so only then is
+    the seven-day allocation constraint absent. The legacy projection is
+    byte-identical.
+    """
     active_cardio = sorted(CARDIO_TYPES - {"yok"})
     weekly_overflow = []
     for training_days in sorted(DAY_COUNTS):
@@ -58,7 +64,7 @@ def public_capability_constraints() -> list[dict]:
         return sorted(
             token for token, target in STYLE_RULE_KEYS.items() if target == rule
         )
-    return [
+    constraints = [
         {
             "status": STATUS_UNSUPPORTED,
             "reason": "CROSSFIT_SCHEMA_UNSUPPORTED",
@@ -89,6 +95,9 @@ def public_capability_constraints() -> list[dict]:
             "when_any": weekly_overflow,
         },
     ]
+    if sessions:
+        constraints.pop()
+    return constraints
 
 
 @dataclass(frozen=True)
@@ -101,7 +110,9 @@ class CapabilityResult:
         return self.status == STATUS_SUPPORTED
 
 
-def evaluate_capability(preferences: TrainingPreferences) -> CapabilityResult:
+def evaluate_capability(
+    preferences: TrainingPreferences, *, sessions: bool = False,
+) -> CapabilityResult:
     style = canonical_style(preferences.antrenman_tarzi)
     allowed_equipment = SUPPORTED_EQUIPMENT_BY_STYLE.get(style, frozenset())
     if style == "crossfit" or not allowed_equipment:
@@ -116,14 +127,20 @@ def evaluate_capability(preferences: TrainingPreferences) -> CapabilityResult:
     cardio_days = preferences.kardiyo_gun if preferences.kardiyo_tipi != "yok" else 0
     if preferences.kardiyo_tipi == "yok" and preferences.kardiyo_gun > 0:
         return CapabilityResult(STATUS_CONFLICTING, "CARDIO_DAYS_WITHOUT_TYPE")
-    if preferences.gun_sayisi + cardio_days > 7:
+    # G4: without the sessions opt-in every cardio session needs its own day.
+    # With it, cardio beyond the free days becomes a strength day's separate
+    # session (never an item of the strength list), so independent
+    # frequencies (strength 3..6, cardio 0..6) are all representable.
+    if not sessions and preferences.gun_sayisi + cardio_days > 7:
         return CapabilityResult(
             STATUS_CONFLICTING, "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS")
     return CapabilityResult(STATUS_SUPPORTED, "SUPPORTED")
 
 
-def require_supported(preferences: TrainingPreferences) -> TrainingPreferences:
-    result = evaluate_capability(preferences)
+def require_supported(
+    preferences: TrainingPreferences, *, sessions: bool = False,
+) -> TrainingPreferences:
+    result = evaluate_capability(preferences, sessions=sessions)
     if result.status == STATUS_UNSUPPORTED:
         raise PreferenceContractError.unsupported(result.reason)
     if result.status == STATUS_CONFLICTING:

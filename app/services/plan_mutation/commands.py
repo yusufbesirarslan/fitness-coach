@@ -28,6 +28,10 @@ class ReplaceExerciseCommand:
     sets: Optional[int] = None
     reps: Optional[str] = None
     position: Optional[int] = None
+    # G4: which exercise list of the day. ``None``/"strength" is the day's
+    # own list (every pre-G4 caller); "cardio" is the strength day's
+    # separate cardio session (native editor, canonical plans only).
+    session: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,10 @@ class AddExerciseCommand:
     exercise: str
     sets: Optional[int] = None
     reps: Optional[str] = None
+    # G4: which exercise list of the day. ``None``/"strength" is the day's
+    # own list (every pre-G4 caller); "cardio" is the strength day's
+    # separate cardio session (native editor, canonical plans only).
+    session: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -64,6 +72,10 @@ class RemoveExerciseCommand:
     match_sets: Optional[int] = None
     match_reps: Optional[str] = None
     position: Optional[int] = None
+    # G4: which exercise list of the day. ``None``/"strength" is the day's
+    # own list (every pre-G4 caller); "cardio" is the strength day's
+    # separate cardio session (native editor, canonical plans only).
+    session: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +96,10 @@ class UpdateExercisePrescriptionCommand:
     sets: Optional[int] = None
     reps: Optional[str] = None
     position: Optional[int] = None
+    # G4: which exercise list of the day. ``None``/"strength" is the day's
+    # own list (every pre-G4 caller); "cardio" is the strength day's
+    # separate cardio session (native editor, canonical plans only).
+    session: Optional[str] = None
 
 
 @dataclass(frozen=True)

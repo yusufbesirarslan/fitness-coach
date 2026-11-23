@@ -121,12 +121,14 @@ def test_any_active_even_previous_day_refuses_and_replays(foundation):
 def coach_proposal(uid):
     from app.services.plan_confirmation.service import create_or_reuse_pending
     from app.services.plan_mutation.commands import UpdateExercisePrescriptionCommand
-    from app.services.coach_plan_tools.proposals import encode_command
+    from app.services.coach_plan_tools.prescriptions import POLICY_VERSION
+    from app.services.coach_plan_tools.proposals import POLICY_KEY, encode_command
     from app.services.plan_mutation.fingerprint import semantic_fingerprint, command_type
     p = current(uid); command = UpdateExercisePrescriptionCommand('Pazartesi', 'Old', sets=4)
     return create_or_reuse_pending(uid, lineage_id=p.lineage_id, mutation_version=p.mutation_version,
         snapshot_fingerprint=snapshot_fingerprint(p.plan_data), command_type=command_type(command),
-        command_payload=encode_command(command)[1], command_fingerprint=semantic_fingerprint(command),
+        command_payload={**encode_command(command)[1], POLICY_KEY: POLICY_VERSION},
+        command_fingerprint=semantic_fingerprint(command),
         reason_codes=[], summary='review')[0]
 
 

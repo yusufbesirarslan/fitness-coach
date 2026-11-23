@@ -47,6 +47,8 @@ def c2(app, alice, monkeypatch):
     app.config[coach_plan_tools.FLAG_KEY] = True
     monkeypatch.setattr(access, "NUTRITION_EDITS_ENABLED", True)
     monkeypatch.setattr(access, "APPROVED_COACH_EDIT_DISCLOSURES", frozenset({APPROVED}))
+    monkeypatch.setattr(nutrition, "APPROVED_NUTRITION_READ_DISCLOSURES",
+                        frozenset({(APPROVED, "synthetic-nutrition")}))
     state = {"calls": [], "fences": [], "published": [], "grant": True,
              "deny_fence": None, "estimate": dict(ESTIMATE)}
 
@@ -61,6 +63,8 @@ def c2(app, alice, monkeypatch):
         state["fences"].append(feature)
         if state["deny_fence"]:
             raise ai_consent.ConsentDenied(state["deny_fence"])
+        if feature == "nutrition_plan" and not state["grant"]:
+            raise ai_consent.ConsentDenied("AI_CONSENT_REQUIRED")
 
     def authorize(authority):
         state["published"].append(authority.feature)
@@ -163,13 +167,13 @@ def test_production_default_publishes_and_executes_nothing(app, alice, monkeypat
         app.config[coach_plan_tools.FLAG_KEY] = False
 
 
-def test_flag_off_hides_nutrition_even_with_source_gate_open(c2):
+def test_saved_nutrition_read_is_independent_of_write_flag(c2):
     c2["app"].config[coach_plan_tools.FLAG_KEY] = False
     with Turn(c2) as turn:
-        assert not set(turn.names()) & nutrition.TOOL_NAMES
+        assert set(turn.names()) & nutrition.TOOL_NAMES == {nutrition.READ_TOOL}
         result, _ = turn.call(nutrition.READ_TOOL)
-    assert result["error"] in ("CAPABILITY_DISABLED", "INVALID_ARGUMENTS") or result["status"] == "unavailable"
-    assert not c2["calls"] and "nutrition_plan" not in c2["published"]
+    assert result["status"] == "ok"
+    assert not c2["calls"] and "nutrition_plan" in c2["published"]
 
 
 def test_missing_nutrition_grant_keeps_ordinary_chat_and_withholds_content(c2):
@@ -648,7 +652,7 @@ def test_authority_capture_fault_fails_closed_and_keeps_chat(c2, monkeypatch):
         names = turn.names()
         result, _ = turn.call(nutrition.READ_TOOL)
     assert "query_fitx_metrics" in names and not set(names) & nutrition.TOOL_NAMES
-    assert result["error"] == "PERMISSION_UNAVAILABLE"
+    assert result["error"] == "AUTHORITY_UNAVAILABLE"
 
 
 def test_closed_gate_never_resolves_but_releases_a_stranded_quote(c2, mobile, bearer, alice, monkeypatch):
@@ -856,3 +860,53 @@ def test_b2_stranded_cancel_logs_its_real_outcome_without_content(c2, mobile, be
     assert lines[-1] == (nutrition.STRANDED_RELEASE_LOG, "cancelled")
     text = repr(lines)
     assert proposal_id not in text and "Eggs" not in text and "Chicken" not in text
+
+
+def test_nutrition_read_requires_its_own_exact_pair_with_write_available(c2, monkeypatch):
+    monkeypatch.setattr(nutrition, "APPROVED_NUTRITION_READ_DISCLOSURES",
+                        frozenset({(APPROVED, "other-nutrition-disclosure")}))
+    with Turn(c2) as turn:
+        assert set(turn.names()) & nutrition.TOOL_NAMES == nutrition.WRITE_TOOL_NAMES
+        refused, raw = turn.call(nutrition.READ_TOOL)
+    assert refused["error"] == "PERMISSION_UNAVAILABLE"
+    assert "Eggs" not in raw and not c2["calls"]
+
+
+def test_ordinary_chat_retires_revoked_quote_and_omits_native_preview(c2):
+    owner = c2["owner"]
+    proposal_id = _stage(c2)
+    c2["grant"] = False
+    with Turn(c2, "Can we talk about training?") as turn:
+        assert coach_confirmation.resolve_pending_turn(owner, "en") is None
+        assert "query_fitx_metrics" in turn.names()
+        effects = coach_plan_tools.turn_plan_effects(owner, "en")["nutrition_plan"]
+    assert effects["pending_confirmation"] is False and effects["proposal"] is None
+    assert _proposal(owner).status == Operation.query.one().status == "stale"
+    c2["grant"] = True
+    with Turn(c2, "yes"):
+        assert nutrition.pending_quote(owner) is None
+        assert nutrition.resolve(owner, proposal_id, "confirm")["error"] == "PENDING_CONFIRMATION_STALE"
+    assert _plan(owner) == (c2["raw"], 0) and len(c2["calls"]) == 1
+
+
+def test_concurrently_resolved_nutrition_quote_does_not_retarget_yes(c2, monkeypatch):
+    owner = c2["owner"]
+    proposal_id = _stage(c2)
+    original = service.lock_proposal
+
+    def already_cancelled(user_id, public_id):
+        assert (user_id, public_id) == (owner, proposal_id)
+        row = original(user_id, public_id)
+        row.status = "cancelled"
+        db.session.commit()
+        return row
+
+    monkeypatch.setattr(service, "lock_proposal", already_cancelled)
+    with Turn(c2, "yes"):
+        monkeypatch.setattr(coach_confirmation, "active_log_pending", lambda _: object())
+        # If the lost quote is treated as absent, this bare yes selects the log.
+        monkeypatch.setattr(coach_confirmation, "_confirm_log",
+                            lambda *_: pytest.fail("stale yes targeted the log"))
+        reply = coach_confirmation.resolve_pending_turn(owner, "en")
+    assert "no longer valid" in reply
+    assert _plan(owner) == (c2["raw"], 0)

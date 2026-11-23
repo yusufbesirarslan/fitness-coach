@@ -15,6 +15,9 @@ from app.services.plan_mutation import (
     UpdateExercisePrescriptionCommand,
 )
 from app.services.plan_mutation.document import (
+    FIELD_KIND,
+    REST_TIP,
+    _find_day,
     apply_command,
     parse_plan_document,
     remove_target_slots,
@@ -28,6 +31,11 @@ from app.services.plan_mutation.fingerprint import (
     undo_fingerprint,
 )
 from app.services.today_facts import get_active_plan
+from app.services.training_generation.plan_schema import CARDIO_SESSION_KEY
+
+
+POLICY_KEY = "policy_version"
+PREVIEW_KEY = "preview"
 
 
 def encode_command(command):
@@ -119,7 +127,7 @@ def decode_command(command_type_name, payload):
 def preview_command(user_id, command):
     """Validate ``command`` against the current plan without persisting.
 
-    Returns ``(plan_row, document, changed)``. Domain errors propagate.
+    Returns the plan row, bounded schedule preview metadata, and change status.
     """
     plan = get_active_plan(user_id)
     if plan is None:
@@ -129,8 +137,19 @@ def preview_command(user_id, command):
         from app.services.plan_mutation.errors import PlanStateConflict
         raise PlanStateConflict("this plan has no history identity")
     document, _program = parse_plan_document(plan.plan_data)
-    _new_document, changed = apply_command(document, command)
-    return plan, document, changed
+    _, changed = apply_command(document, command, coach=True)
+    if changed and isinstance(command, MoveTrainingDayCommand):
+        source = _find_day(_program, command.day)
+        target = _find_day(_program, command.target_day)
+        preview = {
+            "source_rest": source.get(FIELD_KIND) == REST_TIP,
+            "target_rest": target.get(FIELD_KIND) == REST_TIP,
+            "source_cardio": CARDIO_SESSION_KEY in source,
+            "target_cardio": CARDIO_SESSION_KEY in target,
+        }
+    else:
+        preview = {}
+    return plan, preview, changed
 
 
 def remove_candidates(user_id, command):

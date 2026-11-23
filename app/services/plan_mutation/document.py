@@ -69,7 +69,10 @@ from app.services.training_generation.output_errors import (
 )
 
 from app.services.training_generation.plan_schema import (
+    CARDIO_SESSION_KEY,
+    CARDIO_SESSION_PLACEMENT,
     NATIVE_MAX_EXERCISES_PER_DAY,
+    SESSION_TIP,
 )
 
 from .commands import (
@@ -85,6 +88,7 @@ from .errors import (
     ExerciseAlreadyPresent,
     ExerciseNotFound,
     InvalidMutation,
+    InvalidPrescription,
     PlanNotMutable,
 )
 from .validation import (
@@ -448,7 +452,7 @@ def remove_target_slots(document, day_name, exercise_name):
 def _require_workout_day(day):
     """Refuse to put exercises on an explicit rest day."""
     if day.get(FIELD_KIND) == REST_TIP:
-        raise InvalidMutation("cannot add an exercise to a rest day")
+        raise InvalidMutation("cannot edit exercises on a rest day")
 
 
 def _require_day_stays_valid(day):
@@ -494,22 +498,113 @@ def _native_placement_baseline(day, authority):
 
 
 def _require_native_cardio_placement(day, authority, before):
-    """A native edit may correct misplaced cardio, never re-save it.
+    """A native edit may never ADD misplaced cardio.
 
-    Cardio belongs on a ``kardiyo`` day, whatever else the day holds. An
-    edited day passes when nothing on it is misplaced, or when the edit
-    strictly reduced what was misplaced (a corrective Replace or Remove on a
-    legacy day). Any other edit of a day that still holds misplaced cardio is
-    refused, so an unrelated change cannot write a new revision of it.
+    Cardio belongs on a ``kardiyo`` day or in a strength day's separate
+    cardio session (G4), never in the strength list. Every written entry is
+    already placement-checked (``_resolve_placeable_exercise``); this is the
+    whole-day backstop: an edit that leaves more misplaced entries than the
+    day held before is refused.
+
+    G4 founder ruling: a legacy day that already holds misplaced cardio (a
+    pre-P3A mixed list) is NOT locked. Its strength work stays editable and
+    the misplaced entries stay where they are with the same identity — never
+    moved to another list, re-identified or dropped by an unrelated edit. The
+    owner may still edit their stored sets/reps (identity cannot change: a
+    Replace is placement-checked) or correct them.
     """
     if authority is None or not authority.by_id:
         return
     after = _misplaced_entries(day, authority, strict=True)
-    if after and after >= before:
-        raise InvalidMutation("cardio must be corrected before this day can be edited")
+    if after > before:
+        raise InvalidMutation("cardio cannot be added to a strength list")
+    if after and not _holds_strength_work(day, authority):
+        # Stored cardio beside no strength work is a misleading day type: an
+        # edit that would produce (or re-save) such a day is refused, and
+        # only a correction of the cardio is accepted there.
+        raise InvalidMutation("a strength day must keep its strength work")
 
 
-def apply_command(document, command, *, native_editor=False, private_definitions=None):
+#: Movements that are not the strength session a ``antrenman`` day names.
+_NON_STRENGTH_MOVEMENTS = frozenset({"cardio", "mobility"})
+
+
+def _holds_strength_work(day, authority):
+    """Does ``day``'s own list hold at least one strength (or core) entry?"""
+    for entry in _exercises_of(day):
+        exercise = _resolve_catalog_exercise(authority, entry.get(FIELD_EXERCISE_ID))
+        if exercise.movement not in _NON_STRENGTH_MOVEMENTS:
+            return True
+    return False
+
+
+#: G4 session selectors on a native exercise command.
+SESSION_STRENGTH = "strength"
+SESSION_CARDIO = "cardio"
+
+
+def _selected_session(command):
+    """``None`` for the day's own list, ``SESSION_CARDIO`` for its session."""
+    session = getattr(command, "session", None)
+    if session is None or session == SESSION_STRENGTH:
+        return None
+    if session != SESSION_CARDIO:
+        raise InvalidMutation("unknown session")
+    return SESSION_CARDIO
+
+
+def _target_list(day, command, authority, *, create=False):
+    """``(exercises, placement)`` the command addresses on ``day``.
+
+    The strength selector is exactly the pre-G4 behaviour. The cardio
+    selector addresses the strength day's separate session: only on a
+    canonical plan through the native editor, only on a strength day, with
+    the dedicated-cardio placement. ``create`` (Add only) materializes an
+    absent session on the working copy; any later refusal discards it.
+    """
+    if _selected_session(command) is None:
+        return _exercises_of(day), day
+    if authority is None or not authority.by_id:
+        raise InvalidMutation("a cardio session needs a canonical native plan")
+    if day.get(FIELD_KIND) != SESSION_TIP:
+        raise InvalidMutation("a cardio session belongs to a strength day")
+    session = day.get(CARDIO_SESSION_KEY)
+    if session is None:
+        if not create:
+            raise ExerciseNotFound("the day has no cardio session")
+        session = {FIELD_EXERCISES: []}
+        day[CARDIO_SESSION_KEY] = session
+    if not isinstance(session, dict) or not isinstance(session.get(FIELD_EXERCISES), list):
+        raise PlanNotMutable("day has a malformed cardio session")
+    return session[FIELD_EXERCISES], CARDIO_SESSION_PLACEMENT
+
+
+def _finish_session(day, command):
+    """Keep a cardio session canonical after a session edit.
+
+    Every entry stays one round of ASCII ``"<n> dk"`` and the total stays
+    bounded — exactly the structural rule the reader applies — and removing
+    the last entry removes the block: an empty session is not a planned
+    session.
+    """
+    if _selected_session(command) is None:
+        return
+    exercises = day[CARDIO_SESSION_KEY][FIELD_EXERCISES]
+    if not exercises:
+        del day[CARDIO_SESSION_KEY]
+        return
+    # The plan READER's own session validator is the one authority: an edit
+    # the reader would refuse can never be saved (a refused stored session
+    # would make the whole plan unreadable on every client).
+    from app.services.training_generation.output_errors import SchemaInvalidError
+    from app.services.training_generation.response_validator import validate_cardio_session
+    try:
+        validate_cardio_session(day[CARDIO_SESSION_KEY])
+    except SchemaInvalidError as exc:
+        raise InvalidPrescription("a cardio session entry is one round of minutes") from exc
+
+
+def apply_command(document, command, *, native_editor=False, private_definitions=None, coach=False):
     """Apply ``command`` to a copy of ``document``.
 
     Returns ``(new_document, changed)``. ``changed`` is False when the requested
@@ -530,10 +625,25 @@ def apply_command(document, command, *, native_editor=False, private_definitions
     authority = _exercise_authority(working, by_id=native_editor,
                                     private_definitions=private_definitions if native_editor else None)
 
+    if coach:
+        day = _find_day(program, command.day)
+        if isinstance(command, MoveTrainingDayCommand):
+            other = _find_day(program, command.target_day)
+            for slot in (day, other):
+                if CARDIO_SESSION_KEY in slot and slot.get(FIELD_KIND) != SESSION_TIP:
+                    raise InvalidMutation("a cardio session belongs to a strength day")
+                if slot.get(FIELD_KIND) == REST_TIP:
+                    if slot.get(FIELD_EXERCISES) not in (None, []):
+                        raise InvalidMutation("a rest day cannot contain exercises")
+                else:
+                    _require_day_stays_valid(slot)
+        else:
+            _require_workout_day(day)
+
     if isinstance(command, ReplaceExerciseCommand):
-        changed = _apply_replace(program, command, authority)
+        changed = _apply_replace(program, command, authority, coach=coach)
     elif isinstance(command, AddExerciseCommand):
-        changed = _apply_add(program, command, authority)
+        changed = _apply_add(program, command, authority, coach=coach)
     elif isinstance(command, RemoveExerciseCommand):
         changed = _apply_remove(program, command, authority)
     elif isinstance(command, UpdateExercisePrescriptionCommand):
@@ -546,13 +656,13 @@ def apply_command(document, command, *, native_editor=False, private_definitions
     return (working, True) if changed else (document, False)
 
 
-def _apply_replace(program, command, authority):
+def _apply_replace(program, command, authority, *, coach):
     replacement = normalize_exercise_name(command.replacement)
     if replacement is None:
         raise InvalidMutation("replacement name is required")
 
     day = _find_day(program, command.day)
-    exercises = _exercises_of(day)
+    exercises, placement = _target_list(day, command, authority)
     index = _find_exercise_index(
         exercises, command.exercise, authority, position=command.position)
 
@@ -568,8 +678,8 @@ def _apply_replace(program, command, authority):
         # Because both land in ``updates``, the no-op short-circuit below
         # also still holds — replacing an exercise with an alias of itself
         # resolves back to the same pair and stays a deterministic no-op.
-        resolved = _resolve_placeable_exercise(authority, replacement, day)
-        if (authority.by_id and resolved.exercise_id != entry.get(FIELD_EXERCISE_ID)
+        resolved = _resolve_placeable_exercise(authority, replacement, placement)
+        if ((authority.by_id or coach) and resolved.exercise_id != entry.get(FIELD_EXERCISE_ID)
                 and _identity_matches(exercises, replacement, authority, resolved)):
             raise ExerciseAlreadyPresent("replacement is already in the target day")
         updates[FIELD_NAME] = resolved.canonical_name
@@ -583,10 +693,11 @@ def _apply_replace(program, command, authority):
         return False
     entry.update(updates)
     _require_native_cardio_placement(day, authority, before)
+    _finish_session(day, command)
     return True
 
 
-def _apply_add(program, command, authority):
+def _apply_add(program, command, authority, *, coach):
     name = normalize_exercise_name(command.exercise)
     if name is None:
         raise InvalidMutation("exercise name is required")
@@ -597,18 +708,18 @@ def _apply_add(program, command, authority):
 
     day = _find_day(program, command.day)
     _require_workout_day(day)
+    exercises, placement = _target_list(day, command, authority, create=True)
     entry = {FIELD_NAME: name, FIELD_SETS: sets, FIELD_REPS: reps}
     resolved = None
     if authority is not None:
-        resolved = _resolve_placeable_exercise(authority, name, day)
+        resolved = _resolve_placeable_exercise(authority, name, placement)
         entry[FIELD_NAME] = resolved.canonical_name
-        entry["dinlenme"] = "0"
+        entry["dinlenme"] = "—" if coach else "0"
         entry["not"] = ""
         # Appended last, matching the key order canonicalization produces on
         # the generate/save path, so a mutated canonical plan and a freshly
         # saved one serialize the same way.
         entry[FIELD_EXERCISE_ID] = resolved.exercise_id
-    exercises = _exercises_of(day)
 
     # One exercise identity, at most one slot, per day. Checked here — after
     # the catalog/compatibility/placement gates above, which therefore still
@@ -646,18 +757,19 @@ def _apply_add(program, command, authority):
         # the one already there is a different change than the one requested.
         raise ExerciseAlreadyPresent("exercise is already in the target day")
 
-    if (authority is not None and authority.by_id
+    if ((coach or (authority is not None and authority.by_id))
             and len(exercises) >= NATIVE_MAX_EXERCISES_PER_DAY):
         raise InvalidMutation("workout has reached the exercise limit")
     before = _native_placement_baseline(day, authority)
     exercises.append(entry)
     _require_native_cardio_placement(day, authority, before)
+    _finish_session(day, command)
     return True
 
 
 def _apply_remove(program, command, authority):
     day = _find_day(program, command.day)
-    exercises = _exercises_of(day)
+    exercises, _placement = _target_list(day, command, authority)
     index = _find_exercise_index(
         exercises, command.exercise, authority,
         match_sets=command.match_sets, match_reps=command.match_reps,
@@ -666,6 +778,7 @@ def _apply_remove(program, command, authority):
     exercises.pop(index)
     _require_day_stays_valid(day)
     _require_native_cardio_placement(day, authority, before)
+    _finish_session(day, command)
     return True
 
 
@@ -680,7 +793,7 @@ def _apply_update(program, command, authority):
         updates[FIELD_REPS] = validate_reps(command.reps)
 
     day = _find_day(program, command.day)
-    exercises = _exercises_of(day)
+    exercises, _placement = _target_list(day, command, authority)
     # Identity is only READ here. A prescription change is not an identity
     # change, so ``exercise_id`` and ``isim`` are both left exactly alone.
     entry = exercises[
@@ -692,6 +805,7 @@ def _apply_update(program, command, authority):
         return False
     entry.update(updates)
     _require_native_cardio_placement(day, authority, before)
+    _finish_session(day, command)
     return True
 
 

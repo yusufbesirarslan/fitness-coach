@@ -24,6 +24,7 @@ from app.services.general_training_plan import (
 )
 from app.services.mobile_training_generation import (
     GenerationInProgress,
+    InvalidPlanRequest,
     PlanGenerationCommandError,
     parse_idempotency_key,
 )
@@ -46,7 +47,12 @@ def create_general_training_plan():
         with limiter.limit(GENERAL_PLAN_WRITE_RATELIMIT, key_func=_owner_key):
             pass
         key = parse_idempotency_key(request.headers.get("Idempotency-Key"))
-        general_request = parse_general_request(request.get_json(silent=True))
+        try:
+            include_sessions = mobile_training.sessions_requested(request.args)
+        except mobile_training.InvalidSessionsExpansion:
+            raise InvalidPlanRequest("include_sessions must be exactly 1") from None
+        general_request = parse_general_request(
+            request.get_json(silent=True), sessions=include_sessions)
         result = create_general_plan(g.mobile_user, general_request, key)
         payload = mobile_training.project_current_plan(
             result.plan,
@@ -54,6 +60,7 @@ def create_general_training_plan():
             current_app.config["SECRET_KEY"],
             sessions_enabled=bool(
                 current_app.config.get("FITX_WORKOUT_SESSIONS_ENABLED", False)),
+            include_sessions=include_sessions,
         )
     except RateLimitExceeded as error:
         return mobile_error(

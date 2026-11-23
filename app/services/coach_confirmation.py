@@ -19,7 +19,8 @@ from app.services import ai_consent, coach_plan_tools, plan_confirmation
 from app.services.coach_memory_provenance import display_only_reply
 from app.services.coach_plan_policy import CANCEL, CONFIRM, NONE
 from app.services.coach_plan_tools import results
-from app.services.coach_plan_tools.proposals import is_training_proposal
+from app.services.coach_plan_tools.executor import bind_typed_confirmation
+from app.services.coach_plan_tools.proposals import PREVIEW_KEY, is_training_proposal
 from app.services.coach_plan_tools import clarifications as clar_mod
 from app.services.coach_plan_tools.grounding import (
     PROPOSED_REPS,
@@ -33,7 +34,6 @@ from app.services.coach_plan_tools.grounding import (
     matches_boundary_record,
     recover_no_tool_partial_add,
 )
-from app.services.coach_plan_tools.schemas import REMOVE_EXERCISE_TOOL
 from app.services.coach_plan_tools.weekdays import (
     localize_weekday,
     localize_weekday_text,
@@ -145,9 +145,18 @@ def resolve_pending_turn(user_id, language="tr"):
         return None
     intent = coach_plan_tools.current_confirmation_intent()
     plan_pending = _plan_pending(user_id)
+    if intent in (CONFIRM, CANCEL):
+        bind_typed_confirmation(plan_pending.public_id if plan_pending is not None else None)
     # C2: only while the Nutrition boundary is available (None otherwise, with
     # no read), so a closed gate never blocks ordinary chat.
-    nutrition_pending = coach_plan_tools.nutrition.pending_quote(user_id)
+    observed = (_raw_pending(user_id)
+                if coach_plan_tools.nutrition.tools_enabled() else None)
+    nutrition_id = (observed.public_id if observed is not None
+                    and observed.command_type == coach_plan_tools.nutrition.COMMAND else None)
+    nutrition_pending, nutrition_denied = coach_plan_tools.nutrition.pending_quote_state(
+        user_id, nutrition_id)
+    if nutrition_denied and intent in (CONFIRM, CANCEL):
+        return t("coach.nutrition.confirm_unavailable", locale=language)
     log_pending = active_log_pending(user_id)
     n = (int(plan_pending is not None) + int(nutrition_pending is not None)
          + int(log_pending is not None))
@@ -164,7 +173,7 @@ def resolve_pending_turn(user_id, language="tr"):
         return _complete_grounded_followup(user_id, language)
     if n > 1:
         if intent == CANCEL:
-            return _cancel_all(user_id, language)
+            return _cancel_all(user_id, language, plan_pending, nutrition_pending)
         return t("coach.confirm.ambiguous", locale=language)
     if intent == NONE:
         return t("coach.confirm.clarify", locale=language)
@@ -487,9 +496,13 @@ def _plan_pending(user_id):
 
 
 def _any_plan_pending(user_id):
-    """Training OR (available) Nutrition proposal awaiting an answer."""
-    return (_plan_pending(user_id) is not None
-            or coach_plan_tools.nutrition.pending_quote(user_id) is not None)
+    """Block new log staging while a plan proposal still owns the pending slot."""
+    if _plan_pending(user_id) is not None:
+        return True
+    if not coach_plan_tools.nutrition.tools_enabled():
+        return False
+    observed = _raw_pending(user_id)
+    return observed is not None and observed.command_type == coach_plan_tools.nutrition.COMMAND
 
 
 def _resolve_nutrition(user_id, proposal_id, decision, language):
@@ -597,9 +610,13 @@ def _confirm_plan(user_id, language):
 
 
 def _cancel_plan(user_id, language):
-    coach_plan_tools.execute_plan_tool(
+    result = coach_plan_tools.execute_plan_tool(
         user_id, coach_plan_tools.CANCEL_PENDING_TOOL, {})
-    return t("coach.confirm.cancelled", locale=language)
+    if result.get("status") == results.STATUS_CANCELLED:
+        return t("coach.confirm.cancelled", locale=language)
+    if result.get("status") == results.STATUS_REPLAYED:
+        return _format_plan_applied(result, language)
+    return t("coach.confirm.plan_failed", locale=language)
 
 
 @display_only_reply
@@ -637,12 +654,13 @@ def _cancel_log(user_id, language):
     return t("coach.confirm.cancelled", locale=language)
 
 
-def _cancel_all(user_id, language):
+def _cancel_all(user_id, language, plan_pending, nutrition_pending):
     from app.services import ai_coach
-    if _plan_pending(user_id) is not None:
-        coach_plan_tools.execute_plan_tool(
+    if plan_pending is not None:
+        result = coach_plan_tools.execute_plan_tool(
             user_id, coach_plan_tools.CANCEL_PENDING_TOOL, {})
-    nutrition_pending = coach_plan_tools.nutrition.pending_quote(user_id)
+        if result.get("status") != results.STATUS_CANCELLED:
+            return t("coach.confirm.plan_failed", locale=language)
     if nutrition_pending is not None:
         try:
             outcome = coach_plan_tools.nutrition.execute_resolution(
@@ -696,7 +714,20 @@ def _format_plan_proposal(pending, language):
                 payload.get("match_sets"), payload.get("match_reps")),
             day=day,
         )
-    if kind == "replace_exercise":
+    if kind in ("replace_exercise", "update_exercise_prescription"):
+        changes = [
+            t(f"coach.confirm.prescription_{key}", locale=language, value=payload[key])
+            for key in ("sets", "reps") if key in payload
+        ]
+        if kind == "update_exercise_prescription":
+            return t("coach.confirm.propose_prescription", locale=language,
+                     exercise=payload.get("exercise") or "", day=day,
+                     prescription=", ".join(changes))
+        if changes:
+            return t("coach.confirm.propose_replace_prescription", locale=language,
+                     exercise=payload.get("exercise") or "",
+                     replacement=payload.get("replacement") or "", day=day,
+                     prescription=", ".join(changes))
         return t(
             "coach.confirm.propose_plan_replace",
             locale=language,
@@ -704,6 +735,25 @@ def _format_plan_proposal(pending, language):
             replacement=payload.get("replacement") or "",
             day=day,
         )
+    if kind == "undo_last_change":
+        return t("coach.confirm.propose_training_undo", locale=language)
+    if kind == "move_training_day":
+        target = _day_for_copy(payload.get("target_day") or "", language)
+        preview = payload.get(PREVIEW_KEY) or {}
+        if preview.get("source_rest") != preview.get("target_rest"):
+            rest, other = (day, target) if preview["source_rest"] else (target, day)
+            prompt = t("coach.confirm.propose_rest_swap", locale=language,
+                       rest=rest, other=other)
+        else:
+            prompt = t("coach.confirm.propose_day_swap", locale=language, day=day, target=target)
+        for moves_cardio, source, destination in (
+            (preview.get("source_cardio"), day, target),
+            (preview.get("target_cardio"), target, day),
+        ):
+            if moves_cardio:
+                prompt += " " + t("coach.confirm.move_attached_cardio", locale=language,
+                                   source=source, destination=destination)
+        return prompt
     return t("coach.confirm.propose_plan", locale=language)
 
 
@@ -779,13 +829,7 @@ def _complete_grounded_followup(user_id, language):
         return _format_plan_applied(result, language)
     if result.get("status") == results.STATUS_NEEDS_INPUT:
         return _format_plan_clarification(result, language, user_id)
-    if (tool == REMOVE_EXERCISE_TOOL
-            and result.get("status") == results.STATUS_CONFIRMATION_REQUIRED):
-        # A completed remove choice always stages a proposal. Its copy is
-        # the durable row's, not the model's: handing this turn back to the
-        # provider is how a finished clarification turned into another
-        # question. Remove only: other operations' continuations that stage
-        # a proposal still hand the turn back exactly as before.
+    if result.get("status") == results.STATUS_CONFIRMATION_REQUIRED:
         return canonical_pending_prompt(user_id, language)
     return None
 

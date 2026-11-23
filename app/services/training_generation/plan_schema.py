@@ -69,3 +69,48 @@ REPAIR_MAX_TOKENS = 7000
 
 # Shared bound for native workout projection and manual insertion.
 NATIVE_MAX_EXERCISES_PER_DAY = 32
+
+# G4 (#530): an independent cardio SESSION inside a strength day. Optional,
+# admitted only where a caller opted in (``allow_sessions``), and only on a
+# ``tip="antrenman"`` day. It holds cardio movements only, placed by the same
+# rule as a dedicated ``kardiyo`` day (``CARDIO_SESSION_PLACEMENT``), and it is
+# a separate list: the strength ``egzersizler`` never holds cardio (P3A).
+# Its duration is derived, never stored: every entry is one round of
+# ``"<minutes> dk"``. Pre-G4 code rejects the key (DAY_KEYS is closed), so a
+# release that persists it is forward-only.
+CARDIO_SESSION_KEY = "kardiyo_seansi"
+CARDIO_SESSION_KEYS = frozenset({"egzersizler"})
+CARDIO_SESSION_PLACEMENT = {"tip": CARDIO_TIP}
+CARDIO_SESSION_MINUTES_MAX = 600
+SESSION_TIP = "antrenman"
+
+
+def cardio_session_of(day):
+    """The day's cardio session block, or ``None`` (pure, shape-tolerant)."""
+    if not isinstance(day, dict):
+        return None
+    session = day.get(CARDIO_SESSION_KEY)
+    return session if isinstance(session, dict) else None
+
+
+def day_exercise_lists(day):
+    """Every exercise list on ``day``: the day's own list, then its session's.
+
+    The one walker for code that must see EVERY exercise a plan holds
+    (identity ownership, injury and youth screens). Shape-tolerant: a
+    malformed list contributes nothing here; validators refuse it elsewhere.
+    """
+    lists = []
+    if isinstance(day, dict):
+        exercises = day.get("egzersizler")
+        if isinstance(exercises, list):
+            lists.append(exercises)
+        session = cardio_session_of(day)
+        if session is not None and isinstance(session.get("egzersizler"), list):
+            lists.append(session["egzersizler"])
+    return lists
+
+
+def session_minutes(exercises) -> int:
+    """Total minutes of a validated cardio session's ``"<n> dk"`` entries."""
+    return sum(int(entry["tekrar"].split(" ", 1)[0]) for entry in exercises)
