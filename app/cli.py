@@ -103,7 +103,7 @@ def _user_child_models():
         Activity, AiAllowanceBucket, AiStarterGrant, AiUsageReservation, AppleAccountAssociation, AppleSubscription, CoachConversation, CognitoSession, CustomMeal, DailyActivity, ExerciseNote,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, MealLogRetainedTotal, MealPhotoCleanup, MobileAuthSession, Notification,
-        NutritionPlan, PendingAction,
+        NutritionPlan, NutritionPlanEditOperation, NutritionPlanMutationRecord, PendingAction,
         PlanMutationRecord, PrivateExercise, TrainingPlanConfirmationProposal,
         TrainingAllowanceCompensation, TrainingPlanGenerationAllowance, TrainingPlanGenerationOperation,
         TrainingPlanReplacementGenerationOperation, TrainingPlanReplacementProposal,
@@ -119,7 +119,8 @@ def _user_child_models():
     return (
         # MON-02-BE-03A: reservations point at buckets; the grant row goes last.
         TrainingAllowanceCompensation, AiUsageReservation, AiAllowanceBucket, AiStarterGrant,
-        AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
+        AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn,
+        NutritionPlanEditOperation, NutritionPlanMutationRecord, NutritionPlan,
         # PlanMutationRecord before TrainingPlan: the journal describes plan
         # history, so nothing should ever observe entries for a plan that is
         # already gone.

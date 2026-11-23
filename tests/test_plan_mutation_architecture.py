@@ -14,6 +14,8 @@ from tests.test_dependency_boundaries import _python_imports
 
 MUTATION_ROOT = Path("app/services/plan_mutation")
 APP_ROOT = Path("app")
+NUTRITION_STORE = Path("app/services/nutrition_plan_store.py")
+NUTRITION_SERVICE = Path("app/services/nutrition_plan_mutation/service.py")
 
 # The mutation domain sits *below* every AI/prompt/provider concern. A single
 # import from this list would invert the dependency direction the PR establishes.
@@ -100,6 +102,7 @@ def test_only_approved_consumers_import_the_domain():
     consumer appearing quietly — a blueprint, a job, a second AI surface — each
     of which would need its own authorization, identity and idempotency story.
     Adding a name here is cheap; the point is that it has to be a decision.
+    C1 may reuse the pure context validator; Training entrypoints stay closed.
     """
     approved = {
         Path("app/services/plan_replacement.py"),
@@ -129,6 +132,12 @@ def test_only_approved_consumers_import_the_domain():
         if path in approved or MUTATION_ROOT in path.parents:
             continue
         for imported, _lineno in _python_imports(path):
+            # C1 reuses ONLY the pure envelope validator, never Training
+            # mutation commands, entrypoints, journal or persistence authority.
+            if path == NUTRITION_SERVICE and imported in {
+                    "app.services.plan_mutation.context",
+                    "app.services.plan_mutation.context.validate_context"}:
+                continue
             if _module_matches(imported, "app.services.plan_mutation"):
                 consumers.add(str(path))
 
@@ -173,12 +182,14 @@ def _plan_data_assignments(path):
 
 
 def test_targeted_plan_writes_have_a_single_owner():
-    """Only the mutation service may assign an existing plan row's ``plan_data``.
+    """Training rows have one targeted writer; Nutrition has its own guarded store.
 
     A second targeted writer would recreate exactly the "second plan authority"
     this PR forbids. The pre-existing whole-plan save path is *not* on this list
     and does not need to be: it constructs a brand-new ``TrainingPlan(...)``
-    rather than assigning the attribute on a loaded row.
+    rather than assigning the attribute on a loaded row. C1 permits only the
+    exact Nutrition helper, with a behavioral refusal for actual Training rows
+    even when all snapshot/version bindings match. No file-wide exemption.
     """
     approved = {Path("app/services/plan_mutation/service.py")}
     writers = []
@@ -186,6 +197,9 @@ def test_targeted_plan_writes_have_a_single_owner():
         if path in approved:
             continue
         for lineno in _plan_data_assignments(path):
+            if path == NUTRITION_STORE and lineno in _function_write_lines(
+                    path, "write_targeted_locked", "plan_data"):
+                continue  # guarded Nutrition rows only; never TrainingPlan
             writers.append(f"{path}:{lineno}")
 
     assert not writers, f"unapproved plan_data writers: {writers}"
@@ -231,12 +245,39 @@ def _calls_named(path, name):
     return lines
 
 
+def _function_write_lines(path, function, attribute):
+    """A separate domain gets one named writer, not a file-wide exemption."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    scopes = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+              and node.name == function]
+    assert len(scopes) == 1
+    scope = scopes[0]
+    return {line for line in _attribute_assignments(path, attribute)
+            if scope.lineno < line <= scope.end_lineno}
+
+
+def test_nutrition_writer_scope_does_not_hide_a_second_writer(tmp_path):
+    path = tmp_path / "store.py"
+    path.write_text("def write_targeted_locked(row):\n    row.plan_data = 'ok'\n"
+                    "def rogue(row):\n    row.plan_data = 'bad'\n")
+    assert set(_plan_data_assignments(path)) - _function_write_lines(
+        path, "write_targeted_locked", "plan_data") == {4}
+
+
+def test_c1_does_not_import_training_models_or_mutation_entrypoints():
+    imports = {name for name, _ in _python_imports(NUTRITION_SERVICE)}
+    assert {name for name in imports if _module_matches(name, "app.services.plan_mutation")} == {
+        "app.services.plan_mutation.context", "app.services.plan_mutation.context.validate_context"}
+    assert not imports & {"app.models.TrainingPlan", "app.models.PlanMutationRecord"}
+
+
 def test_the_plan_version_has_a_single_writer():
-    """Only the mutation service may move ``mutation_version``.
+    """Each persistence domain has one owner of ``mutation_version``.
 
     A version another module can advance is not a version: two writers means two
     opinions about where history stands, and an undo standing on the wrong one
-    restores a snapshot over state it does not explain.
+    restores a snapshot over state it does not explain. The separately guarded
+    Nutrition helper owns only Nutrition versions, never Training versions.
     """
     approved = {Path("app/services/plan_mutation/service.py")}
     writers = []
@@ -244,6 +285,9 @@ def test_the_plan_version_has_a_single_writer():
         if path in approved:
             continue
         for lineno in _attribute_assignments(path, "mutation_version"):
+            if path == NUTRITION_STORE and lineno in _function_write_lines(
+                    path, "write_targeted_locked", "mutation_version"):
+                continue
             writers.append(f"{path}:{lineno}")
 
     assert not writers, f"unapproved mutation_version writers: {writers}"

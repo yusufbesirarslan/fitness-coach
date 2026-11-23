@@ -82,6 +82,7 @@ from .identity import (
 from .parser import ToolArgumentError, build_command
 from .proposals import (
     binding_matches,
+    is_training_proposal,
     decode_command,
     encode_command,
     plan_binding,
@@ -231,6 +232,8 @@ def published_plan_tool_defs(user_id=None):
         if intent in (CONFIRM, CANCEL):
             return ()
         return PLAN_MUTATION_TOOL_DEFS
+    if not is_training_proposal(pending):
+        return ()
     if new_proposal_created_this_turn():
         # Staged this turn: the user has not seen it yet. Confirm/cancel
         # belong to a later authenticated turn.
@@ -733,7 +736,8 @@ def _confirm_pending(user_id):
             return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
         public_id = pending.public_id
     row = lock_proposal(user_id, public_id)
-    if row is None:
+    if not is_training_proposal(row):
+        db.session.rollback()
         return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
@@ -825,6 +829,9 @@ def _cancel_pending(user_id):
         if named is not None:
             return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
         return results.cancelled_pending_result()
+    if not is_training_proposal(row):
+        db.session.rollback()
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
     if already is not None:

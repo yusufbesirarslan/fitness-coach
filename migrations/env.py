@@ -116,6 +116,14 @@ def run_migrations_online():
             )
 
             with context.begin_transaction():
+                # Retired revisions (app/retired_revisions.py) are refused, or
+                # reconciled when explicitly requested, in this same
+                # transaction and before Alembic reads the current heads.
+                from app.retired_revisions import guard
+                reconciled = guard(connection, context.script)
+                if reconciled is not None:
+                    logger.warning("retired revision %s verified; version pointer "
+                                   "moved to %s before upgrade", *reconciled)
                 context.run_migrations()
     finally:
         if lock_timeout_ms is not None:

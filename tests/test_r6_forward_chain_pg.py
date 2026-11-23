@@ -3,10 +3,12 @@
 The historical R6 baseline was ``c6f8b0d2e4a1`` (restore receipt, 2026-11-09).
 Preserve its four reviewed forward migrations as a frozen prefix, then add
 the source-qualified M4 monitoring revision, the account-deletion
-destruction record, and owner-private exercises:
+destruction record, owner-private exercises, and the dormant C1 Nutrition
+history expansion (re-landed as 19cb998acd2f; the reverted c1a9b7e5d301 is
+retired, see app/retired_revisions.py):
 
     c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
-        -> f01a4e000003 -> ad17de1e0001 -> e5b27aa4101c
+        -> f01a4e000003 -> ad17de1e0001 -> e5b27aa4101c -> 19cb998acd2f
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -23,8 +25,8 @@ the CHAIN qualification on a database built only by the real Alembic history:
 * a database at ``c6f8b0d2e4a1`` populated the way production is (completion
   floor raised, historical Pump Check evidence, photo-free claims, legacy
   FatSecret rows, narrow-scope allowance buckets) is brought to head by the
-  real ``flask release-prepare``; every pre-existing row is unchanged, nothing
-  is backfilled, deleted or retroactively authorized (no consent rows, no
+  real ``flask release-prepare``; every pre-existing row is unchanged, no
+  existing field is rewritten, deleted or retroactively authorized (no consent rows, no
   erasure rows), and the O2-B completion-claim retention fence is installed;
 * the whole chain runs in ONE transaction (migrations/env.py): a lock that
   blocks the third migration rolls the first two back too, the previous
@@ -72,7 +74,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
-CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c")
+CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c", "19cb998acd2f")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -84,7 +86,8 @@ SEEDED = ("user", "meal_log", "custom_meal", "custom_meal_item", "weekly_check_i
           "completion_capability_floor", "activity", "activity_clap")
 NEW_TABLES = ("health_consent_state", "health_consent_event", "meal_log_retained_total",
               "health_erasure", "health_legal_hold", "health_erasure_retry",
-              "account_deletion_record", "private_exercise")
+              "account_deletion_record", "private_exercise",
+              "nutrition_plan_edit_operation", "nutrition_plan_mutation_record")
 PROVIDER_COLUMNS = {"meal_log": ("provider_items", "provider_acquired_at", "provider_expired_at"),
                     "custom_meal_item": ("provider_acquired_at", "provider_expired_at")}
 
@@ -275,7 +278,7 @@ def _verify_head_fence(url):
 
 # ── 1. the graph (no database) ──────────────────────────────────────────────
 
-def test_release_chain_preserves_reviewed_r6_prefix_and_adds_only_m4():
+def test_release_chain_preserves_reviewed_r6_prefix_and_additive_successors():
     from alembic.script import ScriptDirectory
     script = ScriptDirectory(str(ROOT / "migrations"))
     assert script.get_heads() == [HEAD]
@@ -488,7 +491,8 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
     # Nothing retroactively authorized or erased; no retained totals invented.
     for table in ("health_consent_state", "health_consent_event", "health_erasure",
                   "health_legal_hold", "meal_log_retained_total",
-                  "account_deletion_record", "private_exercise"):
+                  "account_deletion_record", "private_exercise",
+                  "nutrition_plan_edit_operation", "nutrition_plan_mutation_record"):
         assert _sql(chain_url, f"SELECT count(*) FROM {table}")[0][0] == 0, table
     definition, valid = _bucket_scope(chain_url)
     assert valid is True and "'LAUNCH_FREE'" in definition and "'STARTER'" in definition
@@ -802,3 +806,87 @@ def test_downgrade_refuses_once_erasure_or_legal_hold_evidence_exists(
     assert _versions(chain_url) == [HEAD]
     assert all(_has_tables(chain_url, NEW_TABLES).values())
     _verify_head_fence(chain_url)
+
+
+# ── 6. retired C1 stamp (c1a9b7e5d301, reverted by R1) ──────────────────────
+
+RETIRED_C1 = "c1a9b7e5d301"
+C1_TABLES = ("nutrition_plan", "nutrition_plan_edit_operation", "nutrition_plan_mutation_record")
+
+
+def _retired_c1_database(monkeypatch, url):
+    """What the reverted C1 left behind: the real chain to the shared parent
+    ``ad17de1e0001``, C1's schema and history (byte-identical schema code, now
+    in ``HEAD``), stamped ``c1a9b7e5d301``, and no ``private_exercise``."""
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    _upgrade_to(monkeypatch, "ad17de1e0001")
+    module = ScriptDirectory(str(ROOT / "migrations")).get_revision(HEAD).module
+    engine = _engine(url)
+    try:
+        with engine.begin() as connection:
+            owner = connection.execute(sa.text(
+                'INSERT INTO "user" (username, email, cognito_sub, referral_code) '
+                "VALUES ('c1a9_owner', 'c1a9_owner@example.com', 'sub-c1a9', 'C1A9HIST') "
+                "RETURNING id")).scalar()
+            connection.execute(sa.text(
+                "INSERT INTO nutrition_plan (user_id, plan_data, created_at) "
+                "VALUES (:u, :p, now())"), {"u": owner, "p": ' {"exact": "bytes"} '})
+            with Operations.context(MigrationContext.configure(connection)):
+                module.upgrade()
+            connection.execute(sa.text(
+                "INSERT INTO nutrition_plan_mutation_record (public_id, user_id, "
+                "plan_lineage_id, idempotency_key, command_fingerprint, operation_kind, "
+                "before_version, after_version, before_snapshot, after_snapshot, created_at) "
+                "VALUES ('c1a9-pub', :u, 'c1a9-lineage', 'c1a9-key', :f, 'mutation', 0, 1, "
+                "'before', 'after', now())"), {"u": owner, "f": "f" * 64})
+            connection.execute(sa.text("UPDATE alembic_version SET version_num = :r"),
+                               {"r": RETIRED_C1})
+    finally:
+        engine.dispose()
+    assert _versions(url) == [RETIRED_C1]
+    assert _has_tables(url, ["private_exercise"]) == {"private_exercise": False}
+
+
+def test_retired_c1_stamp_is_refused_before_any_migration(chain_url, monkeypatch):
+    monkeypatch.delenv("FITX_RECONCILE_RETIRED_REVISION", raising=False)
+    _retired_c1_database(monkeypatch, chain_url)
+    before = _snapshot(chain_url, C1_TABLES)
+    with pytest.raises(SystemExit):
+        _upgrade_to(monkeypatch, "head")
+    result = _release_prepare(monkeypatch)
+    assert result.exit_code != 0, result.output
+    assert _versions(chain_url) == [RETIRED_C1]
+    assert _has_tables(chain_url, ["private_exercise"]) == {"private_exercise": False}
+    assert _snapshot(chain_url, C1_TABLES) == before
+
+
+def test_retired_c1_stamp_reconciles_only_on_explicit_verified_opt_in(chain_url, monkeypatch):
+    _retired_c1_database(monkeypatch, chain_url)
+    before = _snapshot(chain_url, C1_TABLES)
+    monkeypatch.setenv("FITX_RECONCILE_RETIRED_REVISION", RETIRED_C1)
+    result = _release_prepare(monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert _versions(chain_url) == [HEAD]
+    # private_exercise is created by e5b27aa4101c; C1 rows, lineage and
+    # history are byte-for-byte unchanged.
+    assert _has_tables(chain_url, ["private_exercise"]) == {"private_exercise": True}
+    assert _snapshot(chain_url, C1_TABLES) == before
+    rerun = _release_prepare(monkeypatch)
+    assert rerun.exit_code == 0, rerun.output
+    assert _versions(chain_url) == [HEAD]
+    assert _snapshot(chain_url, C1_TABLES) == before
+
+
+def test_retired_c1_reconciliation_commits_with_the_chain_or_not_at_all(chain_url, monkeypatch):
+    _retired_c1_database(monkeypatch, chain_url)
+    # A drifted private_exercise makes e5b27aa4101c refuse AFTER the pointer
+    # move; the one migration transaction must roll the move back too.
+    _sql(chain_url, "CREATE TABLE private_exercise (exercise_id VARCHAR(64) PRIMARY KEY)")
+    before = _snapshot(chain_url, C1_TABLES)
+    monkeypatch.setenv("FITX_RECONCILE_RETIRED_REVISION", RETIRED_C1)
+    result = _release_prepare(monkeypatch)
+    assert result.exit_code != 0, result.output
+    assert _versions(chain_url) == [RETIRED_C1]
+    assert _snapshot(chain_url, C1_TABLES) == before

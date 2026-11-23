@@ -296,14 +296,18 @@ def test_real_receipt_survives_new_engine_and_rejects_unsafe_file(tmp_path):
 
 
 # The source graph's single head. It is the adult migration's descendant once
-# later migrations land (owner-private exercises), so a database still at the
-# adult migration is BEHIND head and must not pass --require-at-head.
-SOURCE_HEAD = 'e5b27aa4101c'
+# later migrations land (owner-private exercises, then the re-landed C1), so a
+# database still at the adult migration or at owner-private exercises is
+# BEHIND head and must not pass --require-at-head. The retired C1 stamp
+# c1a9b7e5d301 is not in the graph at all (app/retired_revisions.py).
+SOURCE_HEAD = '19cb998acd2f'
 
 
 @pytest.mark.parametrize('current, success', [(None, False), ([], False),
                                              ([SOURCE_HEAD], True),
                                              ([tx.ADULT_MIGRATION], False),
+                                             (['e5b27aa4101c'], False),
+                                             (['c1a9b7e5d301'], False),
                                              (['d7e3a9c1f5b8'], False),
                                              ([SOURCE_HEAD, 'unexpected'], False)])
 def test_read_only_schema_command_requires_all_expected_heads(app, current, success):
