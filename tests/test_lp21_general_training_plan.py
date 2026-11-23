@@ -1104,13 +1104,24 @@ def test_cardio_fingerprint_binds_every_field_and_keeps_v1_identity():
 
 def test_every_accepted_request_names_its_template_and_nothing_else_does():
     space = list(identity.request_space())
-    # 6 strength-only + (3 + 2 cardio-day counts) * 3 equipment * 6 types
-    # * 4 durations * 4 intensities.
-    assert len(space) == 6 + 5 * 3 * 6 * 4 * 4
+    # 6 strength-only + (6 + 6 cardio counts, G4 sessions) * 3 equipment
+    # * 6 types * 4 durations * 4 intensities.
+    assert len(space) == 6 + 12 * 3 * 6 * 4 * 4
+    legacy = 0
     for body in space:
-        request = parse_general_request(body)
+        request = parse_general_request(body, sessions=True)
         assert identity.template_for_fingerprint(request.fingerprint) \
             == body["template"]
+        try:
+            legacy_request = parse_general_request(body)
+        except InvalidPlanRequest:
+            # Only the G4-widened counts need the sessions opt-in.
+            assert body["kardiyo_gun"] not in identity.cardio_day_choices(body["gun_sayisi"])
+            continue
+        legacy += 1
+        # Same body, same identity, opt-in or not (pre-G4 fingerprints hold).
+        assert legacy_request.fingerprint == request.fingerprint
+    assert legacy == 6 + 5 * 3 * 6 * 4 * 4
     assert identity.template_for_fingerprint("0" * 64) is None
     assert identity.template_for_fingerprint(None) is None
 

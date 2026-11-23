@@ -288,7 +288,7 @@ def _stub_pipeline(monkeypatch, preferences=None):
     )
     monkeypatch.setattr(training_service, "persist_posted_injuries", lambda *a, **k: None)
     monkeypatch.setattr(training_service, "parse_preferences", lambda *a, **k: preferences)
-    monkeypatch.setattr(training_service, "require_supported", lambda prefs: prefs)
+    monkeypatch.setattr(training_service, "require_supported", lambda prefs, **_: prefs)
     monkeypatch.setattr(training_service, "build_features", lambda *a, **k: object())
     monkeypatch.setattr(training_service, "classify_user", lambda *a, **k: classification)
     monkeypatch.setattr(training_service, "build_program_context", lambda *a, **k: object())

@@ -48,8 +48,10 @@ def canonical_document(request: GeneralPlanRequest, language) -> str:
         else:
             program = build_cardio_program(
                 request.days, request.equipment, cardio.cardio_type,
-                cardio.days, cardio.minutes, cardio.intensity, language)
-        document = validate_plan_for_save({"program": program}, context)
+                cardio.days, cardio.minutes, cardio.intensity, language,
+                sessions=request.sessions)
+        document = validate_plan_for_save(
+            {"program": program}, context, allow_sessions=request.sessions)
     except (GenerationOutputError, KeyError, ValueError) as error:
         raise GeneralPlanUnavailable() from error
     return json.dumps(

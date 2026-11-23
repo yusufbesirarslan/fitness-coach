@@ -6,6 +6,8 @@ Numeric clamps and weekday backfill are gone — malformed values are rejected.
 """
 from __future__ import annotations
 
+import re
+
 from app.services import injury_constraints
 from app.services.exercise_catalog import load_exercise_catalog
 from app.services.training_generation.output_errors import (
@@ -15,6 +17,9 @@ from app.services.training_generation.output_errors import (
 from app.services.training_generation.plan_schema import (
     CALORIE_MAX,
     CALORIE_MIN,
+    CARDIO_SESSION_KEY,
+    CARDIO_SESSION_KEYS,
+    CARDIO_SESSION_MINUTES_MAX,
     DAY_KEYS,
     DURATION_MAX,
     DURATION_MIN,
@@ -31,12 +36,14 @@ from app.services.training_generation.plan_schema import (
     PROVIDER_EXERCISE_KEYS,
     REPS_MAX,
     REST_MAX,
+    SESSION_TIP,
     SCORE_MAX,
     SCORE_MIN,
     SET_MAX,
     SET_MIN,
     VALID_TIPS,
     WEEKDAYS,
+    day_exercise_lists,
 )
 
 
@@ -131,14 +138,53 @@ def _validate_provider_exercise(raw) -> dict:
     }
 
 
+_SESSION_MINUTES_RE = re.compile(r"([1-9][0-9]{0,2}) dk", re.ASCII)
+
+
+def _validate_exercise_list(exercises_raw, label, *, allow_exercise_id, provider_identity):
+    if not isinstance(exercises_raw, list):
+        raise SchemaInvalidError(f"{label} liste olmalı")
+    if provider_identity:
+        return [_validate_provider_exercise(item) for item in exercises_raw]
+    return [
+        _validate_exercise(item, allow_exercise_id=allow_exercise_id)
+        for item in exercises_raw
+    ]
+
+
+def validate_cardio_session(raw, *, allow_exercise_id=True, provider_identity=False) -> dict:
+    """G4 cardio session: exact keys, >=1 timed one-round entry, bounded total."""
+    session = _require_mapping(raw, "kardiyo_seansi")
+    _forbid_unknown(session, CARDIO_SESSION_KEYS, "kardiyo_seansi")
+    if "egzersizler" not in session:
+        raise SchemaInvalidError("kardiyo_seansi missing egzersizler")
+    exercises = _validate_exercise_list(
+        session["egzersizler"], "kardiyo_seansi egzersizler",
+        allow_exercise_id=allow_exercise_id, provider_identity=provider_identity)
+    if not exercises:
+        raise SchemaInvalidError("kardiyo_seansi en az bir egzersiz içermeli")
+    total = 0
+    for exercise in exercises:
+        match = _SESSION_MINUTES_RE.fullmatch(exercise["tekrar"])
+        if exercise["set"] != 1 or match is None:
+            raise SchemaInvalidError(
+                "kardiyo_seansi egzersizi tek set ve dakika (\"<n> dk\") olmalı")
+        total += int(match[1])
+    if total > CARDIO_SESSION_MINUTES_MAX:
+        raise SchemaInvalidError("kardiyo_seansi süresi sınırı aşıyor")
+    return {"egzersizler": exercises}
+
+
 def _validate_day(
     raw,
     *,
     allow_exercise_id: bool = False,
     provider_identity: bool = False,
+    allow_sessions: bool = False,
 ) -> dict:
     day = _require_mapping(raw, "gün")
-    _forbid_unknown(day, DAY_KEYS, "gün")
+    _forbid_unknown(
+        day, DAY_KEYS | {CARDIO_SESSION_KEY} if allow_sessions else DAY_KEYS, "gün")
     for key in DAY_KEYS:
         if key not in day:
             raise SchemaInvalidError(f"gün missing {key}")
@@ -148,23 +194,16 @@ def _validate_day(
     tip = _require_str(day["tip"], "tip", 32)
     if tip not in VALID_TIPS:
         raise SchemaInvalidError("tip alanı antrenman/dinlenme/kardiyo olmalı")
-    exercises_raw = day["egzersizler"]
-    if not isinstance(exercises_raw, list):
-        raise SchemaInvalidError("egzersizler liste olmalı")
-    if provider_identity:
-        exercises = [_validate_provider_exercise(item) for item in exercises_raw]
-    else:
-        exercises = [
-            _validate_exercise(item, allow_exercise_id=allow_exercise_id)
-            for item in exercises_raw
-        ]
+    exercises = _validate_exercise_list(
+        day["egzersizler"], "egzersizler",
+        allow_exercise_id=allow_exercise_id, provider_identity=provider_identity)
     if tip == "antrenman" and len(exercises) < 1:
         raise SchemaInvalidError("antrenman günü en az bir egzersiz içermeli")
     if tip == "kardiyo" and len(exercises) < 1:
         raise SchemaInvalidError("kardiyo günü en az bir egzersiz içermeli")
     if tip == "dinlenme" and exercises:
         raise SchemaInvalidError("dinlenme günü egzersiz içeremez")
-    return {
+    validated = {
         "gun": gun,
         "tip": tip,
         "odak": _require_str(day["odak"], "odak", FOCUS_MAX),
@@ -173,6 +212,16 @@ def _validate_day(
             day["tahmini_kalori"], "tahmini_kalori", CALORIE_MIN, CALORIE_MAX),
         "egzersizler": exercises,
     }
+    if CARDIO_SESSION_KEY in day:
+        # Only reachable with allow_sessions (the key is unknown otherwise).
+        # A session belongs to a strength day: a cardio or rest day carrying
+        # one would be a second, misleading cardio placement.
+        if tip != SESSION_TIP:
+            raise SchemaInvalidError("kardiyo_seansi yalnız antrenman gününde olabilir")
+        validated[CARDIO_SESSION_KEY] = validate_cardio_session(
+            day[CARDIO_SESSION_KEY], allow_exercise_id=allow_exercise_id,
+            provider_identity=provider_identity)
+    return validated
 
 
 def _validate_ozet(raw) -> dict:
@@ -207,6 +256,7 @@ def validate_plan_structure(
     require_ozet: bool = False,
     allow_exercise_id: bool = False,
     provider_identity: bool = False,
+    allow_sessions: bool = False,
 ) -> dict:
     """Validate the canonical 7-day shape of a CLIENT- or provider-authored plan.
 
@@ -224,6 +274,11 @@ def validate_plan_structure(
     must keep rejecting ``exercise_context`` and every other authority key, so
     a caller cannot declare its own equipment truth. The server attaches that
     block after validation, from the verified token alone.
+
+    ``allow_sessions`` (G4) admits the optional ``kardiyo_seansi`` block on a
+    strength day. Persisted-plan readers pass it (a stored plan is read
+    whichever client asks); writers pass it only for an opted-in request, so
+    a legacy request can never produce one.
     """
     if provider_identity and allow_exercise_id:
         raise TypeError("provider_identity and allow_exercise_id are exclusive")
@@ -239,6 +294,7 @@ def validate_plan_structure(
             item,
             allow_exercise_id=allow_exercise_id,
             provider_identity=provider_identity,
+            allow_sessions=allow_sessions,
         )
         for item in program_raw
     ]
@@ -278,14 +334,14 @@ def annotate_injuries(plan: dict, injuries: str = "") -> list[dict]:
         return warnings
     catalog = load_exercise_catalog()
     for day in plan["program"]:
-        for ex in day["egzersizler"]:
+        for ex in (ex for exercises in day_exercise_lists(day) for ex in exercises):
             exercise_id = ex.get(EXERCISE_ID_KEY)
             entry = catalog.by_id.get(exercise_id) if isinstance(exercise_id, str) else None
             if entry is None or ex.get("isim") != entry.canonical_name:
                 raise TypeError(
                     "injury annotation requires canonical exercise identity")
     for day in plan["program"]:
-        for ex in day["egzersizler"]:
+        for ex in (ex for exercises in day_exercise_lists(day) for ex in exercises):
             hit = injury_constraints.find_contraindicated(ex["isim"], injuries)
             if hit:
                 warn = f"⚠️ SAKATLIK RİSKİ ({hit}) - güvenli alternatifle değiştir"
@@ -297,7 +353,9 @@ def annotate_injuries(plan: dict, injuries: str = "") -> list[dict]:
     return warnings
 
 
-def validate_generated_plan(plan: dict, preferences, injuries: str = "") -> tuple[dict, list[dict]]:
+def validate_generated_plan(
+    plan: dict, preferences, injuries: str = "", *, allow_sessions: bool = False,
+) -> tuple[dict, list[dict]]:
     """Structural + semantic validation of a PROVIDER plan (generate, tests).
 
     Uses the PR B provider exercise shape (``exercise_id``, no ``isim``).
@@ -310,6 +368,7 @@ def validate_generated_plan(plan: dict, preferences, injuries: str = "") -> tupl
     )
 
     structured = validate_plan_structure(
-        plan, require_ozet=True, provider_identity=True)
+        plan, require_ozet=True, provider_identity=True,
+        allow_sessions=allow_sessions)
     validate_plan_semantics(structured, preferences)
     return structured, []

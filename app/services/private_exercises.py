@@ -146,9 +146,10 @@ def resolve_owned_historical_exercise(user_id, exercise_id):
 
 
 def program_exercise_ids(program):
+    # G4: a strength day's cardio session holds identities too.
+    from app.services.training_generation.plan_schema import day_exercise_lists
     for day in program:
-        exercises = day.get("egzersizler") if isinstance(day, dict) else None
-        if isinstance(exercises, list):
+        for exercises in day_exercise_lists(day):
             for exercise in exercises:
                 if isinstance(exercise, dict):
                     yield exercise.get("exercise_id")

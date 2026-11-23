@@ -6,7 +6,11 @@ accepted PR2 request? Exercise identity and equipment truth are PR4.
 from __future__ import annotations
 
 from app.services.training_generation.output_errors import SemanticInvalidError
-from app.services.training_generation.plan_schema import MIN_TRAINING_EXERCISES
+from app.services.training_generation.plan_schema import (
+    CARDIO_SESSION_KEY,
+    MIN_TRAINING_EXERCISES,
+    session_minutes,
+)
 from app.services.training_generation.preference_contract import (
     DAY_COUNTS,
     canonical_style,
@@ -32,6 +36,11 @@ def validate_plan_semantics(plan: dict, preferences=None) -> dict:
     training = [day for day in program if day["tip"] == "antrenman"]
     cardio = [day for day in program if day["tip"] == "kardiyo"]
     rest = [day for day in program if day["tip"] == "dinlenme"]
+    # G4: a strength day's cardio session is one more cardio session, never a
+    # day. Structure already admitted it only for an opted-in caller, only on
+    # a strength day, and the strength list stays strength-only, so every
+    # count below is unchanged for a plan without sessions.
+    sessions = [day for day in training if CARDIO_SESSION_KEY in day]
 
     if preferences is None:
         if len(training) not in DAY_COUNTS:
@@ -45,10 +54,10 @@ def validate_plan_semantics(plan: dict, preferences=None) -> dict:
         if len(training) != expected_training:
             raise SemanticInvalidError(
                 f"toplam antrenman günü {expected_training} olmalı")
-        if len(cardio) != expected_cardio:
+        if len(cardio) + len(sessions) != expected_cardio:
             raise SemanticInvalidError(
                 f"toplam kardiyo günü {expected_cardio} olmalı")
-        if len(rest) != 7 - expected_training - expected_cardio:
+        if len(rest) != 7 - expected_training - len(cardio):
             raise SemanticInvalidError("dinlenme günü sayısı kanonik tahsise uymalı")
 
         requested = preferences.sure
@@ -57,8 +66,11 @@ def validate_plan_semantics(plan: dict, preferences=None) -> dict:
                 raise SemanticInvalidError("antrenman süresi istenen süreyle uyumsuz")
         if expected_cardio:
             cardio_dur = preferences.kardiyo_sure
-            for day in cardio:
-                if day["sure_dk"] < max(10, cardio_dur // 2) or day["sure_dk"] > cardio_dur * 2:
+            durations = [day["sure_dk"] for day in cardio] + [
+                session_minutes(day[CARDIO_SESSION_KEY]["egzersizler"])
+                for day in sessions]
+            for duration in durations:
+                if duration < max(10, cardio_dur // 2) or duration > cardio_dur * 2:
                     raise SemanticInvalidError("kardiyo süresi istenen süreyle uyumsuz")
 
         # Style session-size only. Exercise names, equipment, and SBD/%1RM

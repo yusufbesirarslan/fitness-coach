@@ -12,10 +12,10 @@ from test_mobile_log_food_api import as_mobile, manual_command, provider_command
 def test_f01_expansion_follows_the_existing_launch_free_revision():
     from pathlib import Path
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / "migrations"))
-    assert scripts.get_heads() == ["19cb998acd2f"]  # C1 follows owner-private exercises (re-landed past e5b27aa4101c)
+    assert scripts.get_heads() == ["5cc5aa7e47ba"]  # G4 session outcomes follow C1 (re-landed past e5b27aa4101c)
     assert scripts.get_revision("f01c0a1e0001").down_revision == "d8f1a3c5e7b9"
     assert scripts.get_revision("d8f1a3c5e7b9").down_revision == "c6f8b0d2e4a1"
-    assert len(list(scripts.walk_revisions())) == 68
+    assert len(list(scripts.walk_revisions())) == 69
 
 
 @pytest.mark.parametrize("eligibility", [False, True])
