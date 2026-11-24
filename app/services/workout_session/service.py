@@ -174,6 +174,7 @@ def _existing_or_conflict(
 def start_session(
     user_id: int, *, today: Optional[date] = None,
     native: Optional[NativeWorkoutIdentity] = None,
+    finish_without_photo: Optional[dict] = None,
 ) -> SessionResult:
     """Start (or idempotently replay) the user's current workout session.
 
@@ -205,6 +206,9 @@ def start_session(
     later waits for this commit. The unlocked first check stays as the cheap
     common-case refusal and is not trusted on its own.
     """
+    # A direct finish uses the same session identity and transition locks.
+    # A new session is flushed only to link history and is committed by the
+    # completion authority together with its terminal state and rewards.
     day = today or app_today()
     now = datetime.utcnow()
     try:
@@ -222,22 +226,34 @@ def start_session(
         existing = get_active_session(user_id)
         if existing is not None:
             result = _existing_or_conflict(existing, day, snapshot, native)
+            # A direct finish does not own an existing device checkpoint
+            # queue. The session-specific completion requires its revision.
+            if finish_without_photo is not None:
+                result = SessionResult(SessionOutcome.CONFLICT, session=result.session)
             db.session.rollback()
             return result
 
+        completed_outcome = (SessionOutcome.ALREADY_COMPLETED
+                             if finish_without_photo is not None
+                             else SessionOutcome.INVALID_TRANSITION)
         if completed_today(user_id, day):
             db.session.rollback()
             _log("start_refused_completed_today")
-            return SessionResult(SessionOutcome.INVALID_TRANSITION)
+            return SessionResult(completed_outcome)
 
         # LP-13: serialize with the completion claim write, then decide again.
         lock_completion_day(user_id, day)
         if completed_today(user_id, day):
             db.session.rollback()  # end the transaction: releases the day lock
             _log("start_refused_completed_today")
-            return SessionResult(SessionOutcome.INVALID_TRANSITION)
+            return SessionResult(completed_outcome)
 
         session = insert_active_session(user_id, day, snapshot, now, native)
+        if finish_without_photo is not None:
+            return complete_session(
+                user_id, session.public_id, today=day,
+                expected_checkpoint_revision=0, **finish_without_photo,
+            )
         db.session.commit()
     except IntegrityError as exc:
         db.session.rollback()

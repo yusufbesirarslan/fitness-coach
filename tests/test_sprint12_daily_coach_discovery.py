@@ -208,6 +208,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/exercises/<exercise_id>/performance-history",
         "/api/v1/training/workout-sessions",
         "/api/v1/training/workout-sessions/current",
+        "/api/v1/training/workout-sessions/finish",
         "/api/v1/training/workout-sessions/<session_reference>",
         "/api/v1/training/workout-sessions/<session_reference>/training-insight",
         "/api/v1/training/workout-sessions/<session_reference>/resume",
@@ -307,6 +308,8 @@ _APPROVED_TRAINING_PATHS = {
     "/api/v1/training/exercises/<exercise_id>/performance-history",
     "/api/v1/training/workout-sessions",
     "/api/v1/training/workout-sessions/current",
+    # PD3 selects today's workout and delegates to canonical no-photo completion.
+    "/api/v1/training/workout-sessions/finish",
     "/api/v1/training/workout-sessions/<session_reference>",
     "/api/v1/training/workout-sessions/<session_reference>/resume",
     "/api/v1/training/workout-sessions/<session_reference>/checkpoint",

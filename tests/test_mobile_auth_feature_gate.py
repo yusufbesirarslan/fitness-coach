@@ -118,6 +118,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("put", "/api/v1/training/workout-sessions/abc/checkpoint"),
         ("post", "/api/v1/training/workout-sessions/abc/abandon"),
         ("post", "/api/v1/training/workout-sessions/abc/complete"),
+        ("post", "/api/v1/training/workout-sessions/finish"),
     ):
         headers = post_headers if method in ("post", "put", "patch", "delete") else None
         assert getattr(client, method)(path, headers=headers).status_code == 404
@@ -293,6 +294,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/workout-sessions/<session_reference>/abandon",
              ("POST",)),
             ("/api/v1/training/workout-sessions/<session_reference>/complete",
+             ("POST",)),
+            ("/api/v1/training/workout-sessions/finish",
              ("POST",)),
         }
 
