@@ -516,8 +516,11 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
     operation_table = sa.Table('training_plan_generation_operation', sa.MetaData(), autoload_with=db.engine)
     reservation_table = sa.Table('ai_usage_reservation', sa.MetaData(), autoload_with=db.engine)
     now = datetime.now(timezone.utc)
-    db.session.add_all([User(id=1, username='chain-a', email='chain-a@example.invalid'),
-                        User(id=2, username='chain-b', email='chain-b@example.invalid')])
+    # Core insert: a later User column (PD1 goal_pace) is never sent to this
+    # historical schema.
+    db.session.execute(sa.insert(User.__table__), [
+        dict(id=1, username='chain-a', email='chain-a@example.invalid'),
+        dict(id=2, username='chain-b', email='chain-b@example.invalid')])
     db.session.commit()
     for uid in (1, 2):
         premium_row(uid, original_id=str(900 + uid))

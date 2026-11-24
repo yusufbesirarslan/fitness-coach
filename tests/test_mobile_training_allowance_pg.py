@@ -637,7 +637,10 @@ def test_post_d1_full_chain_has_no_drift_and_preserves_authorities(migrate_engin
         before = {}
         if start != "base":
             upgrade(revision=start)
-            db.session.add(User(id=1, username="synthetic-migration", email="migration@example.invalid"))
+            # Core insert: a later User column (PD1 goal_pace) is never sent
+            # to this historical schema.
+            db.session.execute(sa.insert(User.__table__).values(
+                id=1, username="synthetic-migration", email="migration@example.invalid"))
             db.session.commit()
             premium_row(1)
             db.session.add(AIConsentState(owner_id=1, generation=2,

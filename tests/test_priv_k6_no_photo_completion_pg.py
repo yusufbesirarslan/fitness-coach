@@ -532,7 +532,10 @@ def test_full_chain_upgrade_preserves_pump_checks_and_backfills_nothing(migrate_
     Migrate(app, db, directory=str(ROOT / "migrations"))
     with app.app_context():
         upgrade(revision="f8b2d4e6a0c3")
-        db.session.add(User(id=1, username="k6-chain", email="k6-chain@example.invalid"))
+        # A Core insert names only given/defaulted columns, so a later User
+        # column (PD1 goal_pace) is never sent to this historical schema.
+        db.session.execute(sa.insert(User.__table__).values(
+            id=1, username="k6-chain", email="k6-chain@example.invalid"))
         db.session.commit()
         with db.engine.begin() as conn:
             for date_key, description in (
