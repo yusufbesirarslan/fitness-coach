@@ -20,12 +20,22 @@ SAFE_ENDPOINTS = frozenset({
     "ai_consent.web_consent", "health", "pages.referral_data",
 })
 
+_TRAINING_START_ENDPOINTS = frozenset({
+    "mobile_api.training_start_state", "mobile_api.record_training_start",
+    "mobile_api.accept_training_plan_preview", "mobile_api.discard_training_plan_preview",
+    "mobile_api.preview_general_training_plan",
+})
+
 
 def needs_health():
     endpoint = request.endpoint or ""
     if endpoint == "mobile_api.today_guidance":
         from app.blueprints.mobile_today_guidance import _guidance_enabled
         if not _guidance_enabled():
+            return False
+    if endpoint in _TRAINING_START_ENDPOINTS:
+        # PD2: flag OFF answers 404 before auth (the routes are absent).
+        if not current_app.config.get("FITX_TRAINING_START_PREVIEW_ENABLED", False):
             return False
     if endpoint in {"mobile_api.exercise_history_capabilities", "mobile_api.read_exercise_history"}:
         from app.blueprints.mobile_exercise_history import _ready

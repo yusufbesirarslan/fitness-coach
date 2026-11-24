@@ -1,6 +1,8 @@
 """Explicit durable transitions for native training-plan generation."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timedelta, timezone
@@ -346,7 +348,91 @@ def _insert_plan(**kwargs):
     return plan
 
 
-def commit_plan(operation_id, user_id):
+def candidate_sha(document_json):
+    """PD2 preview identity: SHA-256 of the exact staged document text."""
+    return hashlib.sha256(document_json.encode("utf-8")).hexdigest()
+
+
+def read_candidate(operation_id, user_id):
+    """PD2: the owner's staged candidate text, fenced like a commit, never written.
+
+    A preview replay shows AI output again, so it passes the same operation
+    authority fence ``commit_plan`` does. A definitive refusal terminalizes
+    the operation exactly as a refused commit would (candidate discarded);
+    an authority outage stays recoverable. Returns ``(document_json,
+    score, staged_at)``. Read-only otherwise: no lock is held on return.
+    """
+    try:
+        operation = (db.session.query(TrainingPlanGenerationOperation)
+                     .filter_by(id=operation_id, user_id=user_id)
+                     .populate_existing().one_or_none())
+        if operation is None or operation.status != TRAINING_PLAN_GENERATION_GENERATED:
+            raise GenerationPersistenceUnavailable()
+        authority, document_json = ai_consent.unbind_candidate(
+            user_id, operation.candidate_plan_data)
+        ai_consent.fence(authority, user_id, "training_plan")
+        result = (document_json, operation.candidate_score, operation.updated_at)
+        db.session.rollback()
+        return result
+    except ai_consent.ConsentDenied as denied:
+        db.session.rollback()
+        if denied.status < 500:
+            _terminalize_generated(operation_id, user_id, denied)
+        raise
+    except GenerationPersistenceUnavailable:
+        db.session.rollback()
+        raise
+    except Exception as error:
+        db.session.rollback()
+        raise GenerationPersistenceUnavailable() from error
+
+
+# PD2: a GENERATED candidate the owner explicitly set aside (discarded, or
+# replaced by a new preview). The provider produced a valid candidate, so the
+# AI work is consumed: no legacy quota refund, and allowance settles it as a
+# success (``allowance._settlement``). Never retryable under the same key.
+CANDIDATE_DISCARDED_CODE = allowance.CANDIDATE_DISCARDED_CODE
+
+
+def discard_generated(user_id, *, operation_id=None):
+    """GENERATED -> FAILED(discarded) for this owner; returns the ended ids.
+
+    ``operation_id`` limits it to one operation (the preview being discarded);
+    ``None`` ends every GENERATED operation of the owner (a new preview
+    supersedes them). Never touches SUCCEEDED/FAILED/IN_PROGRESS rows, never
+    refunds, never writes a plan. Lock order: operation rows only (1), the
+    same prefix every writer takes. The caller settles the returned ids.
+    """
+    try:
+        query = (db.session.query(TrainingPlanGenerationOperation)
+                 .filter_by(user_id=user_id, status=TRAINING_PLAN_GENERATION_GENERATED))
+        if operation_id is not None:
+            query = query.filter_by(id=operation_id)
+        operations = (query.order_by(TrainingPlanGenerationOperation.id)
+                      .populate_existing().with_for_update().all())
+        now = datetime.utcnow()
+        ended = []
+        for operation in operations:
+            operation.status = TRAINING_PLAN_GENERATION_FAILED
+            operation.candidate_plan_data = None
+            operation.candidate_score = None
+            operation.error_code = CANDIDATE_DISCARDED_CODE
+            operation.error_http_status = 409
+            operation.error_retryable = False
+            operation.updated_at = operation.completed_at = now
+            ended.append(operation.id)
+        db.session.commit()
+        return ended
+    except Exception as error:
+        db.session.rollback()
+        raise GenerationPersistenceUnavailable() from error
+
+
+class CandidateMismatch(RuntimeError):
+    """PD2: the staged candidate is not the one the client previewed."""
+
+
+def commit_plan(operation_id, user_id, *, expected_candidate_sha=None):
     """Turn this owner's staged candidate into their plan, or refuse.
 
     TWO locks, in this order, and the order is the repository-wide one
@@ -385,6 +471,12 @@ def commit_plan(operation_id, user_id):
         authority, document_json = ai_consent.unbind_candidate(
             user_id, operation.candidate_plan_data)
         ai_consent.fence(authority, user_id, "training_plan")
+        if (expected_candidate_sha is not None
+                and not hmac.compare_digest(candidate_sha(document_json),
+                                            expected_candidate_sha)):
+            # PD2 Accept names the exact previewed text; anything else is not
+            # what the owner reviewed. Nothing is written or terminalized.
+            raise CandidateMismatch()
         if get_active_plan(user_id) is not None:
             raise ExistingPlanRefused()
         plan = _insert_plan(
@@ -410,7 +502,7 @@ def commit_plan(operation_id, user_id):
         if denied.status < 500:
             _terminalize_generated(operation_id, user_id, denied)
         raise
-    except ExistingPlanRefused:
+    except (ExistingPlanRefused, CandidateMismatch):
         db.session.rollback()
         raise
     except GenerationPersistenceUnavailable:

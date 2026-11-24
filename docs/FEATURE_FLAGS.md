@@ -490,3 +490,13 @@ layer. The worker and `/health?deep=1` proxy probe follow the flag itself
 `FATSECRET_BASE_URL` with allowlisted egress, staging E2E, and a mobile build
 compiled with `--dart-define=AXISAI_FOOD_SEARCH_ENABLED=true`. Owner:
 @yusufbesirarslan; review by 2026-12-18. Rollback: set the flag to 0.
+
+`FITX_TRAINING_START_PREVIEW_ENABLED` (default OFF, shipped_dark) is PD2
+onboarding training start (docs/PD2_TRAINING_START.md): `GET/PUT
+/api/v1/training/start`, `POST /api/v1/training/plans/general/preview`, the
+`?preview=1` opt-in on `POST /api/v1/training/plans` and `POST
+/api/v1/training/plans/preview/{accept,discard}`. OFF: every new route answers
+404 before auth, `?preview=1` is refused 404 (never ignored), and `If-Match` on
+the general create is refused 428; the legacy creation contracts are
+byte-identical. Requires `MOBILE_AUTH_ENABLED` and migration `b7d2e9f4a1c3`.
+Owner: @yusufbesirarslan; review by 2026-12-31. Rollback: set the flag to 0.

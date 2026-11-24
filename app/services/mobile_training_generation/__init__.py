@@ -10,10 +10,24 @@ from .errors import (
     InvalidIdempotencyKey,
     InvalidPlanRequest,
     PlanGenerationCommandError,
+    PreviewAlreadyAccepted,
+    PreviewDiscarded,
+    PreviewExpired,
+    PreviewNotFound,
+    PreviewPreconditionRequired,
+    PreviewStale,
     StoredGenerationFailure,
     TrainingAllowanceRefused,
 )
-from .service import GenerationCommandResult, generate_and_persist
+from .service import (
+    PREVIEW_TTL,
+    GenerationCommandResult,
+    PreviewResult,
+    accept_preview,
+    discard_preview,
+    generate_and_persist,
+    generate_preview,
+)
 
 __all__ = [
     "ExistingPlanRefused",
@@ -26,10 +40,21 @@ __all__ = [
     "InvalidIdempotencyKey",
     "InvalidPlanRequest",
     "NativePlanRequest",
+    "PREVIEW_TTL",
     "PlanGenerationCommandError",
+    "PreviewAlreadyAccepted",
+    "PreviewDiscarded",
+    "PreviewExpired",
+    "PreviewNotFound",
+    "PreviewPreconditionRequired",
+    "PreviewResult",
+    "PreviewStale",
     "StoredGenerationFailure",
     "TrainingAllowanceRefused",
+    "accept_preview",
+    "discard_preview",
     "generate_and_persist",
+    "generate_preview",
     "parse_idempotency_key",
     "parse_native_request",
 ]

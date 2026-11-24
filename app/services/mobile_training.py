@@ -272,6 +272,43 @@ def _token_field(default, choices):
     return {"type": "token", "default": default, "choices": sorted(choices)}
 
 
+def _validated_document(raw, *, include_editor_revision=False) -> dict:
+    """The canonical plan document's validated program (shared by the active
+    plan projection and the PD2 pending-draft preview)."""
+    if not isinstance(raw, str) or len(raw) > _PLAN_DATA_MAX:
+        raise ValueError("invalid plan document")
+    document = json.loads(raw)
+    if not isinstance(document, dict) or not set(document) <= {
+            "program", "haftalik_ozet", "exercise_context"}:
+        raise ValueError("invalid plan document keys")
+    # ``exercise_context`` is server-created persistence metadata for the
+    # native command, not provider plan structure. Keep the canonical plan
+    # validator closed by passing only the shape it owns.
+    plan_document = {
+        key: document[key]
+        for key in ("program", "haftalik_ozet")
+        if key in document
+    }
+    if include_editor_revision:
+        validate_exercise_context(document.get(FIELD_EXERCISE_CONTEXT))
+    # Canonical Add used to persist this exact four-field shape. Supply
+    # its missing rest value only in the read projection.
+    program = plan_document.get("program")
+    if isinstance(program, list):
+        for day in program:
+            exercises = day.get("egzersizler") if isinstance(day, dict) else None
+            if isinstance(exercises, list):
+                for exercise in exercises:
+                    if (isinstance(exercise, dict)
+                            and set(exercise) == {"isim", "set", "tekrar", "exercise_id"}):
+                        exercise["dinlenme"] = "0"
+    # A stored plan is read whichever client asks: sessions are always
+    # admitted here and only the PROJECTION depends on the opt-in.
+    validated = validate_plan_structure(
+        plan_document, allow_exercise_id=True, allow_sessions=True)
+    return validated
+
+
 def _project_plan(plan, user_id, secret, *, include_editor_revision=False,
                   include_sessions=False) -> dict:
     try:
@@ -280,37 +317,8 @@ def _project_plan(plan, user_id, secret, *, include_editor_revision=False,
         created_at = _utc_iso(plan.created_at)
         score = _score(plan.score)
         raw = plan.plan_data
-        if not isinstance(raw, str) or len(raw) > _PLAN_DATA_MAX:
-            raise ValueError("invalid plan document")
-        document = json.loads(raw)
-        if not isinstance(document, dict) or not set(document) <= {
-                "program", "haftalik_ozet", "exercise_context"}:
-            raise ValueError("invalid plan document keys")
-        # ``exercise_context`` is server-created persistence metadata for the
-        # native command, not provider plan structure. Keep the canonical plan
-        # validator closed by passing only the shape it owns.
-        plan_document = {
-            key: document[key]
-            for key in ("program", "haftalik_ozet")
-            if key in document
-        }
-        if include_editor_revision:
-            validate_exercise_context(document.get(FIELD_EXERCISE_CONTEXT))
-        # Canonical Add used to persist this exact four-field shape. Supply
-        # its missing rest value only in the read projection.
-        program = plan_document.get("program")
-        if isinstance(program, list):
-            for day in program:
-                exercises = day.get("egzersizler") if isinstance(day, dict) else None
-                if isinstance(exercises, list):
-                    for exercise in exercises:
-                        if (isinstance(exercise, dict)
-                                and set(exercise) == {"isim", "set", "tekrar", "exercise_id"}):
-                            exercise["dinlenme"] = "0"
-        # A stored plan is read whichever client asks: sessions are always
-        # admitted here and only the PROJECTION depends on the opt-in.
-        validated = validate_plan_structure(
-            plan_document, allow_exercise_id=True, allow_sessions=True)
+        validated = _validated_document(
+            raw, include_editor_revision=include_editor_revision)
         by_weekday = {day["gun"]: day for day in validated["program"]}
         catalog = owned_catalog(user_id, program_exercise_ids(validated["program"]))
         days = [
@@ -340,13 +348,41 @@ def _project_plan(plan, user_id, secret, *, include_editor_revision=False,
         raise PlanUnprojectable("persisted plan is not projectable") from error
 
 
+def project_preview_document(document_json, user_id: int, *,
+                             include_sessions: bool = False) -> dict:
+    """PD2: project a NOT-YET-ACTIVE candidate document for review.
+
+    Same validation, day/exercise shape and catalog resolution as the active
+    plan read, so what the owner reviews is exactly what Accept activates.
+    It carries no ``workout_ref`` / lineage / version: a draft cannot be
+    started, logged, edited or rewarded (it is not a plan yet).
+    """
+    try:
+        validated = _validated_document(document_json)
+        by_weekday = {day["gun"]: day for day in validated["program"]}
+        catalog = owned_catalog(user_id, program_exercise_ids(validated["program"]))
+        days = [
+            _project_day(by_weekday[weekday], slot, user_id, None, None, None, catalog,
+                         include_sessions=include_sessions, with_refs=False)
+            for slot, weekday in enumerate(WEEKDAYS)
+        ]
+        return {"days": days}
+    except PlanUnprojectable:
+        raise
+    except (
+        ValueError, TypeError, KeyError, AttributeError, OverflowError,
+        RecursionError, InvalidMutation,
+    ) as error:
+        raise PlanUnprojectable("candidate plan is not projectable") from error
+
+
 def _project_day(day, slot, user_id, secret, lineage, version, catalog,
-                 *, include_sessions=False):
+                 *, include_sessions=False, with_refs=True):
     if len(day["egzersizler"]) > MAX_EXERCISES_PER_DAY:
         raise PlanUnprojectable("day exceeds the native exercise bound")
     kind = day_kind(day["tip"])
     reference = None
-    if kind != "rest":
+    if kind != "rest" and with_refs:
         reference = workout_ref(secret, user_id, lineage, version, slot)
     projected = {
         "slot": slot,
@@ -370,8 +406,8 @@ def _project_day(day, slot, user_id, secret, lineage, version, catalog,
             if len(exercises) > MAX_EXERCISES_PER_DAY:
                 raise PlanUnprojectable("session exceeds the native exercise bound")
             block = {
-                "workout_ref": cardio_session_ref(
-                    secret, user_id, lineage, version, slot),
+                "workout_ref": (cardio_session_ref(
+                    secret, user_id, lineage, version, slot) if with_refs else None),
                 "duration_minutes": session_minutes(exercises),
                 "exercises": [_project_exercise(item, catalog=catalog)
                               for item in exercises],
