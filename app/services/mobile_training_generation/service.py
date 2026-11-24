@@ -64,6 +64,11 @@ def _required_session(user):
     return state.session
 
 
+def _training_start_enabled() -> bool:
+    from flask import current_app
+    return bool(current_app.config.get("FITX_TRAINING_START_PREVIEW_ENABLED", False))
+
+
 def _inspect_durable(user_id, key, fingerprint):
     operation = store.find_by_key(user_id, key)
     if operation is None:
@@ -178,8 +183,12 @@ def generate_and_persist(
         if (active is not None and active.status == TRAINING_PLAN_GENERATION_GENERATED
                 and is_preview_operation(active)):
             # PD2 rollback safety: generate-and-persist can never activate a
-            # preview (its fingerprint domain differs), so a stranded preview
-            # (e.g. the PD2 flag turned OFF) must not block this owner.
+            # preview (its fingerprint domain differs). While PD2 is ON an
+            # unexpired preview is still the owner's to accept or discard, so
+            # it is never ended before THIS request's admission is known;
+            # with PD2 OFF (or once expired) it is stranded and is ended.
+            if _training_start_enabled() and not _expired(active):
+                raise PreviewPending()
             for ended in store.discard_generated(user_id, operation_id=active.id):
                 allowance.settle(ended)
             active = store.find_active_for_owner(user_id)

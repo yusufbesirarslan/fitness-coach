@@ -328,6 +328,17 @@ def test_legacy_generation_is_never_stranded_behind_a_preview(
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer", "enabled")
+def test_while_pd2_is_on_legacy_generation_never_ends_a_live_preview(
+        client, mobile_user, as_mobile, provider):
+    _preview(client, as_mobile, mobile_user, "pd2-ai-live-legacy-1")
+    refused = client.post(AI_PATH, json=CANONICAL,
+                          headers=as_mobile(mobile_user, "pd2-legacy-live-2"))
+    assert refused.status_code == 409
+    assert refused.json["error"]["code"] == "TRAINING_PLAN_PREVIEW_PENDING"
+    assert _operations(mobile_user.id) == [("GENERATED", None)] and provider.calls == 1
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer", "enabled")
 def test_a_seen_preview_ended_by_consent_withdrawal_is_consumed_not_refunded(
         client, mobile_user, as_mobile, provider, monkeypatch):
     from app.services import ai_consent
