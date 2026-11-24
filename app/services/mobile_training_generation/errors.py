@@ -114,3 +114,65 @@ class TrainingAllowanceRefused(PlanGenerationCommandError):
             and key in {"feature", "scope", "resets_at"}
             and (value is None or isinstance(value, str))
         }
+
+
+# --- PD2 training-start preview (draft -> preview -> accept) ---------------
+
+class PreviewNotFound(PlanGenerationCommandError):
+    """No preview exists under this key for this owner."""
+
+    public_code = "TRAINING_PLAN_PREVIEW_NOT_FOUND"
+    http_status = 404
+    retryable = False
+
+
+class PreviewDiscarded(PlanGenerationCommandError):
+    """The previewed candidate was discarded or superseded; nothing to accept."""
+
+    public_code = "TRAINING_PLAN_PREVIEW_DISCARDED"
+    http_status = 409
+    retryable = False
+
+
+class PreviewExpired(PlanGenerationCommandError):
+    """The previewed candidate outlived its acceptance window and was ended."""
+
+    public_code = "TRAINING_PLAN_PREVIEW_EXPIRED"
+    http_status = 409
+    retryable = False
+
+
+class PreviewStale(PlanGenerationCommandError):
+    """If-Match does not name the candidate the server would activate."""
+
+    public_code = "TRAINING_PLAN_PREVIEW_STALE"
+    http_status = 412
+    retryable = False
+
+
+class PreviewAlreadyAccepted(PlanGenerationCommandError):
+    """The preview was already activated; it can no longer be discarded."""
+
+    public_code = "TRAINING_PLAN_PREVIEW_ALREADY_ACCEPTED"
+    http_status = 409
+    retryable = False
+
+
+class PreviewPreconditionRequired(PlanGenerationCommandError):
+    """Accept must name the previewed candidate (If-Match)."""
+
+    public_code = "TRAINING_PLAN_PREVIEW_PRECONDITION_REQUIRED"
+    http_status = 428
+    retryable = False
+
+
+class PreviewPending(PlanGenerationCommandError):
+    """Another unaccepted preview is pending; discard it explicitly first.
+
+    A new preview never silently destroys a delivered (paid) draft before its
+    own admission (consent, allowance, quota) is known.
+    """
+
+    public_code = "TRAINING_PLAN_PREVIEW_PENDING"
+    http_status = 409
+    retryable = False

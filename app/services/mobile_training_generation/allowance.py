@@ -52,6 +52,9 @@ from .errors import (
     TrainingAllowanceRefused,
 )
 
+# Same literal as ``store.CANDIDATE_DISCARDED_CODE`` (store imports this module).
+CANDIDATE_DISCARDED_CODE = "TRAINING_PLAN_CANDIDATE_DISCARDED"
+
 FEATURE = "training_generation"
 UNOBSERVABLE = "UNOBSERVABLE"
 OUTCOME_UNKNOWN_CODE = "TRAINING_PLAN_GENERATION_OUTCOME_UNKNOWN"
@@ -147,6 +150,12 @@ def preflight_consent(user_id):
 def _settlement(operation):
     """(outcome, billing evidence) derived only from the terminal operation row."""
     if operation.status == TRAINING_PLAN_GENERATION_SUCCEEDED:
+        return ai_allowances.OUTCOME_SUCCESS, ai_allowances.BILLING_UNKNOWN
+    if operation.error_code == CANDIDATE_DISCARDED_CODE:
+        # PD2: only a GENERATED row can be discarded, i.e. the provider DID
+        # produce a valid candidate the owner then set aside. That is a
+        # consumed success; settling it as a failure would let preview +
+        # discard loop for free generations.
         return ai_allowances.OUTCOME_SUCCESS, ai_allowances.BILLING_UNKNOWN
     if operation.provider_attempt_possible is False:
         # Durable proof of zero physical attempts for the whole operation: True

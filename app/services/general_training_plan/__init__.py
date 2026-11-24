@@ -6,7 +6,13 @@ and nothing about the person is read except the account language.
 """
 from .contract import GeneralCardio, GeneralPlanRequest, parse_general_request
 from .errors import GeneralPlanSuperseded, GeneralPlanUnavailable
-from .service import GeneralPlanResult, create_general_plan, is_general_receipt
+from .service import (
+    GeneralPlanResult,
+    GeneralPreview,
+    create_general_plan,
+    is_general_receipt,
+    preview_general_plan,
+)
 from .template import CARDIO_TEMPLATE_ID, TEMPLATE_ID
 
 __all__ = [
@@ -14,10 +20,12 @@ __all__ = [
     "GeneralCardio",
     "GeneralPlanRequest",
     "GeneralPlanResult",
+    "GeneralPreview",
     "GeneralPlanSuperseded",
     "GeneralPlanUnavailable",
     "TEMPLATE_ID",
     "create_general_plan",
     "is_general_receipt",
     "parse_general_request",
+    "preview_general_plan",
 ]

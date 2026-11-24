@@ -522,6 +522,7 @@ jobs:
           tests/test_coach_publication_transport_pg.py
           tests/test_training_plan_replacement_pg.py
           tests/test_lp21_general_training_plan_pg.py
+          tests/test_pd2_training_start_pg.py
           tests/test_lp18_b0_pg.py
           tests/test_lp18_b1_pg.py
           tests/test_plan_confirmation_pg.py

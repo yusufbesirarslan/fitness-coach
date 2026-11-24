@@ -2,7 +2,7 @@
 from contextlib import contextmanager
 from functools import partial
 
-from flask import current_app, g, jsonify, request
+from flask import abort, current_app, g, jsonify, request
 from flask_limiter.errors import RateLimitExceeded
 
 from app.blueprints.ai_consent import consent_error_response
@@ -20,9 +20,11 @@ from app.services.mobile_training_generation import (
     PlanGenerationCommandError,
     TrainingAllowanceRefused,
     generate_and_persist,
+    generate_preview,
     parse_idempotency_key,
     parse_native_request,
 )
+from app.services import training_start
 from app.services.training_generation.preference_contract import PreferenceContractError
 from app.services.training_plan_origin import (
     InvalidOriginExpansion,
@@ -40,6 +42,27 @@ def _plan_sessions_requested():
         return mobile_training.sessions_requested(request.args)
     except mobile_training.InvalidSessionsExpansion:
         raise InvalidPlanRequest("include_sessions must be exactly 1") from None
+
+
+def training_start_enabled():
+    return bool(current_app.config.get("FITX_TRAINING_START_PREVIEW_ENABLED", False))
+
+
+def _preview_requested():
+    """PD2 opt-in ``?preview=1``: stage the AI candidate, never commit it.
+
+    With the rollout flag OFF the opt-in is refused 404 -- it is never
+    silently ignored, because ignoring it would COMMIT a plan the client
+    asked only to preview.
+    """
+    values = request.args.getlist("preview")
+    if not values:
+        return False
+    if not training_start_enabled():
+        abort(404)
+    if values != ["1"]:
+        raise InvalidPlanRequest("preview must be exactly 1")
+    return True
 
 
 @contextmanager
@@ -73,8 +96,32 @@ def create_training_plan():
     try:
         key = parse_idempotency_key(request.headers.get("Idempotency-Key"))
         include_sessions = _plan_sessions_requested()
+        preview = _preview_requested()
         native_request = parse_native_request(
             request.get_json(silent=True), sessions=include_sessions)
+        if preview:
+            # Same endpoint, so the same D1 closure / launch admission, AI rate
+            # limits and concurrency slot. Stops at the staged candidate.
+            staged = generate_preview(
+                g.mobile_user,
+                native_request,
+                key,
+                chat_fn=partial(_heavy_chat, feature="training_plan"),
+                provider_guard=_native_generation_provider_guard,
+                logger=current_app.logger,
+            )
+            preview_body = training_start.preview_payload(
+                g.mobile_user.id,
+                method=training_start.METHOD_AI,
+                document_json=staged.document_json,
+                candidate_fingerprint=staged.candidate_fingerprint,
+                expires_at=staged.expires_at,
+                include_sessions=include_sessions,
+            )
+            response = jsonify(preview_body)
+            response.status_code = 200
+            response.headers["Idempotency-Replayed"] = str(staged.replayed).lower()
+            return response
         result = generate_and_persist(
             g.mobile_user,
             native_request,
