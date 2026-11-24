@@ -37,6 +37,7 @@ from .errors import (
     PreviewDiscarded,
     PreviewExpired,
     PreviewNotFound,
+    PreviewPending,
     PreviewStale,
 )
 from .locking import try_owner_lock
@@ -175,6 +176,14 @@ def generate_and_persist(
 
         active = store.find_active_for_owner(user_id)
         if (active is not None and active.status == TRAINING_PLAN_GENERATION_GENERATED
+                and is_preview_operation(active)):
+            # PD2 rollback safety: generate-and-persist can never activate a
+            # preview (its fingerprint domain differs), so a stranded preview
+            # (e.g. the PD2 flag turned OFF) must not block this owner.
+            for ended in store.discard_generated(user_id, operation_id=active.id):
+                allowance.settle(ended)
+            active = store.find_active_for_owner(user_id)
+        if (active is not None and active.status == TRAINING_PLAN_GENERATION_GENERATED
                 and (operation is None or active.id != operation.id)):
             # Withdrawn GENERATED work can never commit: end it instead of
             # letting it block this owner forever (LP21 no stranded operation).
@@ -235,7 +244,7 @@ def generate_and_persist(
 # pinned to the exact previewed text. No new plan store, no new plan writer.
 
 PREVIEW_TTL = timedelta(hours=24)
-_PREVIEW_FP_PREFIX = "pv1:"
+_PREVIEW_FP_PREFIX = store.PREVIEW_FINGERPRINT_PREFIX
 _PREVIEW_FP_DOMAIN = b"axisai:training-start-preview:v1\0"
 
 
@@ -251,9 +260,7 @@ def preview_fingerprint(request: NativePlanRequest) -> str:
     return _PREVIEW_FP_PREFIX + digest[:60]
 
 
-def is_preview_operation(operation) -> bool:
-    return bool(operation is not None and operation.request_fingerprint
-                and operation.request_fingerprint.startswith(_PREVIEW_FP_PREFIX))
+is_preview_operation = store.is_preview_operation
 
 
 @dataclass(frozen=True)
@@ -363,9 +370,12 @@ def generate_preview(
         if (active is not None and active.status == TRAINING_PLAN_GENERATION_GENERATED
                 and is_preview_operation(active)
                 and (operation is None or active.id != operation.id)):
-            # "Choose another" / regenerate: the earlier unaccepted PREVIEW
-            # is set aside (consumed, never refunded, never activatable).
-            # Legacy GENERATED recovery work is never discarded here.
+            if not _expired(active):
+                # A delivered draft is never destroyed before THIS request's
+                # admission is known: the owner discards it explicitly
+                # (Choose another / Edit with changed preferences).
+                raise PreviewPending()
+            # An expired draft has no value left: end it (consumed).
             for ended in store.discard_generated(user_id, operation_id=active.id):
                 allowance.settle(ended)
             active = store.find_active_for_owner(user_id)

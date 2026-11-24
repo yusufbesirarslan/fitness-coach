@@ -38,10 +38,15 @@ from app.services.training_plan_origin import general_origin
 
 
 GENERAL_PLAN_WRITE_RATELIMIT = "10 per minute; 60 per hour"
+GENERAL_PLAN_PREVIEW_RATELIMIT = "20 per minute; 120 per hour"
 
 
 def _owner_key():
     return str(g.mobile_user.id)
+
+
+def _preview_key():
+    return f"{g.mobile_user.id}:general-preview"
 
 
 def _accepted_preview():
@@ -151,7 +156,8 @@ def preview_general_training_plan():
     ``POST /training/plans/general`` with ``If-Match: "<candidate_fingerprint>"``.
     """
     try:
-        with limiter.limit(GENERAL_PLAN_WRITE_RATELIMIT, key_func=_owner_key):
+        # Its own bucket: previewing never spends the Accept write budget.
+        with limiter.limit(GENERAL_PLAN_PREVIEW_RATELIMIT, key_func=_preview_key):
             pass
         try:
             include_sessions = mobile_training.sessions_requested(request.args)

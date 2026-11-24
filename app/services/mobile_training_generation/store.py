@@ -43,6 +43,15 @@ from .errors import (
 
 ABANDON_AFTER = timedelta(minutes=15)
 
+# PD2: preview operations carry a domain-separated fingerprint with this
+# prefix (``service.preview_fingerprint``); legacy fingerprints are pure hex.
+PREVIEW_FINGERPRINT_PREFIX = "pv1:"
+
+
+def is_preview_operation(operation) -> bool:
+    return bool(operation is not None and operation.request_fingerprint
+                and operation.request_fingerprint.startswith(PREVIEW_FINGERPRINT_PREFIX))
+
 MAX_CANDIDATE_BYTES = 256 * 1024
 
 
@@ -527,14 +536,20 @@ def _terminalize_generated(operation_id, user_id, denied):
         if operation is None or operation.status != TRAINING_PLAN_GENERATION_GENERATED:
             db.session.rollback()
             return False
-        if operation.quota_reserved:
+        # PD2: a GENERATED preview was already SHOWN to its owner, so the AI
+        # work was delivered. Ending it (here: consent withdrawn) consumes it
+        # exactly like a discard: no refund, settled as success. Otherwise
+        # preview -> withdraw -> re-grant would loop for free generations.
+        delivered = is_preview_operation(operation)
+        if operation.quota_reserved and not delivered:
             premium.refund_ai_quota_in_transaction(
                 operation.user_id, "training", operation.quota_week)
+            operation.quota_reserved = False
         operation.status = TRAINING_PLAN_GENERATION_FAILED
         operation.candidate_plan_data = None
         operation.candidate_score = None
-        operation.quota_reserved = False
-        operation.error_code = str(denied.code)[:64]
+        operation.error_code = (CANDIDATE_DISCARDED_CODE if delivered
+                                else str(denied.code)[:64])
         operation.error_http_status = denied.status
         operation.error_retryable = False
         operation.updated_at = operation.completed_at = datetime.utcnow()

@@ -282,18 +282,68 @@ def test_discard_is_idempotent_and_leaves_nothing_activatable(
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer", "enabled")
-def test_a_new_preview_supersedes_the_unaccepted_one(
+def test_a_new_preview_never_destroys_a_pending_one_implicitly(
         client, mobile_user, as_mobile, provider):
     first = _preview(client, as_mobile, mobile_user, "pd2-ai-regen-1").json["preview"]
-    second = _preview(client, as_mobile, mobile_user, "pd2-ai-regen-2").json["preview"]
+    refused = _preview(client, as_mobile, mobile_user, "pd2-ai-regen-2")
+    # The delivered draft survives until the owner discards it explicitly.
+    assert refused.status_code == 409
+    assert refused.json["error"]["code"] == "TRAINING_PLAN_PREVIEW_PENDING"
+    assert _operations(mobile_user.id) == [("GENERATED", None)] and provider.calls == 1
 
+    assert client.post(DISCARD, headers=as_mobile(mobile_user, "pd2-ai-regen-1")).status_code == 204
+    second = _preview(client, as_mobile, mobile_user, "pd2-ai-regen-3").json["preview"]
     assert first["candidate_fingerprint"] != second["candidate_fingerprint"]
     assert _operations(mobile_user.id) == [
         ("FAILED", "TRAINING_PLAN_CANDIDATE_DISCARDED"), ("GENERATED", None)]
     old = _accept(client, as_mobile, mobile_user, "pd2-ai-regen-1", first["candidate_fingerprint"])
     assert old.status_code == 409 and not _plans(mobile_user.id)
-    new = _accept(client, as_mobile, mobile_user, "pd2-ai-regen-2", second["candidate_fingerprint"])
+    new = _accept(client, as_mobile, mobile_user, "pd2-ai-regen-3", second["candidate_fingerprint"])
     assert new.status_code == 201 and len(_plans(mobile_user.id)) == 1
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer", "enabled")
+def test_an_expired_pending_preview_is_superseded(client, mobile_user, as_mobile, provider):
+    _preview(client, as_mobile, mobile_user, "pd2-ai-old-1")
+    operation = TrainingPlanGenerationOperation.query.filter_by(user_id=mobile_user.id).one()
+    operation.updated_at = datetime.utcnow() - generation_service.PREVIEW_TTL - timedelta(seconds=1)
+    db.session.commit()
+    fresh = _preview(client, as_mobile, mobile_user, "pd2-ai-old-2")
+    assert fresh.status_code == 200
+    assert _operations(mobile_user.id) == [
+        ("FAILED", "TRAINING_PLAN_CANDIDATE_DISCARDED"), ("GENERATED", None)]
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer", "enabled")
+def test_legacy_generation_is_never_stranded_behind_a_preview(
+        app, client, mobile_user, as_mobile, provider):
+    _preview(client, as_mobile, mobile_user, "pd2-ai-rollback-1")
+    app.config[FLAG] = False  # rollback: previews can no longer be accepted
+    created = client.post(AI_PATH, json=CANONICAL,
+                          headers=as_mobile(mobile_user, "pd2-legacy-after-1"))
+    assert created.status_code == 201
+    assert _operations(mobile_user.id) == [
+        ("FAILED", "TRAINING_PLAN_CANDIDATE_DISCARDED"), ("SUCCEEDED", None)]
+    assert len(_plans(mobile_user.id)) == 1
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer", "enabled")
+def test_a_seen_preview_ended_by_consent_withdrawal_is_consumed_not_refunded(
+        client, mobile_user, as_mobile, provider, monkeypatch):
+    from app.services import ai_consent
+    _preview(client, as_mobile, mobile_user, "pd2-ai-consent-end-1")
+    operation = TrainingPlanGenerationOperation.query.filter_by(user_id=mobile_user.id).one()
+    quota_before = (operation.quota_reserved, operation.quota_week)
+
+    def withdrawn(*args, **kwargs):
+        raise ai_consent.ConsentDenied()
+    monkeypatch.setattr(ai_consent, "fence", withdrawn)
+    with pytest.raises(ai_consent.ConsentDenied):
+        store.read_candidate(operation.id, mobile_user.id)
+    db.session.expire_all()
+    ended = db.session.get(TrainingPlanGenerationOperation, operation.id)
+    assert (ended.status, ended.error_code) == ("FAILED", "TRAINING_PLAN_CANDIDATE_DISCARDED")
+    assert (ended.quota_reserved, ended.quota_week) == quota_before  # no refund
 
 
 @pytest.mark.usefixtures("synthetic_ai_layer", "enabled")

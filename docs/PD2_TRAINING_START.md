@@ -48,8 +48,12 @@ target**, the real 7-day week that Accept would activate, and three actions:
   true`), creates nothing, charges nothing.
 * **Cancel / choose another** (`/preview/discard`) ends the draft as
   `FAILED(TRAINING_PLAN_CANDIDATE_DISCARDED)`. A new AI preview under a new key
-  supersedes (discards) the owner's earlier unaccepted preview. Active plans
-  are never touched. Cancel records nothing (the owner returns to the method
+  is refused (409 `TRAINING_PLAN_PREVIEW_PENDING`) while the owner's earlier
+  preview is pending and unexpired: a delivered draft is never destroyed before
+  the new request's own admission (consent/allowance/quota) is known, so the
+  client discards explicitly first (Edit with changed preferences, Back,
+  Choose another). An expired pending preview is ended automatically. Active
+  plans are never touched. Cancel records nothing (the owner returns to the method
   choice); Skip records `skip`. They stay distinct.
 * **Stale**: If-Match ≠ the candidate the server would activate → 412
   `TRAINING_PLAN_PREVIEW_STALE`, nothing written, the draft stays reviewable.
@@ -139,8 +143,9 @@ returns the committed plan without comparing.
 * Accept/Discard never reach a provider; they are not D1-closed (like the
   existing replacement confirmation). Accept still fences the draft's own
   consent operation authority under the owner lock (`commit_plan`).
-* Settlement: a candidate that was staged and then discarded/superseded/expired
-  settles as **success** (`allowance._settlement`) and the legacy weekly quota
+* Settlement: a candidate that was staged (shown) and then discarded/expired —
+  or ended because consent was withdrawn after it was shown — settles as
+  **success** (`allowance._settlement`) and the legacy weekly quota
   is **not** refunded — the AI work happened. Otherwise preview+discard would
   loop for free generations. Accept after the hold settles consumes nothing
   more. Duplicate Accept charges nothing.
@@ -173,8 +178,9 @@ before activation is a product follow-up, not in this slice.
 Enable order: migration `b7d2e9f4a1c3` (expand-only, table
 `training_start_decision`; downgrade refuses with rows) → backend flag ON →
 mobile build with `AXISAI_TRAINING_START_V2_ENABLED=true`. Rollback: flag OFF
-(routes 404, legacy creation unchanged; pending drafts expire through the
-existing ledger). A mobile client with the switch ON must only talk to a
+(routes 404, legacy creation unchanged; a pending preview is ended — consumed —
+by the owner's next legacy generate-and-persist, which can never activate it,
+so no owner is stranded behind a preview). A mobile client with the switch ON must only talk to a
 backend with this change (an older backend would ignore `?preview=1`).
 
 ## Tests

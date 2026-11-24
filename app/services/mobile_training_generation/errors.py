@@ -164,3 +164,15 @@ class PreviewPreconditionRequired(PlanGenerationCommandError):
     public_code = "TRAINING_PLAN_PREVIEW_PRECONDITION_REQUIRED"
     http_status = 428
     retryable = False
+
+
+class PreviewPending(PlanGenerationCommandError):
+    """Another unaccepted preview is pending; discard it explicitly first.
+
+    A new preview never silently destroys a delivered (paid) draft before its
+    own admission (consent, allowance, quota) is known.
+    """
+
+    public_code = "TRAINING_PLAN_PREVIEW_PENDING"
+    http_status = 409
+    retryable = False
