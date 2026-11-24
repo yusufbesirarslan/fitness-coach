@@ -50,6 +50,7 @@ CANONICAL_PATHS = (CHECKPOINT_PATH, ERRORS_PATH, EXECUTION_PATH)
 ENDPOINTS = (
     "mobile_api.workout_execution_capabilities",
     "mobile_api.start_workout_session",
+    "mobile_api.finish_workout_without_photo",
     "mobile_api.current_workout_session",
     "mobile_api.read_workout_session",
     "mobile_api.resume_workout_session",
@@ -375,6 +376,7 @@ def test_every_session_route_is_absent_while_the_flag_is_off(app, monkeypatch, m
     responses = [
         client.post(base, headers=headers, json={"workout_ref": "x" * 24}),
         client.get(base + "/current", headers=headers),
+        client.post(base + "/finish", headers=headers, json={}),
         client.post(f"{base}/abc/resume", headers=headers),
         client.put(f"{base}/abc/checkpoint",
                    headers={**headers, "If-Match": "0",

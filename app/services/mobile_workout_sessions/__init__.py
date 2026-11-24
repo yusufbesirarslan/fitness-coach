@@ -62,6 +62,7 @@ from .service import (
     checkpoint,
     complete,
     current,
+    finish_workout,
     prepare_complete,
     read,
     resume,
@@ -72,6 +73,7 @@ __all__ = [
     # commands
     "start",
     "current",
+    "finish_workout",
     "read",
     "resume",
     "checkpoint",

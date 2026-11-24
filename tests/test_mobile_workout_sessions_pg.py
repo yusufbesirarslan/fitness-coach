@@ -218,6 +218,38 @@ def test_two_concurrent_native_starts_leave_exactly_one_active_session():
         _teardown(flask_app)
 
 
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_two_direct_workout_finishes_commit_one_terminal_session_and_reward():
+    _require_pg()
+    from app.blueprints.mobile_workout_sessions import _no_photo_completion
+    from app.extensions import db
+    from app.models import User, WorkoutCompletionDay, WorkoutSession
+    from app.services import mobile_workout_sessions as sessions
+    from app.timeutil import app_today
+
+    flask_app, user_id, reference = _make_pg_app()
+    secret = flask_app.config["SECRET_KEY"]
+    day = app_today().isoformat()
+
+    def finish():
+        result = sessions.finish_workout(
+            user_id, secret, reference, day, **_no_photo_completion())
+        return result.payload["outcome"]
+
+    try:
+        results = _race(flask_app, user_id, {"a": finish, "b": finish})
+        assert sorted(results.values()) == [
+            ("ok", "already_completed"), ("ok", "created"),
+        ]
+        with flask_app.app_context():
+            session = WorkoutSession.query.filter_by(user_id=user_id).one()
+            assert (session.status, session.workout_ref) == ("completed", reference)
+            assert WorkoutCompletionDay.query.filter_by(user_id=user_id).count() == 1
+            assert db.session.get(User, user_id).rank_points == 10
+    finally:
+        _teardown(flask_app)
+
+
 # -- checkpoint ---------------------------------------------------------------
 
 @pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
