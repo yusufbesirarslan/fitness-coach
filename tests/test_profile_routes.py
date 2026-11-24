@@ -29,6 +29,23 @@ def test_setup_page_renders(client, auth_user):
     assert client.get("/setup").status_code == 200
 
 
+@pytest.mark.parametrize("age", [1, 13, 17])
+def test_setup_rejects_underage_profile_without_storing_body_data(client, auth_user, age):
+    response = client.post("/setup", json={**SETUP_PAYLOAD, "age": age})
+    assert response.status_code == 400
+    assert "18" in response.json["error"]
+    user = _fresh_user(auth_user.id)
+    assert user.age is None and user.weight is None
+    assert user.profile_complete is not True
+    assert UserSession.query.filter_by(user_id=user.id).count() == 0
+
+
+def test_setup_accepts_the_adult_boundary(client, auth_user):
+    response = client.post("/setup", json={**SETUP_PAYLOAD, "age": 18})
+    assert response.status_code == 200
+    assert _fresh_user(auth_user.id).age == 18
+
+
 def test_setup_saves_profile_and_creates_session(client, auth_user):
     response = client.post("/setup", json=SETUP_PAYLOAD)
     assert response.status_code == 200
