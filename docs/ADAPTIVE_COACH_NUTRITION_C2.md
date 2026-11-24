@@ -161,3 +161,18 @@ PostgreSQL `tests/test_adaptive_coach_c2_nutrition_pg.py` (real D1 capture,
 parallel confirm/cancel, double confirm, withdrawal + regrant, Coach regrant,
 cross-account). Synthetic estimator only. Query-count, cache, B2-order,
 logging and undo-contract regressions are pinned in the unit module.
+
+## Allowance runtime: the nested estimator
+
+Under the launch allowance runtime (`AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED`),
+the whole-meal re-estimate of a Coach edit is a physical `nutrition_plan`
+call inside the turn's Coach logical action. `ai_allowances.execution.
+physical_allowed` admits it there ONLY while the owner's own independent
+`nutrition.plan` authority is the current D1 operation (the C1 service's
+`operation_scope(authorities.nutrition)`); it shares the Coach unit's attempt,
+cost and spend-guard ceilings and opens no Nutrition generation allowance.
+`PHYSICAL_FEATURES` itself is unchanged and no other family gains it. Before
+this, every Coach Nutrition edit failed closed with
+`AI_ALLOWANCE_IDEMPOTENCY_CONFLICT` once the runtime was ON (found by the
+isolated Linux Coach E2E; the PG suites run with execution OFF). Tests
+`tests/test_coach_nutrition_estimator_allowance.py`.

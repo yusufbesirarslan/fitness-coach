@@ -41,6 +41,24 @@ PHYSICAL_FEATURES = {
     "pump_check": frozenset({"vision"}),
     "qr_menu": frozenset({"menu_extract", "nutrition"}),
 }
+# C2: a Coach-initiated Nutrition Plan edit re-estimates the affected meal
+# inside the SAME Coach unit (shared attempt/cost ceiling and spend guard).
+# Only while the owner's separate nutrition.plan D1 authority is the current
+# operation; D1 independently refuses any nutrition_plan dispatch without it.
+COACH_NESTED_NUTRITION_EDIT = "nutrition_plan"
+
+
+def physical_allowed(family, feature, owner):
+    """Whether a logical ``family`` action may fund this physical ``feature``."""
+    if feature in PHYSICAL_FEATURES.get(family, ()):
+        return True
+    if family != "coach" or feature != COACH_NESTED_NUTRITION_EDIT:
+        return False
+    authority = ai_consent.current_operation()
+    return (isinstance(authority, ai_consent.OperationAuthority)
+            and authority.owner == owner and authority.feature == "nutrition_plan")
+
+
 CONSENT_FEATURE = {"coach": "coach", "training_generation": "training_plan",
                    "nutrition_generation": "nutrition_plan", "pump_check": "vision",
                    "qr_menu": "menu_extract"}
@@ -400,7 +418,8 @@ def check_provider(owner, feature):
         return
     action = _ACTIVE.get()
     if action is not None:
-        if action.owner != owner or feature not in PHYSICAL_FEATURES[action.feature] or not action.reference:
+        if (action.owner != owner or not physical_allowed(action.feature, feature, owner)
+                or not action.reference):
             _refuse("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
         if action.refusal is not None:
             raise action.refusal
@@ -459,7 +478,7 @@ def before_attempt(owner, feature, *, provider, payload):
         except AllowanceError as error:
             _refuse(error.code)
         return
-    if action.owner != owner or feature not in PHYSICAL_FEATURES[action.feature]:
+    if action.owner != owner or not physical_allowed(action.feature, feature, owner):
         _refuse("AI_ALLOWANCE_IDEMPOTENCY_CONFLICT")
     # Serializes joined menu workers locally; PostgreSQL arbitrates processes.
     with action._lock:
