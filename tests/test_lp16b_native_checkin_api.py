@@ -501,7 +501,7 @@ def test_failure_during_derived_session_update_leaves_nothing_durable(
         client, athlete, principal, monkeypatch):
     from app.services.weekly_checkin import service as checkin_service
 
-    real_target = checkin_service.calculate_target
+    real_target = checkin_service.account_profile.calculate_target
     armed = {"on": True}
 
     def _faulty(*args):
@@ -509,7 +509,7 @@ def test_failure_during_derived_session_update_leaves_nothing_durable(
             raise RuntimeError("derived target fault")
         return real_target(*args)
 
-    monkeypatch.setattr(checkin_service, "calculate_target", _faulty)
+    monkeypatch.setattr(checkin_service.account_profile, "calculate_target", _faulty)
     user = athlete("cin-fault")
     response = post(client, principal(user, "lp16b-fault-0001"))
 
@@ -560,7 +560,7 @@ def test_logs_carry_no_values_keys_or_identity(client, athlete, principal,
     post(client, principal(user, key))
     post(client, principal(user, key), body={**BODY, "fatigue": 1})
     get(client, principal(user))
-    monkeypatch.setattr(checkin_service, "calculate_target",
+    monkeypatch.setattr(checkin_service.account_profile, "calculate_target",
                         lambda *a: (_ for _ in ()).throw(RuntimeError("78.4")))
     post(client, principal(user, "lp16b-logsecret2"))
 

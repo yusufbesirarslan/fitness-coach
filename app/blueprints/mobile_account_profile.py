@@ -56,8 +56,15 @@ REQUIRED_FIELDS = {
     "activity_level": account_profile.CURRENT_ACTIVITY,
 }
 OPTIONAL_FIELDS = {"target_weight_kg": account_profile.TARGET_WEIGHT}
-ALLOWED_FIELDS = frozenset(REQUIRED_FIELDS) | frozenset(OPTIONAL_FIELDS)
-# The read answers every field the write takes, under the same wire names.
+# PD1 (#547): the goal pace is accepted on the full-replace write so a first
+# onboarding submission stores profile, pace and target in ONE transaction.
+# Write-only here: shipped clients decode the GET with an exact key set, so
+# the pace is read back from `GET /api/v1/account/calorie-target` instead.
+WRITE_ONLY_FIELDS = {"goal_pace": account_profile.GOAL_PACE}
+ALLOWED_FIELDS = (frozenset(REQUIRED_FIELDS) | frozenset(OPTIONAL_FIELDS)
+                  | frozenset(WRITE_ONLY_FIELDS))
+# The read answers every field the write takes except the write-only ones,
+# under the same wire names.
 READ_FIELDS = {**REQUIRED_FIELDS, **OPTIONAL_FIELDS}
 
 
@@ -116,6 +123,8 @@ def put_account_profile():
     values = {domain: data[wire] for wire, domain in REQUIRED_FIELDS.items()}
     values.update({domain: data.get(wire)
                    for wire, domain in OPTIONAL_FIELDS.items()})
+    values.update({domain: data.get(wire)
+                   for wire, domain in WRITE_ONLY_FIELDS.items()})
     try:
         profile = OnboardingProfile(**values)
     except ProfileRejected as rejection:

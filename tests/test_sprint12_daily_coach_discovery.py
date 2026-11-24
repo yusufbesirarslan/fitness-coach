@@ -147,6 +147,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # LP-03 native onboarding profile write + its LP-12 prefill read
         # (owner = bearer principal).
         "/api/v1/account/profile",
+        # PD1 (#547) canonical calorie target read + goal-pace edit.
+        "/api/v1/account/calorie-target",
+        "/api/v1/account/goal-pace",
         # LP-09 native Coach (owner = bearer principal; web Coach pipeline).
         "/api/v1/coach/messages",
         "/api/v1/coach/history",

@@ -290,7 +290,9 @@ def test_business_authorities_refuse_before_weight_math_or_mutation(app, make_us
     from app.services.weekly_checkin import service
     user = record_user(make_user)
     monkeypatch.setattr(account_profile, "calculate_bmr", lambda *_: pytest.fail("adult math"))
-    monkeypatch.setattr(service, "calculate_bmr", lambda *_: pytest.fail("adult math"))
+    # PD1: the check-in re-derives through account_profile.derive_targets, so
+    # the one patch above covers both authorities.
+    assert not hasattr(service, "calculate_bmr")
     with pytest.raises(policy.EligibilityDenied):
         account_profile.complete_onboarding(user, object())
     with pytest.raises(policy.EligibilityDenied):

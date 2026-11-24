@@ -171,6 +171,15 @@ Writing it back: the `PUT` is unchanged. `target_weight_kg: null` (or absent)
 keeps the stored target — a target cannot be cleared through this contract —
 so a client leaving the target unchanged omits it.
 
+### 3b. Goal pace (PD1, #547)
+
+`PUT` also accepts an optional, write-only `goal_pace` token. It is not
+echoed by the `GET` (shipped clients decode it with an exact key set); the
+pace and the resulting daily target are read from
+`GET /api/v1/account/calorie-target`, and changed alone with
+`PUT /api/v1/account/goal-pace`. Contract:
+[docs/mobile/goal-pace-calorie-target.md](mobile/goal-pace-calorie-target.md).
+
 ## 4. Vocabulary
 
 Gender, fitness level and activity level already are locale-independent
