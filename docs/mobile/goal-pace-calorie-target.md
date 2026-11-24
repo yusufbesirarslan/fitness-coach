@@ -14,10 +14,16 @@ column, `user.goal_pace`.
 | the canonical daily target | unchanged | newest `UserSession.target_calories` |
 | read projection | `account_profile.calorie_target_view` | — (read-only) |
 
-Every writer of the target goes through `derive_targets`: native and web
-onboarding (`complete_onboarding`), the pace edit (`set_goal_pace`, which
-reuses `complete_onboarding`), and every body-weight update
-(`weekly_checkin.apply_body_weight` → `derive_targets_for_weight`). Every
+Every live writer of the target goes through `derive_targets`: native and
+web onboarding (`complete_onboarding`), the pace edit (`set_goal_pace`,
+which reuses `complete_onboarding`), and every body-weight update
+(`weekly_checkin.apply_body_weight` → `derive_targets_for_weight`). One
+legacy writer does not: web `POST /chat` (`coach.chat`) still appends a
+session sized by `calculate_target`. It is closed by D1
+(`ai_consent._CLOSED_ENDPOINTS`); if it were ever reopened, the read would
+report `basis: stored` for the row it writes and the owner can re-apply the
+pace. Web `/edit-profile` changes the goal without re-deriving (pre-existing);
+the same `stored` rule covers it. Every
 reader keeps reading `UserSession.target_calories` (Nutrition day view,
 diary goal, Plan facts, Coach context, menu, barcode). No client computes
 a target, BMR or TDEE.
@@ -45,6 +51,9 @@ outcome; no muscle-gain rate is modelled or published.
   left after the limits).
 * Gain: maintenance + the clamped surplus of the option.
 * Every pace target is rounded half-up to 10 kcal.
+* A profile whose values give no positive maintenance estimate (e.g. a height
+  typed in metres) cannot be sized by a pace: the legacy formula applies,
+  nothing raises, and the read offers no pace options.
 * Maintenance (a goal outside the two tokens) and accounts with no pace keep
   the legacy formula (`calculate_target`: −400 / +300 / ±0).
 
@@ -95,9 +104,11 @@ or lock).
   NULL / non-positive stored target). `not_set` ⇒ `daily_kcal`,
   `maintenance_kcal`, `basis` are `null`, `bounded` false, options `[]`.
 * `daily_kcal`: the canonical stored `UserSession.target_calories`, rounded
-  half-up to a whole kcal. It is the value Nutrition and Today read. Pace
-  targets are multiples of 10, so it equals the stored value exactly; legacy
-  targets may carry a fraction that every reader rounds the same way.
+  half-up to a whole kcal. It is the value Nutrition and Today read (and
+  PD2's `nutrition_day_view.read_daily_calorie_target`). Pace targets are
+  multiples of 10, so it equals the stored value exactly; a legacy target may
+  carry a fraction, which the mobile client rounds the same way (a Python
+  reader using `round()` can differ by 1 kcal on an exact .5).
 * `basis`: `pace` | `maintenance` | `legacy` | `stored`. `stored` means the
   stored profile no longer reproduces the stored target (changed elsewhere);
   the number is still the canonical one, nothing is guessed.

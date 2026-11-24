@@ -452,3 +452,39 @@ def test_accounts_are_isolated(raw_client, make_user, principal):
 def test_goal_pace_is_erased_with_the_health_profile():
     from app.services import health_erasure
     assert "goal_pace" in health_erasure.PROFILE_FIELDS
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (P2-2, P3-2)
+# ---------------------------------------------------------------------------
+
+def test_a_non_positive_maintenance_never_raises(raw_client, make_user, principal):
+    # Height typed in metres: BMR and maintenance go negative.
+    body = {**BODY, "weight_kg": 45, "height_cm": 1.6, "age": 80,
+            "gender": "female", "goal": "build_muscle", "goal_pace": "gain_lean"}
+    user = make_user("pd1-metres")
+    headers = principal(user)
+    response = raw_client.put(PROFILE, json=body, headers=headers)
+    assert response.status_code == 200, response.json
+    tdee = calculate_tdee(calculate_bmr(45, 1.6, 80, "female"), "active")
+    assert tdee <= 0
+    assert _sessions(user.id)[0].target_calories == calculate_target(
+        tdee, "kas kazanma")
+    view = _view(raw_client, headers)
+    assert view["pace_options"] == [] and view["maintenance_kcal"] is None
+    assert account_profile.derive_targets(
+        weight=45, height=1.6, age=80, gender="female",
+        current_activity="active", stored_goal="kas kazanma",
+        goal_pace="gain_lean").basis == "legacy"
+
+
+def test_edit_with_a_stored_age_under_18_is_409(raw_client, owner):
+    _onboard(raw_client, owner, goal_pace="lose_slower")
+    user = _user(owner.id)
+    user.age = 16  # a contradictory legacy value on an adult account
+    db.session.commit()
+    response = raw_client.put(PACE, json={"goal_pace": "lose_faster"},
+                              headers=owner.headers)
+    assert (response.status_code, response.json["error"]["code"]) == (
+        409, "PROFILE_INCOMPLETE")
+    assert _user(owner.id).goal_pace == "lose_slower"

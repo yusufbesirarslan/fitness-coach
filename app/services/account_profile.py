@@ -65,6 +65,8 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.extensions import db
 from app.models import User, UserSession
 from app.services import goal_pace as pace_rules
@@ -245,6 +247,12 @@ def pace_for_goal(pace, goal):
     return pace if pace in PACES_FOR_GOAL.get(goal, ()) else None
 
 
+def maintenance_usable(tdee):
+    """Whether `tdee` is a maintenance estimate a pace can size from."""
+    return (isinstance(tdee, (int, float)) and not isinstance(tdee, bool)
+            and math.isfinite(tdee) and tdee > 0)
+
+
 def derive_targets(*, weight, height, age, gender, current_activity,
                    stored_goal, goal_pace=None, target_weight=None):
     """The ONE daily-target computation. Pure; the caller persists it.
@@ -256,7 +264,11 @@ def derive_targets(*, weight, height, age, gender, current_activity,
     bmr = calculate_bmr(weight, height, age, gender)
     tdee = calculate_tdee(bmr, current_activity)
     pace = pace_for_goal(goal_pace, goal_token(stored_goal))
-    if pace is None:
+    if pace is None or not maintenance_usable(tdee):
+        # No pace, or a maintenance estimate a pace cannot size (a profile
+        # whose values give a non-positive TDEE, e.g. height in metres): the
+        # legacy formula, unchanged, never a raise. Readers already treat a
+        # non-positive stored target as "no target".
         return DerivedTargets(bmr, tdee, calculate_target(tdee, stored_goal),
                               BASIS_LEGACY, None, False, None)
     outcome = pace_rules.pace_target(
@@ -474,6 +486,11 @@ def complete_onboarding(user, profile):
         user.goal = stored_goal
         user.goal_type = _GOAL_TYPE[profile.goal]
         user.goal_pace = pace
+        if locked_pace != pace:
+            # The in-memory row may hold a value loaded before the lock that
+            # equals `pace`; force the UPDATE so the committed pace always
+            # matches the target derived from it.
+            flag_modified(user, "goal_pace")
         user.fitness_level = profile.fitness_level
         user.current_activity = profile.current_activity
         if profile.target_weight is not None:
@@ -539,6 +556,10 @@ def set_goal_pace(user, pace):
                 WEIGHT, HEIGHT, AGE, GENDER, GOAL, FITNESS_LEVEL,
                 CURRENT_ACTIVITY)):
             raise ProfileIncomplete("profile")
+        if stored[AGE] < ADULT_AGE_MIN:
+            # A stored adult-account age under 18 contradicts the account; the
+            # profile must be corrected first, the pace alone cannot apply.
+            raise ProfileIncomplete(AGE)
         try:
             profile = OnboardingProfile(**{**stored, GOAL_PACE: pace})
         except ProfileRejected as rejection:
@@ -627,10 +648,13 @@ def calorie_target_view(user):
             target_weight=values[TARGET_WEIGHT])
 
     current = derive(stored_pace)
-    view["maintenance_kcal"] = _kcal(pace_rules.round_kcal(current.tdee))
     if abs(current.target_calories - stored_target) < 0.5:
         view.update(basis=current.basis, bounded=current.bounded,
                     reason=current.reason)
+    if not maintenance_usable(current.tdee):
+        # No maintenance estimate a pace can size: no options are offered.
+        return view
+    view["maintenance_kcal"] = _kcal(pace_rules.round_kcal(current.tdee))
     for pace in PACES_FOR_GOAL.get(goal, ()):
         option = derive(pace)
         view["pace_options"].append({
