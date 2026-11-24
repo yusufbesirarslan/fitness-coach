@@ -229,6 +229,9 @@ class User(UserMixin, db.Model):
     full_name        = db.Column(db.String(150), nullable=True)
     target_weight    = db.Column(db.Float, nullable=True)
     goal_type        = db.Column(db.String(10), nullable=True)
+    # PD1 goal pace token (`goal_pace.PACES`); NULL = never chosen → legacy
+    # target formula. Owned by account_profile (the ONE profile authority).
+    goal_pace        = db.Column(db.String(16), nullable=True)
     streak_count     = db.Column(db.Integer, default=0, server_default='0')
     rank_points      = db.Column(db.Integer, default=0, server_default='0')
     weekly_xp        = db.Column(db.Integer, default=0, server_default='0')
