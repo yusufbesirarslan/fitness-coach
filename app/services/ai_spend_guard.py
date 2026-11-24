@@ -207,19 +207,29 @@ def coach_turn_opener(armed):
     if not armed:
         yield
         return
-    _tls.turn_reserve = COACH_TURN_RESERVE
+    token = _TurnReserve(COACH_TURN_RESERVE)
+    _tls.turn_reserve = token
     try:
         yield
     finally:
-        if hasattr(_tls, "turn_reserve"):
+        # Clear only the reserve THIS scope armed (identity), never another's.
+        if getattr(_tls, "turn_reserve", None) is token:
             del _tls.turn_reserve
 
 
+class _TurnReserve:
+    __slots__ = ("size",)
+
+    def __init__(self, size):
+        self.size = size
+
+
 def _take_turn_reserve():
-    reserve = getattr(_tls, "turn_reserve", None)
-    if reserve is not None:
-        del _tls.turn_reserve
-    return reserve or 1
+    token = getattr(_tls, "turn_reserve", None)
+    if token is None:
+        return 1
+    del _tls.turn_reserve
+    return token.size
 
 
 def current_subject():

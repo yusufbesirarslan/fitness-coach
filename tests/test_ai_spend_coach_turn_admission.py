@@ -366,3 +366,49 @@ def test_streaming_turn_admitted_when_the_whole_turn_fits(app, stream_providers)
     assert stream_providers.calls == 1
     assert events[-1]["type"] == "done"
     assert _minute_count(42, None) == 3
+
+
+# ── Review P3 follow-ups (identity cleanup, end-to-end retry) ───────────────
+
+def test_scope_exit_never_clears_a_reserve_another_scope_armed():
+    with ai_spend_guard.coach_turn_opener(True):
+        other = ai_spend_guard._TurnReserve(7)       # e.g. a GC-closed generator's
+        ai_spend_guard._tls.turn_reserve = other     # scope vs. a live opener
+    assert ai_spend_guard._tls.turn_reserve is other
+    assert ai_spend_guard._take_turn_reserve() == 7
+    assert not hasattr(ai_spend_guard._tls, "turn_reserve")
+
+
+class _Transient(Exception):
+    status_code = 503
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer")
+def test_blocking_opener_retry_is_charged_as_a_plain_attempt(
+        app, coach_providers, make_user, monkeypatch):
+    from app.services import ai_provider_call
+    user = make_user("retrier")
+    monkeypatch.setattr(ai_provider_call, "BEDROCK_MAX_RETRIES", 1)
+    monkeypatch.setattr(ai_provider_call.time, "sleep", lambda s: None)
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda uid, name, args: "{}")
+    fake = coach_providers.bedrock
+    fake._responses = [_tool_use_response()]
+    real_create = fake.create
+
+    def flaky(**kwargs):
+        if fake.calls == 0:
+            fake.calls += 1
+            raise _Transient("throttled")
+        return real_create(**kwargs)
+
+    monkeypatch.setattr(fake, "create", flaky)
+    for _ in range(2):
+        _charge(user.id)
+    with app.test_request_context("/ask", method="POST"):
+        with ai_spend_guard.subject_scope(user.id):
+            reply = ai_coach._run_coach_conversation(user.id, "soru", "", client_history=[])
+    # opener 3 <= 5-2; its retry is plain (4 <= 5, would be refused at 4 > 3 if
+    # the reserve leaked); R2 plain (5 <= 5). Each attempt charged exactly once.
+    assert fake.calls == 3
+    assert reply not in ai_coach._COACH_FALLBACKS["tr"].values()
+    assert _minute_count(user.id, None) == 5

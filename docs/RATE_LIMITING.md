@@ -149,6 +149,15 @@ so an empty window always admits a turn).
 - Later rounds, the estimator, and the opener's own transient retries are
   ordinary per-attempt charges: a turn longer than the reserve, or two turns
   of one owner racing, can still be refused mid-turn (bounded, accountable).
+- The opener is a threshold, not a reservation: other accounts' traffic on
+  the global hour/day windows can still refuse R2/R3 after the opener passed.
+- The opener checks only the keys its own `coach` charge plans. The
+  Nutrition estimator also hits the `nutrition_plan` expensive-feature daily
+  key (`daily // 3`), which the opener does not see, so a user who exhausted
+  that key can still be refused at the estimator mid-turn (known residual).
+- A fallback loop (OpenAI under legacy routing, Haiku under claude55) starts
+  again at `tool_round == 1`, so its opener applies the reserve to the light
+  ceilings too (user light day 100 → 98 effective for that opener).
 - Trade-off, pinned in `tests/test_ai_spend_coach_turn_admission.py`: at
   5/min a run of one-attempt turns gets 3 per minute (was 5); the 4th is
   refused before any spend. Two-attempt turns: 2 per minute either way.
