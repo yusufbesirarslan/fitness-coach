@@ -21,7 +21,9 @@ SCRIPT = ScriptDirectory(str(ROOT / "migrations"))
 RETIRED, PARENT, SUCCESSOR = "c1a9b7e5d301", "ad17de1e0001", "19cb998acd2f"
 # G4 (#530) stacks its session-outcome table on the re-landed C1: the graph's
 # head moved, the retired revision's successor did not.
-HEAD = "5cc5aa7e47ba"
+G4 = "5cc5aa7e47ba"
+# PD1 (#547) stacks the nullable user.goal_pace column on G4.
+HEAD = "a7d3c9e1f2b4"
 OPT_IN = {rr.RECONCILE_ENV: RETIRED}
 
 
@@ -29,7 +31,8 @@ def test_graph_retires_c1a9_and_relands_c1_after_private_exercises():
     graph = {item.revision for item in SCRIPT.walk_revisions()}
     assert RETIRED not in graph
     assert SCRIPT.get_heads() == [HEAD]
-    assert SCRIPT.get_revision(HEAD).down_revision == SUCCESSOR
+    assert SCRIPT.get_revision(HEAD).down_revision == G4
+    assert SCRIPT.get_revision(G4).down_revision == SUCCESSOR
     assert SCRIPT.get_revision(SUCCESSOR).down_revision == "e5b27aa4101c"
     assert SCRIPT.get_revision("e5b27aa4101c").down_revision == PARENT
     assert rr.RETIRED == {RETIRED: (PARENT, SUCCESSOR)}
@@ -78,7 +81,7 @@ def conn():
 def test_no_version_table_head_or_other_stamps_are_untouched(conn):
     assert rr.guard(conn, SCRIPT, OPT_IN) is None
     conn.execute(sa.text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
-    for revision in (PARENT, "e5b27aa4101c", SUCCESSOR, HEAD):
+    for revision in (PARENT, "e5b27aa4101c", SUCCESSOR, G4, HEAD):
         conn.execute(sa.text("DELETE FROM alembic_version"))
         conn.execute(sa.text("INSERT INTO alembic_version VALUES (:r)"), {"r": revision})
         assert rr.guard(conn, SCRIPT, OPT_IN) is None
@@ -165,7 +168,8 @@ def test_confirm_admits_only_a_complete_upgrade_to_head(conn):
     reconciled = rr.guard(conn, SCRIPT, OPT_IN)
     _at(conn, HEAD)
     rr.confirm(conn, SCRIPT, reconciled,
-               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([HEAD])])
+               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([G4]),
+                _Step([HEAD])])
 
 
 @pytest.mark.parametrize("steps, at", [
@@ -174,7 +178,8 @@ def test_confirm_admits_only_a_complete_upgrade_to_head(conn):
     ([_Step(["e5b27aa4101c"])], "e5b27aa4101c"),                   # `upgrade e5b27aa4101c`
     ([_Step(["e5b27aa4101c"]), _Step([SUCCESSOR])], SUCCESSOR),    # `upgrade 19cb998acd2f`
     ([_Step([SUCCESSOR]), _Step([HEAD])], HEAD),                   # e5b27aa4101c skipped
-    ([_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([HEAD], upgrade=False)], HEAD),
+    ([_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([G4]),
+      _Step([HEAD], upgrade=False)], HEAD),
 ])
 def test_confirm_refuses_stamp_current_partial_or_skipping_runs(conn, steps, at):
     _historical(conn)

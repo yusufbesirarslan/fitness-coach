@@ -43,6 +43,21 @@ Reading
 `current_profile` is the one read of the stored profile values, in the same
 domain names and tokens the write takes, so a native client can prefill the
 full-replace write from it.
+
+Goal pace and the daily calorie target (PD1)
+--------------------------------------------
+`User.goal_pace` is the owner's chosen pace token (`goal_pace.PACES`), valid
+only for its goal (`PACES_FOR_GOAL`). `derive_targets` is the ONE place the
+daily target is computed — onboarding, a pace edit and every body-weight
+update call it — and `UserSession.target_calories` stays the ONE stored
+target every reader (Nutrition, Today, Coach, Weekly Check-in) uses.
+
+Compatibility: NULL pace means "never chosen" and keeps the legacy formula
+(`calculations.calculate_target`) byte-for-byte, so no existing account is
+re-targeted until its owner picks a pace. A pace that does not belong to the
+stored goal (a goal changed elsewhere) is treated as NULL, never re-mapped.
+A write that omits the pace keeps the stored one when it still fits the
+submitted goal and clears it otherwise. A minor never has a pace or a target.
 """
 from __future__ import annotations
 
@@ -50,8 +65,11 @@ import math
 from dataclasses import dataclass
 from typing import Optional
 
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.extensions import db
 from app.models import User, UserSession
+from app.services import goal_pace as pace_rules
 from app.services.calculations import (
     calculate_bmr,
     calculate_target,
@@ -91,6 +109,14 @@ GOAL = "goal"
 FITNESS_LEVEL = "fitness_level"
 CURRENT_ACTIVITY = "current_activity"
 TARGET_WEIGHT = "target_weight"
+GOAL_PACE = "goal_pace"
+
+# The paces each goal admits. A pace outside its goal's tuple is refused on
+# write and read back as "no pace".
+PACES_FOR_GOAL = {
+    GOAL_LOSE_WEIGHT: pace_rules.LOSS_PACES,
+    GOAL_BUILD_MUSCLE: pace_rules.GAIN_PACES,
+}
 
 # Closed rejection reasons.
 REASON_TYPE = "type"
@@ -163,6 +189,8 @@ class OnboardingProfile:
     non-finite number or a value outside the canonical ranges. There is no
     owner field — the owner is whoever the caller authenticated.
     `target_weight=None` means "not submitted" and leaves the stored value.
+    `goal_pace=None` means "not submitted": the stored pace is kept when it
+    belongs to the submitted goal and cleared when it does not.
     """
 
     weight: float
@@ -173,6 +201,7 @@ class OnboardingProfile:
     fitness_level: str
     current_activity: str
     target_weight: Optional[float] = None
+    goal_pace: Optional[str] = None
 
     def __post_init__(self):
         set_ = object.__setattr__
@@ -186,6 +215,82 @@ class OnboardingProfile:
         if self.target_weight is not None:
             set_(self, TARGET_WEIGHT,
                  _body_weight(TARGET_WEIGHT, self.target_weight))
+        if self.goal_pace is not None:
+            _token(GOAL_PACE, self.goal_pace, pace_rules.PACES)
+            if self.goal_pace not in PACES_FOR_GOAL[self.goal]:
+                raise ProfileRejected(GOAL_PACE, REASON_VOCABULARY)
+
+
+@dataclass(frozen=True)
+class DerivedTargets:
+    """BMR, maintenance and the daily target of one profile, and why.
+
+    `basis` is `pace` / `maintenance` (from `goal_pace`) or `legacy` (no
+    usable pace: the pre-PD1 formula). `goal_pace` is the pace that was
+    applied, never one that did not fit the goal.
+    """
+
+    bmr: float
+    tdee: float
+    target_calories: float
+    basis: str
+    goal_pace: Optional[str]
+    bounded: bool
+    reason: Optional[str]
+
+
+BASIS_LEGACY = "legacy"
+
+
+def pace_for_goal(pace, goal):
+    """`pace` when it is a pace of goal token `goal`, else None."""
+    return pace if pace in PACES_FOR_GOAL.get(goal, ()) else None
+
+
+def maintenance_usable(tdee):
+    """Whether `tdee` is a maintenance estimate a pace can size from."""
+    return (isinstance(tdee, (int, float)) and not isinstance(tdee, bool)
+            and math.isfinite(tdee) and tdee > 0)
+
+
+def derive_targets(*, weight, height, age, gender, current_activity,
+                   stored_goal, goal_pace=None, target_weight=None):
+    """The ONE daily-target computation. Pure; the caller persists it.
+
+    The inputs must already be a complete adult profile (the caller decides
+    that); `stored_goal` is the stored literal, `goal_pace` the stored or
+    submitted token. A pace that does not belong to the goal is ignored.
+    """
+    bmr = calculate_bmr(weight, height, age, gender)
+    tdee = calculate_tdee(bmr, current_activity)
+    pace = pace_for_goal(goal_pace, goal_token(stored_goal))
+    if pace is None or not maintenance_usable(tdee):
+        # No pace, or a maintenance estimate a pace cannot size (a profile
+        # whose values give a non-positive TDEE, e.g. height in metres): the
+        # legacy formula, unchanged, never a raise. Readers already treat a
+        # non-positive stored target as "no target".
+        return DerivedTargets(bmr, tdee, calculate_target(tdee, stored_goal),
+                              BASIS_LEGACY, None, False, None)
+    outcome = pace_rules.pace_target(
+        pace, tdee=tdee, weight=weight, height=height, gender=gender,
+        target_weight=target_weight)
+    return DerivedTargets(bmr, tdee, outcome.target_calories, outcome.basis,
+                          pace, outcome.bounded, outcome.reason)
+
+
+def derive_targets_for_weight(owner, weight):
+    """`derive_targets` for `owner`'s stored profile at a new body `weight`.
+
+    The weight primitive (`weekly_checkin.apply_body_weight`) calls this so a
+    body-weight update keeps the owner's stored pace and target weight
+    without that package reading either column. The caller has already
+    checked that the stored profile is complete.
+    """
+    return derive_targets(
+        weight=weight, height=owner.height, age=owner.age,
+        gender=owner.gender, current_activity=owner.current_activity,
+        stored_goal=owner.goal, goal_pace=owner.goal_pace,
+        target_weight=_stored_number(owner.target_weight))
 
 
 @dataclass(frozen=True)
@@ -268,19 +373,23 @@ def current_profile(user):
         FITNESS_LEVEL: _stored_token(user.fitness_level, FITNESS_LEVELS),
         CURRENT_ACTIVITY: _stored_token(user.current_activity, ACTIVITY_LEVELS),
         TARGET_WEIGHT: _stored_number(user.target_weight),
+        GOAL_PACE: pace_for_goal(user.goal_pace, goal_token(user.goal)),
     }
 
 
 def _lock_owner(user_id):
-    """`SELECT … FOR UPDATE` the owner row for its serializing effect.
+    """`SELECT … FOR UPDATE` the owner row; returns its committed `goal_pace`.
 
     Two first submissions would otherwise both see "no session" and both
     insert one. A column query, so the identity-mapped user is not handed back
-    stale (see `plan_owner_lock.lock_plan_owner`). Position 2 of the
-    repository lock order (`user` row); nothing further is locked here. No-op
-    on SQLite, which admits one writer at a time.
+    stale (see `plan_owner_lock.lock_plan_owner`) — and so the stored pace a
+    write keeps is the one read under the lock, not a value loaded earlier.
+    Position 2 of the repository lock order (`user` row); nothing further is
+    locked here. No-op lock on SQLite, which admits one writer at a time.
     """
-    db.session.query(User.id).filter_by(id=user_id).with_for_update().first()
+    row = (db.session.query(User.id, User.goal_pace).filter_by(id=user_id)
+           .with_for_update().first())
+    return row.goal_pace if row is not None else None
 
 
 # TR 13-17 profile (account_eligibility.tr_minor_profile): no BMR/TDEE/calorie
@@ -298,6 +407,8 @@ def _require_minor_profile(profile):
         raise ProfileRejected(GOAL, REASON_VOCABULARY)
     if profile.target_weight is not None:
         raise ProfileRejected(TARGET_WEIGHT, REASON_VOCABULARY)
+    if profile.goal_pace is not None:
+        raise ProfileRejected(GOAL_PACE, REASON_VOCABULARY)
 
 
 def require_weight_target_eligibility(user):
@@ -340,18 +451,28 @@ def complete_onboarding(user, profile):
         raise ProfileRejected(AGE, REASON_RANGE)
 
     stored_goal = _GOAL_STORED[profile.goal]
-    if minor:
-        bmr = tdee = target_calories = nutrition_plan = None
-    else:
-        bmr = calculate_bmr(profile.weight, profile.height, profile.age,
-                            profile.gender)
-        tdee = calculate_tdee(bmr, profile.current_activity)
-        target_calories = calculate_target(tdee, stored_goal)
-        nutrition_plan = generate_nutrition_plan(stored_goal, target_calories)
     training_plan = generate_training_plan(stored_goal, profile.fitness_level)
 
     try:
-        _lock_owner(user.id)
+        locked_pace = _lock_owner(user.id)
+        if minor:
+            pace = None
+            bmr = tdee = target_calories = nutrition_plan = None
+        else:
+            pace = profile.goal_pace or pace_for_goal(locked_pace, profile.goal)
+            target_weight = (profile.target_weight
+                             if profile.target_weight is not None
+                             else _stored_number(user.target_weight))
+            derived = derive_targets(
+                weight=profile.weight, height=profile.height, age=profile.age,
+                gender=profile.gender,
+                current_activity=profile.current_activity,
+                stored_goal=stored_goal, goal_pace=pace,
+                target_weight=target_weight)
+            bmr, tdee = derived.bmr, derived.tdee
+            target_calories = derived.target_calories
+            nutrition_plan = generate_nutrition_plan(stored_goal,
+                                                     target_calories)
         session = canonical_session(user.id)
         created = session is None
         if created:
@@ -364,6 +485,12 @@ def complete_onboarding(user, profile):
         user.gender = profile.gender
         user.goal = stored_goal
         user.goal_type = _GOAL_TYPE[profile.goal]
+        user.goal_pace = pace
+        if locked_pace != pace:
+            # The in-memory row may hold a value loaded before the lock that
+            # equals `pace`; force the UPDATE so the committed pace always
+            # matches the target derived from it.
+            flag_modified(user, "goal_pace")
         user.fitness_level = profile.fitness_level
         user.current_activity = profile.current_activity
         if profile.target_weight is not None:
@@ -392,3 +519,151 @@ def complete_onboarding(user, profile):
     return OnboardingResult(bmr=bmr, tdee=tdee,
                             target_calories=target_calories,
                             session_created=created)
+
+
+class ProfileIncomplete(ValueError):
+    """The account has no complete adult profile to apply a pace to."""
+
+
+def set_goal_pace(user, pace):
+    """Change only the owner's goal pace and re-derive the canonical target.
+
+    `pace` is validated first (unknown token → `ProfileRejected(goal_pace,
+    vocabulary)`). Then, under the owner-row lock, the stored profile is
+    re-read and must be a complete adult profile (else `ProfileIncomplete`);
+    the pace must belong to the stored goal (else `ProfileRejected`). The
+    write itself is `complete_onboarding` with that same profile: one
+    transaction updates `User.goal_pace` and the canonical session in place,
+    so a repeated call is a no-op and nothing is appended.
+    """
+    if not isinstance(pace, str):
+        raise ProfileRejected(GOAL_PACE, REASON_TYPE)
+    _token(GOAL_PACE, pace, pace_rules.PACES)
+    from app.services.account_eligibility import tr_minor_profile
+    if tr_minor_profile(user):
+        raise ProfileRejected(GOAL_PACE, REASON_VOCABULARY)
+    require_weight_target_eligibility(user)
+    try:
+        _lock_owner(user.id)
+        # The profile the pace is applied to is the one committed now, not a
+        # copy loaded before the lock (a concurrent profile write wins whole).
+        db.session.refresh(user)
+        if not onboarding_state(user).complete:
+            raise ProfileIncomplete("profile")
+        stored = current_profile(user)
+        stored.pop(GOAL_PACE)
+        if any(stored[field] is None for field in (
+                WEIGHT, HEIGHT, AGE, GENDER, GOAL, FITNESS_LEVEL,
+                CURRENT_ACTIVITY)):
+            raise ProfileIncomplete("profile")
+        if stored[AGE] < ADULT_AGE_MIN:
+            # A stored adult-account age under 18 contradicts the account; the
+            # profile must be corrected first, the pace alone cannot apply.
+            raise ProfileIncomplete(AGE)
+        try:
+            profile = OnboardingProfile(**{**stored, GOAL_PACE: pace})
+        except ProfileRejected as rejection:
+            if rejection.field == GOAL_PACE:
+                raise
+            # A stored legacy value outside today's ranges: the owner must
+            # correct the profile first; the pace alone cannot be applied.
+            raise ProfileIncomplete(rejection.field) from None
+    except Exception:
+        db.session.rollback()
+        raise
+    return complete_onboarding(user, profile)
+
+
+# Read projection states.
+TARGET_AVAILABLE = "available"
+TARGET_NOT_SET = "not_set"
+BASIS_STORED = "stored"
+
+
+def _complete_adult_inputs(user):
+    """The stored profile as `derive_targets` inputs, or None."""
+    values = current_profile(user)
+    if any(values[field] is None for field in (
+            WEIGHT, HEIGHT, AGE, GENDER, GOAL, CURRENT_ACTIVITY)):
+        return None
+    if values[AGE] < ADULT_AGE_MIN:
+        return None
+    try:
+        _body_weight(WEIGHT, values[WEIGHT])
+        _positive(HEIGHT, values[HEIGHT])
+    except ProfileRejected:
+        return None
+    return values
+
+
+def _kcal(value):
+    return int(math.floor(value + 0.5))
+
+
+def calorie_target_view(user):
+    """The canonical daily calorie target of `user`, for every client.
+
+    Read-only: no write, no commit, no lock. `daily_kcal` is the canonical
+    `UserSession.target_calories` — the value Nutrition, Today and Coach
+    read — rounded half-up to a whole kcal, never recomputed. `basis`
+    explains it by re-deriving from the stored profile and pace; when that
+    does not reproduce the stored value (a profile changed by a path that
+    does not re-derive), `basis` is `stored` and nothing is guessed.
+    `pace_options` lists, per pace of the stored goal, the target a pace
+    edit would persist — the server's numbers, so no client computes one.
+    """
+    from app.services.account_eligibility import tr_minor_profile
+    goal = goal_token(user.goal)
+    stored_pace = pace_for_goal(user.goal_pace, goal)
+    view = {
+        "state": TARGET_NOT_SET,
+        "daily_kcal": None,
+        "maintenance_kcal": None,
+        "goal": goal,
+        "goal_pace": stored_pace,
+        "basis": None,
+        "bounded": False,
+        "reason": None,
+        "pace_options": [],
+    }
+    state = onboarding_state(user)
+    if not state.complete or tr_minor_profile(user):
+        return view
+    stored_target = _stored_number(state.session.target_calories)
+    if stored_target is None or stored_target <= 0:
+        return view
+    view["state"] = TARGET_AVAILABLE
+    view["daily_kcal"] = _kcal(stored_target)
+    view["basis"] = BASIS_STORED
+
+    values = _complete_adult_inputs(user)
+    if values is None:
+        return view
+
+    def derive(pace):
+        return derive_targets(
+            weight=values[WEIGHT], height=values[HEIGHT], age=values[AGE],
+            gender=values[GENDER], current_activity=values[CURRENT_ACTIVITY],
+            stored_goal=user.goal, goal_pace=pace,
+            target_weight=values[TARGET_WEIGHT])
+
+    current = derive(stored_pace)
+    if abs(current.target_calories - stored_target) < 0.5:
+        view.update(basis=current.basis, bounded=current.bounded,
+                    reason=current.reason)
+    if not maintenance_usable(current.tdee):
+        # No maintenance estimate a pace can size: no options are offered.
+        return view
+    view["maintenance_kcal"] = _kcal(pace_rules.round_kcal(current.tdee))
+    for pace in PACES_FOR_GOAL.get(goal, ()):
+        option = derive(pace)
+        view["pace_options"].append({
+            "goal_pace": pace,
+            "daily_kcal": _kcal(option.target_calories),
+            "basis": option.basis,
+            "bounded": option.bounded,
+            "reason": option.reason,
+            "nominal_weekly_change_g":
+                pace_rules.NOMINAL_WEEKLY_CHANGE_G.get(pace),
+        })
+    return view

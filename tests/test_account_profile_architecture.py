@@ -154,7 +154,7 @@ def test_native_body_is_a_closed_set_without_authority_fields():
 
     assert module.ALLOWED_FIELDS == {
         "weight_kg", "height_cm", "age", "gender", "goal", "fitness_level",
-        "activity_level", "target_weight_kg"}
+        "activity_level", "target_weight_kg", "goal_pace"}
     assert not module.ALLOWED_FIELDS & {
         "user_id", "account_id", "owner_id", "email", "username",
         "profile_complete", "id"}
@@ -195,7 +195,11 @@ def test_native_read_delegates_to_the_service_projection():
 def test_the_read_answers_exactly_the_fields_the_write_takes():
     from app.blueprints import mobile_account_profile as module
 
-    assert set(module.READ_FIELDS) == module.ALLOWED_FIELDS
+    # PD1: `goal_pace` is the one write-only field; it is read back from the
+    # calorie-target contract, so the exact-key GET stays unchanged.
+    assert set(module.WRITE_ONLY_FIELDS) == {"goal_pace"}
+    assert set(module.READ_FIELDS) == module.ALLOWED_FIELDS - set(
+        module.WRITE_ONLY_FIELDS)
 
 
 def test_the_service_read_writes_locks_and_commits_nothing():
