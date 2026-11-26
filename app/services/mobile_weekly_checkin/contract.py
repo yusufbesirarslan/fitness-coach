@@ -30,9 +30,11 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.services.account_profile import BODY_WEIGHT_MAX_KG, BODY_WEIGHT_MIN_KG
+from app.services.weekly_checkin.models import TERNARY_TOKENS
 from app.timeutil import app_date_of, to_app_tz
 
 CONTRACT_VERSION = 1
+TERNARY_CONTRACT_VERSION = 2
 
 RATING_FIELDS = ("training_intensity", "fatigue", "sleep_quality",
                  "nutrition_adherence")
@@ -99,8 +101,9 @@ class NativeCheckIn:
     training_intensity: int
     fatigue: int
     sleep_quality: int
-    nutrition_adherence: int
+    nutrition_adherence: int | str
     progressive_overload: str  # wire token: yes | partial | no
+    contract_version: int = CONTRACT_VERSION
 
 
 def _reject_constant(_name):
@@ -163,7 +166,24 @@ def _overload(value):
     return value
 
 
-def parse_request(raw, *, is_json):
+def parse_contract_version(values):
+    """One exact opt-in query value; an omitted parameter keeps v1."""
+    if not values:
+        return CONTRACT_VERSION
+    if values == ["2"]:
+        return TERNARY_CONTRACT_VERSION
+    raise InvalidRequest("contract version")
+
+
+def _nutrition_token(value):
+    if not isinstance(value, str):
+        raise InvalidRequest("nutrition_adherence type")
+    if value not in TERNARY_TOKENS:
+        raise InvalidValue("nutrition_adherence", REASON_UNSUPPORTED_VALUE)
+    return value
+
+
+def parse_request(raw, *, is_json, version=CONTRACT_VERSION):
     """Raw request bytes → ``NativeCheckIn``, or ``InvalidRequest``/``InvalidValue``.
 
     Shape is decided before values, so a body with an unknown key is 400
@@ -175,10 +195,15 @@ def parse_request(raw, *, is_json):
     if not isinstance(data, dict) or set(data) != FIELDS:
         raise InvalidRequest("shape")
     weight = _weight(data["weight_kg"])
-    ratings = {field: _rating(field, data[field]) for field in RATING_FIELDS}
+    ratings = {
+        field: (_nutrition_token(data[field])
+                if field == "nutrition_adherence" and version == TERNARY_CONTRACT_VERSION
+                else _rating(field, data[field]))
+        for field in RATING_FIELDS
+    }
     overload = _overload(data["progressive_overload"])
     return NativeCheckIn(weight_kg=weight, progressive_overload=overload,
-                         **ratings)
+                         contract_version=version, **ratings)
 
 
 def week_start(day):
@@ -209,7 +234,8 @@ def parse_week_precondition(raw):
 def fingerprint(command):
     """sha256 of the canonical semantic fields under the ``native.v1`` domain."""
     semantic = {
-        "domain": FINGERPRINT_DOMAIN,
+        "domain": ("native.v2" if command.contract_version == TERNARY_CONTRACT_VERSION
+                   else FINGERPRINT_DOMAIN),
         "weight_kg": command.weight_kg,
         "training_intensity": command.training_intensity,
         "fatigue": command.fatigue,
@@ -233,14 +259,14 @@ def analysis_day(value):
     return day.isoformat() if day is not None else None
 
 
-def checkin_payload(checked_in_at, command):
+def checkin_payload(checked_in_at, command, *, checkin_id=None):
     """The closed POST body; identical for the 201 write and every 200 replay.
 
-    Hand-written field list: no DB id, owner, key, fingerprint, stored Turkish
-    token, session id or internal timestamp can leak by accident.
+    The canonical row ID is exposed only to its owner in v2. Both versions
+    omit owner, key, fingerprint, stored Turkish tokens and session identity.
     """
-    return {
-        "contract_version": CONTRACT_VERSION,
+    body = {
+        "contract_version": command.contract_version,
         "checked_in_at": iso_checked_in_at(checked_in_at),
         "analysis_day": analysis_day(checked_in_at),
         "weight_kg": command.weight_kg,
@@ -250,3 +276,6 @@ def checkin_payload(checked_in_at, command):
         "nutrition_adherence": command.nutrition_adherence,
         "progressive_overload": command.progressive_overload,
     }
+    if command.contract_version == TERNARY_CONTRACT_VERSION:
+        body["check_in_id"] = checkin_id
+    return body

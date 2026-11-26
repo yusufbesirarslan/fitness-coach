@@ -10,6 +10,7 @@ retired, see app/retired_revisions.py):
     c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
         -> f01a4e000003 -> ad17de1e0001 -> e5b27aa4101c -> 19cb998acd2f
         -> 5cc5aa7e47ba (G4 cardio-session outcomes)
+        -> c8e1f3a5b702 (PD5 nutrition adherence)
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -76,7 +77,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
 CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c", "19cb998acd2f",
-                    "5cc5aa7e47ba")
+                    "5cc5aa7e47ba", "c8e1f3a5b702")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40

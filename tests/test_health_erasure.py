@@ -68,12 +68,19 @@ def _health(own):
 
 
 def test_withdrawal_erases_health_and_keeps_ordinary_data(world):
+    for owner in (world.a_id, world.b_id):
+        db.session.add(WeeklyCheckIn(user_id=owner, weight=78, yogunluk=4,
+                                     nutrition_adherence_v2="partly"))
+    db.session.commit()
     result = _withdraw(world.a_id)
     assert result["state"] == "withdrawn" and result["erasure"]["state"] == "pending"
     assert health_erasure.run(world.a_id) == "completed"
 
     assert MealLogRetainedTotal.query.filter_by(user_id=world.a_id).count() == 0
     assert MealLogRetainedTotal.query.filter_by(user_id=world.b_id).one().energy_kcal == 500
+    assert WeeklyCheckIn.query.filter_by(user_id=world.a_id).count() == 0
+    assert WeeklyCheckIn.query.filter_by(
+        user_id=world.b_id, nutrition_adherence_v2="partly").count() == 1
     # Every health row is gone, every ordinary row stays.
     assert rows_exist(_health(world.a_own)) == [
         (m.__name__, i) for m, i in _health(world.a_own)]

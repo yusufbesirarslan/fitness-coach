@@ -10,6 +10,29 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 
+NOT_APPLICABLE = "not_applicable"
+TERNARY_TOKENS = frozenset(("yes", "partly", "no", NOT_APPLICABLE))
+
+
+@dataclass(frozen=True)
+class RecordedNutritionAdherence:
+    """Closed read vocabulary shared by native history and later consumers."""
+
+    scale: str | None
+    value: int | str | None
+
+
+def recorded_nutrition_adherence(row):
+    """Read the scale and exact value of a persisted check-in, if available."""
+    answer = row.nutrition_adherence_v2
+    if answer is not None:
+        return RecordedNutritionAdherence("ternary_v2", answer)
+    score = row.beslenme_uyumu
+    if type(score) is int and 1 <= score <= 5:
+        return RecordedNutritionAdherence("numeric_1_5", score)
+    return RecordedNutritionAdherence(None, None)
+
+
 @dataclass(frozen=True)
 class FullCheckIn:
     """Already-parsed values of one full weekly check-in.
@@ -26,8 +49,9 @@ class FullCheckIn:
     fatigue: int
     progressive_overload: str
     sleep_quality: int
-    nutrition_adherence: int
+    nutrition_adherence: int | None
     note: Any = None
+    nutrition_adherence_v2: str | None = None
 
 
 @dataclass(frozen=True)

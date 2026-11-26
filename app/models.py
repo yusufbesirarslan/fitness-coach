@@ -535,7 +535,12 @@ class WeeklyCheckIn(db.Model):
     fatigue           = db.Column(db.Integer)       # 1-5 arası
     progressive_overload = db.Column(db.String(20)) # "evet", "hayir", "kismen"
     uyku_kalitesi     = db.Column(db.Integer)       # 1-5 arası
-    beslenme_uyumu    = db.Column(db.Integer)       # 1-5 arası
+    beslenme_uyumu    = db.Column(db.Integer)       # historical 1–5 scale
+    nutrition_adherence_v2 = db.Column(db.String(14), db.CheckConstraint(
+        "nutrition_adherence_v2 IS NULL OR (beslenme_uyumu IS NULL AND "
+        "yogunluk IS NOT NULL AND nutrition_adherence_v2 IN "
+        "('yes', 'partly', 'no', 'not_applicable'))",
+        name="ck_weekly_checkin_nutrition_adherence_v2"))
     note              = db.Column(db.Text)
     coach_feedback    = db.Column(db.Text)
     idempotency_key   = db.Column(db.String(64), nullable=True)
