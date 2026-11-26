@@ -34,7 +34,7 @@ def test_upgrade_and_rerun_one_head():
     assert len(heads) == 1, f"expected one head, found {heads}"
     assert m.revision == "e3f4a5b6c7d8"
     assert m.down_revision == "e2f3a4b5c6d7"
-    assert heads == ["b7d2e9f4a1c3"]
+    assert heads == ["c8e1f3a5b702"]
     assert m.expand_contract=='expand'
 
 

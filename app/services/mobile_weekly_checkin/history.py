@@ -3,7 +3,7 @@
 Rows: ``progress_history.fetch_qualifying_checkins`` — the existing
 qualifying read (``yogunluk IS NOT NULL``, ``created_at DESC, id DESC``), so
 weight-only ``/update-weight`` rows never appear and same-timestamp rows have
-the canonical order. The id tie-breaker orders; it is never published.
+the canonical order. The id tie-breaker orders and is exposed only in v2.
 
 Weight delta: the Progress History rule, reused, not re-derived —
 ``previous_daily_row`` (latest valid weight on an OLDER Istanbul day; same-day
@@ -26,14 +26,16 @@ from datetime import timedelta
 
 from app.extensions import db
 from app.models import WeeklyCheckIn
+from app.services.nutrition_native.plan import ACTIVE, ABSENT, saved_plan_state
 from app.services.progress_history import (fetch_qualifying_checkins,
                                            historical_body,
                                            previous_daily_row)
 from app.services.weekly_checkin import FULL_CHECKIN
+from app.services.weekly_checkin.models import recorded_nutrition_adherence
 from app.timeutil import APP_TZ, app_date_of, app_today, utc_day_bounds
 
 from .contract import (CONTRACT_VERSION, OVERLOAD_STORED_TO_WIRE, RATING_MAX,
-                       RATING_MIN, analysis_day, iso_checked_in_at, week_start)
+                       RATING_MIN, TERNARY_CONTRACT_VERSION, analysis_day, iso_checked_in_at, week_start)
 
 # Visible bound of the launch contract: the last 12 full check-ins.
 HISTORY_LIMIT = 12
@@ -65,9 +67,9 @@ def _prior_day_row(user_id, day):
                 .first())
 
 
-def _item(row, weight_kg, weight_delta_kg):
-    """One history item. Hand-written field list: no id/owner/key/feedback."""
-    return {
+def _item(row, weight_kg, weight_delta_kg, version):
+    """One owner-private history item. Only v2 includes check-in identity."""
+    body = {
         "checked_in_at": iso_checked_in_at(row.created_at),
         "analysis_day": analysis_day(row.created_at),
         "weight_kg": weight_kg,
@@ -81,7 +83,14 @@ def _item(row, weight_kg, weight_delta_kg):
     }
 
 
-def _items(user_id):
+    if version == TERNARY_CONTRACT_VERSION:
+        adherence = recorded_nutrition_adherence(row)
+        body.update(check_in_id=row.id, nutrition_adherence_scale=adherence.scale,
+                    nutrition_adherence=adherence.value)
+    return body
+
+
+def _items(user_id, version):
     rows = fetch_qualifying_checkins(user_id, HISTORY_LIMIT + 1)
     cut = len(rows) > HISTORY_LIMIT
     beyond = {}
@@ -95,7 +104,7 @@ def _items(user_id):
                     beyond[day] = _prior_day_row(user_id, day)
                 previous = beyond[day]
         weight_kg, weight_delta_kg = historical_body(row, previous)
-        items.append(_item(row, weight_kg, weight_delta_kg))
+        items.append(_item(row, weight_kg, weight_delta_kg, version))
     return items
 
 
@@ -120,11 +129,17 @@ def current_week(user_id, today):
     }
 
 
-def build_history(user_id):
+def build_history(user_id, version=CONTRACT_VERSION):
     """The closed GET body for ``user_id`` (the Bearer owner; nothing else)."""
     today = app_today()
-    return {
-        "contract_version": CONTRACT_VERSION,
+    body = {
+        "contract_version": version,
         "current_week": current_week(user_id, today),
-        "check_ins": _items(user_id),
+        "check_ins": _items(user_id, version),
     }
+    if version == TERNARY_CONTRACT_VERSION:
+        body["nutrition_applicability"] = {
+            ACTIVE: "applicable",
+            ABSENT: "not_applicable",
+        }.get(saved_plan_state(user_id), "unavailable")
+    return body

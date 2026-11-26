@@ -84,6 +84,9 @@ def test_transport_imports_only_http_plumbing_and_the_native_package():
 
 def test_transport_owns_no_persistence_parsing_or_owner_input():
     source = _code_only(TRANSPORT)
+    opt_in = "request.args.getlist('contract_version')"
+    assert source.count(opt_in) == 1
+    source = source.replace(opt_in, "")
     for token in ("WeeklyCheckIn", "UserSession", ".query", "with_for_update",
                   "commit(", ".add(", "get_json", ".json", ".args", ".form",
                   "user_id", "weight", "yogunluk", "evet", "fingerprint(",

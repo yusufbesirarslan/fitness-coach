@@ -297,9 +297,9 @@ def test_real_receipt_survives_new_engine_and_rejects_unsafe_file(tmp_path):
 
 # The source graph's single head. It is the adult migration's descendant once
 # later migrations land (owner-private exercises, the re-landed C1, G4,
-# PD1 and PD2). Each ancestor is behind head and must fail --require-at-head.
+# PD1, PD2 and PD5). Each ancestor is behind head and must fail --require-at-head.
 # Retired C1 stamp c1a9b7e5d301 is absent from the graph.
-SOURCE_HEAD = 'b7d2e9f4a1c3'
+SOURCE_HEAD = 'c8e1f3a5b702'
 
 
 @pytest.mark.parametrize('current, success', [(None, False), ([], False),

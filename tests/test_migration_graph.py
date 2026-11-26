@@ -49,8 +49,9 @@ def test_alembic_migrations_have_single_head():
     # LAUNCH-FREE-BE-01 widens the bucket scope CHECK on the physical budget.
     # FATSECRET-RETENTION-PHASE1 adds provider provenance on top of F01.
     # G4 (#530) records independent cardio-session outcomes after C1.
-    assert heads == ["b7d2e9f4a1c3"]
-    assert parents[heads[0]] == "a7d3c9e1f2b4"
+    assert heads == ["c8e1f3a5b702"]
+    assert parents[heads[0]] == "b7d2e9f4a1c3"
+    assert parents["b7d2e9f4a1c3"] == "a7d3c9e1f2b4"
     assert parents["a7d3c9e1f2b4"] == "5cc5aa7e47ba"
 
 
@@ -97,7 +98,7 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # G4 adds the cardio-session outcome table, no exercise schema.
     # PD1 adds the nullable user.goal_pace column, no exercise schema.
     # PD2 adds the training-start decision table, no exercise schema.
-    assert len(revision_files) == 71
+    assert len(revision_files) == 72
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py",
         "e5b27aa4101c_owner_private_exercises.py",

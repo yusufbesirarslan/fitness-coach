@@ -5,6 +5,8 @@ published from here. Every query is owner-scoped by an explicit ``user_id``.
 """
 from __future__ import annotations
 
+from sqlalchemy import and_, or_
+
 from app.extensions import db
 from app.models import User, WeeklyCheckIn
 
@@ -32,6 +34,26 @@ def latest_full_checkin(user_id):
     """Newest full check-in: ``created_at DESC, id DESC`` (canonical tiebreak)."""
     return (WeeklyCheckIn.query.filter_by(user_id=user_id)
             .filter(FULL_CHECKIN)
+            .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
+            .first())
+
+
+def full_checkin_by_id(user_id, checkin_id):
+    """Owner-scoped full check-in, including records from before native v2."""
+    return (WeeklyCheckIn.query.filter_by(user_id=user_id, id=checkin_id)
+            .filter(FULL_CHECKIN).one_or_none())
+
+
+def previous_full_checkin(user_id, checkin_id):
+    """The preceding full check-in in canonical order, including same-day rows."""
+    current = full_checkin_by_id(user_id, checkin_id)
+    if current is None or current.created_at is None:
+        return None
+    return (WeeklyCheckIn.query.filter_by(user_id=user_id)
+            .filter(FULL_CHECKIN,
+                    or_(WeeklyCheckIn.created_at < current.created_at,
+                        and_(WeeklyCheckIn.created_at == current.created_at,
+                             WeeklyCheckIn.id < current.id)))
             .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
             .first())
 

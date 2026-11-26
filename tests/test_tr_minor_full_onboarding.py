@@ -124,6 +124,9 @@ def test_teen_adult_only_lanes_stay_closed(journey):
     checkin = client.post("/api/v1/progress/check-ins", headers={
         **headers, "Idempotency-Key": "teen-checkin-0001"}, json={})
     assert checkin.json["error"]["code"] == "ELIGIBILITY_FEATURE_UNAVAILABLE"
+    v2 = client.post("/api/v1/progress/check-ins?contract_version=2", headers={
+        **headers, "Idempotency-Key": "teen-checkin-v2-0001"}, json={})
+    assert v2.json["error"]["code"] == "ELIGIBILITY_FEATURE_UNAVAILABLE"
     pump = client.post("/api/v1/pump-checks", headers=headers, json={})
     assert pump.json["error"]["code"] == "ELIGIBILITY_FEATURE_UNAVAILABLE"
     ai = client.post("/api/v1/training/plans", headers={
