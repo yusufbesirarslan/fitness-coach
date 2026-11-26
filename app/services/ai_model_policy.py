@@ -75,6 +75,7 @@ HAIKU55_IDS = frozenset(k for k, v in SPECS.items() if v.spend_class == "light")
 # thinking-off modes above require.
 EFFORT = MappingProxyType({
     "coach": "low",
+    "coach_weekly_review": "low",
     "training_plan": "medium",
     "nutrition_plan": "medium",
     "nutrition": "low",

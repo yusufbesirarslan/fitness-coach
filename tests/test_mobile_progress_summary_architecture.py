@@ -287,4 +287,8 @@ def test_exactly_one_progress_surface_on_the_mobile_namespace(app):
         if rule.rule.startswith("/api/v1") and "progress" in rule.rule}
     # LP16-B adds the weekly check-in pair (its own transport module, over the
     # LP16-A write authority) - still exactly one Progress SUMMARY surface.
-    assert mobile_progress_rules == {PATH, "/api/v1/progress/check-ins"}
+    assert mobile_progress_rules == {
+        PATH,
+        "/api/v1/progress/check-ins",
+        "/api/v1/progress/check-ins/<int:check_in_id>/evaluation",
+    }

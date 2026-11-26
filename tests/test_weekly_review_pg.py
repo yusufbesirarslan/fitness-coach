@@ -277,6 +277,28 @@ def test_erasure_removes_review_and_late_claim_cannot_recreate_it(pg_app, author
     sdk.assert_called_once()
 
 
+def test_account_purge_removes_review_and_allowance_data(pg_app, authorized):
+    from app.cli import _purge_user
+
+    sdk, _, _ = authorized
+    completed = _post(pg_app)
+    _drain(pg_app)
+    _post(pg_app, "pd6-account-purge-pending")
+    with pg_app.app_context():
+        claim = operations._claim()
+        owner = User.query.filter_by(id=_owner().id).with_for_update().one()
+        owner_id = owner.id
+        assert AiUsageReservation.query.filter_by(user_id=owner_id).count() == 1
+        assert _purge_user(owner)["weekly_check_in"] == 2
+        db.session.commit()
+        assert WeeklyCheckIn.query.filter_by(user_id=owner_id).count() == 0
+        assert AiUsageReservation.query.filter_by(user_id=owner_id).count() == 0
+        db.session.rollback()
+        assert operations._evaluate(*claim) == "authorization"
+        assert operations.read(owner_id, completed.json["check_in_id"]) is None
+    sdk.assert_called_once()
+
+
 def test_result_commit_ack_loss_preserves_accounting_and_replay(pg_app, authorized, monkeypatch):
     sdk, _, _ = authorized
     saved = _post(pg_app)
