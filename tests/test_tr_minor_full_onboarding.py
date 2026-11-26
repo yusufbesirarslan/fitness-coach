@@ -250,3 +250,41 @@ def test_minor_viewer_sees_own_xp_without_a_rank(app, make_user):
         login_user(teen)
         board = gamification._leaderboard_via_postgres("global", "all_time").get_json()
     assert board["in_list"] is False and board["me"]["rank"] is None
+
+
+# ---- PD1 goal pace (#547): adult-only ---------------------------------------
+
+def test_teen_has_no_goal_pace_and_no_calorie_target(journey, monkeypatch):
+    from app.services import account_profile, goal_pace
+    monkeypatch.setattr(goal_pace, "pace_target", lambda *a, **k: pytest.fail("adult math"))
+    user, headers = journey.register(15, "trteenpace")
+    assert journey.grant(headers).status_code == 200
+    client = journey.client
+    # A pace on the teen profile write is an adult-only value: refused whole.
+    body = dict(TEEN_PROFILE, age=15, goal_pace="gain_lean")
+    response = client.put("/api/v1/account/profile", headers=headers, json=body)
+    assert (response.status_code, response.json["error"]["code"]) == (
+        422, "PROFILE_INVALID_VALUE")
+    assert UserSession.query.count() == 0
+
+    assert client.put("/api/v1/account/profile", headers=headers,
+                      json=dict(TEEN_PROFILE, age=15)).status_code == 200
+    edit = client.put("/api/v1/account/goal-pace", headers=headers,
+                      json={"goal_pace": "gain_lean"})
+    assert edit.status_code == 422
+    assert db.session.get(User, user.id).goal_pace is None
+    view = client.get("/api/v1/account/calorie-target", headers=headers)
+    assert view.status_code == 200
+    target = view.json["calorie_target"]
+    assert (target["state"], target["daily_kcal"], target["goal_pace"],
+            target["pace_options"]) == ("not_set", None, None, [])
+    assert UserSession.query.filter_by(user_id=user.id).one().target_calories is None
+    assert account_profile.calorie_target_view(db.session.get(User, user.id))["basis"] is None
+
+
+def test_calorie_target_and_pace_need_the_health_permission(journey):
+    user, headers = journey.register(18, "tradultnoconsent")
+    client = journey.client
+    assert client.get("/api/v1/account/calorie-target", headers=headers).status_code == 403
+    assert client.put("/api/v1/account/goal-pace", headers=headers,
+                      json={"goal_pace": "lose_slower"}).status_code == 403

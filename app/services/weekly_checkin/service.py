@@ -28,7 +28,6 @@ from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models import WeeklyCheckIn
 from app.services import account_profile
-from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee
 from app.timeutil import app_today, utc_day_bounds
 
 from . import queries
@@ -55,9 +54,12 @@ def apply_body_weight(owner, weight, session):
         owner.current_activity, owner.goal,
     ])
     if profile_ready:
-        bmr             = calculate_bmr(weight, owner.height, owner.age, owner.gender)
-        tdee            = calculate_tdee(bmr, owner.current_activity)
-        target_calories = calculate_target(tdee, owner.goal)
+        # The ONE target computation (PD1): keeps the owner's goal pace, and
+        # with no pace it is the legacy formula unchanged.
+        derived         = account_profile.derive_targets_for_weight(
+            owner, weight)
+        bmr, tdee       = derived.bmr, derived.tdee
+        target_calories = derived.target_calories
         if session:
             session.weight          = weight
             session.bmr             = bmr

@@ -147,6 +147,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # LP-03 native onboarding profile write + its LP-12 prefill read
         # (owner = bearer principal).
         "/api/v1/account/profile",
+        # PD1 (#547) canonical calorie target read + goal-pace edit.
+        "/api/v1/account/calorie-target",
+        "/api/v1/account/goal-pace",
         # LP-09 native Coach (owner = bearer principal; web Coach pipeline).
         "/api/v1/coach/messages",
         "/api/v1/coach/history",
@@ -196,6 +199,12 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         *_TRAINING_EDITOR_PATHS,
         # LP21 deterministic non-AI first plan through the same create authority.
         "/api/v1/training/plans/general",
+        # PD2 training start: preview/accept/discard over the same create
+        # authority, and the Skip decision. No Daily-Coach aggregate.
+        "/api/v1/training/plans/general/preview",
+        "/api/v1/training/plans/preview/accept",
+        "/api/v1/training/plans/preview/discard",
+        "/api/v1/training/start",
         # LP18-B1 immutable proposal and explicit B0 confirmation.
         "/api/v1/training/plans/replacement-proposals",
         "/api/v1/training/plans/replacement/confirm",
@@ -208,6 +217,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/exercises/<exercise_id>/performance-history",
         "/api/v1/training/workout-sessions",
         "/api/v1/training/workout-sessions/current",
+        "/api/v1/training/workout-sessions/finish",
         "/api/v1/training/workout-sessions/<session_reference>",
         "/api/v1/training/workout-sessions/<session_reference>/training-insight",
         "/api/v1/training/workout-sessions/<session_reference>/resume",
@@ -284,6 +294,13 @@ _APPROVED_TRAINING_PATHS = {
     # (``store`` ledger, owner lock, never replaces), deterministic template,
     # no Daily-Coach aggregate. Admitted here by review, not by widening.
     "/api/v1/training/plans/general",
+    # PD2: preview (pure for General; staged-only for AI), Accept through the
+    # SAME create writers, Discard, and the Skip decision. Never replaces a
+    # plan, no Daily-Coach aggregate. Admitted here by review.
+    "/api/v1/training/plans/general/preview",
+    "/api/v1/training/plans/preview/accept",
+    "/api/v1/training/plans/preview/discard",
+    "/api/v1/training/start",
     # LP18-B1 immutable proposal and explicit B0 confirmation.
     "/api/v1/training/plans/replacement-proposals",
     "/api/v1/training/plans/replacement/confirm",
@@ -307,6 +324,8 @@ _APPROVED_TRAINING_PATHS = {
     "/api/v1/training/exercises/<exercise_id>/performance-history",
     "/api/v1/training/workout-sessions",
     "/api/v1/training/workout-sessions/current",
+    # PD3 selects today's workout and delegates to canonical no-photo completion.
+    "/api/v1/training/workout-sessions/finish",
     "/api/v1/training/workout-sessions/<session_reference>",
     "/api/v1/training/workout-sessions/<session_reference>/resume",
     "/api/v1/training/workout-sessions/<session_reference>/checkpoint",

@@ -47,7 +47,7 @@ MEMORY_KEYS = ("injuries", "fitness_goals", "equipment_available",
                "dietary_restrictions", "preferences")
 COACH_INDEX_KEY = "_pa06_coach_turns_v2"
 PROFILE_FIELDS = ("weight", "height", "target_weight", "goal_type",
-                  "goal", "fitness_level", "current_activity")
+                  "goal", "goal_pace", "fitness_level", "current_activity")
 WORKOUT_COUNTERS = ("streak_count", "weekly_xp", "rank_points")
 
 CATEGORIES = ("profile", "checkins", "activity", "plans", "workouts",

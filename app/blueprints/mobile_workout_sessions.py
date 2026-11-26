@@ -355,6 +355,29 @@ def _no_photo_completion():
     }
 
 
+@bp.post("/training/workout-sessions/finish")
+@require_mobile_auth
+@_flag_gated
+@limiter.limit(WORKOUT_COMPLETION_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
+def finish_workout_without_photo():
+    """Finish by workout identity and date, with no prior start or AI work."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) != {"workout_ref", "workout_date"}:
+        return _failure(sessions.InvalidSessionRequest())
+    try:
+        sessions.parse_idempotency_key(request.headers.get("Idempotency-Key"))
+        result = sessions.finish_workout(
+            g.mobile_user.id, current_app.config["SECRET_KEY"],
+            body["workout_ref"], body["workout_date"], **_no_photo_completion(),
+        )
+    except sessions.SessionCommandError as error:
+        return _failure(error)
+    except Exception as error:  # noqa: BLE001
+        return _unavailable(error, "finish_failed")
+    return _ok(result)
+
+
+
 def _completion_proof():
     """Validate and store the Pump Check proof for a native completion.
 

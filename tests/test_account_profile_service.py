@@ -154,7 +154,8 @@ def test_rejection_never_carries_the_submitted_value():
 def test_profile_has_no_owner_field():
     fields = set(OnboardingProfile.__dataclass_fields__)
     assert fields == {"weight", "height", "age", "gender", "goal",
-                      "fitness_level", "current_activity", "target_weight"}
+                      "fitness_level", "current_activity", "target_weight",
+                      "goal_pace"}
     with pytest.raises(TypeError):
         OnboardingProfile(**VALID, user_id=1)
 

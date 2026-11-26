@@ -363,6 +363,28 @@ ROLLOUT_FLAGS = (
         decision=DECISION_ENABLE,
     ),
     FeatureFlag(
+        key="FITX_TRAINING_START_PREVIEW_ENABLED",
+        capability="PD2 onboarding training start: GET/PUT /api/v1/training/start (skip decision + canonical calorie read), POST /api/v1/training/plans/general/preview (pure, no write, no AI), POST /api/v1/training/plans?preview=1 (AI candidate staged as the pending GENERATED draft, never committed), POST /api/v1/training/plans/preview/{accept,discard}. OFF: every new route answers 404 before auth and ?preview=1 is refused 404; legacy POST /training/plans and /training/plans/general (without If-Match) are byte-identical.",
+        owner=_OWNER,
+        default=False,
+        depends_on=("MOBILE_AUTH_ENABLED",),
+        observability="Existing training_allowance settlement log lines and the generation ledger (TRAINING_PLAN_CANDIDATE_DISCARDED rows), mobile_api HttpRequests/HttpLatency SLIs; no new telemetry.",
+        prerequisites=("PD2 exact-head CI and independent review green",
+                       "migration for training_start_decision applied after separate human migration/deploy approval",
+                       "PD1 canonical pace/calorie target written behind nutrition_day_view.read_daily_calorie_target",
+                       "a reviewed mobile client built with AXISAI_TRAINING_START_V2_ENABLED=true",
+                       "separate environment enablement approval"),
+        success_signals=("one plan per Accept; replays create no plan and no charge",
+                         "no training_plan row before Accept",
+                         "General/Manual/Skip make zero provider calls"),
+        abort_signals=("two plans for one owner", "a plan whose text differs from its accepted preview",
+                       "any provider call from General/Manual/Skip"),
+        rollback="Set FITX_TRAINING_START_PREVIEW_ENABLED=0; new routes 404, legacy creation paths unchanged. Pending GENERATED previews expire through the existing ledger; the training_start_decision table is retained (expand-only).",
+        lifecycle=LIFECYCLE_SHIPPED_DARK,
+        review_by="2026-12-31",
+        decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="WEEKLY_PROGRAM_UI_ENABLED",
         capability=(
             "Renders the read-only weekly-program card on the canonical Plan "

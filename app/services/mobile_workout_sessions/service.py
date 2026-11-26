@@ -28,6 +28,7 @@ from app.services import mobile_training
 from app.services.workout_completion import CompletionResult
 from app.services.workout_session import (
     ActiveSessionExists,
+    InvalidSessionRequest,
     NativeWorkoutIdentity,
     RevisionConflict,
     SessionNotFound,
@@ -187,6 +188,39 @@ def start(user_id: int, secret, workout_ref: object) -> SessionCommandResult:
     return SessionCommandResult(
         {"session": _project(row, today)}, 201 if created else 200,
         replayed=not created)
+
+
+def finish_workout(user_id, secret, workout_ref, workout_date, **completion_kwargs):
+    """Finish the selected day's strength workout without a prior start."""
+    today = app_today()
+    if not isinstance(workout_date, str):
+        raise InvalidSessionRequest("workout date is required")
+    if workout_date != today.isoformat():
+        raise WorkoutNotStartable("the workout date is no longer current")
+    workout = resolve_startable_workout(user_id, secret, workout_ref, today)
+    if workout["kind"] != "training":
+        raise WorkoutNotStartable("only strength workouts can use this command")
+    result = start_session(
+        user_id, today=today,
+        native=NativeWorkoutIdentity(
+            workout_ref=workout["workout_ref"],
+            plan_lineage_id=workout["plan_lineage"],
+            plan_mutation_version=workout["mutation_version"],
+        ),
+        finish_without_photo=completion_kwargs,
+    )
+    if result.outcome is SessionOutcome.CONFLICT:
+        raise ActiveSessionExists("the active session must be resolved")
+    if result.outcome not in {SessionOutcome.COMPLETED, SessionOutcome.ALREADY_COMPLETED}:
+        raise SessionTerminal("the workout session is no longer completable")
+    replayed = result.outcome is SessionOutcome.ALREADY_COMPLETED
+    return SessionCommandResult(
+        {
+            "outcome": "already_completed" if replayed else "created",
+            "workout_ref": workout["workout_ref"],
+            "workout_date": workout_date,
+        }, 200, replayed=replayed,
+    )
 
 
 def current(user_id: int) -> SessionCommandResult:

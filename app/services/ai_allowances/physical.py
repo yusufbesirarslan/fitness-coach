@@ -165,8 +165,8 @@ def reserve(owner, reference, feature, provider, payload, *, operation_id=None, 
         if (not budget or budget['version'] != VERSION or budget['catalog'] != CATALOG
                 or budget['routing'] != ai_model_policy.routing()):
             _unavailable()
-        from .execution import PHYSICAL_FEATURES
-        if (feature not in PHYSICAL_FEATURES.get(budget['feature'], ())
+        from .execution import physical_allowed
+        if (not physical_allowed(budget['feature'], feature, owner)
                 or tuple(budget[n] for n in ('input','output','attempts','images','cost'))
                     != LIMITS.get(budget['feature'])):
             _unavailable()

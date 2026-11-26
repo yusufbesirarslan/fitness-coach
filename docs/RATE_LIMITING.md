@@ -127,6 +127,49 @@ Each retry, tool round, summary job and fan-out call spends a separate attempt.
   the hard input budget below: every counted attempt has a bounded maximum
   input and output, so calls × per-attempt maximum is a real bound.
 
+### Coach turn admission (2026-11-24)
+
+A Coach turn is a tool loop. The real Sonnet 5.5 E2E (isolated runtime,
+2026-11-24) measured 1–3 physical heavy attempts per user message: no tool
+(1), read or Training proposal (R1 + R2 = 2), Nutrition proposal (R1 + R2 +
+estimator = 3). With per-attempt admission only, a turn was admitted at R1
+and refused at R2/R3 by the user minute ceiling after the earlier rounds had
+been paid for: a 503 with no reply and wasted tokens (observed at 8/min).
+
+`AI_SPEND_COACH_TURN_RESERVE` (default 3, range 1..10) makes the turn's
+FIRST attempt (`feature == "coach"`, `tool_round == 1`, armed in
+`ai_provider_call._admit`, consumed by that attempt's own charge) admissible
+only while every heavy ceiling — user minute/hour/day and global — still has
+room for that many attempts (`count + reserve - 1 <= limit`, never below 1,
+so an empty window always admits a turn).
+
+- Every attempt is still charged exactly once to every window; the opener is
+  only held to a lower threshold. No call is uncharged, no ceiling is raised,
+  Redis outage still refuses (fail closed).
+- Later rounds, the estimator, and the opener's own transient retries are
+  ordinary per-attempt charges: a turn longer than the reserve, or two turns
+  of one owner racing, can still be refused mid-turn (bounded, accountable).
+- The opener is a threshold, not a reservation: other accounts' traffic on
+  the global hour/day windows can still refuse R2/R3 after the opener passed.
+- The opener checks only the keys its own `coach` charge plans. The
+  Nutrition estimator also hits the `nutrition_plan` expensive-feature daily
+  key (`daily // 3`), which the opener does not see, so a user who exhausted
+  that key can still be refused at the estimator mid-turn (known residual).
+- A fallback loop (OpenAI under legacy routing, Haiku under claude55) starts
+  again at `tool_round == 1`, so its opener applies the reserve to the light
+  ceilings too (user light day 100 → 98 effective for that opener).
+- Trade-off, pinned in `tests/test_ai_spend_coach_turn_admission.py`: at
+  5/min a run of one-attempt turns gets 3 per minute (was 5); the 4th is
+  refused before any spend. Two-attempt turns: 2 per minute either way.
+  Three-attempt turns: 1 per minute either way, but the second is now
+  refused before spend instead of after two paid rounds.
+- `AI_SPEND_COACH_TURN_RESERVE=1` restores per-attempt admission exactly.
+
+Limit policy: the source minute default (5) supports one three-attempt
+Nutrition turn per minute; the hour default (20) about six. Raising either is
+a product/cost decision for the founder — read production's effective values
+before deciding; the E2E runtime used 8/min, 30/hour, 40/day.
+
 ## Hard input budget (Phase 2 closeout)
 
 `app/services/ai_input_budget.py` (policy) + `app/services/ai_provider_call.py`
@@ -280,6 +323,7 @@ AI_SPEND_USER_LIGHT_PER_DAY=100
 AI_SPEND_GLOBAL_HEAVY_PER_HOUR=300
 AI_SPEND_GLOBAL_HEAVY_PER_DAY=1500
 AI_SPEND_GLOBAL_LIGHT_PER_DAY=500    # 0 disables that one ceiling
+AI_SPEND_COACH_TURN_RESERVE=3        # Coach turn admission; 1 = per-attempt only
 AI_INPUT_BUDGET_<FEATURE>=<int>     # see the input budget table; must be > 0
 AI_OUTPUT_BUDGET_<FEATURE>=<int>
 AI_MENU_OCR_MAX_PAGES=5

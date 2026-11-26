@@ -21,6 +21,7 @@ def _literal_assignment(tree, name):
 def test_alembic_migrations_have_single_head():
     revisions = {}
     down_revisions = set()
+    parents = {}
     versions_dir = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 
     for path in versions_dir.glob("*.py"):
@@ -29,6 +30,7 @@ def test_alembic_migrations_have_single_head():
         down_revision = _literal_assignment(tree, "down_revision")
         assert revision, f"{path.name} is missing revision"
         revisions[revision] = path.name
+        parents[revision] = down_revision
         if isinstance(down_revision, (tuple, list)):
             down_revisions.update(item for item in down_revision if item)
         elif down_revision:
@@ -47,7 +49,9 @@ def test_alembic_migrations_have_single_head():
     # LAUNCH-FREE-BE-01 widens the bucket scope CHECK on the physical budget.
     # FATSECRET-RETENTION-PHASE1 adds provider provenance on top of F01.
     # G4 (#530) records independent cardio-session outcomes after C1.
-    assert heads == ["5cc5aa7e47ba"]
+    assert heads == ["b7d2e9f4a1c3"]
+    assert parents[heads[0]] == "a7d3c9e1f2b4"
+    assert parents["a7d3c9e1f2b4"] == "5cc5aa7e47ba"
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -91,7 +95,9 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # Private exercise registration adds its own owner-private table; C1 adds
     # Nutrition lineage and a separate edit journal, no exercise schema.
     # G4 adds the cardio-session outcome table, no exercise schema.
-    assert len(revision_files) == 69
+    # PD1 adds the nullable user.goal_pace column, no exercise schema.
+    # PD2 adds the training-start decision table, no exercise schema.
+    assert len(revision_files) == 71
     assert [name for name in revision_files if "exercise" in name] == [
         "e2f3a4b5c6d7_persistent_exercise_notes.py",
         "e5b27aa4101c_owner_private_exercises.py",

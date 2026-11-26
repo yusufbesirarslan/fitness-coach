@@ -8,6 +8,7 @@ about the person beyond the account language that picks day labels.
 """
 from __future__ import annotations
 
+import hmac
 import json
 from dataclasses import dataclass
 
@@ -17,6 +18,7 @@ from app.services.mobile_training_generation import store
 from app.services.mobile_training_generation.errors import (
     GenerationPersistenceUnavailable,
     IdempotencyConflict,
+    PreviewStale,
 )
 from app.services.training_generation.output_errors import GenerationOutputError
 from app.services.training_generation.service import validate_plan_for_save
@@ -73,8 +75,36 @@ def _replay(operation, user_id, request):
     return GeneralPlanResult(plan=plan, replayed=True)
 
 
-def create_general_plan(user, request: GeneralPlanRequest, key: str) -> GeneralPlanResult:
-    """Create the owner's first plan from the template, or replay/refuse."""
+@dataclass(frozen=True)
+class GeneralPreview:
+    document_json: str
+    candidate_fingerprint: str
+
+
+def preview_general_plan(user, request: GeneralPlanRequest) -> GeneralPreview:
+    """PD2: the exact document Accept would persist, computed and NOT written.
+
+    Pure: the same ``canonical_document`` the create command persists, so the
+    fingerprint is reproducible at Accept. No ledger row, no plan row, no
+    provider/consent/allowance/quota seam. Nothing is staged server-side: a
+    deterministic candidate needs no draft row to be reproduced exactly.
+    """
+    document_json = canonical_document(request, user.language)
+    return GeneralPreview(
+        document_json=document_json,
+        candidate_fingerprint=store.candidate_sha(document_json))
+
+
+def create_general_plan(user, request: GeneralPlanRequest, key: str, *,
+                        expected_candidate_fingerprint=None) -> GeneralPlanResult:
+    """Create the owner's first plan from the template, or replay/refuse.
+
+    PD2: with ``expected_candidate_fingerprint`` (the preview's If-Match) the
+    recomputed document must be byte-identical to what was previewed, else
+    ``PreviewStale`` and nothing is written. A same-key replay returns the
+    already-created plan without comparing (the key, not the text, is the
+    identity once committed).
+    """
     if not isinstance(request, GeneralPlanRequest):
         raise TypeError("request must be GeneralPlanRequest")
     user_id = user.id
@@ -83,6 +113,10 @@ def create_general_plan(user, request: GeneralPlanRequest, key: str) -> GeneralP
     if operation is not None:
         return _replay(operation, user_id, request)
     document_json = canonical_document(request, language)
+    if (expected_candidate_fingerprint is not None
+            and not hmac.compare_digest(store.candidate_sha(document_json),
+                                        expected_candidate_fingerprint)):
+        raise PreviewStale()
     try:
         plan = store.commit_general_plan(
             user_id, key, request.fingerprint, document_json)

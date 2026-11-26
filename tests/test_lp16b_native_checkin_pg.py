@@ -313,7 +313,7 @@ def test_failure_during_derived_session_update_leaves_no_partial_write(
     def _boom(*_args):
         raise RuntimeError("derived target fault")
 
-    monkeypatch.setattr(checkin_service, "calculate_target", _boom)
+    monkeypatch.setattr(checkin_service.account_profile, "calculate_target", _boom)
     response = _post(pg_app, "lp16bpg1", "lp16b-pg-fault")
 
     assert response.status_code == 503

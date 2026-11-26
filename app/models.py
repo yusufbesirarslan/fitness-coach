@@ -229,6 +229,9 @@ class User(UserMixin, db.Model):
     full_name        = db.Column(db.String(150), nullable=True)
     target_weight    = db.Column(db.Float, nullable=True)
     goal_type        = db.Column(db.String(10), nullable=True)
+    # PD1 goal pace token (`goal_pace.PACES`); NULL = never chosen → legacy
+    # target formula. Owned by account_profile (the ONE profile authority).
+    goal_pace        = db.Column(db.String(16), nullable=True)
     streak_count     = db.Column(db.Integer, default=0, server_default='0')
     rank_points      = db.Column(db.Integer, default=0, server_default='0')
     weekly_xp        = db.Column(db.Integer, default=0, server_default='0')
@@ -1361,6 +1364,28 @@ class TrainingSessionOutcome(db.Model):
                            name="ck_training_session_outcome_outcome"),
         db.CheckConstraint("mutation_version >= 0",
                            name="ck_training_session_outcome_version"),
+    )
+
+
+class TrainingStartDecision(db.Model):
+    """PD2: the owner's explicit "start without a plan" choice (Skip).
+
+    One closed token per owner, never plan content, so it is not a plan
+    store. Distinct from Cancel (which records nothing) and from an active
+    plan (which always wins: a plan is the training state, not this row).
+    """
+    __tablename__ = "training_start_decision"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    decision = db.Column(db.String(16), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", name="uq_training_start_decision_user"),
+        db.CheckConstraint("decision IN ('skip')",
+                           name="ck_training_start_decision_decision"),
     )
 
 

@@ -242,6 +242,7 @@ def me():
 from app.blueprints import mobile_account_deletion  # noqa: E402,F401
 from app.blueprints import mobile_account_language  # noqa: E402,F401
 from app.blueprints import mobile_account_profile  # noqa: E402,F401
+from app.blueprints import mobile_account_goal_pace  # noqa: E402,F401
 from app.blueprints import mobile_eligibility  # noqa: E402,F401
 from app.blueprints import mobile_coach  # noqa: E402,F401
 from app.blueprints import mobile_menu  # noqa: E402,F401
@@ -258,6 +259,7 @@ from app.blueprints import mobile_training  # noqa: E402,F401
 from app.blueprints import mobile_training_editor  # noqa: E402,F401
 from app.blueprints import mobile_private_exercises  # noqa: E402,F401
 from app.blueprints import mobile_training_general  # noqa: E402,F401
+from app.blueprints import mobile_training_start  # noqa: E402,F401
 from app.blueprints import mobile_exercise_notes  # noqa: E402,F401
 from app.blueprints import mobile_exercise_history  # noqa: E402,F401
 from app.blueprints import mobile_workout_sessions  # noqa: E402,F401

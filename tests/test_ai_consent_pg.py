@@ -466,8 +466,8 @@ def _assert_chain_head_and_parity():
     from alembic.migration import MigrationContext
     from alembic.autogenerate import compare_metadata
     scripts = ScriptDirectory(str(Path(__file__).parents[1] / 'migrations'))
-    assert scripts.get_heads() == ['5cc5aa7e47ba']
-    assert len(list(scripts.walk_revisions())) == 69
+    assert scripts.get_heads() == ['b7d2e9f4a1c3']
+    assert len(list(scripts.walk_revisions())) == 71
     assert scripts.get_revision('a4d6f8b0c2e1').down_revision == 'd7e3a9c1f5b8'
     assert scripts.get_revision('d7e3a9c1f5b8').down_revision == 'f9c6d0a1b2e3'
     assert scripts.get_revision('f9c6d0a1b2e3').down_revision == 'f8b2d4e6a0c3'
@@ -480,7 +480,7 @@ def _assert_chain_head_and_parity():
     assert scripts.get_revision('c2b9d0e1f2a3').down_revision == 'b1a8c9d0e1f2'
     with db.engine.connect() as conn:
         context = MigrationContext.configure(conn, opts={'compare_type': True})
-        assert context.get_current_heads() == ('5cc5aa7e47ba',)
+        assert context.get_current_heads() == ('b7d2e9f4a1c3',)
         assert compare_metadata(context, db.metadata) == []
         checks = conn.execute(sa.text(
             "SELECT conname, convalidated FROM pg_constraint WHERE conrelid IN "
@@ -516,8 +516,11 @@ def test_existing_merged_main_upgrade_preserves_all_rows_and_schema(chain_app):
     operation_table = sa.Table('training_plan_generation_operation', sa.MetaData(), autoload_with=db.engine)
     reservation_table = sa.Table('ai_usage_reservation', sa.MetaData(), autoload_with=db.engine)
     now = datetime.now(timezone.utc)
-    db.session.add_all([User(id=1, username='chain-a', email='chain-a@example.invalid'),
-                        User(id=2, username='chain-b', email='chain-b@example.invalid')])
+    # Core insert: a later User column (PD1 goal_pace) is never sent to this
+    # historical schema.
+    db.session.execute(sa.insert(User.__table__), [
+        dict(id=1, username='chain-a', email='chain-a@example.invalid'),
+        dict(id=2, username='chain-b', email='chain-b@example.invalid')])
     db.session.commit()
     for uid in (1, 2):
         premium_row(uid, original_id=str(900 + uid))

@@ -50,6 +50,7 @@ CANONICAL_PATHS = (CHECKPOINT_PATH, ERRORS_PATH, EXECUTION_PATH)
 ENDPOINTS = (
     "mobile_api.workout_execution_capabilities",
     "mobile_api.start_workout_session",
+    "mobile_api.finish_workout_without_photo",
     "mobile_api.current_workout_session",
     "mobile_api.read_workout_session",
     "mobile_api.resume_workout_session",
@@ -375,6 +376,7 @@ def test_every_session_route_is_absent_while_the_flag_is_off(app, monkeypatch, m
     responses = [
         client.post(base, headers=headers, json={"workout_ref": "x" * 24}),
         client.get(base + "/current", headers=headers),
+        client.post(base + "/finish", headers=headers, json={}),
         client.post(f"{base}/abc/resume", headers=headers),
         client.put(f"{base}/abc/checkpoint",
                    headers={**headers, "If-Match": "0",
@@ -423,7 +425,7 @@ def test_the_migration_only_adds_columns_and_keeps_one_alembic_head():
     # The head moves with every added revision; f5a6b7c8d9e0 must still
     # exist (asserted above) but is no longer the tip. F7 chains its Coach
     # history index onto F1's credential-epoch revision.
-    assert revisions - parents == {"5cc5aa7e47ba"}, sorted(revisions - parents)
+    assert revisions - parents == {"b7d2e9f4a1c3"}, sorted(revisions - parents)
 
 
 # 13/14. Untouched neighbours.

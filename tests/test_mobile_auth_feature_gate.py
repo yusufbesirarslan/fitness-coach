@@ -71,6 +71,8 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/account/me"),
         ("get", "/api/v1/account/profile"),
         ("put", "/api/v1/account/profile"),
+        ("get", "/api/v1/account/calorie-target"),
+        ("put", "/api/v1/account/goal-pace"),
         ("put", "/api/v1/account/language"),
         ("post", "/api/v1/coach/messages"),
         ("get", "/api/v1/coach/history"),
@@ -118,6 +120,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("put", "/api/v1/training/workout-sessions/abc/checkpoint"),
         ("post", "/api/v1/training/workout-sessions/abc/abandon"),
         ("post", "/api/v1/training/workout-sessions/abc/complete"),
+        ("post", "/api/v1/training/workout-sessions/finish"),
     ):
         headers = post_headers if method in ("post", "put", "patch", "delete") else None
         assert getattr(client, method)(path, headers=headers).status_code == 404
@@ -194,6 +197,10 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         # so both share its gate, envelope, no-store and 429 handler.
         ("/api/v1/account/profile", ("PUT",)),
         ("/api/v1/account/profile", ("GET",)),
+        # PD1 (#547) canonical daily calorie target read + goal-pace edit.
+        # Bearer-only, health-consent gated like the profile.
+        ("/api/v1/account/calorie-target", ("GET",)),
+        ("/api/v1/account/goal-pace", ("PUT",)),
         # LP-11 native account deletion. Bearer-only, on this blueprint so it
         # shares its gate, envelope, no-store and 429 handler.
         ("/api/v1/account", ("DELETE",)),
@@ -259,6 +266,15 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/plans", ("POST",)),
             # LP21 non-AI general first plan; no provider, no D1 gate.
             ("/api/v1/training/plans/general", ("POST",)),
+            # PD2 training start: pure general preview, AI preview accept /
+            # discard (no provider, no D1 gate) and the Skip decision. All
+            # behind default-OFF FITX_TRAINING_START_PREVIEW_ENABLED (404
+            # before auth while OFF), registered unconditionally.
+            ("/api/v1/training/plans/general/preview", ("POST",)),
+            ("/api/v1/training/plans/preview/accept", ("POST",)),
+            ("/api/v1/training/plans/preview/discard", ("POST",)),
+            ("/api/v1/training/start", ("GET",)),
+            ("/api/v1/training/start", ("PUT",)),
             ("/api/v1/training/plans/replacement-proposals", ("POST",)),
             ("/api/v1/training/plans/replacement/confirm", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),
@@ -293,6 +309,8 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/workout-sessions/<session_reference>/abandon",
              ("POST",)),
             ("/api/v1/training/workout-sessions/<session_reference>/complete",
+             ("POST",)),
+            ("/api/v1/training/workout-sessions/finish",
              ("POST",)),
         }
 
