@@ -1,5 +1,9 @@
 # Feature flags — inventory and lifecycle
 
+`FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED` defaults OFF. It records an evaluation
+intent as part of each new native v2 check-in and lets the worker scan for
+committed intents. See the [PD6 contract and activation gates](PD6_WEEKLY_CHECKIN_EVALUATION.md).
+
 `AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED` (MON-BE-PREMIUM-ALLOWANCE-ENFORCEMENT-01)
 defaults OFF, shipped_dark. It requires the ledger, native Training enforcement,
 Apple entitlement verification and a complete explicitly installed five-family

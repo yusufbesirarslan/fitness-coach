@@ -11,6 +11,7 @@ retired, see app/retired_revisions.py):
         -> f01a4e000003 -> ad17de1e0001 -> e5b27aa4101c -> 19cb998acd2f
         -> 5cc5aa7e47ba (G4 cardio-session outcomes)
         -> c8e1f3a5b702 (PD5 nutrition adherence)
+        -> e6a4b91d702c (PD6 weekly review)
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -77,7 +78,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
 CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c", "19cb998acd2f",
-                    "5cc5aa7e47ba", "c8e1f3a5b702")
+                    "5cc5aa7e47ba", "c8e1f3a5b702", "e6a4b91d702c")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -521,6 +522,26 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
     assert _versions(chain_url) == [HEAD]
     assert _snapshot(chain_url, SEEDED + NEW_TABLES) == settled
     _verify_head_fence(chain_url)
+
+
+def test_pd6_preserves_both_pd5_adherence_scales(chain_url, monkeypatch):
+    _upgrade_to(monkeypatch, "c8e1f3a5b702")
+    owner = _sql(chain_url,
+                 'INSERT INTO "user" (username, email) VALUES (:name, :email) RETURNING id',
+                 name="pd6_migration", email="pd6-migration@example.com")[0][0]
+    _sql(chain_url,
+         "INSERT INTO weekly_check_in (user_id, weight, yogunluk, beslenme_uyumu, "
+         "nutrition_adherence_v2) VALUES (:owner, 80, 3, 4, NULL), "
+         "(:owner, 79, 3, NULL, 'partly'), (:owner, 78, 3, NULL, 'not_applicable')",
+         owner=owner)
+    select = ("SELECT id, weight, yogunluk, beslenme_uyumu, nutrition_adherence_v2 "
+              "FROM weekly_check_in ORDER BY id")
+    before = _sql(chain_url, select)
+    _upgrade_to(monkeypatch, HEAD)
+    assert _versions(chain_url) == [HEAD]
+    assert _sql(chain_url, select) == before
+    assert _sql(chain_url, "SELECT COUNT(*) FROM weekly_check_in "
+                           "WHERE review_status IS NOT NULL")[0][0] == 0
 
 
 def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_after(

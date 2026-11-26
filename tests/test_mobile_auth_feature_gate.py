@@ -94,6 +94,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/progress/summary"),
         ("post", "/api/v1/progress/check-ins"),
         ("get", "/api/v1/progress/check-ins"),
+        ("get", "/api/v1/progress/check-ins/42/evaluation?contract_version=1"),
         ("get", "/api/v1/today"),
         ("get", "/api/v1/today/guidance"),
         ("get", "/api/v1/training/preferences"),
@@ -237,6 +238,7 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # LP16-A canonical service. Bearer-only, same gate/envelope/no-store.
             ("/api/v1/progress/check-ins", ("POST",)),
             ("/api/v1/progress/check-ins", ("GET",)),
+            ("/api/v1/progress/check-ins/<int:check_in_id>/evaluation", ("GET",)),
             # LP-09 native Coach. Bearer-only transport over the web Coach
             # pipeline (same memory, grounding, quota bucket and provider);
             # on this blueprint for its gate, envelope and no-store.

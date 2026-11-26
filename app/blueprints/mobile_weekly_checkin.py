@@ -29,15 +29,19 @@ from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services import meal_idempotency, mobile_weekly_checkin
+from app.services.weekly_review import operations, provider
 
 
 _CHECKIN_UNAVAILABLE = ("CHECKIN_TEMPORARILY_UNAVAILABLE",
                         "Check-in is temporarily unavailable.", 503, True)
 
 
+def _contract_versions():
+    return request.args.getlist("contract_version")
+
+
 def _contract_version():
-    return mobile_weekly_checkin.parse_contract_version(
-        request.args.getlist("contract_version"))
+    return mobile_weekly_checkin.parse_contract_version(_contract_versions())
 
 
 def _invalid_request():
@@ -111,7 +115,9 @@ def create_check_in():
 
     try:
         body, created = mobile_weekly_checkin.submit(
-            g.mobile_user, key, command, expected_week_start=expected_week)
+            g.mobile_user, key, command, expected_week_start=expected_week,
+            review_intent=(provider.capture_intent(g.mobile_user.id)
+                           if command.contract_version == 2 else None))
     except mobile_weekly_checkin.WeekChanged:
         # Nothing was staged; release the owner lock the claim took.
         db.session.rollback()
@@ -157,4 +163,20 @@ def list_check_ins():
         return _invalid_request()
     except Exception as error:
         return _checkin_unavailable(error, "history_read_failed")
+    return jsonify(body)
+
+
+@bp.get("/progress/check-ins/<int:check_in_id>/evaluation")
+@require_mobile_auth
+def read_check_in_evaluation(check_in_id):
+    """Read only. Opening a result or history never creates or dispatches AI."""
+    if _contract_versions() != ["1"]:
+        return _invalid_request()
+    try:
+        body = operations.read(g.mobile_user.id, check_in_id)
+    except Exception as error:
+        return _checkin_unavailable(error, "evaluation_read_failed")
+    if body is None:
+        return mobile_error("CHECKIN_EVALUATION_NOT_FOUND",
+                            "No evaluation exists for this check-in.", 404, False)
     return jsonify(body)

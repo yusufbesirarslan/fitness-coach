@@ -22,7 +22,7 @@ RETIRED, PARENT, SUCCESSOR = "c1a9b7e5d301", "ad17de1e0001", "19cb998acd2f"
 # G4 (#530) stacks its session-outcome table on the re-landed C1: the graph's
 # head moved, the retired revision's successor did not.
 G4 = "5cc5aa7e47ba"
-HEAD = "c8e1f3a5b702"
+HEAD = "e6a4b91d702c"
 OPT_IN = {rr.RECONCILE_ENV: RETIRED}
 
 
