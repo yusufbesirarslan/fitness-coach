@@ -301,7 +301,7 @@ def test_real_receipt_survives_new_engine_and_rejects_unsafe_file(tmp_path):
 # owner-private exercises or at C1 is
 # BEHIND head and must not pass --require-at-head. The retired C1 stamp
 # c1a9b7e5d301 is not in the graph at all (app/retired_revisions.py).
-SOURCE_HEAD = '5cc5aa7e47ba'
+SOURCE_HEAD = 'c8e1f3a5b702'
 
 
 @pytest.mark.parametrize('current, success', [(None, False), ([], False),

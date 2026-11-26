@@ -866,8 +866,7 @@ def test_outcome_migration_is_expand_only_and_never_drops_recorded_outcomes():
     from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
     script = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "migrations"))
-    (head,) = script.get_heads()
-    module = script.get_revision(head).module
+    module = script.get_revision("5cc5aa7e47ba").module
     assert module.down_revision == "19cb998acd2f" and module.expand_contract == "expand"
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:

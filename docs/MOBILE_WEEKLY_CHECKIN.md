@@ -1,7 +1,7 @@
 # Native weekly check-in (LP16-B)
 
-Status: backend only. Stacked on LP16-A (`app/services/weekly_checkin/`).
-No Flutter, no schema/migration, no provider/AI call.
+This page documents v1, the default when clients omit the version opt-in.
+See [PD5 contract v2](MOBILE_WEEKLY_CHECKIN_V2.md) for the ternary contract.
 
 ```
 POST /api/v1/progress/check-ins   one full check-in (Idempotency-Key required)

@@ -35,6 +35,16 @@ _CHECKIN_UNAVAILABLE = ("CHECKIN_TEMPORARILY_UNAVAILABLE",
                         "Check-in is temporarily unavailable.", 503, True)
 
 
+def _contract_version():
+    return mobile_weekly_checkin.parse_contract_version(
+        request.args.getlist("contract_version"))
+
+
+def _invalid_request():
+    return mobile_error(
+        "CHECKIN_INVALID_REQUEST", "Invalid check-in request.", 400, False)
+
+
 def _owner_key():
     return str(g.mobile_user.id)
 
@@ -90,12 +100,12 @@ def create_check_in():
             400, False)
     try:
         command = mobile_weekly_checkin.parse_request(
-            request.get_data(cache=False), is_json=request.is_json)
+            request.get_data(cache=False), is_json=request.is_json,
+            version=_contract_version())
         expected_week = mobile_weekly_checkin.parse_week_precondition(
             request.headers.get(mobile_weekly_checkin.WEEK_PRECONDITION_HEADER))
     except mobile_weekly_checkin.InvalidRequest:
-        return mobile_error(
-            "CHECKIN_INVALID_REQUEST", "Invalid check-in request.", 400, False)
+        return _invalid_request()
     except mobile_weekly_checkin.InvalidValue as error:
         return _invalid_value(error)
 
@@ -111,6 +121,11 @@ def create_check_in():
         return mobile_error(
             "CHECKIN_WEEK_CHANGED",
             "The check-in week has changed; nothing was saved.", 409, False)
+    except mobile_weekly_checkin.NutritionApplicabilityChanged:
+        db.session.rollback()
+        return mobile_error(
+            "CHECKIN_NUTRITION_APPLICABILITY_CHANGED",
+            "Nutrition plan availability changed. Refresh the check-in.", 409, False)
     except mobile_weekly_checkin.IdempotencyConflict:
         current_app.logger.info(
             "mobile_checkin event=write outcome=conflict request_id=%s",
@@ -134,10 +149,12 @@ def create_check_in():
 def list_check_ins():
     """The Bearer owner's last 12 full check-ins + the current Istanbul week.
 
-    No owner, window or page parameter is read: the query string is ignored.
+    Only the explicit contract_version opt-in is read.
     """
     try:
-        body = mobile_weekly_checkin.build_history(g.mobile_user.id)
+        body = mobile_weekly_checkin.build_history(g.mobile_user.id, _contract_version())
+    except mobile_weekly_checkin.InvalidRequest:
+        return _invalid_request()
     except Exception as error:
         return _checkin_unavailable(error, "history_read_failed")
     return jsonify(body)

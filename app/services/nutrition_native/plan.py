@@ -208,6 +208,17 @@ def generation_options(language):
     return options
 
 
+def saved_plan_state(user_id):
+    """Applicability fact from the same saved plan and validator as read_plan.
+
+    Database failures propagate. An unreadable saved plan is INVALID, not ABSENT.
+    """
+    row = newest_plan(user_id)
+    if row is None:
+        return ABSENT
+    return ACTIVE if _parsed_document(row) is not None else INVALID
+
+
 def read_plan(user_id, secret, language):
     """The owner's canonical saved plan. Raises on storage failure (→ 503)."""
     row = newest_plan(user_id)

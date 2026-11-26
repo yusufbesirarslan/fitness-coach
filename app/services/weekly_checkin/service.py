@@ -142,6 +142,7 @@ def stage_full_checkin(owner, checkin, context, *, coach_feedback=None,
         progressive_overload=checkin.progressive_overload,
         uyku_kalitesi=checkin.sleep_quality,
         beslenme_uyumu=checkin.nutrition_adherence,
+        nutrition_adherence_v2=checkin.nutrition_adherence_v2,
         note=checkin.note,
         coach_feedback=coach_feedback,
         idempotency_key=idempotency_key,
@@ -175,8 +176,13 @@ def commit_full_checkin(entry, *, response=None):
     owner_id = entry.user_id
     idempotency_key = entry.idempotency_key
     request_fingerprint = entry.request_fingerprint
-    entry.response_snapshot = json.dumps(response, ensure_ascii=False)
     try:
+        if callable(response):
+            # A versioned transport can include the generated identity in the
+            # same commit's immutable replay snapshot.
+            db.session.flush()
+            response = response(entry.id)
+        entry.response_snapshot = json.dumps(response, ensure_ascii=False)
         db.session.commit()
     except IntegrityError:
         db.session.rollback()

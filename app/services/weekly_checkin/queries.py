@@ -36,6 +36,28 @@ def latest_full_checkin(user_id):
             .first())
 
 
+def full_checkin_by_id(user_id, checkin_id):
+    """Owner-scoped full check-in, including records from before native v2."""
+    return (WeeklyCheckIn.query.filter_by(user_id=user_id, id=checkin_id)
+            .filter(FULL_CHECKIN).one_or_none())
+
+
+def previous_full_checkin(user_id, checkin_id):
+    """The preceding full check-in in canonical order, including same-day rows."""
+    current = full_checkin_by_id(user_id, checkin_id)
+    if current is None or current.created_at is None:
+        return None
+    earlier_time = WeeklyCheckIn.created_at < current.created_at
+    earlier_id_at_same_time = (
+        (WeeklyCheckIn.created_at == current.created_at)
+        & (WeeklyCheckIn.id < current.id)
+    )
+    return (WeeklyCheckIn.query.filter_by(user_id=user_id)
+            .filter(FULL_CHECKIN, earlier_time | earlier_id_at_same_time)
+            .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
+            .first())
+
+
 def same_app_day_checkin(user_id, day_start_utc, day_end_utc):
     """Any row (full OR weight-only) created inside one Istanbul day.
 
