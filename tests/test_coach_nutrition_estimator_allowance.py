@@ -15,10 +15,12 @@ import contextlib
 import pytest
 
 from physical_budget_support import before_attempt as physical_attempt
-from app.services import ai_consent
+from app.services import ai, ai_consent, ai_spend_guard
+from app.services.ai_spend_guard import AISpendLimitExceeded
 from app.services.ai_allowances import execution as E
 from app.services.ai_allowances.policy import SUPPORTED_FEATURES
 from app.models import AiUsageReservation
+from tests.test_ai_spend_guard import providers  # noqa: F401
 from tests.test_premium_allowance_execution import counts, ready  # noqa: F401
 
 
@@ -84,3 +86,35 @@ def test_static_table_is_unchanged_and_only_coach_is_widened(ready):
             assert E.physical_allowed(family, feature, ready) is True
     assert E.physical_allowed("coach", "menu_extract", ready) is False
     assert E.physical_allowed("coach", "training_plan", ready) is False
+
+
+@pytest.mark.usefixtures("synthetic_ai_layer")
+def test_daily_cap_refuses_nested_estimator_before_dispatch(ready, providers, monkeypatch):
+    daily = ("user", "heavy", "d")
+    ai_spend_guard._reset_local_for_tests()
+    monkeypatch.setattr(ai_spend_guard, "ENABLED", True)
+    monkeypatch.setattr(ai_spend_guard, "_get_redis", lambda: None)
+    monkeypatch.setattr(ai_spend_guard, "COACH_TURN_RESERVE", 3)
+    monkeypatch.setattr(ai_spend_guard, "LIMITS", {**ai_spend_guard.LIMITS, daily: 3})
+    try:
+        with ai_spend_guard.subject_scope(ready):
+            with E.logical_action(ready, "coach", {"turn": 2}, key="coach-nutrition-daily-cap"):
+                with ai_spend_guard.coach_turn_opener(True):
+                    ai_spend_guard.charge("bedrock")
+                physical_attempt(ready, "coach")
+                for _ in range(2):
+                    ai_spend_guard.charge("bedrock")
+                    physical_attempt(ready, "coach")
+                with ai_consent.operation_scope(authority(ready, "nutrition_plan")):
+                    E.check_provider(ready, "nutrition_plan")
+                    with pytest.raises(AISpendLimitExceeded) as refused:
+                        ai._heavy_chat([{"role": "user", "content": "synthetic meal"}],
+                                       feature="nutrition_plan")
+                assert refused.value.scope == "user"
+        row = AiUsageReservation.query.one()
+        assert (row.feature, row.physical_attempts) == ("coach", 3)
+        assert providers.bedrock.calls == providers.openai.calls == 0
+        # Existing settlement records billed work without charging for an unusable turn.
+        assert counts(ready, "coach") == (0, 0, 1)
+    finally:
+        ai_spend_guard._reset_local_for_tests()

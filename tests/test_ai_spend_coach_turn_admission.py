@@ -134,6 +134,13 @@ def test_turns_within_reserve_are_never_refused_mid_turn(monkeypatch, backend, c
     assert outcomes[0] == "ok"
 
 
+def test_turn_beyond_the_reserve_can_refuse_mid_turn(backend):
+    _charge(1)
+    _charge(1)
+    assert _turn(1, attempts=4) == ("refused_mid_turn", 3)
+    assert _minute_count(1, backend) == 5
+
+
 def test_reserve_one_restores_per_attempt_admission_and_its_mid_turn_failure(monkeypatch, backend):
     """Non-vacuity: the observed E2E failure (8/min, 3-attempt Nutrition turns)."""
     monkeypatch.setattr(ai_spend_guard, "COACH_TURN_RESERVE", 1)

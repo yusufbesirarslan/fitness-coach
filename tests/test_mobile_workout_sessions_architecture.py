@@ -425,7 +425,7 @@ def test_the_migration_only_adds_columns_and_keeps_one_alembic_head():
     # The head moves with every added revision; f5a6b7c8d9e0 must still
     # exist (asserted above) but is no longer the tip. F7 chains its Coach
     # history index onto F1's credential-epoch revision.
-    assert revisions - parents == {"a7d3c9e1f2b4"}, sorted(revisions - parents)
+    assert revisions - parents == {"b7d2e9f4a1c3"}, sorted(revisions - parents)
 
 
 # 13/14. Untouched neighbours.

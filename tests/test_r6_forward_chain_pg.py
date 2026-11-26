@@ -10,6 +10,7 @@ retired, see app/retired_revisions.py):
     c6f8b0d2e4a1 -> d8f1a3c5e7b9 -> f01c0a1e0001 -> e1a5f0c3d2b4 -> f01e2a5e0002
         -> f01a4e000003 -> ad17de1e0001 -> e5b27aa4101c -> 19cb998acd2f
         -> 5cc5aa7e47ba (G4 cardio-session outcomes) -> a7d3c9e1f2b4 (PD1 goal pace)
+        -> b7d2e9f4a1c3 (PD2 training-start decision)
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -76,7 +77,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
 CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c", "19cb998acd2f",
-                    "5cc5aa7e47ba", "a7d3c9e1f2b4")
+                    "5cc5aa7e47ba", "a7d3c9e1f2b4", "b7d2e9f4a1c3")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -90,7 +91,7 @@ NEW_TABLES = ("health_consent_state", "health_consent_event", "meal_log_retained
               "health_erasure", "health_legal_hold", "health_erasure_retry",
               "account_deletion_record", "private_exercise",
               "nutrition_plan_edit_operation", "nutrition_plan_mutation_record",
-              "training_session_outcome")
+              "training_session_outcome", "training_start_decision")
 PROVIDER_COLUMNS = {"meal_log": ("provider_items", "provider_acquired_at", "provider_expired_at"),
                     "custom_meal_item": ("provider_acquired_at", "provider_expired_at")}
 
@@ -496,7 +497,7 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
                   "health_legal_hold", "meal_log_retained_total",
                   "account_deletion_record", "private_exercise",
                   "nutrition_plan_edit_operation", "nutrition_plan_mutation_record",
-                  "training_session_outcome"):
+                  "training_session_outcome", "training_start_decision"):
         assert _sql(chain_url, f"SELECT count(*) FROM {table}")[0][0] == 0, table
     definition, valid = _bucket_scope(chain_url)
     assert valid is True and "'LAUNCH_FREE'" in definition and "'STARTER'" in definition
@@ -520,6 +521,32 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
     assert _versions(chain_url) == [HEAD]
     assert _snapshot(chain_url, SEEDED + NEW_TABLES) == settled
     _verify_head_fence(chain_url)
+
+
+def test_populated_g4_upgrades_to_pd1_then_pd2(chain_url, monkeypatch):
+    from flask_migrate import check
+
+    _upgrade_to(monkeypatch, "5cc5aa7e47ba")
+    _sql(chain_url, 'INSERT INTO "user" (username, email, referral_code) '
+         "VALUES ('g4-owner', 'g4-owner@example.invalid', 'G4OWNER')")
+    before = _snapshot(chain_url, ("user",))
+    assert not _has_tables(chain_url, ("training_start_decision",))["training_start_decision"]
+
+    _upgrade_to(monkeypatch, "a7d3c9e1f2b4")
+    assert _versions(chain_url) == ["a7d3c9e1f2b4"]
+    assert _sql(chain_url, 'SELECT goal_pace FROM "user"') == [(None,)]
+    result = _release_prepare(monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert _versions(chain_url) == [HEAD]
+    assert _snapshot(chain_url, like=before) == before
+    assert _sql(chain_url, "SELECT count(*) FROM training_start_decision") == [(0,)]
+
+    tool = _boot_tool(monkeypatch)
+    try:
+        with tool.app_context():
+            check()
+    finally:
+        _dispose(tool)
 
 
 def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_after(

@@ -56,6 +56,37 @@ def test_finish_without_start_replays_and_reads_back(
         assert build_performance_history(owner.id).weekly_training_sessions[-1] >= 1
 
 
+@pytest.mark.usefixtures("synthetic_ai_layer")
+@pytest.mark.parametrize("failure, code", [
+    ("upload", "PUMP_CHECK_STORAGE_UNAVAILABLE"),
+    ("provider", "PUMP_CHECK_PROVIDER_UNAVAILABLE"),
+])
+def test_pump_failure_after_direct_finish_preserves_the_completion(
+        client, owner, as_mobile, workout_ref, monkeypatch, failure, code):
+    from app.services.mobile_pump_checks import service
+    from tests.test_mobile_pump_check_api import PATH, _command
+
+    headers = as_mobile(owner)
+    assert finish(client, headers, workout_ref).json["outcome"] == "created"
+    monkeypatch.setattr(service.s3_helper, "is_enabled", lambda: True)
+
+    def unavailable(*args, **kwargs):
+        if failure == "upload":
+            raise service.StorageUnavailable("synthetic upload failure")
+        raise TimeoutError("synthetic provider failure")
+
+    monkeypatch.setattr(service.s3_helper, "upload_image",
+                        unavailable if failure == "upload" else
+                        lambda *a, **kw: "pump-checks/synthetic.jpg")
+    monkeypatch.setattr(service, "analyze_image", unavailable)
+    pump = client.post(PATH, data=_command(),
+                       headers={**headers, "Idempotency-Key": "pd3-pump-failure"})
+    assert pump.status_code == 503
+    assert pump.json["error"]["code"] == code
+    assert finish(client, headers, workout_ref).json["outcome"] == "already_completed"
+    assert _rows(owner.id) == {**_completed_photo_free(), "pump_checks": 1}
+
+
 def test_foreign_reference_and_late_replay_cannot_claim_a_day(
         client, owner, stranger, as_mobile, workout_ref):
     foreign = finish(client, as_mobile(stranger), workout_ref)

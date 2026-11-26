@@ -420,3 +420,14 @@ routes, so the server flag alone changes nothing for it). Abort on sustained
 barcode paths. Rollback: set the flag to 0 — the three routes answer 404
 `FOOD_SEARCH_UNAVAILABLE` and the app falls back to manual logging; logged rows
 stay and the 24h provider-retention worker keeps expiring them.
+
+`FITX_TRAINING_START_PREVIEW_ENABLED=0` is the default. It requires
+`MOBILE_AUTH_ENABLED=1` and migration `b7d2e9f4a1c3` (expand-only). Enable on
+staging first; production enablement must be paired with a mobile release
+compiled with `AXISAI_TRAINING_START_V2_ENABLED=true` and
+`AXISAI_GENERAL_TRAINING_PLAN_ENABLED=true`, and never before PD1's calorie
+target is written behind `nutrition_day_view.read_daily_calorie_target`. Abort
+on two plans for one owner, a plan differing from its accepted preview, or any
+provider call from General/Manual/Skip. Rollback: set the flag to 0 — the new
+routes 404, pending AI previews expire through the existing ledger, the
+`training_start_decision` table is retained.

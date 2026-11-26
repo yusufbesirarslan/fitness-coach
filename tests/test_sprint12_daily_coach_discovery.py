@@ -199,6 +199,12 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         *_TRAINING_EDITOR_PATHS,
         # LP21 deterministic non-AI first plan through the same create authority.
         "/api/v1/training/plans/general",
+        # PD2 training start: preview/accept/discard over the same create
+        # authority, and the Skip decision. No Daily-Coach aggregate.
+        "/api/v1/training/plans/general/preview",
+        "/api/v1/training/plans/preview/accept",
+        "/api/v1/training/plans/preview/discard",
+        "/api/v1/training/start",
         # LP18-B1 immutable proposal and explicit B0 confirmation.
         "/api/v1/training/plans/replacement-proposals",
         "/api/v1/training/plans/replacement/confirm",
@@ -288,6 +294,13 @@ _APPROVED_TRAINING_PATHS = {
     # (``store`` ledger, owner lock, never replaces), deterministic template,
     # no Daily-Coach aggregate. Admitted here by review, not by widening.
     "/api/v1/training/plans/general",
+    # PD2: preview (pure for General; staged-only for AI), Accept through the
+    # SAME create writers, Discard, and the Skip decision. Never replaces a
+    # plan, no Daily-Coach aggregate. Admitted here by review.
+    "/api/v1/training/plans/general/preview",
+    "/api/v1/training/plans/preview/accept",
+    "/api/v1/training/plans/preview/discard",
+    "/api/v1/training/start",
     # LP18-B1 immutable proposal and explicit B0 confirmation.
     "/api/v1/training/plans/replacement-proposals",
     "/api/v1/training/plans/replacement/confirm",

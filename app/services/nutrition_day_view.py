@@ -277,6 +277,26 @@ def _guard(read, failed):
         return failed
 
 
+def read_daily_calorie_target(user_id) -> TargetSection:
+    """PD2 adapter: the ONE canonical daily calorie target, as Nutrition shows it.
+
+    Same read and same failure guard as the Nutrition day view, so onboarding
+    can never show a number Nutrition would not. PD2 never computes TDEE or
+    pace: PD1 owns the math and must write its result behind this read
+    (``UserSession.target_calories`` -> ``derive_daily_macro_targets``).
+    """
+    return _guard(lambda: _read_target(user_id), TargetSection(UNAVAILABLE))
+
+
+def daily_calorie_target_payload(user_id) -> dict:
+    """Wire shape: ``{"state": available|empty|invalid|unavailable, "kcal": int|null}``."""
+    target = read_daily_calorie_target(user_id)
+    kcal = None
+    if target.state == AVAILABLE and target.value is not None:
+        kcal = int(round(target.value))
+    return {"state": target.state, "kcal": kcal}
+
+
 def read_nutrition_target_and_hydration(user_id, day):
     """Independent day facts for Coach, with no diary or saved-plan access."""
     return (

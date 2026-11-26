@@ -266,6 +266,15 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/plans", ("POST",)),
             # LP21 non-AI general first plan; no provider, no D1 gate.
             ("/api/v1/training/plans/general", ("POST",)),
+            # PD2 training start: pure general preview, AI preview accept /
+            # discard (no provider, no D1 gate) and the Skip decision. All
+            # behind default-OFF FITX_TRAINING_START_PREVIEW_ENABLED (404
+            # before auth while OFF), registered unconditionally.
+            ("/api/v1/training/plans/general/preview", ("POST",)),
+            ("/api/v1/training/plans/preview/accept", ("POST",)),
+            ("/api/v1/training/plans/preview/discard", ("POST",)),
+            ("/api/v1/training/start", ("GET",)),
+            ("/api/v1/training/start", ("PUT",)),
             ("/api/v1/training/plans/replacement-proposals", ("POST",)),
             ("/api/v1/training/plans/replacement/confirm", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),
