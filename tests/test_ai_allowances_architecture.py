@@ -19,6 +19,7 @@ ALLOWED_IMPORTERS = {
     "app/services/training_generation/service.py", "app/services/training_plan_replacement/generation.py",
     "app/services/training_plan_replacement/service.py", "app/services/plan_mutation/service.py",
     "app/services/workout_completion/service.py",
+    "app/services/weekly_review/provider.py", "app/services/weekly_review/operations.py",
 }
 
 

@@ -32,7 +32,8 @@ def test_graph_retires_c1a9_and_relands_c1_after_private_exercises():
     graph = {item.revision for item in SCRIPT.walk_revisions()}
     assert RETIRED not in graph
     assert SCRIPT.get_heads() == [HEAD]
-    assert SCRIPT.get_revision(HEAD).down_revision == PD2
+    assert SCRIPT.get_revision(HEAD).down_revision == PD5
+    assert SCRIPT.get_revision(PD5).down_revision == PD2
     assert SCRIPT.get_revision(PD2).down_revision == PD1
     assert SCRIPT.get_revision(PD1).down_revision == G4
     assert SCRIPT.get_revision(G4).down_revision == SUCCESSOR
@@ -171,7 +172,8 @@ def test_confirm_admits_only_a_complete_upgrade_to_head(conn):
     reconciled = rr.guard(conn, SCRIPT, OPT_IN)
     _at(conn, HEAD)
     rr.confirm(conn, SCRIPT, reconciled,
-               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([G4]), _Step([PD1]), _Step([PD2]), _Step([HEAD])])
+               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([G4]),
+                _Step([PD1]), _Step([PD2]), _Step([PD5]), _Step([HEAD])])
 
 
 @pytest.mark.parametrize("steps, at", [

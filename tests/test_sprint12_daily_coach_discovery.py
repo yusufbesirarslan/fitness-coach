@@ -187,6 +187,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/progress/summary",
         # LP16-B native weekly check-in over the LP16-A canonical service.
         "/api/v1/progress/check-ins",
+        "/api/v1/progress/check-ins/<int:check_in_id>/evaluation",
         "/api/v1/today",
         # LP17-B1 transport of the LP17 read model (training = build_today).
         "/api/v1/today/guidance",
@@ -252,6 +253,7 @@ _APPROVED_PROGRESS_PATHS = {
     # History qualifying read / weight-delta rule (reads) - not a second
     # Progress domain. Admitted by exact path, by review.
     "/api/v1/progress/check-ins",
+    "/api/v1/progress/check-ins/<int:check_in_id>/evaluation",
 }
 
 # The only `/api/v1` paths allowed to carry "coach". LP-09 is a transport over

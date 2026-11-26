@@ -161,7 +161,8 @@ owner must verify #565 at `160c887768be1eb08375ba82a7a0a2e09c6c9386`, confirm
 `b7d2e9f4a1c3` as composed W1/W2 tip, then compose PD5 after that head and
 PD6 after PD5. Reconcile `app/models.py`, native route allowlist,
 `app/feature_flags.py`, rollout docs, workflow explicit PostgreSQL file list,
-and Alembic graph/head/count assertions. Preserve PD1's
+exact route and provider inventory assertions, and Alembic graph/head/count
+assertions. Preserve PD1's
 `account_profile.derive_targets_for_weight` in the canonical weight writer
 when composing the existing PD5 overlap. The PD6 worker never touches weight
 or targets. Preserve #561 same-owner Nutrition estimator allowance and #563
