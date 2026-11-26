@@ -455,7 +455,10 @@ def _admit(*, feature, provider, payload, deadline=None, tool_round=None,
         feature=feature, provider=provider, payload=frozen, bound=bound,
         images=images, charge=charge, deadline=deadline, tool_round=tool_round,
         subject=subject, spend_class=spend_class)
-    with ai_spend_guard.class_scope(spend_class):
+    # A Coach turn's first round is admitted for the whole turn (see
+    # ai_spend_guard.COACH_TURN_RESERVE); later rounds and retries charge per attempt.
+    opener = feature == "coach" and tool_round == 1 and (gate or charge)
+    with ai_spend_guard.class_scope(spend_class), ai_spend_guard.coach_turn_opener(opener):
         if gate:
             try:
                 with ai_spend_guard.feature_scope(feature):

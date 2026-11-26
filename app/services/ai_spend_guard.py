@@ -88,6 +88,33 @@ LIMITS = {
     ("global", "light", "d"): _env_limit("AI_SPEND_GLOBAL_LIGHT_PER_DAY", 500),
 }
 
+# Coach turn admission (2026-11-24 real Sonnet 5.5 E2E). A Coach turn is a tool
+# loop: one user message costs several physical heavy attempts (observed: 1-3;
+# R1 tool_use -> R2 -> Nutrition estimator). Every attempt is still charged to
+# every window below; nothing here makes a call cheaper or uncharged. What this
+# adds is a TURN-LEVEL admission check on the turn's FIRST attempt only: it is
+# admitted only while every ceiling still has room for this many attempts. A
+# turn that cannot finish inside a window is refused before any token is
+# spent, instead of being refused at round 2/3 after earlier rounds were paid
+# for (the observed mid-turn 503). It never admits a call a ceiling would
+# refuse: it only lowers the opener's threshold. 1 = per-attempt only (legacy).
+# Not a ceiling, so not `_env_limit` (every `_env_limit` call is a LIMITS entry).
+_COACH_TURN_RESERVE_MAX = 10
+
+
+def _env_turn_reserve(name, default):
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be an integer 1..{_COACH_TURN_RESERVE_MAX}") from None
+    if not 1 <= value <= _COACH_TURN_RESERVE_MAX:
+        raise ValueError(f"{name} must be an integer 1..{_COACH_TURN_RESERVE_MAX}")
+    return value
+
+
+COACH_TURN_RESERVE = _env_turn_reserve("AI_SPEND_COACH_TURN_RESERVE", 3)
+
 # At the verified production ceilings (100/hour, 300/day), a user can spend
 # at most 20/hour and 60/day even if the legacy 200/day env override remains.
 # Two accounts therefore leave at least 60% of each shared window available.
@@ -163,6 +190,46 @@ def subject_scope(subject):
             del _tls.subject
         else:
             _tls.subject = previous
+
+
+@contextmanager
+def coach_turn_opener(armed):
+    """Arm the turn-level reserve for the NEXT `charge()` on this thread only.
+
+    `ai_provider_call._admit` arms it for a Coach call's first tool round, on
+    the thread that makes the call (the streaming producer included). The
+    first charge consumes it, so the opener's own transient retries and every
+    later round are ordinary per-attempt charges. It is cleared on exit, so a
+    capacity refusal before the charge never leaks it to another call. An
+    unarmed scope touches nothing; nothing is ever restored, so a consumed
+    one-shot can never be re-armed.
+    """
+    if not armed:
+        yield
+        return
+    token = _TurnReserve(COACH_TURN_RESERVE)
+    _tls.turn_reserve = token
+    try:
+        yield
+    finally:
+        # Clear only the reserve THIS scope armed (identity), never another's.
+        if getattr(_tls, "turn_reserve", None) is token:
+            del _tls.turn_reserve
+
+
+class _TurnReserve:
+    __slots__ = ("size",)
+
+    def __init__(self, size):
+        self.size = size
+
+
+def _take_turn_reserve():
+    token = getattr(_tls, "turn_reserve", None)
+    if token is None:
+        return 1
+    del _tls.turn_reserve
+    return token.size
 
 
 def current_subject():
@@ -335,6 +402,7 @@ def _record_rejection(scope, cls, provider, subject):
 
 def charge(provider, feature=None):
     """Admit one provider call or raise AISpendLimitExceeded. Call BEFORE the call."""
+    reserve = _take_turn_reserve()
     if not ENABLED:
         return
     cls = getattr(_tls, "spend_class", None) or provider_class(provider)
@@ -345,6 +413,12 @@ def charge(provider, feature=None):
     planned = _planned_keys(cls, subject, now, feature)
     if not planned:
         return
+    if reserve > 1:
+        # Turn opener: this attempt is still counted once; it is only admitted
+        # if `reserve - 1` more attempts would also fit. Never below 1, so an
+        # empty window always admits a turn.
+        planned = [(key, max(1, limit - (reserve - 1)), ttl, scope)
+                   for key, limit, ttl, scope in planned]
     client = _get_redis()
     rejected = None
     if client is not None:
