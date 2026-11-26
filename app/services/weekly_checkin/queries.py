@@ -5,8 +5,6 @@ published from here. Every query is owner-scoped by an explicit ``user_id``.
 """
 from __future__ import annotations
 
-from sqlalchemy import and_, or_
-
 from app.extensions import db
 from app.models import User, WeeklyCheckIn
 
@@ -49,11 +47,13 @@ def previous_full_checkin(user_id, checkin_id):
     current = full_checkin_by_id(user_id, checkin_id)
     if current is None or current.created_at is None:
         return None
+    earlier_time = WeeklyCheckIn.created_at < current.created_at
+    earlier_id_at_same_time = (
+        (WeeklyCheckIn.created_at == current.created_at)
+        & (WeeklyCheckIn.id < current.id)
+    )
     return (WeeklyCheckIn.query.filter_by(user_id=user_id)
-            .filter(FULL_CHECKIN,
-                    or_(WeeklyCheckIn.created_at < current.created_at,
-                        and_(WeeklyCheckIn.created_at == current.created_at,
-                             WeeklyCheckIn.id < current.id)))
+            .filter(FULL_CHECKIN, earlier_time | earlier_id_at_same_time)
             .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
             .first())
 
