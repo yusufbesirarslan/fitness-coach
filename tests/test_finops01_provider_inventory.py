@@ -50,7 +50,7 @@ def test_all_production_python_is_free_of_direct_sdk_sends():
     assert offenders == []
 
 
-CANONICAL = {"coach", "training_plan", "nutrition_plan", "nutrition", "menu_extract", "menu_ocr",
+CANONICAL = {"coach", "coach_weekly_review", "training_plan", "nutrition_plan", "nutrition", "menu_extract", "menu_ocr",
              "vision", "summary", "health_probe", "other"}
 BOUNDARIES = {"_openai_chat", "_claude_chat", "_heavy_chat", "_heavy_complete",
               "_bedrock_validate_image", "_bedrock_compare_images", "_bedrock_image_message", "admit"}

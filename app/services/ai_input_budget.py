@@ -57,6 +57,7 @@ import os
 
 FEATURES = (
     "coach",           # Coach tool loop (blocking + streaming), coach feedback
+    "coach_weekly_review",  # Separate purpose and small, tool-free payload
     "training_plan",   # training-plan generation + its one repair call
     "nutrition_plan",  # nutrition-plan generation
     "nutrition",       # food/macro/serving estimates, meal review
@@ -108,6 +109,7 @@ def _env_positive(name, default):
 # provider's context window.
 _INPUT_DEFAULTS = {
     "coach": 64000,
+    "coach_weekly_review": 4096,
     "training_plan": 32000,
     "nutrition_plan": 32000,
     "nutrition": 16000,
@@ -124,6 +126,7 @@ _INPUT_DEFAULTS = {
 # is a code change that must also move the documented dollar bound.
 _OUTPUT_DEFAULTS = {
     "coach": 700,
+    "coach_weekly_review": 520,
     "training_plan": 7000,
     "nutrition_plan": 2000,
     "nutrition": 4000,

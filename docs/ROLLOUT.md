@@ -420,3 +420,7 @@ routes, so the server flag alone changes nothing for it). Abort on sustained
 barcode paths. Rollback: set the flag to 0 — the three routes answer 404
 `FOOD_SEARCH_UNAVAILABLE` and the app falls back to manual logging; logged rows
 stay and the 24h provider-retention worker keeps expiring them.
+
+
+PD6 `FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED` defaults OFF on web and worker.
+See [PD6 API, rollout and rollback](PD6_WEEKLY_CHECKIN_EVALUATION.md).

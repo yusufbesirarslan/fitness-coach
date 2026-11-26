@@ -42,14 +42,14 @@ HISTORY_LIMIT = 12
 TIMEZONE = APP_TZ.key
 
 
-def _rating(value):
+def recorded_rating(value):
     if isinstance(value, int) and not isinstance(value, bool) and \
             RATING_MIN <= value <= RATING_MAX:
         return value
     return None
 
 
-def _prior_day_row(user_id, day):
+def prior_weight_day_row(user_id, day):
     """Latest qualifying row with a positive weight before Istanbul ``day``.
 
     The same point ``previous_daily_row`` would reach if the bounded read had
@@ -62,7 +62,8 @@ def _prior_day_row(user_id, day):
                 .filter_by(user_id=user_id)
                 .filter(FULL_CHECKIN,
                         WeeklyCheckIn.created_at < day_start_utc,
-                        WeeklyCheckIn.weight > 0)
+                        WeeklyCheckIn.weight > 0,
+                        WeeklyCheckIn.weight < float('inf'))
                 .order_by(WeeklyCheckIn.created_at.desc(), WeeklyCheckIn.id.desc())
                 .first())
 
@@ -74,10 +75,10 @@ def _item(row, weight_kg, weight_delta_kg, version):
         "analysis_day": analysis_day(row.created_at),
         "weight_kg": weight_kg,
         "weight_delta_kg": weight_delta_kg,
-        "training_intensity": _rating(row.yogunluk),
-        "fatigue": _rating(row.fatigue),
-        "sleep_quality": _rating(row.uyku_kalitesi),
-        "nutrition_adherence": _rating(row.beslenme_uyumu),
+        "training_intensity": recorded_rating(row.yogunluk),
+        "fatigue": recorded_rating(row.fatigue),
+        "sleep_quality": recorded_rating(row.uyku_kalitesi),
+        "nutrition_adherence": recorded_rating(row.beslenme_uyumu),
         "progressive_overload": OVERLOAD_STORED_TO_WIRE.get(
             row.progressive_overload),
     }
@@ -101,7 +102,7 @@ def _items(user_id, version):
             day = app_date_of(row.created_at)
             if day is not None:
                 if day not in beyond:
-                    beyond[day] = _prior_day_row(user_id, day)
+                    beyond[day] = prior_weight_day_row(user_id, day)
                 previous = beyond[day]
         weight_kg, weight_delta_kg = historical_body(row, previous)
         items.append(_item(row, weight_kg, weight_delta_kg, version))

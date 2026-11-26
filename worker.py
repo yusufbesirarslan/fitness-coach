@@ -31,6 +31,7 @@ RETENTION_INTERVAL_SECONDS = 300
 # withdrawal request erases at once; this only finishes ones that failed, so an
 # hourly pass keeps the 30-day bound with no dependence on user traffic.
 HEALTH_ERASURE_INTERVAL_SECONDS = 3600
+WEEKLY_REVIEW_INTERVAL_SECONDS = 15
 
 
 def _sample_fatsecret_safely():
@@ -117,6 +118,32 @@ def _health_erasure_tick(last_erasure, now):
     return now
 
 
+def _weekly_review_tick(last_review, now):
+    if now - last_review < WEEKLY_REVIEW_INTERVAL_SECONDS:
+        return last_review
+    try:
+        from app.feature_flags import parse_bool_flag
+        key = "FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED"
+        if parse_bool_flag(key, os.environ.get(key), default=False):
+            from app.jobs import get_queue
+            from app.jobs.tasks import process_weekly_checkin_reviews
+            from rq.exceptions import DuplicateJobError
+            queue = get_queue()
+            if queue is not None:
+                try:
+                    queue.enqueue_call(
+                        process_weekly_checkin_reviews, timeout=240,
+                        job_id="axisai-weekly-review-scan-v1", unique=True,
+                        ttl=60, result_ttl=0, failure_ttl=0,
+                        description="axisai.weekly-review.scan.v1",
+                    )
+                except DuplicateJobError:
+                    pass
+    except Exception as error:
+        _log.warning("weekly_review event=wakeup_failed type=%s", type(error).__name__)
+    return now
+
+
 def _monitoring_tick(sampler, now):
     """R6 M1/M2: publish worker liveness + queue health; never raise.
 
@@ -143,15 +170,17 @@ def _start_heartbeat():
         last_proxy_sample = 0.0
         last_retention = -float(RETENTION_INTERVAL_SECONDS)
         last_erasure = -float(HEALTH_ERASURE_INTERVAL_SECONDS)
+        last_review = -float(WEEKLY_REVIEW_INTERVAL_SECONDS)
         while not stop.is_set():
             last_proxy_sample = _heartbeat_tick(last_proxy_sample,
                                                 time.monotonic())
             last_retention = _retention_tick(last_retention, time.monotonic())
             last_erasure = _health_erasure_tick(last_erasure, time.monotonic())
+            last_review = _weekly_review_tick(last_review, time.monotonic())
             _monitoring_tick(sampler, time.monotonic())
             # The M1 sample must keep its 60 s cadence even if the heartbeat
             # TTL is raised: wake at least once per sampling interval.
-            stop.wait(max(min(WORKER_HEARTBEAT_TTL // 2, SAMPLE_INTERVAL_SECONDS), 5))
+            stop.wait(max(min(WORKER_HEARTBEAT_TTL // 2, SAMPLE_INTERVAL_SECONDS, WEEKLY_REVIEW_INTERVAL_SECONDS), 5))
 
     t = threading.Thread(target=_loop, name="worker-heartbeat", daemon=True)
     t.start()

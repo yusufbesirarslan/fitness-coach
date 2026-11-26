@@ -240,7 +240,7 @@ def test_real_fresh_boot_reaches_head_with_the_widened_scope(monkeypatch):
         with app.app_context():
             with db.engine.connect() as conn:
                 assert conn.exec_driver_sql(
-                    "SELECT version_num FROM alembic_version").scalar_one() == "c8e1f3a5b702"
+                    "SELECT version_num FROM alembic_version").scalar_one() == "e6a4b91d702c"
                 definition, valid = _definition(conn)
                 assert valid is True and "'LAUNCH_FREE'" in definition
             db.session.remove()

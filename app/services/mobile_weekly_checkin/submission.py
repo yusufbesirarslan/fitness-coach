@@ -72,7 +72,7 @@ def _full_checkin(command):
     )
 
 
-def submit(owner, idempotency_key, command, expected_week_start=None):
+def submit(owner, idempotency_key, command, expected_week_start=None, *, review_intent=None):
     """Write (or replay) one native check-in. Returns ``(body, created)``.
 
     ``created`` is true only for the call whose commit made the row durable;
@@ -111,6 +111,18 @@ def submit(owner, idempotency_key, command, expected_week_start=None):
         request_fingerprint=digest,
         checked_in_at=checked_in_at,
     )
+    if ternary and review_intent is not None:
+        # The intent becomes visible atomically with the row and replay body.
+        # The worker is the first consumer and reads in a separate transaction.
+        entry.review_updated_at = checked_in_at
+        if review_intent["authority"] is None or type(review_intent["health_generation"]) is not int:
+            entry.review_status = "unavailable"
+            entry.review_failure = "authorization"
+        else:
+            entry.review_status = "pending"
+            language = "tr" if owner.language == "tr" else "en"
+            entry.review_context = dict(review_intent, language=language)
+
     def versioned_response(checkin_id):
         return checkin_payload(checked_in_at, command, checkin_id=checkin_id)
 

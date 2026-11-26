@@ -182,3 +182,17 @@ def run_daily_maintenance(now_iso):
         return results
 
     return _in_app_context(_body)
+
+
+def process_weekly_checkin_reviews():
+    """Generic RQ wakeup. Its payload carries no owner or health information."""
+    from app.services.weekly_review.operations import drain
+    from rq.timeouts import JobTimeoutException
+    try:
+        return _in_app_context(drain)
+    except JobTimeoutException:
+        raise
+    except Exception as error:
+        # Raw SQL exceptions can include row identity or bound data.
+        _log.warning("weekly_review event=scan_failed type=%s", type(error).__name__)
+        return None

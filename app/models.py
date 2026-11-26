@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.extensions import db, login_manager
 from app.timeutil import app_today
+from app import weekly_review_schema
 
 _logger = logging.getLogger(__name__)
 
@@ -548,8 +549,21 @@ class WeeklyCheckIn(db.Model):
     response_snapshot = db.Column(db.Text, nullable=True)
     created_at        = db.Column(db.DateTime, default=datetime.utcnow)
 
-    __table_args__ = (db.UniqueConstraint(
-        "user_id", "idempotency_key", name="uq_weekly_checkin_user_key"),)
+    review_status     = db.Column(db.String(12))
+    review_context    = db.Column(db.JSON(none_as_null=True))
+    review_updated_at = db.Column(db.DateTime)
+    review_result     = db.Column(db.JSON(none_as_null=True))
+    review_evidence_digest = db.Column(db.String(64))
+    review_failure    = db.Column(db.String(24))
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "idempotency_key", name="uq_weekly_checkin_user_key"),
+        db.CheckConstraint(weekly_review_schema.STATUS_RULE,
+                           name=weekly_review_schema.STATUS_CHECK),
+        db.Index(weekly_review_schema.WORK_INDEX, "review_status", "review_updated_at", "id",
+                 postgresql_where=text(weekly_review_schema.WORK_PREDICATE),
+                 sqlite_where=text(weekly_review_schema.WORK_PREDICATE)),
+    )
 
     def __repr__(self):
         return f"<WeeklyCheckIn {self.user_id} - {self.created_at}>"

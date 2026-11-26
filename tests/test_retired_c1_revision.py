@@ -22,7 +22,8 @@ RETIRED, PARENT, SUCCESSOR = "c1a9b7e5d301", "ad17de1e0001", "19cb998acd2f"
 # G4 (#530) stacks its session-outcome table on the re-landed C1: the graph's
 # head moved, the retired revision's successor did not.
 G4 = "5cc5aa7e47ba"
-HEAD = "c8e1f3a5b702"
+PD5 = "c8e1f3a5b702"
+HEAD = "e6a4b91d702c"
 OPT_IN = {rr.RECONCILE_ENV: RETIRED}
 
 
@@ -30,7 +31,8 @@ def test_graph_retires_c1a9_and_relands_c1_after_private_exercises():
     graph = {item.revision for item in SCRIPT.walk_revisions()}
     assert RETIRED not in graph
     assert SCRIPT.get_heads() == [HEAD]
-    assert SCRIPT.get_revision(HEAD).down_revision == G4
+    assert SCRIPT.get_revision(HEAD).down_revision == PD5
+    assert SCRIPT.get_revision(PD5).down_revision == G4
     assert SCRIPT.get_revision(G4).down_revision == SUCCESSOR
     assert SCRIPT.get_revision(SUCCESSOR).down_revision == "e5b27aa4101c"
     assert SCRIPT.get_revision("e5b27aa4101c").down_revision == PARENT
@@ -167,7 +169,8 @@ def test_confirm_admits_only_a_complete_upgrade_to_head(conn):
     reconciled = rr.guard(conn, SCRIPT, OPT_IN)
     _at(conn, HEAD)
     rr.confirm(conn, SCRIPT, reconciled,
-               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([G4]), _Step([HEAD])])
+               [_Step(["e5b27aa4101c"]), _Step([SUCCESSOR]), _Step([G4]),
+                _Step([PD5]), _Step([HEAD])])
 
 
 @pytest.mark.parametrize("steps, at", [

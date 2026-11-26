@@ -344,6 +344,9 @@ def charge(provider, feature=None):
     now = time.time()
     planned = _planned_keys(cls, subject, now, feature)
     if not planned:
+        if feature == "coach_weekly_review":
+            _record_rejection("backend", cls, provider, subject)
+            raise AISpendLimitExceeded("backend", cls)
         return
     client = _get_redis()
     rejected = None
@@ -353,6 +356,8 @@ def charge(provider, feature=None):
         except _RedisUnavailable:
             _warn_redis_degraded()
             rejected = "backend"
+    elif feature == "coach_weekly_review":
+        rejected = "backend"
     else:
         rejected = _local_admit(planned, now)
     if rejected is not None:
