@@ -121,7 +121,7 @@ D-4 adds an onboarding-time prompt.
 
 ## 5. Tests (synthetic)
 
-Backend `tests/test_product_analytics_v2.py` (40): OFF inertness (404 before
+Backend `tests/test_product_analytics_v2.py` (39 cases): OFF inertness (404 before
 auth, zero SQL), consent independence/notice/idempotence/regrant rotation,
 withdrawal purge + erasure job, ingress strictness (12 out-of-catalog cases),
 envelope bounds, account fence (other account, stale grant, regrant), expiry,
