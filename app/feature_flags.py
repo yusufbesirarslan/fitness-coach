@@ -135,6 +135,20 @@ def _rollback(key):
 # no-ops; retiring them is separate cleanup debt, not this PR.
 ROLLOUT_FLAGS = (
     FeatureFlag(
+        key="FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED",
+        capability="Automatically schedule a private Coach review for a new native v2 weekly check-in.",
+        owner=_OWNER, default=False,
+        depends_on=("MOBILE_AUTH_ENABLED",),
+        observability="Owner-scoped evaluation status and sanitized worker failure classes.",
+        prerequisites=("Counsel-approved automatic weekly review disclosure and D1 binding",
+                       "Founder-approved logical allowance and physical accounting",
+                       "Compatible mobile result flow and separate activation approval"),
+        success_signals=("Canonical check-in stays saved", "One persisted review per check-in"),
+        abort_signals=("Provider processing without exact purpose authority or accounting",),
+        rollback=_rollback("FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED"),
+        lifecycle=LIFECYCLE_BLOCKED, review_by="2026-12-31", decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
         key="AI_PREMIUM_ALLOWANCE_ENFORCEMENT_ENABLED",
         capability="Atomic five-family logical allowance enforcement and provider-door backstop; no unlimited Premium path.",
         owner=_OWNER, default=False,

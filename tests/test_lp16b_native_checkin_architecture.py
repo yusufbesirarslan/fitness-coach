@@ -79,18 +79,22 @@ def test_transport_imports_only_http_plumbing_and_the_native_package():
         "app.mobile_auth_middleware": {"require_mobile_auth"},
         "app.observability": {"current_request_id"},
         "app.services": {"meal_idempotency", "mobile_weekly_checkin"},
+        "app.services.weekly_review": {"operations", "provider"},
     }
 
 
 def test_transport_owns_no_persistence_parsing_or_owner_input():
     source = _code_only(TRANSPORT)
+    opt_in = "request.args.getlist('contract_version')"
+    assert source.count(opt_in) == 1
+    source = source.replace(opt_in, "")
     for token in ("WeeklyCheckIn", "UserSession", ".query", "with_for_update",
                   "commit(", ".add(", "get_json", ".json", ".args", ".form",
                   "user_id", "weight", "yogunluk", "evet", "fingerprint(",
                   "app_today", "timedelta"):
         assert token not in source, f"transport owns {token!r}"
     # The only owner expressions are the Bearer principal.
-    assert source.count("g.mobile_user") == 3
+    assert source.count("g.mobile_user") == 5
 
 
 def test_routes_are_bearer_gets_and_posts_on_the_single_mobile_blueprint(app):

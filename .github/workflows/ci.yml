@@ -432,6 +432,8 @@ jobs:
           tests/test_r6_adult_runtime_pg.py
           tests/test_mobile_training_editor_pg.py
           tests/test_g4_cardio_sessions_pg.py
+          tests/test_lp16b_native_checkin_pg.py
+          tests/test_weekly_review_pg.py
           tests/test_ai_consent_pg.py
           --deselect tests/test_ai_consent_pg.py::test_fresh_empty_postgres_complete_chain_has_no_implicit_grants
           --deselect tests/test_ai_consent_pg.py::test_existing_merged_main_upgrade_preserves_all_rows_and_schema
@@ -543,6 +545,7 @@ jobs:
           tests/test_checkin_integrity_pg.py
           tests/test_lp16a_weekly_checkin_pg.py
           tests/test_lp16b_native_checkin_pg.py
+          tests/test_weekly_review_pg.py
           tests/test_lp16r4_week_precondition_pg.py
           tests/test_sprint14_workout_execution_reliability_pg.py
           tests/test_ti01a_execution_context_pg.py

@@ -87,8 +87,8 @@ def pg_app(monkeypatch):
             db.drop_all()
 
 
-def _post(app, username, key, body=BODY):
-    return app.test_client().post(PATH, json=body, headers={
+def _post(app, username, key, body=BODY, path=PATH):
+    return app.test_client().post(path, json=body, headers={
         "Authorization": f"Bearer {username}", "Idempotency-Key": key})
 
 
@@ -359,3 +359,73 @@ def test_replay_after_a_lost_committed_response_writes_nothing_twice(
     users, _targets, rows = _observe(pg_app)
     assert len(rows) == 1 and rows[0][3] == committed_at
     assert users["lp16bpg1"] == 85.0
+
+
+PD5_PATH = PATH + "?contract_version=2"
+PD5_BODY = dict(BODY, nutrition_adherence="not_applicable")
+
+
+def test_pd5_same_key_concurrent_writes_commit_once_and_replay_identity(pg_app, monkeypatch):
+    intent = ("lp16bpg1", "pd5-pg-same", PD5_BODY, PD5_PATH)
+    first, second = _contend(pg_app, _Hold(monkeypatch), intent, intent)
+    assert (first.status_code, second.status_code) == (201, 200)
+    assert first.get_json() == second.get_json()
+    assert first.get_json()["check_in_id"] > 0
+    conflict = _post(pg_app, *intent[:2])
+    assert conflict.status_code == 409
+    assert conflict.get_json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+    users, targets, rows = _observe(pg_app)
+    assert users["lp16bpg1"] == 78.0
+    assert targets["lp16bpg1"] == _target(78.0)
+    assert len(rows) == 1
+
+
+def test_pd5_commit_failure_rolls_back_flushed_identity_and_weight(pg_app, monkeypatch):
+    from sqlalchemy.orm import Session
+
+    def fail_commit(_session):
+        raise RuntimeError("commit refused after flush")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Session, "commit", fail_commit)
+        result = _post(pg_app, "lp16bpg1", "pd5-pg-atomic", PD5_BODY, PD5_PATH)
+    assert result.status_code == 503
+    users, targets, rows = _observe(pg_app)
+    assert (users["lp16bpg1"], targets["lp16bpg1"], rows) == (80.0, 3.0, [])
+    retry = _post(pg_app, "lp16bpg1", "pd5-pg-atomic", PD5_BODY, PD5_PATH)
+    assert retry.status_code == 201
+    assert len(_observe(pg_app)[2]) == 1
+
+
+def test_pd5_expand_migration_preserves_legacy_rows_and_checks_new_values(pg_app):
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from app.extensions import db
+
+    migration = ScriptDirectory("migrations").get_revision("c8e1f3a5b702").module
+    with pg_app.app_context(), db.engine.begin() as connection:
+        connection.exec_driver_sql("CREATE SCHEMA pd5_migration_test")
+        connection.exec_driver_sql("SET LOCAL search_path TO pd5_migration_test")
+        connection.exec_driver_sql(
+            "CREATE TABLE weekly_check_in (id INTEGER PRIMARY KEY, "
+            "beslenme_uyumu INTEGER, yogunluk INTEGER, response_snapshot TEXT)")
+        connection.exec_driver_sql(
+            "INSERT INTO weekly_check_in VALUES (1, 4, 5, '  exact legacy bytes  '),"
+            " (2, NULL, NULL, NULL)")
+        before = connection.exec_driver_sql("SELECT * FROM weekly_check_in ORDER BY id").all()
+        with Operations.context(MigrationContext.configure(connection)):
+            migration.upgrade()
+            migration.upgrade()  # create_all bootstrap can present the column up front
+        after = connection.exec_driver_sql(
+            "SELECT id, beslenme_uyumu, yogunluk, response_snapshot "
+            "FROM weekly_check_in ORDER BY id").all()
+        assert before == after
+        for values in ("3, 4, 5, NULL, 'yes'", "3, NULL, NULL, NULL, 'no'",
+                       "3, NULL, 5, NULL, 'partial'"):
+            with pytest.raises(sa.exc.IntegrityError, match="ck_weekly_checkin_nutrition"):
+                with connection.begin_nested():
+                    connection.exec_driver_sql(f"INSERT INTO weekly_check_in VALUES ({values})")
+        connection.exec_driver_sql(
+            "INSERT INTO weekly_check_in VALUES (3, NULL, 5, NULL, 'not_applicable')")
+        connection.exec_driver_sql("DROP SCHEMA pd5_migration_test CASCADE")

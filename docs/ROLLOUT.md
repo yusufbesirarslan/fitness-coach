@@ -431,3 +431,6 @@ on two plans for one owner, a plan differing from its accepted preview, or any
 provider call from General/Manual/Skip. Rollback: set the flag to 0 — the new
 routes 404, pending AI previews expire through the existing ledger, the
 `training_start_decision` table is retained.
+
+PD6 `FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED` defaults OFF on web and worker.
+See [PD6 API, rollout and rollback](PD6_WEEKLY_CHECKIN_EVALUATION.md).

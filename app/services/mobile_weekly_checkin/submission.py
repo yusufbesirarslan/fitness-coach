@@ -29,12 +29,24 @@ Never written: ``target_weight``, TrainingPlan, NutritionPlan, Coach, Today.
 from __future__ import annotations
 
 from app.services import weekly_checkin
+from app.services.nutrition_native.plan import ABSENT, ACTIVE, saved_plan_state
 from app.timeutil import UTC, app_date_of, app_now
 
-from .contract import (OVERLOAD_WIRE_TO_STORED, IdempotencyConflict,
+from app.services.weekly_checkin.models import NOT_APPLICABLE
+
+from .contract import (OVERLOAD_WIRE_TO_STORED,
+                       TERNARY_CONTRACT_VERSION, IdempotencyConflict,
                        WeekChanged, checkin_payload, fingerprint, week_start)
 
 _Outcome = weekly_checkin.SubmissionOutcome
+
+
+class NutritionApplicabilityChanged(Exception):
+    """The frozen answer does not match the current canonical plan state."""
+
+
+class NutritionPlanUnavailable(Exception):
+    """The saved plan could not establish applicability."""
 
 
 def server_checked_in_at():
@@ -47,18 +59,20 @@ def server_checked_in_at():
 
 
 def _full_checkin(command):
+    ternary = command.contract_version == TERNARY_CONTRACT_VERSION
     return weekly_checkin.FullCheckIn(
         weight=command.weight_kg,
         intensity=command.training_intensity,
         fatigue=command.fatigue,
         progressive_overload=OVERLOAD_WIRE_TO_STORED[command.progressive_overload],
         sleep_quality=command.sleep_quality,
-        nutrition_adherence=command.nutrition_adherence,
+        nutrition_adherence=None if ternary else command.nutrition_adherence,
+        nutrition_adherence_v2=command.nutrition_adherence if ternary else None,
         note=None,
     )
 
 
-def submit(owner, idempotency_key, command, expected_week_start=None):
+def submit(owner, idempotency_key, command, expected_week_start=None, *, review_intent=None):
     """Write (or replay) one native check-in. Returns ``(body, created)``.
 
     ``created`` is true only for the call whose commit made the row durable;
@@ -82,6 +96,14 @@ def submit(owner, idempotency_key, command, expected_week_start=None):
     if expected_week_start is not None and \
             week_start(app_date_of(checked_in_at)) != expected_week_start:
         raise WeekChanged()
+    ternary = command.contract_version == TERNARY_CONTRACT_VERSION
+    if ternary:
+        state = saved_plan_state(owner_id)
+        if state not in (ACTIVE, ABSENT):
+            raise NutritionPlanUnavailable()
+        answered = command.nutrition_adherence != NOT_APPLICABLE
+        if answered != (state == ACTIVE):
+            raise NutritionApplicabilityChanged()
     entry = weekly_checkin.stage_full_checkin(
         owner, _full_checkin(command), context,
         coach_feedback=None,
@@ -89,10 +111,26 @@ def submit(owner, idempotency_key, command, expected_week_start=None):
         request_fingerprint=digest,
         checked_in_at=checked_in_at,
     )
-    body = checkin_payload(checked_in_at, command)
-    result = weekly_checkin.commit_full_checkin(entry, response=body)
+    if ternary and review_intent is not None:
+        # The intent becomes visible atomically with the row and replay body.
+        # The worker is the first consumer and reads in a separate transaction.
+        entry.review_updated_at = checked_in_at
+        if review_intent["authority"] is None or type(review_intent["health_generation"]) is not int:
+            entry.review_status = "unavailable"
+            entry.review_failure = "authorization"
+        else:
+            entry.review_status = "pending"
+            language = "tr" if owner.language == "tr" else "en"
+            entry.review_context = dict(review_intent, language=language)
+
+    def versioned_response(checkin_id):
+        return checkin_payload(checked_in_at, command, checkin_id=checkin_id)
+
+    response = (versioned_response if ternary
+                else checkin_payload(checked_in_at, command))
+    result = weekly_checkin.commit_full_checkin(entry, response=response)
     if result.outcome is _Outcome.CONFLICT:
         raise IdempotencyConflict()
     if result.outcome is _Outcome.REPLAYED:
         return result.response, False
-    return body, True
+    return result.response, True

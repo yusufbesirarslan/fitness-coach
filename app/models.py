@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from app.extensions import db, login_manager
 from app.timeutil import app_today
+from app import weekly_review_schema
 
 _logger = logging.getLogger(__name__)
 
@@ -538,7 +539,12 @@ class WeeklyCheckIn(db.Model):
     fatigue           = db.Column(db.Integer)       # 1-5 arası
     progressive_overload = db.Column(db.String(20)) # "evet", "hayir", "kismen"
     uyku_kalitesi     = db.Column(db.Integer)       # 1-5 arası
-    beslenme_uyumu    = db.Column(db.Integer)       # 1-5 arası
+    beslenme_uyumu    = db.Column(db.Integer)       # historical 1–5 scale
+    nutrition_adherence_v2 = db.Column(db.String(14), db.CheckConstraint(
+        "nutrition_adherence_v2 IS NULL OR (beslenme_uyumu IS NULL AND "
+        "yogunluk IS NOT NULL AND nutrition_adherence_v2 IN "
+        "('yes', 'partly', 'no', 'not_applicable'))",
+        name="ck_weekly_checkin_nutrition_adherence_v2"))
     note              = db.Column(db.Text)
     coach_feedback    = db.Column(db.Text)
     idempotency_key   = db.Column(db.String(64), nullable=True)
@@ -546,8 +552,21 @@ class WeeklyCheckIn(db.Model):
     response_snapshot = db.Column(db.Text, nullable=True)
     created_at        = db.Column(db.DateTime, default=datetime.utcnow)
 
-    __table_args__ = (db.UniqueConstraint(
-        "user_id", "idempotency_key", name="uq_weekly_checkin_user_key"),)
+    review_status     = db.Column(db.String(12))
+    review_context    = db.Column(db.JSON(none_as_null=True))
+    review_updated_at = db.Column(db.DateTime)
+    review_result     = db.Column(db.JSON(none_as_null=True))
+    review_evidence_digest = db.Column(db.String(64))
+    review_failure    = db.Column(db.String(24))
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "idempotency_key", name="uq_weekly_checkin_user_key"),
+        db.CheckConstraint(weekly_review_schema.STATUS_RULE,
+                           name=weekly_review_schema.STATUS_CHECK),
+        db.Index(weekly_review_schema.WORK_INDEX, "review_status", "review_updated_at", "id",
+                 postgresql_where=text(weekly_review_schema.WORK_PREDICATE),
+                 sqlite_where=text(weekly_review_schema.WORK_PREDICATE)),
+    )
 
     def __repr__(self):
         return f"<WeeklyCheckIn {self.user_id} - {self.created_at}>"

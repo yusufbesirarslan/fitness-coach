@@ -858,3 +858,123 @@ def test_no_foreign_existence_oracle(client, athlete, real_bearer):
                  now=FIXED_NOW)
     assert used.status_code == fresh.status_code == 201
     assert used.get_json() == fresh.get_json()
+
+
+PD5_PATH = PATH + "?contract_version=2"
+
+
+def _pd5_post(client, headers, answer, **extra):
+    with audit_clock(FIXED_NOW):
+        return client.post(PD5_PATH, headers=headers,
+                           json=dict(BODY, nutrition_adherence=answer, **extra))
+
+
+def _saved_plan(user, document='{"kahvalti":{"yemekler":["Yulaf"]}}'):
+    db.session.add(NutritionPlan(user_id=user.id, plan_data=document))
+    db.session.commit()
+
+
+@pytest.mark.parametrize("answer", ["yes", "partly", "no", "not_applicable"])
+def test_pd5_preserves_scale_and_replays_across_plan_and_week_changes(
+        client, athlete, principal, answer):
+    from app.services.weekly_checkin import queries
+
+    user, other = athlete("pd5-owner"), athlete("pd5-other")
+    created_v1 = post(client, principal(user, "pd5-legacy"), BODY)
+    assert created_v1.get_json() == CREATED_BODY
+    if answer != "not_applicable":
+        _saved_plan(user)
+    status = get(client, principal(user), path=PD5_PATH).get_json()
+    assert status["nutrition_applicability"] == (
+        "not_applicable" if answer == "not_applicable" else "applicable")
+    headers = principal(user, "pd5-versioned")
+    created = _pd5_post(client, headers, answer)
+    assert created.status_code == 201
+    body = created.get_json()
+    assert body == dict(CREATED_BODY, contract_version=2,
+                        nutrition_adherence=answer, check_in_id=body["check_in_id"])
+    row = queries.full_checkin_by_id(user.id, body["check_in_id"])
+    assert (row.beslenme_uyumu, row.nutrition_adherence_v2, row.progressive_overload) == (
+        None, answer, "evet")
+    previous = queries.previous_full_checkin(user.id, row.id)
+    assert previous.beslenme_uyumu == 4
+    assert queries.full_checkin_by_id(other.id, row.id) is None
+    assert queries.previous_full_checkin(other.id, row.id) is None
+
+    modern = get(client, principal(user), path=PD5_PATH).get_json()["check_ins"]
+    assert [(r["nutrition_adherence_scale"], r["nutrition_adherence"]) for r in modern] == [
+        ("ternary_v2", answer), ("numeric_1_5", 4)]
+    legacy = get(client, principal(user)).get_json()["check_ins"]
+    assert set(legacy[0]) == ITEM_KEYS
+    assert [r["nutrition_adherence"] for r in legacy] == [None, 4]
+    assert get(client, principal(other), path=PD5_PATH).get_json()["check_ins"] == []
+
+    # Replay precedes both plan and week checks. Retrying the old request
+    # through its original v1 path still returns its original v1 snapshot.
+    NutritionPlan.query.filter_by(user_id=user.id).delete()
+    _saved_plan(user, "invalid")
+    with audit_clock(FIXED_NOW + timedelta(days=7)):
+        replay = client.post(PD5_PATH, headers={
+            **principal(user, "pd5-versioned"), "Check-In-Week-Start": "2026-07-20",
+        }, json=dict(BODY, nutrition_adherence=answer))
+    assert (replay.status_code, replay.get_json()) == (200, body)
+    assert post(client, principal(user, "pd5-legacy")).get_json() == CREATED_BODY
+    conflict = post(client, principal(user, "pd5-versioned"))
+    assert (conflict.status_code, _error(conflict)["code"]) == (409, "IDEMPOTENCY_CONFLICT")
+    assert WeeklyCheckIn.query.filter_by(user_id=user.id).count() == 2
+
+
+@pytest.mark.parametrize(("suffix", "answer", "extra", "status"), [
+    ("?contract_version=2", "partial", {}, 422),
+    ("?contract_version=2", 4, {}, 400),
+    ("?contract_version=2", None, {}, 400),
+    ("?contract_version=2", "yes", {"nutrition_adherence_v2": "no"}, 400),
+    ("?contract_version=2&contract_version=2", "yes", {}, 400),
+    ("?contract_version=3", "yes", {}, 400),
+    ("", "yes", {}, 400),
+])
+def test_pd5_rejects_malformed_or_mixed_contracts(
+        client, athlete, principal, suffix, answer, extra, status):
+    user = athlete("pd5-invalid")
+    response = client.post(PATH + suffix, headers=principal(user, "pd5-invalid-key"),
+                           json=dict(BODY, nutrition_adherence=answer, **extra))
+    assert response.status_code == status
+    assert WeeklyCheckIn.query.count() == 0
+
+
+def test_pd5_checks_plan_on_fresh_writes_and_distinguishes_unavailable(
+        client, athlete, principal, monkeypatch):
+    from app.services.nutrition_native import plan
+
+    user = athlete("pd5-plan")
+    headers = principal(user, "pd5-plan-key")
+    for initial_plan, answer in [(False, "yes"), (True, "not_applicable")]:
+        if initial_plan:
+            _saved_plan(user)
+        response = _pd5_post(client, headers, answer)
+        assert response.status_code == 409
+        assert _error(response)["code"] == "CHECKIN_NUTRITION_APPLICABILITY_CHANGED"
+    NutritionPlan.query.delete()
+    _saved_plan(user, "invalid")
+    assert get(client, principal(user), path=PD5_PATH).get_json()[
+        "nutrition_applicability"] == "unavailable"
+    assert _pd5_post(client, principal(user, "pd5-plan-key"), "not_applicable").status_code == 503
+
+    def failed_read(_owner_id):
+        raise RuntimeError("read failed")
+
+    monkeypatch.setattr(plan, "newest_plan", failed_read)
+    assert get(client, principal(user), path=PD5_PATH).status_code == 503
+    assert _pd5_post(client, principal(user, "pd5-plan-key"), "not_applicable").status_code == 503
+    assert WeeklyCheckIn.query.count() == 0
+    assert db.session.get(User, user.id).weight == 80
+
+
+def test_pd5_full_missing_adherence_and_weight_only_are_distinct(client, athlete, principal):
+    user = athlete("pd5-missing")
+    _seed(user.id, datetime(2026, 7, 22), 78, beslenme=None)
+    _seed(user.id, datetime(2026, 7, 23), 79, beslenme=None, yogunluk=None)
+    db.session.commit()
+    (item,) = get(client, principal(user), path=PD5_PATH).get_json()["check_ins"]
+    assert item["weight_kg"] == 78
+    assert (item["nutrition_adherence"], item["nutrition_adherence_scale"]) == (None, None)

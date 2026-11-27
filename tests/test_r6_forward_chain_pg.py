@@ -11,6 +11,8 @@ retired, see app/retired_revisions.py):
         -> f01a4e000003 -> ad17de1e0001 -> e5b27aa4101c -> 19cb998acd2f
         -> 5cc5aa7e47ba (G4 cardio-session outcomes) -> a7d3c9e1f2b4 (PD1 goal pace)
         -> b7d2e9f4a1c3 (PD2 training-start decision)
+        -> c8e1f3a5b702 (PD5 nutrition adherence)
+        -> e6a4b91d702c (PD6 weekly review)
 
 Each migration has its own isolated test on synthetic tables. This module is
 the CHAIN qualification on a database built only by the real Alembic history:
@@ -77,7 +79,7 @@ import r6_deploy_transaction as tx  # noqa: E402
 LIVE_HEAD = "c6f8b0d2e4a1"
 R6_CHAIN = ("d8f1a3c5e7b9", "f01c0a1e0001", "e1a5f0c3d2b4", "f01e2a5e0002")
 CHAIN = R6_CHAIN + ("f01a4e000003", "ad17de1e0001", "e5b27aa4101c", "19cb998acd2f",
-                    "5cc5aa7e47ba", "a7d3c9e1f2b4", "b7d2e9f4a1c3")
+                    "5cc5aa7e47ba", "a7d3c9e1f2b4", "b7d2e9f4a1c3", "c8e1f3a5b702", "e6a4b91d702c")
 HEAD = CHAIN[-1]
 FLOOR_REVISION = "e" * 40
 PREV_SHA = "a" * 40
@@ -547,6 +549,77 @@ def test_populated_g4_upgrades_to_pd1_then_pd2(chain_url, monkeypatch):
             check()
     finally:
         _dispose(tool)
+
+
+def test_populated_w1_w2_upgrade_preserves_legacy_checkins_and_targets(chain_url, monkeypatch):
+    _upgrade_to(monkeypatch, "b7d2e9f4a1c3")
+    owner = _sql(chain_url,
+                 'INSERT INTO "user" (username, email, weight, goal_pace, referral_code) '
+                 "VALUES ('w3-owner', 'w3-owner@example.invalid', 79, 'lose_slower', 'W3OWNER') RETURNING id")[0][0]
+    _sql(chain_url, "INSERT INTO user_session (user_id, weight, target_calories) "
+         "VALUES (:owner, 79, 2240)", owner=owner)
+    _sql(chain_url,
+         "INSERT INTO weekly_check_in (user_id, weight, yogunluk, beslenme_uyumu, "
+         "idempotency_key, response_snapshot) VALUES "
+         "(:owner, 80, 3, 4, 'legacy-key-001', '  original replay bytes  '), "
+         "(:owner, 79, NULL, NULL, NULL, NULL)", owner=owner)
+    before = _snapshot(chain_url, ("user", "user_session", "weekly_check_in"))
+
+    result = _release_prepare(monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert _versions(chain_url) == [HEAD]
+    assert _snapshot(chain_url, like=before) == before
+    assert _sql(chain_url, "SELECT nutrition_adherence_v2, review_status "
+                           "FROM weekly_check_in ORDER BY id") == [(None, None), (None, None)]
+
+
+def test_pd6_preserves_both_pd5_adherence_scales(chain_url, monkeypatch):
+    _upgrade_to(monkeypatch, "c8e1f3a5b702")
+    owner = _sql(chain_url,
+                 'INSERT INTO "user" (username, email) VALUES (:name, :email) RETURNING id',
+                 name="pd6_migration", email="pd6-migration@example.com")[0][0]
+    _sql(chain_url,
+         "INSERT INTO weekly_check_in (user_id, weight, yogunluk, beslenme_uyumu, "
+         "nutrition_adherence_v2) VALUES (:owner, 80, 3, 4, NULL), "
+         "(:owner, 79, 3, NULL, 'partly'), (:owner, 78, 3, NULL, 'not_applicable')",
+         owner=owner)
+    select = ("SELECT id, weight, yogunluk, beslenme_uyumu, nutrition_adherence_v2 "
+              "FROM weekly_check_in ORDER BY id")
+    before = _sql(chain_url, select)
+    _upgrade_to(monkeypatch, HEAD)
+    assert _versions(chain_url) == [HEAD]
+    assert _sql(chain_url, select) == before
+    assert _sql(chain_url, "SELECT COUNT(*) FROM weekly_check_in "
+                           "WHERE review_status IS NOT NULL")[0][0] == 0
+
+
+@pytest.mark.parametrize("review_exists", [False, True], ids=["pd5", "pd6"])
+def test_w3_downgrade_refuses_to_discard_recorded_data(chain_url, monkeypatch, review_exists):
+    from flask_migrate import downgrade
+
+    _upgrade_to(monkeypatch, HEAD)
+    owner = _sql(chain_url,
+                 'INSERT INTO "user" (username, email) VALUES (:name, :email) RETURNING id',
+                 name="downgrade_owner", email="downgrade@example.invalid")[0][0]
+    row_id = _sql(chain_url, "INSERT INTO weekly_check_in "
+                  "(user_id, weight, yogunluk, nutrition_adherence_v2) "
+                  "VALUES (:owner, 80, 3, 'partly') RETURNING id", owner=owner)[0][0]
+    if review_exists:
+        _sql(chain_url, "UPDATE weekly_check_in SET review_status = 'unavailable', "
+             "review_updated_at = now(), review_failure = 'authorization' WHERE id = :id",
+             id=row_id)
+    before = _snapshot(chain_url, ("weekly_check_in",))
+
+    target = "c8e1f3a5b702" if review_exists else "b7d2e9f4a1c3"
+    tool = _boot_tool(monkeypatch)
+    try:
+        with tool.app_context(), pytest.raises(SystemExit) as stopped:
+            downgrade(revision=target)
+    finally:
+        _dispose(tool)
+    assert stopped.value.code == 1
+    assert _versions(chain_url) == [HEAD]
+    assert _snapshot(chain_url, ("weekly_check_in",)) == before
 
 
 def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_after(

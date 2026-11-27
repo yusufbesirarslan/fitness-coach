@@ -866,7 +866,7 @@ def test_outcome_migration_is_expand_only_and_never_drops_recorded_outcomes():
     from alembic.runtime.migration import MigrationContext
     from alembic.script import ScriptDirectory
     script = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "migrations"))
-    # Inspect G4 directly. PD1 and PD2 extend its migration chain.
+    # Inspect G4 directly. Later migrations extend its chain.
     module = script.get_revision("5cc5aa7e47ba").module
     assert module.down_revision == "19cb998acd2f" and module.expand_contract == "expand"
     engine = sa.create_engine("sqlite://")
