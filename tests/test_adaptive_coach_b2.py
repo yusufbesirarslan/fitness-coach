@@ -308,10 +308,11 @@ def test_mutation_tools_run_on_the_base_prompt(app, tools_on):
 UPDATE = "update_training_plan_prescription"
 
 
-def _update(app, user, authority, sets):
+def _update(app, user, authority, sets, message=None):
+    message = f"Pazartesi bench press {sets} set yap" if message is None else message
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
-        ai_coach._begin_coach_turn()
+        ai_coach._begin_coach_turn(message, user_id=user.id)
         with ai_consent.operation_scope(authority):
             return coach_plan_tools.execute_plan_tool(
                 user.id, UPDATE, {"day": "Pazartesi", "exercise": "Bench Press", "sets": sets})
@@ -359,3 +360,52 @@ def test_direct_apply_never_covers_remove(app, alice, tools_on, fences, authorit
     _seed(alice)
     _stage(app, alice, authority)  # remove still stages a proposal
     assert "Shoulder Press" in _monday(alice) and _journal(alice) == 0
+
+
+def test_direct_apply_never_saves_a_set_count_the_model_chose(
+        app, alice, tools_on, fences, authority, direct_apply_open):
+    _seed(alice)
+    result = _update(app, alice, authority, 4, message="make bench press harder")
+    assert result["status"] == "confirmation_required"
+    assert _bench_sets(alice) == 3 and _journal(alice) == 0
+
+
+def test_a_pre_capability_proposal_is_reported_stale_and_never_applied(
+        app, mobile, alice, bearer, tools_on, fences, authority):
+    _seed(alice)
+    proposal_id = _stage(app, alice, authority)
+    row = _proposal(alice)
+    payload = dict(row.command_payload)
+    payload.pop(ai_consent.PAYLOAD_CAPABILITY_KEY)
+    row.command_payload = payload
+    db.session.commit()
+
+    response = _answer(mobile, bearer(alice), proposal_id)
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "COACH_PLAN_CONFIRMATION_STALE"
+    assert "Shoulder Press" in _monday(alice) and _journal(alice) == 0
+    assert _proposal(alice).status == "stale"
+
+
+def test_confirm_fences_the_stored_capability(
+        app, mobile, alice, bearer, tools_on, fences, authority, monkeypatch):
+    """Revoked/replaced capability after staging: the B2 confirm is refused,
+    nothing is written and the proposal is retired."""
+    _seed(alice)
+    proposal_id = _stage(app, alice, authority)
+    assert isinstance(_proposal(alice).command_payload[ai_consent.PAYLOAD_CAPABILITY_KEY], list)
+    seen = []
+
+    def refuse(owner, capabilities):
+        seen.append(tuple(c.capability for c in capabilities))
+        raise ai_consent.ConsentDenied("AI_CONSENT_CHANGED")
+    monkeypatch.setattr(ai_consent, "_fence_capabilities", refuse)
+
+    response = _answer(mobile, bearer(alice), proposal_id)
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "AI_CONSENT_CHANGED"
+    assert seen and seen[0] == ("training_plan_write",)
+    assert "Shoulder Press" in _monday(alice) and _journal(alice) == 0
+    assert _proposal(alice).status == "stale"

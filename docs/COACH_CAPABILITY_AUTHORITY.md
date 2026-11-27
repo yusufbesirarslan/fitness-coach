@@ -68,11 +68,14 @@ Capability purposes are never in `BINDINGS`, so they never open a provider dispa
 **Risk policy (`coach-risk-v1`):** `is_direct_apply_eligible` treats a change as low impact only when all of the following hold:
 
 - it is an `UpdateExercisePrescriptionCommand` with `sets` only;
+- the set count is the user's own typed value for this turn (or the server-owned clarification it completes, via `grounding.user_owned_intent`), never one the model chose, and the user typed no rep target;
 - exactly one canonical-document leaf (`set`) changes, by ±1, between positive integers (`proposals.changed_document_leaves`);
 - the impact is determinable;
 - no ACTIVE session is touched.
 
 Such a change applies directly only when `direct_apply_allowed`, which needs an approved version that is also listed in `DIRECT_APPLY_VERSIONS`. Every other change keeps preview + explicit confirmation. Undo keeps its confirmed restore.
+
+A Training proposal staged by an AI operation before this change carries no capability key: confirm answers `PENDING_CONFIRMATION_STALE` (409 on the native endpoint) and retires it, rather than asking for a consent the user may already hold. The saved Nutrition Plan READ also rechecks the capability (`authorize_capabilities`) before publishing plan content to the model.
 
 ## Opening it later (separate reviewed PR, after counsel + founder approval)
 

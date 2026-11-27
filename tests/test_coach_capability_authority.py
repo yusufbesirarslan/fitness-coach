@@ -282,25 +282,31 @@ def _sets(before, after):
     return [(("program", 0, "egzersizler", 0, "set"), before, after)]
 
 
-def test_low_impact_rule_is_a_single_small_set_change():
+def _eligible(command, facts, leaves, stated=4, reps=None):
+    return is_direct_apply_eligible(command, facts, leaves, stated_sets=stated, stated_reps=reps)
+
+
+def test_direct_apply_rule_is_a_single_small_user_stated_set_change():
     command = UpdateExercisePrescriptionCommand(day="Pazartesi", exercise="Squat", sets=4)
-    assert is_direct_apply_eligible(command, SAFE, _sets(3, 4))
-    assert is_direct_apply_eligible(command, SAFE, _sets(4, 3))
-    assert not is_direct_apply_eligible(command, SAFE, _sets(3, 5))
-    assert not is_direct_apply_eligible(command, SAFE, _sets(3, 3))
-    assert not is_direct_apply_eligible(command, SAFE, _sets(True, 2))
-    assert not is_direct_apply_eligible(command, SAFE, _sets(3, 4) * 2)
-    assert not is_direct_apply_eligible(command, SAFE, [(("x", "tekrar"), "8", "10")])
-    assert not is_direct_apply_eligible(command, SAFE, None)
-    assert not is_direct_apply_eligible(
-        command, ImpactFacts(touches_active_session=True), _sets(3, 4))
-    assert not is_direct_apply_eligible(
+    assert _eligible(command, SAFE, _sets(3, 4))
+    assert _eligible(command, SAFE, _sets(5, 4))
+    assert not _eligible(command, SAFE, _sets(3, 4), stated=None)   # model-chosen count
+    assert not _eligible(command, SAFE, _sets(3, 4), stated=5)      # not what the user said
+    assert not _eligible(command, SAFE, _sets(3, 4), reps="10")     # user-typed reps confirm
+    assert not _eligible(command, SAFE, _sets(2, 4))
+    assert not _eligible(command, SAFE, _sets(4, 4))
+    assert not _eligible(command, SAFE, _sets(True, 4))
+    assert not _eligible(command, SAFE, _sets(3, 4) * 2)
+    assert not _eligible(command, SAFE, [(("x", "tekrar"), "8", "10")])
+    assert not _eligible(command, SAFE, None)
+    assert not _eligible(command, ImpactFacts(touches_active_session=True), _sets(3, 4))
+    assert not _eligible(
         command, ImpactFacts(touches_active_session=False, impact_undeterminable=True), _sets(3, 4))
     with_reps = UpdateExercisePrescriptionCommand(day="Pazartesi", exercise="Squat", sets=4, reps="8")
-    assert not is_direct_apply_eligible(with_reps, SAFE, _sets(3, 4))
-    for other in (AddExerciseCommand(day="Pazartesi", exercise="Squat", sets=3, reps="8"),
+    assert not _eligible(with_reps, SAFE, _sets(3, 4))
+    for other in (AddExerciseCommand(day="Pazartesi", exercise="Squat", sets=4, reps="8"),
                   RemoveExerciseCommand(day="Pazartesi", exercise="Squat")):
-        assert not is_direct_apply_eligible(other, SAFE, _sets(3, 4))
+        assert not _eligible(other, SAFE, _sets(3, 4))
 
 
 def test_direct_apply_is_closed_without_an_approved_direct_apply_disclosure(monkeypatch):
@@ -315,10 +321,21 @@ def test_direct_apply_is_closed_without_an_approved_direct_apply_disclosure(monk
     assert caps.direct_apply_allowed(authority)
 
 
-def test_changed_document_leaves_reports_structure_changes_as_non_set():
+def test_changed_document_leaves_reports_exact_leaves_from_the_stored_plan():
+    import json
     from app.services.coach_plan_tools import proposals
-    plan = SimpleNamespace(plan_data="not json")
-    assert proposals.changed_document_leaves(plan, None) is None
+    from tests.test_coach_plan_tool_characterization import _program
+    plan = SimpleNamespace(plan_data=json.dumps(_program(), ensure_ascii=False))
+    leaves = proposals.changed_document_leaves(plan, UpdateExercisePrescriptionCommand(
+        day="Pazartesi", exercise="Bench Press", sets=4))
+    assert len(leaves) == 1 and leaves[0][0][-1] == "set" and leaves[0][1:] == (3, 4)
+    both = proposals.changed_document_leaves(plan, UpdateExercisePrescriptionCommand(
+        day="Pazartesi", exercise="Bench Press", sets=4, reps="6-8"))
+    assert len(both) == 2
+    added = proposals.changed_document_leaves(plan, AddExerciseCommand(
+        day="Pazartesi", exercise="Squat", sets=3, reps="8"))
+    assert added and all(path[-1] != "set" for path, _a, _b in added)
+    assert proposals.changed_document_leaves(SimpleNamespace(plan_data="not json"), None) is None
 
 
 # ── Nutrition: Coach + nutrition.plan alone never write ───────────────────

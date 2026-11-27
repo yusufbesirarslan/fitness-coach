@@ -14,7 +14,7 @@ from .decisions import ImpactFacts, UpdateExercisePrescriptionCommand
 DIRECT_APPLY_MAX_SET_DELTA = 1
 
 
-def is_direct_apply_eligible(command, facts, changed_leaves):
+def is_direct_apply_eligible(command, facts, changed_leaves, *, stated_sets=None, stated_reps=None):
     """An explicit, single-field, small, journaled prescription edit.
 
     ``changed_leaves`` is ``[(path, before, after), ...]`` — every leaf of the
@@ -23,6 +23,9 @@ def is_direct_apply_eligible(command, facts, changed_leaves):
 
     * the command is a typed ``UpdateExercisePrescriptionCommand`` carrying
       ``sets`` only (never a remove, replace, add, move, Undo or unknown);
+    * the user's own turn text stated that exact set count (``stated_sets``,
+      from the server's user-owned grounding, never the model) and no rep
+      target (``stated_reps``) — "explicit";
     * impact is determinable and no ACTIVE workout session is touched;
     * exactly ONE leaf changes, it is the exercise's ``set`` count, and the
       count moves by at most ``DIRECT_APPLY_MAX_SET_DELTA`` between positive
@@ -37,6 +40,9 @@ def is_direct_apply_eligible(command, facts, changed_leaves):
             or facts.touches_active_session):
         return False
     if command.reps is not None or command.sets is None:
+        return False
+    if (stated_reps is not None or type(stated_sets) is not int
+            or stated_sets != command.sets):
         return False
     if not isinstance(changed_leaves, (list, tuple)) or len(changed_leaves) != 1:
         return False

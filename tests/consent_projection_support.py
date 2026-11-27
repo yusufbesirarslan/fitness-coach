@@ -150,3 +150,4 @@ def allow_capability_authority(monkeypatch):
                                            'synthetic-capability', operation.generation)
     monkeypatch.setattr(consent, 'capture_capability', capture)
     monkeypatch.setattr(consent, '_fence_capabilities', lambda *a, **kw: None)
+    monkeypatch.setattr(consent, 'authorize_capabilities', lambda *a, **kw: None)

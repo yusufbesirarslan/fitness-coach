@@ -464,6 +464,10 @@ def _read(user_id, authorities):
     # rechecked now; the Coach one is re-authorized by every dispatch.
     ai_consent.authorize_operation(authorities.nutrition)
     ai_consent.authorize_operation(authorities.coach)
+    # ... and the Coach Nutrition Plan capability itself (#533).
+    if authorities.capability is None:
+        raise ai_consent.ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+    ai_consent.authorize_capabilities(authorities.capability)
     if snapshot is None:
         return {"domain": DOMAIN, "status": STATUS_NOT_FOUND}
     document = json.loads(snapshot.raw)

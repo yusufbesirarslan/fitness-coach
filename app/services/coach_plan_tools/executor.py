@@ -187,6 +187,7 @@ def begin_turn(user_message="", history=None, user_id=None):
         setattr(g, _HISTORY_ATTR, list(history or ()))
         setattr(g, _USER_ID_ATTR, user_id)
         setattr(g, _TRAINING_CHANGED_ATTR, False)
+        setattr(g, _CAPABILITY_ATTR, _CAPABILITY_UNSET)
         from .nutrition import reset_turn
         reset_turn()
         from .grounding import refresh_clarification_for_turn
@@ -244,6 +245,8 @@ def published_plan_tool_defs(user_id=None):
     """
     if not plan_mutation_tools_enabled():
         return ()
+    if user_id is None and ai_consent.current_operation() is not None:
+        return ()  # no owner to capture a capability for: nothing published
     if user_id is not None and not training_write_authorized(user_id):
         # No separately granted Coach plan-editing capability: the whole
         # plan-write family stays absent; ordinary chat and the read tool
@@ -617,6 +620,7 @@ def _begin_direct_turn(user_id, intent, proposal_id):
     setattr(g, _USER_ID_ATTR, user_id)
     setattr(g, _DIRECT_PROPOSAL_ATTR, proposal_id)
     setattr(g, _TRAINING_CHANGED_ATTR, False)
+    setattr(g, _CAPABILITY_ATTR, _CAPABILITY_UNSET)
     from .nutrition import reset_turn
     reset_turn()
 
@@ -818,7 +822,19 @@ def _direct_apply_low_impact(user_id, plan, command, facts):
     if not coach_capabilities.direct_apply_allowed(
             ai_consent.active_capability(user_id, coach_capabilities.TRAINING_PLAN_WRITE)):
         return False
-    return is_direct_apply_eligible(command, facts, changed_document_leaves(plan, command))
+    # "Explicit": the set count must be the USER's own typed value for this
+    # turn (or the server-owned clarification it completes), never a value
+    # the model chose; a user-typed rep target always confirms.
+    from .grounding import user_owned_intent
+    try:
+        intent = user_owned_intent(user_id=user_id)
+    except Exception:
+        return False
+    stated = intent.get("prescription") if intent.get("has_user_text") else None
+    return is_direct_apply_eligible(
+        command, facts, changed_document_leaves(plan, command),
+        stated_sets=getattr(stated, "sets", None),
+        stated_reps=getattr(stated, "reps", None))
 
 
 def _execute_undo(user_id, arguments):
@@ -1104,9 +1120,21 @@ def _apply_confirmed(user_id, pending):
     try:
         authority = ai_consent.OperationAuthority.from_context(
             user_id, (pending.command_payload or {}).get(ai_consent.PAYLOAD_AUTHORITY_KEY))
+        if not isinstance((pending.command_payload or {}).get(
+                ai_consent.PAYLOAD_CAPABILITY_KEY), list):
+            # Proposed by an AI operation before the Coach capability
+            # authority existed (#533): it can never apply. Reported as
+            # stale, not as a consent problem the user might answer by
+            # re-granting something they already hold.
+            db.session.rollback()
+            try:
+                mark_stale(user_id, public_id)
+            except Exception:
+                db.session.rollback()
+            return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
         with ai_consent.operation_scope(authority):
             # The ORIGINAL capability it was proposed under (#533): a proposal
-            # staged without one, or under a revoked/replaced one, never applies.
+            # staged under a missing, revoked or replaced one never applies.
             capability = stored_training_capability(user_id, pending)
             with ai_consent.capability_scope(capability):
                 return _apply_confirmed_now(user_id, pending)
