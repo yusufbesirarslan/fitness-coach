@@ -150,6 +150,9 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         # PD1 (#547) canonical calorie target read + goal-pace edit.
         "/api/v1/account/calorie-target",
         "/api/v1/account/goal-pace",
+        # Product analytics v2 (default OFF; independent optional consent).
+        "/api/v1/analytics/consent",
+        "/api/v1/analytics/events",
         # LP-09 native Coach (owner = bearer principal; web Coach pipeline).
         "/api/v1/coach/messages",
         "/api/v1/coach/history",

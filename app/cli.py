@@ -109,7 +109,7 @@ def _user_child_models():
         TrainingPlanReplacementGenerationOperation, TrainingPlanReplacementProposal,
         TrainingPlanReplacementReceipt, PumpCheck,
         PumpCheckComment, PumpCheckComparison, PumpCheckComparisonRequest,
-        PumpCheckLike, Supplement, TrainingPlan,
+        PumpCheckLike, ProductAnalyticsConsent, ProductAnalyticsOutbox, Supplement, TrainingPlan,
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
@@ -119,6 +119,9 @@ def _user_child_models():
     return (
         # MON-02-BE-03A: reservations point at buckets; the grant row goes last.
         TrainingAllowanceCompensation, AiUsageReservation, AiAllowanceBucket, AiStarterGrant,
+        # Product analytics v2: the purge enqueues vendor erasure for the live
+        # pseudonym (no user FK) BEFORE these mapping rows are deleted.
+        ProductAnalyticsOutbox, ProductAnalyticsConsent,
         AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn,
         NutritionPlanEditOperation, NutritionPlanMutationRecord, NutritionPlan,
         # PlanMutationRecord before TrainingPlan: the journal describes plan
@@ -287,6 +290,12 @@ def _purge_user(user):
     # loop below deletes their activities and the user (no-op without it).
     from app.services import legacy_activity_clap
     _deleted("activity_clap", legacy_activity_clap.delete_for_user(uid))
+
+    # Product analytics v2: the durable vendor-erasure job for the live
+    # pseudonym commits atomically with this purge, before the child-model
+    # loop below deletes the only account-to-pseudonym mapping.
+    from app.services.product_analytics import consent as analytics_consent
+    analytics_consent.enqueue_account_erasure(uid)
 
     for Model in _USER_CHILD_MODELS:
         _deleted(Model, Model.query.filter_by(user_id=uid).delete(synchronize_session=False))

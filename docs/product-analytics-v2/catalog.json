@@ -1,0 +1,120 @@
+{
+  "schema_version": 2,
+  "purpose": "product_analytics",
+  "notice_version": "analytics-notice-v1-draft",
+  "review_status": "PROPOSED_PENDING_CATALOG_REVIEW",
+  "vendor_wire_allowlist": {
+    "batch": ["api_key", "batch"],
+    "event": ["event", "distinct_id", "uuid", "timestamp", "properties"],
+    "fixed_properties": {"$process_person_profile": false, "$geoip_disable": true}
+  },
+  "client_envelope": {
+    "keys": ["schema_version", "consent_grant", "events"],
+    "event_keys": ["event_id", "name", "occurred_at", "properties"],
+    "max_events": 20,
+    "max_body_bytes": 16384,
+    "occurred_at_window_seconds": {"past": 86400, "future": 300}
+  },
+  "events": {
+    "axis_v2_analytics_enabled": {
+      "authority": "server", "properties": {},
+      "trigger": "Independent optional analytics grant committed (consent.grant). Once per grant generation.",
+      "kpis": ["retention_cohort_anchor", "consent_opt_in_rate_numerator"]
+    },
+    "axis_v2_onboarding_completed": {
+      "authority": "server", "properties": {},
+      "trigger": "account_profile.complete_onboarding committed with profile_complete false->true. Repeat submissions/edits are not completions.",
+      "kpis": ["onboarding_completion", "time_to_first_value_start"]
+    },
+    "axis_v2_training_plan_proposed": {
+      "authority": "server", "properties": {},
+      "trigger": "PD2 preview candidate staged (mobile_training_generation.store.stage_candidate, preview operation). A proposal is not a plan.",
+      "kpis": ["plan_acceptance_rate_denominator"]
+    },
+    "axis_v2_training_plan_created": {
+      "authority": "server", "properties": {"path": ["ai_preview_accepted", "ai_direct", "general"]},
+      "trigger": "A training plan row committed by store.commit_plan (ai_*) or store.commit_general_plan (general). Idempotent replays emit nothing new.",
+      "kpis": ["first_plan_creation", "plan_acceptance_rate_numerator", "time_to_first_value", "meaningful_activity"]
+    },
+    "axis_v2_workout_completed": {
+      "authority": "server", "properties": {},
+      "trigger": "workout_completion.complete_workout CREATED outcome committed (one canonical completion-day claim). ALREADY_COMPLETED/replay emits nothing.",
+      "kpis": ["workout_completion", "time_to_first_value", "meaningful_activity", "retention"]
+    },
+    "axis_v2_coach_reply_completed": {
+      "authority": "server", "properties": {},
+      "trigger": "memory_manager.record_turn committed a non-interrupted assistant reply. No prompt, reply, topic or model data.",
+      "kpis": ["coach_adoption", "meaningful_activity", "retention"]
+    },
+    "axis_v2_coach_mutation_applied": {
+      "authority": "server", "properties": {"domain": ["training"]},
+      "trigger": "plan_mutation.apply_plan_mutation committed outcome=applied with actor=ai_coach. no_op, replayed, refused and undo are not counted. Nutrition WRITE value is NOT in the enum until that writer exists and is reviewed.",
+      "kpis": ["coach_authorized_mutation_success"]
+    },
+    "axis_v2_weekly_checkin_submitted": {
+      "authority": "server", "properties": {},
+      "trigger": "mobile_weekly_checkin.submission.submit committed a NEW check-in (created=true). Replays emit nothing. No answers.",
+      "kpis": ["weekly_checkin_adoption", "meaningful_activity", "retention"]
+    },
+    "axis_v2_feature_failed": {
+      "authority": "server",
+      "properties": {"feature": ["training_plan_generation"], "retryable": ["yes", "no"]},
+      "trigger": "store.record_failure committed a terminal generation failure. Closed feature/retryability only; no error text, codes or provider names.",
+      "kpis": ["feature_reliability"]
+    },
+    "axis_v2_app_opened": {
+      "authority": "client", "properties": {},
+      "trigger": "First authenticated foreground of a process under a valid grant.",
+      "kpis": ["active_days"]
+    },
+    "axis_v2_app_resumed": {
+      "authority": "client", "properties": {},
+      "trigger": "Authenticated return to foreground after >=30 s in background under a valid grant.",
+      "kpis": ["active_days"]
+    },
+    "axis_v2_screen_viewed": {
+      "authority": "client",
+      "properties": {"screen": ["today", "plan", "plan_create", "coach", "progress", "onboarding", "workout", "nutrition", "nutrition_plan", "settings"]},
+      "trigger": "Coarse top-level screen change; consecutive duplicates suppressed. Never routes, arguments or extras.",
+      "kpis": ["feature_discovery"]
+    },
+    "axis_v2_onboarding_started": {
+      "authority": "client", "properties": {},
+      "trigger": "First actionable onboarding page shown under a valid grant.",
+      "kpis": ["onboarding_funnel"]
+    },
+    "axis_v2_onboarding_step_completed": {
+      "authority": "client", "properties": {"milestone": ["step1", "step2", "step3", "step4"]},
+      "trigger": "Accepted advance from an onboarding step. No answers, permissions or errors.",
+      "kpis": ["onboarding_funnel"]
+    },
+    "axis_v2_training_plan_requested": {
+      "authority": "client", "properties": {},
+      "trigger": "Explicit plan-generation request accepted by the client. A request is never success.",
+      "kpis": ["plan_funnel"]
+    },
+    "axis_v2_plan_viewed": {
+      "authority": "client", "properties": {},
+      "trigger": "Plan screen showed an existing plan.",
+      "kpis": ["feature_discovery"]
+    },
+    "axis_v2_progress_viewed": {
+      "authority": "client", "properties": {},
+      "trigger": "Progress summary shown.",
+      "kpis": ["feature_discovery"]
+    },
+    "axis_v2_coach_message_sent": {
+      "authority": "client", "properties": {},
+      "trigger": "User sent a Coach message (explicit send). No content or length.",
+      "kpis": ["coach_funnel"]
+    }
+  },
+  "excluded_by_design": {
+    "signup_started": "Pre-auth collection is not approved; signup funnel is N/A.",
+    "signup_completed": "No analytics consent can exist before an account exists; N/A.",
+    "client *_observed success events (v1)": "Client projections never count as committed backend success; superseded by server authority events.",
+    "food_log / nutrition contents": "Nutrition contents are excluded; Nutrition WRITE events require separate review once the Coach Nutrition writer exists.",
+    "person/profile properties, $set, identify, alias, groups": "No person profiles; no direct account identifiers.",
+    "device/OS/app/locale/timezone/network/screen metadata": "Not sent; server-mediated wire carries only the allowlist above."
+  }
+}

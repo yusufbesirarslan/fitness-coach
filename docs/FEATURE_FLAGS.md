@@ -504,3 +504,10 @@ onboarding training start (docs/PD2_TRAINING_START.md): `GET/PUT
 the general create is refused 428; the legacy creation contracts are
 byte-identical. Requires `MOBILE_AUTH_ENABLED` and migration `b7d2e9f4a1c3`.
 Owner: @yusufbesirarslan; review by 2026-12-31. Rollback: set the flag to 0.
+
+`FITX_PRODUCT_ANALYTICS_ENABLED` defaults OFF. ON exposes `GET|PUT /api/v1/analytics/consent`
+and `POST /api/v1/analytics/events` and lets canonical writers stage server-authoritative
+analytics events into a consent-fenced outbox; dispatch has a synthetic transport only (no vendor).
+Requires `MOBILE_AUTH_ENABLED` and migration `6e25ecb68c09`. See
+[product analytics v2](product-analytics-v2/README.md).
+Owner: @yusufbesirarslan; review by 2026-12-31. Rollback: set the flag to 0.
