@@ -1200,11 +1200,21 @@ def _pending(coach, owner, authority):
         UpdateExercisePrescriptionCommand("Pazartesi", "Old", sets=4))
     scope = ai_consent.operation_scope(authority) if authority else nullcontext()
     with scope:
-        row, _reused = create_or_reuse_pending(
-            owner, lineage_id=plan.lineage_id, mutation_version=plan.mutation_version,
-            snapshot_fingerprint=snapshot_fingerprint(plan.plan_data), command_type=kind,
-            command_payload=payload, command_fingerprint=fingerprint, reason_codes=(),
-            summary="synthetic")
+        capability = nullcontext()
+        if authority:
+            # #533: staged under a synthetic Coach plan-editing capability; the
+            # Coach operation fences stay real. Real capability capture and
+            # fencing: tests/test_coach_capability_authority_pg.py.
+            coach.monkeypatch.setattr(ai_consent, "_fence_capabilities", lambda *a, **kw: None)
+            capability = ai_consent.capability_scope(ai_consent.CapabilityAuthority(
+                owner, "training_plan_write", "coach.training_plan_edit",
+                "synthetic-capability", authority.generation))
+        with capability:
+            row, _reused = create_or_reuse_pending(
+                owner, lineage_id=plan.lineage_id, mutation_version=plan.mutation_version,
+                snapshot_fingerprint=snapshot_fingerprint(plan.plan_data), command_type=kind,
+                command_payload=payload, command_fingerprint=fingerprint, reason_codes=(),
+                summary="synthetic")
     return row.public_id
 
 
