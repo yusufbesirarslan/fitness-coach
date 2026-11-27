@@ -130,6 +130,11 @@ def create_or_reuse_pending(
         # The proposal remembers the operation that PROPOSED it: confirmation
         # in a later turn applies it under that authority, never a newer one.
         command_payload[ai_consent.PAYLOAD_AUTHORITY_KEY] = operation.to_context()
+        capabilities = ai_consent.active_capabilities()
+        if capabilities:
+            # ... and the capability authorities it was proposed under (#533).
+            command_payload[ai_consent.PAYLOAD_CAPABILITY_KEY] = [
+                authority.to_context() for authority in capabilities]
 
     existing = get_pending(user_id)
     if existing is not None:

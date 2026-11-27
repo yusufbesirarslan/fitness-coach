@@ -44,6 +44,11 @@ def rig(pg_generation_app, monkeypatch):
         (policies["coach"].version, policies["nutrition_plan"].version),
     }))
     from d1_screened_support import screen_adult_tr
+    # #533: synthetic Coach Nutrition Plan capability; the Coach and
+    # nutrition.plan grants and their fences stay real. Real capability
+    # capture/fencing: tests/test_coach_capability_authority_pg.py.
+    from consent_projection_support import allow_capability_authority
+    allow_capability_authority(monkeypatch)
     with app.app_context():
         screen_adult_tr(*owners)
         for owner in owners:

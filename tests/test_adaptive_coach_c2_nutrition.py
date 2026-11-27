@@ -37,6 +37,13 @@ ESTIMATE = {"kalori": 450, "protein": 32, "karb": 38, "yag": 19}
 REPLACE = {"meal": "kahvalti", "item": "Eggs - 2 adet", "replacement": "Chicken - 100 g"}
 
 
+@pytest.fixture(autouse=True)
+def _pre_capability_suite(synthetic_capability_authority):
+    """#533: these suites predate the separate Coach capability grant; it is
+    supplied synthetically. Default-closed refusal and real capture/fencing
+    are qualified by tests/test_coach_capability_authority{,_pg}.py."""
+
+
 @pytest.fixture
 def c2(app, alice, monkeypatch):
     """Gate open (synthetic approved disclosure), flag ON, grants present."""
