@@ -8,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.extensions import db
-from app.models import AiUsageReservation, User, WeeklyCheckIn
+from app.models import AiUsageReservation, User, UserSession, WeeklyCheckIn
 from app.services import (ai, ai_consent, ai_consent_disclosures, ai_launch,
                           ai_recovery, ai_spend_guard, health_consent)
 from app.services.ai_allowances import execution, launch_policy
@@ -138,7 +138,16 @@ def test_flag_and_legal_hold_preserve_v1_v2_success(pg_app):
 
 
 def test_concurrent_submissions_workers_and_result_reads(pg_app, authorized):
+    from app.services.calculations import calculate_bmr, calculate_tdee
+    from app.services.goal_pace import round_kcal
+
     sdk, fallback, _ = authorized
+    with pg_app.app_context():
+        owner = _owner()
+        owner.goal_pace = "lose_slower"
+        age = owner.age
+        db.session.commit()
+    expected_kcal = round_kcal(calculate_tdee(calculate_bmr(78, 180, age, "male"), "active") - 220)
     with ThreadPoolExecutor(max_workers=4) as pool:
         responses = list(pool.map(lambda _: _post(pg_app), range(4)))
     assert sorted(result.status_code for result in responses) == [200, 200, 200, 201]
@@ -146,6 +155,10 @@ def test_concurrent_submissions_workers_and_result_reads(pg_app, authorized):
     assert all(snapshot == snapshots[0] for snapshot in snapshots)
     check_in_id = snapshots[0]["check_in_id"]
     with pg_app.app_context():
+        owner = _owner()
+        session = UserSession.query.filter_by(user_id=owner.id).one()
+        assert (owner.weight, owner.goal_pace, session.weight, session.target_calories) == (
+            78.0, "lose_slower", 78.0, expected_kcal)
         row = db.session.get(WeeklyCheckIn, check_in_id)
         # Legacy can change today's canonical weight; replay remains immutable.
         row.weight = 77.4
@@ -170,6 +183,10 @@ def test_concurrent_submissions_workers_and_result_reads(pg_app, authorized):
     assert _get(pg_app, check_in_id, user=USERS[1]).status_code == 404
     sdk.assert_called_once()
     with pg_app.app_context():
+        owner = _owner()
+        session = UserSession.query.filter_by(user_id=owner.id).one()
+        assert (owner.weight, owner.goal_pace, session.weight, session.target_calories) == (
+            78.0, "lose_slower", 78.0, expected_kcal)
         assert WeeklyCheckIn.query.count() == 1
         hold = AiUsageReservation.query.one()
         assert hold.physical_attempts == 1
@@ -178,7 +195,9 @@ def test_concurrent_submissions_workers_and_result_reads(pg_app, authorized):
         assert len(WeeklyCheckIn.query.one().review_evidence_digest) == 64
 
 
-@pytest.mark.parametrize("condition", ["revoke", "redis", "spend", "rollback", "ineligible"])
+@pytest.mark.parametrize("condition", [
+    "revoke", "redis", "spend", "rollback", "ineligible", "purpose", "allowance", "physical_mapping",
+])
 def test_current_refusal_has_no_physical_attempt(pg_app, authorized, monkeypatch, condition):
     sdk, fallback, redis = authorized
     saved = _post(pg_app)
@@ -195,6 +214,13 @@ def test_current_refusal_has_no_physical_attempt(pg_app, authorized, monkeypatch
         elif condition == "spend":
             monkeypatch.setattr(ai_spend_guard, "_redis_admit",
                                 lambda *_: "global")
+        elif condition == "purpose":
+            monkeypatch.delitem(ai_consent.BINDINGS, provider.FEATURE)
+        elif condition == "allowance":
+            monkeypatch.setattr(provider, "APPROVED_ALLOWANCE_FAMILY", None)
+        elif condition == "physical_mapping":
+            monkeypatch.setitem(execution.PHYSICAL_FEATURES, "coach",
+                                execution.PHYSICAL_FEATURES["coach"] - {provider.FEATURE})
         else:
             pg_app.config[provider.FLAG] = False
     _drain(pg_app)

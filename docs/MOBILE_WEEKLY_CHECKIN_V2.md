@@ -136,11 +136,6 @@ adherence representation, so a rollout change cannot reinterpret a retry.
 
 ## Migration and composition
 
-- Backend #559 base `29eba019d8aabbeb53adf461157553716fb051ba`, branch
-  `integration/fullfeature-v1-r07-g4`. Mobile #216 base
-  `6e59c04425c7a7052769780383b5549dd3d3bdca`, branch
-  `integration/full-v1-212-214-215`. PD5 can run against those foundations
-  independently of PD1–PD4.
 - `c8e1f3a5b702` expands `weekly_check_in` with nullable
   `nutrition_adherence_v2`. Its name encodes the scale. A check constraint
   admits closed tokens on full rows with a null legacy score. Existing
@@ -148,26 +143,14 @@ adherence representation, so a rollout change cannot reinterpret a retry.
   Existing owner delete and health-erasure paths remove the whole row.
   Downgrade refuses when any v2 answer exists. The pre-PD5 writer can
   still insert legacy rows into the expanded schema.
-- The provisional parent is G4 `5cc5aa7e47ba`. When PD5 is composed
-  after W1/W2, put its revision after the verified single W1/W2 head
-  (PD2 `b7d2e9f4a1c3` if confirmed to be the composed tip), preserving the
-  accepted PD1/PD2 revisions. Candidate #565 was inspected at
-  `160c887768be1eb08375ba82a7a0a2e09c6c9386`. Reconcile the overlapping graph-head
-  assertions and expected counts, then qualify a fresh database and
-  an upgrade from the verified predecessor on PostgreSQL. This source
-  graph is qualified independently of the later composition.
-- PD1 #562 inspected at `152241b7dca2b9f5b15773e181712c100960a8df`.
-  Both slices touch `app/models.py`, `app/services/weekly_checkin/service.py`,
-  and graph/head test pins. Keep PD1's
-  `account_profile.derive_targets_for_weight` in `apply_body_weight` and
-  PD5's column staging and keyed response snapshot handling in that same
-  service. Relevant test overlaps include the native check-in API and
-  PostgreSQL suites and the migration and retired-revision tests.
-  The inspected #565 overlap also includes the migration-head assertions
-  in consent, Apple lifecycle, completion fence, launch allowance,
-  workout-session architecture, and forward recovery tests (see the PD5 diff).
-  When composing mobile, reconcile the composition/router wiring and
-  EN/TR ARB entries with any W1/W2 changes to those files.
+- The composed W3 migration chain extends W1/W2 #565
+  (`160c887768be1eb08375ba82a7a0a2e09c6c9386`) with PD5
+  `c8e1f3a5b702` after W1/W2 `b7d2e9f4a1c3`, followed by PD6
+  `e6a4b91d702c`. Existing G4, PD1 and PD2 revisions retain their lineage.
+- Full check-ins continue to derive the applicable calorie target through
+  `account_profile.derive_targets_for_weight` in the canonical writer.
+  Weight, target and the original response snapshot commit together.
+  Replays return that snapshot without reapplying the weight or target.
 - Mobile defaults off via `AXISAI_CHECK_IN_NUTRITION_V2_ENABLED`. New
   submissions and history use v1 while off. A v2 intent already stored
   by a previous build retains its original protocol on retry. Enable

@@ -551,6 +551,28 @@ def test_populated_g4_upgrades_to_pd1_then_pd2(chain_url, monkeypatch):
         _dispose(tool)
 
 
+def test_populated_w1_w2_upgrade_preserves_legacy_checkins_and_targets(chain_url, monkeypatch):
+    _upgrade_to(monkeypatch, "b7d2e9f4a1c3")
+    owner = _sql(chain_url,
+                 'INSERT INTO "user" (username, email, weight, goal_pace, referral_code) '
+                 "VALUES ('w3-owner', 'w3-owner@example.invalid', 79, 'lose_slower', 'W3OWNER') RETURNING id")[0][0]
+    _sql(chain_url, "INSERT INTO user_session (user_id, weight, target_calories) "
+         "VALUES (:owner, 79, 2240)", owner=owner)
+    _sql(chain_url,
+         "INSERT INTO weekly_check_in (user_id, weight, yogunluk, beslenme_uyumu, "
+         "idempotency_key, response_snapshot) VALUES "
+         "(:owner, 80, 3, 4, 'legacy-key-001', '  original replay bytes  '), "
+         "(:owner, 79, NULL, NULL, NULL, NULL)", owner=owner)
+    before = _snapshot(chain_url, ("user", "user_session", "weekly_check_in"))
+
+    result = _release_prepare(monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert _versions(chain_url) == [HEAD]
+    assert _snapshot(chain_url, like=before) == before
+    assert _sql(chain_url, "SELECT nutrition_adherence_v2, review_status "
+                           "FROM weekly_check_in ORDER BY id") == [(None, None), (None, None)]
+
+
 def test_pd6_preserves_both_pd5_adherence_scales(chain_url, monkeypatch):
     _upgrade_to(monkeypatch, "c8e1f3a5b702")
     owner = _sql(chain_url,
@@ -569,6 +591,35 @@ def test_pd6_preserves_both_pd5_adherence_scales(chain_url, monkeypatch):
     assert _sql(chain_url, select) == before
     assert _sql(chain_url, "SELECT COUNT(*) FROM weekly_check_in "
                            "WHERE review_status IS NOT NULL")[0][0] == 0
+
+
+@pytest.mark.parametrize("review_exists", [False, True], ids=["pd5", "pd6"])
+def test_w3_downgrade_refuses_to_discard_recorded_data(chain_url, monkeypatch, review_exists):
+    from flask_migrate import downgrade
+
+    _upgrade_to(monkeypatch, HEAD)
+    owner = _sql(chain_url,
+                 'INSERT INTO "user" (username, email) VALUES (:name, :email) RETURNING id',
+                 name="downgrade_owner", email="downgrade@example.invalid")[0][0]
+    row_id = _sql(chain_url, "INSERT INTO weekly_check_in "
+                  "(user_id, weight, yogunluk, nutrition_adherence_v2) "
+                  "VALUES (:owner, 80, 3, 'partly') RETURNING id", owner=owner)[0][0]
+    if review_exists:
+        _sql(chain_url, "UPDATE weekly_check_in SET review_status = 'unavailable', "
+             "review_updated_at = now(), review_failure = 'authorization' WHERE id = :id",
+             id=row_id)
+    before = _snapshot(chain_url, ("weekly_check_in",))
+
+    target = "c8e1f3a5b702" if review_exists else "b7d2e9f4a1c3"
+    tool = _boot_tool(monkeypatch)
+    try:
+        with tool.app_context(), pytest.raises(SystemExit) as stopped:
+            downgrade(revision=target)
+    finally:
+        _dispose(tool)
+    assert stopped.value.code == 1
+    assert _versions(chain_url) == [HEAD]
+    assert _snapshot(chain_url, ("weekly_check_in",)) == before
 
 
 def test_production_s_legacy_activity_clap_blocks_deleting_its_users_before_and_after(

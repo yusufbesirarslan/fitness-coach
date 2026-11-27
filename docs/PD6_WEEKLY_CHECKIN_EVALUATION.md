@@ -156,22 +156,13 @@ receipts carry no raw health inputs or result and continue under their existing
 settlement, retention and account-purge contracts. No new retention period is
 defined. Confirm derived review and provider-copy retention before activation.
 
-Keep the PD5 parent unchanged in this source candidate. The later integration
-owner must verify #565 at `160c887768be1eb08375ba82a7a0a2e09c6c9386`, confirm
-`b7d2e9f4a1c3` as composed W1/W2 tip, then compose PD5 after that head and
-PD6 after PD5. Reconcile `app/models.py`, native route allowlist,
-`app/feature_flags.py`, rollout docs, workflow explicit PostgreSQL file list,
-exact route and provider inventory assertions, and Alembic graph/head/count
-assertions. Preserve PD1's
-`account_profile.derive_targets_for_weight` in the canonical weight writer
-when composing the existing PD5 overlap. The PD6 worker never touches weight
-or targets. Preserve #561 same-owner Nutrition estimator allowance and #563
-Coach opener admission. PD6 uses the standard metered physical call door
-without arming a Coach tool-loop opener. When integrated, re-run the PD1/PD5
-weight compatibility and #565 allowance/spend regressions in the composed
-candidate. Mobile touches composition, check-in screen/controller/history,
-protected repository and EN/TR strings. Reconcile composition and strings
-against the later accepted W1/W2 mobile stack.
+The W3 chain starts from W1/W2 #565
+(`160c887768be1eb08375ba82a7a0a2e09c6c9386`).
+The W1/W2 tip `b7d2e9f4a1c3` precedes PD5 `c8e1f3a5b702`,
+which precedes the single W3 head `e6a4b91d702c`. The worker uses the
+standard metered physical-attempt boundary, with no Coach tool-loop opener
+reservation. The canonical check-in writer owns body weight and calorie
+targets. The worker persists only the review operation and result.
 
 ## Rollout and rollback
 
