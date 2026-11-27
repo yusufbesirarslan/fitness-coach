@@ -20,6 +20,7 @@ from .decisions import (
     ImpactFacts,
     decide_plan_mutation_impact,
 )
+from .direct_apply import is_direct_apply_eligible
 
 __all__ = [
     "APPLY_NOW",
@@ -37,5 +38,6 @@ __all__ = [
     "ImpactDecision",
     "ImpactFacts",
     "decide_plan_mutation_impact",
+    "is_direct_apply_eligible",
     "parse_confirmation_intent",
 ]

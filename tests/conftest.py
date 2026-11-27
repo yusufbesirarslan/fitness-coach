@@ -452,3 +452,10 @@ def food_search_reopened(monkeypatch):
     monkeypatch.setattr(launch_food_search, "FOOD_SEARCH_AVAILABLE", True)
     from app.services import foodcache
     monkeypatch.setattr(foodcache, "_macro_cache", {"per_100g": {}, "per_serving": {}})
+
+
+@pytest.fixture
+def synthetic_capability_authority(monkeypatch):
+    """#533: ALLOW Coach capability capture + fence for pre-capability suites."""
+    from consent_projection_support import allow_capability_authority
+    allow_capability_authority(monkeypatch)

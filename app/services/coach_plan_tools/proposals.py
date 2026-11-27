@@ -152,6 +152,42 @@ def preview_command(user_id, command):
     return plan, preview, changed
 
 
+def changed_document_leaves(plan, command):
+    """Every canonical-document leaf ``command`` would change on ``plan``.
+
+    ``[(path, before, after), ...]`` from the authoritative stored bytes and
+    the domain's own ``apply_command``; structural changes (a key or list
+    entry appearing or disappearing) are reported as one leaf whose last path
+    element is the container, so they can never look like a single ``set``
+    edit. Read-only. ``None`` when the document cannot be evaluated.
+    """
+    try:
+        document, _program = parse_plan_document(plan.plan_data)
+        after, _changed = apply_command(document, command, coach=True)
+    except Exception:
+        return None
+    leaves = []
+
+    def walk(path, left, right):
+        if isinstance(left, dict) and isinstance(right, dict):
+            if set(left) != set(right):
+                leaves.append((path + ("<keys>",), sorted(left), sorted(right)))
+                return
+            for key in sorted(left):
+                walk(path + (key,), left[key], right[key])
+        elif isinstance(left, list) and isinstance(right, list):
+            if len(left) != len(right):
+                leaves.append((path + ("<items>",), len(left), len(right)))
+                return
+            for index, (a, b) in enumerate(zip(left, right)):
+                walk(path + (index,), a, b)
+        elif type(left) is not type(right) or left != right:
+            leaves.append((path, left, right))
+
+    walk((), document, after)
+    return leaves
+
+
 def remove_candidates(user_id, command):
     """``(sets, reps)`` of every slot ``command``'s remove target matches.
 

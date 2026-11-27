@@ -125,3 +125,28 @@ def publish_synthetic_texts(monkeypatch, policies):
     monkeypatch.setattr(disclosures, "PUBLISHED_TEXTS", {
         (p.version, locale): body for p in qualified.values() for locale, body in texts.items()})
     return qualified
+
+
+def allow_capability_authority(monkeypatch):
+    """#533 Coach capability authority: ALLOW capture and the writer fence.
+
+    For pre-existing Coach Training/Nutrition WRITE suites that predate the
+    separate capability grant. ``capture_capability`` answers a synthetic
+    authority at the ACTIVE operation's owner and generation (outside an
+    operation it still refuses), and the capability half of the writer fence
+    answers ALLOW. Real capture, grant isolation, revoke staleness and fencing
+    are qualified by ``tests/test_coach_capability_authority{,_pg}.py``.
+    """
+    from app.services import ai_consent as consent, coach_capabilities
+
+    def capture(owner, capability):
+        operation = consent.current_operation()
+        spec = coach_capabilities.spec(capability)
+        if operation is None or operation.feature != 'coach' or spec is None:
+            raise consent.ConsentDenied('AI_CONSENT_PATH_UNAVAILABLE')
+        if operation.owner != owner:
+            raise consent.ConsentDenied()
+        return consent.CapabilityAuthority(owner, capability, spec.purpose,
+                                           'synthetic-capability', operation.generation)
+    monkeypatch.setattr(consent, 'capture_capability', capture)
+    monkeypatch.setattr(consent, '_fence_capabilities', lambda *a, **kw: None)

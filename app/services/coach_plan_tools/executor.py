@@ -154,6 +154,11 @@ _TYPED_PROPOSAL_ATTR = "_coach_plan_typed_proposal"
 _USER_MSG_ATTR = "_coach_plan_user_message"
 _HISTORY_ATTR = "_coach_plan_history"
 _USER_ID_ATTR = "_coach_plan_user_id"
+#: The turn's captured Training WRITE capability authority (#533 / #547 F3).
+_CAPABILITY_ATTR = "_coach_plan_training_write_capability"
+_CAPABILITY_UNSET = object()
+#: Outside any AI operation (first-party/non-AI callers): no capability applies.
+NOT_IN_AI_OPERATION = object()
 
 
 def begin_turn(user_message="", history=None, user_id=None):
@@ -238,6 +243,12 @@ def published_plan_tool_defs(user_id=None):
     published when there is nothing to confirm.
     """
     if not plan_mutation_tools_enabled():
+        return ()
+    if user_id is not None and not training_write_authorized(user_id):
+        # No separately granted Coach plan-editing capability: the whole
+        # plan-write family stays absent; ordinary chat and the read tool
+        # are unaffected (#533). A pending proposal can still be cancelled
+        # through the native endpoint.
         return ()
     try:
         pending = get_pending(user_id) if user_id else None
@@ -445,6 +456,65 @@ def invalid_arguments_result(detail):
     return results.error_result(results.ERROR_INVALID_ARGUMENTS, detail)
 
 
+def training_write_authority(user_id):
+    """This turn's Coach Training WRITE capability authority.
+
+    Outside an AI operation the capability does not apply (first-party and
+    non-AI callers are unchanged): ``NOT_IN_AI_OPERATION``. Inside a Coach
+    operation the owner's own separately granted, source-approved
+    ``coach.training_plan_edit`` capability is captured ONCE per turn at the
+    operation's generation (``ai_consent.capture_capability``); refused or
+    unavailable -> ``None`` (fail closed). An r2 Coach grant never implies it.
+    """
+    operation = ai_consent.current_operation()
+    if operation is None:
+        return NOT_IN_AI_OPERATION
+    try:
+        cached = getattr(g, _CAPABILITY_ATTR, _CAPABILITY_UNSET)
+    except RuntimeError:
+        return None
+    if cached is not _CAPABILITY_UNSET:
+        if cached is None:
+            return None
+        if (cached.owner == user_id and cached.generation == operation.generation):
+            return cached
+    from app.services.coach_capabilities import TRAINING_PLAN_WRITE
+    authority = None
+    try:
+        authority = ai_consent.capture_capability(user_id, TRAINING_PLAN_WRITE)
+    except ai_consent.ConsentDenied:
+        # D1 reads on its own connection; the request session is untouched,
+        # so nothing is rolled back here (no second transaction authority).
+        authority = None
+    try:
+        setattr(g, _CAPABILITY_ATTR, authority)
+    except RuntimeError:
+        pass
+    return authority
+
+
+def training_write_authorized(user_id):
+    return training_write_authority(user_id) is not None
+
+
+def _capability_scope(authority):
+    from contextlib import nullcontext
+    if isinstance(authority, ai_consent.CapabilityAuthority):
+        return ai_consent.capability_scope(authority)
+    return nullcontext()
+
+
+def stored_training_capability(user_id, pending):
+    """The Training WRITE capability a proposal was staged under, or a refusal."""
+    from app.services.coach_capabilities import TRAINING_PLAN_WRITE
+    stored = (pending.command_payload or {}).get(ai_consent.PAYLOAD_CAPABILITY_KEY)
+    matches = [entry for entry in stored if isinstance(entry, dict)
+               and entry.get("capability") == TRAINING_PLAN_WRITE] if isinstance(stored, list) else []
+    if len(matches) != 1:
+        raise ai_consent.ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+    return ai_consent.CapabilityAuthority.from_context(user_id, matches[0], TRAINING_PLAN_WRITE)
+
+
 def training_plan_read_authorized(user_id):
     coach_privacy.assert_principal(user_id)
     return ai_consent.authorize_coach_read(
@@ -628,6 +698,17 @@ def _execute(user_id, name, arguments):
         # user 1's plan.
         return results.error_result(results.ERROR_INTERNAL)
 
+    capability = training_write_authority(user_id)
+    if capability is None and name != CANCEL_PENDING_TOOL:
+        # Inside a Coach operation without the separately granted editing
+        # capability: refuse before any read or write (cancel stays open,
+        # it withdraws a proposal and never changes the plan).
+        return results.error_result(results.ERROR_CAPABILITY_DISABLED)
+    with _capability_scope(capability):
+        return _execute_authorized(user_id, name, arguments)
+
+
+def _execute_authorized(user_id, name, arguments):
     try:
         if name in CONFIRMATION_TOOL_NAMES:
             return _execute_confirmation_tool(user_id, name, arguments)
@@ -719,10 +800,25 @@ def _execute_mutation(user_id, name, arguments):
     if decision.verdict == REFUSE_UNSUPPORTED:
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
     if decision.verdict == REQUIRE_CONFIRMATION:
+        if _direct_apply_low_impact(user_id, plan, command, facts):
+            # #547 F3: an explicit low-impact reversible edit under an
+            # approved capability disclosure that permits it (none in this
+            # source). Same canonical writer, binding, journal and Undo.
+            return _apply_typed(user_id, command, binding)
         return _stage_proposal(user_id, binding, command, decision, preview=preview)
     if decision.verdict != APPLY_NOW:
         return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
     return _apply_typed(user_id, command, binding)
+
+
+def _direct_apply_low_impact(user_id, plan, command, facts):
+    from app.services import coach_capabilities
+    from app.services.coach_plan_policy import is_direct_apply_eligible
+    from .proposals import changed_document_leaves
+    if not coach_capabilities.direct_apply_allowed(
+            ai_consent.active_capability(user_id, coach_capabilities.TRAINING_PLAN_WRITE)):
+        return False
+    return is_direct_apply_eligible(command, facts, changed_document_leaves(plan, command))
 
 
 def _execute_undo(user_id, arguments):
@@ -1009,7 +1105,11 @@ def _apply_confirmed(user_id, pending):
         authority = ai_consent.OperationAuthority.from_context(
             user_id, (pending.command_payload or {}).get(ai_consent.PAYLOAD_AUTHORITY_KEY))
         with ai_consent.operation_scope(authority):
-            return _apply_confirmed_now(user_id, pending)
+            # The ORIGINAL capability it was proposed under (#533): a proposal
+            # staged without one, or under a revoked/replaced one, never applies.
+            capability = stored_training_capability(user_id, pending)
+            with ai_consent.capability_scope(capability):
+                return _apply_confirmed_now(user_id, pending)
     except ai_consent.ConsentDenied as denied:
         db.session.rollback()
         if denied.status < 500:
