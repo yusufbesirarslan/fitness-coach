@@ -434,6 +434,7 @@ jobs:
           tests/test_g4_cardio_sessions_pg.py
           tests/test_lp16b_native_checkin_pg.py
           tests/test_weekly_review_pg.py
+          tests/test_product_analytics_v2_pg.py
           tests/test_ai_consent_pg.py
           --deselect tests/test_ai_consent_pg.py::test_fresh_empty_postgres_complete_chain_has_no_implicit_grants
           --deselect tests/test_ai_consent_pg.py::test_existing_merged_main_upgrade_preserves_all_rows_and_schema
@@ -558,6 +559,7 @@ jobs:
           tests/test_quest_challenge_commit_pg.py
           tests/test_r6_dual_revision_pg.py
           tests/test_r6_forward_chain_pg.py
+          tests/test_product_analytics_v2_pg.py
           tests/test_r6_forward_recovery_pg.py
           tests/test_r6_adult_runtime_pg.py
       - name: Completion fence everywhere (activated floor)

@@ -18,6 +18,9 @@ SAFE_ENDPOINTS = frozenset({
     "mobile_api.subscription_entitlement", "mobile_api.subscription_apple_notifications",
     "mobile_api.ai_allowances_read", "mobile_api.ai_action_receipt",
     "ai_consent.web_consent", "health", "pages.referral_data",
+    # Product analytics v2: an independent purpose; withdrawal must never be
+    # blocked by another consent. Event ingress stays health-gated (below).
+    "mobile_api.analytics_consent_read", "mobile_api.analytics_consent_write",
 })
 
 _TRAINING_START_ENDPOINTS = frozenset({
@@ -36,6 +39,10 @@ def needs_health():
     if endpoint in _TRAINING_START_ENDPOINTS:
         # PD2: flag OFF answers 404 before auth (the routes are absent).
         if not current_app.config.get("FITX_TRAINING_START_PREVIEW_ENABLED", False):
+            return False
+    if endpoint == "mobile_api.analytics_events":
+        # Flag OFF answers 404 before auth (the route is absent).
+        if not current_app.config.get("FITX_PRODUCT_ANALYTICS_ENABLED", False):
             return False
     if endpoint in {"mobile_api.exercise_history_capabilities", "mobile_api.read_exercise_history"}:
         from app.blueprints.mobile_exercise_history import _ready
