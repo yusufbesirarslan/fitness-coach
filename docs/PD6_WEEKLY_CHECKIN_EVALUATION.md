@@ -159,7 +159,11 @@ defined. Confirm derived review and provider-copy retention before activation.
 The W3 chain starts from W1/W2 #565
 (`160c887768be1eb08375ba82a7a0a2e09c6c9386`).
 The W1/W2 tip `b7d2e9f4a1c3` precedes PD5 `c8e1f3a5b702`,
-which precedes the single W3 head `e6a4b91d702c`. The worker uses the
+which precedes PD6 `e6a4b91d702c`, the W3 lane head. The accepted composed
+lineage (final isolated integration #573) continues
+`e6a4b91d702c → 6e25ecb68c09` (product analytics) `→ f14209ba73c6`
+(retention coverage and the dedicated PD6 allowance accounting). The single
+Alembic head is `f14209ba73c6`. The worker uses the
 standard metered physical-attempt boundary, with no Coach tool-loop opener
 reservation. The canonical check-in writer owns body weight and calorie
 targets. The worker persists only the review operation and result.

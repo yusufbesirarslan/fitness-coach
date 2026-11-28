@@ -554,3 +554,317 @@ def test_discovery_search_allowed_query_takes_one_slot(app, transport, slots):
     with app.test_request_context():
         assert [f["food_id"] for f in mobile_food_discovery.search("simit")] == ["35755"]
     assert slots == [1] and len(transport.gets) == 1
+
+
+# === Pre-QA technical stabilization (#547 c7242035071), T1–T6 ===================================
+# Every value is synthetic. Each egress test uses the fake transport above, so
+# a withheld or rejected input must leave ZERO token POSTs and ZERO GETs.
+
+# --- T1: the screening work is bounded before normalisation or any regex ----------------------
+
+@pytest.mark.parametrize("query, rule", [
+    ("a" * 100, None), ("a" * 101, "length"),
+    ("ş" * 100, None), ("ş" * 101, "length"),
+    ("İ" * 100, None), ("İ" * 101, "length"),          # folding changes length; the bound does not
+    ("🍎" * 100, "no_letter"), ("🍎" * 101, "length"),  # astral: one code point each
+    (" " * 101, "length"), ("tavuk " * 20, "length"),
+    ("ahmet@gmail.com " + "a" * 90, "length"),          # long + trigger: still one label, no text
+    (("tavuk göğsü " * 9)[:100], None),
+    (b"x" * 1000, "control"), (["x"] * 1000, "control"),
+])
+def test_length_bound(query, rule):
+    assert policy.withheld_search_rule(query) == rule
+
+
+def test_length_bound_is_the_native_contract():
+    assert policy.MAX_QUERY_CHARS == 100
+    assert policy.RULES[0] == policy.LENGTH == "length"
+
+
+@pytest.mark.parametrize("make", [
+    lambda n: "a-" * n,                       # the quadratic _URL shape (assessment P3-1)
+    lambda n: "a." * n,
+    lambda n: "1 " * n,
+    lambda n: "\ufdfa" * n,                  # U+FDFA: the largest NFKC expansion (18 code points)
+    lambda n: "ﬃ" * n,
+    lambda n: "​a" * n,                  # Cf stripped during the fold
+])
+def test_adversarial_input_cost_is_bounded(make):
+    # Before T1, 'a-' * 25000 took ~17.7 s. Over the bound it is withheld
+    # before any normalisation; at the bound the work is at most 100 code points.
+    started = time.perf_counter()
+    assert policy.withheld_search_rule(make(25000)) == "length"
+    assert policy.withheld_search_rule(make(10 ** 6)) == "length"
+    over = time.perf_counter() - started
+    at_bound = make(100)[:100]
+    started = time.perf_counter()
+    for _ in range(200):
+        rule = policy.withheld_search_rule(at_bound)
+    per_call = (time.perf_counter() - started) / 200
+    assert rule is None or rule in policy.RULES
+    assert over < 0.05, over
+    assert per_call < 0.005, per_call
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_overlong_service_query_makes_no_token_or_request(app, transport, strict, caplog):
+    caplog.set_level(logging.DEBUG)
+    query = "mercimek çorbası " * 7
+    with app.app_context():
+        assert fatsecret._food_search_raw(query, strict=strict) == ([] if strict else None)
+        assert fatsecret._fs_search_foods(query, "synthetic-token") == []
+    _no_egress(transport)
+    assert "rule=length" in caplog.text and "mercimek" not in caplog.text
+
+
+def test_overlong_discovery_search_takes_no_slot(app, transport, slots):
+    with app.app_context():
+        assert mobile_food_discovery.search("x" * 101) == []
+    _no_egress(transport)
+    assert slots == []
+
+
+def test_backstop_withholds_an_overlong_search_expression(app, transport):
+    with app.app_context():
+        with pytest.raises(fatsecret.ProviderRequestWithheld):
+            fatsecret._fs_get(fatsecret.FATSECRET_API_URL, params={
+                "method": "foods.search", "search_expression": "a" * 101})
+    _no_egress(transport)
+
+
+@pytest.mark.parametrize("query", [("tavuk göğsü " * 9)[:100], "x" * 100, "ş" * 100])
+def test_query_at_the_bound_is_sent_byte_identical(app, transport, query):
+    with app.app_context():
+        assert fatsecret._food_search_raw(query, strict=True)
+    assert transport.gets == [(fatsecret.FATSECRET_API_URL, {
+        "method": "foods.search", "search_expression": query, "format": "json", "max_results": 8})]
+
+
+# --- T2: the transport backstop fails closed on unsupported representations ------------------
+
+@pytest.mark.parametrize("params", [
+    {b"food_id": b"abc"}, {b"food_id": "abc"}, {b"food_id": "35755"},
+    {"method": "foods.search", b"search_expression": "ahmet@gmail.com"},
+    [(b"food_id", "abc")], [("method", "food.get"), (b"food_id", "x")],
+    {1: "x"}, {None: "x"}, {("food_id",): "abc"},
+    {"FOOD_ID": "abc"}, {"Food_Id": "35755"}, {"food_id ": "abc"}, {" search_expression": "x"},
+    {"ｆｏｏｄ_ｉｄ": "abc"}, {"SEARCH_EXPRESSION": "ahmet@gmail.com"},
+    {"method": ["foods.search", "food.get"]}, {"method": b"food.get"}, {"method": None},
+    {"max_results": True}, {"max_results": 8.0}, {"method": {"a": 1}},
+    {"food_id": b"35755"}, {"search_expression": b"tavuk"}, {"food_id": 35755.0},
+    (pair for pair in [("food_id", "abc")]), {("food_id", "abc")},
+    iter([("method", "food.get")]), [["food_id", "abc", "extra"]], ["food_id"], [("food_id", "abc")],
+])
+def test_backstop_rejects_unsupported_keys_values_and_shapes(app, transport, params):
+    with app.app_context():
+        with pytest.raises(fatsecret.ProviderRequestWithheld):
+            fatsecret._fs_get(fatsecret.FATSECRET_API_URL, params=params)
+    _no_egress(transport)
+
+
+@pytest.mark.parametrize("url", [
+    fatsecret.FATSECRET_API_URL.encode() + b"?food_id=abc",
+    fatsecret.FATSECRET_API_URL.encode(),
+    fatsecret.FATSECRET_API_URL + "?FOOD_ID=abc",
+    fatsecret.FATSECRET_API_URL + "?food%5Fid=abc",          # percent-encoded name decodes to food_id
+    fatsecret.FATSECRET_API_URL + "?search_expression=" + "a" * 101,
+    fatsecret.FATSECRET_API_URL + "?Search_Expression=a%40b",
+])
+def test_backstop_rejects_alternate_url_query_representations(app, transport, url):
+    with app.app_context():
+        with pytest.raises(fatsecret.ProviderRequestWithheld):
+            fatsecret._fs_get(url, params={"method": "food.get"})
+    _no_egress(transport)
+
+
+@pytest.mark.parametrize("body", [{"data": {"search_expression": "ahmet@gmail.com"}},
+                                  {"data": "food_id=abc"}, {"json": {"food_id": "abc"}},
+                                  {"files": {"f": b"x"}}])
+def test_backstop_refuses_a_get_body(app, transport, body):
+    with app.app_context():
+        with pytest.raises(fatsecret.ProviderRequestWithheld):
+            fatsecret._fs_get(fatsecret.FATSECRET_API_URL, params={"method": "food.get"}, **body)
+    _no_egress(transport)
+
+
+@pytest.mark.parametrize("params", [
+    [("method", "foods.search"), ("search_expression", "tavuk göğsü"), ("max_results", 5)],
+    (("method", "food.get.v4"), ("food_id", "35755"), ("format", "json")),
+    [["method", "food.get.v4"], ["food_id", 35755]],
+    {"method": "food.find_id_for_barcode", "barcode": "0012345678905", "format": "json"},
+])
+def test_backstop_keeps_supported_pair_list_and_mapping_shapes(app, transport, params):
+    with app.app_context():
+        fatsecret._fs_get(fatsecret.FATSECRET_API_URL, params=params)
+    assert transport.gets == [(fatsecret.FATSECRET_API_URL, dict(params))]
+
+
+def test_requests_serializes_valid_params_byte_identically():
+    # The wire bytes a supported shape produces are unchanged (requests' own encoder).
+    import requests
+    for params, query in [
+        ({"method": "foods.search", "search_expression": "tavuk göğsü", "format": "json",
+          "max_results": 8},
+         "method=foods.search&search_expression=tavuk+g%C3%B6%C4%9Fs%C3%BC&format=json&max_results=8"),
+        ({"method": "food.get.v4", "food_id": "35755", "format": "json"},
+         "method=food.get.v4&food_id=35755&format=json"),
+        ({"method": "food.get.v4", "food_id": 35755, "format": "json"},
+         "method=food.get.v4&food_id=35755&format=json"),
+    ]:
+        prepared = requests.Request("GET", fatsecret.FATSECRET_API_URL, params=params).prepare()
+        assert prepared.url.split("?", 1)[1] == query
+    # Why bytes names are refused: requests sends them as given, unscreened.
+    prepared = requests.Request("GET", fatsecret.FATSECRET_API_URL,
+                                params={b"food_id": "abc"}).prepare()
+    assert prepared.url.endswith("?food_id=abc")
+
+
+# --- T3: Turkish diabetes term, inside the first-person + health conjunction only -------------
+
+@pytest.mark.parametrize("query", [
+    "diyabetim var ben ne yiyeyim", "benim diyabetim var", "DİYABETİM VAR BENİM",
+    "ben diyabet hastasıyım", "annem diyabet hastası tatlı", "babam DIYABETLI ne yesin",
+    "Bende diyabet var", "oğlum diyabetli kahvaltı", "i have diyabet",
+])
+def test_first_person_turkish_diabetes_is_withheld(query):
+    assert policy.withheld_search_rule(query) == "first_person_health"
+
+
+@pytest.mark.parametrize("query", [
+    "diyabetik çikolata", "diyabet tatlısı", "Diyabetik Bisküvi", "DİYABETİK reçel",
+    "diyabete uygun ekmek", "şekersiz diyabetik gofret", "Ülker diyabetik", "diyabet dostu kek",
+    "DIYABETIK SUT",
+])
+def test_ordinary_diabetes_food_searches_pass(query):
+    assert policy.withheld_search_rule(query) is None
+
+
+def test_suffix_only_first_person_stays_a_documented_residual():
+    # No first-person marker word: the approved conjunction does not fire.
+    assert policy.withheld_search_rule("diyabetliyim") is None
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_turkish_diabetes_statement_makes_no_egress(app, transport, strict, caplog):
+    caplog.set_level(logging.DEBUG)
+    with app.app_context():
+        assert fatsecret._food_search_raw("diyabetim var ben ne yiyeyim",
+                                          strict=strict) == ([] if strict else None)
+    _no_egress(transport)
+    assert "diyabet" not in caplog.text
+
+
+# --- T4: order of checks with the release switch closed (the runtime default) ---------------
+
+@pytest.fixture
+def closed_transport(monkeypatch):
+    session = FakeSession()
+    monkeypatch.setattr(fatsecret, "_get_fs_session", lambda: session)
+    monkeypatch.setitem(fatsecret._fs_token_cache, "token", "warm-synthetic-token")
+    monkeypatch.setitem(fatsecret._fs_token_cache, "expires_at", 10 ** 12)
+    monkeypatch.setenv("FATSECRET_CLIENT_ID", "synthetic-client")
+    monkeypatch.setenv("FATSECRET_CLIENT_SECRET", "synthetic-secret")
+    return session
+
+
+def test_service_policy_checks_run_before_the_switch_but_nothing_leaves(app, closed_transport, caplog):
+    from app.services import launch_food_search
+    caplog.set_level(logging.DEBUG)
+    with app.app_context():
+        assert not launch_food_search.available()
+        # Layer C: the local check runs first and logs its label only.
+        assert fatsecret._food_search_raw("ahmet@gmail.com") is None
+        assert "rule=email_or_handle" in caplog.text
+        assert fatsecret._food_get_raw("abc") is None
+        assert "rule=non_canonical_food_id" in caplog.text
+        # Layer D: a valid query reaches the token gate, which refuses (warm cache too).
+        assert fatsecret._food_search_raw("tavuk göğsü") is None
+        with pytest.raises(fatsecret.FoodProviderUnavailable):
+            fatsecret._food_search_raw("tavuk göğsü", strict=True)
+        assert fatsecret._food_get_raw("35755") is None
+        # Layer B: discovery checks the switch before its policy check.
+        with pytest.raises(launch_food_search.FoodSearchExcluded):
+            mobile_food_discovery.search("ahmet@gmail.com")
+        # Layer E: the transport refuses before the backstop sees the params.
+        with pytest.raises(launch_food_search.FoodSearchExcluded):
+            fatsecret._fs_get(fatsecret.FATSECRET_API_URL, params={b"food_id": "abc"})
+    _no_egress(closed_transport)
+    assert "ahmet" not in caplog.text
+
+
+# --- T5: legacy callers cannot take a token in the target release, even with the flag ON -----
+
+@pytest.mark.parametrize("path", [
+    "/api/food/search?q=tavuk", "/api/food/35755/servings", "/api/food/servings-by-name?name=tavuk",
+    "/api/food/barcode?code=5000159407236", "/api/social/messages", "/",
+])
+def test_legacy_callers_cannot_take_a_token_with_the_flag_on(app, closed_transport, path):
+    from app.services import fatsecret_boundary, launch_food_search
+    app.config[launch_food_search.FLAG_KEY] = True
+    try:
+        with app.test_request_context(path):
+            assert launch_food_search.released() and not launch_food_search.available()
+            assert not fatsecret_boundary.uncovered_provider_persistence_allowed()
+            with pytest.raises(launch_food_search.FoodSearchExcluded):
+                fatsecret._get_fatsecret_token()
+            assert fatsecret._food_find_by_barcode("0012345678905") is None
+            assert fatsecret._food_search_fatsecret("tavuk") is None
+        with app.app_context():                           # a worker: no request context
+            with pytest.raises(launch_food_search.FoodSearchExcluded):
+                fatsecret._get_fatsecret_token()
+    finally:
+        app.config.pop(launch_food_search.FLAG_KEY, None)
+    _no_egress(closed_transport)
+
+
+def test_flag_on_native_endpoint_is_the_only_token_scope(app, closed_transport):
+    # Control for the test above: the gate is endpoint-scoped, not simply closed.
+    from app.services import launch_food_search
+    app.config[launch_food_search.FLAG_KEY] = True
+    try:
+        with app.test_request_context(PREFIX + "/foods/search?q=tavuk"):
+            assert launch_food_search.available()
+            assert fatsecret._get_fatsecret_token() == "warm-synthetic-token"
+    finally:
+        app.config.pop(launch_food_search.FLAG_KEY, None)
+    _no_egress(closed_transport)
+
+
+def test_legacy_browser_routes_stay_closed_with_the_flag_on(app, raw_client, closed_transport):
+    from app.services import launch_food_search
+    app.config[launch_food_search.FLAG_KEY] = True
+    try:
+        for path in ("/api/food/servings-by-name?name=ahmet@gmail.com",
+                     "/api/food/search?q=diyabetim var ben", "/api/food/x-1/servings"):
+            response = raw_client.get(path)
+            assert response.status_code == 404
+            assert response.get_json()["error"]["code"] == launch_food_search.ERROR_CODE
+    finally:
+        app.config.pop(launch_food_search.FLAG_KEY, None)
+    _no_egress(closed_transport)
+
+
+# --- T6: the legacy browser servings route never logs its raw path argument -----------------
+
+@pytest.mark.parametrize("segment", ["ahmet@gmail.com", "05321234567", "john doe", "x-1", "00123"])
+def test_browser_servings_route_does_not_log_a_rejected_id(client, auth_user, transport, segment, caplog):
+    caplog.set_level(logging.DEBUG)
+    response = client.get(f"/api/food/{segment}/servings")
+    assert response.status_code == 200
+    assert response.get_json() == {"servings": [], "debug": "no_servings_returned"}
+    _no_egress(transport)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("food_servings event=called id_state=non_canonical" in m for m in messages)
+    assert any("food_servings event=no_servings id_state=non_canonical" in m for m in messages)
+    assert not any(segment in m for m in messages), [m for m in messages if segment in m]
+
+
+def test_browser_servings_route_valid_id_keeps_its_response(client, auth_user, transport, caplog):
+    caplog.set_level(logging.DEBUG)
+    response = client.get("/api/food/35755/servings")
+    assert response.status_code == 200
+    servings = response.get_json()["servings"]
+    assert servings and servings[0]["serving_description"] == "100 g"
+    messages = [r.getMessage() for r in caplog.records if "food_servings event=" in r.getMessage()]
+    assert messages == ["food_servings event=called id_state=canonical",
+                        "food_servings event=ok id_state=canonical serving_count=1"]

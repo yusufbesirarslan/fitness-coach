@@ -8,6 +8,7 @@ from app.extensions import _user_or_ip_key, limiter
 from app.services.ai_coach import _coach_search_food
 from app.services.ai_gate import BlockingConcurrencyLimit, blocking_concurrency_slot
 from app.services import barcode as barcode_svc
+from app.services.fatsecret_egress_policy import canonical_food_id
 from app.services.fatsecret import _food_get_servings, _fs_relevant_candidates, _get_fatsecret_token
 from app.services.foodcache import _cache_food_id, _get_cached_food_id, _get_cached_macros
 from app.services.gamification import complete_quest_for_user
@@ -196,18 +197,22 @@ def barcode_add_to_diary():
 @require_auth
 @limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def food_servings(food_id):
-    current_app.logger.info("food_servings called with food_id=%s", food_id)
+    # The path argument is caller text: diagnostics name only whether it is a
+    # canonical provider ID, never the value itself (egress policy T6).
+    id_state = ("canonical" if canonical_food_id(food_id) is not None
+                else "non_canonical")
+    current_app.logger.info("food_servings event=called id_state=%s", id_state)
     try:
         with blocking_concurrency_slot():
             servings = _food_get_servings(food_id)
     except BlockingConcurrencyLimit:
         return _fatsecret_busy_response("food_servings")
     if servings:
-        current_app.logger.info("Servings OK for food_id=%s: %d options, first=%s",
-                        food_id, len(servings), servings[0].get("serving_description", "?"))
+        current_app.logger.info("food_servings event=ok id_state=%s serving_count=%d",
+                                id_state, len(servings))
         return jsonify({"servings": servings})
     else:
-        current_app.logger.warning("No servings for food_id=%s", food_id)
+        current_app.logger.warning("food_servings event=no_servings id_state=%s", id_state)
         return jsonify({"servings": [], "debug": "no_servings_returned"})
 
 
