@@ -422,6 +422,12 @@ def tool_result(name, raw, *, user_id=None):
         out.update(numeric_fields(source, ('removed',)))
     elif name == 'get_current_training_plan':
         out.update(_training_plan_projection(source, user_id))
+    elif name == 'request_coach_capability':
+        # #533 D-1: a closed outcome token only; nothing else is projected.
+        from app.services.coach_plan_tools.capability_request import OUTCOMES
+        outcome = token(source.get('outcome'), OUTCOMES)
+        if outcome:
+            out['outcome'] = outcome
     elif name in _nutrition_tool_names():
         out.update(_nutrition_projection(source, out['status']))
     elif name == 'analyze_gym_photo':

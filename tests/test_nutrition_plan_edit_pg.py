@@ -42,7 +42,10 @@ def rig(pg_generation_app, monkeypatch):
         db.session.commit()
     authority = access.Authorities(
         ai_consent.OperationAuthority(owners[0], "coach", generation, policies["coach"].version),
-        ai_consent.OperationAuthority(owners[0], "nutrition_plan", generation, policies["nutrition_plan"].version))
+        ai_consent.OperationAuthority(owners[0], "nutrition_plan", generation, policies["nutrition_plan"].version),
+        # #533: synthetic Coach Nutrition Plan capability; coach/nutrition fences stay real.
+        ai_consent.CapabilityAuthority(owners[0], "nutrition_plan_access", "coach.nutrition_plan_access", "synthetic-capability", generation))
+    monkeypatch.setattr(ai_consent, "_fence_capabilities", lambda *a, **kw: None)
     r = SimpleNamespace(app=app, owner=owners[0], other=owners[1], authorities=authority, calls=[], policies=policies)
     def estimate(items):
         assert not db.session().in_transaction()
@@ -171,7 +174,8 @@ def test_revoke_regrant_does_not_revive_original_confirmation(rig, feature):
         generation = ai_consent.generation(r.owner)
         r.authorities = access.Authorities(
             ai_consent.OperationAuthority(r.owner, "coach", generation, r.policies["coach"].version),
-            ai_consent.OperationAuthority(r.owner, "nutrition_plan", generation, r.policies["nutrition_plan"].version))
+            ai_consent.OperationAuthority(r.owner, "nutrition_plan", generation, r.policies["nutrition_plan"].version),
+            ai_consent.CapabilityAuthority(r.owner, "nutrition_plan_access", "coach.nutrition_plan_access", "synthetic-capability", generation))
         assert prepare(r, "c1-pg-edit-0002").status == "prepared"
 
 

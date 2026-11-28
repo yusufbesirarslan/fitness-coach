@@ -48,7 +48,9 @@ from .identity import (
 DOMAIN = "nutrition_plan"
 
 # Exact (Coach saved-plan READ disclosure, independent nutrition.plan
-# disclosure) pairs. Registration and legal approval are separate work.
+# disclosure) pairs. Registration and legal approval are separate work. A
+# listed pair ALSO needs the owner's ``coach.nutrition_plan_access``
+# capability authority (#533); the pair alone never opens a read.
 APPROVED_NUTRITION_READ_DISCLOSURES = frozenset()
 COMMAND = service.COMMAND
 
@@ -274,7 +276,12 @@ def turn_authorities(user_id):
             from app.services import ai
             nutrition = ai_consent.begin_independent_operation(
                 user_id, "nutrition_plan", *ai.heavy_primary_route())
-            authorities = access.Authorities(coach, nutrition)
+            # #533: the separately granted Coach Nutrition Plan capability,
+            # captured at the Coach operation's generation. Never inferred
+            # from the Coach or nutrition.plan grant.
+            from app.services.coach_capabilities import NUTRITION_PLAN_ACCESS
+            capability = ai_consent.capture_capability(user_id, NUTRITION_PLAN_ACCESS)
+            authorities = access.Authorities(coach, nutrition, capability)
         except Exception:
             # Missing grant, outage or launch refusal: fail closed, ordinary
             # chat continues without Nutrition tools.
@@ -304,7 +311,29 @@ def _read_authorities(user_id):
     if (nutrition.generation != coach.generation
             or (coach.version, nutrition.version) not in APPROVED_NUTRITION_READ_DISCLOSURES):
         return None
-    return access.Authorities(coach, nutrition)
+    # #533: saved-plan READ also needs the Coach Nutrition Plan capability.
+    from app.services.coach_capabilities import NUTRITION_PLAN_ACCESS
+    capability = ai_consent.capture_capability(user_id, NUTRITION_PLAN_ACCESS)
+    return access.Authorities(coach, nutrition, capability)
+
+
+def capability_applicable(user_id):
+    """#533 D-1: would the owner's own grants open a Nutrition tool this turn?
+
+    Account-independent source facts only (the turn's Coach version against the
+    approved READ pairs and the C1 edit boundary). Whether the capability or
+    ``nutrition.plan`` is missing, published and grantable is decided by
+    ``ai_consent.capability_request_open``; nothing here reads plan content.
+    """
+    coach = ai_consent.current_operation()
+    if (type(user_id) is not int or not isinstance(coach, ai_consent.OperationAuthority)
+            or coach.owner != user_id or coach.feature != "coach"):
+        return False
+    from app.services.ai_consent_disclosures import LAUNCH_VERSIONS
+    nutrition_version = LAUNCH_VERSIONS.get(ai_consent.BINDINGS["nutrition_plan"][0])
+    read_path = (coach.version, nutrition_version) in APPROVED_NUTRITION_READ_DISCLOSURES
+    edit_path = tools_enabled() and coach.version in access.APPROVED_COACH_EDIT_DISCLOSURES
+    return bool(read_path or edit_path)
 
 
 def published_read_tool_defs(user_id):
@@ -454,6 +483,10 @@ def _read(user_id, authorities):
     # rechecked now; the Coach one is re-authorized by every dispatch.
     ai_consent.authorize_operation(authorities.nutrition)
     ai_consent.authorize_operation(authorities.coach)
+    # ... and the Coach Nutrition Plan capability itself (#533).
+    if authorities.capability is None:
+        raise ai_consent.ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+    ai_consent.authorize_capabilities(authorities.capability)
     if snapshot is None:
         return {"domain": DOMAIN, "status": STATUS_NOT_FOUND}
     document = json.loads(snapshot.raw)

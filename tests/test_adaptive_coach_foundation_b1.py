@@ -25,6 +25,13 @@ READ = coach_plan_tools.READ_PLAN_TOOL
 PRESCRIBE = "update_training_plan_prescription"
 
 
+@pytest.fixture(autouse=True)
+def _pre_capability_suite(synthetic_capability_authority):
+    """#533: these suites predate the separate Coach capability grant; it is
+    supplied synthetically. Default-closed refusal and real capture/fencing
+    are qualified by tests/test_coach_capability_authority{,_pg}.py."""
+
+
 @pytest.fixture
 def coach_read_scope(monkeypatch):
     # SQLite layer test. Exact grants and dispatch fencing are tested on PG.

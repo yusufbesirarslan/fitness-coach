@@ -130,6 +130,11 @@ def create_or_reuse_pending(
         # The proposal remembers the operation that PROPOSED it: confirmation
         # in a later turn applies it under that authority, never a newer one.
         command_payload[ai_consent.PAYLOAD_AUTHORITY_KEY] = operation.to_context()
+        capabilities = ai_consent.active_capabilities()
+        if capabilities:
+            # ... and the capability authorities it was proposed under (#533).
+            command_payload[ai_consent.PAYLOAD_CAPABILITY_KEY] = [
+                authority.to_context() for authority in capabilities]
 
     existing = get_pending(user_id)
     if existing is not None:
@@ -169,7 +174,21 @@ def create_or_reuse_pending(
             raise PendingConfirmationConflict(
                 "a pending plan confirmation exists") from None
         raise
+    _analytics_training_proposal(user_id, "axis_v2_coach_change_proposed", row)
     return row, False
+
+
+def _analytics_training_proposal(user_id, name, row):
+    """Product analytics v2 (DELTA-1): post-commit, non-undo training proposals only.
+
+    OFF is inert: no attribute of the (expired) row is read, so no SQL runs."""
+    from app.services import product_analytics
+    if not product_analytics.enabled():
+        return
+    if row is None or row.command_type == "undo_last_change":
+        return
+    from app.services.product_analytics.emit import emit_authoritative
+    emit_authoritative(user_id, name, f"plan_confirmation:{row.public_id}", {"domain": "training"})
 
 
 def cancel_pending(user_id):
@@ -219,11 +238,13 @@ def mark_applied(user_id, public_id):
             .filter_by(user_id=user_id, public_id=public_id)
             .one_or_none()
         )
-    return (
+    row = (
         TrainingPlanConfirmationProposal.query
         .filter_by(user_id=user_id, public_id=public_id)
         .one_or_none()
     )
+    _analytics_training_proposal(user_id, "axis_v2_coach_change_confirmed", row)
+    return row
 
 
 def mark_stale(user_id, public_id):

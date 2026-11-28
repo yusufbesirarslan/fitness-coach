@@ -53,4 +53,10 @@ def turn_plan_effects(user_id, language=None):
     nutrition = nutrition_effects(user_id, language)
     if nutrition is not None:
         effects["nutrition_plan"] = nutrition
+    # #533 D-1: additive, only when this Coach turn asked for a capability the
+    # owner can still be offered (re-verified now, in the same operation).
+    from .capability_request import turn_effect as capability_effect
+    capability = capability_effect(user_id)
+    if capability is not None:
+        effects["capability_request"] = capability
     return effects

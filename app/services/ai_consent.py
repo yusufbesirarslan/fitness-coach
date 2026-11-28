@@ -269,6 +269,11 @@ def mutate(owner, data):
                     or dict(policy.texts).get(data["locale"]) != data["text_digest"]
                     or data["contract_digest"] != contract_digest(policy)):
                 raise ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE", 403)
+            from app.services import coach_capabilities
+            if not coach_capabilities.grant_open(policy):
+                # A Coach capability purpose is grantable only when its exact
+                # contract is approved in source (default closed).
+                raise ConsentDenied("AI_CONSENT_DISCLOSURE_UNAVAILABLE", 403)
             _require_grant_cohort(conn, owner, data["purpose"])
         elif data["purpose"] not in grants:
             raise ConsentDenied("AI_CONSENT_INVALID_REQUEST", 400)
@@ -627,7 +632,245 @@ def fence_active(owner):
     operation = _OPERATION.get()
     if operation is not None:
         fence(operation, owner)
+        capabilities = _CAPABILITIES.get()
+        if capabilities:
+            _fence_capabilities(owner, capabilities)
     return operation
+
+
+# ── Coach capability authority (#533 / #547 F3) ───────────────────────────
+# A capability (Coach Training plan editing, saved Nutrition Plan access) is a
+# SEPARATE D1 purpose with its own affirmative grant. It is captured once,
+# inside the active Coach operation and at the SAME generation, and never
+# re-derived: any consent mutation after capture leaves it stale for good,
+# exactly like the operation it belongs to. Registry: ``coach_capabilities``
+# (empty -> every capture refuses).
+
+@dataclass(frozen=True)
+class CapabilityAuthority:
+    owner: int
+    capability: str
+    purpose: str
+    version: str
+    generation: int
+
+    def to_context(self):
+        return {"owner": self.owner, "capability": self.capability,
+                "purpose": self.purpose, "version": self.version,
+                "generation": self.generation}
+
+    @classmethod
+    def from_context(cls, owner, value, capability):
+        """The durable form for THIS owner and capability. Missing/corrupt -> refused."""
+        from app.services import coach_capabilities
+        spec = coach_capabilities.spec(capability)
+        if (spec is None or not isinstance(value, dict)
+                or set(value) != {"owner", "capability", "purpose", "version", "generation"}
+                or type(value["owner"]) is not int or value["owner"] != owner
+                or value["capability"] != capability or value["purpose"] != spec.purpose
+                or type(value["generation"]) is not int or value["generation"] <= 0
+                or not isinstance(value["version"], str) or not value["version"]):
+            raise ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+        return cls(owner, capability, spec.purpose, value["version"], value["generation"])
+
+
+_CAPABILITIES = contextvars.ContextVar("ai_consent_capabilities", default=())
+# Reserved key carrying a proposal's capability authorities (list of contexts).
+PAYLOAD_CAPABILITY_KEY = "_d1_capability_authorities"
+
+
+def _capability_version(state, capability):
+    """The owner's current, approved capability grant version, or a refusal."""
+    from app.services import coach_capabilities
+    spec = coach_capabilities.spec(capability)
+    if spec is None:
+        raise ConsentDenied("AI_CAPABILITY_UNAVAILABLE")
+    grants = state["grants"]
+    record = grants.get(spec.purpose) if isinstance(grants, dict) else None
+    if not _record_valid(spec.purpose, record):
+        raise ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+    if not coach_capabilities.version_open(capability, POLICIES[record["version"]]):
+        raise ConsentDenied("AI_CAPABILITY_UNAVAILABLE")
+    if spec.requires_nutrition_plan_grant:
+        purpose = BINDINGS["nutrition_plan"][0]
+        nutrition = grants.get(purpose)
+        if not _record_valid(purpose, nutrition):
+            raise ConsentDenied("AI_CONSENT_REQUIRED")
+    return record["version"]
+
+
+def _check_capability(state, authority):
+    if not isinstance(authority, CapabilityAuthority):
+        raise ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+    if state["generation"] != authority.generation:
+        raise ConsentDenied("AI_CONSENT_CHANGED")
+    if _capability_version(state, authority.capability) != authority.version:
+        raise ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+
+
+def capture_capability(owner, capability):
+    """Capture ``capability`` for the ACTIVE Coach operation, or refuse.
+
+    Never outside a Coach operation, never for another owner, and only at the
+    operation's own generation (``_check_operation`` proves it unchanged).
+    Account-independent closure is decided before any database access.
+    """
+    from app.services import coach_capabilities
+    if not coach_capabilities.source_open(capability):
+        raise ConsentDenied("AI_CAPABILITY_UNAVAILABLE")
+    operation = current_operation()
+    if operation is None or operation.feature != "coach":
+        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    _operation_binding(operation, owner)
+    with _transaction(owner) as conn:
+        state = _state(conn, owner)
+        _check_operation(state, operation, conn)
+        version = _capability_version(state, capability)
+        return CapabilityAuthority(owner, capability, coach_capabilities.SPECS[capability].purpose,
+                                   version, state["generation"])
+
+
+@contextmanager
+def capability_scope(*authorities):
+    """Canonical writes inside also fence these capabilities (``fence_active``)."""
+    operation = current_operation()
+    for authority in authorities:
+        if (not isinstance(authority, CapabilityAuthority) or operation is None
+                or authority.owner != operation.owner
+                or authority.generation != operation.generation):
+            raise ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+    token = _CAPABILITIES.set(tuple(authorities))
+    try:
+        yield authorities
+    finally:
+        _CAPABILITIES.reset(token)
+
+
+def active_capability(owner, capability):
+    """The active scope's authority for ``capability`` and ``owner``, or None."""
+    for authority in _CAPABILITIES.get():
+        if authority.owner == owner and authority.capability == capability:
+            return authority
+    return None
+
+
+def active_capabilities():
+    return _CAPABILITIES.get()
+
+
+def _fence_capabilities(owner, capabilities):
+    """In the caller's transaction, AFTER ``fence`` locked the owner row."""
+    if not has_app_context():
+        raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
+    try:
+        conn = db.session.connection()
+        if conn.dialect.name != "postgresql":
+            raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503)
+        state = _state(conn, owner)
+    except SQLAlchemyError:
+        raise ConsentDenied("AI_CONSENT_AUTHORITY_UNAVAILABLE", 503) from None
+    for authority in capabilities:
+        if authority.owner != owner:
+            raise ConsentDenied()
+        _check_capability(state, authority)
+
+
+def fence_capabilities(owner, *authorities):
+    """``fence``'s capability half, for writers that call ``fence`` directly.
+
+    Must run in the caller's transaction AFTER ``fence`` took the owner row.
+    """
+    if not authorities:
+        raise ConsentDenied("AI_CAPABILITY_CONSENT_REQUIRED")
+    _fence_capabilities(owner, authorities)
+
+
+def authorize_capabilities(*authorities):
+    """Publication-time recheck with no domain transaction to join."""
+    operation = current_operation()
+    if operation is None:
+        raise ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    with _transaction(operation.owner) as conn:
+        state = _state(conn, operation.owner)
+        _check_operation(state, operation, conn)
+        for authority in authorities:
+            if authority.owner != operation.owner:
+                raise ConsentDenied()
+            _check_capability(state, authority)
+
+
+def _offered_policy(purpose):
+    """The launched policy a client is shown for ``purpose``, or None.
+
+    Exactly the ``available_disclosures`` rule (D-2 included): a purpose whose
+    launched contract is not published offers nothing to grant.
+    """
+    from app.services import coach_capabilities
+    from app.services.ai_consent_disclosures import LAUNCH_VERSIONS, localized_texts
+    policy = POLICIES.get(LAUNCH_VERSIONS.get(purpose))
+    if policy is None or policy.purpose != purpose or localized_texts(policy) is None:
+        return None
+    for capability, capability_spec in coach_capabilities.SPECS.items():
+        if capability_spec.purpose == purpose and not coach_capabilities.version_open(
+                capability, policy):
+            return None
+    return policy
+
+
+def capability_request_open(owner, capability):
+    """Whether THIS owner may be offered a review of ``capability`` now (#533 D-1).
+
+    True only when every one of these holds; anything else, including an
+    outage, is False (fail closed). It never grants, writes or raises:
+
+    * ``capability`` is a registered spec whose launched contract is open
+      (``coach_capabilities.version_open``: approved, launched, published);
+    * an ACTIVE Coach operation exists for ``owner`` and is still valid at
+      its own generation (``_check_operation``: unchanged generation and the
+      same Coach grant), so a consent change mid-turn retires the request;
+    * the capability is NOT already in effect: at least one of its own grant
+      (at the launched version) or, for Nutrition, the owner's separate
+      ``nutrition.plan`` grant is missing. A granted capability is never
+      requested again;
+    * every missing purpose is itself offered (its launched contract is
+      published) and grantable for this account (``_require_grant_cohort``,
+      the same gate ``mutate`` applies), so the client's Allow can succeed.
+    """
+    from app.services import coach_capabilities
+    capability_spec = coach_capabilities.spec(capability)
+    if capability_spec is None or not coach_capabilities.source_open(capability):
+        return False
+    launched = _offered_policy(capability_spec.purpose)
+    if launched is None:
+        return False
+    operation = current_operation()
+    if (not isinstance(operation, OperationAuthority) or operation.feature != "coach"
+            or type(owner) is not int or operation.owner != owner):
+        return False
+    try:
+        _operation_binding(operation, owner)
+        with _transaction(owner) as conn:
+            state = _state(conn, owner)
+            _check_operation(state, operation, conn)
+            grants = state["grants"] if isinstance(state["grants"], dict) else {}
+            missing = []
+            record = grants.get(capability_spec.purpose)
+            if not (_record_valid(capability_spec.purpose, record)
+                    and record["version"] == launched.version):
+                missing.append(capability_spec.purpose)
+            if capability_spec.requires_nutrition_plan_grant:
+                nutrition = BINDINGS["nutrition_plan"][0]
+                if not _record_valid(nutrition, grants.get(nutrition)):
+                    if _offered_policy(nutrition) is None:
+                        return False
+                    missing.append(nutrition)
+            if not missing:
+                return False
+            for purpose in missing:
+                _require_grant_cohort(conn, owner, purpose)
+            return True
+    except ConsentDenied:
+        return False
 
 
 def authorize_active():

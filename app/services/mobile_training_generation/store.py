@@ -13,6 +13,7 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
+from app.services.product_analytics.emit import emit_authoritative as _analytics_emit
 from app.models import (
     TRAINING_PLAN_GENERATION_FAILED,
     TRAINING_PLAN_GENERATION_GENERATED,
@@ -299,6 +300,7 @@ def stage_candidate(operation_id, document_json, score, authority):
         operation.candidate_score = score
         operation.status = TRAINING_PLAN_GENERATION_GENERATED
         operation.updated_at = datetime.utcnow()
+        analytics_preview = (operation.user_id, operation.id) if is_preview_operation(operation) else None
         db.session.commit()
     except ai_consent.ConsentDenied as denied:
         db.session.rollback()
@@ -313,6 +315,9 @@ def stage_candidate(operation_id, document_json, score, authority):
     except Exception as error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from error
+    if analytics_preview is not None:
+        _analytics_emit(analytics_preview[0], "axis_v2_training_plan_proposed",
+                        f"generation_operation:{analytics_preview[1]}:staged")
 
 
 def record_failure(operation_id, error):
@@ -341,14 +346,22 @@ def record_failure(operation_id, error):
         operation.error_retryable = retryable
         operation.updated_at = datetime.utcnow()
         operation.completed_at = datetime.utcnow()
+        owner_id = operation.user_id
         db.session.commit()
-        return stored_failure(operation)
+        failure = stored_failure(operation)
     except GenerationPersistenceUnavailable:
         db.session.rollback()
         raise
     except Exception as persistence_error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from persistence_error
+    if not public_code.startswith("AI_CONSENT"):
+        # Reliability, not consent outcomes: closed feature + retryability only.
+        _analytics_emit(owner_id, "axis_v2_feature_failed",
+                        f"generation_operation:{operation_id}:failed",
+                        {"feature": "training_plan_generation",
+                         "retryable": "yes" if retryable else "no"})
+    return failure
 
 
 def _insert_plan(**kwargs):
@@ -494,6 +507,8 @@ def commit_plan(operation_id, user_id, *, expected_candidate_sha=None):
             score=operation.candidate_score,
         )
         db.session.flush()
+        from app.services import workout_retention
+        workout_retention.stage_schedule(user_id, plan, starts_plan=True)
         operation.status = TRAINING_PLAN_GENERATION_SUCCEEDED
         operation.training_plan_id = plan.id
         operation.plan_lineage_id = plan.lineage_id
@@ -504,8 +519,9 @@ def commit_plan(operation_id, user_id, *, expected_candidate_sha=None):
         operation.error_retryable = None
         operation.updated_at = datetime.utcnow()
         operation.completed_at = datetime.utcnow()
+        analytics_created = (user_id, plan.id,
+                             "ai_preview_accepted" if is_preview_operation(operation) else "ai_direct")
         db.session.commit()
-        return plan
     except ai_consent.ConsentDenied as denied:
         db.session.rollback()
         if denied.status < 500:
@@ -520,6 +536,9 @@ def commit_plan(operation_id, user_id, *, expected_candidate_sha=None):
     except Exception as error:
         db.session.rollback()
         raise GenerationPersistenceUnavailable() from error
+    _analytics_emit(analytics_created[0], "axis_v2_training_plan_created",
+                    f"training_plan:{analytics_created[1]}", {"path": analytics_created[2]})
+    return plan
 
 
 def _terminalize_generated(operation_id, user_id, denied):
@@ -652,10 +671,15 @@ def commit_general_plan(user_id, key, fingerprint, document_json):
             raise GenerationInProgress()
         plan = _insert_plan(user_id=user_id, plan_data=document_json, score=None)
         db.session.flush()
+        from app.services import workout_retention
+        workout_retention.stage_schedule(user_id, plan, starts_plan=True)
         operation.training_plan_id = plan.id
         operation.plan_lineage_id = plan.lineage_id
         operation.completed_at = now
+        analytics_plan_id = plan.id
         db.session.commit()
+        _analytics_emit(user_id, "axis_v2_training_plan_created",
+                        f"training_plan:{analytics_plan_id}", {"path": "general"})
         return plan
     except (ExistingPlanRefused, GenerationInProgress):
         db.session.rollback()

@@ -205,6 +205,11 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         # LP-11 native account deletion. Bearer-only, on this blueprint so it
         # shares its gate, envelope, no-store and 429 handler.
         ("/api/v1/account", ("DELETE",)),
+        # Product analytics v2 (default OFF -> 404 before auth). Consent is
+        # an independent optional purpose; events are strict observations.
+        ("/api/v1/analytics/consent", ("GET",)),
+        ("/api/v1/analytics/consent", ("PUT",)),
+        ("/api/v1/analytics/events", ("POST",)),
             # Sprint 9 backend prerequisite. Product routes live on this blueprint
             # too, so the allow-list keeps covering every /api/v1 route there is.
             ("/api/v1/nutrition/diary/today", ("GET",)),

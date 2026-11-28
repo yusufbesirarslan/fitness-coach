@@ -133,4 +133,8 @@ def submit(owner, idempotency_key, command, expected_week_start=None, *, review_
         raise IdempotencyConflict()
     if result.outcome is _Outcome.REPLAYED:
         return result.response, False
+    # Product analytics v2: a NEW committed check-in only (no answers).
+    from app.services.product_analytics.emit import emit_authoritative
+    emit_authoritative(owner_id, "axis_v2_weekly_checkin_submitted",
+                       f"weekly_checkin:{owner_id}:{idempotency_key}")
     return result.response, True

@@ -30,6 +30,7 @@ from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services import meal_idempotency, mobile_weekly_checkin
 from app.services.weekly_review import operations, provider
+from app.services.workout_state.snapshot import coherent_read_snapshot
 
 
 _CHECKIN_UNAVAILABLE = ("CHECKIN_TEMPORARILY_UNAVAILABLE",
@@ -170,10 +171,13 @@ def list_check_ins():
 @require_mobile_auth
 def read_check_in_evaluation(check_in_id):
     """Read only. Opening a result or history never creates or dispatches AI."""
-    if _contract_versions() != ["1"]:
+    versions = _contract_versions()
+    if versions not in (["1"], ["2"]):
         return _invalid_request()
+    owner = g.mobile_user.id
     try:
-        body = operations.read(g.mobile_user.id, check_in_id)
+        with coherent_read_snapshot():
+            body = operations.read(owner, check_in_id, int(versions[0]))
     except Exception as error:
         return _checkin_unavailable(error, "evaluation_read_failed")
     if body is None:

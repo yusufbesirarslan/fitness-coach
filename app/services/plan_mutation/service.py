@@ -37,7 +37,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.services import private_exercises
+from app.services import private_exercises, workout_retention
 from app.models import TrainingPlan
 from app.services.plan_owner_lock import lock_plan_owner
 from app.services.plan_session_transition import lock_plan_session_transition
@@ -357,6 +357,7 @@ def apply_plan_mutation(
         if changed:
             plan.plan_data = after_snapshot
             plan.mutation_version = after_version
+            workout_retention.stage_schedule(user_id, plan)
 
         db.session.flush()
         mutation_id = record.public_id
@@ -375,6 +376,12 @@ def apply_plan_mutation(
         db.session.rollback()
         raise
     else:
+        if changed and context.actor == ACTOR_AI_COACH:
+            # Product analytics v2: authorized Coach mutation success = the
+            # committed applied ledger row (no_op/replay/refusal/undo excluded).
+            from app.services.product_analytics.emit import emit_authoritative
+            emit_authoritative(user_id, "axis_v2_coach_mutation_applied",
+                               f"plan_mutation:{mutation_id}", {"domain": "training"})
         return PlanMutationResult(
             outcome=outcome,
             plan=mutated,
@@ -487,6 +494,7 @@ def undo_last_change(
         # an erasure of it.
         plan.plan_data = after_snapshot
         plan.mutation_version = after_version
+        workout_retention.stage_schedule(user_id, plan)
 
         db.session.flush()
         mutation_id = record.public_id

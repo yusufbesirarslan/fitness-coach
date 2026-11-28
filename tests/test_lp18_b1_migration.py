@@ -25,7 +25,7 @@ def test_upgrade_rerun_and_model_shape():
         assert m.expand_contract=='expand'
         with pytest.raises(RuntimeError):m.downgrade()
     cfg=Config();cfg.set_main_option('script_location',str(ROOT/'migrations'))
-    assert ScriptDirectory.from_config(cfg).get_heads()==['e6a4b91d702c']
+    assert ScriptDirectory.from_config(cfg).get_heads()==['f14209ba73c6']
 
 
 @pytest.mark.parametrize('damage',['column','unique','check','predicate','fk'])

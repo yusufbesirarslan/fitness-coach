@@ -455,6 +455,7 @@ def complete_onboarding(user, profile):
 
     try:
         locked_pace = _lock_owner(user.id)
+        was_complete = user.profile_complete is True
         if minor:
             pace = None
             bmr = tdee = target_calories = nutrition_plan = None
@@ -511,11 +512,17 @@ def complete_onboarding(user, profile):
         session.nutrition_plan = nutrition_plan
 
         user.profile_complete = True
+        owner_id = user.id
         db.session.commit()
     except Exception as error:
         db.session.rollback()
         raise ProfilePersistenceFailed(type(error).__name__) from error
 
+    if not was_complete:
+        # Product analytics v2: server authority, after the committed
+        # false->true transition only (no-op unless the flag is ON).
+        from app.services.product_analytics.emit import emit_authoritative
+        emit_authoritative(owner_id, "axis_v2_onboarding_completed", f"onboarding:{owner_id}")
     return OnboardingResult(bmr=bmr, tdee=tdee,
                             target_calories=target_calories,
                             session_created=created)

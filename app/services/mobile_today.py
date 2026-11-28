@@ -91,7 +91,7 @@ class TodayUnavailable(RuntimeError):
 
 def build_today(
     user_id: int, *, include_origin: bool = False,
-    include_day_kind: bool = False,
+    include_day_kind: bool = False, include_retention: bool = False,
 ) -> dict:
     """Project the authenticated user's canonical Today state.
 
@@ -129,6 +129,10 @@ def build_today(
                 day, plan, plan_data, snapshot, include_day_kind)
             if include_origin:
                 payload["today"]["plan"]["origin"] = origin
+            if include_retention:
+                from app.services import workout_retention
+                payload["today"]["retention"] = workout_retention.project(
+                    user_id, day, has_plan=plan is not None)
             return payload
     except Exception as error:  # noqa: BLE001 - every fault fails closed
         raise TodayUnavailable("canonical Today read failed") from error

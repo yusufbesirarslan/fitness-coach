@@ -109,22 +109,26 @@ def _user_child_models():
         TrainingPlanReplacementGenerationOperation, TrainingPlanReplacementProposal,
         TrainingPlanReplacementReceipt, PumpCheck,
         PumpCheckComment, PumpCheckComparison, PumpCheckComparisonRequest,
-        PumpCheckLike, Supplement, TrainingPlan,
+        PumpCheckLike, ProductAnalyticsConsent, ProductAnalyticsOutbox, Supplement, TrainingPlan,
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
-        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutCompletionDay, WorkoutLog,
+        WeeklyCheckIn, WeeklyLog, WeeklyReviewAdmission, WeeklyWinner,
+        WorkoutCompletionDay, WorkoutScheduleCoverage, WorkoutLog,
         WorkoutSession, TrainingSessionOutcome, TrainingStartDecision,
     )
     return (
         # MON-02-BE-03A: reservations point at buckets; the grant row goes last.
         TrainingAllowanceCompensation, AiUsageReservation, AiAllowanceBucket, AiStarterGrant,
-        AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn,
+        # Product analytics v2: the purge enqueues vendor erasure for the live
+        # pseudonym (no user FK) BEFORE these mapping rows are deleted.
+        ProductAnalyticsOutbox, ProductAnalyticsConsent,
+        AppleSubscription, AppleAccountAssociation, ExerciseNote, UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, WeeklyReviewAdmission,
         NutritionPlanEditOperation, NutritionPlanMutationRecord, NutritionPlan,
         # PlanMutationRecord before TrainingPlan: the journal describes plan
         # history, so nothing should ever observe entries for a plan that is
         # already gone.
-        PlanMutationRecord, TrainingPlanConfirmationProposal,
+        PlanMutationRecord, TrainingPlanConfirmationProposal, WorkoutScheduleCoverage,
         TrainingPlanReplacementReceipt, TrainingPlanReplacementProposal,
         # BE-03B-01B: the allowance binding points at its generation operation.
         TrainingPlanReplacementGenerationOperation, TrainingPlanGenerationAllowance,
@@ -287,6 +291,12 @@ def _purge_user(user):
     # loop below deletes their activities and the user (no-op without it).
     from app.services import legacy_activity_clap
     _deleted("activity_clap", legacy_activity_clap.delete_for_user(uid))
+
+    # Product analytics v2: the durable vendor-erasure job for the live
+    # pseudonym commits atomically with this purge, before the child-model
+    # loop below deletes the only account-to-pseudonym mapping.
+    from app.services.product_analytics import consent as analytics_consent
+    analytics_consent.enqueue_account_erasure(uid)
 
     for Model in _USER_CHILD_MODELS:
         _deleted(Model, Model.query.filter_by(user_id=uid).delete(synchronize_session=False))
@@ -757,6 +767,12 @@ def health_erasure_run_cmd(limit):
     click.echo(json.dumps(health_erasure.run_pending(limit), sort_keys=True))
 
 
+def product_analytics_run_cmd():
+    """Run ONE product analytics v2 pass (cleanup, dispatch, vendor erasure); prints counts."""
+    from app.services.product_analytics.pipeline import run_pass
+    click.echo(json.dumps(run_pass(), sort_keys=True))
+
+
 @click.option("--user-id", required=True, type=int)
 @click.option("--matter", required=True, help="Documented claim/request reference (no health content).")
 @click.option("--review-date", required=True, help="YYYY-MM-DD: when the hold must be reviewed.")
@@ -838,6 +854,7 @@ def register_cli(app):
     app.cli.command("account-deletion-audit-export")(account_deletion_audit_export_cmd)
     app.cli.command("account-deletion-reconcile")(account_deletion_reconcile_cmd)
     app.cli.command("health-erasure-run")(health_erasure_run_cmd)
+    app.cli.command("product-analytics-run")(product_analytics_run_cmd)
     app.cli.command("health-legal-hold-add")(health_legal_hold_add_cmd)
     app.cli.command("health-legal-hold-release")(health_legal_hold_release_cmd)
     app.cli.command("health-legal-hold-list")(health_legal_hold_list_cmd)

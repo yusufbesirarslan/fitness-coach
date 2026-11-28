@@ -58,7 +58,7 @@ from .executor import (
     set_turn_history,
 )
 from .turn_effects import turn_plan_effects
-from . import nutrition
+from . import capability_request, nutrition
 from .executor import training_plan_changed_this_turn
 from .plan_read import READ_PLAN_TOOL, READ_PLAN_TOOL_DEF
 from .schemas import (
@@ -98,6 +98,7 @@ __all__ = [
     "published_plan_tool_defs",
     "set_turn_history",
     "turn_plan_effects",
+    "capability_request",
     "nutrition",
     "training_plan_changed_this_turn",
 ]
