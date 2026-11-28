@@ -538,3 +538,19 @@ def test_barcode_cache_with_a_legacy_non_canonical_id_is_a_miss(app, transport, 
         assert mobile_food_discovery.barcode_lookup("0012345678905") is None
     _no_egress(transport)
     assert slots == []
+
+
+@pytest.mark.parametrize("query", ["ahmet@gmail.com", "tel 0532 123 45 67", "my doctor said"])
+def test_discovery_search_is_screened_before_the_slot_for_any_caller(app, transport, slots, query):
+    # Defence in depth behind the route: a direct caller gets the same empty
+    # answer with no concurrency slot, token or request.
+    with app.test_request_context():
+        assert mobile_food_discovery.search(query) == []
+    _no_egress(transport)
+    assert slots == []
+
+
+def test_discovery_search_allowed_query_takes_one_slot(app, transport, slots):
+    with app.test_request_context():
+        assert [f["food_id"] for f in mobile_food_discovery.search("simit")] == ["35755"]
+    assert slots == [1] and len(transport.gets) == 1
