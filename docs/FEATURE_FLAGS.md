@@ -507,7 +507,9 @@ Owner: @yusufbesirarslan; review by 2026-12-31. Rollback: set the flag to 0.
 
 `FITX_PRODUCT_ANALYTICS_ENABLED` defaults OFF. ON exposes `GET|PUT /api/v1/analytics/consent`
 and `POST /api/v1/analytics/events` and lets canonical writers stage server-authoritative
-analytics events into a consent-fenced outbox; dispatch has a synthetic transport only (no vendor).
+analytics events into a consent-fenced outbox. Dispatch runs only in the worker pass and only
+with complete PostHog EU configuration (none exists; missing config = no vendor call). Vendor
+erasure also runs while OFF when erasure credentials exist.
 Requires `MOBILE_AUTH_ENABLED` and migration `6e25ecb68c09`. See
 [product analytics v2](product-analytics-v2/README.md).
 Owner: @yusufbesirarslan; review by 2026-12-31. Rollback: set the flag to 0.

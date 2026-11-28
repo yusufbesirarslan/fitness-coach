@@ -6,7 +6,9 @@ launch gate). Supersedes, for first public, the v1 drafts in
 `docs/posthog-eu-v1/` (#211, merged hard-disabled).
 
 **State:** `SOURCE_READY` candidate only. Not merged, not deployed, not
-activated. No vendor project, token or network transport exists. Flag
+activated. No vendor project, token or key exists. The PostHog EU HTTPS
+transport is in source but default-unreachable: it is built only from complete
+configuration, and none exists. Flag
 `FITX_PRODUCT_ANALYTICS_ENABLED` (backend) and define
 `AXISAI_PRODUCT_ANALYTICS_V2_ENABLED` (mobile) are OFF by default; OFF is
 byte-for-byte inert (routes 404 before auth, emitters return without a DB
@@ -45,18 +47,24 @@ Backend (`app/services/product_analytics/`, `app/blueprints/mobile_analytics.py`
 | `emit.py` | `emit_authoritative(user, name, canonical_ref, props)` called right after a canonical writer's commit. `event_id` = HMAC(server key; subject, name, canonical ref) shaped as UUID v8 → replays/retries of one committed transition collapse on `(subject, event_id)`; the domain reference never leaves the server. Never raises into the writer. |
 | `ingress.py` | Strict client batch validation (exact keys, closed names with `authority: client`, enum properties, UUIDv4 ids, `[received−24h, received+5min]`, ≤20 events, ≤16 KiB). Account fence: owner = Bearer principal and `consent_grant` must equal that owner's current valid grant (else 409, nothing stored). |
 | `wire.py` | Exact PostHog `/batch` body: `{api_key, batch:[{event, distinct_id=subject, uuid=event_id, timestamp, properties}]}`, properties = catalog values + `$process_person_profile:false`, `$geoip_disable:true`. Nothing else can be added. |
-| `dispatch.py` | Outbox → wire → transport. Each row re-checked against the owner's CURRENT consent under a share lock held across the send (withdrawal's exclusive lock waits or wins); generation AND subject must match, so a stale retry can never be re-bound to a new grant (fixes #541 A6). Bounded retries (5, exponential), 48 h max age. Erasure jobs → `transport.delete_subjects`. |
-| `transport.py` | **Synthetic only.** There is intentionally no network transport in this source (architecture test forbids network imports in the package). |
-| Migration `6e25ecb68c09` | Three empty tables (consent, outbox, erasure; erasure has no user FK). Expand-only, re-runnable, downgrade refuses rows. Cut from `e6a4b91d702c` (#568); integration owner re-points `down_revision` once. |
+| `dispatch.py` | Worker-only. It commits the exposure marker before any send, then locks consent → outbox `FOR UPDATE SKIP LOCKED` across one bounded send. Generation AND subject must match (fixes #541 A6). Bounded retries (5, exponential); outbox age ≤ 48 h. Erasure receipt lifecycle: pending → materialized → requested → verified, or not_required. See [TRANSPORT_AND_ERASURE.md](TRANSPORT_AND_ERASURE.md). |
+| `posthog_transport.py` | The ONLY network module (AST test). Exact EU allowlist, bounded timeouts, no redirects or proxies, fixed outcome codes. |
+| `transport.py` | Contract + `SyntheticTransport` (in-memory vendor used by every test). |
+| `settings.py` / `retention.py` / `pipeline.py` | Fail-closed configuration; outbox expiry, optional pseudonym rotation, receipt purge (no production default, [RETENTION.md](RETENTION.md)); one worker pass (cleanup → dispatch → erasure). |
+| Scheduling | `worker.py` tick → unique RQ job `axisai-product-analytics-pass-v2`, only when the flag is ON or erasure credentials exist; `flask product-analytics-run`. |
+| Migration `6e25ecb68c09` | Three empty tables (consent incl. `vendor_exposed_at`/`subject_issued_at`; outbox; erasure receipt with no user FK). Expand-only, re-runnable, downgrade refuses rows. Extended in place on 2026-11-28 (same id, same parent, never applied anywhere). Cut from `e6a4b91d702c` (#568); the integration owner re-points `down_revision` once. |
 
 Mobile (`lib/core/analytics/first_party_analytics.dart`,
 `lib/features/analytics_consent/analytics_consent.dart`,
 `lib/features/analytics_consent/analytics_consent_panel.dart`): Settings → Privacy & data →
 "Product analytics" (only when the define is `true`); switch off by default;
-withdrawal denies locally and synchronously before the network call; queue in
-memory only (≤100, batches of 20, 30 s / background flush, 3 attempts, stable
-ids), fenced by grant id + session epoch + generation; server-owned success
-events are not mappable; no vendor SDK, no disk.
+withdrawal denies locally and synchronously, then persists an origin-bound,
+account-keyed marker (no payload) before the request. The marker survives
+restarts until the server confirms and is retried first. A re-grant completes
+it first. Decisions are serialized. Queue in memory only (≤100, batches of 20,
+30 s / background flush, 3 attempts, stable ids), fenced by grant id + session
+epoch + generation. Server-owned success events are not mappable. No vendor
+SDK; the device never stores an event.
 
 ## 3. Exact event inventory (catalog `catalog.json`, `review_status: PROPOSED_PENDING_CATALOG_REVIEW`)
 
@@ -71,7 +79,9 @@ Every property value is a closed string enum.
 | `axis_v2_training_plan_created` | server | `path` ∈ `ai_preview_accepted`, `ai_direct`, `general` | `store.commit_plan` (AI) / `store.commit_general_plan` (general) committed the plan row |
 | `axis_v2_workout_completed` | server | — | `workout_completion.complete_workout` CREATED (one canonical completion-day claim) |
 | `axis_v2_coach_reply_completed` | server | — | `memory_manager.record_turn` committed a non-interrupted assistant reply |
-| `axis_v2_coach_mutation_applied` | server | `domain` ∈ `training` | `plan_mutation.apply_plan_mutation` committed `applied` with actor `ai_coach` (no_op/replay/refusal/undo excluded) |
+| `axis_v2_coach_mutation_applied` | server | `domain` ∈ `training`, `nutrition` (DELTA-1) | training: `plan_mutation.apply_plan_mutation` committed `applied` with actor `ai_coach`; nutrition: `nutrition_plan_mutation.resolve_edit` committed a confirmed edit (no_op/replay/refusal/cancel/stale/undo excluded) |
+| `axis_v2_coach_change_proposed` (DELTA-1) | server | `domain` ∈ `training`, `nutrition` | a NEW pending Coach change proposal committed (`plan_confirmation.create_or_reuse_pending`, non-undo, not reused; nutrition `_publish`) |
+| `axis_v2_coach_change_confirmed` (DELTA-1) | server | `domain` ∈ `training` | `plan_confirmation.mark_applied` performed pending→applied for a non-undo training proposal |
 | `axis_v2_weekly_checkin_submitted` | server | — | `mobile_weekly_checkin.submission.submit` committed a NEW check-in |
 | `axis_v2_feature_failed` | server | `feature` ∈ `training_plan_generation`; `retryable` ∈ `yes`,`no` | `store.record_failure` committed a terminal generation failure (consent refusals excluded) |
 | `axis_v2_app_opened` | client | — | first authenticated foreground of a process under a valid grant (once per grant per process) |
@@ -90,13 +100,31 @@ food log / Nutrition contents; Coach Nutrition WRITE (enum value added only
 when that writer exists and is reviewed); person properties, `identify`,
 `alias`, groups; any device/app/OS/locale/timezone/network/screen metadata.
 
-Known instrumentation limits (documented, not hidden): web (browser) plan
-creation via `plan_replacement` is not instrumented (first public = mobile);
-Coach mutation *attempts/refusals* are not instrumented, so a mutation
-*success rate* is N/A (counts and per-user rates only); a crash between a
-writer's commit and the analytics insert loses that one event (undercount).
+DELTA-1 (2026-11-28, `catalog.delta_pending_review`, pending catalog review)
+adds Coach Nutrition success and the canonical proposal denominator. It is a
+separate commit so it can be dropped. Chat messages are never attempts.
+Refusal reasons, proposal contents and plan or nutrition contents are never
+emitted.
+
+Known instrumentation limits (documented, not hidden):
+
+* Web (browser) plan creation via `plan_replacement` is not instrumented
+  (first public = mobile).
+* **Proposal acceptance** is measurable: training confirmed/proposed and
+  nutrition applied/proposed.
+* A **direct-apply** training change (no confirmation) has no committed attempt
+  record, so its success *rate* is N/A (counts only).
+* Cancelled and stale proposals are not distinguished.
+* A crash between a writer's commit and the analytics insert loses that one
+  event (undercount).
+* The erasure marker `$set` event is the only person-profile write. It is sent
+  only for retired pseudonyms (catalog `erasure_profile_event`).
 
 ## 4. Dashboard specifications (PostHog EU; none created)
+
+Exact numerator, denominator, cohort, maturity and limitations per panel, with
+importable HogQL insight bodies: [DASHBOARDS.md](DASHBOARDS.md) /
+[dashboards.json](dashboards.json). The summary below is kept for reference.
 
 Common rules: occurrence time UTC, calendar days Europe/Istanbul; unit =
 `distinct_id` (per-grant pseudonym, personless); every panel shows x/n and the
@@ -121,7 +149,23 @@ D-4 adds an onboarding-time prompt.
 
 ## 5. Tests (synthetic)
 
-Backend `tests/test_product_analytics_v2.py` (39 cases): OFF inertness (404 before
+2026-11-28 additions:
+
+* `test_product_analytics_v2_transport.py` (36): settings fail-closed, exact
+  URLs, timeouts, redirects/HTTP refused, response caps, private-API key use,
+  loopback timeout, pipeline flag/erasure independence, no secrets in logs,
+  retention, rotation, erasure lifecycle, budget, worker tick.
+* `test_product_analytics_v2_pg.py` (16, real PostgreSQL): withdrawal vs
+  in-flight send, withdrawal before admission, duplicate wakeups and ordering,
+  generation/subject fence, withdraw+regrant in flight, account deletion race,
+  atomic durable erasure job, lost-ack replay, expiry cleanup, erasure retry
+  and settlement with concurrent passes, dispatch OFF with erasure, missing
+  config, cross-account isolation, canonical writes not delayed, rotation skip,
+  migration create/verify/refuse.
+* `test_product_analytics_v2_coach_delta.py` (7): DELTA-1.
+* `test_product_analytics_v2_dashboards.py` (2).
+
+Backend `tests/test_product_analytics_v2.py` (40 cases): OFF inertness (404 before
 auth, zero SQL), consent independence/notice/idempotence/regrant rotation,
 withdrawal purge + erasure job, ingress strictness (12 out-of-catalog cases),
 envelope bounds, account fence (other account, stale grant, regrant), expiry,
@@ -129,8 +173,8 @@ canonical identity dedup, real writer (`commit_general_plan`), exact emitter
 inventory (AST), no network imports, exact wire allowlist without account
 identity, withdrawal-before-dispatch, #541 A6 regression, bounded retries,
 erasure on withdrawal and account purge. Mutation-checked: dispatch fence,
-account fence, flag gate. Mobile `test/core/analytics/first_party_analytics_test.dart` (19),
-mutation-checked in-flight fence.
+account fence, flag gate. Mobile `test/core/analytics/first_party_analytics_test.dart` (27,
+incl. durable withdrawal and stop counters), mutation-checked in-flight fence.
 
 ## 6. Remaining activation gates
 

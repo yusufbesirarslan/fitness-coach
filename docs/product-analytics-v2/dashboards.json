@@ -1,0 +1,259 @@
+{
+  "schema": "axisai-product-analytics-v2-dashboards/1",
+  "status": "SPEC ONLY - no vendor project or dashboard exists",
+  "import": "Each panels[].insight is a PostHog insight body (SQL insight: DataVisualizationNode over HogQLQuery) for POST /api/projects/<id>/insights/ on an AUTHORIZED project; verify the insight schema at G3.",
+  "conventions": {
+    "unit": "distinct_id (per-grant pseudonym, personless)",
+    "time": "stored UTC; weeks and days in Europe/Istanbul; ISO weeks start Monday",
+    "watermark": "24 h ingestion",
+    "survivor_bias": "withdrawal and rotation delete history; every panel is biased toward people who kept consent"
+  },
+  "panels": [
+    {
+      "id": "P1",
+      "name": "Onboarding completion",
+      "numerator": "subjects with axis_v2_onboarding_completed within 24 h after their first axis_v2_onboarding_started",
+      "denominator": "subjects with axis_v2_onboarding_started whose axis_v2_analytics_enabled precedes it",
+      "cohort": "ISO week (Europe/Istanbul) of onboarding_started",
+      "maturity": "started_at <= now - 48 h (24 h window + 24 h ingestion watermark)",
+      "limitations": [
+        "Only people who consented BEFORE onboarding are observable; with Settings-only consent this is near empty (no onboarding prompt by founder direction).",
+        "Step funnel (step1..4) is available from axis_v2_onboarding_step_completed.milestone; not shown here.",
+        "Survivor bias: withdrawal deletes history."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P1 Onboarding completion",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH s AS (SELECT distinct_id, minIf(timestamp, event='axis_v2_analytics_enabled') AS enabled_at, minIf(timestamp, event='axis_v2_onboarding_started') AS started_at, minIf(timestamp, event='axis_v2_onboarding_completed') AS completed_at FROM events WHERE event IN ('axis_v2_analytics_enabled','axis_v2_onboarding_started','axis_v2_onboarding_completed') GROUP BY distinct_id) SELECT toStartOfWeek(toTimeZone(started_at,'Europe/Istanbul'),1) AS week, count() AS started, countIf(completed_at >= started_at AND completed_at <= started_at + INTERVAL 24 HOUR) AS completed_24h, round(completed_24h / started, 3) AS rate FROM s WHERE started_at > toDateTime('2000-01-01 00:00:00') AND enabled_at > toDateTime('2000-01-01 00:00:00') AND enabled_at <= started_at AND started_at <= now() - INTERVAL 48 HOUR GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P2",
+      "name": "Time to first value",
+      "numerator": "per subject: first training_plan_created | workout_completed | coach_reply_completed at or after onboarding_completed",
+      "denominator": "subjects with onboarding_completed whose analytics_enabled precedes it",
+      "cohort": "ISO week of onboarding_completed",
+      "maturity": "done_at <= now - 8 d (7 d window + 1 d watermark)",
+      "limitations": [
+        "Median/P75 are over subjects that reached value; within_24h/within_7d are over all completers (no censoring bias).",
+        "Existing users without an observed onboarding are excluded (a separate series anchored on analytics_enabled can be added).",
+        "Under model L only plan_created and coach_reply_completed count as value (workout is Tier 2)."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P2 Time to first value",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH s AS (SELECT distinct_id, minIf(timestamp, event='axis_v2_analytics_enabled') AS enabled_at, minIf(timestamp, event='axis_v2_onboarding_completed') AS done_at FROM events WHERE event IN ('axis_v2_analytics_enabled','axis_v2_onboarding_completed') GROUP BY distinct_id), v AS (SELECT s.distinct_id AS distinct_id, s.enabled_at AS enabled_at, s.done_at AS done_at, minIf(e.timestamp, e.timestamp >= s.done_at) AS value_at FROM s LEFT JOIN (SELECT distinct_id, timestamp FROM events WHERE event IN ('axis_v2_training_plan_created','axis_v2_workout_completed','axis_v2_coach_reply_completed')) AS e ON e.distinct_id = s.distinct_id GROUP BY distinct_id, enabled_at, done_at) SELECT toStartOfWeek(toTimeZone(done_at,'Europe/Istanbul'),1) AS week, count() AS completers, countIf(value_at > toDateTime('2000-01-01 00:00:00') AND value_at <= done_at + INTERVAL 24 HOUR) AS within_24h, countIf(value_at > toDateTime('2000-01-01 00:00:00') AND value_at <= done_at + INTERVAL 7 DAY) AS within_7d, quantileIf(0.5)(dateDiff('minute', done_at, value_at), value_at > toDateTime('2000-01-01 00:00:00')) AS median_minutes, quantileIf(0.75)(dateDiff('minute', done_at, value_at), value_at > toDateTime('2000-01-01 00:00:00')) AS p75_minutes FROM v WHERE done_at > toDateTime('2000-01-01 00:00:00') AND enabled_at > toDateTime('2000-01-01 00:00:00') AND enabled_at <= done_at AND done_at <= now() - INTERVAL 8 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P3a",
+      "name": "First plan creation within 7 days",
+      "numerator": "completers with a first training_plan_created within 7 d (split by path of that first plan)",
+      "denominator": "subjects with onboarding_completed whose analytics_enabled precedes it",
+      "cohort": "ISO week of onboarding_completed",
+      "maturity": "done_at <= now - 8 d",
+      "limitations": [
+        "Web (browser) plan replacement is not instrumented (first public = mobile)."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P3a First plan creation within 7 days",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH s AS (SELECT distinct_id, minIf(timestamp, event='axis_v2_analytics_enabled') AS enabled_at, minIf(timestamp, event='axis_v2_onboarding_completed') AS done_at FROM events WHERE event IN ('axis_v2_analytics_enabled','axis_v2_onboarding_completed') GROUP BY distinct_id), v AS (SELECT s.distinct_id AS distinct_id, s.enabled_at AS enabled_at, s.done_at AS done_at, minIf(e.timestamp, e.timestamp >= s.done_at) AS plan_at, argMinIf(e.path, e.timestamp, e.timestamp >= s.done_at) AS path FROM s LEFT JOIN (SELECT distinct_id, timestamp, properties.path AS path FROM events WHERE event = 'axis_v2_training_plan_created') AS e ON e.distinct_id = s.distinct_id GROUP BY distinct_id, enabled_at, done_at) SELECT toStartOfWeek(toTimeZone(done_at,'Europe/Istanbul'),1) AS week, count() AS completers, countIf(plan_at > toDateTime('2000-01-01 00:00:00') AND plan_at <= done_at + INTERVAL 7 DAY) AS created_7d, countIf(plan_at > toDateTime('2000-01-01 00:00:00') AND plan_at <= done_at + INTERVAL 7 DAY AND path='ai_preview_accepted') AS ai_preview_accepted, countIf(plan_at > toDateTime('2000-01-01 00:00:00') AND plan_at <= done_at + INTERVAL 7 DAY AND path='ai_direct') AS ai_direct, countIf(plan_at > toDateTime('2000-01-01 00:00:00') AND plan_at <= done_at + INTERVAL 7 DAY AND path='general') AS general FROM v WHERE done_at > toDateTime('2000-01-01 00:00:00') AND enabled_at > toDateTime('2000-01-01 00:00:00') AND enabled_at <= done_at AND done_at <= now() - INTERVAL 8 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P3b",
+      "name": "Plan preview acceptance rate",
+      "numerator": "count(training_plan_created path=ai_preview_accepted)",
+      "denominator": "count(training_plan_proposed)",
+      "cohort": "ISO week of the event (period ratio, not a per-proposal join)",
+      "maturity": "week closed + 1 d watermark",
+      "limitations": [
+        "Period ratio: an acceptance can fall in the week after its proposal; read over >= 4 weeks.",
+        "Event counts, not subjects; a re-generated preview counts as a new proposal."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P3b Plan preview acceptance rate",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "SELECT toStartOfWeek(toTimeZone(timestamp,'Europe/Istanbul'),1) AS week, countIf(event='axis_v2_training_plan_proposed') AS proposed, countIf(event='axis_v2_training_plan_created' AND properties.path='ai_preview_accepted') AS accepted, round(accepted / nullIf(proposed,0), 3) AS acceptance FROM events WHERE event IN ('axis_v2_training_plan_proposed','axis_v2_training_plan_created') AND timestamp <= now() - INTERVAL 1 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P4",
+      "name": "Workout completion engagement",
+      "numerator": "subjects with >= 1 axis_v2_workout_completed in the week",
+      "denominator": "subjects with any axis_v2 event in the week (excluding analytics_enabled)",
+      "cohort": "ISO week",
+      "maturity": "week closed + 1 d",
+      "limitations": [
+        "One completion per canonical completion day (server claim), so multiple sessions per day count once.",
+        "Tier 2: consenters only under every model."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P4 Workout completion engagement",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "SELECT toStartOfWeek(toTimeZone(timestamp,'Europe/Istanbul'),1) AS week, uniq(distinct_id) AS active_subjects, uniqIf(distinct_id, event='axis_v2_workout_completed') AS workout_subjects, round(workout_subjects / active_subjects, 3) AS share, countIf(event='axis_v2_workout_completed') AS completions FROM events WHERE event LIKE 'axis_v2_%' AND event != 'axis_v2_analytics_enabled' AND timestamp <= now() - INTERVAL 1 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P5a",
+      "name": "Coach adoption",
+      "numerator": "cohort subjects with >= 1 coach_reply_completed within 7 d of analytics_enabled",
+      "denominator": "subjects whose first analytics_enabled is in the week",
+      "cohort": "ISO week of analytics_enabled",
+      "maturity": "enabled_at <= now - 8 d",
+      "limitations": [
+        "coach_message_sent (client) vs coach_reply_completed (server) gap = sends without a completed reply; interrupted replies are excluded by design."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P5a Coach adoption",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH c AS (SELECT distinct_id, minIf(timestamp, event='axis_v2_analytics_enabled') AS enabled_at FROM events WHERE event = 'axis_v2_analytics_enabled' GROUP BY distinct_id), v AS (SELECT c.distinct_id AS distinct_id, c.enabled_at AS enabled_at, minIf(e.timestamp, e.timestamp >= c.enabled_at) AS reply_at FROM c LEFT JOIN (SELECT distinct_id, timestamp FROM events WHERE event = 'axis_v2_coach_reply_completed') AS e ON e.distinct_id = c.distinct_id GROUP BY distinct_id, enabled_at) SELECT toStartOfWeek(toTimeZone(enabled_at,'Europe/Istanbul'),1) AS week, count() AS cohort, countIf(reply_at > toDateTime('2000-01-01 00:00:00') AND reply_at <= enabled_at + INTERVAL 7 DAY) AS coach_7d, round(coach_7d / cohort, 3) AS adoption FROM v WHERE enabled_at > toDateTime('2000-01-01 00:00:00') AND enabled_at <= now() - INTERVAL 8 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P5b",
+      "name": "Coach mutation success and proposal acceptance",
+      "numerator": "training acceptance = confirmed_training / proposed (domain=training); nutrition acceptance = applied / proposed (domain=nutrition)",
+      "denominator": "count(coach_change_proposed) per domain (new pending proposals only; reuse, undo, chat messages and refusals excluded)",
+      "cohort": "ISO week of the event (period ratio)",
+      "maturity": "week closed + 1 d",
+      "limitations": [
+        "DELTA-1 events are pending catalog review.",
+        "Direct (no-confirmation) training applies have NO attempt denominator: a direct-apply success RATE is not measurable; only counts.",
+        "Cancelled vs stale proposals are not distinguished (proposed - confirmed - still pending).",
+        "Nutrition: Tier 2 (consent only)."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P5b Coach mutation success and proposal acceptance",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "SELECT toStartOfWeek(toTimeZone(timestamp,'Europe/Istanbul'),1) AS week, properties.domain AS domain, countIf(event='axis_v2_coach_change_proposed') AS proposed, countIf(event='axis_v2_coach_change_confirmed') AS confirmed_training, countIf(event='axis_v2_coach_mutation_applied') AS applied, uniqIf(distinct_id, event='axis_v2_coach_mutation_applied') AS applying_subjects FROM events WHERE event IN ('axis_v2_coach_change_proposed','axis_v2_coach_change_confirmed','axis_v2_coach_mutation_applied') AND timestamp <= now() - INTERVAL 1 DAY GROUP BY week, domain ORDER BY week, domain"
+          }
+        }
+      }
+    },
+    {
+      "id": "P6",
+      "name": "Weekly check-in adoption",
+      "numerator": "subjects with >= 1 weekly_checkin_submitted in the week",
+      "denominator": "subjects active in the week whose analytics_enabled is >= 7 d before week start",
+      "cohort": "ISO week",
+      "maturity": "week closed + 1 d",
+      "limitations": [
+        "Tier 2: consenters only.",
+        "A check-in submitted for a past week counts in the week it was submitted."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P6 Weekly check-in adoption",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH w AS (SELECT toStartOfWeek(toTimeZone(timestamp,'Europe/Istanbul'),1) AS week, distinct_id, max(event='axis_v2_weekly_checkin_submitted') AS checked_in FROM events WHERE event LIKE 'axis_v2_%' GROUP BY week, distinct_id), e AS (SELECT distinct_id, minIf(timestamp, event='axis_v2_analytics_enabled') AS enabled_at FROM events GROUP BY distinct_id) SELECT w.week AS week, count() AS eligible_active, sum(w.checked_in) AS checked_in, round(checked_in / eligible_active, 3) AS adoption FROM w JOIN e ON w.distinct_id = e.distinct_id WHERE e.enabled_at > toDateTime('2000-01-01 00:00:00') AND e.enabled_at <= toDateTime(w.week) - INTERVAL 7 DAY AND toDateTime(w.week) <= now() - INTERVAL 8 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P7",
+      "name": "D1/D7/D30 retention",
+      "numerator": "cohort subjects with >= 1 meaningful event exactly on cohort day + N (Europe/Istanbul)",
+      "denominator": "subjects whose first analytics_enabled is on the cohort day",
+      "cohort": "Istanbul calendar day of analytics_enabled",
+      "maturity": "report dN only for cohort_day <= today - (N + 1); earlier cells are immature and must be blank",
+      "limitations": [
+        "Secondary series: replace the meaningful-event set with axis_v2_app_opened/axis_v2_app_resumed.",
+        "Pseudonym rotation (RETENTION.md) creates subjects without analytics_enabled; they never enter a cohort.",
+        "Under model L the meaningful set shrinks to plan_created + coach_reply_completed (Tier 1)."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P7 D1/D7/D30 retention",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "WITH c AS (SELECT distinct_id, toDate(toTimeZone(minIf(timestamp, event='axis_v2_analytics_enabled'),'Europe/Istanbul')) AS cohort_day FROM events GROUP BY distinct_id HAVING cohort_day > toDate('2000-01-01')), a AS (SELECT DISTINCT distinct_id, toDate(toTimeZone(timestamp,'Europe/Istanbul')) AS day FROM events WHERE event IN ('axis_v2_training_plan_created','axis_v2_workout_completed','axis_v2_coach_reply_completed','axis_v2_weekly_checkin_submitted')) SELECT c.cohort_day AS cohort_day, count(DISTINCT c.distinct_id) AS cohort, uniqIf(a.distinct_id, a.day = c.cohort_day + 1) AS d1, uniqIf(a.distinct_id, a.day = c.cohort_day + 7) AS d7, uniqIf(a.distinct_id, a.day = c.cohort_day + 30) AS d30 FROM c LEFT JOIN a ON a.distinct_id = c.distinct_id WHERE c.cohort_day <= today() - 2 GROUP BY cohort_day ORDER BY cohort_day"
+          }
+        }
+      }
+    },
+    {
+      "id": "P8",
+      "name": "Feature reliability: AI plan generation",
+      "numerator": "count(training_plan_created path in ai_*)",
+      "denominator": "count(training_plan_created ai_*) + count(feature_failed feature=training_plan_generation)",
+      "cohort": "ISO week",
+      "maturity": "week closed + 1 d",
+      "limitations": [
+        "Previews that were generated but never accepted are neither success nor failure here (see P3b).",
+        "Consent refusals (AI_CONSENT_*) are excluded from failures by design."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P8 Feature reliability: AI plan generation",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "SELECT toStartOfWeek(toTimeZone(timestamp,'Europe/Istanbul'),1) AS week, countIf(event='axis_v2_training_plan_created' AND properties.path IN ('ai_preview_accepted','ai_direct')) AS ai_created, countIf(event='axis_v2_feature_failed' AND properties.feature='training_plan_generation') AS failed, countIf(event='axis_v2_feature_failed' AND properties.retryable='yes') AS failed_retryable, round(ai_created / nullIf(ai_created + failed, 0), 3) AS success_rate FROM events WHERE event IN ('axis_v2_training_plan_created','axis_v2_feature_failed') AND timestamp <= now() - INTERVAL 1 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    },
+    {
+      "id": "P9",
+      "name": "Weekly founder review",
+      "numerator": "per metric (see columns)",
+      "denominator": "shown with P1-P8 x/n for the last mature week",
+      "cohort": "ISO week",
+      "maturity": "week closed + 1 d",
+      "limitations": [
+        "Opt-in rate is NOT computable from vendor data (refusers emit nothing).",
+        "Export for 12-month retention only as counts with cells < 5 shown as '<5' (RETENTION.md); never export distinct_ids."
+      ],
+      "insight": {
+        "name": "[AxisAI v2] P9 Weekly founder review",
+        "query": {
+          "kind": "DataVisualizationNode",
+          "source": {
+            "kind": "HogQLQuery",
+            "query": "SELECT toStartOfWeek(toTimeZone(timestamp,'Europe/Istanbul'),1) AS week, uniq(distinct_id) AS active_subjects, uniqIf(distinct_id, event='axis_v2_analytics_enabled') AS new_consenting_subjects, countIf(event='axis_v2_onboarding_completed') AS onboarding_completed, countIf(event='axis_v2_training_plan_created') AS plans_created, countIf(event='axis_v2_workout_completed') AS workouts_completed, countIf(event='axis_v2_coach_reply_completed') AS coach_replies, countIf(event='axis_v2_coach_mutation_applied') AS coach_mutations_applied, countIf(event='axis_v2_weekly_checkin_submitted') AS checkins, countIf(event='axis_v2_feature_failed') AS feature_failures FROM events WHERE event LIKE 'axis_v2_%' AND timestamp > now() - INTERVAL 12 WEEK AND timestamp <= now() - INTERVAL 1 DAY GROUP BY week ORDER BY week"
+          }
+        }
+      }
+    }
+  ],
+  "validation": "Names/properties pinned to catalog.json by tests/test_product_analytics_v2_dashboards.py. HogQL was NOT executed (no ClickHouse/PostHog available): run each query on the authorized synthetic project at G5 before relying on it."
+}

@@ -317,9 +317,10 @@ def test_cleanup_expires_outbox_rows_by_configured_age_and_purges_only_terminal_
     ])
     db.session.commit()
     assert retention.cleanup(settings.retention_policy({}), now=now) == {
-        "outbox_expired": 0, "receipts_purged": 0}
+        "outbox_expired": 0, "receipts_purged": 0, "subjects_rotated": 0}
     policy = settings.retention_policy({settings.OUTBOX_MAX_AGE: "6", settings.RECEIPT_RETENTION: "90"})
-    assert retention.cleanup(policy, now=now) == {"outbox_expired": 1, "receipts_purged": 2}
+    assert retention.cleanup(policy, now=now) == {
+        "outbox_expired": 1, "receipts_purged": 2, "subjects_rotated": 0}
     assert {j.subject for j in ProductAnalyticsErasure.query.all()} == {"s-open", "s-recent"}
 
 
@@ -397,3 +398,32 @@ def test_worker_tick_enqueues_nothing_by_default_and_one_unique_job_when_wanted(
     monkeypatch.delenv("FITX_PRODUCT_ANALYTICS_ENABLED")
     monkeypatch.setenv("PRODUCT_ANALYTICS_POSTHOG_PERSONAL_API_KEY", PERSONAL)
     assert worker._product_analytics_wanted() is True
+
+
+def test_subject_rotation_bounds_vendor_retention_without_touching_the_grant(on, make_user):
+    user = make_user("analytics-rotation")
+    _granted(user.id, exposed=True)
+    row = consent.current(user.id)
+    old_subject, grant_id, generation = row.subject, row.grant_id, row.generation
+    issued = row.subject_issued_at
+    policy = settings.retention_policy({settings.SUBJECT_MAX_AGE: "90"})
+    assert retention.cleanup(policy, now=issued + timedelta(days=89))["subjects_rotated"] == 0
+    stats = retention.cleanup(policy, now=issued + timedelta(days=91))
+    assert stats["subjects_rotated"] == 1
+    db.session.expire_all()
+    row = consent.current(user.id)
+    assert row.subject != old_subject and row.grant_id == grant_id
+    assert row.generation == generation + 1 and row.vendor_exposed_at is None
+    job = ProductAnalyticsErasure.query.one()
+    assert (job.subject, job.reason, job.status) == (old_subject, "rotated", "pending")
+    assert ProductAnalyticsOutbox.query.count() == 0          # never re-bound
+    assert consent.view(row)["grant_id"] == grant_id           # client unaffected
+    assert settings.retention_policy({settings.SUBJECT_MAX_AGE: "3"}).subject_max_age is None
+
+
+def test_rotation_of_a_never_exposed_subject_needs_no_vendor_call(on, make_user):
+    user = make_user("analytics-rotation-unexposed")
+    row = _granted(user.id)
+    policy = settings.retention_policy({settings.SUBJECT_MAX_AGE: "30"})
+    retention.cleanup(policy, now=row.subject_issued_at + timedelta(days=31))
+    assert ProductAnalyticsErasure.query.one().status == "not_required"

@@ -23,6 +23,7 @@ READ_TIMEOUT = "PRODUCT_ANALYTICS_HTTP_READ_TIMEOUT_SECONDS"
 OUTBOX_MAX_AGE = "PRODUCT_ANALYTICS_OUTBOX_MAX_AGE_HOURS"
 RECEIPT_RETENTION = "PRODUCT_ANALYTICS_ERASURE_RECEIPT_RETENTION_DAYS"
 ERASURE_OVERDUE = "PRODUCT_ANALYTICS_ERASURE_OVERDUE_DAYS"
+SUBJECT_MAX_AGE = "PRODUCT_ANALYTICS_SUBJECT_MAX_AGE_DAYS"
 
 #: Absolute ceiling for an undispatched outbox row, independent of config.
 OUTBOX_HARD_CEILING = timedelta(hours=48)
@@ -55,6 +56,7 @@ class RetentionPolicy:
     outbox_max_age: timedelta
     receipt_retention: timedelta | None
     erasure_overdue: timedelta | None
+    subject_max_age: timedelta | None = None
 
 
 def _text(config, key):
@@ -100,7 +102,9 @@ def retention_policy(config):
     hours = _bounded(config, OUTBOX_MAX_AGE, 1, 48, cast=int)
     receipt = _bounded(config, RECEIPT_RETENTION, 1, 400, cast=int)
     overdue = _bounded(config, ERASURE_OVERDUE, 1, 90, cast=int)
+    rotation = _bounded(config, SUBJECT_MAX_AGE, 7, 400, cast=int)
     return RetentionPolicy(
         outbox_max_age=timedelta(hours=hours) if hours else OUTBOX_HARD_CEILING,
         receipt_retention=timedelta(days=receipt) if receipt else None,
-        erasure_overdue=timedelta(days=overdue) if overdue else None)
+        erasure_overdue=timedelta(days=overdue) if overdue else None,
+        subject_max_age=timedelta(days=rotation) if rotation else None)

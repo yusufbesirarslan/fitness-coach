@@ -1434,6 +1434,8 @@ class ProductAnalyticsConsent(db.Model):
     # unacknowledged send counts). Reset with every new subject. Erasure of a
     # subject that was never exposed needs no vendor call at all.
     vendor_exposed_at = db.Column(db.DateTime)
+    # When the current subject was minted (rotation bound for vendor raw retention).
+    subject_issued_at = db.Column(db.DateTime)
 
     __table_args__ = (
         db.UniqueConstraint("user_id", name="uq_product_analytics_consent_user"),
@@ -1503,7 +1505,7 @@ class ProductAnalyticsErasure(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("subject", name="uq_product_analytics_erasure_subject"),
-        db.CheckConstraint("reason IN ('withdrawn', 'account_deleted')",
+        db.CheckConstraint("reason IN ('withdrawn', 'account_deleted', 'rotated')",
                            name="ck_product_analytics_erasure_reason"),
         db.CheckConstraint("status IN ('pending', 'materialized', 'requested', 'verified', "
                            "'not_required')",

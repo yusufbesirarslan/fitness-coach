@@ -40,6 +40,7 @@ def _create_consent():
         sa.Column("withdrawn_at", sa.DateTime()),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.Column("vendor_exposed_at", sa.DateTime()),
+        sa.Column("subject_issued_at", sa.DateTime()),
         sa.UniqueConstraint("user_id", name="uq_product_analytics_consent_user"),
         sa.CheckConstraint("status IN ('granted', 'withdrawn')",
                            name="ck_product_analytics_consent_status"),
@@ -85,7 +86,7 @@ def _create_erasure():
         sa.Column("last_outcome", sa.String(24)),
         sa.Column("completed_at", sa.DateTime()),
         sa.UniqueConstraint("subject", name="uq_product_analytics_erasure_subject"),
-        sa.CheckConstraint("reason IN ('withdrawn', 'account_deleted')",
+        sa.CheckConstraint("reason IN ('withdrawn', 'account_deleted', 'rotated')",
                            name="ck_product_analytics_erasure_reason"),
         sa.CheckConstraint("status IN ('pending', 'materialized', 'requested', 'verified', "
                            "'not_required')",
@@ -103,7 +104,7 @@ _EXPECTED_UNIQUE = {
 _EXPECTED_COLUMNS = {
     "product_analytics_consent": {"id", "user_id", "status", "generation", "subject", "grant_id",
                                   "notice_version", "granted_at", "expires_at", "withdrawn_at",
-                                  "updated_at", "vendor_exposed_at"},
+                                  "updated_at", "vendor_exposed_at", "subject_issued_at"},
     "product_analytics_outbox": {"id", "user_id", "generation", "subject", "event_id", "name",
                                  "authority", "occurred_at", "received_at", "properties",
                                  "attempts", "next_attempt_at"},

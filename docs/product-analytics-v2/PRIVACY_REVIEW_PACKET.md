@@ -16,9 +16,17 @@ collected; no vendor account exists for this purpose.
 | Data categories | Event name, time, a closed set of coarse enum values (screen, onboarding milestone, plan path, Coach domain, failure retryability), a random per-grant pseudonym, a random or keyed event id. See README §3. |
 | Not collected | Name, email, username, Cognito sub, account id, device/OS/app/locale/timezone/network/screen metadata, IP address (vendor sees AxisAI's server), advertising ids, health/body measurements, photos, meals or nutrition contents, Coach prompts/replies/topics, check-in answers, error text, free text of any kind. Enforced by catalog validation on ingress and an exact wire allowlist. |
 | Pseudonymity | `distinct_id` is a random UUIDv4 minted at grant; a new one after every withdrawal. AxisAI's database maps account → current pseudonym (needed for withdrawal and erasure), so the data is **pseudonymous, not anonymous**. The vendor never receives the mapping. |
-| Retention (PROPOSALS — DECIDE) | Outbox: deleted on send; max 48 h. Vendor event retention: 12 months (PostHog project setting). Consent row: account lifetime (consent evidence). Erasure job rows: subject kept until vendor deletion confirmed + 90 days, then purged (purge job not yet implemented). Grant expiry: 365 days, then re-ask. |
+| Retention (PROPOSALS — DECIDE) | Reconciled on 2026-11-28 ([RETENTION.md](RETENTION.md)): raw vendor events ≤ 90 days, enforced by configurable pseudonym rotation + erasure (PostHog Free has a fixed 1-year retention and monthly cleanup). Anonymized aggregates ≤ 12 months. Outbox ≤ 48 h. Erasure receipts purged 90 days after verification (implemented, configurable). Consent row: account lifetime. Grant expiry: 365 days. |
 
 ## 2. Lawful basis and notice (DECIDE)
+
+Founder direction (2026-11-28): no additional standalone onboarding consent
+screen. A narrow legitimate-interest alternative is assessed in
+[LEGAL_BASIS_ASSESSMENT.md](LEGAL_BASIS_ASSESSMENT.md): KVKK text verified,
+event-level matrix, Tier 1/Tier 2, Apple 5.1.1(ii) risk, questions Q-1…Q-8.
+The conditional EN/TR Privacy Policy text is
+[PRIVACY_POLICY_AMENDMENT_DRAFT.md](PRIVACY_POLICY_AMENDMENT_DRAFT.md). **The
+active model is unchanged (opt-in).**
 
 * Proposed basis: explicit consent (opt-in), withdrawable at any time.
   Counsel to confirm for KVKK and, where applicable, GDPR.
@@ -60,7 +68,8 @@ contents, personless (no profile aggregation at the vendor).
 |---|---|---|
 | Withdrawal | outbox delete + generation fence + `product_analytics_erasure` job (no user link) | vendor deletion call not implemented (synthetic transport only) |
 | Account deletion | job created inside the purge transaction before the mapping is deleted | same |
-| Vendor deletion | `process_erasures_once` → `transport.delete_subjects(pseudonyms)` | **VERIFY** on a synthetic PostHog project that personless events are deletable by `distinct_id` and the SLA; define AxisAI SLA (proposal: 30 days) |
+| Vendor deletion | `process_erasures_once`: `$set` marker (PostHog's documented personless workaround) → person lookup → `bulk_delete` (`delete_events`) → `deletion_status` verification; never-exposed pseudonyms settle with no vendor call | PostHog documents async weekend batches and no SLA. **VERIFY at G5** that personless deletion works end to end. AxisAI overdue alarm proposal: 30 days |
+| Rotation | the retired pseudonym is erased like a withdrawal | retention bound |
 | Access/portability | not implemented | DECIDE whether analytics events are in scope of access requests (AxisAI holds the mapping) |
 
 ## 7. App Store privacy answers and SDK manifests (DECIDE)
@@ -89,7 +98,7 @@ kept, document why its manifest differs from the app's answers. No ATT prompt
 | G1 Legal | counsel/controller | §2–§6 decisions; final notice EN/TR + privacy policy; transfer mechanism executed/notified |
 | G2 Contract | founder | PostHog DPA (+ transfer clauses) executed; subprocessors reviewed |
 | G3 Vendor provisioning | founder (separate approval) | EU project; autocapture, session replay, heatmaps, surveys, feature flags, web analytics OFF; GeoIP off; client-IP discard; person profiles off; retention set; token in Parameter Store (never in source/logs) |
-| G4 Implementation | analytics owner | network transport (HTTPS, timeout, worker-side only), vendor erasure client, dispatch/erasure scheduling, erasure-row purge, device-persisted pending withdrawal (currently in-memory), optional onboarding-time prompt (D-4) |
-| G5 Qualification | analytics owner | PG concurrency tests for consent/dispatch locks (not executed — no local PostgreSQL); synthetic PostHog project E2E (stored properties = allowlist, no IP, deletion works); Android measured if any SDK remains; composed device QA |
+| G4 Implementation | analytics owner | **source done 2026-11-28**: HTTPS transport, erasure client + receipts, scheduling, purge, rotation, durable device withdrawal. Left: the processing-model change only if counsel/founder choose model L. D-4 is resolved as "no standalone screen" (founder) |
+| G5 Qualification | analytics owner | **PG concurrency done** (16 cases, local PG16 + hosted CI). Left: an authorized synthetic PostHog project E2E (stored properties = allowlist, no IP, personless deletion works, path/shape facts in TRANSPORT_AND_ERASURE.md §2, HogQL panels run); composed device QA (reuse W1/W2/W3 evidence; no new campaign) |
 | G6 Composition | integration owner | re-point migration `down_revision`; single Alembic head; exact-head CI |
 | G7 Release | founder | App Store answers updated; new binary; backend flag + mobile define enabled only after G1–G6; explicit activation GO |

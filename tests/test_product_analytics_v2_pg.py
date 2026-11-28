@@ -406,6 +406,38 @@ def test_an_in_flight_send_does_not_delay_canonical_writes_or_emits(pg_app):
         assert ProductAnalyticsOutbox.query.filter_by(name="axis_v2_workout_completed").count() == 1
 
 
+def test_rotation_skips_a_busy_account_and_never_waits(pg_app):
+    with pg_app.app_context():
+        for owner in (1, 2):
+            grant(owner)
+        old = {owner: consent.current(owner).subject for owner in (1, 2)}
+        db.session.remove()
+    holding, release = threading.Event(), threading.Event()
+
+    def hold_owner_one():
+        consent.current(1, lock=True)
+        holding.set()
+        assert release.wait(WAIT)
+        db.session.rollback()
+
+    holder = background(pg_app, hold_owner_one)
+    assert holding.wait(WAIT)
+    policy = settings.retention_policy({settings.SUBJECT_MAX_AGE: "30"})
+    with pg_app.app_context():
+        started = time.monotonic()
+        from app.services.product_analytics import retention
+        stats = retention.cleanup(policy, now=datetime.utcnow() + timedelta(days=31))
+        assert time.monotonic() - started < HOLD
+        db.session.remove()
+    release.set()
+    join(holder)
+    assert stats["subjects_rotated"] == 1
+    with pg_app.app_context():
+        assert consent.current(1).subject == old[1]
+        assert consent.current(2).subject != old[2]
+        assert {j.subject for j in ProductAnalyticsErasure.query.all()} == {old[2]}
+
+
 def _module(name):
     path = ROOT / "migrations/versions" / name
     spec = importlib.util.spec_from_file_location(path.stem, path)

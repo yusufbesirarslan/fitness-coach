@@ -99,6 +99,7 @@ def grant(user_id, notice_version, *, now=None):
             row.subject = str(uuid.uuid4())
             row.grant_id = str(uuid.uuid4())
             row.vendor_exposed_at = None
+            row.subject_issued_at = now
         row.status = GRANTED
         row.notice_version = notice_version
         row.granted_at = now
@@ -154,6 +155,7 @@ def withdraw(user_id, *, now=None):
         row.granted_at = None
         row.expires_at = None
         row.vendor_exposed_at = None
+        row.subject_issued_at = None
         row.updated_at = now
         db.session.commit()
         return view(row, now)
@@ -172,3 +174,19 @@ def enqueue_account_erasure(user_id, *, now=None):
     row = current(user_id, lock=True)
     if row is not None and row.subject:
         _retire_subject(row, "account_deleted", now or _now())
+
+
+def rotate_subject(row, now):
+    """Retention bound (caller holds the row lock, commits): retire the current
+    subject to vendor erasure and mint a fresh one for the SAME live grant.
+
+    The client-facing ``grant_id`` is kept (nothing changes for the user). The
+    generation bump fences every undispatched row of the old subject, which
+    are deleted here; they are never re-bound to the new subject."""
+    _retire_subject(row, "rotated", now)
+    ProductAnalyticsOutbox.query.filter_by(user_id=row.user_id).delete(synchronize_session=False)
+    row.generation += 1
+    row.subject = str(uuid.uuid4())
+    row.subject_issued_at = now
+    row.vendor_exposed_at = None
+    row.updated_at = now
