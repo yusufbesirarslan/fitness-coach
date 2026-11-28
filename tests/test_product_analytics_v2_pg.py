@@ -4,6 +4,7 @@ Synthetic transport only (a gate transport parks a send in flight so the
 other side of each race can run against the real lock). No vendor contact.
 Run: FITX_PG_CONCURRENCY_TEST=1 PG_TEST_DATABASE_URL=postgresql://... pytest -m pg_concurrency
 """
+import gc
 import importlib.util
 import json
 import os
@@ -175,13 +176,21 @@ class Slow(SyntheticTransport):
 def test_a_send_cut_off_by_the_cap_is_not_resent_every_pass(pg_app, monkeypatch):
     """Review P2-1: the cap rolls back the send's transaction; the attempt is
     still recorded, so backoff and MAX_ATTEMPTS bound vendor re-sends."""
-    monkeypatch.setattr(dispatch, "LOCK_HOLD_CAP", timedelta(seconds=1))
+    # Margins: the pre-send statements must stay well under the cap even late
+    # in a long CI process (a GC pause past a 1 s cap killed the session
+    # BEFORE the send on hosted PG18), and the send must clearly outlive it.
+    monkeypatch.setattr(dispatch, "LOCK_HOLD_CAP", timedelta(seconds=2))
     bounded = {settings.SUBJECT_MAX_AGE: "60", settings.ERASURE_OVERDUE: "14"}
     with pg_app.app_context():
         grant(1)
-        transport = Slow(1.6)
+        transport = Slow(3.5)
         now = datetime.utcnow()
-        first = pipeline.run_pass(transport=transport, config=bounded, now=now)
+        gc.collect()
+        gc.disable()
+        try:
+            first = pipeline.run_pass(transport=transport, config=bounded, now=now)
+        finally:
+            gc.enable()
         assert first["aborted_after_send"] == 1 and first["retry"] == 1
         db.session.remove()
         row = ProductAnalyticsOutbox.query.one()
