@@ -24,6 +24,13 @@ REMOVE = "remove_training_plan_exercise"
 REMOVE_ARGS = {"day": "Pazartesi", "exercise": "Shoulder Press"}
 
 
+@pytest.fixture(autouse=True)
+def _pre_capability_suite(synthetic_capability_authority):
+    """#533: these suites predate the separate Coach capability grant; it is
+    supplied synthetically. Default-closed refusal and real capture/fencing
+    are qualified by tests/test_coach_capability_authority{,_pg}.py."""
+
+
 @pytest.fixture
 def tools_on(app):
     previous = app.config.get(coach_plan_tools.FLAG_KEY, False)
@@ -294,3 +301,111 @@ def test_mutation_tools_run_on_the_base_prompt(app, tools_on):
         names = [t["function"]["name"] for t in ai_coach._openai_tools_for_call()]
     assert coach_plan_tools.READ_PLAN_TOOL not in names
     assert REMOVE in names
+
+
+# ── #547 F3 risk-based direct apply (closed by default) ───────────────────
+
+UPDATE = "update_training_plan_prescription"
+
+
+def _update(app, user, authority, sets, message=None):
+    message = f"Pazartesi bench press {sets} set yap" if message is None else message
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        ai_coach._begin_coach_turn(message, user_id=user.id)
+        with ai_consent.operation_scope(authority):
+            return coach_plan_tools.execute_plan_tool(
+                user.id, UPDATE, {"day": "Pazartesi", "exercise": "Bench Press", "sets": sets})
+
+
+def _bench_sets(user):
+    db.session.expire_all()
+    plan = TrainingPlan.query.filter_by(user_id=user.id).one()
+    day = next(d for d in json.loads(plan.plan_data)["program"] if d["gun"] == "Pazartesi")
+    return next(e["set"] for e in day["egzersizler"] if e["isim"] == "Bench Press")
+
+
+@pytest.fixture
+def direct_apply_open(monkeypatch):
+    from types import MappingProxyType
+    from app.services import coach_capabilities
+    monkeypatch.setattr(coach_capabilities, "APPROVED_VERSIONS", MappingProxyType({
+        coach_capabilities.TRAINING_PLAN_WRITE: frozenset({"synthetic-capability"})}))
+    monkeypatch.setattr(coach_capabilities, "DIRECT_APPLY_VERSIONS",
+                        frozenset({"synthetic-capability"}))
+
+
+def test_small_set_change_still_confirms_while_direct_apply_is_closed(
+        app, alice, tools_on, fences, authority):
+    _seed(alice)
+    result = _update(app, alice, authority, 4)
+    assert result["status"] == "confirmation_required"
+    assert _bench_sets(alice) == 3 and _journal(alice) == 0
+
+
+def test_approved_direct_apply_saves_only_a_one_set_change(
+        app, alice, tools_on, fences, authority, direct_apply_open):
+    _seed(alice)
+    result = _update(app, alice, authority, 4)
+    assert result["status"] == "applied"
+    assert _bench_sets(alice) == 4 and _journal(alice) == 1
+    assert _proposal(alice) is None
+    # Larger change: preview + confirmation, nothing saved.
+    bigger = _update(app, alice, authority, 6)
+    assert bigger["status"] == "confirmation_required"
+    assert _bench_sets(alice) == 4 and _journal(alice) == 1
+
+
+def test_direct_apply_never_covers_remove(app, alice, tools_on, fences, authority, direct_apply_open):
+    _seed(alice)
+    _stage(app, alice, authority)  # remove still stages a proposal
+    assert "Shoulder Press" in _monday(alice) and _journal(alice) == 0
+
+
+def test_direct_apply_never_saves_a_set_count_the_model_chose(
+        app, alice, tools_on, fences, authority, direct_apply_open):
+    _seed(alice)
+    result = _update(app, alice, authority, 4, message="make bench press harder")
+    assert result["status"] == "confirmation_required"
+    assert _bench_sets(alice) == 3 and _journal(alice) == 0
+
+
+def test_a_pre_capability_proposal_is_reported_stale_and_never_applied(
+        app, mobile, alice, bearer, tools_on, fences, authority):
+    _seed(alice)
+    proposal_id = _stage(app, alice, authority)
+    row = _proposal(alice)
+    payload = dict(row.command_payload)
+    payload.pop(ai_consent.PAYLOAD_CAPABILITY_KEY)
+    row.command_payload = payload
+    db.session.commit()
+
+    response = _answer(mobile, bearer(alice), proposal_id)
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "COACH_PLAN_CONFIRMATION_STALE"
+    assert "Shoulder Press" in _monday(alice) and _journal(alice) == 0
+    assert _proposal(alice).status == "stale"
+
+
+def test_confirm_fences_the_stored_capability(
+        app, mobile, alice, bearer, tools_on, fences, authority, monkeypatch):
+    """Revoked/replaced capability after staging: the B2 confirm is refused,
+    nothing is written and the proposal is retired."""
+    _seed(alice)
+    proposal_id = _stage(app, alice, authority)
+    assert isinstance(_proposal(alice).command_payload[ai_consent.PAYLOAD_CAPABILITY_KEY], list)
+    seen = []
+
+    def refuse(owner, capabilities):
+        seen.append(tuple(c.capability for c in capabilities))
+        raise ai_consent.ConsentDenied("AI_CONSENT_CHANGED")
+    monkeypatch.setattr(ai_consent, "_fence_capabilities", refuse)
+
+    response = _answer(mobile, bearer(alice), proposal_id)
+
+    assert response.status_code == 403
+    assert response.get_json()["error"]["code"] == "AI_CONSENT_CHANGED"
+    assert seen and seen[0] == ("training_plan_write",)
+    assert "Shoulder Press" in _monday(alice) and _journal(alice) == 0
+    assert _proposal(alice).status == "stale"

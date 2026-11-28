@@ -23,8 +23,12 @@ ESTIMATE = {"kalori": 450, "protein": 32, "karb": 38, "yag": 19}
 
 
 def authorities(owner):
+    # #533: the separately granted Coach Nutrition Plan capability (synthetic).
     return access.Authorities(ai_consent.OperationAuthority(owner, "coach", 1, "synthetic-edit"),
-                              ai_consent.OperationAuthority(owner, "nutrition_plan", 1, "synthetic-nutrition"))
+                              ai_consent.OperationAuthority(owner, "nutrition_plan", 1, "synthetic-nutrition"),
+                              ai_consent.CapabilityAuthority(owner, "nutrition_plan_access",
+                                                             "coach.nutrition_plan_access",
+                                                             "synthetic-capability", 1))
 
 
 @pytest.fixture
@@ -35,6 +39,7 @@ def edit_rig(app, make_user, monkeypatch):
     db.session.commit()
     monkeypatch.setattr(access, "NUTRITION_EDITS_ENABLED", True)
     monkeypatch.setattr(access, "APPROVED_COACH_EDIT_DISCLOSURES", frozenset({"synthetic-edit"}))
+    monkeypatch.setattr(ai_consent, "fence_capabilities", lambda user, *capabilities: None)
     fences, calls = [], []
 
     def fence(authority, user, feature=None):

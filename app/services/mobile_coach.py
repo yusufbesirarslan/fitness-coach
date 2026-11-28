@@ -129,7 +129,25 @@ def project_plan_effects(plan_effects):
             "proposal_id": (proposal or {}).get("proposal_id") if isinstance(proposal, dict) else None,
             "proposal": proposal if isinstance(proposal, dict) else None,
         }
+    capability = _capability_request(plan_effects.get("capability_request"))
+    if capability is not None:
+        projected["capability_request"] = capability
     return projected
+
+
+def _capability_request(value):
+    """#533 D-1: exactly ``{"capability", "purpose"}`` of one registered spec.
+
+    Additive (v1 clients ignore unknown keys) and present only when the turn
+    recorded a request the server re-verified; anything else is omitted.
+    """
+    from app.services import coach_capabilities
+    if not isinstance(value, dict) or set(value) != {"capability", "purpose"}:
+        return None
+    spec = coach_capabilities.spec(value["capability"])
+    if spec is None or value["purpose"] != spec.purpose:
+        return None
+    return {"capability": spec.name, "purpose": spec.purpose}
 
 
 def history_payload(user_id, secret):
