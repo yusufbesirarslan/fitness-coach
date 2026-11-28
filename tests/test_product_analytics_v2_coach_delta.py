@@ -97,3 +97,25 @@ def test_flag_off_delta_emitters_touch_no_analytics_state(edit_rig):  # noqa: F8
     quote = prepare(edit_rig)
     nutrition.resolve_edit(edit_rig.owner, quote.proposal_id, "confirm")
     assert ProductAnalyticsOutbox.query.count() == 0
+
+
+def test_flag_off_delta_hooks_issue_no_sql(app, make_user):
+    """Review T-1: OFF, the hooks return before any statement or attribute refresh."""
+    from sqlalchemy import event
+    from app.services.plan_confirmation import service as confirmation_service
+    owner = make_user("delta-off-sql").id
+    row, _ = _propose(owner)
+    db.session.commit()
+    statements = []
+
+    def count(*args, **kwargs):
+        statements.append(1)
+
+    event.listen(db.engine, "before_cursor_execute", count)
+    try:
+        confirmation_service._analytics_training_proposal(
+            owner, "axis_v2_coach_change_proposed", row)
+        nutrition._analytics(owner, "axis_v2_coach_change_proposed", "plan_confirmation:x")
+    finally:
+        event.remove(db.engine, "before_cursor_execute", count)
+    assert statements == []
