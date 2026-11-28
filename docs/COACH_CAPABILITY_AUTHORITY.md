@@ -77,6 +77,36 @@ Such a change applies directly only when `direct_apply_allowed`, which needs an 
 
 A Training proposal staged by an AI operation before this change carries no capability key: confirm answers `PENDING_CONFIRMATION_STALE` (409 on the native endpoint) and retires it, rather than asking for a consent the user may already hold. The saved Nutrition Plan READ also rechecks the capability (`authorize_capabilities`) before publishing plan content to the model.
 
+## Capability request and disclosure availability (companion D-1/D-2)
+
+**D-2, disclosure availability.** `ai_consent_disclosures.available_disclosures()` publishes a capability purpose only while `coach_capabilities.version_open` holds for its launched contract. A version that is registered (POLICIES + PUBLISHED_TEXTS + LAUNCH_VERSIONS) but not in `APPROVED_VERSIONS`, or that deviates in any other way, is not published, so no client can show an Allow for it. A forged grant is still refused by `mutate` (`grant_open`). The five core D1 purposes are unchanged.
+
+**D-1, the typed request.** A Coach turn that needs a missing capability has no write/read tool for it, and a client must never infer missing authority from reply text. The server gives it a typed signal instead:
+
+- **Predicate.** `ai_consent.capability_request_open(owner, capability)` is True only when all of these hold. Anything else, an outage included, is False, and it never raises or writes.
+  - The capability's launched contract is open. When the source is closed (all of this source), it returns before any database read.
+  - An active Coach operation for this owner is still valid at its own generation (`_check_operation`).
+  - The capability is not in effect: its own grant at the launched version is missing, or for Nutrition the separate `nutrition.plan` grant is missing.
+  - Every missing purpose is published and passes `_require_grant_cohort`.
+- **Tool** (`coach_plan_tools/capability_request.py`). `request_coach_capability` takes a single enum argument listing only the capabilities that are actionable now.
+  - "Actionable" means the predicate holds and granting would actually open a tool: Training needs the plan-tool flag; Nutrition needs an approved saved-plan READ pair or the open C1 edit boundary (`nutrition.capability_applicable`).
+  - It is published inside the flag block, and never without the user's own text or on a typed confirm/cancel answer.
+  - Execution re-checks the predicate and records the first request of the turn.
+  - The model sees a closed result (`coach_privacy`: `status` + `outcome` ∈ {`review_offered`, `unavailable`}).
+  - It never grants, reads plan content, stages, writes or changes allowance accounting.
+  - A refused write tool is never turned into a request.
+- **Effect.** `turn_plan_effects` adds `capability_request = {capability, purpose}`.
+  - It is re-verified at response time in the same operation, so a consent change during the turn retires it.
+  - It is bound to the turn's owner and reset by `begin_turn` and the B2 direct turn.
+  - The purpose comes from `SPECS`, never from the model.
+  - `mobile_coach.project_plan_effects` publishes only an exact registered pair (wire: docs/MOBILE_COACH.md §Capability request).
+- **No replay.** After a grant the client returns the user's own message as an unsent draft. The next turn the user sends publishes the write family and no request tool.
+
+Tests:
+
+- `tests/test_coach_capability_request.py`: predicate, D-2, publication, execution, effect, wire, and the native route end to end.
+- `tests/test_coach_capability_request_pg.py`: real grant/revoke/regrant, Nutrition's two grants and the cohort, on the owner lock; in the CI PG list.
+
 ## Opening it later (separate reviewed PR, after counsel + founder approval)
 
 1. Register the approved contracts: `POLICIES`, `PUBLISHED_TEXTS` generated from the approved files, and `LAUNCH_VERSIONS`.
@@ -84,7 +114,7 @@ A Training proposal staged by an AI operation before this change carries no capa
 3. Add to `DIRECT_APPLY_VERSIONS` only if counsel accepts the direct-apply wording.
 4. Set Nutrition to `APPROVED_COACH_EDIT_DISCLOSURES = {r2}`, `APPROVED_NUTRITION_READ_DISCLOSURES = {(r2, nutrition-plan)}` and `NUTRITION_EDITS_ENABLED = True`.
 
-Production activation remains separate: flags, R1 watch2, a mobile in-flow capability prompt and Settings rows.
+Production activation remains separate: flags, R1 watch2 and deployment. The mobile in-flow prompt and Settings rows are mobile #235; the typed request it consumes is D-1 above.
 
 Tests:
 

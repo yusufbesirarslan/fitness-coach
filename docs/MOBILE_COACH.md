@@ -190,6 +190,24 @@ pending proposal's opaque owner-scoped public id, present only while
 `pending_confirmation` is `true`. Never plan content, lineage or version.
 `contract_version` stays 1; v1 clients ignore the key. History is unchanged.
 
+### Capability request (#533 companion D-1, additive)
+
+`plan_effects.capability_request = {"capability": "training_plan_write", "purpose": "coach.training_plan_edit"}`
+or `{"capability": "nutrition_plan_access", "purpose": "coach.nutrition_plan_access"}`:
+exactly these two keys, one per turn, on `POST /api/v1/coach/messages` only
+(never on history or the B2 confirmation response). Present only when this
+turn called the closed `request_coach_capability` tool for a capability that
+the server re-verified at response time, inside the same Coach operation, as
+open (approved + launched + published contract), not in effect for this owner
+(its own grant, plus `nutrition.plan` for Nutrition), grantable for the account
+(same screened-cohort gate as the grant) and applicable (the plan-tool flag;
+for Nutrition an approved saved-plan READ pair or the open C1 edit boundary).
+It offers a permission review and nothing else: no grant, proposal, write,
+replay handle or allowance change. Absent with the flag OFF and in this source
+(no capability is approved), so today's wire is byte-identical. Mobile #235
+`CoachApiDto.capabilityRequest` accepts only these exact pairs. See
+docs/COACH_CAPABILITY_AUTHORITY.md §Capability request.
+
 ### Direct Confirm/Cancel (B2)
 
 `POST /api/v1/coach/plan-confirmation`, body exactly

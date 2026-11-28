@@ -799,6 +799,80 @@ def authorize_capabilities(*authorities):
             _check_capability(state, authority)
 
 
+def _offered_policy(purpose):
+    """The launched policy a client is shown for ``purpose``, or None.
+
+    Exactly the ``available_disclosures`` rule (D-2 included): a purpose whose
+    launched contract is not published offers nothing to grant.
+    """
+    from app.services import coach_capabilities
+    from app.services.ai_consent_disclosures import LAUNCH_VERSIONS, localized_texts
+    policy = POLICIES.get(LAUNCH_VERSIONS.get(purpose))
+    if policy is None or policy.purpose != purpose or localized_texts(policy) is None:
+        return None
+    for capability, capability_spec in coach_capabilities.SPECS.items():
+        if capability_spec.purpose == purpose and not coach_capabilities.version_open(
+                capability, policy):
+            return None
+    return policy
+
+
+def capability_request_open(owner, capability):
+    """Whether THIS owner may be offered a review of ``capability`` now (#533 D-1).
+
+    True only when every one of these holds; anything else, including an
+    outage, is False (fail closed). It never grants, writes or raises:
+
+    * ``capability`` is a registered spec whose launched contract is open
+      (``coach_capabilities.version_open``: approved, launched, published);
+    * an ACTIVE Coach operation exists for ``owner`` and is still valid at
+      its own generation (``_check_operation``: unchanged generation and the
+      same Coach grant), so a consent change mid-turn retires the request;
+    * the capability is NOT already in effect: at least one of its own grant
+      (at the launched version) or, for Nutrition, the owner's separate
+      ``nutrition.plan`` grant is missing. A granted capability is never
+      requested again;
+    * every missing purpose is itself offered (its launched contract is
+      published) and grantable for this account (``_require_grant_cohort``,
+      the same gate ``mutate`` applies), so the client's Allow can succeed.
+    """
+    from app.services import coach_capabilities
+    capability_spec = coach_capabilities.spec(capability)
+    if capability_spec is None or not coach_capabilities.source_open(capability):
+        return False
+    launched = _offered_policy(capability_spec.purpose)
+    if launched is None:
+        return False
+    operation = current_operation()
+    if (not isinstance(operation, OperationAuthority) or operation.feature != "coach"
+            or type(owner) is not int or operation.owner != owner):
+        return False
+    try:
+        _operation_binding(operation, owner)
+        with _transaction(owner) as conn:
+            state = _state(conn, owner)
+            _check_operation(state, operation, conn)
+            grants = state["grants"] if isinstance(state["grants"], dict) else {}
+            missing = []
+            record = grants.get(capability_spec.purpose)
+            if not (_record_valid(capability_spec.purpose, record)
+                    and record["version"] == launched.version):
+                missing.append(capability_spec.purpose)
+            if capability_spec.requires_nutrition_plan_grant:
+                nutrition = BINDINGS["nutrition_plan"][0]
+                if not _record_valid(nutrition, grants.get(nutrition)):
+                    if _offered_policy(nutrition) is None:
+                        return False
+                    missing.append(nutrition)
+            if not missing:
+                return False
+            for purpose in missing:
+                _require_grant_cohort(conn, owner, purpose)
+            return True
+    except ConsentDenied:
+        return False
+
+
 def authorize_active():
     """``authorize_operation`` for the active operation, if any (publication)."""
     operation = _OPERATION.get()
