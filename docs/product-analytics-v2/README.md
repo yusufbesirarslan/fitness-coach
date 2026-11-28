@@ -151,18 +151,18 @@ D-4 adds an onboarding-time prompt.
 
 2026-11-28 additions:
 
-* `test_product_analytics_v2_transport.py` (36): settings fail-closed, exact
+* `test_product_analytics_v2_transport.py` (43): settings fail-closed, exact
   URLs, timeouts, redirects/HTTP refused, response caps, private-API key use,
   loopback timeout, pipeline flag/erasure independence, no secrets in logs,
   retention, rotation, erasure lifecycle, budget, worker tick.
-* `test_product_analytics_v2_pg.py` (16, real PostgreSQL): withdrawal vs
+* `test_product_analytics_v2_pg.py` (18, real PostgreSQL): withdrawal vs
   in-flight send, withdrawal before admission, duplicate wakeups and ordering,
   generation/subject fence, withdraw+regrant in flight, account deletion race,
   atomic durable erasure job, lost-ack replay, expiry cleanup, erasure retry
   and settlement with concurrent passes, dispatch OFF with erasure, missing
   config, cross-account isolation, canonical writes not delayed, rotation skip,
   migration create/verify/refuse.
-* `test_product_analytics_v2_coach_delta.py` (7): DELTA-1.
+* `test_product_analytics_v2_coach_delta.py` (8): DELTA-1.
 * `test_product_analytics_v2_dashboards.py` (2).
 
 Backend `tests/test_product_analytics_v2.py` (40 cases): OFF inertness (404 before
