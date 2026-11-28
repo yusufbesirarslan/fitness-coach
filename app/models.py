@@ -580,8 +580,6 @@ class WeeklyCheckIn(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "idempotency_key", name="uq_weekly_checkin_user_key"),
-        db.Index("uq_weekly_checkin_review_admission", "user_id", "review_admission_week",
-                 unique=True),
         db.CheckConstraint(weekly_review_schema.STATUS_RULE,
                            name=weekly_review_schema.STATUS_CHECK),
         db.Index(weekly_review_schema.WORK_INDEX, "review_status", "review_updated_at", "id",

@@ -61,7 +61,7 @@ def review(owner, language, evidence, authority):
         completion = ai._heavy_complete(
             [{"role": "user", "content": message}],
             system_prompt=contract.INSTRUCTIONS, max_tokens=contract.MAX_OUTPUT_TOKENS,
-            temperature=0.0, feature=FEATURE,
+            temperature=0.0, feature="coach_weekly_review",
         )
     if completion.truncated or completion.provider not in {"bedrock", "openai"}:
         raise contract.InvalidReview()

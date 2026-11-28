@@ -503,7 +503,7 @@ def test_populated_live_head_reaches_head_without_touching_existing_rows(chain_u
                   "account_deletion_record", "private_exercise",
                   "nutrition_plan_edit_operation", "nutrition_plan_mutation_record",
                   "training_session_outcome", "training_start_decision",
-              "workout_schedule_coverage", "weekly_review_admission"):
+                  "workout_schedule_coverage", "weekly_review_admission"):
         assert _sql(chain_url, f"SELECT count(*) FROM {table}")[0][0] == 0, table
     definition, valid = _bucket_scope(chain_url)
     assert valid is True and "'LAUNCH_FREE'" in definition and "'STARTER'" in definition

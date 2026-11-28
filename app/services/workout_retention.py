@@ -16,10 +16,14 @@ ONE_DAY = timedelta(days=1)
 def stage_schedule(owner, plan, *, starts_plan=False):
     """Write tomorrow's expectation in the canonical plan transaction."""
     today = app_today()
-    if starts_plan and db.session.get(WorkoutScheduleCoverage, (owner, today)) is None:
-        db.session.add(WorkoutScheduleCoverage(user_id=owner, effective_date=today))
     effective = today + ONE_DAY
-    row = db.session.get(WorkoutScheduleCoverage, (owner, effective))
+    dates = (today, effective) if starts_plan else (effective,)
+    existing = {row.effective_date: row for row in
+                WorkoutScheduleCoverage.query.filter_by(user_id=owner)
+                .filter(WorkoutScheduleCoverage.effective_date.in_(dates)).all()}
+    if starts_plan and today not in existing:
+        db.session.add(WorkoutScheduleCoverage(user_id=owner, effective_date=today))
+    row = existing.get(effective)
     if row is None:
         row = WorkoutScheduleCoverage(user_id=owner, effective_date=effective)
         db.session.add(row)
