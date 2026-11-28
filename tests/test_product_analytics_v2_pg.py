@@ -438,6 +438,96 @@ def test_rotation_skips_a_busy_account_and_never_waits(pg_app):
         assert {j.subject for j in ProductAnalyticsErasure.query.all()} == {old[2]}
 
 
+def test_no_event_leaves_after_a_withdrawal_committed_even_with_a_racing_emit(pg_app):
+    """The consent lock across the send: a withdrawal cannot commit between the
+    dispatcher's consent read and its send, so a late row of the old generation
+    (an emitter that read the grant just before the withdrawal) is never sent
+    after the withdrawal took effect."""
+    with pg_app.app_context():
+        grant(1)
+        old = consent.current(1)
+        old_subject, old_generation = old.subject, old.generation
+        db.session.remove()
+    stamps = {}
+    paused = threading.Event()
+
+    class Stamped(SyntheticTransport):
+        def send(self, body):
+            stamps["send"] = time.monotonic()
+            super().send(body)
+
+    def withdraw():
+        consent.withdraw(1)
+        stamps["withdrawn"] = time.monotonic()
+
+    def late_row():
+        now = datetime.utcnow()
+        db.session.add(ProductAnalyticsOutbox(
+            user_id=1, generation=old_generation, subject=old_subject, event_id=str(uuid.uuid4()),
+            name="axis_v2_app_resumed", authority="client", occurred_at=now, received_at=now,
+            properties="{}", attempts=0, next_attempt_at=now))
+        db.session.commit()
+
+    def before_outbox_lock(state):
+        sql = str(state.statement)
+        if (not paused.is_set() and "FROM product_analytics_outbox" in sql
+                and "FOR UPDATE" in str(state.statement.compile(dialect=db.engine.dialect))):
+            paused.set()
+            racer = background(pg_app, withdraw)
+            if racer["done"].wait(HOLD):              # only possible without the lock
+                join(background(pg_app, late_row))
+            stamps["racer"] = racer
+
+    transport = Stamped()
+    with pg_app.app_context():
+        sa.event.listen(db.session, "do_orm_execute", before_outbox_lock)
+        try:
+            dispatch.dispatch_once(transport)
+        finally:
+            sa.event.remove(db.session, "do_orm_execute", before_outbox_lock)
+        db.session.remove()
+    join(stamps["racer"])
+    assert paused.is_set()
+    if "send" in stamps:
+        assert stamps["send"] < stamps["withdrawn"]
+
+
+def test_account_purge_holds_the_consent_lock_so_no_send_slips_past_its_erasure_record(
+        pg_app, monkeypatch):
+    from account_deletion_support import install_fakes
+    from app.cli import _purge_user
+    install_fakes(monkeypatch)
+    with pg_app.app_context():
+        grant(1)
+        db.session.remove()
+    recorded, release = threading.Event(), threading.Event()
+    original = consent.enqueue_account_erasure
+
+    def record_then_wait(user_id, **kwargs):
+        original(user_id, **kwargs)
+        recorded.set()
+        assert release.wait(WAIT)
+
+    monkeypatch.setattr(consent, "enqueue_account_erasure", record_then_wait)
+
+    def purge():
+        _purge_user(db.session.get(User, 1))
+        db.session.commit()
+
+    purger = background(pg_app, purge)
+    assert recorded.wait(WAIT)
+    transport = SyntheticTransport()
+    with pg_app.app_context():
+        stats = dispatch.dispatch_once(transport)
+        db.session.remove()
+    release.set()
+    join(purger)
+    with pg_app.app_context():
+        job = ProductAnalyticsErasure.query.one()
+    assert (transport.sent == [] and stats["sent"] == 0) or job.status == "pending"
+    assert transport.sent == []        # the purge owns the row: skipped, never sent
+
+
 def _module(name):
     path = ROOT / "migrations/versions" / name
     spec = importlib.util.spec_from_file_location(path.stem, path)

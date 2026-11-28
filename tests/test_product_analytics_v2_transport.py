@@ -11,6 +11,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -408,7 +409,14 @@ def test_subject_rotation_bounds_vendor_retention_without_touching_the_grant(on,
     issued = row.subject_issued_at
     policy = settings.retention_policy({settings.SUBJECT_MAX_AGE: "90"})
     assert retention.cleanup(policy, now=issued + timedelta(days=89))["subjects_rotated"] == 0
-    stats = retention.cleanup(policy, now=issued + timedelta(days=91))
+    rotate_at = issued + timedelta(days=91)
+    fresh = ProductAnalyticsOutbox(
+        user_id=user.id, generation=generation, subject=old_subject, event_id=str(uuid.uuid4()),
+        name="axis_v2_app_opened", authority="client", occurred_at=rotate_at,
+        received_at=rotate_at, properties="{}", attempts=0, next_attempt_at=rotate_at)
+    db.session.add(fresh)
+    db.session.commit()
+    stats = retention.cleanup(policy, now=rotate_at)
     assert stats["subjects_rotated"] == 1
     db.session.expire_all()
     row = consent.current(user.id)
@@ -427,3 +435,53 @@ def test_rotation_of_a_never_exposed_subject_needs_no_vendor_call(on, make_user)
     policy = settings.retention_policy({settings.SUBJECT_MAX_AGE: "30"})
     retention.cleanup(policy, now=row.subject_issued_at + timedelta(days=31))
     assert ProductAnalyticsErasure.query.one().status == "not_required"
+
+
+def test_a_partial_or_errored_bulk_delete_is_never_accepted(on, make_user):
+    class Partial(SyntheticTransport):
+        def __init__(self, result):
+            super().__init__()
+            self.result = result
+
+        def bulk_delete(self, subjects):
+            super().bulk_delete(subjects)
+            return dict(self.result)
+
+    for result in ({"persons_found": 1, "persons_queued_for_deletion": 0, "persons_deleted": 0,
+                    "deletion_errors": []},
+                   {"persons_found": 1, "persons_queued_for_deletion": 1, "persons_deleted": 0,
+                    "deletion_errors": ["synthetic"]}):
+        ProductAnalyticsErasure.query.delete()
+        db.session.commit()
+        user = make_user(f"analytics-partial-{len(result['deletion_errors'])}")
+        _granted(user.id, exposed=True)
+        consent.withdraw(user.id)
+        transport = Partial(result)
+        now = datetime.utcnow()
+        dispatch.process_erasures_once(transport, now=now)
+        stats = dispatch.process_erasures_once(transport, now=now + dispatch.ERASURE_SETTLE)
+        job = ProductAnalyticsErasure.query.one()
+        assert stats["requested"] == 0 and job.status == "materialized"
+        assert job.last_outcome == "deletion_incomplete" and transport.deleted
+
+
+def test_a_subject_minted_after_the_exposure_marker_is_never_sent_unmarked(on, make_user, monkeypatch):
+    user = make_user("analytics-regrant-before-send")
+    first = _granted(user.id).subject
+    original = dispatch._mark_exposure
+
+    def mark_then_churn(owners, now):
+        original(owners, now)
+        consent.withdraw(user.id)          # first subject: exposed -> pending erasure
+        consent.grant(user.id, NOTICE_VERSION)
+
+    monkeypatch.setattr(dispatch, "_mark_exposure", mark_then_churn)
+    transport = SyntheticTransport()
+    later = datetime.utcnow() + timedelta(seconds=5)     # the regrant's row is due too
+    stats = dispatch.dispatch_once(transport, now=later)
+    assert stats["sent"] == 0 and stats["skipped"] == 1 and transport.sent == []
+    monkeypatch.setattr(dispatch, "_mark_exposure", original)
+    assert dispatch.dispatch_once(transport, now=later)["sent"] == 1
+    second = consent.current(user.id)
+    assert second.vendor_exposed_at is not None and second.subject != first
+    assert ProductAnalyticsErasure.query.one().status == "pending"
