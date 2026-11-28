@@ -87,9 +87,9 @@ Other Usage Data as **not linked**, plus required-reason APIs UserDefaults
 `CA92.1`, SystemBootTime `35F9.1`, FileTimestamp `C617.1`; `posthog_flutter`
 5.61.1 declares the same data types. Do not copy the vendor's "not linked"
 answer. **D-2 approved and applied (2026-11-28, mobile #232):** `posthog_flutter`
-and both vendor manifests are gone from the binary, so the Xcode privacy report
-reflects only what the app itself does; the answers above come from the
-server-mediated collection. No ATT prompt
+and both vendor manifests are removed from the resolved dependency graph (no
+binary was built; confirm the Xcode privacy report at the G7 build). The
+answers above come from the server-mediated collection. No ATT prompt
 (no tracking). Build 101119 under review is unaffected (v2 not in it).
 
 ## 8. Activation gates (all OPEN)
@@ -100,6 +100,6 @@ server-mediated collection. No ATT prompt
 | G2 Contract | founder | PostHog DPA (+ transfer clauses) executed; subprocessors reviewed. Exact checklist: [`ACTIVATION_HANDOFF.md`](ACTIVATION_HANDOFF.md) §G2 |
 | G3 Vendor provisioning | founder (separate approval) | Exact checklist: [`ACTIVATION_HANDOFF.md`](ACTIVATION_HANDOFF.md) §G3. EU project; autocapture, session replay, heatmaps, surveys, feature flags, web analytics OFF; GeoIP off; client-IP discard; person profiles off; retention set; token in Parameter Store (never in source/logs) |
 | G4 Implementation | analytics owner | **source done 2026-11-28**: HTTPS transport, erasure client + receipts, scheduling, purge, rotation, durable device withdrawal. Left: the processing-model change only if counsel/founder choose model L. D-4 is resolved as "no standalone screen" (founder) |
-| G5 Qualification | analytics owner | Exact checklist: [`ACTIVATION_HANDOFF.md`](ACTIVATION_HANDOFF.md) §G5. **PG concurrency done** (19 cases incl. the B-3 lock cap, local PG16 + hosted CI). Left: an authorized synthetic PostHog project E2E (stored properties = allowlist, no IP, personless deletion works, path/shape facts in TRANSPORT_AND_ERASURE.md §2, HogQL panels run); composed device QA (reuse W1/W2/W3 evidence; no new campaign) |
+| G5 Qualification | analytics owner | Exact checklist: [`ACTIVATION_HANDOFF.md`](ACTIVATION_HANDOFF.md) §G5. **PG concurrency done** (20 cases incl. the B-3 lock cap and its bounded re-send, local PG16 + hosted CI). Left: an authorized synthetic PostHog project E2E (stored properties = allowlist, no IP, personless deletion works, path/shape facts in TRANSPORT_AND_ERASURE.md §2, HogQL panels run); composed device QA (reuse W1/W2/W3 evidence; no new campaign) |
 | G6 Composition | integration owner | re-point migration `down_revision`; single Alembic head; exact-head CI |
 | G7 Release | founder | App Store answers updated; new binary; backend flag + mobile define enabled only after G1–G6; explicit activation GO |

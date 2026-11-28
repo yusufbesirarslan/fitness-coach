@@ -52,6 +52,10 @@ R + B (1 d) + O (overdue alarm) + M (escalation margin, 7 d) <= 90 d
 * While **any** erasure job is unfinished after O days, capture halts
   (`capture=halted_erasure_overdue`, error log `event=erasure_overdue`).
   Erasure continues.
+* The pass must keep running for data already sent. Removing or
+  invalidating the rotation key stops rotation of existing subjects, not
+  just new capture. The pass logs this as an error,
+  `event=capture_halted reason=retention_unbounded`; treat it as an incident.
 * A halt does **not** delete anything. It stops adding data while a human
   uses the M-day margin to escalate: a vendor support request or a manual
   person deletion in the vendor console.

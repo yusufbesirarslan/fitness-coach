@@ -55,8 +55,8 @@ hard bounds are:
    * If a send, stuck in any phase above, keeps the transaction idle past the
      cap, PostgreSQL ends the session. That releases the locks **at that
      instant** and rolls back.
-   * A waiting withdrawal, purge or rotation therefore waits at most the cap,
-     never the send (PG test
+   * A waiting withdrawal or purge therefore waits at most the cap, never
+     the send (rotation never waits: it skips locked rows) (PG test
      `test_the_lock_hold_cap_releases_a_withdrawal_behind_a_hung_send`,
      mutation-checked).
    * The pass catches the error and stops dispatching with
@@ -74,8 +74,18 @@ When the cap ends a send:
 * If the vendor did receive the batch, the subject's exposure was already
   committed (transaction A). So a concurrent withdrawal created a `pending`
   erasure job, and the batch is covered by vendor erasure.
-* If no withdrawal happened, the rows are retried. A duplicate is possible
-  until G5 verifies `uuid` de-duplication.
+* The attempt is still counted (review P2-1): `pipeline` records one attempt
+  with backoff for the attempted rows in a fresh short transaction
+  (`dispatch.record_aborted_attempt`, outbox rows only, `SKIP LOCKED`). So the
+  5-attempt limit and the exponential backoff bound re-sends exactly as for a
+  transport failure (PG test `test_a_send_cut_off_by_the_cap_is_not_resent_every_pass`,
+  mutation-checked). Each re-send is a possible duplicate until G5 verifies
+  `uuid` de-duplication.
+* With the maximum configurable timeouts (connect 5 s, read 15 s) a single
+  slow but valid send can exceed the 30 s cap (about c + 2r = 35 s). It is
+  then retried with backoff, which is the intended degradation.
+* The pass logs `event=dispatch_aborted stage=after_send` for this case and
+  `stage=before_send` for a database fault before any send.
 
 The erasure transaction locks only erasure-job rows across its vendor calls.
 No consent, outbox or product row is involved, and withdrawal inserts new

@@ -153,14 +153,16 @@ D-4 adds an onboarding-time prompt.
 
 2026-11-28 additions:
 
-* `test_product_analytics_v2_transport.py` (51): settings fail-closed, exact
+* `test_product_analytics_v2_transport.py` (55): settings fail-closed, exact
   URLs, timeouts, redirects/HTTP refused, response caps, private-API key use,
   loopback timeout, pipeline flag/erasure independence, no secrets in logs,
   retention, rotation, erasure lifecycle, budget, worker tick, the 90-day
   retention ceiling gate (8 configs), the overdue-erasure capture halt, and
-  the fixed-code dispatch abort.
-* `test_product_analytics_v2_pg.py` (19, real PostgreSQL): the B-3 lock-hold
-  cap releasing a withdrawal behind a hung send (mutation-checked), withdrawal vs
+  the fixed-code dispatch abort before and after a send (attempt still
+  counted), and the error log for unbounded retention.
+* `test_product_analytics_v2_pg.py` (20, real PostgreSQL): the B-3 lock-hold
+  cap releasing a withdrawal behind a hung send, and a cut-off send not being
+  re-sent every pass (both mutation-checked), withdrawal vs
   in-flight send, withdrawal before admission, duplicate wakeups and ordering,
   generation/subject fence, withdraw+regrant in flight, account deletion race,
   atomic durable erasure job, lost-ack replay, expiry cleanup, erasure retry

@@ -576,8 +576,42 @@ def test_a_database_abort_mid_dispatch_stops_the_pass_with_a_fixed_code(on, make
     monkeypatch.setattr(dispatch, "dispatch_once", abort)
     with caplog.at_level(logging.ERROR):
         stats = pipeline.run_pass(transport=SyntheticTransport(), config=BOUNDED)
-    assert calls == [1] and stats["aborted"] == 1 and stats["sent"] == 0
-    assert "event=dispatch_aborted count=1" in caplog.text and "synthetic" not in caplog.text
+    assert calls == [1] and stats["aborted_before_send"] == 1 and stats["sent"] == 0
+    assert "event=dispatch_aborted stage=before_send count=1" in caplog.text
+    assert "synthetic" not in caplog.text
+
+
+def test_a_send_that_outlived_its_transaction_still_counts_one_attempt(on, make_user,
+                                                                      monkeypatch, caplog):
+    """Review P2-1: an attempt rolled back with its transaction is recorded in
+    a fresh one, so backoff and MAX_ATTEMPTS bound re-sends."""
+    user = make_user("analytics-aborted-after-send")
+    _granted(user.id, exposed=True)
+    row_id = ProductAnalyticsOutbox.query.one().id
+    now = datetime.utcnow()
+
+    def abort(*args, **kwargs):
+        raise dispatch.DispatchAborted([row_id])
+
+    monkeypatch.setattr(dispatch, "dispatch_once", abort)
+    with caplog.at_level(logging.ERROR):
+        stats = pipeline.run_pass(transport=SyntheticTransport(), config=BOUNDED, now=now)
+    assert stats["aborted_after_send"] == 1 and stats["retry"] == 1
+    row = db.session.get(ProductAnalyticsOutbox, row_id)
+    assert row.attempts == 1 and row.next_attempt_at > now
+    assert "event=dispatch_aborted stage=after_send count=1" in caplog.text
+    for attempt in range(2, dispatch.MAX_ATTEMPTS + 1):
+        pipeline.run_pass(transport=SyntheticTransport(), config=BOUNDED, now=now)
+    assert ProductAnalyticsOutbox.query.count() == 0          # bounded: dropped at the limit
+
+
+def test_an_unbounded_retention_config_is_logged_as_an_error(on, make_user, caplog):
+    user = make_user("analytics-unbounded-log")
+    _granted(user.id)
+    with caplog.at_level(logging.ERROR):
+        stats = pipeline.run_pass(transport=SyntheticTransport(), config={})
+    assert stats["capture"] == "halted_retention_unbounded"
+    assert "event=capture_halted reason=retention_unbounded" in caplog.text
 
 
 def test_a_subject_whose_rows_are_all_fenced_is_never_marked_exposed(on, make_user):

@@ -11,8 +11,11 @@ A. Exposure marker. For the owners of due rows, ``vendor_exposed_at`` is
 B. Fenced send. Lock order is the same as withdrawal and account purge:
    consent rows (``FOR UPDATE SKIP LOCKED``, ordered), then the owners' due
    outbox rows (``FOR UPDATE SKIP LOCKED``). The consent locks are held across
-   the bounded send, so a withdrawal either commits first (its rows are gone
-   or fenced) or waits for at most the transport deadline. A row is sent only
+   the send, so a withdrawal either commits first (its rows are gone or
+   fenced) or waits for at most ``LOCK_HOLD_CAP``: past it PostgreSQL ends
+   this transaction and the withdrawal proceeds; a send that still lands
+   afterwards is covered by the erasure job (exposure was committed in A).
+   A row is sent only
    if its owner's grant is valid NOW and generation AND subject match (never
    re-bound to a newer grant; fixes #541 A6), and the subject's exposure is
    already committed. A concurrent pass skips locked owners/rows (duplicate
@@ -33,6 +36,7 @@ import time
 from datetime import datetime, timedelta
 
 from sqlalchemy import text, update
+from sqlalchemy.exc import OperationalError
 
 from app.extensions import db
 from app.models import ProductAnalyticsConsent, ProductAnalyticsErasure, ProductAnalyticsOutbox
@@ -105,6 +109,46 @@ def _mark_exposure(owners, now):
 LOCK_HOLD_CAP = timedelta(seconds=30)
 
 
+class DispatchAborted(Exception):
+    """The send was attempted but its transaction could not commit (typically
+    the lock-hold cap ended it). Carries the attempted outbox row ids only."""
+
+    def __init__(self, row_ids):
+        super().__init__("dispatch_aborted_after_send")
+        self.row_ids = tuple(row_ids)
+
+
+def _retry(row, now, stats):
+    row.attempts += 1
+    if row.attempts >= MAX_ATTEMPTS:
+        db.session.delete(row)
+        stats["dropped"] += 1
+    else:
+        row.next_attempt_at = now + BASE_BACKOFF * (2 ** (row.attempts - 1))
+        stats["retry"] += 1
+
+
+def record_aborted_attempt(row_ids, *, now=None):
+    """Count one attempt (with backoff) for rows whose send outlived its
+    transaction, in a fresh short transaction, so ``MAX_ATTEMPTS`` and the
+    backoff still bound re-sends (review P2-1). Outbox rows only; rows locked
+    or already deleted (e.g. by a withdrawal) are left to their owner."""
+    now = now or datetime.utcnow()
+    stats = {"retry": 0, "dropped": 0}
+    try:
+        rows = (ProductAnalyticsOutbox.query
+                .filter(ProductAnalyticsOutbox.id.in_(list(row_ids)))
+                .order_by(ProductAnalyticsOutbox.id)
+                .with_for_update(skip_locked=True).all())
+        for row in rows:
+            _retry(row, now, stats)
+        db.session.commit()
+        return stats
+    except Exception:
+        db.session.rollback()
+        raise
+
+
 def _cap_lock_hold():
     if db.session.get_bind().dialect.name == "postgresql":
         db.session.execute(
@@ -116,6 +160,7 @@ def dispatch_once(transport, *, limit=50, now=None, max_age=MAX_AGE):
     now = now or datetime.utcnow()
     max_age = min(max_age, MAX_AGE)
     stats = {"sent": 0, "fenced": 0, "retry": 0, "dropped": 0, "skipped": 0}
+    attempted = ()
     try:
         owners = _due_owners(now, limit)
         if not owners:
@@ -158,25 +203,23 @@ def dispatch_once(transport, *, limit=50, now=None, max_age=MAX_AGE):
             else:
                 deliver.append(row)
         if deliver:
+            body = wire.encode(wire.build_batch(transport.api_key, deliver))
+            attempted = tuple(row.id for row in deliver)
             try:
-                transport.send(wire.encode(wire.build_batch(transport.api_key, deliver)))
+                transport.send(body)
             except TransportFailure:
                 for row in deliver:
-                    row.attempts += 1
-                    if row.attempts >= MAX_ATTEMPTS:
-                        db.session.delete(row)
-                        stats["dropped"] += 1
-                    else:
-                        row.next_attempt_at = now + BASE_BACKOFF * (2 ** (row.attempts - 1))
-                        stats["retry"] += 1
+                    _retry(row, now, stats)
             else:
                 for row in deliver:
                     db.session.delete(row)
                 stats["sent"] = len(deliver)
         db.session.commit()
         return stats
-    except Exception:
+    except Exception as error:
         db.session.rollback()
+        if attempted and isinstance(error, OperationalError):
+            raise DispatchAborted(attempted) from None
         raise
 
 

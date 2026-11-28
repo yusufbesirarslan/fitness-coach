@@ -152,7 +152,7 @@ def test_the_lock_hold_cap_releases_a_withdrawal_behind_a_hung_send(pg_app, monk
     assert not sender["done"].is_set() and waited < 1 + 3
     join(withdrawal)
     gate.release.set()
-    with pytest.raises(sa.exc.OperationalError):
+    with pytest.raises(dispatch.DispatchAborted):
         join(sender)                                # nothing of the pass commits
     with pg_app.app_context():
         assert ProductAnalyticsOutbox.query.count() == 0
@@ -160,6 +160,34 @@ def test_the_lock_hold_cap_releases_a_withdrawal_behind_a_hung_send(pg_app, monk
         assert (job.reason, job.status) == ("withdrawn", "pending")   # exposure was committed
         grant(2)                                    # the pool recovers for the next pass
         assert dispatch.dispatch_once(SyntheticTransport())["sent"] == 1
+
+
+class Slow(SyntheticTransport):
+    def __init__(self, seconds, **kwargs):
+        super().__init__(**kwargs)
+        self.seconds = seconds
+
+    def send(self, body):
+        time.sleep(self.seconds)
+        super().send(body)
+
+
+def test_a_send_cut_off_by_the_cap_is_not_resent_every_pass(pg_app, monkeypatch):
+    """Review P2-1: the cap rolls back the send's transaction; the attempt is
+    still recorded, so backoff and MAX_ATTEMPTS bound vendor re-sends."""
+    monkeypatch.setattr(dispatch, "LOCK_HOLD_CAP", timedelta(seconds=1))
+    bounded = {settings.SUBJECT_MAX_AGE: "60", settings.ERASURE_OVERDUE: "14"}
+    with pg_app.app_context():
+        grant(1)
+        transport = Slow(1.6)
+        now = datetime.utcnow()
+        first = pipeline.run_pass(transport=transport, config=bounded, now=now)
+        assert first["aborted_after_send"] == 1 and first["retry"] == 1
+        db.session.remove()
+        row = ProductAnalyticsOutbox.query.one()
+        assert row.attempts == 1 and row.next_attempt_at > now
+        again = pipeline.run_pass(transport=transport, config=bounded, now=now)
+        assert "aborted_after_send" not in again and len(transport.sent) == 1   # not due yet
 
 
 def test_withdrawal_committed_before_transport_admission_sends_nothing(pg_app, monkeypatch):

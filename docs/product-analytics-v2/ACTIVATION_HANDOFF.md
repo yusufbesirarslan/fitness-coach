@@ -55,7 +55,7 @@ synthetic set.
 
 ## Not part of these gates (already accepted, reuse)
 
-* PG concurrency (19 tests).
+* PG concurrency (20 tests).
 * Durable withdrawal (mobile, 30 tests).
 * The transport discipline tests.
 * The W1/W2/W3 device evidence. No new device campaign.

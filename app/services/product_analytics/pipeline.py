@@ -46,10 +46,21 @@ def _dispatch(transport, now, policy, clock):
             break
         try:
             step = dispatch.dispatch_once(transport, now=now, max_age=policy.outbox_max_age)
+        except dispatch.DispatchAborted as aborted:
+            # Typically the lock-hold cap ended a send that outlived it (B-3):
+            # locks released, nothing committed. Count the attempt anyway so
+            # backoff and MAX_ATTEMPTS bound re-sends (review P2-1).
+            totals["aborted_after_send"] = totals.get("aborted_after_send", 0) + 1
+            try:
+                step = dispatch.record_aborted_attempt(aborted.row_ids, now=now)
+                totals["retry"] += step["retry"]
+                totals["dropped"] += step["dropped"]
+            except OperationalError:
+                totals["attempt_unrecorded"] = totals.get("attempt_unrecorded", 0) + 1
+            break
         except OperationalError:
-            # Typically the database lock-hold cap ended a send that outlived
-            # it (B-3): the locks are already released, nothing was committed.
-            totals["aborted"] = totals.get("aborted", 0) + 1
+            # A database fault before any send (unavailable, deadlock, timeout).
+            totals["aborted_before_send"] = totals.get("aborted_before_send", 0) + 1
             break
         for key in step:
             totals[key] += step[key]
@@ -86,7 +97,12 @@ def run_pass(*, transport=None, now=None, config=None, clock=time.monotonic):
     if stats.get("erasure_overdue"):
         current_app.logger.error("product_analytics event=erasure_overdue count=%d",
                                  stats["erasure_overdue"])
-    if stats.get("aborted"):
-        current_app.logger.error("product_analytics event=dispatch_aborted count=%d",
-                                 stats["aborted"])
+    for stage in ("before_send", "after_send"):
+        if stats.get(f"aborted_{stage}"):
+            current_app.logger.error("product_analytics event=dispatch_aborted stage=%s count=%d",
+                                     stage, stats[f"aborted_{stage}"])
+    if stats.get("capture") == "halted_retention_unbounded":
+        # Also stops rotation of already-sent subjects if the rotation key was
+        # removed or made invalid: an operator must see it (review P3-1).
+        current_app.logger.error("product_analytics event=capture_halted reason=retention_unbounded")
     return stats
