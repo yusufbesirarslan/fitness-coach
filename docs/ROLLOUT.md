@@ -434,3 +434,8 @@ routes 404, pending AI previews expire through the existing ledger, the
 
 PD6 `FITX_WEEKLY_CHECKIN_AI_REVIEW_ENABLED` defaults OFF on web and worker.
 See [PD6 API, rollout and rollback](PD6_WEEKLY_CHECKIN_EVALUATION.md).
+
+`FITX_PRODUCT_ANALYTICS_ENABLED` defaults OFF and is BLOCKED: activation needs the gates in
+[the privacy review packet](product-analytics-v2/PRIVACY_REVIEW_PACKET.md) §8 (counsel, DPA,
+vendor project, network transport, qualification, App Store answers, founder GO).
+Rollback: set it to 0; routes 404 and emitters stop; tables are retained (expand-only).

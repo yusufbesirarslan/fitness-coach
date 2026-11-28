@@ -149,7 +149,13 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False,
     if assistant_memory_eligible is True:
         eligible_rows.append(assistant_message)
     mark_turn(conversation, eligible_rows)
+    owner_id, reply_id = conversation.user_id, assistant_message.id
     db.session.commit()
+    if not interrupted:
+        # Product analytics v2: Coach adoption = committed, complete reply.
+        # No prompt, reply, topic or model data. No-op unless the flag is ON.
+        from app.services.product_analytics.emit import emit_authoritative
+        emit_authoritative(owner_id, "axis_v2_coach_reply_completed", f"coach_message:{reply_id}")
     return user_message, assistant_message
 
 

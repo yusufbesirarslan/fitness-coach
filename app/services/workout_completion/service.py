@@ -290,6 +290,11 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
     if session_completed:
         from app.services.workout_session.metrics import record_lifecycle_event
         record_lifecycle_event("completed")
+    # Product analytics v2: one server event per committed completion-day
+    # claim (replays/ALREADY_COMPLETED never reach here). No-op unless ON.
+    from app.services.product_analytics.emit import emit_authoritative
+    emit_authoritative(command.user_id, "axis_v2_workout_completed",
+                       f"workout_completion_day:{command.user_id}:{command.today}")
     return CompletionResult(
         outcome=CompletionOutcome.CREATED,
         proof=command.proof,

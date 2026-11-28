@@ -236,10 +236,17 @@ def _publish(owner, public_id, prepared):
         op.after_snapshot, op.status, op.proposal_public_id = prepared.after.raw, "prepared", proposal.public_id
         result = _result(op)
         db.session.commit()
-        return result
     except Exception:
         db.session.rollback()
         raise
+    _analytics(owner, "axis_v2_coach_change_proposed", f"plan_confirmation:{result.proposal_id}")
+    return result
+
+
+def _analytics(owner, name, canonical_ref):
+    """Product analytics v2 (DELTA-1): post-commit; never raises into the edit."""
+    from app.services.product_analytics.emit import emit_authoritative
+    emit_authoritative(owner, name, canonical_ref, {"domain": "nutrition"})
 
 
 def cancel_preparation(owner, operation_id):
@@ -446,6 +453,7 @@ def resolve_edit(owner, proposal_id, decision):
         db.session.flush()
         result = _record_result(record, plan, False, op.public_id, proposal.public_id)
         db.session.commit()
+        _analytics(owner, "axis_v2_coach_mutation_applied", f"nutrition_plan_edit:{operation_id}")
         return result
     except ai_consent.ConsentDenied as denied:
         db.session.rollback()
