@@ -190,6 +190,8 @@ def begin_turn(user_message="", history=None, user_id=None):
         setattr(g, _CAPABILITY_ATTR, _CAPABILITY_UNSET)
         from .nutrition import reset_turn
         reset_turn()
+        from .capability_request import reset_turn as reset_capability_request
+        reset_capability_request()
         from .grounding import refresh_clarification_for_turn
         refresh_clarification_for_turn(user_message, user_id=user_id)
     except RuntimeError:
@@ -623,6 +625,8 @@ def _begin_direct_turn(user_id, intent, proposal_id):
     setattr(g, _CAPABILITY_ATTR, _CAPABILITY_UNSET)
     from .nutrition import reset_turn
     reset_turn()
+    from .capability_request import reset_turn as reset_capability_request
+    reset_capability_request()
 
 
 def bind_typed_confirmation(proposal_id):

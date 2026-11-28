@@ -409,12 +409,20 @@ def available_disclosures():
     Used by ai_consent._public; grants independently verify this same pair.
     This helper cannot grant, authorize dispatch, or bypass the endpoint gate.
     """
+    from app.services import coach_capabilities
+    capabilities = {spec.purpose: name for name, spec in coach_capabilities.SPECS.items()}
     disclosures = []
     for policy in ai_consent.POLICIES.values():
         if LAUNCH_VERSIONS and LAUNCH_VERSIONS.get(policy.purpose) != policy.version:
             continue
         texts = localized_texts(policy)
         if texts is None:
+            continue
+        capability = capabilities.get(policy.purpose)
+        if capability is not None and not coach_capabilities.version_open(capability, policy):
+            # #533 D-2: a Coach capability contract is published only while its
+            # exact version is approved and launched (``version_open``), so a
+            # registered but unapproved capability never shows an Allow.
             continue
         disclosures.append({
             "version": policy.version,

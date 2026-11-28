@@ -1029,6 +1029,9 @@ def _coach_tool_defs_for_call(user_id=None):
         # Coach editing disclosure AND the owner's nutrition.plan grant all hold
         # (``coach_plan_tools.nutrition``); this flag alone never publishes them.
         defs.extend(coach_plan_tools.nutrition.published_tool_defs(user_id))
+        # #533 D-1: one closed request tool, only while a capability is
+        # actionable for this owner (never in this source: all closed).
+        defs.extend(coach_plan_tools.capability_request.published_tool_defs(user_id))
     return defs
 
 
@@ -1076,6 +1079,18 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
                 ensure_ascii=False)
         return json.dumps(
             coach_plan_tools.execute_plan_read(user_id), ensure_ascii=False)
+
+    if name == coach_plan_tools.capability_request.REQUEST_CAPABILITY_TOOL:
+        # #533 D-1: records a review offer for the turn; never grants, reads
+        # or writes. Unparsable arguments are refused, never folded into {}.
+        if not arguments_parsed:
+            return json.dumps(
+                coach_plan_tools.invalid_arguments_result(
+                    "araç argümanları okunamadı"),
+                ensure_ascii=False)
+        return json.dumps(
+            coach_plan_tools.capability_request.execute(user_id, args),
+            ensure_ascii=False)
 
     if name in coach_plan_tools.nutrition.TOOL_NAMES:
         # C2: unparsable arguments are refused, never folded into {}.

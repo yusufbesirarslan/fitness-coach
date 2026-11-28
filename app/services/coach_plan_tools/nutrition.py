@@ -317,6 +317,25 @@ def _read_authorities(user_id):
     return access.Authorities(coach, nutrition, capability)
 
 
+def capability_applicable(user_id):
+    """#533 D-1: would the owner's own grants open a Nutrition tool this turn?
+
+    Account-independent source facts only (the turn's Coach version against the
+    approved READ pairs and the C1 edit boundary). Whether the capability or
+    ``nutrition.plan`` is missing, published and grantable is decided by
+    ``ai_consent.capability_request_open``; nothing here reads plan content.
+    """
+    coach = ai_consent.current_operation()
+    if (type(user_id) is not int or not isinstance(coach, ai_consent.OperationAuthority)
+            or coach.owner != user_id or coach.feature != "coach"):
+        return False
+    from app.services.ai_consent_disclosures import LAUNCH_VERSIONS
+    nutrition_version = LAUNCH_VERSIONS.get(ai_consent.BINDINGS["nutrition_plan"][0])
+    read_path = (coach.version, nutrition_version) in APPROVED_NUTRITION_READ_DISCLOSURES
+    edit_path = tools_enabled() and coach.version in access.APPROVED_COACH_EDIT_DISCLOSURES
+    return bool(read_path or edit_path)
+
+
 def published_read_tool_defs(user_id):
     try:
         return (READ_TOOL_DEF,) if _read_authorities(user_id) else ()

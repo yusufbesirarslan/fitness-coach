@@ -69,10 +69,12 @@ def test_unapproved_capability_contract_cannot_be_granted(candidate, monkeypatch
     _register(monkeypatch, approve=False)
     headers = _adult(client)
     status = call(client, 'get', '/api/v1/ai-consent', headers=headers)
-    disclosure = next(d for d in status['available_disclosures'] if d['purpose'] == PURPOSE)
+    # Companion D-2: an unapproved capability contract is not even published.
+    assert all(d['purpose'] != PURPOSE for d in status['available_disclosures'])
+    policy = ai_consent.POLICIES[VERSION]
     response = client.post('/api/v1/ai-consent', headers=headers, json=dict(
         action='affirmative_grant', purpose=PURPOSE, version=VERSION, locale='en',
-        text_digest=disclosure['texts']['en'], contract_digest=disclosure['contract_digest'],
+        text_digest=dict(policy.texts)['en'], contract_digest=ai_consent.contract_digest(policy),
         expected_generation=status['generation'], request_id='cap-unapproved-grant'))
     assert response.status_code == 403
     assert response.get_json()['error']['code'] == 'AI_CONSENT_DISCLOSURE_UNAVAILABLE'
