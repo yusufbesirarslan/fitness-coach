@@ -1,4 +1,5 @@
 """Durable worker claims live on the canonical row and share its erasure."""
+from contextvars import ContextVar
 from datetime import timedelta
 import hashlib
 import hmac
@@ -9,17 +10,18 @@ from flask import current_app
 from rq.timeouts import JobTimeoutException
 
 from app.extensions import db
-from app.models import WeeklyCheckIn as CheckIn
-from app.services import ai, ai_consent, ai_provider_call, ai_spend_guard, health_consent
-from app.services.ai_allowances import execution
+from app.models import User, WeeklyCheckIn as CheckIn
+from app.services import ai, ai_consent, ai_spend_guard, health_consent
+from app.services.mobile_weekly_checkin.contract import week_start
 from app.services.weekly_checkin import queries
-from app.timeutil import UTC, app_now
+from app.timeutil import UTC, app_date_of, app_now, utc_day_bounds
 
-from . import contract, evidence, provider
+from . import allowance, contract, evidence, provider
 
 CLAIM_WINDOW = timedelta(minutes=5)
 BATCH_SIZE = 8
 SCAN_BUDGET_SECONDS = 180
+_PHYSICAL_BINDING = ContextVar("weekly_review_physical_binding", default=None)
 
 
 def _now():
@@ -54,29 +56,144 @@ def _unavailable(failure):
             "review_updated_at": _now(), "review_failure": failure}
 
 
+def _locked_claim(owner, check_in_id, claimed_at, *, status):
+    return (_processing_row(owner, check_in_id, status=status)
+            .filter(CheckIn.review_updated_at == claimed_at)
+            .populate_existing().with_for_update().one_or_none())
+
+
+def _terminalize(row, failure):
+    admission = allowance.admission_for(row)
+    if admission is not None and admission.state == allowance.RESERVED:
+        admission.state = allowance.RESTORED
+    for key, value in _unavailable(failure).items():
+        setattr(row, key, value)
+
+
+def _settlement_owner(owner):
+    # Settlement can release an obligation after revoke. It takes the same
+    # owner row before the operation without granting processing authority.
+    return (db.session.query(User.id).filter_by(id=owner)
+            .with_for_update(skip_locked=True).scalar()) is not None
+
+
 def _recover_stale():
-    for status, outcome in (
-        ("processing", {"review_status": "pending", "review_updated_at": _now()}),
-        ("dispatching", _unavailable("interrupted")),
-    ):
-        stale_ids = (db.session.query(CheckIn.id).filter(
-            CheckIn.review_status == status,
-            CheckIn.review_updated_at <= _now() - CLAIM_WINDOW,
-        ).order_by(CheckIn.review_updated_at, CheckIn.id).limit(BATCH_SIZE)
-            .with_for_update(skip_locked=True).scalar_subquery())
-        CheckIn.query.filter(CheckIn.id.in_(stale_ids)).update(
-            outcome, synchronize_session=False)
-    db.session.commit()
+    candidates = db.session.query(CheckIn.user_id, CheckIn.id, CheckIn.review_status,
+                                  CheckIn.review_updated_at).filter(
+        CheckIn.review_status.in_(("processing", "dispatching")),
+        CheckIn.review_updated_at <= _now() - CLAIM_WINDOW,
+    ).order_by(CheckIn.review_updated_at, CheckIn.id).limit(BATCH_SIZE).all()
+    db.session.rollback()
+    for owner, check_in_id, status, claimed_at in candidates:
+        if _settlement_owner(owner):
+            row = _locked_claim(owner, check_in_id, claimed_at, status=status)
+            if row is not None:
+                if status == "dispatching":
+                    _terminalize(row, "interrupted")
+                else:
+                    row.review_status = "pending"
+                    row.review_updated_at = _now()
+        db.session.commit()
 
 
-def _begin_dispatch(owner, check_in_id, claimed_at):
-    if not provider.enabled() or _now() >= claimed_at + CLAIM_WINDOW:
+def _fresh_week(saved_at, now):
+    if saved_at is None or now < saved_at:
+        return None
+    week = week_start(app_date_of(saved_at))
+    next_monday, _ = utc_day_bounds(week + timedelta(days=7))
+    return week if now < min(saved_at + timedelta(hours=24), next_monday) else None
+
+
+def _begin_dispatch(owner, check_in_id, claimed_at, authority):
+    ai_consent.fence(authority, owner, feature=provider.FEATURE)
+    row = _locked_claim(owner, check_in_id, claimed_at, status="processing")
+    now = _now()
+    if row is None or not provider.enabled() or now >= claimed_at + CLAIM_WINDOW:
+        db.session.rollback()
         return False
-    updated = (_processing_row(owner, check_in_id)
-               .filter(CheckIn.review_updated_at == claimed_at)
-               .update({"review_status": "dispatching"}, synchronize_session=False))
+    week = _fresh_week(row.created_at, now)
+    if (week is None or row.nutrition_adherence_v2 is None
+            or row.idempotency_key is None or row.response_snapshot is None):
+        _terminalize(row, "checkin_ineligible")
+        db.session.commit()
+        return False
+    admission, failure = allowance.reserve(owner, week, allowance.window_for(now))
+    if admission is None:
+        _terminalize(row, failure)
+        db.session.commit()
+        return False
+    row.review_admission_week = week
+    row.review_status = "dispatching"
     db.session.commit()
-    return updated == 1
+    return True
+
+
+def _physical_row(owner, *, lock):
+    binding = _PHYSICAL_BINDING.get()
+    if binding is None or binding[0] != owner or not provider.enabled():
+        raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    _, check_in_id, claimed_at, deadline = binding
+    if _now() >= claimed_at + CLAIM_WINDOW or (
+        deadline is not None and time.monotonic() >= deadline
+    ):
+        raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    query = (_processing_row(owner, check_in_id, status="dispatching")
+             .filter(CheckIn.review_updated_at == claimed_at))
+    row = (query.with_for_update() if lock else query).one_or_none()
+    admission = allowance.admission_for(row) if row is not None else None
+    if admission is None or admission.state != allowance.RESERVED or admission.physical_attempt:
+        raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    return admission
+
+
+def check_physical_binding(owner):
+    try:
+        _physical_row(owner, lock=False)
+    finally:
+        db.session.rollback()
+
+
+def mark_physical_attempt(owner):
+    """The shared SDK door calls this while its independent D1 fence is held."""
+    try:
+        admission = _physical_row(owner, lock=True)
+        admission.physical_attempt = True
+        db.session.commit()
+    except BaseException:
+        db.session.rollback()
+        raise
+
+
+def _publish(owner, check_in_id, claimed_at, authority, result, digest):
+    ai_consent.fence(authority, owner, feature=provider.FEATURE)
+    row = _locked_claim(owner, check_in_id, claimed_at, status="dispatching")
+    if row is None or _now() >= claimed_at + CLAIM_WINDOW:
+        raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    admission = allowance.admission_for(row)
+    if admission is None or admission.state != allowance.RESERVED or not admission.physical_attempt:
+        raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
+    admission.state = allowance.CHARGED
+    row.review_status = "completed"
+    row.review_context = None
+    row.review_updated_at = _now()
+    row.review_result = {"version": contract.VERSION, "value": result}
+    row.review_evidence_digest = digest
+    db.session.commit()
+
+
+def _finish_failure(owner, check_in_id, claimed_at, failure):
+    if not _settlement_owner(owner):
+        db.session.rollback()
+        return
+    row = _locked_claim(owner, check_in_id, claimed_at, status="dispatching")
+    if row is None:
+        row = _locked_claim(owner, check_in_id, claimed_at, status="processing")
+    if row is not None:
+        admission = allowance.admission_for(row)
+        if (failure != "processing_failed" or admission is None
+                or not admission.physical_attempt):
+            _terminalize(row, failure)
+    db.session.commit()
 
 
 def _snapshot(owner, check_in_id):
@@ -108,48 +225,20 @@ def _evaluate(owner, check_in_id, context, claimed_at, *, scan_deadline=None):
         if type(generation) is not int:
             return "authorization"
         with health_consent.processing(owner, expected_generation=generation):
-            authority, family = provider.authorize(owner, context)
+            authority = provider.authorize(owner, context)
             snapshot = _snapshot(owner, check_in_id)
             if snapshot is None:
                 return "evidence_unavailable"
             language = context["language"]
             digest = _digest(owner, check_in_id, language, snapshot)
-
-            if not _begin_dispatch(owner, check_in_id, claimed_at):
+            if not _begin_dispatch(owner, check_in_id, claimed_at, authority):
                 return "interrupted"
-
-            def publish(original_authority, result):
-                # Owner lock precedes row update, matching erasure/deletion and D1.
-                ai_consent.fence(original_authority, owner, feature=provider.FEATURE)
-                if not provider.enabled() or _now() >= claimed_at + CLAIM_WINDOW:
-                    raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
-                execution.canonical_within(owner)
-                updated = _processing_row(owner, check_in_id, status="dispatching").update({
-                    "review_status": "completed", "review_context": None,
-                    "review_updated_at": _now(),
-                    "review_result": {"version": contract.VERSION, "value": result},
-                    "review_evidence_digest": digest,
-                }, synchronize_session=False)
-                if updated != 1:
-                    raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
-                db.session.commit()
-
-            def before_attempt():
-                # The shared provider door invokes this inside each D1 dispatch
-                # fence, including the router's authorized retries or fallback.
-                try:
-                    active = (_processing_row(owner, check_in_id, status="dispatching")
-                              .filter(CheckIn.review_updated_at == claimed_at)
-                              .with_entities(CheckIn.id).scalar())
-                    if (active is None or not provider.enabled()
-                            or _now() >= claimed_at + CLAIM_WINDOW
-                            or (scan_deadline is not None and time.monotonic() >= scan_deadline)):
-                        raise ai_consent.ConsentDenied("AI_CONSENT_PATH_UNAVAILABLE")
-                finally:
-                    db.session.rollback()
-
-            with ai_provider_call.attempt_observer(before_attempt):
-                provider.review(owner, check_in_id, language, snapshot, authority, family, publish)
+            token = _PHYSICAL_BINDING.set((owner, check_in_id, claimed_at, scan_deadline))
+            try:
+                result = provider.review(owner, language, snapshot, authority)
+            finally:
+                _PHYSICAL_BINDING.reset(token)
+            _publish(owner, check_in_id, claimed_at, authority, result, digest)
     except JobTimeoutException:
         raise
     except (ai_consent.ConsentDenied, health_consent.HealthConsentDenied):
@@ -163,16 +252,19 @@ def _evaluate(owner, check_in_id, context, claimed_at, *, scan_deadline=None):
     except Exception as error:
         current_app.logger.warning("weekly_review event=processing_failed type=%s",
                                    type(error).__name__)
+        original = error.__cause__ or error.__context__ or error
+        if getattr(original, "status_code", None) in (400, 401, 403, 404, 413, 422, 429):
+            return "provider_rejected"
         return "processing_failed"
     return None
 
 
 def drain():
     """RQ wakeups may repeat or disappear. PostgreSQL is the source of work."""
+    _recover_stale()
     if not provider.enabled():
         return
     deadline = time.monotonic() + SCAN_BUDGET_SECONDS
-    _recover_stale()
     for _ in range(BATCH_SIZE):
         if time.monotonic() >= deadline:
             return
@@ -187,13 +279,10 @@ def drain():
             continue
         if failure is not None:
             db.session.rollback()
-            (CheckIn.query.filter_by(user_id=owner, id=check_in_id, review_updated_at=claimed_at)
-             .filter(CheckIn.review_status.in_(("processing", "dispatching")), queries.FULL_CHECKIN)
-             .update(_unavailable(failure), synchronize_session=False))
-            db.session.commit()
+            _finish_failure(owner, check_in_id, claimed_at, failure)
 
 
-def read(owner, check_in_id):
+def read(owner, check_in_id, version=1):
     row = queries.full_checkin_by_id(owner, check_in_id)
     if row is None or row.review_status is None:
         return None
@@ -211,5 +300,19 @@ def read(owner, check_in_id):
             result = row.review_result["value"]
         else:
             status = "unavailable"
-    return {"contract_version": contract.VERSION, "check_in_id": check_in_id,
-            "status": status, "evaluation": result}
+    payload = {"contract_version": version, "check_in_id": check_in_id,
+               "status": status, "evaluation": result}
+    if version == 2:
+        admission = allowance.admission_for(row)
+        state = admission.state if admission is not None else "none"
+        if state == allowance.RESERVED and row.review_status == "dispatching":
+            payload["status"] = "processing"
+        window = (allowance.window_for(_now())
+                  if provider.enabled() and row.review_failure != "authorization" else None)
+        payload["allowance"] = {
+            "state": state,
+            "remaining": allowance.remaining(owner, window) if window else None,
+            "window_end": (window + timedelta(days=allowance.WINDOW_DAYS)).isoformat()
+            if window else None,
+        }
+    return payload

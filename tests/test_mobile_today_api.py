@@ -506,3 +506,102 @@ def test_today_is_correct_with_every_adaptive_coaching_flag_off(
 
     assert payload["status"] == ws_models.PRIMARY_SCHEDULED_NOT_STARTED
     assert payload["daily_context"]["plan_lineage"] is not None
+
+
+def test_retention_canonical_days_recovery_and_midnight(client, mobile_user, other_user, as_mobile):
+    from app.models import TrainingSessionOutcome, WorkoutCompletionDay, WorkoutScheduleCoverage
+
+    monday = date(2026, 7, 20)
+    wednesday = monday + timedelta(days=2)
+    plan = save_plan(mobile_user, today=monday)
+    db.session.add(WorkoutScheduleCoverage(
+        user_id=mobile_user.id, effective_date=monday, lineage_id=plan.lineage_id,
+        schedule=["antrenman", "dinlenme", "antrenman", "kardiyo", *["dinlenme"] * 3],
+    ))
+    db.session.add_all([
+        WorkoutCompletionDay(user_id=mobile_user.id, date_key=monday.isoformat(), proof="none"),
+        PumpCheck(user_id=mobile_user.id, date_key=monday.isoformat()),
+        PumpCheck(user_id=mobile_user.id, date_key=None),
+        WorkoutCompletionDay(user_id=other_user.id, date_key=wednesday.isoformat(), proof="none"),
+        TrainingSessionOutcome(user_id=mobile_user.id, date_key=wednesday.isoformat(),
+                               session_kind="cardio", outcome="completed",
+                               plan_lineage_id=plan.lineage_id, mutation_version=0),
+    ])
+    db.session.commit()
+    headers = as_mobile(mobile_user)
+
+    def read(instant):
+        with audit_clock(datetime.fromisoformat(instant).replace(tzinfo=APP_TZ)):
+            legacy = client.get(TODAY_PATH, headers=headers)
+            assert "retention" not in legacy.json["today"]
+            response = client.get(TODAY_PATH, headers={
+                **headers, "X-AxisAI-Today-Retention": "1",
+            })
+            assert response.status_code == 200
+            return response.json["today"]["retention"]
+
+    assert read("2026-07-22T23:59:59") == {
+        "streak_status": "bounded", "streak_days": 1, "week_start": "2026-07-20",
+        "completed_days": 2, "week_days": [True, False, True, False, False, False, False],
+    }
+    assert read("2026-07-23T00:00:00")["streak_days"] == 0
+    db.session.add(PumpCheck(user_id=mobile_user.id, date_key="2026-07-23"))
+    db.session.add(WorkoutCompletionDay(user_id=mobile_user.id, date_key="2026-07-26", proof="none"))
+    db.session.commit()
+    sunday = read("2026-07-26T23:59:59")
+    assert sunday["streak_days"] == 1
+    assert sunday["completed_days"] == 4
+    assert read("2026-07-27T00:00:00")["completed_days"] == 0
+
+
+def test_retention_staged_by_canonical_edit_replacement_and_undo(
+    mobile_user, monkeypatch,
+):
+    from app.models import WorkoutScheduleCoverage
+    from app.services import ai_consent, workout_retention
+    from app.services.plan_mutation import (
+        MoveTrainingDayCommand, MutationContext, apply_plan_mutation, undo_last_change,
+    )
+    from app.services.plan_replacement import PlanExpectation, replace_training_plan
+
+    owner = mobile_user.id
+    initial = save_plan(mobile_user, today=date(2026, 7, 20))
+    with audit_clock(datetime(2026, 7, 19, 12, tzinfo=APP_TZ)):
+        workout_retention.stage_schedule(owner, initial, starts_plan=True)
+        db.session.commit()
+    with audit_clock(datetime(2026, 7, 20, 12, tzinfo=APP_TZ)):
+        apply_plan_mutation(owner, MoveTrainingDayCommand("Pazartesi", "Salı"),
+                            MutationContext(idempotency_key="retention-edit"))
+    assert db.session.get(WorkoutScheduleCoverage, (owner, date(2026, 7, 20))).schedule[:2] == [
+        "antrenman", "dinlenme"]
+    assert db.session.get(WorkoutScheduleCoverage, (owner, date(2026, 7, 21))).schedule[:2] == [
+        "dinlenme", "antrenman"]
+    with audit_clock(datetime(2026, 7, 21, 12, tzinfo=APP_TZ)):
+        undo_last_change(owner, MutationContext(idempotency_key="retention-undo"))
+    assert db.session.get(WorkoutScheduleCoverage, (owner, date(2026, 7, 22))).schedule[0] == "antrenman"
+    monkeypatch.setattr(ai_consent, "fence", lambda *_args, **_kwargs: None)
+    with audit_clock(datetime(2026, 7, 22, 12, tzinfo=APP_TZ)):
+        replace_training_plan(
+            owner, PlanExpectation(
+                absent=False, lineage_id=initial.lineage_id, mutation_version=initial.mutation_version),
+            plan_data=json.dumps(_program(today=date(2026, 7, 23), today_tip="kardiyo")),
+            score=1, authority=object(),
+        )
+    assert db.session.get(WorkoutScheduleCoverage, (owner, date(2026, 7, 22))).schedule[0] == "antrenman"
+    assert db.session.get(WorkoutScheduleCoverage, (owner, date(2026, 7, 23))).schedule[3] == "kardiyo"
+
+
+def test_retention_no_plan_missing_and_unreadable_coverage(mobile_user):
+    from app.models import WorkoutScheduleCoverage
+    from app.services import workout_retention
+
+    owner = mobile_user.id
+    assert workout_retention.project(owner, TODAY, has_plan=False)["streak_status"] == "no_plan"
+    assert workout_retention.project(owner, TODAY, has_plan=True)["streak_status"] == "unavailable"
+    db.session.add(WorkoutScheduleCoverage(
+        user_id=owner, effective_date=TODAY, lineage_id="test-lineage", schedule=42,
+    ))
+    db.session.commit()
+    projection = workout_retention.project(owner, TODAY, has_plan=True)
+    assert (projection["streak_status"], projection["streak_days"],
+            projection["completed_days"]) == ("unavailable", None, 0)

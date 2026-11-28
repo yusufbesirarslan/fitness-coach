@@ -80,6 +80,7 @@ def test_transport_imports_only_http_plumbing_and_the_native_package():
         "app.observability": {"current_request_id"},
         "app.services": {"meal_idempotency", "mobile_weekly_checkin"},
         "app.services.weekly_review": {"operations", "provider"},
+        "app.services.workout_state.snapshot": {"coherent_read_snapshot"},
     }
 
 

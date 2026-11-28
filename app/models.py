@@ -531,6 +531,24 @@ class WeeklyLog(db.Model):
         return f"<WeeklyLog {self.user_id} - {self.weight}kg - {self.created_at}>"
 
 
+class WeeklyReviewAdmission(db.Model):
+    __tablename__ = "weekly_review_admission"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+                        primary_key=True)
+    week_start = db.Column(db.Date, primary_key=True)
+    window_start = db.Column(db.Date, nullable=False)
+    state = db.Column(db.String(8), nullable=False)
+    physical_attempt = db.Column(db.Boolean, nullable=False, default=False,
+                                 server_default=text("false"))
+
+    __table_args__ = (
+        db.CheckConstraint("state IN ('reserved', 'charged', 'restored')",
+                           name="ck_weekly_review_admission_state"),
+        db.Index("ix_weekly_review_admission_window", "user_id", "window_start"),
+    )
+
+
 class WeeklyCheckIn(db.Model):
     id                = db.Column(db.Integer, primary_key=True)
     user_id           = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -552,6 +570,7 @@ class WeeklyCheckIn(db.Model):
     response_snapshot = db.Column(db.Text, nullable=True)
     created_at        = db.Column(db.DateTime, default=datetime.utcnow)
 
+    review_admission_week = db.Column(db.Date)
     review_status     = db.Column(db.String(12))
     review_context    = db.Column(db.JSON(none_as_null=True))
     review_updated_at = db.Column(db.DateTime)
@@ -755,6 +774,16 @@ class TrainingPlanGenerationAllowance(db.Model):
             name="ck_training_plan_generation_allowance_state"),
         db.Index("ix_training_plan_generation_allowance_owner", "user_id", "state"),
     )
+
+
+class WorkoutScheduleCoverage(db.Model):
+    __tablename__ = "workout_schedule_coverage"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+                        primary_key=True)
+    effective_date = db.Column(db.Date, primary_key=True)
+    lineage_id = db.Column(db.String(64))
+    schedule = db.Column(db.JSON(none_as_null=True))
 
 
 class TrainingPlan(db.Model):

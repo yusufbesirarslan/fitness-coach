@@ -41,13 +41,22 @@ _WORKOUT_TIPS = frozenset(VALID_TIPS) - {_REST_TIP}
 PLAN_NOT_PROVIDED = object()
 
 
-def _weekday_name_tr(d: date) -> str:
-    """Istanbul weekday → the Turkish ``gun`` value used in ``plan_data``.
-
-    ``date.weekday()`` is Monday=0, which lines up with ``WEEKDAYS[0]``
-    ("Pazartesi") — the plan generator's own ordering.
-    """
-    return WEEKDAYS[d.weekday()]
+def schedule_tips(plan_data):
+    """Canonical stored weekday classification in Monday-first order."""
+    try:
+        data = json.loads(plan_data)
+    except (ValueError, TypeError):
+        return None
+    program = data if isinstance(data, list) else (
+        data.get("program") if isinstance(data, dict) else None)
+    if not isinstance(program, list) or len(program) != 7:
+        return None
+    tips = []
+    for weekday in WEEKDAYS:
+        tip = next((day.get("tip") for day in program
+                    if isinstance(day, dict) and day.get("gun") == weekday), None)
+        tips.append(tip if isinstance(tip, str) and tip in VALID_TIPS else None)
+    return tips
 
 
 def _load_schedule(
@@ -67,21 +76,10 @@ def _load_schedule(
                 .first())
     if plan is None:
         return False, False, None
-    try:
-        data = json.loads(plan.plan_data)
-    except (ValueError, TypeError):
+    tips = schedule_tips(plan.plan_data)
+    if tips is None:
         return True, False, None
-    program = data if isinstance(data, list) else (
-        data.get("program") if isinstance(data, dict) else None)
-    if not isinstance(program, list) or len(program) != 7:
-        return True, False, None
-
-    today_name = _weekday_name_tr(today)
-    tip = None
-    for day in program:
-        if isinstance(day, dict) and day.get("gun") == today_name:
-            tip = day.get("tip")
-            break
+    tip = tips[today.weekday()]
     if tip == _REST_TIP:
         return True, True, KIND_REST
     if tip in _WORKOUT_TIPS:
